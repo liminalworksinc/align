@@ -204,8 +204,13 @@ export interface InjectedState {
   limits_seen?: { id: string; text: string }[];
   /** The accepted asks of the bound goal's team last put into context (D3); a change is told once as a delta. */
   asks_seen?: { team_id: string; team_name?: string; ids: string[]; member?: boolean };
-  /** Limit ids a local drift notice was already shown for (D5): once per limit per session. */
+  /** Before E2E acycle2: limit ids a drift notice was shown for (once per limit per session). No longer read. */
   drift_shown?: string[];
+  /** Local drift notice (D5): `<limit id>:<digest>` of each crossing sentence already told, so one sentence is never
+   *  told twice while a later, different one still is (E2E acycle2 A2-cross-1). Digests only, never reply text. */
+  drift_seen?: string[];
+  /** Local drift notice: how many notices named each limit in this session (at most `DRIFT_PER_LIMIT`). */
+  drift_count?: Record<string, number>;
   /**
    * Requests (REQ-002) by id: `shown` once the user notice and model context went out, `told` the answer last put into
    * context, `answer` the developer's `::align accept|decline` before the sync has recorded it, `auto` once the Stop hook
@@ -343,7 +348,8 @@ export interface DriftFile {
   v: 1;
   goal_id: string;
   goal_title: string;
-  items: { limit_id: string; type: Limit["type"]; text: string }[];
+  /** One per limit; `digests` are the crossing sentences' digests (`crossingDigest`), never their text. */
+  items: { limit_id: string; type: Limit["type"]; text: string; digests?: string[] }[];
   at: string;
 }
 

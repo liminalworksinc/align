@@ -41,7 +41,7 @@ import {
   type DeltaKind,
 } from "../shared/envelope.ts";
 import { readAsks, teamAsks } from "../shared/asks.ts";
-import { crossing, lastReply } from "../shared/drift.ts";
+import { crossingDigest, crossings, lastReply } from "../shared/drift.ts";
 import { feedHold, feedHoldReason } from "../shared/feedhold.ts";
 import { endedWhyWords, latchWayOut, noneTold, SHARE_CHANGED, shareAgainWords, shareNotice, shareRetell, toldSituation, type ReleaseReaches, type ShareAgain, type ShareFacts, type ShareTold } from "../shared/ended.ts";
 import { contextGoals, snapshot } from "../shared/goaltree.ts";
@@ -164,19 +164,39 @@ function driftOn(home: string): boolean {
   return readJson<{ drift?: boolean }>(layout.config(home))?.drift !== false;
 }
 
-/** A drift notice the Stop hook left for this session: shown once to the user, never to the model. */
+/** A drift notice names at most this many limits; the rest wait for the next prompt (still pending, not latched). */
+export const DRIFT_PER_PROMPT = 3;
+/** A limit is named in at most this many drift notices per session, so a noisy limit can't nag. */
+export const DRIFT_PER_LIMIT = 3;
+
+/**
+ * A drift notice the Stop hook left for this session: shown to the user, never to the model. It names every limit it
+ * covers (up to `DRIFT_PER_PROMPT`; the rest stay pending for the next prompt), and latches only what it named: the
+ * digests of the crossing sentences it was about, and one notice toward each limit's per-session cap. A false alarm
+ * therefore never silences a later, different crossing of the same limit (E2E acycle2 A2-cross-1, A2-cross-4).
+ */
 function takeDrift(home: string, lid: string, hot: HotState | null, inj: InjectedState): string | null {
   const file = readJson<DriftFile>(layout.drift(home, lid));
   if (!file) return null;
   removeFile(layout.drift(home, lid));
   if (!hot?.goal || hot.goal.id !== file.goal_id || !Array.isArray(file.items)) return null;
-  const shown = inj.drift_shown || [];
-  const items = file.items.filter((i) => !shown.includes(i.limit_id));
+  const count = inj.drift_count || {};
+  const seen = new Set(inj.drift_seen || []);
+  const items = file.items.filter((i) => (count[i.limit_id] || 0) < DRIFT_PER_LIMIT && (i.digests || []).some((d) => !seen.has(`${i.limit_id}:${d}`)));
   if (!items.length) return null;
-  inj.drift_shown = [...shown, ...items.map((i) => i.limit_id)].slice(-50);
-  const first = items[0];
-  const more = items.length > 1 ? ` (and ${items.length - 1} more of its limits)` : "";
-  return `${endSentence(`Align: the agent's last reply may conflict with a limit on goal "${clean(file.goal_title, 80)}": ${LIMIT_WORDS[first.type] ?? "Must"} "${clean(first.text, 160)}"${more}`)} This is a word check on this machine only; nothing was sent or added to the agent's context. \`align config drift off\` turns it off.`;
+  const named = items.slice(0, DRIFT_PER_PROMPT);
+  const later = items.slice(DRIFT_PER_PROMPT);
+  if (later.length) writeJsonAtomic(layout.drift(home, lid), { ...file, items: later });
+  for (const i of named) {
+    count[i.limit_id] = (count[i.limit_id] || 0) + 1;
+    for (const d of i.digests || []) seen.add(`${i.limit_id}:${d}`);
+  }
+  inj.drift_count = count;
+  inj.drift_seen = [...seen].slice(-200);
+  delete inj.drift_shown;
+  const quote = (i: DriftFile["items"][number]) => `${LIMIT_WORDS[i.type] ?? "Must"} "${clean(i.text, 160)}"`;
+  const what = named.length === 1 ? `a limit on goal "${clean(file.goal_title, 80)}": ${quote(named[0])}` : `${named.length} limits on goal "${clean(file.goal_title, 80)}": ${named.map(quote).join("; ")}`;
+  return `${endSentence(`Align: the agent's last reply may conflict with ${what}`)} This is a word check on this machine only; nothing was sent or added to the agent's context. \`align config drift off\` turns it off.`;
 }
 
 function sameAsInjected(inj: InjectedState, goal: GoalSnapshot | null, shareState: string): boolean {
@@ -873,10 +893,11 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   let context: string | null = null;
   if (kind) {
     // A newly bound goal comes with all its limits, as the envelope words them; a version whose limits changed names
-    // the first change in the note (the rest come with the next envelope).
+    // the first change in the note, and when it adds more than one, all its limits follow it too: a running session
+    // gets the envelope again only at startup, clear or compact (E2E acycle2 A2-cross-3).
     const limits = goal && kind === "updated" ? limitChange(goal, inj.limits_seen) : null;
     context = renderDelta(kind, goal, limits);
-    const all = goal && kind === "bound" ? boundLimits(goal) : null;
+    const all = goal && (kind === "bound" || (limits?.added.length ?? 0) > 1) ? boundLimits(goal) : null;
     if (all) context = `${context}\n${all}`;
     // Moved to another goal while a hold on the old one still blocks the tools: the model hears that too, as the user
     // did at `::align bind` (cycle 11, section 5).
@@ -934,8 +955,9 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
 /**
  * Auto-accepts the safe requests delivered this turn (spooled for the sync, which posts the receipt). Then the
  * local drift check (D5): for a shared session bound to a goal with limits, compare the turn's last reply with each
- * limit not yet noticed and leave a notice for the next prompt. Prints nothing (a Stop hook's output would continue the
- * turn), uploads nothing, keeps no reply text.
+ * limit under its per-session cap and leave a notice for the next prompt for each crossing sentence not told before
+ * (its digest, never its text). Prints nothing (a Stop hook's output would continue the turn), uploads nothing, keeps no
+ * reply text.
  */
 export function stop(home: string, harness: Harness, input: HookInput): void {
   const sid = input.session_id;
@@ -948,35 +970,47 @@ export function stop(home: string, harness: Harness, input: HookInput): void {
   if (!limits.length || !driftOn(home)) return;
   const pending = readJson<DriftFile>(layout.drift(home, lid));
   const keep = pending && pending.goal_id === hot.goal.id && Array.isArray(pending.items) ? pending.items : [];
-  const known = new Set([...(readInjected(home, lid).drift_shown || []), ...keep.map((i) => i.limit_id)]);
-  const open = limits.filter((l) => !known.has(l.id));
+  const inj = readInjected(home, lid);
+  const count = inj.drift_count || {};
+  const seen = new Set(inj.drift_seen || []);
+  const open = limits.filter((l) => (count[l.id] || 0) < DRIFT_PER_LIMIT);
   if (!open.length) return;
   const reply = lastReply(input);
   if (!reply) return;
-  const titles = goalTitles(home, hot);
-  const hits = open.filter((l) => crossing(l, reply, titles));
-  if (!hits.length) return;
-  const file: DriftFile = {
-    v: 1,
-    goal_id: hot.goal.id,
-    goal_title: hot.goal.title,
-    items: [...keep, ...hits.map((l) => ({ limit_id: l.id, type: l.type, text: l.text }))],
-    at: new Date().toISOString(),
-  };
+  const known = { titles: goalTitles(home, hot), texts: limits.map((l) => l.text) };
+  const items = keep.map((i) => ({ ...i, digests: [...(i.digests || [])] }));
+  let added = false;
+  for (const l of open) {
+    // Each crossing sentence once per session: one already told (or waiting) is not told again.
+    const fresh = crossings(l, reply, known)
+      .map((sen) => crossingDigest(l.id, sen))
+      .filter((d) => !seen.has(`${l.id}:${d}`));
+    if (!fresh.length) continue;
+    let item = items.find((i) => i.limit_id === l.id);
+    if (!item) items.push((item = { limit_id: l.id, type: l.type, text: l.text, digests: [] }));
+    for (const d of fresh) if (!item.digests.includes(d)) (item.digests.push(d), (added = true));
+  }
+  if (!added) return;
+  const file: DriftFile = { v: 1, goal_id: hot.goal.id, goal_title: hot.goal.title, items, at: new Date().toISOString() };
   writeJsonAtomic(layout.drift(home, lid), file);
 }
 
-/** Every goal title this session could name: its own, related goals, requests' goals and the cached feed's. */
+/** Every goal title and measure this session could name (Align's own words, so a reply naming one is no crossing):
+ *  its own, related goals', requests' goals and the cached feed's. */
 function goalTitles(home: string, hot: HotState): string[] {
   const out = new Set<string>();
   const add = (t: unknown) => typeof t === "string" && t.trim() && out.add(t);
+  const measures = (g: { measures?: unknown } | null | undefined) => {
+    for (const m of Array.isArray(g?.measures) ? g.measures : []) add((m as { text?: unknown })?.text);
+  };
   add(hot.goal?.title);
-  for (const c of hot.context_goals || []) add(c.goal?.title);
+  measures(hot.goal);
+  for (const c of hot.context_goals || []) (add(c.goal?.title), measures(c.goal));
   for (const r of hot.requests || []) {
     add(r.goal?.title);
     add(r.target_goal?.title);
   }
-  if (hot.share) for (const g of readJson<FeedFile>(layout.feed(home, hot.share.workspace_id))?.goals || []) add(g.title);
+  if (hot.share) for (const g of readJson<FeedFile>(layout.feed(home, hot.share.workspace_id))?.goals || []) (add(g.title), measures(g));
   return [...out].slice(0, 500);
 }
 

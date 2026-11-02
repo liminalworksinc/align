@@ -455,7 +455,7 @@ Wherever a goal's consent is needed (an alignment requirement, a change request 
 
 ### Requirement: Requesting an alignment
 
-The server SHALL let a workspace owner or member (viewers 403 `read_only`) request an alignment on `POST /api/v2/workspaces/{ws}/alignments {target_goal_id, source_goal_id?, choice, session_keys?, note?}` (browser session, body at most 16 KB), with `choice` `contribution` (effect `contributes_to`) or `work_toward` (effects `contributes_to`, `governing_goal` and `allocation_transfer`), and respond 201 with the alignment view. It SHALL answer 404 for a target or source goal the caller may not read and for a session key that is unknown or not the caller's own; 409 `goal_not_active` for a target that is not `active`; 400 when the source is the target, `choice` is invalid, `note` exceeds 1000 characters, `session_keys` exceeds 50, a `work_toward` request lists no session, or a `contribution` request has neither a source nor a session; 403 `source_not_yours` when the source goal is neither the caller's own nor a goal of a team the caller is in (an approved `work_toward` alignment does not make another goal a valid source, and the source's status is not checked); 409 `sharing_stopped` for a stopped session; and 409 `already_governed` when a `work_toward` session already follows another goal through an alignment. Creating writes audit action `alignment.requested`.
+The server SHALL let a workspace owner or member (viewers 403 `read_only`) request an alignment on `POST /api/v2/workspaces/{ws}/alignments {target_goal_id, source_goal_id?, choice, session_keys?, note?}` (browser session, body at most 16 KB), with `choice` `contribution` (effect `contributes_to`) or `work_toward` (effects `contributes_to`, `governing_goal` and `allocation_transfer`), and respond 201 with the alignment view. It SHALL answer 404 for a target or source goal the caller may not read and for a session key that is unknown or not the caller's own; 409 `goal_not_active` for a target that is not `active`; 400 when the source is the target, `choice` is invalid, `note` exceeds 1000 characters, `session_keys` exceeds 50, a `work_toward` request lists no session, or a `contribution` request has neither a source nor a session; 403 `source_not_yours` when the source goal is neither the caller's own nor a goal of a team the caller is in (an approved `work_toward` alignment does not make another goal a valid source, and the source's status is not checked); 409 `sharing_stopped` for a stopped session; and 409 `already_governed` when a `work_toward` session already follows a goal through an alignment, worded for what is true: `This session already follows this goal through an alignment, so there is nothing to change.` (one session, this very goal; `One of these sessions already follows this goal through an alignment; leave it out.` for several) or `One of these sessions already follows another goal through an alignment; revoke that one first.` (E2E acycle2 A2-cross-7; the same wording when an approval meets it). Creating writes audit action `alignment.requested`.
 
 #### Scenario: Contribution of my team's goal to a company goal
 
@@ -466,6 +466,11 @@ The server SHALL let a workspace owner or member (viewers 403 `read_only`) reque
 
 - **WHEN** a request lists another person's session, a stopped session, an inactive target, no session for `work_toward`, or a session already governed through another alignment
 - **THEN** the server responds 404, 409 `sharing_stopped`, 409 `goal_not_active`, 400, or 409 `already_governed` respectively
+
+#### Scenario: Already following this goal
+
+- **WHEN** a session already follows G1 through an approved alignment and its person asks again to work toward G1 with it, and then toward another goal (`scripts/test-v2.mjs` "A2-cross-7: ...")
+- **THEN** both get 409 `already_governed`, the first saying `This session already follows this goal through an alignment, so there is nothing to change.` and the second `One of these sessions already follows another goal through an alignment; revoke that one first.`
 
 ### Requirement: Alignment approval requirements
 

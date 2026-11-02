@@ -17,7 +17,7 @@ import { ensureSession } from "../src/ledger.ts";
 import { renderHot } from "../src/hot.ts";
 import { crossing } from "../src/shared/drift.ts";
 import { sessionKey } from "../src/keys.ts";
-import { pathHash, repoIdentity, type PodFeed, type RemoteItem } from "../src/hooks/siblings.ts";
+import { pathHash, podReport, repoIdentity, type PodFeed, type RemoteItem } from "../src/hooks/siblings.ts";
 import { writeJsonAtomic, readJson } from "../src/shared/fsx.ts";
 import { layout, localId } from "../src/shared/layout.ts";
 import type { Ask, FeedFile, Goal, GoalSnapshot, Harness, InjectedState, Limit } from "../src/shared/types.ts";
@@ -152,7 +152,8 @@ describe("A1-cross-1: the drift check follows the limit's type and its own negat
   test("a reply that only names a goal whose title shares the limit's words does not cross it (the L6 false alarm)", () => {
     const titles = ["Cut over the ledger database", "Retire the old ledger cluster"];
     const reply = 'Milo asked to move this session to "Retire the old ledger cluster", before the cutover. The goal stays "Cut over the ledger database" unless you accept the move.';
-    assert.equal(crossing(DROP, reply), true, "without the titles the words count");
+    // Since E2E acycle2 the quotes and the missing "drop" are enough on their own (A2-cross-1).
+    assert.equal(crossing(DROP, reply), false);
     assert.equal(crossing(DROP, reply, titles), false);
     assert.equal(crossing(DROP, "Lena's Retire the old ledger cluster work lands before the cutover.", titles), false);
     // Prose that describes the act still counts, title or not.
@@ -378,21 +379,22 @@ describe("A1-cross-7: `align team` keeps the asks section's own count under the 
         items.push({ kind: "edit", path: rel, path_hash: pathHash(id.repo_id, rel), repo_id: id.repo_id, user: { id: `u_${u}`, name: `Person${"abcde"[u]}` }, session_key: `rk-${u}` });
       }
     writePod(t, items);
-    share(ctx, "claude-code", "sess-team", { id: "g1", version: 1, title: g1.title, measures: g1.measures, status: "active" }, dir);
-    return { t, dir };
+    const lid = share(ctx, "claude-code", "sess-team", { id: "g1", version: 1, title: g1.title, measures: g1.measures, status: "active" }, dir);
+    return { t, dir, lid };
   }
+  // As `align team` prints it in a terminal (open asks included; where an agent may read it they are left out, see
+  // findings18 A2-cross-8).
+  const inTerminal = (w: { t: TestEnv; dir: string; lid: string }) => podReport(w.t.home, w.lid, WS, "g1", w.dir, 1500, Date.now(), true, true);
 
   test("three asks: the in-flight part is cut first and every ask is shown", async () => {
-    const { t, dir } = world(3);
-    const out = (await runCli(t, ["team", "--cwd", dir])).stdout.trimEnd();
+    const out = inTerminal(world(3));
     assert.ok(out.length <= 1500, String(out.length));
     assert.match(out, /\(more not shown\)\nAsked of your teams:\n/);
     for (const n of [0, 1, 2]) assert.match(out, new RegExp(`ASKCANARY-${n},`));
   });
 
   test("six asks: four, then `(+2 more; run \\`align asks\\`)`, never cut", async () => {
-    const { t, dir } = world(6);
-    const out = (await runCli(t, ["team", "--cwd", dir])).stdout.trimEnd();
+    const out = inTerminal(world(6));
     assert.ok(out.length <= 1500, String(out.length));
     assert.match(out, /- \(\+2 more; run `align asks`\)$/);
     assert.equal((out.match(/ASKCANARY-/g) || []).length, 4);

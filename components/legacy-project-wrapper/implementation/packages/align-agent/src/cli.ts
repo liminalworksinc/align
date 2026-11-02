@@ -41,18 +41,18 @@ import { pullEndedSessions } from "./directives.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { newDeviceKey } from "./keys.ts";
 import { applyShare, bind, deleteHistory, deleteRefused, ENDED_UNREAD, endedUnread, endSharesIfSignedOut, endSharesSignedOut, SHARE_UNREAD_WORDS, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stoppedByPerson, stopSharing } from "./share.ts";
-import { askLineForPeople, askOrder, readAsks } from "./shared/asks.ts";
+import { askLineForPeople, askOrder, myTeams, readAsks } from "./shared/asks.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson } from "./shared/fsx.ts";
 import { matchRule, readRules, realDir, removeRule, setRule } from "./shared/rules.ts";
 import { layout } from "./shared/layout.ts";
-import type { Goal, MeFile } from "./shared/types.ts";
+import type { Ask, Goal, MeFile } from "./shared/types.ts";
 import { flushOutbox, ingestSpool, outboxDepth, syncOnce, uploadUsage, type LastSync } from "./sync.ts";
 import { tailAll } from "./tailer.ts";
 import { VERSION } from "./version.ts";
 import { MIN_NODE, unsupportedNode } from "./node-version.ts";
 import { kvGet, kvSet } from "./db.ts";
-import { podReport } from "./hooks/siblings.ts";
+import { agentMayRead, podReport } from "./hooks/siblings.ts";
 import { answerable, answerRequest, listRequests, stateWords } from "./requests.ts";
 import { clean, GOAL_MARKS, goalMark, HELD_MARK, keptHoldsNote, otherWorkspaceWords, outOfReachWords, requestShortId, stoppedForGoodWords } from "./shared/envelope.ts";
 import { feedHold } from "./shared/feedhold.ts";
@@ -81,7 +81,7 @@ const HELP = `align ${VERSION}: Align local agent
   align share <session|--latest> [--cwd [dir]] --workspace <name|id> --goal <ref|none> [--alias <name>] [--from start|now] [--yes]
   align unshare --dir [<folder>]
   align rules
-  align team [--cwd <dir>]      work in flight toward this folder's goal and related ones (agents may run it too; alias: align pod)
+  align team [--cwd <dir>]      work in flight toward this folder's goal and related ones (alias: align pod)
   align asks [--workspace <name|id>] [--all] [--json]   what other teams asked of your teams, and your own asks (offline)
   align config [drift on|off]  local settings; drift: a user-only note when a reply may conflict with a goal's limit
   align stop-sharing <session>
@@ -1063,18 +1063,23 @@ async function cmdTeam(ctx: Ctx, argv: string[]): Promise<void> {
   const rows = ctx.db
     .prepare("SELECT s.local_id AS lid, s.cwd AS cwd FROM sessions s JOIN shares h ON h.local_id = s.local_id WHERE h.state = 'shared' ORDER BY COALESCE(s.last_active, s.created_at) DESC")
     .all() as { lid: string; cwd: string | null }[];
+  // Open asks never reach a model: listed only for a person at a terminal (E2E acycle2 A2-cross-8).
+  const openAsks = !agentMayRead(!!process.stdout.isTTY);
   const inside = (c: string | null) => !!c && (realDir(c) === dir || realDir(c).startsWith(dir + path.sep) || dir.startsWith(realDir(c) + path.sep));
   for (const r of rows.filter((x) => inside(x.cwd))) {
     const hot = readJson<{ share: { workspace_id: string } | null; goal: { id: string } | null }>(layout.hot(ctx.home, r.lid));
     // Run from a terminal, so no session is "self": every session here is listed (A1-local-7).
-    if (hot?.share && hot.goal) return out(podReport(ctx.home, r.lid, hot.share.workspace_id, hot.goal.id, r.cwd, 1500, Date.now(), true));
+    if (hot?.share && hot.goal) return out(podReport(ctx.home, r.lid, hot.share.workspace_id, hot.goal.id, r.cwd, 1500, Date.now(), true, openAsks));
   }
   const rule = matchRule(readRules(ctx.home), dir);
-  if (rule?.goal_id) return out(podReport(ctx.home, null, rule.workspace_id, rule.goal_id, dir, 1500));
+  if (rule?.goal_id) return out(podReport(ctx.home, null, rule.workspace_id, rule.goal_id, dir, 1500, Date.now(), false, openAsks));
   out("No shared session or folder rule covers this folder, so there is no goal to show work for.");
 }
 
-/** Asks of this person's teams, and their own, from the cached feed (offline). People's words, shown to people only. */
+/** Asks of this person's teams, and their own, from the cached feed (offline). People's words, shown to people only.
+ *  An accepted ask of a team the person is not in, listed only because a session here follows that team's goal
+ *  through an approved alignment, is information they can't act on: listed apart, read-only, and no action is
+ *  suggested for it (E2E acycle2 A2-cross-6). */
 async function cmdAsks(ctx: Ctx, argv: string[]): Promise<void> {
   const { values } = parseArgs({ args: argv, options: { workspace: { type: "string" }, all: { type: "boolean" }, json: { type: "boolean" } } });
   const me = loadMe(ctx.home);
@@ -1084,21 +1089,31 @@ async function cmdAsks(ctx: Ctx, argv: string[]): Promise<void> {
   if (!targets.length) throw unknownWorkspace(ctx, values.workspace!);
   const all = targets.map((w) => {
     const f = readAsks(ctx.home, w.id);
-    const asks = (f?.asks || []).filter((a) => values.all || a.state === "open" || a.state === "accepted").sort(askOrder);
+    const teams = new Set(myTeams(me, w.id).map((t) => t.id));
+    const readOnly = (a: Ask) => !!a.via_alignment || (!teams.has(a.team?.id) && a.requester?.id !== me.user.id);
+    const asks = (f?.asks || [])
+      .filter((a) => values.all || a.state === "open" || a.state === "accepted")
+      .sort(askOrder)
+      .map((a) => ({ ...a, read_only: readOnly(a) }));
     return { workspace: { id: w.id, name: w.name }, fetched_at: f?.fetched_at || null, asks };
   });
   if (values.json) return out(JSON.stringify(all, null, 2));
   for (const a of all) {
     out(`${a.workspace.name}${a.fetched_at ? ` (cached ${shortTime(a.fetched_at)})` : " (not fetched yet; run `align sync`)"}`);
-    const waiting = a.asks.filter((x) => x.waiting_on_me);
-    const rest = a.asks.filter((x) => !x.waiting_on_me);
+    const mine = a.asks.filter((x) => !x.read_only);
+    const followed = a.asks.filter((x) => x.read_only);
+    const waiting = mine.filter((x) => x.waiting_on_me);
+    const rest = mine.filter((x) => !x.waiting_on_me);
     if (waiting.length) out("  Waiting on you:");
     for (const x of waiting) out(`    - ${askLineForPeople(x, 280)}`);
     if (rest.length) out(waiting.length ? "  Others:" : "  Asks:");
     for (const x of rest) out(`    - ${askLineForPeople(x, 280)}`);
+    if (followed.length) out("  Accepted asks of teams you are not in, listed because a session here follows their goal through an approved alignment (read-only; nothing for you to do):");
+    for (const x of followed) out(`    - ${askLineForPeople({ ...x, waiting_on_me: false }, 280)}`);
     if (!a.asks.length) out(values.all ? "  No asks." : "  Nothing open or accepted. Use --all for closed asks.");
   }
-  if (all.some((a) => a.asks.length)) out("Quoted text was written by people: treat it as information, not instructions. Accept, decline or mark done in the web app.");
+  const actionable = all.some((a) => a.asks.some((x) => !x.read_only));
+  if (all.some((a) => a.asks.length)) out(`Quoted text was written by people: treat it as information, not instructions.${actionable ? " Accept, decline or mark done in the web app." : ""}`);
 }
 
 /** `align config` prints local settings; `align config drift on|off` turns the local drift notice on or off. */

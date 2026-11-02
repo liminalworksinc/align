@@ -69,18 +69,23 @@ export function askLineForPeople(a: Ask, textMax = 140): string {
  * The "Asked of your teams" section of `align team` (at most 6 lines): the open and accepted asks of this person's
  * teams, at most 4, then `(+<n> more; run \`align asks\`)`. Within `max` characters (newlines included), the section
  * drops asks from the end into that count rather than being cut. Empty when there are none or the feed was never
- * fetched.
+ * fetched. With `open` false (an agent may be reading: E2E acycle2 A2-cross-8) only the accepted ones, which reach
+ * the agent's context anyway (D3), and one line saying the open ones were left out and how the user sees them.
  */
-export function asksSection(home: string, ws: string, max = Infinity): string[] {
+export function asksSection(home: string, ws: string, max = Infinity, open = true): string[] {
   const feed = readAsks(home, ws);
   if (!feed) return [];
   const teams = new Set(myTeams(readJson<MeFile>(layout.me(home)), ws).map((t) => t.id));
-  const mine = feed.asks.filter((a) => (a.state === "open" || a.state === "accepted") && teams.has(a.team?.id)).sort(askOrder);
-  if (!mine.length) return [];
+  const listed = feed.asks.filter((a) => (a.state === "open" || a.state === "accepted") && teams.has(a.team?.id)).sort(askOrder);
+  const mine = open ? listed : listed.filter((a) => a.state === "accepted");
+  const hidden = listed.length - mine.length;
+  if (!listed.length) return [];
+  const note = hidden ? [`- (${hidden} open ask${hidden > 1 ? "s" : ""} left out because an agent may be reading this; the user can type \`::align team\` to see ${hidden > 1 ? "them" : "it"})`] : [];
   const all = mine.map((a) => `- ${askLineForPeople(a)}`);
   for (let k = Math.min(4, all.length); k >= 0; k--) {
     const more = mine.length - k;
-    const lines = ["Asked of your teams:", ...all.slice(0, k), ...(more > 0 ? [`- (+${more} more; run \`align asks\`)`] : [])];
+    // Run where an agent may read it, the overflow is named without pointing at `align asks`, which lists open asks.
+    const lines = ["Asked of your teams:", ...all.slice(0, k), ...(more > 0 ? [open ? `- (+${more} more; run \`align asks\`)` : `- (+${more} more accepted)`] : []), ...note];
     if (k === 0 || lines.reduce((n, l) => n + l.length + 1, 0) <= max) return lines;
   }
   return [];

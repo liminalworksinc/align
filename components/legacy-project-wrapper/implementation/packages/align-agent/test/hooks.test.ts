@@ -525,7 +525,7 @@ describe("limits in the envelope and deltas", () => {
     assert.equal(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "v6", prompt: "go" }).stdout, "");
     // Binding a goal with limits mid-session names its first limit in the bound note.
     const b = renderDelta("bound", LIMITED, { added: LIMITED.limits!, removed: [] });
-    assert.match(b, /counts toward goal "Ship the v2 onboarding flow" \(v3, active\)\. Limit: Must not "The three models must not all fit on the GPU at once\." \(\+1 more; they come with the goal context\.\) No added authority\./);
+    assert.match(b, /counts toward goal "Ship the v2 onboarding flow" \(v3, active\)\. Limit: Must not "The three models must not all fit on the GPU at once\." \(\+1 more, listed below\.\) No added authority\./);
     assert.ok(b.length <= DELTA_MAX);
   });
 });

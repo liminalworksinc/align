@@ -27,7 +27,8 @@ align share --dir <folder> --past <days> --workspace W --goal G [--signals] [--y
 align share <session|--latest> [--cwd [dir]] --workspace W --goal <ref|none> [--alias <name>] [--from start|now] [--yes]
 align unshare --dir [folder] · align rules            remove a folder rule · list them
 align team [--cwd <dir>]                              work in flight toward this folder's goal and related goals, and what
-                                                      was asked of your teams (offline; alias align pod)
+                                                      was asked of your teams (offline; alias align pod; open asks only
+                                                      in a terminal, never where an agent may read it)
 align asks [--workspace W] [--all] [--json]           asks of your teams and your own asks, from the cache (offline)
 align config [drift on|off]                           local settings; drift notice on by default
 align stop-sharing <session>                          future usage stays local
@@ -95,7 +96,7 @@ call.
 - At a prompt, a session gets one card (<= 300 chars) about work in flight toward its goal and related goals (parents,
   dependencies, children, and goals under the same parent): this machine's sessions and other people's, grouped per
   person, overlap with its own files first. At most one card per 10 minutes unless work overlaps; 0 bytes when nothing
-  is new. `align pod` gives the agent more when it asks.
+  is new. The card ends ``The user can type `::align team` for details.``; nothing points the agent at `align team`.
 - Edits are seen three ways: edit tools (Claude Edit/Write/MultiEdit, Codex apply_patch), plain shell writes (`>`,
   `>>`, `tee`, `sed -i`, `touch`, `cp`/`mv` targets; `git add` is no edit), and, in the sync pass, the repo's working
   tree and new commits since the previous pass (for files a script wrote), credited to the session most recently
@@ -115,19 +116,30 @@ call.
   the goal. The envelope lists them after the measures, quoted, as context set by the goal's approvers (budget 1,800
   characters when there are limits; they are clipped to 100 characters before one is ever dropped). A later version
   whose limits changed reaches the session as the usual `updated` delta naming the first added or removed limit
-  (`limits_seen` in `injected/<lid>.json`); the full list comes with the next startup, clear or compact.
+  (`limits_seen` in `injected/<lid>.json`); when it adds more than one, all the goal's limits follow the note, since a
+  running session gets the envelope again only at startup, clear or compact.
 - **Accepted asks.** The sync pass revalidates `GET /api/v2/workspaces/:ws/asks` (ETag) into `feeds/asks-<ws>.json`,
   keeping the asks of your teams and the ones you recorded (at most 200). The envelope of a shared session adds the
   *accepted* asks addressed to its goal's team (at most 5, newest first, each at most 280 characters), quoted with who
   asked and who accepted them, as information, not instructions. When that accepted set changes, the next prompt gets
-  one short note; otherwise nothing. Open, declined, done or withdrawn asks and other teams' asks never reach the
-  model: they appear only in `align asks` and the "Asked of your teams" part of `align team`.
+  one note quoting every newly accepted ask (one line for one, a list within the 2,200-character budget for several);
+  otherwise nothing. Open, declined, done or withdrawn asks and other teams' asks are never put into the model's
+  context by Align: hooks never carry them, `::align team` shows them to the user only, and `align team` lists open
+  asks only when a person runs it in a terminal (not when its output is piped, or inside Claude Code's or Codex's
+  shell, where an agent may read it). `align asks` lists them for whoever runs it; nothing tells the agent to. An
+  accepted ask of a team you are not in, kept because a session here follows that team's goal through an approved
+  alignment, is listed apart in `align asks` as read-only.
 - **Drift notice.** After each turn of a shared session whose goal has limits, the Stop hook reads the agent's last
-  reply on this machine (the hook input's `last_assistant_message`, else the end of the transcript) and runs the v1
-  word check against each limit: a sentence about the limit that says the opposite (any mention, for out of scope).
-  If one may conflict, the next prompt shows *you* a `systemMessage` naming the limit, once per limit per session.
-  Nothing is uploaded, nothing is added to the model's context, no reply text is kept, and it never blocks.
-  `align config drift off` turns it off.
+  reply on this machine (the hook input's `last_assistant_message`, else the end of the transcript) and runs a word
+  check against each limit: a sentence that uses the limit's own verb (the word after its "must"/"not", or its first
+  word) and two more of its words, in the sense the limit rules out, read from the clause that holds that verb (a
+  "no" elsewhere in the sentence doesn't count) and from the limit's own with/without, before/after or during/outside
+  contrast. Lists of the limits, quotes, questions, code, conditions, someone else's ask and Align's own goal titles
+  and measures never count. If one may conflict, the next prompt shows *you* a `systemMessage` naming every limit it
+  may conflict with (up to 3 per prompt; at most 3 notices per limit per session). Each crossing sentence is told
+  once (only a digest of it is kept), so a false alarm never silences a later, different crossing. Nothing is
+  uploaded, nothing is added to the model's context, no reply text is kept, and it never blocks. `align config drift
+  off` turns it off.
 - **Past sessions.** `align share --dir <folder> --past <days>` writes the folder rule and also shares the sessions
   already metered on this machine in the last 1 to 14 days whose own recorded folders (the first one and any it later
   reported) are all the folder or inside it (`/work/app-secret` is not inside `/work/app`). Each is shared from its own
@@ -201,7 +213,7 @@ replaced and could not revoke, with its tokens and key, kept until the server co
 0600, never sent), `align.db` (SQLite WAL: sessions, root turns, epochs, request ledger, file offsets, outbox,
 directives, requests, holds, shares, aliases), `rules.json` folder share rules, `hot/` and `injected/` per-session JSON for hooks,
 `latch/` stop latches and goal holds, `spool/` hook records for the next sync, `feeds/` cached goals (`<ws>.json`), team activity
-(`activity-<ws>.json`) and asks (`asks-<ws>.json`), `drift/` drift notices waiting for the next prompt (limit ids only),
+(`activity-<ws>.json`) and asks (`asks-<ws>.json`), `drift/` drift notices waiting for the next prompt (limit ids and sentence digests only),
 `steering/` steering lines shown and not yet reported, `unshared-digest.json` and `unshared-shown.json` (this machine's
 agent time outside shared sessions, by folder, and the week its note was shown; never sent), `me.json`,
 `last-sync.json`, `logs/`.
@@ -225,7 +237,8 @@ without `--dir`; `align config` shows it. Otherwise the default is the only work
   this machine's own sessions the card carries file paths, task labels and commit subjects. From other people it
   carries only a first name (letters only) and paths made of path characters (overlap is named by this session's own
   path); their task labels, commit subjects and claim reasons are free text from someone else's machine, so they
-  appear only in `align pod`, which marks them as information, not instructions.
+  appear only in `::align team` and `align team` (alias `align pod`), which mark them as information, not
+  instructions.
 
 ## Development
 
