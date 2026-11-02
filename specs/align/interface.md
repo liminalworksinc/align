@@ -544,7 +544,8 @@ you", "Waiting on others", "Active goals", and "Connected apps that read the goa
 goals". It SHALL show only what the server holds: a count or a
 section the server could not read SHALL say "unknown", never zero, and nothing on the page SHALL infer what an agent is
 doing (no working, stuck, blocked or diverged state, and no claim that an app has the current goal version or is "on
-the current plan": Align keeps no per-app version). The page
+the current plan": Align knows only which versions it sent an app, never which one the app uses; the decision value
+card names the apps Align sent a launched version). The page
 reads once when it opens and does not poll (only its first-run card checks the apps while it is shown).
 
 The read SHALL return, for a workspace member or viewer (cookie only: an `Authorization` header gets `403
@@ -647,7 +648,8 @@ state): the Home's connected apps (see "Workspace Home"); the goal page's Agent 
 the align CLI's bindings, usage and work signals, else "not observed"); each session's answer on the Agents on this goal
 card ("delivery receipt" for a request received and not answered, "agent reported" for an answer, "not observed"
 otherwise); the value card's "Agents on the new version" line ("delivery receipt" once any receipt for the launched
-version arrived, else "not observed"); and the Sessions tab's stop or resume progress (the same rule). Where an MCP
+version arrived, else "not observed") and its "Connected AI apps" row ("delivery receipt" when Align sent the launched
+version to an app the reader can see, else "not observed"); and the Sessions tab's stop or resume progress (the same rule). Where an MCP
 read returns the same item (`align_get_goal_activity`), it SHALL carry the same class as `evidence_class`.
 
 #### Scenario: One class per item
@@ -1012,7 +1014,12 @@ to it), "Agents on the new version" (before the launch "Not launched yet: agents
 of the bound sessions the launch's `goal_version` directive reached: how many have it in context, received but not used
 yet, and not reached; "No shared sessions work toward this goal yet." when none; marked "delivery receipt" when any of
 those sessions' machines sent a receipt for it, else "not observed", as in "Evidence class on every agent-status
-item"), "Measured in Align" (proposal to
+item"), once launched "Connected AI apps" (the apps the reader can see on the Apps tab, a workspace owner every one,
+that Align sent the version the launch made when they read the goals, the `mcp` part's "Goal versions Align sent an
+app are recorded": "<app> (connected by <person>): Align sent it version <n> on <time>", and that Align can't see what
+the app does next; with none, "Align hasn't sent version <n> to a connected app yet" ("an app you connected" for anyone
+but a workspace owner); marked "delivery receipt" when it lists any app, else "not observed"; main #56), "Measured in
+Align" (proposal to
 approval, approval to launch, and approval to the first `applied` receipt of the launch's directive, from server
 timestamps only; "not yet" while there is none), one optional question with a note, the reports
 of others, and the follow-up link.
@@ -1031,6 +1038,11 @@ of others, and the follow-up link.
 
 - **WHEN** the card loads below the fold and the person scrolls until at least 75% of its top 240 px is on screen (clipped by the window and any scroll column) and stays there for one second
 - **THEN** the page posts `{action: "viewed"}` once (the server keeps one `value_card_viewed` per person per workspace); a card nobody scrolled to, or whose top was seen for less than a second, records nothing. The card is taller than the screen, so its top, not half of it, is what a reader sees (LIM-2445, #38)
+
+#### Scenario: Apps Align sent the launched version
+
+- **WHEN** a change is launched as version 2, one member's app then reads the goals, and a workspace owner's app last read them at version 1
+- **THEN** the owner's card shows "Connected AI apps" marked "delivery receipt" with "<member's app> (connected by <member>): Align sent it version 2 on <time>" and not the owner's own app; before the launch the row is not shown (`apps` is `null`), and once the member disconnects the app it is gone
 
 #### Scenario: Follow-up link
 

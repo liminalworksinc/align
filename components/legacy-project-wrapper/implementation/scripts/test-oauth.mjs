@@ -1236,10 +1236,11 @@ async function local(env) {
     ];
     await sleep(300);
     const afterOthers = times();
+    const sendsOf = (grant) => withDb((d) => d.prepare("SELECT goal_id, version, sent_at FROM v2_oauth_goal_sends WHERE grant_id = ? ORDER BY goal_id, version").all(grant));
     check(
-      "connected, not read: align_list_change_requests, align_get_decision_record, align_get_directives, align_get_asks, align_get_goal_activity and an align_get_goal for a goal it can't read leave last_read_at null",
-      notReads.every((r) => r.status === 200) && notReads.at(-1).isError && afterOthers?.last_read_at === null,
-      `${notReads.map((r) => `${r.status}${r.isError ? "!" : ""}`).join(" ")} ${JSON.stringify(afterOthers)}`,
+      "connected, not read: align_list_change_requests, align_get_decision_record, align_get_directives, align_get_asks, align_get_goal_activity and an align_get_goal for a goal it can't read leave last_read_at null and record no goal version sent (main #56)",
+      notReads.every((r) => r.status === 200) && notReads.at(-1).isError && afterOthers?.last_read_at === null && sendsOf(gid).length === 0,
+      `${notReads.map((r) => `${r.status}${r.isError ? "!" : ""}`).join(" ")} ${JSON.stringify(afterOthers)} ${JSON.stringify(sendsOf(gid))}`,
     );
     const got = await tool(tR.access_token, "align_get_goal", { goal_id: GC.id });
     await sleep(300);
@@ -1258,14 +1259,35 @@ async function local(env) {
       again.every((r) => r.status === 200 && !r.isError) && again[0].sc?.goals?.length > 0 && throttled?.last_read_at === read.last_read_at && throttled.last_used_at === connected.last_used_at,
       `${JSON.stringify(read)} ${JSON.stringify(throttled)}`,
     );
-    // A device token has no grant: its goal reads touch no grant's times.
+    // main #56 on v2: each goal read records the goal versions Align sent the app, once per version (sent_at is the first
+    // time), unthrottled; an explicit older version is recorded as that version. The value card of the launched
+    // request (GI at version 4) then names the app.
+    const sends = sendsOf(gid);
+    const sentGI = sends.find((r) => r.goal_id === GI.id && r.version === 4);
+    const listedIds = again[0].sc?.goals?.map((g) => `${g.id}@${g.version}`) ?? [];
+    const old3 = await tool(tR.access_token, "align_get_goal", { goal_id: GI.id, version: 3 });
+    const again2 = await tool(tR.access_token, "align_list_goals");
+    await sleep(300);
+    const sends2 = sendsOf(gid);
+    const valueApps = (await web(U1, "GET", `${crBase(GI.id)}/${crApproved.json?.id}/value`)).json?.apps;
+    check(
+      "goal versions sent (main #56): align_get_goal and the reads after it record one row per goal and version Align sent the app (every goal align_list_goals returned, at its version; GI at its launched version 4); an align_get_goal for version 3 adds GI@3; reading again changes no sent_at; the launched request's value card lists the app with that sent_at",
+      sends.some((r) => r.goal_id === GC.id) && listedIds.length > 0 && listedIds.every((k) => sends.some((r) => `${r.goal_id}@${r.version}` === k)) && !!sentGI && old3.sc?.goal?.version === 3 && again2.status === 200 &&
+        sends2.some((r) => r.goal_id === GI.id && r.version === 3) && sends2.find((r) => r.goal_id === GI.id && r.version === 4)?.sent_at === sentGI.sent_at && sends2.length === sends.length + 1 &&
+        valueApps?.everyone === true && valueApps.items.some((a) => a.id === gid && a.name === "Reads CLI" && a.sent_at === sentGI.sent_at),
+      `${JSON.stringify(sends)} ${JSON.stringify(listedIds)} ${JSON.stringify(sends2)} ${JSON.stringify(valueApps)}`,
+    );
+    // A device token has no grant: its goal reads touch no grant's times and record no goal version sent.
     const grantTimes = () => JSON.stringify(withDb((d) => d.prepare("SELECT id, last_used_at, last_read_at FROM v2_oauth_grants ORDER BY id").all()));
+    const allSends = () => withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_oauth_goal_sends").get().n);
     const beforeDev = grantTimes();
+    const sendsBeforeDev = allSends();
     const devGoal = await tool(D1.access, "align_get_goal", { goal_id: GC.id, workspace: A });
     await sleep(300);
-    check("a device token's goal read records nothing on any grant (devices use no grant)", devGoal.status === 200 && grantTimes() === beforeDev, `${devGoal.status} ${devGoal.text.slice(0, 120)}`);
-    // Disconnect it, so the Apps checks below count as before.
+    check("a device token's goal read records nothing on any grant (devices use no grant), and no goal version sent", devGoal.status === 200 && grantTimes() === beforeDev && allSends() === sendsBeforeDev, `${devGoal.status} ${devGoal.text.slice(0, 120)}`);
+    // Disconnect it, so the Apps checks below count as before; what Align recorded sending it goes with it.
     await web(U1, "DELETE", `/api/v2/workspaces/${A}/apps/${gid}`);
+    check("goal versions sent (main #56): disconnecting the app deletes its rows", sendsOf(gid).length === 0, JSON.stringify(sendsOf(gid)));
   }
   const cimd = "https://pub-two.addr.align-test/doc";
   const tU1 = await connect(cimd, U1, A);

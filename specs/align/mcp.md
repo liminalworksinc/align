@@ -746,6 +746,28 @@ A grant's `last_read_at` SHALL be set (asynchronously), and only set, when its a
 - **WHEN** that app then calls `align_get_asks` and `align_get_goal` for a goal that does not exist, then `align_get_goal` for a goal it can read
 - **THEN** `last_read_at` stays null until the third call and is set by it; an `align_list_goals` call a moment later leaves it unchanged, because it is written at most every 5 minutes
 
+### Requirement: Goal versions Align sent an app are recorded
+
+The same four goal reads (`align_list_goals`, `align_get_goal`, `align_get_brief`, `align_get_limits`, through an app's
+grant) SHALL record, asynchronously, which goal versions Align sent the app: one row per grant, goal and version
+(`v2_oauth_goal_sends`), with `sent_at` the first time Align sent that version, never moved by a later read and not
+throttled like `last_read_at`. Each goal in the answer is recorded at the version the answer holds (the launched
+version; for `align_get_goal` with `version`, that version). Nothing else records one, and device tokens record nothing.
+It is what Align served the app, not what the app did with it. A grant's rows go with the grant (disconnect, leaving,
+a new sign-in for the same app, workspace deletion) and with their goal. The decision value card (the `interface`
+part) names, once a change is launched, the apps the reader can see on the Apps tab that Align sent the version the
+launch made (main #56, "Show when a connected agent received the approved plan").
+
+#### Scenario: Versions sent
+
+- **WHEN** an app with a grant calls `align_get_goal` for a goal at version 4, then `align_list_goals`, then `align_get_goal` with `version: 3`
+- **THEN** the grant has a row for each goal the list returned at its version, a row for that goal at 4 whose `sent_at` the later reads did not change, and one at 3; `align_get_decision_record`, `align_get_directives`, `align_get_asks`, `align_get_goal_activity` and a failed read add none
+
+#### Scenario: Disconnected
+
+- **WHEN** the person disconnects the app
+- **THEN** its rows are deleted with the grant, and no value card lists it
+
 ### Requirement: Leaving or removal revokes app grants
 
 When a member leaves a workspace or a workspace owner removes them (`DELETE /api/v2/workspaces/{ws}/members/{user}`), the server SHALL, in the same transaction that deletes the membership, revoke every OAuth grant of that person for that workspace, so that their `alm.` access tokens get `401` on the next call and their refresh tokens get `invalid_grant`. Their grants for other workspaces SHALL keep working.

@@ -69,6 +69,12 @@ with the goals themselves at their launched version. A decision record (one requ
 <time>, no goal read seen yet"). Neither says which goal version the app has or what it did. Device tokens have no
 grant, so neither time is kept for them.
 
+**Versions sent (main #56).** The same four reads also record, per grant, each goal version Align sent the app and when
+it first did (`v2_oauth_goal_sends`, `lib/oauth/grants.ts` `noteGoalsSent`; not throttled, a later read never moves the
+time). Once a change request is launched, its decision value card lists the apps the reader can see that Align sent the
+new version ("Align sent it version <n> on <time>"). It records what Align served, not what the app did. The rows go
+with the grant.
+
 **Scopes.** `goals:read` is always granted and is the default. `changes:evidence` is granted only when the authorization
 request names it (unknown scope names are ignored); dynamic registration accepts and echoes it. The grant stores its
 scopes (`v2_oauth_grants.scope`, shown on the Apps tab), the token response's `scope` says which, and a refresh keeps

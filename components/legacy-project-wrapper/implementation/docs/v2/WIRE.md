@@ -418,7 +418,8 @@ request open, else `409 evidence_frozen`; each revision reads `evidence[]` with 
 `lib/v2/evidence.ts`), the decision value card of an approved request (`GET .../change-requests/:id/value` →
 `{ change_request_id, goal (version null until launched, base_version), launch, launched_at, diff, approved_by,
 decided_at, created_at, approved_without_evidence, affected: { parents, dependents }, delivery: { sessions, received,
-applied } | null (the launch's directive), measured: { proposal_to_decision, decision_to_launch,
+applied } | null (the launch's directive), apps: { everyone, items: [ { id, name, connected_by, sent_at } ] } | null (the
+connected apps the reader can see that an MCP goal read sent the launched version; null before the launch), measured: { proposal_to_decision, decision_to_launch,
 decision_to_first_applied }, my_report, reports, sees_all_reports, follow_up_url }`; `POST .../value` same-site `{ action:
 "viewed"|"follow_up"|"reported", estimate?, note? (≤ 500) }` → `{ recorded, report }`; 409 `not_approved` before
 approval, 409 `edit_closed` 7 days after a report was saved, 429 past 30 a minute per person; see `lib/v2/value.ts`),

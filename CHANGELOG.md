@@ -18,6 +18,10 @@
   workspace up at its next contact and says how to share again there.
   The same grant is available later from the Devices page, for a person's own live devices.
 
+- Ported main's #53, #55, #56 and the merged #44 onto v2 (PORT4): the requester's Home shows their declined request
+  (who declined it, the reason) until they send a newer one on that goal (#53); Align records which goal versions it
+  sent each connected app, and a launched change's value card names the apps it sent the new version, "Align sent it
+  version <n>", never what an app did with it (#56). The rest of the four was already true on v2 or is v1-only.
 - Ported main's #29 onto v2 (PORT3-001): goals carry a target share of agent time (active targets add up to 100% or
   less); the Spend tab shows each goal's share of the last 7 days against its target; an owner can turn on steering,
   a local line in the session when its goal is off target (never in a stopped or held session); target changes between
