@@ -9696,6 +9696,23 @@ try {
       `${c2Wrong.map(([k, a, , r]) => `${k} ${a}: ${r.status} ${r.json?.error} ${r.json?.message}`).join(" | ")} || ${JSON.stringify([tAlNow(c2Al), tCrNow(c2Cr), tRlNow(c2Rl)])}`,
     );
 
+    // -- W3: an approval whose workspaces are not a list of ids, or too many, is refused in a person's words --
+    const w3Code = insertPairing("Tess's laptop");
+    const w3Out = [];
+    for (const ids of ["x", [123], [long(65)], { a: TW }, Array.from({ length: 51 }, (_, i) => `ws_${String(i).padStart(10, "0")}`)])
+      w3Out.push(await call("TO", "POST", "/api/v2/device/approve", { cookie: TO.cookie, body: { user_code: w3Code.userCode, workspace_ids: ids } }));
+    const W3_LIST = "This approval doesn't say which of your workspaces the device may use, so nothing was approved. Tick your workspaces again.";
+    const W3_MANY = "One approval can give a device at most 50 workspaces, so nothing was approved. Tick fewer workspaces.";
+    const w3State = () => withDb((d) => d.prepare("SELECT state FROM v2_device_requests WHERE user_code = ?").get(w3Code.userCode)?.state);
+    const w3Pending = w3State();
+    const w3Ok = await call("TO", "POST", "/api/v2/device/approve", { cookie: TO.cookie, body: { user_code: w3Code.userCode, workspace_ids: [` ${TW} `, TW] } });
+    check(
+      "c12 W3 (E2E-WEB cycle 12): an approval whose workspace_ids is not a list, holds a number or an id longer than any workspace's, or is an object is 400 \"This approval doesn't say which of your workspaces the device may use, so nothing was approved. Tick your workspaces again.\"; 51 of them is 400 \"One approval can give a device at most 50 workspaces, …\"; never \"workspace_ids …\"; the code stays pending, and a list (spaces and repeats aside) then approves it",
+      w3Out.slice(0, 4).every((r) => r.status === 400 && r.json?.message === W3_LIST) && w3Out[4].status === 400 && w3Out[4].json?.message === W3_MANY &&
+        w3Out.every((r) => !/workspace_ids/.test(r.text)) && w3Pending === "pending" && w3Ok.status === 200 && w3Ok.json?.state === "approved",
+      `${w3Out.map((r) => `${r.status} ${r.json?.message}`).join(" | ")} || ${w3Pending} ${w3Ok.status} ${w3Ok.text.slice(0, 200)}`,
+    );
+
   }
   // ==== end fix:c12-web ====
 

@@ -1270,7 +1270,7 @@ its sessions that is not stopped: close its open epoch, clear its governing goal
 #### Scenario: Approving a code
 
 - **WHEN** a person with a recent sign-in approves a pending, unexpired code (in any letter case, with or without the hyphen)
-- **THEN** the response is `{state:"approved"}`; an empty `workspace_ids` is 400 `Choose at least one workspace for this device`, a workspace they are not a member of or an unknown, expired or decided code 404, and more than 20 lookups, or more than 20 decisions, per person in 10 minutes 429 `rate_limited`
+- **THEN** the response is `{state:"approved"}`; an empty `workspace_ids` is 400 `Choose at least one workspace for this device`, a `workspace_ids` that is not a list of workspace ids is 400 "This approval doesn't say which of your workspaces the device may use, so nothing was approved. Tick your workspaces again." and one of more than 50 is 400 "One approval can give a device at most 50 workspaces, so nothing was approved. Tick fewer workspaces.", never a field's name (`scripts/test-v2.mjs` "c12 W3 (E2E-WEB cycle 12): ..."), a workspace they are not a member of or an unknown, expired or decided code 404, and more than 20 lookups, or more than 20 decisions, per person in 10 minutes 429 `rate_limited`
 
 #### Scenario: Refresh token reuse
 
