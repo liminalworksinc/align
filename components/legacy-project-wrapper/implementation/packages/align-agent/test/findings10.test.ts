@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import { sessionKey } from "../src/keys.ts";
+import { latchNoticeTail, latchWayOut } from "../src/shared/ended.ts";
 import { readJson } from "../src/shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../src/shared/layout.ts";
 import type { HotState } from "../src/shared/types.ts";
@@ -76,7 +77,7 @@ const logout = async (t: TestEnv) => assert.equal((await runCli(t, ["logout"])).
 
 const GOAL = "Ship the v2 onboarding flow";
 const AGAIN = `Align: this machine is signed in to Align again. To share this session again, type \`::align share\` here (it counts toward "${GOAL}" again).`;
-const LATCHED_AGAIN = " It was stopped or held from the web: once it is shared again, that can be lifted there; until then its tools stay blocked.";
+const LATCHED_AGAIN = " It was stopped or held from the web, so tools stay blocked until it is shared again (you can type `::align share` in this session), after which the stop or hold can be lifted from the web.";
 const SIGNED_OUT = `Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on. To share it again, run \`align login\` in a terminal, then type \`::align share\` here (it counts toward "${GOAL}" again).`;
 const stopSharingTail = (lid: string) => ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
 
@@ -119,5 +120,65 @@ describe("C9-1: a web Stop sharing before a re-pairing is heard by the new pairi
     const told = prompt(t, A.sid, "go on", A.cwd)?.systemMessage ?? "";
     assert.ok(told.endsWith(stopSharingTail(A.lid)), told);
     assert.match(deny(t, A) ?? "", new RegExp(`until the user runs \`align stop-sharing ${A.lid.slice(0, 8)}\``));
+  });
+});
+
+describe("C9-2: every notice about a share that ended gives the deny's advice", () => {
+  /** Which way out a text gives, as `latchWayOut` words it for its reader: sharing again, `align stop-sharing`, or none. */
+  const advice = (text: string, lid: string, reader: "model" | "user") =>
+    text.includes(latchWayOut(lid, true, reader)) ? "share again" : text.includes(latchWayOut(lid, false, reader)) ? "stop-sharing" : "none";
+  /** The session's newest notice and its deny give the same way out, and the expected one. */
+  const same = (t: TestEnv, s: { sid: string; cwd: string; lid: string }, want: "share again" | "stop-sharing", label: string) => {
+    const notice = prompt(t, s.sid, "go on", s.cwd)?.systemMessage ?? "";
+    const why = deny(t, s) ?? "";
+    assert.equal(advice(notice, s.lid, "user"), want, `${label}: notice ${notice}`);
+    assert.equal(advice(why, s.lid, "model"), want, `${label}: deny ${why}`);
+    assert.ok(notice.endsWith(latchNoticeTail(s.lid, want === "share again")), `${label}: the notice ends with the latch sentence: ${notice}`);
+  };
+  const stopped = async (fake: FakeServer, t: TestEnv) => {
+    const A = await shared(t);
+    await sync(t);
+    fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [A.key], goal: null, binding: null });
+    await sync(t);
+    return A;
+  };
+
+  test("stopped from the web, then Stop sharing on the web (heard at the next pass): the notice says tools stay blocked until `align stop-sharing`, as the deny does", async () => {
+    const { fake, t } = await world();
+    const A = await stopped(fake, t);
+    fake.stopOnWeb(A.key);
+    await sync(t);
+    same(t, A, "stop-sharing", "stopped by its person");
+    assert.match(prompt(t, A.sid, "::align status", A.cwd).reason, new RegExp(`run \`align stop-sharing ${A.lid.slice(0, 8)}\``));
+  });
+
+  test("ended while its person was out of the workspace, or at a sign-out the server reports: notice and deny both offer `::align share`", async () => {
+    const { fake, t } = await world();
+    const A = await stopped(fake, t);
+    fake.removeAndReAdd(A.key);
+    await sync(t);
+    same(t, A, "share again", "member removed and back");
+    const B = await stopped(fake, t);
+    const row = fake.sessions.get(B.key)!;
+    Object.assign(row, { state: "stopped", ended: "device_signed_out", stopped_at: new Date().toISOString() });
+    await sync(t);
+    same(t, B, "share again", "ended at an earlier sign-out");
+  });
+
+  test("a sign-out and a sign-in, a lost workspace and its return: each notice gives the deny's advice", async () => {
+    const { fake, t } = await world();
+    const A = await stopped(fake, t);
+    await logout(t);
+    same(t, A, "stop-sharing", "signed out");
+    await login(t);
+    same(t, A, "share again", "signed in again");
+    const B = await stopped(fake, t);
+    const acme = fake.workspaces[0];
+    fake.workspaces = [];
+    await sync(t);
+    same(t, B, "stop-sharing", "workspace lost");
+    fake.workspaces = [acme];
+    await sync(t);
+    same(t, B, "share again", "workspace back");
   });
 });

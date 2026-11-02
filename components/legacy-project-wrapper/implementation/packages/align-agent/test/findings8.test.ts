@@ -120,7 +120,7 @@ describe("C7-1: shared again toward the goal already in context, after a folder 
 
 describe("C7-2: signed out and in again, the session's notice says what holds now, as its deny and the status views do", () => {
   const AGAIN = 'Align: this machine is signed in to Align again. To share this session again, type `::align share` here (it counts toward "Ship the v2 onboarding flow" again).';
-  const LATCHED = " It was stopped or held from the web: once it is shared again, that can be lifted there; until then its tools stay blocked.";
+  const LATCHED = " It was stopped or held from the web, so tools stay blocked until it is shared again (you can type `::align share` in this session), after which the stop or hold can be lifted from the web.";
 
   test("stopped from the web, then `align logout` and `align login`: the next prompt tells the signed-in-again notice, never `align login` or `align stop-sharing`; a session not stopped gets it at its next start", async () => {
     const { fake, t } = await world();
@@ -131,7 +131,7 @@ describe("C7-2: signed out and in again, the session's notice says what holds no
     await relogin(t);
     const told = prompt(t, A.sid, "go on", A.cwd);
     assert.equal(told?.systemMessage, AGAIN + LATCHED);
-    assert.match(deny(t, A) ?? "", /so the user can share it there again by typing `::align share` in this session/);
+    assert.match(deny(t, A) ?? "", /so tools stay blocked until it is shared again \(the user can type `::align share` in this session\)/);
     assert.equal(start(t, B.sid, "resume", B.cwd)?.systemMessage, AGAIN);
     assert.equal(prompt(t, A.sid, "go on", A.cwd)?.systemMessage, undefined, "once");
     assert.match(prompt(t, A.sid, "::align share confirm", A.cwd).reason, /sharing requested/);

@@ -35,6 +35,7 @@ import {
 import { myTeams, teamAsks } from "../shared/asks.ts";
 import { crossing, lastReply } from "../shared/drift.ts";
 import { feedHold, feedHoldReason } from "../shared/feedhold.ts";
+import { latchWayOut } from "../shared/ended.ts";
 import { contextGoals, snapshot } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
@@ -748,14 +749,14 @@ const ENDED_AGAIN: Partial<Record<keyof typeof ENDED_WHY, string>> = {
 };
 
 /**
- * The way out of a latch nothing can lift from the web any more (B6): `align stop-sharing <id>` in a terminal. When the
- * session can be shared there again now (`reshare`), the way the session's own notice gives instead: `::align share`,
- * after which the web can lift it (C6-2). Never both: following `align stop-sharing` makes re-sharing impossible.
+ * The way out of a latch nothing can lift from the web any more (B6), or, when the session can be shared there again now
+ * (`reshare`), the way back (C6-2): worded by `latchWayOut`, which every notice about a share that ended uses too, so
+ * the deny and the notices never give different advice (C9-2).
  */
 function endedNote(ended: keyof typeof ENDED_WHY, lid: string, reshare = false): string {
   const again = reshare ? ENDED_AGAIN[ended] : undefined;
-  if (again) return `Its sharing ended (${again}), so the user can share it there again by typing \`::align share\` in this session; once it is shared again, this can be lifted from the web. Until then tools stay blocked.`;
-  return `Its sharing has since ended (${ENDED_WHY[ended] ?? ENDED_WHY.sharing_ended}), so this can no longer be lifted from the web: tools stay blocked until the user runs \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
+  if (again) return `Its sharing ended (${again}), so ${latchWayOut(lid, true, "model")}`;
+  return `Its sharing has since ended (${ENDED_WHY[ended] ?? ENDED_WHY.sharing_ended}), so this can no longer be lifted from the web: ${latchWayOut(lid, false, "model")}`;
 }
 
 /** What every deny that blocks tools until people act ends with: the model tells the user instead of working around it. */

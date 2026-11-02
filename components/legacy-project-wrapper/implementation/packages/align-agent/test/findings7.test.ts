@@ -156,11 +156,11 @@ describe("C6-2: a stopped session whose share ended says the same thing everywhe
     fake.workspaces = [acme];
     await sync(t);
     const start = json(runHook(t, "claude", "SessionStart", { session_id: A.sid, source: "resume", cwd: A.cwd }).stdout);
-    assert.match(start.systemMessage, /can reach Acme in Align again\. To share this session there again, type `::align share` here \(it counts toward "Ship the v2 onboarding flow" again\)\. It was stopped or held from the web: once it is shared again, that can be lifted there; until then its tools stay blocked\./);
+    assert.match(start.systemMessage, /can reach Acme in Align again\. To share this session there again, type `::align share` here \(it counts toward "Ship the v2 onboarding flow" again\)\. It was stopped or held from the web, so tools stay blocked until it is shared again \(you can type `::align share` in this session\), after which the stop or hold can be lifted from the web\./);
     const d = deny(t, A);
     assert.equal(
       d,
-      "Align: this session was stopped from its Align workspace. Its sharing ended (this machine lost access to its Align workspace, and can reach it again now), so the user can share it there again by typing `::align share` in this session; once it is shared again, this can be lifted from the web. Until then tools stay blocked. Tell the user and wait for instructions.",
+      "Align: this session was stopped from its Align workspace. Its sharing ended (this machine lost access to its Align workspace, and can reach it again now), so tools stay blocked until it is shared again (the user can type `::align share` in this session), after which the stop or hold can be lifted from the web. Tell the user and wait for instructions.",
     );
     const latch = (await runCli(t, ["latch", "status"])).stdout;
     assert.match(latch, /sharing ended \(this machine lost access to its Align workspace, and can reach it again now\): `::align share` in the session shares it there again, after which it can be resumed or released from the web/);
@@ -188,7 +188,7 @@ describe("C6-2: a stopped session whose share ended says the same thing everywhe
     assert.equal((await runCli(t, ["logout"])).code, 0);
     assert.match(deny(t, A), /this machine signed out of Align\), so this can no longer be lifted from the web: tools stay blocked until the user runs `align stop-sharing /);
     assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
-    assert.match(deny(t, A), /Its sharing ended \(this machine signed out of Align, and is signed in again now\), so the user can share it there again by typing `::align share` in this session/);
+    assert.match(deny(t, A), /Its sharing ended \(this machine signed out of Align, and is signed in again now\), so tools stay blocked until it is shared again \(the user can type `::align share` in this session\)/);
   });
 });
 

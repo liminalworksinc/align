@@ -943,8 +943,8 @@ try {
   check(
     "signed in again (E2E-AGENT cycle 7 C7-2): after `align logout` and `align login`, the stopped session's next prompt tells only that this machine is signed in again and `::align share` shares it again, after which the web can lift the stop, as its deny says; never `align login` or `align stop-sharing`",
     (q1In.system ?? "").startsWith("Align: this machine is signed in to Align again. To share this session again, type `::align share` here") &&
-      (q1In.system ?? "").includes("once it is shared again, that can be lifted there") && !/align login|align stop-sharing/.test(q1In.system ?? "") &&
-      q1InDeny.includes("signed in again now), so the user can share it there again by typing `::align share` in this session"),
+      (q1In.system ?? "").includes("so tools stay blocked until it is shared again (you can type `::align share` in this session)") && !/align login|align stop-sharing/.test(q1In.system ?? "") &&
+      q1InDeny.includes("signed in again now), so tools stay blocked until it is shared again (the user can type `::align share` in this session)"),
     `back=${q1In.stdout} deny=${q1InDeny}`,
   );
   const xwAnswer = (await call("GET", "/api/v2/directives?cursor=0", { bearer: JSON.parse(readFileSync(path.join(alignHome, "credentials.json"), "utf8")).access_token })).json;
@@ -1233,7 +1233,7 @@ try {
   check(
     "stopped, removed and re-invited (E2E-AGENT cycle 6 C6-2): while the workspace is out of reach the deny names `align stop-sharing`; once it is back the deny and `align latch status` offer `::align share` instead, as the session's notice does; `::align share confirm` shares it again, the deny becomes the plain stop, and a web resume frees its tools",
     q3Shared0.code === 0 && q3Stop.status === 200 && q3Lost.includes("no longer has access to its Align workspace") && q3Lost.includes("`align stop-sharing ") &&
-      q3Back.includes("can reach it again now), so the user can share it there again by typing `::align share` in this session") && !q3Back.includes("align stop-sharing") &&
+      q3Back.includes("can reach it again now), so tools stay blocked until it is shared again (the user can type `::align share` in this session)") && !q3Back.includes("align stop-sharing") &&
       q3Latch.includes(`${q3Lid.slice(0, 8)} claude-code STOPPED`) && !new RegExp(`${q3Lid.slice(0, 8)}[^\n]*only \`align stop-sharing`).test(q3Latch) &&
       /sharing requested/.test(q3Share.json?.reason ?? "") && q3Shared === "Align: this session was stopped from its Align workspace. Tools are blocked until it is resumed there. Tell the user and wait for instructions." &&
       q3Resume.status === 200 && q3Free === null,

@@ -16,6 +16,7 @@ import { gitInfo } from "./shared/anchors.ts";
 import { clean } from "./shared/envelope.ts";
 import { randomId, readJson, removeFile, writeJsonAtomic } from "./shared/fsx.ts";
 import { layout } from "./shared/layout.ts";
+import { latchNoticeTail } from "./shared/ended.ts";
 import type { FeedFile, Goal, GoalSnapshot, MeFile } from "./shared/types.ts";
 import type { PodFeed } from "./hooks/siblings.ts";
 
@@ -338,10 +339,9 @@ export function noticeSignedInAgain(ctx: Ctx): void {
     const last = ctx.db.prepare(`SELECT id FROM notices WHERE local_id=? AND ${SIGNED_IN_NOTICE} ORDER BY created_at DESC, rowid DESC LIMIT 1`).get(lid) as { id: string } | undefined;
     if (last && last.id.slice(lid.length + 1).startsWith("signed_in_noreach_") === !end.reshare) continue;
     const goal = share.goal_json ? (JSON.parse(share.goal_json) as GoalSnapshot) : null;
-    const latched = latchedFromWeb(ctx, lid);
     const text = end.reshare
-      ? `Align: this machine is signed in to Align again. To share this session again, type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.${latched ? " It was stopped or held from the web: once it is shared again, that can be lifted there; until then its tools stay blocked." : ""}`
-      : `Align: this machine is signed in to Align again, but this sign-in does not reach ${clean(share.workspace_name, 80)}, so this session can't be shared there again from here; its usage stays on this machine.${latched ? ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.` : ""}`;
+      ? `Align: this machine is signed in to Align again. To share this session again, type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.${latchTail(ctx, lid)}`
+      : `Align: this machine is signed in to Align again, but this sign-in does not reach ${clean(share.workspace_name, 80)}, so this session can't be shared there again from here; its usage stays on this machine.${latchTail(ctx, lid)}`;
     notify(ctx, lid, `${end.reshare ? "signed_in_" : "signed_in_noreach_"}${nowIso()}`, text);
   }
 }
@@ -362,12 +362,11 @@ function endShare(ctx: Ctx, lid: string, why: string, noticeId: string, text: st
 
 /** What a notice about a share that ended adds for a session stopped or held from the web: a session that can be shared
  *  there again at once (signed in, its workspace in reach) gets out the way its latch says, by sharing it again; any
- *  other until `align stop-sharing` (C6-2). Empty for a session that is not. */
-function latchTail(ctx: Ctx, lid: string): string {
+ *  other until `align stop-sharing` (C6-2). Worded by the function the deny uses (`latchWayOut`), from the same
+ *  `reshare` state its latch file carries, so the two never differ (C9-2). Empty for a session that is not. */
+export function latchTail(ctx: Ctx, lid: string): string {
   if (!latchedFromWeb(ctx, lid)) return "";
-  return endedState(ctx, getShare(ctx, lid))?.reshare
-    ? " It was stopped or held from the web: once it is shared again, that can be lifted there; until then its tools stay blocked."
-    : ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
+  return latchNoticeTail(lid, !!endedState(ctx, getShare(ctx, lid))?.reshare);
 }
 
 /**
@@ -425,7 +424,8 @@ export function endShareStoppedByPerson(ctx: Ctx, lid: string, noticeId: string)
   tx(ctx.db, () => {
     markStopped(ctx, lid);
     notePriorShare(ctx, lid, true);
-    addNotice(ctx, lid, noticeId, STOPPED_ELSEWHERE);
+    // Stopped or held from the web as well: the notice says how to unblock it, as the deny does (C9-2).
+    addNotice(ctx, lid, noticeId, `${STOPPED_ELSEWHERE}${latchTail(ctx, lid)}`);
   });
   renderHot(ctx, lid);
 }
@@ -580,13 +580,12 @@ export function noticeWorkspacesAdded(ctx: Ctx, me: MeFile, added: { id: string;
       }
       const goal = s.goal_json ? (JSON.parse(s.goal_json) as GoalSnapshot) : null;
       told.add(s.local_id);
-      // Stopped or held from the web: sharing it again is also how the web gets to lift that (C6-2).
-      const latched = ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(s.local_id) || ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(s.local_id);
+      // Stopped or held from the web: sharing it again is also how the web gets to lift that (C6-2), in the deny's words.
       notify(
         ctx,
         s.local_id,
         `workspace_back_${w.id}_${at}`,
-        `Align: this machine can reach ${name} in Align again. To share this session there again, type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.${latched ? " It was stopped or held from the web: once it is shared again, that can be lifted there; until then its tools stay blocked." : ""}`,
+        `Align: this machine can reach ${name} in Align again. To share this session there again, type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.${latchTail(ctx, s.local_id)}`,
       );
     }
     // A session whose share there a sign-out ended hears it from its "signed in again" notice, toward the goal it had
