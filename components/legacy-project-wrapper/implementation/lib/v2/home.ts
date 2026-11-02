@@ -4,7 +4,7 @@ import { listAlignments } from "./alignments";
 import { listAsks } from "./asks";
 import { changeRequestGroups } from "./changes";
 import { all } from "./db";
-import { visibleGoals } from "./goals";
+import { goalRow, visibleGoals } from "./goals";
 import { alignmentWaits, appEvidence, changeWaits, launchWaits, type EvidenceClass, type HomeNext, type HomePerson } from "./home-core.mts";
 import type { PolicyPrincipal } from "./policy";
 import { memberName } from "./workspaces";
@@ -16,6 +16,9 @@ import { memberName } from "./workspaces";
 // Each section is read on its own: a section whose read fails is null, which the page shows as "unknown", never as
 // zero. Change requests and alignments "waiting on others" are the open ones that involve the reader: they asked, or
 // the goal is theirs, their team's, or (for a workspace owner) a company goal, or they are in its approval set.
+// "Declined" (main #53, M2): the reader's own latest request on an active goal, when an approver declined it, so the
+// requester sees the decision and its reason ("<requester> sees your reason", the decide card) without opening the goal;
+// it stays until they send a newer request on that goal or the goal closes. It waits on nobody and is never counted.
 
 export interface HomeChange {
   id: string;
@@ -27,6 +30,16 @@ export interface HomeChange {
   /** Who it waits on; empty when nobody can approve it yet. */
   waiting_on: HomePerson[];
   updated_at: string;
+}
+
+/** The reader's latest request on an active goal, declined (main #53): who declined it, why and when. */
+export interface HomeDeclined {
+  id: string;
+  goal: { id: string; title: string; version: number };
+  reason: string;
+  rejected_by: HomePerson | null;
+  rejection_reason: string | null;
+  decided_at: string | null;
 }
 
 export interface HomeAsk {
@@ -131,7 +144,18 @@ export function workspaceHome(pp: PolicyPrincipal) {
       if (mineToAct) onMe.push(item(w.next, w.waiting_on));
       else if (v.requester.id === me || ours(v.goal.id) || v.approvers.some((a) => a.id === me)) onOthers.push(item(w.next, w.next === "decide" || w.next === "resolve_loop" ? notMe(w.waiting_on) : w.waiting_on));
     }
-    return { waiting_on_me: onMe, waiting_on_others: onOthers };
+    // Declined: per goal, the reader's newest request (requests are created in order; an id breaks a same-time tie).
+    const latest = new Map<string, (typeof views)[number]>();
+    for (const v of views) {
+      if (v.requester.id !== me) continue;
+      const p = latest.get(v.goal.id);
+      if (!p || v.created_at > p.created_at || (v.created_at === p.created_at && v.id > p.id)) latest.set(v.goal.id, v);
+    }
+    const declined = [...latest.values()]
+      .filter((v) => v.state === "rejected" && goalRow(pp.wsId, v.goal.id)?.status === "active")
+      .map((v): HomeDeclined => ({ id: v.id, goal: v.goal, reason: v.reason, rejected_by: v.rejected_by, rejection_reason: v.rejection_reason, decided_at: v.decided_at }))
+      .sort((a, b) => (b.decided_at ?? "").localeCompare(a.decided_at ?? "") || a.id.localeCompare(b.id));
+    return { waiting_on_me: onMe, waiting_on_others: onOthers, declined };
   });
 
   const asks = section(() => ({

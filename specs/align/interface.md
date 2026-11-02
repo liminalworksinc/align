@@ -540,14 +540,15 @@ The Home at `/app/w/<ws>`, a workspace's landing view, SHALL show under "Know wh
 `GET /api/v2/workspaces/<ws>/home`, a line saying how many things wait on the person, four count tiles ("Waiting on
 you", "Waiting on others", "Active goals", and "Connected apps that read the goals" as "<read> of <connected>", or
 "Connected apps" with none), each a link to its section, and the sections "Waiting on you", "Waiting on others",
-"Active goals" and "Connected AI apps · when they last read the goals". It SHALL show only what the server holds: a count or a
+"Your declined requests" (only when there is one), "Active goals" and "Connected AI apps · when they last read the
+goals". It SHALL show only what the server holds: a count or a
 section the server could not read SHALL say "unknown", never zero, and nothing on the page SHALL infer what an agent is
 doing (no working, stuck, blocked or diverged state, and no claim that an app has the current goal version or is "on
 the current plan": Align keeps no per-app version). The page
 reads once when it opens and does not poll (only its first-run card checks the apps while it is shown).
 
 The read SHALL return, for a workspace member or viewer (cookie only: an `Authorization` header gets `403
-bearer_not_allowed`, a non-member `404`), `change_requests` (`waiting_on_me`, `waiting_on_others`), `asks`
+bearer_not_allowed`, a non-member `404`), `change_requests` (`waiting_on_me`, `waiting_on_others`, `declined`), `asks`
 (`waiting_on_me`), `alignments` (`waiting_on_me`, `waiting_on_others`), `goals` and `apps` (`everyone`, `items`),
 each `null` when the server could not read it. Every queue item SHALL carry `next` (what it needs) and `waiting_on`
 (the people it waits on). An open change request waits on its approvers to decide (`waiting_on` is the effective
@@ -568,6 +569,14 @@ on the person when their `can.launch` flag is set, otherwise under waiting on ot
 when the person asked for it or the goal is theirs, their team's, or (for a workspace owner) a company goal. A launched
 or superseded request is on no Home, nor is an approved one that would now close a dependency loop (`dependency_loop`):
 nobody can launch it as it stands.
+
+The decide card tells an approver who declines that the requester sees their reason, so the requester's Home SHALL
+show it (main #53): `change_requests.declined` lists, per active goal, the person's own latest change request there
+when it is `rejected`, with the goal (its current version), `reason`, `rejected_by`, `rejection_reason` and
+`decided_at`, newest decision first. It waits on nobody, is counted in no tile or summary, and is on nobody else's Home.
+It stays until the person sends a newer request on that goal (whatever becomes of that one) or the goal closes. Each is
+a row "<approver> declined your request on <goal>" with "Declined <time>. Reason: “<reason>”. Your change wasn't made;
+the goal is at version <n>." and **Open** (the goal page's change requests, where the record is).
 
 Every agent-status item SHALL show exactly one evidence class, "delivery receipt" (a `received`, `applied` or
 `enforced` receipt, or a goal read Align served), "agent reported" (the agent's own claim or evidence link) or "not
@@ -608,6 +617,16 @@ read. A workspace owner sees every connected app and anyone else their own, as o
 
 - **WHEN** a signed-in person who is not a member opens `/app/w/<ws>` or any page under it: the workspace doesn't exist, was deleted, they were removed, or they were never in it
 - **THEN** the page shows only the top bar and "This workspace doesn't exist or you're not in it" with a link to `/app` ("Go to your workspaces"): no workspace tabs, no tiles, no "unknown" and no "Reload" (that is for a read that failed, not for a 404)
+
+#### Scenario: A declined request on the requester's Home
+
+- **WHEN** an approver declines a member's change request with a reason
+- **THEN** the member's Home shows it under "Your declined requests" as "<approver> declined your request on <goal>" with the time, the quoted reason and the goal's version, with **Open** to the goal's change requests; the approver's, the workspace owner's and every other Home don't list it, and no count includes it
+
+#### Scenario: A newer request replaces the declined one
+
+- **WHEN** that member then sends a new request on the same goal, and later withdraws it
+- **THEN** the declined request leaves their Home when the new one is sent and does not come back after the withdrawal
 
 #### Scenario: First-run card after the queue
 

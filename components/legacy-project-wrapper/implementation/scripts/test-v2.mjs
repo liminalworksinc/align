@@ -6422,6 +6422,63 @@ try {
     const lnHL = await ha(HO, "POST", `/goals/${GX.id}/change-requests/${crHL.json?.id}/launch`, {});
     const [kX, kM] = await Promise.all([HX, HM].map(home));
     check("home (LAUNCH-001): once launched the change leaves every Home", lnHL.json?.launch === "launched" && !lOf(kX, "waiting_on_me") && !lOf(kM, "waiting_on_others"), lnHL.text.slice(0, 200));
+
+    // -- main #53 (M2) on v2: the requester's Home shows their declined request (who declined it, the reason, the goal's
+    //    version) until they send a newer request on that goal; nobody else's Home lists it, and it waits on nobody --
+    const crD = await ha(HM, "POST", `/goals/${GX.id}/change-requests`, { base_version: 2, changes: { title: "Hank's side project, paused" }, reason: "Home: pause it" });
+    const rjD = await ha(HX, "POST", `/goals/${GX.id}/change-requests/${crD.json?.id}/reject`, { revision: 1, reason: "Home: not this quarter" });
+    const [dM, dX, dO, dL] = await Promise.all([HM, HX, HO, HL].map(home));
+    const dOf = (h) => h?.change_requests?.declined?.find((c) => c.id === crD.json?.id);
+    const inQueues = (h) => [...(h?.change_requests?.waiting_on_me ?? []), ...(h?.change_requests?.waiting_on_others ?? [])].some((c) => c.id === crD.json?.id);
+    check(
+      "home (main #53): a declined request is under change_requests.declined on its requester's Home only, with the goal at its current version, rejected_by the approver, the rejection reason and decided_at; it is in no queue and on no other Home (approver, workspace owner, lead)",
+      crD.status === 201 && rjD.json?.state === "rejected" && dOf(dM)?.goal?.id === GX.id && dOf(dM).goal.version === 2 && JSON.stringify(dOf(dM).rejected_by) === JSON.stringify({ id: HX.id, name: "Hank Other" }) && dOf(dM).rejection_reason === "Home: not this quarter" && typeof dOf(dM).decided_at === "string" &&
+        !inQueues(dM) && !dOf(dX) && !dOf(dO) && !dOf(dL) && Array.isArray(dX?.change_requests?.declined) && (dM.change_requests.declined ?? []).every((c) => c.goal.id !== GT.id),
+      `${crD.status} ${rjD.text.slice(0, 200)} ${JSON.stringify(dM?.change_requests?.declined)}`,
+    );
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const page = await browser.newPage();
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        await page.setViewport({ width: 390, height: 844 });
+        await page.setCookie(...HM.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await page.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        await page.waitForSelector(`[data-home-item="declined:${crD.json?.id}"]`, { timeout: 15000 });
+        const dv = await page.evaluate((id) => {
+          const row = document.querySelector(`[data-home-item="declined:${id}"]`);
+          return {
+            text: row?.innerText ?? "",
+            href: row?.querySelector("a")?.getAttribute("href") ?? "",
+            section: row?.closest("section[aria-label]")?.getAttribute("aria-label") ?? "",
+            summary: document.querySelector("[data-home-summary]")?.textContent ?? "",
+            sw: document.scrollingElement.scrollWidth,
+            W: window.innerWidth,
+          };
+        }, crD.json?.id);
+        check(
+          "ui (Chrome, main #53): the requester's Home lists \"Hank Other declined your request on <goal>\" under \"Your declined requests\" with when, the quoted reason and \"Your change wasn't made; the goal is at version 2.\", and Open goes to the goal's change requests; the summary still counts only what waits on them; it fits 390 px",
+          /Hank Other declined your request on Hank's side project, shipped/.test(dv.text) && /Declined .+\. Reason: “Home: not this quarter”\. Your change wasn.t made; the goal is at version 2\./.test(dv.text) && dv.section === "Your declined requests" &&
+            dv.href === `/app/w/${HW}/goals/${GX.id}#change-requests` && !/declined/i.test(dv.summary) && dv.sw <= dv.W && errors.length === 0,
+          `${JSON.stringify(dv)} ${errors.join(" | ")}`,
+        );
+      } catch (e) {
+        check("ui (Chrome) home declined run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the Home's declined request", false, `no Chrome at ${CHROME}`);
+    const crD2 = await ha(HM, "POST", `/goals/${GX.id}/change-requests`, { base_version: 2, changes: { title: "Hank's side project, paused in May" }, reason: "Home: pause it later" });
+    const eM = await home(HM);
+    const wdD2 = await ha(HM, "POST", `/goals/${GX.id}/change-requests/${crD2.json?.id}/withdraw`, {});
+    const fM = await home(HM);
+    check(
+      "home (main #53): once the requester sends a newer request on that goal the declined one leaves their Home, and stays gone after they withdraw the newer one (their latest request there is no longer declined)",
+      crD2.status === 201 && !dOf(eM) && wdD2.json?.state === "withdrawn" && !dOf(fM) && (fM?.change_requests?.declined ?? []).every((c) => c.goal.id !== GX.id),
+      `${crD2.status} ${wdD2.text.slice(0, 120)} ${JSON.stringify(fM?.change_requests?.declined)}`,
+    );
   }
   // ==== end port2:home ====
 
