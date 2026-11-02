@@ -70,10 +70,10 @@ export default function Devices({ me }: { me: Me }) {
             return (
               <li key={d.id} data-device={d.id} className="flex flex-wrap items-center gap-3 py-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-[16px] text-zinc-900">
+                  <p className="overflow-hidden text-[16px] text-zinc-900 [overflow-wrap:anywhere]">
                     {d.name} {d.revoked_at ? <Pill tone="red">revoked</Pill> : <Pill tone="green">active</Pill>}
                   </p>
-                  <p className="text-[14px] text-zinc-500">
+                  <p className="text-[14px] text-zinc-500 [overflow-wrap:anywhere]">
                     <span className="font-mono">{tag(d.id)}</span>. Connected {when(d.created_at)}
                     {d.last_seen_at ? `, last seen ${when(d.last_seen_at)}` : ""}
                     {d.workspaces.length ? `. Workspaces: ${d.workspaces.map((w) => w.name).join(", ")}` : ""}

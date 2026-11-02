@@ -361,6 +361,20 @@ export function deviceFromAccessToken(tokenValue: string): DevicePrincipal | nul
 /** A code no device is waiting on: unknown, expired, or approved or denied already (in another tab, say). */
 const CODE_NOT_WAITING = "No device is waiting for that code. Check it, or run align login again.";
 
+/** The code an approval or denial names, from its body: an empty one is refused in words the person can act on, never
+ *  as a field name (E2E-WEB cycle 10 W4). */
+export function userCodeOf(b: Record<string, unknown>): string {
+  const v = b.user_code;
+  if (v !== undefined && typeof v !== "string") throw badRequest("user_code must be a string");
+  const t = typeof v === "string" ? v.trim() : "";
+  if (!t) throw badRequest(EMPTY_CODE);
+  if (t.length > 20) throw badRequest("user_code is too long (max 20 characters)");
+  return t;
+}
+
+/** An approval or denial with no code. */
+export const EMPTY_CODE = "Enter the code shown by align login.";
+
 function pendingByCode(code: string, nowMs = Date.now()): RequestRow {
   const norm = normalizeUserCode(code);
   const r = norm ? get<RequestRow>("SELECT * FROM v2_device_requests WHERE user_code = ?", norm) : undefined;
