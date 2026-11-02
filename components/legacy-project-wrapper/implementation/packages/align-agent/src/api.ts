@@ -451,6 +451,9 @@ export interface PendingRevoke {
   /** Why it waits: `align logout` could not reach the server, or `align login` replaced it (C4-9). Absent in files
    *  written before this was kept: a logout. */
   reason?: "logout" | "replaced";
+  /** For `replaced`: the device that replaced it here. Its revoke names it, so the server gives that device this one's
+   *  name when it was "<name> (n)" only because this one was live (two logins approved together, cycle 6). */
+  replaced_by?: string;
 }
 
 /** `revoke.json`: every device still to revoke (C4-3). An older file held a single device. */
@@ -520,7 +523,7 @@ export async function commitPairing<T>(ctx: Ctx, creds: Credentials, keyPem: str
     async () => {
       const before = loadCredentials(ctx.home);
       const replaced = before && !before.signed_out && before.refresh_token && before.device_id !== creds.device_id ? before : null;
-      if (replaced) addPendingRevoke(ctx.home, pendingRevokeFor(ctx.home, replaced, "replaced"));
+      if (replaced) addPendingRevoke(ctx.home, { ...pendingRevokeFor(ctx.home, replaced, "replaced"), replaced_by: creds.device_id });
       const committed = onCommit();
       writeFileAtomic(layout.deviceKey(ctx.home), keyPem, 0o600);
       const next: Credentials = { ...creds };
@@ -630,7 +633,8 @@ export async function revokePending(ctx: Ctx): Promise<RevokeOutcome> {
 }
 
 async function revokeOne(ctx: Ctx, p: PendingRevoke): Promise<"revoked" | "already" | "pending"> {
-  const del = (token: string) => rawRequest(p.server_url, "DELETE", "/api/v2/devices/self", { headers: { authorization: `Bearer ${token}` } });
+  const self = `/api/v2/devices/self${p.replaced_by ? `?replaced_by=${encodeURIComponent(p.replaced_by)}` : ""}`;
+  const del = (token: string) => rawRequest(p.server_url, "DELETE", self, { headers: { authorization: `Bearer ${token}` } });
   const seen: string[] = [];
   try {
     let done = false;

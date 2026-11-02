@@ -1151,6 +1151,28 @@ try {
     d.prepare("DELETE FROM v2_devices WHERE id = ?").run(notMine.id);
   });
   check("device (E2E-AGENT cycle 5): a new pairing named as one of the person's live devices gets a distinguishing suffix (\"reuse test (2)\"), so no two live devices share a name, also when the poll names another person's device as the one it replaces", drName === "reuse test (2)", String(drName));
+  // E2E-AGENT cycle 6: two logins approved together. The first's device ("race mac") is replaced by the second's ("race
+  // mac (2)", named while the first was live); the first's revoke names its replacement, which takes the plain name.
+  // Not while another live device of the person has it, never for another person's device, and never without the name.
+  const raceA = insertDevice(U1.id, "race mac");
+  const raceB = insertDevice(U1.id, "race mac (2)");
+  const raceOther = insertDevice(U2.id, "race mac (3)");
+  const raceKeep = insertDevice(U1.id, "race mac (4)");
+  const nameOf = (id) => withDb((d) => d.prepare("SELECT name, revoked_at FROM v2_devices WHERE id = ?").get(id));
+  const raceStranger = await call("U1", "DELETE", `/api/v2/devices/self?replaced_by=${raceOther.id}`, { bearer: insertDevice(U1.id, "race mac").access });
+  const strangerName = nameOf(raceOther.id)?.name;
+  const raceRevoke = await call("U1", "DELETE", `/api/v2/devices/self?replaced_by=${raceB.id}`, { bearer: raceA.access });
+  const raceAfter = [nameOf(raceA.id), nameOf(raceB.id)];
+  const raceTaken = await call("U1", "DELETE", `/api/v2/devices/self?replaced_by=${raceKeep.id}`, { bearer: insertDevice(U1.id, "race mac").access });
+  check(
+    "device (E2E-AGENT cycle 6): a self-revoke naming the device that replaced it (two logins approved together) gives that device its plain name (\"race mac (2)\" -> \"race mac\") and is revoked; never another person's device, and not while another live device of the person has the plain name",
+    raceRevoke.status === 204 && !!raceAfter[0]?.revoked_at && raceAfter[1]?.name === "race mac" && !raceAfter[1]?.revoked_at &&
+      raceStranger.status === 204 && strangerName === "race mac (3)" && raceTaken.status === 204 && nameOf(raceKeep.id)?.name === "race mac (4)",
+    `${raceRevoke.status} ${JSON.stringify(raceAfter)} ${raceStranger.status} ${strangerName} ${raceTaken.status} ${JSON.stringify(nameOf(raceKeep.id))}`,
+  );
+  withDb((d) => {
+    for (const x of [raceB, raceOther, raceKeep]) d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), x.id);
+  });
   const ts3 = new Date().toISOString();
   const rr1 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });
   const rrReuse = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });
@@ -2364,6 +2386,7 @@ try {
   const gBearer = await call("U5", "POST", `/api/v2/devices/${desk.id}/workspaces`, { bearer: D5.access, body: { workspace_id: A } });
   const deskGrants = () => withDb((d) => d.prepare("SELECT ws_id FROM v2_device_grants WHERE device_id = ?").all(desk.id).map((r) => r.ws_id).join());
   const refusedGrants = deskGrants();
+  const deskMeBefore = await call("U5", "GET", "/api/v2/me", { bearer: desk.access });
   const gOk = await give(U5, desk.id, A);
   const gAgain = await give(U5, desk.id, A);
   const deskMe = await call("U5", "GET", "/api/v2/me", { bearer: desk.access });
@@ -2377,6 +2400,14 @@ try {
       gOk.status === 200 && gOk.json?.device_id === desk.id && gOk.json?.workspace_id === A && gAgain.status === 409 && gAgain.json?.error === "already_granted" &&
       deskMe.json?.workspaces?.map((w) => w.id).join() === A && JSON.stringify(deskDirs.json?.workspaces) === JSON.stringify([A]) && audDesk.length === 1 && audDesk[0].actor?.id === U5.id,
     `${gStale.text} ${gOther.status} ${gNotMember.status} ${gRevoked.status} ${gBadWs.status} ${gBearer.status} [${refusedGrants}] ${gOk.text} ${gAgain.text} ${deskMe.text} ${deskDirs.text} ${JSON.stringify(audDesk)}`,
+  );
+  const webMe = await call("U5", "GET", "/api/v2/me", { cookie: U5.cookie });
+  check(
+    "devices (E2E-AGENT cycle 6): a device's GET /me lists as other_workspaces ({id, name}) its person's workspaces it was not given, never one they are not a member of; given one, it moves to workspaces; the web's /me has no other_workspaces",
+    JSON.stringify(deskMeBefore.json?.workspaces) === "[]" && deskMeBefore.json?.other_workspaces?.some((w) => w.id === A && typeof w.name === "string") &&
+      !deskMeBefore.json.other_workspaces.some((w) => w.id === B) && Array.isArray(deskMe.json?.other_workspaces) && !deskMe.json.other_workspaces.some((w) => w.id === A) &&
+      webMe.status === 200 && !("other_workspaces" in (webMe.json ?? {})),
+    `${deskMeBefore.text} ${deskMe.text} ${webMe.text}`,
   );
   if (existsSync(CHROME)) {
     const { default: puppeteer } = await import("puppeteer-core");
@@ -2470,6 +2501,11 @@ try {
   const epochAfterStop = await epoch(D3, S3b, { epoch_id: epochId(), goal_id: G3.id, starts_at: new Date().toISOString() });
   const strangerStop = await call("U1", "POST", `/api/v2/workspaces/${A}/sessions/${S3b}/stop-sharing`, { cookie: U1.cookie, body: {} });
   check("stop sharing: -> stopped; then usage, re-share and epochs -> 409 sharing_stopped; someone else's session -> 404", stopShare.json?.state === "stopped" && upAfterStop.status === 409 && upAfterStop.json?.error === "sharing_stopped" && putAfterStop.status === 409 && epochAfterStop.status === 409 && strangerStop.status === 404, `${stopShare.text} ${upAfterStop.status} ${putAfterStop.status} ${epochAfterStop.status} ${strangerStop.status}`);
+  check(
+    "stop sharing (E2E-AGENT cycle 6 C6-3): the 409 sharing_stopped for usage and epochs of a session its person stopped says ended_reason null",
+    "ended_reason" in (upAfterStop.json ?? {}) && upAfterStop.json.ended_reason === null && epochAfterStop.json?.error === "sharing_stopped" && epochAfterStop.json?.ended_reason === null,
+    `${upAfterStop.text} ${epochAfterStop.text}`,
+  );
   // -- E2E-AGENT B4/G2: a revoked device can't receive a stop or resume, so its sessions end with it ("device signed
   //    out"): the Sessions tab says so, Stop and Resume are refused (never reported as sent), and the same person's
   //    re-paired machine may share the session again --
@@ -2632,8 +2668,20 @@ try {
       `${cpB.status} ${stopB.status} ${rmB.status} ${JSON.stringify(rowB)} ${openB} ${stopAfter.text} ${resumeAfter.text} ${JSON.stringify(vB)} ${holdB.status} ${dirsB}/${dirCount(SB)}`,
     );
 
-    // Let back in, the same person's new pairing shares the session again (its keys come from the same local secret).
+    // Let back in, and the device that shared it given the workspace again before it looked (E2E-AGENT cycle 6 C6-3):
+    // its usage is refused 409 sharing_stopped naming ended_reason member_removed, so the device can say that sharing
+    // it again works, not that it was stopped for good.
     await invite();
+    withDb((d) => d.prepare("INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(DB2.id, CW));
+    const lastB = withDb((d) => d.prepare("SELECT epoch_id FROM v2_epochs WHERE ws_id = ? AND session_key = ? ORDER BY starts_at DESC LIMIT 1").get(CW, SB))?.epoch_id;
+    const upRemoved = await call("CM", "POST", `/api/v2/workspaces/${CW}/sessions/${SB}/usage`, { bearer: DB2.access, body: { rows: [usageRow(DB2, "c63-removed", lastB, {})] } });
+    check(
+      "usage (E2E-AGENT cycle 6 C6-3): a session that ended when its person was removed, uploaded to by its own device once they are back -> 409 sharing_stopped with ended_reason member_removed",
+      upRemoved.status === 409 && upRemoved.json?.error === "sharing_stopped" && upRemoved.json?.ended_reason === "member_removed",
+      upRemoved.text,
+    );
+    withDb((d) => d.prepare("DELETE FROM v2_device_grants WHERE device_id = ? AND ws_id = ?").run(DB2.id, CW));
+    // Let back in, the same person's new pairing shares the session again (its keys come from the same local secret).
     const DC = cDevice({ pub: DB2.pub, privateKey: DB2.privateKey, secret: DB2.secret });
     const againB = await cPut(DC, SB);
     const rowC = cRow(SB);
@@ -2662,6 +2710,12 @@ try {
         stored("c51-before-end") && !stored("c51-gap") && stored("c51-tail") && stored("c51-new"),
       `${JSON.stringify(oldB)} ${reEp.text} ${upGap.text} ${cBefore}/${conflictsB()}`,
     );
+    check(
+      "usage (E2E-AGENT cycle 6): the answer names the conflicts it did not store (`refused`: the gap row's request_key, and a row naming an unknown epoch), so the device counts them as not shared; a stored row is not named",
+      JSON.stringify(upGap.json?.refused) === JSON.stringify([reqKey(DC, "c51-gap")]) &&
+        (await call("CM", "POST", `/api/v2/workspaces/${CW}/sessions/${SB}/usage`, { bearer: DC.access, body: { rows: [usageRow(DC, "c63-unknown", epochId(), { ts: isoAt(2600) })] } })).json?.refused?.join() === reqKey(DC, "c63-unknown"),
+      upGap.text,
+    );
 
     // A clock that runs ahead: named, with the server's time; a start stored in the future is moved back.
     const ahead = (ms) => new Date(Date.now() + ms).toISOString();
@@ -2678,6 +2732,24 @@ try {
         putNear.status === 200 && epFar.status === 400 && epFar.json?.error === "clock_skew" && /starts_at is 10 minutes ahead/.test(epFar.json?.message ?? "") && !!epFar.json?.server_time &&
         epNow.status === 200 && cRow(KN)?.started_at === nowAt,
       `${putFar.text} ${putNear.status} ${epFar.text} ${epNow.text} ${JSON.stringify(cRow(KN))}`,
+    );
+
+    // E2E-AGENT cycle 6: removed again (SB ends member_removed), let back in with the device given the workspace again,
+    // and the person stops sharing SB on the web: that is their stop, so its usage is refused with ended_reason null and
+    // the device can't share it again (a folder rule never would).
+    const rmAgain = await ca(CO, "DELETE", `/members/${CM.id}`);
+    const endedAgain = cRow(SB)?.ended_reason;
+    await invite();
+    withDb((d) => d.prepare("INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(DC.id, CW));
+    const webStopEnded = await ca(CM, "POST", `/sessions/${SB}/stop-sharing`, {});
+    const rowStopped = cRow(SB);
+    const upStopped = await call("CM", "POST", `/api/v2/workspaces/${CW}/sessions/${SB}/usage`, { bearer: DC.access, body: { rows: [usageRow(DC, "c6-stopped", newB, {})] } });
+    const putStopped = await cPut(DC, SB);
+    check(
+      "sessions (E2E-AGENT cycle 6): a person who stops sharing on the web a session that had ended member_removed makes it their stop (state stopped, ended_reason null): its usage is refused 409 sharing_stopped with ended_reason null and its device's PUT 409 sharing_stopped, never shared again",
+      rmAgain.status === 204 && endedAgain === "member_removed" && webStopEnded.status === 200 && rowStopped?.state === "stopped" && rowStopped.ended_reason === null &&
+        upStopped.status === 409 && upStopped.json?.error === "sharing_stopped" && upStopped.json?.ended_reason === null && putStopped.status === 409 && putStopped.json?.error === "sharing_stopped",
+      `${rmAgain.status} ${endedAgain} ${webStopEnded.text} ${JSON.stringify(rowStopped)} ${upStopped.text} ${putStopped.text}`,
     );
   }
   const totalBefore = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json.total.requests;

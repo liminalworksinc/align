@@ -252,8 +252,28 @@ function endDeviceSessions(deviceId: string, at: string) {
   endSessions(all<{ ws_id: string; session_key: string }>("SELECT ws_id, session_key FROM v2_sessions WHERE device_id = ? AND state <> 'stopped'", deviceId), "device_signed_out", at);
 }
 
-export async function revokeDevice(deviceId: string, reason: string, actor: string) {
-  await tx(() => revokeInTx(deviceId, reason, actor));
+export async function revokeDevice(deviceId: string, reason: string, actor: string, replacedBy: string | null = null) {
+  await tx(() => {
+    revokeInTx(deviceId, reason, actor);
+    if (replacedBy) passNameOn(deviceId, replacedBy);
+  });
+}
+
+/**
+ * A device revoked because a newer pairing on the same machine replaced it (`align login`; the agent names that device
+ * in its self-revoke) gives that pairing its name when the pairing got "<name> (n)" only because this one was still
+ * live: two `align login`s approved together, where the first one's device is replaced by the second's a moment later
+ * (E2E-AGENT cycle 6). Only for the same person's live device whose name is this one's plus " (n)", and only while no
+ * other live device of theirs has the plain name, so two real machines of one name keep telling apart.
+ */
+function passNameOn(revokedId: string, nextId: string) {
+  const gone = get<{ user_id: string; name: string }>("SELECT user_id, name FROM v2_devices WHERE id = ?", revokedId);
+  const next = get<{ user_id: string; name: string; revoked_at: string | null }>("SELECT user_id, name, revoked_at FROM v2_devices WHERE id = ?", nextId);
+  if (!gone || !next || next.user_id !== gone.user_id || next.revoked_at) return;
+  const m = /^(.*) \((\d+)\)$/.exec(next.name);
+  if (!m || m[1] !== gone.name) return;
+  if (get("SELECT 1 AS x FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL AND name = ?", gone.user_id, gone.name)) return;
+  run("UPDATE v2_devices SET name = ? WHERE id = ?", gone.name, nextId);
 }
 
 /** Revoke every unrevoked device of this person, inside the caller's tx() (signing out everywhere). How many. */

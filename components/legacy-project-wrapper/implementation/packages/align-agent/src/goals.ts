@@ -1,5 +1,5 @@
 import type { Ctx } from "./context.ts";
-import { renderHot, snapshot } from "./hot.ts";
+import { renderEndedLatches, renderHot, snapshot } from "./hot.ts";
 import { endSharesWithoutAccess, noticeWorkspacesAdded } from "./share.ts";
 import { api, apiOk, HttpError } from "./api.ts";
 import { layout } from "./shared/layout.ts";
@@ -24,6 +24,8 @@ export async function refreshMe(ctx: Ctx): Promise<MeFile> {
     const added = next.workspaces.filter((w) => !before.has(w.id));
     if (added.length) workspacesAdded.push(...noticeWorkspacesAdded(ctx, next, added));
   }
+  // Stopped or held sessions whose share ended: their deny says whether `::align share` can share them again now (C6-2).
+  renderEndedLatches(ctx);
   return next;
 }
 

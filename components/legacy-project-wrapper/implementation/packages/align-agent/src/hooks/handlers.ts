@@ -30,6 +30,7 @@ import {
 } from "../shared/envelope.ts";
 import { myTeams, teamAsks } from "../shared/asks.ts";
 import { crossing, lastReply } from "../shared/drift.ts";
+import { feedHold, feedHoldReason } from "../shared/feedhold.ts";
 import { contextGoals, snapshot } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
@@ -354,7 +355,11 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
   const messages: string[] = [];
   if (hot?.share?.state === "shared" && hot.goal) {
     const full = source === "startup" || source === "clear" || source === "compact";
-    const need = full || ((source === "resume" || source === "fork") && !sameAsInjected(inj, hot.goal, "shared"));
+    // A resumed session shared again since its context was given (cycle 6) gets the envelope again, as a new goal would.
+    const since = hot.share.since;
+    const again = !!since && !!inj.share_since && inj.share_since !== since;
+    const need = full || ((source === "resume" || source === "fork") && (!sameAsInjected(inj, hot.goal, "shared") || again));
+    if (since) inj.share_since = since;
     if (need) {
       const ta = teamAsks(home, hot.share.workspace_id, hot.goal.id);
       context = renderEnvelope(hot.goal, hot.context_goals || [], ta);
@@ -593,6 +598,12 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
     if (inj.goal_id || inj.share_state === "shared") kind = "unbound";
     goal = null;
   }
+  // Shared again (a new share, after the one the model knew ended) toward the goal already in its context: it was
+  // never told the session stopped counting, so it is told it counts again (cycle 6). A share the model's context
+  // predates the record of is taken as the one it knows.
+  const since = hot.share.since;
+  if (!kind && hot.share.state === "shared" && goal && since && inj.share_since && inj.share_since !== since) kind = "bound";
+  if (hot.share.state === "shared" && since) inj.share_since = since;
   let context: string | null = null;
   if (kind) {
     // A newly bound goal comes with all its limits, as the envelope words them; a version whose limits changed names
@@ -683,20 +694,32 @@ const ENDED_WHY = {
   sharing_ended: "the Align server no longer has this session's share",
 } as const;
 
-/** The way out of a latch nothing can lift from the web any more (B6): `align stop-sharing <id>` in a terminal. */
-function endedNote(ended: keyof typeof ENDED_WHY, lid: string): string {
+/** Why a share ended, when this machine can share the session there again now (C6-2). */
+const ENDED_AGAIN: Partial<Record<keyof typeof ENDED_WHY, string>> = {
+  device_signed_out: "this machine signed out of Align, and is signed in again now",
+  access_lost: "this machine lost access to its Align workspace, and can reach it again now",
+};
+
+/**
+ * The way out of a latch nothing can lift from the web any more (B6): `align stop-sharing <id>` in a terminal. When the
+ * session can be shared there again now (`reshare`), the way the session's own notice gives instead: `::align share`,
+ * after which the web can lift it (C6-2). Never both: following `align stop-sharing` makes re-sharing impossible.
+ */
+function endedNote(ended: keyof typeof ENDED_WHY, lid: string, reshare = false): string {
+  const again = reshare ? ENDED_AGAIN[ended] : undefined;
+  if (again) return `Its sharing ended (${again}), so the user can share it there again by typing \`::align share\` in this session; once it is shared again, this can be lifted from the web. Until then tools stay blocked.`;
   return `Its sharing has since ended (${ENDED_WHY[ended] ?? ENDED_WHY.sharing_ended}), so this can no longer be lifted from the web: tools stay blocked until the user runs \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
 }
 
 /** The stop deny: the plain wording, or, when the session's sharing ended, how the user gets out. */
 export function stopReason(latch: Latch | null, lid: string): string {
   if (!latch?.ended) return DENY_REASON;
-  return `Align: this session was stopped from its Align workspace. ${endedNote(latch.ended, lid)} Tell the user and wait for instructions.`;
+  return `Align: this session was stopped from its Align workspace. ${endedNote(latch.ended, lid, !!latch.reshare)} Tell the user and wait for instructions.`;
 }
 
 function holdDenyReason(h: HoldLatch | null, lid: string): string {
   const base = holdReason(h);
-  return h?.ended ? `${base} ${endedNote(h.ended, lid)}` : base;
+  return h?.ended ? `${base} ${endedNote(h.ended, lid, !!h.reshare)}` : base;
 }
 
 /** The goal-hold latch: a hold file that names a hold, or one that can't be read, blocks every tool (read-only ones too). */
@@ -749,7 +772,14 @@ export function latchDeny(home: string, harness: Harness, input: HookInput): Hoo
     (latch.state === "ok" && latch.value && latch.value.stopped !== true) ||
     (latch.state === "ok" && !!input.tool_name && READ_ONLY[harness].has(input.tool_name));
   if (!allowed) return denyOutput(latch.state === "ok" ? stopReason(latch.value, lid) : DENY_REASON);
-  return holdDeny(home, lid);
+  return holdDeny(home, lid) || feedHoldDeny(home, lid, input.cwd || null);
+}
+
+/** A goal hold that has not reached this session yet, from the cached feed (`shared/feedhold.ts`): every tool is denied
+ *  as a hold, fail closed (cycle 6). */
+function feedHoldDeny(home: string, lid: string, cwd: string | null): HookOutput {
+  const h = feedHold(home, lid, cwd);
+  return h ? denyOutput(feedHoldReason(h.goal_title, clean)) : null;
 }
 
 /**
@@ -903,12 +933,17 @@ function openRequests(hot: HotState | null, inj: InjectedState): HotRequest[] {
   });
 }
 
-function holdLine(home: string, lid: string): string {
+function holdLine(home: string, lid: string, cwd: string | null): string {
   const h = readJsonStrict<HoldLatch>(layout.hold(home, lid));
-  if (h.state === "absent" || (h.state === "ok" && Array.isArray(h.value?.holds) && !h.value.holds.length)) return "  Goal hold: off";
+  if (h.state === "absent" || (h.state === "ok" && Array.isArray(h.value?.holds) && !h.value.holds.length)) {
+    // A hold the cached feed shows that has not reached the session yet: denied as PreToolUse denies it (cycle 6).
+    const f = feedHold(home, lid, cwd);
+    return f ? `  Goal hold: on goal "${clean(f.goal_title, 80)}" (held in Align's cached goals; it reaches this session at the next sync) (all tools blocked)` : "  Goal hold: off";
+  }
   if (h.state !== "ok" || !Array.isArray(h.value?.holds)) return "  Goal hold: unreadable (tools blocked)";
   const out = h.value.holds.map((x) => `  Goal hold: on goal "${clean(x.goal_title, 80)}" by ${clean(x.by, 50) || "someone"} (all tools blocked)`);
-  if (h.value.ended) out.push(`  Sharing ended, so no release can reach it: run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal to unblock it`);
+  if (h.value.ended && h.value.reshare) out.push("  Sharing ended; `::align share` here shares it again, after which the hold can be released from the web");
+  else if (h.value.ended) out.push(`  Sharing ended, so no release can reach it: run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal to unblock it`);
   return out.join("\n");
 }
 
@@ -971,12 +1006,14 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
           latch.state === "absent"
             ? "off"
             : latch.state === "ok" && latch.value.stopped
-              ? latch.value.ended
-                ? `on (tools blocked; sharing ended, so run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal to unblock it)`
-                : "on (tools blocked)"
+              ? latch.value.ended && latch.value.reshare
+                ? "on (tools blocked; sharing ended: `::align share` here shares it again, after which it can be resumed from the web)"
+                : latch.value.ended
+                  ? `on (tools blocked; sharing ended, so run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal to unblock it)`
+                  : "on (tools blocked)"
               : "unreadable (tools blocked)"
         }`,
-        holdLine(home, lid),
+        holdLine(home, lid, cwd),
         ...openRequests(hot, inj).map((r) =>
           requestState(r, inj.requests_seen?.[r.id]) === "pending"
             ? `  Request:  ${requestLine(r)}; \`::align accept ${requestShortId(r.id)}\` or \`::align decline ${requestShortId(r.id)}\``
@@ -1081,7 +1118,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
             `Align folder share preview (nothing changes yet):`,
             `  Folder: ${dir} (stays on this machine)`,
             `  Every new session started in it is shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : " with no goal"}, from its start.`,
-            `  ${already ? "This session is already shared." : "This session is shared too."} Forks stay private. \`::align unshare\` keeps one session private.`,
+            `  ${already ? "This session is already shared." : hot?.prior_share?.stopped ? "This session stays private: its sharing was stopped (or its history deleted)." : "This session is shared too."} Forks stay private. \`::align unshare\` keeps one session private.`,
             `  Sent per session: harness, a keyed repo hash, start time, an epoch, and per-request token counts with model, basis and estimated list cost.`,
             signals
               ? `  Work signals on: repo-relative paths of edited files, commit subjects, task labels and the branch name go to people who can read the goal, kept 24 hours. Never sent: prompts, responses, tool output, file contents.`
@@ -1090,12 +1127,17 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
           ].join("\n");
         }
         setRule(home, { dir, workspace_id: feed.workspace_id, workspace_name: feed.workspace_name, goal_id: goal ? goal.id : null, goal_title: goal ? goal.title : null, signals });
-        if (!already) spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed.workspace_id, rule_dir: dir, ts });
-        return `Align: new sessions in ${dir} are now shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : ""}.${already ? "" : " This session too; your next prompt carries the goal."} \`::align unshare --dir\` turns it off.`;
+        // A session its person stopped sharing (or whose history was deleted) stays private: only `::align share` or
+        // `align share` shares it again (C6-1).
+        const kept = !already && !!hot?.prior_share?.stopped;
+        if (!already && !kept) spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed.workspace_id, rule_dir: dir, ts });
+        const self = already ? "" : kept ? " This session stays private: its sharing was stopped (or its history deleted)." : " This session too; your next prompt carries the goal.";
+        return `Align: new sessions in ${dir} are now shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : ""}.${self} \`::align unshare --dir\` turns it off.`;
       }
       if (!confirm) {
-        // Shared before (its share ended): the new share counts from now, as the sync then shares it (C5-1).
-        const from = hot?.share ? "now" : "session start";
+        // Shared before (its share ended, or its history was deleted since): the new share counts from now, as the sync
+        // then shares it (C5-1, C6-1).
+        const from = hot?.share || hot?.prior_share ? "now" : "session start";
         return [
           `Align share preview for this session (nothing uploaded yet):`,
           `  Workspace: ${feed?.workspace_name || "your default workspace"}`,

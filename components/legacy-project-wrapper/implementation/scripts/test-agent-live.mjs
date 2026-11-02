@@ -487,6 +487,7 @@ try {
     const lid = d.prepare("SELECT local_id FROM sessions WHERE native_id = ?").get(P2)?.local_id ?? "";
     for (const table of ["shares", "epochs", "outbox"]) d.prepare(`DELETE FROM ${table} WHERE local_id = ?`).run(lid);
     d.prepare("UPDATE requests SET uploaded = 0, epoch_id = NULL WHERE local_id = ?").run(lid);
+    d.prepare("DELETE FROM kv WHERE key = ?").run(`shared_before:${lid}`);
   });
   const p2EpochBefore = sdb((d) => d.prepare("SELECT starts_at FROM v2_epochs WHERE session_key = ?").all(K2));
   const past = cli(["share", "--dir", oldRepo, "--past", "3", "--workspace", W, "--goal", G.id, "--yes"]);
@@ -900,8 +901,22 @@ try {
     "delete-history after a re-pair (E2E-AGENT cycle 4 C4-1): a session shared under the earlier pairing is deleted on the server from the new device (session and usage gone, audited session.history_deleted naming the new device), the CLI says `Shared history deleted.` only then, and `--past` no longer offers it",
     k1Before?.state === "stopped" && k1Before.ended_reason === "device_signed_out" && k1Before.device_id !== newDevice && k1Usage === 1 &&
       delK1.code === 0 && /Shared history deleted\./.test(delK1.stdout) && k1After[0] === 0 && k1After[1] === 0 && delAudit?.actor_id === M.id && delAudit.object_id === newDevice &&
-      /Skipped 1 whose shared history you deleted/.test(pastAgain.stdout),
+      /Skipped 1 whose shared history was deleted \(on the web or with `align delete-history`\)/.test(pastAgain.stdout),
     `${JSON.stringify(k1Before)} ${k1Usage} ${delK1.code} ${delK1.stdout} ${delK1.stderr} ${JSON.stringify(k1After)} ${JSON.stringify(delAudit)} ${pastAgain.stdout}`,
+  );
+
+  // -- E2E-AGENT cycle 6 C6-1: shared again after its history was deleted, a session counts from now: none of its usage
+  //    from before (shared, or made while it was not) goes up again --
+  const reshareAt = Date.now();
+  const reK1 = cli(["share", "a1a1a1a1", "--workspace", W, "--goal", G.id, "--yes"]);
+  cli(["sync"]);
+  const reK1Epochs = sdb((d) => d.prepare("SELECT starts_at FROM v2_epochs WHERE ws_id = ? AND session_key = ?").all(W, K1));
+  const reK1Usage = sdb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_usage WHERE ws_id = ? AND session_key = ?").get(W, K1).n);
+  check(
+    "shared again after its history was deleted (E2E-AGENT cycle 6 C6-1): the preview counts from now, the server's one epoch starts at the re-share, and none of the session's earlier usage goes up again",
+    reK1.code === 0 && /Counting: {3}from now/.test(reK1.stdout) && /This session was shared before, so this share counts from now\./.test(reK1.stdout) &&
+      reK1Epochs.length === 1 && Date.parse(reK1Epochs[0].starts_at) >= reshareAt - 2000 && reK1Usage === 0,
+    `${reK1.code} ${reK1.stdout} ${reK1.stderr} ${JSON.stringify(reK1Epochs)} ${reK1Usage}`,
   );
 
   // -- E2E-AGENT cycle 2 N2: hooks and syncs on a clock 10 minutes ahead: the session's start, its epoch and its usage
@@ -1046,6 +1061,13 @@ try {
   const rmGoal = openEpochOf(Q1.key)?.goal_id;
   const rmReq = await ws(O2, "POST", `/goals/${rmGoal}/requests`, { type: "checkpoint", session_keys: [Q1.key] });
   const rmStop = await ws(M, "POST", `/sessions/${Q1.key}/stop`, {});
+  // E2E-AGENT cycle 6 C6-2: a second session stopped from the web goes through the removal and the re-invite stopped.
+  const Q3 = startQ("q3");
+  // The folder rule's goal is achieved by now, so the rule did not share it: shared from the terminal toward the goal Q1 has.
+  const q3Lid0 = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === Q3.sid)?.local_id ?? "none";
+  const q3Shared0 = cli(["share", "--workspace", W, "--goal", G.id, "--yes", "--", q3Lid0.slice(0, 8)]);
+  sync();
+  const q3Stop = await ws(M, "POST", `/sessions/${Q3.key}/stop`, {});
   sync();
   const rm = await ws(O2, "DELETE", `/members/${M.id}`);
   const rmRow = sdb((d) => d.prepare("SELECT state, ended_reason FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, Q1.key));
@@ -1058,6 +1080,7 @@ try {
     `${rmReq.text.slice(0, 200)} ${rmStop.status} ${rm.status} ${rm.text} ${JSON.stringify(rmRow)} ${rmTarget} ${rmStopAgain.text}`,
   );
   const rmSync = sync();
+  const q3Lost = denied(tool(Q3, "Bash")) ?? "";
   const rmTold = prompt(Q1, "still there?");
   const rmDeny = denied(tool(Q1, "Bash")) ?? "";
   const rmGoals = cli(["goals"]);
@@ -1110,6 +1133,27 @@ try {
       scRow()?.state === "shared" && scRow()?.device_id === deviceBefore && scLocal() === "shared (Side Co)" && liveDevice() === deviceBefore && miloDevices === 1,
     `${reInv.status} ${rePreview.text} ${reAccept.text} ${JSON.stringify(reAudit)} ${reHook.stderr} ${reMe} told=${reTold.stdout} told2=${reTold2.stdout} share=${reShare.stdout} ${JSON.stringify(q1Back)} ${q1Local} ${JSON.stringify(scRow())} ${scLocal()} ${miloDevices}`,
   );
+  // C6-2: the session stopped from the web whose workspace came back: its deny gives the advice its notice gives
+  // (`::align share`), never "only `align stop-sharing`"; shared again, the plain stop, which a web resume lifts.
+  const q3Back = denied(tool(Q3, "Bash")) ?? "";
+  const q3Latch = cli(["latch", "status"]).stdout;
+  const q3Lid = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === Q3.sid)?.local_id ?? "none";
+  const q3Share = prompt(Q3, "::align share confirm");
+  sync();
+  const q3Shared = denied(tool(Q3, "Bash")) ?? "";
+  const q3Resume = await ws(M, "POST", `/sessions/${Q3.key}/resume`, {});
+  sync();
+  const q3Free = denied(tool(Q3, "Bash"));
+  check(
+    "stopped, removed and re-invited (E2E-AGENT cycle 6 C6-2): while the workspace is out of reach the deny names `align stop-sharing`; once it is back the deny and `align latch status` offer `::align share` instead, as the session's notice does; `::align share confirm` shares it again, the deny becomes the plain stop, and a web resume frees its tools",
+    q3Shared0.code === 0 && q3Stop.status === 200 && q3Lost.includes("no longer has access to its Align workspace") && q3Lost.includes("`align stop-sharing ") &&
+      q3Back.includes("can reach it again now), so the user can share it there again by typing `::align share` in this session") && !q3Back.includes("align stop-sharing") &&
+      q3Latch.includes(`${q3Lid.slice(0, 8)} claude-code STOPPED`) && !new RegExp(`${q3Lid.slice(0, 8)}[^\n]*only \`align stop-sharing`).test(q3Latch) &&
+      /sharing requested/.test(q3Share.json?.reason ?? "") && q3Shared === "Align: this session was stopped from its Align workspace. Tools are blocked until it is resumed there. Tell the user and wait for instructions." &&
+      q3Resume.status === 200 && q3Free === null,
+    `lost=${q3Lost} back=${q3Back} latch=${q3Latch} share=${q3Share.stdout} shared=${q3Shared} ${q3Resume.text} free=${q3Free} stop=${q3Stop.status} first share=${q3Shared0.code} ${q3Shared0.stderr}`,
+  );
+
   // C5-1 and C5-2: shared again, the session counts from the re-share; the turn made while it was not shared never goes
   // up, and the next one goes up under the new epoch. The device reaches two workspaces again, so it has no default.
   const backAt = Date.now() + 200;

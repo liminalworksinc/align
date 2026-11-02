@@ -37,7 +37,9 @@ The user signs in at `/app/device`, types the code, sees device name + request a
   `{ "error": "clock_skew", "message", "server_time": "<ISO>" }` when the signature is valid but `ts` is more than 5 min
   off the server's clock: nothing is rotated and the device stays paired; sign again with the server's time.
 
-`DELETE /api/v2/devices/self` (Bearer) → 204. Revokes this device's tokens (logout). Any revocation also ends the
+`DELETE /api/v2/devices/self[?replaced_by=<dv_id>]` (Bearer) → 204. Revokes this device's tokens (logout). With
+`replaced_by` (the device that replaced it on this machine, `align login`), that device of the same person takes this
+one's name when it is named `<this name> (<n>)` and no other live device has the plain name. Any revocation also ends the
 device's sessions: `stopped` with `ended_reason: "device_signed_out"`. Removing a member from a workspace (or their
 leaving it) ends their sessions there the same way, with `ended_reason: "member_removed"`; requests still waiting on
 an ended session expire.
@@ -51,7 +53,8 @@ usage `ts`, receipt `at`, activity and steering `at`) on the server's clock.
 → `{ "user": { "id", "name", "email" }, "device": { "id", "name" } | null, "workspaces": [ { "id", "name", "role": "owner"|"member"|"viewer", "teams": [ { "id", "name", "role": "lead"|"member" } ] } ] }`
 Only workspaces the device was granted (device) or the user belongs to (cookie). A device gains a workspace when its
 person accepts an invite with it ticked (`POST /api/v2/invites/:token/accept { device_ids }`); the directives answer's
-`workspaces` tells it at its next pass.
+`workspaces` tells it at its next pass. A device also gets `"other_workspaces": [ { "id", "name" } ]`: its person's
+workspaces it was not given (the Devices page gives one; the CLI points there).
 
 `GET /api/v2/devices` (cookie, or Bearer) → `{ "devices": [ { "id", "name", "created_at", "last_seen_at", "revoked_at",
 "revoked_reason", "workspaces": [ { "id", "name" } ], "current"?: bool } ] }`: the person's devices; with a device token
@@ -108,10 +111,14 @@ Key owned by another user/device → 404. `started_at` more than 5 min ahead of 
 `POST /api/v2/workspaces/:ws/sessions/:session_key/usage` (Bearer) — idempotent batch, ≤500 rows, ≤256 KB
 → req `{ "rows": [ UsageRow ] }`
 `UsageRow = { "request_key" (b64url HMAC of provider request id), "ts", "epoch_id", "model", "query_source": "main"|"subagent"|"auxiliary"|"unknown", "input", "output", "cache_read", "cache_write_5m", "cache_write_1h", "cache_write_unsplit", "basis": "api_usd"|"subscription_included"|"workspace_credits"|"estimated_list_usd"|"unknown", "est_list_usd_micros": int|null, "price_table_version", "source": "otel"|"transcript"|"rollout" }`
-→ 200 `{ "accepted": n, "duplicates": n, "conflicts": n }`. Same key with different values = conflict, never overwritten.
+→ 200 `{ "accepted": n, "duplicates": n, "conflicts": n, "refused": [request_key] }`. Same key with different values = conflict, never overwritten.
+`refused` names the conflicts that were not stored (below), so the device counts them as not shared.
 Rows whose epoch is unknown or belongs to another session → rejected per row (counted as conflicts).
 So are rows whose `ts` is at or after their epoch's end at a time no epoch of the session covers (made while the
 session was not shared, before it was shared again).
+A stopped session's usage (and epochs) → `409 { "error": "sharing_stopped", "ended_reason": "member_removed"|"device_signed_out"|null }`:
+`null` when its person stopped sharing it; `member_removed` when it ended because they left the workspace or were
+removed (once they are back, their device shares it again with a `PUT`).
 
 `POST /api/v2/workspaces/:ws/sessions/:session_key/stop-sharing` (Bearer or cookie by owner) → 200; no more uploads accepted.
 `DELETE /api/v2/workspaces/:ws/sessions/:session_key` (cookie by owner, or Bearer from any live device of the person who

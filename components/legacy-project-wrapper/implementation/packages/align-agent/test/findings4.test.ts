@@ -108,6 +108,7 @@ describe("C4-2: a sync pass is one device's", () => {
     const r = await sync;
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /pairing changed during this sync/);
+    assert.match(r.stdout, new RegExp(`The next sync goes on as the device signed in now \\(dv_…${now.slice(-6)}\\)\\.`));
     assert.equal(fake.refreshes, refreshes, "the pass did not refresh the new device");
     assert.ok(!fake.log.some((l) => l.path.endsWith("/usage") && l.device === now), "nothing went up as the new device");
     const notices = hot(t, s.lid).notices.map((x) => x.text);
@@ -307,7 +308,7 @@ describe("cycle 4: CLI arguments and `--past`", () => {
     const r = await runCli(t, ["share", "--dir", folder, "--past", "3", "--workspace", "Acme", "--goal", "none"]);
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /0 session\(s\) in .* from the last 3 days/);
-    assert.match(r.stdout, /Skipped 1 whose shared history you deleted/);
+    assert.match(r.stdout, /Skipped 1 whose shared history was deleted \(on the web or with `align delete-history`\)/);
     assert.doesNotMatch(r.stdout, new RegExp(s.lid.slice(0, 8)));
   });
 });

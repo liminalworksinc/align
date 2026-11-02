@@ -7,7 +7,9 @@ import { kvGet, kvSet, nowIso, tx } from "./db.ts";
 import { repoKey, sessionKey } from "./keys.ts";
 import path from "node:path";
 import { endEpochs, getSession, sessionCwds, type SessionRow } from "./ledger.ts";
-import { ACCESS_LOST, addNotice, DEVICE_SIGNED_OUT, getShare, renderHot, snapshot } from "./hot.ts";
+import { ACCESS_LOST, addNotice, DEVICE_SIGNED_OUT, endedState, getShare, notePriorShare, renderEndedLatches, renderHot, sharedBefore, snapshot } from "./hot.ts";
+
+export { notePriorShare, sharedBefore, stoppedByPerson } from "./hot.ts";
 import { loadCredentials } from "./api.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { clean } from "./shared/envelope.ts";
@@ -132,6 +134,9 @@ export function applyShare(ctx: Ctx, p: SharePlan): void {
       .prepare("INSERT INTO epochs(epoch_id, local_id, workspace_id, goal_id, starts_at, root_turn, cause, created_at) VALUES(?,?,?,?,?,?,?,?)")
       .run(p.epoch_body.epoch_id, lid, p.workspace.id, p.epoch_body.goal_id, p.starts_at, null, "manual", nowIso());
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
+    notePriorShare(ctx, lid, false);
+    // Which share this is: a share made again after an earlier one ended is told to the model as bound (cycle 6).
+    kvSet(ctx.db, `share_since:${lid}`, p.epoch_body.epoch_id);
     // Notices about an earlier share that ended (and how to share again) are stale once it is shared again: one the
     // session has not seen yet would otherwise show after this share, next to whatever ends it later.
     for (const kind of ["signed_out_", "access_lost_", "workspace_back_", "workspace_added_"]) {
@@ -164,6 +169,7 @@ export function stopSharing(ctx: Ctx, lid: string): void {
   tx(ctx.db, () => {
     ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=? WHERE local_id=?").run(at, lid);
     endEpochs(ctx.db, lid, at);
+    notePriorShare(ctx, lid, true, at);
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM latches WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM holds WHERE local_id=?").run(lid);
@@ -185,6 +191,7 @@ export function deleteHistory(ctx: Ctx, lid: string): void {
   if (!share) throw new Error("session was never shared");
   tx(ctx.db, () => {
     markStopped(ctx, lid);
+    notePriorShare(ctx, lid, true);
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM latches WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM holds WHERE local_id=?").run(lid);
@@ -204,7 +211,8 @@ export function deleteRefused(ctx: Ctx, lid: string): string | null {
 /**
  * Local cleanup after the server confirmed a hard delete: local metering stays, server links go. The session is
  * remembered as deleted, so `align share --dir --past` never offers it again, and its items in the cached team activity
- * go too (the server deleted them with it), so it never shows as "you, on another machine" (C4-1).
+ * go too (the server deleted them with it), so it never shows as "you, on another machine" (C4-1). Its record of having
+ * been shared (and stopped) stays: an explicit share later counts from now, so nothing from before it goes up (C6-1).
  */
 export function forgetShare(ctx: Ctx, lid: string): void {
   const share = getShare(ctx, lid);
@@ -216,6 +224,7 @@ export function forgetShare(ctx: Ctx, lid: string): void {
     ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind='delete_session'").run(lid);
     ctx.db.prepare("DELETE FROM kv WHERE key=?").run(`delete_refused:${lid}`);
     kvSet(ctx.db, `history_deleted:${lid}`, nowIso());
+    notePriorShare(ctx, lid, true);
   });
   if (share) {
     const file = layout.podFeed(ctx.home, share.workspace_id);
@@ -247,6 +256,9 @@ export function endSharesSignedOut(ctx: Ctx): number {
     );
   }
   if (live.length) ctx.log(`signed out: ${live.length} shares ended on this machine`);
+  // A stopped session whose share had ended already (its workspace lost, say) can no longer be shared again from here
+  // either: its deny says so (C6-2).
+  renderEndedLatches(ctx);
   return live.length;
 }
 
@@ -260,9 +272,39 @@ function endShare(ctx: Ctx, lid: string, why: string, noticeId: string, text: st
     endEpochs(ctx.db, lid, at);
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('put_session','post_epoch')").run(lid);
-    addNotice(ctx, lid, noticeId, `${text}${latched ? ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.` : ""}`);
+    // A session that can be shared there again at once (its person is back in the workspace) gets out the way its
+    // latch says: by sharing it again (C6-2).
+    const again = latched && endedState(ctx, getShare(ctx, lid))?.reshare;
+    const tail = !latched
+      ? ""
+      : again
+        ? " It was stopped or held from the web: once it is shared again, that can be lifted there; until then its tools stay blocked."
+        : ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
+    addNotice(ctx, lid, noticeId, `${text}${tail}`);
   });
   renderHot(ctx, lid);
+}
+
+/**
+ * The server refused this session's usage as `sharing_stopped` because its person was removed from the workspace (or
+ * left it) and this device never saw it: `/me` lists the workspace again, as they are back (E2E-AGENT cycle 6 C6-3).
+ * Not a stop by its person: the share ends here as a lost workspace does, and the notice says `::align share` shares it
+ * there again (the server shares a `member_removed` session again for its own device).
+ */
+export function endShareRemoved(ctx: Ctx, lid: string): void {
+  const s = getShare(ctx, lid);
+  if (!s || (s.state !== "shared" && s.state !== "pending" && s.state !== "suspended")) return;
+  const goal = s.goal_json ? (JSON.parse(s.goal_json) as GoalSnapshot) : null;
+  const at = nowIso();
+  endShare(
+    ctx,
+    lid,
+    ACCESS_LOST,
+    `access_lost_${s.workspace_id}_${at}`,
+    `Align: this session stopped sharing because you were removed from ${clean(s.workspace_name, 80)} in Align (or left it) while this machine was not in touch; its usage from then on stays on this machine. You are a member again, so to share it there again, type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.`,
+    at,
+  );
+  ctx.log(`usage refused: session ${lid.slice(0, 8)} ended on the server when its person was removed from ${s.workspace_name}; ended here too`);
 }
 
 /**
@@ -325,7 +367,14 @@ export function noticeWorkspacesAdded(ctx: Ctx, me: MeFile, added: { id: string;
     for (const s of ended) {
       const goal = s.goal_json ? (JSON.parse(s.goal_json) as GoalSnapshot) : null;
       told.add(s.local_id);
-      notify(ctx, s.local_id, `workspace_back_${w.id}_${at}`, `Align: this machine can reach ${name} in Align again. To share this session there again, type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.`);
+      // Stopped or held from the web: sharing it again is also how the web gets to lift that (C6-2).
+      const latched = ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(s.local_id) || ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(s.local_id);
+      notify(
+        ctx,
+        s.local_id,
+        `workspace_back_${w.id}_${at}`,
+        `Align: this machine can reach ${name} in Align again. To share this session there again, type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.${latched ? " It was stopped or held from the web: once it is shared again, that can be lifted there; until then its tools stay blocked." : ""}`,
+      );
     }
     const since = new Date(Date.now() - 3_600_000).toISOString();
     // A session this pass recorded first started with it (its own SessionStart spooled it and started the pass): it
@@ -379,8 +428,8 @@ export function insideDir(cwd: string, dir: string): boolean {
  * one they reported later) are all `dir` (a realpath) or inside it. A session with no folder is left out. One that was
  * ever shared (shared, pending, suspended, stopped or failed) or has epochs is skipped: sharing it from its start
  * could backdate history a live hook already reported, which the server refuses anyway (`epoch_overlap`). One whose
- * shared history the developer deleted (`align delete-history`) is skipped too and counted in `deleted`: deleting it
- * was a choice, never undone by a later `--past`.
+ * shared history was deleted (on the web or with `align delete-history`) is skipped too and counted in `deleted`:
+ * deleting it was a choice, never undone by a later `--past`.
  */
 export function pastSessions(ctx: Ctx, dir: string, days: number, now = Date.now()): { take: SessionRow[]; already: number; deleted: number } {
   const since = new Date(now - days * 86_400_000).toISOString();
@@ -397,8 +446,7 @@ export function pastSessions(ctx: Ctx, dir: string, days: number, now = Date.now
       deleted++;
       continue;
     }
-    const shared = ctx.db.prepare("SELECT 1 FROM shares WHERE local_id=?").get(s.local_id) || ctx.db.prepare("SELECT 1 FROM epochs WHERE local_id=?").get(s.local_id);
-    if (shared) already++;
+    if (sharedBefore(ctx, s.local_id)) already++;
     else take.push(s);
   }
   return { take, already, deleted };
