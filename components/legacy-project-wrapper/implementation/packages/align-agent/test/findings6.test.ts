@@ -90,7 +90,7 @@ describe("C5-1 follow-up: what counts as waiting to upload, and as shared time",
     fake.setOffline(true);
     const off = await runCli(t, ["sync"]);
     assert.equal(off.code, 1);
-    assert.match(off.stderr, /\. 0 usage rows and \d+ queued calls stay on this machine/, off.stderr);
+    assert.match(off.stderr, /\. 0 usage rows, \d+ activity items? and \d+ queued calls stay on this machine/, off.stderr);
     assert.match((await runCli(t, ["status"])).stdout, /Server: {5}unreachable since .*; 0 usage rows wait to upload/);
 
     const ctx = ctxFor(t);

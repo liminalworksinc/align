@@ -7,6 +7,8 @@ import fs from "node:fs";
 import type { Limit } from "./types.ts";
 
 const NEGATION = /\b(not|no|never|cannot|can't|won't|don't|doesn't|isn't|aren't|wouldn't|couldn't|without|nor)\b|n't\b/i;
+/** A sentence that calls the thing out of scope declines it, as "not" does. */
+const DECLINED = /\bout of scope\b/i;
 const MODAL =
   /\b(must not|mustn't|must never|should not|shouldn't|should never|may not|not allowed to|never|do not|don't|doesn't|cannot|can not|can't|won't|must|has to|have to|needs to|need to|should)\b/i;
 const FILLER = new Set(["all", "the", "any", "both", "ever", "explicitly", "always", "only", "simultaneously", "together"]);
@@ -47,6 +49,9 @@ function prose(reply: string): string {
 /** Words a list of limits puts around one ("Limits: ...", "out of scope: ...", "(must not)"). */
 const LIST_LABELS = new Set(["limit", "limits", "constraint", "constraints", "rule", "rules", "out", "scope", "listed", "following", "these", "type", "types", "done", "criteria", "boundary", "boundaries"]);
 
+/** Words that make a sentence about the agent's own action rather than a list of limits. */
+const INTENT = /\b(i|we|i ll|we ll|ll|will|shall|going|gonna|now|today|tonight|let s|let me|did|doing)\b/;
+
 const norm = (t: string) => ` ${t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
 
 /** The sentence only restates the limit (the agent listing the goal's limits): its words, with nothing around them but a
@@ -56,28 +61,63 @@ function restates(sen: string, limit: string): boolean {
   const s = norm(sen);
   const i = l.trim() ? s.indexOf(l) : -1;
   if (i < 0) return false;
-  return [...keyWords(`${s.slice(0, i)} ${s.slice(i + l.length)}`)].every((w) => LIST_LABELS.has(w));
+  const around = `${s.slice(0, i)} ${s.slice(i + l.length)}`;
+  // "I will <the limit's words>" says what the agent does, which a list never does (E2E acycle1 A1-cross-1).
+  if (INTENT.test(around)) return false;
+  return [...keyWords(around)].every((w) => LIST_LABELS.has(w));
+}
+
+/** Modals that turn a limit's text into a ban ("must not", "never", "do not"), as its first modal or its first word. */
+const NEG_MODAL = /^(must not|mustn't|must never|should not|shouldn't|should never|may not|not allowed to|never|do not|don't|doesn't|cannot|can not|can't|won't)$/i;
+const NEG_LEAD = /^\W*(no|not|never|don't|do not|avoid|without)\b/i;
+
+/**
+ * What a limit forbids being done, as its sense: a `must_not` or `out_of_scope` limit's text names the forbidden thing
+ * (usually without a "not": `Must not` "Drop the old ledger cluster before the cutover."; a text that says "Do not X"
+ * still forbids X), and a `must` limit names the required thing unless its own modal is negative ("must never run",
+ * "Do not drop"), which makes it a ban too. A ban is crossed by a sentence that says it will (no negation); a
+ * requirement by one that says it won't.
+ */
+export function forbids(l: Pick<Limit, "text" | "type">): boolean {
+  if (l.type !== "must") return true;
+  const m = MODAL.exec(l.text);
+  return (!!m && NEG_MODAL.test(m[0])) || NEG_LEAD.test(l.text);
+}
+
+/** A goal title is a name, not a plan: a reply that names a goal as it is written ("Retire the old ledger cluster", in
+ *  quotes or not) says nothing about doing what a limit with the same words forbids (E2E acycle1 A1-cross-1, the L6
+ *  false alarm). Case counts, so prose that describes the act in lower case ("drop the old ledger cluster") still does. */
+function withoutTitles(sen: string, titles: string[]): string {
+  const words = (t: string) => ` ${t.replace(/[^A-Za-z0-9]+/g, " ").trim()} `;
+  let s = words(sen);
+  for (const t of titles) {
+    const n = words(t);
+    if (n.trim() && keyWords(t).size >= 2) s = s.split(n).join(" ; ");
+  }
+  return s;
 }
 
 /**
  * Whether a reply may cross a limit (v1 `crossing`): some sentence uses the limit's key word (the one after its
- * "must" or "not") and one more of its words, or half of its words, with the opposite sense (one says "not" where the
- * other doesn't); for out of scope, any such mention. Questions never count, nor a sentence that only restates the
- * limit (a list of the goal's limits).
+ * "must" or "not") and one more of its words, or half of its words, in the sense the limit rules out: for a ban
+ * (`must_not`, `out_of_scope`, or a `must` whose text says "not"), saying it will (no negation); for a requirement,
+ * saying it won't. Questions never count, nor a sentence that only restates the limit (a list of the goal's limits),
+ * nor words that are only part of a goal's title (`titles`: the goals this machine knows).
  */
-export function crossing(l: Pick<Limit, "text" | "type">, reply: string): boolean {
+export function crossing(l: Pick<Limit, "text" | "type">, reply: string, titles: string[] = []): boolean {
   const key = keyWords(l.text);
   if (key.size < 2) return false;
   const anchor = anchorOf(l.text);
+  const ban = forbids(l);
   return sentences(prose(reply))
     .slice(-SENTENCES_MAX)
     .some((sen) => {
       if (sen.endsWith("?") || restates(sen, l.text)) return false;
-      const w = keyWords(sen);
+      const w = keyWords(withoutTitles(sen, titles));
       let n = 0;
       for (const k of key) if (w.has(k)) n++;
       const about = anchor && w.has(anchor) ? n >= 2 : n >= Math.max(2, Math.ceil(key.size * 0.5));
-      return about && (l.type === "out_of_scope" || NEGATION.test(sen) !== NEGATION.test(l.text));
+      return about && (NEGATION.test(sen) || DECLINED.test(sen)) !== ban;
     });
 }
 

@@ -9,6 +9,7 @@ import {
   clean,
   collisionReason,
   crossNote,
+  endSentence,
   holdReason,
   LIMIT_WORDS,
   limitChange,
@@ -22,6 +23,7 @@ import {
   measureKey,
   renderAsksDelta,
   renderAsksGone,
+  renderFollowedAsksEnded,
   renderCard,
   renderContextDelta,
   renderDelta,
@@ -36,7 +38,7 @@ import {
   SAFE_REQUESTS,
   type DeltaKind,
 } from "../shared/envelope.ts";
-import { myTeams, teamAsks } from "../shared/asks.ts";
+import { readAsks, teamAsks } from "../shared/asks.ts";
 import { crossing, lastReply } from "../shared/drift.ts";
 import { feedHold, feedHoldReason } from "../shared/feedhold.ts";
 import { endedWhyWords, latchWayOut, noneTold, SHARE_CHANGED, shareAgainWords, shareNotice, shareRetell, toldSituation, type ReleaseReaches, type ShareAgain, type ShareFacts, type ShareTold } from "../shared/ended.ts";
@@ -108,7 +110,21 @@ function markInjected(inj: InjectedState, goal: GoalSnapshot | null, shareState:
 
 /** The accepted asks put into context with an envelope; a fresh envelope replaces whatever context held before. */
 function markAsks(inj: InjectedState, ta: TeamAsks | null): void {
-  inj.asks_seen = ta ? { team_id: ta.team.id, ids: ta.asks.map((a) => a.id) } : undefined;
+  inj.asks_seen = ta ? { team_id: ta.team.id, team_name: ta.team.name, ids: ta.asks.map((a) => a.id), member: ta.member !== false } : undefined;
+}
+
+/**
+ * The session no longer follows the goal of a team the person is not in (its approved alignment ended, or the session
+ * moved to another goal or stopped counting), while that team's accepted asks are in its context: told once that they no
+ * longer apply to it, honestly (not closed, and never "you are no longer in this team"; E2E acycle1 A1-cross-3).
+ */
+function followedAsksEnded(home: string, ws: string, inj: InjectedState, goal: GoalSnapshot | null): string | null {
+  const seen = inj.asks_seen;
+  if (!seen || seen.member !== false || !seen.ids.length) return null;
+  const team = goal ? readJson<FeedFile>(layout.feed(home, ws))?.goals?.find((g) => g.id === goal.id)?.team?.id : null;
+  if (team === seen.team_id) return null;
+  inj.asks_seen = undefined;
+  return renderFollowedAsksEnded(seen.team_name || "");
 }
 
 /**
@@ -118,17 +134,25 @@ function markAsks(inj: InjectedState, ta: TeamAsks | null): void {
 function asksNote(home: string, ws: string, goalId: string, inj: InjectedState): string | null {
   const ta = teamAsks(home, ws, goalId);
   if (!ta) return null;
-  const prev = inj.asks_seen && inj.asks_seen.team_id === ta.team.id ? inj.asks_seen.ids : [];
+  const seen = inj.asks_seen && inj.asks_seen.team_id === ta.team.id ? inj.asks_seen : null;
+  const prev = seen ? seen.ids : [];
   const ids = ta.asks.map((a) => a.id);
   const added = ta.asks.filter((a) => !prev.includes(a.id));
-  // Closed (done, declined, reopened, withdrawn), not merely pushed past the first five by newer ones.
-  const removed = prev.filter((id) => !ids.includes(id) && !(ta.accepted_ids || ids).includes(id)).length;
-  inj.asks_seen = { team_id: ta.team.id, ids };
-  // The person left the goal's team (or was taken out of it): its asks are no longer in this machine's feed, which is
-  // not the same as closed (C3-10).
-  const member = myTeams(readJson<MeFile>(layout.me(home)), ws).some((t) => t.id === ta.team.id);
-  if (removed && !member && !added.length) return renderAsksGone(ta);
-  return added.length || removed ? renderAsksDelta(ta, added, removed) : null;
+  // Gone from the accepted ones, not merely pushed past the first five by newer ones.
+  const gone = prev.filter((id) => !ids.includes(id) && !(ta.accepted_ids || ids).includes(id));
+  const member = ta.member !== false;
+  inj.asks_seen = { team_id: ta.team.id, team_name: ta.team.name, ids, member };
+  // Closed (done, reopened, withdrawn): the feed still holds it in another state. An ask the feed no longer holds is
+  // closed too, unless the person was in the team and no longer is: then the feed dropped the team's asks, which is not
+  // the same as closing them (C3-10). A session that follows a goal of a team the person was never in (an approved
+  // alignment) gets that team's accepted asks only while they are accepted, so for it a missing one closed (E2E acycle1
+  // A1-cross-3).
+  const feed = readAsks(home, ws);
+  const inFeed = new Map((feed?.asks || []).map((a) => [a.id, a.state]));
+  const left = !member && seen?.member !== false;
+  const closed = gone.filter((id) => inFeed.has(id) || !left).length;
+  if (gone.length && !closed && !added.length) return renderAsksGone(ta);
+  return added.length || closed ? renderAsksDelta(ta, added, closed) : null;
 }
 
 /** The drift check is on unless `align config drift off` turned it off. */
@@ -148,7 +172,7 @@ function takeDrift(home: string, lid: string, hot: HotState | null, inj: Injecte
   inj.drift_shown = [...shown, ...items.map((i) => i.limit_id)].slice(-50);
   const first = items[0];
   const more = items.length > 1 ? ` (and ${items.length - 1} more of its limits)` : "";
-  return `Align: the agent's last reply may conflict with a limit on goal "${clean(file.goal_title, 80)}": ${LIMIT_WORDS[first.type] ?? "Must"} "${clean(first.text, 160)}"${more}. This is a word check on this machine only; nothing was sent or added to the agent's context. \`align config drift off\` turns it off.`;
+  return `${endSentence(`Align: the agent's last reply may conflict with a limit on goal "${clean(file.goal_title, 80)}": ${LIMIT_WORDS[first.type] ?? "Must"} "${clean(first.text, 160)}"${more}`)} This is a word check on this machine only; nothing was sent or added to the agent's context. \`align config drift off\` turns it off.`;
 }
 
 function sameAsInjected(inj: InjectedState, goal: GoalSnapshot | null, shareState: string): boolean {
@@ -848,6 +872,8 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
         holdsTold(inj, kept.map((x) => x.goal_id), kept.map((x) => x.goal_title));
       }
     }
+    const ended = followedAsksEnded(home, hot.share.workspace_id, inj, kind === "unbound" ? null : goal);
+    if (ended) context = `${context}\n${ended}`;
     markInjected(inj, kind === "unbound" ? null : goal, hot.share.state);
   }
   if (hot.share.state === "shared" && goal) {
@@ -902,7 +928,8 @@ export function stop(home: string, harness: Harness, input: HookInput): void {
   if (!open.length) return;
   const reply = lastReply(input);
   if (!reply) return;
-  const hits = open.filter((l) => crossing(l, reply));
+  const titles = goalTitles(home, hot);
+  const hits = open.filter((l) => crossing(l, reply, titles));
   if (!hits.length) return;
   const file: DriftFile = {
     v: 1,
@@ -912,6 +939,20 @@ export function stop(home: string, harness: Harness, input: HookInput): void {
     at: new Date().toISOString(),
   };
   writeJsonAtomic(layout.drift(home, lid), file);
+}
+
+/** Every goal title this session could name: its own, related goals, requests' goals and the cached feed's. */
+function goalTitles(home: string, hot: HotState): string[] {
+  const out = new Set<string>();
+  const add = (t: unknown) => typeof t === "string" && t.trim() && out.add(t);
+  add(hot.goal?.title);
+  for (const c of hot.context_goals || []) add(c.goal?.title);
+  for (const r of hot.requests || []) {
+    add(r.goal?.title);
+    add(r.target_goal?.title);
+  }
+  if (hot.share) for (const g of readJson<FeedFile>(layout.feed(home, hot.share.workspace_id))?.goals || []) add(g.title);
+  return [...out].slice(0, 500);
 }
 
 // ---------- PreToolUse ----------
@@ -1410,7 +1451,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       // Named as a decline names it: which request, and its short id (E2E-AGENT cycle 13, section 5).
       const which = `${who}'s request to ${requestWhat(r)} (${requestShortId(r.id)})`;
       if (r.type === "switch_goal" && later) return `Align: you accepted ${which}. This session moves to "${clean(r.target_goal?.title, 100)}" at the first prompt after Align has fetched that goal (the next sync).`;
-      if (r.type === "switch_goal") return `Align: you accepted ${which}. From your next prompt this session counts toward "${clean(r.target_goal?.title, 100)}".`;
+      if (r.type === "switch_goal") return `Align: you accepted ${which}. From your next prompt this session counts toward ${endSentence(`"${clean(r.target_goal?.title, 100)}"`)}`;
       return `Align: you accepted ${which}; ${who} will see that. The agent hears it at your next prompt.`;
     }
     case "goals": {
@@ -1575,13 +1616,13 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "bind", arg: goal.id, pending_id: id, ts });
       const h = readJsonStrict<HoldLatch>(layout.hold(home, lid));
       const kept = h.state === "ok" && Array.isArray(h.value?.holds) ? h.value.holds.filter((x) => x.goal_id !== goal.id).map((x) => x.goal_title) : [];
-      return `Align: from your next prompt this session counts toward "${goal.title}".${heldNote(goal)}${keptHoldsNote(kept)}`;
+      return `${endSentence(`Align: from your next prompt this session counts toward "${goal.title}"`)}${heldNote(goal)}${keptHoldsNote(kept)}`;
     }
     case "task": {
       if (!willShare(home, hot, cwd)) return "Align: this session is not shared, so there is no one to tell.";
       if (!arg) return "Align: usage is `::align task <what this session is working on>`.";
       record(home, lid, [{ t: "task", at: ts, s: arg.slice(0, 120) }]);
-      return `Align: sessions toward related goals will see this session is on "${arg.slice(0, 120)}".`;
+      return endSentence(`Align: sessions toward related goals will see this session is on "${arg.slice(0, 120)}"`);
     }
     case "claim": {
       if (!willShare(home, hot, cwd)) return "Align: this session is not shared, so there is no one to tell.";

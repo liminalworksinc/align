@@ -156,7 +156,8 @@ describe("pod awareness", () => {
     assert.match(card, /Nishant \(1 session, 1 min ago\)(: toward "HAL on two robots")?; edited hal\/go2\.py\.|Nishant \(1 session, 1 min ago\): (toward "HAL on two robots"; )?edited hal\/go2\.py\./, "a sibling goal under the same parent");
     assert.doesNotMatch(card, /Zed|elsewhere/, "goals outside the tree are not shown");
     assert.doesNotMatch(card, /tick probe/, "another person's task label and commit subject stay out of model context");
-    assert.match(card, /Run `align team` for details\.$/);
+    assert.match(card, /The user can type `::align team` for details\.$/);
+    assert.doesNotMatch(card, /Run `align team`/, "the card does not point the agent at a command that prints other people's text");
     assert.ok(card.length <= 300, `card ${card.length}`);
     assert.equal(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "p2", prompt: "more", cwd: dir }).stdout, "", "seen: 0 bytes");
 

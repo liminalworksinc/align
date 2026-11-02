@@ -509,7 +509,7 @@ describe("limits in the envelope and deltas", () => {
     setGoal(ctx, lid, { ...LIMITED, version: 4, limits: [...LIMITED.limits!, lim("lim_q", "must", "Every queue job must finish within ten minutes.")] });
     const d4 = ctxOf(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "v4", prompt: "next" }))!;
     assert.ok(d4.length <= DELTA_MAX, `${d4.length}`);
-    assert.equal(d4, `[Align] Goal "Ship the v2 onboarding flow" is now v4 (active). New limit: Must "Every queue job must finish within ten minutes.". No added authority.`);
+    assert.equal(d4, `[Align] Goal "Ship the v2 onboarding flow" is now v4 (active). New limit: Must "Every queue job must finish within ten minutes." No added authority.`);
     assert.equal(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "v4b", prompt: "again" }).stdout, "", "once");
     // v5 drops the GPU limit and rewords the queue limit (same id): both named, within 300.
     setGoal(ctx, lid, { ...LIMITED, version: 5, title: "S".repeat(200), limits: [LIMITED.limits![1], lim("lim_q", "must", `Every queue job must finish within five minutes ${"and more ".repeat(20)}`)] });
@@ -521,11 +521,11 @@ describe("limits in the envelope and deltas", () => {
     // v6 mid-turn: delivered next to the tool call, once, then the prompt is quiet.
     setGoal(ctx, lid, { ...LIMITED, version: 6, limits: [lim("lim_new", "must_not", "Never write to the production database.")] });
     const mid = ctxOf(runHook(t, "claude", "PreToolUse", { session_id: sid, tool_name: "Bash" }))!;
-    assert.match(mid, /now v6 \(active\)\. New limit: Must not "Never write to the production database\."\. Limit removed: "SSO for the admin console is out of scope\."\. \(\+1 more removed\.\) No added authority\./);
+    assert.match(mid, /now v6 \(active\)\. New limit: Must not "Never write to the production database\." Limit removed: "SSO for the admin console is out of scope\." \(\+1 more removed\.\) No added authority\./);
     assert.equal(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "v6", prompt: "go" }).stdout, "");
     // Binding a goal with limits mid-session names its first limit in the bound note.
     const b = renderDelta("bound", LIMITED, { added: LIMITED.limits!, removed: [] });
-    assert.match(b, /counts toward goal "Ship the v2 onboarding flow" \(v3, active\)\. Limit: Must not "The three models must not all fit on the GPU at once\."\. \(\+1 more; they come with the goal context\.\) No added authority\./);
+    assert.match(b, /counts toward goal "Ship the v2 onboarding flow" \(v3, active\)\. Limit: Must not "The three models must not all fit on the GPU at once\." \(\+1 more; they come with the goal context\.\) No added authority\./);
     assert.ok(b.length <= DELTA_MAX);
   });
 });
@@ -664,7 +664,7 @@ describe("local drift notice (D5)", () => {
     assert.equal(out.hookSpecificOutput, undefined, "never model context");
     assert.equal(
       out.systemMessage,
-      'Align: the agent\'s last reply may conflict with a limit on goal "Ship the v2 onboarding flow": Must not "The migration cutover must never run during month-end close.". This is a word check on this machine only; nothing was sent or added to the agent\'s context. `align config drift off` turns it off.',
+      'Align: the agent\'s last reply may conflict with a limit on goal "Ship the v2 onboarding flow": Must not "The migration cutover must never run during month-end close." This is a word check on this machine only; nothing was sent or added to the agent\'s context. `align config drift off` turns it off.',
     );
     assert.equal(fs.existsSync(layout.drift(t.home, lid)), false);
     assert.equal(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "p3", prompt: "ok" }).stdout, "", "shown once");

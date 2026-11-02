@@ -402,7 +402,7 @@ try {
     "limit delta: the owner proposes a third limit, the lead approves and then launches it (version 2); nothing reaches the session before the CLI syncs; after `align sync` (one goal_version directive, received) the next prompt names the new limit, once",
     cr.status === 201 && appr.status === 200 && appr.json?.state === "approved" && launch.json?.launch === "launched" && launch.json.version === 2 && beforeSync.stdout === "" &&
       sdb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_directives WHERE ws_id = ? AND kind = 'goal_version' AND goal_id = ? AND seq > ?").get(W, G.id, seqBeforeApprove).n) === 1 && JSON.parse(dirRow?.goal_json ?? "{}").limits?.length === 3 && received &&
-      delta.context === `[Align] Goal "${GOAL_TITLE}" is now v2 (active). New limit: Must "${LIM3}". No added authority.` && delta.json?.systemMessage === undefined && deltaAgain.stdout === "",
+      delta.context === `[Align] Goal "${GOAL_TITLE}" is now v2 (active). New limit: Must "${LIM3}" No added authority.` && delta.json?.systemMessage === undefined && deltaAgain.stdout === "",
     `${cr.status} ${cr.text.slice(0, 200)} ${appr.status} ${appr.text.slice(0, 200)} before=${beforeSync.stdout} received=${received} delta=${delta.stdout} again=${deltaAgain.stdout}`,
   );
   check("limit delta: the next sync posts the applied receipt to the server", receipt("applied"), dirRow?.id);
@@ -458,7 +458,7 @@ try {
   check(
     "drift: Stop adds 0 bytes; the next prompt shows the user a systemMessage naming the crossed limit, with no model context; once",
     stop.code === 0 && stop.stdout === "" &&
-      drift.system === `Align: the agent's last reply may conflict with a limit on goal "${GOAL_TITLE}": Must not "${LIM1}". This is a word check on this machine only; nothing was sent or added to the agent's context. \`align config drift off\` turns it off.` &&
+      drift.system === `Align: the agent's last reply may conflict with a limit on goal "${GOAL_TITLE}": Must not "${LIM1}" This is a word check on this machine only; nothing was sent or added to the agent's context. \`align config drift off\` turns it off.` &&
       drift.json?.hookSpecificOutput === undefined && driftAgain.stdout === "",
     `stop=${stop.stdout} drift=${drift.stdout} again=${driftAgain.stdout}`,
   );

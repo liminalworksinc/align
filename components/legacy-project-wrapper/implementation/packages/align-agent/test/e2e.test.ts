@@ -437,7 +437,7 @@ describe("e2e", () => {
     await waitFor(() => fake.receipts.some((r) => r.id === d.id && r.state === "received"), 5000, "received");
     await waitFor(() => hot(t, SID)?.goal?.version === 2, 3000, "hot v2");
     const delta = JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "l2", prompt: "next", cwd: repo }).stdout).hookSpecificOutput.additionalContext as string;
-    assert.equal(delta, `[Align] Goal "Ship the v2 onboarding flow" is now v2 (active). New limit: Must not "The two models must not both fit on the GPU at once.". No added authority.`);
+    assert.equal(delta, `[Align] Goal "Ship the v2 onboarding flow" is now v2 (active). New limit: Must not "The two models must not both fit on the GPU at once." No added authority.`);
     await waitFor(() => fake.receipts.some((r) => r.id === d.id && r.state === "applied"), 5000, "applied");
 
     // The team accepts the open ask on the server: the next pass refetches, the next prompt tells it once.

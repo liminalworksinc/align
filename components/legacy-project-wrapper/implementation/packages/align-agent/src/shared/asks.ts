@@ -46,7 +46,8 @@ export function teamAsks(home: string, ws: string, goalId: string): TeamAsks | n
       asked_on: clean(a.source?.date, 10),
       accepted_by: a.decided_by ? personName(a.decided_by.name) : "the team",
     }));
-  return { team: { id: team.id, name: team.name }, asks, accepted_ids: accepted.map((a) => a.id) };
+  const member = myTeams(readJson<MeFile>(layout.me(home)), ws).some((t) => t.id === team.id);
+  return { team: { id: team.id, name: team.name }, asks, accepted_ids: accepted.map((a) => a.id), member };
 }
 
 /** This person's teams in a workspace (`teams`, or `pods` from servers before the rename). */
@@ -66,15 +67,21 @@ export function askLineForPeople(a: Ask, textMax = 140): string {
 
 /**
  * The "Asked of your teams" section of `align team` (at most 6 lines): the open and accepted asks of this person's
- * teams. Empty when there are none or the feed was never fetched.
+ * teams, at most 4, then `(+<n> more; run \`align asks\`)`. Within `max` characters (newlines included), the section
+ * drops asks from the end into that count rather than being cut. Empty when there are none or the feed was never
+ * fetched.
  */
-export function asksSection(home: string, ws: string): string[] {
+export function asksSection(home: string, ws: string, max = Infinity): string[] {
   const feed = readAsks(home, ws);
   if (!feed) return [];
   const teams = new Set(myTeams(readJson<MeFile>(layout.me(home)), ws).map((t) => t.id));
   const mine = feed.asks.filter((a) => (a.state === "open" || a.state === "accepted") && teams.has(a.team?.id)).sort(askOrder);
   if (!mine.length) return [];
-  const shown = mine.slice(0, 4).map((a) => `- ${askLineForPeople(a)}`);
-  const more = mine.length - shown.length;
-  return ["Asked of your teams:", ...shown, ...(more > 0 ? [`- (+${more} more; run \`align asks\`)`] : [])];
+  const all = mine.map((a) => `- ${askLineForPeople(a)}`);
+  for (let k = Math.min(4, all.length); k >= 0; k--) {
+    const more = mine.length - k;
+    const lines = ["Asked of your teams:", ...all.slice(0, k), ...(more > 0 ? [`- (+${more} more; run \`align asks\`)`] : [])];
+    if (k === 0 || lines.reduce((n, l) => n + l.length + 1, 0) <= max) return lines;
+  }
+  return [];
 }
