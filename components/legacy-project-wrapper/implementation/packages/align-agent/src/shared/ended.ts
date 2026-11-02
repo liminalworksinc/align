@@ -55,7 +55,7 @@ export function shareAgainWords(unread: boolean, where: string, there = false, u
 export function latchWayOut(lid: string, reshare: boolean, reader: "model" | "user", release: ReleaseReaches | null = null, again: ShareAgain = {}): string {
   const user = reader === "user";
   const run = `${user ? "you run" : "the user runs"} \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal`;
-  const lifted = "after which the stop or hold can be lifted from the web";
+  const lifted = "after which the stop or hold, if still in place, can be lifted from the web";
   if (reshare && again.unread) {
     return `tools stay blocked until it is shared again: ${user ? "run" : "the user runs"} \`align sync\` in a terminal first (this machine has not yet heard from the Align server whether its sharing was stopped on the web meanwhile, and one stopped there is not shared again), then ${user ? "type" : "types"} \`::align share\` in this session, ${lifted}.`;
   }
@@ -79,7 +79,7 @@ export function latchWayOut(lid: string, reshare: boolean, reader: "model" | "us
 export function latchNoticeTail(lid: string, reshare: boolean, release: ReleaseReaches | null = null, again: ShareAgain = {}): string {
   const what = !reshare && release?.goals.length ? (release.stopped ? "stopped and held" : "held") : "stopped or held";
   if (!reshare && again.login) {
-    return ` It was ${what} from the web, so tools stay blocked until it is shared again that way, after which the stop or hold can be lifted from the web, or until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
+    return ` It was ${what} from the web, so tools stay blocked until it is shared again that way, after which the stop or hold, if still in place, can be lifted from the web, or until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
   }
   return ` It was ${what} from the web, so ${latchWayOut(lid, reshare, "user", release, again)}`;
 }

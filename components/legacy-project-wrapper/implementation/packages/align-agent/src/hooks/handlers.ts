@@ -17,6 +17,7 @@ import {
   keptHoldsNote,
   limitsSeen,
   otherWorkspaceWords,
+  expiredWhy,
   outOfReachWords,
   measureKey,
   renderAsksDelta,
@@ -1161,7 +1162,8 @@ const STATE_LABELS: Record<RequestState, string> = {
   withdrawn: "withdrawn",
   expired: "expired (this session's share ended)",
 };
-const stateLabel = (s: RequestState) => STATE_LABELS[s] || s;
+/** A request's state in the session's words; an expired one says why, as `align requests` does (cycle 14, section 5). */
+const stateLabel = (s: RequestState, r?: HotRequest) => (s === "expired" && r ? `expired (${expiredWhy(r as Parameters<typeof expiredWhy>[0])})` : STATE_LABELS[s] || s);
 
 /** One line about a request for people (never model context). */
 function requestLine(r: HotRequest): string {
@@ -1187,7 +1189,7 @@ function holdLine(home: string, lid: string, cwd: string | null): string {
   }
   if (h.state !== "ok" || !Array.isArray(h.value?.holds)) return "  Goal hold: unreadable (tools blocked)";
   const out = h.value.holds.map((x) => `  Goal hold: on goal "${clean(x.goal_title, 80)}" by ${clean(x.by, 50) || "someone"} (all tools blocked)`);
-  if (h.value.ended && h.value.reshare) out.push(`  Sharing ended; ${shareAgainWords(!!h.value.unread, "here")}, after which the hold can be released from the web`);
+  if (h.value.ended && h.value.reshare) out.push(`  Sharing ended (${endedWhyWords(h.value.ended, true, !!h.value.relogin, true)}); ${shareAgainWords(!!h.value.unread, "here")}, after which the hold can be released from the web`);
   else if (h.value.ended && h.value.login) out.push(`  Sharing ended (this machine signed out): ${latchWayOut(lid, false, "user", null, { login: true })}`);
   else if (h.value.ended && h.value.release?.goals.length) out.push(`  Sharing ended: ${latchWayOut(lid, false, "user", h.value.release)}`);
   else if (h.value.ended) out.push(`  Sharing ended, so no release can reach it: run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal to unblock it`);
@@ -1332,7 +1334,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
             ? "off"
             : latch.state === "ok" && latch.value.stopped
               ? latch.value.ended && latch.value.reshare
-                ? `on (tools blocked; sharing ended: ${shareAgainWords(!!latch.value.unread, "here")}, after which it can be resumed from the web)`
+                ? `on (tools blocked; sharing ended (${endedWhyWords(latch.value.ended, true, !!latch.value.relogin, true)}): ${shareAgainWords(!!latch.value.unread, "here")}, after which it can be resumed from the web)`
                 : latch.value.ended && latch.value.login
                   ? `on (tools blocked; sharing ended, this machine signed out: ${latchWayOut(lid, false, "user", null, { login: true })})`
                   : latch.value.ended
@@ -1365,7 +1367,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       const inj = readInjected(home, lid);
       return [
         "Align requests for this session (sent by people who can approve its goal):",
-        ...list.map((r) => `  ${requestShortId(r.id)} ${requestLine(r)} [${stateLabel(requestState(r, inj.requests_seen?.[r.id]))}]`),
+        ...list.map((r) => `  ${requestShortId(r.id)} ${requestLine(r)} [${stateLabel(requestState(r, inj.requests_seen?.[r.id]), r)}]`),
         "Answer with `::align accept <id>` or `::align decline <id>`.",
       ].join("\n");
     }
@@ -1381,7 +1383,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       const hits = ref ? open.filter((r) => r.id.toLowerCase().replace(/^rq_/, "").startsWith(ref)) : open;
       if (!hits.length) {
         const known = ref ? (hot?.requests || []).filter((r) => r.id.toLowerCase().replace(/^rq_/, "").startsWith(ref)) : [];
-        if (known.length === 1) return `Align: the request ${requestShortId(known[0].id)} is already ${stateLabel(requestState(known[0], inj.requests_seen?.[known[0].id]))}, so it can't be ${answer} now.`;
+        if (known.length === 1) return `Align: the request ${requestShortId(known[0].id)} is already ${stateLabel(requestState(known[0], inj.requests_seen?.[known[0].id]), known[0])}, so it can't be ${answer} now.`;
         return ref ? `Align: no open request matches "${arg}". Type \`::align requests\` to list them.` : "Align: no request is waiting for an answer.";
       }
       if (hits.length > 1) return `Align: ${hits.length} requests match; use one of the ids: ${hits.map((r) => requestShortId(r.id)).join(", ")}.`;
@@ -1534,8 +1536,8 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       // no default would otherwise not know which (C3-6).
       spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed?.workspace_id, ts });
       return goal
-        ? `Align: sharing requested toward "${goal.title}". It takes effect within a few seconds; your next prompt carries the goal.${heldNote(goal)}`
-        : "Align: sharing requested with no goal (its usage counts as unallocated; `::align bind <goal>` picks one). It takes effect within a few seconds.";
+        ? `Align: sharing requested toward "${goal.title}". The next sync asks the Align server for it (within a few seconds); once it is shared, your next prompt carries the goal.${heldNote(goal)}`
+        : "Align: sharing requested with no goal (its usage counts as unallocated; `::align bind <goal>` picks one). The next sync asks the Align server for it (within a few seconds).";
     }
     case "unshare":
     case "stop":

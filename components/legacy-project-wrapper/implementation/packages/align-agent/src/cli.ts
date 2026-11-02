@@ -45,7 +45,7 @@ import { gitInfo } from "./shared/anchors.ts";
 import { readJson } from "./shared/fsx.ts";
 import { matchRule, readRules, realDir, removeRule, setRule } from "./shared/rules.ts";
 import { layout } from "./shared/layout.ts";
-import type { Goal } from "./shared/types.ts";
+import type { Goal, MeFile } from "./shared/types.ts";
 import { flushOutbox, ingestSpool, outboxDepth, syncOnce, uploadUsage, type LastSync } from "./sync.ts";
 import { tailAll } from "./tailer.ts";
 import { VERSION } from "./version.ts";
@@ -351,7 +351,13 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   /** The live shares of this machine's earlier sign-in that this login ended. */
   let endedLids: string[] = [];
   let concurrent: string | null = null;
+  /** The device of this machine's earlier pairing that this login replaced, and its name as this machine cached it. */
+  let replacedDevice: string | null = null;
+  const earlierName = readJson<MeFile>(layout.me(ctx.home))?.device?.name ?? null;
   out(`To connect this device, open ${verification_uri} and enter the code ${user_code}`);
+  // The page approves only with a recent sign-in: an older browser session sees a sign-in prompt there while this
+  // command waits (E2E-AGENT cycle 14, section 5).
+  out(`Approving needs a sign-in from the last 15 minutes in that browser: if the page asks you to sign in again, do so. This command waits until the device is approved (the code is good for ${Math.round(Number(a.json.expires_in || 600) / 60)} minutes).`);
   if (!ctx.env.ALIGN_NO_BROWSER && process.platform === "darwin") execFile("open", [verification_uri], () => undefined);
   const scale = Number(ctx.env.ALIGN_DEVICE_POLL_SCALE_MS || 1000);
   for (;;) {
@@ -413,6 +419,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
       }
       // Said after "Signed in as ..." and its workspace lines, which name the sign-in first (cycle 8).
       endedLids = ended;
+      replacedDevice = replaced || null;
       pairedAs = creds.device_id;
       break;
     }
@@ -448,6 +455,9 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   const name = me.device?.name || deviceName;
   const said = () => {
     out(`Signed in as ${me.user.name} <${me.user.email}> on device ${name}.`);
+    // The approval page named the device before this login said which one it replaces, so it may have shown the name
+    // with a number (`<name> (2)`): this machine keeps its earlier device's name (E2E-AGENT cycle 14, section 5).
+    if (replacedDevice && !concurrent && earlierName === name) out(`This login replaced this machine's earlier device, so it keeps that device's name (the approval page may have shown it with a number added).`);
     if (concurrent) out(`Another \`align login\` on this machine paired device ${concurrent} while this one waited; this login replaced it, so this machine is ${clean(name, 60)} (${pairedAs}).`);
   };
   if (!(await whileSignedInAs(ctx, pairedAs!, said))) {

@@ -6,7 +6,7 @@ import { kvGet, nowIso, tx } from "./db.ts";
 import { loadFeed } from "./goals.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
 import { enqueue } from "./share.ts";
-import { releaseNotice, SAFE_REQUESTS } from "./shared/envelope.ts";
+import { expiredWhy as expiredWhyWords, releaseNotice, SAFE_REQUESTS } from "./shared/envelope.ts";
 import { randomId } from "./shared/fsx.ts";
 import type { RequestState, RequestType, WireHold, WireRequest } from "./shared/types.ts";
 
@@ -131,25 +131,27 @@ export function answerRequest(ctx: Ctx, lid: string, requestId: string, answer: 
 
 export function stateWords(s: RequestState, json?: string): string {
   if (s === "expired") return `expired (${expiredWhy(json)})`;
+  // A checkpoint or a replan needs no answer to reach the agent: before its next prompt it is on its way, not waiting on
+  // the developer (E2E-AGENT cycle 14, section 5).
+  if (s === "pending" && SAFE_REQUESTS.has(typeOf(json))) return "not delivered yet: it goes to the agent at the session's next prompt, with no answer needed";
   return s === "auto_accepted" ? "delivered to the agent, not declined" : s === "pending" ? "waiting for an answer" : s;
 }
 
+const typeOf = (json?: string): string => {
+  try {
+    return String((json ? (JSON.parse(json) as { type?: unknown }) : {}).type ?? "");
+  } catch {
+    return "";
+  }
+};
+
 /** Why a request expired here, from the reason kept with it (`expireRequests`): its share ended as the server says. */
 function expiredWhy(json?: string): string {
-  let reason: unknown = null;
   try {
-    reason = json ? (JSON.parse(json) as { expired_reason?: unknown }).expired_reason : null;
+    return expiredWhyWords(json ? JSON.parse(json) : null);
   } catch {
-    /* unknown */
+    return expiredWhyWords(null);
   }
-  if (reason === "device_signed_out") return "this session's share ended when this machine signed out of Align, and the Align server expired the request";
-  if (reason === "receipt_refused") {
-    const j = JSON.parse(json!) as { refused_answer?: string; refused_error?: string };
-    return `the Align server did not take the answer ${j.refused_answer === "declined" ? "declined" : "accepted"} here (${String(j.refused_error || "not_found").slice(0, 40)}): this session's share there has ended`;
-  }
-  if (reason === "member_removed") return "this session's share ended when this machine lost access to its workspace, and the Align server expired the request";
-  if (reason === "sharing_stopped") return "this session's sharing was stopped (Stop sharing on the web, or `align stop-sharing`), and the Align server expired the request";
-  return "this session's share ended, and the Align server expired the request";
 }
 
 /** Requests on this device, newest first (`align requests`). */

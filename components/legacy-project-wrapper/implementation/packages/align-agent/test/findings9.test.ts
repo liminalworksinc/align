@@ -77,11 +77,11 @@ const logout = async (t: TestEnv) => assert.equal((await runCli(t, ["logout"])).
 
 const GOAL = "Ship the v2 onboarding flow";
 const AGAIN = `Align: this machine is signed in to Align again. To share this session again, type \`::align share\` here (it counts toward "${GOAL}" again).`;
-const LATCHED_AGAIN = " It was stopped or held from the web, so tools stay blocked until it is shared again (you can type `::align share` in this session), after which the stop or hold can be lifted from the web.";
+const LATCHED_AGAIN = " It was stopped or held from the web, so tools stay blocked until it is shared again (you can type `::align share` in this session), after which the stop or hold, if still in place, can be lifted from the web.";
 const SIGNED_OUT = `Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on. To share it again, run \`align login\` in a terminal, then type \`::align share\` here (it counts toward "${GOAL}" again).`;
 const stopSharingTail = (lid: string) => ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
 /** Signed out: sharing it again after `align login`, which the notice has just said, or `align stop-sharing` (cycle 12). */
-const signedOutTail = (lid: string) => ` It was stopped or held from the web, so tools stay blocked until it is shared again that way, after which the stop or hold can be lifted from the web, or until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
+const signedOutTail = (lid: string) => ` It was stopped or held from the web, so tools stay blocked until it is shared again that way, after which the stop or hold, if still in place, can be lifted from the web, or until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
 
 describe("C8-1: every change of whether a session can be shared again tells it the notice for the new state, whatever it has seen", () => {
   test("told \"signed in to Align again\", then signed out again: the next prompt tells the sign-out notice again, as the deny says; signed in once more, the signed-in-again notice again", async () => {

@@ -3,8 +3,8 @@
 // session told the neutral sentence from an older build's hot file never told when its situation changed), closed as a
 // class: the database records the newest build that wrote to it, an older build that sees it leaves the sessions'
 // notices, hot files and latch files to that build, and the newest re-renders whatever another build wrote. Also C14-2
-// (a release notice shown after a newer hold), C14-4 (a share that never reached the server called a share that ended)
-// and C14-5 (`align install --dry-run` wrote ~/.align). The randomized check, with "an older
+// (a release notice shown after a newer hold), C14-4 (a share that never reached the server called a share that ended),
+// C14-5 (`align install --dry-run` wrote ~/.align) and the items of its section 5. The randomized check, with "an older
 // build writes" and "hold, release, hold again" added, is test/sharestate-property.test.ts.
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -14,6 +14,7 @@ import * as build from "../src/build.ts";
 import { kvGet, kvSet } from "../src/db.ts";
 import { sessionKey } from "../src/keys.ts";
 import { latchWayOut } from "../src/shared/ended.ts";
+import { requestShortId } from "../src/shared/envelope.ts";
 import { readJson, writeJsonAtomic } from "../src/shared/fsx.ts";
 import { localId, layout } from "../src/shared/layout.ts";
 import type { HotState, InjectedState } from "../src/shared/types.ts";
@@ -339,5 +340,83 @@ describe("C14-5: `align install --dry-run`", () => {
     assert.equal(fs.existsSync(t.home), false, `${t.home} exists after the dry run: ${fs.existsSync(t.home) ? fs.readdirSync(t.home).join(", ") : ""}`);
     assert.deepEqual(fs.readdirSync(t.claudeDir), []);
     assert.deepEqual(fs.readdirSync(t.codexHome), []);
+  });
+});
+
+describe("cycle 14, section 5: works, but would confuse a developer", () => {
+  test("an answer queued before the stop was heard expires with the request, and the session and the terminal give one reason", async () => {
+    const { fake, t } = await world();
+    const R = await shared(t);
+    await sync(t);
+    const q = fake.sendRequest("ws_acme", { type: "checkpoint", goal_id: "g_ship", session_keys: [R.key] });
+    await sync(t);
+    const id = requestShortId(q.wire.id);
+    // Delivered at the prompt; the developer declines it while the receipts can't reach the server.
+    fake.failCalls = (m: string, p: string) => m === "POST" && /\/receipts$/.test(p);
+    prompt(t, R);
+    const d = await runCli(t, ["requests", "decline", id]);
+    assert.equal(d.code, 0, d.stderr);
+    fake.stopOnWeb(R.key);
+    await runCli(t, ["sync"]);
+    const all = (await runCli(t, ["requests", "--all"])).stdout;
+    assert.match(all, new RegExp(`${id} .*: expired \\(this session's sharing was stopped \\(Stop sharing on the web, or \`align stop-sharing\`\\), and the Align server expired the request\\)`), all);
+    assert.doesNotMatch(all, /: declined/);
+    const ctx = ctxFor(t);
+    const queued = ctx.db.prepare("SELECT COUNT(*) AS n FROM outbox WHERE kind='receipt' AND payload LIKE '%declined%'").get() as { n: number };
+    ctx.db.close();
+    assert.equal(queued.n, 0, "the answer's receipt is not sent");
+    fake.failCalls = null;
+    assert.match(said(t, R), new RegExp(`Align: Dana Lee's request ${id} had expired \\(this session's sharing was stopped\\), so your answer was not taken and Dana Lee does not see it\\.`));
+    // In the session, the same reason as in the terminal.
+    assert.equal(
+      prompt(t, R, `::align decline ${id}`).reason,
+      `Align: the request ${id} is already expired (this session's sharing was stopped (Stop sharing on the web, or \`align stop-sharing\`), and the Align server expired the request), so it can't be declined now.`,
+    );
+  });
+
+  test("a replan's notice never says both that it needs no answer and to answer it; one not delivered yet is not listed as waiting for an answer", async () => {
+    const { fake, t } = await world();
+    const R = await shared(t);
+    await sync(t);
+    const q = fake.sendRequest("ws_acme", { type: "replan", goal_id: "g_ship", session_keys: [R.key] });
+    await sync(t);
+    const id = requestShortId(q.wire.id);
+    assert.match((await runCli(t, ["requests"])).stdout, new RegExp(`${id} .*: not delivered yet: it goes to the agent at the session's next prompt, with no answer needed`));
+    const msg = said(t, R);
+    assert.doesNotMatch(msg, /needs no answer\./);
+    assert.match(msg, /drafting the plan needs no answer from you, and the plan changes only when you accept it/);
+    assert.match(msg, new RegExp(`Run \`::align accept ${id}\` when you agree to its plan, or \`::align decline ${id}\`, or tell the agent\\.`));
+  });
+
+  test("`::align status` says why a held session's share ended, a replacing login included", async () => {
+    const { fake, t } = await world();
+    const H = await shared(t);
+    await sync(t);
+    fake.holdGoal("ws_acme", "g_ship", [H.key]);
+    await sync(t);
+    await login(t);
+    const st = prompt(t, H, "::align status").reason as string;
+    assert.match(st, /Sharing ended \(a new sign-in on this machine \(`align login`\) ended its share from the earlier sign-in\); `::align share` here shares it again/, st);
+  });
+
+  test("`align login` says approving needs a recent sign-in, and a replacing login that it keeps the device's name", async () => {
+    const { t } = await world();
+    const l = await login(t);
+    assert.match(l.stdout, /^Approving needs a sign-in from the last 15 minutes in that browser: if the page asks you to sign in again, do so\. This command waits until the device is approved \(the code is good for \d+ minutes\)\.$/m);
+    assert.match(l.stdout, /^This login replaced this machine's earlier device, so it keeps that device's name \(the approval page may have shown it with a number added\)\.$/m);
+    await logout(t);
+    assert.doesNotMatch((await login(t)).stdout, /This login replaced/);
+  });
+
+  test("a stopped or held session whose share ended says the web lifts the stop or hold only if it is still in place", async () => {
+    const { fake, t } = await world();
+    const H = await shared(t);
+    await sync(t);
+    fake.holdGoal("ws_acme", "g_ship", [H.key]);
+    await sync(t);
+    await logout(t);
+    await login(t);
+    await sync(t);
+    assert.match(said(t, H), /after which the stop or hold, if still in place, can be lifted from the web\.$/);
   });
 });
