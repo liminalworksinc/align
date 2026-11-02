@@ -2457,6 +2457,22 @@ try {
       const askedLine = await page.evaluate(() => [...document.querySelectorAll("p")].map((p) => p.textContent ?? "").find((t) => t.startsWith("Asked ")) ?? "");
       check("C6-4 (ui): the device approval page says \"Asked 1 minute ago\" for a code 70 seconds old (one count-and-noun helper), never \"1 minutes\"", askedLine === "Asked 1 minute ago", askedLine);
 
+      // Z3 (ui): Delete shared history on a session already deleted in another tab is done: the row goes, and the page
+      // says it was already deleted instead of an error.
+      const z3Key = sessionKey(D5, A, "claude-code", "native-z3");
+      const z3Put = await put(D5, z3Key, { title: "Z3 history" });
+      page.on("dialog", (dl) => void dl.accept());
+      await page.goto(`${BASE}/app/w/${A}/sessions`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.body.innerText.includes("Z3 history"), { timeout: 15000 }).catch(() => undefined);
+      const z3Gone = await call("U5", "DELETE", `/api/v2/workspaces/${A}/sessions/${z3Key}`, { cookie: U5.cookie });
+      await page.evaluate(() => [...document.querySelectorAll("main li")].find((li) => li.innerText.includes("Z3 history"))?.querySelectorAll("button").forEach((b) => b.textContent === "Delete shared history" && b.click()));
+      await page.waitForFunction(() => !document.body.innerText.includes("Z3 history"), { timeout: 15000 }).catch(() => undefined);
+      const z3Text = await page.evaluate(() => document.querySelector("main")?.innerText ?? "");
+      check(
+        "Z3 (ui): deleting shared history already deleted in another tab (410 history_deleted) counts as done: the row is gone and the page says \"That session's shared history was already deleted, …\" with no error",
+        z3Put.status === 200 && z3Gone.status === 204 && !z3Text.includes("Z3 history") && z3Text.includes("That session's shared history was already deleted, in another tab or window or from its machine, so it is no longer listed.") && !z3Text.includes("nothing is left to delete"),
+        `${z3Put.status} ${z3Gone.status} ${z3Text.slice(0, 600)}`,
+      );
     } finally {
       await browser.close();
     }

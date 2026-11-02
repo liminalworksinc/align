@@ -1056,6 +1056,11 @@ everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<w
 - **WHEN** the person presses **Stop sharing** or **Delete shared history**
 - **THEN** the page asks "Stop sharing this session? Nothing more will be uploaded. What was already shared stays until you delete it." or "Delete this session's shared history? Its usage is removed from every total, so goal and team totals will change. This can't be undone." and on confirm posts to `.../sessions/<key>/stop-sharing` or calls `DELETE .../sessions/<key>`
 
+#### Scenario: History already deleted elsewhere
+
+- **WHEN** the person deletes a session's shared history that was already deleted in another tab, window or from its machine (`DELETE` answers 410 `history_deleted`; `scripts/test-v2.mjs` "Z3 (ui): ...")
+- **THEN** the deletion counts as done: the list is read again, so the row is gone, and the page says "That session's shared history was already deleted, in another tab or window or from its machine, so it is no longer listed." instead of an error
+
 #### Scenario: Owners see everyone's sessions
 
 - **WHEN** a workspace owner opens the tab
