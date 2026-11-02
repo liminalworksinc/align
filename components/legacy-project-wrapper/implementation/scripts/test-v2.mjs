@@ -8268,6 +8268,36 @@ try {
     const e2Read = await zRead(ZA, GE2.id, e2?.id);
     check("W2: a request's read has state_note, the wrong_state words for its state (\"This request was declined by Zoe Approver, so nothing changes.\"; withdrawn: \"… withdrawn by Zak Asker …\")", e1Read?.state === "rejected" && e1Read.state_note === DECLINED && e2Read?.state_note === `This request was withdrawn by ${ZB.name}, so nothing changes.`, `${e1Read?.state_note} | ${e2Read?.state_note}`);
 
+    // -- C8-2: a counter on a request behind its goal is compared with the request's base, and the refusal says so --
+    const GB = await zGoal("Behind goal");
+    const b1 = await zPropose(GB, { title: "Behind goal renamed" });
+    const bV2 = await za(ZA, "POST", `/goals/${GB.id}/versions`, { version: 1, measures: [{ text: "Added in v2", target: null }] });
+    const bRead = (await za(ZA, "GET", `/goals/${GB.id}?counter=${b1?.id}`)).json;
+    const bReadReq = (await za(ZB, "GET", `/goals/${GB.id}?counter=${b1?.id}`)).json;
+    const bBack = await zAct(ZA, GB.id, b1?.id, "counter", { revision: 1, changes: { title: "Behind goal", measures: [] }, note: "Back to the old name" });
+    check(
+      "C8-2: GET ?counter= gives the approver counter_base, the request's base version (version 1: title \"Behind goal\", no measures) though the goal is at version 2 (null for the requester); a counter that sets the title back and removes the version-2 measure is 409 no_change naming that version: \"This suggestion changes nothing on version 1, the version this request was made against (the goal is now at version 2), …\"",
+      bV2.status === 201 && bRead?.goal?.version === 2 && bRead.counter_base?.title === "Behind goal" && JSON.stringify(bRead.counter_base.measures) === "[]" && bRead.counter_base.status === "active" && bReadReq?.counter_base === null &&
+        bBack.status === 409 && bBack.json?.error === "no_change" && bBack.json.message === "This suggestion changes nothing on version 1, the version this request was made against (the goal is now at version 2), so there is nothing to suggest. Change a field to suggest something else, or decline the request.",
+      `${bV2.status} ${JSON.stringify(bRead?.counter_base)} ${JSON.stringify(bReadReq?.counter_base)} ${bBack.status} ${bBack.text}`,
+    );
+
+    // -- W4: a counter that is the request itself is no suggestion (with a condition it is Accept if…) --
+    const GN = await zGoal("Norm");
+    const GN2 = await zGoal("Norm two");
+    const n1 = await zPropose(GN, { title: "Norm 2" });
+    const n2 = await zPropose(GN2, { title: "Norm two, renamed" });
+    const nSame = await zAct(ZA, GN.id, n1?.id, "counter", { revision: 1, changes: { title: "Norm 2" }, note: "The same thing" });
+    const nAfter = await zRead(ZA, GN.id, n1?.id);
+    const nIf = await zAct(ZA, GN2.id, n2?.id, "counter", { revision: 1, changes: { title: "Norm two, renamed" }, note: "If", condition: "Docs first" });
+    const bSame = await zAct(ZA, GB.id, b1?.id, "counter", { revision: 1, changes: { title: "Behind goal renamed" }, note: "The same thing" });
+    check(
+      "W4: a counter whose changes are the request's own, with no condition, is 409 no_change \"That's what the request already asks for: approve it instead.\" and nothing is recorded (on a request behind its goal: \"… approve it once Zak Asker updates it to version 2.\"); with a condition (Accept if…) it is countered",
+      nSame.status === 409 && nSame.json?.error === "no_change" && nSame.json.message === "That's what the request already asks for: approve it instead." && nAfter?.state === "pending" && nAfter.revision === 1 &&
+        nIf.status === 200 && nIf.json?.state === "countered" && bSame.status === 409 && bSame.json?.message === `That's what the request already asks for: approve it once ${ZB.name} updates it to version 2.`,
+      `${nSame.status} ${nSame.text} ${nAfter?.state} ${nIf.status} ${bSame.status} ${bSame.text}`,
+    );
+
     // -- the browser: C8-1 (ui), W2 (ui), C8-2 (ui), W3 (ui), W4 (ui) --
     const GE4 = await zGoal("Evidence in the browser");
     const GW2 = await zGoal("Withdraw in the browser");
@@ -8360,6 +8390,62 @@ try {
           w2Text.slice(0, 700),
         );
 
+        // C8-2 and W3/W4 (ui) on the behind request: Review follows the server's comparison with the base, with a reason.
+        const pA = await as(ZA);
+        const bCard = `[data-cr="${b1?.id}"]`;
+        const bForm = `${bCard} [data-decision-input="counter"]`;
+        await open(pA, `/app/w/${ZW}/goals/${GB.id}`);
+        await pA.waitForSelector(`${bCard} [data-decision="Suggest a change"]`, { timeout: 15000 }).catch(() => undefined);
+        await pA.click(`${bCard} [data-decision="Suggest a change"]`).catch(() => undefined);
+        await pA.waitForSelector(`${bForm} form`, { timeout: 15000 }).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        const bOpen = await reviewState(pA, bCard);
+        await typeIn(pA, bForm, "Note", "Back to the old name");
+        await typeIn(pA, bForm, "Goal", "Behind goal");
+        const bTitleBack = await reviewState(pA, bCard);
+        await press(pA, bForm, "Remove");
+        const bRemoved = await reviewState(pA, bCard);
+        const bRemovedForm = await textOf(pA, bForm);
+        await typeIn(pA, bForm, "Goal", "Behind goal, retitled");
+        const bChanged = await reviewState(pA, bCard);
+        const SAME_BASE_BEHIND = "This suggestion is the same as the request's base, version 1 (the goal is now at version 2); change a field to suggest something.";
+        check(
+          "C8-2 (ui): on a request behind its goal, Suggest a change compares with the request's base version as the server does: with the title set back and the version-2 measure removed, Review this decision stays disabled, saying \"This suggestion is the same as the request's base, version 1 (the goal is now at version 2); change a field to suggest something.\"; a real change enables it",
+          bTitleBack.review === "disabled" && bTitleBack.reason === SAME_BASE_BEHIND && !bRemovedForm.includes("Added in v2") && bRemoved.review === "disabled" && bRemoved.reason === SAME_BASE_BEHIND && bChanged.review === "enabled" && bChanged.reason === "",
+          JSON.stringify({ bTitleBack, bRemoved, bChanged }),
+        );
+        check(
+          "W4 (ui): Suggest a change on a behind request opens with Review this decision disabled and \"That's what the request already asks for: approve it once Zak Asker updates it to version 2.\"",
+          bOpen.review === "disabled" && bOpen.reason === `That's what the request already asks for: approve it once ${ZB.name} updates it to version 2.`,
+          JSON.stringify(bOpen),
+        );
+
+        const nCard = `[data-cr="${n1?.id}"]`;
+        const nForm = `${nCard} [data-decision-input="counter"]`;
+        await open(pA, `/app/w/${ZW}/goals/${GN.id}`);
+        await pA.waitForSelector(`${nCard} [data-decision="Suggest a change"]`, { timeout: 15000 }).catch(() => undefined);
+        await pA.click(`${nCard} [data-decision="Suggest a change"]`).catch(() => undefined);
+        await pA.waitForSelector(`${nForm} form`, { timeout: 15000 }).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await typeIn(pA, nForm, "Note", "A thought");
+        const nOpen = await reviewState(pA, nCard);
+        await typeIn(pA, nForm, "Accept if… (optional condition the requester confirms)", "Docs first");
+        const nIfUi = await reviewState(pA, nCard);
+        await typeIn(pA, nForm, "Accept if… (optional condition the requester confirms)", "");
+        await typeIn(pA, nForm, "Goal", "Norm");
+        const nBase = await reviewState(pA, nCard);
+        await typeIn(pA, nForm, "Goal", "Norm 3");
+        const nChanged = await reviewState(pA, nCard);
+        check(
+          "W4 (ui): Suggest a change opens with the request's own fields and, with a note but no condition, keeps Review this decision disabled next to \"That's what the request already asks for: approve it instead.\"; writing an Accept if… condition enables it",
+          nOpen.review === "disabled" && nOpen.reason === "That's what the request already asks for: approve it instead." && nIfUi.review === "enabled" && nIfUi.reason === "",
+          JSON.stringify({ nOpen, nIfUi }),
+        );
+        check(
+          "W3 (ui): setting an ordinary request's field back to its base value disables Review this decision with the reason \"This suggestion is the same as the request's base; change a field to suggest something.\"; changing it enables Review and the reason goes",
+          nBase.review === "disabled" && nBase.reason === "This suggestion is the same as the request's base; change a field to suggest something." && nChanged.review === "enabled" && nChanged.reason === "",
+          JSON.stringify({ nBase, nChanged }),
+        );
         check("c8 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));
       } catch (e) {
         check("c8 web fix (ui) run", false, e?.stack ?? e);

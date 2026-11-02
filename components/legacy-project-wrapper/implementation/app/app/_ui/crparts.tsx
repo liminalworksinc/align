@@ -4,7 +4,7 @@ import { api, ApiError, Btn, Err, Field, Input, num, Pill, Select, TextArea, usd
 import { LimitEditor, MeasuresEditor, limitsDraft, limitsOut, measuresDraft, measuresOut, sameLimits, type LimitDraft, type MeasureDraft } from "./goalform";
 import { LIMIT_WORDS } from "./limits";
 import type { AlignSnapshot, ChangeFields, ChangeRequest, Evidence, EvidenceKind, Goal } from "./types";
-import { hiddenGoals, withHidden } from "@/lib/v2/change-words.mts";
+import { counterSameAsBase, counterSameAsRequest, hiddenGoals, withHidden } from "@/lib/v2/change-words.mts";
 import { count } from "@/lib/v2/plural.mts";
 
 // Pieces a change request is shown with, shared by its open view (decide.tsx: understand, then decide) and its record
@@ -112,9 +112,12 @@ function sameField(k: keyof ChangeFields, a: ChangeFields[keyof ChangeFields], b
  *  as a new dependency (the ones everyone who decides can see), besides those already on the list; `notOfferedWho`
  *  names who can't see the others ("someone who decides on this goal", or for a counter the requester too). Each goal
  *  that isn't offered is left out for one reason, counted once (C7-1). Sending is offered only while what would be sent
- *  changes something: compared with `before` (a counter: the request's base values of its fields) or else `goal`, plus
- *  `hiddenChange` (the request changes dependencies the person can't see, which a counter keeps). A counter whose only
- *  change was a dependency that would loop has nothing left to send, and says so, pointing to Decline (C7-2). */
+ *  changes something: compared with `base` (a counter: the request's base version, every field, exactly what the server
+ *  compares it with, also on a request behind its goal; C8-2) or else `goal`, plus `hiddenChange` (the request changes
+ *  dependencies the person can't see, which a counter keeps). A counter whose only change was a dependency that would
+ *  loop has nothing left to send, and says so, pointing to Decline (C7-2); one that is the request's base says so next to
+ *  the disabled button (W3); and one identical to the request, with no condition, is no suggestion: it says to approve
+ *  instead (W4). Each reason is the server's own wording for the refusal (lib/v2/change-words.mts). */
 export function ChangesForm({
   ws,
   goal,
@@ -124,7 +127,8 @@ export function ChangesForm({
   choices = null,
   notOfferedWho = "someone who decides on this goal",
   loops = null,
-  before,
+  base = null,
+  versions,
   hiddenChange = false,
   requesterName,
   noteLabel,
@@ -143,8 +147,11 @@ export function ChangesForm({
   notOfferedWho?: string;
   /** Goals left out of `choices` because they already depend on this goal (a loop), counted on their own (C3-3). */
   loops?: string[] | null;
-  /** The values the sent fields are compared with to tell whether sending changes anything, when not `goal`'s. */
-  before?: ChangeFields;
+  /** A counter: the request's base version (every field; dependencies the person can see), which the sent fields are
+   *  compared with to tell whether sending changes anything, and with `start` what the request asks for. */
+  base?: Required<ChangeFields> | null;
+  /** A counter: the request's base version and the goal's version now, for the reasons' words. */
+  versions?: { base: number; goal: number };
   hiddenChange?: boolean;
   /** A counter's requester, named where the form says there is nothing left to suggest. */
   requesterName?: string;
@@ -187,10 +194,18 @@ export function ChangesForm({
   if (!sameIds(deps, goal.depends_on ?? []) || keep.includes("depends_on") || looped.length) changes.depends_on = deps;
   const limitsChanged = !sameLimits(limits, goal.limits ?? []);
   if (limitsChanged || keep.includes("limits")) changes.limits = limitsOut(limits) as Goal["limits"];
-  // Would sending change anything? Each field sent against the value it would replace (the server answers 409
-  // no_change otherwise), so a counter that only restates nothing is never offered.
-  const differs = hiddenChange || (Object.keys(changes) as (keyof ChangeFields)[]).some((k) => !sameField(k, changes[k], before && k in before ? before[k] : (goal as ChangeFields)[k]));
+  // Would sending change anything? Each field sent against the value it would replace: for a counter the request's base
+  // version, as the server compares it (409 no_change otherwise), so a counter that only restates nothing is never
+  // offered, also on a request behind its goal (C8-2).
+  const sent = Object.keys(changes) as (keyof ChangeFields)[];
+  const differs = hiddenChange || sent.some((k) => !sameField(k, changes[k], (base ?? (goal as ChangeFields))[k]));
   const nothingLeft = !differs && looped.length > 0;
+  // A counter asking for exactly what the request asks (every field it sends against the request's own values), with
+  // no condition: the server refuses it 409 no_change, approve instead (W4).
+  const asked: ChangeFields | null = base ? { ...base, ...start } : null;
+  const sameAsRequest = !!asked && differs && !condition.trim() && sent.every((k) => sameField(k, changes[k], asked[k]));
+  const v = versions ?? { base: goal.version, goal: goal.version };
+  const why = !base || nothingLeft ? null : !differs ? counterSameAsBase(v.base, v.goal) : sameAsRequest ? counterSameAsRequest(requesterName ?? "the requester", v.base, v.goal) : null;
   return (
     <form
       onSubmit={(e) => {
@@ -259,9 +274,16 @@ export function ChangesForm({
           here.
         </p>
       )}
-      <Btn type="submit" disabled={busy || !differs || (noteRequired && !note.trim()) || !title.trim()}>
-        {sendLabel}
-      </Btn>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <Btn type="submit" disabled={busy || !differs || sameAsRequest || (noteRequired && !note.trim()) || !title.trim()}>
+          {sendLabel}
+        </Btn>
+        {why && (
+          <p className="min-w-0 text-[14px] text-zinc-600" data-counter-reason>
+            {why}
+          </p>
+        )}
+      </div>
     </form>
   );
 }

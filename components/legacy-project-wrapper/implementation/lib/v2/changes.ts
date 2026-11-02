@@ -8,6 +8,7 @@ import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { memberName, memberPrincipal } from "./workspaces";
 import { nonNegInt, optStr, str, type Body } from "./validate";
 import { EVIDENCE_PER_REVISION, evidenceCount, evidenceInput, evidenceRows, evidenceView, recordSnapshot, snapshotView, type EvidenceSource } from "./evidence";
+import { counterNoChange, counterSameAsRequest } from "./change-words.mts";
 
 // Change requests: a member proposes a new version of a goal they can read but don't own (owners just publish a
 // version). The goal's approval set decides, under the requester rule (lib/v2/approval.ts): one approval is enough.
@@ -157,9 +158,6 @@ function crStateRefusal(r: ChangeRequestRow): string {
   }
 }
 
-/** A counter that would change nothing (409 no_change): suggest a change, or decline instead (C7-2). */
-const COUNTER_NO_CHANGE = "This suggestion changes nothing on the goal, so there is nothing to suggest. Change a field to suggest something else, or decline the request.";
-
 /** Who must be able to read a dependency a revision adds, and what the refusal says. A proposal (or a rebase) is
  *  decided by the goal's effective approval set; a counter goes back to the requester, who accepts it or not, and then
  *  to that set again. No message names the goal or the person who can't read it. */
@@ -294,6 +292,19 @@ export function dependencyChoices(pp: PolicyPrincipal, goalId: string, counterOf
 export function dependencyLoops(pp: PolicyPrincipal, goalId: string, counterOf?: string): string[] | null {
   const g = visibleGoal(pp, goalId);
   return dependencyReaders(pp, g, counterOf) ? readableLoops(pp, g.id) : null;
+}
+
+/** What a counter from this reader on request `counterOf` is compared with: the request's base version (its dependencies
+ *  limited to those the reader can read; a counter keeps the others), so the Suggest a change form offers Review exactly
+ *  when the server would record the counter, also on a request behind its goal (C8-2). null without `counterOf`, and
+ *  for a reader who may not counter it (the same audience as dependencyChoices). */
+export function counterBase(pp: PolicyPrincipal, goalId: string, counterOf?: string): Changes | null {
+  if (!counterOf) return null;
+  const g = visibleGoal(pp, goalId);
+  if (!dependencyReaders(pp, g, counterOf)) return null;
+  const base = versionContentOf(pp.wsId, g.id, crRow(pp.wsId, counterOf)!.base_version)!;
+  const hidden = unreadableGoals(pp, base.depends_on);
+  return { title: base.title, measures: base.measures, depends_on: base.depends_on.filter((id) => !hidden.includes(id)), status: base.status, limits: base.limits };
 }
 
 /** The goals the New version form leaves out of Depends on because they already depend on `goalId` (saving one would
@@ -539,14 +550,18 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
           const hiddenBase = unreadableGoals(pp, base.depends_on);
           sent = { ...(sent as Body), depends_on: base.depends_on.filter((id) => !hiddenBase.includes(id)) };
         }
-        // A suggestion that changes nothing on the version the request was made against says what to do instead (C7-2).
+        // A suggestion that changes nothing on the version the request was made against says what to do instead (C7-2),
+        // naming that version when the goal has moved on since (C8-2).
         let countered: Changes;
         try {
           countered = changesIn(pp, g.id, base, sent, current.depends_on);
         } catch (e) {
-          if (e instanceof V2Error && e.code === "no_change") throw conflict("no_change", COUNTER_NO_CHANGE);
+          if (e instanceof V2Error && e.code === "no_change") throw conflict("no_change", counterNoChange(r.base_version, g.version));
           throw e;
         }
+        // One that asks for exactly what the request asks, with no condition to add, is no suggestion: approving it is
+        // (W4). With a condition it is Accept if…, which keeps the request's changes.
+        if (condition === null && sameContent(applied(base, countered), current)) throw conflict("no_change", counterSameAsRequest(memberName(r.requester_id), r.base_version, g.version));
         // A dependency already on the request or its base was checked when it was added; one this counter adds must be
         // readable by the requester, who accepts it, and by the approval set, who then decide on it (C2 N1).
         const already = [...base.depends_on, ...current.depends_on];

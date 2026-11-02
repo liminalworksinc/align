@@ -101,3 +101,29 @@ export function changeWords(field: string, d: FieldDiff, o: ChangeWordsOptions =
 export function diffWords(diff: Record<string, FieldDiff | undefined>, o: ChangeWordsOptions = {}): string[] {
   return ["title", "measures", "limits", "status", "depends_on"].flatMap((k) => (diff[k] ? changeWords(k, diff[k]!, o) : []));
 }
+
+// ---- why a counter has nothing to send: the server's 409 no_change and the Suggest a change form's reason ----
+// A counter is a revision of the request, so it is compared with the version the request was made against (its base),
+// never with the goal as it is now: on a request behind its goal the two differ, and the words say which one (C8-2).
+
+/** The server's 409 no_change for a counter that changes nothing on the request's base version (C7-2). On a request
+ *  behind its goal it names that version, so removing what only the goal's newer version has never reads as changing
+ *  "nothing on the goal" (C8-2). */
+export function counterNoChange(baseVersion: number, goalVersion: number): string {
+  return baseVersion === goalVersion
+    ? "This suggestion changes nothing on the goal, so there is nothing to suggest. Change a field to suggest something else, or decline the request."
+    : `This suggestion changes nothing on version ${baseVersion}, the version this request was made against (the goal is now at version ${goalVersion}), so there is nothing to suggest. Change a field to suggest something else, or decline the request.`;
+}
+
+/** Why the counter form's Review this decision is disabled: what it would send is the request's base (W3, C8-2). */
+export function counterSameAsBase(baseVersion: number, goalVersion: number): string {
+  return baseVersion === goalVersion
+    ? "This suggestion is the same as the request's base; change a field to suggest something."
+    : `This suggestion is the same as the request's base, version ${baseVersion} (the goal is now at version ${goalVersion}); change a field to suggest something.`;
+}
+
+/** A counter identical to the request with no "Accept if…" condition: the server's 409 no_change and the form's reason
+ *  (W4). A request behind its goal is approved once its requester updates it. */
+export function counterSameAsRequest(requester: string, baseVersion: number, goalVersion: number): string {
+  return baseVersion === goalVersion ? "That's what the request already asks for: approve it instead." : `That's what the request already asks for: approve it once ${requester} updates it to version ${goalVersion}.`;
+}
