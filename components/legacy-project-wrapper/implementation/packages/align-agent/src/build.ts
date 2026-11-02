@@ -82,5 +82,5 @@ export function selfBuild(): BuildId & { gen: number } {
 
 /** The words a build says when a newer build has written to this machine's Align data (`theirs`). */
 export function supersededWords(theirs: BuildId, mine: BuildId): string {
-  return `a newer Align build (${theirs.version} build ${theirs.build}) has written to this machine's Align data, so this \`align\` (${mine.version} build ${mine.build}) leaves what sessions are told and their stop and hold files to that build: it meters, and sessions follow what this command does once that build runs. Run the newer \`align\` (and \`align install\` with it) instead.`;
+  return `a newer Align build (${theirs.version} build ${theirs.build}) has written to this machine's Align data, so this \`align\` (${mine.version} build ${mine.build}) leaves what sessions are told to that build: it meters and enforces the stops and holds it hears, and sessions are told what this command does once that build runs. Run the newer \`align\` (and \`align install\` with it) instead.`;
 }

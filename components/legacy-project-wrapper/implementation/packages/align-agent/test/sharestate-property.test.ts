@@ -11,7 +11,7 @@
 // shown as stored), and the pass reads the ended sessions before it sends a share (no share sent to be refused as
 // stopped). Cycle 14 added an older build writing to the same ~/.align (one from before builds were marked: a notice
 // with no facts and its own hot file, the session perhaps prompted at once; or one that sees a newer build's mark and
-// leaves the sessions' files to it: C14-1, C14-3), with every session whose situation changed since it was last told
+// leaves the sessions' hot files to it while still enforcing a stop or hold it alone hears: C14-1, C14-3), with every session whose situation changed since it was last told
 // told at its next prompt, and a hold, its release and a hold again with no prompt between (C14-2: no release notice
 // while held again). A fixed set of seeds runs every time, plus random ones (printed, so a failure can be run again with
 // ALIGN_PROP_SEEDS=<seed>).
@@ -261,7 +261,19 @@ test(`share-state notices agree with the deny and the status views, whatever the
           let ctx = ctxFor(t);
           ctx.db.prepare("INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(NEWEST_BUILD, JSON.stringify({ version: "9.9.9", build: "fffffffffff0", gen: WRITER_GEN + 1, since: new Date().toISOString() }));
           ctx.db.close();
-          await pick([() => runCli(t, ["logout"]), () => runCli(t, ["login", "--name", "Prop Mac"]), sync, () => runCli(t, ["stop-sharing", s.lid.slice(0, 8)])])();
+          // A stop or a hold it alone hears is enforced at the next tool call, before the newest build runs.
+          // (Only to a session shared on the server while this machine is signed in: a signed-out pass hears nothing.)
+          const target = signedIn() && live().length && rand() < 0.5 ? pick(live()) : null;
+          if (target) {
+            // A hold only when the goal is not held already (a hold that is on reached the sessions it was sent to).
+            if (rand() < 0.5 || fake.holds.has("ws_acme/g_ship")) fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [target.key], goal: null, binding: null });
+            else fake.holdGoal("ws_acme", "g_ship", ss.map((x) => x.key));
+            await sync();
+            const reason = json(runHook(t, "claude", "PreToolUse", { session_id: target.sid, tool_name: "Bash", tool_input: { command: "true" }, cwd: target.cwd }).stdout)?.hookSpecificOutput?.permissionDecisionReason;
+            assert.ok(reason, `seed ${seed} after ${trail.join(" > ")}: a stop or hold heard only by an older build is not enforced`);
+          } else {
+            await pick([() => runCli(t, ["logout"]), () => runCli(t, ["login", "--name", "Prop Mac"]), sync, () => runCli(t, ["stop-sharing", s.lid.slice(0, 8)])])();
+          }
           ctx = ctxFor(t);
           ctx.db.prepare("DELETE FROM kv WHERE key=?").run(NEWEST_BUILD);
           ctx.db.close();

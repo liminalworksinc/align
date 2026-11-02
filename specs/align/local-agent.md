@@ -1140,12 +1140,15 @@ deny contradicted (E2E-AGENT cycle 13 C13-1, cycle 14 C14-1 and C14-3). So each 
 (an ordered number raised by any change to what the sessions' notices, hot files and latch files carry or how they are
 worded), recorded in `build.json` with its version and build id, and every command and pass SHALL record in the local
 database the newest build that has written to it (`newest_build`: its generation, version, build id, and since when).
-A build that finds a newer build's record SHALL NOT write notices about a session's share state, hot files or latch
-files: it still runs its passes and meters (its usage uploads), and the hooks still enforce from the files that are
-there; it leaves what it would have told for the newest build to store, records which sessions it changed, and every
+A build that finds a newer build's record SHALL NOT write notices about a session's share state or hot files: it still
+runs its passes and meters (its usage uploads). Enforcement never waits for the newest build: a stop or hold its pass
+hears SHALL be written to the session's stop latch and hold file at once (a hold file keeps the holds it already held
+besides), so the next tool call is denied whatever build heard it, while a resume or release it hears removes nothing
+(a file another build wrote may hold what it does not know), and the newest build lifts it when it re-renders the
+session. It leaves what it would have told for the newest build to store, records which sessions it changed, and every
 command it runs prints on stderr `align: a newer Align build (<version> build <id>) has written to this machine's Align
-data, so this \`align\` (<version> build <id>) leaves what sessions are told and their stop and hold files to that
-build: it meters, and sessions follow what this command does once that build runs. Run the newer \`align\` (and
+data, so this \`align\` (<version> build <id>) leaves what sessions are told to that build: it meters
+and enforces the stops and holds it hears, and sessions are told what this command does once that build runs. Run the newer \`align\` (and
 \`align install\` with it) instead.` (a hook's `sync --hook` logs it instead; `align doctor` shows it as a `WARN`
 `newest build` line). The newest build SHALL stamp the hot files it writes with its generation and, at every command
 and every pass, catch up with what another build wrote: it stores the notices left for it as notices that only say the
@@ -1154,13 +1157,17 @@ reached the server), and when anything shows another build wrote (those, a sessi
 without this generation's stamp) re-renders every session's hot and latch files from the state now. A notice about a
 share's state that a build of an older generation stored after the newest build's record began (or one with no facts)
 SHALL be worded as one that says only that the share's state changed (`Notices about a share's state are worded when
-shown`), so each session is told from the state now. A stop or hold that only an older build's pass heard is enforced
-from the latch file the newest build writes at its next command or pass.
+shown`), so each session is told from the state now.
 
 #### Scenario: An older build after a newer one
 
-- **WHEN** two shared sessions (one stopped from the web) are on a machine whose database records a newer build, and this build runs `align logout`, then the newer build runs a command (test `findings15` "records the newest build; an older one writes no share-state notice, hot or latch file ...")
-- **THEN** the newest build is recorded and stamped on the hot files; the older build's logout prints `align: a newer Align build (...) has written to this machine's Align data, ...` on stderr, changes no hot or latch file and stores no notice about a share's state, `align doctor` warns `newest build`, and the sessions' prompts tell nothing; after the newer build's command each is told `Align: this session stopped sharing because this machine signed out of Align; ...` once, and the stopped one's deny says its sharing ended at the sign-out
+- **WHEN** two shared sessions (one stopped from the web) are on a machine whose database records a newer build, and this build runs `align logout`, then the newer build runs a command (test `findings15` "records the newest build; an older one writes no share-state notice or hot file ...")
+- **THEN** the newest build is recorded and stamped on the hot files; the older build's logout prints `align: a newer Align build (...) has written to this machine's Align data, ...` on stderr, changes no hot file, keeps the stopped one's stop latch and stores no notice about a share's state, `align doctor` warns `newest build`, and the sessions' prompts tell nothing; after the newer build's command each is told `Align: this session stopped sharing because this machine signed out of Align; ...` once, and the stopped one's deny says its sharing ended at the sign-out
+
+#### Scenario: A stop and a hold heard only by an older build
+
+- **WHEN** a build that finds a newer build's record runs `align sync` and hears a stop for one shared session and a goal hold for another, then, in a later pass, their resume and release; then the newer build runs a command (test `findings15` "a stop and a hold heard only by an older build are enforced at the next tool call ..."; and the `sharestate-property` event "an older build writes")
+- **THEN** the next `PreToolUse` of each is denied (the stop deny, the hold deny naming its reason) before the newer build runs, no hot file is written, both stay denied after the resume and release that build heard, and both run once the newer build has run
 
 #### Scenario: An older build's pass
 
@@ -1754,7 +1761,7 @@ share of its own, and `align share --dir --past` only sessions never shared, so 
 
 #### Scenario: Any order of events
 
-- **WHEN** three shared sessions (one also stopped from the web, one held) go through random sequences of sign-out, login, a login that can't read the ended shares, sync, Stop sharing and stop or resume on the web, a goal hold and its release, a hold then Stop sharing on the web, the workspace lost and given back (on the Devices page, or a re-invite and a new login), the device revoked on the web and heard by a sync, `align stop-sharing`, `::align share`, `::align share --dir confirm`, `align share`, an older build writing (one from before builds were recorded storing a notice with no facts and its own hot file, the session perhaps prompted at once; or one that finds a newer build's record running a logout, a login, a sync or `align stop-sharing`), a hold, its release and a hold again with no prompt between, and prompts, for a fixed set of seeds and random ones (test `sharestate-property` "share-state notices agree with the deny and the status views ...")
+- **WHEN** three shared sessions (one also stopped from the web, one held) go through random sequences of sign-out, login, a login that can't read the ended shares, sync, Stop sharing and stop or resume on the web, a goal hold and its release, a hold then Stop sharing on the web, the workspace lost and given back (on the Devices page, or a re-invite and a new login), the device revoked on the web and heard by a sync, `align stop-sharing`, `::align share`, `::align share --dir confirm`, `align share`, an older build writing (one from before builds were recorded storing a notice with no facts and its own hot file, the session perhaps prompted at once; or one that finds a newer build's record running a logout, a login, a sync or `align stop-sharing`, or hearing a stop or a hold in its sync, which the next tool call of that session is denied by), a hold, its release and a hold again with no prompt between, and prompts, for a fixed set of seeds and random ones (test `sharestate-property` "share-state notices agree with the deny and the status views ...")
 - **THEN** after every step, for every session, the notice it would be told now names the deny's way out in its latch sentence, a session whose situation (signed out, shareable again, out of reach) differs from the one it was last told would be told something, no release notice is told while its goal is held again, offers `::align share` only when the deny (if any) and `align sessions` say it shares the session again and this machine is signed in, says to run `align login` only while signed out, says nothing while the ended shares are unread since a sign-in (but that a share its person stopped on the web stays stopped, which no read changes), never says `sharing failed (sharing_stopped)`, no share is sent that the server refuses as stopped (each web stop there comes before the next pass reads it), `::align status` and `align latch status` name the deny's way out, the deny never offers plain `::align share` while the ended shares are unread, no share is live while this machine is signed out, and a prompt tells the notice that was worked out
 
 #### Scenario: A login that can't read the ended shares, sessions not prompted since the sign-out

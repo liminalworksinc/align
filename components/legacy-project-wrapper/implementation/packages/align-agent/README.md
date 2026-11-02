@@ -158,7 +158,7 @@ the hooks' copy is another build than the `align` you run (an older `align` stil
 yet), every command says so on stderr and `align doctor` shows a `WARN hooks build` line until `align install` runs
 with that `align`. `build.json` also carries the build's writer generation (`gen`, ordered), and every command and
 pass records in `align.db` the newest build that has written to it: an older build that finds a newer one's record
-writes no share-state notice, hot file or latch file (it still meters, and says so on stderr and in `align doctor`),
+writes no share-state notice or hot file (it still meters and writes the stop latch and hold file for a stop or hold it hears, and says so on stderr and in `align doctor`),
 and the newest build re-renders every session from the state now whenever another build wrote. `--dry-run` writes
 nothing, not even `ALIGN_HOME`.
 

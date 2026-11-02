@@ -195,12 +195,10 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     updated_at: new Date().toISOString(),
     by: { gen: WRITER_GEN, build: selfBuild().build },
   };
-  // A newer build has written here: the sessions' files are its to write (cycle 14). Marked, so it rewrites them.
-  if (ctx.superseded) {
-    kvSet(ctx.db, `${OLDER_RENDER}${lid}`, nowIso());
-    return hot;
-  }
-  writeJsonAtomic(layout.hot(ctx.home, lid), hot);
+  // A newer build has written here: the hot file is its to write (cycle 14). Marked, so it rewrites it; a stop or hold
+  // is still enforced below, whatever build hears it.
+  if (ctx.superseded) kvSet(ctx.db, `${OLDER_RENDER}${lid}`, nowIso());
+  else writeJsonAtomic(layout.hot(ctx.home, lid), hot);
   // A latch whose share has ended (this machine signed out, or the server no longer has the share) can't be lifted from
   // the web any more: the latch says so, so the deny tells the user how to get out (`align stop-sharing`). When the
   // session can be shared there again now (signed in again, its workspace in reach again), the latch says that instead,
@@ -232,26 +230,46 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
         ...(release ? { release } : {}),
       }
     : {};
+  const held: HoldLatch["holds"] = holds.map((r) => {
+    const j = JSON.parse(r.json) as { goal_title: string; by: string; reason: string | null };
+    return { goal_id: r.goal_id, goal_title: j.goal_title, by: j.by, reason: j.reason, directive_id: r.directive_id, seq: r.seq, at: r.at };
+  });
+  if (ctx.superseded) {
+    enforceOnly(ctx, lid, latch?.stopped ? { v: 1, stopped: true, directive_id: latch.directive_id, seq: latch.seq, at: latch.at, ...ended } : null, held, ended);
+    return hot;
+  }
   if (latch && latch.stopped) {
     const l: Latch = { v: 1, stopped: true, directive_id: latch.directive_id, seq: latch.seq, at: latch.at, ...ended };
     writeJsonAtomic(layout.latch(ctx.home, lid), l);
   } else {
     removeFile(layout.latch(ctx.home, lid));
   }
-  if (holds.length) {
-    const h: HoldLatch = {
-      v: 1,
-      ...ended,
-      holds: holds.map((r) => {
-        const j = JSON.parse(r.json) as { goal_title: string; by: string; reason: string | null };
-        return { goal_id: r.goal_id, goal_title: j.goal_title, by: j.by, reason: j.reason, directive_id: r.directive_id, seq: r.seq, at: r.at };
-      }),
-    };
+  if (held.length) {
+    const h: HoldLatch = { v: 1, ...ended, holds: held };
     writeJsonAtomic(layout.hold(ctx.home, lid), h);
   } else {
     removeFile(layout.hold(ctx.home, lid));
   }
   return hot;
+}
+
+/**
+ * A build that found a newer build's record writes no hot file, but a stop or hold it hears is enforced at once: stops
+ * and holds fail closed whatever build hears them, never waiting for the newest build (E2E-AGENT cycle 14). It only
+ * adds blocks: a stop latch when the session is stopped, and a hold file holding the goals held now together with those
+ * the file already holds (a goal held now replaces its own entry). A resume or release it hears removes nothing, since a
+ * file another build wrote may hold what this one does not know: the newest build lifts them when it re-renders the
+ * session, which this build marked (`OLDER_RENDER`).
+ */
+function enforceOnly(ctx: Ctx, lid: string, stop: Latch | null, held: HoldLatch["holds"], ended: Partial<HoldLatch>): void {
+  if (stop) writeJsonAtomic(layout.latch(ctx.home, lid), stop);
+  if (!held.length) return;
+  const file = layout.hold(ctx.home, lid);
+  const prev = readJson<HoldLatch>(file);
+  const kept = Array.isArray(prev?.holds) ? prev.holds.filter((h) => h && typeof h.goal_id === "string" && !held.some((x) => x.goal_id === h.goal_id)) : [];
+  // A hold file that can't be read blocks every tool already; it is left as it is.
+  if (fs.existsSync(file) && !prev) return;
+  writeJsonAtomic(file, { v: 1, ...ended, holds: [...kept, ...held] } satisfies HoldLatch);
 }
 
 /** The newest notice about a sign-out that ended the share of `lid` says a new `align login` ended it (cycle 12), and

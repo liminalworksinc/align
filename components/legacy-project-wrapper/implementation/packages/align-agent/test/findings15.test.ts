@@ -197,7 +197,7 @@ describe("C14-3: a session told the neutral sentence from an older build's hot f
 });
 
 describe("cycle 14: a build that sees a newer build's mark", () => {
-  test("records the newest build; an older one writes no share-state notice, hot or latch file, says so, and the newer re-tells from the state", async () => {
+  test("records the newest build; an older one writes no share-state notice or hot file, says so, and the newer re-tells from the state", async () => {
     const { fake, t } = await world();
     const A = await shared(t);
     const B = await shared(t);
@@ -217,9 +217,9 @@ describe("cycle 14: a build that sees a newer build's mark", () => {
     const latchB = fileOf(layout.latch(t.home, B.lid));
     const out = await runCli(t, ["logout"]);
     assert.equal(out.code, 0, out.stderr);
-    assert.match(out.stderr, /align: a newer Align build \(0\.3\.0 build abcdef012345\) has written to this machine's Align data, so this `align` \(\S+ build \S+\) leaves what sessions are told and their stop and hold files to that build/);
+    assert.match(out.stderr, /align: a newer Align build \(0\.3\.0 build abcdef012345\) has written to this machine's Align data, so this `align` \(\S+ build \S+\) leaves what sessions are told to that build: it meters and enforces the stops and holds it hears/);
     assert.equal(fileOf(layout.hot(t.home, A.lid)), hotA, "no hot file written");
-    assert.equal(fileOf(layout.latch(t.home, B.lid)), latchB, "no latch file written");
+    assert.ok(latchB && fileOf(layout.latch(t.home, B.lid)), "the stop latch stays: a stop never waits for the newest build");
     ctx = ctxFor(t);
     const stored = ctx.db.prepare("SELECT COUNT(*) AS n FROM notices WHERE id LIKE '%/signed_out_%'").get() as { n: number };
     ctx.db.close();
@@ -236,6 +236,34 @@ describe("cycle 14: a build that sees a newer build's mark", () => {
     assert.match(b, /^Align: this session stopped sharing because this machine signed out of Align;/);
     assert.ok(deny(t, B).includes("Its sharing has since ended (this machine signed out of Align)"), deny(t, B));
     assert.equal(said(t, A), "", "once");
+  });
+
+  test("a stop and a hold heard only by an older build are enforced at the next tool call; a resume and a release it hears wait for the newest build", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    const B = await shared(t);
+    await sync(t);
+    said(t, A);
+    said(t, B);
+    assert.equal(deny(t, A), "");
+    newerBuildMarked(t);
+    fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [A.key], goal: null, binding: null });
+    fake.holdGoal("ws_acme", "g_ship", [B.key], "older-build hold");
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.match(deny(t, A), /^Align: this session was stopped from its Align workspace/, "the stop is enforced at once");
+    assert.match(deny(t, B), /paused all agents on goal "Ship the v2 onboarding flow": "older-build hold"/, "the hold is enforced at once");
+    const hotB = fileOf(layout.hot(t.home, B.lid));
+    // A resume and a release heard only by the older build lift nothing yet: the newest build lifts them.
+    fake.pushDirective({ ws: "ws_acme", kind: "resume", session_keys: [A.key], goal: null, binding: null });
+    fake.releaseGoal("ws_acme", "g_ship", [B.key]);
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.notEqual(deny(t, A), "", "still blocked (fails closed)");
+    assert.notEqual(deny(t, B), "", "still blocked (fails closed)");
+    assert.equal(fileOf(layout.hot(t.home, B.lid)), hotB, "no hot file written");
+    newerBuildGone(t);
+    await runCli(t, ["status"]);
+    assert.equal(deny(t, A), "", "the newest build lifts the stop it did not hear");
+    assert.equal(deny(t, B), "", "and the hold");
   });
 
   test("an older build's pass still runs (it meters), and a hook's pass says nothing on the terminal", async () => {
