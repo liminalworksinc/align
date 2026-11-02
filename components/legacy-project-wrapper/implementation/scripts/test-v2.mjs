@@ -8667,6 +8667,18 @@ try {
       z4.status === 200 && z4Name === "nl here x" && z4Empty.status === 400 && z4Empty.json?.message === "device_name is required",
       `${z4.status} ${JSON.stringify(z4Name)} ${z4Empty.status} ${z4Empty.text}`,
     );
+    // W3 (E2E-WEB cycle 7): every invisible format character (Unicode category Cf) is dropped, by property, not a list:
+    // the Arabic letter mark, isolates, embeddings and overrides, zero-width spaces and joiners, word joiners and
+    // invisible operators, the byte order mark, the Mongolian vowel separator and the soft hyphen.
+    const CF = [0x061c, 0x2066, 0x2067, 0x2068, 0x2069, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0xfeff, 0x180e, 0x00ad];
+    const w3 = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: `al${CF.map((c) => String.fromCodePoint(c)).join("m")}x laptop`, public_key: newDeviceKeys().pub } });
+    const w3Name = withDb((d) => d.prepare("SELECT device_name FROM v2_device_requests WHERE user_code = ?").get(w3.json?.user_code ?? ""))?.device_name;
+    const w3Empty = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: CF.map((c) => String.fromCodePoint(c)).join(" "), public_key: newDeviceKeys().pub } });
+    check(
+      "W3: a device name drops every invisible format character (Unicode category Cf: U+061C ARABIC LETTER MARK, U+2066 to U+2069, U+202A to U+202E, U+200B to U+200F, U+2060 to U+2064, U+FEFF, U+180E, U+00AD), so \"al<each>m…x laptop\" is stored as \"al\" + 22 \"m\" + \"x laptop\"; a name of only those characters and spaces -> 400 device_name is required",
+      w3.status === 200 && w3Name === `al${"m".repeat(CF.length - 1)}x laptop` && w3Empty.status === 400 && w3Empty.json?.message === "device_name is required",
+      `${w3.status} ${JSON.stringify(w3Name)} ${w3Empty.status} ${w3Empty.text}`,
+    );
     const evEnv = { ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1" };
     const q = (sql, ...a) => withDb((d) => d.prepare(sql).all(...a));
     const ev = (name, w = null) => (w ? q("SELECT * FROM v2_events WHERE name = ? AND ws_id = ?", name, w) : q("SELECT * FROM v2_events WHERE name = ?", name));

@@ -1111,9 +1111,11 @@ a device id; malformed is 400); that device, counted only when it is the approvi
 check, as it is revoked a moment later, so a re-login keeps the plain name instead of alternating with `<name> (2)`.
 A device name SHALL be one line as the person reads it everywhere (the approval page, the Devices page, `align
 login`): at `authorize` every run of control characters (C0, DEL and C1) and whitespace, line and paragraph
-separators included, SHALL become one space, invisible direction marks (bidirectional embeddings, overrides and
-isolates, left-to-right and right-to-left marks) and zero-width spaces SHALL be dropped, and the ends trimmed, before
-the 100-character limit applies; a name with nothing left SHALL be 400 `device_name is required`.
+separators included, SHALL become one space, every invisible format character (Unicode general category Cf, by
+property rather than a list: bidirectional embeddings, overrides and isolates, left-to-right, right-to-left and Arabic
+letter marks, zero-width spaces and joiners, word joiners and invisible operators, the byte order mark, the Mongolian
+vowel separator and soft hyphens) and any lone surrogate SHALL be dropped, and the ends trimmed, before the
+100-character limit applies; a name with nothing left SHALL be 400 `device_name is required`.
 A device that revokes itself because a newer pairing on the same machine replaced it (`DELETE
 /api/v2/devices/self?replaced_by=<device id>`) SHALL pass its name on: when the named device is the same person's, live,
 and named `<its name> (<n>)`, and no other live device of the person has the plain name once it is revoked, the named
@@ -1135,6 +1137,11 @@ named while the first's device was live, then replacing it) so end with the plai
 
 - **WHEN** a pairing is started with the name `"  nl\nhere\t\u0007x \u202e "`, and another with only `"\n\t\u0000\u200b"` (`scripts/test-v2.mjs` "Z4: a device name ...")
 - **THEN** the first is stored (and so shown on the approval page) as `nl here x`; the second is 400 `device_name is required` and starts no pairing
+
+#### Scenario: Invisible format characters in a device name
+
+- **WHEN** a pairing is started with a name holding U+061C ARABIC LETTER MARK, U+2066 to U+2069, U+202A to U+202E, U+200B to U+200F, U+2060 to U+2064, U+FEFF, U+180E and U+00AD between its letters, and another with only those characters and spaces (`scripts/test-v2.mjs` "W3: ...")
+- **THEN** the first is stored with every one of them dropped and its letters kept; the second is 400 `device_name is required`
 
 #### Scenario: A second device of one name
 
