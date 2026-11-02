@@ -147,6 +147,11 @@ function LaunchRecord({ props, acc }: { props: ViewProps; acc: Acceptance }) {
                   {d ? "Change to not yet" : "Not yet"}
                 </Button>
               )}
+              {d && (
+                <Button kind="secondary" onClick={() => props.go("decision")}>
+                  See the decision
+                </Button>
+              )}
             </div>
           </div>
         </Section>

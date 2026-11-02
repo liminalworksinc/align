@@ -159,7 +159,7 @@ function ValueCard({ props, acc, p }: { props: ViewProps; acc: Acceptance; p: Pr
           </li>
           {company && (
             <li>
-              {poss(L.team.ceo)} goal it serves: {company}
+              {poss(L.team.ceo)} requirement it serves: {company}
             </li>
           )}
           <li>Teams: {[L.team.ceo, L.team.product, L.team.security].join(", ")}</li>
