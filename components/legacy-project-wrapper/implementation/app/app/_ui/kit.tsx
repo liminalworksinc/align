@@ -353,9 +353,8 @@ export const Loading = () => <p className="text-[15px] text-zinc-500">Loading…
 
 export const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString() : "");
 
-export function usd(micros: number) {
-  return `$${(micros / 1e6).toFixed(micros > 0 && micros < 10_000 ? 4 : 2)}`;
-}
+/** Estimated list cost, by the rule the MCP text uses too (Z5). */
+export { usd } from "@/lib/v2/money.mts";
 
 export function num(n: number) {
   return n.toLocaleString();

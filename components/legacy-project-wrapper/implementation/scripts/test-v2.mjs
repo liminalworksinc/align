@@ -1997,6 +1997,25 @@ try {
     /in 2 requests, 1 bound session, last activity/.test(mcpList.text) && !/\b1 bound sessions\b/.test(mcpList.text) && !/\b1 requests\b/.test(mcpList.text),
     (mcpList.text ?? "").slice(0, 900),
   );
+  // Z5 (E2E-WEB cycle 6): a snapshot under one cent reads the same in the MCP text as on the web card ("$0.0010"), from
+  // one money helper (lib/v2/money.mts), never "$0.00" to an agent.
+  const GZ5 = (await mkGoal(U3, { title: "Tiny spend goal", visibility: "workspace" })).json;
+  const SZ5 = sessionKey(D3, A, "claude-code", "native-z5");
+  await put(D3, SZ5);
+  const EZ5 = epochId();
+  await epoch(D3, SZ5, { epoch_id: EZ5, goal_id: GZ5.id, starts_at: T0 });
+  await upload(D3, SZ5, [usageRow(D3, "z5-1", EZ5, { est_list_usd_micros: 1000 })]);
+  const crZ5 = await propose(U1, GZ5.id, { base_version: 1, changes: { title: "Tiny spend goal, renamed" }, reason: "A clearer name" });
+  const mcpZ5 = await mcpCall("U1", D1, "align_list_change_requests", { state: "pending" });
+  const money = await import(pathToFileURL(path.join(ROOT, "lib/v2/money.mts")).href).catch(() => null);
+  const z5Micros = crZ5.json?.revisions?.[0]?.snapshot?.spend?.total?.est_list_usd_micros;
+  check(
+    "Z5: one money rule for the web and MCP (lib/v2/money.mts): usd(1000) is \"$0.0010\", usd(0) \"$0.00\", usd(12_345_678) \"$12.35\"; a snapshot of $0.001 reads \"$0.0010 estimated over 30 days in 1 request\" in the MCP text, as the web card writes it, never \"$0.00 estimated\"",
+    money?.usd(1000) === "$0.0010" && money.usd(0) === "$0.00" && money.usd(12_345_678) === "$12.35" && crZ5.status === 201 && z5Micros === 1000 &&
+      mcpZ5.text.includes("$0.0010 estimated over 30 days in 1 request"),
+    `${money ? "" : "no lib/v2/money.mts; "}${crZ5.status} ${z5Micros} ${(mcpZ5.text ?? "").slice(0, 1500)}`,
+  );
+  await crAct(U1, GZ5.id, crZ5.json?.id, "withdraw");
   const evEventText = withDb((d) => d.prepare("SELECT * FROM v2_events").all()).map((r) => Object.values(r).join(" ")).join("\n");
   const evRowsAll = withDb((d) => d.prepare("SELECT url, label FROM v2_change_request_evidence").all());
   check(

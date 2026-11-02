@@ -259,7 +259,7 @@ The MCP server SHALL return every string written by a person inside a marked fie
 
 ### Requirement: MCP goal reads show the launched version only
 
-The MCP server SHALL return from `align_list_goals`, `align_get_goal`, `align_get_brief`, `align_get_limits` and `align_get_directives` only goal versions that were saved by the goal's owner or written by a launch, never the content an approved but unlaunched change request holds: approving a change request SHALL change none of their results. Where a tool returns change requests (`align_list_change_requests`, `align_get_decision_record`, `align_get_brief`), each SHALL carry its `launch` (`pending`, `not_yet`, `launched`, `superseded` or `null`), declared in the tool's `outputSchema`, and the text summary SHALL say "Approved, agents still on v<n> until launch" for an approved, unlaunched request and "Launched, agents on v<n+1>" for a launched one; no summary SHALL say that an agent did, applied or executed anything. Every count in a text summary SHALL agree with its noun ("Recorded by Align at revision 1 (…): $0.41 estimated over 30 days in 1 request, 1 bound session, …", "2 bound sessions"; `scripts/test-v2.mjs` "C4-4: ...").
+The MCP server SHALL return from `align_list_goals`, `align_get_goal`, `align_get_brief`, `align_get_limits` and `align_get_directives` only goal versions that were saved by the goal's owner or written by a launch, never the content an approved but unlaunched change request holds: approving a change request SHALL change none of their results. Where a tool returns change requests (`align_list_change_requests`, `align_get_decision_record`, `align_get_brief`), each SHALL carry its `launch` (`pending`, `not_yet`, `launched`, `superseded` or `null`), declared in the tool's `outputSchema`, and the text summary SHALL say "Approved, agents still on v<n> until launch" for an approved, unlaunched request and "Launched, agents on v<n+1>" for a launched one; no summary SHALL say that an agent did, applied or executed anything. Every count in a text summary SHALL agree with its noun ("Recorded by Align at revision 1 (…): $0.41 estimated over 30 days in 1 request, 1 bound session, …", "2 bound sessions"; `scripts/test-v2.mjs` "C4-4: ..."), and its money SHALL be written by the rule the web app's snapshot uses, from one helper (`lib/v2/money.mts`): two decimals, or four for a cost under one cent that is not zero, so the same snapshot reads "$0.0010" in both and never "$0.00" here (`scripts/test-v2.mjs` "Z5: ...").
 
 #### Scenario: Approved, not launched
 
@@ -839,6 +839,7 @@ An Align URL that fails the scheme rule at start SHALL make the script write `al
 - `lib/mcp/register.ts`
 - `lib/v2/change-words.mts`
 - `lib/v2/plural.mts`
+- `lib/v2/money.mts`
 - `lib/v2/goal-limits.ts`
 - `lib/v2/asks.ts`
 - `lib/v2/goal-activity.ts`
