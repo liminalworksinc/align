@@ -6457,7 +6457,7 @@ try {
     );
     const apL = await rlAct(AL, P1.id, "approve", { revision: 1 });
     const apL2 = await rlAct(AL, P1.id, "approve", { revision: 1 });
-    const apStale = await rlAct(AX, P1.id, "approve", { revision: 2 });
+    const apStale = await rlAct(AX, P1.id, "approve", { revision: 0 });
     const lnEarly = await rlAct(AO, P1.id, "launch");
     const notApprover = await rlAct(AV, P1.id, "approve", { revision: 1 });
     check(
@@ -7619,8 +7619,8 @@ try {
     // -- N5: launch and not yet check the revision they are sent --
     const crS = (await ka(KB, "POST", kcrs(KGS.id), { base_version: 1, changes: { title: "Stale launch, checked" }, reason: "Check it" })).json;
     await kAct(KA, KGS.id, crS?.id, "approve", { revision: 1 });
-    const staleLaunch = await kAct(KA, KGS.id, crS?.id, "launch", { revision: 7 });
-    const staleNotYet = await kAct(KA, KGS.id, crS?.id, "not_yet", { revision: 7 });
+    const staleLaunch = await kAct(KA, KGS.id, crS?.id, "launch", { revision: 0 });
+    const staleNotYet = await kAct(KA, KGS.id, crS?.id, "not_yet", { revision: 0 });
     const sAfter = await kRead(KA, KGS.id, crS?.id);
     check(
       "C2 N5: launch and not yet with a revision that isn't the request's -> 409 stale_revision, and nothing is recorded (launch still pending, the goal at version 1)",
@@ -9225,7 +9225,7 @@ try {
       ["revoke", RO, e3, 1, {}],
     ];
     for (const [action, u, al, rev, extra] of alCases) {
-      const stale = await alAct(u, al, action, { ...extra, revision: rev + 7 });
+      const stale = await alAct(u, al, action, { ...extra, revision: rev - 1 });
       const bare = await alAct(u, al, action, extra);
       tried.alignments[action] = staleOk(stale) && bare.status === 400 && JSON.stringify(alNow(al)) === JSON.stringify({ state: action === "accept_counter" ? "countered" : action === "revoke" ? "approved" : "pending", revision: rev }) ? "ok" : `${stale.text} ${bare.status}`;
     }
@@ -9266,7 +9266,7 @@ try {
     const crBefore = (x) => JSON.stringify(crNow(x));
     for (const [action, u, x, extra] of crCases) {
       const was = crBefore(x);
-      const stale = await crAct(u, x, action, { ...extra, revision: 9 });
+      const stale = await crAct(u, x, action, { ...extra, revision: 0 });
       tried["change-requests"][action] = staleOk(stale) && crBefore(x) === was ? "ok" : stale.text;
     }
     // accept_counter needs a countered request: a fresh one, sent for revision 1 after the counter made revision 2.
@@ -9297,7 +9297,7 @@ try {
     ];
     for (const [action, u, t, extra] of rlCases) {
       const was = JSON.stringify(rlNow(t));
-      const stale = await rlAct(u, t, action, { ...extra, revision: 9 });
+      const stale = await rlAct(u, t, action, { ...extra, revision: 0 });
       tried.reallocations[action] = staleOk(stale) && JSON.stringify(rlNow(t)) === was ? "ok" : stale.text;
     }
     const rlFresh = t3Ok.json?.state === "approved" && rlNow(t2)?.state === "countered";
@@ -9508,6 +9508,49 @@ try {
         n1Other.status === 409 && n1Other.json?.error === "wrong_state" && n1Other.json.message === NOT_YET_RL(SO.name) &&
         sRlAudit(n1, "reallocation.not_yet").join() === SO.id && n1Read?.can?.not_yet === false && n1Read.can.launch === true && n1Launch.json?.launch === "launched",
       `${n1Ok.status} ${n1First.status} ${n1Again.text} | ${n1Other.text} | ${JSON.stringify(n1Read?.can)} ${n1Launch.text.slice(0, 200)} ${JSON.stringify(sRlAudit(n1, "reallocation.not_yet"))}`,
+    );
+
+    // -- W3: a decision sent for a revision the request or proposal never reached is 400 unknown_revision, saying so,
+    //    never the stale refusal "it is now at revision 1" (nothing changed); a malformed one is 400 in words too --
+    const sCr = async (n) => {
+      const g = await sGoal(`Change request goal ${n}`);
+      const cr = (await sa(SD, "POST", `/goals/${g?.id}/change-requests`, { base_version: 1, changes: { title: `Change request goal ${n}, renamed` }, reason: "Cycle 11" })).json;
+      return { g, cr };
+    };
+    const sCrAct = (u, x, action, body) => sa(u, "POST", `/goals/${x.g?.id}/change-requests/${x.cr?.id}/${action}`, body);
+    const sCrNow = (x) => withDb((d) => d.prepare("SELECT state, revision, launch FROM v2_change_requests WHERE id = ?").get(x.cr?.id));
+    const FUTURE = (what, sent, now) => `This ${what} has no revision ${sent}: it is at revision ${now}, so nothing was recorded. Read it again and decide again.`;
+    const future = (r, what, sent, now) => r.status === 400 && r.json?.error === "unknown_revision" && r.json.message === FUTURE(what, sent, now);
+    const w3Al = await sAl("w3");
+    const w3Cr = await sCr("w3");
+    const w3Rl = await sRl(12);
+    const w3Out = {
+      alApprove: await sAlAct(SO, w3Al, "approve", { revision: 2 }),
+      alReject: await sAlAct(SO, w3Al, "reject", { revision: 5 }),
+      alWithdraw: await sAlAct(SD, w3Al, "withdraw", { revision: 9 }),
+      crApprove: await sCrAct(SO, w3Cr, "approve", { revision: 2 }),
+      crReject: await sCrAct(SO, w3Cr, "reject", { revision: 3, reason: "No" }),
+      crWithdraw: await sCrAct(SD, w3Cr, "withdraw", { revision: 4 }),
+      rlApprove: await sRlAct(SO, w3Rl, "approve", { revision: 2 }),
+      rlReject: await sRlAct(SO, w3Rl, "reject", { revision: 3, reason: "No" }),
+      rlWithdraw: await sRlAct(SD, w3Rl, "withdraw", { revision: 4 }),
+    };
+    const w3Bad = [await sCrAct(SO, w3Cr, "reject", { revision: "1", reason: "No" }), await sRlAct(SO, w3Rl, "reject", { revision: null })];
+    // An approved request's launch decisions too: a future revision is 400, the current one is recorded.
+    const w3Launch = await sCr("w3 launch");
+    await sCrAct(SO, w3Launch, "approve", { revision: 1 });
+    const w3NotYet = await sCrAct(SO, w3Launch, "not_yet", { revision: 2 });
+    const w3Still = [JSON.stringify(sAlNow(w3Al)), JSON.stringify(sCrNow(w3Cr)), JSON.stringify(sRlNow(w3Rl)), JSON.stringify(sCrNow(w3Launch))];
+    const w3Then = [await sAlAct(SO, w3Al, "reject", { revision: 1 }), await sCrAct(SO, w3Cr, "reject", { revision: 1, reason: "No" }), await sRlAct(SO, w3Rl, "reject", { revision: 1, reason: "No" })];
+    check(
+      "c11 W3 (E2E-WEB cycle 11): an alignment, change request or target change decision sent for a revision it never reached is 400 unknown_revision \"This request has no revision <n>: it is at revision 1, so nothing was recorded. Read it again and decide again.\" (\"This proposal …\" for a target change), never the stale \"changed after you read it\"; a change request's or target change's revision that isn't a whole number is 400 in the same words as an alignment's (W1); nothing changes, and the same decision with the current revision is then recorded",
+      future(w3Out.alApprove, "request", 2, 1) && future(w3Out.alReject, "request", 5, 1) && future(w3Out.alWithdraw, "request", 9, 1) &&
+        future(w3Out.crApprove, "request", 2, 1) && future(w3Out.crReject, "request", 3, 1) && future(w3Out.crWithdraw, "request", 4, 1) &&
+        future(w3Out.rlApprove, "proposal", 2, 1) && future(w3Out.rlReject, "proposal", 3, 1) && future(w3Out.rlWithdraw, "proposal", 4, 1) &&
+        future(w3NotYet, "request", 2, 1) && w3Bad.every((r) => r.status === 400 && r.json?.message === NO_REV) &&
+        JSON.stringify(w3Still) === JSON.stringify([JSON.stringify({ state: "pending", revision: 1 }), JSON.stringify({ state: "pending", revision: 1, launch: null }), JSON.stringify({ state: "pending", revision: 1, launch: null, launch_by: null }), JSON.stringify({ state: "approved", revision: 1, launch: "pending" })]) &&
+        w3Then.every((r) => r.status === 200 && r.json?.state === "rejected"),
+      `${Object.entries(w3Out).map(([k, r]) => `${k}=${r.status} ${r.json?.error} ${r.json?.message}`).join(" | ")} || ${w3NotYet.text} || ${w3Bad.map((r) => r.text).join(" | ")} || ${w3Still.join(" ")} || ${w3Then.map((r) => `${r.status} ${r.json?.state}`).join(" ")}`,
     );
 
     // -- the browser: W2 (ui), Not yet on a target change card left open while another launcher said not yet --

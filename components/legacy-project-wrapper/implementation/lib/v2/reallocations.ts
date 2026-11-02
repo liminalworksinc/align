@@ -5,7 +5,7 @@ import { effectiveSet, launchSet } from "./approval";
 import { assertTargetsFit, contentOf, goalObj, goalRow, visibleGoal, writeGoalVersion } from "./goals";
 import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { memberName, nameTo } from "./workspaces";
-import { optStr, type Body } from "./validate";
+import { assertRevisionReached, optStr, revisionRead, type Body } from "./validate";
 
 // Reallocations (PORT29, main #29): a proposal to change the target share of agent time of one or more goals at once,
 // so time can move from one goal to another without passing 100% in between. It follows the change request model
@@ -219,8 +219,12 @@ export async function actOnReallocation(pp: PolicyPrincipal, id: string, action:
   // A counter's targets are read before the transaction: reading checks each goal's visibility and can throw 404.
   const countered = action === "counter" ? targetsIn(pp, b.targets) : null;
   const note = action === "counter" || action === "reject" ? optStr(b, action === "reject" ? "reason" : "note", NOTE_MAX) : null;
+  // A revision, when sent, is a whole number (400 in words otherwise, c11 W1) that the proposal has reached: one it
+  // never reached was never read, so it is 400, not a stale refusal (c11 W3).
+  const sent = revisionRead(b, true);
   await tx(() => {
     const r = rowOf(pp.wsId, id)!; // read inside the transaction
+    assertRevisionReached("proposal", sent, r.revision);
     const targets = targetsOf(r.id, r.revision);
     const isRequester = r.requester_id === me;
     const isApprover = targets.some((t) => {

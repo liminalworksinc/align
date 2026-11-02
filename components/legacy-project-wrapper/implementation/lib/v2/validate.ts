@@ -110,6 +110,13 @@ export function revisionRead(b: Body, optional = false): number | undefined {
   return v;
 }
 
+/** A decision sent for a revision the request or proposal never reached: nothing about it changed since it was read, so
+ *  this is 400 `unknown_revision`, not a stale refusal (E2E-WEB cycle 11 W3). `what` is "request" or "proposal". */
+export function assertRevisionReached(what: "request" | "proposal", sent: number | undefined, current: number) {
+  if (sent !== undefined && sent > current)
+    throw badRequest(`This ${what} has no revision ${sent}: it is at revision ${current}, so nothing was recorded. Read it again and decide again.`, "unknown_revision");
+}
+
 export function optInt(b: Body, k: string): number | null {
   if (b[k] === undefined || b[k] === null) return null;
   return nonNegInt(b, k);

@@ -8,7 +8,7 @@ import { writeDirective } from "./directives";
 import { holdNewlyBound } from "./requests";
 import { openEpoch, sessionRow, type SessionRow } from "./sessions";
 import { memberName, nameTo, need } from "./workspaces";
-import { oneOf, optStr, revisionRead, strList, type Body } from "./validate";
+import { assertRevisionReached, oneOf, optStr, revisionRead, strList, type Body } from "./validate";
 
 // Alignment = effect-scoped approval (plan rev 2, option D). Two choices in the UI:
 //   contribution -> contributes_to only (a relationship; nothing about usage or directives changes)
@@ -296,6 +296,8 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
   const at = nowIso();
   await tx(() => {
     const a = alignmentRow(pp.wsId, id)!; // re-read inside the transaction
+    // A revision it never reached was never read: 400, not a stale refusal, as nothing changed (c11 W3).
+    assertRevisionReached("request", seen, a.revision);
     if (a.revision !== a0.revision || a.state !== a0.state) throw conflict("stale_revision", "This request changed while your decision was being sent. Read it again and decide again.");
     const rev = revisionOf(a.id, a.revision);
     const approvers = approversIn(currentRequirements(a.id, a.revision));
