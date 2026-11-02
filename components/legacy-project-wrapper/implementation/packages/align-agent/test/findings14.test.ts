@@ -1,5 +1,8 @@
-// Regressions for the cycle-13 agent-side E2E report: C13-2 (a session told of a goal hold by its envelope never told of
-// the release).
+// Regressions for the cycle-13 agent-side E2E report: C13-1 (a notice about a share's state that an older agent stored
+// with no facts after the one-time migration ran, shown word for word; and the hooks' copy in bin/current of another
+// build than the terminal `align`, silently), C13-2 (a session told of a goal hold by its envelope never told of the
+// release). The randomized check of the share-state views, with an older agent's notice written after the migration
+// added, is test/sharestate-property.test.ts.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -96,6 +99,99 @@ const unreadLogin = async (fake: FakeServer, t: TestEnv) => {
 const stop = (fake: FakeServer, s: S) => fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [s.key], goal: null, binding: null });
 const injected = (t: TestEnv, s: S) => readJson<InjectedState>(layout.injected(t.home, s.lid));
 const sessionRow = async (t: TestEnv, s: S) => (json((await runCli(t, ["sessions", "--json"])).stdout) as { local_id: string; shared: string }[]).find((r) => r.local_id === s.lid)?.shared ?? "";
+
+describe("C13-1: a notice about a share's state that an older agent stores after the migration ran", () => {
+  /** As an older `align` writing to the same ~/.align after this agent's migration ran (a downgrade, or the hooks'
+   *  older copy in bin/current): the sign-out notice as its words, no facts; `user_version` stays as this agent left it. */
+  const olderAgentWrote = (t: TestEnv, s: S, text: string) => {
+    const ctx = ctxFor(t);
+    const v = (ctx.db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+    assert.ok(v >= 1, "the one-time migration ran already");
+    const r = ctx.db.prepare("UPDATE notices SET facts=NULL, text=? WHERE local_id=? AND id LIKE ?").run(text, s.lid, `${s.lid}/signed_out_%`);
+    assert.ok(Number(r.changes) >= 1);
+    renderHot(ctx, s.lid);
+    ctx.db.close();
+  };
+
+  test("it is worded from the state now: held back while the ended shares are unread, never `run align login` while signed in, then the signed-in-again notice once", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    const B = await shared(t);
+    await sync(t);
+    stop(fake, B);
+    await sync(t);
+    await logout(t);
+    olderAgentWrote(t, A, OLD_OUT);
+    olderAgentWrote(t, B, `${OLD_OUT} It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${B.lid.slice(0, 8)}\` in a terminal.`);
+    await unreadLogin(fake, t);
+    for (const s of [A, B]) {
+      const msg = said(t, s);
+      assert.doesNotMatch(msg, /run `align login`/, "never the stored words while signed in");
+      assert.equal(msg, "", "held back while the ended shares are unread");
+    }
+    fake.failCalls = null;
+    await sync(t);
+    assert.equal(said(t, A), AGAIN);
+    assert.ok(said(t, B).startsWith(AGAIN), "the stopped one too, with the deny's latch sentence");
+    assert.ok(deny(t, B).includes(latchWayOut(B.lid, true, "model")));
+    assert.equal(said(t, A), "", "once");
+  });
+
+  test("signed out it gives the sign-out's words as now; a live share's factless notice says only that its sharing changed; an older agent's hot file is never shown as stored", async () => {
+    const { t } = await world();
+    const A = await shared(t);
+    await sync(t);
+    await logout(t);
+    olderAgentWrote(t, A, "Align: this machine is signed in to Align again. To share this session again, type `::align share` here.");
+    const out = said(t, A);
+    assert.match(out, /^Align: this session stopped sharing because this machine signed out of Align; .*run `align login` in a terminal/, out);
+
+    // Shared and live: an older agent's notice (its share started, say) is told as changed, never as stored.
+    await login(t);
+    const L = await shared(t);
+    await sync(t);
+    said(t, L);
+    const ctx = ctxFor(t);
+    ctx.db.prepare("INSERT INTO notices(id, local_id, text, created_at, facts) VALUES(?,?,?,?,NULL)").run(`${L.lid}/access_lost_ws_acme_old`, L.lid, "Align: you no longer have access to Acme.", new Date().toISOString());
+    renderHot(ctx, L.lid);
+    ctx.db.close();
+    assert.equal(said(t, L), SHARE_CHANGED);
+
+    // A hot file an older agent rendered (no `share_now`): what is true whenever it is shown, not its stored words.
+    const hot = readJson<Record<string, unknown>>(layout.hot(t.home, L.lid))!;
+    delete hot.share_now;
+    (hot.notices as { id: string; text: string }[]).push({ id: `${L.lid}/signed_out_older`, text: OLD_OUT });
+    writeJsonAtomic(layout.hot(t.home, L.lid), hot);
+    assert.equal(said(t, L), SHARE_CHANGED);
+  });
+});
+
+describe("C13-1: the hooks' copy of Align is another build than the terminal `align`", () => {
+  test("every command says so on stderr and `align doctor` warns, until `align install` updates the hooks", async () => {
+    const t = makeEnv();
+    cleanups.push(() => t.cleanup());
+    assert.equal((await runCli(t, ["install", "--claude"])).code, 0);
+    const quiet = await runCli(t, ["status"]);
+    assert.doesNotMatch(quiet.stderr, /another Align build/);
+    const doc = await runCli(t, ["doctor"]);
+    assert.match(doc.stdout, /OK {4}hooks build {6}\S+ build [0-9a-f]{12}, as this `align`/);
+
+    // An older (or newer) build of the same version left in bin/current.
+    const file = path.join(t.home, "bin", "current", "build.json");
+    const b = JSON.parse(fs.readFileSync(file, "utf8"));
+    fs.writeFileSync(file, JSON.stringify({ ...b, build: "0123456789ab" }));
+    const st = await runCli(t, ["status"]);
+    assert.match(st.stderr, new RegExp(`align: the hooks run another Align build \\(${b.version} build 0123456789ab\\) than this \`align\` \\(${b.version} build ${b.build}\\), .*Run \`align install\` with this \`align\` to update them\\.`));
+    assert.match((await runCli(t, ["sessions"])).stderr, /the hooks run another Align build/);
+    assert.match((await runCli(t, ["doctor"])).stdout, /WARN  hooks build {6}the hooks run another Align build/);
+    // A copy from before builds were recorded.
+    fs.rmSync(file);
+    assert.match((await runCli(t, ["status"])).stderr, /the hooks run another Align build \(an earlier build\)/);
+
+    assert.equal((await runCli(t, ["install", "--claude"])).code, 0);
+    assert.doesNotMatch((await runCli(t, ["status"])).stderr, /another Align build/);
+  });
+});
 
 describe("C13-2: a session told of a goal hold by its envelope", () => {
   async function heldRuleSession() {

@@ -38,7 +38,7 @@ import {
 import { myTeams, teamAsks } from "../shared/asks.ts";
 import { crossing, lastReply } from "../shared/drift.ts";
 import { feedHold, feedHoldReason } from "../shared/feedhold.ts";
-import { latchWayOut, shareAgainWords, shareNotice, shareRetell, type ReleaseReaches, type ShareAgain, type ShareTold } from "../shared/ended.ts";
+import { latchWayOut, SHARE_CHANGED, shareAgainWords, shareNotice, shareRetell, type ReleaseReaches, type ShareAgain, type ShareFacts, type ShareTold } from "../shared/ended.ts";
 import { contextGoals, snapshot } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
@@ -191,10 +191,14 @@ export function planNotices(hot: HotState, inj: InjectedState): NoticePlan {
   let told: HotState["notices"][number] | null = null;
   let shareTold: ShareTold | null = null;
   seen.push(...state.filter((n) => n !== newest && unseen(n)).map((n) => n.id));
-  if (newest?.facts && hot.share_now) {
+  // Never a share-state notice's stored words: one with no facts (an older agent wrote it, whenever that was: a
+  // downgrade, or hooks and terminal at different builds after the one-time migration ran) is worded as "its share's
+  // state changed", from the state now like any other (E2E-AGENT cycle 13 C13-1).
+  const facts = newest ? (newest.facts ?? changedFacts(hot)) : null;
+  if (newest && facts && hot.share_now) {
     const fresh = unseen(newest);
     const prev = inj.share_told ?? null;
-    const w = shareNotice(hot.local_id, newest.id, newest.facts, hot.share_now, prev);
+    const w = shareNotice(hot.local_id, newest.id, facts, hot.share_now, prev);
     if (w !== "hold") {
       if (fresh) seen.push(newest.id);
       // Seen, but by an older hook, which showed its stored text (that only says the sharing changed): told once now,
@@ -210,8 +214,9 @@ export function planNotices(hot: HotState, inj: InjectedState): NoticePlan {
       }
     }
   } else if (newest && unseen(newest)) {
+    // A hot file an older agent wrote, with no state to word it from: only what is true whenever it is shown.
     seen.push(newest.id);
-    told = newest;
+    told = { id: newest.id, text: SHARE_CHANGED };
   }
   const others = hot.notices.filter((n) => !state.includes(n) && unseen(n));
   seen.push(...others.map((n) => n.id));
@@ -225,6 +230,12 @@ export function planNotices(hot: HotState, inj: InjectedState): NoticePlan {
   });
   const words = kept.map((n) => (n.id === told?.id ? told : n));
   return { told: words.filter((n, i) => !words.slice(i + 1).some((m) => m.text === n.text)), seen, share_told: shareTold, share_seen: seen.filter((id) => state.some((n) => n.id === id)) };
+}
+
+/** The facts of a notice about a share's state stored with none: only that its state changed, with its workspace and
+ *  goal as the hot file has them (C13-1). */
+function changedFacts(hot: HotState): ShareFacts {
+  return { e: "changed", ws: clean(hot.share?.workspace_name ?? "its workspace", 80), goal: hot.goal ? clean(hot.goal.title, 100) : null };
 }
 
 /** `held`: the goal holds that block this session's tools now (`blockingHolds`), so a "resumed" notice told while one

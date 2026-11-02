@@ -713,7 +713,8 @@ out), so only \`align stop-sharing <lid8>\` unblocks it` (`this machine no longe
 when the workspace went out of reach, as the deny says; `the Align server no longer has this session's share`
 otherwise) when its share ended, print `No stop latches or goal holds.` when there
 are none, and reject any other subcommand with `usage: align latch status (stop and resume come from the web)`. `align doctor` SHALL print one `OK`, `WARN` or `FAIL` line per check (node >= 24,
-`ALIGN_HOME` mode, 0600 file modes, Claude and Codex hooks, hook file hash, recorded node path, hook latency over
+`ALIGN_HOME` mode, 0600 file modes, Claude and Codex hooks, hook file hash, the hooks' build against this `align`'s
+("Installing hooks into Claude Code and Codex"), recorded node path, hook latency over
 10 probe runs with `p95 < 150 ms` as OK, outbox under 100, sign-in) and exit 1 when any check is `FAIL`. Its sign-in
 line SHALL give the access token's expiry on the server's clock: with a saved clock offset, `access token expires
 <time + offset> (on the server's clock)`. The stored expiry SHALL follow the saved offset: when the offset is replaced
@@ -1072,10 +1073,26 @@ nothing, makes no backup and prints `Codex hooks in <file> are already up to dat
 sets `hooks = false`, and never edit `config.toml` or write trust entries. Installing twice SHALL leave one Align
 handler per event. `--dry-run` SHALL print `Would ...` lines and write nothing.
 
+Each build SHALL record its identity in `build.json` beside `cli.js` (its version and `build`, a hash of its built files),
+which `align install` copies with it, so the hooks' copy in `bin/current` and the terminal `align` can never be different
+builds silently: both may report the same version, and an older build there writes notices and words denies this one
+never would (E2E-AGENT cycle 13 C13-1). While Align is installed, every `align` command run from another folder than
+`bin/current` (all but `install`, `uninstall`, `doctor` and a hook's `sync --hook`) SHALL, when the two builds differ,
+print on stderr `align: the hooks run another Align build (<version> build <id>) than this \`align\` (<version> build
+<id>), so sessions may be told or blocked differently from what this command says. Run \`align install\` with this
+\`align\` to update them.` (`an earlier build` for a copy with no `build.json`), and `align doctor` SHALL show the same
+words as a `WARN` `hooks build` line, or `OK` `hooks build <version> build <id>, as this \`align\``. Nothing is
+replaced without `align install`.
+
 #### Scenario: Install, reinstall, user config untouched
 
 - **WHEN** `align install --claude --codex --dry-run` runs, then `align install --claude --codex` runs twice (test `install` "Claude Code plugin + Codex merge, idempotent ...")
 - **THEN** the dry run writes nothing, the user's `settings.json` and `config.toml` are byte-identical afterwards with no backup of `settings.json`, the plugin `hooks.json` has one Align handler for each of the five events, Codex `hooks.json` has one for each of four events, and stdout includes `trust them; Align never writes trust entries` and `No background process`
+
+#### Scenario: The hooks run another build
+
+- **WHEN** Align is installed, then the copy in `bin/current` is of another build (its `build.json` names another hash, or it has none), and `align status`, `align sessions` and `align doctor` run, then `align install` runs again (test `findings14` "every command says so on stderr and `align doctor` warns ...")
+- **THEN** before the change `align doctor` says `OK hooks build ...` and nothing is printed on stderr; after it each command prints `align: the hooks run another Align build (...) than this \`align\` (...) ...` on stderr (`an earlier build` without `build.json`) and `align doctor` a `WARN hooks build` line; after the new install nothing is printed
 
 #### Scenario: Legacy settings.json handlers and foreign plugin folder
 
@@ -1622,7 +1639,14 @@ the first of which gives every notice about a share's state that an older agent 
 its kind and the session's share say (or deletes it when they say nothing that still holds), that stored text and a new
 id, and rewrites those sessions' hot files, so the session's next prompt tells it worded from the state then (held back
 while the ended shares are unread), whatever an older hook had shown. A notice an older hook showed (seen, with nothing
-recorded of its words) SHALL be told once more by this agent's hook, worded as now. The hold-back while the ended shares
+recorded of its words) SHALL be told once more by this agent's hook, worded as now. The hook SHALL never show the
+stored text of a notice about a share's state, whatever stored it and whenever, so it does not depend on that one-time
+migration: an older `align` can still write such a notice after it ran (a downgrade, or the hooks' older copy in
+`bin/current`; E2E-AGENT cycle 13 C13-1). A notice about a share's state with no facts SHALL be worded as one that says
+only that the share's state changed, from the state now like any other: held back while the ended shares are unread, a
+sign-out's or a lost workspace's words when the share ended so, and otherwise (live, or stopped for good) `Align: this
+session's sharing changed; ...` with the latch sentence its deny gives; a hot file an older agent wrote, with no share
+state, gets only that sentence. The hold-back while the ended shares
 are unread SHALL hold for every path that would share such a session (E2E-AGENT cycle 12 C12-3): `::align share --dir`
 (its preview says `This session is not shared yet: this machine has not yet heard from the Align server whether its
 sharing was stopped on the web meanwhile (a session stopped there is not shared again). Run \`align sync\` in a
@@ -1649,6 +1673,11 @@ share of its own, and `align share --dir --past` only sessions never shared, so 
 
 - **WHEN** two shared sessions, one stopped from the web, have sign-out notices an older agent stored as words with no facts (one already shown by its hook), and the new agent's `align login` can't read the ended shares, then a sync reads them; in another case a notice this agent stored is shown by an older hook and the machine signs in again (test `findings13` "C12-1: ...")
 - **THEN** that login leaves no such notice without facts and stores `Align: this session's sharing changed; ...` as their text, neither prompt says anything while the ended shares are unread (never the stored `run \`align login\``), and after the sync each is told `Align: this machine is signed in to Align again. ...` once, the stopped one with the latch sentence its deny gives; in the other case the stored text is `Align: this session's sharing changed; ...` and this agent's hook tells the signed-in-again notice once
+
+#### Scenario: An older agent's notice after the migration ran
+
+- **WHEN** after this agent's migration ran, an older agent stores the sign-out notices of two sessions (one stopped from the web) as words with no facts, then the machine signs in with a login that can't read the ended shares, then a sync reads them; in other cases the machine is signed out, a live session gets an older agent's notice with no facts, and its hot file has no share state (test `findings14` "C13-1: ..."; and the `sharestate-property` event "an older agent's notice, after the migration")
+- **THEN** neither prompt says anything while the ended shares are unread (never the stored `run \`align login\``), after the sync each is told `Align: this machine is signed in to Align again. ...` once, the stopped one with its deny's latch sentence; signed out it gets the sign-out's words; the live one and the one with no share state are told `Align: this session's sharing changed; ...`
 
 #### Scenario: Every share path holds back while the ended shares are unread
 
@@ -2680,6 +2709,8 @@ next to a session shared in the same folder in the last 24 hours, `Align: this f
 - `packages/align-agent/src/shared/steering.ts`
 - `packages/align-agent/src/hot.ts`
 - `packages/align-agent/src/version.ts`
+- `packages/align-agent/src/build.ts`
+- `packages/align-agent/scripts/postbuild.mjs`
 - `packages/align-agent/src/node-version.ts`
 - `packages/align-agent/src/shared/anchors.ts`
 - `packages/align-agent/src/shared/asks.ts`

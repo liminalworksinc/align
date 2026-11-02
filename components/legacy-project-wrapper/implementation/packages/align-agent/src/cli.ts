@@ -33,6 +33,7 @@ import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
 import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, endedState, getShare, releaseOf, renderEndedShares } from "./hot.ts";
 import { latchWayOut, shareAgainWords } from "./shared/ended.ts";
+import { buildOf, hooksBuildDiffers, hooksBuildWords } from "./build.ts";
 import { fetchAsks } from "./asks.ts";
 import { pullEndedSessions } from "./directives.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
@@ -1396,6 +1397,10 @@ async function cmdDoctor(ctx: Ctx): Promise<void> {
   add("claude hooks", s.claude === "installed" ? "OK" : "WARN", s.claude);
   add("codex hooks", s.codex.startsWith("installed") ? "OK" : "WARN", s.codex);
   add("hook file", s.hash === "ok" ? "OK" : "WARN", s.hash);
+  const differs = hooksBuildDiffers(ctx.home, distDir());
+  const mine = buildOf(distDir());
+  if (differs) add("hooks build", "WARN", hooksBuildWords(differs, mine));
+  else if (s.hash !== "not installed" && mine) add("hooks build", "OK", `${mine.version} build ${mine.build}, as this \`align\``);
   const rec = readJson<InstallRecord>(layout.install(ctx.home));
   if (rec && !fs.existsSync(rec.node)) add("hook node path", "FAIL", `${rec.node} no longer exists; rerun align install`);
   const hookJs = fs.existsSync(path.join(ctx.home, "bin", "current", "hook.js")) ? path.join(ctx.home, "bin", "current", "hook.js") : path.join(distDir(), "hook.js");
@@ -1546,6 +1551,12 @@ export async function main(argv: string[]): Promise<void> {
     if (cmd !== "login" && cmd !== "status" && !rest.includes("--hook")) {
       const note = takePairingNote(ctx);
       if (note) err(`align: ${note}`);
+    }
+    // The hooks run the copy in bin/current: another build there (an older `align` still on PATH, a newer one not yet
+    // installed) is said at every command, never silently (E2E-AGENT cycle 13 C13-1). `align doctor` says it as a check.
+    if (cmd !== "install" && cmd !== "uninstall" && cmd !== "doctor" && !rest.includes("--hook")) {
+      const differs = hooksBuildDiffers(ctx.home, distDir());
+      if (differs) err(`align: ${hooksBuildWords(differs, buildOf(distDir()))}`);
     }
     switch (cmd) {
       case "login":
