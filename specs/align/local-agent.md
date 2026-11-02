@@ -263,7 +263,10 @@ system clock to update automatically.` on stderr, log it, and sign later refresh
 the clock is right again (under a minute off) SHALL clear the saved offset, log it and print nothing. `align logout`
 SHALL call `DELETE /api/v2/devices/self`, wipe the tokens, delete `device_key`, end this machine's shares (as "Signing
 out ends this machine's shares" says), and print `Signed out. Tokens and the device key were removed; local metering
-continues.`; when the server could not be told it SHALL keep what revokes the device later (as "A logout the server did
+continues.`, then, when it ended shares, `<n> shared session(s) stopped sharing.`, followed, when a session stopped or
+held from the web is among the sessions a sign-out ended, by `Sessions stopped or held from the web stay blocked: after
+\`align login\`, \`::align share\` in such a session shares it again, and then the web can lift the stop or hold.`
+(never `align stop-sharing` as the only way out); when the server could not be told it SHALL keep what revokes the device later (as "A logout the server did
 not hear is finished later" says) and print `align: could not reach <server> to revoke this device. Align revokes it
 the next time it reaches the server (the next \`align sync\` or \`align login\`); until then its sessions still show
 as shared there. You can also revoke it at <server>/app/devices.` on stderr. `align logout` SHALL print `Signed out.
@@ -520,7 +523,7 @@ this machine is signed out of Align ...`, nothing for a folder rule's), never ap
 #### Scenario: Logout with a stopped session
 
 - **WHEN** a shared session is stopped from the web, then the user runs `align logout`, then `align login` (test `findings` "B4/G2/B6: logout ends this machine's shares ..."; against the real server in `scripts/test-agent-live.mjs` "logout ...")
-- **THEN** logout prints `1 shared session(s) stopped sharing`, `align sessions` lists it as `stopped (Acme; this machine signed out)` before and after the new login, `Bash` stays denied with the reason naming `align stop-sharing <id>`, the next prompt shows the notice once, and `align stop-sharing <id>` frees the tools
+- **THEN** logout prints `1 shared session(s) stopped sharing. Sessions stopped or held from the web stay blocked: after \`align login\`, \`::align share\` in such a session shares it again, and then the web can lift the stop or hold.` (test `findings8` "`align logout` with a session stopped from the web ..."), `align sessions` lists it as `stopped (Acme; this machine signed out)` before and after the new login, `Bash` stays denied with the reason naming `align stop-sharing <id>`, the next prompt shows the notice once, and `align stop-sharing <id>` frees the tools
 
 #### Scenario: Signed in again, the sign-out notice is not told stale
 
@@ -696,7 +699,7 @@ not shared, SHALL be assigned to none and stay on this machine for good, also af
 share counts from its own start (now, as for every session shared before), never from the earlier epoch. So the notices
 that say a session's usage `stays on this machine from now on` hold. Such usage SHALL not count among the usage rows
 waiting to upload (`align sync`'s `<n> usage rows ... stay on this machine` and `align status`'s `<n> usage rows wait
-to upload` count only rows that will go up), and the weekly note's digest SHALL count it as not shared. A row the server did not store because, by its
+to upload` count only rows that will go up, of shares that are `shared` or still waiting for the server, `pending`), and the weekly note's digest SHALL count it as not shared. A row the server did not store because, by its
 clock, it was made while the session was not shared (its answer's `refused`, `workspaces` "Usage upload": a share that
 ended on the server before this machine heard, say) SHALL likewise stay on this machine and count as not shared, never
 as uploaded. `::align
@@ -1019,13 +1022,25 @@ stored, not replays), then, after that line, `This machine can now reach <worksp
 when you accepted an invite or on your Devices page). ...` once per workspace the pass found added, or `Another sync is running.`; when the pass could not reach the server it SHALL print, instead
 of the `Server:` line, `align: <error>. <n> usage rows and <n> queued calls stay on this machine; the next sync
 retries.` on stderr and exit 1. A pass whose pairing changed under it stops (as "A new pairing replaces the old one only
-once it exists" says) and prints that line after `Local:`, instead of `Signed out: nothing uploaded.` when it was a
-logout.
+once it exists" says) and prints that line after `Local:` and nothing after it about the pass, whether a login or a
+logout changed it: no `Server:` line (and not `Signed out: nothing uploaded.`), and no `could not reach` error for a
+call the change cut short (one held past its timeout, say), which SHALL neither exit 1 nor mark the server unreachable
+in `last-sync.json` (it keeps what the pass before it recorded).
 
 #### Scenario: Unreachable server
 
 - **WHEN** the server is down and the user runs `align sync`, then `align status`, then the server comes back (test `findings` "B5: an unreachable server makes `align sync` exit 1 ...")
 - **THEN** `align sync` exits 1 with stderr naming the server URL and no `Server:` line on stdout (test `findings2` "confusing: `align sync` against an unreachable server prints no ..."), `align status` shows `Server:     unreachable since ...`, `align.log` has the line, and after the server is back a sync exits 0 and the status line is gone
+
+#### Scenario: A pass whose pairing changed says only that
+
+- **WHEN** a sync pass's directives call is held while `align login` replaces the pairing and then answered; again, with the held call never answered (its connection dropped); and then `align status` runs (test `findings8` "a sync whose pairing changed: no `Server:` line after `align login` either ...")
+- **THEN** each pass prints the pairing-changed line and no `Server:` line and exits 0, the second prints no `could not reach` error, `last-sync.json` has no `error`, and `align status` says nothing about an unreachable server
+
+#### Scenario: Rows of a share waiting for the server
+
+- **WHEN** a session is shared from the terminal while the server is down (its share `pending`), two turns finish, `align sync` and `align status` run, and then the server comes back and a sync runs (test `findings8` "`align status` while the server is unreachable counts the rows of a share still waiting ...")
+- **THEN** the sync's error says `2 usage rows and <n> queued calls stay on this machine`, `align status` says `2 usage rows wait to upload`, and both rows go up once the server is back
 
 #### Scenario: Asks feed revalidated
 
@@ -1176,7 +1191,17 @@ confirmed command SHALL be spooled for the next sync, and `--dir` SHALL also wri
 session it was typed in, except one its person stopped sharing or whose shared history was deleted: that one stays
 private (`This session stays private: its sharing was stopped (or its history deleted).`), as the sync also never
 shares such a session for a folder rule; only `::align share` or `align share` shares it again, counting from now.
-`::align share`'s preview says `counts from now.` for any session shared before. On a device that reaches more than
+`::align share`'s preview says `counts from now.` for any session shared before, except one its person stopped sharing
+whose shared history is kept: the server never shares it again, so `::align share` (preview or `confirm`) SHALL answer
+`Align: this session's sharing was stopped (\`::align unshare\`, \`align stop-sharing\` or Stop sharing on the web), and
+a session whose sharing was stopped is not shared again, so it stays stopped. To share it again, counting from now,
+first delete its shared history (it leaves every total): run \`align delete-history <lid8>\` in a terminal, or use
+Delete shared history on the web's Sessions page; then type \`::align share\` here.` and spool nothing. `::align share
+--dir` that replaces the rule of the same folder SHALL say `This replaces the current rule (<workspace>, "<goal>").`
+(`no goal` without one) in its preview and its confirmation, as `align share --dir` does. `::align bind`, `::align share`
+(preview and confirmation) and `::align share --dir` toward a goal the cached feed says is held SHALL add `That goal is
+on hold (all agents on it were paused from its Align workspace), so this session's tools stay blocked until the hold is
+released.` On a device that reaches more than
 one workspace and has no default, `::align share --dir` (preview or `confirm`) in a session with no workspace of its own
 SHALL answer `Align: this machine reaches more than one workspace and none is the default, so \`::align share --dir\`
 can't tell which. Run \`align share --dir <folder> --workspace <name> --goal <goal|none>\` in a terminal.`, naming the
@@ -1201,6 +1226,16 @@ SHALL show `::align status`.
 
 - **WHEN** a shared session is stopped with `align stop-sharing`, its history is deleted on the web, `align delete-history` hears 410, and the developer types `::align share --dir confirm`, then `::align share`, and previews `align share --dir <folder> --past 3` (test `findings7` "stopped, then its history deleted on the web (410) ...")
 - **THEN** the first reply says `This session stays private: its sharing was stopped (or its history deleted).` and the next sync sends nothing for it, the second previews `counts from now.`, and the third says `Skipped 1 whose shared history was deleted (on the web or with \`align delete-history\`)`
+
+#### Scenario: Sharing again a session its person stopped
+
+- **WHEN** a shared session is stopped with `align stop-sharing`, the developer types `::align share`, then `::align share confirm`, a sync runs, and then its history is deleted with `align delete-history` and the developer types `::align share` (test `findings8` "`::align share` in a session its person stopped (history kept) ...")
+- **THEN** both replies say it stays stopped and point to `align delete-history <lid8>` and the web's Delete shared history, nothing is sent to the server, and after the deletion the preview says `counts from now.`
+
+#### Scenario: Toward a held goal, and replacing a folder's rule
+
+- **WHEN** a goal is held in the cached feed and the developer types `::align bind <it>` in a shared session, `::align share <it>` and its `confirm` in a private one, and `::align share --dir <it> confirm` in another; and in a folder with a rule toward "Ship the v2 onboarding flow" types `::align share --dir`, then `::align share --dir confirm` (tests `findings8` "`::align bind`, `::align share` and `::align share --dir` toward a goal held ..." and "`::align share --dir confirm` that replaces the folder's rule says so ...")
+- **THEN** each reply toward the held goal ends with `That goal is on hold ...` (a goal not held gets the reply as before), and both folder replies say `This replaces the current rule (Acme, "Ship the v2 onboarding flow").`
 
 #### Scenario: A folder share on a device with two workspaces
 
@@ -1495,8 +1530,9 @@ their state.
 A `hold` directive (`hold: {goal, held_by, reason, at}`) SHALL set a goal-hold latch on each targeted session, written to
 `latch/<lid>.hold.json`, ordered per goal by directive `seq`, and acknowledged `received` then `enforced`. While it is
 set the `align` hook SHALL deny every `PreToolUse`, read-only tools too, with `Align: <name> paused all agents on goal
-"<title>": "<reason>". Work resumes when they release it. Your work so far is saved.` (without `: "<reason>"` when
-there is none), without needing a sync; a hold file that cannot be parsed SHALL deny every tool. A `release` directive
+"<title>": "<reason>". Work resumes when they release it. Your work so far is saved. Tell the user and wait for
+instructions.` (without `: "<reason>"` when there is none; a share that ended puts its `Its sharing ...` sentence before
+the last one, as the stop deny does), without needing a sync; a hold file that cannot be parsed SHALL deny every tool. A `release` directive
 SHALL remove that goal's hold, be acknowledged `received` then `applied`, and show the user `Align: <name> released
 the hold on "<title>".` once in each session it released; since the model saw its tools blocked, that prompt SHALL
 also give it one context line `[Align] <name> released the hold on goal "<title>", so it no longer blocks tools.` A hold SHALL stay on a session that moves to another goal until that goal's `release`
@@ -1508,7 +1544,7 @@ A hold SHALL also fail closed before its directive arrives: while a session's go
 a folder rule is sharing that has no share yet, the rule's goal it was given at its start) is held in the cached goals
 feed (`allocation.held`) and no hold or release of that goal has reached the session, the hook SHALL deny every
 `PreToolUse` with `Align: all agents on goal "<title>" were paused from its Align workspace. Work resumes when the hold
-is released. Your work so far is saved.`; a release that reached the session wins over a feed that still says held.
+is released. Your work so far is saved. Tell the user and wait for instructions.`; a release that reached the session wins over a feed that still says held.
 The status views SHALL show such a hold as PreToolUse enforces it: `::align status` `Goal hold: on goal "<title>" (held
 in Align's cached goals; it reaches this session at the next sync) (all tools blocked)`, `align latch status` `<lid8>
 <harness> HELD on goal "<title>" (held in Align's cached goals; the hold reaches this session at the next sync) (all
@@ -1519,6 +1555,11 @@ line (`... (<n> from the cached goals, before the hold reaches them)`).
 
 - **WHEN** a goal is held and a session starts in a folder a rule shares toward it, then calls `Bash` and `Read` before any sync, then a sync shares it, the hold and its release reach it while the cached feed still says held, and a session in another, unshared folder calls `Bash` (test `findings7` "held goal, fail closed ...")
 - **THEN** both calls are denied with the hold wording, `::align status`, `align latch status` and `align status` show that hold, it stays denied after the sync and while held, its tools run after the release (and the status views no longer show it), and the unshared session's tools run
+
+#### Scenario: A hold deny asks the model to tell the user
+
+- **WHEN** a shared session's goal is held with reason `Security review` and a tool is called, then the machine signs out and a tool is called again (test `findings8` "hold denies end with ...")
+- **THEN** the first reason is `Align: Dana Lee paused all agents on goal "Ship the v2 onboarding flow": "Security review". Work resumes when they release it. Your work so far is saved. Tell the user and wait for instructions.`, and the second names `align stop-sharing <lid8>` and ends with `Tell the user and wait for instructions.`
 
 #### Scenario: Hold, stop and release with no sync running
 

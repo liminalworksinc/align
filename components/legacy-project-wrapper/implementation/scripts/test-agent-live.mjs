@@ -720,7 +720,7 @@ try {
   const Q2 = startQ("q2");
   const HOLD_CANARY = `HOLD-CANARY-${randomBytes(4).toString("hex")}`;
   const REASON = `Security review of the replica keys ${HOLD_CANARY}`;
-  const HOLD_WORDS = `Align: Lena Lead paused all agents on goal "${RQ_TITLE}": "${REASON}". Work resumes when they release it. Your work so far is saved.`;
+  const HOLD_WORDS = `Align: Lena Lead paused all agents on goal "${RQ_TITLE}": "${REASON}". Work resumes when they release it. Your work so far is saved. Tell the user and wait for instructions.`;
   const holdDirs = (key) =>
     sdb((d) =>
       d.prepare("SELECT d.id FROM v2_directives d JOIN v2_directive_targets t ON t.directive_id = d.id WHERE d.ws_id = ? AND d.kind = 'hold' AND d.goal_id = ? AND t.session_key = ? ORDER BY d.seq").all(W, GQ?.id, key),

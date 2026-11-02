@@ -702,7 +702,10 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     return res;
   } finally {
     unbind();
-    res.serverError = serverTrouble();
+    // A call the pairing change cut short (held past its timeout while `align login` or `align logout` committed, say)
+    // says nothing about whether the server can be reached: no "could not reach", and last-sync keeps what it said
+    // (cycle 7).
+    res.serverError = res.aborted ? null : serverTrouble();
     try {
       const at = nowIso();
       const prev = readJson<LastSync>(layout.lastSync(ctx.home));
@@ -711,6 +714,9 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
         rec.error = res.serverError;
         rec.error_since = prev?.error ? prev.error_since || prev.at : at;
         ctx.log(`sync: ${res.serverError}; queued work stays on this machine until a pass gets through`);
+      } else if (res.aborted && prev?.error) {
+        rec.error = prev.error;
+        rec.error_since = prev.error_since || prev.at;
       } else if (prev?.error) ctx.log("sync: the server is reachable again");
       writeJsonAtomic(layout.lastSync(ctx.home), rec);
       fs.unlinkSync(lock);

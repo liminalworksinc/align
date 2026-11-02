@@ -217,3 +217,130 @@ describe("C7-5: a usage refusal that names `device_signed_out`", () => {
     assert.equal(row.shared, "stopped (Acme; ended at a sign-out; `::align share` shares it again)");
   });
 });
+
+describe("cycle 7, section 5: works, but would confuse a developer", () => {
+  test("`::align share` in a session its person stopped (history kept): preview and confirm say it stays stopped and point to deleting its history, spool nothing; after `align delete-history` it previews counts from now", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    await sync(t);
+    assert.equal((await runCli(t, ["stop-sharing", A.lid.slice(0, 8)])).code, 0);
+    const want = `Align: this session's sharing was stopped (\`::align unshare\`, \`align stop-sharing\` or Stop sharing on the web), and a session whose sharing was stopped is not shared again, so it stays stopped. To share it again, counting from now, first delete its shared history (it leaves every total): run \`align delete-history ${A.lid.slice(0, 8)}\` in a terminal, or use Delete shared history on the web's Sessions page; then type \`::align share\` here.`;
+    assert.equal(prompt(t, A.sid, "::align share", A.cwd).reason, want);
+    assert.equal(prompt(t, A.sid, "::align share confirm", A.cwd).reason, want);
+    const puts = fake.log.filter((l) => l.method === "PUT").length;
+    await sync(t);
+    assert.equal(fake.log.filter((l) => l.method === "PUT").length, puts, "nothing was asked of the server");
+    assert.equal((await runCli(t, ["delete-history", A.lid.slice(0, 8), "--yes"])).code, 0);
+    assert.match(prompt(t, A.sid, "::align share", A.cwd).reason, /counts from now\./);
+  });
+
+  test("a sync whose pairing changed: no `Server:` line after `align login` either; a held call that never answers is not reported as an unreachable server, nor marked so in last-sync.json", async () => {
+    const { fake, t } = await world();
+    await shared(t);
+    const race = async (drop: boolean) => {
+      let release!: () => void;
+      fake.holdCalls = { match: (m, p) => m === "GET" && p === "/api/v2/directives", release: new Promise<void>((r) => (release = r)), left: 1, drop };
+      const pass = runCli(t, ["sync"]);
+      await waitFor(() => fake.log.filter((l) => l.method === "GET" && l.path === "/api/v2/directives").length > seen, 10_000, "the held directives call");
+      assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
+      fake.holdCalls = null;
+      release();
+      return pass;
+    };
+    let seen = fake.log.filter((l) => l.method === "GET" && l.path === "/api/v2/directives").length;
+    const plain = await race(false);
+    assert.equal(plain.code, 0, plain.stderr);
+    assert.match(plain.stdout, /pairing changed during this sync/);
+    assert.doesNotMatch(plain.stdout, /^Server:/m);
+    seen = fake.log.filter((l) => l.method === "GET" && l.path === "/api/v2/directives").length;
+    const dropped = await race(true);
+    assert.equal(dropped.code, 0, dropped.stderr);
+    assert.match(dropped.stdout, /pairing changed during this sync/);
+    assert.doesNotMatch(dropped.stderr, /could not reach/);
+    assert.equal(readJson<{ error?: string }>(layout.lastSync(t.home))?.error, undefined, "not marked unreachable");
+    assert.doesNotMatch((await runCli(t, ["status"])).stdout, /unreachable/);
+  });
+
+  test("`align logout` with a session stopped from the web says it can be shared again after `align login`, not only `align stop-sharing`", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    await shared(t);
+    fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [A.key], goal: null, binding: null });
+    await sync(t);
+    const out = await runCli(t, ["logout"]);
+    assert.equal(out.code, 0, out.stderr);
+    assert.match(out.stdout, /2 shared session\(s\) stopped sharing\. Sessions stopped or held from the web stay blocked: after `align login`, `::align share` in such a session shares it again, and then the web can lift the stop or hold\./);
+    assert.doesNotMatch(out.stdout, /align stop-sharing/);
+  });
+
+  test("`::align bind`, `::align share` and `::align share --dir` toward a goal held in the cached feed say so", async () => {
+    const { fake, t } = await world();
+    const perf = fake.goals.get("ws_acme")!.find((x) => x.id === "g_perf")!;
+    perf.allocation = { target_share: null, share_7d: 0, gap_7d: null, held: true };
+    await sync(t);
+    const HELD = "That goal is on hold (all agents on it were paused from its Align workspace), so this session's tools stay blocked until the hold is released.";
+    const A = await shared(t);
+    await sync(t);
+    assert.equal(prompt(t, A.sid, "::align bind Cut hook", A.cwd).reason, `Align: from your next prompt this session counts toward "Cut hook latency". ${HELD}`);
+    assert.equal(prompt(t, A.sid, "::align bind Ship", A.cwd).reason, 'Align: from your next prompt this session counts toward "Ship the v2 onboarding flow".', "a goal not held: as before");
+    const sid = newSid();
+    const cwd = path.join(t.root, "held-share");
+    fs.mkdirSync(cwd, { recursive: true });
+    start(t, sid, "startup", cwd);
+    assert.match(prompt(t, sid, "::align share Cut hook", cwd).reason, new RegExp(`Goal: Cut hook latency; counts from session start\\. ${HELD.replace(/[.()]/g, "\\$&")}`));
+    assert.equal(prompt(t, sid, "::align share Cut hook confirm", cwd).reason, `Align: sharing requested toward "Cut hook latency". It takes effect within a few seconds; your next prompt carries the goal. ${HELD}`);
+    const sid2 = newSid();
+    const cwd2 = path.join(t.root, "held-dir");
+    fs.mkdirSync(cwd2, { recursive: true });
+    start(t, sid2, "startup", cwd2);
+    assert.match(prompt(t, sid2, "::align share --dir Cut hook confirm", cwd2).reason, new RegExp(HELD.replace(/[.()]/g, "\\$&")));
+  });
+
+  test("`align status` while the server is unreachable counts the rows of a share still waiting for the server", async () => {
+    const { fake, t } = await world();
+    const sid = newSid();
+    const cwd = path.join(t.root, "pending-repo");
+    fs.mkdirSync(cwd, { recursive: true });
+    start(t, sid, "startup", cwd);
+    prompt(t, sid, "start", cwd);
+    fake.setOffline(true);
+    const r = await runCli(t, ["share", localId("claude-code", sid).slice(0, 8), "--workspace", "Acme", "--goal", "Ship the v2", "--yes"]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /queued to share/);
+    turn(t, { sid, cwd }, "req_pending_1", 50);
+    turn(t, { sid, cwd }, "req_pending_2", 100);
+    await sleep(150);
+    const s = await runCli(t, ["sync"]);
+    assert.equal(s.code, 1);
+    assert.match(s.stderr, /2 usage rows and \d+ queued calls stay on this machine/);
+    assert.match((await runCli(t, ["status"])).stdout, /Server: {5}unreachable since .*; 2 usage rows wait to upload/);
+    fake.setOffline(false);
+    await sleep(400); // the queued share's backoff
+    await sync(t);
+    assert.equal([...fake.usage.values()].filter((u) => u.session_key === keyOf(t, sid)).length, 2, "they went up");
+  });
+
+  test("`::align share --dir confirm` that replaces the folder's rule says so, as `align share --dir` does", async () => {
+    const { t } = await world();
+    const dir = path.join(t.root, "rule-replace");
+    fs.mkdirSync(dir, { recursive: true });
+    assert.equal((await runCli(t, ["share", "--dir", dir, "--workspace", "Acme", "--goal", "Ship the v2", "--yes"])).code, 0);
+    const sid = newSid();
+    start(t, sid, "startup", dir);
+    const preview = prompt(t, sid, "::align share --dir", dir).reason;
+    assert.match(preview, /with no goal, from its start\.\n {2}This replaces the current rule \(Acme, "Ship the v2 onboarding flow"\)\./);
+    assert.match(prompt(t, sid, "::align share --dir confirm", dir).reason, new RegExp(`^Align: new sessions in ${dir.replace(/[.]/g, "\\.")} are now shared with Acme\\. This replaces the current rule \\(Acme, "Ship the v2 onboarding flow"\\)\\.`));
+    assert.match((await runCli(t, ["rules"])).stdout, /Acme \/ no goal/);
+  });
+
+  test("hold denies end with \"Tell the user and wait for instructions.\" as stop denies do", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    await sync(t);
+    fake.holdGoal("ws_acme", "g_ship", [A.key], "Security review");
+    await sync(t);
+    assert.equal(deny(t, A), 'Align: Dana Lee paused all agents on goal "Ship the v2 onboarding flow": "Security review". Work resumes when they release it. Your work so far is saved. Tell the user and wait for instructions.');
+    assert.equal((await runCli(t, ["logout"])).code, 0);
+    assert.match(deny(t, A) ?? "", /^Align: Dana Lee paused .* tools stay blocked until the user runs `align stop-sharing [^`]+` in a terminal\. Tell the user and wait for instructions\.$/);
+  });
+});

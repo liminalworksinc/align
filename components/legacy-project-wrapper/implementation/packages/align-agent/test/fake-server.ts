@@ -93,7 +93,7 @@ export class FakeServer {
   /** Each self-revoke, with the device it named as its replacement (`replaced_by`, null when none). */
   revokesSeen: { device: string; replaced_by: string | null }[] = [];
   /** Hold matching calls (before the server looks at them) until `release` settles; `left` of them, when set (C4). */
-  holdCalls: { match: (method: string, path: string) => boolean; release: Promise<void>; left?: number } | null = null;
+  holdCalls: { match: (method: string, path: string) => boolean; release: Promise<void>; left?: number; drop?: boolean } | null = null;
   /** Answer matching calls 503 without processing them (a proxy in front of a failing route, C4-3). */
   failCalls: ((method: string, path: string) => boolean) | null = null;
   /** Refuse every session DELETE with 404 not_found (history this device may not delete, C4-1). */
@@ -381,7 +381,11 @@ export class FakeServer {
       return;
     }
     const held = this.holdCalls;
-    if (held && held.match(entry.method, p) && (held.left === undefined || held.left-- > 0)) await held.release;
+    if (held && held.match(entry.method, p) && (held.left === undefined || held.left-- > 0)) {
+      await held.release;
+      // `drop`: the held call never gets an answer (its connection goes, as a call held past its timeout does).
+      if (held.drop) return void req.socket.destroy();
+    }
     if (this.failCalls?.(entry.method, p)) return send(503, { error: "unavailable" });
     if (req.headers.origin) return send(403, { error: "origin_forbidden" });
     try {

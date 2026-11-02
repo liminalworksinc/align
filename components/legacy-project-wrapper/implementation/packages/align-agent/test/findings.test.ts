@@ -152,7 +152,7 @@ describe("E2E findings: server side of the agent", () => {
     assert.ok(fs.existsSync(layout.latch(t.home, lid)));
     const out = await runCli(t, ["logout"]);
     assert.equal(out.code, 0, out.stderr);
-    assert.match(out.stdout, /1 shared session\(s\) stopped sharing\. Sessions stopped from the web stay blocked until you run `align stop-sharing <session>`/);
+    assert.match(out.stdout, /1 shared session\(s\) stopped sharing\. Sessions stopped or held from the web stay blocked: after `align login`, `::align share` in such a session shares it again, and then the web can lift the stop or hold\./);
     const sessions = await runCli(t, ["sessions"]);
     assert.doesNotMatch(sessions.stdout, /shared \(Acme\)/);
     assert.match(sessions.stdout, /stopped \(Acme; this machine signed out\)/);

@@ -474,7 +474,19 @@ async function cmdLogout(ctx: Ctx): Promise<void> {
   }
   out("Signed out. Tokens and the device key were removed; local metering continues.");
   const ended = res.after ?? 0;
-  if (ended) out(`${ended} shared session(s) stopped sharing. Sessions stopped from the web stay blocked until you run \`align stop-sharing <session>\`.`);
+  // A stopped or held one stays blocked; after a new `align login` it can be shared again and lifted from the web
+  // (C6-2), as its deny and notice then say (cycle 7).
+  const blocked = ctx.db
+    .prepare(
+      `SELECT 1 FROM shares s WHERE s.state='stopped' AND s.error=?
+         AND (EXISTS (SELECT 1 FROM latches l WHERE l.local_id=s.local_id AND l.stopped=1) OR EXISTS (SELECT 1 FROM holds h WHERE h.local_id=s.local_id AND h.held=1)) LIMIT 1`,
+    )
+    .get(DEVICE_SIGNED_OUT);
+  if (ended) {
+    out(
+      `${ended} shared session(s) stopped sharing.${blocked ? " Sessions stopped or held from the web stay blocked: after `align login`, `::align share` in such a session shares it again, and then the web can lift the stop or hold." : ""}`,
+    );
+  }
   if (!res.revoked) {
     err(
       `align: could not reach ${c.server_url} to revoke this device. Align revokes it the next time it reaches the server (the next \`align sync\` or \`align login\`); until then its sessions still show as shared there. You can also revoke it at ${c.server_url}/app/devices.`,
@@ -1084,6 +1096,9 @@ async function cmdSync(ctx: Ctx, argv: string[] = []): Promise<void> {
         ? `The next sync goes on as the device signed in now (${deviceTag(now.device_id)}).`
         : "This machine is signed out now, so nothing more is uploaded until you run `align login`.";
     out(`This machine's Align pairing changed during this sync (\`align login\` or \`align logout\`), so it stopped there; nothing more was sent as the earlier device. ${next}`);
+    // Nothing more to say about this pass, signed in now or not: no `Server:` line for the part it did as the earlier
+    // device, as after a logout (cycle 7).
+    if (signedIn(ctx.home)) return;
   }
   if (!signedIn(ctx.home)) {
     // Cut short by `align logout`: the line above says so, not that it ran signed out (C5-4).
@@ -1106,13 +1121,13 @@ async function cmdSync(ctx: Ctx, argv: string[] = []): Promise<void> {
   }
 }
 
-/** Finalized usage rows of shared sessions that will upload and have not yet: never one made while the session was not
- *  shared, which stays on this machine (C5-1). */
+/** Finalized usage rows of shared sessions (or ones whose share waits for the server, cycle 7) that will upload and have
+ *  not yet: never one made while the session was not shared, which stays on this machine (C5-1). */
 function unuploadedRows(ctx: Ctx): number {
   const rows = ctx.db
     .prepare(
       `SELECT r.local_id, r.root_turn, r.ts, r.created_at, r.epoch_id, r.uploaded FROM requests r JOIN shares s ON s.local_id=r.local_id
-       WHERE s.state='shared' AND r.uploaded=0 AND r.finalized=1`,
+       WHERE s.state IN ('shared','pending') AND r.uploaded=0 AND r.finalized=1`,
     )
     .all() as unknown as PendingRow[];
   return rows.filter((r) => willUpload(ctx.db, r)).length;

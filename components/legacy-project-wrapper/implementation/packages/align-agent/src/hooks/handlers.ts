@@ -740,12 +740,15 @@ function endedNote(ended: keyof typeof ENDED_WHY, lid: string, reshare = false):
 /** The stop deny: the plain wording, or, when the session's sharing ended, how the user gets out. */
 export function stopReason(latch: Latch | null, lid: string): string {
   if (!latch?.ended) return DENY_REASON;
-  return `Align: this session was stopped from its Align workspace. ${endedNote(latch.ended, lid, !!latch.reshare)} Tell the user and wait for instructions.`;
+  return `Align: this session was stopped from its Align workspace. ${endedNote(latch.ended, lid, !!latch.reshare)} ${TELL_USER}`;
 }
+
+/** What every deny that blocks tools until people act ends with: the model tells the user instead of working around it. */
+const TELL_USER = "Tell the user and wait for instructions.";
 
 function holdDenyReason(h: HoldLatch | null, lid: string): string {
   const base = holdReason(h);
-  return h?.ended ? `${base} ${endedNote(h.ended, lid, !!h.reshare)}` : base;
+  return `${h?.ended ? `${base} ${endedNote(h.ended, lid, !!h.reshare)}` : base} ${TELL_USER}`;
 }
 
 /** The goal-hold latch: a hold file that names a hold, or one that can't be read, blocks every tool (read-only ones too). */
@@ -805,7 +808,7 @@ export function latchDeny(home: string, harness: Harness, input: HookInput): Hoo
  *  as a hold, fail closed (cycle 6). */
 function feedHoldDeny(home: string, lid: string, cwd: string | null): HookOutput {
   const h = feedHold(home, lid, cwd);
-  return h ? denyOutput(feedHoldReason(h.goal_title, clean)) : null;
+  return h ? denyOutput(`${feedHoldReason(h.goal_title, clean)} ${TELL_USER}`) : null;
 }
 
 /**
@@ -1006,6 +1009,26 @@ function noCachedGoal(arg: string, feed: FeedFile | null): string {
   return `Align: no cached goal matches "${arg}"${when}. A goal created just now arrives with the next sync, which starts now: try again in a few seconds, or run \`align goals --refresh\` in a terminal. \`::align goals\` lists the cached ones.`;
 }
 
+/** A goal the cached feed says is held: binding or sharing toward it works, but its tools stay blocked (cycle 7). */
+function heldNote(g: { allocation?: { held?: boolean } | null }): string {
+  return g.allocation?.held ? " That goal is on hold (all agents on it were paused from its Align workspace), so this session's tools stay blocked until the hold is released." : "";
+}
+
+/** A session its person stopped sharing (`::align unshare`, `align stop-sharing`, Stop sharing on the web), whose shared
+ *  history is not deleted: the server never shares it again, so `::align share` says so instead of previewing a share
+ *  (cycle 7). */
+function stoppedForGood(lid: string): string {
+  return `Align: this session's sharing was stopped (\`::align unshare\`, \`align stop-sharing\` or Stop sharing on the web), and a session whose sharing was stopped is not shared again, so it stays stopped. To share it again, counting from now, first delete its shared history (it leaves every total): run \`align delete-history ${lid.slice(0, 8)}\` in a terminal, or use Delete shared history on the web's Sessions page; then type \`::align share\` here.`;
+}
+
+/** The folder rule a new `--dir` rule for `dir` replaces, in words (as `align share --dir` says it). */
+function replacedRule(home: string, dir: string): string | null {
+  const prev = matchRule(readRules(home), dir);
+  if (!prev || prev.dir !== dir) return null;
+  const title = (prev.goal_id && readJson<FeedFile>(layout.feed(home, prev.workspace_id))?.goals.find((g) => g.id === prev.goal_id)?.title) || prev.goal_title;
+  return `${clean(prev.workspace_name, 80)}, ${title ? `"${clean(title, 100)}"` : "no goal"}`;
+}
+
 export function command(home: string, harness: Harness, sid: string, cwd: string | null, line: string): string {
   const lid = localId(harness, sid);
   const hot = readHot(home, lid);
@@ -1132,6 +1155,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       arg = arg.replace(/\s*(confirm|--yes|-y)$/i, "").trim();
       const me = readJson<MeFile>(layout.me(home));
       if (!me || me.signed_out) return "Align: not signed in on this machine. Run `align login` in a terminal first.";
+      if (!dirMode && hot?.share?.state === "stopped" && hot.prior_share?.stopped) return stoppedForGood(lid);
       const feed = feedFor(home, hot);
       // With no workspace of its own, no default and more than one in reach, no goal can be looked up either: say why
       // first, whatever goal was named, rather than that the goal is not cached (C4-7); a folder rule can't tell which
@@ -1147,18 +1171,22 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         if (!cwd) return "Align: this session has no working folder to share.";
         if (goal && !goal.bindable) return `Align: "${goal.title}" needs an approved alignment before sessions can count toward it.`;
         const dir = gitInfo(cwd)?.toplevel || cwd;
+        const replaces = replacedRule(home, dir);
         if (!confirm) {
           return [
             `Align folder share preview (nothing changes yet):`,
             `  Folder: ${dir} (stays on this machine)`,
-            `  Every new session started in it is shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : " with no goal"}, from its start.`,
+            `  Every new session started in it is shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : " with no goal"}, from its start.${goal ? heldNote(goal) : ""}`,
+            replaces ? `  This replaces the current rule (${replaces}).` : "",
             `  ${already ? "This session is already shared." : hot?.prior_share?.stopped ? "This session stays private: its sharing was stopped (or its history deleted)." : "This session is shared too."} Forks stay private. \`::align unshare\` keeps one session private.`,
             `  Sent per session: harness, a keyed repo hash, start time, an epoch, and per-request token counts with model, basis and estimated list cost.`,
             signals
               ? `  Work signals on: repo-relative paths of edited files, commit subjects, task labels and the branch name go to people who can read the goal, kept 24 hours. Never sent: prompts, responses, tool output, file contents.`
               : `  Never sent: prompts, responses, tool input or output, paths, branch names. (Add --signals to share file paths and task labels with the team.)`,
             `Type \`::align share --dir ${signals ? "--signals " : ""}${arg ? `${arg} ` : ""}confirm\` to turn it on.`,
-          ].join("\n");
+          ]
+            .filter(Boolean)
+            .join("\n");
         }
         setRule(home, { dir, workspace_id: feed.workspace_id, workspace_name: feed.workspace_name, goal_id: goal ? goal.id : null, goal_title: goal ? goal.title : null, signals });
         // A session its person stopped sharing (or whose history was deleted) stays private: only `::align share` or
@@ -1166,7 +1194,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         const kept = !already && !!hot?.prior_share?.stopped;
         if (!already && !kept) spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed.workspace_id, rule_dir: dir, ts });
         const self = already ? "" : kept ? " This session stays private: its sharing was stopped (or its history deleted)." : " This session too; your next prompt carries the goal.";
-        return `Align: new sessions in ${dir} are now shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : ""}.${self} \`::align unshare --dir\` turns it off.`;
+        return `Align: new sessions in ${dir} are now shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : ""}.${replaces ? ` This replaces the current rule (${replaces}).` : ""}${self}${goal ? heldNote(goal) : ""} \`::align unshare --dir\` turns it off.`;
       }
       if (!confirm) {
         // Shared before (its share ended, or its history was deleted since): the new share counts from now, as the sync
@@ -1175,7 +1203,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         return [
           `Align share preview for this session (nothing uploaded yet):`,
           `  Workspace: ${feed?.workspace_name || "your default workspace"}`,
-          `  Goal: ${goal ? `${goal.title}${before ? " (the goal it had before)" : ""}` : "none (unallocated)"}; counts from ${from}.`,
+          `  Goal: ${goal ? `${goal.title}${before ? " (the goal it had before)" : ""}` : "none (unallocated)"}; counts from ${from}.${goal ? heldNote(goal) : ""}`,
           `  Sent: harness, a keyed repo hash, start time, an epoch, and per-request token counts with model, basis and estimated list cost.`,
           `  Never sent: prompts, responses, tool input or output, paths, branch names.`,
           `Type \`::align share ${arg ? `${arg} ` : ""}confirm\` to share.`,
@@ -1185,7 +1213,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       // no default would otherwise not know which (C3-6).
       spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed?.workspace_id, ts });
       return goal
-        ? `Align: sharing requested toward "${goal.title}". It takes effect within a few seconds; your next prompt carries the goal.`
+        ? `Align: sharing requested toward "${goal.title}". It takes effect within a few seconds; your next prompt carries the goal.${heldNote(goal)}`
         : "Align: sharing requested with no goal (its usage counts as unallocated; `::align bind <goal>` picks one). It takes effect within a few seconds.";
     }
     case "unshare":
@@ -1211,7 +1239,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       chooseBinding(hot, inj, { id, goal_id: goal.id, goal: snapshot(goal), cause: "manual", directive_id: null });
       writeInjected(home, lid, inj);
       spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "bind", arg: goal.id, pending_id: id, ts });
-      return `Align: from your next prompt this session counts toward "${goal.title}".`;
+      return `Align: from your next prompt this session counts toward "${goal.title}".${heldNote(goal)}`;
     }
     case "task": {
       if (!willShare(home, hot, cwd)) return "Align: this session is not shared, so there is no one to tell.";
