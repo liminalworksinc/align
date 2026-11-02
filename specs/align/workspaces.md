@@ -1262,13 +1262,13 @@ is off` and `server_time`.
 
 #### Scenario: Stopping a session that had ended
 
-- **WHEN** a member's session ends `member_removed` when they are removed, they are let back in and their device is given the workspace again, and they stop sharing the session on the web (`scripts/test-v2.mjs` "sessions (E2E-AGENT cycle 6): a person who stops sharing on the web a session that had ended member_removed ...")
+- **WHEN** a member's session ends `member_removed` when they are removed, they are let back in and their device is given the workspace again, and they stop sharing the session on the web (the Sessions tab's **Stop sharing for good**, `interface` "Workspace Sessions tab") (`scripts/test-v2.mjs` "sessions (E2E-AGENT cycle 6): a person who stops sharing on the web a session that had ended member_removed ..." and "W8 (ui): ...")
 - **THEN** the session is `stopped` with no `ended_reason`, its device's usage is refused 409 `sharing_stopped` with `ended_reason: null`, and its device's `PUT` is 409 `sharing_stopped`
 
 #### Scenario: Session list
 
 - **WHEN** a member calls `GET .../sessions`
-- **THEN** `mine` lists their own sessions in full (state, current epoch and goal, governing goal, stop status, conflicts and token totals), and `all` is null except for workspace owners, for whom it lists every non-stopped session's key, alias, owner, harness, `started_at`, state and stop status, never its title or usage (`scripts/test-v2.mjs` "W3: the owner's list of everyone's sessions carries each session's started_at ...")
+- **THEN** `mine` lists their own sessions in full (state, `ended_reason`, current epoch and goal, governing goal, stop status, conflicts and token totals, and `device`: the machine that shared it as `{id, name, signed_out, has_workspace}`, whether it signed out of Align and whether it has this workspace now, or null when no device is left, so the Sessions tab can say how to share an ended session again), and `all` is null except for workspace owners, for whom it lists every non-stopped session's key, alias, owner, harness, `started_at`, state and stop status, never its title or usage (`scripts/test-v2.mjs` "W3: the owner's list of everyone's sessions carries each session's started_at ...")
 
 ### Requirement: Binding epochs
 

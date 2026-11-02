@@ -2564,6 +2564,8 @@ try {
       // says it was already deleted instead of an error.
       const z3Key = sessionKey(D5, A, "claude-code", "native-z3");
       const z3Put = await put(D5, z3Key, { title: "Z3 history" });
+      const w5Key = sessionKey(D5, A, "claude-code", "native-w5");
+      const w5Put = await put(D5, w5Key, { title: "W5 next action" });
       page.on("dialog", (dl) => void dl.accept());
       await page.goto(`${BASE}/app/w/${A}/sessions`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Z3 history"), { timeout: 15000 }).catch(() => undefined);
@@ -2575,6 +2577,16 @@ try {
         "Z3 (ui): deleting shared history already deleted in another tab (410 history_deleted) counts as done: the row is gone and the page says \"That session's shared history was already deleted, …\" with no error",
         z3Put.status === 200 && z3Gone.status === 204 && !z3Text.includes("Z3 history") && z3Text.includes("That session's shared history was already deleted, in another tab or window or from its machine, so it is no longer listed.") && !z3Text.includes("nothing is left to delete"),
         `${z3Put.status} ${z3Gone.status} ${z3Text.slice(0, 600)}`,
+      );
+      // W5 (E2E-WEB cycle 7): the note is about that delete only: the next action (Stop sharing on another row) clears it.
+      await page.evaluate(() => [...document.querySelectorAll("main li")].find((li) => li.innerText.includes("W5 next action"))?.querySelectorAll("button").forEach((b) => b.textContent === "Stop sharing" && b.click()));
+      await page.waitForFunction(() => [...document.querySelectorAll("main li")].find((li) => li.innerText.includes("W5 next action"))?.innerText.includes("not shared"), { timeout: 15000 }).catch(() => undefined);
+      const w5Text = await page.evaluate(() => document.querySelector("main")?.innerText ?? "");
+      const w5Row = await page.evaluate(() => [...document.querySelectorAll("main li")].find((li) => li.innerText.includes("W5 next action"))?.innerText ?? "");
+      check(
+        "W5 (ui): after \"That session's shared history was already deleted …\", the next action on the Sessions tab (Stop sharing on another row, which succeeds) clears the note",
+        w5Put.status === 200 && w5Row.includes("not shared") && !w5Text.includes("That session's shared history was already deleted"),
+        w5Text.slice(0, 600),
       );
     } finally {
       await browser.close();
@@ -7839,10 +7851,49 @@ try {
         const pD = await as(XD);
         await open(pD, `/app/w/${XW}/sessions`);
         const dText = await pD.evaluate(() => document.body.innerText);
+        // W7 (E2E-WEB cycle 7): how to share it again depends on where its machine stands. XD came back without ticking it,
+        // so it is still paired but lacks the workspace: the Devices page gives it back (never align login).
+        const xdLaptop = `${XD.name}'s laptop`;
         check(
-          "S1 (ui): back in the workspace, the removed member's Sessions tab reads \"ended: left the workspace\" and says how to share it again: run align login on that machine again, then ::align share in the session",
-          dText.includes("ended: left the workspace") && /Sharing ended when you left this workspace \(or were removed from it\)/.test(dText) && /run align login on that machine again \(it lost access to this workspace when you left\), then ::align share in the session/.test(dText),
+          "S1, W7 (ui): back in the workspace, the removed member's Sessions tab reads \"ended: left the workspace\"; its machine is paired but lacks the workspace, so the note says to give it this workspace on the Devices page (a link), then ::align share, never align login",
+          dText.includes("ended: left the workspace") && /Sharing ended when you left this workspace \(or were removed from it\)/.test(dText) &&
+            dText.includes(`To share it again now that you are back, give its machine, ${xdLaptop}, this workspace on your Devices page (Give this device the workspace), then run ::align share in the session.`) &&
+            !dText.includes("align login") && (await pD.evaluate(() => [...document.querySelectorAll("main a")].some((a) => a.getAttribute("href") === "/app/devices"))),
           dText.slice(0, 900),
+        );
+        // The machine is given the workspace (on the Devices page): ::align share is all it takes.
+        const xdGive = await call("XD", "POST", `/api/v2/devices/${xDevs.XD.id}/workspaces`, { cookie: XD.cookie, body: { workspace_id: XW } });
+        await open(pD, `/app/w/${XW}/sessions`);
+        const dGiven = await pD.evaluate(() => document.body.innerText);
+        check(
+          "W7 (ui): once the machine that shared it has the workspace again, the member_removed note says \"Its machine, <name>, has this workspace again: to share it again, run ::align share in the session.\" (no align login, no Devices page)",
+          xdGive.status === 200 && dGiven.includes(`Its machine, ${xdLaptop}, has this workspace again: to share it again, run ::align share in the session.`) && !dGiven.includes("align login") && !dGiven.includes("on your Devices page"),
+          `${xdGive.status} ${xdGive.text.slice(0, 200)} ${dGiven.slice(0, 900)}`,
+        );
+        // The machine signs out (revoked on the web): align login pairs it again.
+        const xdOut = await call("XD", "DELETE", `/api/v2/devices/${xDevs.XD.id}`, { cookie: XD.cookie });
+        await open(pD, `/app/w/${XW}/sessions`);
+        const dOut = await pD.evaluate(() => document.body.innerText);
+        check(
+          "W7 (ui): when the machine that shared it has signed out, the member_removed note says to run align login on that machine and give it this workspace, then ::align share",
+          xdOut.status === 204 && dOut.includes("To share it again now that you are back, run align login on that machine (it has signed out of Align) and give it this workspace, then ::align share in the session."),
+          `${xdOut.status} ${dOut.slice(0, 900)}`,
+        );
+        // W8: the person stops the ended session for good from the web (it was API-only): confirmed, it reads "not shared",
+        // has no ended_reason, and is never shared again.
+        pD.on("dialog", (dl) => void dl.accept());
+        const w8Before = await pD.evaluate(() =>
+          [...(document.querySelector("main li")?.querySelectorAll("button") ?? [])].map((b) => b.textContent?.trim()).join("|"),
+        );
+        await pD.evaluate(() => [...document.querySelectorAll("main li button")].find((b) => b.textContent?.trim() === "Stop sharing for good")?.click());
+        await pD.waitForFunction(() => !document.body.innerText.includes("ended: left the workspace"), { timeout: 15000 }).catch(() => undefined);
+        const w8After = await pD.evaluate(() => document.querySelector("main")?.innerText ?? "");
+        const w8Row = withDb((db) => db.prepare("SELECT state, ended_reason FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(XW, xKeys.XD.key));
+        check(
+          "W8 (ui): an ended session's row offers Stop sharing for good (beside Delete shared history, no Stop or Resume); confirmed, it posts stop-sharing, the row reads \"not shared\" and the session is stopped with no ended_reason, so it is never shared again",
+          w8Before === "Stop sharing for good|Delete shared history" &&
+            w8After.includes("not shared") && !w8After.includes("ended: left the workspace") && !w8After.includes("Stop sharing for good") && w8Row?.state === "stopped" && w8Row.ended_reason === null,
+          `${w8Before} || ${w8After.slice(0, 600)} || ${JSON.stringify(w8Row)}`,
         );
 
         // C3-2 (ui): "1 point", "5 points".

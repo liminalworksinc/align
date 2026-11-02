@@ -62,6 +62,8 @@ export interface MySession {
   /** Why sharing ended when its person did not stop it, so no stop or resume reaches it: "device_signed_out" (the
    *  machine that shared it signed out) or "member_removed" (its person left or was removed from the workspace). */
   ended_reason: "device_signed_out" | "member_removed" | null;
+  /** The machine that shared it: its name, whether it signed out of Align, and whether it has this workspace now (W7). */
+  device: { id: string; name: string; signed_out: boolean; has_workspace: boolean } | null;
   current_epoch: { epoch_id: string; goal_id: string | null; starts_at: string; goal: GoalLabel | null } | null;
   governing_goal: GoalLabel | null;
   agent_stopped: boolean;

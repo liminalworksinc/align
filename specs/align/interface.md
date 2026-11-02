@@ -1054,17 +1054,22 @@ everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<w
 #### Scenario: Own sessions
 
 - **WHEN** a member opens the tab
-- **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared", "ended: device signed out" or "ended: left the workspace", the two ended states with no **Stop agent**, **Resume agent** or **Stop sharing**, only **Delete shared history**, and "Stopped; can't be resumed from here" when its agent was stopped), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed") marked "delivery receipt" once the machine sent any receipt for it and "not observed" before, the goal it counts under and follows, and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
+- **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared", "ended: device signed out" or "ended: left the workspace", the two ended states with no **Stop agent**, **Resume agent** or **Stop sharing**, only **Stop sharing for good** and **Delete shared history**, and "Stopped; can't be resumed from here" when its agent was stopped), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed") marked "delivery receipt" once the machine sent any receipt for it and "not observed" before, the goal it counts under and follows, and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
 
 #### Scenario: A session whose device signed out
 
 - **WHEN** a member opens the tab after the machine that shared one of their sessions signed out of Align (`align logout`, removal on the web, or Sign out everywhere with "Also unpair all my devices")
-- **THEN** that session reads "ended: device signed out" with the note "The machine that shared this session signed out of Align, so sharing ended and Stop or Resume can't reach it. ... To share it again, run align login on that machine, then ::align share in the session." ("It stays stopped on that machine until you run align stop-sharing there." in between when its agent was stopped)
+- **THEN** that session reads "ended: device signed out" with the note "The machine that shared this session signed out of Align, so sharing ended and Stop or Resume can't reach it. ... To share it again, run align login on that machine, then ::align share in the session. To keep it from being shared again, press Stop sharing for good." ("It stays stopped on that machine until you run align stop-sharing there." in between when its agent was stopped)
 
 #### Scenario: A session ended by leaving the workspace
 
-- **WHEN** a member who was removed from the workspace (or left it) while a session of theirs was shared is invited back and opens the tab (`scripts/test-v2.mjs` "S1 (ui): back in the workspace, the removed member's Sessions tab reads ...")
-- **THEN** that session reads "ended: left the workspace" with the note "Sharing ended when you left this workspace (or were removed from it), so Stop or Resume can't reach it. ... To share it again now that you are back, run align login on that machine again (it lost access to this workspace when you left), then ::align share in the session." ("It stays stopped on your machine until you run align stop-sharing there." in between when its agent was stopped)
+- **WHEN** a member who was removed from the workspace (or left it) while a session of theirs was shared is invited back and opens the tab, without the machine that shared it ticked on Join; then once that machine has the workspace again (from the Devices page, or ticked on Join); then once it has signed out (`scripts/test-v2.mjs` "S1, W7 (ui): ..." and "W7 (ui): ...")
+- **THEN** that session reads "ended: left the workspace" with the note "Sharing ended when you left this workspace (or were removed from it), so Stop or Resume can't reach it. ... <how to share it again> To keep it from being shared again, press Stop sharing for good." ("It stays stopped on your machine until you run align stop-sharing there." in between when its agent was stopped), where how to share it again follows where that machine (the session list's `device`) stands now: still paired without the workspace, "To share it again now that you are back, give its machine, <device name>, this workspace on your Devices page (Give this device the workspace), then run ::align share in the session." with a link to `/app/devices` (never `align login`, which would end that machine's shares in its other workspaces); given the workspace again, "Its machine, <device name>, has this workspace again: to share it again, run ::align share in the session."; signed out, "To share it again now that you are back, run align login on that machine (it has signed out of Align) and give it this workspace, then ::align share in the session."
+
+#### Scenario: Stopping an ended session for good
+
+- **WHEN** the person presses **Stop sharing for good** on a session that ended "ended: left the workspace" or "ended: device signed out" (`scripts/test-v2.mjs` "W8 (ui): ...")
+- **THEN** the page asks "Stop sharing this session for good? It won't be shared again, even if its machine runs ::align share. What was already shared stays until you delete it." and on confirm posts to `.../sessions/<key>/stop-sharing` (`workspaces` "Stopping a session that had ended"), and the row reads "not shared", with no ended state and no **Stop sharing for good**
 
 #### Scenario: Confirmed actions
 
@@ -1074,7 +1079,7 @@ everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<w
 #### Scenario: History already deleted elsewhere
 
 - **WHEN** the person deletes a session's shared history that was already deleted in another tab, window or from its machine (`DELETE` answers 410 `history_deleted`; `scripts/test-v2.mjs` "Z3 (ui): ...")
-- **THEN** the deletion counts as done: the list is read again, so the row is gone, and the page says "That session's shared history was already deleted, in another tab or window or from its machine, so it is no longer listed." instead of an error
+- **THEN** the deletion counts as done: the list is read again, so the row is gone, and the page says "That session's shared history was already deleted, in another tab or window or from its machine, so it is no longer listed." instead of an error, until the person's next action on the tab (**Stop sharing** on another row, say), which clears it (`scripts/test-v2.mjs` "W5 (ui): ...")
 
 #### Scenario: Owners see everyone's sessions
 
