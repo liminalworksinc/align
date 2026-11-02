@@ -498,14 +498,16 @@ export function endSharesEndedOnServer(ctx: Ctx, ended: EndedOnServer[]): number
  */
 export function endSharesWithoutAccess(ctx: Ctx, me: MeFile): number {
   const reach = new Set(me.workspaces.map((w) => w.id));
-  const live = (ctx.db.prepare("SELECT local_id, workspace_id, workspace_name, goal_json FROM shares WHERE state IN ('shared','pending','suspended')").all() as {
+  const live = (ctx.db.prepare("SELECT local_id, workspace_id, workspace_name, goal_json, state FROM shares WHERE state IN ('shared','pending','suspended')").all() as {
     local_id: string;
     workspace_id: string;
     workspace_name: string;
     goal_json: string | null;
+    state: string;
   }[]).filter((s) => !reach.has(s.workspace_id));
   const at = nowIso();
-  for (const s of live) endShare(ctx, s.local_id, ACCESS_LOST, `access_lost_${s.workspace_id}_${at}`, factsOf(s, "access_lost"), at, "member_removed");
+  // One still pending had not reached the server: it was not shared, and its notice says so (E2E-AGENT cycle 14 C14-4).
+  for (const s of live) endShare(ctx, s.local_id, ACCESS_LOST, `access_lost_${s.workspace_id}_${at}`, factsOf(s, "access_lost", s.state === "pending" ? { unsent: true } : {}), at, "member_removed");
   // A session whose share there had ended already and that was told it can be shared there again (its workspace back,
   // or a member again) hears it can't any more at its next prompt, whatever it has seen: its notice is worded from the
   // state its deny gives, which the caller's `renderEndedShares` writes (C8-1, cycle 11).

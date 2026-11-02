@@ -38,7 +38,7 @@ import {
 import { myTeams, teamAsks } from "../shared/asks.ts";
 import { crossing, lastReply } from "../shared/drift.ts";
 import { feedHold, feedHoldReason } from "../shared/feedhold.ts";
-import { endedWhyWords, latchWayOut, SHARE_CHANGED, shareAgainWords, shareNotice, shareRetell, type ReleaseReaches, type ShareAgain, type ShareFacts, type ShareTold } from "../shared/ended.ts";
+import { endedWhyWords, latchWayOut, noneTold, SHARE_CHANGED, shareAgainWords, shareNotice, shareRetell, toldSituation, type ReleaseReaches, type ShareAgain, type ShareFacts, type ShareTold } from "../shared/ended.ts";
 import { contextGoals, snapshot } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
@@ -180,7 +180,8 @@ export interface NoticePlan {
  * deny uses (`shareNotice`), and told when the session has not seen it, or again when its advice changed since it was
  * told (signed in or out, the workspace back or lost again, a release that no longer reaches it); held back, unseen,
  * while the ended shares are not read since this sign-in (E2E-AGENT cycle 11 C11-1 to C11-4). Of the others: a
- * "resumed" one only while that resume still holds (a later stop withdrew it, C4-6), a workspace this device reaches for
+ * "resumed" one only while that resume still holds (a later stop withdrew it, C4-6), a release only while it holds (a
+ * later hold on its goal withdrew it, C14-2), a workspace this device reaches for
  * the first time only while the session has no share of its own (C11-2), and each text once. All count as seen.
  */
 export function planNotices(hot: HotState, inj: InjectedState): NoticePlan {
@@ -193,30 +194,39 @@ export function planNotices(hot: HotState, inj: InjectedState): NoticePlan {
   seen.push(...state.filter((n) => n !== newest && unseen(n)).map((n) => n.id));
   // Never a share-state notice's stored words: one with no facts (an older agent wrote it, whenever that was: a
   // downgrade, or hooks and terminal at different builds after the one-time migration ran) is worded as "its share's
-  // state changed", from the state now like any other (E2E-AGENT cycle 13 C13-1).
+  // state changed", from the state now like any other (E2E-AGENT cycle 13 C13-1); the newer build's hot file gives it
+  // (and another build's notices) those facts, with how its share ended as every view reads it (cycle 14 C14-1).
   const facts = newest ? (newest.facts ?? changedFacts(hot)) : null;
+  const prev = inj.share_told ?? null;
   if (newest && facts && hot.share_now) {
     const fresh = unseen(newest);
-    const prev = inj.share_told ?? null;
-    const w = shareNotice(hot.local_id, newest.id, facts, hot.share_now, prev);
+    const changed = facts.e === "changed";
+    const toldFacts = prev ? (hot.notices.find((n) => n.id === prev.id)?.facts ?? null) : null;
+    const w = shareNotice(hot.local_id, newest.id, facts, hot.share_now, prev, toldFacts);
     if (w !== "hold") {
       if (fresh) seen.push(newest.id);
       // Seen, but by an older hook, which showed its stored text (that only says the sharing changed): told once now,
       // worded as now (E2E-AGENT cycle 12 C12-1).
       const olderHook = !fresh && prev?.id !== newest.id && !(inj.share_seen ?? []).includes(newest.id);
-      if (w && (shareRetell(newest.id, w, prev, fresh) || olderHook)) {
+      if (w && (shareRetell(newest.id, w, prev, fresh, changed) || olderHook)) {
         told = { id: newest.id, text: w.text };
         shareTold = { id: newest.id, key: w.key, tail: w.tail };
+      } else if (w && changed && (fresh || prev?.id !== newest.id)) {
+        // An older build's notice in the situation the session was last told: nothing new, and what it was told stands.
+        shareTold = { id: newest.id, key: w.key, tail: prev?.tail ?? w.tail };
       } else if (!w && (fresh || olderHook)) {
-        // Nothing to tell about it now (shared again since, say): kept as told with no words, so a later change of
-        // situation is told.
-        shareTold = { id: newest.id, key: "none:", tail: "" };
+        // Nothing to tell about it now (shared again since, say): kept as told with no words, with the situation it is
+        // in, so a later change of situation is told.
+        shareTold = noneTold(newest.id, hot.share_now);
       }
     }
   } else if (newest && unseen(newest)) {
-    // A hot file an older agent wrote, with no state to word it from: only what is true whenever it is shown.
+    // A hot file an older agent wrote, with no state to word it from: only what is true whenever it is shown. What the
+    // session was told of its situation before stands (the sentence names none), so the newer build's next hot file
+    // tells it when its situation differs from that, or, told none, once from the state then (E2E-AGENT cycle 14 C14-3).
     seen.push(newest.id);
     told = { id: newest.id, text: SHARE_CHANGED };
+    shareTold = prev && toldSituation(prev.key) ? { id: newest.id, key: prev.key, tail: prev.tail } : { id: newest.id, key: "changed:neutral", tail: "" };
   }
   const others = hot.notices.filter((n) => !state.includes(n) && unseen(n));
   seen.push(...others.map((n) => n.id));
@@ -225,6 +235,8 @@ export function planNotices(hot: HotState, inj: InjectedState): NoticePlan {
     if (!others.includes(n)) return false;
     const k = noticeKind(n.id);
     if (k.startsWith("resumed_")) return !!hot.resumed && k === `resumed_${hot.resumed}`;
+    // A release only while it holds: a later hold on its goal withdrew it (E2E-AGENT cycle 14 C14-2).
+    if (k.startsWith("release_") && hot.releases_now) return hot.releases_now.includes(k.slice("release_".length));
     if (k.startsWith("workspace_added_")) return !hot.share;
     return true;
   });

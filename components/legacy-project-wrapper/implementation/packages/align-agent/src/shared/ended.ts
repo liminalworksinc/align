@@ -34,9 +34,11 @@ export interface ShareAgain {
  * How `::align share` (`where`: "here", "in the session") shares a session whose share ended there again now, in every
  * view that says so (`::align status`, `align latch status`, `align status`, `align sessions`): while the ended shares
  * are unread since this sign-in, `align sync` first, as `::align share` itself then answers (cycle 12, section 6).
+ * `unsent`: its share never reached the server, so it is shared, not shared again.
  */
-export function shareAgainWords(unread: boolean, where: string, there = false): string {
-  const share = `\`::align share\`${where ? ` ${where}` : ""} shares it ${there ? "there " : ""}again`;
+export function shareAgainWords(unread: boolean, where: string, there = false, unsent = false): string {
+  // A share that never reached the server is shared, not shared again (E2E-AGENT cycle 14 C14-4).
+  const share = `\`::align share\`${where ? ` ${where}` : ""} shares it${there ? " there" : ""}${unsent ? "" : " again"}`;
   return unread ? `run \`align sync\` first (this machine has not yet heard whether its sharing was stopped on the web meanwhile), then ${share}` : share;
 }
 
@@ -113,8 +115,11 @@ export interface ShareFacts {
   via?: "login";
   /** With `via`: this machine signed out since, so the end now reads as a sign-out's (E2E-AGENT cycle 13, section 5). */
   out_since?: true;
-  /** A share asked for here that had not reached the server yet (still pending) when the sign-out ended it. */
+  /** A share asked for here that had not reached the server yet (still pending) when the sign-out (or the lost
+   *  workspace) ended it: every wording of its end says it was never shared (E2E-AGENT cycle 14 C14-4). */
   unsent?: true;
+  /** The writer generation of the build that stored it (`WRITER_GEN`; absent before cycle 14). */
+  g?: number;
 }
 
 /** A session's share state now, as its latch files and the status views have it (`renderHot`). */
@@ -157,39 +162,76 @@ export interface ShareWords {
 
 const STOPPED_ON_WEB = "Align: this session's sharing was stopped (Stop sharing on the web), so it stopped sharing here; its usage stays on this machine from now on.";
 
-function words(key: string, f: ShareFacts): string {
-  const again = f.goal ? ` (it counts toward "${f.goal}" again)` : "";
+/** The clause for a share that had not reached the server yet when `when` ended it, so it was never shared: one wording
+ *  for every notice about such an end (a sign-out, a replacing `align login`, a lost workspace), so none calls it a share
+ *  that ended or is shared "again" (E2E-AGENT cycle 14 C14-4). */
+export function neverSentWords(when: string): string {
+  return `this session's share had not reached the Align server yet when ${when}, so it was not shared`;
+}
+
+const RELOGIN_WHEN = "a new sign-in on this machine (`align login`) replaced the earlier one";
+const OUT_WHEN = "this machine signed out of Align";
+
+/** How the end of the share `f` (`why`: why it ended, as its latch has it) came, for `neverSentWords`. */
+function endWhen(f: ShareFacts, why: ShareNow["ended"]): string {
+  if (f.e === "access_lost" || why === "access_lost") return `you lost access to ${f.ws} in Align (you were removed from it or left it)`;
+  return f.via === "login" && !f.out_since ? RELOGIN_WHEN : OUT_WHEN;
+}
+
+function words(key: string, f: ShareFacts, why: ShareNow["ended"] = null): string {
+  const unsent = !!f.unsent;
+  const re = unsent ? "" : " again";
+  const again = f.goal ? ` (it counts toward "${f.goal}"${re})` : "";
+  const never = neverSentWords(endWhen(f, why));
+  // Out of reach: it can't be shared there (again) from here; one never sent says so in the same sentence.
+  const noShare = unsent ? `can't be shared there from here (${never})` : "can't be shared there again from here";
   switch (key) {
     case "out:signed_out":
       return `Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on. To share it again, run \`align login\` in a terminal, then type \`::align share\` here${again}.`;
     case "out:signed_out_unsent":
-      return `Align: this session's share had not reached the Align server yet when this machine signed out of Align, so it was not shared; its usage stays on this machine. To share it, run \`align login\` in a terminal, then type \`::align share\` here${again}.`;
+      return `Align: ${neverSentWords(OUT_WHEN)}; its usage stays on this machine. To share it, run \`align login\` in a terminal, then type \`::align share\` here${again}.`;
     case "out:signed_out_ended":
-      return `Align: this machine signed out of Align, so this session can't be shared again from here for now; its usage stays on this machine. To share it again, run \`align login\` in a terminal, then type \`::align share\` here${again}.`;
+      return unsent
+        ? `Align: this machine signed out of Align, so this session can't be shared from here for now (${never}); its usage stays on this machine. To share it, run \`align login\` in a terminal, then type \`::align share\` here${again}.`
+        : `Align: this machine signed out of Align, so this session can't be shared again from here for now; its usage stays on this machine. To share it again, run \`align login\` in a terminal, then type \`::align share\` here${again}.`;
     case "reshare:signed_in":
-      return `Align: this machine is signed in to Align again. To share this session again, type \`::align share\` here${again}.`;
+      return unsent
+        ? `Align: this machine is signed in to Align again. Earlier, ${never}; to share it, type \`::align share\` here${again}.`
+        : `Align: this machine is signed in to Align again. To share this session again, type \`::align share\` here${again}.`;
     case "reshare:relogin":
-      return `Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in; its usage stays on this machine until it is shared again. To share it again, type \`::align share\` here${again}.`;
+      return unsent
+        ? `Align: ${neverSentWords(RELOGIN_WHEN)}; its usage stays on this machine until it is shared. To share it, type \`::align share\` here${again}.`
+        : `Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in; its usage stays on this machine until it is shared again. To share it again, type \`::align share\` here${again}.`;
     case "reshare:workspace_back":
-      return `Align: this machine can reach ${f.ws} in Align again. To share this session there again, type \`::align share\` here${again}.`;
+      return unsent
+        ? `Align: this machine can reach ${f.ws} in Align again. Earlier, ${never}; to share it there, type \`::align share\` here${again}.`
+        : `Align: this machine can reach ${f.ws} in Align again. To share this session there again, type \`::align share\` here${again}.`;
     case "reshare:removed":
       return `Align: this session stopped sharing because you were removed from ${f.ws} in Align (or left it) while this machine was not in touch; its usage from then on stays on this machine. You are a member again, so to share it there again, type \`::align share\` here${again}.`;
     case "reshare:server_signed_out":
       return `Align: this session stopped sharing because the Align server ended its share when this machine signed out of Align (an earlier sign-in); its usage stays on this machine from now on. This machine is signed in now, so to share it again, type \`::align share\` here${again}.`;
     case "noreach:signed_in_noreach":
-      return `Align: this machine is signed in to Align again, but this sign-in does not reach ${f.ws}, so this session can't be shared there again from here; its usage stays on this machine.`;
+      return `Align: this machine is signed in to Align again, but this sign-in does not reach ${f.ws}, so this session ${noShare}; its usage stays on this machine.`;
     case "noreach:relogin_noreach":
-      return `Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in, and this sign-in does not reach ${f.ws}, so this session can't be shared there again from here; its usage stays on this machine.`;
+      return unsent
+        ? `Align: ${neverSentWords(RELOGIN_WHEN)}, and this sign-in does not reach ${f.ws}, so it can't be shared there from here; its usage stays on this machine.`
+        : `Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in, and this sign-in does not reach ${f.ws}, so this session can't be shared there again from here; its usage stays on this machine.`;
     case "noreach:signed_in_removed":
-      return `Align: this machine is signed in to Align again, but you are no longer a member of ${f.ws} in Align (you were removed from it or left it), so this session can't be shared there again from here; its usage stays on this machine.`;
+      return `Align: this machine is signed in to Align again, but you are no longer a member of ${f.ws} in Align (you were removed from it or left it), so this session ${noShare}; its usage stays on this machine.`;
     case "noreach:relogin_removed":
-      return `Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in, and you are no longer a member of ${f.ws} in Align (you were removed from it or left it), so this session can't be shared there again from here; its usage stays on this machine.`;
+      return unsent
+        ? `Align: ${neverSentWords(RELOGIN_WHEN)}, and you are no longer a member of ${f.ws} in Align (you were removed from it or left it), so it can't be shared there from here; its usage stays on this machine.`
+        : `Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in, and you are no longer a member of ${f.ws} in Align (you were removed from it or left it), so this session can't be shared there again from here; its usage stays on this machine.`;
     case "noreach:removed_again":
-      return `Align: you are no longer a member of ${f.ws} in Align (you were removed from it or left it), so this session can't be shared there again from here; its usage stays on this machine.`;
+      return `Align: you are no longer a member of ${f.ws} in Align (you were removed from it or left it), so this session ${noShare}; its usage stays on this machine.`;
+    case "noreach:reach_lost":
+      return `Align: this sign-in no longer reaches ${f.ws} in Align, so this session ${noShare}; its usage stays on this machine.`;
     case "noreach:access_lost":
-      return `Align: this session stopped sharing because you no longer have access to ${f.ws} in Align (you were removed from it or left it); its usage stays on this machine from now on.`;
+      return unsent
+        ? `Align: ${never}; its usage stays on this machine.`
+        : `Align: this session stopped sharing because you no longer have access to ${f.ws} in Align (you were removed from it or left it); its usage stays on this machine from now on.`;
     case "noreach:access_lost_again":
-      return `Align: this machine can no longer reach ${f.ws} in Align (you were removed from it or left it again), so this session can't be shared there again from here; its usage stays on this machine.`;
+      return `Align: this machine can no longer reach ${f.ws} in Align (you were removed from it or left it again), so this session ${noShare}; its usage stays on this machine.`;
     case "stopped:web":
       return STOPPED_ON_WEB;
     case "changed:live":
@@ -225,6 +267,36 @@ function stateTail(lid: string, now: ShareNow): string {
   return now.latched && now.ended ? latchNoticeTail(lid, now.reshare, now.reshare ? null : now.release, { unread: now.unread, login: now.login }) : "";
 }
 
+/** The situations a session can be told its share is in: live, stopped for good, signed out, shareable again, out of
+ *  reach. A notice is told again only when the session's situation differs from the one it was last told. */
+type Situation = "live" | "stopped" | "out" | "reshare" | "noreach";
+
+/** The session's situation now (`"hold"`: signed in again with the ended shares unread, so nothing is told yet). */
+export function stateSituation(now: ShareNow): Situation | "hold" {
+  if (now.live) return "live";
+  if (now.ended !== "device_signed_out" && now.ended !== "access_lost") return "stopped";
+  if (now.signed_in && now.unread) return "hold";
+  return !now.signed_in ? (now.ended === "access_lost" && !now.reaches ? "noreach" : "out") : now.reshare ? "reshare" : "noreach";
+}
+
+/** The situation a notice's words (`ShareTold.key`) told the session it was in; null when they told none (the neutral
+ *  sentence, or nothing). */
+export function toldSituation(key: string): Situation | null {
+  const s = situation(key);
+  if (s === "started" || key === "changed:live") return "live";
+  if (s === "stopped" || s === "share_err" || key === "changed:other") return "stopped";
+  if (s === "out" || s === "reshare" || s === "noreach") return s;
+  // "Nothing to tell" (`none:<situation>`), kept with the situation it was in then.
+  if (s === "none") return (["live", "stopped", "out", "reshare", "noreach"] as const).find((x) => x === key.slice(5)) ?? null;
+  return null;
+}
+
+/** What `planNotices` records when there is nothing to tell about a notice now: the situation it was in. */
+export function noneTold(id: string, now: ShareNow): ShareTold {
+  const sit = stateSituation(now);
+  return { id, key: `none:${sit === "hold" ? "" : sit}`, tail: "" };
+}
+
 /**
  * The notice about the share event `f` (stored as `id`) as it reads now, from the session's state now and what it was
  * last told (`told`, when that was about this same event): its words follow the state, and its latch sentence is the
@@ -233,11 +305,29 @@ function stateTail(lid: string, now: ShareNow): string {
  * one its person stopped on the web, C11-1); null when there is nothing to tell (a share that started and has since ended, say, or an ended share shared
  * again). Within one event the words change only with the situation (signed out, shareable again, out of reach,
  * stopped), so a notice is told again only when its advice changed.
+ *
+ * A notice an older build stored (`changed`: no facts, or another build's) continues what the session was last told,
+ * whatever event that was about: in the same situation it keeps those words (`toldFacts`: the facts of the notice they
+ * came from, when the hot file still has it), so it is never told a second time in one situation; in another, it is
+ * worded from the state now, a share a replacing `align login` ended never as "signed in again" (E2E-AGENT cycle 14
+ * C14-1).
  */
-export function shareNotice(lid: string, id: string, f: ShareFacts, now: ShareNow, told: ShareTold | null): ShareWords | "hold" | null {
-  const prev = told && told.id === id ? told : null;
+export function shareNotice(lid: string, id: string, f: ShareFacts, now: ShareNow, told: ShareTold | null, toldFacts: ShareFacts | null = null): ShareWords | "hold" | null {
+  const changed = f.e === "changed";
+  const sitNow = stateSituation(now);
+  if (changed && sitNow === "hold") return "hold";
+  if (changed && told && told.id !== id && toldSituation(told.key) === sitNow) {
+    // The same situation as it was last told: those words, as now.
+    const base = toldFacts && toldFacts.e !== "changed" ? shareNotice(lid, told.id, toldFacts, now, told) : null;
+    if (base && base !== "hold" && toldSituation(base.key) === sitNow) return base;
+    const tail = stateTail(lid, now);
+    return { key: told.key, tail, text: (situation(told.key) === "started" || situation(told.key) === "none" ? SHARE_CHANGED : words(told.key, f, now.ended)) + tail };
+  }
+  // About this same event; for an older build's notice, what the session was told of how its share ended (its words
+  // decide how a change of situation is worded: signed in "again", the workspace "back").
+  const prev = told && (told.id === id || (changed && ["out", "reshare", "noreach"].includes(situation(told.key)))) ? told : null;
   const tail = stateTail(lid, now);
-  const out = (key: string): ShareWords => ({ key, tail, text: words(key, f) + tail });
+  const out = (key: string): ShareWords => ({ key, tail, text: words(key, f, now.ended) + tail });
   switch (f.e) {
     case "started":
       return now.live ? { key: "started:text", tail: "", text: words("", f) } : null;
@@ -252,9 +342,9 @@ export function shareNotice(lid: string, id: string, f: ShareFacts, now: ShareNo
     case "upload_refused":
       return now.live ? null : out("stopped:refused");
     case "changed":
-      // An older agent's notice with no facts: what it said may no longer hold, so never its words. Live, or stopped
-      // for good, it is told as changed (true whenever shown); ended at a sign-out or a lost workspace, as such an end
-      // is told (held back while the ended shares are unread). E2E-AGENT cycle 13 C13-1.
+      // An older build's notice: what it said may no longer hold, so never its words. Live, or stopped for good, it is
+      // told as changed (true whenever shown); ended at a sign-out or a lost workspace, as such an end is told (held
+      // back while the ended shares are unread). E2E-AGENT cycle 13 C13-1.
       if (now.live) return out("changed:live");
       if (now.ended !== "device_signed_out" && now.ended !== "access_lost") return out("changed:other");
   }
@@ -262,10 +352,13 @@ export function shareNotice(lid: string, id: string, f: ShareFacts, now: ShareNo
   // sign-in and reach now. A share stopped for good since, or shared again, has a newer event or nothing to tell.
   if (now.live || (now.ended !== "device_signed_out" && now.ended !== "access_lost")) return null;
   // Signed in again, but its person may have stopped it on the web: nothing until the ended shares are read.
-  if (now.signed_in && now.unread) return "hold";
-  const sit = !now.signed_in ? (now.ended === "access_lost" && !now.reaches ? "noreach" : "out") : now.reshare ? "reshare" : "noreach";
+  if (sitNow === "hold") return "hold";
+  const sit = sitNow;
   if (prev && situation(prev.key) === sit) return out(prev.key);
   const was = prev ? situation(prev.key) : null;
+  // Ended by a new `align login` that replaced this machine's pairing, and this machine has not signed out since: never
+  // "signed out" or "signed in again" (cycle 12, section 6; C14-1). Told the sign-out's words before, it did sign out.
+  const relogin = f.via === "login" && !f.out_since && now.ended === "device_signed_out" && was !== "out";
   if (sit === "out") return out(now.ended === "device_signed_out" ? (f.unsent ? "out:signed_out_unsent" : "out:signed_out") : "out:signed_out_ended");
   if (sit === "reshare") {
     if (!prev && f.e === "removed") return out("reshare:removed");
@@ -273,22 +366,27 @@ export function shareNotice(lid: string, id: string, f: ShareFacts, now: ShareNo
     // Told this sign-in does not reach its workspace: what changed is the reach (a workspace given back on the Devices
     // page or at a re-invite), not the sign-in (cycle 12, section 6).
     if (was === "noreach") return out("reshare:workspace_back");
-    // Ended by a new `align login` that replaced this machine's pairing: it never signed out (cycle 12, section 6).
-    if (!prev && f.via === "login" && !f.out_since && now.ended === "device_signed_out") return out("reshare:relogin");
+    if (relogin) return out("reshare:relogin");
     return out(now.ended === "device_signed_out" || was === "out" ? "reshare:signed_in" : "reshare:workspace_back");
   }
   // Out of its workspace because its person is no longer a member: the removal is named, not this sign-in's reach, so
   // nobody signs in again hoping to tick it (E2E-AGENT cycle 13, section 5).
   const removed = now.member === false;
-  if (!prev && f.via === "login" && !f.out_since && now.ended === "device_signed_out") return out(removed ? "noreach:relogin_removed" : "noreach:relogin_noreach");
+  if (relogin && was !== "reshare") return out(removed ? "noreach:relogin_removed" : "noreach:relogin_noreach");
   if (removed && now.ended === "device_signed_out") return out(was === "reshare" ? "noreach:removed_again" : "noreach:signed_in_removed");
+  // Told it could be shared again after a replacing `align login`, now out of reach: the reach changed, never "signed in
+  // again" (C14-1).
+  if (relogin) return out("noreach:reach_lost");
   if (now.ended === "device_signed_out" || (was === "out" && now.signed_in)) return out(removed ? "noreach:signed_in_removed" : "noreach:signed_in_noreach");
   return out(was === "reshare" ? "noreach:access_lost_again" : "noreach:access_lost");
 }
 
 /** Tell the notice `w` now, after `told`: when it is about a newer event (`fresh`), or its situation changed since, or
- *  its latch sentence changed while it still blocks (a re-pairing took the release away, say). */
-export function shareRetell(id: string, w: ShareWords, told: ShareTold | null, fresh: boolean): boolean {
+ *  its latch sentence changed while it still blocks (a re-pairing took the release away, say). A notice an older build
+ *  stored (`changed`) is about no event of its own: told only when the situation differs from the one the session was
+ *  last told (or it was told none), or its latch sentence changed while it still blocks (E2E-AGENT cycle 14 C14-1). */
+export function shareRetell(id: string, w: ShareWords, told: ShareTold | null, fresh: boolean, changed = false): boolean {
+  if (changed) return !told || toldSituation(told.key) === null || toldSituation(told.key) !== toldSituation(w.key) || (!!w.tail && w.tail !== told.tail);
   if (fresh || !told || told.id !== id) return fresh;
   return situation(told.key) !== situation(w.key) || (!!w.tail && w.tail !== told.tail);
 }
