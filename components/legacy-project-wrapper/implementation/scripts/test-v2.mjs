@@ -4618,7 +4618,19 @@ try {
         await press(po, cr1.id, "Review this decision");
         await sleep(300);
         await press(po, cr1.id, "Confirm: Accept if");
-        await po.waitForFunction((sel) => /Recorded: you accepted revision 1 if Drew Requester acknowledges your condition/.test(document.querySelector(sel)?.innerText ?? ""), { timeout: 15000 }, card(cr1.id));
+        // The Recorded line shows before the card is read again: wait for the reloaded card (countered, with the
+        // condition and "Not confirmed yet"), not for a fixed time, so a slow reload can't be caught half-way.
+        await po
+          .waitForFunction(
+            (sel, cond) => {
+              const t = document.querySelector(sel)?.innerText ?? "";
+              return /Recorded: you accepted revision 1 if Drew Requester acknowledges your condition/.test(t) && t.includes(`Accept if: ${cond}`) && t.includes("Not confirmed yet");
+            },
+            { timeout: 15000 },
+            card(cr1.id),
+            COND,
+          )
+          .catch(() => undefined);
         const afterIf = (await read(cr1.id)).json;
         const ifText = await po.$eval(card(cr1.id), (e) => e.innerText);
         check(
