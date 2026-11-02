@@ -2041,6 +2041,24 @@ try {
     `${money ? "" : "no lib/v2/money.mts; "}${crZ5.status} ${z5Micros} ${(mcpZ5.text ?? "").slice(0, 1500)}`,
   );
   await crAct(U1, GZ5.id, crZ5.json?.id, "withdraw");
+  // C7-3 (E2E-WEB cycle 7): a cost that would round to "$0.0000" reads "under $0.0001", and the amount is rounded before
+  // the format is chosen, so 9,999 micro-dollars reads "$0.01" as 10,000 does; the MCP text uses the same words.
+  const GC73 = (await mkGoal(U3, { title: "Dust spend goal", visibility: "workspace" })).json;
+  const SC73 = sessionKey(D3, A, "claude-code", "native-c73");
+  await put(D3, SC73);
+  const EC73 = epochId();
+  await epoch(D3, SC73, { epoch_id: EC73, goal_id: GC73.id, starts_at: T0 });
+  await upload(D3, SC73, [usageRow(D3, "c73-1", EC73, { est_list_usd_micros: 30 })]);
+  const crC73 = await propose(U1, GC73.id, { base_version: 1, changes: { title: "Dust spend goal, renamed" }, reason: "A clearer name" });
+  const mcpC73 = await mcpCall("U1", D1, "align_list_change_requests", { state: "pending" });
+  const usdCases = { 1: "under $0.0001", 30: "under $0.0001", 49: "under $0.0001", 50: "$0.0001", 1000: "$0.0010", 9949: "$0.0099", 9950: "$0.01", 9999: "$0.01", 10000: "$0.01", 14999: "$0.01", 15000: "$0.02", 0: "$0.00" };
+  const usdWrong = Object.entries(usdCases).filter(([m, want]) => money?.usd(Number(m)) !== want).map(([m, want]) => `${m}: ${money?.usd(Number(m))} (want ${want})`);
+  check(
+    "C7-3: usd() never reads a non-zero cost as nothing and rounds before choosing its format: 1, 30 and 49 micro-dollars read \"under $0.0001\", 50 \"$0.0001\", 9,949 \"$0.0099\", 9,950 to 14,999 \"$0.01\" (never \"$0.0100\"), 15,000 \"$0.02\", 0 \"$0.00\"; a snapshot of 30 micro-dollars reads \"under $0.0001 estimated over 30 days in 1 request\" in the MCP text, never \"$0.0000\"",
+    usdWrong.length === 0 && crC73.status === 201 && (mcpC73.text ?? "").includes("under $0.0001 estimated over 30 days in 1 request") && !(mcpC73.text ?? "").includes("$0.0000"),
+    `${JSON.stringify(usdWrong)} ${crC73.status} ${(mcpC73.text ?? "").slice(0, 1500)}`,
+  );
+  await crAct(U1, GC73.id, crC73.json?.id, "withdraw");
   const evEventText = withDb((d) => d.prepare("SELECT * FROM v2_events").all()).map((r) => Object.values(r).join(" ")).join("\n");
   const evRowsAll = withDb((d) => d.prepare("SELECT url, label FROM v2_change_request_evidence").all());
   check(
