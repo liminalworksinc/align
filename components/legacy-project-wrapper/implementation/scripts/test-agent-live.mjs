@@ -720,7 +720,7 @@ try {
   const Q2 = startQ("q2");
   const HOLD_CANARY = `HOLD-CANARY-${randomBytes(4).toString("hex")}`;
   const REASON = `Security review of the replica keys ${HOLD_CANARY}`;
-  const HOLD_WORDS = `Align: Lena Lead paused all agents on goal "${RQ_TITLE}": "${REASON}". Work resumes when they release it. Your work so far is saved.`;
+  const HOLD_WORDS = `Align: Lena Lead paused all agents on goal "${RQ_TITLE}": "${REASON}". Work resumes when they release it. Your work so far is saved. Tell the user and wait for instructions.`;
   const holdDirs = (key) =>
     sdb((d) =>
       d.prepare("SELECT d.id FROM v2_directives d JOIN v2_directive_targets t ON t.directive_id = d.id WHERE d.ws_id = ? AND d.kind = 'hold' AND d.goal_id = ? AND t.session_key = ? ORDER BY d.seq").all(W, GQ?.id, key),
@@ -840,6 +840,16 @@ try {
 
   // -- E2E-AGENT B4/G2/B6: logout ends this machine's shares on the server and here; a stopped one stays blocked with
   //    a way out; after logging in again the developer shares it again and the web can resume it --
+  // E2E-AGENT cycle 7 C7-1: a session in the ledger folder (its rule shares it toward the goal) whose only prompt runs
+  // before the sync applies the rule, as `claude -p`'s does; it is shared again after the re-pair below.
+  const R7 = { sid: randomUUID() };
+  R7.tr = path.join(claudeDir, "projects", "-work-ledger", `${R7.sid}.jsonl`);
+  const r7Start = hook("SessionStart", { session_id: R7.sid, source: "startup", cwd: repo, transcript_path: R7.tr, model: "claude-sonnet-4-5" });
+  const r7First = hook("UserPromptSubmit", { session_id: R7.sid, prompt_id: "r7-p0", prompt: "Reply with just OK.", cwd: repo, transcript_path: R7.tr });
+  sync();
+  const r7Key = sessionKey(W, "claude-code", R7.sid);
+  const r7Shared = sdb((d) => d.prepare("SELECT state FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, r7Key))?.state;
+  const r7Prompt = (text) => hook("UserPromptSubmit", { session_id: R7.sid, prompt_id: `r7-${++qn}`, prompt: text, cwd: repo, transcript_path: R7.tr });
   const stopQ1 = await ws(M, "POST", `/sessions/${Q1.key}/stop`, {});
   sync();
   const q1Stopped = tool(Q1, "Bash");
@@ -874,6 +884,9 @@ try {
   if (login2Code === "timeout") login2.kill();
   outputs.push(login2Out);
   const notShared = !JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").some((s) => / \(Ledger Co\)$/.test(s.shared) && s.shared.startsWith("shared"));
+  // E2E-AGENT cycle 7 C7-2: signed in again, the session stopped from the web is told so, as its deny says.
+  const q1In = prompt(Q1, "are we back?");
+  const q1InDeny = denied(tool(Q1, "Bash")) ?? "";
   const reshare = prompt(Q1, "::align share confirm");
   sync();
   const q1Again = sdb((d) => d.prepare("SELECT state, ended_reason, device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, Q1.key));
@@ -887,6 +900,25 @@ try {
     M2.status === 200 && approve2.status === 200 && login2Code === 0 && notShared && reshare.json?.decision === "block" && q1Again?.state === "shared" && q1Again.ended_reason === null && q1Again.device_id === newDevice &&
       stillBlocked !== null && webResume.status === 200 && denied(q1Free3) === null,
     `${M2.status} ${approve2.status} ${approve2.text} ${login2Code} ${login2Out} ${notShared} ${reshare.stdout} ${JSON.stringify(q1Again)} ${newDevice} blocked=${stillBlocked} ${webResume.text} free=${q1Free3.stdout}`,
+  );
+  check(
+    "signed in again (E2E-AGENT cycle 7 C7-2): after `align logout` and `align login`, the stopped session's next prompt tells only that this machine is signed in again and `::align share` shares it again, after which the web can lift the stop, as its deny says; never `align login` or `align stop-sharing`",
+    (q1In.system ?? "").startsWith("Align: this machine is signed in to Align again. To share this session again, type `::align share` here") &&
+      (q1In.system ?? "").includes("once it is shared again, that can be lifted there") && !/align login|align stop-sharing/.test(q1In.system ?? "") &&
+      q1InDeny.includes("signed in again now), so the user can share it there again by typing `::align share` in this session"),
+    `back=${q1In.stdout} deny=${q1InDeny}`,
+  );
+  const r7Again = r7Prompt("::align share confirm");
+  sync();
+  const r7Row = sdb((d) => d.prepare("SELECT state, device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, r7Key));
+  const r7Told = r7Prompt("go on");
+  const r7Once = r7Prompt("go on");
+  check(
+    "shared again after a folder rule's share (E2E-AGENT cycle 7 C7-1): a session whose prompt ran before the sync applied its folder rule, signed out and in again, then `::align share confirm`: the server shares it on the new device, and its next prompt tells the model once that it counts toward the goal again",
+    (r7Start.context ?? "").includes(`Goal: ${GOAL_TITLE}`) && r7First.stdout === "" && r7Shared === "shared" && /sharing requested toward "Cut over the ledger database"/.test(r7Again.json?.reason ?? "") &&
+      r7Row?.state === "shared" && r7Row.device_id === newDevice &&
+      /^\[Align\] From this turn this session counts toward goal "Cut over the ledger database" \(v\d+, active\)\./.test(r7Told.context ?? "") && r7Once.context === null,
+    `start=${r7Start.stdout.slice(0, 200)} first=${r7First.stdout} ${r7Shared} again=${r7Again.stdout} ${JSON.stringify(r7Row)} told=${r7Told.stdout} once=${r7Once.stdout}`,
   );
   // -- E2E-AGENT cycle 4 C4-1: the past session shared under the first pairing (now ended there as device_signed_out)
   //    has its shared history deleted from the new pairing: the server deletes it (any live device of the account that

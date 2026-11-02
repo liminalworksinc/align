@@ -459,6 +459,15 @@ export function holdReason(latch: HoldLatch | null): string {
   return `Align: ${clean(h.by, 50) || "Someone"} paused all agents on goal "${clean(h.goal_title, 100)}"${reason}${more}. Work resumes when they release it. Your work so far is saved.`;
 }
 
+/**
+ * A session its person stopped sharing (`::align unshare`, `align stop-sharing`, Stop sharing on the web) while it was
+ * shared, whose shared history is kept: the server never shares it again, so `::align share` and `align share` say so
+ * instead of previewing a share (cycle 7). `then`: how to share it once its history is deleted.
+ */
+export function stoppedForGoodWords(lid: string, then: string): string {
+  return `this session's sharing was stopped (\`::align unshare\`, \`align stop-sharing\` or Stop sharing on the web), and a session whose sharing was stopped is not shared again, so it stays stopped. To share it again, counting from now, first delete its shared history (it leaves every total): run \`align delete-history ${lid.slice(0, 8)}\` in a terminal, or use Delete shared history on the web's Sessions page; then ${then}.`;
+}
+
 export function releaseNotice(by: string, title: string): string {
   return `Align: ${clean(by, 50) || "Someone"} released the hold on "${clean(title, 100)}".`;
 }

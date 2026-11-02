@@ -277,7 +277,7 @@ describe("cycle 6, section 5: works, but would confuse a developer", () => {
     for (const tool of ["Bash", "Read"]) {
       const d = use(tool);
       assert.equal(d?.hookSpecificOutput?.permissionDecision, "deny", `${tool} before any sync`);
-      assert.equal(d.hookSpecificOutput.permissionDecisionReason, 'Align: all agents on goal "Ship the v2 onboarding flow" were paused from its Align workspace. Work resumes when the hold is released. Your work so far is saved.');
+      assert.equal(d.hookSpecificOutput.permissionDecisionReason, 'Align: all agents on goal "Ship the v2 onboarding flow" were paused from its Align workspace. Work resumes when the hold is released. Your work so far is saved. Tell the user and wait for instructions.');
     }
     // The status views show the hold PreToolUse enforces.
     assert.match(json(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "st", prompt: "::align status", cwd: dir }).stdout).reason, /Goal hold: on goal "Ship the v2 onboarding flow" \(held in Align's cached goals; it reaches this session at the next sync\) \(all tools blocked\)/);

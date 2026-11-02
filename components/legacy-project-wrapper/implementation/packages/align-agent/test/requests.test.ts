@@ -285,7 +285,7 @@ describe("requests", () => {
       ["received", "enforced"],
     );
     ctx.db.close(); // no sync running: the hold file alone blocks
-    const want = `Align: Dana Lee paused all agents on goal "Ship the v2 onboarding flow": "Security review". Work resumes when they release it. Your work so far is saved.`;
+    const want = `Align: Dana Lee paused all agents on goal "Ship the v2 onboarding flow": "Security review". Work resumes when they release it. Your work so far is saved. Tell the user and wait for instructions.`;
     for (const tool of ["Bash", "Read", "Grep"]) {
       const out = json(runHook(t, "claude", "PreToolUse", { session_id: sid, tool_name: tool }).stdout);
       assert.equal(out.hookSpecificOutput.permissionDecision, "deny", tool);
@@ -322,7 +322,7 @@ describe("requests", () => {
     handleDirective(c2, directive("hold", sid, { hold: { ...hold, reason: null } }));
     handleDirective(c2, directive("resume", sid));
     const still = json(runHook(t, "claude", "PreToolUse", { session_id: sid, tool_name: "Read" }).stdout);
-    assert.equal(still.hookSpecificOutput.permissionDecisionReason, `Align: Dana Lee paused all agents on goal "Ship the v2 onboarding flow". Work resumes when they release it. Your work so far is saved.`);
+    assert.equal(still.hookSpecificOutput.permissionDecisionReason, `Align: Dana Lee paused all agents on goal "Ship the v2 onboarding flow". Work resumes when they release it. Your work so far is saved. Tell the user and wait for instructions.`);
     // Stop-sharing lifts a hold, like the stop latch.
     stopSharing(c2, lid);
     assert.ok(!fs.existsSync(file));

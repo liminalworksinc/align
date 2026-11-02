@@ -14,8 +14,9 @@ Zero runtime dependencies (Node 24+: `node:sqlite`, `node:crypto`, `fetch`).
 ```
 align login [--server <url>] [--name <device name>]   device flow; key-bound tokens; names your other paired devices
 align logout                                          revokes this device, wipes tokens and the device key; this
-                                                      machine's shares stop (sessions stopped from the web stay
-                                                      blocked until `align stop-sharing`). If the server can't be
+                                                      machine's shares stop (sessions stopped or held from the web
+                                                      stay blocked: after `align login`, `::align share` shares one
+                                                      again and the web can lift it). If the server can't be
                                                       reached, the next `align sync` or `align login` revokes it
 align status                                          identity, last sync, hooks + hash, outbox, unpriced
 align sessions [--all] [--json]                       local sessions, tokens, basis, list-price estimate (offline)
