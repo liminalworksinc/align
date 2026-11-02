@@ -451,6 +451,16 @@ export async function setAgentStop(pp: PolicyPrincipal, key: string, stop: boole
   return { directive_id: id, agent_stopped: stop };
 }
 
+/** The machine that shared one of the caller's own sessions, as the Sessions tab words how to share it again (W7): its
+ *  name, whether it signed out of Align, and whether it has this workspace now (given back on Join or from the Devices
+ *  page). Null when no device is left (its person's account was deleted). */
+function sharedFrom(wsId: string, deviceId: string | null) {
+  const d = deviceId ? get<{ id: string; name: string; revoked_at: string | null }>("SELECT id, name, revoked_at FROM v2_devices WHERE id = ?", deviceId) : undefined;
+  if (!d) return null;
+  const has = !d.revoked_at && !!get("SELECT 1 AS x FROM v2_device_grants WHERE device_id = ? AND ws_id = ?", d.id, wsId);
+  return { id: d.id, name: d.name, signed_out: !!d.revoked_at, has_workspace: has };
+}
+
 /** The sessions page: the caller's own shared sessions in full; for workspace owners, every shared session's
  *  alias, owner, start and state (for stop/resume), never its title or usage. */
 export function listSessions(pp: PolicyPrincipal) {
@@ -475,6 +485,7 @@ export function listSessions(pp: PolicyPrincipal) {
       state: s.state,
       stopped_at: s.stopped_at,
       ended_reason: s.ended_reason,
+      device: sharedFrom(pp.wsId, s.device_id),
       current_epoch: e ? { ...epochOut(e), goal: goalLabel(e.goal_id) } : null,
       governing_goal: goalLabel(s.governing_goal_id),
       agent_stopped: !!s.agent_stopped,

@@ -13,14 +13,16 @@ export function str(b: Body, k: string, max = 300, { min = 1 }: { min?: number }
   return t;
 }
 
-/** Characters a one-line name never keeps: controls (C0, DEL, C1) and Unicode line and paragraph separators become a
- *  space, as runs of whitespace do; bidirectional embeddings, overrides and isolates and zero-width spaces are dropped,
- *  so a name reads the same wherever it is shown. */
+/** Characters a one-line name never keeps, by Unicode property rather than a list (W3): controls (category Cc: C0, DEL,
+ *  C1) and Unicode line and paragraph separators become a space, as runs of whitespace do; invisible format characters
+ *  (category Cf: bidirectional marks, embeddings, overrides and isolates, the Arabic letter mark, zero-width spaces and
+ *  joiners, word joiners, invisible operators, the byte order mark, the Mongolian vowel separator, soft hyphens) and
+ *  lone surrogates (Cs) are dropped, so a name reads the same wherever it is shown. */
 const NAME_SPACE = /[\p{Cc}\s\u2028\u2029]+/gu;
-const NAME_DROP = /[\u200B\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/gu;
+const NAME_DROP = /[\p{Cf}\p{Cs}]/gu;
 
 /** A one-line name (a device name, Z4): `str`'s rules after control characters and whitespace runs become one space
- *  and invisible direction marks are dropped; nothing left is 400 "<k> is required". */
+ *  and invisible format characters are dropped; nothing left is 400 "<k> is required". */
 export function oneLine(b: Body, k: string, max = 300): string {
   const v = b[k];
   if (typeof v !== "string") throw badRequest(`${k} must be a string`);

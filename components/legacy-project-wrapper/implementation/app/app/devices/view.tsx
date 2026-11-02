@@ -27,14 +27,16 @@ export default function Devices({ me }: { me: Me }) {
   const mine = useApi<{ workspaces: WsSummary[] }>("/api/v2/workspaces");
   const act = useAction();
   const [pick, setPick] = useState<Record<string, string>>({});
-  /** Give a device a workspace. A device that is no longer the person's (signed out in another tab, say), or a workspace
-   *  they left, reads both lists again, so its row shows it revoked and offers nothing (Z2), as the invite page does. */
+  /** Give a device a workspace. A device that is no longer the person's (signed out in another tab, say), a workspace
+   *  they left or deleted (404, W1), or one the device was given in another tab (409 already_granted, W2) reads both
+   *  lists again, so the row shows what is true now (revoked, or with the workspace and not offering it), as the invite
+   *  page does; the server's message says what happened. */
   const give = (deviceId: string, wsId: string) =>
     act.run(async () => {
       try {
         await api(`/api/v2/devices/${deviceId}/workspaces`, { body: { workspace_id: wsId } });
       } catch (e) {
-        if (e instanceof ApiError && e.status === 404) {
+        if (e instanceof ApiError && (e.status === 404 || e.status === 409)) {
           list.reload();
           mine.reload();
         }

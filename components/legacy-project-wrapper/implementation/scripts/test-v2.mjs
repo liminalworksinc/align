@@ -304,7 +304,21 @@ async function pairDevice(who, user, wsIds, name = `${who}'s laptop`, replaces =
   if (ap.status !== 200) throw new Error(`approve ${ap.status} ${ap.text}`);
   const t = await call(who, "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: a.json.device_code, ...(replaces ? { replaces } : {}) } });
   if (t.status !== 200) throw new Error(`token ${t.status} ${t.text}`);
-  return { ...keys, who, user, id: t.json.device_id, access: t.json.access_token, refresh: t.json.refresh_token };
+  return { ...keys, who, user, id: t.json.device_id, access: t.json.access_token, refresh: t.json.refresh_token, approved: ap.json };
+}
+
+/** A pending pairing request written straight into the database (the pairing limit is spent by then), with the device
+ *  code that polls it. */
+function insertPairing(name, { ageMs = 0 } = {}) {
+  const deviceCode = randomBytes(32).toString("base64url");
+  const letters = Array.from(randomBytes(8), (x) => "BCDFGHJKLMNPQRSTVWXZ"[x % 20]).join("");
+  const userCode = `${letters.slice(0, 4)}-${letters.slice(4)}`;
+  withDb((d) =>
+    d
+      .prepare("INSERT INTO v2_device_requests (id, device_code_hash, user_code, device_name, public_key, created_at, expires_at, interval_s, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')")
+      .run(`dr_${randomBytes(12).toString("hex")}`, sha256hex(deviceCode), userCode, name, newDeviceKeys().pub, new Date(Date.now() - ageMs).toISOString(), new Date(Date.now() + 500_000).toISOString(), 5),
+  );
+  return { deviceCode, userCode };
 }
 
 /** A paired device written straight into the database, with a live access token (the device-pairing limit, 10 per
@@ -771,7 +785,7 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 19, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds and deleted-session markers included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 19 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 20, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds and deleted-session markers included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 20 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
@@ -1151,6 +1165,27 @@ try {
     d.prepare("DELETE FROM v2_devices WHERE id = ?").run(notMine.id);
   });
   check("device (E2E-AGENT cycle 5): a new pairing named as one of the person's live devices gets a distinguishing suffix (\"reuse test (2)\"), so no two live devices share a name, also when the poll names another person's device as the one it replaces", drName === "reuse test (2)", String(drName));
+  check(
+    "W4 (E2E-WEB cycle 7): the approval answers the device's name as it will be stored, decided when the person approves it: {state:\"approved\", device_name:\"reuse test (2)\", asked_as:\"reuse test\"}, the name the device then has",
+    DR.approved?.state === "approved" && DR.approved.device_name === "reuse test (2)" && DR.approved.asked_as === "reuse test" && drName === DR.approved.device_name,
+    JSON.stringify(DR.approved),
+  );
+  // W4: two pairings of one name approved together get two names at approval, and keep them whichever polls first.
+  const pairPoll = (code) => call("D", "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: code } });
+  const twinA = insertPairing("twin approval");
+  const twinB = insertPairing("twin approval");
+  const twinApA = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1.cookie, body: { user_code: twinA.userCode, workspace_ids: [A] } });
+  const twinApB = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1.cookie, body: { user_code: twinB.userCode, workspace_ids: [A] } });
+  const twinTokB = await pairPoll(twinB.deviceCode);
+  const twinTokA = await pairPoll(twinA.deviceCode);
+  const twinNames = withDb((d) => [twinTokA, twinTokB].map((t) => d.prepare("SELECT name FROM v2_devices WHERE id = ?").get(t.json?.device_id ?? "")?.name));
+  check(
+    "W4: two pairings of one name approved together are named at approval (\"twin approval\", then \"twin approval (2)\", the first one's name held until its poll), and each device keeps the name its approval answered, even when the second polls first",
+    twinApA.json?.device_name === "twin approval" && twinApB.json?.device_name === "twin approval (2)" && twinTokA.status === 200 && twinTokB.status === 200 &&
+      twinNames[0] === "twin approval" && twinNames[1] === "twin approval (2)",
+    `${twinApA.text} ${twinApB.text} ${twinTokA.status} ${twinTokB.status} ${JSON.stringify(twinNames)}`,
+  );
+  withDb((d) => d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id IN (?, ?)").run(new Date().toISOString(), twinTokA.json?.device_id ?? "", twinTokB.json?.device_id ?? ""));
   // E2E-AGENT cycle 6: two logins approved together. The first's device ("race mac") is replaced by the second's ("race
   // mac (2)", named while the first was live); the first's revoke names its replacement, which takes the plain name.
   // Not while another live device of the person has it, never for another person's device, and never without the name.
@@ -2041,6 +2076,24 @@ try {
     `${money ? "" : "no lib/v2/money.mts; "}${crZ5.status} ${z5Micros} ${(mcpZ5.text ?? "").slice(0, 1500)}`,
   );
   await crAct(U1, GZ5.id, crZ5.json?.id, "withdraw");
+  // C7-3 (E2E-WEB cycle 7): a cost that would round to "$0.0000" reads "under $0.0001", and the amount is rounded before
+  // the format is chosen, so 9,999 micro-dollars reads "$0.01" as 10,000 does; the MCP text uses the same words.
+  const GC73 = (await mkGoal(U3, { title: "Dust spend goal", visibility: "workspace" })).json;
+  const SC73 = sessionKey(D3, A, "claude-code", "native-c73");
+  await put(D3, SC73);
+  const EC73 = epochId();
+  await epoch(D3, SC73, { epoch_id: EC73, goal_id: GC73.id, starts_at: T0 });
+  await upload(D3, SC73, [usageRow(D3, "c73-1", EC73, { est_list_usd_micros: 30 })]);
+  const crC73 = await propose(U1, GC73.id, { base_version: 1, changes: { title: "Dust spend goal, renamed" }, reason: "A clearer name" });
+  const mcpC73 = await mcpCall("U1", D1, "align_list_change_requests", { state: "pending" });
+  const usdCases = { 1: "under $0.0001", 30: "under $0.0001", 49: "under $0.0001", 50: "$0.0001", 1000: "$0.0010", 9949: "$0.0099", 9950: "$0.01", 9999: "$0.01", 10000: "$0.01", 14999: "$0.01", 15000: "$0.02", 0: "$0.00" };
+  const usdWrong = Object.entries(usdCases).filter(([m, want]) => money?.usd(Number(m)) !== want).map(([m, want]) => `${m}: ${money?.usd(Number(m))} (want ${want})`);
+  check(
+    "C7-3: usd() never reads a non-zero cost as nothing and rounds before choosing its format: 1, 30 and 49 micro-dollars read \"under $0.0001\", 50 \"$0.0001\", 9,949 \"$0.0099\", 9,950 to 14,999 \"$0.01\" (never \"$0.0100\"), 15,000 \"$0.02\", 0 \"$0.00\"; a snapshot of 30 micro-dollars reads \"under $0.0001 estimated over 30 days in 1 request\" in the MCP text, never \"$0.0000\"",
+    usdWrong.length === 0 && crC73.status === 201 && (mcpC73.text ?? "").includes("under $0.0001 estimated over 30 days in 1 request") && !(mcpC73.text ?? "").includes("$0.0000"),
+    `${JSON.stringify(usdWrong)} ${crC73.status} ${(mcpC73.text ?? "").slice(0, 1500)}`,
+  );
+  await crAct(U1, GC73.id, crC73.json?.id, "withdraw");
   const evEventText = withDb((d) => d.prepare("SELECT * FROM v2_events").all()).map((r) => Object.values(r).join(" ")).join("\n");
   const evRowsAll = withDb((d) => d.prepare("SELECT url, label FROM v2_change_request_evidence").all());
   check(
@@ -2423,6 +2476,11 @@ try {
       deskMe.json?.workspaces?.map((w) => w.id).join() === A && JSON.stringify(deskDirs.json?.workspaces) === JSON.stringify([A]) && audDesk.length === 1 && audDesk[0].actor?.id === U5.id,
     `${gStale.text} ${gOther.status} ${gNotMember.status} ${gRevoked.status} ${gBadWs.status} ${gBearer.status} [${refusedGrants}] ${gOk.text} ${gAgain.text} ${deskMe.text} ${deskDirs.text} ${JSON.stringify(audDesk)}`,
   );
+  check(
+    "W1 (E2E-WEB cycle 7): giving a device a workspace I am not a member of is 404 saying what happened, never a bare \"Not found\": \"This workspace is not one of yours any more (it was deleted, or you left it or were removed from it), so the device was given nothing.\"",
+    gNotMember.status === 404 && gNotMember.json?.message === "This workspace is not one of yours any more (it was deleted, or you left it or were removed from it), so the device was given nothing.",
+    gNotMember.text,
+  );
   const webMe = await call("U5", "GET", "/api/v2/me", { cookie: U5.cookie });
   check(
     "devices (E2E-AGENT cycle 6): a device's GET /me lists as other_workspaces ({id, name}) its person's workspaces it was not given, never one they are not a member of; given one, it moves to workspaces; the web's /me has no other_workspaces",
@@ -2497,6 +2555,33 @@ try {
         `${revokedElsewhere.status} ${z2.row} | ${z2.body.slice(0, 300)}`,
       );
 
+      // W2 and W1 (E2E-WEB cycle 7): the cart lacks a third workspace, which it is given in another tab; then a fourth,
+      // which is deleted in another tab. Each press says what happened and reads both lists again.
+      const u5Third = (await call("U5", "POST", "/api/v2/workspaces", { cookie: U5.cookie, body: { name: "U5 third" } })).json?.id;
+      await page.goto(`${BASE}/app/devices`, { waitUntil: "networkidle0" });
+      await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes("Give this device the workspace"), { timeout: 15000 }, cartRow).catch(() => undefined);
+      const grantedElsewhere = await give(U5, cart.id, u5Third);
+      await giveOn(cartRow).catch(() => undefined);
+      await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes("U5 third") && !document.querySelector(sel)?.textContent?.includes("Give this device the workspace"), { timeout: 15000 }, cartRow).catch(() => undefined);
+      const w2 = await page.evaluate((sel) => ({ row: document.querySelector(sel)?.textContent ?? "", body: document.body.innerText }), cartRow);
+      check(
+        "W2 (ui): Give this device the workspace for a workspace the device was given in another tab says \"This device already has this workspace\" and reads the lists again: the row lists it and offers nothing more",
+        !!u5Third && grantedElsewhere.status === 200 && w2.body.includes("This device already has this workspace") && w2.row.includes("U5 third") && !w2.row.includes("Give this device the workspace"),
+        `${grantedElsewhere.status} ${w2.row} | ${w2.body.slice(0, 300)}`,
+      );
+      const u5Fourth = (await call("U5", "POST", "/api/v2/workspaces", { cookie: U5.cookie, body: { name: "U5 fourth" } })).json?.id;
+      await page.goto(`${BASE}/app/devices`, { waitUntil: "networkidle0" });
+      await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes("Give this device the workspace"), { timeout: 15000 }, cartRow).catch(() => undefined);
+      const deletedElsewhere = await call("U5", "DELETE", `/api/v2/workspaces/${u5Fourth}`, { cookie: U5.cookie });
+      await giveOn(cartRow).catch(() => undefined);
+      await page.waitForFunction((sel) => !document.querySelector(sel)?.textContent?.includes("Give this device the workspace"), { timeout: 15000 }, cartRow).catch(() => undefined);
+      const w1 = await page.evaluate((sel) => ({ row: document.querySelector(sel)?.textContent ?? "", body: document.body.innerText }), cartRow);
+      check(
+        "W1 (ui): Give this device the workspace for a workspace deleted in another tab says \"This workspace is not one of yours any more (it was deleted, or you left it or were removed from it), so the device was given nothing.\" (never a bare \"Not found\") and reads the lists again: the workspace is offered no more",
+        !!u5Fourth && deletedElsewhere.status === 204 && w1.body.includes("This workspace is not one of yours any more (it was deleted, or you left it or were removed from it), so the device was given nothing.") && !/\bNot found\b/.test(w1.body) && !w1.row.includes("Give this device the workspace"),
+        `${deletedElsewhere.status} ${deletedElsewhere.text.slice(0, 200)} ${w1.row} | ${w1.body.slice(0, 300)}`,
+      );
+
       // C6-4 (ui): a pairing code asked 70 seconds ago reads "Asked 1 minute ago".
       const askedCode = "ZXCV-BNMQ";
       withDb((d) =>
@@ -2510,10 +2595,31 @@ try {
       const askedLine = await page.evaluate(() => [...document.querySelectorAll("p")].map((p) => p.textContent ?? "").find((t) => t.startsWith("Asked ")) ?? "");
       check("C6-4 (ui): the device approval page says \"Asked 1 minute ago\" for a code 70 seconds old (one count-and-noun helper), never \"1 minutes\"", askedLine === "Asked 1 minute ago", askedLine);
 
+      // W4 (ui): approving a second "U5's zed cart" names it as it is stored, "(2)" included, decided at approval.
+      const w4 = insertPairing("U5's zed cart");
+      await page.goto(`${BASE}/app/device?code=${w4.userCode}`, { waitUntil: "networkidle0" });
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
+      await page.waitForFunction(() => document.querySelectorAll('main input[type="checkbox"]').length > 0, { timeout: 15000 }).catch(() => undefined);
+      await page.evaluate(() => document.querySelector('main input[type="checkbox"]')?.click());
+      await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve" && !b.disabled), { timeout: 15000 }).catch(() => undefined);
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Approve")?.click());
+      await page.waitForFunction(() => /is connected/.test(document.body.innerText), { timeout: 15000 }).catch(() => undefined);
+      const w4Text = await page.evaluate(() => document.querySelector("main")?.innerText ?? "");
+      const w4Tok = await call("D", "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: w4.deviceCode } });
+      const w4Name = withDb((d) => d.prepare("SELECT name FROM v2_devices WHERE id = ?").get(w4Tok.json?.device_id ?? "")?.name);
+      check(
+        "W4 (ui): approving a pairing named as a live device of mine says \"U5's zed cart is connected as “U5's zed cart (2)”: you already have a device named “U5's zed cart”. …\" and the device is then stored under that name (never \"U5's zed cart is connected\" for a device stored as \"(2)\")",
+        w4Text.includes("U5's zed cart is connected as “U5's zed cart (2)”: you already have a device named “U5's zed cart”. If this is a new align login on that same machine, it keeps that device's name instead. You can close this page.") &&
+          w4Tok.status === 200 && w4Name === "U5's zed cart (2)",
+        `${w4Text.slice(0, 600)} | ${w4Tok.status} ${w4Name}`,
+      );
+
       // Z3 (ui): Delete shared history on a session already deleted in another tab is done: the row goes, and the page
       // says it was already deleted instead of an error.
       const z3Key = sessionKey(D5, A, "claude-code", "native-z3");
       const z3Put = await put(D5, z3Key, { title: "Z3 history" });
+      const w5Key = sessionKey(D5, A, "claude-code", "native-w5");
+      const w5Put = await put(D5, w5Key, { title: "W5 next action" });
       page.on("dialog", (dl) => void dl.accept());
       await page.goto(`${BASE}/app/w/${A}/sessions`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Z3 history"), { timeout: 15000 }).catch(() => undefined);
@@ -2525,6 +2631,16 @@ try {
         "Z3 (ui): deleting shared history already deleted in another tab (410 history_deleted) counts as done: the row is gone and the page says \"That session's shared history was already deleted, …\" with no error",
         z3Put.status === 200 && z3Gone.status === 204 && !z3Text.includes("Z3 history") && z3Text.includes("That session's shared history was already deleted, in another tab or window or from its machine, so it is no longer listed.") && !z3Text.includes("nothing is left to delete"),
         `${z3Put.status} ${z3Gone.status} ${z3Text.slice(0, 600)}`,
+      );
+      // W5 (E2E-WEB cycle 7): the note is about that delete only: the next action (Stop sharing on another row) clears it.
+      await page.evaluate(() => [...document.querySelectorAll("main li")].find((li) => li.innerText.includes("W5 next action"))?.querySelectorAll("button").forEach((b) => b.textContent === "Stop sharing" && b.click()));
+      await page.waitForFunction(() => [...document.querySelectorAll("main li")].find((li) => li.innerText.includes("W5 next action"))?.innerText.includes("not shared"), { timeout: 15000 }).catch(() => undefined);
+      const w5Text = await page.evaluate(() => document.querySelector("main")?.innerText ?? "");
+      const w5Row = await page.evaluate(() => [...document.querySelectorAll("main li")].find((li) => li.innerText.includes("W5 next action"))?.innerText ?? "");
+      check(
+        "W5 (ui): after \"That session's shared history was already deleted …\", the next action on the Sessions tab (Stop sharing on another row, which succeeds) clears the note",
+        w5Put.status === 200 && w5Row.includes("not shared") && !w5Text.includes("That session's shared history was already deleted"),
+        w5Text.slice(0, 600),
       );
     } finally {
       await browser.close();
@@ -7155,6 +7271,28 @@ try {
       `${lr5Done.status} ${lr6IfKeep.status} ${lr6IfKeep.text.slice(0, 200)} ${lr6Read?.state} ${lr6Read?.dependency_loop}`,
     );
 
+    // -- C7-1, C7-2: the looping dependency is explained once (never also counted as a goal a decider can't see), and a
+    // request whose only change was that dependency leaves its counter nothing to send --
+    const KL9 = await kGoal(KA, { title: "Solo nine", visibility: "workspace", team_id: KPT });
+    const KL10 = await kGoal(KA, { title: "Solo ten", visibility: "workspace", team_id: KPT });
+    const lr9 = await ka(KB, "POST", kcrs(KL9.id), { base_version: 1, changes: { depends_on: [KL10.id] }, reason: "Nine reads ten" });
+    const lr10 = await ka(KB, "POST", kcrs(KL10.id), { base_version: 1, changes: { depends_on: [KL9.id] }, reason: "Ten reads nine" });
+    const lr9Done = await kAct(KA, KL9.id, lr9.json?.id, "approve_and_launch", { revision: 1 });
+    const lr10Empty = await kAct(KA, KL10.id, lr10.json?.id, "counter", { revision: 1, changes: { depends_on: [] }, note: "Without the loop" });
+    check(
+      "C7-2: a counter that changes nothing (the request's only change was a dependency that now loops, dropped) is 409 no_change saying what to do: \"This suggestion changes nothing on the goal, so there is nothing to suggest. Change a field to suggest something else, or decline the request.\"",
+      lr9.status === 201 && lr10.status === 201 && lr9Done.status === 200 && lr10Empty.status === 409 && lr10Empty.json?.error === "no_change" &&
+        lr10Empty.json?.message === "This suggestion changes nothing on the goal, so there is nothing to suggest. Change a field to suggest something else, or decline the request.",
+      `${lr9.status} ${lr10.status} ${lr9Done.status} ${lr10Empty.status} ${lr10Empty.text.slice(0, 300)}`,
+    );
+    /** How many goals the counter form on `crId` should count as hidden from someone who decides: those KA can see that
+     *  are neither offered, nor would loop, nor already on the request (C7-1). */
+    const kHiddenFromDeciders = async (goalId, crId, startDeps) => {
+      const read = (await ka(KA, "GET", `/goals/${goalId}?counter=${crId}`)).json ?? {};
+      const listed = ((await ka(KA, "GET", "/goals")).json?.goals ?? []).filter((g) => g.id !== goalId && g.status === "active");
+      return listed.filter((g) => !(read.dependency_choices ?? []).includes(g.id) && !(read.dependency_loops ?? []).includes(g.id) && !startDeps.includes(g.id)).length;
+    };
+
     // -- C6-2: a pending request that would now loop, on a goal that then moved on: its requester can still update it,
     // and it then waits on its deciders like any request that would loop --
     const KL7 = await kGoal(KA, { title: "Loop seven", visibility: "workspace", team_id: KPT });
@@ -7324,6 +7462,46 @@ try {
             lr6Form.dropped === `The request's dependency on “${KL5.title}” is left out: it already depends on this goal, so keeping it would make a loop.` &&
             !lr6Form.boxes.some((b) => b.label === KL5.title),
           `${JSON.stringify(lr6Choices)} ${JSON.stringify(lr6Form).slice(0, 600)}`,
+        );
+
+        // C7-1 (ui): the looping dependency is said once, by name, and not also counted among goals a decider can't see.
+        const lr6Hidden = await kHiddenFromDeciders(KL6.id, lr6.json?.id, []);
+        const lr6NotOffered = await pL.evaluate((sel) => document.querySelector(sel)?.querySelector("[data-deps-not-offered]")?.textContent?.replace(/\s+/g, " ").trim() ?? "", lr6Card);
+        const lr6WantNotOffered = lr6Hidden === 0 ? "" : `${lr6Hidden === 1 ? "1 goal you can see isn't offered" : `${lr6Hidden} goals you can see aren't offered`}: ${KB.name} or someone who decides on this goal can't see ${lr6Hidden === 1 ? "it" : "them"}.`;
+        check(
+          "C7-1 (ui): the counter form of a request that would close a loop explains the dropped dependency once (\"The request's dependency on “Loop five” is left out …\") and never also counts it as \"N goals you can see aren't offered: … can't see it\" (only goals left out because someone who decides can't see them are counted there)",
+          !!lr6Form.dropped && lr6NotOffered === lr6WantNotOffered,
+          `hidden=${lr6Hidden} shown=${JSON.stringify(lr6NotOffered)} want=${JSON.stringify(lr6WantNotOffered)}`,
+        );
+
+        // C7-2 (ui): the request's only change was the looping dependency: the counter form says there is nothing left to
+        // suggest and points to Decline, and Review this decision stays disabled even with a note.
+        const lr10Card = `[data-cr="${lr10.json?.id}"]`;
+        await open(pL, `/app/w/${KW}/goals/${KL10.id}`);
+        await pL.waitForSelector(`${lr10Card} [data-dependency-loop]`, { timeout: 15000 }).catch(() => undefined);
+        await pL.click(`${lr10Card} [data-decision="Suggest a change"]`).catch(() => undefined);
+        await pL.waitForSelector(`${lr10Card} [data-deps-loop-dropped]`, { timeout: 15000 }).catch(() => undefined);
+        await pL.evaluate((sel) => {
+          const t = document.querySelector(`${sel} [data-decision-input] textarea`);
+          if (t) t.setAttribute("data-c72-note", "1");
+        }, lr10Card);
+        await pL.type(`${lr10Card} [data-c72-note]`, "Without the loop").catch(() => undefined);
+        const lr10Form = await pL.evaluate((sel) => {
+          const c = document.querySelector(sel);
+          const review = [...(c?.querySelectorAll("[data-decision-input] button") ?? [])].find((b) => b.textContent?.trim() === "Review this decision");
+          return {
+            left: c?.querySelector("[data-counter-nothing-left]")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
+            notOffered: c?.querySelector("[data-deps-not-offered]")?.textContent ?? "",
+            review: review ? (review.disabled ? "disabled" : "enabled") : "none",
+            choices: [...(c?.querySelectorAll("[data-decision]") ?? [])].map((e) => e.getAttribute("data-decision")),
+          };
+        }, lr10Card);
+        const lr10Hidden = await kHiddenFromDeciders(KL10.id, lr10.json?.id, []);
+        check(
+          "C7-2 (ui): when the looping dependency was the request's only change, Suggest a change says \"Without its dependency on “Solo nine”, this request changes nothing, so there is nothing left to suggest. To close it, choose Decline above (or <requester> can withdraw it); …\", Review this decision stays disabled with a note written (no confirmation of an empty change), Decline is offered, and the dropped dependency is not counted as hidden",
+          lr10Form.left.startsWith(`Without its dependency on “${KL9.title}”, this request changes nothing, so there is nothing left to suggest. To close it, choose Decline above (or ${KB.name} can withdraw it)`) &&
+            lr10Form.review === "disabled" && lr10Form.choices.includes("Decline") && (lr10Hidden > 0 || lr10Form.notOffered === ""),
+          `${JSON.stringify(lr10Form)} hidden=${lr10Hidden}`,
         );
 
         // N3, N5 and F4: Not yet, then Launch, from the goal page. Every fetch and every "Loading…" in the change-request
@@ -7727,10 +7905,49 @@ try {
         const pD = await as(XD);
         await open(pD, `/app/w/${XW}/sessions`);
         const dText = await pD.evaluate(() => document.body.innerText);
+        // W7 (E2E-WEB cycle 7): how to share it again depends on where its machine stands. XD came back without ticking it,
+        // so it is still paired but lacks the workspace: the Devices page gives it back (never align login).
+        const xdLaptop = `${XD.name}'s laptop`;
         check(
-          "S1 (ui): back in the workspace, the removed member's Sessions tab reads \"ended: left the workspace\" and says how to share it again: run align login on that machine again, then ::align share in the session",
-          dText.includes("ended: left the workspace") && /Sharing ended when you left this workspace \(or were removed from it\)/.test(dText) && /run align login on that machine again \(it lost access to this workspace when you left\), then ::align share in the session/.test(dText),
+          "S1, W7 (ui): back in the workspace, the removed member's Sessions tab reads \"ended: left the workspace\"; its machine is paired but lacks the workspace, so the note says to give it this workspace on the Devices page (a link), then ::align share, never align login",
+          dText.includes("ended: left the workspace") && /Sharing ended when you left this workspace \(or were removed from it\)/.test(dText) &&
+            dText.includes(`To share it again now that you are back, give its machine, ${xdLaptop}, this workspace on your Devices page (Give this device the workspace), then run ::align share in the session.`) &&
+            !dText.includes("align login") && (await pD.evaluate(() => [...document.querySelectorAll("main a")].some((a) => a.getAttribute("href") === "/app/devices"))),
           dText.slice(0, 900),
+        );
+        // The machine is given the workspace (on the Devices page): ::align share is all it takes.
+        const xdGive = await call("XD", "POST", `/api/v2/devices/${xDevs.XD.id}/workspaces`, { cookie: XD.cookie, body: { workspace_id: XW } });
+        await open(pD, `/app/w/${XW}/sessions`);
+        const dGiven = await pD.evaluate(() => document.body.innerText);
+        check(
+          "W7 (ui): once the machine that shared it has the workspace again, the member_removed note says \"Its machine, <name>, has this workspace again: to share it again, run ::align share in the session.\" (no align login, no Devices page)",
+          xdGive.status === 200 && dGiven.includes(`Its machine, ${xdLaptop}, has this workspace again: to share it again, run ::align share in the session.`) && !dGiven.includes("align login") && !dGiven.includes("on your Devices page"),
+          `${xdGive.status} ${xdGive.text.slice(0, 200)} ${dGiven.slice(0, 900)}`,
+        );
+        // The machine signs out (revoked on the web): align login pairs it again.
+        const xdOut = await call("XD", "DELETE", `/api/v2/devices/${xDevs.XD.id}`, { cookie: XD.cookie });
+        await open(pD, `/app/w/${XW}/sessions`);
+        const dOut = await pD.evaluate(() => document.body.innerText);
+        check(
+          "W7 (ui): when the machine that shared it has signed out, the member_removed note says to run align login on that machine and give it this workspace, then ::align share",
+          xdOut.status === 204 && dOut.includes("To share it again now that you are back, run align login on that machine (it has signed out of Align) and give it this workspace, then ::align share in the session."),
+          `${xdOut.status} ${dOut.slice(0, 900)}`,
+        );
+        // W8: the person stops the ended session for good from the web (it was API-only): confirmed, it reads "not shared",
+        // has no ended_reason, and is never shared again.
+        pD.on("dialog", (dl) => void dl.accept());
+        const w8Before = await pD.evaluate(() =>
+          [...(document.querySelector("main li")?.querySelectorAll("button") ?? [])].map((b) => b.textContent?.trim()).join("|"),
+        );
+        await pD.evaluate(() => [...document.querySelectorAll("main li button")].find((b) => b.textContent?.trim() === "Stop sharing for good")?.click());
+        await pD.waitForFunction(() => !document.body.innerText.includes("ended: left the workspace"), { timeout: 15000 }).catch(() => undefined);
+        const w8After = await pD.evaluate(() => document.querySelector("main")?.innerText ?? "");
+        const w8Row = withDb((db) => db.prepare("SELECT state, ended_reason FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(XW, xKeys.XD.key));
+        check(
+          "W8 (ui): an ended session's row offers Stop sharing for good (beside Delete shared history, no Stop or Resume); confirmed, it posts stop-sharing, the row reads \"not shared\" and the session is stopped with no ended_reason, so it is never shared again",
+          w8Before === "Stop sharing for good|Delete shared history" &&
+            w8After.includes("not shared") && !w8After.includes("ended: left the workspace") && !w8After.includes("Stop sharing for good") && w8Row?.state === "stopped" && w8Row.ended_reason === null,
+          `${w8Before} || ${w8After.slice(0, 600)} || ${JSON.stringify(w8Row)}`,
         );
 
         // C3-2 (ui): "1 point", "5 points".
@@ -7817,6 +8034,18 @@ try {
           "C3-5 (ui): a refused Update to version n reads \"Not recorded. This goal is at version 3; reload and try again\" like other refused decisions, and the card reloads (it now offers Update to version 3)",
           bumpR2.status === 201 && rNotice === "refused" && rText.includes("Not recorded. This goal is at version 3; reload and try again") && rText.includes("Update to version 3"),
           `${bumpR2.status} ${rNotice} ${rText.slice(0, 500)}`,
+        );
+
+        // W6 (E2E-WEB cycle 7): an approver counters the behind request while its requester's card is open; Update to
+        // version 3 is then refused in Y5's words, naming who countered it, never the bare "This request is countered".
+        const ctrR = await xa(XO, "POST", `/goals/${GR?.id}/change-requests/${crR?.id}/counter`, { changes: { title: "Rebase here, retitled" }, note: "A shorter name" });
+        await press(pA, rSel, "Update to version 3");
+        await pA.waitForFunction((s) => /Not recorded\. This request was countered/.test(document.querySelector(s)?.innerText ?? ""), { timeout: 15000 }, rSel).catch(() => undefined);
+        const w6Text = await textOf(pA, rSel);
+        check(
+          "W6 (ui): Update to version n on a request countered meanwhile (another tab) reads \"Not recorded. This request was countered by <approver>; review the counter.\" (wrong_state in the app's words, naming who countered it), never \"This request is countered\"",
+          ctrR.status === 200 && w6Text.includes(`Not recorded. This request was countered by ${XO.name}; review the counter.`) && !w6Text.includes("This request is countered"),
+          `${ctrR.status} ${ctrR.text.slice(0, 200)} ${w6Text.slice(0, 600)}`,
         );
 
         // C3-3 (ui): the propose form doesn't offer the goals that would make a loop, and says why.
@@ -8648,6 +8877,18 @@ try {
       "Z4: a device name with control characters is kept on one line at pairing (\"  nl\\nhere\\t\\u0007x \\u202e \" -> \"nl here x\": control characters and whitespace runs become one space, direction marks are dropped, the ends trimmed); a name with nothing left -> 400 device_name is required",
       z4.status === 200 && z4Name === "nl here x" && z4Empty.status === 400 && z4Empty.json?.message === "device_name is required",
       `${z4.status} ${JSON.stringify(z4Name)} ${z4Empty.status} ${z4Empty.text}`,
+    );
+    // W3 (E2E-WEB cycle 7): every invisible format character (Unicode category Cf) is dropped, by property, not a list:
+    // the Arabic letter mark, isolates, embeddings and overrides, zero-width spaces and joiners, word joiners and
+    // invisible operators, the byte order mark, the Mongolian vowel separator and the soft hyphen.
+    const CF = [0x061c, 0x2066, 0x2067, 0x2068, 0x2069, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0xfeff, 0x180e, 0x00ad];
+    const w3 = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: `al${CF.map((c) => String.fromCodePoint(c)).join("m")}x laptop`, public_key: newDeviceKeys().pub } });
+    const w3Name = withDb((d) => d.prepare("SELECT device_name FROM v2_device_requests WHERE user_code = ?").get(w3.json?.user_code ?? ""))?.device_name;
+    const w3Empty = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: CF.map((c) => String.fromCodePoint(c)).join(" "), public_key: newDeviceKeys().pub } });
+    check(
+      "W3: a device name drops every invisible format character (Unicode category Cf: U+061C ARABIC LETTER MARK, U+2066 to U+2069, U+202A to U+202E, U+200B to U+200F, U+2060 to U+2064, U+FEFF, U+180E, U+00AD), so \"al<each>m…x laptop\" is stored as \"al\" + 22 \"m\" + \"x laptop\"; a name of only those characters and spaces -> 400 device_name is required",
+      w3.status === 200 && w3Name === `al${"m".repeat(CF.length - 1)}x laptop` && w3Empty.status === 400 && w3Empty.json?.message === "device_name is required",
+      `${w3.status} ${JSON.stringify(w3Name)} ${w3Empty.status} ${w3Empty.text}`,
     );
     const evEnv = { ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1" };
     const q = (sql, ...a) => withDb((d) => d.prepare(sql).all(...a));

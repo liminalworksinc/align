@@ -1069,6 +1069,12 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (ws_id, key_hash)
   );
   `,
+  // E2E-WEB cycle 7 (W4): a device's name is decided when its pairing is approved (the person is known then), so the
+  // approval page names the device as it is stored ("<name> (2)" included); the token poll uses it unless `replaces`
+  // frees the plain name. Approved names waiting for their poll are held, so two approvals at once never get one name.
+  `
+  ALTER TABLE v2_device_requests ADD COLUMN approved_name TEXT;
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

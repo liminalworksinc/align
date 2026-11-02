@@ -931,7 +931,9 @@ actor, the device as object), as accepting an invite with the device ticked, nee
 (403 `reauth_required` with `Sign in again to give a device this workspace. This needs a sign-in from the last 15
 minutes.`), answer `{device_id, workspace_id}`, 409 `already_granted` when the device has it already, 404 for a device
 that is another person's, revoked or unknown (all alike: `This device is not one of your paired devices any more (it may
-have been signed out), so it was given nothing.`) or a workspace they are not a member of, and 400 for a malformed
+have been signed out), so it was given nothing.`) or a workspace they are not a member of (deleted, left, removed from or
+never theirs, all alike: `This workspace is not one of yours any more (it was deleted, or you left it or were removed
+from it), so the device was given nothing.`; `scripts/test-v2.mjs` "W1 (E2E-WEB cycle 7): ..."), and 400 for a malformed
 workspace id, and grant nothing on any refusal. A device token SHALL never do it. The device learns the workspace at
 its next pass, as after an invite (`local-agent`).
 
@@ -1106,14 +1108,22 @@ public_key}` (a 32-byte base64url Ed25519 key, name at most 100 characters) retu
 and `POST /api/v2/device/token` returns the tokens exactly once after approval. The device SHALL get a name none of
 the person's live devices has: when one already has the requested name (another machine of that name, or a second
 login at once), it gets the first free `<name> (2)`, `<name> (3)`, ..., so the Devices page and `align login` never show
-two live devices of one name. The token poll MAY name the device the pairing replaces on the same machine (`replaces`,
-a device id; malformed is 400); that device, counted only when it is the approving person's own, is left out of the
-check, as it is revoked a moment later, so a re-login keeps the plain name instead of alternating with `<name> (2)`.
+two live devices of one name. The name SHALL be decided when the person approves the pairing (the person is known
+then), against their live devices and the names held by their other approved pairings still waiting for their token
+poll, stored on the request, and answered by the approval as `{state:"approved", device_name, asked_as}` (the name
+decided and the name asked for), so the approval page names the device as it is stored; the token poll SHALL store the
+device under that name, unless a device of theirs paired since has taken it (then the next free one). The token poll
+MAY name the device the pairing replaces on the same machine (`replaces`, a device id; malformed is 400); when that
+device is the approving person's own and live, the name SHALL be decided again at the poll with that device left out
+of the check, as it is revoked a moment later, so a re-login keeps the plain name instead of alternating with
+`<name> (2)`.
 A device name SHALL be one line as the person reads it everywhere (the approval page, the Devices page, `align
 login`): at `authorize` every run of control characters (C0, DEL and C1) and whitespace, line and paragraph
-separators included, SHALL become one space, invisible direction marks (bidirectional embeddings, overrides and
-isolates, left-to-right and right-to-left marks) and zero-width spaces SHALL be dropped, and the ends trimmed, before
-the 100-character limit applies; a name with nothing left SHALL be 400 `device_name is required`.
+separators included, SHALL become one space, every invisible format character (Unicode general category Cf, by
+property rather than a list: bidirectional embeddings, overrides and isolates, left-to-right, right-to-left and Arabic
+letter marks, zero-width spaces and joiners, word joiners and invisible operators, the byte order mark, the Mongolian
+vowel separator and soft hyphens) and any lone surrogate SHALL be dropped, and the ends trimmed, before the
+100-character limit applies; a name with nothing left SHALL be 400 `device_name is required`.
 A device that revokes itself because a newer pairing on the same machine replaced it (`DELETE
 /api/v2/devices/self?replaced_by=<device id>`) SHALL pass its name on: when the named device is the same person's, live,
 and named `<its name> (<n>)`, and no other live device of the person has the plain name once it is revoked, the named
@@ -1136,10 +1146,20 @@ named while the first's device was live, then replacing it) so end with the plai
 - **WHEN** a pairing is started with the name `"  nl\nhere\t\u0007x \u202e "`, and another with only `"\n\t\u0000\u200b"` (`scripts/test-v2.mjs` "Z4: a device name ...")
 - **THEN** the first is stored (and so shown on the approval page) as `nl here x`; the second is 400 `device_name is required` and starts no pairing
 
+#### Scenario: Invisible format characters in a device name
+
+- **WHEN** a pairing is started with a name holding U+061C ARABIC LETTER MARK, U+2066 to U+2069, U+202A to U+202E, U+200B to U+200F, U+2060 to U+2064, U+FEFF, U+180E and U+00AD between its letters, and another with only those characters and spaces (`scripts/test-v2.mjs` "W3: ...")
+- **THEN** the first is stored with every one of them dropped and its letters kept; the second is 400 `device_name is required`
+
 #### Scenario: A second device of one name
 
 - **WHEN** a person with a live device named `reuse test` pairs another device with that name (`scripts/test-v2.mjs` "device (E2E-AGENT cycle 5): a new pairing named as one of the person's live devices ...")
 - **THEN** the new device is named `reuse test (2)`, also when its poll names another person's device as the one it replaces
+
+#### Scenario: The name is decided at approval
+
+- **WHEN** a person with a live device named `reuse test` approves a pairing of that name; and approves two pairings named `twin approval` one after the other, whose devices then poll the second first (`scripts/test-v2.mjs` "W4 (E2E-WEB cycle 7): ..." and "W4: two pairings of one name approved together ...")
+- **THEN** the first approval answers `{state:"approved", device_name:"reuse test (2)", asked_as:"reuse test"}` and the device is `reuse test (2)`; the two others answer `twin approval` and `twin approval (2)`, and each device keeps the name its approval answered
 
 #### Scenario: A re-login keeps its name
 
@@ -1253,13 +1273,13 @@ is off` and `server_time`.
 
 #### Scenario: Stopping a session that had ended
 
-- **WHEN** a member's session ends `member_removed` when they are removed, they are let back in and their device is given the workspace again, and they stop sharing the session on the web (`scripts/test-v2.mjs` "sessions (E2E-AGENT cycle 6): a person who stops sharing on the web a session that had ended member_removed ...")
+- **WHEN** a member's session ends `member_removed` when they are removed, they are let back in and their device is given the workspace again, and they stop sharing the session on the web (the Sessions tab's **Stop sharing for good**, `interface` "Workspace Sessions tab") (`scripts/test-v2.mjs` "sessions (E2E-AGENT cycle 6): a person who stops sharing on the web a session that had ended member_removed ..." and "W8 (ui): ...")
 - **THEN** the session is `stopped` with no `ended_reason`, its device's usage is refused 409 `sharing_stopped` with `ended_reason: null`, and its device's `PUT` is 409 `sharing_stopped`
 
 #### Scenario: Session list
 
 - **WHEN** a member calls `GET .../sessions`
-- **THEN** `mine` lists their own sessions in full (state, current epoch and goal, governing goal, stop status, conflicts and token totals), and `all` is null except for workspace owners, for whom it lists every non-stopped session's key, alias, owner, harness, `started_at`, state and stop status, never its title or usage (`scripts/test-v2.mjs` "W3: the owner's list of everyone's sessions carries each session's started_at ...")
+- **THEN** `mine` lists their own sessions in full (state, `ended_reason`, current epoch and goal, governing goal, stop status, conflicts and token totals, and `device`: the machine that shared it as `{id, name, signed_out, has_workspace}`, whether it signed out of Align and whether it has this workspace now, or null when no device is left, so the Sessions tab can say how to share an ended session again), and `all` is null except for workspace owners, for whom it lists every non-stopped session's key, alias, owner, harness, `started_at`, state and stop status, never its title or usage (`scripts/test-v2.mjs` "W3: the owner's list of everyone's sessions carries each session's started_at ...")
 
 ### Requirement: Binding epochs
 

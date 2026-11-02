@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+import Link from "next/link";
+import { useState, type ReactNode } from "react";
 import { api, ApiError, Btn, Card, Err, Loading, Note, Pill, Shell, num, useAction, useApi, when } from "../../../_ui/kit";
 import type { Me } from "../../../_ui/server";
 import { EvidencePill } from "../../../_ui/evidence";
@@ -33,13 +34,38 @@ function stopText(s: StopStatus | null, stopped: boolean, ended = false) {
   return has("applied") || has("received") ? "Resumed" : "Resume sent, not yet received";
 }
 
+/** How to share a session again that ended when its person left the workspace, by where its machine stands now (W7):
+ *  given the workspace again (on Join, or from the Devices page), its PUT shares it again, so ::align share is all;
+ *  still paired but without the workspace, the Devices page gives it back (never align login, which would end that
+ *  machine's shares elsewhere); signed out, align login pairs it again. */
+function shareAgain(s: MySession): ReactNode {
+  const d = s.device;
+  if (d && !d.signed_out && d.has_workspace) return <>Its machine, {d.name}, has this workspace again: to share it again, run ::align share in the session.</>;
+  if (d && !d.signed_out)
+    return (
+      <>
+        To share it again now that you are back, give its machine, {d.name}, this workspace on your{" "}
+        <Link href="/app/devices" className="underline">
+          Devices page
+        </Link>{" "}
+        (Give this device the workspace), then run ::align share in the session.
+      </>
+    );
+  return <>To share it again now that you are back, run align login on that machine (it has signed out of Align) and give it this workspace, then ::align share in the session.</>;
+}
+
 export default function Sessions({ me, ws }: { me: Me; ws: string }) {
   const d = useApi<{ mine: MySession[]; all: AnySession[] | null }>(`/api/v2/workspaces/${ws}/sessions`);
   const holds = useApi<{ holds: { goal: { id: string; title: string }; held_by: { id: string; name: string }; reason: string | null; held_at: string }[] }>(`/api/v2/workspaces/${ws}/holds`);
   const act = useAction();
   const base = `/api/v2/workspaces/${ws}/sessions`;
-  const post = (key: string, verb: string) => act.run(() => api(`${base}/${key}/${verb}`, { body: {} }), d.reload);
   const [alreadyDeleted, setAlreadyDeleted] = useState(false);
+  /** Every action starts afresh: the note about an already deleted history is about that delete only (W5). */
+  const post = (key: string, verb: string) =>
+    act.run(() => {
+      setAlreadyDeleted(false);
+      return api(`${base}/${key}/${verb}`, { body: {} });
+    }, d.reload);
   /** Delete a session's shared history. 410 history_deleted means it is already gone (deleted in another tab or window,
    *  or from the machine): the deletion is done, so the row goes and the page says so instead of an error (Z3). */
   const del = (key: string) =>
@@ -85,14 +111,14 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
                 <Note>
                   The machine that shared this session signed out of Align, so sharing ended and Stop or Resume can&apos;t reach it.
                   {s.agent_stopped ? " It stays stopped on that machine until you run align stop-sharing there." : ""} To share it again, run align login on that machine, then
-                  ::align share in the session.
+                  ::align share in the session. To keep it from being shared again, press Stop sharing for good.
                 </Note>
               )}
               {s.ended_reason === "member_removed" && (
                 <Note>
                   Sharing ended when you left this workspace (or were removed from it), so Stop or Resume can&apos;t reach it.
-                  {s.agent_stopped ? " It stays stopped on your machine until you run align stop-sharing there." : ""} To share it again now that you are back, run align login on
-                  that machine again (it lost access to this workspace when you left), then ::align share in the session.
+                  {s.agent_stopped ? " It stays stopped on your machine until you run align stop-sharing there." : ""} {shareAgain(s)} To keep it from being shared again, press
+                  Stop sharing for good.
                 </Note>
               )}
               <div className="mt-2 flex flex-wrap gap-2">
@@ -115,6 +141,21 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
                     }}
                   >
                     Stop sharing
+                  </Btn>
+                )}
+                {/* An ended session can still be stopped by its person, for good: it is then never shared again, from any
+                    of their machines (W8; workspaces "Stopping a session that had ended"). */}
+                {s.state === "stopped" && s.ended_reason && (
+                  <Btn
+                    kind="secondary"
+                    disabled={act.busy}
+                    onClick={() => {
+                      if (window.confirm("Stop sharing this session for good? It won't be shared again, even if its machine runs ::align share. What was already shared stays until you delete it.")) {
+                        void post(s.session_key, "stop-sharing");
+                      }
+                    }}
+                  >
+                    Stop sharing for good
                   </Btn>
                 )}
                 <Btn
