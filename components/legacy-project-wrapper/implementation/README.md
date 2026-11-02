@@ -161,6 +161,8 @@ server's settings:
 ```sh
 npm run admin -- requests list --status pending
 npm run admin -- requests approve ar_…          # an email-bound code, emailed when the email settings are set
+                                                # (its link: ALIGN_PUBLIC_ORIGIN; without it, hosted refuses to send,
+                                                # Mode L sends this computer's local address and says so)
 npm run admin -- codes create --email someone@example.com --days 14
 npm run admin -- codes list                     # never shows a code
 npm run admin -- workspaces list                # counts only, no people; deleted ones show when

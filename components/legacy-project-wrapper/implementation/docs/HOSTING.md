@@ -122,7 +122,9 @@ fly ssh console -C "node scripts/align-admin.mjs events record loi_signed --work
 
 It prints no secret except a code it has just made. `requests approve` emails the code through the email API when the
 email settings are set (add `--print` to show it instead); if the email fails, the code is revoked and the request
-stays pending. It refuses a database that this version of Align has not migrated (or a newer one). The server runs the
+stays pending. The email's sign-in link is `ALIGN_PUBLIC_ORIGIN`: with `HOSTED=1` and that variable not set in the
+script's shell it refuses to email (nothing is approved), so run it on the machine, where it is set; in Mode L without it
+the link is the computer's local address (`http://127.0.0.1:<PORT>`), and the email and the output say so. It refuses a database that this version of Align has not migrated (or a newer one). The server runs the
 retention job itself at every start and every 24 hours; `retention run` (or `node scripts/retention.mjs`, the same
 command, from a checkout) is for seeing or forcing it.
 

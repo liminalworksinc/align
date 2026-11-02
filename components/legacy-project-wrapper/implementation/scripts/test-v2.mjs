@@ -11433,6 +11433,16 @@ try {
   );
   // -- the operator approves: an email-bound code, emailed, never printed --
   const noSecret = admin(["requests", "approve", aliceReq.id], { ...opGate, ALIGN_SECRET: undefined });
+  // E2E-WEB cycle 13 W7: hosted, without ALIGN_PUBLIC_ORIGIN in its environment, the script refuses to email a link to
+  // this machine; nothing is approved or sent.
+  const mailsBeforeNoOrigin = mails.length;
+  const noOrigin = await adminAsync(["requests", "approve", aliceReq.id], { ...opGate, ALIGN_PUBLIC_ORIGIN: undefined });
+  const aliceAfterNoOrigin = withDb((d) => d.prepare("SELECT status, code_id FROM v2_access_requests WHERE id = ?").get(aliceReq.id));
+  check(
+    "c13 W7 (E2E-WEB cycle 13): align-admin requests approve, hosted with the email settings but no ALIGN_PUBLIC_ORIGIN, exits 1 saying the link would point at this machine (run it where the variable is set, or --print); the request stays pending with no code, and no email is sent",
+    noOrigin.status === 1 && noOrigin.err.includes("ALIGN_PUBLIC_ORIGIN is not set in this shell") && noOrigin.err.includes("--print") && aliceAfterNoOrigin?.status === "pending" && aliceAfterNoOrigin.code_id === null && mails.length === mailsBeforeNoOrigin,
+    `${noOrigin.status} ${noOrigin.out} ${noOrigin.err} ${JSON.stringify(aliceAfterNoOrigin)}`,
+  );
   const mailsBeforeApprove = mails.length;
   const approveG = await adminAsync(["requests", "approve", aliceReq.id], opGate);
   const aliceMail = mails.slice(mailsBeforeApprove).find((m) => m.body?.to === "alice@example.test");
@@ -11474,6 +11484,21 @@ try {
     redeemedEv.length === 1 && redeemedEv[0].ws_id === W2.json?.id && redeemedEv[0].actor === eventActor(good.ALIGN_SECRET, withDb((d) => d.prepare("SELECT id FROM ba_user WHERE email = ?").get("alice@example.test")?.id)) &&
       gEv("workspace_created", W1.json?.id).length === 1 && gEv("code_redeemed", W1.json?.id).length === 0 && gEv("workspace_created", W2.json?.id).length === 1,
     JSON.stringify(redeemedEv),
+  );
+  // E2E-WEB cycle 13 W7: in Mode L (no HOSTED) with no ALIGN_PUBLIC_ORIGIN the emailed link stays this computer's local
+  // address, and both the email and the script's output say it is local.
+  const localReqId = "ar_c13w7localaaaaaaaaaaaaaa";
+  withDb((d) =>
+    d.prepare("INSERT INTO v2_access_requests (id, email, name, use_case, interest, status, created_at) VALUES (?, ?, ?, ?, 'try', 'pending', ?)").run(localReqId, "local-link@example.test", "Lo Cal", "Local link", new Date().toISOString()),
+  );
+  const mailsBeforeLocal = mails.length;
+  const localApprove = await adminAsync(["requests", "approve", localReqId], { ...opGate, HOSTED: undefined, ALIGN_PUBLIC_ORIGIN: undefined });
+  const localMail = mails.slice(mailsBeforeLocal).find((m) => m.body?.to === "local-link@example.test");
+  check(
+    "c13 W7 (E2E-WEB cycle 13): align-admin requests approve in Mode L with no ALIGN_PUBLIC_ORIGIN still emails the local sign-in link (http://127.0.0.1:3100/app/sign-in?…), the email saying it is a local address that opens only on the computer Align runs on, and the output saying the link is this computer's local address and to set ALIGN_PUBLIC_ORIGIN for one others can open",
+    localApprove.status === 0 && localMail?.body?.text.includes("http://127.0.0.1:3100/app/sign-in?email=local-link%40example.test (a local address: it opens only on the computer Align runs on") &&
+      localApprove.out.includes("this computer's local address") && localApprove.out.includes("Set ALIGN_PUBLIC_ORIGIN"),
+    `${localApprove.status} ${localApprove.out} ${localApprove.err} ${JSON.stringify(localMail?.body)}`,
   );
   // -- codes made by the operator: revoked, expired and bound to someone else don't work; a disposable address can't create --
   const gMade = admin(["codes", "create", "--count", "4"], opGate);

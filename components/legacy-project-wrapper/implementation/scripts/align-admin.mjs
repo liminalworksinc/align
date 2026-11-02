@@ -13,6 +13,8 @@
 //   codes revoke <id>                                             revoke an unused code
 //   requests list [--status pending|approved|declined]
 //   requests approve <id> [--days <n>] [--print]                  an email-bound code, emailed when email is set up
+//                                                                 (its link is ALIGN_PUBLIC_ORIGIN; hosted without it,
+//                                                                 refused; Mode L without it, the local address, said so)
 //   requests decline <id>
 //   workspaces list                                               id, name, created, deleted, member and owner counts
 //   workspaces delete <id> --yes                                  the app's own deletion path: a soft delete, which
@@ -166,11 +168,18 @@ function emailApi() {
     return null;
   }
 }
-const origin = () => {
+/** Where an emailed sign-in link points: ALIGN_PUBLIC_ORIGIN as the server reads it (hosted, an https origin). Hosted
+ *  without one, null: the email is refused, never sent with this machine's own address (E2E-WEB cycle 13 W7). In Mode L
+ *  without one, this machine's local address, marked `local` so the email and the output say so. */
+const linkOrigin = () => {
   try {
-    if (process.env.ALIGN_PUBLIC_ORIGIN) return new URL(process.env.ALIGN_PUBLIC_ORIGIN).origin;
+    if (process.env.ALIGN_PUBLIC_ORIGIN) {
+      const u = new URL(process.env.ALIGN_PUBLIC_ORIGIN);
+      if (!hosted || u.protocol === "https:") return { origin: u.origin, local: false };
+    }
   } catch {}
-  return `http://127.0.0.1:${process.env.PORT || "3100"}`;
+  if (hosted) return null;
+  return { origin: `http://127.0.0.1:${process.env.PORT || "3100"}`, local: true };
 };
 
 // ---- commands ----
@@ -222,6 +231,13 @@ async function main() {
     if (!arg) fail(USAGE, 2);
     const days = intOpt("days", CODE_DAYS, 365);
     const api = opt.print ? null : emailApi();
+    const link = linkOrigin();
+    // Checked before anything is approved: hosted, an email whose link points at this machine is never sent.
+    if (api && !link) {
+      fail(
+        `ALIGN_PUBLIC_ORIGIN is not set in this shell (or is not an https origin), so the email's sign-in link would point at this machine. Nothing was approved; ${arg} is still pending. Run this on the server machine (fly ssh console), where it is set, or add --print to show the code instead.`,
+      );
+    }
     const out = tx(() => approveAccessRequest(db, secret(), arg, days));
     if (!out) fail(`No pending request ${arg}.`);
     const { request, code } = out;
@@ -231,13 +247,18 @@ async function main() {
       return;
     }
     try {
-      await postEmail(api, { to: request.email, ...codeEmail(origin(), request.name, code) }, "Access email");
+      await postEmail(api, { to: request.email, ...codeEmail(link.origin, request.name, code, { local: link.local }) }, "Access email");
     } catch {
       // Nothing half-done: the code is revoked and the request is pending again.
       tx(() => undoApproval(db, request.id, code.id));
       fail(`The email to ${request.email} could not be sent, so ${request.id} is still pending. Try again, or add --print to show the code instead.`);
     }
     console.log(`Approved ${request.id}: emailed a creation code (${code.id}, until ${day(code.expires_at)}) to ${request.email}.`);
+    if (link.local) {
+      console.log(
+        `Its sign-in link is ${link.origin}, this computer's local address: it opens only here, and the email says so. Set ALIGN_PUBLIC_ORIGIN to send a link others can open.`,
+      );
+    }
     return;
   }
   if (key === "requests decline") {

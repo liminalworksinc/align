@@ -706,12 +706,21 @@ commands `report [--since] [--json]` and `events record loi_sent|loi_signed` (sp
 never print a secret other than a code it has just made, SHALL delete a workspace through the same (soft) deletion
 path as the app and purge one through the same purge as the retention job, SHALL run the retention job with the same
 code as the server, reading `ALIGN_SESSION_MAX_DAYS` from its environment as the server does, and SHALL refuse a
-database whose schema version is not the one it was written for.
+database whose schema version is not the one it was written for. An emailed code's sign-in link SHALL use
+`ALIGN_PUBLIC_ORIGIN` from the script's environment: hosted (`HOSTED=1`) without an https one, `requests approve` SHALL
+refuse to email before approving anything (exit 1, the request still pending, nothing sent), never sending a link to
+the machine it runs on; in Mode L without one the link SHALL be the computer's local address and both the email and the
+script's output SHALL say that it is local (E2E-WEB cycle 13 W7).
 
 #### Scenario: Approving a request
 
 - **WHEN** the operator approves a pending request on a server with the email settings
 - **THEN** the script makes a code bound to the request's address, marks the request approved with that code's id, emails the code with a sign-in link through the email API, and prints only the code's id; without the email settings, or with `--print`, it prints the code instead; if the email fails, the code is revoked and the request stays pending
+
+#### Scenario: Approving without a public origin
+
+- **WHEN** the operator approves a pending request with the email settings but no `ALIGN_PUBLIC_ORIGIN` in the script's environment, hosted and in Mode L (`scripts/test-v2.mjs` "c13 W7 (E2E-WEB cycle 13): ...")
+- **THEN** hosted, the script exits 1 with "ALIGN_PUBLIC_ORIGIN is not set in this shell (or is not an https origin), so the email's sign-in link would point at this machine. Nothing was approved; <id> is still pending. Run this on the server machine (fly ssh console), where it is set, or add --print to show the code instead.", and no email is sent; in Mode L it emails `http://127.0.0.1:<PORT>/app/sign-in?email=…` followed by "(a local address: it opens only on the computer Align runs on; if it doesn't open for you, ask whoever runs Align for its address)" and prints that the link is this computer's local address and to set `ALIGN_PUBLIC_ORIGIN` for one others can open
 
 #### Scenario: Listing without secrets or people
 
