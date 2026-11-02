@@ -509,6 +509,47 @@ try {
     `${sibShare.code} ${sibShare.stderr} ${JSON.stringify(sibEdits)} ${told.stdout}`,
   );
 
+  // ======== refused edits by harness (E2E acycle2 A2-local-1): a Claude Code session whose first and only call is
+  // refused (this build's plugin, `--post-tool-use`), and a refused Codex patch, never go up, though another session
+  // then writes the same files with exactly the content they were to write ========
+  const hookAs = (harness, event, input, args = []) => {
+    const r = spawnSync(process.execPath, [HOOK, harness, event, ...args], { input: JSON.stringify({ hook_event_name: event, ...input }), env: agentEnv, encoding: "utf8", timeout: 10_000 });
+    outputs.push(r.stdout ?? "");
+    return r.stdout ?? "";
+  };
+  const SRD = randomUUID();
+  const SRC = `019a${randomUUID().slice(4)}`;
+  hookAs("claude", "SessionStart", { session_id: SRD, source: "startup", cwd: sibRepo });
+  hookAs("codex", "SessionStart", { session_id: SRC, source: "startup", cwd: sibRepo });
+  sync();
+  const planFile = path.join(sibRepo, "docs", "plan.md");
+  const codexFile = path.join(sibRepo, "src", "codex.ts");
+  const planText = "# Plan\nCut over reads first.\n";
+  const codexText = "export const codex = 1;\n";
+  hookAs("claude", "PreToolUse", { session_id: SRD, cwd: sibRepo, tool_name: "Write", tool_input: { file_path: planFile, content: planText }, tool_use_id: "toolu_d1" }, ["--post-tool-use"]);
+  hookAs("claude", "Stop", { session_id: SRD, cwd: sibRepo, last_assistant_message: "The write was refused." });
+  hookAs("codex", "PreToolUse", { session_id: SRC, turn_id: "t1", cwd: sibRepo, tool_name: "apply_patch", tool_input: { command: `*** Begin Patch\n*** Add File: src/codex.ts\n+${codexText.trim()}\n*** End Patch\n` }, tool_use_id: "call_c1" });
+  for (const [id, file, content] of [["toolu_a3", planFile, planText], ["toolu_a4", codexFile, codexText]]) {
+    const call = { session_id: SA, cwd: sibRepo, tool_name: "Write", tool_input: { file_path: file, content }, tool_use_id: id };
+    hookAs("claude", "PreToolUse", call, ["--post-tool-use"]);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, content);
+    hookAs("claude", "PostToolUse", call);
+  }
+  hookAs("codex", "Stop", { session_id: SRC, turn_id: "t1", cwd: sibRepo, last_assistant_message: "The patch was rejected." });
+  sync();
+  sync();
+  const refusedRows = sdb((d) =>
+    d
+      .prepare("SELECT session_key, path FROM v2_activity WHERE ws_id = ? AND kind = 'edit' AND path IN ('docs/plan.md', 'src/codex.ts') ORDER BY path")
+      .all(W),
+  );
+  check(
+    "refused edits by harness (A2-local-1): a Claude Code session's refused first Write and a refused Codex patch never reach the server, though another session then writes exactly their content; only that session's two edits do",
+    refusedRows.length === 2 && refusedRows.every((r) => r.session_key === sessionKey(W, "claude-code", SA)) && refusedRows.map((r) => r.path).join() === "docs/plan.md,src/codex.ts",
+    JSON.stringify(refusedRows),
+  );
+
   // ======== align share --dir --past: already-metered past sessions from their start, never backdated ========
   const oldRepo = path.join(tmpRoot, "work", "old-repo");
   mkdirSync(oldRepo, { recursive: true });

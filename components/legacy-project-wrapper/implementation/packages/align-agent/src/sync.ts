@@ -35,7 +35,7 @@ import { pollDirectives } from "./directives.ts";
 import { answerRequest } from "./requests.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { tailAll, type TailResult } from "./tailer.ts";
-import { detectGitEdits, fetchPod, uploadActivity } from "./activity.ts";
+import { detectGitEdits, fetchPod, settleActivity, uploadActivity } from "./activity.ts";
 import { fetchAsks } from "./asks.ts";
 import { computeUnsharedDigest, uploadSteering } from "./allocation.ts";
 import { layout, listSpool, localId } from "./shared/layout.ts";
@@ -91,6 +91,7 @@ function lockSpool(home: string): (() => void) | null {
 }
 
 function ingestLocked(ctx: Ctx): number {
+  const started = Date.now();
   const files = listSpool(ctx.home);
   let n = 0;
   for (const file of files) {
@@ -113,7 +114,30 @@ function ingestLocked(ctx: Ctx): number {
       }
     }
   }
+  dropStartingShares(ctx, started);
   return n;
+}
+
+/**
+ * A folder rule's share made at a session start stands in for the share until a pass makes it (A2-local-7). The hook
+ * writes it after its spool record, so one written before this ingest started is now applied (made, or refused): its
+ * hot file says which, and it goes.
+ */
+function dropStartingShares(ctx: Ctx, before: number): void {
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(layout.activityDir(ctx.home)).filter((n) => n.endsWith(".starting"));
+  } catch {
+    return;
+  }
+  for (const n of names) {
+    const file = path.join(layout.activityDir(ctx.home), n);
+    try {
+      if (fs.statSync(file).mtimeMs < before) fs.unlinkSync(file);
+    } catch {
+      /* gone meanwhile */
+    }
+  }
 }
 
 function applySpool(ctx: Ctx, r: SpoolRecord): string | null {
@@ -822,6 +846,7 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     guard();
     // Team activity: this machine's in-flight work up, other machines' down (a few hundred bytes when quiet).
     try {
+      settleActivity(ctx);
       detectGitEdits(ctx);
     } catch {
       /* best effort */

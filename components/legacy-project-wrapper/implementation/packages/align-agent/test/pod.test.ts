@@ -214,7 +214,9 @@ describe("pod awareness", () => {
     runHook(t, "codex", "SessionStart", { session_id: sid, source: "startup", cwd: dir });
     const patch = "*** Begin Patch\n*** Update File: trinity_sched/preempt.py\n@@\n-a\n+b\n*** End Patch\n";
     runHook(t, "codex", "PreToolUse", { session_id: sid, turn_id: "t1", cwd: dir, tool_name: "apply_patch", tool_input: { command: patch } });
-    touch(path.join(dir, "trinity_sched/preempt.py"));
+    // The patch applied: the file holds its line (a file merely changing proves nothing, E2E acycle2 A2-local-1).
+    fs.mkdirSync(path.join(dir, "trinity_sched"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "trinity_sched/preempt.py"), "b\n");
     writePod(t, [
       { kind: "edit", path: null, path_hash: pathHash(id.repo_id, "trinity_sched/preempt.py"), repo_id: id.repo_id },
       { kind: "edit", path: null, path_hash: pathHash(id.repo_id, "x/other.py"), repo_id: id.repo_id },

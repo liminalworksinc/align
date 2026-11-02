@@ -424,6 +424,21 @@ export function collisionReason(harness: SiblingSummary["harness"], id: string, 
 }
 
 /**
+ * The hold when several sessions toward the same goal changed the files this edit touches since this session read them:
+ * one deny naming them all, so the retry after a re-read passes (E2E acycle2 A2-local-4). One sibling keeps the
+ * single wording.
+ */
+export function collisionsReason(hits: { harness: SiblingSummary["harness"]; id: string; file: string; minutesAgo: number }[]): string {
+  if (hits.length === 1) return collisionReason(hits[0].harness, hits[0].id, hits[0].file, hits[0].minutesAgo);
+  const ago = (m: number) => (m < 1 ? "less than a minute ago" : `${m} min ago`);
+  const parts = hits.slice(0, 4).map((h) => `${harnessLabel(h.harness)} session ${clean(String(h.id).slice(0, 8), 20)} edited ${clean(h.file, 80)} ${ago(h.minutesAgo)}`);
+  const more = hits.length > 4 ? `, and ${hits.length - 4} more` : "";
+  const list = parts.length === 2 && !more ? `${parts[0]} and ${parts[1]}` : `${parts.join(", ")}${more}`;
+  const files = new Set(hits.map((h) => h.file)).size > 1;
+  return `Align: ${list}, all working toward the same goal. Read the ${files ? "files" : "file"} again so you keep their changes, then retry this edit.`;
+}
+
+/**
  * Another session toward the same goal changed a file this session read or edited, after it did (A1-local-3). Claude
  * Code refuses such an edit with its own error before any hook runs, so this note, at the next prompt or tool call, is
  * how the model learns which session changed it.

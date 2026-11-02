@@ -154,7 +154,7 @@ describe("A1-local-1: an edit counts only when its own tool call ran", () => {
     assert.doesNotMatch(card, new RegExp(B.sid.slice(0, 8)), "B's refused edit is in no card");
   });
 
-  test("a shell write counts once its command ran (also when it exited non-zero) and its file changed; a session with no PostToolUse hook keeps the file-change rule", async () => {
+  test("a shell write counts once its command ran and its file changed; one that exited non-zero never does (E2E acycle2 A2-local-2); nor a refused one in a session with no PostToolUse hook", async () => {
     const { fake, t } = await world();
     const repo = gitRepo(t, "r1b");
     const A = await shared(t, repo);
@@ -163,11 +163,12 @@ describe("A1-local-1: an edit counts only when its own tool call ran", () => {
     const { id } = pre(t, A, "Bash", cmd);
     fs.writeFileSync(path.join(repo, "out.txt"), "q\n");
     post(t, A, "Bash", cmd, id, true);
+    ranTool(t, A, "Bash", { command: "printf 'r\\n' > ok.txt" }, () => fs.writeFileSync(path.join(repo, "ok.txt"), "r\n"));
     // A refused shell write in a Codex session (no PostToolUse hook): its file never appears.
     const C = await shared(t, repo, "codex");
     pre(t, C, "Bash", { command: "echo x > never.txt" });
     await sync(t);
-    assert.deepEqual(edits(fake).map((e) => e.path), ["out.txt"]);
+    assert.deepEqual(edits(fake).map((e) => e.path), ["ok.txt"]);
   });
 });
 

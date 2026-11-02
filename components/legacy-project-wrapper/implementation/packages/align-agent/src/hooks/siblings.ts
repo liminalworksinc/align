@@ -10,8 +10,9 @@ import { gitInfo } from "../shared/anchors.ts";
 import { asksSection } from "../shared/asks.ts";
 import { readJson, writeFileAtomic } from "../shared/fsx.ts";
 import { layout } from "../shared/layout.ts";
+import { happened, verdictsOf, type Expect, type Verdicts } from "./evidence.ts";
 import { clean, NAME_NOT_SHARED, personName, quoted, remotePath, SELF_ELSEWHERE, type SiblingSummary } from "../shared/envelope.ts";
-import type { FeedFile, Goal, Harness, HotState, InjectedState } from "../shared/types.ts";
+import type { FeedFile, Goal, GoalSnapshot, Harness, HotState, InjectedState } from "../shared/types.ts";
 
 /** An edit by another session this recent holds an edit to the same file once. */
 export const COLLIDE_MS = 20 * 60_000;
@@ -29,7 +30,7 @@ const KEEP_LINES = 300;
 const HARD_BYTES = 4 * 1024 * 1024;
 
 export interface Act {
-  t: "edit" | "read" | "commit" | "task" | "claim" | "warned" | "noted" | "ran";
+  t: "edit" | "read" | "commit" | "task" | "claim" | "warned" | "noted" | "ran" | "failed";
   at: string;
   /** Absolute path for edit, read, claim and warned. */
   p?: string;
@@ -40,8 +41,19 @@ export interface Act {
   ref?: string;
   /** "git": found by the sync pass in the repo's working tree, not seen by a hook (e.g. a script wrote the file). */
   via?: "git";
-  /** edit: the harness's id for the tool call (`tool_use_id`); ran: the same id, once the PostToolUse hook saw it run. */
+  /** edit, commit: the harness's id for the tool call (`tool_use_id`); ran, failed: the verdict on that call, once its
+   *  PostToolUse hook saw it run or fail, or its evidence was checked (`hooks/evidence.ts`), for one file (`p`), the
+   *  commit (`p: "#commit"`) or the whole call. */
   u?: string;
+  /** edit, commit: recorded by a Claude Code plugin that installs PostToolUse, so it counts only once that hook saw
+   *  its own call run (A2-local-1). */
+  c?: 1;
+  /** edit: what its file should show once the call ran, checked when there is no PostToolUse (A2-local-1). */
+  v?: Expect;
+  /** commit: the folder it was made in, where the repo is checked for it when there is no PostToolUse (A2-local-5). */
+  d?: string;
+  /** Recorded from a Claude Code subagent's tool call (A2-local-3). */
+  ag?: 1;
   /** edit: written through a shell command, which counts only if the command ran and its file changed. */
   sh?: 1;
   /** The goal the session counted toward when this was recorded (null: none); absent in lines older builds wrote. */
@@ -318,35 +330,15 @@ export function localKeys(home: string): Set<string> {
 }
 
 /**
- * Edits recorded at PreToolUse that actually happened. The hook runs before the harness's own permission check, so an
- * edit the user refused is recorded too. In a session whose PostToolUse hook runs (`confirmed`: Claude Code with this
- * build's plugin), an edit counts only once that hook saw its own tool call run (a `ran` act with its `u`), plus, for a
- * shell write, its file changed: another session's write to the same file never makes it count (A1-local-1).
- * Otherwise (Codex, an older plugin) it counts if its file changed at or after the time it was recorded (C3-9). Edits
- * the sync pass found in the working tree (`via: "git"`) and every other kind of act are kept.
+ * Edits and commits recorded at PreToolUse that actually happened, by evidence about the session's own tool call
+ * (`hooks/evidence.ts`): the hook runs before the harness's own permission check, so a refused or failed call is
+ * recorded too, and a file another session wrote since never makes it count (A1-local-1, A2-local-1, 2, 5). Edits the
+ * sync pass found in the working tree (`via: "git"`) and every other kind of act are kept. `lazy`: an edit still
+ * waiting for its own session's next hook counts once its file shows it and no other session explains that.
  */
-export function madeActs(acts: Act[], confirmed = false, ran?: Set<string>): Act[] {
-  const done = ran ?? new Set(acts.filter((a) => a.t === "ran" && a.u).map((a) => a.u as string));
-  const mtimes = new Map<string, number>();
-  const mtime = (p: string) => {
-    if (!mtimes.has(p)) {
-      let m = -Infinity;
-      try {
-        m = fs.statSync(p).mtimeMs;
-      } catch {
-        /* never written */
-      }
-      mtimes.set(p, m);
-    }
-    return mtimes.get(p)!;
-  };
-  // A second of slack for file systems that keep whole-second times.
-  const changed = (a: Act) => mtime(a.p as string) >= Date.parse(a.at) - 1000;
-  return acts.filter((a) => {
-    if (a.t !== "edit" || a.via || !a.p) return true;
-    if (confirmed && a.u) return done.has(a.u) && (!a.sh || changed(a));
-    return changed(a);
-  });
+export function madeActs(acts: Act[], confirmed = false, verdicts?: Verdicts, lazy: { home: string; lid: string } | null = null): Act[] {
+  const v = verdicts ?? verdictsOf(acts);
+  return acts.filter((a) => happened(a, v, confirmed, lazy));
 }
 
 /** Every line of a session's activity file, as recorded (the trim header and torn lines left out). */
@@ -371,7 +363,7 @@ export function rawActs(home: string, lid: string): Act[] {
 }
 
 export function readActs(home: string, lid: string): Act[] {
-  return madeActs(rawActs(home, lid), confirming(home, lid));
+  return madeActs(rawActs(home, lid), confirming(home, lid), undefined, { home, lid });
 }
 
 /**
@@ -394,20 +386,86 @@ interface Sibling {
   acts: Act[];
 }
 
-/** Other shared sessions on this machine bound to the same goal (`everyLocal`: this one too), with their acts toward it. */
+/** What the hook knows of a session a folder rule shared at its start, until the sync pass makes its share. */
+export interface StartingShare {
+  harness: Harness;
+  native_session_id: string;
+  cwd: string | null;
+  workspace_id: string;
+  workspace_name: string;
+  goal_id: string | null;
+  at: string;
+}
+
+/** How long a session's start share stands in for its share when no pass has made it (the pass removes it sooner). */
+const STARTING_MS = 10 * 60_000;
+
+/**
+ * A session a folder rule shared at its start, as a hot file would show it, while no sync pass has made its share
+ * (A2-local-7: a session started within seconds of another's pass had no hot file, so its edits were neither recorded
+ * nor held, and the git pass credited them to the other session). Null once its hot file has a share.
+ */
+export function startingHot(home: string, lid: string, hot: HotState | null = readJson<HotState>(layout.hot(home, lid))): HotState | null {
+  if (hot?.share) return null;
+  const s = readJson<StartingShare>(layout.activityStarting(home, lid));
+  if (!s || !s.workspace_id || !(Date.now() - Date.parse(s.at) < STARTING_MS)) return null;
+  return {
+    v: 1,
+    local_id: lid,
+    harness: s.harness,
+    native_session_id: s.native_session_id,
+    cwd: s.cwd,
+    share: { workspace_id: s.workspace_id, workspace_name: s.workspace_name, session_key: "", state: "shared" },
+    goal: s.goal_id ? ({ id: s.goal_id } as GoalSnapshot) : null,
+    binding: null,
+    pending_binding: null,
+    pending_directives: [],
+    notices: [],
+    updated_at: s.at,
+  };
+}
+
+/** A share whose session's work is recorded and held: shared, or waiting for the server to take it (`pending`, as a
+ *  folder rule's share is for a moment after the pass that makes it). */
+const working = (hot: HotState | null) => hot?.share?.state === "shared" || hot?.share?.state === "pending";
+
+/** The session's hot file as its activity hooks read it: its share while shared or pending, else the start share a
+ *  folder rule made that no pass has applied yet (A2-local-7). Its share state then reads `shared`. */
+export function activityHot(home: string, lid: string, hot: HotState | null): HotState | null {
+  if (working(hot)) return { ...hot!, share: { ...hot!.share!, state: "shared" } };
+  return startingHot(home, lid, hot);
+}
+
+/** Other shared sessions on this machine bound to the same goal (`everyLocal`: this one too), with their acts toward it:
+ *  those a sync pass made, and those a folder rule shared at their start that no pass has made yet (A2-local-7). */
 export function siblings(home: string, lid: string, goalId: string, everyLocal = false): Sibling[] {
   let names: string[] = [];
   try {
     names = fs.readdirSync(layout.hotDir(home)).filter((n) => n.endsWith(".json"));
   } catch {
-    return [];
+    names = [];
   }
   const out: Sibling[] = [];
+  const known = new Set<string>();
   for (const n of names) {
     const hot = readJson<HotState>(path.join(layout.hotDir(home), n));
-    if (!hot || (hot.local_id === lid && !everyLocal) || hot.share?.state !== "shared") continue;
+    if (hot?.share) known.add(hot.local_id);
+    if (!hot || (hot.local_id === lid && !everyLocal) || !working(hot)) continue;
     if (liveGoalId(hot, readJson<InjectedState>(layout.injected(home, hot.local_id))) !== goalId) continue;
     out.push({ lid: hot.local_id, hot, acts: readActs(home, hot.local_id).filter((a) => towardGoal(a, goalId)) });
+  }
+  let starting: string[] = [];
+  try {
+    starting = fs.readdirSync(layout.activityDir(home)).filter((n) => n.endsWith(".starting"));
+  } catch {
+    /* none */
+  }
+  for (const n of starting) {
+    const other = n.slice(0, -".starting".length);
+    if (known.has(other) || (other === lid && !everyLocal)) continue;
+    const hot = startingHot(home, other, null);
+    if (!hot || hot.goal?.id !== goalId) continue;
+    out.push({ lid: other, hot, acts: readActs(home, other).filter((a) => towardGoal(a, goalId)) });
   }
   return out;
 }
@@ -415,10 +473,15 @@ export function siblings(home: string, lid: string, goalId: string, everyLocal =
 const ms = (iso: string) => Date.parse(iso) || 0;
 const minutes = (iso: string, now: number) => Math.max(0, Math.floor((now - ms(iso)) / 60_000));
 
-/** The newest edit by a sibling to one of these files that this session has not read, edited or been warned about since. */
-export function collision(home: string, lid: string, goalId: string, files: string[], now = Date.now()): { sib: Sibling; file: string; at: string } | null {
-  if (!files.length) return null;
+/**
+ * Each sibling's newest edit to one of these files that this session has not read, edited or been warned about since:
+ * all of them, so one hold names every sibling and the retry passes (A2-local-4: one hold per sibling edit held the
+ * retry again). Oldest first.
+ */
+export function collisions(home: string, lid: string, goalId: string, files: string[], now = Date.now()): { sib: Sibling; file: string; at: string }[] {
+  if (!files.length) return [];
   const mine = readActs(home, lid);
+  const out: { sib: Sibling; file: string; at: string }[] = [];
   for (const sib of siblings(home, lid, goalId)) {
     for (const file of files) {
       // Only edits a hook saw: a git-detected edit may belong to either of two sessions sharing one clone.
@@ -426,10 +489,10 @@ export function collision(home: string, lid: string, goalId: string, files: stri
       if (!theirs) continue;
       const ref = `${sib.lid}@${theirs.at}`;
       const mineAfter = mine.some((a) => a.p === file && (((a.t === "edit" || a.t === "read") && ms(a.at) > ms(theirs.at)) || (a.t === "warned" && a.ref === ref)));
-      if (!mineAfter) return { sib, file, at: theirs.at };
+      if (!mineAfter) out.push({ sib, file, at: theirs.at });
     }
   }
-  return null;
+  return out.sort((x, y) => ms(x.at) - ms(y.at));
 }
 
 /**
@@ -442,7 +505,8 @@ export function collision(home: string, lid: string, goalId: string, files: stri
 export function siblingChanges(home: string, lid: string, goalId: string, now = Date.now()): { sib: Sibling; file: string; at: string }[] {
   const mine = readActs(home, lid);
   const touched = new Map<string, number>();
-  for (const a of mine) if ((a.t === "edit" || a.t === "read") && a.p && now - ms(a.at) < MINE_MS) touched.set(a.p, Math.max(touched.get(a.p) || 0, ms(a.at)));
+  // The main agent's reads and edits: a subagent's re-read leaves the main agent's copy as stale as before (A2-local-3).
+  for (const a of mine) if ((a.t === "edit" || a.t === "read") && a.p && !a.ag && now - ms(a.at) < MINE_MS) touched.set(a.p, Math.max(touched.get(a.p) || 0, ms(a.at)));
   if (!touched.size) return [];
   // Told already: by this note (`noted` `chg:<lid>@<at>`), or by a hold on that edit (`warned`).
   const told = new Set(mine.filter((a) => a.t === "warned" || a.t === "noted").map((a) => (a.t === "noted" ? String(a.ref).replace(/^chg:/, "") : a.ref)));

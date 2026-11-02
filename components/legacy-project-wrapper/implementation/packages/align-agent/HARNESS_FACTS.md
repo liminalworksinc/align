@@ -54,6 +54,17 @@ Source: https://code.claude.com/docs/en/hooks (markdown at https://code.claude.c
   command that exits non-zero fires `PostToolUseFailure` (with `error: "Exit code 1"`), not `PostToolUse`. Claude
   Code also blocks a standalone `sleep <n>` command. Hence edits counted on `PostToolUse` confirmation, and the
   sibling-change note at the next prompt or tool call (A1-local-1, A1-local-3).
+- Checked 11-02 (E2E acycle2 A2-local-1): a session whose only tool call is refused at the permission prompt never
+  fires `PostToolUse`, so "this session's PostToolUse hook has run" cannot tell the hook that PostToolUse is installed.
+  Hence the plugin's `PreToolUse` command carries `--post-tool-use` (what Claude Code loaded at the session's start
+  says so), and edits wait for their own `PostToolUse` from the first call. A subagent's `PreToolUse`/`PostToolUse`
+  carry the parent's `session_id` plus `agent_id`; context returned there stays in the subagent, so the
+  sibling-change note, like the mid-turn delta, skips calls with `agent_id` (A2-local-3). Real `claude -p` runs with
+  2.1.316 on 11-02 (`/tmp/align-work/a2local-fix-home/runs`): rB2's only call, a `Write` refused in
+  `--permission-mode default`, was recorded waiting for its PostToolUse and never counted after another session wrote
+  the same content (rA2); in rB8 a subagent's `cat`, `git log` and `ls` ran after a sibling edit, got no note, and the
+  main agent's re-read after Claude Code's "File has been modified since read" refusal got the note naming the
+  sibling; rB11's `git commit -m` with nothing staged fired `PostToolUseFailure` and was recorded `failed`.
 - Plugins: a folder in `~/.claude/skills/` "that contains a `.claude-plugin/plugin.json` is a skills-directory plugin"
   that Claude Code "loads ... when a session starts, with no flag and no install step"; its `hooks/hooks.json` uses
   the settings `hooks` shape. `claude plugin disable <name>@skills-dir` turns it off. Checked with 2.1.309:
@@ -103,6 +114,22 @@ Source: https://learn.chatgpt.com/docs/hooks (markdown at https://learn.chatgpt.
 - Model-visible hook output defaults to "roughly 2,500 tokens" (`additionalContextLimit`). `timeout` is seconds,
   default 600. `matcher` `"*"` matches everything; UserPromptSubmit ignores matchers.
 - Background hooks: "Finishing a background hook doesn't start a new turn." Align uses no background hooks.
+- Re-read 11-02 (E2E acycle2 A2-local-1). Events now listed: `PreToolUse`, `PermissionRequest`, `PostToolUse`,
+  `PreCompact`, `PostCompact`, `UserPromptSubmit`, `SubagentStop`, `Stop`. `PreToolUse` and `PostToolUse` input carry
+  `tool_use_id` ("Tool-call id for this invocation"); `PostToolUse` adds `tool_response` ("Tool-specific output ...
+  Other local function tools normally send their model-facing output"), no documented exit status or success flag.
+  `PostToolUse` "runs after supported tools produce output, including Bash, `apply_patch` ... For Bash, it also runs
+  after commands that exit with a non-zero status." The docs say nothing about a call refused at the approval prompt
+  (whether `PostToolUse` fires, and with what), and `PermissionRequest` "doesn't run for commands that don't need
+  approval". A `matcher` of `apply_patch` also matches `Edit` and `Write`, with `tool_name` still `apply_patch`.
+  So Align installs no Codex `PostToolUse` (a new hook is also skipped until the user trusts it in `/hooks`) and
+  confirms a Codex edit by content instead: at `PreToolUse` the hook keeps hashes of the patch's added lines that are
+  not in the file yet (else of the removed lines present once, else whether the file exists), and the edit counts once
+  they are in the file and no other session's edit of it explains them; the session's next hook decides, its `Stop`
+  or next prompt decides what is still missing as not made (`src/hooks/evidence.ts`). A Codex commit counts once
+  HEAD's reflog has its subject. No Codex binary or account was available here, so these were exercised through the
+  installed `hook.js codex <event>`, as the acycle2 tester did. A failed Codex shell write that leaves its file
+  unchanged never counts; one that exits non-zero after writing cannot be told apart without `PostToolUse`.
 
 ## Codex telemetry
 

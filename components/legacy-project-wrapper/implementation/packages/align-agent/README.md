@@ -100,14 +100,18 @@ call.
 - Edits are seen three ways: edit tools (Claude Edit/Write/MultiEdit, Codex apply_patch), plain shell writes (`>`,
   `>>`, `tee`, `sed -i`, `touch`, `cp`/`mv` targets; `git add` is no edit), and, in the sync pass, the repo's working
   tree and new commits since the previous pass (for files a script wrote), credited to the session most recently
-  active there unless a hook already recorded the file's latest change. In Claude Code an edit counts once its
-  `PostToolUse` hook saw it run, so one refused at the permission prompt is never reported, whoever changes the file
-  later; in Codex once its file changed. Reads are Claude's `Read` and plain shell reads (`cat`, `head`, `sed -n`, `git
+  active there unless a hook (in any session here, shared now or not) already recorded the file's latest change, or an
+  earlier pass credited it. An edit or commit counts only on evidence that its own tool call made it: with this
+  build's Claude Code plugin, its `PostToolUse` (never a refused call, which fires no hook, nor `PostToolUseFailure`);
+  in Codex and with an older plugin, the lines the call was to write are in the file and were not before, no other
+  session's edit explains them (a commit: the repo's reflog has it), checked at the session's next hook
+  (`src/hooks/evidence.ts`). So a refused or failed edit is never reported, whoever writes the file later, the same
+  content included. Reads are Claude's `Read` and plain shell reads (`cat`, `head`, `sed -n`, `git
   diff <path>` ...). Activity carries the goal it was recorded toward, so a session that moves to another goal brings
   none of its earlier work along. The activity file is trimmed only of lines the sync pass has uploaded.
 - On this machine, an edit to a file another same-goal session changed in the last 20 minutes (and this session has not
   read since) is held once with the reason. Claude Code refuses such an edit itself before any hook runs, so every
-  prompt and tool call also tells the session, once, which session changed a file it read or edited. Only hook-seen edits can hold an edit. Across people nothing is held; the next edit of an overlapping or claimed
+  prompt and tool call of the main agent (never a subagent's) also tells the session, once, which session changed a file it read or edited. When several sessions changed it, one hold names them all. A session a folder rule shares at its start counts from its first tool call, before the sync makes its share. Only hook-seen edits can hold an edit. Across people nothing is held; the next edit of an overlapping or claimed
   file gets one short note.
 
 ## Limits, accepted asks and the drift notice
@@ -184,7 +188,9 @@ nothing, not even `ALIGN_HOME`.
   `$CLAUDE_CONFIG_DIR/skills/align/` (default `~/.claude/skills/align/`): `.claude-plugin/plugin.json` and
   `hooks/hooks.json` with one handler each for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and
   `PostToolUseFailure` (matcher `"*"`; these two confirm that an edit recorded at `PreToolUse` ran), `Stop` and
-  `StopFailure`: `'<node>' '<ALIGN_HOME>/bin/current/hook.js' claude <Event>`, timeout 5. Claude Code
+  `StopFailure`: `'<node>' '<ALIGN_HOME>/bin/current/hook.js' claude <Event>`, timeout 5 (`PreToolUse` adds
+  `--post-tool-use`: this plugin has `PostToolUse`, so edits wait for it from the first call; `align status` and
+  `align doctor` name a plugin an older Align wrote). Claude Code
   loads it in every new session with no install step (`claude plugin list` shows `align@skills-dir`);
   `claude plugin disable align@skills-dir` turns it off. `settings.json` is not edited, except that handlers an
   earlier Align merged there are removed (with a `settings.json.align-backup-<timestamp>` copy first). Install

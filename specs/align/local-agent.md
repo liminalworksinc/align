@@ -738,7 +738,10 @@ or restored Align folder, say)` for `refresh_reuse`, and `this device was unpair
 out everywhere), its account was deleted, or its sign-in expired` for a bare `invalid_grant`), `Clock:` when a clock offset is saved (`... Align sends times on the server's clock. ...`), `Revoke:`
 while a logout's revoke waits for the server, `Last sync:` (and `Server:     unreachable since <time>:
 <why>; <n> usage rows wait to upload` while the last pass could not reach the server), `Hooks:` (Claude Code `installed`, Codex `installed (trust them in Codex /hooks)`, either one
-`partial (n/m)` or `not installed`, and the hook file hash state `ok`, `missing`, `modified since install` or `not installed`), `Outbox:`, `Shares:`, `Unpriced:` and,
+`partial (n/m)` or `not installed`; a Claude Code plugin an older Align wrote reads `installed by an older Align (<why>)`
+when its `PreToolUse` lacks `--post-tool-use`, and a partial one `partial (n/m; <why>)`, where `<why>` is `edits in its
+sessions are confirmed from the files' content, not by Claude Code; run \`align install\``, A2-local-1; `align doctor`
+warns with the same words, and the hook file hash state `ok`, `missing`, `modified since install` or `not installed`), `Outbox:`, `Shares:`, `Unpriced:` and,
 when any session is stopped, `Stop latch:` lines, when any session is held, `Goal hold:  <n> session(s) paused on
 "<title>"` (counting sessions, not holds; each adding `; <k> can't be lifted from the web any more (sharing ended):
 \`align stop-sharing <session>\` unblocks each` when some of those shares ended, and `; <k> of them on a goal whose hold
@@ -1102,7 +1105,9 @@ with `"type": "module"`), atomically repoint `~/.align/bin/current` at it, and r
 (`"name": "align"`) and `hooks/hooks.json` with exactly one handler each for `SessionStart`, `UserPromptSubmit`,
 `PreToolUse`, `PostToolUse` and `PostToolUseFailure` (each with matcher `"*"`; the last two confirm that a recorded
 edit ran, A1-local-1), `Stop` and `StopFailure`, each `'<node>' '<ALIGN_HOME>/bin/current/hook.js' claude
-<Event>` with `timeout` 5; it SHALL NOT edit `settings.json` except to remove handlers an earlier Align merged there
+<Event>` with `timeout` 5, `PreToolUse`'s followed by `--post-tool-use`, which tells the hook that this plugin
+installs `PostToolUse` too, so an edit counts only once that hook saw its own call run, from the session's first tool
+call (E2E acycle2 A2-local-1); it SHALL NOT edit `settings.json` except to remove handlers an earlier Align merged there
 (after a `settings.json.align-backup-<timestamp>` copy), and SHALL refuse to replace a `skills/align` folder that is
 not Align's. With `--codex` (or no flag) it SHALL merge `SessionStart`, `UserPromptSubmit`, `PreToolUse` (matcher
 `"*"`) and `Stop` handlers with `codex` into `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`) after a
@@ -2715,7 +2720,12 @@ Code's `Read` and plain shell reads of a path (`cat`, `head`, `tail`, `less`, `m
 `-i`, `git diff <path>`), which is how Codex reads (A1-local-4). Another session counts toward the same goal by the
 goal it counts toward now: from the prompt after a move made in the session (`::align bind`, an accepted
 `switch_goal`), before any sync records it (A1-local-6), and only its work recorded toward that goal counts, never its
-earlier work toward the goal it left (A1-local-5). At a
+earlier work toward the goal it left (A1-local-5). A session a folder rule shares at its start SHALL count as shared
+toward the rule's goal from its first tool call, before any sync pass makes its share: its `SessionStart` hook writes
+`activity/<lid>.starting` (after the share's spool record), which stands in for the share until the pass that applies
+that record removes it (at most 10 minutes), so its edits are recorded and held and hold others' at once; and that
+`SessionStart` SHALL always start a sync pass (waiting for one already running), never skipped because another
+session's pass was started within the last 3 seconds (E2E acycle2 A2-local-7). At a
 prompt it SHALL add one card of at most 300 characters, `[Align] Also working toward this goal on this machine:
 ...`, about other local sessions bound to the same goal (at most once per 10 minutes per session, sooner only when
 another person's work overlaps this session's files, and 0 bytes when nothing is new; the same card is also added at
@@ -2724,14 +2734,19 @@ rather than only counts of files. Before an edit it SHALL deny, once, an edit to
 machine changed in the last 20 minutes through a hook-seen edit, unless this session read or edited it since, with
 the reason `Align: <harness> session <id8>, working toward the same goal, edited <file> <n> min ago. Read the file
 again so you keep its changes, then retry this edit.` (with `less than a minute ago` in place of `<n> min ago` when the
-edit is under a minute old). Claude Code refuses an edit of a file changed since it was read with its own error before
+edit is under a minute old). When several such sessions changed the files the edit touches, it SHALL deny it once,
+naming them all, `Align: <harness> session <id8> edited <file> <ago> and <harness> session <id8> edited <file> <ago>,
+all working toward the same goal. Read the file again so you keep their changes, then retry this edit.` (`the files`
+when they differ; up to four sessions, then `and <n> more`), so the retry passes (A2-local-4). Claude Code refuses an edit of a file changed since it was read with its own error before
 any hook runs, so the hold rarely reaches a Claude Code model (A1-local-3); so at every prompt (whatever the card's
-throttle) and every tool call, of any tool, the hook SHALL add, once per sibling edit, `[Align] <harness> session <id8>,
+throttle) and every tool call of the main agent, of any tool, the hook SHALL add, once per sibling edit, `[Align] <harness> session <id8>,
 working toward the same goal, edited <file> <n> min ago, after this session last read it. Read the file again before
 editing it so you keep its changes. No added authority.` for each file (at most three) this session read or edited
 that such a session then changed through a hook-seen edit in the last 20 minutes. A Claude Code session thus hears
 which session changed the file at the prompt or tool call after the change, typically the re-read that follows Claude
-Code's refusal. The note does not replace the hold: an edit without a read since is still held once.
+Code's refusal. A subagent's tool call SHALL neither get the note nor use it up (its context reaches only that
+subagent), and a subagent's read of the file does not count as the main agent's (A2-local-3). The note does not
+replace the hold: an edit without a read since is still held once.
 
 #### Scenario: Card, then hold once
 
@@ -2742,6 +2757,21 @@ Code's refusal. The note does not replace the hold: an edit without a read since
 
 - **WHEN** Claude Code session B read `src/cutover.ts` and saw a card a moment ago, session A then edits the file, and B's next tool call is a `Read` of it, then A edits it again and B prompts (test `findings16` "at its next tool call, or its next prompt within the card's throttle ..."; with real `claude -p`, B's `Edit` refused by Claude Code's "File has been modified since read" and the re-read's `PreToolUse` naming A, and a resumed B told at its prompt)
 - **THEN** the `Read` gets `[Align] Claude Code session <A>, working toward the same goal, edited src/cutover.ts less than a minute ago, after this session last read it. ...`, the next tool call gets nothing, the prompt gets the note for the second edit, and the prompt after it nothing
+
+#### Scenario: A subagent's tool call does not use up the note
+
+- **WHEN** Claude Code session B reads `src/db.ts`, session A then edits it, and B's subagent runs `git log` and reads `src/db.ts`, and then B's main agent reads it (test `findings19` "a subagent's tool calls neither get nor use up the note ..."; with real `claude -p`, a subagent's `Bash` calls after a sibling edit)
+- **THEN** the subagent's calls get nothing, the main agent's read gets `[Align] Claude Code session <A>, working toward the same goal, edited src/db.ts less than a minute ago, after this session last read it. ...`, and its next call nothing
+
+#### Scenario: Several siblings, one hold
+
+- **WHEN** Claude Code sessions N1 and N2 both edited `src/shared.ts` and a Codex session that never read it patches it twice (test `findings19` "the edit is held once, naming every sibling, and the retry passes")
+- **THEN** the first patch is denied with `Align: Claude Code session <N1> edited src/shared.ts less than a minute ago and Claude Code session <N2> edited src/shared.ts less than a minute ago, all working toward the same goal. Read the file again so you keep their changes, then retry this edit.` and the retry passes
+
+#### Scenario: Sessions started together by a folder rule
+
+- **WHEN** a folder rule shares sessions S1 and S2 started one after the other with no sync pass between, S2 writes `docs/s2.md`, S1 then edits it, and two syncs run (test `findings19` "its edits are recorded and held ... before any pass makes its share ..."); in another case a pass was spawned a moment before S2's `SessionStart` (test `findings19` "its SessionStart always starts a pass ...")
+- **THEN** S2's edit is recorded, S1's edit is held naming S2, the edit goes up once with S2's key, nothing is credited to S1 through git, and `activity/<S2>.starting` is gone; in the other case S2's share is made by the pass its own `SessionStart` started
 
 #### Scenario: A shell read is a read
 
@@ -2764,12 +2794,18 @@ The `align` hook SHALL treat as edits Claude Code `Edit`, `Write`, `MultiEdit` a
 `apply_patch` file headers, and plain path targets of shell writes (`>`, `>>`, `tee`, `sed -i`, `touch`, `cp`/`mv`
 destinations), ignoring variables, globs and `/dev/` targets; `git add` stages a file and changes nothing in it, so it
 is not an edit (A1-local-1); shell writes SHALL never be held. Commit subjects SHALL come from `git commit -m` including
-the heredoc form. The `align sync` pass SHALL also detect files changed in a shared session's repo working tree or in
+the heredoc form, and a commit SHALL count only once it was made (A2-local-5): its command's `PostToolUse` (not
+`PostToolUseFailure`) with this build's Claude Code plugin, else the repo's HEAD reflog holding a commit with that
+subject made since (checked at the session's next hook and by the sync pass; a commit still missing when the turn ends
+never counts). The `align sync` pass SHALL also detect files changed in a shared session's repo working tree or in
 new commits since its previous pass, attribute them to the session most recently active there with `via: "git"`,
 take only a baseline on the first pass, and never use them to hold an edit. A file whose latest change a hook
-recorded SHALL never be credited this way: one recorded since the previous pass, one waiting to be confirmed, or one an
-earlier pass took as made while the file has not changed since (its change time is kept for 6 hours), so committing
-hook-seen work, from a terminal or by the agent, credits it to nobody else and uploads it once (A1-local-2).
+recorded SHALL never be credited this way: one recorded since the previous pass, one waiting for its verdict, or one an
+earlier pass took as made while the file has not changed since (its change time is kept for 6 hours), in any session
+that recorded activity on this machine, shared now or not (a share a sign-out or `align stop-sharing` ended keeps its
+edits, A2-local-6), so committing hook-seen work, from a terminal or by the agent, credits it to nobody else and
+uploads it once (A1-local-2). A change the pass credited is kept the same way, so committing it later credits it to
+nobody again (A2-local-6).
 
 #### Scenario: Shell writes
 
@@ -2781,6 +2817,16 @@ hook-seen work, from a terminal or by the agent, credits it to nobody else and u
 - **WHEN** a shared Codex session's repo gets a rewritten `DESIGN.md` and a committed `TESTING.md` with no hook seeing either (test `pod` "a file a script wrote ...")
 - **THEN** the first `detectGitEdits` pass records 0, the second records both files with `via: "git"`, and a third records 0
 
+#### Scenario: A commit that was never made
+
+- **WHEN** a Claude Code session's `git commit -m 'Cut over reads to the new cluster'` exits 1 (`PostToolUseFailure`), a Codex session's `git commit -m 'Never ran'` and an older plugin's `git commit -m 'Tweak db'` are seen by the hook but never run, and then the Codex session really commits `Add c` (test `findings19` "a failed `git commit -m` ...")
+- **THEN** another session's card names no commit, and the only commit item that goes up is `Add c`
+
+#### Scenario: A script's change, then a commit of it
+
+- **WHEN** a script writes `docs/trig1.md` and a pass credits it `via: "git"`, then the person commits everything with another session most recently active, and a pass runs (test `findings19` "a script's change credited by one pass is not credited again ..."); in another case a session's hook-seen edit waits to upload when its share stops (`align stop-sharing`), and a pass runs with another session most recently active (test `findings19` "an edit of a session whose share stopped ...")
+- **THEN** `docs/trig1.md` goes up once and nothing is credited to the other session; in the other case nothing is credited to the other session either
+
 #### Scenario: A commit of hook-seen work
 
 - **WHEN** session A writes `src/cutover.ts` through an edit tool and passes run, session B is then the most recently active one and the person commits everything in a terminal; then A writes `src/x.ts` and commits it itself; then a script changes `src/cutover.ts` (test `findings16` "committing a hook-seen edit ... credits nobody else and uploads it once")
@@ -2791,15 +2837,30 @@ hook-seen work, from a terminal or by the agent, credits it to nobody else and u
 The `align sync` pass SHALL upload new lines of each shared session's activity file to `POST
 /api/v2/workspaces/:ws/activity` in batches of 200, advancing its offset only on success. Offsets SHALL be logical (the bytes a trim dropped plus the position in the file), so a trim never makes the
 pass resume mid-file. The hook records an edit at
-`PreToolUse`, before the harness's own permission check, with the tool call's id. In a session whose `PostToolUse` hook
-runs (Claude Code with this build's plugin: the first `PostToolUse` of any tool marks it with
-`activity/<lid>.confirmed`), an edit SHALL count, for the upload and for the sibling card and hold, only once that hook
-saw its own tool call run (`PostToolUse` of the edit tool, or `PostToolUse`/`PostToolUseFailure` of a shell command,
-whose written file must also have changed), so another session's change of the same file never makes a refused edit
-count (A1-local-1). Otherwise (Codex, an older plugin) an edit SHALL count only if its file changed at or after the
-time it was recorded (one second of slack). Either way an edit the user refused is never reported as made. An edit whose file has not changed yet when a pass
-reads it (the user is still on the permission prompt) SHALL wait, for up to an hour, and go up for its own session once
-its file changes, exactly once; after an hour unchanged it counts as refused. Edits the sync pass finds in the working
+`PreToolUse`, before the harness's own permission check, with the tool call's id, so a refused or failed call is
+recorded too, and its file changing afterwards proves nothing (another session may have written it). An edit SHALL
+count, for the upload and for the sibling card and hold, only on evidence that this session's own tool call made it
+(A1-local-1, E2E acycle2 A2-local-1, A2-local-2):
+- With this build's Claude Code plugin (its `PreToolUse` command says `--post-tool-use`), from the session's first tool
+  call: once the call's own `PostToolUse` ran (recorded as `ran`; for a shell command, per written file, only when the
+  file changed since the call was recorded). A refused call fires no hook, and `PostToolUseFailure` (a command that
+  exited non-zero, an edit tool that failed) records `failed`: neither ever counts.
+- Otherwise (Codex, whose `PostToolUse` Align does not install and which documents nothing reliable for a refused
+  `apply_patch`; an older Claude Code plugin): when the file shows what the call was to do and did not before, as the
+  hook recorded it at `PreToolUse` from the call's own input, by line hashes only (lines a patch, `Write`, `Edit` or
+  `MultiEdit` adds that were absent, else lines it removes that were present once, else whether the file then exists;
+  a shell write, or a call that says nothing about lines, needs the file changed), and no other session's edit of that
+  file explains the change (one that ran with the same lines, or, when lines say nothing, after this edit was recorded).
+  The session's next hook decides (`ran`), and its next `UserPromptSubmit` or `Stop` decides the rest as not made
+  (`failed`); the sync pass also records those it finds made. A session with an older plugin whose `PostToolUse` runs
+  (it had one, without the flag) counts an edit on either.
+Lines older builds wrote, with no evidence, keep the rule that their file changed at or after the time they were
+recorded (one second of slack). Either way an edit the user refused is never reported as made, whoever writes its
+file later, the same content included. An edit not decided yet when a pass reads it (the user is still on the
+permission prompt) SHALL wait, for up to an hour, and go up for its own session once it is decided as made, exactly
+once; after an hour undecided it counts as refused. `align logout` SHALL upload what the shared sessions recorded since
+the last pass before it signs out (best effort), so their last edits are reported for their own sessions
+(A2-local-6). Edits the sync pass finds in the working
 tree count as they are, except a change some session's hook recorded (since the last pass, or waiting so): that is
 that session's edit, never credited to the session most recently active in the repo. Each item SHALL carry the
 session key, its kind (`edit`, `commit`, `task` or `claim`), a time and a `repo_id` (hash of the workspace and
@@ -2810,8 +2871,9 @@ on `align share`, else the folder rule's setting). The `align share` previews SH
 `Work signals OFF: only keyed hashes of edited files are sent, ...`, and the in-session `::align share --dir` preview
 without `--signals` SHALL include `(Add --signals to share file paths and task labels with the team.)` (the
 single-session `::align share` preview does not mention work signals). The pass SHALL fetch `GET
-.../activity?after=<cursor>` into `~/.align/feeds/activity-<ws>.json`, keeping items from the last 6 hours (at most
-1,000).
+.../activity?after=<cursor>` into `~/.align/feeds/activity-<ws>.json`, keeping other machines' items from the last 6
+hours (at most 1,000); this machine's own items are never kept, since they are never shown back and would push other
+people's recent work out of the 1,000 (A2-local-8).
 
 #### Scenario: An edit approved after a pass read it
 
@@ -2827,6 +2889,21 @@ single-session `::align share` preview does not mention work signals). The pass 
 
 - **WHEN** Claude Code session B reads `docs/r.md` and its `Edit` of it is refused at the permission prompt (no `PostToolUse`), B runs `git add README.md`, then session A reads and edits `docs/r.md` and two syncs run, then a Codex session patches `docs/r.md` (test `findings16` "a refused Claude Code edit is never uploaded ..."; also with real `claude -p`, B in `--permission-mode default`)
 - **THEN** only A's edit of `docs/r.md` goes up, B has no edit, and the Codex patch is held naming A, not B
+
+#### Scenario: Refused edits, by harness and plugin
+
+- **WHEN** for each of Claude Code with this build's plugin, Claude Code with an older plugin (no `PostToolUse`) and Codex, a session X whose every call is refused (its first call a `Write` or `apply_patch` of `docs/plan.md`) tries three files, while session A, with this build's plugin, writes one of them with other content before X's turn ends, one with exactly X's content, and the third after X's turn ended, and another session Y's edit of `docs/ok.md` runs; then two syncs, a Codex patch of `docs/plan.md` and `align team` (test `findings19` "... an edit that ran counts; one refused never does ..."; with real `claude -p`: a refused `Write` as the first call, then the file written by another session; a Codex refused patch through the installed hook)
+- **THEN** only Y's `docs/ok.md` and A's three edits go up, the patch is held naming A and never X, and `align team` lists no work of X's
+
+#### Scenario: A failed shell write
+
+- **WHEN** a Claude Code session's `echo hi > docs/missing2/f.md` exits 1 (`PostToolUseFailure`) and another session then creates the file (test `findings19` "a shell write whose command failed never counts ..."; `findings17` "a shell write counts once its command ran and its file changed ...")
+- **THEN** only the other session's edit goes up, and the failed one is recorded `failed`
+
+#### Scenario: Own items stay out of the feed cache
+
+- **WHEN** another person edits `src/db.ts`, then the server lists 1,000 items this machine uploaded, a sync runs, and a session that read `src/db.ts` edits it (test `findings19` "1,000 of this machine's items ...")
+- **THEN** the cache holds the other person's edit and none of this machine's, and the edit gets the note naming them
 
 #### Scenario: Names only under consent
 
@@ -3080,6 +3157,7 @@ next to a session shared in the same folder in the last 24 hours, `Align: this f
 - `packages/align-agent/src/hooks/handlers.ts`
 - `packages/align-agent/src/hooks/autostart.ts`
 - `packages/align-agent/src/hooks/siblings.ts`
+- `packages/align-agent/src/hooks/evidence.ts`
 - `packages/align-agent/src/install.ts`
 - `packages/align-agent/src/sync.ts`
 - `packages/align-agent/src/tailer.ts`

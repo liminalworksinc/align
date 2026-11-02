@@ -344,7 +344,10 @@ describe("e2e", () => {
     for (const [sid, cwd] of [[A, named], [B, hashed]]) {
       runHook(t, "claude", "PreToolUse", { session_id: sid, cwd, tool_name: "Edit", tool_input: { file_path: path.join(cwd, "src/sso.ts") } });
       touch(path.join(cwd, "src/sso.ts"));
-      runHook(t, "claude", "PreToolUse", { session_id: sid, cwd, tool_name: "Bash", tool_input: { command: 'git commit -am "Wire SSO callback"' } });
+      // The commit ran: its PostToolUse says so (a commit the hook saw that never ran is not one, A2-local-5).
+      const commit = { session_id: sid, cwd, tool_name: "Bash", tool_input: { command: 'git commit -am "Wire SSO callback"' }, tool_use_id: `toolu_commit_${sid}` };
+      runHook(t, "claude", "PreToolUse", commit);
+      runHook(t, "claude", "PostToolUse", commit);
     }
     const kA = hot(t, A)!.share!.session_key;
     const kB = hot(t, B)!.share!.session_key;

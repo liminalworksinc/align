@@ -7,7 +7,7 @@ import { gitInfo, matchAnchors } from "../shared/anchors.ts";
 import {
   boundLimits,
   clean,
-  collisionReason,
+  collisionsReason,
   crossNote,
   endSentence,
   holdReason,
@@ -51,7 +51,8 @@ import { isShareStateNotice, noticeKind, resumedButHeld } from "../shared/notice
 import { matchRule, readRules, removeRule, setRule } from "../shared/rules.ts";
 import { queueSteering, steeringLine, unsharedNote } from "../shared/steering.ts";
 import type { DriftFile, FeedFile, Goal, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
-import { CLAIM_MS, collision, commitSubject, crossOverlap, display, editedPaths, liveGoalId, podReport, readPaths, record, shellWrites, siblingChanges, siblingNews, type Act } from "./siblings.ts";
+import { CLAIM_MS, collisions, commitSubject, crossOverlap, display, editedPaths, liveGoalId, podReport, rawActs, readPaths, record, shellWrites, siblingChanges, siblingNews, activityHot, type Act, type StartingShare } from "./siblings.ts";
+import { changedSince, COMMIT, expectations, settle } from "./evidence.ts";
 
 export interface HookInput {
   session_id?: string;
@@ -422,6 +423,16 @@ function autoShare(home: string, harness: Harness, sid: string, cwd: string | nu
   });
   inj.notices_shown.push("anchor");
   const goal = rule.goal_id ? feedGoal(home, rule.workspace_id, rule.goal_id) : null;
+  // Until a sync pass makes the share, this stands in for it, so the session's edits are recorded and held, and hold
+  // others, from its first tool call (A2-local-7). Written after the spool record, so a pass that started before it
+  // read that record.
+  try {
+    fs.mkdirSync(layout.activityDir(home), { recursive: true, mode: 0o700 });
+    const start: StartingShare = { harness, native_session_id: sid, cwd, workspace_id: rule.workspace_id, workspace_name: rule.workspace_name, goal_id: rule.goal_id, at: new Date().toISOString() };
+    writeJsonAtomic(layout.activityStarting(home, localId(harness, sid)), start);
+  } catch {
+    /* the share still comes with the next pass */
+  }
   inj.rule_share = { workspace_id: rule.workspace_id, workspace_name: rule.workspace_name, goal_id: rule.goal_id, goal_title: goal?.title ?? rule.goal_title, at: new Date().toISOString() };
   // A goal the cached feed says is held: its tools are blocked from the first call, so the start says so (cycle 11,
   // section 5), as `::align share` toward it does.
@@ -1079,17 +1090,23 @@ export function failureDeny(home: string, harness: Harness, sessionId: string | 
   return denyOutput(stopReason(readJson<Latch>(layout.latch(home, lid)), lid));
 }
 
+/** How the hook was installed: `post`, a Claude Code plugin whose PreToolUse command says `--post-tool-use` installs
+ *  PostToolUse too, so an edit counts only once that hook saw its own call run (E2E acycle2 A2-local-1). */
+export interface ToolHookOpts {
+  post?: boolean;
+}
+
 /**
  * Fail closed: a latch file that exists but cannot be read denies. The stop latch and the goal-hold latch are
  * independent; a tool runs only when neither blocks it. Otherwise, deliver a pending goal change.
  */
-export function preToolUse(home: string, harness: Harness, input: HookInput): HookOutput {
+export function preToolUse(home: string, harness: Harness, input: HookInput, opts: ToolHookOpts = {}): HookOutput {
   const sid = input.session_id;
   if (!sid) return anyLatch(home) ? denyOutput() : null;
   const lid = localId(harness, sid);
   const blocked = latchDeny(home, harness, input);
   if (blocked) return blocked;
-  const sib = siblingEdits(home, harness, lid, input);
+  const sib = siblingEdits(home, harness, lid, input, opts);
   if (sib.held) return sib.held;
   // Context from a subagent's tool call reaches only that subagent, so the delta waits for the main agent.
   const delta = input.agent_id ? null : midTurnDelta(home, lid);
@@ -1129,40 +1146,75 @@ function feedHoldDeny(home: string, lid: string, cwd: string | null): HookOutput
 
 /**
  * Record this shared session's edits, reads and commits for its siblings (with the goal it counts toward now, A1-local-5),
- * and hold an edit to a file another session toward the same goal changed in the last 20 minutes, once, so the agent
- * re-reads it instead of overwriting that work. Any tool call also tells, once, which session changed a file this one
- * read or edited (A1-local-3). The goal is the one the session counts toward from its last prompt (A1-local-6).
+ * and hold an edit to a file another session toward the same goal changed in the last 20 minutes, once, naming every
+ * such session (A2-local-4), so the agent re-reads it instead of overwriting that work. Any tool call of the main agent
+ * also tells, once, which session changed a file it read or edited (A1-local-3); a subagent's never does, since its
+ * context does not reach the main agent (A2-local-3). The goal is the one the session counts toward from its last
+ * prompt (A1-local-6); a session a folder rule shared at its start counts from its first call, before any sync pass
+ * makes its share (A2-local-7). Each edit and commit carries what will show that its own call made it (A2-local-1, 5).
  */
-function siblingEdits(home: string, harness: Harness, lid: string, input: HookInput): { held?: HookOutput; note?: string } {
-  const hot = readHot(home, lid);
+function siblingEdits(home: string, harness: Harness, lid: string, input: HookInput, opts: ToolHookOpts): { held?: HookOutput; note?: string } {
+  const hot = activityHot(home, lid, readHot(home, lid));
   if (hot?.share?.state !== "shared") return {};
   const goalId = liveGoalId(hot, readInjected(home, lid));
   if (!goalId) return {};
   const cwd = input.cwd || hot.cwd;
+  // Calls this session made before this one, which its PostToolUse does not confirm: decided by their evidence now.
+  const post = harness === "claude-code" && !!opts.post;
+  if (!post) settleQuietly(home, lid, false);
   const files = editedPaths(harness, input.tool_name, input.tool_input, cwd);
   const subject = commitSubject(input.tool_name, input.tool_input);
   const at = new Date().toISOString();
   const g = goalId;
-  const hit = collision(home, lid, goalId, files);
-  if (hit) {
-    record(home, lid, [{ t: "warned", at, p: hit.file, ref: `${hit.sib.lid}@${hit.at}`, g }]);
-    const reason = collisionReason(hit.sib.hot.harness, hit.sib.hot.native_session_id, display(hit.file, cwd), Math.floor((Date.now() - Date.parse(hit.at)) / 60_000));
+  const hits = collisions(home, lid, goalId, files);
+  if (hits.length) {
+    record(home, lid, hits.map((h): Act => ({ t: "warned", at, p: h.file, ref: `${h.sib.lid}@${h.at}`, g })));
+    const reason = collisionsReason(hits.map((h) => ({ harness: h.sib.hot.harness, id: h.sib.hot.native_session_id, file: display(h.file, cwd), minutesAgo: Math.floor((Date.now() - Date.parse(h.at)) / 60_000) })));
     return { held: { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } } };
   }
-  const changed = changeNotes(home, lid, goalId, cwd);
+  const changed = input.agent_id ? [] : changeNotes(home, lid, goalId, cwd);
   // Files written through the shell count as edits for the team (never held: one command can't be partly denied).
   const shell = shellWrites(input.tool_name, input.tool_input, cwd).filter((p) => !files.includes(p));
-  // The tool call's id, so its PostToolUse hook can confirm it ran (A1-local-1).
-  const u = typeof input.tool_use_id === "string" && input.tool_use_id ? { u: input.tool_use_id } : {};
-  const acts: Act[] = [...files.map((p): Act => ({ t: "edit", at, p, g, ...u })), ...shell.map((p): Act => ({ t: "edit", at, p, g, sh: 1, ...u }))];
-  for (const p of readPaths(harness, input.tool_name, input.tool_input, cwd)) acts.push({ t: "read", at, p, g });
-  if (subject) acts.push({ t: "commit", at, s: subject, g });
+  // The tool call's id, so its PostToolUse hook (or, without one, its evidence) can confirm it ran (A1-local-1).
+  const id = typeof input.tool_use_id === "string" && input.tool_use_id ? input.tool_use_id : (files.length || shell.length || subject) && !post ? randomId("call_") : null;
+  const u = id ? { u: id } : {};
+  const ag = input.agent_id ? { ag: 1 as const } : {};
+  // With PostToolUse installed, that hook decides; otherwise what the files should show afterwards. Recorded either
+  // way, so an edit of the same lines by another session is known for what it is (`evidence.ts` `explained`).
+  const expect = id ? expectations(harness, input.tool_name, input.tool_input, cwd, files, shell) : null;
+  const proof = (p: string) => ({ ...(post && id ? { c: 1 as const } : {}), ...(expect?.get(p) ? { v: expect.get(p)! } : {}) });
+  const acts: Act[] = [...files.map((p): Act => ({ t: "edit", at, p, g, ...u, ...proof(p), ...ag })), ...shell.map((p): Act => ({ t: "edit", at, p, g, sh: 1, ...u, ...proof(p), ...ag }))];
+  for (const p of readPaths(harness, input.tool_name, input.tool_input, cwd)) acts.push({ t: "read", at, p, g, ...ag });
+  // A commit counts once its own call ran (PostToolUse), or the repo has it (A2-local-5).
+  if (subject) acts.push({ t: "commit", at, s: subject, g, ...u, ...(post && id ? { c: 1 as const } : cwd ? { d: cwd } : {}) });
   // Another person (or a claim) on this file: one note, never a hold, since nothing local gets overwritten.
   const cross = crossOverlap(home, lid, hot.share.workspace_id, goalId, [...files, ...shell], cwd);
   if (cross) acts.push({ t: "noted", at, ref: cross.ref });
   record(home, lid, acts);
   const notes = [...changed, ...(cross ? [crossNote(cross.who, cross.file, cross.minutes, { goal: cross.goal, claimUntil: cross.claimUntil, task: cross.task, remote: cross.remote })] : [])];
   return notes.length ? { note: notes.join("\n") } : {};
+}
+
+/** Decide this session's waiting edits and commits by their evidence (`hooks/evidence.ts`); never fails a hook. */
+function settleQuietly(home: string, lid: string, final: boolean): void {
+  try {
+    settle(home, lid, final, (acts) => record(home, lid, acts));
+  } catch {
+    /* decided by a later hook or pass */
+  }
+}
+
+/**
+ * The turn is over (Stop) or a new one starts (UserPromptSubmit): every tool call before it is done, so a shared
+ * session's edits and commits that no PostToolUse confirms are decided now, those whose evidence is missing as not
+ * made (A2-local-1). Prints nothing.
+ */
+export function settleTurn(home: string, harness: Harness, input: HookInput): void {
+  const sid = input.session_id;
+  if (!sid) return;
+  const lid = localId(harness, sid);
+  if (!fs.existsSync(layout.activity(home, lid))) return;
+  settleQuietly(home, lid, true);
 }
 
 /** The sibling-change notes for this session (at most three), each recorded as told so it is never repeated. */
@@ -1176,16 +1228,18 @@ function changeNotes(home: string, lid: string, goalId: string, cwd: string | nu
 
 // ---------- PostToolUse ----------
 /**
- * Claude Code's PostToolUse (and, for a shell command that exited non-zero, PostToolUseFailure): the tool call ran. For
- * a shared session it records, once, that its edits now count only when confirmed, and a `ran` act for a call that
- * edits (an edit tool that succeeded, or a shell command with writes). An edit refused at the permission prompt never
- * gets one, so it is never reported as made, whoever changes its file later (A1-local-1). Prints nothing.
+ * Claude Code's PostToolUse (and, for a call that failed, PostToolUseFailure): the tool call ran. For a shared session it
+ * records, once, that its edits now count only when confirmed, and the verdict on a call that edits or commits: `ran`
+ * for an edit tool that succeeded and a commit whose command succeeded, per file for a shell command's writes (`ran`
+ * when the file changed since the call was recorded, else `failed`), and `failed` for every one of them when the call
+ * failed (A2-local-2, 5). An edit refused at the permission prompt fires no hook at all, so it is never reported as
+ * made, whoever changes its file later (A1-local-1). Prints nothing.
  */
 export function postToolUse(home: string, harness: Harness, input: HookInput, failed: boolean): void {
   const sid = input.session_id;
   if (!sid) return;
   const lid = localId(harness, sid);
-  const hot = readHot(home, lid);
+  const hot = activityHot(home, lid, readHot(home, lid));
   if (hot?.share?.state !== "shared") return;
   const marker = layout.activityConfirmed(home, lid);
   if (!fs.existsSync(marker)) {
@@ -1195,8 +1249,17 @@ export function postToolUse(home: string, harness: Harness, input: HookInput, fa
   const u = input.tool_use_id;
   if (typeof u !== "string" || !u) return;
   const cwd = input.cwd || hot.cwd;
-  const edit = !failed && editedPaths(harness, input.tool_name, input.tool_input, cwd).length > 0;
-  if (edit || shellWrites(input.tool_name, input.tool_input, cwd).length) record(home, lid, [{ t: "ran", at: new Date().toISOString(), u }]);
+  const at = new Date().toISOString();
+  const t = failed ? "failed" : "ran";
+  const acts: Act[] = [];
+  if (editedPaths(harness, input.tool_name, input.tool_input, cwd).length) acts.push({ t, at, u });
+  if (shellWrites(input.tool_name, input.tool_input, cwd).length) {
+    for (const a of rawActs(home, lid)) {
+      if (a.t === "edit" && a.sh && a.u === u && a.p) acts.push({ t: !failed && changedSince(a) ? "ran" : "failed", at, u, p: a.p });
+    }
+  }
+  if (commitSubject(input.tool_name, input.tool_input)) acts.push({ t, at, u, p: COMMIT });
+  record(home, lid, acts);
 }
 
 /**
