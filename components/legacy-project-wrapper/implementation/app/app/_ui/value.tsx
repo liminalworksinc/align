@@ -14,6 +14,8 @@ import { EvidencePill } from "./evidence";
 // (lib/v2/value.ts); the measured spans come from the request's own timestamps and receipts, apart from the estimates
 // people give. changes.tsx renders it only for an approved request. "viewed" is recorded once the card is at least half
 // on screen (or fills half the screen), once per page, workspace and person; the server keeps one per person anyway.
+// Once launched, "Connected AI apps" names the apps Align sent the new version to when they read the goals (main #56):
+// a delivery receipt of what Align sent, never what the app did with it.
 
 interface Report {
   id: string;
@@ -37,6 +39,7 @@ interface ValueView {
   approved_without_evidence: boolean | null;
   affected: { parents: { id: string; title: string }[]; dependents: { id: string; title: string }[] };
   delivery: { sessions: number; received: number; applied: number } | null;
+  apps?: { everyone: boolean; items: { id: string; name: string; connected_by: { id: string; name: string }; sent_at: string }[] } | null;
   measured: { proposal_to_decision: string; decision_to_launch: string | null; decision_to_first_applied: string | null };
   my_report: Report | null;
   reports: Report[];
@@ -55,9 +58,9 @@ const TOP_PX = 240;
 const TOP_SEEN_RATIO = 0.75;
 const VIEW_DWELL_MS = 1000;
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
+function Row({ label, children, testId }: { label: string; children: ReactNode; testId?: string }) {
   return (
-    <div className="flex min-w-0 flex-col gap-1 border-t border-zinc-200 pt-3">
+    <div className="flex min-w-0 flex-col gap-1 border-t border-zinc-200 pt-3" data-value-row={testId}>
       <span className="text-[13px] font-medium uppercase tracking-[0.04em] text-zinc-500">{label}</span>
       <div className="min-w-0 text-[15px] leading-snug text-zinc-900">{children}</div>
     </div>
@@ -153,7 +156,7 @@ export function ValueCard({ ws, cr, me, titles }: { ws: string; cr: ChangeReques
 
       {/* The checklist's §E2: the delivery line carries one evidence class, a delivery receipt only when a session's
           machine sent a received or applied receipt for the launched version. */}
-      <Row label="Agents on the new version">
+      <Row label="Agents on the new version" testId="delivery">
         <div className="mb-1">
           <EvidencePill c={receiptEvidence(d.launch === "launched" && dl ? dl.received : 0)} />
         </div>
@@ -171,6 +174,31 @@ export function ValueCard({ ws, cr, me, titles }: { ws: string; cr: ChangeReques
           </ul>
         )}
       </Row>
+
+      {/* main #56: the connected apps Align sent the launched version to (an MCP goal read served it), one evidence
+          class: a delivery receipt when Align sent it to any app the reader can see, else not observed. */}
+      {d.apps && d.goal.version !== null && (
+        <Row label="Connected AI apps" testId="apps">
+          <div className="mb-1">
+            <EvidencePill c={d.apps.items.length ? "delivery_receipt" : "not_observed"} />
+          </div>
+          {d.apps.items.length === 0 ? (
+            `Align hasn't sent version ${d.goal.version} to ${d.apps.everyone ? "a connected app" : "an app you connected"} yet.`
+          ) : (
+            <>
+              <ul className="flex flex-col gap-0.5" aria-label="Apps Align sent this version to">
+                {d.apps.items.map((a) => (
+                  <li key={a.id} data-value-app={a.id}>
+                    <span className="font-medium">{a.name}</span> (connected by {a.connected_by.id === me ? "you" : a.connected_by.name}): Align sent it version {d.goal.version} on{" "}
+                    {when(a.sent_at)}
+                  </li>
+                ))}
+              </ul>
+              <span className="text-[13.5px] text-zinc-500">Align sent it this version when it read the goals. Align can&apos;t see what the app does next.</span>
+            </>
+          )}
+        </Row>
+      )}
 
       <Row label="Measured in Align">
         <ul className="flex flex-col gap-0.5">

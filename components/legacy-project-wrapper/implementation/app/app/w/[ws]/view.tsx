@@ -11,7 +11,8 @@ import { appStatusWords, EVIDENCE_WORDS, type EvidenceClass, type HomeNext, type
 // apps with when each last read the goals (or only connected). Counts are only numbers Align has: a section the server
 // couldn't read (null), or a failed read of the whole page, shows "unknown", never zero. Every agent-status item carries
 // exactly one evidence class (delivery receipt, agent reported, not observed); nothing says what an agent is doing or
-// which goal version an app has. A connection is never shown as a read (main #48).
+// which goal version an app has. A connection is never shown as a read (main #48). The person's own declined requests
+// (main #53) follow the queues: the decision and its reason, until they send a newer request on that goal.
 
 interface Change {
   id: string;
@@ -21,6 +22,15 @@ interface Change {
   reason: string;
   next: HomeNext;
   waiting_on: HomePerson[];
+}
+/** The reader's own latest request on an active goal, declined (main #53): not waiting on anyone, never counted. */
+interface Declined {
+  id: string;
+  goal: { id: string; title: string; version: number };
+  reason: string;
+  rejected_by: HomePerson | null;
+  rejection_reason: string | null;
+  decided_at: string | null;
 }
 interface Ask {
   id: string;
@@ -60,7 +70,7 @@ interface App {
 }
 interface HomeData {
   me: string;
-  change_requests: { waiting_on_me: Change[]; waiting_on_others: Change[] } | null;
+  change_requests: { waiting_on_me: Change[]; waiting_on_others: Change[]; declined?: Declined[] } | null;
   asks: { waiting_on_me: Ask[] } | null;
   alignments: { waiting_on_me: Alignment[]; waiting_on_others: Alignment[] } | null;
   goals: Goal[] | null;
@@ -179,6 +189,26 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
       href={`${base}/asks`}
     />
   );
+  const declinedRow = (c: Declined) => (
+    <Row
+      key={`declined:${c.id}`}
+      testId={`declined:${c.id}`}
+      kind="Declined"
+      title={
+        <>
+          {c.rejected_by ? (c.rejected_by.id === me.id ? "You" : c.rejected_by.name) : "An approver"} declined your request on <b className="font-semibold">{c.goal.title}</b>
+        </>
+      }
+      need={
+        <>
+          {c.decided_at ? `Declined ${when(c.decided_at)}. ` : ""}
+          {c.rejection_reason ? <>Reason: &ldquo;{c.rejection_reason}&rdquo;. </> : null}
+          Your change wasn&apos;t made; the goal is at version {c.goal.version}.
+        </>
+      }
+      href={`${base}/goals/${c.goal.id}#change-requests`}
+    />
+  );
   const alignmentRow = (a: Alignment, mine: boolean) => (
     <Row
       key={`al:${a.id}`}
@@ -248,6 +278,14 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
               </ul>
             </Card>
           </section>
+
+          {!!h.change_requests?.declined?.length && (
+            <section id="declined" aria-label="Your declined requests" className="scroll-mt-4">
+              <Card title="Your declined requests">
+                <ul className="divide-y divide-zinc-200">{h.change_requests.declined.map(declinedRow)}</ul>
+              </Card>
+            </section>
+          )}
 
           <section id="goals" aria-label="Active goals" className="scroll-mt-4">
             <Card title="Active goals">

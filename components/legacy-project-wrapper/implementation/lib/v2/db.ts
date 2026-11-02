@@ -1082,6 +1082,23 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE v2_devices ADD COLUMN replaces TEXT;
   `,
+  // PORT4-002 (main #56, "Show when a connected agent received the approved plan"): which launched goal versions Align
+  // sent each connected app, and when it first sent each (lib/oauth/grants.ts noteGoalsSent, from the same four goal
+  // reads that set last_read_at). The decision value card names the apps Align sent the version a launch made. It is
+  // what Align served, never what the app did with it. Rows go with their grant (disconnect, leaving, a new sign-in,
+  // workspace deletion) and their goal.
+  `
+  CREATE TABLE v2_oauth_goal_sends (
+    grant_id TEXT NOT NULL REFERENCES v2_oauth_grants(id) ON DELETE CASCADE,
+    ws_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    sent_at TEXT NOT NULL,
+    PRIMARY KEY (grant_id, goal_id, version),
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_oauth_goal_sends_goal ON v2_oauth_goal_sends(ws_id, goal_id, version);
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).
