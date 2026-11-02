@@ -5,6 +5,7 @@ import type { Acceptance, SimulationRun } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { AuthorityStrip } from "./AuthorityStrip";
 import { DecisionValueCard } from "./DecisionValueCard";
+import { useAgents } from "./useAgents";
 import { STALE_APPROVAL_NOTE, agreementStatus, approvedStale, launchLine, launchState } from "./launch";
 import { ProofStrip } from "./ProofStrip";
 import { accepted, activeProposal, comparablePair, currentGoal } from "./select";
@@ -488,6 +489,8 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
 function CustomRecord({ props, L, acc }: { props: ViewProps; L: Labels; acc: Acceptance }) {
   const { s, me } = props;
   const [tab, setTab] = useRecordTab();
+  // Which connected apps Align sent this plan to. A Mode L scenario (workspace "northstar") has no connections endpoint.
+  const agents = useAgents(props.workspace && props.workspace !== "northstar" ? props.workspace : undefined);
   const owning = L.team.security;
   const owner = L.person.security;
   const goal = s.goals.find((g) => g.id === acc.new_goal_id);
@@ -571,7 +574,7 @@ function CustomRecord({ props, L, acc }: { props: ViewProps; L: Labels; acc: Acc
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <MeasuredTile s={s} />
           </div>
-          <DecisionValueCard {...props} />
+          <DecisionValueCard {...props} agents={props.workspace !== "northstar" ? agents : undefined} />
           <div className="flex flex-wrap items-center gap-2.5 border-t border-zinc-200 pt-4">
             <CopyText text={copy} />
             <MoveWork props={props} />

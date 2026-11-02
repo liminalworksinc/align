@@ -6,8 +6,8 @@ import { claudeCodeLine } from "@/lib/paste-lines";
 // The first-run card at the top of a custom workspace's canvas. ConnectAI renders it (into a slot Home gives it), so
 // it reads the one connections poll ConnectAI already runs and never fetches on its own.
 // Until Align has seen an app: two paths, a fictional sample and one agent over MCP, with what Align itself has seen
-// of the connection (approved, not seen by Align yet). Once any app has been seen (last_used_at: any authenticated MCP request)
-// the card is gone. Every state is Align-observed (a grant, an app seen); nothing an agent says about itself is shown,
+// of the connection (approved, not seen by Align yet). Once any app has been seen (last_used_at: its first tool call;
+// initialize and tools/list don't count) the card is gone. Every state is Align-observed (a grant, an app seen); nothing an agent says about itself is shown,
 // and the one reported read (goal activity) is labelled as reported. Dismissed per workspace in localStorage.
 
 interface FirstRunApp {
