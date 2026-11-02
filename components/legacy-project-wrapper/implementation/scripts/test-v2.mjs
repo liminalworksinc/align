@@ -1641,6 +1641,14 @@ try {
   check("alignment: notes and counters never reach agents", !JSON.stringify(after).includes("Moving to onboarding") && !JSON.stringify(after).includes("only this one"), "a note reached a directive");
   const feedAfter = await call("U3", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D3.access });
   check("alignment: G1 is now bindable for U3", feedAfter.json.goals.find((g) => g.id === G1.id).bindable === true, "");
+  const againSame = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S3a] });
+  const againOther = await al(U3, { target_goal_id: G3.id, choice: "work_toward", session_keys: [S3a] });
+  check(
+    "A2-cross-7: work_toward for a session that already follows this goal through an alignment -> 409 already_governed \"This session already follows this goal through an alignment, so there is nothing to change.\"; another goal -> \"... already follows another goal ...; revoke that one first.\"",
+    againSame.status === 409 && againSame.json?.error === "already_governed" && againSame.json?.message === "This session already follows this goal through an alignment, so there is nothing to change." &&
+      againOther.status === 409 && againOther.json?.error === "already_governed" && againOther.json?.message === "One of these sessions already follows another goal through an alignment; revoke that one first.",
+    `${againSame.text} ${againOther.text}`,
+  );
   const E4 = epochId();
   const e4 = await epoch(D3, S3a, { epoch_id: E4, goal_id: G1.id, starts_at: at(90), cause: `directive:${bc?.id}` });
   const notCovered = await epoch(D3, S3b, { epoch_id: epochId(), goal_id: G1.id, starts_at: at(90) });

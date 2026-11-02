@@ -121,11 +121,20 @@ function sessionsIn(pp: PolicyPrincipal, keys: string[], ownerId: string): Sessi
   });
 }
 
-function governedElsewhere(ws: string, keys: string[], alignmentId: string | null): boolean {
-  return keys.some((k) => {
-    const s = sessionRow(ws, k);
-    return !!s?.governing_alignment_id && s.governing_alignment_id !== alignmentId;
-  });
+/** 409 `already_governed` when a listed session already follows a goal through another alignment, worded for what is
+ *  true: this very goal (nothing to change; E2E acycle2 A2-cross-7) or another one (revoke that first). */
+function refuseGoverned(ws: string, keys: string[], alignmentId: string | null, targetGoalId: string): void {
+  const governed = keys.map((k) => sessionRow(ws, k)).filter((s) => !!s?.governing_alignment_id && s.governing_alignment_id !== alignmentId);
+  if (!governed.length) return;
+  if (governed.every((s) => s!.governing_goal_id === targetGoalId)) {
+    throw conflict(
+      "already_governed",
+      governed.length === keys.length && keys.length === 1
+        ? "This session already follows this goal through an alignment, so there is nothing to change."
+        : "One of these sessions already follows this goal through an alignment; leave it out.",
+    );
+  }
+  throw conflict("already_governed", "One of these sessions already follows another goal through an alignment; revoke that one first.");
 }
 
 function writeRevision(a: { id: string; ws: string }, revision: number, choice: Choice, keys: string[], reqs: Requirement[], note: string | null, author: string, at: string) {
@@ -178,7 +187,7 @@ function maybeApprove(a: AlignmentRow, at: string, actor: string): boolean {
   if (a.source_goal_id && contributionCycle(a.ws_id, a.source_goal_id, a.target_goal_id)) throw conflict("cycle", CONTRIBUTION_CYCLE);
   const keys = keysOf(a.id, a.revision);
   if (rev.choice === "work_toward") {
-    if (governedElsewhere(a.ws_id, keys, a.id)) throw conflict("already_governed", "One of these sessions already follows another goal through an alignment; revoke that one first.");
+    refuseGoverned(a.ws_id, keys, a.id, a.target_goal_id);
     const target = goalRow(a.ws_id, a.target_goal_id)!;
     const core = goalCore(target);
     for (const k of keys) {
@@ -210,7 +219,7 @@ export async function createAlignment(pp: PolicyPrincipal, b: Body) {
   const sessions = sessionsIn(pp, keys, pp.userId);
   if (choice === "work_toward" && !sessions.length) throw badRequest("Pick at least one of your shared sessions to work toward this goal");
   if (choice === "contribution" && !sessions.length && !source) throw badRequest("Pick a goal of yours or at least one session that contributes");
-  if (choice === "work_toward" && governedElsewhere(pp.wsId, keys, null)) throw conflict("already_governed", "One of these sessions already follows another goal through an alignment; revoke that one first.");
+  if (choice === "work_toward") refuseGoverned(pp.wsId, keys, null, target.id);
   const note = optStr(b, "note", 1000);
   const at = nowIso();
   const id = await tx(() => insertAlignment(pp, target, source, choice, sessions, note, at));
