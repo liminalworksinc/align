@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { api, ApiError, Btn, Card, Err, Field, Input, Note, Shell, SignInAgain, useAction, useApi, type WsSummary } from "../_ui/kit";
 import type { Me } from "../_ui/server";
+import { count } from "@/lib/v2/plural.mts";
 
 interface Pending {
   device_name: string;
@@ -9,7 +10,8 @@ interface Pending {
   age_seconds: number;
 }
 
-const ago = (s: number) => (s < 60 ? `${s} seconds ago` : `${Math.round(s / 60)} minutes ago`);
+/** How long ago the device asked, with the count-and-noun helper (C6-4: never "1 minutes ago"). */
+const ago = (s: number) => `${s < 60 ? count(s, "second") : count(Math.round(s / 60), "minute")} ago`;
 
 export default function DeviceApprove({ me, code: code0, recent }: { me: Me; code: string; recent: boolean }) {
   const list = useApi<{ workspaces: WsSummary[] }>("/api/v2/workspaces");

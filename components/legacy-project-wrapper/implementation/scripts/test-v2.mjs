@@ -2444,6 +2444,19 @@ try {
         `${revokedElsewhere.status} ${z2.row} | ${z2.body.slice(0, 300)}`,
       );
 
+      // C6-4 (ui): a pairing code asked 70 seconds ago reads "Asked 1 minute ago".
+      const askedCode = "ZXCV-BNMQ";
+      withDb((d) =>
+        d
+          .prepare("INSERT INTO v2_device_requests (id, device_code_hash, user_code, device_name, public_key, created_at, expires_at, interval_s, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')")
+          .run(`dr_${randomBytes(12).toString("hex")}`, sha256hex(randomBytes(32).toString("hex")), askedCode, "U5's asking laptop", newDeviceKeys().pub, new Date(Date.now() - 70_000).toISOString(), new Date(Date.now() + 500_000).toISOString(), 5),
+      );
+      await page.goto(`${BASE}/app/device?code=${askedCode}`, { waitUntil: "networkidle0" });
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
+      await page.waitForFunction(() => /Asked \d+ /.test(document.body.innerText), { timeout: 15000 }).catch(() => undefined);
+      const askedLine = await page.evaluate(() => [...document.querySelectorAll("p")].map((p) => p.textContent ?? "").find((t) => t.startsWith("Asked ")) ?? "");
+      check("C6-4 (ui): the device approval page says \"Asked 1 minute ago\" for a code 70 seconds old (one count-and-noun helper), never \"1 minutes\"", askedLine === "Asked 1 minute ago", askedLine);
+
     } finally {
       await browser.close();
     }

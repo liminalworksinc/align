@@ -5,6 +5,7 @@ import { Btn, Err, Field, Input, Note, TrustLinks, go } from "../_ui/kit";
 import { autofillAvailable, passkeySignInMessage, signInWithPasskey, usePasskeyPlace } from "../_ui/passkey";
 import type { SignInOptions } from "../_ui/server";
 import { useTurnstile } from "../_ui/turnstile";
+import { count } from "@/lib/v2/plural.mts";
 
 class AuthError extends Error {
   constructor(
@@ -33,7 +34,7 @@ async function post(path: string, body: unknown, headers: Record<string, string>
 const tooManySends = (e: AuthError) => {
   if (e.code === "rate_limited") return e.message;
   const min = Math.max(1, Math.ceil((e.retryAfter ?? 60) / 60));
-  return `Too many codes were sent. Try again in ${min === 1 ? "1 minute" : `${min} minutes`}.`;
+  return `Too many codes were sent. Try again in ${count(min, "minute")}.`;
 };
 
 /** What the person reads when a code is refused (Better Auth's emailOtp codes, and ours from lib/v2/auth.ts). */

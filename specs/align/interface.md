@@ -355,7 +355,7 @@ which of their workspaces the device may use, and approve or deny it.
 #### Scenario: Approve a device
 
 - **WHEN** a person enters the code, presses **Look up**, ticks at least one workspace and presses **Approve**
-- **THEN** the page calls `GET /api/v2/device/requests/<code>` (showing the device name and "Asked <n> seconds/minutes ago") and then `POST /api/v2/device/approve` with `{user_code, workspace_ids}`, and says "<device> is connected. You can close this page."; **Approve** stays disabled until a workspace is ticked
+- **THEN** the page calls `GET /api/v2/device/requests/<code>` (showing the device name and "Asked <n> seconds ago" or "Asked <n> minutes ago", with the count-and-noun helper `lib/v2/plural.mts`, so "Asked 1 minute ago" for a code 60 to 89 seconds old: `scripts/test-v2.mjs` "C6-4 (ui): ...") and then `POST /api/v2/device/approve` with `{user_code, workspace_ids}`, and says "<device> is connected. You can close this page."; **Approve** stays disabled until a workspace is ticked
 
 #### Scenario: Unknown code or deny
 
