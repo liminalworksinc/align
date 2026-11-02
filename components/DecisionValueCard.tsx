@@ -56,17 +56,17 @@ function PlanReceipts({ read, acc, teamOf }: { read: AgentsRead; acc: Acceptance
   if (read === null) return <span className="text-zinc-500">Checking connected apps…</span>;
   if (read === "unknown") return <span className="text-zinc-500">Couldn’t check connected apps just now. Align retries every 15 seconds.</span>;
   const got = read.apps.filter((a) => a.plan_receipt?.proposal_id === acc.proposal_id && a.plan_receipt.accepted_version === acc.accepted_version);
-  if (got.length === 0) return <span className="text-zinc-500">Not received by a connected app yet</span>;
+  if (got.length === 0) return <span className="text-zinc-500">Align hasn’t sent this plan to a connected app yet</span>;
   return (
     <div className="flex flex-col gap-1.5">
-      <ul aria-label="Apps that received this approved plan" className="flex flex-col gap-1.5">
+      <ul aria-label="Apps Align sent this approved plan to" className="flex flex-col gap-1.5">
           {got.map((a) => (
             <li key={a.id} className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span>
                 <span className="font-semibold">{a.name}</span> ({teamOf(a.role)})
               </span>
               <Badge tone="violet" wrap>
-                Received this approved plan
+                Align sent it this approved plan
               </Badge>
               <span className="text-zinc-600">
                 {when(a.plan_receipt!.at)}

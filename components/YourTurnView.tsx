@@ -173,7 +173,7 @@ function AgentsSection({ agents: read, teamOf }: { agents: AgentsRead; teamOf: (
               <span className="text-[14px] text-zinc-500">as {teamOf(a.role)}</span>
               {a.received_current_plan && a.plan_receipt ? (
                 <span className="ml-auto flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px] text-zinc-700 @max-md:ml-6 @max-md:basis-full">
-                  <Badge tone="violet">Received the approved plan ({a.plan_receipt.accepted_version})</Badge>
+                  <Badge tone="violet">Align sent it the approved plan ({a.plan_receipt.accepted_version})</Badge>
                   <span>sent by Align {ago(a.plan_receipt.at)}</span>
                 </span>
               ) : (

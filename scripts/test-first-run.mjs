@@ -537,9 +537,9 @@ async function phaseHosted(dir) {
     check("hosted: reading the launched plan counts again; reading it again keeps the first time Align sent it", current && (await app0())?.plan_receipt?.at === at1, JSON.stringify(await app0()));
 
     await page.reload({ waitUntil: "networkidle2" });
-    const sideGot = await waitFor(page, async () => /Claude Code\s*Received the approved plan \(v2\)/.test(await side()));
-    const homeGot = /Claude Code[\s\S]*Received the approved plan \(v2\)/.test(await home()) && !/Seen since the latest change/.test(await home());
-    check("hosted: the sidebar and Home say Claude Code received the approved plan (v2), in place of 'Seen since the latest change'", sideGot && homeGot, `${await side()} || ${await home()}`);
+    const sideGot = await waitFor(page, async () => /Claude Code\s*Align sent it the approved plan \(v2\)/.test(await side()));
+    const homeGot = /Claude Code[\s\S]*Align sent it the approved plan \(v2\)/.test(await home()) && !/Seen since the latest change/.test(await home());
+    check("hosted: the sidebar and Home say Align sent Claude Code the approved plan (v2), in place of 'Seen since the latest change'", sideGot && homeGot, `${await side()} || ${await home()}`);
     const claims = `${await side()} ${await home()}`;
     check("hosted: no screen says the agent is working from or follows the plan", !/working from|works from|follows|is working/i.test(claims), claims);
     await shots(page, "receipt-home");
@@ -550,9 +550,9 @@ async function phaseHosted(dir) {
       await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent?.includes("See the decision"))?.click());
     };
     await openDecision();
-    const recordGot = await waitFor(page, async () => /Claude Code \(Leadership\)\s*◆?\s*Received this approved plan/.test(await decisionText()));
+    const recordGot = await waitFor(page, async () => /Claude Code \(Leadership\)\s*◆?\s*Align sent it this approved plan/.test(await decisionText()));
     check(
-      "hosted: the decision record lists Claude Code (Leadership) as having received this approved plan, and says Align can't see what the agent does next",
+      "hosted: the decision record lists Claude Code (Leadership) as having been sent this approved plan, and says Align can't see what the agent does next",
       recordGot && /Align sent it this plan\. Align can’t see what the agent does next\./.test(await decisionText()),
       await decisionText(),
     );
@@ -563,9 +563,9 @@ async function phaseHosted(dir) {
     const moved = await app0();
     check("hosted: after a new approval the old receipt no longer counts: received_current_plan is false and the receipt still names the old acceptance", pid2 !== pid1 && moved?.received_current_plan === false && moved?.plan_receipt?.proposal_id === pid1, JSON.stringify(moved));
     await openDecision();
-    const recordNone = await waitFor(page, async () => /Not received by a connected app yet/.test(await decisionText()));
+    const recordNone = await waitFor(page, async () => /Align hasn’t sent this plan to a connected app yet/.test(await decisionText()));
     const sideNow = await side();
-    check("hosted: the new decision record says not received yet, and the sidebar no longer says received", recordNone && !/Received the approved plan/.test(sideNow), `${await decisionText()} || ${sideNow}`);
+    check("hosted: the new decision record says not sent yet, and the sidebar no longer says sent", recordNone && !/sent it the approved plan/.test(sideNow), `${await decisionText()} || ${sideNow}`);
     await shots(page, "receipt-newer");
     await readPlan();
     const caughtUp = await untilApi(w, (j) => j?.apps?.[0]?.plan_receipt?.proposal_id === pid2 && j.apps[0].plan_receipt.accepted_version === "v3" && j.apps[0].received_current_plan === true);
