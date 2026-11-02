@@ -3,6 +3,7 @@ import path from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import { config } from "../config";
 import { SCHEMA_VERSION, type Sql } from "./core.mts";
+import { count } from "./plural.mts";
 
 // Goal sessions storage: one SQLite file (WAL) at <ALIGN_DATA_DIR or ./data>/v2/align.sqlite, directory 0700, file 0600.
 // Two connections to the same file:
@@ -1092,7 +1093,7 @@ export function migrate() {
       try {
         d.exec(MIGRATIONS[v]);
         const broken = d.prepare("PRAGMA foreign_key_check").all();
-        if (broken.length) throw new Error(`migration ${v + 1} left ${broken.length} broken references`);
+        if (broken.length) throw new Error(`migration ${v + 1} left ${count(broken.length, "broken reference")}`);
         d.exec(`PRAGMA user_version = ${v + 1}`);
         d.exec("COMMIT");
       } catch (e) {

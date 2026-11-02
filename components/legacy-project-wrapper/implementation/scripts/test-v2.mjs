@@ -8298,6 +8298,52 @@ try {
       `${nSame.status} ${nSame.text} ${nAfter?.state} ${nIf.status} ${bSame.status} ${bSame.text}`,
     );
 
+    // -- C8-3: MCP counts agree with their nouns, through the one helper --
+    const zDev = insertDevice(ZB.id, "Zak's laptop");
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(zDev.id, ZW));
+    const GV = await zGoal("Evidence counted");
+    const v1 = await zPropose(GV, { title: "Evidence counted, renamed" });
+    const vEv = await za(ZB, "POST", `${zcrs(GV.id)}/${v1?.id}/evidence`, { kind: "pr", url: "https://github.com/acme/c8/pull/1", label: "The change" });
+    const mcpWithdrawn = await mcpCall("ZB", zDev, "align_list_change_requests", { state: "withdrawn", workspace: ZW });
+    const mcpPending = await mcpCall("ZB", zDev, "align_list_change_requests", { state: "pending", workspace: ZW });
+    const vApprove = await zAct(ZA, GV.id, v1?.id, "approve", { revision: 1 });
+    const mcpRecord = await mcpCall("ZB", zDev, "align_get_decision_record", { change_request_id: v1?.id, workspace: ZW });
+    const mcpDeclined = await mcpCall("ZB", zDev, "align_get_decision_record", { change_request_id: e1?.id, workspace: ZW });
+    const mcpAll = [mcpWithdrawn, mcpPending, mcpRecord, mcpDeclined].map((m) => m.text).join("\n");
+    check(
+      "C8-3: MCP text summaries agree count with noun: \"1 change request (withdrawn).\", a list line \"(base version 1, revision 1, 1 evidence link)\", the decision record's \"1 evidence link (self-reported or agent-reported, none verified):\"; a declined request's record says it \"was declined by\" its approver",
+      vEv.status === 201 && vApprove.status === 200 && mcpWithdrawn.text.startsWith("1 change request (withdrawn).") && mcpPending.text.includes(`${v1?.id} pending on goal ${GV.id}`) && mcpPending.text.includes("(base version 1, revision 1, 1 evidence link):") &&
+        mcpRecord.text.includes("1 evidence link (self-reported or agent-reported, none verified):") && /was declined by <untrusted-text>Zoe Approver<\/untrusted-text>/.test(mcpDeclined.text) && !/\b1 (change requests|evidence links|recent directives)\b/.test(mcpAll) && !/was rejected/.test(mcpAll),
+      mcpAll.slice(0, 900),
+    );
+    // A count followed by a fixed plural noun, without count() (lib/v2/plural.mts), in any MCP or server message.
+    const VERBS = new Set(["is", "was", "has", "does", "needs", "counts", "contributes", "stays", "updates", "yours"]);
+    const PLURAL_OK = [
+      ["lib/v2/validate.ts", "${k} items are too long"], // k is a field name
+      ["lib/v2/goals.ts", "anchors.${k} items are too long"], // k is a field name
+      ["lib/v2/devices.ts", "${Math.abs(minutes)} minutes"], // a clock skew past the allowed few minutes
+      ["lib/v2/sessions.ts", "${minutes} minutes ahead"], // the same
+      ["lib/v2/metrics-core.mts", "${a.codes_from_requests} from requests"], // "<n> (codes) from requests"
+      ["lib/mcp/register.ts", "${s.window.days} days"], // the 30-day snapshot window
+      ["lib/v2/db.ts", "${MIGRATIONS.length} migrations"], // a startup invariant, never one
+    ];
+    const plurals = [];
+    for (const dir of ["lib/mcp", "lib/v2"])
+      for (const f of readdirSync(path.join(ROOT, dir)).filter((x) => /\.m?ts$/.test(x) && !x.endsWith(".d.ts"))) {
+        const rel = `${dir}/${f}`;
+        for (const [i, l] of readFileSync(path.join(ROOT, rel), "utf8").split("\n").entries())
+          for (const m of l.matchAll(/\$\{([^{}]+)\}\s+(?:([a-z]+)\s+)?([a-z]+s)\b/g)) {
+            const [whole, expr, word, noun] = m;
+            const e = expr.trim();
+            if (/^[A-Z][A-Z0-9_]*$/.test(e) || /["'`]/.test(e) || /^(count|plural)\(/.test(e)) continue; // a constant, a word, the helper
+            if (VERBS.has(noun) || (word && VERBS.has(word)) || /(max| to) $/.test(l.slice(0, m.index))) continue; // a name and a verb; a limit, "(max N characters)", "(8 to N characters)"
+            if (l.includes(`${e} === 1`)) continue; // one is worded by hand on that line
+            if (PLURAL_OK.some(([af, snip]) => af === rel && l.includes(snip))) continue;
+            plurals.push(`${rel}:${i + 1} ${whole}`);
+          }
+      }
+    check("C8-3 (scan): no message in lib/mcp or lib/v2 writes a count followed by a fixed plural noun (\"${n} change requests\") without count() from lib/v2/plural.mts", plurals.length === 0, plurals.join(" | "));
+
     // -- the browser: C8-1 (ui), W2 (ui), C8-2 (ui), W3 (ui), W4 (ui) --
     const GE4 = await zGoal("Evidence in the browser");
     const GW2 = await zGoal("Withdraw in the browser");

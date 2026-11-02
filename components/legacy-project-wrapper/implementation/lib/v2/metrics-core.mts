@@ -393,7 +393,7 @@ export function formatReport(r: Report): string {
     ...table(
       [
         ["workspaces with an approved request", r.value.workspaces_with_approved_request, ""],
-        ["value card viewed", r.value.viewed.people, `${r.value.viewed.workspaces} workspaces`],
+        ["value card viewed", r.value.viewed.people, r.value.viewed.workspaces === 1 ? "1 workspace" : `${r.value.viewed.workspaces} workspaces`],
         ["value reported", r.value.reported.people, ESTIMATES.map((e) => `${r.value.reported.by_estimate[e]} ${e}`).join(", ")],
         ["follow-up clicked", r.value.follow_up_clicked, ""],
         ["access requested from the card", r.value.access_from_value_card.try + r.value.access_from_value_card.evaluate, `${r.value.access_from_value_card.try} try, ${r.value.access_from_value_card.evaluate} evaluate`],
