@@ -237,6 +237,8 @@ function ImportAsks({ ws, teams, onDone }: { ws: string; teams: { id: string; na
   const act = useAction();
   const run = () =>
     act.run(async () => {
+      // A new import's outcome stands alone: the last one's counts never sit beside its error (W6).
+      setResult(null);
       let parsed: unknown;
       try {
         parsed = JSON.parse(json);

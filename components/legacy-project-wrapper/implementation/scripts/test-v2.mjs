@@ -4843,6 +4843,33 @@ try {
         stopRows.length >= 1 && stopRows.every((r) => r.classes.length === 1) && stopRows.filter((r) => /Resume sent, not yet received/.test(r.text)).every((r) => r.classes[0] === "not_observed") && stopRows.some((r) => /Resume sent, not yet received/.test(r.text)),
         JSON.stringify(stopRows),
       );
+      // E2E-WEB cycle 13 W6: a new import clears the last import's result, so a failed import never sits under
+      // "Imported: …" as if it had counted something.
+      const pageO = await browser.newPage();
+      pageO.on("pageerror", (e) => errors.push(e.message));
+      for (const pair of KO.cookie.split("; ")) {
+        const i = pair.indexOf("=");
+        await pageO.setCookie({ name: pair.slice(0, i), value: pair.slice(i + 1), url: BASE });
+      }
+      await pageO.goto(`${BASE}/app/w/${AK}/asks`, { waitUntil: "networkidle0" });
+      await pageO.click("#import-asks summary");
+      const importText = async (text) => {
+        await pageO.$eval("#import-asks textarea", (t) => (t.value = ""));
+        await pageO.type("#import-asks textarea", text);
+        await pageO.evaluate(() => [...document.querySelectorAll("#import-asks button")].find((b) => b.textContent === "Import")?.click());
+      };
+      await importText(JSON.stringify([{ team_id: TS, text: "W6 imported ask", source: { kind: "manual", date: "2026-10-02" } }]));
+      await pageO.waitForFunction(() => document.querySelector("#import-asks")?.innerText.includes("Imported:"), { timeout: 15000 }).catch(() => undefined);
+      const w6First = await pageO.evaluate(() => document.querySelector("#import-asks")?.innerText ?? "");
+      await importText("not json");
+      await pageO.waitForFunction(() => !!document.querySelector('#import-asks [role="alert"]'), { timeout: 15000 }).catch(() => undefined);
+      const w6Second = await pageO.evaluate(() => document.querySelector("#import-asks")?.innerText ?? "");
+      check(
+        "c13 W6 (ui, E2E-WEB cycle 13): Import asks shows \"Imported: 1 new, …\"; a second import that fails shows only its error, never the first import's counts beside it",
+        w6First.includes("Imported: 1 new, 0 came up again, 0 already recorded.") && w6Second.includes("Paste valid JSON") && !w6Second.includes("Imported:") && errors.length === 0,
+        `${w6First.slice(-300)} | ${w6Second.slice(-300)} ${errors.join(" | ")}`,
+      );
+      await pageO.close();
     } catch (e) {
       check("ui (Chrome) asks and activity run", false, e?.stack ?? e);
     } finally {
