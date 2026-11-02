@@ -9,7 +9,7 @@ import { removeFile, writeJsonAtomic } from "./shared/fsx.ts";
 import { contextGoals, snapshot } from "./shared/goaltree.ts";
 import { clean } from "./shared/envelope.ts";
 import { readJson } from "./shared/fsx.ts";
-import type { ReleaseReaches } from "./shared/ended.ts";
+import { eventWords, type ReleaseReaches, type ShareFacts, type ShareNow } from "./shared/ended.ts";
 import type { EndedWhy, GoalSnapshot, HoldLatch, HotRequest, HotState, Latch, MeFile, RequestState, ShareState } from "./shared/types.ts";
 
 export { snapshot };
@@ -125,9 +125,9 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   const pending = ctx.db.prepare("SELECT * FROM pending_bindings WHERE local_id=?").get(lid) as
     | { id: string; goal_id: string | null; goal_json: string | null; cause: string; directive_id: string | null }
     | undefined;
-  const held = kvGet(ctx.db, ENDED_UNREAD) && signedIn(ctx.home);
-  const notices = (ctx.db.prepare("SELECT id, text FROM notices WHERE local_id=? ORDER BY created_at, rowid").all(lid) as { id: string; text: string }[]).filter(
-    (n) => !held || !n.id.slice(lid.length + 1).startsWith("signed_out_"),
+  // Notices about the share's state go with what happened (`facts`): the hook words them from `share_now` (cycle 11).
+  const notices = (ctx.db.prepare("SELECT id, text, facts FROM notices WHERE local_id=? ORDER BY created_at, rowid").all(lid) as { id: string; text: string; facts: string | null }[]).map(
+    (n) => ({ id: n.id, text: n.text, ...(n.facts ? { facts: JSON.parse(n.facts) as ShareFacts } : {}) }),
   );
   const pendingDirs = (
     ctx.db
@@ -138,6 +138,10 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     .map((r) => r.id);
   const live = share && share.state !== "error" ? share : null;
   const since = kvGet(ctx.db, `share_since:${lid}`);
+  // Why the share ended so nothing from the web can lift its latches, whether `::align share` shares it again now, and
+  // whether a release still reaches its holds: one reading, for its latch files and its notices alike (C6-2, C10-4).
+  const end = endedState(ctx, share);
+  const release = end && !end.reshare ? releaseOf(ctx, lid, share) : null;
   const hot: HotState = {
     v: 1,
     local_id: lid,
@@ -162,6 +166,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
         : null,
     pending_directives: live ? pendingDirs : [],
     notices,
+    share_now: shareNow(ctx, lid, share, end, release),
     context_goals: live && live.goal_json ? contextGoals(ctx.home, live.workspace_id, (JSON.parse(live.goal_json) as GoalSnapshot).id) : [],
     requests: live ? hotRequests(ctx, lid) : [],
     released_holds: live ? releasedHolds(ctx, lid) : [],
@@ -175,7 +180,6 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   // the web any more: the latch says so, so the deny tells the user how to get out (`align stop-sharing`). When the
   // session can be shared there again now (signed in again, its workspace in reach again), the latch says that instead,
   // so the deny gives the same advice as the session's notice: `::align share` (C6-2).
-  const end = endedState(ctx, share);
   const latch = ctx.db.prepare("SELECT * FROM latches WHERE local_id=?").get(lid) as { stopped: number; directive_id: string; seq: number; at: string } | undefined;
   // Goal holds: a latch of their own, so a stop and a hold are set and lifted independently.
   const holds = ctx.db.prepare("SELECT goal_id, json, directive_id, seq, at FROM holds WHERE local_id=? AND held=1 ORDER BY seq").all(lid) as {
@@ -187,7 +191,6 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   }[];
   // A hold whose release still reaches the session though its share ended: both latch files say so, so every deny and
   // notice names the release as a way out of the hold, and none says it lifts the stop (C10-4).
-  const release = end && !end.reshare ? releaseOf(ctx, lid, share) : null;
   const ended = end ? { ended: end.why, ...(end.reshare ? { reshare: true as const } : {}), ...(release ? { release } : {}) } : {};
   if (latch && latch.stopped) {
     const l: Latch = { v: 1, stopped: true, directive_id: latch.directive_id, seq: latch.seq, at: latch.at, ...ended };
@@ -209,6 +212,37 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     removeFile(layout.hold(ctx.home, lid));
   }
   return hot;
+}
+
+/** Stopped (a stop latch) or held (a goal hold) from the web: what a notice about its ended share ends with. */
+export function latchedFromWeb(ctx: Ctx, lid: string): boolean {
+  return !!(ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid) || ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(lid));
+}
+
+/**
+ * The share's state now, as its latch files have it (`end`, `release`: the same reading), plus what a notice about it
+ * needs besides: this machine's sign-in, whether the cached `/me` reaches the share's workspace, and whether the ended
+ * shares were read since this sign-in. The hook words the session's notices about its share from it (cycle 11).
+ */
+export function shareNow(
+  ctx: Ctx,
+  lid: string,
+  share = getShare(ctx, lid),
+  end = endedState(ctx, share),
+  release = end && !end.reshare ? releaseOf(ctx, lid, share) : null,
+): ShareNow {
+  const signed = signedIn(ctx.home);
+  const me = readJson<MeFile>(layout.me(ctx.home));
+  return {
+    live: !!share && (share.state === "shared" || share.state === "pending" || share.state === "suspended"),
+    ended: end?.why ?? null,
+    signed_in: signed,
+    reaches: !!share && !!me && me.workspaces.some((w) => w.id === share.workspace_id),
+    reshare: !!end?.reshare,
+    unread: signed && !!kvGet(ctx.db, ENDED_UNREAD),
+    latched: latchedFromWeb(ctx, lid),
+    release,
+  };
 }
 
 /** Why a share can no longer receive directives (a resume or a release), or null while it can. */
@@ -267,15 +301,11 @@ export function releaseOf(ctx: Ctx, lid: string, share: ShareRow | null): Releas
   return { goals, stopped: !!ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid) };
 }
 
-/** Rewrite the latch files of every stopped or held session whose share ended, after this machine's sign-in or reach
- *  changed (a new `/me`, a sign-out), so their deny reasons follow (C6-2). */
-export function renderEndedLatches(ctx: Ctx): void {
-  const rows = ctx.db
-    .prepare(
-      `SELECT DISTINCT s.local_id FROM shares s WHERE s.state IN ('stopped','error')
-         AND (EXISTS (SELECT 1 FROM latches l WHERE l.local_id=s.local_id AND l.stopped=1) OR EXISTS (SELECT 1 FROM holds h WHERE h.local_id=s.local_id AND h.held=1))`,
-    )
-    .all() as { local_id: string }[];
+/** Rewrite the hot and latch files of every session whose share ended, after this machine's sign-in or reach changed
+ *  (a new `/me`, a sign-out, a sign-in, the ended shares read), so their denies (C6-2) and the notices worded from the
+ *  same state (cycle 11) follow. */
+export function renderEndedShares(ctx: Ctx): void {
+  const rows = ctx.db.prepare("SELECT local_id FROM shares WHERE state IN ('stopped','error')").all() as { local_id: string }[];
   for (const r of rows) renderHot(ctx, r.local_id);
 }
 
@@ -287,6 +317,14 @@ export const ACCESS_LOST = "workspace_access_lost";
 
 /** A user notice for one session, once per `id` and session: one directive that reaches several sessions (a release,
  *  a suspension) leaves each its own notice, so the stored id is scoped to the session. */
-export function addNotice(ctx: Ctx, lid: string, id: string, text: string): void {
-  ctx.db.prepare("INSERT OR IGNORE INTO notices(id, local_id, text, created_at) VALUES(?,?,?,?)").run(`${lid}/${id}`, lid, text, new Date().toISOString());
+export function addNotice(ctx: Ctx, lid: string, id: string, text: string, facts: ShareFacts | null = null): void {
+  ctx.db
+    .prepare("INSERT OR IGNORE INTO notices(id, local_id, text, created_at, facts) VALUES(?,?,?,?,?)")
+    .run(`${lid}/${id}`, lid, text, new Date().toISOString(), facts ? JSON.stringify(facts) : null);
+}
+
+/** A notice about what happened to the share of `lid` (`facts`), worded when it is shown, from the state then; its stored
+ *  text is its words as the event left the state (cycle 11). */
+export function addShareNotice(ctx: Ctx, lid: string, id: string, facts: ShareFacts): void {
+  addNotice(ctx, lid, id, eventWords(lid, facts, shareNow(ctx, lid)), facts);
 }

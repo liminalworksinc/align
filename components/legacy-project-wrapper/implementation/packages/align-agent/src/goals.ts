@@ -1,6 +1,6 @@
 import type { Ctx } from "./context.ts";
-import { renderEndedLatches, renderHot, snapshot } from "./hot.ts";
-import { endSharesWithoutAccess, noticeSignedInAgain, noticeWorkspacesAdded } from "./share.ts";
+import { renderEndedShares, renderHot, snapshot } from "./hot.ts";
+import { endSharesWithoutAccess, noticeWorkspacesAdded } from "./share.ts";
 import { api, apiOk, HttpError } from "./api.ts";
 import { layout } from "./shared/layout.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
@@ -24,10 +24,10 @@ export async function refreshMe(ctx: Ctx): Promise<MeFile> {
     const added = next.workspaces.filter((w) => !before.has(w.id));
     if (added.length) workspacesAdded.push(...noticeWorkspacesAdded(ctx, next, added));
   }
-  // Sessions whose share a sign-out ended hear that this machine is signed in again, and what that lets them do (C7-2).
-  noticeSignedInAgain(ctx);
-  // Stopped or held sessions whose share ended: their deny says whether `::align share` can share them again now (C6-2).
-  renderEndedLatches(ctx);
+  // Sessions whose share ended: their deny says whether `::align share` can share them again now (C6-2), and their
+  // notices are worded from the same state when shown, so one whose share a sign-out ended hears that this machine is
+  // signed in again (C7-2) and one whose lost workspace is in reach again that it is back (C11-3).
+  renderEndedShares(ctx);
   return next;
 }
 

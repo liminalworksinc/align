@@ -4,8 +4,8 @@
 import type { Ctx } from "./context.ts";
 import { api, HttpError } from "./api.ts";
 import { bumpGap, kvGet, kvSet, nowIso, tx } from "./db.ts";
-import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
-import { ENDED_UNREAD, endSharesEndedOnServer, enqueue, noticeSignedInAgain, type EndedOnServer } from "./share.ts";
+import { addNotice, getShare, renderEndedShares, renderHot, snapshot } from "./hot.ts";
+import { ENDED_UNREAD, endSharesEndedOnServer, enqueue, type EndedOnServer } from "./share.ts";
 import { RESUMED_NOTICE } from "./shared/notices.ts";
 import type { Goal, WireHold, WireRequest } from "./shared/types.ts";
 import { loadFeed } from "./goals.ts";
@@ -234,18 +234,16 @@ export async function pullEndedSessions(ctx: Ctx): Promise<number> {
   const r = await api(ctx, "GET", `/api/v2/directives?cursor=${cursor(ctx)}`);
   if (r.status !== 200) return 0;
   const n = Array.isArray(r.json?.ended_sessions) ? endSharesEndedOnServer(ctx, r.json.ended_sessions.filter(validEnded)) : 0;
-  // `/me` follows, and with it the signed-in-again notices.
-  endedRead(ctx, false);
+  // `/me` follows, which words the signed-in-again notices too.
+  endedRead(ctx);
   return n;
 }
 
 /** The first directives page of a pass was read: a sign-in whose `ended_sessions` `align login` could not read now tells
- *  its sessions it is signed in again, knowing which of them its person stopped on the web (cycle 10, section 5). */
-function endedRead(ctx: Ctx, tell = true): void {
+ *  its sessions it is signed in again, knowing which of them its person stopped on the web (cycle 10, section 5): their
+ *  notices, held back until now, are worded from the state written here (C11-1). */
+function endedRead(ctx: Ctx): void {
   if (!kvGet(ctx.db, ENDED_UNREAD)) return;
   ctx.db.prepare("DELETE FROM kv WHERE key=?").run(ENDED_UNREAD);
-  if (tell) noticeSignedInAgain(ctx);
-  // The sign-out notices it held back are shown again where nothing newer supersedes them.
-  const held = ctx.db.prepare("SELECT DISTINCT local_id FROM notices WHERE substr(id, length(local_id) + 2, 11)='signed_out_'").all() as { local_id: string }[];
-  for (const r of held) renderHot(ctx, r.local_id);
+  renderEndedShares(ctx);
 }
