@@ -36,6 +36,7 @@ import { endedWhyWords, latchWayOut, shareAgainWords } from "./shared/ended.ts";
 import { buildOf, hooksBuildDiffers, hooksBuildWords, selfBuild, supersededWords } from "./build.ts";
 import { resolvePaths, type Paths } from "./paths.ts";
 import { fetchAsks } from "./asks.ts";
+import { waitingActivity } from "./activity.ts";
 import { pullEndedSessions } from "./directives.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { newDeviceKey } from "./keys.ts";
@@ -1390,7 +1391,14 @@ async function cmdSync(ctx: Ctx, argv: string[] = []): Promise<void> {
   for (const w of takeWorkspacesAdded()) out(`This machine can now reach ${clean(w.name, 80)} in Align (given to this device when you accepted an invite or on your Devices page). \`align share\`, or \`::align share\` in a session, shares sessions there.`);
   if (r.serverError) {
     const waiting = unuploadedRows(ctx);
-    err(`align: ${r.serverError}. ${waiting} usage rows and ${outboxDepth(ctx)} queued calls stay on this machine; the next sync retries.`);
+    // Activity items wait too (E2E acycle1, "works but confusing"): a count of 0 rows read as if nothing waited.
+    let acts = 0;
+    try {
+      acts = waitingActivity(ctx);
+    } catch {
+      /* a count only */
+    }
+    err(`align: ${r.serverError}. ${waiting} usage rows, ${acts} activity item${acts === 1 ? "" : "s"} and ${outboxDepth(ctx)} queued calls stay on this machine; the next sync retries.`);
     process.exitCode = 1;
   }
 }

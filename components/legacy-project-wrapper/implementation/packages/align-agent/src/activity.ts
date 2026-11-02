@@ -7,7 +7,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { Ctx } from "./context.ts";
-import { api, postTimed } from "./api.ts";
+import { api, clockOffset, postTimed } from "./api.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { getSession } from "./ledger.ts";
 import { madeActs, pathHash, readActs, record, relTo, repoIdentity, type Act, type PodFeed, type RemoteItem } from "./hooks/siblings.ts";
@@ -185,6 +185,25 @@ function newActs(file: string, from: number): { acts: Act[]; next: number } {
   }
 }
 
+/** Activity items this machine's shared sessions recorded that wait to upload (what the next pass would send, branch
+ *  label aside): counted when a pass could not reach the server, so its message does not say nothing waits. */
+export function waitingActivity(ctx: Ctx): number {
+  const shares = ctx.db.prepare("SELECT local_id, workspace_id FROM shares WHERE state='shared'").all() as { local_id: string; workspace_id: string }[];
+  let n = 0;
+  for (const s of shares) {
+    const all = [...undecidedEdits(ctx, s.local_id), ...newActs(layout.activity(ctx.home, s.local_id), Number(kvGet(ctx.db, `act_off:${s.local_id}`) || 0)).acts];
+    const cwd = getSession(ctx.db, s.local_id)?.cwd ?? null;
+    const repo = repoIdentity(s.workspace_id, cwd);
+    if (!repo) continue;
+    const named = signalsAllowed(ctx, s.local_id, cwd);
+    for (const a of madeActs(all)) {
+      if ((a.t === "edit" || a.t === "claim") && a.p) n += relTo(repo.toplevel, a.p) ? 1 : 0;
+      else if (a.t === "commit" || (a.t === "task" && named && a.s)) n++;
+    }
+  }
+  return n;
+}
+
 export async function uploadActivity(ctx: Ctx): Promise<number> {
   const shares = ctx.db.prepare("SELECT local_id, workspace_id, session_key FROM shares WHERE state='shared'").all() as { local_id: string; workspace_id: string; session_key: string }[];
   let sent = 0;
@@ -238,16 +257,20 @@ export async function uploadActivity(ctx: Ctx): Promise<number> {
   return sent;
 }
 
-/** Fetch new team activity by cursor and keep the last 6 hours of unexpired items (at most 1,000). */
+/** Fetch new team activity by cursor and keep the last 6 hours of unexpired items (at most 1,000), with the clock offset
+ *  this machine knows, so hooks read the items' server times on the server's clock (E2E acycle1 A1-cross-5). */
 export async function fetchPod(ctx: Ctx, ws: string): Promise<number> {
   const prev = readJson<PodFeed>(layout.podFeed(ctx.home, ws));
   const r = await api(ctx, "GET", `/api/v2/workspaces/${encodeURIComponent(ws)}/activity?after=${prev?.cursor ?? 0}`);
   if (r.status !== 200 || !Array.isArray(r.json?.items)) return 0;
+  const offset = clockOffset(ctx.home);
   const now = Date.now();
+  const snow = now + offset;
   const fresh = r.json.items as RemoteItem[];
-  if (!fresh.length && prev && now - Date.parse(prev.fetched_at) < 60_000) return 0;
-  const items = [...(prev?.items || []), ...fresh].filter((i) => Date.parse(i.expires_at) > now && now - Date.parse(i.at) < KEEP_MS).slice(-1000);
+  if (!fresh.length && prev && now - Date.parse(prev.fetched_at) < 60_000 && (prev.clock_offset_ms || 0) === offset) return 0;
+  const items = [...(prev?.items || []), ...fresh].filter((i) => Date.parse(i.expires_at) > snow && snow - Date.parse(i.at) < KEEP_MS).slice(-1000);
   const next: PodFeed = { v: 1, workspace_id: ws, cursor: Number(r.json.cursor) || prev?.cursor || 0, fetched_at: new Date().toISOString(), items };
+  if (offset) next.clock_offset_ms = offset;
   writeJsonAtomic(layout.podFeed(ctx.home, ws), next);
   return fresh.length;
 }

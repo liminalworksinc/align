@@ -355,7 +355,7 @@ describe("cycle 7, section 5: works, but would confuse a developer", () => {
     await sleep(150);
     const s = await runCli(t, ["sync"]);
     assert.equal(s.code, 1);
-    assert.match(s.stderr, /2 usage rows and \d+ queued calls stay on this machine/);
+    assert.match(s.stderr, /2 usage rows, \d+ activity items? and \d+ queued calls stay on this machine/);
     assert.match((await runCli(t, ["status"])).stdout, /Server: {5}unreachable since .*; 2 usage rows wait to upload/);
     fake.setOffline(false);
     await sleep(400); // the queued share's backoff
