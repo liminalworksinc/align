@@ -101,6 +101,7 @@ export interface ShareFacts {
     | "server_signed_out" // the server ended it at a sign-out of an earlier pairing (`device_signed_out`)
     | "stopped_on_web" // its person stopped it (Stop sharing on the web)
     | "stopped_before_end" // ... before a sign-out or a lost workspace had ended it here: `before`
+    | "share_stopped" // a share asked for here of a session its person had stopped (the server never shares it again)
     | "upload_refused" // the server no longer accepts its usage (an older server's words): `text`
     | "changed"; // a notice an older agent stored with no facts (`changedFacts`): only that the share's state changed
   ws: string;
@@ -196,6 +197,8 @@ function words(key: string, f: ShareFacts): string {
       return SHARE_CHANGED;
     case "stopped:before_end":
       return `Align: this session's sharing was stopped (Stop sharing on the web), so it stays stopped and is not shared again from here (its share here had ended when ${f.before ?? "this machine signed out of Align"}); its usage stays on this machine.`;
+    case "stopped:share_refused":
+      return "Align: this session's sharing was stopped (Stop sharing on the web), so it stays stopped and is not shared again from here; its usage stays on this machine.";
     default:
       return f.text ?? "";
   }
@@ -244,6 +247,8 @@ export function shareNotice(lid: string, id: string, f: ShareFacts, now: ShareNo
       return now.live ? null : out("stopped:web");
     case "stopped_before_end":
       return now.live ? null : out("stopped:before_end");
+    case "share_stopped":
+      return now.live ? null : out("stopped:share_refused");
     case "upload_refused":
       return now.live ? null : out("stopped:refused");
     case "changed":

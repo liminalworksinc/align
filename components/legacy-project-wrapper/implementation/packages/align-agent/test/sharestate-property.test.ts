@@ -8,7 +8,8 @@
 // `::align share --dir` and `align share` (C12-3: held back like `::align share` while the ended shares are unread),
 // and the unread and signed-out ways out (section 6: `align sync` first; `align login` or `align stop-sharing`). Cycle 13
 // added an older agent writing a notice about a share's state with no facts after the one-time migration ran (C13-1: never
-// shown as stored). A fixed set of seeds runs every time, plus random ones (printed, so a failure can be run again with
+// shown as stored), and the pass reads the ended sessions before it sends a share (no share sent to be refused as
+// stopped). A fixed set of seeds runs every time, plus random ones (printed, so a failure can be run again with
 // ALIGN_PROP_SEEDS=<seed>).
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -247,6 +248,11 @@ test(`share-state notices agree with the deny and the status views, whatever the
         ctx.db.close();
         assert.equal(live.length, 0, `${where}: signed out with live shares`);
       }
+      // Every web stop here comes before the next pass, which reads the ended sessions before it sends a share: no share
+      // is ever sent to be refused as stopped (`sharing_stopped`; E2E-AGENT cycle 13 follow-up). The server's refusal for
+      // a web stop after that read is told as "stays stopped" (test findings14), outside what this sequence makes.
+      const refused = fake.log.filter((l) => l.method === "PUT" && /\/sessions\/[^/]+$/.test(l.path) && l.status === 409);
+      assert.equal(refused.length, 0, `${where}: a share was sent for a session stopped on the web`);
       const latch = (await runCli(t, ["latch", "status"])).stdout;
       const listed = json((await runCli(t, ["sessions", "--json"])).stdout) as { local_id: string; shared: string }[];
       for (const s of ss) {

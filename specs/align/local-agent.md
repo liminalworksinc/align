@@ -1689,7 +1689,7 @@ share of its own, and `align share --dir --past` only sessions never shared, so 
 #### Scenario: Any order of events
 
 - **WHEN** three shared sessions (one also stopped from the web, one held) go through random sequences of sign-out, login, a login that can't read the ended shares, sync, Stop sharing and stop or resume on the web, a goal hold and its release, a hold then Stop sharing on the web, the workspace lost and given back (on the Devices page, or a re-invite and a new login), the device revoked on the web and heard by a sync, `align stop-sharing`, `::align share`, `::align share --dir confirm`, `align share` and prompts, for a fixed set of seeds and random ones (test `sharestate-property` "share-state notices agree with the deny and the status views ...")
-- **THEN** after every step, for every session, the notice it would be told now names the deny's way out in its latch sentence, offers `::align share` only when the deny (if any) and `align sessions` say it shares the session again and this machine is signed in, says to run `align login` only while signed out, says nothing while the ended shares are unread since a sign-in (but that a share its person stopped on the web stays stopped, which no read changes), never says `sharing failed (sharing_stopped)`, `::align status` and `align latch status` name the deny's way out, the deny never offers plain `::align share` while the ended shares are unread, no share is live while this machine is signed out, and a prompt tells the notice that was worked out
+- **THEN** after every step, for every session, the notice it would be told now names the deny's way out in its latch sentence, offers `::align share` only when the deny (if any) and `align sessions` say it shares the session again and this machine is signed in, says to run `align login` only while signed out, says nothing while the ended shares are unread since a sign-in (but that a share its person stopped on the web stays stopped, which no read changes), never says `sharing failed (sharing_stopped)`, no share is sent that the server refuses as stopped (each web stop there comes before the next pass reads it), `::align status` and `align latch status` name the deny's way out, the deny never offers plain `::align share` while the ended shares are unread, no share is live while this machine is signed out, and a prompt tells the notice that was worked out
 
 #### Scenario: A login that can't read the ended shares, sessions not prompted since the sign-out
 
@@ -1907,9 +1907,19 @@ that says to type `::align share` after signing in (also one worded at an earlie
 notices about a share's state are worded when shown, "Notices about a share's state are worded when shown", E2E-AGENT
 cycle 11 C11-1), until a pass has read the first page of a directives answer as the new pairing; that pass then tells
 them, knowing which its person stopped (E2E-AGENT cycle 10, section 5). A share made here after that end (its first epoch recorded after
-the end, on the server's clock) and a share still `pending` SHALL be left alone. So `::align share`, `align status`,
-`align sessions` and the session's notices agree with the server from the next pass on, not from the session's next
-usage upload.
+the end, on the server's clock) SHALL be left alone. Whatever sends a share waiting to be sent (a pass, or a command's own flush such
+as `align stop-sharing`'s) SHALL read the directives answer first, and a share still `pending` that the list
+names with `ended_reason` null SHALL not be sent: its queued calls go, it becomes a share its person stopped, and the
+session is told `Align: this session's sharing was stopped (Stop sharing on the web), so it stays stopped and is not
+shared again from here; its usage stays on this machine.`, never `sharing failed` (E2E-AGENT cycle 13). A Stop sharing
+pressed between that read and the send is refused by the server (409 `sharing_stopped`), which the session is told in
+the same words. So `::align share`, `align status`, `align sessions` and the session's notices agree with the server
+from the next pass on, not from the session's next usage upload.
+
+#### Scenario: A share asked for after Stop sharing on the web
+
+- **WHEN** a session whose share ended at a sign-out is stopped with Stop sharing on the web after the new login, and `::align share confirm` is typed in it and a sync runs; in another case the stop lands after the pass read the directives answer, just before the share is sent (test `findings14` "cycle 13 follow-up: a share asked for after Stop sharing on the web"; the `sharestate-property` check that no share is sent to be refused)
+- **THEN** no share is sent and the session is told `Align: this session's sharing was stopped (Stop sharing on the web), so it stays stopped and is not shared again from here; ...`; in the other case the server refuses it and the session is told the same, never `sharing failed`
 
 #### Scenario: Stopped on the web, then paired again before a sync
 
@@ -2025,9 +2035,18 @@ answer <accepted|declined> here (<code>): this session's share there has ended)`
 `Align: the Align server did not take your answer to <sender>'s request <id> (<code>): this session's share there has
 ended, so <sender> does not see it.`; `align requests accept|decline` SHALL then print `<lid8> <harness>: not
 <accepted|declined>: the Align server did not take ...` and exit 1, never that it was recorded, and an answer the server
-could not be reached for says `(queued: the Align server could not be reached; the next sync sends it)`. `::align
+could not be reached for says `(queued: the Align server could not be reached; the next sync sends it)`. A request to a
+session whose sharing was stopped (Stop sharing on the web, heard from the directives answer, or `align stop-sharing`)
+SHALL expire here as the server expires it, and an answer the server refuses 409 `request_expired` SHALL not be sent
+again: the request reads `expired (this session's sharing was stopped (Stop sharing on the web, or \`align
+stop-sharing\`), and the Align server expired the request)` in `align requests --all` and in what `align requests
+accept|decline` then say (exit 2), and the session's next prompt shows `Align: <sender>'s request <id> had expired (this
+session's sharing was stopped), so your answer was not taken and <sender> does not see it.` (E2E-AGENT cycle 13). `::align
 decline` SHALL name the request it declined: `Align: you declined <sender>'s request to <what> (<id>); <sender> will see
-that.` (cycle 12, section 6). Accepting a
+that.` (cycle 12, section 6), and `::align accept` the request it accepted, the same way: `Align: you accepted
+<sender>'s request to <what> (<id>); <sender> will see that. The agent hears it at your next prompt.` (for a
+`switch_goal` `Align: you accepted <sender>'s request to <what> (<id>). From your next prompt this session counts toward
+"<goal>".`; E2E-AGENT cycle 13, section 5). Accepting a
 `switch_goal` SHALL queue a pending binding toward the target goal with cause `directive:<request directive id>`,
 applied at the next root turn as a new epoch exactly like `align bind` (recorded by the hook itself for `::align
 accept`, so it never waits for a sync; when the target goal is not cached yet the reply says the session moves at the
@@ -2057,6 +2076,16 @@ their state.
 
 - **WHEN** a checkpoint is shown in a session and the developer types `::align decline <id>` (test `findings13` "declining a request in the session names which request")
 - **THEN** the reply starts `Align: you declined Dana Lee's request to make a checkpoint (<id>); Dana Lee will see that.`
+
+#### Scenario: An accept names the request
+
+- **WHEN** a checkpoint is shown in a session and the developer types `::align accept <id>` (test `findings14` "`::align accept` names the request it accepted ...")
+- **THEN** the reply is `Align: you accepted Dana Lee's request to make a checkpoint (<id>); Dana Lee will see that. The agent hears it at your next prompt.`
+
+#### Scenario: A request to a session stopped on the web
+
+- **WHEN** checkpoints wait on two shared sessions whose person stops sharing both on the web; the developer accepts one in its session before a sync, then a sync runs, and `align requests accept` is run for the other (test `findings14` "a request to a session stopped on the web expires ..."; against the real server `scripts/test-agent-live.mjs` "request to a session stopped on the web ...")
+- **THEN** the server records no answer, the session's next prompt says `Align: Dana Lee's request <id> had expired (this session's sharing was stopped), so your answer was not taken ...`, `align requests --all` lists both `expired (this session's sharing was stopped ...)`, and the accept exits 2 with `... is already expired (this session's sharing was stopped ...`
 
 #### Scenario: switch_goal accepted end to end
 

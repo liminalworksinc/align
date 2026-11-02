@@ -11,6 +11,7 @@ import { after, describe, test } from "node:test";
 import { renderHot } from "../src/hot.ts";
 import { sessionKey } from "../src/keys.ts";
 import { latchWayOut } from "../src/shared/ended.ts";
+import { requestShortId } from "../src/shared/envelope.ts";
 import { readJson, writeJsonAtomic } from "../src/shared/fsx.ts";
 import { localId, layout } from "../src/shared/layout.ts";
 import type { InjectedState } from "../src/shared/types.ts";
@@ -315,5 +316,87 @@ describe("cycle 13, section 5: works, but would confuse a developer", () => {
     assert.match(r.stdout, /^1 shared session\(s\) stopped sharing\.$/m, r.stdout);
     assert.match(said(t, q), /had not reached the Align server yet when this machine signed out of Align, so it was not shared/);
     void A;
+  });
+});
+
+describe("cycle 13 follow-up: a share asked for after Stop sharing on the web", () => {
+  const STAYS = "Align: this session's sharing was stopped (Stop sharing on the web), so it stays stopped and is not shared again from here; its usage stays on this machine.";
+  const puts = (fake: FakeServer, s: S) => fake.log.filter((l) => l.method === "PUT" && l.path.endsWith(`/sessions/${s.key}`));
+
+  test("the pass reads the ended sessions before it sends a share: one stopped on the web is not sent and is told it stays stopped", async () => {
+    const { fake, t } = await world();
+    const S = await shared(t);
+    await sync(t);
+    await logout(t);
+    await login(t);
+    said(t, S);
+    fake.stopOnWeb(S.key);
+    const before = puts(fake, S).length;
+    assert.match(prompt(t, S, "::align share confirm").reason, /^Align: sharing requested toward/);
+    await sync(t);
+    assert.equal(puts(fake, S).length, before, "no share sent");
+    const msg = said(t, S);
+    assert.equal(msg, STAYS);
+    assert.doesNotMatch(msg, /sharing failed/);
+    assert.match(prompt(t, S, "::align share confirm").reason, /stays stopped/);
+  });
+
+  test("a web stop after that read: the server's refusal is told as the session staying stopped, never `sharing failed`", async () => {
+    const { fake, t } = await world();
+    const S = await shared(t);
+    await sync(t);
+    await logout(t);
+    await login(t);
+    said(t, S);
+    prompt(t, S, "::align share confirm");
+    fake.beforeRequest = (m, p) => {
+      if (m === "PUT" && p.endsWith(`/sessions/${S.key}`)) {
+        fake.stopOnWeb(S.key);
+        fake.beforeRequest = null;
+      }
+    };
+    await sync(t);
+    assert.equal(fake.log.filter((l) => l.method === "PUT" && l.path.endsWith(`/sessions/${S.key}`)).at(-1)?.status, 409);
+    assert.equal(said(t, S), STAYS);
+  });
+});
+
+describe("cycle 13 follow-up: requests", () => {
+  test("`::align accept` names the request it accepted, as `::align decline` does", async () => {
+    const { fake, t } = await world();
+    const R = await shared(t);
+    await sync(t);
+    const q = fake.sendRequest("ws_acme", { type: "checkpoint", goal_id: "g_ship", session_keys: [R.key] });
+    await sync(t);
+    prompt(t, R);
+    assert.equal(
+      prompt(t, R, `::align accept ${requestShortId(q.wire.id)}`).reason,
+      `Align: you accepted Dana Lee's request to make a checkpoint (${requestShortId(q.wire.id)}); Dana Lee will see that. The agent hears it at your next prompt.`,
+    );
+  });
+
+  test("a request to a session stopped on the web expires: an answer the server refuses as expired is said, and once the stop is read it is expired here", async () => {
+    const { fake, t } = await world();
+    const R = await shared(t);
+    const R2 = await shared(t);
+    await sync(t);
+    const q = fake.sendRequest("ws_acme", { type: "checkpoint", goal_id: "g_ship", session_keys: [R.key] });
+    const q2 = fake.sendRequest("ws_acme", { type: "checkpoint", goal_id: "g_ship", session_keys: [R2.key] });
+    await sync(t);
+    prompt(t, R);
+    fake.stopOnWeb(R.key);
+    fake.stopOnWeb(R2.key);
+    // Answered in the session before this machine heard of the stop: the server refuses it as expired.
+    prompt(t, R, `::align accept ${requestShortId(q.wire.id)}`);
+    await sync(t);
+    assert.ok(!fake.receipts.some((x) => x.state === "accepted"), "no answer taken");
+    assert.match(said(t, R), new RegExp(`Align: Dana Lee's request ${requestShortId(q.wire.id)} had expired \\(this session's sharing was stopped\\), so your answer was not taken`));
+    const all = (await runCli(t, ["requests", "--all"])).stdout;
+    assert.match(all, new RegExp(`${requestShortId(q.wire.id)} .*: expired \\(this session's sharing was stopped`));
+    // The other, not answered: the read of the stop expired it here, so it is not waiting and can't be answered.
+    assert.match(all, new RegExp(`${requestShortId(q2.wire.id)} .*: expired \\(this session's sharing was stopped`));
+    const a = await runCli(t, ["requests", "accept", requestShortId(q2.wire.id)]);
+    assert.equal(a.code, 2, a.stdout);
+    assert.match(a.stderr, /is already expired \(this session's sharing was stopped/);
   });
 });

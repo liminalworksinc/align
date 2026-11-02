@@ -1393,9 +1393,11 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       writeInjected(home, lid, inj);
       // Which request: the model's line names it, and so does this (E2E-AGENT cycle 12, section 6).
       if (answer === "declined") return `Align: you declined ${who}'s request to ${requestWhat(r)} (${requestShortId(r.id)}); ${who} will see that.${seen[r.id].shown ? " The agent hears it at your next prompt." : ""}`;
-      if (r.type === "switch_goal" && later) return `Align: you accepted ${who}'s request. This session moves to "${clean(r.target_goal?.title, 100)}" at the first prompt after Align has fetched that goal (the next sync).`;
-      if (r.type === "switch_goal") return `Align: you accepted ${who}'s request. From your next prompt this session counts toward "${clean(r.target_goal?.title, 100)}".`;
-      return `Align: you accepted ${who}'s request; ${who} will see that. The agent hears it at your next prompt.`;
+      // Named as a decline names it: which request, and its short id (E2E-AGENT cycle 13, section 5).
+      const which = `${who}'s request to ${requestWhat(r)} (${requestShortId(r.id)})`;
+      if (r.type === "switch_goal" && later) return `Align: you accepted ${which}. This session moves to "${clean(r.target_goal?.title, 100)}" at the first prompt after Align has fetched that goal (the next sync).`;
+      if (r.type === "switch_goal") return `Align: you accepted ${which}. From your next prompt this session counts toward "${clean(r.target_goal?.title, 100)}".`;
+      return `Align: you accepted ${which}; ${who} will see that. The agent hears it at your next prompt.`;
     }
     case "goals": {
       const feed = feedFor(home, hot, cwd);

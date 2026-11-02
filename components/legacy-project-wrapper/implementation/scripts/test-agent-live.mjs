@@ -624,7 +624,7 @@ try {
         `[Align] A request from Lena Lead, who can approve goal "${RQ_TITLE}": re-read goal v1 (in your Align goal context) and draft an updated plan for the developer. Drafting is safe to do now, but keep working as before until the developer agrees to the new plan.` &&
       (rpShown.system ?? "").startsWith(`Align: Lena Lead (approver of "${RQ_TITLE}") asks: re-read goal "${RQ_TITLE}" (v1) and update the plan.`) &&
       rpStop.stdout === "" && rpAuto?.state === "accepted" && rpAuto.auto_accepted === true &&
-      rpAccept.json?.decision === "block" && rpAccept.json.reason === "Align: you accepted Lena Lead's request; Lena Lead will see that. The agent hears it at your next prompt." &&
+      rpAccept.json?.decision === "block" && rpAccept.json.reason === `Align: you accepted Lena Lead's request to replan toward goal "${RQ_TITLE}" (${short(RP1?.id)}); Lena Lead will see that. The agent hears it at your next prompt.` &&
       rpDev?.state === "accepted" && rpDev.auto_accepted === false && JSON.stringify(receipts(reqDirId(RP1?.id, false), Q1.key, "accepted")) === "[0,1]" &&
       JSON.stringify(await auditOf("request.accepted", RP1?.id)) === JSON.stringify([M.id]) &&
       rpTold.context === `[Align] The developer accepted Lena Lead's request to replan toward goal "${RQ_TITLE}": follow the updated plan.` && rpTold.system === null && rpQuiet.stdout === "",
@@ -717,7 +717,7 @@ try {
   );
   check(
     "request (switch_goal): `::align accept <id>`; with no sync in between, the very next root turn moves the session (E2E-AGENT B2): its context names the target goal and says the developer accepted, and after `align sync` the server shows it accepted by the developer and an epoch on the target goal opened at that prompt with cause directive:<the request directive's id>",
-    swAccept.json?.reason === `Align: you accepted Lena Lead's request. From your next prompt this session counts toward "${SW_TITLE}".` && swAccepted?.state === "accepted" && swAccepted.auto_accepted === false &&
+    swAccept.json?.reason === `Align: you accepted Lena Lead's request to move this session to goal "${SW_TITLE}" (${short(SW?.id)}). From your next prompt this session counts toward "${SW_TITLE}".` && swAccepted?.state === "accepted" && swAccepted.auto_accepted === false &&
       swEpochBefore?.goal_id === GQ?.id && swEpoch?.goal_id === GT?.id && swEpoch.cause === `directive:${swDir}` && swRootTurn === swNextId && swApi?.current_epoch?.goal?.id === GT?.id &&
       (swNext.context ?? "").includes(SW_TITLE) && (swNext.context ?? "").includes(`[Align] The developer accepted Lena Lead's request to move this session to goal "${SW_TITLE}".`),
     `accept=${swAccept.stdout} ${JSON.stringify(swAccepted)} before=${JSON.stringify(swEpochBefore)} after=${JSON.stringify(swEpoch)} root=${swRootTurn}/${swNextId} dir=${swDir} next=${swNext.stdout}`,
@@ -805,6 +805,32 @@ try {
     `${[stop1, resume1, stop2, resume2].map((r) => r.status)} afterResume=${q1AfterResume.stdout} bash=${q1Bash.stdout} read=${q1Read.stdout} free=${q1Free2.stdout}`,
   );
 
+  // E2E-AGENT cycle 13: a request to a session its person then stops sharing on the web expires on the server; the answer
+  // typed in the session before the device heard of the stop is refused (409 request_expired), never recorded, and the
+  // session and `align requests` say it expired.
+  const SX = startQ("sx13");
+  const sxLid = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === SX.sid)?.local_id ?? "none";
+  if (!sdb((d) => d.prepare("SELECT 1 AS x FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, SX.key))) cli(["share", sxLid.slice(0, 8), "--workspace", W, "--goal", GQ?.id ?? "none", "--yes"]);
+  sync();
+  const sxReq = await sendReq(L, { type: "checkpoint", session_keys: [SX.key] });
+  const SXQ = sxReq.json?.request;
+  sync();
+  const sxShown = prompt(SX);
+  const sxStop = await ws(M, "POST", `/sessions/${SX.key}/stop-sharing`, {});
+  const sxView = await reqView(SXQ?.id);
+  const sxAccept = prompt(SX, `::align accept ${short(SXQ?.id)}`);
+  sync();
+  const sxTold = prompt(SX);
+  const sxAll = cli(["requests", "--all"]).stdout;
+  const sxAnswers = sdb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_receipts WHERE directive_id = ? AND state IN ('accepted','declined') AND auto_accepted = 0").get(reqDirId(SXQ?.id, false) ?? ""))?.n;
+  check(
+    "request to a session stopped on the web (E2E-AGENT cycle 13): Stop sharing expires the request on the server (expired, its sessions ended); the developer's accept typed before the device heard of the stop is refused (request_expired), never recorded; the session is told its answer was not taken because the request had expired, and `align requests --all` says it expired because its sharing was stopped",
+    sxReq.status === 201 && (sxShown.system ?? "").includes(short(SXQ?.id)) && sxStop.status === 200 && sxView?.state === "expired" && sxView.expired_reason === "sessions_ended" &&
+      (sxAccept.json?.reason ?? "").startsWith("Align: you accepted Lena Lead's request to make a checkpoint") && sxAnswers === 0 &&
+      (sxTold.system ?? "").includes(`Align: Lena Lead's request ${short(SXQ?.id)} had expired (this session's sharing was stopped), so your answer was not taken`) &&
+      new RegExp(`${short(SXQ?.id)} .*: expired \\(this session's sharing was stopped`).test(sxAll),
+    `${sxReq.status} ${sxReq.text.slice(0, 200)} shown=${sxShown.stdout} stop=${sxStop.status} view=${JSON.stringify(sxView)} accept=${sxAccept.stdout} answers=${sxAnswers} told=${sxTold.stdout} all=${sxAll}`,
+  );
   // -- the goal closes while a request waits: the server expires it, the agent drops it with one notice --
   const cl = await sendReq(L, { type: "checkpoint", note: "Before we call it done" });
   const CL = cl.json?.request;

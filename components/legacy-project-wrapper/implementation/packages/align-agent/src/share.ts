@@ -186,6 +186,8 @@ export function stopSharing(ctx: Ctx, lid: string): void {
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM latches WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM holds WHERE local_id=?").run(lid);
+    // The server expires the requests still waiting on it at this stop (E2E-AGENT cycle 13).
+    expireRequests(ctx, lid, "sharing_stopped", at);
     enqueue(ctx, lid, "stop_sharing", { ws: share.workspace_id, session_key: share.session_key });
   });
   renderHot(ctx, lid);
@@ -327,7 +329,7 @@ function endShare(ctx: Ctx, lid: string, why: string, noticeId: string, facts: S
 }
 
 /** Why a request to a session expired before an answer: its share ended as the server's `ended_reason` says. */
-export type RequestExpiry = "device_signed_out" | "member_removed";
+export type RequestExpiry = "device_signed_out" | "member_removed" | "sharing_stopped";
 
 /**
  * The requests to `lid` still waiting for an answer expire when its share ends at a sign-out or a lost workspace: the
@@ -378,6 +380,8 @@ export function endShareStoppedByPerson(ctx: Ctx, lid: string, noticeId: string)
   tx(ctx.db, () => {
     markStopped(ctx, lid);
     notePriorShare(ctx, lid, true);
+    // The server expired the requests still waiting on it when its person stopped it (E2E-AGENT cycle 13).
+    expireRequests(ctx, lid, "sharing_stopped");
     // Stopped or held from the web as well: the notice says how to unblock it, as the deny does (C9-2).
     const s = getShare(ctx, lid);
     if (s) addShareNotice(ctx, lid, noticeId, factsOf(s, "stopped_on_web"));
@@ -411,6 +415,23 @@ function endedShareStoppedByPerson(ctx: Ctx, lid: string, noticeId: string): voi
   renderHot(ctx, lid);
 }
 
+/** A pending share of a session its person stopped on the web: its queued calls go, it is stopped as its person
+ *  stopped it, and it is told it stays stopped (`share_stopped`). */
+function dropStoppedShare(ctx: Ctx, lid: string): void {
+  const s = getShare(ctx, lid);
+  if (!s) return;
+  tx(ctx.db, () => {
+    ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('put_session','post_epoch')").run(lid);
+    ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
+    markStopped(ctx, lid);
+    ctx.db.prepare("UPDATE shares SET error=NULL WHERE local_id=?").run(lid);
+    notePriorShare(ctx, lid, true);
+    ctx.db.prepare("DELETE FROM notices WHERE local_id=? AND id LIKE ?").run(lid, `${lid}/share_started_%`);
+    addShareNotice(ctx, lid, `share_stopped_${nowIso()}`, factsOf(s, "share_stopped"));
+  });
+  renderHot(ctx, lid);
+}
+
 /** One of the person's sessions whose share the server ended, as the directives answer lists it (`ended_sessions`). */
 export interface EndedOnServer {
   ws: string;
@@ -436,6 +457,15 @@ export function endSharesEndedOnServer(ctx: Ctx, ended: EndedOnServer[]): number
   for (const e of ended) {
     const s = ctx.db.prepare("SELECT local_id, state, error FROM shares WHERE session_key=? AND workspace_id=?").get(e.session_key, e.ws) as { local_id: string; state: string; error: string | null } | undefined;
     if (!s) continue;
+    // A share asked for here and not sent yet, of a session its person stopped (Stop sharing on the web): the server
+    // never shares it again, so it is dropped before it is sent and the session told it stays stopped, never "sharing
+    // failed" (E2E-AGENT cycle 13 follow-up; the pass reads this answer before it sends a share).
+    if (s.state === "pending" && e.ended_reason === null) {
+      dropStoppedShare(ctx, s.local_id);
+      ctx.log(`directives: session ${s.local_id.slice(0, 8)} was stopped by its person on the web; its share asked for here was not sent`);
+      n++;
+      continue;
+    }
     // Ended here already at a sign-out or a lost workspace, which offer `::align share`: a stop by its person before that
     // means the server never shares it again (C9-1). One its person stopped here since is left as it is.
     const endedHere = (s.state === "stopped" || s.state === "error") && (s.error === DEVICE_SIGNED_OUT || s.error === ACCESS_LOST);
