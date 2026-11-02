@@ -35,6 +35,7 @@ import { feedHold, feedHoldReason } from "../shared/feedhold.ts";
 import { contextGoals, snapshot } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
+import { isShareStateNotice, noticeKind } from "../shared/notices.ts";
 import { matchRule, readRules, removeRule, setRule } from "../shared/rules.ts";
 import { queueSteering, steeringLine, unsharedNote } from "../shared/steering.ts";
 import type { DriftFile, FeedFile, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
@@ -156,24 +157,17 @@ function reportApplied(home: string, lid: string, inj: InjectedState, ids: (stri
   spoolWrite(home, { type: "applied", local_id: lid, directive_ids: fresh, ts: new Date().toISOString() });
 }
 
-/** Notices about whether this session is shared (started, refused, ended, or this machine signed in again or its lost
- *  workspace back so it can be shared there again): only the newest of them still holds (C5-3, C7-2). A workspace this
- *  device reaches for the first time is not one: it says nothing about this session's own share, so a notice that its
- *  share ended is still told next to it. */
-const SHARE_STATE_NOTICES = ["share_started_", "share_err_", "upload_refused_", "signed_out_", "signed_in_", "access_lost_", "workspace_back_"];
-
 /**
  * The notices still worth telling, of those the session has not seen: one about its share's state (the newest, the
  * earlier ones are stale), a "resumed" one only while that resume still holds (a later stop withdrew it, C4-6), and each
  * text once. All of them count as seen.
  */
 export function currentNotices(hot: HotState, fresh: HotState["notices"]): HotState["notices"] {
-  const kind = (n: { id: string }) => n.id.slice(n.id.indexOf("/") + 1);
-  const lastState = fresh.filter((n) => SHARE_STATE_NOTICES.some((k) => kind(n).startsWith(k))).pop();
+  const lastState = fresh.filter((n) => isShareStateNotice(noticeKind(n.id))).pop();
   const kept = fresh.filter((n) => {
-    const k = kind(n);
+    const k = noticeKind(n.id);
     if (k.startsWith("resumed_")) return !!hot.resumed && k === `resumed_${hot.resumed}`;
-    if (SHARE_STATE_NOTICES.some((p) => k.startsWith(p))) return n === lastState;
+    if (isShareStateNotice(k)) return n === lastState;
     return true;
   });
   return kept.filter((n, i) => !kept.slice(i + 1).some((m) => m.text === n.text));

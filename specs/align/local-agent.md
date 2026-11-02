@@ -477,6 +477,11 @@ device <id>, which \`align login\` replaced on this machine; its sessions stoppe
 - **WHEN** after such a logout the device is revoked on the Devices page before the server is reachable again, then `align sync` runs (test `findings3` "already revoked: ...")
 - **THEN** it says `The device this machine signed out of while the server could not be reached was already revoked (on the web, say); nothing was left to do.`, never `Revoked ...`, and `revoke.json` is gone
 
+#### Scenario: Told it can be shared again, then signed out again
+
+- **WHEN** a session stopped from the web and another not stopped are told `this machine is signed in to Align again` after `align logout` and `align login`, then the machine signs out again and each is prompted, a sync runs, and the machine signs in again (test `findings9` "told \"signed in to Align again\", then signed out again ...")
+- **THEN** each prompt shows the sign-out notice again (the stopped one with `align stop-sharing <lid8>`, as its deny says), the next prompt and a pass while signed out add nothing, and after the new sign-in the signed-in-again notice is told again
+
 #### Scenario: Revoked by the next login
 
 - **WHEN** after such a logout the server is back, the old access token has expired, and the developer runs `align login` (test `findings2` "logout while the server is unreachable, then `align login` ..."; against the real server in `scripts/test-agent-live.mjs` "logout offline (E2E-AGENT cycle 2) ...")
@@ -500,8 +505,16 @@ blocked.`), or, when this sign-in does not reach its workspace, `Align: this mac
 this sign-in does not reach <workspace>, so this session can't be shared there again from here; its usage stays on this
 machine.` (plus `It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing <id>\`
 in a terminal.`). It SHALL be told once per sign-in and again when that answer changes; the next sign-out SHALL take it
-back, so the sign-out notice holds again; and such a session SHALL not also get the `can now reach <workspace>` notice
-for its own workspace. Its stop latch and goal holds SHALL stay, so
+back, so the sign-out notice holds again: every session whose newest notice about its share says `::align share` shares
+it again now (signed in again and reaching its workspace, its lost workspace reached again, a member again, a refusal
+naming a sign-out the server ended) SHALL be told the sign-out notice again at that sign-out, whatever it has seen, so
+its newest notice always agrees with its deny (with the `align stop-sharing <id>` sentence for a session stopped or held
+from the web); one whose share ended because its workspace was lost gets `Align: this machine signed out of Align, so
+this session can't be shared again from here for now; its usage stays on this machine. To share it again, run \`align
+login\` in a terminal, then type \`::align share\` here (it counts toward "<goal>" again).`, and hears the next sign-in's
+answer from the signed-in-again notice. A session that has not seen the signed-in-again notice yet is told the
+sign-out notice once, and each further sync pass while signed out tells nothing more. Such a session SHALL not also get
+the `can now reach <workspace>` notice for its own workspace. Its stop latch and goal holds SHALL stay, so
 it fails closed until it is shared again and the web lifts them, or the developer runs `align stop-sharing`. `align sessions` SHALL show such a share as `stopped
 (<workspace>; this machine signed out)` while it can't be shared again, and `stopped (<workspace>; ended at a sign-out;
 \`::align share\` shares it again)` once this machine is signed in again and reaches its workspace; never as `shared`. Sharing it again after a new
@@ -1710,7 +1723,11 @@ workspace no longer listed: `stopped` with the reason `workspace_access_lost`, i
 and epoch calls dropped, and the notice `Align: this session stopped sharing because you no longer have access to
 <workspace> in Align (you were removed from it or left it); its usage stays on this machine from now on.` (plus the
 `align stop-sharing <lid8>` sentence for a stopped or held session). Its stop latch and goal holds SHALL stay until
-`align stop-sharing`, their denies naming that command; the cached goal, asks and team activity feeds of every
+`align stop-sharing`, their denies naming that command. A session whose share there had ended already and whose newest
+notice said it can be shared there again (its workspace reached again, or a member again) SHALL be told, whatever it
+has seen, `Align: this machine can no longer reach <workspace> in Align (you were removed from it or left it again), so
+this session can't be shared there again from here; its usage stays on this machine.` (plus the `align stop-sharing
+<lid8>` sentence for a stopped or held session), so its newest notice agrees with its deny. The cached goal, asks and team activity feeds of every
 workspace out of reach SHALL be deleted, so no envelope or `::align goals` shows them, and a default workspace out of
 reach is no default any more. The device's default workspace (in `me.json`) SHALL be worked out afresh from each `/me`,
 never carried over from the previous one: the server's, else `default_workspace` in `config.json` (which `align config`
@@ -1730,6 +1747,11 @@ continue, and shares in the person's other workspaces SHALL be unaffected.
 
 - **WHEN** a shared session is stopped from the web, then the person is removed from the workspace and `align sync` runs (test `findings2` "removed from the workspace: the next contact ends the share here ..."; against the real server in `scripts/test-agent-live.mjs` "member removed (E2E-AGENT cycle 2) ...")
 - **THEN** `align sessions` shows it `stopped (Acme; no access to the workspace)`, the next prompt shows the notice naming `align stop-sharing <lid8>`, `Bash` stays denied naming the lost access and that command, the cached feed is gone, a resume gets no goal envelope, and after `align stop-sharing <lid8>` tools run
+
+#### Scenario: Back, then out of reach again
+
+- **WHEN** a session stopped from the web loses its workspace, is told it is back, loses it again, gets it back, and then the machine signs out and in (test `findings9` "told its lost workspace is back, then the workspace is lost again ...")
+- **THEN** after the second loss its next prompt says `this machine can no longer reach Acme in Align ... can't be shared there again from here` with `align stop-sharing <lid8>`, as its deny does; back again it is told so again; at the sign-out it is told `this machine signed out of Align, so this session can't be shared again from here for now ...`; and after the sign-in that it can be shared again
 
 #### Scenario: No workspace left
 

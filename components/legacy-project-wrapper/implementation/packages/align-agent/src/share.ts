@@ -7,6 +7,7 @@ import { kvGet, kvSet, nowIso, tx } from "./db.ts";
 import { repoKey, sessionKey } from "./keys.ts";
 import path from "node:path";
 import { endEpochs, getSession, sessionCwds, type SessionRow } from "./ledger.ts";
+import { isShareStateNotice, noticeKind, offersReshare } from "./shared/notices.ts";
 import { ACCESS_LOST, addNotice, DEVICE_SIGNED_OUT, endedState, getShare, notePriorShare, renderEndedLatches, renderHot, sharedBefore, snapshot } from "./hot.ts";
 
 export { notePriorShare, sharedBefore, stoppedByPerson } from "./hot.ts";
@@ -246,33 +247,60 @@ export function forgetShare(ctx: Ctx, lid: string): void {
   renderHot(ctx, lid);
 }
 
+/** The sign-out notice of a session whose share a sign-out ended (or, `ended` set, one whose share had ended already
+ *  and that was told it can be shared again), with how to share it again. */
+function signedOutText(goal: GoalSnapshot | null, ended = false): string {
+  const toward = goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : "";
+  return ended
+    ? `Align: this machine signed out of Align, so this session can't be shared again from here for now; its usage stays on this machine. To share it again, run \`align login\` in a terminal, then type \`::align share\` here${toward}.`
+    : `Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on. To share it again, run \`align login\` in a terminal, then type \`::align share\` here${toward}.`;
+}
+
+/** The kind of the newest notice about `lid`'s share state (`signed_out_...`, `signed_in_...`), or null: the one the
+ *  session's hook tells (only the newest of them still holds). */
+function lastStateNotice(ctx: Ctx, lid: string): string | null {
+  const rows = ctx.db.prepare("SELECT id FROM notices WHERE local_id=? ORDER BY created_at DESC, rowid DESC").all(lid) as { id: string }[];
+  for (const r of rows) {
+    const kind = noticeKind(r.id);
+    if (isShareStateNotice(kind)) return kind;
+  }
+  return null;
+}
+
+/** Sessions whose share ended earlier (a sign-out or a lost workspace) and whose newest share-state notice says
+ *  `::align share` shares them again now (`offersReshare`), of those `which` picks. */
+function toldReshare(ctx: Ctx, which: (s: { local_id: string; workspace_id: string; error: string }) => boolean = () => true) {
+  const rows = ctx.db
+    .prepare("SELECT local_id, workspace_id, workspace_name, error, goal_json FROM shares WHERE state IN ('stopped','error') AND error IN (?,?)")
+    .all(DEVICE_SIGNED_OUT, ACCESS_LOST) as { local_id: string; workspace_id: string; workspace_name: string; error: string; goal_json: string | null }[];
+  return rows.filter((s) => which(s) && offersReshare(lastStateNotice(ctx, s.local_id)));
+}
+
 /**
  * This machine signed out (logout, a revoked device, or a new pairing that replaced the old device): the server can no
  * longer reach its shares, so each live one ends here too and its session is told once how to share it again. Queued
  * share and epoch calls are dropped (they belonged to the old device). Stop latches and goal holds stay: a stopped
- * session stays blocked until the developer runs `align stop-sharing`. Returns how many shares ended.
+ * session stays blocked until the developer runs `align stop-sharing`. A session whose share had ended already and that
+ * was told `::align share` shares it again now (signed in again, its workspace back) is told the sign-out notice again,
+ * whatever it has seen, so its newest notice agrees with its deny (C8-1). Returns how many shares ended.
  */
 export function endSharesSignedOut(ctx: Ctx): number {
-  // "Signed in again" is no longer true: a session that has not seen that notice yet gets its sign-out notice again
-  // (C7-2).
-  const back = ctx.db.prepare(`SELECT DISTINCT local_id FROM notices WHERE ${SIGNED_IN_NOTICE}`).all() as { local_id: string }[];
-  if (back.length) {
-    ctx.db.prepare(`DELETE FROM notices WHERE ${SIGNED_IN_NOTICE}`).run();
-    for (const b of back) renderHot(ctx, b.local_id);
-  }
-  const live = ctx.db.prepare("SELECT local_id, goal_json FROM shares WHERE state IN ('shared','pending','suspended')").all() as { local_id: string; goal_json: string | null }[];
   const at = nowIso();
+  const retell = toldReshare(ctx);
+  // "Signed in again" is no longer true: a session that has not seen that notice yet gets its sign-out notice again
+  // (C7-2), and one that has, a new one (C8-1).
+  const back = ctx.db.prepare(`SELECT DISTINCT local_id FROM notices WHERE ${SIGNED_IN_NOTICE}`).all() as { local_id: string }[];
+  if (back.length) ctx.db.prepare(`DELETE FROM notices WHERE ${SIGNED_IN_NOTICE}`).run();
+  for (const s of retell) {
+    const goal = s.goal_json ? (JSON.parse(s.goal_json) as GoalSnapshot) : null;
+    addNotice(ctx, s.local_id, `signed_out_${at}`, `${signedOutText(goal, s.error !== DEVICE_SIGNED_OUT)}${latchTail(ctx, s.local_id)}`);
+  }
+  for (const lid of new Set([...back.map((b) => b.local_id), ...retell.map((s) => s.local_id)])) renderHot(ctx, lid);
+  const live = ctx.db.prepare("SELECT local_id, goal_json FROM shares WHERE state IN ('shared','pending','suspended')").all() as { local_id: string; goal_json: string | null }[];
   for (const { local_id: lid, goal_json } of live) {
     // Typed in the session after a new `align login`, `::align share` shares it toward the goal it had (N8).
     const goal = goal_json ? (JSON.parse(goal_json) as GoalSnapshot) : null;
-    endShare(
-      ctx,
-      lid,
-      DEVICE_SIGNED_OUT,
-      `signed_out_${at}`,
-      `Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on. To share it again, run \`align login\` in a terminal, then type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.`,
-      at,
-    );
+    endShare(ctx, lid, DEVICE_SIGNED_OUT, `signed_out_${at}`, signedOutText(goal), at);
   }
   if (live.length) ctx.log(`signed out: ${live.length} shares ended on this machine`);
   // A stopped session whose share had ended already (its workspace lost, say) can no longer be shared again from here
@@ -301,8 +329,8 @@ function latchedFromWeb(ctx: Ctx, lid: string): boolean {
 export function noticeSignedInAgain(ctx: Ctx): void {
   if (!signedIn(ctx.home)) return;
   const rows = ctx.db
-    .prepare(`SELECT DISTINCT s.local_id AS lid FROM shares s JOIN notices n ON n.local_id=s.local_id WHERE s.state IN ('stopped','error') AND s.error=? AND ${noticeOfKind("signed_out_", "n.")}`)
-    .all(DEVICE_SIGNED_OUT) as { lid: string }[];
+    .prepare(`SELECT DISTINCT s.local_id AS lid FROM shares s JOIN notices n ON n.local_id=s.local_id WHERE s.state IN ('stopped','error') AND s.error IN (?,?) AND ${noticeOfKind("signed_out_", "n.")}`)
+    .all(DEVICE_SIGNED_OUT, ACCESS_LOST) as { lid: string }[];
   for (const { lid } of rows) {
     const share = getShare(ctx, lid);
     const end = endedState(ctx, share);
@@ -322,23 +350,24 @@ export function noticeSignedInAgain(ctx: Ctx): void {
  *  its pending binding and queued session and epoch calls dropped, one notice. Its stop latch and goal holds stay, so
  *  it fails closed, and the notice says how to get out. */
 function endShare(ctx: Ctx, lid: string, why: string, noticeId: string, text: string, at = nowIso()): void {
-  const latched = ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid) || ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(lid);
   tx(ctx.db, () => {
     ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=?, error=? WHERE local_id=?").run(at, why, lid);
     endEpochs(ctx.db, lid, at);
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('put_session','post_epoch')").run(lid);
-    // A session that can be shared there again at once (its person is back in the workspace) gets out the way its
-    // latch says: by sharing it again (C6-2).
-    const again = latched && endedState(ctx, getShare(ctx, lid))?.reshare;
-    const tail = !latched
-      ? ""
-      : again
-        ? " It was stopped or held from the web: once it is shared again, that can be lifted there; until then its tools stay blocked."
-        : ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
-    addNotice(ctx, lid, noticeId, `${text}${tail}`);
+    addNotice(ctx, lid, noticeId, `${text}${latchTail(ctx, lid)}`);
   });
   renderHot(ctx, lid);
+}
+
+/** What a notice about a share that ended adds for a session stopped or held from the web: a session that can be shared
+ *  there again at once (signed in, its workspace in reach) gets out the way its latch says, by sharing it again; any
+ *  other until `align stop-sharing` (C6-2). Empty for a session that is not. */
+function latchTail(ctx: Ctx, lid: string): string {
+  if (!latchedFromWeb(ctx, lid)) return "";
+  return endedState(ctx, getShare(ctx, lid))?.reshare
+    ? " It was stopped or held from the web: once it is shared again, that can be lifted there; until then its tools stay blocked."
+    : ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
 }
 
 /**
@@ -356,7 +385,7 @@ export function endShareRemoved(ctx: Ctx, lid: string): void {
     ctx,
     lid,
     ACCESS_LOST,
-    `access_lost_${s.workspace_id}_${at}`,
+    `access_lost_rejoined_${s.workspace_id}_${at}`,
     `Align: this session stopped sharing because you were removed from ${clean(s.workspace_name, 80)} in Align (or left it) while this machine was not in touch; its usage from then on stays on this machine. You are a member again, so to share it there again, type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.`,
     at,
   );
@@ -409,6 +438,17 @@ export function endSharesWithoutAccess(ctx: Ctx, me: MeFile): number {
       at,
     );
   }
+  // A session whose share there had ended already and that was told it can be shared there again (its workspace back,
+  // or a member again) is told it can't any more, whatever it has seen, as its deny now says (C8-1). One whose share a
+  // sign-out ended hears it from its "signed in again" notice, which follows this sign-in's reach (`noticeSignedInAgain`).
+  for (const s of toldReshare(ctx, (x) => x.error === ACCESS_LOST && !reach.has(x.workspace_id))) {
+    notify(
+      ctx,
+      s.local_id,
+      `access_lost_${s.workspace_id}_${at}`,
+      `Align: this machine can no longer reach ${clean(s.workspace_name, 80)} in Align (you were removed from it or left it again), so this session can't be shared there again from here; its usage stays on this machine.${latchTail(ctx, s.local_id)}`,
+    );
+  }
   // Cached feeds of every workspace out of reach go too (with or without a live share in it).
   const gone = new Set(live.map((s) => s.workspace_id));
   try {
@@ -443,6 +483,12 @@ export function noticeWorkspacesAdded(ctx: Ctx, me: MeFile, added: { id: string;
     ctx.log(`workspace added: this device can now reach ${w.name} (${w.id})`);
     const ended = ctx.db.prepare("SELECT local_id, goal_json FROM shares WHERE workspace_id=? AND state IN ('stopped','error') AND error=?").all(w.id, ACCESS_LOST) as { local_id: string; goal_json: string | null }[];
     for (const s of ended) {
+      // Told at a sign-out that it can't be shared again until `align login` (C8-1): it hears this sign-in's answer from
+      // its "signed in again" notice (`noticeSignedInAgain`), not from a second notice next to it.
+      if (lastStateNotice(ctx, s.local_id)?.startsWith("signed_out_")) {
+        told.add(s.local_id);
+        continue;
+      }
       const goal = s.goal_json ? (JSON.parse(s.goal_json) as GoalSnapshot) : null;
       told.add(s.local_id);
       // Stopped or held from the web: sharing it again is also how the web gets to lift that (C6-2).
