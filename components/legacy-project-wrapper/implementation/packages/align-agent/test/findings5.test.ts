@@ -197,8 +197,10 @@ describe("C5-4: `align sync` cut short by `align logout`", () => {
     const device = loadCredentials(t.home)!.device_id;
     let release!: () => void;
     fake.holdCalls = { match: (m, p) => m === "GET" && p === "/api/v2/directives", release: new Promise<void>((r) => (release = r)), left: 1 };
+    // Only this pass's call: `align login` reads the directives answer too (its ended sessions, cycle 9).
+    const from = fake.log.length;
     const sync = runCli(t, ["sync"]);
-    await waitFor(() => fake.log.some((l) => l.method === "GET" && l.path === "/api/v2/directives"), 10_000, "the held directives call");
+    await waitFor(() => fake.log.slice(from).some((l) => l.method === "GET" && l.path === "/api/v2/directives"), 10_000, "the held directives call");
     const out = await runCli(t, ["logout"]);
     assert.equal(out.code, 0, out.stderr);
     assert.ok(fake.devices.get(device)!.revoked);

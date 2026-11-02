@@ -1222,8 +1222,46 @@ try {
       passRenamedRevoke.status === 204 && nameOf(passRenamed.id)?.name === "work mac (2)" && passBetterRevoke.status === 204 && nameOf(passBetter.id)?.name === "pass mac (4)",
     `${passRevoke.status} ${JSON.stringify([nameOf(passNew.id), nameOf(passOther.id), nameOf(passOld.id)])} ${passRenamedRevoke.status} ${nameOf(passRenamed.id)?.name} ${passBetterRevoke.status} ${nameOf(passBetter.id)?.name}`,
   );
+  // C9-4 (E2E-AGENT cycle 9): `align login --name "ask mac (5)"` replacing this machine's live "ask mac (2)" (another
+  // machine holds "ask mac") keeps the name it asked for, which its approval answered; a pairing whose number was only
+  // added to tell it apart ("auto mac" approved as "auto mac (3)") still gets the replaced device's "auto mac (2)".
+  const askOther = insertDevice(U1.id, "ask mac");
+  const askOld = insertDevice(U1.id, "ask mac (2)");
+  const askReq = insertPairing("ask mac (5)");
+  const askAp = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1.cookie, body: { user_code: askReq.userCode, workspace_ids: [A] } });
+  const askTok = await call("D", "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: askReq.deviceCode, replaces: askOld.id } });
+  const askRevoke = await call("U1", "DELETE", `/api/v2/devices/self?replaced_by=${askTok.json?.device_id ?? ""}`, { bearer: askOld.access });
+  const autoOther = insertDevice(U1.id, "auto mac");
+  const autoOld = insertDevice(U1.id, "auto mac (2)");
+  const autoReq = insertPairing("auto mac");
+  const autoAp = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1.cookie, body: { user_code: autoReq.userCode, workspace_ids: [A] } });
+  const autoTok = await call("D", "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: autoReq.deviceCode } });
+  const autoRevoke = await call("U1", "DELETE", `/api/v2/devices/self?replaced_by=${autoTok.json?.device_id ?? ""}`, { bearer: autoOld.access });
+  check(
+    "device (E2E-AGENT cycle 9 C9-4): `align login --name \"ask mac (5)\"` replacing the live \"ask mac (2)\" keeps \"ask mac (5)\", the name it asked for and its approval answered, when the replaced device's self-revoke names it; a pairing that asked for \"auto mac\" and got \"auto mac (3)\" only to tell it apart still takes the replaced \"auto mac (2)\"",
+    askAp.json?.device_name === "ask mac (5)" && askTok.status === 200 && askRevoke.status === 204 && nameOf(askTok.json.device_id)?.name === "ask mac (5)" && !!nameOf(askOld.id)?.revoked_at &&
+      autoAp.json?.device_name === "auto mac (3)" && autoTok.status === 200 && autoRevoke.status === 204 && nameOf(autoTok.json.device_id)?.name === "auto mac (2)",
+    `${askAp.text} ${askTok.status} ${askRevoke.status} ${JSON.stringify(nameOf(askTok.json?.device_id ?? ""))} ${autoAp.text} ${autoTok.status} ${autoRevoke.status} ${JSON.stringify(nameOf(autoTok.json?.device_id ?? ""))}`,
+  );
+  // E2E-WEB cycle 9 C9-1: live "gap mac" and "gap mac (3)" ("(2)" revoked): a re-login on the "(3)" machine is approved as
+  // "gap mac (2)" with same_name naming "gap mac (3)" as a machine a re-login keeps the name of; its poll replacing the
+  // "(3)" device keeps "gap mac (3)", also after the old device's self-revoke.
+  const gapOther = insertDevice(U1.id, "gap mac");
+  const gapOld = insertDevice(U1.id, "gap mac (3)");
+  const gapReq = insertPairing("gap mac");
+  const gapAp = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1.cookie, body: { user_code: gapReq.userCode, workspace_ids: [A] } });
+  const gapTok = await call("D", "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: gapReq.deviceCode, replaces: gapOld.id } });
+  const gapStored = nameOf(gapTok.json?.device_id ?? "")?.name;
+  const gapRevoke = await call("U1", "DELETE", `/api/v2/devices/self?replaced_by=${gapTok.json?.device_id ?? ""}`, { bearer: gapOld.access });
+  check(
+    "device (E2E-WEB cycle 9 C9-1): with live \"gap mac\" and \"gap mac (3)\", a re-login on the \"(3)\" machine is approved as \"gap mac (2)\" naming [\"gap mac\", \"gap mac (3)\"] as the machines a re-login keeps the name of, and its poll replacing the \"(3)\" device keeps \"gap mac (3)\" (not the free \"(2)\"), also after the old device revokes itself",
+    gapAp.json?.device_name === "gap mac (2)" && JSON.stringify(gapAp.json?.same_name) === JSON.stringify(["gap mac", "gap mac (3)"]) && gapTok.status === 200 && gapStored === "gap mac (3)" &&
+      gapRevoke.status === 204 && nameOf(gapTok.json.device_id)?.name === "gap mac (3)",
+    `${gapAp.text} ${gapTok.status} ${gapStored} ${gapRevoke.status} ${JSON.stringify(nameOf(gapTok.json?.device_id ?? ""))}`,
+  );
   withDb((d) => {
-    for (const x of [raceB, raceOther, raceKeep, passOther, passNew, passRenamed, passBetter]) d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), x.id);
+    for (const x of [raceB, raceOther, raceKeep, passOther, passNew, passRenamed, passBetter, askOther, autoOther, gapOther, { id: gapTok.json?.device_id ?? "" }, { id: askTok.json?.device_id ?? "" }, { id: autoTok.json?.device_id ?? "" }])
+      d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), x.id);
   });
   const ts3 = new Date().toISOString();
   const rr1 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });
@@ -2674,6 +2712,35 @@ try {
         w1c8Other.status === 200 && w1c8Page.text.includes("No device is waiting for that code. Check it, or run align login again.") && !w1c8Page.text.includes("U5's tabbed laptop") && !/Asked \d+/.test(w1c8Page.text) &&
           w1c8Page.boxes === 0 && !w1c8Page.buttons.includes("Approve") && !w1c8Page.buttons.includes("Deny"),
         `${w1c8Other.status} ${JSON.stringify(w1c8Page)}`,
+      );
+
+      // E2E-WEB cycle 9 C9-2: a workspace ticked for one device looked up is not carried to the next device looked up.
+      const tickA = insertPairing("U5's tick one");
+      const tickB = insertPairing("U5's tick two");
+      await page.goto(`${BASE}/app/device?code=${tickA.userCode}`, { waitUntil: "networkidle0" });
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
+      await page.waitForFunction(() => document.querySelectorAll('main input[type="checkbox"]').length > 0, { timeout: 15000 }).catch(() => undefined);
+      await page.evaluate(() => document.querySelector('main input[type="checkbox"]')?.click());
+      await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve" && !b.disabled), { timeout: 15000 }).catch(() => undefined);
+      const tickedA = await page.evaluate(() => [...document.querySelectorAll('main input[type="checkbox"]')].filter((b) => b.checked).length);
+      // Clear the code field as a person would: select its text and delete it, then type the next code.
+      await page.focus('main input[placeholder="BCDF-GHJK"]');
+      await page.evaluate(() => document.querySelector('main input[placeholder="BCDF-GHJK"]')?.select());
+      await page.keyboard.press("Backspace");
+      await page.type('main input[placeholder="BCDF-GHJK"]', tickB.userCode);
+      const tickTyped = await page.evaluate(() => document.querySelector('main input[placeholder="BCDF-GHJK"]')?.value ?? "");
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
+      await page.waitForFunction(() => document.body.innerText.includes("U5's tick two") && document.querySelectorAll('main input[type="checkbox"]').length > 0, { timeout: 15000 }).catch(() => undefined);
+      const tickPage = await page.evaluate(() => ({
+        text: document.querySelector("main")?.innerText ?? "",
+        checked: [...document.querySelectorAll('main input[type="checkbox"]')].filter((b) => b.checked).length,
+        boxes: document.querySelectorAll('main input[type="checkbox"]').length,
+        approve: [...document.querySelectorAll("button")].find((b) => b.textContent === "Approve")?.disabled ?? null,
+      }));
+      check(
+        "C9-2 (ui, E2E-WEB cycle 9): a workspace ticked for one device looked up is not ticked for the next device looked up: its boxes start unticked and Approve stays disabled",
+        tickedA === 1 && tickPage.text.includes("U5's tick two") && !tickPage.text.includes("U5's tick one") && tickPage.boxes > 0 && tickPage.checked === 0 && tickPage.approve === true,
+        `${tickedA} typed=${tickTyped} want=${tickB.userCode} ${JSON.stringify({ ...tickPage, text: tickPage.text.slice(0, 300) })}`,
       );
 
       // Z3 (ui): Delete shared history on a session already deleted in another tab is done: the row goes, and the page
@@ -9561,11 +9628,23 @@ try {
     );
     const w6 = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "\u{1F469}\u200D\u{1F4BB}".repeat(100), public_key: newDeviceKeys().pub } });
     const w6Long = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "\u{1F4BB}".repeat(101), public_key: newDeviceKeys().pub } });
-    const w6Bytes = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: `a${"\u0301".repeat(900)}`, public_key: newDeviceKeys().pub } });
+    const w6Bytes = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}".repeat(100), public_key: newDeviceKeys().pub } });
     check(
-      "W6 (E2E-WEB cycle 8): the 100-character device-name limit counts what a person reads (grapheme clusters): 100 × \"👩‍💻\" is accepted, 101 × \"💻\" is 400 \"device_name is too long (max 100 characters)\", and one character of 900 combining marks passes no byte cap: 400 \"device_name is too long (max 1600 bytes)\"",
-      w6.status === 200 && w6Long.status === 400 && w6Long.json?.message === "device_name is too long (max 100 characters)" && w6Bytes.status === 400 && w6Bytes.json?.message === "device_name is too long (max 1600 bytes)",
+      "W6 (E2E-WEB cycle 8) and W5 (E2E-WEB cycle 9): the 100-character device-name limit counts what a person reads (grapheme clusters): 100 × \"👩‍💻\" is accepted, 101 × \"💻\" is 400 \"device_name is too long (max 100 characters)\", and 100 family emoji (100 characters, over the store's cap) are refused in words the person can act on, never a byte count: \"device_name is too long to store: emoji such as families and flags take much more room than letters, so use fewer of them\"",
+      w6.status === 200 && w6Long.status === 400 && w6Long.json?.message === "device_name is too long (max 100 characters)" && w6Bytes.status === 400 &&
+        w6Bytes.json?.message === "device_name is too long to store: emoji such as families and flags take much more room than letters, so use fewer of them",
       `${w6.status} ${w6.text.slice(0, 120)} ${w6Long.status} ${w6Long.text} ${w6Bytes.status} ${w6Bytes.text}`,
+    );
+    // C9-3 (E2E-WEB cycle 9): one letter with 700 combining marks (1,401 bytes, under the store's cap) draws over the page:
+    // refused; real clusters (Vietnamese "ệ" decomposed, Devanagari "स्त्री", the keycap "#️⃣") pass.
+    const c93Tower = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: `a${"\u0301".repeat(700)} zalgo`, public_key: newDeviceKeys().pub } });
+    const c93Seven = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: `a${"\u0301".repeat(7)}`, public_key: newDeviceKeys().pub } });
+    const c93Real = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: `e\u0323\u0302 \u0938\u094D\u0924\u094D\u0930\u0940 #\uFE0F\u20E3 a${"\u0301".repeat(6)}`, public_key: newDeviceKeys().pub } });
+    const marksMsg = "device_name has a character with too many accents or marks on it (at most 6 on one character)";
+    check(
+      "C9-3 (E2E-WEB cycle 9): a device name whose character carries more than 6 combining marks (\"a\" + 700 × U+0301, 1,401 bytes; or 7) is 400 \"device_name has a character with too many accents or marks on it (at most 6 on one character)\", while decomposed Vietnamese, a Devanagari conjunct, a keycap emoji and 6 marks on one letter are accepted",
+      c93Tower.status === 400 && c93Tower.json?.message === marksMsg && c93Seven.status === 400 && c93Seven.json?.message === marksMsg && c93Real.status === 200,
+      `${c93Tower.status} ${c93Tower.text} ${c93Seven.status} ${c93Seven.text} ${c93Real.status} ${c93Real.text}`,
     );
     const evEnv = { ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1" };
     const q = (sql, ...a) => withDb((d) => d.prepare(sql).all(...a));

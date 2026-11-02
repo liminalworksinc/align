@@ -73,7 +73,14 @@ async function call(method, p, { body, cookie, bearer, headers = {} } = {}) {
   if (body !== undefined && !h["content-type"]) h["content-type"] = "application/json";
   if (cookie) h.cookie = cookie;
   if (bearer) h.authorization = `Bearer ${bearer}`;
-  const res = await fetch(BASE + p, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body), redirect: "manual" });
+  const send = () => fetch(BASE + p, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body), redirect: "manual" });
+  // The CLI and hooks run synchronously (spawnSync), so while one runs this process can't see the server close an idle
+  // keep-alive connection: the next request on it fails "other side closed" before reaching the server. Sent once more
+  // on a fresh connection then (nothing reached the server the first time).
+  const res = await send().catch((e) => {
+    if (e?.cause?.code === "UND_ERR_SOCKET") return send();
+    throw e;
+  });
   const text = await res.text();
   let json = null;
   try {
@@ -863,23 +870,35 @@ try {
   const qwAccess = JSON.parse(readFileSync(path.join(alignHome, "credentials.json"), "utf8")).access_token;
   const qwAnswer = (await call("GET", "/api/v2/directives?cursor=0", { bearer: qwAccess })).json;
   const qwListed = (qwAnswer?.ended_sessions ?? []).filter((e) => e.session_key === QW.key);
-  const qwOthers = (qwAnswer?.ended_sessions ?? []).filter((e) => e.session_key !== QW.key && sdb((d) => d.prepare("SELECT device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(e.ws, e.session_key))?.device_id !== JSON.parse(readFileSync(path.join(alignHome, "credentials.json"), "utf8")).device_id);
+  // Every device of the person (C9-1), never another person's session.
+  const qwOthers = (qwAnswer?.ended_sessions ?? []).filter((e) => e.session_key !== QW.key && sdb((d) => d.prepare("SELECT user_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(e.ws, e.session_key))?.user_id !== M.id);
   const qwRowsBefore = sdb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_usage WHERE ws_id = ? AND session_key = ?").get(W, QW.key))?.n;
   sync();
   const qwLocal = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === QW.sid);
   const qwTold = prompt(QW);
   const qwShare = prompt(QW, "::align share");
   check(
-    "web stop-sharing (E2E-AGENT cycle 8): Stop sharing on the web is listed in the device's next directives answer (`ended_sessions`, ended_reason null, with stopped_at; no other device's session), and the next `align sync` ends the share on the machine before any usage upload: `align sessions` no longer says shared, the next prompt says its sharing was stopped (Stop sharing on the web, ...), and `::align share` says it stays stopped, never `already shared`",
+    "web stop-sharing (E2E-AGENT cycle 8): Stop sharing on the web is listed in the device's next directives answer (`ended_sessions`, ended_reason null, with stopped_at; no other person's session), and the next `align sync` ends the share on the machine before any usage upload: `align sessions` no longer says shared, the next prompt says its sharing was stopped (Stop sharing on the web, ...), and `::align share` says it stays stopped, never `already shared`",
     qwStop.status === 200 && qwListed.length === 1 && qwListed[0].ws === W && qwListed[0].ended_reason === null && !Number.isNaN(Date.parse(qwListed[0].stopped_at)) && qwOthers.length === 0 &&
       !/^shared/.test(qwLocal?.shared ?? "shared") && (qwTold.system ?? "").includes("this session's sharing was stopped (Stop sharing on the web") &&
       !(qwShare.json?.reason ?? "").includes("already shared") && (qwShare.json?.reason ?? "").includes("so it stays stopped") &&
       sdb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_usage WHERE ws_id = ? AND session_key = ?").get(W, QW.key))?.n === qwRowsBefore,
     `${qwStop.status} ${JSON.stringify(qwListed)} others=${JSON.stringify(qwOthers)} local=${JSON.stringify(qwLocal?.shared)} told=${qwTold.stdout} share=${qwShare.stdout}`,
   );
+  // E2E-AGENT cycle 9 C9-1: Stop sharing on the web, then the machine signs out and pairs again before any sync: the new
+  // device hears the stop (`ended_sessions` lists the person's sessions of every device), so the session is never told
+  // `::align share` shares it again.
+  const XW = startQ("x9");
+  const xwLid = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === XW.sid)?.local_id ?? "none";
+  if (!sdb((d) => d.prepare("SELECT 1 AS x FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, XW.key))) cli(["share", xwLid.slice(0, 8), "--workspace", W, "--goal", "none", "--yes"]);
+  prompt(XW);
+  sync();
   const stopQ1 = await ws(M, "POST", `/sessions/${Q1.key}/stop`, {});
   sync();
   const q1Stopped = tool(Q1, "Bash");
+  // No sync between this and the logout: the machine never hears it before it pairs again.
+  const xwStop = await ws(M, "POST", `/sessions/${XW.key}/stop-sharing`, {});
+  const xwBeforeLogout = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === XW.sid)?.shared ?? "";
   const logout = cli(["logout"]);
   const q1Row = sdb((d) => d.prepare("SELECT state, ended_reason, agent_stopped FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, Q1.key));
   const webStop = await ws(M, "POST", `/sessions/${Q1.key}/stop`, {});
@@ -931,9 +950,24 @@ try {
   check(
     "signed in again (E2E-AGENT cycle 7 C7-2): after `align logout` and `align login`, the stopped session's next prompt tells only that this machine is signed in again and `::align share` shares it again, after which the web can lift the stop, as its deny says; never `align login` or `align stop-sharing`",
     (q1In.system ?? "").startsWith("Align: this machine is signed in to Align again. To share this session again, type `::align share` here") &&
-      (q1In.system ?? "").includes("once it is shared again, that can be lifted there") && !/align login|align stop-sharing/.test(q1In.system ?? "") &&
-      q1InDeny.includes("signed in again now), so the user can share it there again by typing `::align share` in this session"),
+      (q1In.system ?? "").includes("so tools stay blocked until it is shared again (you can type `::align share` in this session)") && !/align login|align stop-sharing/.test(q1In.system ?? "") &&
+      q1InDeny.includes("signed in again now), so tools stay blocked until it is shared again (the user can type `::align share` in this session)"),
     `back=${q1In.stdout} deny=${q1InDeny}`,
+  );
+  const xwAnswer = (await call("GET", "/api/v2/directives?cursor=0", { bearer: JSON.parse(readFileSync(path.join(alignHome, "credentials.json"), "utf8")).access_token })).json;
+  const xwListed = (xwAnswer?.ended_sessions ?? []).find((e) => e.session_key === XW.key);
+  const xwTold = prompt(XW);
+  const xwSessions = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === XW.sid)?.shared ?? "";
+  const xwShare = prompt(XW, "::align share confirm");
+  sync();
+  const xwRow = sdb((d) => d.prepare("SELECT state, ended_reason FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, XW.key));
+  check(
+    "web stop-sharing before a re-pairing (E2E-AGENT cycle 9 C9-1): Stop sharing on the web, then `align logout` and `align login` before any sync: the new device's directives answer lists the session (ended_reason null), and the machine never offers `::align share` for it: its next prompt says its sharing was stopped before this machine signed out, so it stays stopped (never `signed in to Align again`), `align sessions` lists it as `stopped (Ledger Co)`, and `::align share confirm` says it stays stopped, sharing nothing",
+    xwStop.status === 200 && /^shared/.test(xwBeforeLogout) && xwListed?.ended_reason === null &&
+      (xwTold.system ?? "").startsWith("Align: this session's sharing was stopped (Stop sharing on the web) before this machine signed out of Align, so it stays stopped") &&
+      !/signed in to Align again|::align share/.test(xwTold.system ?? "") && xwSessions === "stopped (Ledger Co)" &&
+      (xwShare.json?.reason ?? "").includes("so it stays stopped") && xwRow?.state === "stopped" && xwRow.ended_reason === null,
+    `${xwStop.status} before=${xwBeforeLogout} listed=${JSON.stringify(xwListed)} told=${xwTold.stdout} sessions=${xwSessions} share=${xwShare.stdout} row=${JSON.stringify(xwRow)}`,
   );
   const r7Again = r7Prompt("::align share confirm");
   sync();
@@ -1206,7 +1240,7 @@ try {
   check(
     "stopped, removed and re-invited (E2E-AGENT cycle 6 C6-2): while the workspace is out of reach the deny names `align stop-sharing`; once it is back the deny and `align latch status` offer `::align share` instead, as the session's notice does; `::align share confirm` shares it again, the deny becomes the plain stop, and a web resume frees its tools",
     q3Shared0.code === 0 && q3Stop.status === 200 && q3Lost.includes("no longer has access to its Align workspace") && q3Lost.includes("`align stop-sharing ") &&
-      q3Back.includes("can reach it again now), so the user can share it there again by typing `::align share` in this session") && !q3Back.includes("align stop-sharing") &&
+      q3Back.includes("can reach it again now), so tools stay blocked until it is shared again (the user can type `::align share` in this session)") && !q3Back.includes("align stop-sharing") &&
       q3Latch.includes(`${q3Lid.slice(0, 8)} claude-code STOPPED`) && !new RegExp(`${q3Lid.slice(0, 8)}[^\n]*only \`align stop-sharing`).test(q3Latch) &&
       /sharing requested/.test(q3Share.json?.reason ?? "") && q3Shared === "Align: this session was stopped from its Align workspace. Tools are blocked until it is resumed there. Tell the user and wait for instructions." &&
       q3Resume.status === 200 && q3Free === null,

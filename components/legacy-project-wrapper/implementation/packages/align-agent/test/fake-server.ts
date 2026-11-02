@@ -112,8 +112,9 @@ export class FakeServer {
   access = new Map<string, { device: string; exp: number }>();
   /** `ended`: why a stopped session ended when its person did not stop it (as `v2_sessions.ended_reason`). */
   sessions = new Map<string, { ws: string; device: string; body: any; state: string; ended?: "member_removed" | "device_signed_out" | null; stopped_at?: string }>();
-  /** As the server: the directives answer lists this device's ended sessions (`ended_sessions`, cycle 8). Off to see a
-   *  device that hears of an end only at its next usage upload (an older server). */
+  /** As the server: the directives answer lists the person's ended sessions, of every device of theirs (`ended_sessions`,
+   *  cycles 8 and 9; a one-person fake: every session). Off to see a device that hears of an end only at its next usage
+   *  upload (an older server). */
   reportEnded = true;
   /** DELETE …/sessions/{key} that went through, and the device that sent each (audited with the acting device). */
   deletedBy: { key: string; device: string }[] = [];
@@ -401,6 +402,8 @@ export class FakeServer {
         return send(429, { error: "rate_limited", ...(lim.message ? { message: lim.message, retry_after: lim.retryAfter } : {}) }, { "retry-after": String(lim.retryAfter) });
       }
       if (req.method === "POST" && p === "/api/v2/device/authorize") {
+        // As lib/v2/validate.ts oneLine: a character with more than 6 combining marks is refused (cycle 9).
+        if (String(body.device_name).normalize("NFD").match(/\p{M}{7,}/u)) return send(400, { error: "bad_request", message: "device_name has a character with too many accents or marks on it (at most 6 on one character)" });
         const pend: Pending = { device_code: b64u(crypto.randomBytes(33)), user_code: "BCDF-GHJK", name: body.device_name, publicKey: body.public_key, polls: 0, issued: false, denied: false };
         if (Buffer.from(String(body.public_key), "base64url").length !== 32) return send(400, { error: "invalid_public_key" });
         this.pending.set(pend.device_code, pend);
@@ -602,7 +605,7 @@ export class FakeServer {
         // As the server: the workspaces this device reaches now (a single-device fake: the person's workspaces).
         const reach = new Set(this.workspaces.map((w) => w.id));
         const ended = this.reportEnded
-          ? [...this.sessions].filter(([, x]) => x.device === dev.id && x.state === "stopped" && x.stopped_at && reach.has(x.ws)).map(([k, x]) => ({ ws: x.ws, session_key: k, ended_reason: x.ended ?? null, stopped_at: x.stopped_at }))
+          ? [...this.sessions].filter(([, x]) => x.state === "stopped" && x.stopped_at && reach.has(x.ws)).map(([k, x]) => ({ ws: x.ws, session_key: k, ended_reason: x.ended ?? null, stopped_at: x.stopped_at }))
           : undefined;
         return send(200, { directives: list, next_cursor: String(list.length ? list[list.length - 1].seq : cursor), workspaces: [...reach].sort(), ...(ended ? { ended_sessions: ended } : {}) });
       }

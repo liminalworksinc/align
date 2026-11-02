@@ -156,11 +156,11 @@ describe("C6-2: a stopped session whose share ended says the same thing everywhe
     fake.workspaces = [acme];
     await sync(t);
     const start = json(runHook(t, "claude", "SessionStart", { session_id: A.sid, source: "resume", cwd: A.cwd }).stdout);
-    assert.match(start.systemMessage, /can reach Acme in Align again\. To share this session there again, type `::align share` here \(it counts toward "Ship the v2 onboarding flow" again\)\. It was stopped or held from the web: once it is shared again, that can be lifted there; until then its tools stay blocked\./);
+    assert.match(start.systemMessage, /can reach Acme in Align again\. To share this session there again, type `::align share` here \(it counts toward "Ship the v2 onboarding flow" again\)\. It was stopped or held from the web, so tools stay blocked until it is shared again \(you can type `::align share` in this session\), after which the stop or hold can be lifted from the web\./);
     const d = deny(t, A);
     assert.equal(
       d,
-      "Align: this session was stopped from its Align workspace. Its sharing ended (this machine lost access to its Align workspace, and can reach it again now), so the user can share it there again by typing `::align share` in this session; once it is shared again, this can be lifted from the web. Until then tools stay blocked. Tell the user and wait for instructions.",
+      "Align: this session was stopped from its Align workspace. Its sharing ended (this machine lost access to its Align workspace, and can reach it again now), so tools stay blocked until it is shared again (the user can type `::align share` in this session), after which the stop or hold can be lifted from the web. Tell the user and wait for instructions.",
     );
     const latch = (await runCli(t, ["latch", "status"])).stdout;
     assert.match(latch, /sharing ended \(this machine lost access to its Align workspace, and can reach it again now\): `::align share` in the session shares it there again, after which it can be resumed or released from the web/);
@@ -188,7 +188,7 @@ describe("C6-2: a stopped session whose share ended says the same thing everywhe
     assert.equal((await runCli(t, ["logout"])).code, 0);
     assert.match(deny(t, A), /this machine signed out of Align\), so this can no longer be lifted from the web: tools stay blocked until the user runs `align stop-sharing /);
     assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
-    assert.match(deny(t, A), /Its sharing ended \(this machine signed out of Align, and is signed in again now\), so the user can share it there again by typing `::align share` in this session/);
+    assert.match(deny(t, A), /Its sharing ended \(this machine signed out of Align, and is signed in again now\), so tools stay blocked until it is shared again \(the user can type `::align share` in this session\)/);
   });
 });
 
@@ -227,7 +227,7 @@ describe("C6-3: a removal the device never saw is not worded as a stop for good"
     await sync(t);
     assert.equal(
       prompt(t, A.sid, "go on", A.cwd).systemMessage,
-      "Align: this session's sharing was stopped (Stop sharing on the web, or `align stop-sharing` on another of your devices), so it stopped sharing here; its usage stays on this machine from now on.",
+      "Align: this session's sharing was stopped (Stop sharing on the web), so it stopped sharing here; its usage stays on this machine from now on.",
     );
     assert.match(prompt(t, A.sid, "::align share --dir confirm", A.cwd).reason, /This session stays private/);
   });
@@ -358,8 +358,10 @@ describe("cycle 6, section 5: works, but would confuse a developer", () => {
     await shared(t);
     let release!: () => void;
     fake.holdCalls = { match: (m, p) => m === "GET" && p === "/api/v2/directives", release: new Promise<void>((r) => (release = r)), left: 1 };
+    // Only this pass's call: `align login` reads the directives answer too (its ended sessions, cycle 9).
+    const from = fake.log.length;
     const pass = runCli(t, ["sync"]);
-    await waitFor(() => fake.log.some((l) => l.method === "GET" && l.path === "/api/v2/directives"), 10_000, "the held directives call");
+    await waitFor(() => fake.log.slice(from).some((l) => l.method === "GET" && l.path === "/api/v2/directives"), 10_000, "the held directives call");
     assert.equal((await runCli(t, ["logout"])).code, 0);
     fake.holdCalls = null;
     release();

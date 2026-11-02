@@ -33,6 +33,7 @@ import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
 import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, endedState, getShare } from "./hot.ts";
 import { fetchAsks } from "./asks.ts";
+import { pullEndedSessions } from "./directives.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { newDeviceKey } from "./keys.ts";
 import { applyShare, bind, deleteHistory, deleteRefused, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stoppedByPerson, stopSharing } from "./share.ts";
@@ -299,12 +300,15 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
     const wait = Number.isFinite(secs) && secs > 0 ? ` Try again in ${Math.max(1, Math.ceil(secs / 60))} minute${Math.ceil(secs / 60) > 1 ? "s" : ""}.` : " Try again later.";
     throw new Error(`could not start pairing this device: ${said || `too many device pairings were started recently.${wait}`}`);
   }
+  // A refused name says why in the person's words (too many marks on a character, too many long emoji, cycle 9).
+  if (a.status === 400 && typeof a.json?.message === "string" && /^device_name /.test(a.json.message)) throw new UsageError(`the device name was refused: ${a.json.message.replace(/^device_name /, "it ")}. Pass another with \`align login --name <name>\`.`);
   if (a.status !== 200 || !a.json?.device_code) throw new Error(`device authorize failed: ${a.status} ${a.json?.error || ""}`);
   const { device_code, user_code, verification_uri } = a.json;
   let interval = Number(a.json.interval || 5);
   const expiresAt = Date.now() + Number(a.json.expires_in || 600) * 1000;
   let pairedAs: string | null = null;
   let endedLine: string | null = null;
+  let concurrent: string | null = null;
   out(`To connect this device, open ${verification_uri} and enter the code ${user_code}`);
   if (!ctx.env.ALIGN_NO_BROWSER && process.platform === "darwin") execFile("open", [verification_uri], () => undefined);
   const scale = Number(ctx.env.ALIGN_DEVICE_POLL_SCALE_MS || 1000);
@@ -335,6 +339,13 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
       // pairing shares while the old device's revoke is in flight keeps its share (C4-2). Each is told how to share
       // it again.
       const { replaced, committed: ended } = await commitPairing(ctx, creds, key.pem, () => endSharesSignedOut(ctx));
+      // The device this pairing replaced is not the one this machine was signed in as when this login started: another
+      // `align login` paired it meanwhile, and may have said it signed in as it. This login says so, and so does this
+      // machine's next command and `align status`, which name the device it is now (cycle 9).
+      if (replaced && replaced !== (before && !before.signed_out ? before.device_id : null)) {
+        concurrent = replaced;
+        kvSet(ctx.db, PAIRING_NOTE, JSON.stringify({ replaced, by: creds.device_id, at: new Date().toISOString() } satisfies PairingNote));
+      }
       // From here on this command is the new device's: if another login replaces it meanwhile, nothing goes on as that
       // one, and this login does not say it signed in (two logins at once).
       bindDevice(ctx, creds.device_id);
@@ -363,6 +374,14 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
     if (code === "expired_token") throw new Error("the code expired; run `align login` again");
     throw new Error(`device token failed: ${t.status} ${code || ""}`);
   }
+  // Shares the server ended while this machine's earlier device held them (Stop sharing on the web before this login)
+  // are heard before `/me` tells the sessions this machine signed in again, so none is offered `::align share` that the
+  // server would refuse (C9-1). Best effort: the next sync reads the same list.
+  try {
+    await pullEndedSessions(ctx);
+  } catch {
+    /* the next pass */
+  }
   let me;
   try {
     me = await refreshMe(ctx);
@@ -375,7 +394,11 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   // Said under the refresh lock and only while this pairing is still the one signed in: a second `align login` that
   // committed meanwhile revoked it, and this one must not report a revoked device as signed in.
   const name = me.device?.name || deviceName;
-  if (!(await whileSignedInAs(ctx, pairedAs!, () => out(`Signed in as ${me.user.name} <${me.user.email}> on device ${name}.`)))) {
+  const said = () => {
+    out(`Signed in as ${me.user.name} <${me.user.email}> on device ${name}.`);
+    if (concurrent) out(`Another \`align login\` on this machine paired device ${concurrent} while this one waited; this login replaced it, so this machine is ${clean(name, 60)} (${pairedAs}).`);
+  };
+  if (!(await whileSignedInAs(ctx, pairedAs!, said))) {
     if (endedLine) out(endedLine);
     return replacedMeanwhile(ctx, pairedAs!);
   }
@@ -392,6 +415,37 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   if (endedLine) out(endedLine);
   // After the workspace lines, which belong with "Signed in as" (cycle 6).
   await mentionOtherDevices(ctx, server, pairedAs!);
+}
+
+/** kv: a pairing a second `align login` replaced moments after another login paired it (two logins at once, cycle 9). */
+const PAIRING_NOTE = "pairing_replaced";
+interface PairingNote {
+  replaced: string;
+  by: string;
+  at: string;
+}
+
+/**
+ * Two `align login`s ran at once and the second replaced (and revoked) the device the first paired, which the first may
+ * already have reported as signed in: the next command says once which device this machine is now, and `align status`
+ * says it as a status line (cycle 9). Forgotten when this machine is no longer that device (another login or a logout
+ * since). Null when there is nothing to say.
+ */
+function takePairingNote(ctx: Ctx): string | null {
+  const v = kvGet(ctx.db, PAIRING_NOTE);
+  if (!v) return null;
+  ctx.db.prepare("DELETE FROM kv WHERE key=?").run(PAIRING_NOTE);
+  let n: PairingNote;
+  try {
+    n = JSON.parse(v) as PairingNote;
+  } catch {
+    return null;
+  }
+  const c = loadCredentials(ctx.home);
+  if (!c || c.signed_out || c.device_id !== n.by) return null;
+  const me = loadMe(ctx.home);
+  const name = me?.device?.id === c.device_id ? me.device.name : null;
+  return `two \`align login\`s ran at once on this machine (${shortTime(n.at)}): device ${n.replaced}, which the other one paired (and may have said it signed in as), was replaced and revoked. This machine is ${name ? `${clean(name, 60)} (${c.device_id})` : `device ${c.device_id}`}.`;
 }
 
 /** Another `align login` committed after this one and replaced (and revoked) its device: say so, and which device this
@@ -531,7 +585,12 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
   out(`Align ${VERSION}  home ${ctx.home}`);
   // The name and email as the server last said (`/me`, refreshed by each sync), not as they were at pairing (N9).
   const who = loadMe(ctx.home)?.user || c?.user;
-  if (c && !c.signed_out) out(`  Identity:   ${who?.name || "?"} <${who?.email || "?"}> device ${c.device_id} on ${c.server_url}`);
+  // The device by name too, as the Devices page shows it, so two logins at once leave no doubt which one this is (cycle 9).
+  const meNow = loadMe(ctx.home);
+  const devName = meNow?.device?.id === c?.device_id ? meNow?.device?.name : null;
+  if (c && !c.signed_out) out(`  Identity:   ${who?.name || "?"} <${who?.email || "?"}> device ${devName ? `${clean(devName, 60)} (${c.device_id})` : c.device_id} on ${c.server_url}`);
+  const note = takePairingNote(ctx);
+  if (note) out(`  Pairing:    ${note.charAt(0).toUpperCase()}${note.slice(1)}`);
   else out(`  Identity:   signed out${c?.signed_out_reason ? ` (${signedOutWords(c.signed_out_reason)})` : ""}; local metering only`);
   if (c && !c.signed_out && c.clock_offset_ms) {
     out(`  Clock:      this computer's clock is ${clockWords(c.clock_offset_ms)} the server's; Align sends times on the server's clock. Set the system clock to update automatically.`);
@@ -590,9 +649,11 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
     const deleting = share && ctx.db.prepare("SELECT 1 FROM outbox WHERE local_id=? AND kind='delete_session'").get(s.local_id);
     const refused = deleting ? deleteRefused(ctx, s.local_id) : null;
     // An ending this machine can undo now (signed in again, back in the workspace) says how, as the session's notice does.
+    // Signed out, a share that ended at a lost workspace reads as its newest notice does then: this machine signed out,
+    // so it can't be shared again from here for now (cycle 9).
     const again = endedState(ctx, share)?.reshare;
     const why =
-      (share?.error === DEVICE_SIGNED_OUT
+      (share?.error === DEVICE_SIGNED_OUT || (share?.error === ACCESS_LOST && !signedIn(ctx.home))
         ? again
           ? "; ended at a sign-out; `::align share` shares it again"
           : "; this machine signed out"
@@ -840,8 +901,16 @@ async function cmdRules(ctx: Ctx): Promise<void> {
   const rules = readRules(ctx.home);
   if (!rules.length) return out("No folder rules. Every session is private until you share it.");
   for (const r of rules) {
-    const title = (r.goal_id && loadFeed(ctx.home, r.workspace_id)?.goals.find((g) => g.id === r.goal_id)?.title) || r.goal_title;
+    const feed = r.goal_id ? loadFeed(ctx.home, r.workspace_id) : null;
+    const goal = r.goal_id ? feed?.goals.find((g) => g.id === r.goal_id) : undefined;
+    const title = goal?.title || r.goal_title;
     out(`${r.dir}  ->  ${r.workspace_name}${title ? ` / ${title}` : " / no goal"}  (since ${r.created_at.slice(0, 10)}${r.signals ? ", work signals on" : ""})`);
+    // A goal the cached feed says this person can't bind yet: new sessions in the folder stay private (cycle 9).
+    if (goal && !goal.bindable) {
+      out(
+        `  warning: "${clean(goal.title, 100)}" needs an approved alignment before your sessions can count toward it (cached goals${feed?.fetched_at ? ` of ${shortTime(feed.fetched_at)}` : ""}), so new sessions in this folder stay private until it has one. \`align share --dir ${r.dir} --workspace "${clean(r.workspace_name, 80)}" --goal <goal>\` points the rule at another goal.`,
+      );
+    }
   }
 }
 
@@ -1303,6 +1372,12 @@ export async function main(argv: string[]): Promise<void> {
   }
   const ctx = openCtx(process.env);
   try {
+    // Two logins at once: the next command the person runs says which device this machine is now (`align status` says it
+    // in its own lines; a hook's background sync leaves it for the person).
+    if (cmd !== "login" && cmd !== "status" && !rest.includes("--hook")) {
+      const note = takePairingNote(ctx);
+      if (note) err(`align: ${note}`);
+    }
     switch (cmd) {
       case "login":
         return await cmdLogin(ctx, rest);

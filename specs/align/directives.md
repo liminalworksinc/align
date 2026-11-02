@@ -254,16 +254,25 @@ The server SHALL include, for every session returned by `GET /api/v2/workspaces/
 
 The server SHALL serve `GET /api/v2/directives?cursor=<seq>` to a v2 device access token (`alnd_…`) only, returning HTTP 200 `{ directives, next_cursor, workspaces, ended_sessions }` with up to 100 directives whose `seq` is greater than the cursor and that target sessions owned by the token's person on the token's device in workspaces the device is still granted, oldest first, each as `{ id, seq, ws, kind, session_keys, goal, binding, created_at }` plus `request` on kind `request` and `hold` on kinds `hold` and `release`, where `session_keys` lists only that device's targeted keys, `goal` is the snapshot plus `bindable` or null when the person can no longer read the goal, and `next_cursor` is the last returned `seq` as a string (or the given cursor when none is returned). `workspaces` SHALL list the ids, sorted, of the workspaces the device reaches now (its grants in live workspaces its person is still a member of), so a device learns at its next pass that it gained a workspace (its person accepted an invite with it ticked) or lost one, without re-reading `/api/v2/me` every pass.
 `ended_sessions` SHALL list, newest first and at most 200, `{ws, session_key, ended_reason, stopped_at}` for the
-token's person's sessions on the token's device, in those workspaces, whose share ended (state `stopped`) in the last
-30 days: stopped with Stop sharing on the web or by another device of the person (`ended_reason` null), or ended while
-the person was out of the workspace (`member_removed`). An end of sharing has no directive, so a device would otherwise
-learn it only at the session's next usage upload (refused `sharing_stopped`); with this list it ends its own share at
-its next pass (`local-agent` "Directive intake and receipts").
+token's person's sessions on any of their devices, in the workspaces the token's device reaches, whose share ended
+(state `stopped`) in the last 30 days: stopped with Stop sharing on the web, or by the device that shared it
+(`align stop-sharing`, which already knows it) (`ended_reason` null; another device of the person can't stop a
+session it does not hold, `sessions` answers it 404), ended while the person was out of the workspace (`member_removed`), or ended when the device
+holding it signed out (`device_signed_out`). An end of sharing has no directive, so a device would otherwise learn it
+only at the session's next usage upload (refused `sharing_stopped`); with this list it ends its own share at its next
+pass (`local-agent` "Directive intake and receipts"). It is not limited to the token's device: a machine that paired
+again (after a logout, or replacing its live pairing) holds the sessions of its earlier device and must hear a stop
+made while that device held them. Another person's sessions and workspaces the device does not reach are never listed.
 
 #### Scenario: A share stopped on the web is listed
 
 - **WHEN** a device shares a session and its owner presses Stop sharing on the web, and the device then fetches directives (against the real server and the CLI in `scripts/test-agent-live.mjs` "web stop-sharing (E2E-AGENT cycle 8) ...")
-- **THEN** the answer's `ended_sessions` lists `{ws, session_key, ended_reason: null, stopped_at}` for it, no other device's session is listed, and the device's next `align sync` ends the share there
+- **THEN** the answer's `ended_sessions` lists `{ws, session_key, ended_reason: null, stopped_at}` for it, no other person's session is listed, and the device's next `align sync` ends the share there
+
+#### Scenario: A stop made before a re-pairing is listed to the new device
+
+- **WHEN** a device shares a session, its owner presses Stop sharing on the web, and before the device's next fetch the machine signs out and pairs again as a new device (against the real server and the CLI in `scripts/test-agent-live.mjs` "web stop-sharing before a re-pairing (E2E-AGENT cycle 9 C9-1) ...")
+- **THEN** the new device's directives answer lists that session with `ended_reason: null`, and the machine never offers `::align share` for it
 
 #### Scenario: First fetch
 
