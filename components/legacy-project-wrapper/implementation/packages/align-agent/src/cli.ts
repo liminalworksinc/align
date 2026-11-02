@@ -33,6 +33,7 @@ import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
 import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, endedState, getShare } from "./hot.ts";
 import { fetchAsks } from "./asks.ts";
+import { pullEndedSessions } from "./directives.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { newDeviceKey } from "./keys.ts";
 import { applyShare, bind, deleteHistory, deleteRefused, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stoppedByPerson, stopSharing } from "./share.ts";
@@ -363,6 +364,14 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
     if (code === "expired_token") throw new Error("the code expired; run `align login` again");
     throw new Error(`device token failed: ${t.status} ${code || ""}`);
   }
+  // Shares the server ended while this machine's earlier device held them (Stop sharing on the web before this login)
+  // are heard before `/me` tells the sessions this machine signed in again, so none is offered `::align share` that the
+  // server would refuse (C9-1). Best effort: the next sync reads the same list.
+  try {
+    await pullEndedSessions(ctx);
+  } catch {
+    /* the next pass */
+  }
   let me;
   try {
     me = await refreshMe(ctx);
@@ -590,9 +599,11 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
     const deleting = share && ctx.db.prepare("SELECT 1 FROM outbox WHERE local_id=? AND kind='delete_session'").get(s.local_id);
     const refused = deleting ? deleteRefused(ctx, s.local_id) : null;
     // An ending this machine can undo now (signed in again, back in the workspace) says how, as the session's notice does.
+    // Signed out, a share that ended at a lost workspace reads as its newest notice does then: this machine signed out,
+    // so it can't be shared again from here for now (cycle 9).
     const again = endedState(ctx, share)?.reshare;
     const why =
-      (share?.error === DEVICE_SIGNED_OUT
+      (share?.error === DEVICE_SIGNED_OUT || (share?.error === ACCESS_LOST && !signedIn(ctx.home))
         ? again
           ? "; ended at a sign-out; `::align share` shares it again"
           : "; this machine signed out"

@@ -220,3 +220,15 @@ export async function pollDirectives(ctx: Ctx, onRefresh: (ws: string) => void, 
   }
   return n;
 }
+
+/**
+ * `align login`, before it tells sessions this machine is signed in again: the first directives page's `ended_sessions`
+ * only (its directives wait for the next pass), so a session whose share its person stopped on the web while this
+ * machine's earlier device held it is never told `::align share` shares it again (E2E-AGENT cycle 9 C9-1). Best effort:
+ * the next pass reads the same list. Returns how many shares it ended.
+ */
+export async function pullEndedSessions(ctx: Ctx): Promise<number> {
+  const r = await api(ctx, "GET", `/api/v2/directives?cursor=${cursor(ctx)}`);
+  if (r.status !== 200 || !Array.isArray(r.json?.ended_sessions)) return 0;
+  return endSharesEndedOnServer(ctx, r.json.ended_sessions.filter(validEnded));
+}

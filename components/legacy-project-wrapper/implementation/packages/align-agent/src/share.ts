@@ -8,7 +8,7 @@ import { repoKey, sessionKey } from "./keys.ts";
 import path from "node:path";
 import { endEpochs, getSession, sessionCwds, type SessionRow } from "./ledger.ts";
 import { isShareStateNotice, noticeKind, offersReshare } from "./shared/notices.ts";
-import { ACCESS_LOST, addNotice, DEVICE_SIGNED_OUT, endedState, getShare, notePriorShare, renderEndedLatches, renderHot, sharedBefore, snapshot } from "./hot.ts";
+import { ACCESS_LOST, addNotice, DEVICE_SIGNED_OUT, endedState, getShare, notePriorShare, renderEndedLatches, renderHot, sharedBefore, snapshot, stoppedByPerson } from "./hot.ts";
 
 export { notePriorShare, sharedBefore, stoppedByPerson } from "./hot.ts";
 import { clockOffset, loadCredentials, signedIn } from "./api.ts";
@@ -430,7 +430,31 @@ export function endShareStoppedByPerson(ctx: Ctx, lid: string, noticeId: string)
   renderHot(ctx, lid);
 }
 
-/** One of this device's sessions whose share the server ended, as the directives answer lists it (`ended_sessions`). */
+/**
+ * A share that had ended here already (this machine signed out, or lost its workspace) and that its person had stopped
+ * elsewhere before that (the server says so, `ended_reason` null): the stop was made while the session belonged to this
+ * machine's earlier device, so only a later pairing hears it (E2E-AGENT cycle 9 C9-1). The server never shares it again,
+ * so it becomes a share its person stopped (`::align share` says to delete its history first, `align sessions` and the
+ * "signed in again" notice no longer offer `::align share`), with one notice whose advice follows its latch.
+ */
+function endedShareStoppedByPerson(ctx: Ctx, lid: string, noticeId: string): void {
+  const s = getShare(ctx, lid);
+  if (!s) return;
+  const before = s.error === ACCESS_LOST ? `this machine lost access to ${clean(s.workspace_name, 80)} in Align` : "this machine signed out of Align";
+  tx(ctx.db, () => {
+    ctx.db.prepare("UPDATE shares SET error=NULL WHERE local_id=?").run(lid);
+    notePriorShare(ctx, lid, true, s.stopped_at ?? nowIso());
+    addNotice(
+      ctx,
+      lid,
+      noticeId,
+      `Align: this session's sharing was stopped (Stop sharing on the web, or \`align stop-sharing\` on another of your devices) before ${before}, so it stays stopped and is not shared again from here; its usage stays on this machine.${latchTail(ctx, lid)}`,
+    );
+  });
+  renderHot(ctx, lid);
+}
+
+/** One of the person's sessions whose share the server ended, as the directives answer lists it (`ended_sessions`). */
 export interface EndedOnServer {
   ws: string;
   session_key: string;
@@ -439,23 +463,35 @@ export interface EndedOnServer {
 }
 
 /**
- * The directives answer lists this device's sessions whose share the server ended (`ended_sessions`): stopped on the web
- * or on another device of the person (`ended_reason` null), or ended while its person was out of the workspace
- * (`member_removed`; they are back, as the device reaches it). Each one still shared or suspended here ends now, as the
- * usage upload's `sharing_stopped` refusal would end it, so `::align share`, `align status` and the session's notices
- * agree with the server at the next pass (E2E-AGENT cycle 8). A share made here after that end (its first epoch was
- * recorded after it, on the server's clock) is a newer share and stays; a pending one is left to its own calls. Returns
- * how many ended.
+ * The directives answer lists the person's sessions whose share the server ended (`ended_sessions`, of all their
+ * devices: this machine's earlier device's too): stopped on the web or on another device of the person (`ended_reason`
+ * null), or ended while its person was out of the workspace (`member_removed`; they are back, as the device reaches it).
+ * Each one still shared or suspended here ends now, as the usage upload's `sharing_stopped` refusal would end it, so
+ * `::align share`, `align status` and the session's notices agree with the server at the next pass (E2E-AGENT cycle 8).
+ * One whose share ended here already at a sign-out or a lost workspace, which its person had stopped before, is no
+ * longer offered for sharing again (C9-1). A share made here after that end (its first epoch was recorded after it, on
+ * the server's clock) is a newer share and stays; a pending one is left to its own calls. Keys this machine never
+ * shared match nothing. Returns how many ended.
  */
 export function endSharesEndedOnServer(ctx: Ctx, ended: EndedOnServer[]): number {
   const offset = clockOffset(ctx.home);
   let n = 0;
   for (const e of ended) {
-    const s = ctx.db.prepare("SELECT local_id, state FROM shares WHERE session_key=? AND workspace_id=?").get(e.session_key, e.ws) as { local_id: string; state: string } | undefined;
-    if (!s || (s.state !== "shared" && s.state !== "suspended")) continue;
+    const s = ctx.db.prepare("SELECT local_id, state, error FROM shares WHERE session_key=? AND workspace_id=?").get(e.session_key, e.ws) as { local_id: string; state: string; error: string | null } | undefined;
+    if (!s) continue;
+    // Ended here already at a sign-out or a lost workspace, which offer `::align share`: a stop by its person before that
+    // means the server never shares it again (C9-1). One its person stopped here since is left as it is.
+    const endedHere = (s.state === "stopped" || s.state === "error") && (s.error === DEVICE_SIGNED_OUT || s.error === ACCESS_LOST);
+    if (!(s.state === "shared" || s.state === "suspended" || (endedHere && e.ended_reason === null && !stoppedByPerson(ctx, s.local_id)))) continue;
     const since = kvGet(ctx.db, `share_since:${s.local_id}`);
     const made = since ? (ctx.db.prepare("SELECT created_at FROM epochs WHERE epoch_id=?").get(since) as { created_at: string } | undefined)?.created_at : undefined;
     if (made && Date.parse(made) + offset > Date.parse(e.stopped_at)) continue;
+    if (endedHere) {
+      endedShareStoppedByPerson(ctx, s.local_id, `server_stopped_${nowIso()}`);
+      ctx.log(`directives: session ${s.local_id.slice(0, 8)} had been stopped by its person elsewhere before its share ended here; it is not offered for sharing again`);
+      n++;
+      continue;
+    }
     if (e.ended_reason === "member_removed") endShareRemoved(ctx, s.local_id);
     else if (e.ended_reason === "device_signed_out") endShareSignedOutByServer(ctx, s.local_id);
     else {
