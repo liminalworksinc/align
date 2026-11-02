@@ -3,10 +3,10 @@
 // which denies when a stop latch or a goal hold exists for the session (or cannot be ruled out) and fails closed. Before the input is
 // read, any latch on the machine denies; after, only this session's.
 import fs from "node:fs";
-import { alignHomeForHook } from "./shared/layout.ts";
+import { alignHomeForHook, layout, localId } from "./shared/layout.ts";
 import type { Harness } from "./shared/types.ts";
 import { kickSync } from "./hooks/autostart.ts";
-import { denyOutput, failureDeny, latchDeny, latchedOnFailure, postToolUse, preToolUse, sessionStart, stop, userPromptSubmit, type HookInput, type HookOutput } from "./hooks/handlers.ts";
+import { denyOutput, failureDeny, latchDeny, latchedOnFailure, postToolUse, preToolUse, sessionStart, settleTurn, stop, userPromptSubmit, type HookInput, type HookOutput } from "./hooks/handlers.ts";
 import { MIN_NODE, unsupportedNode } from "./node-version.ts";
 
 const DEADLINE_MS = Number(process.env.ALIGN_HOOK_DEADLINE_MS || 300);
@@ -14,6 +14,8 @@ const MAX_INPUT = 8 * 1024 * 1024;
 
 const harnessArg = process.argv[2];
 const event = process.argv[3] || "";
+/** Claude Code's PreToolUse from a plugin that installs PostToolUse too (`align install` writes this flag). */
+const postInstalled = process.argv.slice(4).includes("--post-tool-use");
 const harness: Harness | null = harnessArg === "claude" || harnessArg === "claude-code" ? "claude-code" : harnessArg === "codex" ? "codex" : null;
 const home = alignHomeForHook(process.argv[1] || "", process.env);
 let settled = false;
@@ -88,10 +90,13 @@ async function main(): Promise<void> {
   switch (event) {
     case "SessionStart": {
       const out = (decided = sessionStart(home, harness, input, process.env));
-      await kickSync(home, process.argv[1] || "", process.env, event).catch(() => undefined);
+      // A folder rule shared it just now: a pass always runs (waiting for one already running), so its share is made
+      // within seconds even when another session's pass just started (A2-local-7).
+      await kickSync(home, process.argv[1] || "", process.env, startedShare(input) ? "Command" : event).catch(() => undefined);
       return emit(out);
     }
     case "UserPromptSubmit": {
+      settleQuietly(input);
       const out = (decided = userPromptSubmit(home, harness, input));
       const command = typeof input.prompt === "string" && /^\s*::align\b/i.test(input.prompt);
       await kickSync(home, process.argv[1] || "", process.env, command ? "Command" : event).catch(() => undefined);
@@ -100,6 +105,7 @@ async function main(): Promise<void> {
     case "Stop":
     case "StopFailure": {
       decided = null; // the turn is over: add nothing to context and never continue it
+      settleQuietly(input);
       if (event === "Stop") {
         try {
           stop(home, harness, input); // local drift check: leaves a user-only notice for the next prompt
@@ -112,7 +118,7 @@ async function main(): Promise<void> {
     }
     case "PreToolUse": {
       sessionId = typeof input.session_id === "string" && input.session_id ? input.session_id : null;
-      const out = (decided = preToolUse(home, harness, input));
+      const out = (decided = preToolUse(home, harness, input, { post: postInstalled }));
       await kickSync(home, process.argv[1] || "", process.env, event).catch(() => undefined);
       return emit(out);
     }
@@ -128,6 +134,25 @@ async function main(): Promise<void> {
     }
     default:
       return emit(null);
+  }
+}
+
+/** Every earlier tool call of the session is done: decide its edits and commits by their evidence (A2-local-1). */
+function settleQuietly(input: HookInput): void {
+  try {
+    if (harness) settleTurn(home, harness, input);
+  } catch {
+    /* decided later */
+  }
+}
+
+/** This SessionStart shared the session by a folder rule (its start share was just written). */
+function startedShare(input: HookInput): boolean {
+  if (!harness || typeof input.session_id !== "string" || !input.session_id) return false;
+  try {
+    return Date.now() - fs.statSync(layout.activityStarting(home, localId(harness, input.session_id))).mtimeMs < 5_000;
+  } catch {
+    return false;
   }
 }
 

@@ -36,9 +36,9 @@ import { endedWhyWords, latchWayOut, shareAgainWords } from "./shared/ended.ts";
 import { buildOf, hooksBuildDiffers, hooksBuildWords, selfBuild, supersededWords } from "./build.ts";
 import { resolvePaths, type Paths } from "./paths.ts";
 import { fetchAsks } from "./asks.ts";
-import { waitingActivity } from "./activity.ts";
+import { settleActivity, uploadActivity, waitingActivity } from "./activity.ts";
 import { pullEndedSessions } from "./directives.ts";
-import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
+import { hookEvents, install, pluginHooksFile, POST_FLAG, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { newDeviceKey } from "./keys.ts";
 import { applyShare, bind, deleteHistory, deleteRefused, ENDED_UNREAD, endedUnread, endSharesIfSignedOut, endSharesSignedOut, SHARE_UNREAD_WORDS, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stoppedByPerson, stopSharing } from "./share.ts";
 import { askLineForPeople, askOrder, readAsks } from "./shared/asks.ts";
@@ -602,6 +602,18 @@ async function cmdLogout(ctx: Ctx): Promise<void> {
   // Entirely under the refresh lock that `align login` commits under (C4-4): the device this reads is the one it revokes
   // and signs out, whichever of the two finishes first. When the server could not be told, what revokes the device
   // later (its latest tokens and key) is kept in `revoke.json` for the next contact.
+  // What the shared sessions recorded since the last pass goes up first, while they are still shared: a sign-out ends
+  // their shares, and their last edits would otherwise never be reported (E2E acycle2 A2-local-6). Best effort.
+  const signed = loadCredentials(ctx.home);
+  if (signed && !signed.signed_out) {
+    try {
+      ingestSpool(ctx);
+      settleActivity(ctx);
+      await uploadActivity(ctx);
+    } catch {
+      /* the sign-out goes on */
+    }
+  }
   let res;
   try {
     res = await logoutLocked(ctx, () => endSharesSignedOut(ctx));
@@ -653,12 +665,21 @@ function installState(ctx: Ctx): { claude: string; codex: string; hash: string }
     }
   };
   const c = count(pluginHooksFile(ctx.paths), "claude", (j) => j.hooks);
+  // A plugin an older Align wrote: no PostToolUse (5 events), or one whose PreToolUse does not say it has it. Its
+  // sessions' edits are then confirmed from the files' content instead of by Claude Code (E2E acycle2 A2-local-1).
+  let older = false;
+  try {
+    older = c > 0 && !JSON.stringify(JSON.parse(fs.readFileSync(pluginHooksFile(ctx.paths), "utf8")).hooks?.PreToolUse || []).includes(POST_FLAG);
+  } catch {
+    /* counted as not installed above */
+  }
+  const olderWords = "edits in its sessions are confirmed from the files' content, not by Claude Code; run `align install`";
   const x = count(path.join(ctx.paths.codexHome, "hooks.json"), "codex", (j) => j.hooks);
   const installed = sha256File(marker);
   const hash = !rec ? "not installed" : !installed ? "missing" : installed === rec.hook_sha256 ? "ok" : "modified since install";
   const n = hookEvents("claude").length;
   const m = hookEvents("codex").length;
-  return { claude: c === n ? "installed" : c ? `partial (${c}/${n})` : "not installed", codex: x === m ? "installed (trust them in Codex /hooks)" : x ? `partial (${x}/${m})` : "not installed", hash };
+  return { claude: c === n && !older ? "installed" : c === n ? `installed by an older Align (${olderWords})` : c ? `partial (${c}/${n}; ${olderWords})` : "not installed", codex: x === m ? "installed (trust them in Codex /hooks)" : x ? `partial (${x}/${m})` : "not installed", hash };
 }
 
 async function cmdStatus(ctx: Ctx): Promise<void> {

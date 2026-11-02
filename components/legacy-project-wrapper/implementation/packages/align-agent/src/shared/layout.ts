@@ -58,6 +58,9 @@ export const layout = {
   activity: (h: string, lid: string) => path.join(h, "activity", `${safe(lid)}.jsonl`),
   /** Present once the session's PostToolUse hook ran: its edits then count only when that hook confirms them. */
   activityConfirmed: (h: string, lid: string) => path.join(h, "activity", `${safe(lid)}.confirmed`),
+  /** A session a folder rule shared at its start, until the sync pass makes its share: its hooks record and hold as
+   *  shared from its first tool call (E2E acycle2 A2-local-7). */
+  activityStarting: (h: string, lid: string) => path.join(h, "activity", `${safe(lid)}.starting`),
   /** How far the sync pass has uploaded the session's activity (a logical byte offset), so the hook trims only that. */
   activityUploaded: (h: string, lid: string) => path.join(h, "activity", `${safe(lid)}.uploaded`),
   /** Team activity fetched from the server for one workspace (other machines' sessions). */

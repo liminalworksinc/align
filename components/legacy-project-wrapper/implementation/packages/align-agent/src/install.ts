@@ -61,9 +61,13 @@ function isOurPlugin(paths: Paths): boolean {
   }
 }
 
+/** Claude Code's PreToolUse says the plugin installs PostToolUse too, so the hook counts an edit only once that hook
+ *  saw its own call run, from the session's first call (E2E acycle2 A2-local-1). */
+export const POST_FLAG = "--post-tool-use";
+
 export function hookCommand(nodePath: string, alignHome: string, harness: "claude" | "codex", event: string): string {
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-  return `${q(nodePath)} ${q(path.join(alignHome, "bin", "current", "hook.js"))} ${harness} ${event}`;
+  return `${q(nodePath)} ${q(path.join(alignHome, "bin", "current", "hook.js"))} ${harness} ${event}${harness === "claude" && event === "PreToolUse" ? ` ${POST_FLAG}` : ""}`;
 }
 
 function isOurs(handler: unknown, alignHome: string): boolean {

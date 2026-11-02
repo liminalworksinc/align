@@ -10,7 +10,8 @@ import type { Ctx } from "./context.ts";
 import { api, clockOffset, postTimed } from "./api.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { getSession } from "./ledger.ts";
-import { activityBase, confirming, madeActs, pathHash, rawActs, readActs, record, relTo, repoIdentity, type Act, type PodFeed, type RemoteItem } from "./hooks/siblings.ts";
+import { activityBase, confirming, madeActs, pathHash, rawActs, record, relTo, repoIdentity, type Act, type PodFeed, type RemoteItem } from "./hooks/siblings.ts";
+import { activityLids, PENDING_MS, settle, verdictFor, verdictsOf } from "./hooks/evidence.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
 import { layout } from "./shared/layout.ts";
@@ -88,7 +89,7 @@ function readCover(ctx: Ctx): Record<string, number> {
   }
 }
 
-/** Remember that a hook saw these files' latest change (6 hours, at most 5,000 files). */
+/** Remember that a hook (or an earlier git pass) saw these files' latest change (6 hours, at most 5,000 files). */
 function addCover(ctx: Ctx, edits: Act[]): void {
   if (!edits.length) return;
   const cover = readCover(ctx);
@@ -110,10 +111,57 @@ function addCover(ctx: Ctx, edits: Act[]): void {
 }
 
 /**
+ * Decide, by their evidence, the waiting edits and commits of every session that recorded activity here (those whose
+ * own next hook has not come yet): made ones only, the rest wait for that hook or for their hour (A2-local-1).
+ */
+export function settleActivity(ctx: Ctx): number {
+  let n = 0;
+  for (const lid of activityLids(ctx.home, PENDING_MS)) {
+    try {
+      n += settle(ctx.home, lid, false, (acts) => record(ctx.home, lid, acts));
+    } catch {
+      /* the next pass */
+    }
+  }
+  return n;
+}
+
+/**
+ * What hooks on this machine saw, for the git pass: files whose latest change a hook recorded since `since` (made, or
+ * still waiting for its verdict), from every session that recorded activity here, whether or not it is still shared
+ * (A2-local-6: an edit a share's sign-out left un-uploaded was credited to another session after the next sign-in).
+ */
+function hookSeen(ctx: Ctx, since: number): { paths: Set<string>; made: Act[] } {
+  const paths = new Set<string>();
+  const made: Act[] = [];
+  const now = Date.now();
+  const lids = new Set([...activityLids(ctx.home), ...(ctx.db.prepare("SELECT local_id FROM shares").all() as { local_id: string }[]).map((r) => r.local_id)]);
+  for (const lid of lids) {
+    for (const a of undecidedEdits(ctx, lid)) if (a.p) paths.add(a.p);
+    const raw = rawActs(ctx.home, lid);
+    if (!raw.length) continue;
+    const v = verdictsOf(raw);
+    const confirmed = confirming(ctx.home, lid);
+    for (const a of madeActs(raw, confirmed, v)) {
+      if (a.t === "edit" && !a.via && a.p && Date.parse(a.at) >= since) {
+        paths.add(a.p);
+        made.push(a);
+      }
+    }
+    for (const a of raw) {
+      if (a.t !== "edit" || a.via || !a.p || now - Date.parse(a.at) >= PENDING_MS || verdictFor(a, v) !== null) continue;
+      if (a.c || a.v || (confirmed && a.u)) paths.add(a.p); // waiting for its verdict
+    }
+  }
+  return { paths, made };
+}
+
+/**
  * Files changed in a shared session's repo since the previous pass (working tree, and commits made since), recorded as
  * edits of the session most recently active there. Hooks see edit tools and plain shell writes; this catches the rest
  * (a script, a code-mode tool). The first pass only takes a baseline, so earlier changes are never attributed. A file
- * whose latest change a hook already recorded is never credited again, whenever it is committed (A1-local-2).
+ * whose latest change a hook already recorded, in any session here, is never credited again, whenever it is committed
+ * (A1-local-2, A2-local-6); nor is one an earlier pass already credited, when it is committed later (A2-local-6).
  */
 export function detectGitEdits(ctx: Ctx): number {
   const rows = ctx.db
@@ -126,6 +174,8 @@ export function detectGitEdits(ctx: Ctx): number {
     byRepo.set(top, [...(byRepo.get(top) || []), r]);
   }
   let found = 0;
+  let seenAt = Infinity;
+  let hooks: { paths: Set<string>; made: Act[] } | null = null;
   for (const [top, sessions] of byRepo) {
     const key = `git_snap:${crypto.createHash("sha256").update(top).digest("hex").slice(0, 16)}`;
     const cur = gitState(top);
@@ -145,17 +195,16 @@ export function detectGitEdits(ctx: Ctx): number {
     if (!changed.size) continue;
     const owner = sessions.filter((s) => s.last && Date.parse(s.last) >= prev.at - 120_000).sort((a, b) => Date.parse(b.last!) - Date.parse(a.last!))[0];
     if (!owner) continue;
-    // A change a hook already recorded, in any of the repo's sessions, is that session's edit and goes up with it once:
-    // one recorded since the last pass, one recorded earlier whose file was only written later (an edit approved after a
-    // pass read it, C4-5), or one an earlier pass took as made, while the file has not changed since (a commit of it,
-    // A1-local-2). Only the rest is credited to the session most recently active here.
-    const seen = new Set<string>();
-    for (const s of sessions) {
-      for (const a of undecidedEdits(ctx, s.lid)) if (a.p) seen.add(a.p);
-      for (const a of readActs(ctx.home, s.lid)) {
-        if (a.t === "edit" && !a.via && a.p && Date.parse(a.at) >= prev.at - 5_000) seen.add(a.p);
-      }
+    // A change a hook already recorded, in any session here (shared now or not), is that session's edit and goes up
+    // with it once: one recorded since the last pass, one recorded earlier whose file was only written later (an edit
+    // approved after a pass read it, C4-5), or one an earlier pass took as made, while the file has not changed since
+    // (a commit of it, A1-local-2). Only the rest is credited to the session most recently active here.
+    if (!hooks || prev.at - 5_000 < seenAt) {
+      seenAt = prev.at - 5_000;
+      hooks = hookSeen(ctx, seenAt);
+      addCover(ctx, hooks.made);
     }
+    const seen = hooks.paths;
     const cover = readCover(ctx);
     const covered = (p: string) => {
       if (cover[p] === undefined) return false;
@@ -171,6 +220,8 @@ export function detectGitEdits(ctx: Ctx): number {
       .filter((p) => !seen.has(p) && !covered(p))
       .map((p) => ({ t: "edit", at, p, via: "git" }));
     record(ctx.home, owner.lid, acts);
+    // Credited once: a commit of the same change later credits nobody (A2-local-6).
+    addCover(ctx, acts);
     found += acts.length;
   }
   return found;
@@ -182,7 +233,7 @@ export function detectGitEdits(ctx: Ctx): number {
  */
 const UNDECIDED_EDIT_MS = 60 * 60_000;
 
-const actKey = (a: Act) => `${a.at}\0${a.p ?? ""}`;
+const actKey = (a: Act) => `${a.t}\0${a.at}\0${a.p ?? ""}\0${a.u ?? ""}`;
 
 /** Edits of a session that a pass read before their file changed: kept, not uploaded yet (C4-5). */
 function undecidedEdits(ctx: Ctx, lid: string): Act[] {
@@ -194,10 +245,13 @@ function undecidedEdits(ctx: Ctx, lid: string): Act[] {
   }
 }
 
-/** Edits a hook recorded that have not happened (not confirmed, or their file has not changed) and may still. */
-function stillUndecided(all: Act[], made: Act[], now = Date.now()): Act[] {
+/** Edits and commits a hook recorded that have not happened (no verdict yet, or their file has not changed) and may
+ *  still; one decided as not made never will. */
+function stillUndecided(all: Act[], made: Act[], v: Map<string, boolean>, now = Date.now()): Act[] {
   const done = new Set(made.map(actKey));
-  return all.filter((a) => a.t === "edit" && !a.via && a.p && !done.has(actKey(a)) && now - Date.parse(a.at) < UNDECIDED_EDIT_MS);
+  return all.filter(
+    (a) => ((a.t === "edit" && !a.via && a.p) || (a.t === "commit" && a.u)) && !done.has(actKey(a)) && verdictFor(a, v) !== false && now - Date.parse(a.at) < UNDECIDED_EDIT_MS,
+  );
 }
 
 /**
@@ -252,7 +306,8 @@ export function waitingActivity(ctx: Ctx): number {
     const repo = repoIdentity(s.workspace_id, cwd);
     if (!repo) continue;
     const named = signalsAllowed(ctx, s.local_id, cwd);
-    for (const a of madeActs(all)) {
+    const v = verdictsOf([...rawActs(ctx.home, s.local_id), ...all]);
+    for (const a of madeActs(all, confirming(ctx.home, s.local_id), v)) {
       if ((a.t === "edit" || a.t === "claim") && a.p) n += relTo(repo.toplevel, a.p) ? 1 : 0;
       else if (a.t === "commit" || (a.t === "task" && named && a.s)) n++;
     }
@@ -271,10 +326,11 @@ export async function uploadActivity(ctx: Ctx): Promise<number> {
     // Edits read by an earlier pass before their file changed come first; each counts once its file has changed (an
     // edit the user refused never does, C3-9), and is kept until then rather than skipped for good (C4-5).
     const all = [...undecidedEdits(ctx, s.local_id), ...fresh.acts];
-    // Confirmations of a session whose PostToolUse hook runs: an edit counts once its own tool call ran (A1-local-1).
-    const ran = new Set([...rawActs(ctx.home, s.local_id), ...fresh.acts].filter((a) => a.t === "ran" && a.u).map((a) => a.u as string));
-    const acts = madeActs(all, confirming(ctx.home, s.local_id), ran);
-    const waiting = stillUndecided(all, acts);
+    // Verdicts on the session's tool calls: an edit or commit counts once its own call is known to have made it
+    // (A1-local-1, A2-local-1, 5); the pass decided what it could just before (`settleActivity`).
+    const v = verdictsOf([...rawActs(ctx.home, s.local_id), ...fresh.acts]);
+    const acts = madeActs(all, confirming(ctx.home, s.local_id), v);
+    const waiting = stillUndecided(all, acts, v);
     addCover(ctx, acts.filter((a) => a.t === "edit" && !a.via && a.p));
     const cwd = getSession(ctx.db, s.local_id)?.cwd ?? null;
     const repo = repoIdentity(s.workspace_id, cwd);
@@ -316,7 +372,7 @@ export async function uploadActivity(ctx: Ctx): Promise<number> {
   return sent;
 }
 
-/** Fetch new team activity by cursor and keep the last 6 hours of unexpired items (at most 1,000), with the clock offset
+/** Fetch new team activity by cursor and keep the last 6 hours of other machines' unexpired items (at most 1,000), with the clock offset
  *  this machine knows, so hooks read the items' server times on the server's clock (E2E acycle1 A1-cross-5). */
 export async function fetchPod(ctx: Ctx, ws: string): Promise<number> {
   const prev = readJson<PodFeed>(layout.podFeed(ctx.home, ws));
@@ -327,7 +383,10 @@ export async function fetchPod(ctx: Ctx, ws: string): Promise<number> {
   const snow = now + offset;
   const fresh = r.json.items as RemoteItem[];
   if (!fresh.length && prev && now - Date.parse(prev.fetched_at) < 60_000 && (prev.clock_offset_ms || 0) === offset) return 0;
-  const items = [...(prev?.items || []), ...fresh].filter((i) => Date.parse(i.expires_at) > snow && snow - Date.parse(i.at) < KEEP_MS).slice(-1000);
+  // This machine's own items are never shown back (its sessions are read locally), so they are not kept: they would push
+  // other people's recent work out of the 1,000 (A2-local-8).
+  const own = new Set((ctx.db.prepare("SELECT session_key FROM shares").all() as { session_key: string }[]).map((r) => r.session_key));
+  const items = [...(prev?.items || []), ...fresh].filter((i) => !own.has(i.session_key) && Date.parse(i.expires_at) > snow && snow - Date.parse(i.at) < KEEP_MS).slice(-1000);
   const next: PodFeed = { v: 1, workspace_id: ws, cursor: Number(r.json.cursor) || prev?.cursor || 0, fetched_at: new Date().toISOString(), items };
   if (offset) next.clock_offset_ms = offset;
   writeJsonAtomic(layout.podFeed(ctx.home, ws), next);

@@ -13,7 +13,7 @@ import { loadCredentials } from "../src/api.ts";
 import { computeUnsharedDigest } from "../src/allocation.ts";
 import { addNotice, renderHot } from "../src/hot.ts";
 import { sessionKey } from "../src/keys.ts";
-import { readJson } from "../src/shared/fsx.ts";
+import { readJson, writeJsonAtomic } from "../src/shared/fsx.ts";
 import { layout, localId } from "../src/shared/layout.ts";
 import type { HotState } from "../src/shared/types.ts";
 import type { PodFeed } from "../src/hooks/siblings.ts";
@@ -239,7 +239,11 @@ describe("C4-1: deleting shared history", () => {
     // The session's own work, as the team feed returns it to this person's devices.
     fake.addRemoteActivity("ws_acme", { session_key: s.key, mine: true, user: { id: fake.user.id, name: fake.user.name }, kind: "edit", repo_id: "r".repeat(32), path_hash: "h".repeat(32) });
     assert.equal((await runCli(t, ["sync"])).code, 0);
-    assert.ok(readJson<PodFeed>(layout.podFeed(t.home, "ws_acme"))!.items.some((i) => i.session_key === s.key), "cached");
+    // This machine's own items are not kept in the feed cache (E2E acycle2 A2-local-8); a cache an older build wrote
+    // may still hold them.
+    const feed = readJson<PodFeed>(layout.podFeed(t.home, "ws_acme"))!;
+    assert.ok(!feed.items.some((i) => i.session_key === s.key), "not cached");
+    writeJsonAtomic(layout.podFeed(t.home, "ws_acme"), { ...feed, items: [...feed.items, fake.activity.find((i) => i.session_key === s.key)] });
     await relogin(t);
     const device = loadCredentials(t.home)!.device_id;
     const del = await runCli(t, ["delete-history", s.lid.slice(0, 8), "--yes"]);

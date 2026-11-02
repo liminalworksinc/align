@@ -1,6 +1,7 @@
 // Hook behavior: budgets, zero bytes when unchanged, private sessions silent, local commands, fail-closed latch,
 // offline operation and latency. Runs the built dist/hook.js as Claude Code and Codex would.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
@@ -163,8 +164,16 @@ describe("claude hooks", () => {
   test("sessions toward the same goal: a card with the other's edits and commits at the next prompt, once; an edit to a file it just changed is held once", () => {
     const { t, ctx } = setup();
     const repo = path.join(t.root, "synthetic-repo");
-    /** The edit tool ran (its hook let it): its files changed. */
+    fs.mkdirSync(repo, { recursive: true });
+    const git = (...a: string[]) => execFileSync("git", ["-C", repo, "-c", "user.email=t@example.test", "-c", "user.name=T", ...a], { stdio: "ignore" });
+    git("init", "-q");
+    /** The edit tool ran (its hook let it): its files changed, to the content it was to write (E2E acycle2 A2-local-1:
+     *  a file merely changing proves nothing). */
     const wrote = (...files: string[]) => files.forEach((f) => touch(path.join(repo, f)));
+    const put = (f: string, text: string) => {
+      fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true });
+      fs.writeFileSync(path.join(repo, f), text);
+    };
     const a = "sess-claude-sib";
     const b = "019a-codex-sib";
     shareSession(ctx, "claude-code", a);
@@ -177,8 +186,11 @@ describe("claude hooks", () => {
     // Codex edits two files and commits.
     const patch = "*** Begin Patch\n*** Update File: fair/campaign_v5.py\n@@\n-x\n+y\n*** Add File: infra/queue.sh\n+echo hi\n*** End Patch\n";
     assert.equal(runHook(t, "codex", "PreToolUse", { session_id: b, turn_id: "t1", cwd: repo, tool_name: "apply_patch", tool_input: { command: patch } }).stdout, "");
-    wrote("fair/campaign_v5.py", "infra/queue.sh");
+    put("fair/campaign_v5.py", "y\n");
+    put("infra/queue.sh", "echo hi\n");
     runHook(t, "codex", "PreToolUse", { session_id: b, turn_id: "t1", cwd: repo, tool_name: "Bash", tool_input: { command: 'git add -A && git commit -m "Add held-out read path"' } });
+    git("add", "-A");
+    git("commit", "-qm", "Add held-out read path");
 
     const card = JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: a, prompt_id: "p2", prompt: "continue", cwd: repo }).stdout).hookSpecificOutput.additionalContext;
     assert.match(card, /^\[Align\] Also working toward this goal on this machine: Codex session 019a-cod/);
@@ -195,15 +207,17 @@ describe("claude hooks", () => {
     assert.equal(held.permissionDecision, "deny");
     assert.match(held.permissionDecisionReason, /^Align: Codex session 019a-cod, working toward the same goal, edited fair\/campaign_v5\.py (less than a minute|\d+ min) ago\. Read the file again/);
     assert.equal(runHook(t, "claude", "PreToolUse", edit).stdout, "", "retry after re-reading goes through");
-    wrote("fair/campaign_v5.py");
+    put("fair/campaign_v5.py", "z\n");
     // A file Claude read after Codex changed it is not held.
+    put("DESIGN.md", "a\n");
+    put("README.md", "y\n");
     runHook(t, "codex", "PreToolUse", { session_id: b, turn_id: "t1", cwd: repo, tool_name: "apply_patch", tool_input: { command: "*** Begin Patch\n*** Update File: DESIGN.md\n@@\n-a\n+b\n*** End Patch\n" } });
-    wrote("DESIGN.md");
+    put("DESIGN.md", "b\n");
     runHook(t, "claude", "PreToolUse", { session_id: a, cwd: repo, tool_name: "Read", tool_input: { file_path: `${repo}/DESIGN.md` } });
     assert.equal(runHook(t, "claude", "PreToolUse", { session_id: a, cwd: repo, tool_name: "Edit", tool_input: { file_path: `${repo}/DESIGN.md` } }).stdout, "", "read since their edit: not held");
     wrote("DESIGN.md");
-    assert.equal(runHook(t, "claude", "PreToolUse", { ...edit, tool_input: { file_path: `${repo}/README.md` } }).stdout, "", "untouched files are never held");
-    wrote("README.md");
+    assert.equal(runHook(t, "claude", "PreToolUse", { ...edit, tool_input: { file_path: `${repo}/README.md`, old_string: "y", new_string: "z" } }).stdout, "", "untouched files are never held");
+    put("README.md", "z\n");
     assert.equal(runHook(t, "claude", "PreToolUse", { session_id: other, cwd: repo, tool_name: "Write", tool_input: { file_path: `${repo}/fair/campaign_v5.py` } }).stdout, "", "another goal's session is not held");
     wrote("fair/campaign_v5.py");
 
