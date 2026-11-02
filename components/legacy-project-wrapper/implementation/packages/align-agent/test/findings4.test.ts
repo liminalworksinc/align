@@ -413,6 +413,8 @@ describe("cycle 4: notices and the unshared-time note", () => {
     ctx.db.close();
     const start = json(runHook(t, "claude", "SessionStart", { session_id: s.sid, source: "resume", cwd: s.cwd }).stdout);
     const said = String(start.systemMessage).split("\n").filter((x) => x.startsWith("Align: ") && !/^Align: (shared with|sharing this session)/.test(x));
-    assert.deepEqual(said, ["Align: bind failed: no such goal.", "Align: this session stopped sharing because you no longer have access to Acme in Align (you were removed from it or left it); its usage stays on this machine from now on."]);
+    // The newest share-state notice, stored with no facts as an older agent left it, is never shown as stored: its share
+    // is live, so only that its sharing changed (E2E-AGENT cycle 13 C13-1).
+    assert.deepEqual(said, ["Align: bind failed: no such goal.", "Align: this session's sharing changed; run `align sessions` in a terminal for what it is now, and `align latch status` if its tools are blocked."]);
   });
 });

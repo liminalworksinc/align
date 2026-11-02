@@ -230,6 +230,8 @@ interface TargetRow {
   state: TargetState;
   /** Why an expired target's session ended (lib/v2/sessions.ts endSessions); null when it expired for another reason. */
   ended_reason: EndedReason | null;
+  /** The session's own state: `stopped` for one that ended or that its person stopped sharing. */
+  session_state: string;
   auto_accepted: number;
   updated_at: string;
   user_id: string;
@@ -243,7 +245,7 @@ interface TargetRow {
  *  row (owner, repository alias, state); anyone else who reads the goal sees their own sessions' rows and the counts. */
 function requestView(pp: PolicyPrincipal, g: GoalRow, r: RequestRow, approvers = approvalSet(g)) {
   const rows = all<TargetRow>(
-    `SELECT t.session_key, t.state, t.ended_reason, t.auto_accepted, t.updated_at, s.user_id, s.repo_alias, s.harness, s.title, s.started_at
+    `SELECT t.session_key, t.state, t.ended_reason, s.state AS session_state, t.auto_accepted, t.updated_at, s.user_id, s.repo_alias, s.harness, s.title, s.started_at
      FROM v2_request_targets t JOIN v2_sessions s ON s.ws_id = t.ws_id AND s.session_key = t.session_key
      WHERE t.request_id = ? ORDER BY t.session_key`,
     r.id,
@@ -266,8 +268,9 @@ function requestView(pp: PolicyPrincipal, g: GoalRow, r: RequestRow, approvers =
     // writeGoalVersion) or because every session it waited on ended (C3-1).
     state,
     /** Why an expired request expired: sessions_ended when every session it waited on ended (its device signed out, or
-     *  its person left the workspace), else goal_closed. null unless state is expired. */
-    expired_reason: state !== "expired" ? null : rows.every((t) => t.ended_reason) ? ("sessions_ended" as const) : ("goal_closed" as const),
+     *  its person left the workspace) or was stopped by its person (E2E-AGENT cycle 13), else goal_closed. null unless
+     *  state is expired. */
+    expired_reason: state !== "expired" ? null : rows.every((t) => t.ended_reason || t.session_state === "stopped") ? ("sessions_ended" as const) : ("goal_closed" as const),
     // accepted: the developer's own accepts; not_declined: delivered to the agent and not declined (auto_accepted),
     // never counted as accepted.
     counts: {
@@ -343,6 +346,13 @@ export function requestWire(pp: PolicyPrincipal, j: RequestJson) {
     note: r.note,
     created_at: r.created_at,
   };
+}
+
+/** The requests still waiting on a session its person stopped sharing (Stop sharing, on the web or from a device) expire,
+ *  as for a session that ended (lib/v2/sessions.ts endSessions): no answer is taken from it now. Their targets keep
+ *  `ended_reason` null (a stop by its person, not an end). Inside the caller's tx(). Returns how many expired. */
+export function expireStoppedSessionTargets(ws: string, sessionKey: string, at: string): number {
+  return run("UPDATE v2_request_targets SET state = 'expired', updated_at = ? WHERE ws_id = ? AND session_key = ? AND state IN ('sent','received')", at, ws, sessionKey);
 }
 
 /** Move one session's request state on an answer or a delivery receipt (inside the receipt's tx). received after

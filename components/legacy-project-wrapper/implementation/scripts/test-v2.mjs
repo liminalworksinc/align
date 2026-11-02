@@ -6086,6 +6086,29 @@ try {
       `${ecp.text.slice(0, 200)} ${JSON.stringify(openBefore)} ${JSON.stringify(achReq)} ${JSON.stringify(ecpView)} ${lateRc.map((r) => r.text).join(" | ")}`,
     );
 
+    // -- E2E-AGENT cycle 13: a request to a session its person stopped sharing on the web --
+    const GS = (await qa(QL, "POST", "/goals", { title: "Stopped-session requests", visibility: "workspace", team_id: QT })).json;
+    const SM9 = await qShare(DQM, "req-9", GS.id);
+    const ssBefore = (await qDirs(DQM)).next_cursor;
+    const ssReq = await send(QL, { type: "checkpoint" }, GS.id);
+    const ssDir = (await qDirs(DQM, ssBefore)).directives.find((d) => d.kind === "request" && d.request?.id === ssReq.json?.request?.id);
+    const ssReceived = await qRec(ssDir?.id, SM9.key, "received");
+    const ssStop = await qa(QM, "POST", `/sessions/${SM9.key}/stop-sharing`, {});
+    const ssView = (await list(QL, GS.id)).json?.requests?.find((r) => r.id === ssReq.json?.request?.id);
+    const ssAccept = await qRec(ssDir?.id, SM9.key, "accepted");
+    const ssDecline = await qRec(ssDir?.id, SM9.key, "declined");
+    const ssAgain = await qRec(ssDir?.id, SM9.key, "received");
+    const ssTarget = withDb((d) => d.prepare("SELECT state, ended_reason FROM v2_request_targets WHERE request_id = ? AND session_key = ?").get(ssReq.json?.request?.id ?? "", SM9.key));
+    const ssAnswers = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_receipts WHERE directive_id = ? AND state IN ('accepted','declined')").get(ssDir?.id ?? "")).n;
+    check(
+      "requests (E2E-AGENT cycle 13): stopping a session's sharing expires the requests still waiting on it, as for a session that ended (the request reads expired, its sessions ended; the target expired with no ended_reason); an answer from it is then refused 409 request_expired (ended_reason null) and not recorded, while a delivery receipt is still taken",
+      SM9.status === 200 && ssReq.status === 201 && ssReceived.status === 200 && ssStop.status === 200 &&
+        ssView?.state === "expired" && ssView.expired_reason === "sessions_ended" && ssView.sessions[0]?.state === "expired" && ssView.sessions[0].ended_reason === null &&
+        [ssAccept, ssDecline].every((r) => r.status === 409 && r.json?.error === "request_expired" && r.json.ended_reason === null && /expired/.test(r.json.message ?? "")) &&
+        ssAgain.status === 200 && ssTarget?.state === "expired" && ssTarget.ended_reason === null && ssAnswers === 0,
+      `${SM9.status} ${ssReq.text.slice(0, 200)} ${ssReceived.status} ${ssStop.status} ${ssStop.text.slice(0, 200)} ${JSON.stringify(ssView)} ${ssAccept.text} ${ssDecline.text} ${ssAgain.status} ${JSON.stringify(ssTarget)} ${ssAnswers}`,
+    );
+
     // -- events, deletion, retention --
     const qEv = (name) => withDb((d) => d.prepare("SELECT props FROM v2_events WHERE name = ? AND ws_id = ?").all(name, QW)).map((r) => r.props);
     check("events: first_request once for the workspace with its type, first_hold once with no props; first_directive allows the new kinds", JSON.stringify(qEv("first_request")) === JSON.stringify(['{"type":"checkpoint"}']) && JSON.stringify(qEv("first_hold")) === JSON.stringify(["{}"]) && qEv("first_directive").length === 1, `${qEv("first_request")} ${qEv("first_hold")}`);

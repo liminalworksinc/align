@@ -153,7 +153,10 @@ call.
 
 Copies the built `dist/` to `ALIGN_HOME/bin/<version>/` (adds a `package.json` with `"type": "module"`) and points the
 symlink `ALIGN_HOME/bin/current` at it, so hooks never run from a git checkout. `ALIGN_HOME/install.json` records
-what was added.
+what was added. Each build records its identity in `dist/build.json` (version and a hash of the built files): when
+the hooks' copy is another build than the `align` you run (an older `align` still on `PATH`, a newer one not installed
+yet), every command says so on stderr and `align doctor` shows a `WARN hooks build` line until `align install` runs
+with that `align`.
 
 - `--claude` (default when no flag is given): writes the Claude Code plugin folder
   `$CLAUDE_CONFIG_DIR/skills/align/` (default `~/.claude/skills/align/`): `.claude-plugin/plugin.json` and

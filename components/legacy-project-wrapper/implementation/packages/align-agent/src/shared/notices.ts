@@ -3,7 +3,7 @@
 /** Notices about whether this session is shared (started, refused, ended; `signed_in_` and `workspace_back_` are kinds
  *  an older agent stored): only the newest of them still holds (C5-3, C7-2), worded when shown (`shareNotice`, cycle
  *  11). A workspace this device reaches for the first time is not one: it says nothing about this session's own share. */
-export const SHARE_STATE_NOTICES = ["share_started_", "share_err_", "upload_refused_", "server_stopped_", "signed_out_", "signed_in_", "access_lost_", "workspace_back_"];
+export const SHARE_STATE_NOTICES = ["share_started_", "share_err_", "share_stopped_", "upload_refused_", "server_stopped_", "signed_out_", "signed_in_", "access_lost_", "workspace_back_"];
 
 /** A notice's kind: its id without the `<local id>/` it is stored under. */
 export const noticeKind = (id: string): string => id.slice(id.indexOf("/") + 1);

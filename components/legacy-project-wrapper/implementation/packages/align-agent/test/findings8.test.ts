@@ -151,7 +151,9 @@ describe("C7-2: signed out and in again, the session's notice says what holds no
     assert.doesNotMatch(out.systemMessage, /signed in to Align again/);
 
     const acme = fake.workspaces[0];
+    // A pairing that was not given Acme (the person is still a member: `/me` names it among their other workspaces).
     fake.workspaces = [];
+    fake.otherWorkspaces = [{ id: acme.id, name: acme.name }];
     assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
     const lid8 = A.lid.slice(0, 8);
     assert.equal(
@@ -160,6 +162,7 @@ describe("C7-2: signed out and in again, the session's notice says what holds no
     );
     assert.match(deny(t, A) ?? "", /tools stay blocked until the user runs `align stop-sharing /);
     fake.workspaces = [acme];
+    fake.otherWorkspaces = [];
     await sync(t);
     // What changed is the reach, not the sign-in: its words say so (E2E-AGENT cycle 12, section 6).
     assert.equal(

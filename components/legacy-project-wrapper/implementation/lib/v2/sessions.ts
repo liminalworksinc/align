@@ -11,7 +11,7 @@ import { stopStatus, writeDirective } from "./directives";
 import type { DevicePrincipal } from "./devices";
 import type { Principal } from "./http";
 import { need } from "./workspaces";
-import { holdNewlyBound } from "./requests";
+import { expireStoppedSessionTargets, holdNewlyBound } from "./requests";
 import { personName } from "./retention";
 import { shareAgainText, shareAgainWords } from "./share-again.mts";
 import { b64url, iso, nonNegInt, oneOf, optInt, optStr, str, type Body } from "./validate";
@@ -394,6 +394,8 @@ export async function stopSharing(pp: PolicyPrincipal, p: Principal, key: string
       pp.wsId,
       key,
     );
+    // Nothing answers the requests still waiting on it now: they expire, as for a session that ended (E2E-AGENT cycle 13).
+    expireStoppedSessionTargets(pp.wsId, key, at);
     audit(pp.wsId, pp.userId, "session.sharing_stopped", null, at);
   });
   return { session_key: key, state: "stopped" as const };

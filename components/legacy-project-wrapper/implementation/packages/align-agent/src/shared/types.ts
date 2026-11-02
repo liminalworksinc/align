@@ -163,6 +163,8 @@ export interface HoldLatch {
   unread?: true;
   /** As on the stop latch. */
   login?: true;
+  /** As on the stop latch. */
+  relogin?: true;
   /** With `ended`: the holds' release still reaches this session (its sharing was stopped while this device held it),
    *  and whether a stop blocks it too (C10-4). */
   release?: ReleaseReaches;
@@ -257,6 +259,9 @@ export interface Latch {
   /** With `ended`: signed out, and a new `align login` would let `::align share` share it again, besides
    *  `align stop-sharing` (cycle 12, section 6). */
   login?: true;
+  /** With `ended` (`device_signed_out`), signed in: a new `align login` that replaced this machine's pairing ended its
+   *  share, so the deny never says this machine signed out (E2E-AGENT cycle 13, section 5). */
+  relogin?: true;
   /** With `ended`: the session is held too, and the hold's release still reaches it, lifting only the hold (C10-4). */
   release?: ReleaseReaches;
 }

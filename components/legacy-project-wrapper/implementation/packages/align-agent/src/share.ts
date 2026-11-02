@@ -7,7 +7,7 @@ import { kvGet, kvSet, nowIso, tx } from "./db.ts";
 import { repoKey, sessionKey } from "./keys.ts";
 import path from "node:path";
 import { endEpochs, getSession, sessionCwds, type SessionRow } from "./ledger.ts";
-import { ACCESS_LOST, addNotice, addShareNotice, DEVICE_SIGNED_OUT, ENDED_UNREAD as ENDED_UNREAD_KEY, getShare, notePriorShare, renderEndedShares, renderHot, sharedBefore, snapshot, stoppedByPerson, stoppedOnDeviceKey } from "./hot.ts";
+import { ACCESS_LOST, addNotice, addShareNotice, DEVICE_SIGNED_OUT, ENDED_UNREAD as ENDED_UNREAD_KEY, endedByLogin, getShare, notePriorShare, renderEndedShares, renderHot, sharedBefore, snapshot, stoppedByPerson, stoppedOnDeviceKey } from "./hot.ts";
 
 export { ENDED_UNREAD, notePriorShare, sharedBefore, stoppedByPerson } from "./hot.ts";
 import { clockOffset, loadCredentials, signedIn } from "./api.ts";
@@ -186,6 +186,8 @@ export function stopSharing(ctx: Ctx, lid: string): void {
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM latches WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM holds WHERE local_id=?").run(lid);
+    // The server expires the requests still waiting on it at this stop (E2E-AGENT cycle 13).
+    expireRequests(ctx, lid, "sharing_stopped", at);
     enqueue(ctx, lid, "stop_sharing", { ws: share.workspace_id, session_key: share.session_key });
   });
   renderHot(ctx, lid);
@@ -265,7 +267,8 @@ function factsOf(row: { workspace_name: string; goal_json: string | null }, e: S
  * and epoch calls are dropped (they belonged to the old device). Stop latches and goal holds stay: a stopped session
  * stays blocked until the developer runs `align stop-sharing`. Every session whose share had ended already is worded
  * afresh from the state now (its hot and latch files), so a notice that said `::align share` shares it again now gives
- * the sign-out's words at its next prompt, as its deny does (C8-1, cycle 11). Returns how many shares ended.
+ * the sign-out's words at its next prompt, as its deny does (C8-1, cycle 11). Returns how many shares the server had
+ * ended (`pending` ones never reached it).
  */
 export function endSharesSignedOut(ctx: Ctx, via?: "login"): number {
   const at = nowIso();
@@ -283,8 +286,30 @@ export function endSharesSignedOut(ctx: Ctx, via?: "login"): number {
     endShare(ctx, s.local_id, DEVICE_SIGNED_OUT, `signed_out_${at}`, factsOf(s, "signed_out", extra), at, "device_signed_out");
   }
   if (live.length) ctx.log(`signed out: ${live.length} shares ended on this machine`);
+  // A share a new `align login` ended earlier, now that this machine really signed out: from here its words are a
+  // sign-out's, in its notice and its deny alike (E2E-AGENT cycle 13, section 5).
+  if (!via) signedOutSinceLogin(ctx);
   renderEndedShares(ctx);
-  return live.length;
+  // The shares the server had: one still pending had not reached it, so it was not shared and did not stop sharing
+  // (its own notice says so; E2E-AGENT cycle 13, section 5).
+  return live.filter((s) => s.state !== "pending").length;
+}
+
+/** Mark the notices of shares a replacing `align login` ended (`via: "login"`) with `out_since`: this machine signed out
+ *  since. Once each, so a pass that finds this machine still signed out writes nothing. */
+function signedOutSinceLogin(ctx: Ctx): void {
+  const rows = ctx.db
+    .prepare("SELECT n.rowid AS rid, n.facts AS facts FROM notices n JOIN shares s ON s.local_id=n.local_id WHERE s.state='stopped' AND s.error=? AND n.id LIKE n.local_id || '/signed_out_%' AND n.facts IS NOT NULL")
+    .all(DEVICE_SIGNED_OUT) as { rid: number; facts: string }[];
+  for (const r of rows) {
+    let f: ShareFacts;
+    try {
+      f = JSON.parse(r.facts) as ShareFacts;
+    } catch {
+      continue;
+    }
+    if (f.via === "login" && !f.out_since) ctx.db.prepare("UPDATE notices SET facts=? WHERE rowid=?").run(JSON.stringify({ ...f, out_since: true }), r.rid);
+  }
 }
 
 /** End one live share here (the server already ended it, or can no longer be reached for it): stopped with `why`,
@@ -304,7 +329,7 @@ function endShare(ctx: Ctx, lid: string, why: string, noticeId: string, facts: S
 }
 
 /** Why a request to a session expired before an answer: its share ended as the server's `ended_reason` says. */
-export type RequestExpiry = "device_signed_out" | "member_removed";
+export type RequestExpiry = "device_signed_out" | "member_removed" | "sharing_stopped";
 
 /**
  * The requests to `lid` still waiting for an answer expire when its share ends at a sign-out or a lost workspace: the
@@ -355,6 +380,8 @@ export function endShareStoppedByPerson(ctx: Ctx, lid: string, noticeId: string)
   tx(ctx.db, () => {
     markStopped(ctx, lid);
     notePriorShare(ctx, lid, true);
+    // The server expired the requests still waiting on it when its person stopped it (E2E-AGENT cycle 13).
+    expireRequests(ctx, lid, "sharing_stopped");
     // Stopped or held from the web as well: the notice says how to unblock it, as the deny does (C9-2).
     const s = getShare(ctx, lid);
     if (s) addShareNotice(ctx, lid, noticeId, factsOf(s, "stopped_on_web"));
@@ -388,14 +415,21 @@ function endedShareStoppedByPerson(ctx: Ctx, lid: string, noticeId: string): voi
   renderHot(ctx, lid);
 }
 
-/** The newest notice about a sign-out that ended the share of `lid` says a new `align login` ended it (cycle 12). */
-function endedByLogin(ctx: Ctx, lid: string): boolean {
-  const r = ctx.db.prepare("SELECT facts FROM notices WHERE local_id=? AND id LIKE ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(lid, `${lid}/signed_out_%`) as { facts: string | null } | undefined;
-  try {
-    return !!r?.facts && (JSON.parse(r.facts) as ShareFacts).via === "login";
-  } catch {
-    return false;
-  }
+/** A pending share of a session its person stopped on the web: its queued calls go, it is stopped as its person
+ *  stopped it, and it is told it stays stopped (`share_stopped`). */
+function dropStoppedShare(ctx: Ctx, lid: string): void {
+  const s = getShare(ctx, lid);
+  if (!s) return;
+  tx(ctx.db, () => {
+    ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('put_session','post_epoch')").run(lid);
+    ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
+    markStopped(ctx, lid);
+    ctx.db.prepare("UPDATE shares SET error=NULL WHERE local_id=?").run(lid);
+    notePriorShare(ctx, lid, true);
+    ctx.db.prepare("DELETE FROM notices WHERE local_id=? AND id LIKE ?").run(lid, `${lid}/share_started_%`);
+    addShareNotice(ctx, lid, `share_stopped_${nowIso()}`, factsOf(s, "share_stopped"));
+  });
+  renderHot(ctx, lid);
 }
 
 /** One of the person's sessions whose share the server ended, as the directives answer lists it (`ended_sessions`). */
@@ -423,6 +457,15 @@ export function endSharesEndedOnServer(ctx: Ctx, ended: EndedOnServer[]): number
   for (const e of ended) {
     const s = ctx.db.prepare("SELECT local_id, state, error FROM shares WHERE session_key=? AND workspace_id=?").get(e.session_key, e.ws) as { local_id: string; state: string; error: string | null } | undefined;
     if (!s) continue;
+    // A share asked for here and not sent yet, of a session its person stopped (Stop sharing on the web): the server
+    // never shares it again, so it is dropped before it is sent and the session told it stays stopped, never "sharing
+    // failed" (E2E-AGENT cycle 13 follow-up; the pass reads this answer before it sends a share).
+    if (s.state === "pending" && e.ended_reason === null) {
+      dropStoppedShare(ctx, s.local_id);
+      ctx.log(`directives: session ${s.local_id.slice(0, 8)} was stopped by its person on the web; its share asked for here was not sent`);
+      n++;
+      continue;
+    }
     // Ended here already at a sign-out or a lost workspace, which offer `::align share`: a stop by its person before that
     // means the server never shares it again (C9-1). One its person stopped here since is left as it is.
     const endedHere = (s.state === "stopped" || s.state === "error") && (s.error === DEVICE_SIGNED_OUT || s.error === ACCESS_LOST);

@@ -31,8 +31,9 @@ import {
 import { openCtx, saveConfig, type Ctx } from "./context.ts";
 import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
-import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, endedState, getShare, releaseOf, renderEndedShares } from "./hot.ts";
-import { latchWayOut, shareAgainWords } from "./shared/ended.ts";
+import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedByLogin, endedReason, endedState, getShare, notMember, releaseOf, renderEndedShares } from "./hot.ts";
+import { endedWhyWords, latchWayOut, shareAgainWords } from "./shared/ended.ts";
+import { buildOf, hooksBuildDiffers, hooksBuildWords } from "./build.ts";
 import { fetchAsks } from "./asks.ts";
 import { pullEndedSessions } from "./directives.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
@@ -756,14 +757,17 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
     const lost = share?.error === ACCESS_LOST && !signedIn(ctx.home) && !(loadMe(ctx.home)?.workspaces ?? []).some((w) => w.id === share.workspace_id);
     // While the ended shares are unread since this sign-in, `align sync` comes first, as the deny says (cycle 12).
     const unread = !!kvGet(ctx.db, ENDED_UNREAD);
+    // Ended by a new `align login` that replaced this machine's pairing, as its notice and deny say; out of reach because
+    // its person is no longer a member, that rather than this sign-in's reach (cycle 13, section 5).
+    const at = share?.error === DEVICE_SIGNED_OUT && signedIn(ctx.home) && endedByLogin(ctx, s.local_id) ? "ended at a new sign-in (`align login`)" : "ended at a sign-out";
     const why =
       (share?.error === DEVICE_SIGNED_OUT || (share?.error === ACCESS_LOST && !signedIn(ctx.home))
         ? again
-          ? `; ended at a sign-out; ${shareAgainWords(unread, "")}`
+          ? `; ${at}; ${shareAgainWords(unread, "")}`
           : lost
             ? "; no access to the workspace; this machine signed out"
             : signedIn(ctx.home)
-              ? "; ended at a sign-out; this sign-in does not reach its workspace"
+              ? `; ${at}; ${notMember(loadMe(ctx.home), share!.workspace_id) ? "you are no longer a member of its workspace" : "this sign-in does not reach its workspace"}`
               : "; this machine signed out"
         : share?.error === ACCESS_LOST
           ? again
@@ -1188,11 +1192,12 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
     const ended = endedState(ctx, share);
     if (!ended) return "";
     // Shareable there again now: the way the session's notice and its deny give (C6-2).
+    // Why, in the deny's words: a share a replacing `align login` ended never reads as signed out (cycle 13, section 5).
+    const relogin = ended.why === "device_signed_out" && signedIn(ctx.home) && endedByLogin(ctx, lid);
     if (ended.reshare) {
-      const why = ended.why === "device_signed_out" ? "this machine signed out, and is signed in again now" : "this machine lost access to its Align workspace, and can reach it again now";
-      return `; sharing ended (${why}): ${shareAgainWords(!!kvGet(ctx.db, ENDED_UNREAD), "in the session", true)}, after which it can be resumed or released from the web`;
+      return `; sharing ended (${endedWhyWords(ended.why, true, relogin, true)}): ${shareAgainWords(!!kvGet(ctx.db, ENDED_UNREAD), "in the session", true)}, after which it can be resumed or released from the web`;
     }
-    const why = ended.why === "device_signed_out" ? "this machine signed out" : ended.why === "access_lost" ? "this machine no longer has access to its Align workspace" : "the Align server no longer has this session's share";
+    const why = endedWhyWords(ended.why, false, relogin, true);
     // Signed out: `align stop-sharing`, or a new sign-in and `::align share`, in the deny's words (cycle 12, section 6).
     if (ended.login) return `; sharing ended (${why}): ${latchWayOut(lid, false, "user", null, { login: true })}`;
     const release = releaseOf(ctx, lid, share);
@@ -1396,6 +1401,10 @@ async function cmdDoctor(ctx: Ctx): Promise<void> {
   add("claude hooks", s.claude === "installed" ? "OK" : "WARN", s.claude);
   add("codex hooks", s.codex.startsWith("installed") ? "OK" : "WARN", s.codex);
   add("hook file", s.hash === "ok" ? "OK" : "WARN", s.hash);
+  const differs = hooksBuildDiffers(ctx.home, distDir());
+  const mine = buildOf(distDir());
+  if (differs) add("hooks build", "WARN", hooksBuildWords(differs, mine));
+  else if (s.hash !== "not installed" && mine) add("hooks build", "OK", `${mine.version} build ${mine.build}, as this \`align\``);
   const rec = readJson<InstallRecord>(layout.install(ctx.home));
   if (rec && !fs.existsSync(rec.node)) add("hook node path", "FAIL", `${rec.node} no longer exists; rerun align install`);
   const hookJs = fs.existsSync(path.join(ctx.home, "bin", "current", "hook.js")) ? path.join(ctx.home, "bin", "current", "hook.js") : path.join(distDir(), "hook.js");
@@ -1546,6 +1555,12 @@ export async function main(argv: string[]): Promise<void> {
     if (cmd !== "login" && cmd !== "status" && !rest.includes("--hook")) {
       const note = takePairingNote(ctx);
       if (note) err(`align: ${note}`);
+    }
+    // The hooks run the copy in bin/current: another build there (an older `align` still on PATH, a newer one not yet
+    // installed) is said at every command, never silently (E2E-AGENT cycle 13 C13-1). `align doctor` says it as a check.
+    if (cmd !== "install" && cmd !== "uninstall" && cmd !== "doctor" && !rest.includes("--hook")) {
+      const differs = hooksBuildDiffers(ctx.home, distDir());
+      if (differs) err(`align: ${hooksBuildWords(differs, buildOf(distDir()))}`);
     }
     switch (cmd) {
       case "login":

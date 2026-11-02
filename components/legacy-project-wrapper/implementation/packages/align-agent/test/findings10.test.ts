@@ -99,7 +99,9 @@ describe("C9-1: a web Stop sharing before a re-pairing is heard by the new pairi
       assert.equal(told, `Align: this session's sharing was stopped (Stop sharing on the web), so it stays stopped and is not shared again from here (its share here had ended when ${ended}); its usage stays on this machine.`);
       const rows = json((await runCli(t, ["sessions", "--json"])).stdout) as { local_id: string; shared: string }[];
       assert.equal(rows.find((r) => r.local_id === A.lid)?.shared, "stopped (Acme)");
-      assert.match(rows.find((r) => r.local_id === B.lid)?.shared ?? "", /ended at a sign-out; `::align share` shares it again/, "another session still offers it");
+      // Ended by the replacing login, it says so, as its deny and notice do (E2E-AGENT cycle 13, section 5).
+      const at = how.startsWith("logout") ? "ended at a sign-out" : "ended at a new sign-in \\(`align login`\\)";
+      assert.match(rows.find((r) => r.local_id === B.lid)?.shared ?? "", new RegExp(`${at}; \`::align share\` shares it again`), "another session still offers it");
       assert.match(prompt(t, A.sid, "::align share confirm", A.cwd).reason, /a session whose sharing was stopped is not shared again, so it stays stopped/);
       // The next pass changes nothing more, and the other session is still told it can be shared again.
       await sync(t);
