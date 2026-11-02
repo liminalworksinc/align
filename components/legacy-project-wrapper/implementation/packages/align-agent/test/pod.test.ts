@@ -234,7 +234,8 @@ describe("shell writes", () => {
     assert.deepEqual(w("cat > notes/plan.md <<'EOF'\nhello\nEOF"), ["notes/plan.md"]);
     assert.deepEqual(w("echo hi | tee -a log.txt >/dev/null"), ["log.txt"]);
     assert.deepEqual(w("sed -i '' 's/a/b/' trinity_sched/preempt.py"), ["trinity_sched/preempt.py"]);
-    assert.deepEqual(w("git add DESIGN.md TESTING.md && git commit -m 'x'"), ["DESIGN.md", "TESTING.md"]);
+    // Staging changes nothing in a file: `git add <path>` is no edit (A1-local-1).
+    assert.deepEqual(w("git add DESIGN.md TESTING.md && git commit -m 'x'"), []);
     assert.deepEqual(w("cp a.yml configs/b.yml; touch done.flag"), ["configs/b.yml", "done.flag"]);
     assert.deepEqual(w("make test 2>&1 | tail -5"), []);
     assert.deepEqual(w("cat DESIGN.md; ls > /dev/null; echo $X > $OUT; git add -A; git add ."), []);

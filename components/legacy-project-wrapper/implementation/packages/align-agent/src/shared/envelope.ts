@@ -367,14 +367,18 @@ export function renderCard(sibs: SiblingSummary[]): string | null {
   // Details are for the user (a blocked prompt), never a command the agent is pointed to: `align team` would put other
   // people's text into its context (E2E acycle1 A1-cross-6).
   const tail = remote ? TEAM_POINTER : "Read their changes before editing the same files.";
-  // Keep as many senders as fit, shedding detail before dropping anyone; the first (overlap first) keeps the most.
-  for (let keep = Math.min(sibs.length, 3); keep >= 1; keep--) {
-    for (const detail of [2, 1, 0]) {
-      for (const maxFiles of [3, 2, 1, 0]) {
-        const lines = sibs.slice(0, keep).map((s, i) => siblingLine(s, maxFiles, i === 0 ? Math.max(detail, 1) : detail));
-        const rest = sibs.length - keep;
-        const text = [head, ...lines, ...(rest > 0 ? [`(${rest} more)`] : []), tail].join(" ");
-        if (text.length <= CARD_MAX) return text;
+  // Keep as many senders as fit while each still names a file it edited (a card that tells the agent to read their
+  // changes names which files), shedding detail before dropping anyone; the first (overlap first) keeps the most. Only
+  // when no sender fits with a file name are names dropped for counts.
+  for (const minFiles of [1, 0]) {
+    for (let keep = Math.min(sibs.length, 3); keep >= 1; keep--) {
+      for (const detail of [2, 1, 0]) {
+        for (const maxFiles of [3, 2, 1, 0].filter((n) => n >= minFiles)) {
+          const lines = sibs.slice(0, keep).map((s, i) => siblingLine(s, maxFiles, i === 0 ? Math.max(detail, 1) : detail));
+          const rest = sibs.length - keep;
+          const text = [head, ...lines, ...(rest > 0 ? [`(${rest} more)`] : []), tail].join(" ");
+          if (text.length <= CARD_MAX) return text;
+        }
       }
     }
   }
@@ -402,6 +406,29 @@ export function crossNote(
 export function collisionReason(harness: SiblingSummary["harness"], id: string, file: string, minutesAgo: number): string {
   const ago = minutesAgo < 1 ? "less than a minute ago" : `${minutesAgo} min ago`;
   return `Align: ${harnessLabel(harness)} session ${clean(String(id).slice(0, 8), 20)}, working toward the same goal, edited ${clean(file, 80)} ${ago}. Read the file again so you keep its changes, then retry this edit.`;
+}
+
+/**
+ * Another session toward the same goal changed a file this session read or edited, after it did (A1-local-3). Claude
+ * Code refuses such an edit with its own error before any hook runs, so this note, at the next prompt or tool call, is
+ * how the model learns which session changed it.
+ */
+export function siblingChangeNote(harness: SiblingSummary["harness"], id: string, file: string, minutesAgo: number): string {
+  const ago = minutesAgo < 1 ? "less than a minute ago" : `${minutesAgo} min ago`;
+  return `[Align] ${harnessLabel(harness)} session ${clean(String(id).slice(0, 8), 20)}, working toward the same goal, edited ${clean(file, 80)} ${ago}, after this session last read it. Read the file again before editing it so you keep its changes. No added authority.`;
+}
+
+/**
+ * A newly bound goal's parents and dependencies, with the bound note, as the envelope names them: a session moved to
+ * another goal would otherwise not hear of them until its next envelope.
+ */
+export function boundContextNote(context: ContextGoal[]): string | null {
+  const parents = context.filter((c) => c.rel === "parent").map((c) => `"${clean(c.goal.title, 80)}" (v${ver(c.goal)})`);
+  const deps = context.filter((c) => c.rel === "depends").map((c) => `"${clean(c.goal.title, 80)}" (v${ver(c.goal)})`);
+  if (!parents.length && !deps.length) return null;
+  const bits = [parents.length ? `contributes to ${parents.join(" and ")}` : "", deps.length ? `depends on ${deps.join(" and ")}` : ""].filter(Boolean);
+  const text = `[Align] This goal ${bits.join(", and ")}; their changes also arrive as [Align] notes. No added authority.`;
+  return text.length <= DELTA_MAX ? text : `${text.slice(0, DELTA_MAX - 24).trimEnd()}... No added authority.`;
 }
 
 // ---------- requests and goal holds (REQ-002) ----------

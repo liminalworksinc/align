@@ -470,6 +470,45 @@ try {
     `${usage2}`,
   );
 
+  // ======== two sessions in one repo (A1-local-1, A1-local-3): a refused edit never goes up, whoever changes its file
+  // later; the session that read the file hears which session changed it ========
+  const sibRepo = path.join(tmpRoot, "work", "siblings");
+  mkdirSync(path.join(sibRepo, "docs"), { recursive: true });
+  spawnSync("git", ["init", "-q", sibRepo]);
+  spawnSync("git", ["-C", sibRepo, "remote", "add", "origin", "https://github.example.test/ledger/siblings.git"]);
+  writeFileSync(path.join(sibRepo, "docs", "r.md"), "base\n");
+  const sibShare = cli(["share", "--dir", sibRepo, "--workspace", W, "--goal", G.id, "--signals", "--yes"]);
+  const [SA, SB] = [randomUUID(), randomUUID()];
+  for (const sid of [SA, SB]) {
+    hook("SessionStart", { session_id: sid, source: "startup", cwd: sibRepo });
+    hook("UserPromptSubmit", { session_id: sid, prompt_id: `${sid}-p1`, prompt: "go", cwd: sibRepo });
+  }
+  sync();
+  const rfile = path.join(sibRepo, "docs", "r.md");
+  const toolCall = (sid, tool, input, id, ran = true) => {
+    const pre = hook("PreToolUse", { session_id: sid, cwd: sibRepo, tool_name: tool, tool_input: input, tool_use_id: id });
+    if (ran) hook("PostToolUse", { session_id: sid, cwd: sibRepo, tool_name: tool, tool_input: input, tool_use_id: id });
+    return pre;
+  };
+  // B reads the file, then its Edit is refused at the permission prompt (no PostToolUse); A reads and edits it.
+  toolCall(SB, "Read", { file_path: rfile }, "toolu_b1");
+  toolCall(SB, "Edit", { file_path: rfile, old_string: "base", new_string: "B-change" }, "toolu_b2", false);
+  await sleep(20);
+  toolCall(SA, "Read", { file_path: rfile }, "toolu_a1");
+  hook("PreToolUse", { session_id: SA, cwd: sibRepo, tool_name: "Edit", tool_input: { file_path: rfile, old_string: "base", new_string: "A-change" }, tool_use_id: "toolu_a2" });
+  writeFileSync(rfile, "A-change\n");
+  hook("PostToolUse", { session_id: SA, cwd: sibRepo, tool_name: "Edit", tool_input: { file_path: rfile }, tool_use_id: "toolu_a2" });
+  const told = toolCall(SB, "Read", { file_path: rfile }, "toolu_b3");
+  sync();
+  sync();
+  const sibEdits = sdb((d) => d.prepare("SELECT session_key, path FROM v2_activity WHERE ws_id = ? AND kind = 'edit' AND session_key IN (?, ?)").all(W, sessionKey(W, "claude-code", SA), sessionKey(W, "claude-code", SB)));
+  check(
+    "siblings: B's edit refused at the permission prompt never reaches the server after A edits the same file (only A's edit does, with A's key and path); B's next tool call names A's session as the one that changed the file",
+    sibShare.code === 0 && sibEdits.length === 1 && sibEdits[0].session_key === sessionKey(W, "claude-code", SA) && sibEdits[0].path === "docs/r.md" &&
+      (told.context ?? "").startsWith(`[Align] Claude Code session ${SA.slice(0, 8)}, working toward the same goal, edited docs/r.md less than a minute ago, after this session last read it.`),
+    `${sibShare.code} ${sibShare.stderr} ${JSON.stringify(sibEdits)} ${told.stdout}`,
+  );
+
   // ======== align share --dir --past: already-metered past sessions from their start, never backdated ========
   const oldRepo = path.join(tmpRoot, "work", "old-repo");
   mkdirSync(oldRepo, { recursive: true });

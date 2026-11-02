@@ -6,7 +6,7 @@ import fs from "node:fs";
 import { alignHomeForHook } from "./shared/layout.ts";
 import type { Harness } from "./shared/types.ts";
 import { kickSync } from "./hooks/autostart.ts";
-import { denyOutput, failureDeny, latchDeny, latchedOnFailure, preToolUse, sessionStart, stop, userPromptSubmit, type HookInput, type HookOutput } from "./hooks/handlers.ts";
+import { denyOutput, failureDeny, latchDeny, latchedOnFailure, postToolUse, preToolUse, sessionStart, stop, userPromptSubmit, type HookInput, type HookOutput } from "./hooks/handlers.ts";
 import { MIN_NODE, unsupportedNode } from "./node-version.ts";
 
 const DEADLINE_MS = Number(process.env.ALIGN_HOOK_DEADLINE_MS || 300);
@@ -115,6 +115,16 @@ async function main(): Promise<void> {
       const out = (decided = preToolUse(home, harness, input));
       await kickSync(home, process.argv[1] || "", process.env, event).catch(() => undefined);
       return emit(out);
+    }
+    case "PostToolUse":
+    case "PostToolUseFailure": {
+      decided = null; // the tool already ran: nothing to add or deny
+      try {
+        postToolUse(home, harness, input, event === "PostToolUseFailure");
+      } catch {
+        /* best effort */
+      }
+      return emit(null);
     }
     default:
       return emit(null);

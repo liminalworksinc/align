@@ -28,6 +28,8 @@ import {
   renderContextDelta,
   renderDelta,
   renderEnvelope,
+  boundContextNote,
+  siblingChangeNote,
   requestAnswerLine,
   stoppedForGoodWords,
   requestContext,
@@ -49,7 +51,7 @@ import { isShareStateNotice, noticeKind, resumedButHeld } from "../shared/notice
 import { matchRule, readRules, removeRule, setRule } from "../shared/rules.ts";
 import { queueSteering, steeringLine, unsharedNote } from "../shared/steering.ts";
 import type { DriftFile, FeedFile, Goal, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
-import { CLAIM_MS, collision, commitSubject, crossOverlap, display, editedPaths, podReport, readPath, record, shellWrites, siblingNews, type Act } from "./siblings.ts";
+import { CLAIM_MS, collision, commitSubject, crossOverlap, display, editedPaths, liveGoalId, podReport, readPaths, record, shellWrites, siblingChanges, siblingNews, type Act } from "./siblings.ts";
 
 export interface HookInput {
   session_id?: string;
@@ -62,6 +64,8 @@ export interface HookInput {
   prompt?: string;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
+  /** The harness's id for one tool call, the same at PreToolUse and PostToolUse. */
+  tool_use_id?: string;
   model?: string;
   /** Set when a tool event fires inside a Claude Code subagent. */
   agent_id?: string;
@@ -277,7 +281,7 @@ function changedFacts(hot: HotState): ShareFacts {
 
 /** `held`: the goal holds that block this session's tools now (`blockingHolds`), so a "resumed" notice told while one
  *  does says the hold still blocks them instead of that the tools work again (C10-3). */
-function takeNotices(hot: HotState | null, inj: InjectedState, held: () => BlockingHolds | null = () => null): string | null {
+function takeNotices(hot: HotState | null, inj: InjectedState, held: () => BlockingHolds | null = () => null, stopped: () => boolean = () => false): string | null {
   if (!hot) return null;
   const plan = planNotices(hot, inj);
   inj.notices_shown.push(...plan.seen);
@@ -286,7 +290,19 @@ function takeNotices(hot: HotState | null, inj: InjectedState, held: () => Block
   const told = plan.told;
   if (!told.length) return null;
   const blocking = told.some((n) => noticeKind(n.id).startsWith("resumed_")) ? held() : null;
-  return told.map((n) => (blocking && noticeKind(n.id).startsWith("resumed_") ? resumedButHeld(blocking.titles, "user") : n.text)).join("\n");
+  // A release lifts the hold only: a session also stopped from the web stays blocked, and its user hears so.
+  const stop = told.some((n) => noticeKind(n.id).startsWith("release_")) && stopped();
+  return told
+    .map((n) => (blocking && noticeKind(n.id).startsWith("resumed_") ? resumedButHeld(blocking.titles, "user") : stop && noticeKind(n.id).startsWith("release_") ? `${n.text} ${STILL_STOPPED}` : n.text))
+    .join("\n");
+}
+
+const STILL_STOPPED = "This session is still stopped from its Align workspace, so its tools stay blocked until it is resumed there.";
+
+/** The session's stop latch says it is stopped now (an unreadable one counts: it blocks tools too). */
+function stoppedNow(home: string, lid: string): boolean {
+  const l = readJsonStrict<Latch>(layout.latch(home, lid));
+  return l.state === "ok" ? l.value?.stopped === true : l.state !== "absent";
 }
 
 /** Goal holds blocking a session's tools now: those its hold file names (an unreadable one blocks with no title known),
@@ -580,7 +596,7 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
     const again = pendingRequestContext(hot, inj, hot?.goal?.id ?? null);
     if (again.length) context = [context, ...again].filter(Boolean).join("\n");
   }
-  const notices = takeNotices(hot, inj, () => blockingHolds(home, lid, cwd));
+  const notices = takeNotices(hot, inj, () => blockingHolds(home, lid, cwd), () => stoppedNow(home, lid));
   if (notices) messages.push(notices);
   if (source === "startup") {
     const note = unsharedNote(home);
@@ -791,7 +807,7 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
     // A session whose share failed (or ended) still hears the sync's notices at its next prompt (N5); and one a folder
     // rule is sharing that saw the cached feed's hold, that the hold is gone (C9-3).
     const inj = readInjected(home, lid);
-    const notices = takeNotices(hot, inj);
+    const notices = takeNotices(hot, inj, undefined, () => stoppedNow(home, lid));
     const lifted = liftedHolds(home, lid, inj, input.cwd || hot?.cwd || null);
     const system = [notices, ...lifted.notices].filter(Boolean).join("\n") || null;
     if (!system && !lifted.context.length) return null;
@@ -877,11 +893,20 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
     markInjected(inj, kind === "unbound" ? null : goal, hot.share.state);
   }
   if (hot.share.state === "shared" && goal) {
-    // A newly bound goal's parents arrive with the bound note; later parent or dependency versions as short notes.
-    const notes = kind === "bound" ? (markContext(inj, hot.context_goals), []) : goal.id === hot.goal?.id ? contextNotes(inj, hot.context_goals) : [];
+    // A newly bound goal's parents and dependencies arrive with the bound note (from the cached feed when the hot file
+    // still has the goal before a move made in this session); later parent or dependency versions as short notes.
+    let notes: string[] = [];
+    if (kind === "bound") {
+      const related = goal.id === hot.goal?.id ? hot.context_goals || [] : contextGoals(home, hot.share.workspace_id, goal.id);
+      markContext(inj, related);
+      const line = boundContextNote(related);
+      if (line) notes = [line];
+    } else if (goal.id === hot.goal?.id) notes = contextNotes(inj, hot.context_goals);
     const asks = asksNote(home, hot.share.workspace_id, goal.id, inj);
+    // Which session changed a file this one read or edited: told now, whatever the card's throttle (A1-local-3).
+    const changed = changeNotes(home, lid, goal.id, input.cwd || hot.cwd);
     const card = cardFor(home, lid, goal.id, inj, input.cwd || hot.cwd, hot.share.workspace_id);
-    const parts = [context, ...notes, asks, card].filter((x): x is string => !!x);
+    const parts = [context, ...notes, asks, ...changed, card].filter((x): x is string => !!x);
     context = parts.length ? parts.join("\n") : null;
   }
   if (kind || sameAsInjected(inj, goal, hot.share.state)) {
@@ -896,7 +921,7 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   const held = blockingHolds(home, lid, input.cwd || hot.cwd);
   const resumed = resumeLine(hot, inj, held);
   if (resumed) context = [context, resumed].filter(Boolean).join("\n");
-  const notices = [takeNotices(hot, inj, () => held), ...req.notices, ...lifted.notices, takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
+  const notices = [takeNotices(hot, inj, () => held, () => stoppedNow(home, lid)), ...req.notices, ...lifted.notices, takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
   writeInjected(home, lid, inj);
   if (!context && !notices) return null;
   const out: Record<string, unknown> = {};
@@ -1069,33 +1094,75 @@ function feedHoldDeny(home: string, lid: string, cwd: string | null): HookOutput
 }
 
 /**
- * Record this shared session's edits and commits for its siblings, and hold an edit to a file another session toward
- * the same goal changed in the last 20 minutes, once, so the agent re-reads it instead of overwriting that work.
+ * Record this shared session's edits, reads and commits for its siblings (with the goal it counts toward now, A1-local-5),
+ * and hold an edit to a file another session toward the same goal changed in the last 20 minutes, once, so the agent
+ * re-reads it instead of overwriting that work. Any tool call also tells, once, which session changed a file this one
+ * read or edited (A1-local-3). The goal is the one the session counts toward from its last prompt (A1-local-6).
  */
 function siblingEdits(home: string, harness: Harness, lid: string, input: HookInput): { held?: HookOutput; note?: string } {
   const hot = readHot(home, lid);
-  if (hot?.share?.state !== "shared" || !hot.goal) return {};
+  if (hot?.share?.state !== "shared") return {};
+  const goalId = liveGoalId(hot, readInjected(home, lid));
+  if (!goalId) return {};
   const cwd = input.cwd || hot.cwd;
   const files = editedPaths(harness, input.tool_name, input.tool_input, cwd);
   const subject = commitSubject(input.tool_name, input.tool_input);
   const at = new Date().toISOString();
-  const hit = collision(home, lid, hot.goal.id, files);
+  const g = goalId;
+  const hit = collision(home, lid, goalId, files);
   if (hit) {
-    record(home, lid, [{ t: "warned", at, p: hit.file, ref: `${hit.sib.lid}@${hit.at}` }]);
+    record(home, lid, [{ t: "warned", at, p: hit.file, ref: `${hit.sib.lid}@${hit.at}`, g }]);
     const reason = collisionReason(hit.sib.hot.harness, hit.sib.hot.native_session_id, display(hit.file, cwd), Math.floor((Date.now() - Date.parse(hit.at)) / 60_000));
     return { held: { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } } };
   }
+  const changed = changeNotes(home, lid, goalId, cwd);
   // Files written through the shell count as edits for the team (never held: one command can't be partly denied).
   const shell = shellWrites(input.tool_name, input.tool_input, cwd).filter((p) => !files.includes(p));
-  const acts: Act[] = [...files, ...shell].map((p) => ({ t: "edit", at, p }));
-  const read = readPath(harness, input.tool_name, input.tool_input, cwd);
-  if (read) acts.push({ t: "read", at, p: read });
-  if (subject) acts.push({ t: "commit", at, s: subject });
+  // The tool call's id, so its PostToolUse hook can confirm it ran (A1-local-1).
+  const u = typeof input.tool_use_id === "string" && input.tool_use_id ? { u: input.tool_use_id } : {};
+  const acts: Act[] = [...files.map((p): Act => ({ t: "edit", at, p, g, ...u })), ...shell.map((p): Act => ({ t: "edit", at, p, g, sh: 1, ...u }))];
+  for (const p of readPaths(harness, input.tool_name, input.tool_input, cwd)) acts.push({ t: "read", at, p, g });
+  if (subject) acts.push({ t: "commit", at, s: subject, g });
   // Another person (or a claim) on this file: one note, never a hold, since nothing local gets overwritten.
-  const cross = crossOverlap(home, lid, hot.share.workspace_id, hot.goal.id, [...files, ...shell], cwd);
+  const cross = crossOverlap(home, lid, hot.share.workspace_id, goalId, [...files, ...shell], cwd);
   if (cross) acts.push({ t: "noted", at, ref: cross.ref });
   record(home, lid, acts);
-  return cross ? { note: crossNote(cross.who, cross.file, cross.minutes, { goal: cross.goal, claimUntil: cross.claimUntil, task: cross.task, remote: cross.remote }) } : {};
+  const notes = [...changed, ...(cross ? [crossNote(cross.who, cross.file, cross.minutes, { goal: cross.goal, claimUntil: cross.claimUntil, task: cross.task, remote: cross.remote })] : [])];
+  return notes.length ? { note: notes.join("\n") } : {};
+}
+
+/** The sibling-change notes for this session (at most three), each recorded as told so it is never repeated. */
+function changeNotes(home: string, lid: string, goalId: string, cwd: string | null): string[] {
+  const hits = siblingChanges(home, lid, goalId);
+  if (!hits.length) return [];
+  const at = new Date().toISOString();
+  record(home, lid, hits.map((h): Act => ({ t: "noted", at, p: h.file, ref: `chg:${h.sib.lid}@${h.at}` })));
+  return hits.slice(0, 3).map((h) => siblingChangeNote(h.sib.hot.harness, h.sib.hot.native_session_id, display(h.file, cwd), Math.floor((Date.now() - Date.parse(h.at)) / 60_000)));
+}
+
+// ---------- PostToolUse ----------
+/**
+ * Claude Code's PostToolUse (and, for a shell command that exited non-zero, PostToolUseFailure): the tool call ran. For
+ * a shared session it records, once, that its edits now count only when confirmed, and a `ran` act for a call that
+ * edits (an edit tool that succeeded, or a shell command with writes). An edit refused at the permission prompt never
+ * gets one, so it is never reported as made, whoever changes its file later (A1-local-1). Prints nothing.
+ */
+export function postToolUse(home: string, harness: Harness, input: HookInput, failed: boolean): void {
+  const sid = input.session_id;
+  if (!sid) return;
+  const lid = localId(harness, sid);
+  const hot = readHot(home, lid);
+  if (hot?.share?.state !== "shared") return;
+  const marker = layout.activityConfirmed(home, lid);
+  if (!fs.existsSync(marker)) {
+    fs.mkdirSync(layout.activityDir(home), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(marker, "", { mode: 0o600 });
+  }
+  const u = input.tool_use_id;
+  if (typeof u !== "string" || !u) return;
+  const cwd = input.cwd || hot.cwd;
+  const edit = !failed && editedPaths(harness, input.tool_name, input.tool_input, cwd).length > 0;
+  if (edit || shellWrites(input.tool_name, input.tool_input, cwd).length) record(home, lid, [{ t: "ran", at: new Date().toISOString(), u }]);
 }
 
 /**

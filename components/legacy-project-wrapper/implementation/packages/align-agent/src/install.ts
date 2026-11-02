@@ -12,10 +12,18 @@ import { readJson, writeFileAtomic, writeJsonAtomic } from "./shared/fsx.ts";
 
 export const HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "Stop"] as const;
 
-/** Claude Code runs StopFailure instead of Stop when a turn ends on an API error; Codex has no such event. */
+/**
+ * Claude Code runs StopFailure instead of Stop when a turn ends on an API error; Codex has no such event. Claude Code
+ * also gets PostToolUse and PostToolUseFailure (a shell command that exited non-zero), which confirm that an edit
+ * recorded at PreToolUse ran, so one refused at its permission prompt is never reported as made (A1-local-1). Codex
+ * keeps the file-change rule.
+ */
 export function hookEvents(harness: "claude" | "codex"): readonly string[] {
-  return harness === "claude" ? [...HOOK_EVENTS, "StopFailure"] : HOOK_EVENTS;
+  return harness === "claude" ? ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop", "StopFailure"] : HOOK_EVENTS;
 }
+
+/** Events whose handler takes a tool matcher. */
+const TOOL_EVENTS = new Set(["PreToolUse", "PostToolUse", "PostToolUseFailure"]);
 export interface InstallOptions {
   claude: boolean;
   codex: boolean;
@@ -92,7 +100,7 @@ export function mergeHooks(hooks: Record<string, unknown>, alignHome: string, no
   for (const event of hookEvents(harness)) {
     const groups = Array.isArray(hooks[event]) ? (hooks[event] as unknown[]) : [];
     const handler = { type: "command", command: hookCommand(nodePath, alignHome, harness, event), timeout: 5 };
-    const group: Record<string, unknown> = event === "PreToolUse" ? { matcher: "*", hooks: [handler] } : { hooks: [handler] };
+    const group: Record<string, unknown> = TOOL_EVENTS.has(event) ? { matcher: "*", hooks: [handler] } : { hooks: [handler] };
     groups.push(group);
     hooks[event] = groups;
   }
@@ -215,7 +223,7 @@ export function install(paths: Paths, o: InstallOptions): { lines: string[]; rec
     const skillsCreated = prev?.claude ? !!prev.claude.skills_created : !fs.existsSync(path.dirname(dir));
     const hooks: Record<string, unknown> = {};
     mergeHooks(hooks, home, o.nodePath, "claude");
-    say(`${o.dryRun ? "Would install" : "Installed"} the Align plugin for Claude Code at ${dir} (hooks ${hookEvents("claude").join(", ")}; PreToolUse matcher "*"). New sessions load it; \`claude plugin disable align@skills-dir\` turns it off.`);
+    say(`${o.dryRun ? "Would install" : "Installed"} the Align plugin for Claude Code at ${dir} (hooks ${hookEvents("claude").join(", ")}; tool events matcher "*"). New sessions load it; \`claude plugin disable align@skills-dir\` turns it off.`);
     if (!o.dryRun) {
       fs.mkdirSync(path.join(dir, ".claude-plugin"), { recursive: true });
       fs.mkdirSync(path.join(dir, "hooks"), { recursive: true });

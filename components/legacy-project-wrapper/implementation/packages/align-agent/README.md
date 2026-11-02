@@ -97,10 +97,16 @@ call.
   person, overlap with its own files first. At most one card per 10 minutes unless work overlaps; 0 bytes when nothing
   is new. `align pod` gives the agent more when it asks.
 - Edits are seen three ways: edit tools (Claude Edit/Write/MultiEdit, Codex apply_patch), plain shell writes (`>`,
-  `>>`, `tee`, `sed -i`, `cp`/`mv` targets, `git add` paths), and, in the sync pass, the repo's working tree and new
-  commits since the previous pass (for files a script wrote), credited to the session most recently active there.
+  `>>`, `tee`, `sed -i`, `touch`, `cp`/`mv` targets; `git add` is no edit), and, in the sync pass, the repo's working
+  tree and new commits since the previous pass (for files a script wrote), credited to the session most recently
+  active there unless a hook already recorded the file's latest change. In Claude Code an edit counts once its
+  `PostToolUse` hook saw it run, so one refused at the permission prompt is never reported, whoever changes the file
+  later; in Codex once its file changed. Reads are Claude's `Read` and plain shell reads (`cat`, `head`, `sed -n`, `git
+  diff <path>` ...). Activity carries the goal it was recorded toward, so a session that moves to another goal brings
+  none of its earlier work along. The activity file is trimmed only of lines the sync pass has uploaded.
 - On this machine, an edit to a file another same-goal session changed in the last 20 minutes (and this session has not
-  read since) is held once with the reason. Only hook-seen edits can hold an edit. Across people nothing is held; the next edit of an overlapping or claimed
+  read since) is held once with the reason. Claude Code refuses such an edit itself before any hook runs, so every
+  prompt and tool call also tells the session, once, which session changed a file it read or edited. Only hook-seen edits can hold an edit. Across people nothing is held; the next edit of an overlapping or claimed
   file gets one short note.
 
 ## Limits, accepted asks and the drift notice
@@ -164,8 +170,9 @@ nothing, not even `ALIGN_HOME`.
 
 - `--claude` (default when no flag is given): writes the Claude Code plugin folder
   `$CLAUDE_CONFIG_DIR/skills/align/` (default `~/.claude/skills/align/`): `.claude-plugin/plugin.json` and
-  `hooks/hooks.json` with one handler each for `SessionStart`, `UserPromptSubmit`, `PreToolUse` (matcher `"*"`),
-  `Stop` and `StopFailure`: `'<node>' '<ALIGN_HOME>/bin/current/hook.js' claude <Event>`, timeout 5. Claude Code
+  `hooks/hooks.json` with one handler each for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and
+  `PostToolUseFailure` (matcher `"*"`; these two confirm that an edit recorded at `PreToolUse` ran), `Stop` and
+  `StopFailure`: `'<node>' '<ALIGN_HOME>/bin/current/hook.js' claude <Event>`, timeout 5. Claude Code
   loads it in every new session with no install step (`claude plugin list` shows `align@skills-dir`);
   `claude plugin disable align@skills-dir` turns it off. `settings.json` is not edited, except that handlers an
   earlier Align merged there are removed (with a `settings.json.align-backup-<timestamp>` copy first). Install
