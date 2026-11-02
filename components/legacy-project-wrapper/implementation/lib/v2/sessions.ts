@@ -435,12 +435,7 @@ export async function setAgentStop(pp: PolicyPrincipal, key: string, stop: boole
       "The machine that shared this session signed out of Align, so its sharing ended and a stop or resume can't reach it. If it was stopped, it stays stopped until its developer runs align stop-sharing there.",
     );
   }
-  if (s.ended_reason === "member_removed") {
-    throw conflict(
-      "member_removed",
-      "This session's developer is no longer a member of this workspace, so its sharing ended and a stop or resume can't reach it. If it was stopped, it stays stopped until they run align stop-sharing on their machine.",
-    );
-  }
+  if (s.ended_reason === "member_removed") throw conflict("member_removed", memberRemovedRefusal(pp, s));
   if (s.state === "stopped") throw conflict("sharing_stopped", "Sharing was stopped for this session");
   const at = nowIso();
   const id = await tx(() => {
@@ -449,6 +444,22 @@ export async function setAgentStop(pp: PolicyPrincipal, key: string, stop: boole
     return writeDirective(pp.wsId, stop ? "stop" : "resume", [key], null, null);
   });
   return { directive_id: id, agent_stopped: stop };
+}
+
+/** Why a stop or resume can't reach a session that ended when its person left the workspace, and what shares it again
+ *  as things stand: back in the workspace, with its machine given the workspace again, `::align share` in that session
+ *  shares it again (which the machine offers), and then Stop and Resume here reach it (E2E-AGENT cycle 12, section 6:
+ *  never only "align stop-sharing", which gives the session up). Its person is "you" to the reader. */
+function memberRemovedRefusal(pp: PolicyPrincipal, s: SessionRow): string {
+  const you = s.user_id === pp.userId;
+  const name = personName(s.user_id, get<{ name: string }>("SELECT name FROM ba_user WHERE id = ?", s.user_id)?.name);
+  const lead = `This session's sharing ended when ${you ? "you" : name} left this workspace, so a stop or resume can't reach it.`;
+  const then = "::align share in that session shares it again, and then Stop and Resume here reach it.";
+  const member = !!get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", pp.wsId, s.user_id);
+  if (!member) return `${lead} Once ${you ? "you are" : `${name} is`} back in the workspace and the machine that shared it has the workspace again, ${then}`;
+  const machine = sharedFrom(pp.wsId, s.device_id);
+  if (machine?.has_workspace) return `${lead} Its machine, ${machine.name}, has this workspace again: ${then}`;
+  return `${lead} Once the machine that shared it has this workspace again, ${then}`;
 }
 
 /** The machine that shared one of the caller's own sessions, as the Sessions tab words how to share it again (W7): its

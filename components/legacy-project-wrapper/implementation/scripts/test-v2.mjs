@@ -3143,7 +3143,8 @@ try {
     check(
       "members (E2E-AGENT cycle 2): removing a member ends their live sessions in that workspace in the same transaction (stopped, ended_reason member_removed, open epoch closed) and expires the requests waiting on them; Stop and Resume then -> 409 member_removed with a clear reason and no directive; the owner's list drops the session; a hold no longer reaches it",
       cpB.status === 201 && stopB.status === 200 && rmB.status === 204 && rowB?.state === "stopped" && rowB.ended_reason === "member_removed" && openB === 0 && target(cpB.json.request.id, SB) === "expired" && vB?.state === "expired" &&
-        stopAfter.status === 409 && stopAfter.json?.error === "member_removed" && /no longer a member of this workspace/.test(stopAfter.json?.message ?? "") && /align stop-sharing/.test(stopAfter.json?.message ?? "") &&
+        stopAfter.status === 409 && stopAfter.json?.error === "member_removed" &&
+        stopAfter.json.message === `This session's sharing ended when ${CM.name} left this workspace, so a stop or resume can't reach it. Once ${CM.name} is back in the workspace and the machine that shared it has the workspace again, ::align share in that session shares it again, and then Stop and Resume here reach it.` &&
         resumeAfter.status === 409 && resumeAfter.json?.error === "member_removed" && !allB.some((s) => s.session_key === SB) && holdB.status === 201 && dirCount(SB) === dirsB,
       `${cpB.status} ${stopB.status} ${rmB.status} ${JSON.stringify(rowB)} ${openB} ${stopAfter.text} ${resumeAfter.text} ${JSON.stringify(vB)} ${holdB.status} ${dirsB}/${dirCount(SB)}`,
     );
@@ -3237,6 +3238,27 @@ try {
     const rmAgain = await ca(CO, "DELETE", `/members/${CM.id}`);
     const endedAgain = cRow(SB)?.ended_reason;
     await invite();
+    // E2E-AGENT cycle 12, section 6: back in the workspace, Stop and Resume say what shares the session again now:
+    // its machine given the workspace again, then ::align share there; never only align stop-sharing.
+    const dirsBack = dirCount(SB);
+    const backNoMachine = await ca(CO, "POST", `/sessions/${SB}/stop`, {});
+    const backNoMachineOwn = await ca(CM, "POST", `/sessions/${SB}/resume`, {});
+    // The machine that shared it last: the new pairing (DC) that shared it again after C6-3.
+    const sbDevice = withDb((d) => d.prepare("SELECT device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(CW, SB))?.device_id;
+    withDb((d) => d.prepare("INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(sbDevice, CW));
+    const backMachine = await ca(CO, "POST", `/sessions/${SB}/resume`, {});
+    const backMachineOwn = await ca(CM, "POST", `/sessions/${SB}/stop`, {});
+    const BACK_LEAD = (who) => `This session's sharing ended when ${who} left this workspace, so a stop or resume can't reach it.`;
+    const BACK_THEN = "::align share in that session shares it again, and then Stop and Resume here reach it.";
+    check(
+      "c12 member_removed (E2E-AGENT cycle 12, section 6): Stop or Resume on a session that ended when its person left, once they are back, says what shares it again now: \"Once the machine that shared it has this workspace again, ::align share in that session shares it again, and then Stop and Resume here reach it.\", and once the machine has it again \"Its machine, Cato's laptop, has this workspace again: ::align share …\"; \"you\" to the person themself; never align stop-sharing; no directive",
+      [backNoMachine, backNoMachineOwn, backMachine, backMachineOwn].every((r) => r.status === 409 && r.json?.error === "member_removed" && !/stop-sharing/.test(r.json.message)) &&
+        backNoMachine.json.message === `${BACK_LEAD(CM.name)} Once the machine that shared it has this workspace again, ${BACK_THEN}` &&
+        backNoMachineOwn.json.message === `${BACK_LEAD("you")} Once the machine that shared it has this workspace again, ${BACK_THEN}` &&
+        backMachine.json.message === `${BACK_LEAD(CM.name)} Its machine, Cato's laptop, has this workspace again: ${BACK_THEN}` &&
+        backMachineOwn.json.message === `${BACK_LEAD("you")} Its machine, Cato's laptop, has this workspace again: ${BACK_THEN}` && dirCount(SB) === dirsBack,
+      `${sbDevice === DC.id} ${[backNoMachine, backNoMachineOwn, backMachine, backMachineOwn].map((r) => `${r.status} ${r.text}`).join(" | ")}`,
+    );
     withDb((d) => d.prepare("INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(DC.id, CW));
     const webStopEnded = await ca(CM, "POST", `/sessions/${SB}/stop-sharing`, {});
     const rowStopped = cRow(SB);

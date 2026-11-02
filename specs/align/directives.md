@@ -224,7 +224,7 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/sessions/{key}/stop` and `
 #### Scenario: The session's person left the workspace
 
 - **WHEN** the owner calls `.../stop` or `.../resume` for a session that ended because its person was removed from the workspace (`ended_reason` `member_removed`) (`scripts/test-v2.mjs` "members (E2E-AGENT cycle 2): removing a member ends their live sessions ...")
-- **THEN** the response is HTTP 409 `member_removed` with a message saying the session's developer is no longer a member of this workspace, so a stop or resume can't reach it, and that a stopped one stays stopped until they run `align stop-sharing` on their machine, and no directive is written
+- **THEN** the response is HTTP 409 `member_removed`, "This session's sharing ended when <name> left this workspace, so a stop or resume can't reach it." ("you left" to the person themself), followed by what shares it again as things stand, never only `align stop-sharing` (which gives the session up): while they are not a member, "Once <name> is back in the workspace and the machine that shared it has the workspace again, ::align share in that session shares it again, and then Stop and Resume here reach it."; back in the workspace, "Once the machine that shared it has this workspace again, ::align share in that session shares it again, …"; and once that machine has the workspace again, "Its machine, <device>, has this workspace again: ::align share in that session shares it again, and then Stop and Resume here reach it." (as the machine itself offers `::align share` then: `scripts/test-v2.mjs` "c12 member_removed (E2E-AGENT cycle 12, section 6): ..."); no directive is written
 
 #### Scenario: Wrong credential or origin
 
