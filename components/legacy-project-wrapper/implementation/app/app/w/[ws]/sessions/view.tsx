@@ -40,11 +40,11 @@ function stopText(s: StopStatus | null, stopped: boolean, ended = false) {
  *  machine's shares elsewhere); signed out, align login pairs it again. */
 function shareAgain(s: MySession): ReactNode {
   const d = s.device;
-  if (d && !d.signed_out && d.has_workspace) return <>Its machine, {d.name}, has this workspace again: to share it again, run ::align share in the session.</>;
+  if (d && !d.signed_out && d.has_workspace) return <>Its machine, <span className="[overflow-wrap:anywhere]">{d.name}</span>, has this workspace again: to share it again, run ::align share in the session.</>;
   if (d && !d.signed_out)
     return (
       <>
-        To share it again now that you are back, give its machine, {d.name}, this workspace on your{" "}
+        To share it again now that you are back, give its machine, <span className="[overflow-wrap:anywhere]">{d.name}</span>, this workspace on your{" "}
         <Link href="/app/devices" className="underline">
           Devices page
         </Link>{" "}

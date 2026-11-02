@@ -30,7 +30,7 @@
 //                                                                 and a busy port; --no-build reuses the app's build)
 
 import { spawn, spawnSync } from "node:child_process";
-import { createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createHmac, generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -962,9 +962,9 @@ try {
   sync();
   const xwRow = sdb((d) => d.prepare("SELECT state, ended_reason FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, XW.key));
   check(
-    "web stop-sharing before a re-pairing (E2E-AGENT cycle 9 C9-1): Stop sharing on the web, then `align logout` and `align login` before any sync: the new device's directives answer lists the session (ended_reason null), and the machine never offers `::align share` for it: its next prompt says its sharing was stopped before this machine signed out, so it stays stopped (never `signed in to Align again`), `align sessions` lists it as `stopped (Ledger Co)`, and `::align share confirm` says it stays stopped, sharing nothing",
+    "web stop-sharing before a re-pairing (E2E-AGENT cycle 9 C9-1): Stop sharing on the web, then `align logout` and `align login` before any sync: the new device's directives answer lists the session (ended_reason null), and the machine never offers `::align share` for it: its next prompt says its sharing was stopped on the web, so it stays stopped (its share here had ended at the sign-out, with no claim about which came first) (never `signed in to Align again`), `align sessions` lists it as `stopped (Ledger Co)`, and `::align share confirm` says it stays stopped, sharing nothing",
     xwStop.status === 200 && /^shared/.test(xwBeforeLogout) && xwListed?.ended_reason === null &&
-      (xwTold.system ?? "").startsWith("Align: this session's sharing was stopped (Stop sharing on the web) before this machine signed out of Align, so it stays stopped") &&
+      (xwTold.system ?? "").startsWith("Align: this session's sharing was stopped (Stop sharing on the web), so it stays stopped and is not shared again from here (its share here had ended when this machine signed out of Align)") &&
       !/signed in to Align again|::align share/.test(xwTold.system ?? "") && xwSessions === "stopped (Ledger Co)" &&
       (xwShare.json?.reason ?? "").includes("so it stays stopped") && xwRow?.state === "stopped" && xwRow.ended_reason === null,
     `${xwStop.status} before=${xwBeforeLogout} listed=${JSON.stringify(xwListed)} told=${xwTold.stdout} sessions=${xwSessions} share=${xwShare.stdout} row=${JSON.stringify(xwRow)}`,
@@ -1306,6 +1306,55 @@ try {
     approve4.status === 200 && login4Code === 0 && fourth !== deviceBefore && names4.find((r) => r.id === fourth)?.name === "Milo's laptop" && !!names4.find((r) => r.id === deviceBefore)?.revoked_at &&
       /Signed in as .* on device Milo's laptop\./.test(login4Out) && !/other paired device/.test(login4Out),
     `${approve4.status} ${login4Code} ${JSON.stringify(names4)} ${login4Out}`,
+  );
+
+  // -- E2E-AGENT cycle 10 C10-6: the machine is "Milo's laptop (5)" (asked for with --name) and another machine of
+  //    Milo's holds "Milo's laptop"; two `align login`s start together, the first is approved and finishes, then the
+  //    second: each poll names the device this machine is signed in as then, so both end as "Milo's laptop (5)" --
+  const spawnLogin = (name) => {
+    const p = spawn(process.execPath, [CLI, "login", "--name", name], { env: agentEnv, stdio: ["ignore", "pipe", "pipe"] });
+    const run = { out: "", done: null, code: null };
+    p.stdout.on("data", (d) => (run.out += d));
+    p.stderr.on("data", (d) => (run.out += d));
+    run.done = Promise.race([new Promise((r) => p.on("close", r)), sleep(60_000).then(() => (p.kill(), "timeout"))]);
+    run.code = async () => {
+      for (let i = 0; i < 100; i++) {
+        const c = /enter the code (\S+)/.exec(run.out)?.[1];
+        if (c) return c;
+        await sleep(100);
+      }
+      return "";
+    };
+    return run;
+  };
+  const MR3 = await freshMilo();
+  const approveCode = async (code) => (await call("POST", "/api/v2/device/approve", { cookie: MR3.cookie, body: { user_code: code, workspace_ids: [W] } })).status;
+  const l5 = spawnLogin("Milo's laptop (5)");
+  const l5Approve = await approveCode(await l5.code());
+  const l5Code = await l5.done;
+  outputs.push(l5.out);
+  // Another machine of Milo's, paired straight through the API, takes the plain name.
+  const { publicKey: otherKey } = generateKeyPairSync("ed25519");
+  const oa = await call("POST", "/api/v2/device/authorize", { body: { device_name: "Milo's laptop", public_key: otherKey.export({ format: "jwk" }).x } });
+  const oApprove = await approveCode(oa.json?.user_code);
+  const ot = await call("POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: oa.json?.device_code } });
+  const la = spawnLogin("Milo's laptop");
+  const lb = spawnLogin("Milo's laptop");
+  const [codeA, codeB] = [await la.code(), await lb.code()];
+  const laApprove = await approveCode(codeA);
+  const laCode = await la.done;
+  const afterA = liveDevice();
+  const lbApprove = await approveCode(codeB);
+  const lbCode = await lb.done;
+  outputs.push(la.out, lb.out);
+  const finalDevice = liveDevice();
+  const names6 = sdb((d) => d.prepare("SELECT id, name, revoked_at FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL ORDER BY name").all(M.id));
+  check(
+    "two logins at once (E2E-AGENT cycle 10 C10-6): on a machine named \"Milo's laptop (5)\" (another machine of theirs is \"Milo's laptop\"), two `align login`s started together, approved one after the other, both end as \"Milo's laptop (5)\": the second's poll names the device the first paired, which it replaces, so it keeps that device's name",
+    l5Approve === 200 && l5Code === 0 && oApprove === 200 && ot.status === 200 && laApprove === 200 && lbApprove === 200 && laCode === 0 && lbCode === 0 &&
+      /on device Milo's laptop \(5\)\./.test(la.out) && lb.out.includes(`this machine is Milo's laptop (5) (${finalDevice})`) && finalDevice !== afterA &&
+      JSON.stringify(names6.map((r) => r.name)) === JSON.stringify(["Milo's laptop", "Milo's laptop (5)"]) && names6.find((r) => r.name === "Milo's laptop (5)")?.id === finalDevice,
+    `${l5Approve} ${l5Code} ${oApprove} ${ot.status} ${laApprove} ${laCode} ${lbApprove} ${lbCode} ${JSON.stringify(names6)} | ${l5.out} | ${la.out} | ${lb.out}`,
   );
 
   // -- canaries: people's words reach the model only inside Align's quoted-data wording --

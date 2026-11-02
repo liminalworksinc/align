@@ -112,7 +112,7 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
                           checked={chosen.includes(d.id)}
                           onChange={(e) => setChosen((c) => (e.target.checked ? [...c, d.id] : c.filter((x) => x !== d.id)))}
                         />
-                        <span>
+                        <span className="min-w-0 overflow-hidden [overflow-wrap:anywhere]">
                           {d.name} <span className="text-zinc-500">(last seen {when(d.last_seen_at)})</span>
                         </span>
                       </label>

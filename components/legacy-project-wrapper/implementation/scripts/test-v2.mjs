@@ -2743,6 +2743,68 @@ try {
         `${tickedA} typed=${tickTyped} want=${tickB.userCode} ${JSON.stringify({ ...tickPage, text: tickPage.text.slice(0, 300) })}`,
       );
 
+      // E2E-WEB cycle 10 C10-1: Approve and Deny act on the device looked up, never on a code typed after it: editing the
+      // field to another code closes the panel (name, ticks, Approve and Deny), so neither device is decided by it.
+      const editC = insertPairing("U5's edit C");
+      const editD = insertPairing("U5's edit D");
+      const codeField = 'main input[placeholder="BCDF-GHJK"]';
+      const retype = async (code) => {
+        await page.focus(codeField);
+        await page.evaluate((f) => document.querySelector(f)?.select(), codeField);
+        await page.keyboard.press("Backspace");
+        await page.type(codeField, code);
+      };
+      const panelOf = () =>
+        page.evaluate(() => ({
+          text: document.querySelector("main")?.innerText ?? "",
+          buttons: [...document.querySelectorAll("main button")].map((b) => b.textContent),
+          boxes: document.querySelectorAll('main input[type="checkbox"]').length,
+        }));
+      await page.goto(`${BASE}/app/device?code=${editC.userCode}`, { waitUntil: "networkidle0" });
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
+      await page.waitForFunction(() => document.querySelectorAll('main input[type="checkbox"]').length > 0, { timeout: 15000 }).catch(() => undefined);
+      await page.evaluate(() => document.querySelector('main input[type="checkbox"]')?.click());
+      const editLooked = await panelOf();
+      await retype(editD.userCode);
+      const editAfter = await panelOf();
+      const stateOf = (code) => withDb((d) => d.prepare("SELECT state FROM v2_device_requests WHERE user_code = ?").get(code)?.state);
+      // Looked up again, D is decided by its own panel: Deny denies D, and C stays pending.
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
+      await page.waitForFunction(() => document.body.innerText.includes("U5's edit D") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Deny"), { timeout: 15000 }).catch(() => undefined);
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Deny")?.click());
+      await page.waitForFunction(() => document.body.innerText.includes("Denied."), { timeout: 15000 }).catch(() => undefined);
+      check(
+        "C10-1 (ui, E2E-WEB cycle 10): after Look up of device C and a tick, typing device D's code into the field closes C's panel (no name, no workspace boxes, no Approve or Deny), so nothing is approved or denied by a code the person never looked up; D looked up and denied is denied, and C stays pending",
+        editLooked.text.includes("U5's edit C") && editLooked.buttons.includes("Approve") && !editAfter.text.includes("U5's edit C") && editAfter.boxes === 0 &&
+          !editAfter.buttons.includes("Approve") && !editAfter.buttons.includes("Deny") && stateOf(editD.userCode) === "denied" && stateOf(editC.userCode) === "pending",
+        `${JSON.stringify({ ...editLooked, text: editLooked.text.slice(0, 200) })} ${JSON.stringify({ ...editAfter, text: editAfter.text.slice(0, 200) })} C=${stateOf(editC.userCode)} D=${stateOf(editD.userCode)}`,
+      );
+      // W4 (E2E-WEB cycle 10): an approval or denial with no code says what to do, not a field name.
+      const w4Empty = await call("U5", "POST", "/api/v2/device/approve", { cookie: U5.cookie, body: { user_code: "  ", workspace_ids: [A] } });
+      const w4EmptyDeny = await call("U5", "POST", "/api/v2/device/deny", { cookie: U5.cookie, body: {} });
+      check(
+        "W4 (E2E-WEB cycle 10): Approve or Deny with an empty code is 400 \"Enter the code shown by align login.\", never \"user_code is required\"",
+        w4Empty.status === 400 && w4Empty.json?.message === "Enter the code shown by align login." && w4EmptyDeny.status === 400 && w4EmptyDeny.json?.message === "Enter the code shown by align login.",
+        `${w4Empty.status} ${w4Empty.text} ${w4EmptyDeny.status} ${w4EmptyDeny.text}`,
+      );
+      // C10-3 (E2E-WEB cycle 10): a device name stored before the extender limit, one unbreakable "character" 150 marks
+      // wide, and a 100-letter word: the Devices page clips or wraps them, so it never scrolls sideways.
+      insertDevice(U5.id, `\uFF76${"\uFF9E".repeat(150)}`);
+      insertDevice(U5.id, "W".repeat(100));
+      const widths = {};
+      for (const width of [320, 1280]) {
+        await page.setViewport({ width, height: 900 });
+        await page.goto(`${BASE}/app/devices`, { waitUntil: "networkidle0" });
+        await page.waitForFunction(() => document.body.innerText.includes("WWWWWWWWWW"), { timeout: 15000 }).catch(() => undefined);
+        widths[width] = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth, shown: document.body.innerText.includes("WWWWWWWWWW") }));
+      }
+      await page.setViewport({ width: 800, height: 600 });
+      check(
+        "C10-3 (ui, E2E-WEB cycle 10): the Devices page with a one-character name of 150 half-width voiced sound marks and a 100-letter word as device names never scrolls sideways, at 320 or 1280 px",
+        widths[320].shown && widths[1280].shown && widths[320].scroll <= widths[320].client && widths[1280].scroll <= widths[1280].client,
+        JSON.stringify(widths),
+      );
+
       // Z3 (ui): Delete shared history on a session already deleted in another tab is done: the row goes, and the page
       // says it was already deleted instead of an error.
       const z3Key = sessionKey(D5, A, "claude-code", "native-z3");
@@ -9958,6 +10020,20 @@ try {
       "C9-3 (E2E-WEB cycle 9): a device name whose character carries more than 6 combining marks (\"a\" + 700 × U+0301, 1,401 bytes; or 7) is 400 \"device_name has a character with too many accents or marks on it (at most 6 on one character)\", while decomposed Vietnamese, a Devanagari conjunct, a keycap emoji and 6 marks on one letter are accepted",
       c93Tower.status === 400 && c93Tower.json?.message === marksMsg && c93Seven.status === 400 && c93Seven.json?.message === marksMsg && c93Real.status === 200,
       `${c93Tower.status} ${c93Tower.text} ${c93Seven.status} ${c93Seven.text} ${c93Real.status} ${c93Real.text}`,
+    );
+    // C10-3 (E2E-WEB cycle 10): every grapheme extender counts toward the 6, not only category M (half-width voiced
+    // sound marks, skin-tone modifiers), and one character joins at most 16 code points (a chain of joined emoji), while
+    // the longest real emoji (a kiss with two skin tones, a family with four, a subdivision flag) still pass.
+    const authName = (name) => call("D", "POST", "/api/v2/device/authorize", { body: { device_name: name, public_key: newDeviceKeys().pub } });
+    const c103Kana = await authName(`\uFF76${"\uFF9E".repeat(150)}`);
+    const c103Wave = await authName(`\u{1F44B}${"\u{1F3FD}".repeat(50)}`);
+    const c103Chain = await authName(`${"\u{1F469}\u200D".repeat(20)}\u{1F469}`);
+    const c103Real = await authName(`\u{1F9D1}\u{1F3FB}\u200D\u2764\uFE0F\u200D\u{1F48B}\u200D\u{1F9D1}\u{1F3FC} \u{1F469}\u{1F3FD}\u200D\u{1F469}\u{1F3FD}\u200D\u{1F467}\u{1F3FD}\u200D\u{1F466}\u{1F3FD} ${scot} \uFF76\uFF9E`);
+    check(
+      "C10-3 (E2E-WEB cycle 10): \"ｶ\" + 150 × U+FF9E and \"👋\" + 50 skin-tone modifiers are 400 with the too-many-marks message, 21 women joined into one character is 400 \"device_name has a character joined from too many parts (at most 16 in one character)\", while a kiss with two skin tones, a family with four, the Scotland flag and \"ｶﾞ\" are accepted",
+      c103Kana.status === 400 && c103Kana.json?.message === marksMsg && c103Wave.status === 400 && c103Wave.json?.message === marksMsg && c103Chain.status === 400 &&
+        c103Chain.json?.message === "device_name has a character joined from too many parts (at most 16 in one character)" && c103Real.status === 200,
+      `${c103Kana.status} ${c103Kana.text} ${c103Wave.status} ${c103Wave.text} ${c103Chain.status} ${c103Chain.text} ${c103Real.status} ${c103Real.text}`,
     );
     const evEnv = { ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1" };
     const q = (sql, ...a) => withDb((d) => d.prepare(sql).all(...a));

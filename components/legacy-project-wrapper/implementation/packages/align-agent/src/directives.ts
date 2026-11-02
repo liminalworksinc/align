@@ -5,7 +5,8 @@ import type { Ctx } from "./context.ts";
 import { api, HttpError } from "./api.ts";
 import { bumpGap, kvGet, kvSet, nowIso, tx } from "./db.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
-import { endSharesEndedOnServer, enqueue, type EndedOnServer } from "./share.ts";
+import { ENDED_UNREAD, endSharesEndedOnServer, enqueue, noticeSignedInAgain, type EndedOnServer } from "./share.ts";
+import { RESUMED_NOTICE } from "./shared/notices.ts";
 import type { Goal, WireHold, WireRequest } from "./shared/types.ts";
 import { loadFeed } from "./goals.ts";
 import { applyHold, applyRequest, validRequest } from "./requests.ts";
@@ -165,7 +166,8 @@ function applyOne(ctx: Ctx, d: Directive, lid: string, seq: number, at: string):
       // believing its tools are blocked.
       if (cur?.stopped) {
         kvSet(ctx.db, `resumed:${lid}`, d.id);
-        addNotice(ctx, lid, `resumed_${d.id}`, "Align: this session was resumed from its Align workspace, so its tools work again.");
+        // Worded again when it is told, while a goal hold still blocks the tools (C10-3).
+        addNotice(ctx, lid, `resumed_${d.id}`, RESUMED_NOTICE);
       }
       return "applied";
     }
@@ -208,6 +210,7 @@ export async function pollDirectives(ctx: Ctx, onRefresh: (ws: string) => void, 
     if (i === 0 && Array.isArray(r.json?.workspaces)) onReach(r.json.workspaces.filter((w: unknown): w is string => typeof w === "string"));
     // Shares the server ended (Stop sharing on the web, say), which no directive tells: they end here now (cycle 8).
     if (i === 0 && Array.isArray(r.json?.ended_sessions)) endSharesEndedOnServer(ctx, r.json.ended_sessions.filter(validEnded));
+    if (i === 0) endedRead(ctx);
     const list: Directive[] = Array.isArray(r.json?.directives) ? r.json.directives : [];
     for (const d of list) {
       const h = handleDirective(ctx, d);
@@ -229,6 +232,20 @@ export async function pollDirectives(ctx: Ctx, onRefresh: (ws: string) => void, 
  */
 export async function pullEndedSessions(ctx: Ctx): Promise<number> {
   const r = await api(ctx, "GET", `/api/v2/directives?cursor=${cursor(ctx)}`);
-  if (r.status !== 200 || !Array.isArray(r.json?.ended_sessions)) return 0;
-  return endSharesEndedOnServer(ctx, r.json.ended_sessions.filter(validEnded));
+  if (r.status !== 200) return 0;
+  const n = Array.isArray(r.json?.ended_sessions) ? endSharesEndedOnServer(ctx, r.json.ended_sessions.filter(validEnded)) : 0;
+  // `/me` follows, and with it the signed-in-again notices.
+  endedRead(ctx, false);
+  return n;
+}
+
+/** The first directives page of a pass was read: a sign-in whose `ended_sessions` `align login` could not read now tells
+ *  its sessions it is signed in again, knowing which of them its person stopped on the web (cycle 10, section 5). */
+function endedRead(ctx: Ctx, tell = true): void {
+  if (!kvGet(ctx.db, ENDED_UNREAD)) return;
+  ctx.db.prepare("DELETE FROM kv WHERE key=?").run(ENDED_UNREAD);
+  if (tell) noticeSignedInAgain(ctx);
+  // The sign-out notices it held back are shown again where nothing newer supersedes them.
+  const held = ctx.db.prepare("SELECT DISTINCT local_id FROM notices WHERE substr(id, length(local_id) + 2, 11)='signed_out_'").all() as { local_id: string }[];
+  for (const r of held) renderHot(ctx, r.local_id);
 }

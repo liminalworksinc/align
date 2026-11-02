@@ -457,7 +457,10 @@ export function holdReason(latch: HoldLatch | null): string {
   if (!h) return "Align: all agents on this session's goal were paused from its Align workspace. Work resumes when the hold is released. Your work so far is saved.";
   const reason = h.reason ? `: ${quoted(h.reason, 200)}` : "";
   const more = latch!.holds.length > 1 ? ` (and ${latch!.holds.length - 1} more goal holds)` : "";
-  return `Align: ${clean(h.by, 50) || "Someone"} paused all agents on goal "${clean(h.goal_title, 100)}"${reason}${more}. Work resumes when they release it. Your work so far is saved.`;
+  // A share that ended where no release reaches it any more: the way out the deny adds is the only one, so "work resumes
+  // when they release it" would send the model the wrong way (E2E-AGENT cycle 10, section 5).
+  const resumes = latch!.ended && !latch!.reshare && !latch!.release ? "" : " Work resumes when they release it.";
+  return `Align: ${clean(h.by, 50) || "Someone"} paused all agents on goal "${clean(h.goal_title, 100)}"${reason}${more}.${resumes} Your work so far is saved.`;
 }
 
 /**
@@ -493,4 +496,16 @@ export function otherWorkspaceWords(ws: string, other: string): string {
 
 export function releaseNotice(by: string, title: string): string {
   return `Align: ${clean(by, 50) || "Someone"} released the hold on "${clean(title, 100)}".`;
+}
+
+/**
+ * After a move to another goal (`::align bind`, `align bind`), the holds that still block the session's tools: a hold
+ * stays until its release reaches the session, whatever goal it counts toward now (cycle 10, section 5). `titles`: the
+ * held goals other than the new one. Leading space included; empty when there are none.
+ */
+export function keptHoldsNote(titles: string[]): string {
+  if (!titles.length) return "";
+  const q = titles.map((t) => `"${clean(t, 100)}"`);
+  const which = q.length > 1 ? `The holds on ${q.slice(0, -1).join(", ")} and ${q[q.length - 1]} still block` : `The hold on ${q[0]} still blocks`;
+  return ` ${which} this session's tools until ${q.length > 1 ? "they are" : "it is"} released: moving to another goal does not lift ${q.length > 1 ? "them" : "it"}.`;
 }

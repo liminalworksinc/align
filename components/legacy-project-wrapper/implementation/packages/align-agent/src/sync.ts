@@ -44,6 +44,52 @@ import type { SpoolRecord } from "./shared/types.ts";
 
 // ---------- spool ----------
 export function ingestSpool(ctx: Ctx): number {
+  const unlock = lockSpool(ctx.home);
+  // Another process (a CLI command, a hook's background sync) is ingesting it now, in order: it applies these records.
+  if (!unlock) return 0;
+  try {
+    return ingestLocked(ctx);
+  } finally {
+    unlock();
+  }
+}
+
+/** How long `lockSpool` waits for another ingester, and after how long a lock was left by a process that died. */
+const SPOOL_LOCK_WAIT_MS = 3_000;
+const SPOOL_LOCK_STALE_MS = 60_000;
+
+/**
+ * One process ingests the spool at a time, so a record is applied once and in order, and no two processes race to delete
+ * the same file (E2E-AGENT cycle 10, section 5: a CLI command and a hook's background sync both applied a record and
+ * logged `ENOENT ... unlink`). Waits a moment for another ingester; null when it still holds the lock. A spool folder
+ * that does not exist yet has nothing to ingest: no lock needed.
+ */
+function lockSpool(home: string): (() => void) | null {
+  const dir = path.join(layout.spool(home), ".ingest.lock");
+  const until = Date.now() + SPOOL_LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      fs.mkdirSync(dir, { mode: 0o700 });
+      return () => fs.rmSync(dir, { recursive: true, force: true });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") return () => undefined;
+      let age = 0;
+      try {
+        age = Date.now() - fs.statSync(dir).mtimeMs;
+      } catch {
+        continue; // released meanwhile
+      }
+      if (age > SPOOL_LOCK_STALE_MS) {
+        fs.rmSync(dir, { recursive: true, force: true });
+        continue;
+      }
+      if (Date.now() > until) return null;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
+}
+
+function ingestLocked(ctx: Ctx): number {
   const files = listSpool(ctx.home);
   let n = 0;
   for (const file of files) {
