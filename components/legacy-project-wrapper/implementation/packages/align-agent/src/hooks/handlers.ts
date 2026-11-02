@@ -21,6 +21,7 @@ import {
   renderDelta,
   renderEnvelope,
   requestAnswerLine,
+  stoppedForGoodWords,
   requestContext,
   requestNotice,
   requestShortId,
@@ -1014,13 +1015,6 @@ function heldNote(g: { allocation?: { held?: boolean } | null }): string {
   return g.allocation?.held ? " That goal is on hold (all agents on it were paused from its Align workspace), so this session's tools stay blocked until the hold is released." : "";
 }
 
-/** A session its person stopped sharing (`::align unshare`, `align stop-sharing`, Stop sharing on the web), whose shared
- *  history is not deleted: the server never shares it again, so `::align share` says so instead of previewing a share
- *  (cycle 7). */
-function stoppedForGood(lid: string): string {
-  return `Align: this session's sharing was stopped (\`::align unshare\`, \`align stop-sharing\` or Stop sharing on the web), and a session whose sharing was stopped is not shared again, so it stays stopped. To share it again, counting from now, first delete its shared history (it leaves every total): run \`align delete-history ${lid.slice(0, 8)}\` in a terminal, or use Delete shared history on the web's Sessions page; then type \`::align share\` here.`;
-}
-
 /** The folder rule a new `--dir` rule for `dir` replaces, in words (as `align share --dir` says it). */
 function replacedRule(home: string, dir: string): string | null {
   const prev = matchRule(readRules(home), dir);
@@ -1157,7 +1151,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       if (!me || me.signed_out) return "Align: not signed in on this machine. Run `align login` in a terminal first.";
       // Stopped by its person while it was shared there; not one whose share a sign-out or a lost workspace had ended
       // before `align stop-sharing` freed its tools, which the server shares again.
-      if (!dirMode && hot?.share?.state === "stopped" && hot.prior_share?.stopped && (hot.share.ended ?? "sharing_ended") === "sharing_ended") return stoppedForGood(lid);
+      if (!dirMode && hot?.share?.state === "stopped" && hot.prior_share?.stopped && (hot.share.ended ?? "sharing_ended") === "sharing_ended") return `Align: ${stoppedForGoodWords(lid, "type `::align share` here")}`;
       const feed = feedFor(home, hot);
       // With no workspace of its own, no default and more than one in reach, no goal can be looked up either: say why
       // first, whatever goal was named, rather than that the goal is not cached (C4-7); a folder rule can't tell which

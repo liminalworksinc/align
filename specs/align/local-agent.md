@@ -1283,7 +1283,13 @@ refuses with 409 `sharing_stopped` (its sharing was stopped, which the server ne
 account's devices) SHALL produce `Align: sharing failed (sharing_stopped): this session's sharing was stopped (\`align
 stop-sharing\`, \`::align unshare\` or Stop sharing on the web), and a session whose sharing was stopped is not shared
 again. This session stays private.`, never the advice to revoke an old device; each takes back the `sharing this
-session` notice if the session has not seen it yet. Notices SHALL be shown at the session's next
+session` notice if the session has not seen it yet. `align share <session>` in the workspace of a share its person
+stopped while it was shared (history kept; not one a sign-out or a lost workspace had ended before `align stop-sharing`
+freed it, which is shared again) SHALL send nothing and show no share preview: it SHALL exit 1 with `align: session
+<lid8> was not shared: this session's sharing was stopped (...), and a session whose sharing was stopped is not shared
+again, so it stays stopped. To share it again, counting from now, first delete its shared history (it leaves every
+total): run \`align delete-history <lid8>\` in a terminal, or use Delete shared history on the web's Sessions page;
+then run \`align share\` again.`, as `::align share` answers. Notices SHALL be shown at the session's next
 `UserPromptSubmit` (or `SessionStart`), whatever its share's state, also when it has none or its share failed. Sharing a
 session again (`align share` or `::align share`) SHALL drop its notices about an earlier share that ended (signed out,
 workspace lost or given back) that it has not shown yet, so a later ending is never told next to a stale one. Of the
@@ -1310,8 +1316,8 @@ is not one of them.
 
 #### Scenario: Re-sharing a session its person stopped
 
-- **WHEN** a session was stopped with `align unshare`, the machine pairs again, and the developer runs `align share <id> --yes` (test `findings4` "after a re-pair, the server answers sharing_stopped ...")
-- **THEN** it exits 1 with `... was not shared: sharing failed (sharing_stopped): this session's sharing was stopped ...` and nothing about revoking an old device
+- **WHEN** a session was stopped with `align unshare`, the machine pairs again, and the developer runs `align share <id> --yes`; in another case a session stopped with `align stop-sharing` is shared from the terminal without `--yes`; in a third, one whose lost workspace ended its share was freed with `align stop-sharing` and is shared from the terminal once the workspace is back (tests `findings4` "after a re-pair, the CLI says the session's sharing was stopped and stays stopped ...", `findings8` "terminal `align share` in a session its person stopped ..." and "`align stop-sharing` that freed a session whose lost workspace ended its share ...")
+- **THEN** the first two exit 1 with `align: session <lid8> was not shared: this session's sharing was stopped ... so it stays stopped. ... run \`align delete-history <lid8>\` ...`, no share preview, nothing about revoking an old device, and no request to the server; the third previews `Counting:   from now` and the server shares it again
 
 #### Scenario: A removal this machine never saw
 

@@ -234,7 +234,24 @@ describe("cycle 7, section 5: works, but would confuse a developer", () => {
     assert.match(prompt(t, A.sid, "::align share", A.cwd).reason, /counts from now\./);
   });
 
-  test("`align stop-sharing` that freed a session whose lost workspace ended its share does not make it stopped for good: back in the workspace, `::align share` shares it again", async () => {
+  test("terminal `align share` in a session its person stopped (history kept): no preview of a share and nothing sent, the same answer as `::align share`, exit 1", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    await sync(t);
+    assert.equal((await runCli(t, ["stop-sharing", A.lid.slice(0, 8)])).code, 0);
+    await sync(t);
+    const puts = fake.log.filter((l) => l.method === "PUT").length;
+    const r = await runCli(t, ["share", A.lid.slice(0, 8), "--workspace", "Acme", "--goal", "Ship the v2"]);
+    assert.equal(r.code, 1);
+    assert.equal(
+      r.stderr.trim(),
+      `align: session ${A.lid.slice(0, 8)} was not shared: this session's sharing was stopped (\`::align unshare\`, \`align stop-sharing\` or Stop sharing on the web), and a session whose sharing was stopped is not shared again, so it stays stopped. To share it again, counting from now, first delete its shared history (it leaves every total): run \`align delete-history ${A.lid.slice(0, 8)}\` in a terminal, or use Delete shared history on the web's Sessions page; then run \`align share\` again.`,
+    );
+    assert.doesNotMatch(r.stdout, /Share preview|counts from now|Counting/);
+    assert.equal(fake.log.filter((l) => l.method === "PUT").length, puts, "nothing was sent");
+  });
+
+  test("`align stop-sharing` that freed a session whose lost workspace ended its share does not make it stopped for good: back in the workspace, `::align share` previews counts from now and `align share` shares it again", async () => {
     const { fake, t } = await world();
     const A = await shared(t);
     await sync(t);
@@ -245,7 +262,11 @@ describe("cycle 7, section 5: works, but would confuse a developer", () => {
     fake.workspaces = [acme];
     await sync(t);
     assert.match(prompt(t, A.sid, "::align share", A.cwd).reason, /counts from now\./);
-    assert.match(prompt(t, A.sid, "::align share confirm", A.cwd).reason, /sharing requested/);
+    // From the terminal too (its `confirm` is the same request; one of them is enough).
+    const r = await runCli(t, ["share", A.lid.slice(0, 8), "--workspace", "Acme", "--goal", "Ship the v2", "--yes"]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /Counting: {3}from now/);
+    assert.equal(fake.sessions.get(A.key)?.state, "shared", "the server shares it again");
   });
 
   test("a sync whose pairing changed: no `Server:` line after `align login` either; a held call that never answers is not reported as an unreachable server, nor marked so in last-sync.json", async () => {

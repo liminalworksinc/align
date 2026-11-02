@@ -31,11 +31,11 @@ import {
 import { openCtx, saveConfig, type Ctx } from "./context.ts";
 import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
-import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedState, getShare } from "./hot.ts";
+import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, endedState, getShare } from "./hot.ts";
 import { fetchAsks } from "./asks.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { newDeviceKey } from "./keys.ts";
-import { applyShare, bind, deleteHistory, deleteRefused, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stopSharing } from "./share.ts";
+import { applyShare, bind, deleteHistory, deleteRefused, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stoppedByPerson, stopSharing } from "./share.ts";
 import { askLineForPeople, askOrder, readAsks } from "./shared/asks.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson } from "./shared/fsx.ts";
@@ -49,7 +49,7 @@ import { MIN_NODE, unsupportedNode } from "./node-version.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { podReport } from "./hooks/siblings.ts";
 import { answerable, answerRequest, listRequests, stateWords } from "./requests.ts";
-import { clean, requestShortId } from "./shared/envelope.ts";
+import { clean, requestShortId, stoppedForGoodWords } from "./shared/envelope.ts";
 import { feedHold } from "./shared/feedhold.ts";
 import type { WireRequest } from "./shared/types.ts";
 import { computeUnsharedDigest } from "./allocation.ts";
@@ -722,6 +722,14 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
   const session = resolveSession(ctx, positionals[0], { latest: values.latest, cwd: values.cwd === undefined ? null : values.cwd || process.cwd() });
   const share = getShare(ctx, session.local_id);
   if (share && (share.state === "shared" || share.state === "pending" || share.state === "suspended")) throw new UsageError(`session is already ${share.state} with ${share.workspace_name}`);
+  // Its person stopped it while it was shared, and its history is kept: the server would refuse it, so nothing is sent
+  // and the answer is the one `::align share` gives. A share a sign-out or a lost workspace had ended is shared again
+  // (cycle 7).
+  if (share?.state === "stopped" && stoppedByPerson(ctx, session.local_id) && (endedReason(share) ?? "sharing_ended") === "sharing_ended" && ws.id === share.workspace_id) {
+    err(`align: session ${session.local_id.slice(0, 8)} was not shared: ${stoppedForGoodWords(session.local_id, "run `align share` again")}`);
+    process.exitCode = 1;
+    return;
+  }
   const goal = await goalFor(ctx, ws.id, values.goal);
   // Shared before, also when its shared history was deleted since: this share counts from now (C6-1).
   const effectiveFrom = from === "start" && sharedBefore(ctx, session.local_id) ? "now" : from;

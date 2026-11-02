@@ -367,15 +367,17 @@ describe("C4-7: `::align share <goal>` on a two-workspace device", () => {
 });
 
 describe("C4-8: re-sharing a session the user stopped", () => {
-  test("after a re-pair, the server answers sharing_stopped and the CLI says the session's sharing was stopped, not to revoke an old device", async () => {
-    const { t } = await world();
+  test("after a re-pair, the CLI says the session's sharing was stopped and stays stopped (cycle 7: without asking the server, which would refuse it), not to revoke an old device", async () => {
+    const { fake, t } = await world();
     const s = await shared(t);
     assert.equal((await runCli(t, ["unshare", s.lid.slice(0, 8)])).code, 0);
     await relogin(t);
+    const puts = fake.log.filter((l) => l.method === "PUT").length;
     const r = await runCli(t, ["share", s.lid.slice(0, 8), "--workspace", "Acme", "--goal", "none", "--yes"]);
     assert.equal(r.code, 1);
-    assert.match(r.stderr, /was not shared: sharing failed \(sharing_stopped\): this session's sharing was stopped/);
+    assert.match(r.stderr, /was not shared: this session's sharing was stopped .* so it stays stopped\. .*`align delete-history /);
     assert.doesNotMatch(r.stderr, /revoke the old device/);
+    assert.equal(fake.log.filter((l) => l.method === "PUT").length, puts, "nothing was sent");
   });
 });
 
