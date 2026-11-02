@@ -77,7 +77,7 @@ const logout = async (t: TestEnv) => assert.equal((await runCli(t, ["logout"])).
 
 const GOAL = "Ship the v2 onboarding flow";
 const AGAIN = `Align: this machine is signed in to Align again. To share this session again, type \`::align share\` here (it counts toward "${GOAL}" again).`;
-const LATCHED_AGAIN = " It was stopped or held from the web: once it is shared again, that can be lifted there; until then its tools stay blocked.";
+const LATCHED_AGAIN = " It was stopped or held from the web, so tools stay blocked until it is shared again (you can type `::align share` in this session), after which the stop or hold can be lifted from the web.";
 const SIGNED_OUT = `Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on. To share it again, run \`align login\` in a terminal, then type \`::align share\` here (it counts toward "${GOAL}" again).`;
 const stopSharingTail = (lid: string) => ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
 
@@ -150,7 +150,7 @@ describe("cycle 8, section 5: works, but would confuse a developer", () => {
     assert.equal(hot(t, A.lid).share?.state, "stopped");
     assert.equal(
       prompt(t, A.sid, "go on", A.cwd)?.systemMessage,
-      "Align: this session's sharing was stopped (Stop sharing on the web, or `align stop-sharing` on another of your devices), so it stopped sharing here; its usage stays on this machine from now on.",
+      "Align: this session's sharing was stopped (Stop sharing on the web), so it stopped sharing here; its usage stays on this machine from now on.",
     );
     const again = prompt(t, A.sid, "::align share", A.cwd).reason as string;
     assert.doesNotMatch(again, /already shared/);

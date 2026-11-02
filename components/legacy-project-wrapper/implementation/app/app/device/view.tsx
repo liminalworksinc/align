@@ -47,8 +47,10 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
   const lookup = () =>
     act.run(async () => {
       setDone(null);
-      // A device looked up before is not the one this code names: its panel goes, also when this code finds nothing.
+      // A device looked up before is not the one this code names: its panel goes, also when this code finds nothing, and
+      // so do its ticks, so a workspace ticked for one device is never approved for the next (E2E-WEB cycle 9 C9-2).
       setPending(null);
+      setChosen([]);
       setPending(
         await api<Pending>(`/api/v2/device/requests/${encodeURIComponent(code.trim())}`).catch((e) => {
           throw new Error(e.status === 404 ? NOT_WAITING : e.message);
@@ -86,6 +88,7 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
       const asked = out.asked_as ?? pending?.device_name ?? "The device";
       setDone(approve ? connectedLine(asked, out.device_name ?? asked, Array.isArray(out.same_name) ? out.same_name : []) : "Denied. That device was not connected.");
       setPending(null);
+      setChosen([]);
       setCode("");
     });
 

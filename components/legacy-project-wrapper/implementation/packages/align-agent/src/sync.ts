@@ -29,7 +29,7 @@ import { bumpGap, nowIso, tx } from "./db.ts";
 import { endEpochs, ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
 import { otherWorkspaceWords, outOfReachWords } from "./shared/envelope.ts";
-import { applyShare, bind, endShareRemoved, endShareSignedOutByServer, endShareStoppedByPerson, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
+import { applyShare, bind, latchTail, endShareRemoved, endShareSignedOutByServer, endShareStoppedByPerson, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
 import { pollDirectives } from "./directives.ts";
 import { answerRequest } from "./requests.ts";
@@ -548,9 +548,9 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
               ctx,
               s.local_id,
               `upload_refused_${r.status}`,
-              stopped
+              (stopped
                   ? "Align: the server no longer accepts this session's usage (sharing_stopped), so it stopped sharing here; its usage stays on this machine from now on. If its sharing ended because you left its workspace or were removed and you are a member again, `::align share` here shares it again."
-                  : `Align: the server no longer accepts this session's usage (${r.json?.error || r.status}), so it stopped sharing; its usage stays on this machine from now on.`,
+                  : `Align: the server no longer accepts this session's usage (${r.json?.error || r.status}), so it stopped sharing; its usage stays on this machine from now on.`) + latchTail(ctx, s.local_id),
             );
             renderHot(ctx, s.local_id);
           }

@@ -175,7 +175,7 @@ describe("E2E findings: server side of the agent", () => {
     // Signed in again (cycles 6, 7): the session can be shared again, and every view says so.
     assert.match((await runCli(t, ["sessions"])).stdout, /stopped \(Acme; ended at a sign-out; `::align share` shares it again\)/);
     const again = json(runHook(t, "claude", "PreToolUse", { session_id: SID, tool_name: "Bash", cwd }).stdout).hookSpecificOutput.permissionDecisionReason;
-    assert.match(again, /Its sharing ended \(this machine signed out of Align, and is signed in again now\), so the user can share it there again by typing `::align share` in this session; once it is shared again, this can be lifted from the web\./);
+    assert.match(again, /Its sharing ended \(this machine signed out of Align, and is signed in again now\), so tools stay blocked until it is shared again \(the user can type `::align share` in this session\), after which the stop or hold can be lifted from the web\./);
     assert.doesNotMatch(again, /align stop-sharing/);
     const back = json(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "p11", prompt: "go on", cwd }).stdout);
     assert.match(back.systemMessage, /^Align: this machine is signed in to Align again\. To share this session again, type `::align share` here/);

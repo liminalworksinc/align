@@ -8,6 +8,7 @@
 // Budgets (plan rev 2): envelope <= 1,200 chars (target 1,000), or 1,800 when the goal has limits; the accepted-asks
 // block <= 2,200 more; delta <= 300 chars (target 250), card <= 300 chars.
 import type { AcceptedAsk, ContextGoal, GoalSnapshot, HoldLatch, HotRequest, Limit, Measure, TeamAsks } from "./types.ts";
+import { latchNoticeTail } from "./ended.ts";
 
 export const ENVELOPE_MAX = 1200;
 /** The envelope's budget when the bound goal has limits (they are never dropped to fit). */
@@ -482,7 +483,7 @@ export const HELD_MARK = "h = on hold: all agents on it were paused from its Ali
  *  again only there (its work is that workspace's), never into another one; `latched`: its tools stay blocked until
  *  `align stop-sharing`. */
 export function outOfReachWords(ws: string, lid: string, latched: boolean): string {
-  return `this session was shared with ${clean(ws, 80)}, and this machine can't reach ${clean(ws, 80)} in Align now, so this session can't be shared there again from here, and it is never shared into another workspace instead; its usage stays on this machine.${latched ? ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.` : ""}`;
+  return `this session was shared with ${clean(ws, 80)}, and this machine can't reach ${clean(ws, 80)} in Align now, so this session can't be shared there again from here, and it is never shared into another workspace instead; its usage stays on this machine.${latched ? latchNoticeTail(lid, false) : ""}`;
 }
 
 /** Why a session shared before in workspace `ws` is not shared into `other` (cycle 8). */

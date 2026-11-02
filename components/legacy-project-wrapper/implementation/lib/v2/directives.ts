@@ -149,25 +149,28 @@ export function directivesFor(dev: DevicePrincipal, cursor: number, limit = 100)
   return rows.map((r) => serialize(dev, r, r.keys.split(" ").sort()));
 }
 
-/** How far back the directives answer lists this device's ended sessions (`endedSessionsFor`). */
+/** How far back the directives answer lists the person's ended sessions (`endedSessionsFor`). */
 const ENDED_LOOKBACK_MS = 30 * 86_400_000;
 
 /**
- * This device's sessions whose share has ended on the server in the last 30 days, in the workspaces it reaches now
- * (newest first, at most 200): stopped on the web (Stop sharing) or by another device of the person (`ended_reason`
- * null), or ended because the person was removed from the workspace and is back (`member_removed`). A stop or resume
- * reaches a device as a directive, but an end of sharing has none, and a device would otherwise hear of it only at the
- * session's next usage upload (refused `sharing_stopped`): listed in every directives answer, the device ends its own
- * share at its next pass (E2E-AGENT cycle 8). The device's own stops are listed too; it already knows them.
+ * The device's person's sessions whose share has ended on the server in the last 30 days, in the workspaces this device
+ * reaches now (newest first, at most 200): stopped on the web (Stop sharing) or by the device that shared it
+ * (`ended_reason` null; another device can't stop a session it does not hold), ended because the person was removed from the workspace and is back (`member_removed`), or
+ * ended when the device holding it signed out (`device_signed_out`). A stop or resume reaches a device as a directive,
+ * but an end of sharing has none, and a device would otherwise hear of it only at the session's next usage upload
+ * (refused `sharing_stopped`): listed in every directives answer, the device ends its own share at its next pass
+ * (E2E-AGENT cycle 8). Every device of the person, not only the asking one: a machine that paired again (`align login`
+ * after a logout, or replacing its live pairing) holds the sessions of its earlier device, whose stop on the web it
+ * must still hear (E2E-AGENT cycle 9 C9-1). A device matches only the keys it can compute (its machine's secret), so
+ * another machine's entries are inert there; the device's own stops are listed too, and it already knows them.
  */
 export function endedSessionsFor(dev: DevicePrincipal, nowMs = Date.now()) {
   const ws = [...dev.grants];
   if (!ws.length) return [];
   return all<{ ws_id: string; session_key: string; ended_reason: string | null; stopped_at: string }>(
     `SELECT ws_id, session_key, ended_reason, stopped_at FROM v2_sessions
-     WHERE device_id = ? AND user_id = ? AND state = 'stopped' AND stopped_at >= ? AND ws_id IN (${ws.map(() => "?").join(",")})
+     WHERE user_id = ? AND state = 'stopped' AND stopped_at >= ? AND ws_id IN (${ws.map(() => "?").join(",")})
      ORDER BY stopped_at DESC LIMIT 200`,
-    dev.deviceId,
     dev.user.id,
     new Date(nowMs - ENDED_LOOKBACK_MS).toISOString(),
     ...ws,
