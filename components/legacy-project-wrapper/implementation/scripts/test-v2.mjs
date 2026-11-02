@@ -5568,8 +5568,8 @@ try {
           JSON.stringify(ui.answers),
         );
         check(
-          "ui (Chrome): the goal page shows the hold banner with who and why, and the Agents on this goal card: Release, Send a request (Replan, Checkpoint, Switch goal), and each request with its sender, quoted note and per-session pills (declined, accepted by the developer)",
-          /All agents on this goal are on hold/.test(ui.banner) && ui.banner.includes("Quill Lead") && ui.banner.includes(QREASON) && /Agents on this goal/.test(ui.card) && /Release/.test(ui.card) && /Send a request/.test(ui.card) &&
+          "ui (Chrome): the goal page shows the hold banner with who (\"You paused them\" to the person who did, c9 W3) and why, and the Agents on this goal card: Release, Send a request (Replan, Checkpoint, Switch goal), and each request with its sender, quoted note and per-session pills (declined, accepted by the developer)",
+          /All agents on this goal are on hold/.test(ui.banner) && ui.banner.includes("You paused them") && !ui.banner.includes("Quill Lead") && ui.banner.includes(QREASON) && /Agents on this goal/.test(ui.card) && /Release/.test(ui.card) && /Send a request/.test(ui.card) &&
             JSON.stringify(ui.radios) === JSON.stringify(["replan", "checkpoint", "switch_goal"]) && /Checkpoint/.test(ui.cp) && ui.cp.includes(QNOTE) && /declined/.test(ui.cp) && /accepted by the developer/.test(ui.cp) && errors.length === 0,
           `${JSON.stringify(ui).slice(0, 600)} ${errors.join(" | ")}`,
         );
