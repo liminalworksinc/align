@@ -12,7 +12,7 @@ import { addWorkspaceToDevices, liveDevicesOf } from "./devices";
 import { deleteMemberSessions, onMemberRemoved } from "./lifecycle";
 import { cancelDeparture, noteDeparture, personName, RESTORE_DAYS } from "./retention";
 import { workspaceSteering, writeSteering } from "./steering";
-import { str, type Body } from "./validate";
+import { oneLine, type Body } from "./validate";
 
 // Workspaces, members, invites and teams. Teams are stored as pods (v2_pods, pod_ ids); every response, message and
 // audit action says "team". The /pods routes remain as aliases of /teams.
@@ -118,7 +118,8 @@ export function workspaceDetail(pp: PolicyPrincipal) {
 export async function updateWorkspace(pp: PolicyPrincipal, b: Body) {
   need(pp, "workspace.manage");
   if (b.name === undefined && b.steering === undefined) throw badRequest("Send name or steering");
-  const name = b.name === undefined ? undefined : str(b, "name", 100);
+  // A one-line name, cleaned as a device name is: one of only invisible characters or marks is blank (E2E-WEB cycle 13 W8).
+  const name = b.name === undefined ? undefined : oneLine(b, "name", 100);
   const at = nowIso();
   const steering = await tx(() => {
     if (name !== undefined) {

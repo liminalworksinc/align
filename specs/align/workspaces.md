@@ -593,6 +593,16 @@ when `BETTER_AUTH_SECRET` is unset, migrate the database before serving, and run
 
 The server SHALL let a signed-in person create a workspace on `POST /api/v2/workspaces {name, creation_code?}` (name
 1 to 100 characters) as its only owner: in Mode L always, and when hosted only through the hosted creation gate.
+A workspace name, on creation and on rename, and a team name SHALL be one line cleaned exactly as a device name is
+(as "Device pairing flow" says: controls, whitespace and blank fillers become one space, invisible format characters are dropped
+with emoji sequences kept whole, the ends trimmed, at most 100 characters as a person reads them), and one with nothing
+left, or nothing but combining marks and spaces, SHALL be 400 `name is required`, so no workspace or team is listed
+with a name nobody can see or click (E2E-WEB cycle 13 W8).
+
+#### Scenario: An invisible workspace or team name
+
+- **WHEN** an owner renames a workspace to U+200B, U+FE0F, two U+0301, U+3164 or spaces with a word joiner, creates a workspace named U+200B U+FE0F, creates a team named U+3164 U+200B, and renames the workspace to `Workspace<U+200B> A<newline>renamed<U+2060>` (`scripts/test-v2.mjs` "c13 W8 (E2E-WEB cycle 13): ...")
+- **THEN** each of the first seven is 400 `name is required` and nothing changes, and the last stores `Workspace A renamed`
 
 #### Scenario: Create
 

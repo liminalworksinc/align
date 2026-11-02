@@ -2940,6 +2940,20 @@ try {
   const renByViewer = await call("U4", "PATCH", `/api/v2/workspaces/${A}`, { cookie: U4.cookie, body: { name: "Hijacked" } });
   const ren = await call("U1", "PATCH", `/api/v2/workspaces/${A}`, { cookie: U1.cookie, body: { name: "Workspace A renamed" } });
   check("workspaces: an owner renames (PATCH -> {id, name}); a member -> 403 owner_only, a viewer -> 403 read_only", ren.status === 200 && ren.json.id === A && ren.json.name === "Workspace A renamed" && renByMember.json?.error === "owner_only" && renByViewer.json?.error === "read_only", `${ren.text} ${renByMember.text} ${renByViewer.text}`);
+  // E2E-WEB cycle 13 W8: workspace and team names are cleaned as device names are: one of only invisible characters or
+  // marks is blank (400 name is required); invisible characters inside a name are dropped.
+  const BLANK_NAMES = ["\u200B", "\uFE0F", "\u0301\u0301", "\u3164", " \u200B\u2060 "];
+  const w8Renames = [];
+  for (const name of BLANK_NAMES) w8Renames.push(await call("U1", "PATCH", `/api/v2/workspaces/${A}`, { cookie: U1.cookie, body: { name } }));
+  const w8Create = await call("U1", "POST", "/api/v2/workspaces", { cookie: U1.cookie, body: { name: "\u200B\uFE0F" } });
+  const w8Team = await call("U1", "POST", `/api/v2/workspaces/${A}/teams`, { cookie: U1.cookie, body: { name: "\u3164\u200B" } });
+  const w8Inner = await call("U1", "PATCH", `/api/v2/workspaces/${A}`, { cookie: U1.cookie, body: { name: "Workspace\u200B A\nrenamed\u2060" } });
+  check(
+    "c13 W8 (E2E-WEB cycle 13): a workspace rename, a new workspace and a new team named with only invisible characters or marks (U+200B, U+FE0F, two U+0301, U+3164, spaces with a word joiner) -> 400 \"name is required\" and nothing changes; invisible characters inside a name are dropped and a line break becomes a space (\"Workspace A renamed\")",
+    w8Renames.every((r) => r.status === 400 && r.json?.message === "name is required") && w8Create.status === 400 && w8Create.json?.message === "name is required" && w8Team.status === 400 && w8Team.json?.message === "name is required" &&
+      w8Inner.status === 200 && w8Inner.json?.name === "Workspace A renamed" && withDb((d) => d.prepare("SELECT name FROM v2_workspaces WHERE id = ?").get(A).name) === "Workspace A renamed",
+    `${w8Renames.map((r) => r.text).join(" | ")} | ${w8Create.text} | ${w8Team.text} | ${w8Inner.text}`,
+  );
 
   // -- audit trail --
   withDb((d) => d.prepare("INSERT INTO v2_audit (ws_id, actor_id, action, object_id, at) VALUES (?, ?, 'pod.created', 'pod_legacyrowxxxxxxxxxxxxxx', ?)").run(A, U1.id, new Date().toISOString()));
