@@ -931,7 +931,9 @@ actor, the device as object), as accepting an invite with the device ticked, nee
 (403 `reauth_required` with `Sign in again to give a device this workspace. This needs a sign-in from the last 15
 minutes.`), answer `{device_id, workspace_id}`, 409 `already_granted` when the device has it already, 404 for a device
 that is another person's, revoked or unknown (all alike: `This device is not one of your paired devices any more (it may
-have been signed out), so it was given nothing.`) or a workspace they are not a member of, and 400 for a malformed
+have been signed out), so it was given nothing.`) or a workspace they are not a member of (deleted, left, removed from or
+never theirs, all alike: `This workspace is not one of yours any more (it was deleted, or you left it or were removed
+from it), so the device was given nothing.`; `scripts/test-v2.mjs` "W1 (E2E-WEB cycle 7): ..."), and 400 for a malformed
 workspace id, and grant nothing on any refusal. A device token SHALL never do it. The device learns the workspace at
 its next pass, as after an invite (`local-agent`).
 

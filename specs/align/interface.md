@@ -406,8 +406,10 @@ with **Sign in again** (back to `/app/devices`), and a note says the device pick
 The devices SHALL be listed as the invite page lists them, by name (case-insensitive), the live ones first and then the
 revoked ones. The button SHALL give the workspace the list shows: once one is given it leaves the list, and the next
 press gives the one shown then. A refusal because the device is no longer the person's (revoked in another tab, say),
-or the workspace no longer theirs, SHALL show the server's message and read both lists again, so the row shows what is
-true now.
+the workspace no longer theirs (deleted, left or removed from in another tab: 404, "This workspace is not one of yours
+any more (it was deleted, or you left it or were removed from it), so the device was given nothing."), or the device
+given that workspace meanwhile (409 `already_granted`, "This device already has this workspace") SHALL show the server's
+message and read both lists again after any 404 or 409, so the row shows what is true now.
 
 #### Scenario: Give a device a workspace
 
@@ -423,6 +425,11 @@ true now.
 
 - **WHEN** the person opens the page, then a device is revoked in another tab and they press **Give this device the workspace** on its row (`scripts/test-v2.mjs` "Z1, Z2 (ui): ...")
 - **THEN** the live devices were listed by name before the revoked ones, and after the press the page shows "This device is not one of your paired devices any more …", and the row reads "revoked" with nothing offered
+
+#### Scenario: A workspace given or deleted in another tab
+
+- **WHEN** a device lacks a workspace the person then gives it in another tab, and they press **Give this device the workspace** on its row; and again for a workspace they then delete in another tab (`scripts/test-v2.mjs` "W2 (ui): ..." and "W1 (ui): ...")
+- **THEN** the first shows "This device already has this workspace" and the row lists that workspace and offers it no more; the second shows "This workspace is not one of yours any more (it was deleted, or you left it or were removed from it), so the device was given nothing." (never a bare "Not found") and the workspace is offered no more
 
 #### Scenario: Revoke a device
 

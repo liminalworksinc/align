@@ -2441,6 +2441,11 @@ try {
       deskMe.json?.workspaces?.map((w) => w.id).join() === A && JSON.stringify(deskDirs.json?.workspaces) === JSON.stringify([A]) && audDesk.length === 1 && audDesk[0].actor?.id === U5.id,
     `${gStale.text} ${gOther.status} ${gNotMember.status} ${gRevoked.status} ${gBadWs.status} ${gBearer.status} [${refusedGrants}] ${gOk.text} ${gAgain.text} ${deskMe.text} ${deskDirs.text} ${JSON.stringify(audDesk)}`,
   );
+  check(
+    "W1 (E2E-WEB cycle 7): giving a device a workspace I am not a member of is 404 saying what happened, never a bare \"Not found\": \"This workspace is not one of yours any more (it was deleted, or you left it or were removed from it), so the device was given nothing.\"",
+    gNotMember.status === 404 && gNotMember.json?.message === "This workspace is not one of yours any more (it was deleted, or you left it or were removed from it), so the device was given nothing.",
+    gNotMember.text,
+  );
   const webMe = await call("U5", "GET", "/api/v2/me", { cookie: U5.cookie });
   check(
     "devices (E2E-AGENT cycle 6): a device's GET /me lists as other_workspaces ({id, name}) its person's workspaces it was not given, never one they are not a member of; given one, it moves to workspaces; the web's /me has no other_workspaces",
@@ -2513,6 +2518,33 @@ try {
         "Z2 (ui): Give this device the workspace on a device revoked in another tab says \"This device is not one of your paired devices any more …\" and reads the list again: the row reads revoked and offers nothing",
         revokedElsewhere.status === 204 && z2.body.includes("This device is not one of your paired devices any more (it may have been signed out), so it was given nothing.") && /revoked/.test(z2.row) && !/active/.test(z2.row) && !z2.row.includes("Give this device the workspace"),
         `${revokedElsewhere.status} ${z2.row} | ${z2.body.slice(0, 300)}`,
+      );
+
+      // W2 and W1 (E2E-WEB cycle 7): the cart lacks a third workspace, which it is given in another tab; then a fourth,
+      // which is deleted in another tab. Each press says what happened and reads both lists again.
+      const u5Third = (await call("U5", "POST", "/api/v2/workspaces", { cookie: U5.cookie, body: { name: "U5 third" } })).json?.id;
+      await page.goto(`${BASE}/app/devices`, { waitUntil: "networkidle0" });
+      await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes("Give this device the workspace"), { timeout: 15000 }, cartRow).catch(() => undefined);
+      const grantedElsewhere = await give(U5, cart.id, u5Third);
+      await giveOn(cartRow).catch(() => undefined);
+      await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes("U5 third") && !document.querySelector(sel)?.textContent?.includes("Give this device the workspace"), { timeout: 15000 }, cartRow).catch(() => undefined);
+      const w2 = await page.evaluate((sel) => ({ row: document.querySelector(sel)?.textContent ?? "", body: document.body.innerText }), cartRow);
+      check(
+        "W2 (ui): Give this device the workspace for a workspace the device was given in another tab says \"This device already has this workspace\" and reads the lists again: the row lists it and offers nothing more",
+        !!u5Third && grantedElsewhere.status === 200 && w2.body.includes("This device already has this workspace") && w2.row.includes("U5 third") && !w2.row.includes("Give this device the workspace"),
+        `${grantedElsewhere.status} ${w2.row} | ${w2.body.slice(0, 300)}`,
+      );
+      const u5Fourth = (await call("U5", "POST", "/api/v2/workspaces", { cookie: U5.cookie, body: { name: "U5 fourth" } })).json?.id;
+      await page.goto(`${BASE}/app/devices`, { waitUntil: "networkidle0" });
+      await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes("Give this device the workspace"), { timeout: 15000 }, cartRow).catch(() => undefined);
+      const deletedElsewhere = await call("U5", "DELETE", `/api/v2/workspaces/${u5Fourth}`, { cookie: U5.cookie });
+      await giveOn(cartRow).catch(() => undefined);
+      await page.waitForFunction((sel) => !document.querySelector(sel)?.textContent?.includes("Give this device the workspace"), { timeout: 15000 }, cartRow).catch(() => undefined);
+      const w1 = await page.evaluate((sel) => ({ row: document.querySelector(sel)?.textContent ?? "", body: document.body.innerText }), cartRow);
+      check(
+        "W1 (ui): Give this device the workspace for a workspace deleted in another tab says \"This workspace is not one of yours any more (it was deleted, or you left it or were removed from it), so the device was given nothing.\" (never a bare \"Not found\") and reads the lists again: the workspace is offered no more",
+        !!u5Fourth && deletedElsewhere.status === 204 && w1.body.includes("This workspace is not one of yours any more (it was deleted, or you left it or were removed from it), so the device was given nothing.") && !/\bNot found\b/.test(w1.body) && !w1.row.includes("Give this device the workspace"),
+        `${deletedElsewhere.status} ${deletedElsewhere.text.slice(0, 200)} ${w1.row} | ${w1.body.slice(0, 300)}`,
       );
 
       // C6-4 (ui): a pairing code asked 70 seconds ago reads "Asked 1 minute ago".

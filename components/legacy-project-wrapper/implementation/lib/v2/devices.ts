@@ -377,6 +377,10 @@ export function addWorkspaceToDevices(userId: string, wsId: string, deviceIds: s
   return deviceIds;
 }
 
+/** The Devices page's refusal for a workspace that is not the person's (any more): deleted, left or removed from (in
+ *  another tab, say), or never theirs. */
+export const WORKSPACE_NOT_YOURS = "This workspace is not one of yours any more (it was deleted, or you left it or were removed from it), so the device was given nothing.";
+
 /**
  * Give one of this person's own live devices a workspace they are a member of, later than at an invite (the Devices
  * page, an extension of owner decision 2026-11-01, ADR 0003 section 6): the same grant and the same
@@ -390,7 +394,8 @@ export async function grantWorkspace(userId: string, deviceId: string, wsId: str
     if (!get("SELECT 1 AS x FROM v2_devices WHERE id = ? AND user_id = ? AND revoked_at IS NULL", deviceId, userId)) {
       throw new V2Error(404, "not_found", "This device is not one of your paired devices any more (it may have been signed out), so it was given nothing.");
     }
-    if (!get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, wsId, userId)) throw notFound();
+    // A workspace deleted, left or removed from in another tab, and one never theirs, read alike: what happened (W1).
+    if (!get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, wsId, userId)) throw new V2Error(404, "not_found", WORKSPACE_NOT_YOURS);
     if (get("SELECT 1 AS x FROM v2_device_grants WHERE device_id = ? AND ws_id = ?", deviceId, wsId)) throw conflict("already_granted", "This device already has this workspace");
     // The invite path's grant and audit row, as it stands.
     addWorkspaceToDevices(userId, wsId, [deviceId], at);
