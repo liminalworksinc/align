@@ -63,6 +63,16 @@ export function workspacesFor(p: Principal) {
   }));
 }
 
+/** For a device: the workspaces its person is a member of that this device was not given (names they already see), so
+ *  the CLI can point to the Devices page grant instead of saying "unknown workspace" (E2E-AGENT cycle 6). */
+export function otherWorkspacesFor(p: Principal) {
+  if (p.kind !== "device") return [];
+  return all<{ id: string; name: string }>(
+    "SELECT w.id, w.name FROM v2_workspaces w JOIN v2_members m ON m.ws_id = w.id AND m.user_id = ? WHERE w.deleted_at IS NULL ORDER BY w.name, w.id",
+    p.user.id,
+  ).filter((w) => !p.grants.has(w.id));
+}
+
 /** A new workspace owned by the caller. When hosted it must pass the creation gate (lib/v2/creation.ts): the mode,
  *  the caps, the address, the captcha and, in `codes` mode, a creation code spent in the same transaction. `seed`,
  *  when given, fills it in that transaction too (the sample workspace). */

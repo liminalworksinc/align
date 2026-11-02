@@ -69,7 +69,8 @@ export interface HotState {
   harness: Harness;
   native_session_id: string;
   cwd: string | null;
-  share: { workspace_id: string; workspace_name: string; session_key: string; state: ShareState } | null;
+  /** `since`: the first epoch of this share, which a share made again after an earlier one ended changes (cycle 6). */
+  share: { workspace_id: string; workspace_name: string; session_key: string; state: ShareState; since?: string } | null;
   goal: GoalSnapshot | null;
   binding: { epoch_id: string; goal_id: string | null } | null;
   /** Opened by the next UserPromptSubmit hook (a root-turn boundary). */
@@ -91,9 +92,12 @@ export interface HotState {
   /** This session's newest epochs as the sync recorded them, so a hook can tell whether the epoch it opened is in. */
   epochs_seen?: string[];
   /** Goal holds on this session that were released (the release directive, who released it, the goal's title). */
-  released_holds?: { directive_id: string; goal_title: string; by: string }[];
+  released_holds?: { directive_id: string; goal_id?: string; goal_title: string; by: string }[];
   /** The resume directive that lifted this session's stop from the web, while it is the latest word on its latch. */
   resumed?: string | null;
+  /** Set when the session was shared from this machine before (its history may be deleted since): a share counts from
+   *  now. `stopped` when its person stopped that share or deleted its history: a folder rule never shares it again. */
+  prior_share?: { stopped: boolean } | null;
   updated_at: string;
 }
 
@@ -145,6 +149,8 @@ export interface HoldLatch {
   v: 1;
   /** As on the stop latch: the release can no longer reach this session. */
   ended?: EndedWhy;
+  /** As on the stop latch: `::align share` can share it again now, after which a release reaches it. */
+  reshare?: true;
   holds: { goal_id: string; goal_title: string; by: string; reason: string | null; directive_id: string; seq: number; at: string }[];
 }
 
@@ -195,6 +201,9 @@ export interface InjectedState {
   releases_told?: string[];
   /** The resume the model was last told about. */
   resume_told?: string;
+  /** The share (its `since`) the model was last told it counts in: a share made again later is told as `bound` even
+   *  toward the goal already in context, since it stopped counting in between (cycle 6). */
+  share_since?: string;
   at: string;
 }
 
@@ -207,6 +216,9 @@ export interface Latch {
   /** Set when the session's sharing ended (this machine signed out, or the server no longer has the share), so no
    *  resume can reach it: only `align stop-sharing <session>` lifts the latch. */
   ended?: EndedWhy;
+  /** With `ended`: this machine can share the session there again now (signed in again, its workspace in reach again),
+   *  so `::align share` shares it again, after which the web can resume it (C6-2). */
+  reshare?: true;
 }
 
 /** Why a share ended so that nothing from the web can lift its latches any more. */
@@ -282,6 +294,9 @@ export interface MeFile {
   /** Each workspace's teams for this person (`teams`; servers before teams were renamed sent `pods`). */
   workspaces: { id: string; name: string; role: string; teams?: { id: string; name: string; role: string }[]; pods?: { id: string; name: string; role: string }[] }[];
   default_workspace?: string | null;
+  /** The person's workspaces this device was not given (servers from cycle 6 on): named so `--workspace` can point to
+   *  the Devices page grant instead of saying "unknown workspace". */
+  other_workspaces?: { id: string; name: string }[];
   /** Set when this machine signed out (logout, or the server revoked the device), so hooks refuse to share. */
   signed_out?: boolean;
 }

@@ -124,8 +124,10 @@ call.
 - **Past sessions.** `align share --dir <folder> --past <days>` writes the folder rule and also shares the sessions
   already metered on this machine in the last 1 to 14 days whose own recorded folders (the first one and any it later
   reported) are all the folder or inside it (`/work/app-secret` is not inside `/work/app`). Each is shared from its own
-  start after a preview that lists them by start time and harness. Sessions with no folder, and sessions that were ever
-  shared, are skipped; the server also refuses an epoch that would start before history it already holds
+  start after a preview that lists them by start time and harness. Sessions with no folder, sessions that were ever
+  shared, and sessions whose shared history was deleted (on the web or with `align delete-history`) are skipped; a
+  session shared before, even one whose history was deleted since, is only ever shared again from now, by an explicit
+  `align share <session>` or `::align share`. The server also refuses an epoch that would start before history it already holds
   (`epoch_overlap`), and the CLI reports that session as skipped.
 
 ## Allocation and steering
@@ -165,13 +167,14 @@ what was added.
   `hooks.json.align-backup-<timestamp>` copy. Codex lists new hooks for review; trust them in Codex `/hooks`.
   `config.toml` is not edited.
 - `--dry-run` prints the plan and writes nothing. A reinstall that changes nothing writes no backup. `align uninstall`
-  deletes the plugin folder, removes only Align's Codex handlers (and the backups Align made of those files) and keeps
-  `ALIGN_HOME` unless `--purge`.
+  deletes the plugin folder (and the `skills/` folder when Align's install created it and it is empty again), removes
+  only Align's Codex handlers (and the backups Align made of those files) and keeps `ALIGN_HOME` unless `--purge`.
 
 Workspaces: a device reaches the workspaces you ticked when you approved it. When you accept an invite to a workspace
 (joining it, or rejoining after being removed), the invite page lists your paired devices: tick a device there and its
 next sync picks the workspace up (`align sync` and the sessions that lost it say so once), with no `align login`, so
-shares in your other workspaces carry on.
+shares in your other workspaces carry on. A workspace you joined without ticking this device can be given to it later
+on the Devices page ("Give this device the workspace"); until then `--workspace <it>` says so and points there.
 
 ## State (`ALIGN_HOME`, default `~/.align`, 0700, must be owned by you)
 

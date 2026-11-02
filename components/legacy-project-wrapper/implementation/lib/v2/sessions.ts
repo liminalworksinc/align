@@ -189,7 +189,7 @@ const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 export async function openBindingEpoch(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {
   const s = ownSession(pp, dev, key);
-  if (s.state === "stopped") throw conflict("sharing_stopped", "Sharing was stopped for this session");
+  if (s.state === "stopped") throw sharingStopped(s);
   const epochId = str(b, "epoch_id", 70);
   if (!EPOCH_ID.test(epochId)) throw badRequest("epoch_id must be ep_ followed by 22+ url-safe characters");
   const goalId = b.goal_id === null || b.goal_id === undefined ? null : str(b, "goal_id", 64);
@@ -306,11 +306,17 @@ function usageRowIn(v: unknown, i: number): UsageRow {
   }
 }
 
+/** 409 sharing_stopped, with why the session's sharing ended when its person did not stop it (`member_removed`: they
+ *  left the workspace or were removed, and may be back; `device_signed_out`), else `ended_reason: null`: a device
+ *  that never saw the ending can then say what its user can do (`::align share` once they are back), not that the
+ *  session was stopped for good (E2E-AGENT cycle 6 C6-3). */
+const sharingStopped = (s: SessionRow) => new V2Error(409, "sharing_stopped", "Sharing was stopped for this session", { ended_reason: s.ended_reason ?? null });
+
 /** Idempotent usage batch: INSERT OR IGNORE on (ws, session_key, request_key). The same key with different values is
  *  a conflict and never overwrites; a row whose epoch is unknown or another session's is a conflict too. */
 export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {
   const s = ownSession(pp, dev, key);
-  if (s.state === "stopped") throw conflict("sharing_stopped", "Sharing was stopped for this session");
+  if (s.state === "stopped") throw sharingStopped(s);
   if (!Array.isArray(b.rows)) throw badRequest("rows must be a list");
   if (b.rows.length > 500) throw new V2Error(413, "too_many_rows", "At most 500 rows per batch");
   const rows = b.rows.map(usageRowIn);
@@ -323,10 +329,15 @@ export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key
     let accepted = 0;
     let duplicates = 0;
     let conflicts = 0;
+    // The conflicts that were never stored (an unknown epoch, or made while the session was not shared or before its
+    // epoch started), by key, so the
+    // device counts them as not shared (E2E-AGENT cycle 6); a key stored before with other values is not one of them.
+    const refused: string[] = [];
     for (const r of rows) {
       const e = epochs.get(r.epoch_id as string);
       if (!e) {
         conflicts++;
+        refused.push(r.request_key as string);
         continue;
       }
       // A row from after its epoch ended, at a time no epoch of this session covers, was made while the session was not
@@ -337,10 +348,12 @@ export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key
       // stored either (Z7).
       if (t < Date.parse(e.starts_at)) {
         conflicts++;
+        refused.push(r.request_key as string);
         continue;
       }
       if (e.ends_at !== null && t >= Date.parse(e.ends_at) && !shared(t)) {
         conflicts++;
+        refused.push(r.request_key as string);
         continue;
       }
       const n = run(
@@ -361,18 +374,20 @@ export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key
       else conflicts++;
     }
     if (conflicts) run("UPDATE v2_sessions SET conflicts = conflicts + ? WHERE ws_id = ? AND session_key = ?", conflicts, pp.wsId, key);
-    return { accepted, duplicates, conflicts };
+    return { accepted, duplicates, conflicts, refused };
   });
 }
 
-/** Stop sharing (future only): no more uploads; the open epoch ends now. History stays until deleted. */
+/** Stop sharing (future only): no more uploads; the open epoch ends now. History stays until deleted. It is its person's
+ *  stop also for a session that had ended (`member_removed`, `device_signed_out`): the reason goes, so it is never
+ *  shared again and its refusals say `ended_reason: null` (E2E-AGENT cycle 6). */
 export async function stopSharing(pp: PolicyPrincipal, p: Principal, key: string) {
   ownSession(pp, p, key);
   const at = nowIso();
   await tx(() => {
     run("UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL", at, pp.wsId, key);
     run(
-      "UPDATE v2_sessions SET state = 'stopped', stopped_at = COALESCE(stopped_at, ?), governing_goal_id = NULL, governing_alignment_id = NULL, updated_at = ? WHERE ws_id = ? AND session_key = ?",
+      "UPDATE v2_sessions SET state = 'stopped', stopped_at = COALESCE(stopped_at, ?), ended_reason = NULL, governing_goal_id = NULL, governing_alignment_id = NULL, updated_at = ? WHERE ws_id = ? AND session_key = ?",
       at,
       at,
       pp.wsId,

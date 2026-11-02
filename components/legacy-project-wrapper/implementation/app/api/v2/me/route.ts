@@ -1,15 +1,17 @@
 import { deleteAccount } from "@/lib/v2/account";
 import { eitherAuth, noContent, readJson, requireRecentSignIn, route, webWrite } from "@/lib/v2/http";
 import { str } from "@/lib/v2/validate";
-import { workspacesFor } from "@/lib/v2/workspaces";
+import { otherWorkspacesFor, workspacesFor } from "@/lib/v2/workspaces";
 
-// GET /api/v2/me (Bearer or cookie): who this is, the device (Bearer only), and the workspaces in reach.
+// GET /api/v2/me (Bearer or cookie): who this is, the device (Bearer only), and the workspaces in reach; for a device
+// also `other_workspaces`, its person's workspaces it was not given ({id, name}; the Devices page gives one).
 export const GET = route(async (req) => {
   const p = await eitherAuth(req);
   return {
     user: p.user,
     device: p.kind === "device" ? { id: p.deviceId, name: p.deviceName } : null,
     workspaces: workspacesFor(p),
+    ...(p.kind === "device" ? { other_workspaces: otherWorkspacesFor(p) } : {}),
   };
 });
 

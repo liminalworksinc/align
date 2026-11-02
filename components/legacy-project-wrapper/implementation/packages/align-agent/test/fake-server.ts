@@ -90,6 +90,8 @@ export class FakeServer {
   log: { method: string; path: string; status: number; auth: boolean; origin: boolean; device?: string }[] = [];
   /** `replaces` of each token poll that created a device (null when the poll named none). */
   replacesSeen: (string | null)[] = [];
+  /** Each self-revoke, with the device it named as its replacement (`replaced_by`, null when none). */
+  revokesSeen: { device: string; replaced_by: string | null }[] = [];
   /** Hold matching calls (before the server looks at them) until `release` settles; `left` of them, when set (C4). */
   holdCalls: { match: (method: string, path: string) => boolean; release: Promise<void>; left?: number } | null = null;
   /** Answer matching calls 503 without processing them (a proxy in front of a failing route, C4-3). */
@@ -98,6 +100,8 @@ export class FakeServer {
   refuseDeletes = false;
   user = { id: "u_sean", name: "Sean", email: "sean@example.test" };
   workspaces = [{ id: "ws_acme", name: "Acme", role: "owner", teams: [{ id: "pod_core", name: "Core", role: "lead" }] }];
+  /** The person's workspaces this device was not given (`/me`'s `other_workspaces`). */
+  otherWorkspaces: { id: string; name: string }[] = [];
   goals = new Map<string, Goal[]>();
   /** Workspace steering switch, as the goals feed reports it. */
   steering = new Map<string, "on" | "off">();
@@ -106,7 +110,8 @@ export class FakeServer {
   pending = new Map<string, Pending>();
   devices = new Map<string, Device>();
   access = new Map<string, { device: string; exp: number }>();
-  sessions = new Map<string, { ws: string; device: string; body: any; state: string }>();
+  /** `ended`: why a stopped session ended when its person did not stop it (as `v2_sessions.ended_reason`). */
+  sessions = new Map<string, { ws: string; device: string; body: any; state: string; ended?: "member_removed" | "device_signed_out" | null }>();
   /** DELETE …/sessions/{key} that went through, and the device that sent each (audited with the acting device). */
   deletedBy: { key: string; device: string }[] = [];
   /** POST /activity items as received, plus items other people's machines "sent" (addRemoteActivity). */
@@ -118,6 +123,23 @@ export class FakeServer {
   usage = new Map<string, any>();
   /** Session keys whose history was deleted (on the web or by a device): a later DELETE gets 410 history_deleted. */
   deletedKeys = new Set<string>();
+
+  /** As lib/v2/lifecycle.ts: the session's person was removed from its workspace (its share ends, `member_removed`)
+   *  and let back in, all while this device did not look (`/me` lists the workspace throughout). */
+  removeAndReAdd(key: string): void {
+    const s = this.sessions.get(key)!;
+    s.state = "stopped";
+    s.ended = "member_removed";
+    for (const e of this.epochs.values()) if (e.session_key === key && !e.ends_at) e.ends_at = new Date().toISOString();
+  }
+
+  /** The person stops sharing the session on the web. */
+  stopOnWeb(key: string): void {
+    const s = this.sessions.get(key)!;
+    s.state = "stopped";
+    s.ended = null;
+    for (const e of this.epochs.values()) if (e.session_key === key && !e.ends_at) e.ends_at = new Date().toISOString();
+  }
 
   /** The person deletes a session's shared history on the web. */
   deleteOnWeb(key: string): void {
@@ -429,9 +451,15 @@ export class FakeServer {
       if (req.method === "DELETE" && p === "/api/v2/devices/self") {
         dev.revoked = true;
         dev.revokedReason = "logout";
+        // As lib/v2/devices.ts passNameOn: the device that replaced it on this machine takes its name when it got
+        // "<name> (n)" only because this one was live.
+        const next = this.devices.get(url.searchParams.get("replaced_by") ?? "");
+        const m = next && !next.revoked ? /^(.*) \((\d+)\)$/.exec(next.name) : null;
+        if (next && m && m[1] === dev.name && ![...this.devices.values()].some((x) => !x.revoked && x.name === dev.name)) next.name = dev.name;
+        this.revokesSeen.push({ device: dev.id, replaced_by: url.searchParams.get("replaced_by") });
         return send(204);
       }
-      if (req.method === "GET" && p === "/api/v2/me") return send(200, { user: this.user, device: { id: dev.id, name: dev.name }, workspaces: this.workspaces });
+      if (req.method === "GET" && p === "/api/v2/me") return send(200, { user: this.user, device: { id: dev.id, name: dev.name }, workspaces: this.workspaces, other_workspaces: this.otherWorkspaces });
       if (req.method === "GET" && p === "/api/v2/devices") {
         const list = [...this.devices.values()].map((d) => ({ id: d.id, name: d.name, created_at: d.createdAt ?? new Date(0).toISOString(), last_seen_at: d.createdAt ?? null, revoked_at: d.revoked ? new Date().toISOString() : null, revoked_reason: d.revoked ? d.revokedReason || "revoked_on_web" : null, workspaces: [], current: d.id === dev.id }));
         return send(200, { devices: list });
@@ -467,7 +495,9 @@ export class FakeServer {
         // A session its person stopped sharing (not one its device's revoke ended) stays stopped: 409 sharing_stopped to
         // any of their devices (C4-8). Its history may be deleted by any of their live devices (C4-1).
         const reshare = !sub && req.method === "PUT" && !!sess && sess.device !== dev.id && sess.state !== "stopped" && !!this.devices.get(sess.device)?.revoked;
-        if (sess && !sub && req.method === "PUT" && sess.state === "stopped") return send(409, { error: "sharing_stopped" });
+        // A session that ended when its person was removed is shared again by its own device once they are back.
+        const back = !!sess && !sub && req.method === "PUT" && sess.state === "stopped" && sess.ended === "member_removed" && sess.device === dev.id;
+        if (sess && !sub && req.method === "PUT" && sess.state === "stopped" && !back) return send(409, { error: "sharing_stopped" });
         const deleting = !sub && req.method === "DELETE";
         if (sess && sess.device !== dev.id && !reshare && !deleting) return send(404, { error: "not_found" });
         if (!sub && req.method === "PUT") {
@@ -525,16 +555,21 @@ export class FakeServer {
           return send(200, wire);
         }
         if (sub === "usage") {
-          if (sess.state !== "shared") return send(409, { error: sess.state === "stopped" ? "sharing_stopped" : "suspended" });
+          if (sess.state !== "shared") return send(409, sess.state === "stopped" ? { error: "sharing_stopped", ended_reason: sess.ended ?? null } : { error: "suspended" });
           const rows = Array.isArray(body?.rows) ? body.rows : [];
           if (rows.length > 500) return send(413, { error: "too_many_rows" });
           let accepted = 0;
           let duplicates = 0;
           let conflicts = 0;
+          const refused: string[] = [];
+          // As lib/v2/sessions.ts: a row from after its epoch ended, at a time no epoch of the session covers, was made
+          // while the session was not shared: a conflict, never stored, named in `refused` like an unknown epoch's.
+          const covered = (t: number) => [...this.epochs.values()].some((x) => x.session_key === key && Date.parse(x.starts_at) <= t && (!x.ends_at || t < Date.parse(x.ends_at)));
           for (const r of rows) {
             const e = this.epochs.get(r.epoch_id);
-            if (!e || e.session_key !== key) {
+            if (!e || e.session_key !== key || (e.ends_at && Date.parse(r.ts) >= Date.parse(e.ends_at) && !covered(Date.parse(r.ts)))) {
               conflicts++;
+              refused.push(r.request_key);
               continue;
             }
             const prev = this.usage.get(r.request_key);
@@ -547,7 +582,7 @@ export class FakeServer {
             this.usage.set(r.request_key, { ...r, session_key: key });
             accepted++;
           }
-          return send(200, { accepted, duplicates, conflicts });
+          return send(200, { accepted, duplicates, conflicts, refused });
         }
       }
       if (req.method === "GET" && p === "/api/v2/directives") {

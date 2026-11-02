@@ -28,7 +28,7 @@ import {
 import { bumpGap, nowIso, tx } from "./db.ts";
 import { endEpochs, ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
-import { applyShare, bind, endSharesIfSignedOut, enqueue, forgetShare, markStopped, planShare, stopSharing } from "./share.ts";
+import { applyShare, bind, endShareRemoved, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
 import { pollDirectives } from "./directives.ts";
 import { answerRequest } from "./requests.ts";
@@ -165,9 +165,16 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
       if (!ws) throw new Error(r.workspace ? `${r.rule_dir ? "the folder rule's" : "that"} workspace is no longer available on this device` : "no default workspace; run `align share --latest --workspace <name>` in a terminal");
       const goal = r.arg ? resolveGoal(loadFeed(ctx.home, ws.id), r.arg) : null;
       if (goal && !goal.bindable) throw new Error(`goal "${goal.title}" needs an approved alignment before it can be bound`);
-      const hasEpochs = ctx.db.prepare("SELECT 1 FROM epochs WHERE local_id=?").get(lid);
-      applyShare(ctx, planShare(ctx, lid, ws, goal, null, hasEpochs ? "now" : "start"));
-      if (!r.rule_dir) addNotice(ctx, lid, `share_started_${r.ts}`, `Align: sharing this session with ${ws.name}${goal ? ` for "${goal.title}"` : ""}, counting from ${hasEpochs ? "now" : "session start"}.`);
+      // A folder rule never shares again a session its person stopped sharing (or whose history was deleted): only an
+      // explicit share does (C6-1).
+      if (r.rule_dir && stoppedByPerson(ctx, lid)) {
+        ctx.log(`folder rule: session ${lid.slice(0, 8)} was stopped by its person (or its history deleted), so it stays private`);
+        return lid;
+      }
+      // Shared before (its history deleted since, too): this share counts from now (C6-1).
+      const before = sharedBefore(ctx, lid);
+      applyShare(ctx, planShare(ctx, lid, ws, goal, null, before ? "now" : "start"));
+      if (!r.rule_dir) addNotice(ctx, lid, `share_started_${r.ts}`, `Align: sharing this session with ${ws.name}${goal ? ` for "${goal.title}"` : ""}, counting from ${before ? "now" : "session start"}.`);
     }
   } catch (e) {
     say(`Align: ${r.command} failed: ${(e as Error).message}`);
@@ -299,6 +306,7 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
       }
       if (r.status === 409 && r.json?.error === "sharing_stopped") {
         markStopped(ctx, lid);
+        notePriorShare(ctx, lid, true);
         ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('post_epoch')").run(lid);
         // Its sharing was stopped (by the developer, or on the web): the server never shares a stopped session again,
         // whichever of the account's devices asks, so no "revoke the old device" here (C4-8).
@@ -505,14 +513,28 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
           ctx.log(`usage upload refused for ${s.local_id}: ${r.status} ${r.json?.error || ""}`);
           // This machine may have lost access to the workspace: that ends its shares there, with their own notice.
           if ((r.status === 403 || r.status === 404) && !(await hasWorkspace(ctx, s.workspace_id))) break;
-          if (r.json?.error === "sharing_stopped" || r.json?.error === "not_shared" || r.status === 404) {
+          const stopped = r.json?.error === "sharing_stopped";
+          if (stopped && r.json?.ended_reason === "member_removed") {
+            // Its person was removed (and is back: /me lists the workspace) while this device never saw it: not a stop
+            // for good, so it ends as a lost workspace does and `::align share` shares it again (C6-3).
+            endShareRemoved(ctx, s.local_id);
+          } else if (stopped || r.json?.error === "not_shared" || r.status === 404) {
             markStopped(ctx, s.local_id);
+            // A server that names why (`ended_reason`) says null when its person stopped it (on the web, or on another
+            // of their devices): stopped for good, and a folder rule never shares it again (C6-1). An older server
+            // doesn't say, so the words stay neutral.
+            const byPerson = stopped && r.json && "ended_reason" in r.json && r.json.ended_reason === null;
+            if (byPerson) notePriorShare(ctx, s.local_id, true);
             // Never silently: the session hears that its sharing ended and that usage now stays here.
             addNotice(
               ctx,
               s.local_id,
               `upload_refused_${r.status}`,
-              `Align: the server no longer accepts this session's usage (${r.json?.error || r.status}), so it stopped sharing; its usage stays on this machine from now on.`,
+              byPerson
+                ? "Align: this session's sharing was stopped (Stop sharing on the web, or `align stop-sharing` on another of your devices), so it stopped sharing here; its usage stays on this machine from now on."
+                : stopped
+                  ? "Align: the server no longer accepts this session's usage (sharing_stopped), so it stopped sharing here; its usage stays on this machine from now on. If its sharing ended because you left its workspace or were removed and you are a member again, `::align share` here shares it again."
+                  : `Align: the server no longer accepts this session's usage (${r.json?.error || r.status}), so it stopped sharing; its usage stays on this machine from now on.`,
             );
             renderHot(ctx, s.local_id);
           }
@@ -520,9 +542,13 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
         break;
       }
       const keys = wire.map((w) => w.request_key);
+      // Rows the server did not store (made while the session was not shared, by its clock: the C5-1 backstop) stay on
+      // this machine and count as not shared, as rows withheld here do (cycle 6).
+      const refused = new Set(Array.isArray(r.json?.refused) ? (r.json.refused as unknown[]).filter((k): k is string => typeof k === "string") : []);
       tx(ctx.db, () => {
-        const mark = ctx.db.prepare("UPDATE requests SET uploaded=1 WHERE request_key=?");
-        for (const k of keys) mark.run(k);
+        const mark = ctx.db.prepare("UPDATE requests SET uploaded=? WHERE request_key=?");
+        for (const k of keys) mark.run(refused.has(k) ? 2 : 1, k);
+        if (refused.size) ctx.log(`usage: the server did not store ${refused.size} row(s) of ${s.local_id.slice(0, 8)} (made while it was not shared); they stay on this machine`);
         ctx.db
           .prepare("UPDATE shares SET accepted=accepted+?, duplicates=duplicates+?, conflicts=conflicts+? WHERE local_id=?")
           .run(Number(r.json?.accepted || 0), Number(r.json?.duplicates || 0), Number(r.json?.conflicts || 0), s.local_id);

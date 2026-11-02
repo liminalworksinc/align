@@ -19,6 +19,7 @@ import {
   rawRequest,
   revokePending,
   SignedOut,
+  serverIso,
   signedIn,
   revokeState,
   whileSignedInAs,
@@ -30,11 +31,11 @@ import {
 import { openCtx, saveConfig, type Ctx } from "./context.ts";
 import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
-import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, getShare } from "./hot.ts";
+import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedState, getShare } from "./hot.ts";
 import { fetchAsks } from "./asks.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { newDeviceKey } from "./keys.ts";
-import { applyShare, bind, deleteHistory, deleteRefused, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, stopSharing } from "./share.ts";
+import { applyShare, bind, deleteHistory, deleteRefused, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stopSharing } from "./share.ts";
 import { askLineForPeople, askOrder, readAsks } from "./shared/asks.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson } from "./shared/fsx.ts";
@@ -49,6 +50,7 @@ import { kvGet, kvSet } from "./db.ts";
 import { podReport } from "./hooks/siblings.ts";
 import { answerable, answerRequest, listRequests, stateWords } from "./requests.ts";
 import { clean, requestShortId } from "./shared/envelope.ts";
+import { feedHold } from "./shared/feedhold.ts";
 import type { WireRequest } from "./shared/types.ts";
 import { computeUnsharedDigest } from "./allocation.ts";
 import { listSteering, weekKey } from "./shared/steering.ts";
@@ -371,7 +373,6 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   // committed meanwhile revoked it, and this one must not report a revoked device as signed in.
   const name = me.device?.name || deviceName;
   if (!(await whileSignedInAs(ctx, pairedAs!, () => out(`Signed in as ${me.user.name} <${me.user.email}> on device ${name}.`)))) return replacedMeanwhile(ctx, pairedAs!);
-  await mentionOtherDevices(ctx, server, pairedAs!);
   for (const w of me.workspaces) {
     out(`  workspace ${w.name} (${w.id}), role ${w.role}`);
     try {
@@ -382,6 +383,8 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
       /* feed later */
     }
   }
+  // After the workspace lines, which belong with "Signed in as" (cycle 6).
+  await mentionOtherDevices(ctx, server, pairedAs!);
 }
 
 /** Another `align login` committed after this one and replaced (and revoked) its device: say so, and which device this
@@ -527,14 +530,23 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
   const unpriced = ctx.db.prepare("SELECT unpriced, COUNT(*) AS n FROM requests WHERE unpriced IS NOT NULL GROUP BY unpriced").all() as { unpriced: string; n: number }[];
   out(`  Unpriced:   ${unpriced.length ? unpriced.map((u) => `${u.n} ${u.unpriced}`).join(", ") : "0"}`);
   const latched = (ctx.db.prepare("SELECT COUNT(*) AS n FROM latches WHERE stopped=1").get() as { n: number }).n;
-  const stuck = (n: number) => (n ? `; ${n} can't be lifted from the web any more (sharing ended): \`align stop-sharing <session>\` unblocks each` : "");
-  const endedOf = (table: "latches" | "holds", flag: "stopped" | "held") =>
-    (ctx.db.prepare(`SELECT COUNT(DISTINCT x.local_id) AS n FROM ${table} x JOIN shares s ON s.local_id=x.local_id WHERE x.${flag}=1 AND s.state IN ('stopped','error')`).get() as { n: number }).n;
+  // Of those whose share ended: the ones that can be shared there again now (`::align share`, then the web lifts it), and
+  // the ones only `align stop-sharing` unblocks (C6-2).
+  const stuck = (e: { stuck: number; again: number }) =>
+    (e.again ? `; ${e.again} can be shared again (\`::align share\` in the session), after which the web can lift it` : "") +
+    (e.stuck ? `; ${e.stuck} can't be lifted from the web any more (sharing ended): \`align stop-sharing <session>\` unblocks each` : "");
+  const endedOf = (table: "latches" | "holds", flag: "stopped" | "held") => {
+    const lids = (ctx.db.prepare(`SELECT DISTINCT x.local_id AS lid FROM ${table} x JOIN shares s ON s.local_id=x.local_id WHERE x.${flag}=1 AND s.state IN ('stopped','error')`).all() as { lid: string }[]).map((r) => r.lid);
+    const again = lids.filter((lid) => endedState(ctx, getShare(ctx, lid))?.reshare).length;
+    return { stuck: lids.length - again, again };
+  };
   if (latched) out(`  Stop latch: ${latched} session(s) stopped${stuck(endedOf("latches", "stopped"))}; see \`align latch status\``);
   const holds = ctx.db.prepare("SELECT json FROM holds WHERE held=1").all() as { json: string }[];
-  if (holds.length) {
-    const goals = [...new Set(holds.map((h) => `"${clean((JSON.parse(h.json) as { goal_title: string }).goal_title, 80)}"`))];
-    out(`  Goal hold:  ${holds.length} session(s) paused on ${goals.join(", ")}${stuck(endedOf("holds", "held"))}; see \`align latch status\``);
+  const fromFeed = feedHolds(ctx);
+  if (holds.length || fromFeed.length) {
+    const goals = [...new Set([...holds.map((h) => (JSON.parse(h.json) as { goal_title: string }).goal_title), ...fromFeed.map((f) => f.goal_title)].map((t) => `"${clean(t, 80)}"`))];
+    const early = fromFeed.length ? ` (${fromFeed.length} from the cached goals, before the hold reaches them)` : "";
+    out(`  Goal hold:  ${holds.length + fromFeed.length} session(s) paused on ${goals.join(", ")}${early}${stuck(endedOf("holds", "held"))}; see \`align latch status\``);
   }
   const pending = (ctx.db.prepare("SELECT COUNT(*) AS n FROM goal_requests WHERE state='pending'").get() as { n: number }).n;
   if (pending) out(`  Requests:   ${pending} waiting for your answer; see \`align requests\``);
@@ -558,8 +570,18 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
     const share = getShare(ctx, s.local_id);
     const deleting = share && ctx.db.prepare("SELECT 1 FROM outbox WHERE local_id=? AND kind='delete_session'").get(s.local_id);
     const refused = deleting ? deleteRefused(ctx, s.local_id) : null;
+    // An ending this machine can undo now (signed in again, back in the workspace) says how, as the session's notice does.
+    const again = endedState(ctx, share)?.reshare;
     const why =
-      (share?.error === DEVICE_SIGNED_OUT ? "; this machine signed out" : share?.error === ACCESS_LOST ? "; no access to the workspace" : "") +
+      (share?.error === DEVICE_SIGNED_OUT
+        ? again
+          ? "; ended at a sign-out; `::align share` shares it again"
+          : "; this machine signed out"
+        : share?.error === ACCESS_LOST
+          ? again
+            ? "; ended while out of the workspace; `::align share` shares it again"
+            : "; no access to the workspace"
+          : "") +
       (refused ? `; history deletion refused (${refused})` : deleting ? "; history deletion queued" : "");
     return { ...s, repo: repoLabel(ctx, s, share?.workspace_id ?? null), usage: agg, shared: share ? `${share.state} (${share.workspace_name}${why})` : "private" };
   });
@@ -586,8 +608,7 @@ async function cmdGoals(ctx: Ctx, argv: string[]): Promise<void> {
   const me = loadMe(ctx.home);
   if (!me) throw new UsageError("no cached workspaces; run `align login`");
   if (!values.workspace && !me.workspaces.length) return out(NO_WORKSPACES);
-  const targets = values.workspace ? [resolveWorkspace(ctx.home, values.workspace)].filter(Boolean) : me.workspaces.map((w) => ({ id: w.id, name: w.name }));
-  if (!targets.length) throw new UsageError(`unknown workspace "${values.workspace}"`);
+  const targets = values.workspace ? [await workspaceOrExplain(ctx, values.workspace)] : me.workspaces.map((w) => ({ id: w.id, name: w.name }));
   const all: { ws: string; goals: Goal[]; fetched: string | null }[] = [];
   for (const w of targets as { id: string; name: string }[]) {
     if (values.refresh) await refreshFeed(ctx, w.id);
@@ -600,6 +621,44 @@ async function cmdGoals(ctx: Ctx, argv: string[]): Promise<void> {
     for (const g of a.goals) out(`  ${g.bindable ? "*" : " "} ${pad(g.id, 14)} v${pad(String(g.version), 3)} ${pad(g.status, 9)} ${pad(g.visibility === "pod" ? "team" : g.visibility, 10)} ${g.title}`);
   }
   out("* = you can bind a session to it now.");
+}
+
+/**
+ * The workspace `--workspace` names, from the cached `/me`, read again when it is not there and this machine is signed
+ * in. One this device can't reach is explained: when its person is a member but the device was never given it
+ * (`other_workspaces`), say so and where to give it, the Devices page (cycle 6); otherwise "unknown workspace".
+ */
+async function workspaceOrExplain(ctx: Ctx, ref: string): Promise<{ id: string; name: string }> {
+  let ws = resolveWorkspace(ctx.home, ref);
+  if (!ws && signedIn(ctx.home)) {
+    await refreshMe(ctx).catch(() => undefined);
+    ws = resolveWorkspace(ctx.home, ref);
+  }
+  if (ws) return ws;
+  throw unknownWorkspace(ctx, ref);
+}
+
+function unknownWorkspace(ctx: Ctx, ref: string): UsageError {
+  const q = ref.toLowerCase();
+  const other = (loadMe(ctx.home)?.other_workspaces || []).find((w) => w.id === ref || w.name.toLowerCase() === q);
+  if (!other) return new UsageError(`unknown workspace "${ref}"`);
+  const server = (loadCredentials(ctx.home)?.server_url || ctx.config.server_url).replace(/\/$/, "");
+  return new UsageError(
+    `this device has not been given the workspace ${clean(other.name, 80)}: you are a member, but this device was not ticked when you joined it. Give it this workspace on your Devices page (${server}/app/devices, "Give this device the workspace"), then run \`align goals --refresh\`.`,
+  );
+}
+
+/** Sessions of the last week held only by the cached feed (`allocation.held`, a hold not delivered yet), which their
+ *  PreToolUse hook denies as held (`shared/feedhold.ts`, cycle 6). */
+function feedHolds(ctx: Ctx): { local_id: string; harness: string; goal_title: string }[] {
+  const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const rows = ctx.db
+    .prepare("SELECT local_id, harness, cwd FROM sessions WHERE COALESCE(last_active, created_at) >= ? AND local_id NOT IN (SELECT local_id FROM holds WHERE held=1)")
+    .all(since) as { local_id: string; harness: string; cwd: string | null }[];
+  return rows.flatMap((r) => {
+    const f = feedHold(ctx.home, r.local_id, r.cwd);
+    return f ? [{ local_id: r.local_id, harness: r.harness, goal_title: f.goal_title }] : [];
+  });
 }
 
 /** No workspace in this device's reach (its person was removed from the only one, say): not an error (N6). */
@@ -647,13 +706,13 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
     await refreshMe(ctx).catch(() => undefined);
     ws = resolveWorkspace(ctx.home, values.workspace);
   }
-  if (!ws) throw new UsageError(values.workspace ? `unknown workspace "${values.workspace}"` : "--workspace is required (no default workspace)");
+  if (!ws) throw values.workspace ? unknownWorkspace(ctx, values.workspace) : new UsageError("--workspace is required (no default workspace)");
   const session = resolveSession(ctx, positionals[0], { latest: values.latest, cwd: values.cwd === undefined ? null : values.cwd || process.cwd() });
   const share = getShare(ctx, session.local_id);
   if (share && (share.state === "shared" || share.state === "pending" || share.state === "suspended")) throw new UsageError(`session is already ${share.state} with ${share.workspace_name}`);
   const goal = await goalFor(ctx, ws.id, values.goal);
-  const priorEpochs = ctx.db.prepare("SELECT 1 FROM epochs WHERE local_id=?").get(session.local_id);
-  const effectiveFrom = priorEpochs && from === "start" ? "now" : from;
+  // Shared before, also when its shared history was deleted since: this share counts from now (C6-1).
+  const effectiveFrom = from === "start" && sharedBefore(ctx, session.local_id) ? "now" : from;
   const plan = planShare(ctx, session.local_id, ws, goal, values.alias ?? null, effectiveFrom);
   out(renderPreview(plan));
   out(signalsPreview(!!values.signals));
@@ -692,7 +751,7 @@ async function shareDir(ctx: Ctx, folder: string, wsRef: string | undefined, goa
     await refreshMe(ctx).catch(() => undefined);
     ws = resolveWorkspace(ctx.home, wsRef);
   }
-  if (!ws) throw new UsageError(wsRef ? `unknown workspace "${wsRef}"` : "--workspace is required (no default workspace)");
+  if (!ws) throw wsRef ? unknownWorkspace(ctx, wsRef) : new UsageError("--workspace is required (no default workspace)");
   if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) throw new UsageError(`${folder} is not a folder`);
   const dir = gitInfo(realDir(folder))?.toplevel || realDir(folder);
   const goal = await goalFor(ctx, ws.id, goalRef);
@@ -713,7 +772,7 @@ async function shareDir(ctx: Ctx, folder: string, wsRef: string | undefined, goa
     out(`${past.take.length} session(s) in ${realDir(folder)} from the last ${pastDays} days: ${n("claude-code")} Claude Code, ${n("codex")} Codex`);
     for (const s of past.take) out(`  ${shortTime(s.started_at)}  ${pad(HARNESS_NAME[s.harness] || s.harness, 11)} ${s.local_id.slice(0, 8)}`);
     if (past.already) out(`Skipped ${past.already} that were shared before (an earlier share is never backdated).`);
-    if (past.deleted) out(`Skipped ${past.deleted} whose shared history you deleted (\`align delete-history\`); \`align share <session>\` shares one again if you want.`);
+    if (past.deleted) out(`Skipped ${past.deleted} whose shared history was deleted (on the web or with \`align delete-history\`); \`align share <session>\` shares one again, counting from now, if you want.`);
     if (past.take.length) out("Each is shared from its own start with the fields above; nothing it said is sent.");
   }
   if (!(await confirm(past?.take.length ? "Share this folder and these sessions?" : "Share this folder?", yes))) return out("Not changed. Run again with --yes to confirm.");
@@ -770,7 +829,7 @@ async function cmdAsks(ctx: Ctx, argv: string[]): Promise<void> {
   if (!me) throw new UsageError("no cached workspaces; run `align login`");
   if (!values.workspace && !me.workspaces.length) return out(NO_WORKSPACES);
   const targets = values.workspace ? [resolveWorkspace(ctx.home, values.workspace)].filter((w): w is { id: string; name: string } => !!w) : me.workspaces.map((w) => ({ id: w.id, name: w.name }));
-  if (!targets.length) throw new UsageError(`unknown workspace "${values.workspace}"`);
+  if (!targets.length) throw unknownWorkspace(ctx, values.workspace!);
   const all = targets.map((w) => {
     const f = readAsks(ctx.home, w.id);
     const asks = (f?.asks || []).filter((a) => values.all || a.state === "open" || a.state === "accepted").sort(askOrder);
@@ -883,12 +942,18 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
     at: string;
     harness: string;
   }[];
-  if (!rows.length && !holds.length) return out("No stop latches or goal holds.");
+  const fromFeed = feedHolds(ctx);
+  if (!rows.length && !holds.length && !fromFeed.length) return out("No stop latches or goal holds.");
   /** A latch or hold whose share ended can't be lifted from the web: say how to get out. */
   const way = (lid: string) => {
-    const ended = endedReason(getShare(ctx, lid));
+    const ended = endedState(ctx, getShare(ctx, lid));
     if (!ended) return "";
-    const why = ended === "device_signed_out" ? "this machine signed out" : ended === "access_lost" ? "this machine no longer has access to its Align workspace" : "the Align server no longer has this session's share";
+    // Shareable there again now: the way the session's notice and its deny give (C6-2).
+    if (ended.reshare) {
+      const why = ended.why === "device_signed_out" ? "this machine signed out, and is signed in again now" : "this machine lost access to its Align workspace, and can reach it again now";
+      return `; sharing ended (${why}): \`::align share\` in the session shares it there again, after which it can be resumed or released from the web`;
+    }
+    const why = ended.why === "device_signed_out" ? "this machine signed out" : ended.why === "access_lost" ? "this machine no longer has access to its Align workspace" : "the Align server no longer has this session's share";
     return `; sharing ended (${why}), so only \`align stop-sharing ${lid.slice(0, 8)}\` unblocks it`;
   };
   for (const r of rows) {
@@ -901,7 +966,7 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
     out(
       `${h.local_id.slice(0, 8)} ${h.harness} HELD on goal "${clean(j.goal_title, 80)}" by ${clean(j.by, 50) || "someone"} since ${shortTime(h.at)}${j.reason ? ` (${clean(j.reason, 80)})` : ""} (all tools blocked)${file ? "" : " (hold file missing!)"}${way(h.local_id)}`,
     );
-  }
+  }  for (const f of fromFeed) out(`${f.local_id.slice(0, 8)} ${f.harness} HELD on goal "${clean(f.goal_title, 80)}" (held in Align's cached goals; the hold reaches this session at the next sync) (all tools blocked)`);
 }
 
 /** `align requests`: what people who can approve a session's goal asked of it, and the developer's answers. */
@@ -1011,7 +1076,15 @@ async function cmdSync(ctx: Ctx, argv: string[] = []): Promise<void> {
   if (r.skipped) return out("Another sync is running.");
   out(`Local: ${r.spooled} hook records, ${r.tail.files} files scanned (${r.tail.bytes} new bytes).`);
   if (r.revoked) revokeLines(r.revoked, "sync").forEach((l) => out(l));
-  if (r.aborted) out("This machine's Align pairing changed during this sync (`align login` or `align logout`), so it stopped there; nothing more was sent as the earlier device. The next sync goes on as the device signed in now.");
+  if (r.aborted) {
+    // What comes next, as things are now: another device signed in, or none (an `align logout`, cycle 6).
+    const now = loadCredentials(ctx.home);
+    const next =
+      now && !now.signed_out && now.refresh_token
+        ? `The next sync goes on as the device signed in now (${deviceTag(now.device_id)}).`
+        : "This machine is signed out now, so nothing more is uploaded until you run `align login`.";
+    out(`This machine's Align pairing changed during this sync (\`align login\` or \`align logout\`), so it stopped there; nothing more was sent as the earlier device. ${next}`);
+  }
   if (!signedIn(ctx.home)) {
     // Cut short by `align logout`: the line above says so, not that it ran signed out (C5-4).
     if (!r.aborted) out("Signed out: nothing uploaded.");
@@ -1079,7 +1152,9 @@ async function cmdDoctor(ctx: Ctx): Promise<void> {
   add("hook latency", p95 < 150 ? "OK" : "WARN", `p50 ${times[Math.floor(times.length / 2)].toFixed(0)} ms, p95 ${p95.toFixed(0)} ms (internal deadline 300 ms)`);
   add("outbox", outboxDepth(ctx) < 100 ? "OK" : "WARN", `${outboxDepth(ctx)} queued`);
   const c = loadCredentials(ctx.home);
-  add("sign-in", c && !c.signed_out ? "OK" : "WARN", c && !c.signed_out ? `access token expires ${c.access_expires_at}` : "signed out (local metering only)");
+  // The expiry on the server's clock (this computer's clock may be off; the saved offset puts it right, cycle 6).
+  const expires = c?.access_expires_at ? serverIso(c.access_expires_at, Number(c.clock_offset_ms) || 0) : null;
+  add("sign-in", c && !c.signed_out ? "OK" : "WARN", c && !c.signed_out ? `access token expires ${expires}${c.clock_offset_ms ? " (on the server's clock)" : ""}` : "signed out (local metering only)");
   for (const [n, l, dtl] of checks) out(`${pad(l, 5)} ${pad(n, 16)} ${dtl}`);
   if (checks.some((c) => c[1] === "FAIL")) process.exitCode = 1;
 }
@@ -1090,7 +1165,7 @@ function allocationTargets(ctx: Ctx, ref: string | undefined): { id: string; nam
   if (!me) throw new UsageError("no cached workspaces; run `align login`");
   if (!ref && !me.workspaces.length) return [];
   const list = ref ? [resolveWorkspace(ctx.home, ref)].filter((w): w is { id: string; name: string } => !!w) : me.workspaces.map((w) => ({ id: w.id, name: w.name }));
-  if (!list.length) throw new UsageError(`unknown workspace "${ref}"`);
+  if (!list.length) throw unknownWorkspace(ctx, ref!);
   return list;
 }
 

@@ -851,7 +851,12 @@ credential the caller's identity on `GET /api/v2/me`.
 #### Scenario: Who am I
 
 - **WHEN** a device token or a browser session calls `GET /api/v2/me`
-- **THEN** the response is `{user:{id, name, email}, device, workspaces}`, where `device` is `{id, name}` only for a device token, and for a device `workspaces` lists only the workspaces granted to it while the person is still a member
+- **THEN** the response is `{user:{id, name, email}, device, workspaces}`, where `device` is `{id, name}` only for a device token, and for a device `workspaces` lists only the workspaces granted to it while the person is still a member, and `other_workspaces` (`{id, name}`, device tokens only) the person's other workspaces, the ones this device was not given, so the CLI can point to the Devices page
+
+#### Scenario: A device's workspaces it was not given
+
+- **WHEN** a device of a member of A, never given A, calls `GET /api/v2/me`, is then given A on the Devices page and calls it again, and the person's browser calls it (`scripts/test-v2.mjs` "devices (E2E-AGENT cycle 6): a device's GET /me lists as other_workspaces ...")
+- **THEN** the first lists A under `other_workspaces` (never a workspace they are not a member of) and none under `workspaces`, the second no longer lists A under `other_workspaces`, and the browser's answer has no `other_workspaces`
 
 #### Scenario: Devices list
 
@@ -1109,6 +1114,17 @@ login`): at `authorize` every run of control characters (C0, DEL and C1) and whi
 separators included, SHALL become one space, invisible direction marks (bidirectional embeddings, overrides and
 isolates, left-to-right and right-to-left marks) and zero-width spaces SHALL be dropped, and the ends trimmed, before
 the 100-character limit applies; a name with nothing left SHALL be 400 `device_name is required`.
+A device that revokes itself because a newer pairing on the same machine replaced it (`DELETE
+/api/v2/devices/self?replaced_by=<device id>`) SHALL pass its name on: when the named device is the same person's, live,
+and named `<its name> (<n>)`, and no other live device of the person has the plain name once it is revoked, the named
+device SHALL take the plain name in the same transaction. Two logins approved together on one machine (the second
+named while the first's device was live, then replacing it) so end with the plain name, never `<name> (2)` next to no
+`<name>`; another person's device, or a name still taken, is left as it is.
+
+#### Scenario: A replaced device passes its name on
+
+- **WHEN** a person's device `race mac` revokes itself naming their live `race mac (2)` as its replacement; a device of theirs names another person's `race mac (3)`; and one names their `race mac (4)` while `race mac` is taken (`scripts/test-v2.mjs` "device (E2E-AGENT cycle 6): a self-revoke naming the device that replaced it ...")
+- **THEN** each revoke is 204, `race mac (2)` becomes `race mac`, and the other two keep their names
 
 #### Scenario: Starting a pairing
 
@@ -1202,7 +1218,9 @@ epochs, usage, stop-sharing) stays with the device that shared it, and another p
 (`ended_reason` `device_signed_out`) SHALL be shared again by a `PUT` from another device of the same person with the
 same harness and repo key (its device, state `shared`, `stopped_at` and `ended_reason` cleared, its stop flag kept,
 audited `session.shared_again`), and so SHALL one that ended because its person left the workspace (`member_removed`),
-from any device of theirs once they are a member again; any other stopped session stays 409 `sharing_stopped`, to the
+from any device of theirs once they are a member again, unless its person stopped sharing it since: stop-sharing SHALL
+clear `ended_reason`, so a session that had ended is then their stop like any other (its refusals carry `ended_reason:
+null`, and it is never shared again); any other stopped session stays 409 `sharing_stopped`, to the
 device that shared it and to the person's other devices alike (never a 404 that reads as another device holding it),
 and another person's device still gets 404. A `started_at` more than 5 minutes ahead of the server's clock SHALL be
 answered 400 `clock_skew` with the message `started_at is <n> minutes ahead of the server's clock; this device's clock
@@ -1232,6 +1250,11 @@ is off` and `server_time`.
 
 - **WHEN** the session's person stops sharing, then deletes it
 - **THEN** stop-sharing returns `{session_key, state:"stopped"}`, ends the open epoch and refuses later uploads with 409 `sharing_stopped`; the delete returns 204 and removes the session, its epochs, usage, directive deliveries and receipts, so spend totals change
+
+#### Scenario: Stopping a session that had ended
+
+- **WHEN** a member's session ends `member_removed` when they are removed, they are let back in and their device is given the workspace again, and they stop sharing the session on the web (`scripts/test-v2.mjs` "sessions (E2E-AGENT cycle 6): a person who stops sharing on the web a session that had ended member_removed ...")
+- **THEN** the session is `stopped` with no `ended_reason`, its device's usage is refused 409 `sharing_stopped` with `ended_reason: null`, and its device's `PUT` is 409 `sharing_stopped`
 
 #### Scenario: Session list
 
@@ -1274,21 +1297,30 @@ conflict, counted on the session and never stored, so a re-share never brings in
 ended while a later epoch of the session was open is the tail of a turn that started in its epoch, and is stored. A
 row whose `ts` is before the start of the epoch it names was not made in that epoch (from the gap, naming the epoch of
 the re-share, say, or from before the session was first shared): it SHALL be a conflict too, counted and never stored.
+Usage or an epoch for a stopped session SHALL be refused 409 `sharing_stopped` with `ended_reason`: `member_removed` when
+its sharing ended because its person was removed from the workspace or left it (they may be a member again, and their
+device that never saw the ending can then share it again), `device_signed_out` when its device signed out, and `null`
+when its person stopped sharing it, so the device words the refusal as what its user can do.
+
+#### Scenario: Why a stopped session's usage is refused
+
+- **WHEN** a session's person stops sharing it and its device uploads usage and opens an epoch; and a session that ended when its person was removed is uploaded to by its own device once they are back and it has the workspace again (`scripts/test-v2.mjs` "stop sharing (E2E-AGENT cycle 6 C6-3) ..." and "usage (E2E-AGENT cycle 6 C6-3) ...")
+- **THEN** the first two answers are 409 `sharing_stopped` with `ended_reason: null`, and the last 409 `sharing_stopped` with `ended_reason: "member_removed"`
 
 #### Scenario: Usage batch
 
 - **WHEN** a device POSTs rows for its session
-- **THEN** the response is `{accepted, duplicates, conflicts}`, where a repeated `request_key` with identical values is a duplicate, and one with other values or a row for an epoch this session does not have is a conflict that is counted on the session and never stored
+- **THEN** the response is `{accepted, duplicates, conflicts, refused}`, where a repeated `request_key` with identical values is a duplicate, and one with other values or a row for an epoch this session does not have is a conflict that is counted on the session and never stored; `refused` lists the `request_key` of each conflict that was not stored (an unknown epoch, made while the session was not shared, or dated before its epoch started), so the device counts it as not shared, never a key stored earlier with other values
 
 #### Scenario: Usage from while a session was not shared
 
 - **WHEN** a member's session ends when they are removed, they are let back in, their device shares it again with a new epoch starting 2 seconds after the old one ended, and uploads rows naming the old epoch from 1 second before its end, 1 second after it and 2.5 seconds after it, and one naming the new epoch from 2.5 seconds after (`scripts/test-v2.mjs` "usage (C5-1): a row naming an epoch that ended ...")
-- **THEN** the response is `{accepted: 3, conflicts: 1}`, the session's conflicts grow by one, and only the row from the gap is not stored
+- **THEN** the response is `{accepted: 3, conflicts: 1}` with `refused` naming the gap row's key (`scripts/test-v2.mjs` "usage (E2E-AGENT cycle 6): the answer names the conflicts it did not store ..."), the session's conflicts grow by one, and only the row from the gap is not stored
 
 #### Scenario: Usage from before its epoch started
 
 - **WHEN** after such a re-share the device uploads a row naming the new epoch from the gap (1 second after the old epoch ended, before the new one started), one naming the old epoch from before it started, and one naming the new epoch from after it started (`scripts/test-v2.mjs` "Z7: a usage row dated before the start of the epoch it names ...")
-- **THEN** the response is `{accepted: 1, conflicts: 2}`, the session's conflicts grow by two, and only the last row is stored
+- **THEN** the response is `{accepted: 1, conflicts: 2}` with `refused` naming the first two rows' keys, the session's conflicts grow by two, and only the last row is stored
 
 #### Scenario: Oversized batch
 
