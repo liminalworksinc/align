@@ -126,7 +126,11 @@ function RequestAlignment({ ws, goal, me }: { ws: string; goal: Goal; me: Me }) 
   const [note, setNote] = useState("");
   const [sent, setSent] = useState(false);
   const act = useAction();
-  const shared = sessions.data?.mine.filter((s) => s.state !== "stopped") ?? [];
+  // A session already on this goal (following it through an alignment, or bound to it) is not offered again (A1-cross-4).
+  const live = sessions.data?.mine.filter((s) => s.state !== "stopped") ?? [];
+  const onGoal = (s: MySession) => s.governing_goal?.id === goal.id || s.current_epoch?.goal?.id === goal.id;
+  const shared = live.filter((s) => !onGoal(s));
+  const already = live.length - shared.length;
   const mineGoals = feed.data?.goals.filter((g) => g.id !== goal.id && g.bindable && g.owner.id === me.id) ?? [];
   if (goal.status !== "active") return null;
   return (
@@ -158,14 +162,26 @@ function RequestAlignment({ ws, goal, me }: { ws: string; goal: Goal; me: Me }) 
       )}
       <p className="mb-1 text-[14px] text-zinc-600">Your shared sessions{choice === "work_toward" ? " (pick at least one)" : ""}</p>
       {sessions.loading && <Loading />}
-      {shared.length === 0 && !sessions.loading && <Note>You have no shared sessions in this workspace. Share one with align share.</Note>}
+      {live.length === 0 && !sessions.loading && <Note>You have no shared sessions in this workspace. Share one with align share.</Note>}
+      {/* Each session as the Alignments tab names it, "started <time> · …<key end>", so two of one person in one
+          repository can be told apart before one is ticked (A1-cross-4). */}
       {shared.map((s) => (
-        <label key={s.session_key} className="mb-1 flex items-center gap-2 text-[15px]">
-          <input type="checkbox" checked={keys.includes(s.session_key)} onChange={(e) => setKeys((k) => (e.target.checked ? [...k, s.session_key] : k.filter((x) => x !== s.session_key)))} />
-          {s.title || s.repo_alias || `${s.harness} session`}
-          <span className="text-zinc-500">{s.current_epoch?.goal?.title ? `now on ${s.current_epoch.goal.title}` : "no goal yet"}</span>
+        <label key={s.session_key} className="mb-1 flex items-start gap-2 text-[15px]" data-align-session={s.session_key.slice(-6)}>
+          <input type="checkbox" className="mt-1" checked={keys.includes(s.session_key)} onChange={(e) => setKeys((k) => (e.target.checked ? [...k, s.session_key] : k.filter((x) => x !== s.session_key)))} />
+          <span className="min-w-0 [overflow-wrap:anywhere]">
+            {s.title || s.repo_alias || `${s.harness} session`}
+            <span className="text-zinc-500">
+              {" "}
+              · started {when(s.started_at)} · …{s.session_key.slice(-6)} · {s.current_epoch?.goal ? `now on ${s.current_epoch.goal.private ? "a goal you can't see" : s.current_epoch.goal.title}` : "no goal yet"}
+            </span>
+          </span>
         </label>
       ))}
+      {already > 0 && (
+        <p className="mb-2 text-[14px] text-zinc-500" data-align-already>
+          {already === 1 ? "1 of your sessions is already on this goal, so it isn't offered." : `${already} of your sessions are already on this goal, so they aren't offered.`}
+        </p>
+      )}
       <Field label="Note for the approvers (never sent to agents)">
         <TextArea rows={2} value={note} maxLength={1000} onChange={(e) => setNote(e.target.value)} />
       </Field>

@@ -160,8 +160,17 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
                 <StopStatusPills s={s.stop_status} stopped={s.agent_stopped} ended={!!s.ended_reason} />
               </div>
               <p className="text-[14px] text-zinc-500">
-                Started {when(s.started_at)}. Counting under: {goalText(s.current_epoch?.goal)}
-                {s.governing_goal ? `. Follows: ${goalText(s.governing_goal)}` : ""}. {count(s.usage.requests, "request", undefined, num)}, {num(s.usage.input + s.usage.output)} input and output tokens.
+                Started {when(s.started_at)}.{" "}
+                {/* A session no longer shared counts under nothing from then on: say so, never "Counting under: no goal". */}
+                {s.state === "stopped" ? (
+                  <>Sharing {s.ended_reason ? "ended" : "stopped"}{s.stopped_at ? ` ${when(s.stopped_at)}` : ""}, so nothing more counts</>
+                ) : (
+                  <>
+                    Counting under: {goalText(s.current_epoch?.goal)}
+                    {s.governing_goal ? `. Follows: ${goalText(s.governing_goal)}` : ""}
+                  </>
+                )}
+                . {count(s.usage.requests, "request", undefined, num)}, {num(s.usage.input + s.usage.output)} input and output tokens.
               </p>
               {s.state === "suspended" && <Note>The alignment this session counted under was revoked. Pick a goal for it on your machine to resume uploads.</Note>}
               {s.ended_reason === "device_signed_out" && (

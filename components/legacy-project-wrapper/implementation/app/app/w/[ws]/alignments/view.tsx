@@ -33,6 +33,23 @@ function requirementLabel(a: Alignment, forId: string | null, me: string): strin
   return g?.title ? `"${g.title}"` : "A goal";
 }
 
+/** A declined, withdrawn or revoked request shows its decision in place of the approvals it no longer waits for
+ *  (A1-cross-8): "Declined by <name>, <time>. Nothing changes.", "you" for the reader. Null for an open or approved one. */
+function closedLine(a: Alignment, me: string): string | null {
+  const by = a.closed_by ? ` by ${said(a.closed_by, me)}` : "";
+  const at = a.closed_at ? `, ${when(a.closed_at)}` : "";
+  switch (a.state) {
+    case "rejected":
+      return `Declined${by}${at}. Nothing changes.`;
+    case "withdrawn":
+      return `Withdrawn${by}${at}. Nothing changes.`;
+    case "revoked":
+      return `Revoked${by}${at}. It has no effect from then on; past usage did not move.`;
+    default:
+      return null;
+  }
+}
+
 /** What a decision recorded, for its "Recorded: …" line, as change requests and target changes confirm every decision
  *  (X2). `after` is the alignment as the server answered. */
 function recordedLine(action: string, a: Alignment, after: Alignment | null): string {
@@ -94,6 +111,7 @@ function AlignmentCard({ ws, a, me, onDone }: { ws: string; a: Alignment; me: st
   // The card is keyed by its revision and state, and moves between sections, so a decision remounts it: the notice
   // outlives that.
   const [notice, setNotice] = useNotice(`alignment:${a.id}`);
+  const closed = closedLine(a, me);
   /** Send a decision on the revision on screen: "Recorded: …" when it is, "Not recorded. <why>" when the server refuses
    *  it (a 409 reloads, to show the request as it is now). Every decision names the revision, so one taken on an older
    *  view is refused instead of recorded against a counter the person never saw (c10 C10-2). */
@@ -133,15 +151,23 @@ function AlignmentCard({ ws, a, me, onDone }: { ws: string; a: Alignment; me: st
           Sessions: {a.sessions.map((s) => `${s.label}${sessionId(s)}${s.current_goal ? `, now on ${s.current_goal.visible ? s.current_goal.title : "a goal you can't see"}` : ""}`).join("; ")}
         </p>
       )}
-      <p className="text-[14px] text-zinc-500">Approvals needed (one from each):</p>
-      <ul className="mb-1 list-disc pl-5 text-[14px] text-zinc-500">
-        {a.requirements.map((r, i) => (
-          <li key={`${r.for}-${i}`}>
-            {requirementLabel(a, r.for, me)}: {r.approvers.map((p) => said(p, me)).join(" or ") || "nobody yet"}{" "}
-            {r.approved_by ? <Pill tone="green">approved by {said(r.approved_by, me)}</Pill> : <Pill tone="amber">waiting</Pill>}
-          </li>
-        ))}
-      </ul>
+      {closed ? (
+        <p className="text-[14px] text-zinc-700" data-alignment-decision>
+          {closed}
+        </p>
+      ) : (
+        <>
+          <p className="text-[14px] text-zinc-500">Approvals needed (one from each):</p>
+          <ul className="mb-1 list-disc pl-5 text-[14px] text-zinc-500">
+            {a.requirements.map((r, i) => (
+              <li key={`${r.for}-${i}`}>
+                {requirementLabel(a, r.for, me)}: {r.approvers.map((p) => said(p, me)).join(" or ") || "nobody yet"}{" "}
+                {r.approved_by ? <Pill tone="green">approved by {said(r.approved_by, me)}</Pill> : <Pill tone="amber">waiting</Pill>}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {a.note && <p className="mt-1 text-[14px] text-zinc-600">Note: {a.note}</p>}
       {a.history.length > 1 && (
         <details className="mt-1 text-[14px] text-zinc-500">

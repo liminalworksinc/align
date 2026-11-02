@@ -100,6 +100,9 @@ export interface Alignment {
   history: { revision: number; choice: string; author: { id: string; name: string }; note: string | null; created_at: string }[];
   waiting_on_me: boolean;
   can: Record<"approve" | "counter" | "reject" | "accept_counter" | "withdraw" | "revoke", boolean>;
+  /** Who declined, withdrew or revoked it, and when (null while open or approved). */
+  closed_by: { id: string; name: string } | null;
+  closed_at: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -10348,6 +10348,277 @@ try {
   }
   // ==== end fix:c12-web ====
 
+  // ==== fix:a1-web ====
+  // Regression checks for the alignment cross walk (e2e-reports/acycle1/cross.md: A1-cross-2, -4, -8, -9 and three of its
+  // "works but confusing" items), on a workspace of their own, as the walk set it up: LO owns it; LM leads team Cutover
+  // and owns its goal LGC; LL leads team Retirement, owns LGR and shares several sessions in one repository from her
+  // laptop (LD; LD2 is another laptop of hers with no session). LL is not in Cutover.
+  {
+    const lUsers = {};
+    for (const [who, name] of [
+      ["LO", "Olga Owner"],
+      ["LM", "Milo Cutover"],
+      ["LL", "Lena Retire"],
+    ])
+      lUsers[who] = await signUp(who, name, `${who.toLowerCase()}@a1web.example.test`);
+    const { LO, LM, LL } = lUsers;
+    const LW = (await call("LO", "POST", "/api/v2/workspaces", { cookie: LO.cookie, body: { name: "A1 web fix workspace" } })).json?.id;
+    const la = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${LW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const u of [LM, LL]) {
+      const i = await la(LO, "POST", "/invites", { email: u.email, role: "member" });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const TCut = (await la(LO, "POST", "/teams", { name: "Cutover" })).json?.id;
+    const TRet = (await la(LO, "POST", "/teams", { name: "Retirement" })).json?.id;
+    await la(LO, "POST", `/teams/${TCut}/members`, { user_id: LM.id, role: "lead" });
+    await la(LO, "POST", `/teams/${TRet}/members`, { user_id: LL.id, role: "lead" });
+    const LGC = (await la(LM, "POST", "/goals", { title: "Cut over the ledger database", visibility: "workspace", team_id: TCut })).json;
+    const LGR = (await la(LL, "POST", "/goals", { title: "Retire the old ledger cluster", visibility: "workspace", team_id: TRet })).json;
+    const lDevice = (name) => {
+      const d = insertDevice(LL.id, name);
+      withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, LW));
+      return { ...newDeviceKeys(), who: "LL", user: LL, id: d.id, access: d.access };
+    };
+    const LD = lDevice("Lena's laptop");
+    const LD2 = lDevice("Lena's other laptop");
+    const lShare = async (native, minutesAgo) => {
+      const key = sessionKey(LD, LW, "claude-code", native);
+      const startedAt = new Date(Date.now() - minutesAgo * 60_000).toISOString();
+      const put = await call("LL", "PUT", `/api/v2/workspaces/${LW}/sessions/${key}`, { bearer: LD.access, body: { harness: "claude-code", repo_key: repoKey(LD, LW, "/src/ledger"), started_at: startedAt, title: null } });
+      const e = await call("LL", "POST", `/api/v2/workspaces/${LW}/sessions/${key}/epochs`, { bearer: LD.access, body: { epoch_id: epochId(), goal_id: LGR?.id, starts_at: startedAt, root_turn: null, cause: "manual" } });
+      return { key, ok: put.status === 200 && e.status === 200 };
+    };
+    const L = {};
+    for (const [n, m] of [["l1", 90], ["l2", 80], ["l3", 70], ["l4", 60], ["l5", 50], ["l6", 40], ["l7", 30], ["l8", 20]]) L[n] = await lShare(`a1-${n}`, m);
+    // Cutover's asks: one Lena recorded (accepted), one the owner recorded about the goal (accepted), one open, one declined.
+    const lAsk = async (u, text, extra = {}) => (await la(u, "POST", "/asks", { team_id: TCut, text, source: { kind: "manual", date: "2026-11-01" }, ...extra })).json;
+    const ask1 = await lAsk(LL, "Keep the old cluster readable until the cutover. ASKCANARY-1");
+    const ask3 = await lAsk(LO, "Do the cutover outside month-end close. ASKCANARY-3", { goal_id: LGC?.id });
+    const ask2 = await lAsk(LO, "Tell us the cutover date. ASKCANARY-2");
+    const ask4 = await lAsk(LO, "Move the cutover to a weekend. ASKCANARY-4");
+    for (const x of [ask1, ask3]) await la(LM, "POST", `/asks/${x?.id}/accept`, {});
+    await la(LM, "POST", `/asks/${ask4?.id}/decline`, {});
+    check(
+      "a1 web fix setup: Cutover (lead Milo, goal \"Cut over the ledger database\") and Retirement (lead Lena); eight of Lena's sessions in one repository on her goal; Cutover's asks: two accepted, one open, one declined",
+      !!LW && !!LGC?.id && !!LGR?.id && Object.values(L).every((s) => s.ok) && !!ask1?.id && !!ask2?.id && !!ask3?.id && !!ask4?.id,
+      JSON.stringify([LW, LGC?.id, LGR?.id, Object.values(L).map((s) => s.ok)]),
+    );
+
+    // -- A1-cross-2: a device's asks feed carries, read-only, the accepted asks of a team whose goal one of that device's
+    //    live sessions follows through an approved "work toward" alignment; nothing else widens --
+    const feedOf = async (dev = LD, q = "") => (await call("LL", "GET", `/api/v2/workspaces/${LW}/asks${q}`, { bearer: dev.access })).json?.asks ?? [];
+    const has = (asks, x) => asks.find((a) => a.id === x?.id);
+    const alAct = (u, al, action, body = {}) => la(u, "POST", `/alignments/${al?.id}/${action}`, { revision: al?.revision ?? 1, ...body });
+    const before = await feedOf();
+    const own1 = has(before, ask1);
+    check(
+      "A1-cross-2: before any alignment, Lena's device reads the Cutover ask she recorded (no via_alignment) and not the one the owner recorded",
+      !!own1 && own1.via_alignment === undefined && !has(before, ask3),
+      JSON.stringify(before.map((a) => [a.text.slice(-12), a.via_alignment])),
+    );
+    // A contribution-only alignment, approved, governs nothing, so it gives nothing.
+    const alContrib = (await la(LL, "POST", "/alignments", { target_goal_id: LGC?.id, choice: "contribution", session_keys: [L.l1.key] })).json;
+    const alContribOk = await alAct(LM, alContrib, "approve");
+    const afterContrib = await feedOf();
+    check("A1-cross-2: an approved contribution-only alignment gives the device none of the team's asks", alContribOk.json?.state === "approved" && !has(afterContrib, ask3), `${alContribOk.text.slice(0, 200)}`);
+    // A work-toward alignment: nothing while pending, the accepted asks once approved.
+    const alW1 = (await la(LL, "POST", "/alignments", { target_goal_id: LGC?.id, choice: "work_toward", session_keys: [L.l4.key] })).json;
+    const pendingFeed = await feedOf();
+    const alW1Ok = await alAct(LM, alW1, "approve");
+    const aligned = await feedOf();
+    const a3 = has(aligned, ask3);
+    const a1 = has(aligned, ask1);
+    const browserLL = (await la(LL, "GET", "/asks")).json?.asks ?? [];
+    const readLL = await la(LL, "GET", `/asks/${ask3?.id}`);
+    const otherDevice = await feedOf(LD2);
+    const filtered = await feedOf(LD, `?state=accepted&team_id=${TCut}`);
+    const openOnly = await feedOf(LD, "?state=open");
+    check(
+      "A1-cross-2: while one of the device's sessions follows the goal through an approved work-toward alignment, the device's asks feed holds the team's accepted ask Lena could not read, marked via_alignment {goal_id}, read-only (can all false, waiting_on_me false), with its goal; open and declined asks are not in it; an ask she reads anyway stays unmarked",
+      alW1Ok.json?.state === "approved" && !has(pendingFeed, ask3) && !!a3 && a3.via_alignment?.goal_id === LGC?.id && Object.values(a3.can).every((v) => v === false) && a3.waiting_on_me === false &&
+        a3.goal?.id === LGC?.id && a3.state === "accepted" && !has(aligned, ask2) && !has(aligned, ask4) && !!a1 && a1.via_alignment === undefined && !!has(filtered, ask3) && !has(openOnly, ask3),
+      `${alW1Ok.text.slice(0, 160)} ${JSON.stringify(a3)} ${JSON.stringify(aligned.map((a) => [a.text.slice(-12), a.state, a.via_alignment]))}`,
+    );
+    check(
+      "A1-cross-2: the browser listing and GET .../asks/{id} keep their read rule (Lena's browser doesn't list the ask, its read is 404), and another device of hers with no following session doesn't get it",
+      !has(browserLL, ask3) && readLL.status === 404 && !has(otherDevice, ask3),
+      `${browserLL.length} ${readLL.status} ${otherDevice.length}`,
+    );
+    // Revoked: gone. Its session is suspended, and no other session follows the goal.
+    await alAct(LM, alW1Ok.json, "revoke");
+    const afterRevoke = await feedOf();
+    // A second one, approved, ends when its session stops sharing.
+    const alW2 = (await la(LL, "POST", "/alignments", { target_goal_id: LGC?.id, choice: "work_toward", session_keys: [L.l5.key] })).json;
+    await alAct(LM, alW2, "approve");
+    const w2Feed = await feedOf();
+    const stopL5 = await call("LL", "POST", `/api/v2/workspaces/${LW}/sessions/${L.l5.key}/stop-sharing`, { bearer: LD.access, body: {} });
+    const afterStop = await feedOf();
+    // A declined one never gives anything.
+    const alW3 = (await la(LL, "POST", "/alignments", { target_goal_id: LGC?.id, choice: "work_toward", session_keys: [L.l6.key] })).json;
+    const declineW3 = await alAct(LM, alW3, "reject");
+    const afterDecline = await feedOf();
+    check(
+      "A1-cross-2: the asks leave the device's feed once the alignment is revoked or its session stops sharing, and a declined alignment never gives them",
+      !has(afterRevoke, ask3) && !!has(w2Feed, ask3) && stopL5.status === 200 && !has(afterStop, ask3) && declineW3.json?.state === "rejected" && !has(afterDecline, ask3),
+      `${!!has(afterRevoke, ask3)} ${!!has(w2Feed, ask3)} ${stopL5.status} ${!!has(afterStop, ask3)} ${declineW3.text.slice(0, 120)} ${!!has(afterDecline, ask3)}`,
+    );
+    // Moved off the goal (a switch_goal accepted, here a new epoch on Lena's own goal): no longer following, so no asks,
+    // and the alignment's effect lines no longer claim the session follows the goal.
+    const alW4 = (await la(LL, "POST", "/alignments", { target_goal_id: LGC?.id, choice: "work_toward", session_keys: [L.l7.key] })).json;
+    await alAct(LM, alW4, "approve");
+    const w4Before = (await la(LL, "GET", `/alignments/${alW4?.id}`)).json;
+    const w4Feed = await feedOf();
+    const moved = await call("LL", "POST", `/api/v2/workspaces/${LW}/sessions/${L.l7.key}/epochs`, { bearer: LD.access, body: { epoch_id: epochId(), goal_id: LGR?.id, starts_at: new Date().toISOString(), root_turn: null, cause: "manual" } });
+    const afterMove = await feedOf();
+    const w4After = (await la(LL, "GET", `/alignments/${alW4?.id}`)).json;
+    const eff = (v, kind) => v?.effects?.find((e) => e.kind === kind)?.text ?? "";
+    check(
+      "A1-cross-2: a session moved off the goal no longer gets the team's asks",
+      !!has(w4Feed, ask3) && moved.status === 200 && !has(afterMove, ask3),
+      `${!!has(w4Feed, ask3)} ${moved.status} ${moved.text.slice(0, 160)} ${!!has(afterMove, ask3)}`,
+    );
+    check(
+      "A1-cross (works but confusing): once its session moved to another goal, an approved work-toward alignment's effects say \"This session no longer follows \"<goal>\": it moved to another goal or stopped sharing.\" and \"Future usage from this session no longer counts under \"<goal>\". …\", not that it follows the goal",
+      eff(w4Before, "governing_goal") === `This session follows "${LGC?.title}": its agent gets that goal and its changes.` &&
+        eff(w4After, "governing_goal") === `This session no longer follows "${LGC?.title}": it moved to another goal or stopped sharing.` &&
+        eff(w4After, "allocation_transfer") === `Future usage from this session no longer counts under "${LGC?.title}". Past usage stays where it is.` && w4After?.state === "approved",
+      `${eff(w4Before, "governing_goal")} | ${eff(w4After, "governing_goal")} | ${eff(w4After, "allocation_transfer")}`,
+    );
+
+    // -- A1-cross-8: a declined, withdrawn or revoked request says who closed it and when --
+    const alW5 = (await la(LL, "POST", "/alignments", { target_goal_id: LGC?.id, choice: "contribution", session_keys: [L.l8.key] })).json;
+    await alAct(LL, alW5, "withdraw");
+    const closedViews = {};
+    for (const [n, al] of [["declined", alW3], ["withdrawn", alW5], ["revoked", alW1]]) closedViews[n] = { LL: (await la(LL, "GET", `/alignments/${al?.id}`)).json, LM: (await la(LM, "GET", `/alignments/${al?.id}`)).json };
+    const openView = (await la(LM, "GET", `/alignments/${alW4?.id}`)).json;
+    check(
+      "A1-cross-8: a closed alignment's view names who closed it and when (closed_by, closed_at): declined by its approver, withdrawn by its requester, revoked by whoever revoked it; null while open or approved",
+      closedViews.declined.LL?.closed_by?.id === LM.id && closedViews.declined.LL.closed_by.name === "Milo Cutover" && typeof closedViews.declined.LL.closed_at === "string" &&
+        closedViews.withdrawn.LM?.closed_by?.id === LL.id && typeof closedViews.withdrawn.LM.closed_at === "string" && closedViews.revoked.LL?.closed_by?.id === LM.id && typeof closedViews.revoked.LL.closed_at === "string" &&
+        openView?.closed_by === null && openView.closed_at === null,
+      JSON.stringify(Object.entries(closedViews).map(([k, v]) => [k, v.LL?.closed_by, v.LL?.closed_at])),
+    );
+
+    // -- A1-cross-9: two requests on one goal differ on the Home --
+    const alP1 = (await la(LL, "POST", "/alignments", { target_goal_id: LGC?.id, choice: "contribution", session_keys: [L.l2.key] })).json;
+    const alP2 = (await la(LL, "POST", "/alignments", { target_goal_id: LGC?.id, choice: "work_toward", session_keys: [L.l3.key] })).json;
+    const homeM = (await la(LM, "GET", "/home")).json;
+    const hP1 = homeM?.alignments?.waiting_on_me?.find((a) => a.id === alP1?.id);
+    const hP2 = homeM?.alignments?.waiting_on_me?.find((a) => a.id === alP2?.id);
+    check(
+      "A1-cross-9: Home alignment items carry their choice, source goal and sessions (label, started_at, key_end), so two requests on one goal differ",
+      hP1?.choice === "contribution" && hP2?.choice === "work_toward" && hP1.source_goal === null && hP1.sessions?.length === 1 && hP1.sessions[0].key_end === L.l2.key.slice(-6) && typeof hP1.sessions[0].started_at === "string" &&
+        hP2.sessions?.[0]?.key_end === L.l3.key.slice(-6) && !JSON.stringify(homeM.alignments).includes(L.l2.key),
+      JSON.stringify([hP1, hP2]),
+    );
+
+    // Goal activity with only files whose paths aren't shared (A1-cross, works but confusing).
+    const LGH = (await la(LL, "POST", "/goals", { title: "Hidden paths goal", visibility: "workspace", team_id: TRet })).json;
+    await call("LL", "POST", `/api/v2/workspaces/${LW}/sessions/${L.l8.key}/epochs`, { bearer: LD.access, body: { epoch_id: epochId(), goal_id: LGH?.id, starts_at: new Date().toISOString(), root_turn: null, cause: "manual" } });
+    const hid = await call("LL", "POST", `/api/v2/workspaces/${LW}/activity`, {
+      bearer: LD.access,
+      body: { items: ["5", "6"].map((c) => ({ session_key: L.l8.key, kind: "edit", at: new Date().toISOString(), repo_id: "b".repeat(32), path_hash: c.repeat(32) })) },
+    });
+    const hidAct = (await la(LL, "GET", `/goals/${LGH?.id}/activity`)).json;
+    check("a1 web fix setup: a goal whose only work signals have no paths (detail files [] and files_hidden 2)", hid.json?.accepted === 2 && hidAct?.detail?.files?.length === 0 && hidAct.detail.files_hidden === 2, `${hid.text} ${JSON.stringify(hidAct?.detail)}`);
+
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      const errors = [];
+      const as = async (u, width = 1100, height = 900) => {
+        const ctx = await browser.createBrowserContext();
+        const pg = await ctx.newPage();
+        pg.on("pageerror", (e) => errors.push(e.message));
+        await pg.setViewport({ width, height });
+        await pg.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        return pg;
+      };
+      const open = async (pg, p) => {
+        await pg.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await pg.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      };
+      const textOf = (pg, sel) => pg.evaluate((s) => document.querySelector(s)?.innerText ?? "", sel);
+      try {
+        const pL = await as(LL);
+        const pM = await as(LM);
+        // A1-cross-4 (ui): the goal page's "Align with this goal" card names each session as the Alignments tab does,
+        // and doesn't offer one already on the goal. alW2's l5 stopped sharing; alW4's l7 moved off; a new approved one
+        // makes l6 follow the goal now.
+        const alW6 = (await la(LL, "POST", "/alignments", { target_goal_id: LGC?.id, choice: "work_toward", session_keys: [L.l6.key] })).json;
+        await alAct(LM, alW6, "approve");
+        await open(pL, `/app/w/${LW}/goals/${LGC?.id}`);
+        await pL.waitForSelector("[data-align-session]", { timeout: 15000 }).catch(() => undefined);
+        const offered = await pL.evaluate(() => [...document.querySelectorAll("[data-align-session]")].map((x) => ({ end: x.getAttribute("data-align-session"), text: x.innerText })));
+        const alreadyNote = await textOf(pL, "[data-align-already]");
+        check(
+          "A1-cross-4 (ui): \"Align with this goal\" lists each of the person's sessions as \"claude-code session · started <time> · …<key end> · now on <goal>\", all different, and leaves out the one that already follows this goal (\"1 of your sessions is already on this goal, so it isn't offered.\")",
+          offered.length >= 2 && new Set(offered.map((o) => o.text)).size === offered.length && offered.every((o) => /claude-code session · started .+ · …[A-Za-z0-9_-]{6} · (now on |no goal yet)/.test(o.text)) &&
+            offered.some((o) => o.end === L.l1.key.slice(-6) && o.text.includes(`…${L.l1.key.slice(-6)}`)) && !offered.some((o) => o.end === L.l6.key.slice(-6)) && !offered.some((o) => o.end === L.l5.key.slice(-6)) &&
+            alreadyNote === "1 of your sessions is already on this goal, so it isn't offered.",
+          `${JSON.stringify(offered)} ${alreadyNote}`,
+        );
+
+        // A1-cross-8 (ui): closed cards say who closed them, "you" for the reader, never "waiting".
+        await open(pL, `/app/w/${LW}/alignments`);
+        await pL.waitForSelector(`[data-alignment="${alW3?.id}"]`, { timeout: 15000 }).catch(() => undefined);
+        const cardL = async (al) => textOf(pL, `[data-alignment="${al?.id}"]`);
+        const decL = await textOf(pL, `[data-alignment="${alW3?.id}"] [data-alignment-decision]`);
+        const wdL = await textOf(pL, `[data-alignment="${alW5?.id}"] [data-alignment-decision]`);
+        const rvL = await textOf(pL, `[data-alignment="${alW1?.id}"] [data-alignment-decision]`);
+        const decCardL = await cardL(alW3);
+        await open(pM, `/app/w/${LW}/alignments`);
+        await pM.waitForSelector(`[data-alignment="${alW3?.id}"]`, { timeout: 15000 }).catch(() => undefined);
+        const decM = await textOf(pM, `[data-alignment="${alW3?.id}"] [data-alignment-decision]`);
+        const wdM = await textOf(pM, `[data-alignment="${alW5?.id}"] [data-alignment-decision]`);
+        const rvM = await textOf(pM, `[data-alignment="${alW1?.id}"] [data-alignment-decision]`);
+        const decCardM = await textOf(pM, `[data-alignment="${alW3?.id}"]`);
+        check(
+          "A1-cross-8 (ui): a declined card reads \"Declined by Milo Cutover, <time>. Nothing changes.\" (\"Declined by you\" for Milo) with no \"Approvals needed\" or \"waiting\"; withdrawn reads \"Withdrawn by you\" / \"Withdrawn by Lena Retire\"; revoked \"Revoked by Milo Cutover\" / \"Revoked by you\"",
+          /^Declined by Milo Cutover, .+\. Nothing changes\.$/.test(decL) && /^Declined by you, .+\. Nothing changes\.$/.test(decM) && !/Approvals needed|waiting/.test(decCardL) && !/Approvals needed|waiting/.test(decCardM) &&
+            /^Withdrawn by you, /.test(wdL) && /^Withdrawn by Lena Retire, /.test(wdM) && /^Revoked by Milo Cutover, /.test(rvL) && /^Revoked by you, /.test(rvM),
+          JSON.stringify({ decL, decM, wdL, wdM, rvL, rvM, decCardL: decCardL.slice(0, 300) }),
+        );
+
+        // A1-cross-9 (ui): Milo's Home tells the two requests apart.
+        await open(pM, `/app/w/${LW}`);
+        await pM.waitForSelector(`[data-home-item="alignment:${alP1?.id}"]`, { timeout: 15000 }).catch(() => undefined);
+        const d1 = await textOf(pM, `[data-home-item="alignment:${alP1?.id}"] [data-home-detail]`);
+        const d2 = await textOf(pM, `[data-home-item="alignment:${alP2?.id}"] [data-home-detail]`);
+        check(
+          "A1-cross-9 (ui): the Home's two alignment items from one person on one goal differ: \"Contribution only · session: claude-code session · started <time> · …<key end>\" and \"Work toward, usage moves · session: …\"",
+          d1.startsWith("Contribution only · session: ") && d1.includes(`…${L.l2.key.slice(-6)}`) && d2.startsWith("Work toward, usage moves · session: ") && d2.includes(`…${L.l3.key.slice(-6)}`) && d1 !== d2,
+          `${d1} | ${d2}`,
+        );
+
+        // Sessions tab (works but confusing): a stopped session says sharing stopped, never "Counting under: no goal".
+        await open(pL, `/app/w/${LW}/sessions`);
+        const sessText = await pL.evaluate(() => document.body.innerText);
+        check(
+          "A1-cross (ui, works but confusing): the Sessions tab says a stopped session's \"Sharing stopped <time>, so nothing more counts\", and \"Counting under\" only for sessions still shared",
+          /Sharing stopped .+, so nothing more counts\./.test(sessText) && (sessText.match(/Counting under:/g) ?? []).length === Object.keys(L).length - 1,
+          sessText.slice(0, 1200),
+        );
+
+        // Goal page Agent activity (works but confusing): no empty file-list heading.
+        await open(pL, `/app/w/${LW}/goals/${LGH?.id}`);
+        await pL.waitForSelector("#goal-activity", { timeout: 15000 }).catch(() => undefined);
+        const actText = await textOf(pL, "#goal-activity");
+        check(
+          "A1-cross (ui, works but confusing): with only files whose paths aren't shared, Agent activity says \"These sessions reported working on 2 files whose paths aren't shared.\" and no empty \"Files these sessions reported working on\" heading",
+          actText.includes("These sessions reported working on 2 files whose paths aren't shared.") && !actText.includes("Files these sessions reported working on"),
+          actText,
+        );
+        check("a1 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));
+      } catch (e) {
+        check("a1 web fix (ui) run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the a1 web fix checks", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end fix:a1-web ====
+
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));
   const ownerSaw = seen.some((s) => s.who === "U2" && s.text.includes(CANARY));

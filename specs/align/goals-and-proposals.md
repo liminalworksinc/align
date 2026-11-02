@@ -548,7 +548,7 @@ The server SHALL refuse with 409 `cycle` an alignment with a source goal whose a
 
 ### Requirement: Alignment read views
 
-The server SHALL list the alignments the caller is involved in on `GET /api/v2/workspaces/{ws}/alignments` (browser session) as `{waiting_on_me, mine, others}`, newest change first, and serve one on `GET .../alignments/{id}` (404 when the caller is not involved). Each view SHALL hold `id`, `state`, `revision`, `choice`, `requester`, `target_goal`, `source_goal` (a goal the caller may not read shows `id` and `title` null), `sessions` (by `ref`; another person's session has no `session_key`; each with `started_at` and `key_end`, the last 6 characters of its key, so two sessions of one person in one repository can be told apart), `effects` in plain words, `requirements` (each `{for, approvers:[{id,name}], approved_by}`, with `for` null for a goal the caller may not read), `approvers` (everyone in any current set, each with `approved`), `note`, `history` of revisions, `waiting_on_me`, `can` flags for exactly the actions the server would allow (all false for a viewer), `created_at` and `updated_at`.
+The server SHALL list the alignments the caller is involved in on `GET /api/v2/workspaces/{ws}/alignments` (browser session) as `{waiting_on_me, mine, others}`, newest change first, and serve one on `GET .../alignments/{id}` (404 when the caller is not involved). Each view SHALL hold `id`, `state`, `revision`, `choice`, `requester`, `target_goal`, `source_goal` (a goal the caller may not read shows `id` and `title` null), `sessions` (by `ref`; another person's session has no `session_key`; each with `started_at` and `key_end`, the last 6 characters of its key, so two sessions of one person in one repository can be told apart), `effects` in plain words, `requirements` (each `{for, approvers:[{id,name}], approved_by}`, with `for` null for a goal the caller may not read), `approvers` (everyone in any current set, each with `approved`), `note`, `history` of revisions, `waiting_on_me`, `can` flags for exactly the actions the server would allow (all false for a viewer), `closed_by` (`{id, name}` of whoever declined, withdrew or revoked it: the declining approver from the audit, the requester, or `revoked_by`; null while it is open or approved) and `closed_at` (`decided_at`, or `revoked_at` for a revoked one; null otherwise), `created_at` and `updated_at`. The effects of an approved `work_toward` alignment SHALL describe its sessions as they are now: a session that no longer follows its target through it (it accepted a `switch_goal`, its person picked another goal, or it stopped sharing) is never said to follow the goal or to count its future usage there.
 
 #### Scenario: Alignment list
 
@@ -559,6 +559,16 @@ The server SHALL list the alignments the caller is involved in on `GET /api/v2/w
 
 - **WHEN** a person reads a contribution-only alignment and a work-toward alignment with one session
 - **THEN** the first's `contributes_to` effect reads "Records that this session contributes to <goal>. No usage moves."; the second's reads "Records that this session contributes to <goal>." without "No usage moves", next to its "Future usage from this session counts under <goal>. Past usage stays where it is."; with several sessions the verb agrees, "Records that these 3 sessions contribute to <goal>." (`scripts/test-v2.mjs` "C5-5: ...")
+
+#### Scenario: A session moved off the goal
+
+- **WHEN** the one session of an approved work-toward alignment moves to another goal (`scripts/test-v2.mjs` "A1-cross (works but confusing): once its session moved ...")
+- **THEN** the alignment stays `approved`, its `governing_goal` effect reads "This session no longer follows <goal>: it moved to another goal or stopped sharing." and its `allocation_transfer` effect "Future usage from this session no longer counts under <goal>. Past usage stays where it is."; with several sessions of which some moved, "<k> of these <n> sessions still follow <goal>: their agents get that goal and its changes. The other <m> moved to another goal or stopped sharing." and "Future usage from the <k> still following counts under <goal>. …"
+
+#### Scenario: Who closed a request
+
+- **WHEN** an approver declines a request, a requester withdraws another and an approver revokes a third (`scripts/test-v2.mjs` "A1-cross-8: ...")
+- **THEN** each view's `closed_by` names that person, with `closed_at`, and an open or approved request has both null
 
 ### Requirement: Proposing a change request
 

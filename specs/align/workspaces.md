@@ -1549,7 +1549,9 @@ source:{kind, title?, date}}` (browser session, same-site; workspace owners and 
 with `text` 1..400, `from_label` up to 80, `source.kind` `meeting` (title 1..120 required) or `manual` (title
 optional), `source.date` `YYYY-MM-DD`, control characters in people's text replaced by spaces, and an optional
 `goal_id` that the person can read (else 404) and that belongs to the team asked (else 400); it SHALL let read an ask
-only its requester, the members and leads of the team asked and workspace owners (404 for anyone else), show its goal
+only its requester, the members and leads of the team asked and workspace owners (404 for anyone else; the one
+exception is a device's asks feed, which also carries, read-only and marked `via_alignment`, the accepted asks of a
+team whose goal one of that device's live shared sessions follows through an approved alignment: see "Asks feed"), show its goal
 as null to a reader who can't read that goal, refuse a 501st open or accepted ask in a workspace (409
 `too_many_asks`) and a 61st ask recorded in a workspace in an hour (429 `rate_limited`), and record `first_ask` once
 per workspace (`metrics`).
@@ -1562,7 +1564,7 @@ per workspace (`metrics`).
 #### Scenario: Who reads an ask
 
 - **WHEN** the requester, a lead, member or viewer of the team asked, a workspace owner, another member, or a member in no team reads `GET .../asks/{id}`
-- **THEN** the first five get 200 and the last two 404, and only the first five find it in `GET .../asks`
+- **THEN** the first five get 200 and the last two 404, and only the first five find it in the browser's `GET .../asks` (a device of the last two finds it only as "Asks feed" says, once it is accepted and one of that device's sessions follows the team's goal through an approved alignment)
 
 #### Scenario: Goal checks
 
@@ -1635,12 +1637,27 @@ browser session or a device token with a grant for the workspace, as `{version, 
 version and 304 with no body for a matching `If-None-Match`, where `state` is one state or a comma-separated list (else
 400), `team_id` keeps one team's asks (a malformed id is 400), `limit` is 1..500 (default 500), and the order is the
 person's own (their teams' asks and the asks they recorded) first, then open, accepted and closed, then the newest
-source date.
+source date. To a device token the feed SHALL also serve the **accepted** asks of each team that owns a goal which one
+of that device's live shared sessions (its person's, `shared`, neither suspended nor stopped) follows through an
+**approved** `work_toward` alignment (the session's governing goal is that alignment's target), only while the
+alignment is approved and the session is live and on that goal, so an agent working toward another team's goal holds
+the same team commitments as that team's own sessions (e2e-reports/acycle1/cross.md A1-cross-2). Such an ask, when the
+person would not read it otherwise, SHALL be read-only (`can` all false, `waiting_on_me` false), SHALL carry
+`via_alignment: {goal_id}` naming the goal followed (an ask the person reads anyway is listed once, unmarked), and its
+`goal` follows the usual goal-visibility rule; open, declined, done and withdrawn asks of that team are never added, a
+contribution-only alignment (which governs no session) adds nothing, and the browser listing and
+`GET .../asks/{id}` keep the read rule of "Asks between teams". The field is additive, so an agent that does not know it
+ignores it.
 
 #### Scenario: Accepted asks of a team for the agent
 
 - **WHEN** a device asks for `?state=accepted&team_id=<team>` and then again with the `ETag` it got
-- **THEN** the first response holds only that team's accepted asks the person reads and the second is 304; a device gets exactly what the same person's browser gets
+- **THEN** the first response holds only that team's accepted asks the person reads and the second is 304; a device with no session following another team's goal gets exactly what the same person's browser gets
+
+#### Scenario: Accepted asks of a goal a session follows
+
+- **WHEN** Lena, in no team of Cutover, has a session on her laptop that works toward Cutover's goal through an alignment Milo approved, and Cutover has an accepted ask Lena did not record, an open one and a declined one (`scripts/test-v2.mjs` "A1-cross-2: ...")
+- **THEN** her laptop's feed holds the accepted ask with `via_alignment: {goal_id: <Cutover's goal>}`, `can` all false and `waiting_on_me` false, and neither of the others; her browser's listing does not hold it and `GET .../asks/{id}` is 404 to her; her other laptop, with no such session, does not get it; it leaves the feed once the alignment is revoked, the session stops sharing or moves to another goal, and a declined or contribution-only alignment never adds it
 
 ### Requirement: Goal activity counts
 
@@ -1802,6 +1819,7 @@ per-path limits apply only when hosted, since Mode L turns off its IP tracking, 
 - Removing or leaving keeps a person's goals and sessions (as a former member after 30 days). Their open alignments, change requests and pending approvals, and goals they own that others depend on, are not reassigned; whether an owner can transfer goal ownership is not decided.
 - The retention periods are fixed in code (`lib/v2/retention-core.mts`); a per-workspace setting (for example a shorter audit log or longer spend history) waits for a customer who needs it.
 - Should deleting shared history stay open to any of the sharer's live devices, or only the device that shared it? (Implemented: any live device of the sharing account; a re-pair otherwise strands the history.)
+- A goal's approver approving a "work toward" alignment now lets the aligned person's agent read that goal's team's accepted asks (read-only, on the device feed only, while the alignment is approved and the session is live on the goal; "Asks feed"). The owners should confirm that approving an alignment may grant this, or say whether the approver should see it on the alignment card first. (Implemented: it does, with no extra wording on the card; the browser and `GET .../asks/{id}` are unchanged.)
 
 ## Sources
 

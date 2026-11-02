@@ -46,6 +46,7 @@ interface AlignmentRow {
   updated_at: string;
   decided_at: string | null;
   revoked_at: string | null;
+  revoked_by: string | null;
 }
 interface RevisionRow {
   revision: number;
@@ -433,6 +434,10 @@ function alignmentView(pp: PolicyPrincipal, a: AlignmentRow) {
   }).filter(Boolean);
   const who = sessions.length === 1 ? "this session" : `these ${sessions.length} sessions`;
   const kinds = JSON.parse(rev.effects_json) as EffectKind[];
+  // An approved "work toward" says which of its sessions still follow the goal: one moved off it since (a switch_goal it
+  // accepted, a goal its owner picked, sharing stopped) no longer does, and its effect lines must not claim it does.
+  const following = a.state === "approved" && kinds.includes("governing_goal") ? keys.filter((k) => sessionRow(a.ws_id, k)?.governing_alignment_id === a.id).length : sessions.length;
+  const gone = sessions.length - following;
   // "No usage moves" only when nothing else in this alignment moves it (contribution only); work toward also transfers
   // the sessions' future usage, said in its own line.
   const movesUsage = kinds.includes("allocation_transfer");
@@ -442,10 +447,18 @@ function alignmentView(pp: PolicyPrincipal, a: AlignmentRow) {
       kind === "contributes_to"
         ? `Records that ${a.source_goal_id ? `${named(source)} contributes` : `${who} ${sessions.length === 1 ? "contributes" : "contribute"}`} to ${named(target)}.${movesUsage ? "" : " No usage moves."}`
         : kind === "governing_goal"
-          ? sessions.length === 1
-            ? `This session follows ${named(target)}: its agent gets that goal and its changes.`
-            : `${who[0].toUpperCase()}${who.slice(1)} follow ${named(target)}: their agents get that goal and its changes.`
-          : `Future usage from ${who} counts under ${named(target)}. Past usage stays where it is.`,
+          ? gone === 0
+            ? sessions.length === 1
+              ? `This session follows ${named(target)}: its agent gets that goal and its changes.`
+              : `${who[0].toUpperCase()}${who.slice(1)} follow ${named(target)}: their agents get that goal and its changes.`
+            : following === 0
+              ? `${sessions.length === 1 ? "This session no longer follows" : `${who[0].toUpperCase()}${who.slice(1)} no longer follow`} ${named(target)}: ${sessions.length === 1 ? "it" : "they"} moved to another goal or stopped sharing.`
+              : `${following} of ${who} still ${following === 1 ? "follows" : "follow"} ${named(target)}: ${following === 1 ? "its agent gets" : "their agents get"} that goal and its changes. The other ${gone} moved to another goal or stopped sharing.`
+          : gone === 0
+            ? `Future usage from ${who} counts under ${named(target)}. Past usage stays where it is.`
+            : following === 0
+              ? `Future usage from ${who} no longer counts under ${named(target)}. Past usage stays where it is.`
+              : `Future usage from the ${following} still following counts under ${named(target)}. Past usage stays where it is.`,
   }));
   const me = pp.userId;
   const isRequester = a.requester_id === me;
@@ -459,6 +472,9 @@ function alignmentView(pp: PolicyPrincipal, a: AlignmentRow) {
     revoke: a.state === "approved" && (isRequester || isApprover),
   };
   if (pp.wsRole === "viewer") for (const k of Object.keys(can) as (keyof typeof can)[]) can[k] = false;
+  // A closed request is its decision: who declined, withdrew or revoked it, and when (A1-cross-8). Its approvals are
+  // no longer waited for.
+  const closer = a.state === "rejected" ? closedBy(a, "alignment.rejected") : a.state === "withdrawn" ? a.requester_id : a.state === "revoked" ? a.revoked_by : null;
   const history = all<RevisionRow>("SELECT * FROM v2_alignment_revisions WHERE alignment_id = ? ORDER BY revision", a.id).map((r) => ({
     revision: r.revision,
     choice: r.choice,
@@ -487,6 +503,8 @@ function alignmentView(pp: PolicyPrincipal, a: AlignmentRow) {
     history,
     waiting_on_me: can.approve || can.accept_counter,
     can,
+    closed_by: closer ? { id: closer, name: memberName(closer) } : null,
+    closed_at: a.state === "revoked" ? a.revoked_at : a.state === "rejected" || a.state === "withdrawn" ? a.decided_at : null,
     created_at: a.created_at,
     updated_at: a.updated_at,
   };

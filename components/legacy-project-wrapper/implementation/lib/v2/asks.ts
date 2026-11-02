@@ -17,6 +17,10 @@ import type { Body } from "./validate";
 //   open -> accepted | declined | withdrawn;  accepted -> done | withdrawn;  done | declined -> open (reopen)
 // Every action is audited (ask.<action>) with the person as actor; viewers read and never act (403 read_only).
 // Workspace owners import asks from meeting notes (at most 60 a call); an import appends and merges, never replaces.
+// A device's asks feed also carries, read-only, the accepted asks of a team whose goal one of that device's live shared
+// sessions follows through an approved "work toward" alignment (A1-cross-2), marked `via_alignment: {goal_id}`, so an
+// agent working toward another team's goal holds the same team commitments as that team's own sessions. Nothing else
+// widens: the browser listing and GET .../asks/{id} keep the read rule above.
 
 export type AskState = "open" | "accepted" | "done" | "declined" | "withdrawn";
 export const ASK_STATES: readonly AskState[] = ["open", "accepted", "done", "declined", "withdrawn"];
@@ -65,6 +69,9 @@ export interface AskView {
   /** Open and the reader can accept it, or accepted and the reader can mark it done. */
   waiting_on_me: boolean;
   can: { accept: boolean; decline: boolean; done: boolean; reopen: boolean; withdraw: boolean; mention: boolean };
+  /** Only on the device feed, for an accepted ask this person reads only because one of the device's live shared
+   *  sessions follows `goal_id`, the asked team's goal, through an approved "work toward" alignment. */
+  via_alignment?: { goal_id: string };
 }
 
 interface AskRow {
@@ -248,8 +255,8 @@ function viewer(pp: PolicyPrincipal) {
     }
     return goals.get(id)!;
   };
-  return (a: AskRow, mentions: MentionRow[]): AskView => {
-    const can = canFlags(pp, a);
+  return (a: AskRow, mentions: MentionRow[], via?: string): AskView => {
+    const can = via ? NO_ACTIONS : canFlags(pp, a);
     return {
       id: a.id,
       state: a.state,
@@ -264,10 +271,33 @@ function viewer(pp: PolicyPrincipal) {
       decided_at: a.decided_at,
       created_at: a.created_at,
       updated_at: a.updated_at,
-      waiting_on_me: waitingOn(pp, a, can),
+      waiting_on_me: via ? false : waitingOn(pp, a, can),
       can,
+      ...(via ? { via_alignment: { goal_id: via } } : {}),
     };
   };
+}
+const NO_ACTIONS: AskView["can"] = { accept: false, decline: false, done: false, reopen: false, withdraw: false, mention: false };
+
+/** The teams whose accepted asks a device also reads (A1-cross-2): for each live shared session of this person on this
+ *  device that follows a goal through an approved "work toward" alignment (its governing goal is that alignment's
+ *  target), the goal's team, with the goal followed. A revoked or declined alignment, a session no longer shared (or
+ *  suspended), one moved off the goal and a contribution-only alignment (which governs nothing) give nothing. */
+export function alignedTeams(pp: PolicyPrincipal, deviceId: string): Map<string, string> {
+  const rows = all<{ team_id: string; goal_id: string }>(
+    `SELECT DISTINCT g.pod_id AS team_id, g.id AS goal_id FROM v2_sessions s
+       JOIN v2_alignments al ON al.ws_id = s.ws_id AND al.id = s.governing_alignment_id
+       JOIN v2_goals g ON g.ws_id = s.ws_id AND g.id = s.governing_goal_id
+     WHERE s.ws_id = ? AND s.user_id = ? AND s.device_id = ? AND s.state = 'shared'
+       AND al.state = 'approved' AND al.target_goal_id = s.governing_goal_id AND g.pod_id IS NOT NULL
+     ORDER BY g.id`,
+    pp.wsId,
+    pp.userId,
+    deviceId,
+  );
+  const out = new Map<string, string>();
+  for (const r of rows) if (!out.has(r.team_id)) out.set(r.team_id, r.goal_id);
+  return out;
 }
 
 const mentionsOf = (askId: string) => all<MentionRow>("SELECT * FROM v2_ask_mentions WHERE ask_id = ? ORDER BY n", askId);
@@ -281,7 +311,7 @@ const STATE_ORDER: Record<AskState, number> = { open: 0, accepted: 1, done: 2, d
 
 /** Readable asks, filtered: the reader's own (their teams' and those they recorded) first, then open, accepted and
  *  closed, then the newest source date, then the newest recorded; at most `limit` (default all). */
-export function listAsks(pp: PolicyPrincipal, o: { states?: readonly AskState[]; teamId?: string; limit?: number } = {}): AskView[] {
+export function listAsks(pp: PolicyPrincipal, o: { states?: readonly AskState[]; teamId?: string; limit?: number; followed?: ReadonlyMap<string, string> } = {}): AskView[] {
   need(pp, "workspace.read");
   const where = ["ws_id = ?"];
   const params: string[] = [pp.wsId];
@@ -294,8 +324,10 @@ export function listAsks(pp: PolicyPrincipal, o: { states?: readonly AskState[];
     params.push(o.teamId);
   }
   const mine = (a: AskRow) => (pp.pods.has(a.team_id) || a.created_by === pp.userId ? 0 : 1);
+  // An ask read only through a followed team (device feed): accepted ones, marked with the goal followed.
+  const via = (a: AskRow) => (!canReadAsk(pp, a) && a.state === "accepted" ? o.followed?.get(a.team_id) : undefined);
   const rows = all<AskRow>(`SELECT * FROM v2_asks WHERE ${where.join(" AND ")}`, ...params)
-    .filter((a) => canReadAsk(pp, a))
+    .filter((a) => canReadAsk(pp, a) || !!via(a))
     .sort(
       (a, b) =>
         mine(a) - mine(b) ||
@@ -313,7 +345,7 @@ export function listAsks(pp: PolicyPrincipal, o: { states?: readonly AskState[];
     }
   }
   const view = viewer(pp);
-  return rows.map((a) => view(a, byAsk.get(a.id) ?? []));
+  return rows.map((a) => view(a, byAsk.get(a.id) ?? [], via(a)));
 }
 
 /** The asks this person can read, filtered by state and team: their own teams' (and the asks they recorded) first,
@@ -323,14 +355,16 @@ export function readableAsks(pp: PolicyPrincipal, o: { state?: AskState; teamId?
 }
 
 /** The asks feed (GET .../asks, browser or device): readable asks, filtered, with a short version hash for ETag /
- *  If-None-Match. `state` may list several states, comma-separated. 400 for an unknown state. */
-export function asksFeed(pp: PolicyPrincipal, q: { state?: string | null; teamId?: string | null; limit?: string | null }) {
+ *  If-None-Match. `state` may list several states, comma-separated. 400 for an unknown state. A device (`deviceId`)
+ *  also gets the accepted asks of the teams its sessions follow through an approved alignment (alignedTeams). */
+export function asksFeed(pp: PolicyPrincipal, q: { state?: string | null; teamId?: string | null; limit?: string | null }, deviceId: string | null = null) {
   const states = q.state ? q.state.split(",").map((s) => s.trim()) : [];
   if (states.some((s) => !(ASK_STATES as readonly string[]).includes(s))) throw badRequest(`state must be one or more of ${ASK_STATES.join(", ")}`);
   if (q.teamId && !/^pod_[A-Za-z0-9_-]{8,64}$/.test(q.teamId)) throw badRequest("team_id must be a team id");
   const limit = q.limit ? Number(q.limit) : FEED_MAX;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > FEED_MAX) throw badRequest(`limit must be 1 to ${FEED_MAX}`);
-  const asks = listAsks(pp, { states: states as AskState[], teamId: q.teamId ?? undefined, limit });
+  const followed = deviceId ? alignedTeams(pp, deviceId) : undefined;
+  const asks = listAsks(pp, { states: states as AskState[], teamId: q.teamId ?? undefined, limit, followed });
   return { version: sha256hex(JSON.stringify(asks)).slice(0, 16), asks };
 }
 const FEED_MAX = 500;
