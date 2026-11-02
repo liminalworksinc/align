@@ -4,23 +4,20 @@ import { createPortal } from "react-dom";
 import FirstRun from "@/components/FirstRun";
 import { Button } from "@/components/ui";
 import { api } from "@/components/useAlign";
+import type { AgentApp } from "@/components/useAgents";
 import { claudeCodeLine, codexLine } from "@/lib/paste-lines";
 
 // "Connected AI apps" in a custom workspace's sidebar: the one URL any AI app connects with (Align's read-only MCP
 // endpoint, OAuth sign-in with a team passcode), the steps for each app, and the apps connected now. The signal is
-// last_used_at: when Align last saw the app make any authenticated MCP request (app/api/mcp/route.ts noteGrantUse),
-// stamped with the plan revision current at that moment (lib/plan-rev.ts). It says the app was seen while that plan
-// was current, not that it read the plan. An approved app Align hasn't seen yet is listed as "Approved, not seen by Align yet".
-// Align sees when an app connects, never what it does. The same poll feeds the first-run card (components/FirstRun.tsx).
+// last_used_at: when Align last saw the app call a tool (app/api/mcp/route.ts noteGrantUse; initialize, tools/list and
+// pings don't count), stamped with the plan revision current at that moment (lib/plan-rev.ts). It says the app was seen
+// while that plan was current, not that it read the plan. received_current_plan says Align sent the app the plan agreed
+// now from align_get_accepted_plan (lib/oauth/grants.ts notePlanReceipt), and takes precedence. An approved app Align
+// hasn't seen yet is listed as "Approved, not seen by Align yet". Align sees what it sent an app, never what the app
+// does. The same poll feeds the first-run card (components/FirstRun.tsx).
 
-interface App {
-  id: string;
-  name: string;
+interface App extends AgentApp {
   redirect_host: string;
-  role: string;
-  approved_at: string;
-  last_used_at: string | null;
-  on_current_plan?: boolean;
 }
 
 type Tab = "claude-code" | "codex" | "claude" | "chatgpt";
@@ -207,7 +204,13 @@ export default function ConnectAI({
               </span>
               <span className="min-w-0">
                 <span className="font-semibold text-zinc-900">{a.name}</span>{" "}
-                <span className={a.on_current_plan ? "text-zinc-700" : "text-amber-800"}>{a.on_current_plan ? "Seen since the latest change" : "Last seen before the latest change"}</span>
+                {a.received_current_plan && a.plan_receipt && (
+                  <span className="text-zinc-700">Align sent it the approved plan ({a.plan_receipt.accepted_version})</span>
+                )}
+                {/* Both can be true: the approved plan is unchanged, but a newer request changed the workspace. */}
+                {!(a.received_current_plan && a.plan_receipt && a.on_current_plan) && (
+                  <span className={`block ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"}`}>{a.on_current_plan ? "Seen since the latest change" : "Last seen before the latest change"}</span>
+                )}
               </span>
             </li>
           ))}
@@ -288,7 +291,12 @@ export default function ConnectAI({
                       <div className="text-[14px] text-zinc-600">
                         As {teamOf(a.role)} · {a.last_used_at ? `last seen by Align ${when(a.last_used_at)}` : "Approved, not seen by Align yet"}
                       </div>
-                      {a.last_used_at && (
+                      {a.received_current_plan && a.plan_receipt && (
+                        <div className="mt-1 text-[14px] text-zinc-700">
+                          ✓ Align sent it the approved plan ({a.plan_receipt.accepted_version}) at {when(a.plan_receipt.at)}. Align can’t see what the app does next.
+                        </div>
+                      )}
+                      {a.last_used_at && !(a.received_current_plan && a.plan_receipt && a.on_current_plan) && (
                         <div className={`mt-1 text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"}`}>
                           {a.on_current_plan
                             ? "✓ Seen since the latest change."
