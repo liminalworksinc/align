@@ -6908,6 +6908,55 @@ try {
         hcLoop.changeWaits({ state: "pending", behind: true, requester: { id: "r", name: "Rae" }, approvers: [], dependency_loop: "loop" })?.next === "rebase",
       "",
     );
+    // -- C6-1: a pending request that would now loop, kept for the browser (no Accept if…, the counter form leaves the
+    // looping dependency out) --
+    const KL5 = await kGoal(KA, { title: "Loop five", visibility: "workspace", team_id: KPT });
+    const KL6 = await kGoal(KA, { title: "Loop six", visibility: "workspace", team_id: KPT });
+    const lr5 = await ka(KB, "POST", kcrs(KL5.id), { base_version: 1, changes: { depends_on: [KL6.id] }, reason: "Five reads six" });
+    const lr6 = await ka(KB, "POST", kcrs(KL6.id), { base_version: 1, changes: { title: "Loop six, measured", depends_on: [KL5.id] }, reason: "Six reads five" });
+    const lr5Done = await kAct(KA, KL5.id, lr5.json?.id, "approve_and_launch", { revision: 1 });
+    const lr6IfKeep = await kAct(KA, KL6.id, lr6.json?.id, "counter", { revision: 1, changes: lr6.json?.changes, note: "Fine if", condition: "Docs first" });
+    const lr6Read = await kRead(KA, KL6.id, lr6.json?.id);
+    check(
+      "C6-1: on a pending request that would now close a loop, an Accept if… (a counter keeping its changes) is refused 409 cycle, so the card must not offer it; the request stays pending with dependency_loop set and can.counter true for its decider",
+      lr5Done.status === 200 && lr6IfKeep.status === 409 && lr6IfKeep.json?.error === "cycle" && lr6Read?.state === "pending" && lr6Read.revision === 1 && !!lr6Read.dependency_loop && lr6Read.can.counter === true,
+      `${lr5Done.status} ${lr6IfKeep.status} ${lr6IfKeep.text.slice(0, 200)} ${lr6Read?.state} ${lr6Read?.dependency_loop}`,
+    );
+
+    // -- C6-2: a pending request that would now loop, on a goal that then moved on: its requester can still update it,
+    // and it then waits on its deciders like any request that would loop --
+    const KL7 = await kGoal(KA, { title: "Loop seven", visibility: "workspace", team_id: KPT });
+    const KL8 = await kGoal(KA, { title: "Loop eight", visibility: "workspace", team_id: KPT });
+    const lr7 = await ka(KB, "POST", kcrs(KL7.id), { base_version: 1, changes: { depends_on: [KL8.id] }, reason: "Seven reads eight" });
+    const lr8 = await ka(KB, "POST", kcrs(KL8.id), { base_version: 1, changes: { title: "Loop eight, measured", depends_on: [KL7.id] }, reason: "Eight reads seven" });
+    await kAct(KA, KL7.id, lr7.json?.id, "approve_and_launch", { revision: 1 });
+    const kl8v2 = await ka(KA, "POST", `/goals/${KL8.id}/versions`, { version: 1, title: "Loop eight, renamed" });
+    const lr8KB = await kRead(KB, KL8.id, lr8.json?.id);
+    const lr8KA = await kRead(KA, KL8.id, lr8.json?.id);
+    const kbHome8 = (await ka(KB, "GET", "/home")).json?.change_requests;
+    const kaHome8 = (await ka(KA, "GET", "/home")).json?.change_requests;
+    const lr8Sent = await kAct(KB, KL8.id, lr8.json?.id, "rebase", { revision: 1, base_version: 2, changes: { title: "Loop eight, measured", depends_on: [KL7.id] } });
+    const lr8Kept = await kAct(KB, KL8.id, lr8.json?.id, "rebase", { revision: 1, base_version: 2 });
+    const lr8After = await kRead(KA, KL8.id, lr8.json?.id);
+    const kaHome8b = (await ka(KA, "GET", "/home")).json?.change_requests;
+    check(
+      "C6-2: a pending request that would close a loop, on a goal that moved on, reads behind with dependency_loop set (the loop is known before the update), the requester's can.rebase true and the decider's waiting_on_me false; the Home sends the requester to rebase (waiting on them); a rebase sending its changes is 409 cycle, the rebase keeping them is recorded (revision 2 at version 2); then it waits on the decider (waiting_on_me, Home resolve_loop)",
+      lr7.status === 201 && lr8.status === 201 && kl8v2.status === 201 &&
+        lr8KB?.behind === true && !!lr8KB.dependency_loop && lr8KB.can.rebase === true && lr8KA?.waiting_on_me === false && lr8KA.can.approve === false &&
+        homeItem(kbHome8, "waiting_on_me", lr8.json?.id)?.next === "rebase" && homeItem(kaHome8, "waiting_on_others", lr8.json?.id)?.next === "rebase" && !homeItem(kaHome8, "waiting_on_me", lr8.json?.id) &&
+        lr8Sent.status === 409 && lr8Sent.json?.error === "cycle" &&
+        lr8Kept.status === 200 && lr8Kept.json?.revision === 2 && lr8Kept.json?.base_version === 2 && lr8Kept.json?.behind === false &&
+        lr8After?.dependency_loop === LOOP_APPROVE && lr8After.waiting_on_me === true && lr8After.can.approve === false && homeItem(kaHome8b, "waiting_on_me", lr8.json?.id)?.next === "resolve_loop",
+      `${kl8v2.status} ${JSON.stringify({ behind: lr8KB?.behind, loop: lr8KB?.dependency_loop, can: lr8KB?.can })} ${lr8KA?.waiting_on_me} ${JSON.stringify(homeItem(kbHome8, "waiting_on_me", lr8.json?.id))} ${lr8Sent.status} ${lr8Sent.text.slice(0, 160)} ${lr8Kept.status} ${lr8Kept.text.slice(0, 200)} ${lr8After?.dependency_loop} ${lr8After?.waiting_on_me}`,
+    );
+    const lr8Ctr = await kAct(KA, KL8.id, lr8.json?.id, "counter", { revision: 2, changes: { title: "Loop eight, measured", depends_on: [] }, note: "Seven already reads eight" });
+    const lr8Acc = await kAct(KB, KL8.id, lr8.json?.id, "accept_counter", { revision: 3 });
+    const lr8Ap = await kAct(KA, KL8.id, lr8.json?.id, "approve", { revision: 3 });
+    check(
+      "C6-2: after the update, a counter without the looping dependency, once accepted, is approved",
+      lr8Ctr.status === 200 && lr8Acc.status === 200 && lr8Ap.status === 200 && lr8Ap.json?.state === "approved",
+      `${lr8Ctr.status} ${lr8Ctr.text.slice(0, 160)} ${lr8Acc.status} ${lr8Ap.status} ${lr8Ap.text.slice(0, 160)}`,
+    );
 
     // -- C5-3: a request adding a dependency the reader can see and one they can't: the value card and the MCP record
     // count the hidden one ("… and 1 other goal you can't see"), as the rest of the card does --
@@ -7020,6 +7069,29 @@ try {
           "C5-1 (ui): the approved change that would close a loop shows \"Nobody can launch this as it stands. A goal this change adds as a dependency has since come to depend on this goal, …\" and no Launch button, nor \"Can launch: …\"",
           lr4Ui.text.includes(`Nobody can launch this as it stands. ${LOOP_LAUNCH}`) && !lr4Ui.buttons.some((t) => /^Launch version/.test(t ?? "")) && !/Can launch:/.test(lr4Ui.text),
           JSON.stringify(lr4Ui).slice(0, 800),
+        );
+
+        // C6-1 (ui): the pending request that would now loop offers its decider Suggest a change and Decline, not Accept
+        // if…; Suggest a change leaves the looping dependency unticked and unoffered, and says why.
+        const lr6Card = `[data-cr="${lr6.json?.id}"]`;
+        await open(pL, `/app/w/${KW}/goals/${KL6.id}`);
+        await pL.waitForSelector(`${lr6Card} [data-dependency-loop]`, { timeout: 15000 }).catch(() => undefined);
+        const lr6Choices = await pL.$$eval(`${lr6Card} [data-decision]`, (els) => els.map((e) => e.getAttribute("data-decision"))).catch(() => []);
+        await pL.click(`${lr6Card} [data-decision="Suggest a change"]`).catch(() => undefined);
+        await pL.waitForSelector(`${lr6Card} [data-deps-loop-dropped]`, { timeout: 15000 }).catch(() => undefined);
+        const lr6Form = await pL.evaluate((sel) => {
+          const c = document.querySelector(sel);
+          return {
+            dropped: c?.querySelector("[data-deps-loop-dropped]")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
+            boxes: [...(c?.querySelectorAll('[data-decision-input] input[type="checkbox"]') ?? [])].map((b) => ({ label: b.closest("label")?.textContent?.trim() ?? "", checked: b.checked })),
+          };
+        }, lr6Card);
+        check(
+          "C6-1 (ui): a pending request that would now close a loop offers its decider Suggest a change and Decline but not Accept if… (refused 409 cycle); Suggest a change leaves the looping dependency unticked and unoffered and says \"The request's dependency on “Loop five” is left out: it already depends on this goal, so keeping it would make a loop.\"",
+          JSON.stringify(lr6Choices) === JSON.stringify(["Suggest a change", "Decline"]) &&
+            lr6Form.dropped === `The request's dependency on “${KL5.title}” is left out: it already depends on this goal, so keeping it would make a loop.` &&
+            !lr6Form.boxes.some((b) => b.label === KL5.title),
+          `${JSON.stringify(lr6Choices)} ${JSON.stringify(lr6Form).slice(0, 600)}`,
         );
 
         // N3, N5 and F4: Not yet, then Launch, from the goal page. Every fetch and every "Loading…" in the change-request

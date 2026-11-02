@@ -40,8 +40,9 @@ import { EVIDENCE_PER_REVISION, evidenceCount, evidenceInput, evidenceRows, evid
 // would close a loop. Approve, approve_and_launch and launch are refused (409 cycle) for a request whose dependencies
 // would loop against the goals as they stand at decision time, and the same predicate (dependencyLoop) clears the
 // `can` flags and says why (dependency_loop) to every reader (C5-1). A pending one stays open for a counter without that
-// dependency, a decline or a withdrawal, and waits on its deciders for that; an approved one can't launch until the
-// loop is gone, waits on nobody, and a newer version of its goal supersedes it.
+// dependency, a decline or a withdrawal, and waits on its deciders for that (once its requester has updated it, when its
+// goal moved on: a rebase keeping its own changes is not refused for the loop, C6-2); an approved one can't launch until
+// the loop is gone, waits on nobody, and a newer version of its goal supersedes it.
 // A reader still sees only the dependencies they can read, with the others counted (diff.hidden_depends_on).
 // Everyone who can read the goal can read its requests (viewers too); viewers can't act. A request is its own
 // decision record once approved or rejected.
@@ -111,15 +112,16 @@ const sortedIds = (ids: string[]) => [...ids].sort().join(",");
 /** Validate `changes` against the content it would change (the base version): only title, measures, depends_on,
  *  status and limits, each checked like a new goal version (400, 404 for a dependency the caller can't read, 409 cycle,
  *  409 no_change). Keeps only the fields that differ from the base. A depends_on sent keeps the dependencies in
- *  `keepDepsFrom` (by default the base's) the caller can't read. */
-function changesIn(pp: PolicyPrincipal, goalId: string, base: GoalContent, v: unknown, keepDepsFrom: string[] = base.depends_on): Changes {
+ *  `keepDepsFrom` (by default the base's) the caller can't read. `loopOk`: no cycle check (a rebase keeping its own
+ *  changes, C6-2). */
+function changesIn(pp: PolicyPrincipal, goalId: string, base: GoalContent, v: unknown, keepDepsFrom: string[] = base.depends_on, loopOk = false): Changes {
   if (!v || typeof v !== "object" || Array.isArray(v)) throw badRequest("changes must be an object with title, measures, depends_on, status or limits");
   const b = v as Body;
   const keys = Object.keys(b);
   if (!keys.length) throw badRequest("changes must name at least one of title, measures, depends_on, status or limits");
   const other = keys.find((k) => !(CHANGE_KEYS as readonly string[]).includes(k));
   if (other) throw badRequest(`changes: ${other} can't be proposed (only title, measures, depends_on, status and limits)`);
-  const next = nextContent(pp, goalId, base, b, keepDepsFrom);
+  const next = nextContent(pp, goalId, base, b, keepDepsFrom, loopOk);
   const out: Changes = {};
   if (next.title !== base.title) out.title = next.title;
   if (JSON.stringify(next.measures) !== JSON.stringify(base.measures)) out.measures = next.measures;
@@ -169,17 +171,18 @@ const loopRefusalFor = (r: ChangeRequestRow) =>
     : `A goal this request adds as a dependency has since come to depend on this goal, so approving it would make a loop. Someone who decides on this goal can suggest a change without that dependency or decline it, and ${memberName(r.requester_id)} can withdraw it.`;
 
 /** The refusal (409 cycle) for approving a pending request, or launching an approved one, whose dependencies would close
- *  a loop against the goals as they stand now, or null. Only for a request on a goal still at its base version (else it
- *  is behind, or superseded, and refused for that). One predicate for the action, the `can` flags, `waiting_on_me` and
- *  the Home (C5-1), so nobody is offered, or queued for, a decision the server refuses for a loop. */
+ *  a loop against the goals as they stand now, or null. One predicate for the action, the `can` flags (Accept if… in the
+ *  app too, C6-1), `waiting_on_me` and the Home (C5-1), so nobody is offered, or queued for, a decision the server
+ *  refuses for a loop. A pending request that is behind its goal is checked too, against the goals as they stand: its
+ *  requester can still update it (a rebase keeping its changes is not refused for the loop, C6-2), and then it waits on
+ *  its deciders like any other. An approved one only on a goal still at its base version (else it is superseded). */
 function dependencyLoop(r: ChangeRequestRow, g: GoalRow): string | null {
-  if (g.version !== r.base_version) return null;
   let deps: string[];
   if (r.state === "pending") {
     const c = JSON.parse(r.changes_json) as Changes;
     if (!c.depends_on) return null;
     deps = c.depends_on;
-  } else if (r.state === "approved" && (r.launch === "pending" || r.launch === "not_yet") && r.approved_json) {
+  } else if (r.state === "approved" && (r.launch === "pending" || r.launch === "not_yet") && r.approved_json && g.version === r.base_version) {
     deps = (JSON.parse(r.approved_json) as GoalContent).depends_on;
   } else return null;
   return deps.length && dependencyCycle(r.ws_id, r.goal_id, deps) ? loopRefusalFor(r) : null;
@@ -543,8 +546,12 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         expectRevision(false);
         const baseVersion = nonNegInt(b, "base_version");
         if (baseVersion !== g.version) throw conflict("stale_version", `This goal is at version ${g.version}; reload and try again`);
-        // The changes as sent, or the request's own, checked again against the goal as it is now.
-        const rebased = changesIn(pp, g.id, contentOf(g), b.changes === undefined ? changes : b.changes);
+        // The changes as sent, or the request's own, checked again against the goal as it is now. Its own changes add
+        // nothing new, so a dependency that has since come to close a loop doesn't refuse the update (C6-2): the request
+        // moves to this version and waits, as any request that would loop does, on its deciders to suggest a change
+        // without that dependency or decline it. Changes sent are checked like a proposal (409 cycle).
+        const own = b.changes === undefined;
+        const rebased = changesIn(pp, g.id, contentOf(g), own ? changes : b.changes, contentOf(g).depends_on, own);
         const hidden = hiddenAddedDependency(pp.wsId, contentOf(g).depends_on, rebased, effectiveSet(g, r.requester_id));
         if (hidden) {
           // The request's own changes, kept: the dependency may have come from an approver's counter, accepted before
@@ -753,8 +760,9 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     dependency_loop: loop,
     /** The reader's turn: they may approve it, accept its counter, or launch it (approved and not launched, whether
      *  nobody decided the launch yet or someone said not yet): the same rule as the workspace Home's queue. A pending
-     *  request that would close a loop waits on its deciders to suggest a change or decline it (C5-1). */
-    waiting_on_me: can.approve || can.accept_counter || can.launch || (!!loop && r.state === "pending" && can.counter),
+     *  request that would close a loop waits on its deciders to suggest a change or decline it (C5-1), once its requester
+     *  has updated it to the goal's version (C6-2). */
+    waiting_on_me: can.approve || can.accept_counter || can.launch || (!!loop && r.state === "pending" && r.base_version === g.version && can.counter),
     created_at: r.created_at,
     updated_at: r.updated_at,
     decided_at: r.decided_at,
