@@ -1153,8 +1153,10 @@ of which is an extender (`ก` with 15 × `ำ`, 15 Malayalam dot rephs before `
 can draw wide, and every page that shows a device name wraps and clips it so the page never scrolls sideways
 (`interface` "Device approval screen"; E2E-WEB cycle 11 W4); and the name SHALL also be at most 1600 bytes of UTF-8, which only long emoji sequences reach, refused in
 words the person can act on rather than a byte count (`device_name is too long to store: emoji such as families and
-flags take much more room than letters, so use fewer of them`); a name with nothing left SHALL be 400 `device_name is
-required`. `align login` SHALL show such a refusal as `align: the device name was refused: it <reason>. Pass another
+flags take much more room than letters, so use fewer of them`); a name with nothing left, or with nothing but
+combining marks and spaces (a variation selector such as U+FE0F or the combining grapheme joiner U+034F alone, or an
+accent with no letter under it, which render as nothing, as `align login` refuses locally: E2E-AGENT cycle 12, section
+6), SHALL be 400 `device_name is required`. `align login` SHALL show such a refusal as `align: the device name was refused: it <reason>. Pass another
 with \`align login --name <name>\`.`
 A device that revokes itself because a newer pairing on the same machine replaced it (`DELETE
 /api/v2/devices/self?replaced_by=<device id>`) SHALL pass its name on, whatever that name is: when the named device is
@@ -1222,6 +1224,11 @@ from a live device is passed back: a replacement whose name is exactly the name 
 
 - **WHEN** a pairing is started with a name holding U+061C ARABIC LETTER MARK, U+2066 to U+2069, U+202A to U+202E, U+200B to U+200F, U+2060 to U+2064, U+FEFF, U+180E and U+00AD between its letters, and another with only those characters and spaces (`scripts/test-v2.mjs` "W3: ...")
 - **THEN** the first is stored with every one of them dropped and its letters kept; the second is 400 `device_name is required`
+
+#### Scenario: A device name of marks alone
+
+- **WHEN** a pairing is started with a name of only U+FE0F, only U+034F, those with spaces and a zero-width space, or two U+0301 accents with no letter (`scripts/test-v2.mjs` "c12 device name (E2E-AGENT cycle 12, section 6): ...")
+- **THEN** each is 400 `device_name is required` and starts no pairing, while a mark on a letter (decomposed Vietnamese, a keycap emoji) is kept as before
 
 #### Scenario: A second device of one name
 

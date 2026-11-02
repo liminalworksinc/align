@@ -10522,6 +10522,15 @@ try {
       w3.status === 200 && w3Name === `al${"m".repeat(CF.length - 1)}x laptop` && w3Empty.status === 400 && w3Empty.json?.message === "device_name is required",
       `${w3.status} ${JSON.stringify(w3Name)} ${w3Empty.status} ${w3Empty.text}`,
     );
+    // c12 (E2E-AGENT cycle 12, section 6): a name of nothing but combining marks (a variation selector, the combining
+    // grapheme joiner, accents with no letter) renders as nothing: blank, as align login refuses it locally.
+    const marksOnly = [];
+    for (const name of ["\uFE0F", "\u034F", " \uFE0F\u200B \u034F ", "\u0301\u0301"]) marksOnly.push(await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: name, public_key: newDeviceKeys().pub } }));
+    check(
+      "c12 device name (E2E-AGENT cycle 12, section 6): a device name of only U+FE0F, only U+034F, those with spaces and a zero-width space, or two accents with no letter is 400 device_name is required and starts no pairing (a mark on a letter, as in decomposed Vietnamese or a keycap, still counts: C9-3)",
+      marksOnly.every((r) => r.status === 400 && r.json?.message === "device_name is required" && !r.json?.user_code),
+      marksOnly.map((r) => `${r.status} ${r.text}`).join(" | "),
+    );
     // W5 (E2E-WEB cycle 8): the zero-width joiner of an emoji sequence and the tags of a subdivision flag are kept (a
     // joiner between letters, and a lone tag, still go); W6: the limit counts characters as a person reads them.
     const scot = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}";
