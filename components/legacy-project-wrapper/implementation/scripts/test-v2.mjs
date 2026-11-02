@@ -9156,10 +9156,13 @@ try {
       `${dPut.status} ${dEp.status} ${dReq.status} ${dHold.status} ${dRelease.status} | ${mineLine} | ${mGoal.text.slice(0, 200)} | ${mLimits.text.slice(0, 200)} | ${mDirs.text.slice(0, 600)} | ${leaks.join(" || ")}`,
     );
 
-    // -- the browser: C10-2 (ui) on an alignment's Decline and Withdraw and a target change's Decline --
+    // -- the browser: C10-2 (ui) on an alignment's Decline and Withdraw and a target change's Decline; W3 (ui) --
     const ua1 = await rAl("u1");
     const ua2 = await rAl("u2");
     const ut1 = await rRl(13);
+    const ask = await ra(RD, "POST", "/asks", { team_id: RT, text: "Cycle 10: write the runbook", source: { kind: "manual", date: "2026-11-02" } });
+    const askIn = await ra(RC, "POST", `/asks/${ask.json?.id}/accept`, {});
+    const askDone = await ra(RC, "POST", `/asks/${ask.json?.id}/done`, {});
     if (existsSync(CHROME)) {
       const { default: puppeteer } = await import("puppeteer-core");
       const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
@@ -9217,6 +9220,19 @@ try {
           "c10 C10-2 (ui): Decline on a target change left at revision 1 while another approver countered it reads \"Not recorded. This proposal changed after you read it: Carys Counter countered it, and it is now at revision 2. Read it again and decide again.\" and the proposal stays countered",
           d2.r.status === 200 && d2.ui.notice === "refused" && d2.ui.noticeText === `Not recorded. This proposal changed after you read it: ${RC.name} countered it, and it is now at revision 2. Read it again and decide again.` && rlNow(ut1)?.state === "countered",
           JSON.stringify(d2.ui).slice(0, 700),
+        );
+        const askCard = `[data-ask="${ask.json?.id}"]`;
+        await open(pD, `/app/w/${RW}/asks`);
+        await pD.waitForSelector(askCard, { timeout: 15000 }).catch(() => undefined);
+        const askD = await cardState(pD, askCard);
+        const pC = await as(RC);
+        await open(pC, `/app/w/${RW}/asks`);
+        await pC.waitForSelector(askCard, { timeout: 15000 }).catch(() => undefined);
+        const askC = await cardState(pC, askCard);
+        check(
+          "c10 W3 (ui): a done ask's card says who marked it done in the refusal's words: \"Recorded by you · marked done by Carys Counter\" to its recorder and \"… · marked done by you\" to the person who did, never the bare \"done by\"",
+          ask.status === 201 && askIn.status === 200 && askDone.status === 200 && askD.text.includes(`Recorded by you · marked done by ${RC.name}`) && askC.text.includes(`Recorded by ${RD.name} · marked done by you`) && !/(^|[^d]) done by/.test(`${askD.text} ${askC.text}`.replace(/marked done by/g, "")),
+          `${askD.text.slice(0, 300)} || ${askC.text.slice(0, 300)}`,
         );
         check("c10 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));
       } catch (e) {
