@@ -283,18 +283,23 @@ export async function revokeDevice(deviceId: string, reason: string, actor: stri
 
 /**
  * A device revoked because a newer pairing on the same machine replaced it (`align login`; the agent names that device
- * in its self-revoke) gives that pairing its name when the pairing got "<name> (n)" only because this one was still
- * live: two `align login`s approved together, where the first one's device is replaced by the second's a moment later
- * (E2E-AGENT cycle 6). Only for the same person's live device whose name is this one's plus " (n)", and only while no
- * other live device of theirs has the plain name, so two real machines of one name keep telling apart.
+ * in its self-revoke) gives that pairing its name, whatever that name is, when the pairing got a later name of the same
+ * kind only because this one was still live: two `align login`s approved together, where the first one's device is
+ * replaced by the second's a moment later (E2E-AGENT cycles 6 and 8). So "X (2)" passes "X" on, and "X (2)" replaced by
+ * "X (3)" (the plain name held by another machine) passes "X (2)" on, and the machine keeps the name it had. Only for the
+ * same person's live device named `<base> (<n>)` whose base is this one's name without its own " (<m>)" and m < n (the
+ * plain name counting as 1), and only while no other live device of theirs has the name, so two real machines of one
+ * name keep telling apart; a pairing that asked for another name keeps it.
  */
 function passNameOn(revokedId: string, nextId: string) {
   const gone = get<{ user_id: string; name: string }>("SELECT user_id, name FROM v2_devices WHERE id = ?", revokedId);
   const next = get<{ user_id: string; name: string; revoked_at: string | null }>("SELECT user_id, name, revoked_at FROM v2_devices WHERE id = ?", nextId);
   if (!gone || !next || next.user_id !== gone.user_id || next.revoked_at) return;
   const m = /^(.*) \((\d+)\)$/.exec(next.name);
-  if (!m || m[1] !== gone.name) return;
-  if (get("SELECT 1 AS x FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL AND name = ?", gone.user_id, gone.name)) return;
+  if (!m) return;
+  const was = nameNumber(m[1], gone.name);
+  if (was === null || was >= Number(m[2])) return;
+  if (get("SELECT 1 AS x FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL AND name = ? AND id <> ?", gone.user_id, gone.name, nextId)) return;
   run("UPDATE v2_devices SET name = ? WHERE id = ?", gone.name, nextId);
 }
 
@@ -351,6 +356,25 @@ export function lookupRequest(userId: string, code: string) {
   return { device_name: r.device_name, requested_at: r.created_at, age_seconds: Math.max(0, Math.round((Date.now() - Date.parse(r.created_at)) / 1000)), expires_at: r.expires_at };
 }
 
+/** `name` and `name (n)`: the names a pairing that asked for `name` may get. Null when `other` is not one of them, else
+ *  its number (1 for the plain name). */
+function nameNumber(name: string, other: string): number | null {
+  if (other === name) return 1;
+  const m = /^(.*) \((\d+)\)$/.exec(other);
+  return m && m[1] === name ? Number(m[2]) : null;
+}
+
+/** The names of this person's live devices a pairing that asked for `name` would be told apart from (`name`, `name (2)`,
+ *  ...), plain first (C8-3): a new `align login` on one of those machines keeps that machine's name, so the approval
+ *  page names them instead of a name the device may never get. */
+function sameNameDevices(userId: string, name: string): string[] {
+  return all<{ name: string }>("SELECT name FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL", userId)
+    .map((d) => ({ name: d.name, n: nameNumber(name, d.name) }))
+    .filter((d): d is { name: string; n: number } => d.n !== null)
+    .sort((a, b) => a.n - b.n)
+    .map((d) => d.name);
+}
+
 /** Approve or deny a pairing. Approving decides the device's name now that the person is known (W4): the name it asked
  *  for, or "<name> (n)" when one of their live devices (or another approved pairing of theirs waiting for its poll) has
  *  it. The answer carries it as `device_name`, with `asked_as`, so the page names the device as it is stored. */
@@ -366,7 +390,7 @@ export async function decideRequest(userId: string, code: string, decision: "app
     for (const ws of wsIds) if (!get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, ws, userId)) throw new V2Error(404, "not_found", WORKSPACE_CHOSEN_NOT_YOURS);
     const name = distinctName(userId, r.device_name, null, heldNames(userId, r.id, Date.now()));
     run("UPDATE v2_device_requests SET state = 'approved', user_id = ?, ws_ids_json = ?, approved_name = ? WHERE id = ?", userId, JSON.stringify(wsIds), name, r.id);
-    return { state: "approved" as const, device_name: name, asked_as: r.device_name };
+    return { state: "approved" as const, device_name: name, asked_as: r.device_name, same_name: sameNameDevices(userId, r.device_name) };
   });
 }
 

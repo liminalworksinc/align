@@ -14,19 +14,43 @@ export function str(b: Body, k: string, max = 300, { min = 1 }: { min?: number }
 }
 
 /** Characters a one-line name never keeps, by Unicode property rather than a list (W3): controls (category Cc: C0, DEL,
- *  C1) and Unicode line and paragraph separators become a space, as runs of whitespace do; invisible format characters
- *  (category Cf: bidirectional marks, embeddings, overrides and isolates, the Arabic letter mark, zero-width spaces and
- *  joiners, word joiners, invisible operators, the byte order mark, the Mongolian vowel separator, soft hyphens) and
- *  lone surrogates (Cs) are dropped, so a name reads the same wherever it is shown. */
-const NAME_SPACE = /[\p{Cc}\s\u2028\u2029]+/gu;
+ *  C1), Unicode line and paragraph separators and the blank fillers that render as nothing (Hangul fillers U+115F,
+ *  U+1160, U+3164, U+FFA0 and the Braille blank U+2800) become a space, as runs of whitespace do; invisible format
+ *  characters (category Cf: bidirectional marks, embeddings, overrides and isolates, the Arabic letter mark, zero-width
+ *  spaces, the zero-width non-joiner, word joiners, invisible operators, the byte order mark, the Mongolian vowel
+ *  separator, soft hyphens) and lone surrogates (Cs) are dropped, so a name reads the same wherever it is shown. The
+ *  only Cf characters kept are those an emoji is made of (E2E-WEB cycle 8 W5): a zero-width joiner between two
+ *  pictographs (`👩‍💻`), and the tag characters of a tag sequence after one (U+E0020 to U+E007E ended by U+E007F, a
+ *  subdivision flag such as Scotland's). */
+const NAME_SPACE = /[\p{Cc}\s\u2028\u2029\u115F\u1160\u3164\uFFA0\u2800]+/gu;
 const NAME_DROP = /[\p{Cf}\p{Cs}]/gu;
+const EMOJI_ZWJ = /(?<=\p{Extended_Pictographic}[\uFE0E\uFE0F\u{1F3FB}-\u{1F3FF}]?)\u200D(?=\p{Extended_Pictographic})/gu;
+const EMOJI_TAGS = /(?<=\p{Extended_Pictographic}\uFE0F?)[\u{E0020}-\u{E007E}]+\u{E007F}/gu;
 
-/** A one-line name (a device name, Z4): `str`'s rules after control characters and whitespace runs become one space
- *  and invisible format characters are dropped; nothing left is 400 "<k> is required". */
+/** `v` with the characters a one-line name never keeps dropped (or made spaces), keeping emoji sequences whole. */
+export function cleanName(v: string): string {
+  const keep = new Set<number>();
+  for (const m of v.matchAll(EMOJI_ZWJ)) keep.add(m.index);
+  for (const m of v.matchAll(EMOJI_TAGS)) for (let i = 0; i < m[0].length; i++) keep.add(m.index + i);
+  return v.replace(NAME_DROP, (c, at: number) => (keep.has(at) ? c : "")).replace(NAME_SPACE, " ");
+}
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** How many characters a person reads in `v` (grapheme clusters: `👩‍💻` and a flag are one each). */
+export const charCount = (v: string): number => [...graphemes.segment(v)].length;
+
+/** A one-line name (a device name, Z4): cleaned (`cleanName`) and trimmed; nothing left is 400 "<k> is required". At
+ *  most `max` characters as a person reads them (grapheme clusters, W6: never UTF-16 units, so 100 emoji fit), and at
+ *  most 16 bytes of UTF-8 per character allowed, so a cluster built of thousands of combining marks is refused too. */
 export function oneLine(b: Body, k: string, max = 300): string {
   const v = b[k];
   if (typeof v !== "string") throw badRequest(`${k} must be a string`);
-  return str({ [k]: v.replace(NAME_DROP, "").replace(NAME_SPACE, " ") }, k, max);
+  const t = cleanName(v).trim();
+  if (!t) throw badRequest(`${k} is required`);
+  if (charCount(t) > max) throw badRequest(`${k} is too long (max ${max} characters)`);
+  if (Buffer.byteLength(t, "utf8") > max * 16) throw badRequest(`${k} is too long (max ${max * 16} bytes)`);
+  return t;
 }
 
 export function optStr(b: Body, k: string, max = 300): string | null {
