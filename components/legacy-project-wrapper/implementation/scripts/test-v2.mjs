@@ -785,7 +785,7 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 20, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds and deleted-session markers included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 20 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 21, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds and deleted-session markers included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 21 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
@@ -1259,8 +1259,33 @@ try {
       gapRevoke.status === 204 && nameOf(gapTok.json.device_id)?.name === "gap mac (3)",
     `${gapAp.text} ${gapTok.status} ${gapStored} ${gapRevoke.status} ${JSON.stringify(nameOf(gapTok.json?.device_id ?? ""))}`,
   );
+  // E2E-AGENT cycle 11 C11-5: the machine is "sim mac (5)" (another machine holds "sim mac"); two `align login`s on it are
+  // approved at the same moment and both token polls name "sim mac (5)" as the device they replace (neither has
+  // committed yet). Both get "sim mac (5)": the other is the same machine, which one of the two logins revokes a moment
+  // later. Then, as the agents do, both revokes at once: the first login's device replaced the old one, the second's the
+  // first's; the machine ends "sim mac (5)".
+  const simOther = insertDevice(U1.id, "sim mac");
+  const simOld = insertDevice(U1.id, "sim mac (5)");
+  const [simReqA, simReqB] = [insertPairing("sim mac"), insertPairing("sim mac")];
+  const simAp = await Promise.all([simReqA, simReqB].map((r) => call("U1", "POST", "/api/v2/device/approve", { cookie: U1.cookie, body: { user_code: r.userCode, workspace_ids: [A] } })));
+  const simTok = await Promise.all(
+    [simReqA, simReqB].map((r) => call("D", "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: r.deviceCode, replaces: simOld.id } })),
+  );
+  const simIds = simTok.map((t) => t.json?.device_id ?? "");
+  const simPolled = simIds.map((id) => nameOf(id)?.name);
+  const simRevokes = await Promise.all([
+    call("U1", "DELETE", `/api/v2/devices/self?replaced_by=${simIds[0]}`, { bearer: simOld.access }),
+    call("U1", "DELETE", `/api/v2/devices/self?replaced_by=${simIds[1]}`, { bearer: simTok[0].json?.access_token ?? "" }),
+  ]);
+  const simLive = withDb((d) => d.prepare("SELECT id, name FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL AND name LIKE 'sim mac%' ORDER BY name").all(U1.id));
+  check(
+    "device (E2E-AGENT cycle 11 C11-5): two logins on \"sim mac (5)\" approved at the same moment, whose token polls both name it as the device they replace, both get \"sim mac (5)\" (the other is the same machine), never \"sim mac (2)\"; after both self-revokes the machine's one live device is \"sim mac (5)\", next to the other machine's \"sim mac\"",
+    simAp.every((r) => r.status === 200) && simTok.every((t) => t.status === 200) && simPolled.every((n) => n === "sim mac (5)") && simRevokes.every((r) => r.status === 204) &&
+      JSON.stringify(simLive.map((r) => r.name)) === JSON.stringify(["sim mac", "sim mac (5)"]) && simLive[1]?.id === simIds[1],
+    `${simAp.map((r) => r.status)} ${simTok.map((t) => t.status)} ${JSON.stringify(simPolled)} ${simRevokes.map((r) => r.status)} ${JSON.stringify(simLive)}`,
+  );
   withDb((d) => {
-    for (const x of [raceB, raceOther, raceKeep, passOther, passNew, passRenamed, passBetter, askOther, autoOther, gapOther, { id: gapTok.json?.device_id ?? "" }, { id: askTok.json?.device_id ?? "" }, { id: autoTok.json?.device_id ?? "" }])
+    for (const x of [raceB, raceOther, raceKeep, passOther, passNew, passRenamed, passBetter, askOther, autoOther, gapOther, simOther, { id: simIds[1] }, { id: gapTok.json?.device_id ?? "" }, { id: askTok.json?.device_id ?? "" }, { id: autoTok.json?.device_id ?? "" }])
       d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), x.id);
   });
   const ts3 = new Date().toISOString();

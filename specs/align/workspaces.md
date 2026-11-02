@@ -1122,7 +1122,11 @@ of the check, as it is revoked a moment later, so a re-login keeps the plain nam
 `<asked> (<n>)` SHALL pass its own name on, unless another live device or approved pairing of theirs holds it: a
 re-login on `bob laptop (3)` stays `bob laptop (3)` even when `bob laptop (2)` is free, as the approval page promised
 ("it keeps that machine's name instead"). A name asked for that is free (`align login --name "bob laptop (5)"`) is
-kept as asked.
+kept as asked. The server SHALL keep, on each device, the device its pairing's poll named as replaced (when it was the
+person's own and live), and a live device paired by a poll that named the same replaced device is the same machine (two
+`align login`s on it approved at the same moment, whose polls both name the device it was signed in as before either
+login committed): it SHALL not count as holding the replaced device's name, so both get that name, and one of the two
+logins revokes the other's device a moment later (E2E-AGENT cycle 11 C11-5).
 A device name SHALL be one line as the person reads it everywhere (the approval page, the Devices page, `align
 login`): at `authorize` every run of control characters (C0, DEL and C1) and whitespace, line and paragraph
 separators and the blank fillers that render as nothing (Hangul fillers U+115F, U+1160, U+3164, U+FFA0 and the Braille
@@ -1165,6 +1169,11 @@ from a live device is passed back: a replacement whose name is exactly the name 
 
 - **WHEN** a person's device `pass mac (2)` (their other machine is `pass mac`) revokes itself naming their live `pass mac (3)` as its replacement; `pass mac (5)` names their `work mac (2)`; and `pass mac (6)` names their `pass mac (4)` (`scripts/test-v2.mjs` "device (E2E-AGENT cycle 8 C8-2): ...")
 - **THEN** each revoke is 204, `pass mac (3)` becomes `pass mac (2)` and `pass mac` stays, while `work mac (2)` and `pass mac (4)` keep their names
+
+#### Scenario: Two logins on a numbered machine approved at the same moment
+
+- **WHEN** a person's live devices are `sim mac` and `sim mac (5)`, two pairings asking for `sim mac` are approved at once and both token polls name `sim mac (5)` in `replaces` at once, and then, as the agents do, `sim mac (5)` revokes itself naming the first new device while the first revokes itself naming the second (`scripts/test-v2.mjs` "device (E2E-AGENT cycle 11 C11-5): ...")
+- **THEN** both new devices are stored as `sim mac (5)`, never `sim mac (2)`, both revokes are 204, and the person's live devices are `sim mac` and the second new device, `sim mac (5)`
 
 #### Scenario: A re-login on a suffixed machine keeps its name when a lower number is free
 

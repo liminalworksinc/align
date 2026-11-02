@@ -1076,6 +1076,12 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE v2_device_requests ADD COLUMN approved_name TEXT;
   `,
+  // E2E-AGENT cycle 11 C11-5: the live device of this person a device's pairing replaces on the same machine (the token
+  // poll's `replaces`), so two `align login`s approved at the same moment on one machine, whose polls both name the
+  // device it was signed in as, are told apart from other machines and both keep that machine's name.
+  `
+  ALTER TABLE v2_devices ADD COLUMN replaces TEXT;
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).
