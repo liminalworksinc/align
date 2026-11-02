@@ -498,7 +498,12 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
       inj.context_epoch++;
       // Held (the cached feed says so): the model hears it with its goal, not first from a deny (cycle 11, section 5).
       const cached = readJson<FeedFile>(layout.feed(home, rule!.workspace_id))?.goals.find((x) => x.id === goal.id);
-      if (cached?.allocation?.held) context = `${context}\n${heldContext([goal.title])}`;
+      if (cached?.allocation?.held) {
+        context = `${context}\n${heldContext([goal.title])}`;
+        // Told to wait for the hold's release: so the release (or the hold no longer applying) is told to it too
+        // (E2E-AGENT cycle 13 C13-2).
+        holdsTold(inj, [goal.id], [goal.title]);
+      }
       const card = cardFor(home, lid, goal.id, inj, cwd, rule!.workspace_id);
       if (card) context = `${context}\n${card}`;
       const steer = steerOnce(home, lid, source, rule!.workspace_id, goal.id, inj);
@@ -653,9 +658,17 @@ function resumeLine(hot: HotState, inj: InjectedState, held: BlockingHolds | nul
   if (!held) return "[Align] This session was resumed from its Align workspace, so its tools are no longer blocked. Continue the user's task.";
   // A goal hold still blocks them (a resume never lifts one): said so, never "continue", and the hold counts as told to
   // the model, so its release is told to it later (C10-3).
-  inj.holds_told = [...new Set([...(inj.holds_told || []), ...held.ids])].slice(-50);
-  inj.hold_titles = { ...(inj.hold_titles || {}), ...Object.fromEntries(held.ids.map((g, i) => [g, held.titles[i]])) };
+  holdsTold(inj, held.ids, held.titles);
   return resumedButHeld(held.titles, "model");
+}
+
+/** Holds on goals `ids` (titled `titles`) were named to the model as blocking its tools, in a context line (the envelope
+ *  of a session a folder rule shares toward a held goal, a move that keeps a hold, a resume while held): recorded as a
+ *  deny records them (`noteBlockTold`), so their release, or their no longer applying, is told to it, and only then
+ *  (C10-3; E2E-AGENT cycle 13 C13-2: told by its envelope, it never heard the release). */
+function holdsTold(inj: InjectedState, ids: string[], titles: string[]): void {
+  inj.holds_told = [...new Set([...(inj.holds_told || []), ...ids])].slice(-50);
+  inj.hold_titles = { ...(inj.hold_titles || {}), ...Object.fromEntries(ids.map((g, i) => [g, clean(titles[i] ?? "", 100)]).filter(([, t]) => t)) };
 }
 
 /**
@@ -805,8 +818,11 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
     // did at `::align bind` (cycle 11, section 5).
     if (goal && kind === "bound") {
       const h = readJsonStrict<HoldLatch>(layout.hold(home, lid));
-      const kept = h.state === "ok" && Array.isArray(h.value?.holds) ? h.value.holds.filter((x) => x.goal_id !== goal!.id).map((x) => x.goal_title) : [];
-      if (kept.length) context = `${context}\n${heldContext(kept, true)}`;
+      const kept = h.state === "ok" && Array.isArray(h.value?.holds) ? h.value.holds.filter((x) => x.goal_id !== goal!.id) : [];
+      if (kept.length) {
+        context = `${context}\n${heldContext(kept.map((x) => x.goal_title), true)}`;
+        holdsTold(inj, kept.map((x) => x.goal_id), kept.map((x) => x.goal_title));
+      }
     }
     markInjected(inj, kind === "unbound" ? null : goal, hot.share.state);
   }

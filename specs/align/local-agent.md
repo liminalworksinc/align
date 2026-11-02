@@ -2022,7 +2022,9 @@ instructions.` (without `: "<reason>"` when there is none; a share that ended pu
 the last one, as the stop deny does), without needing a sync; a hold file that cannot be parsed SHALL deny every tool. A `release` directive
 SHALL remove that goal's hold, be acknowledged `received` then `applied`, and show the user `Align: <name> released
 the hold on "<title>".` once in each session it released; when the model saw that hold deny one of its tools (a hold
-deny, or the cached feed's hold, named that goal since), that prompt SHALL also give it one context line `[Align]
+deny, or the cached feed's hold, named that goal since) or was told of it in its context (the envelope of a session a
+folder rule shares toward a held goal, the bound note of a move that keeps a hold, a resume told while held: each counts
+as told, E2E-AGENT cycle 13 C13-2), that prompt SHALL also give it one context line `[Align]
 <name> released the hold on goal "<title>", so it no longer blocks tools.`, and a session whose model never saw it
 block a tool SHALL get no such line (test `findings9` "a hold or stop released before the model saw it block a tool
 ..."). A hold the model saw deny one of its tools that no longer blocks the session and that no `release` reached SHALL
@@ -2047,6 +2049,11 @@ in Align's cached goals; it reaches this session at the next sync) (all tools bl
 <harness> HELD on goal "<title>" (held in Align's cached goals; the hold reaches this session at the next sync) (all
 tools blocked)` for each such session active in the last 7 days, and `align status` counts them in its `Goal hold:`
 line (`... (<n> from the cached goals, before the hold reaches them)`).
+
+#### Scenario: Told of the hold by its envelope
+
+- **WHEN** the cached goals say a folder rule's goal is held and a session starts in the folder (its envelope says so), a sync shares it, the hold reaches it, it is prompted, and the hold is released and a sync runs, with no tool denied in between; in another case the hold is released before it reached the session (test `findings14` "C13-2: ...")
+- **THEN** the prompt after the release gives the model `[Align] Lena released the hold on goal "Ship the v2 onboarding flow", so it no longer blocks tools.` once (in the other case `[Align] The hold on goal "Ship the v2 onboarding flow" was released, so it no longer blocks tools.`), and `Bash` runs
 
 #### Scenario: A held goal before its first sync
 
