@@ -9793,6 +9793,40 @@ try {
           w4UiOk.json?.state === "approved" && w4Ui.notice === "done" && w4Ui.text === "Recorded: you decided not yet. Agents keep the old targets until someone launches the new ones.",
           JSON.stringify(w4Ui).slice(0, 500),
         );
+
+        // W1 (ui): a refusal shown for a code goes when the field is edited to another code; the same code in another
+        // format keeps it.
+        const codeField = 'main input[placeholder="BCDF-GHJK"]';
+        const pd = await as(TO);
+        const retype = async (code) => {
+          await pd.focus(codeField);
+          await pd.evaluate((f) => document.querySelector(f)?.select(), codeField);
+          await pd.keyboard.press("Backspace");
+          await pd.type(codeField, code);
+        };
+        const pageText = () => pd.evaluate(() => document.querySelector("main")?.innerText ?? "");
+        const nobody = "BCDF-BCDF";
+        const w1Pending = insertPairing("Tess's desktop");
+        await pd.goto(`${BASE}/app/device?code=${nobody}`, { waitUntil: "networkidle0" });
+        await press(pd, "main", "Look up");
+        await pd.waitForFunction(() => document.body.innerText.includes("No device is waiting for that code"), { timeout: 15000 }).catch(() => undefined);
+        const w1Shown = await pageText();
+        // The same code written another way (a space added at the end): the refusal is still about it.
+        await pd.focus(codeField);
+        await pd.keyboard.press("End");
+        await pd.type(codeField, " ");
+        const w1Same = await pageText();
+        const w1SameField = await pd.evaluate((f) => document.querySelector(f)?.value ?? "", codeField);
+        await retype(w1Pending.userCode);
+        const w1Other = await pageText();
+        await press(pd, "main", "Look up");
+        await pd.waitForFunction(() => document.body.innerText.includes("Tess's desktop"), { timeout: 15000 }).catch(() => undefined);
+        const w1Found = await pageText();
+        check(
+          "c12 W1 (ui, E2E-WEB cycle 12): on the approval page, \"No device is waiting for that code. …\" for a code nobody waits on stays while the field holds that code written another way (a space added), and goes when the field is edited to another code; Look up then opens that device's panel",
+          w1Shown.includes("No device is waiting for that code.") && w1SameField === `${nobody} ` && w1Same.includes("No device is waiting for that code.") && !w1Other.includes("No device is waiting") && w1Found.includes("Tess's desktop") && !w1Found.includes("No device is waiting"),
+          `${w1Shown.slice(0, 200)} || [${w1SameField}] ${w1Same.slice(0, 200)} || ${w1Other.slice(0, 200)} || ${w1Found.slice(0, 200)}`,
+        );
         check("c12 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));
       } catch (e) {
         check("c12 web fix (ui) run", false, e?.stack ?? e);

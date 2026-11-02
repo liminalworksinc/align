@@ -401,7 +401,7 @@ E2E-WEB cycle 11 W4).
 #### Scenario: Unknown code or deny
 
 - **WHEN** the code is unknown or expired, or the person presses **Deny**; in another case the code shown was approved (or denied) in another tab and the person presses **Approve** or **Deny** (`scripts/test-v2.mjs` "W1 (ui, E2E-WEB cycle 8): ...")
-- **THEN** the page shows "No device is waiting for that code. Check it, or run align login again.", or calls `POST /api/v2/device/deny {user_code}` and says "Denied. That device was not connected."; in the other case it shows that refusal and the device's panel (its name, "Asked ...", the workspaces, **Approve** and **Deny**) closes, as after an approval, so nothing offers to decide a code nobody is waiting on; a new **Look up** also closes the panel of a device looked up before, whatever it finds
+- **THEN** the page shows "No device is waiting for that code. Check it, or run align login again.", or calls `POST /api/v2/device/deny {user_code}` and says "Denied. That device was not connected."; in the other case it shows that refusal and the device's panel (its name, "Asked ...", the workspaces, **Approve** and **Deny**) closes, as after an approval, so nothing offers to decide a code nobody is waiting on; a new **Look up** also closes the panel of a device looked up before, whatever it finds, and editing the field to another code clears a refusal shown for the code before, so "No device is waiting for that code." never stays under a code it is not about (the same code written another way, in another letter case, with a space or without the hyphen, keeps it: `scripts/test-v2.mjs` "c12 W1 (ui, E2E-WEB cycle 12): ...")
 
 #### Scenario: Nothing to grant
 
