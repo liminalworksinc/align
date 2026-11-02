@@ -5,7 +5,7 @@ import type { Ctx } from "./context.ts";
 import { api, HttpError } from "./api.ts";
 import { bumpGap, kvGet, kvSet, nowIso, tx } from "./db.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
-import { enqueue } from "./share.ts";
+import { endSharesEndedOnServer, enqueue, type EndedOnServer } from "./share.ts";
 import type { Goal, WireHold, WireRequest } from "./shared/types.ts";
 import { loadFeed } from "./goals.ts";
 import { applyHold, applyRequest, validRequest } from "./requests.ts";
@@ -182,12 +182,19 @@ function applyOne(ctx: Ctx, d: Directive, lid: string, seq: number, at: string):
 /** Directives per page the server sends at most (docs/v2/WIRE.md); a shorter page is the last one. */
 const PAGE = 100;
 
+/** An `ended_sessions` entry of the shape the server sends. */
+function validEnded(e: unknown): e is EndedOnServer {
+  const x = e as EndedOnServer | null;
+  return !!x && typeof x.ws === "string" && typeof x.session_key === "string" && typeof x.stopped_at === "string" && !Number.isNaN(Date.parse(x.stopped_at)) && (x.ended_reason === null || typeof x.ended_reason === "string");
+}
+
 /**
  * Fetch directives by cursor, up to 20 pages a pass. After each page the cursor moves to the server's `next_cursor`
  * (never backwards), so a page of replays or malformed directives is never fetched again. Returns how many directives
  * were new and stored (replays and out-of-order ones are not counted). `onReach` gets the ids of the workspaces the
  * server says this device reaches now (`workspaces`, when the answer has it), so the pass can re-read `/me` at once
- * when they changed (a workspace given back at an invite, or one lost).
+ * when they changed (a workspace given back at an invite, or one lost). The first page's `ended_sessions` end the shares
+ * the server ended (`endSharesEndedOnServer`).
  */
 export async function pollDirectives(ctx: Ctx, onRefresh: (ws: string) => void, onReach: (ws: string[]) => void = () => undefined): Promise<number> {
   let n = 0;
@@ -199,6 +206,8 @@ export async function pollDirectives(ctx: Ctx, onRefresh: (ws: string) => void, 
       return n;
     }
     if (i === 0 && Array.isArray(r.json?.workspaces)) onReach(r.json.workspaces.filter((w: unknown): w is string => typeof w === "string"));
+    // Shares the server ended (Stop sharing on the web, say), which no directive tells: they end here now (cycle 8).
+    if (i === 0 && Array.isArray(r.json?.ended_sessions)) endSharesEndedOnServer(ctx, r.json.ended_sessions.filter(validEnded));
     const list: Directive[] = Array.isArray(r.json?.directives) ? r.json.directives : [];
     for (const d of list) {
       const h = handleDirective(ctx, d);

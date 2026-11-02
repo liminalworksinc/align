@@ -139,3 +139,37 @@ describe("C8-1: every change of whether a session can be shared again tells it t
     assert.equal(prompt(t, A.sid, "go on", A.cwd)?.systemMessage, AGAIN + LATCHED_AGAIN, "signed in again, reaching Acme: told so");
   });
 });
+
+describe("cycle 8, section 5: works, but would confuse a developer", () => {
+  test("Stop sharing on the web is heard at the next sync's directives answer, before any usage upload: the session is told, `::align share` says it stays stopped (never `already shared`), and a folder rule leaves it private", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    await sync(t);
+    fake.stopOnWeb(A.key);
+    await sync(t);
+    assert.equal(hot(t, A.lid).share?.state, "stopped");
+    assert.equal(
+      prompt(t, A.sid, "go on", A.cwd)?.systemMessage,
+      "Align: this session's sharing was stopped (Stop sharing on the web, or `align stop-sharing` on another of your devices), so it stopped sharing here; its usage stays on this machine from now on.",
+    );
+    const again = prompt(t, A.sid, "::align share", A.cwd).reason as string;
+    assert.doesNotMatch(again, /already shared/);
+    assert.match(again, /a session whose sharing was stopped is not shared again, so it stays stopped/);
+    assert.match(prompt(t, A.sid, "::align share --dir confirm", A.cwd).reason, /This session stays private: its sharing was stopped/);
+    const sessions = await runCli(t, ["sessions"]);
+    assert.doesNotMatch(sessions.stdout.split("\n").find((l) => l.startsWith(A.lid.slice(0, 8))) ?? "", /\bshared\b(?! before)/);
+
+    // A share made again after the server's end (here: its person removed and back, then shared again) is a newer share
+    // and stays, even while the answer still lists the old end.
+    const B = await shared(t);
+    await sync(t);
+    fake.removeAndReAdd(B.key);
+    await sync(t);
+    assert.match(prompt(t, B.sid, "go on", B.cwd)?.systemMessage ?? "", /you were removed from Acme in Align \(or left it\) while this machine was not in touch/);
+    assert.match(prompt(t, B.sid, "::align share confirm", B.cwd).reason, /sharing requested/);
+    await sync(t);
+    await sync(t);
+    assert.equal(hot(t, B.lid).share?.state, "shared", "the new share stays shared");
+  });
+
+});

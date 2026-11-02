@@ -1281,7 +1281,9 @@ sharing because you were removed from <workspace> in Align (or left it) while th
 from then on stays on this machine. You are a member again, so to share it there again, type \`::align share\` here
 (it counts toward "<goal>" again).`, never as a stop for good; `null` (its person stopped it) `Align: this session's
 sharing was stopped (Stop sharing on the web, or \`align stop-sharing\` on another of your devices), so it stopped
-sharing here; its usage stays on this machine from now on.`, and a folder rule never shares it again;
+sharing here; its usage stays on this machine from now on.`, and a folder rule never shares it again (the same words,
+and the same end of the share, when the directives answer's `ended_sessions` lists it: see "Directive intake and
+receipts");
 `device_signed_out` (its share ended when this machine signed out, at a sign-out of an earlier pairing it never saw end
 it) ends the share as a sign-out does (`align sessions`: `stopped (<workspace>; ended at a sign-out; \`::align share\`
 shares it again)` while signed in and reaching the workspace) with `Align: this session stopped sharing because the
@@ -1337,6 +1339,11 @@ is not one of them.
 
 - **WHEN** a shared session's person is removed from its workspace and let back in while the device does not look, a turn is made and a sync runs; the developer prompts, lists sessions and types `::align share confirm`; in another case its person stops sharing it on the web (tests `findings7` "removed and let back in while this machine did not look ..." and "stopped by its person on the web ...")
 - **THEN** the prompt shows the `you were removed from Acme in Align (or left it) while this machine was not in touch ... type \`::align share\` here` notice, never `sharing_stopped`, `align sessions` shows `stopped (Acme; ended while out of the workspace; \`::align share\` shares it again)`, and the share goes through (the session is shared again on the server); in the other case the prompt says `this session's sharing was stopped (Stop sharing on the web, ...)` and `::align share --dir confirm` leaves it private
+
+#### Scenario: Stop sharing on the web, heard at the next pass
+
+- **WHEN** a shared session is stopped with Stop sharing on the web and `align sync` runs before any usage upload; in another case its person is removed and let back in, it is shared again with `::align share confirm`, and two syncs run while the directives answer still lists the earlier end (test `findings9` "Stop sharing on the web is heard at the next sync's directives answer ..."; against the real server in `scripts/test-agent-live.mjs` "web stop-sharing (E2E-AGENT cycle 8) ...")
+- **THEN** the share is `stopped` here after that sync, the next prompt says `this session's sharing was stopped (Stop sharing on the web, ...)`, `::align share` says it stays stopped (never `already shared`), `::align share --dir confirm` leaves it private, and `align sessions` no longer counts it as shared; in the other case the new share stays `shared`
 
 #### Scenario: A refusal that says the share ended at a sign-out
 
@@ -1428,6 +1435,15 @@ session keys this device shares in the directive's workspace, and post receipts:
 `binding_suspended` directive SHALL set the share to `suspended`, withhold the session's later usage, show the user
 `Align: this session's goal binding was revoked, so its usage is paused and stays on this machine. Type
 \`::align bind <goal>\` or run \`align bind\` to pick a goal.` and give the model the unbound delta at the next prompt.
+A share ends with no directive (Stop sharing on the web, say), so the pass SHALL also read the first page's
+`ended_sessions` (this device's sessions whose share the server ended, `directives` "Device fetch of v2 directives by
+cursor") and end each share that is still `shared` or `suspended` here as the usage upload's `sharing_stopped` refusal
+with that `ended_reason` would end it, with the same notice: `null` as its person's stop (stopped for good, `Align: this
+session's sharing was stopped (Stop sharing on the web, or \`align stop-sharing\` on another of your devices), ...`),
+`member_removed` as a removal this machine never saw. A share made here after that end (its first epoch recorded after
+the end, on the server's clock) and a share still `pending` SHALL be left alone. So `::align share`, `align status`,
+`align sessions` and the session's notices agree with the server from the next pass on, not from the session's next
+usage upload.
 
 #### Scenario: Replays after a restored database
 

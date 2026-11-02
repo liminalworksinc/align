@@ -11,7 +11,7 @@ import { isShareStateNotice, noticeKind, offersReshare } from "./shared/notices.
 import { ACCESS_LOST, addNotice, DEVICE_SIGNED_OUT, endedState, getShare, notePriorShare, renderEndedLatches, renderHot, sharedBefore, snapshot } from "./hot.ts";
 
 export { notePriorShare, sharedBefore, stoppedByPerson } from "./hot.ts";
-import { loadCredentials, signedIn } from "./api.ts";
+import { clockOffset, loadCredentials, signedIn } from "./api.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { clean } from "./shared/envelope.ts";
 import { randomId, readJson, removeFile, writeJsonAtomic } from "./shared/fsx.ts";
@@ -412,6 +412,59 @@ export function endShareSignedOutByServer(ctx: Ctx, lid: string): void {
     at,
   );
   ctx.log(`usage refused: session ${lid.slice(0, 8)} ended on the server when this machine signed out; ended here too`);
+}
+
+/** The words of a share its person stopped elsewhere (Stop sharing on the web, or `align stop-sharing` on another of
+ *  their devices), as the server says it (`ended_reason` null). */
+export const STOPPED_ELSEWHERE =
+  "Align: this session's sharing was stopped (Stop sharing on the web, or `align stop-sharing` on another of your devices), so it stopped sharing here; its usage stays on this machine from now on.";
+
+/** The share of `lid` was stopped by its person elsewhere (the server says so): stopped here too, from then on, for good
+ *  (a folder rule never shares it again, C6-1), with one notice. */
+export function endShareStoppedByPerson(ctx: Ctx, lid: string, noticeId: string): void {
+  tx(ctx.db, () => {
+    markStopped(ctx, lid);
+    notePriorShare(ctx, lid, true);
+    addNotice(ctx, lid, noticeId, STOPPED_ELSEWHERE);
+  });
+  renderHot(ctx, lid);
+}
+
+/** One of this device's sessions whose share the server ended, as the directives answer lists it (`ended_sessions`). */
+export interface EndedOnServer {
+  ws: string;
+  session_key: string;
+  ended_reason: string | null;
+  stopped_at: string;
+}
+
+/**
+ * The directives answer lists this device's sessions whose share the server ended (`ended_sessions`): stopped on the web
+ * or on another device of the person (`ended_reason` null), or ended while its person was out of the workspace
+ * (`member_removed`; they are back, as the device reaches it). Each one still shared or suspended here ends now, as the
+ * usage upload's `sharing_stopped` refusal would end it, so `::align share`, `align status` and the session's notices
+ * agree with the server at the next pass (E2E-AGENT cycle 8). A share made here after that end (its first epoch was
+ * recorded after it, on the server's clock) is a newer share and stays; a pending one is left to its own calls. Returns
+ * how many ended.
+ */
+export function endSharesEndedOnServer(ctx: Ctx, ended: EndedOnServer[]): number {
+  const offset = clockOffset(ctx.home);
+  let n = 0;
+  for (const e of ended) {
+    const s = ctx.db.prepare("SELECT local_id, state FROM shares WHERE session_key=? AND workspace_id=?").get(e.session_key, e.ws) as { local_id: string; state: string } | undefined;
+    if (!s || (s.state !== "shared" && s.state !== "suspended")) continue;
+    const since = kvGet(ctx.db, `share_since:${s.local_id}`);
+    const made = since ? (ctx.db.prepare("SELECT created_at FROM epochs WHERE epoch_id=?").get(since) as { created_at: string } | undefined)?.created_at : undefined;
+    if (made && Date.parse(made) + offset > Date.parse(e.stopped_at)) continue;
+    if (e.ended_reason === "member_removed") endShareRemoved(ctx, s.local_id);
+    else if (e.ended_reason === "device_signed_out") endShareSignedOutByServer(ctx, s.local_id);
+    else {
+      endShareStoppedByPerson(ctx, s.local_id, `server_stopped_${nowIso()}`);
+      ctx.log(`directives: session ${s.local_id.slice(0, 8)} was stopped by its person elsewhere (on the web, say); stopped here too`);
+    }
+    n++;
+  }
+  return n;
 }
 
 /**

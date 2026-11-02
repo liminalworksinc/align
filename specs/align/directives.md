@@ -252,7 +252,18 @@ The server SHALL include, for every session returned by `GET /api/v2/workspaces/
 
 ### Requirement: Device fetch of v2 directives by cursor
 
-The server SHALL serve `GET /api/v2/directives?cursor=<seq>` to a v2 device access token (`alnd_…`) only, returning HTTP 200 `{ directives, next_cursor, workspaces }` with up to 100 directives whose `seq` is greater than the cursor and that target sessions owned by the token's person on the token's device in workspaces the device is still granted, oldest first, each as `{ id, seq, ws, kind, session_keys, goal, binding, created_at }` plus `request` on kind `request` and `hold` on kinds `hold` and `release`, where `session_keys` lists only that device's targeted keys, `goal` is the snapshot plus `bindable` or null when the person can no longer read the goal, and `next_cursor` is the last returned `seq` as a string (or the given cursor when none is returned). `workspaces` SHALL list the ids, sorted, of the workspaces the device reaches now (its grants in live workspaces its person is still a member of), so a device learns at its next pass that it gained a workspace (its person accepted an invite with it ticked) or lost one, without re-reading `/api/v2/me` every pass.
+The server SHALL serve `GET /api/v2/directives?cursor=<seq>` to a v2 device access token (`alnd_…`) only, returning HTTP 200 `{ directives, next_cursor, workspaces, ended_sessions }` with up to 100 directives whose `seq` is greater than the cursor and that target sessions owned by the token's person on the token's device in workspaces the device is still granted, oldest first, each as `{ id, seq, ws, kind, session_keys, goal, binding, created_at }` plus `request` on kind `request` and `hold` on kinds `hold` and `release`, where `session_keys` lists only that device's targeted keys, `goal` is the snapshot plus `bindable` or null when the person can no longer read the goal, and `next_cursor` is the last returned `seq` as a string (or the given cursor when none is returned). `workspaces` SHALL list the ids, sorted, of the workspaces the device reaches now (its grants in live workspaces its person is still a member of), so a device learns at its next pass that it gained a workspace (its person accepted an invite with it ticked) or lost one, without re-reading `/api/v2/me` every pass.
+`ended_sessions` SHALL list, newest first and at most 200, `{ws, session_key, ended_reason, stopped_at}` for the
+token's person's sessions on the token's device, in those workspaces, whose share ended (state `stopped`) in the last
+30 days: stopped with Stop sharing on the web or by another device of the person (`ended_reason` null), or ended while
+the person was out of the workspace (`member_removed`). An end of sharing has no directive, so a device would otherwise
+learn it only at the session's next usage upload (refused `sharing_stopped`); with this list it ends its own share at
+its next pass (`local-agent` "Directive intake and receipts").
+
+#### Scenario: A share stopped on the web is listed
+
+- **WHEN** a device shares a session and its owner presses Stop sharing on the web, and the device then fetches directives (against the real server and the CLI in `scripts/test-agent-live.mjs` "web stop-sharing (E2E-AGENT cycle 8) ...")
+- **THEN** the answer's `ended_sessions` lists `{ws, session_key, ended_reason: null, stopped_at}` for it, no other device's session is listed, and the device's next `align sync` ends the share there
 
 #### Scenario: First fetch
 
