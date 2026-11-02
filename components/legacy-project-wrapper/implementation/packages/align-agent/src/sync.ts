@@ -40,7 +40,8 @@ import { fetchAsks } from "./asks.ts";
 import { computeUnsharedDigest, uploadSteering } from "./allocation.ts";
 import { layout, listSpool, localId } from "./shared/layout.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
-import type { SpoolRecord } from "./shared/types.ts";
+import type { ShareFacts } from "./shared/ended.ts";
+import type { GoalSnapshot, SpoolRecord } from "./shared/types.ts";
 
 // ---------- spool ----------
 export function ingestSpool(ctx: Ctx): number {
@@ -280,6 +281,11 @@ const enc = encodeURIComponent;
 export async function flushOutbox(ctx: Ctx): Promise<{ sent: number; deferred: number }> {
   const res = { sent: 0, deferred: 0 };
   if (!signedIn(ctx.home)) return res;
+  // A share waiting to be sent goes after the directives answer's `ended_sessions` are read: one its person stopped on
+  // the web meanwhile is dropped there and told it stays stopped, never sent to be refused (E2E-AGENT cycle 13
+  // follow-up). Only then, so a flush with no share to send makes no directives call; every caller (a pass, a command's
+  // own flush) reads first.
+  if (ctx.db.prepare("SELECT 1 FROM outbox WHERE kind='put_session' AND next_at<=? LIMIT 1").get(Date.now())) await pollDirectives(ctx, () => undefined).catch(() => 0);
   const sessions = ctx.db.prepare("SELECT local_id, MIN(id) AS first FROM outbox GROUP BY local_id ORDER BY first").all() as { local_id: string }[];
   for (const { local_id } of sessions) {
     for (;;) {
@@ -351,6 +357,13 @@ function dropShareStarted(ctx: Ctx, lid: string): void {
   ctx.db.prepare("DELETE FROM notices WHERE local_id=? AND id LIKE ?").run(lid, `${lid}/share_started_%`);
 }
 
+/** The facts of a notice about the share of `lid` (`e`), with its workspace and goal as the share row has them. */
+function shareFacts(ctx: Ctx, lid: string, e: ShareFacts["e"]): ShareFacts {
+  const s = getShare(ctx, lid);
+  const g = s?.goal_json ? (JSON.parse(s.goal_json) as GoalSnapshot) : null;
+  return { e, ws: clean(s?.workspace_name ?? "", 80), goal: g ? clean(g.title, 100) : null };
+}
+
 /** The notice of a share the server refused (`text`: why, and what to do): about the share's state, so only the newest
  *  such notice is told. */
 function shareErr(ctx: Ctx, lid: string, id: string, text: string): void {
@@ -386,7 +399,9 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
         // Its sharing was stopped (by the developer, or on the web): the server never shares a stopped session again,
         // whichever of the account's devices asks, so no "revoke the old device" here (C4-8).
         dropShareStarted(ctx, lid);
-        shareErr(ctx, lid, `share_err_${item.id}`, "Align: sharing failed (sharing_stopped): this session's sharing was stopped (`align stop-sharing`, `::align unshare` or Stop sharing on the web), and a session whose sharing was stopped is not shared again. This session stays private.");
+        // Stopped on the web after the pass read the ended sessions (it reads them before sending a share): the session
+        // stays stopped, told as such, never "sharing failed" (E2E-AGENT cycle 13 follow-up).
+        addShareNotice(ctx, lid, `share_stopped_${item.id}`, shareFacts(ctx, lid, "share_stopped"));
         renderHot(ctx, lid);
         return;
       }
@@ -442,6 +457,12 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
       if (r.status === 200) return;
       if (r.status === 404) {
         receiptRefused(ctx, lid, p.directive_id, String(p.body?.state ?? ""), r.json?.error || "not_found");
+        return;
+      }
+      // An answer to a request of a session whose sharing was stopped: the server expired the request then (E2E-AGENT
+      // cycle 13). Not sent again; the request reads expired here, and the session hears the answer was not taken.
+      if (r.status === 409 && r.json?.error === "request_expired") {
+        answerExpired(ctx, lid, p.directive_id, String(p.body?.state ?? ""), r.json?.ended_reason ?? null);
         return;
       }
       throw new HttpError(r.status, r.json?.error ?? null, r.json);
@@ -501,6 +522,21 @@ function receiptRefused(ctx: Ctx, lid: string, directiveId: string, state: strin
     `ans_refused_${row.request_id}`,
     `Align: the Align server did not take your answer to ${who}'s request ${requestShortId(row.request_id)} (${code}): this session's share there has ended, so ${who} does not see it.`,
   );
+  renderHot(ctx, lid);
+}
+
+/** The server refused an answer because the request expired when the session's sharing was stopped (or ended,
+ *  `ended`): the request reads expired here with why, and the session is told its answer was not taken. */
+function answerExpired(ctx: Ctx, lid: string, directiveId: string, state: string, ended: string | null): void {
+  ctx.log(`receipt ${state} for directive ${directiveId} (session ${lid.slice(0, 8)}) refused by the server: request_expired; not sent again`);
+  const row = ctx.db.prepare("SELECT request_id, json FROM goal_requests WHERE directive_id=? AND local_id=?").get(directiveId, lid) as { request_id: string; json: string } | undefined;
+  if (!row) return;
+  const q = JSON.parse(row.json) as { sender?: { name?: string } } & Record<string, unknown>;
+  const reason = ended === "device_signed_out" || ended === "member_removed" ? ended : "sharing_stopped";
+  ctx.db.prepare("UPDATE goal_requests SET state='expired', json=? WHERE request_id=? AND local_id=?").run(JSON.stringify({ ...q, expired_reason: reason }), row.request_id, lid);
+  const who = clean(q.sender?.name, 50) || "the sender";
+  const why = reason === "sharing_stopped" ? "this session's sharing was stopped" : "this session's share ended";
+  addNotice(ctx, lid, `ans_expired_${row.request_id}`, `Align: ${who}'s request ${requestShortId(row.request_id)} had expired (${why}), so your answer was not taken and ${who} does not see it.`);
   renderHot(ctx, lid);
 }
 

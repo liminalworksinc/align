@@ -6,12 +6,16 @@
 // or a re-invite and a new login), `align stop-sharing`, `::align share` and prompts; after every step every session is
 // checked. Cycle 12 added the device revoked on the web and heard by a sync (C12-2: that pass ends the shares), and
 // `::align share --dir` and `align share` (C12-3: held back like `::align share` while the ended shares are unread),
-// and the unread and signed-out ways out (section 6: `align sync` first; `align login` or `align stop-sharing`). A fixed set of seeds runs every time, plus random ones (printed, so a failure can be run again with
+// and the unread and signed-out ways out (section 6: `align sync` first; `align login` or `align stop-sharing`). Cycle 13
+// added an older agent writing a notice about a share's state with no facts after the one-time migration ran (C13-1: never
+// shown as stored), and the pass reads the ended sessions before it sends a share (no share sent to be refused as
+// stopped). A fixed set of seeds runs every time, plus random ones (printed, so a failure can be run again with
 // ALIGN_PROP_SEEDS=<seed>).
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { after, test } from "node:test";
+import { renderHot } from "../src/hot.ts";
 import { sessionKey } from "../src/keys.ts";
 import * as handlers from "../src/hooks/handlers.ts";
 import { readJson } from "../src/shared/fsx.ts";
@@ -34,6 +38,12 @@ const STEPS = Number(process.env.ALIGN_PROP_STEPS || 10);
 const FAST = { ALIGN_DEVICE_POLL_SCALE_MS: "10", ALIGN_OUTBOX_MAX_BACKOFF_MS: "200" };
 const ACME = { id: "ws_acme", name: "Acme", role: "owner", teams: [{ id: "pod_core", name: "Core", role: "lead" }] };
 const json = (s: string) => (s ? JSON.parse(s) : null);
+/** What an agent from before notices were worded when shown stored, by notice kind: advice from the time of the event. */
+const OLDER_WORDS: Record<string, string> = {
+  signed_out_: 'Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on. To share it again, run `align login` in a terminal, then type `::align share` here (it counts toward "Ship the v2 onboarding flow" again).',
+  signed_in_: 'Align: this machine is signed in to Align again. To share this session again, type `::align share` here (it counts toward "Ship the v2 onboarding flow" again).',
+  access_lost_ws_acme_: "Align: this session stopped sharing because you no longer have access to Acme in Align (you were removed from it or left it); its usage stays on this machine from now on.",
+};
 
 /** mulberry32: a small seeded generator, so a failing sequence can be run again. */
 function rng(seed: number) {
@@ -208,6 +218,16 @@ test(`share-state notices agree with the deny and the status views, whatever the
         if (c && !c.signed_out) fake.revokeOnWeb(c.device_id);
         await sync();
       },
+      // C13-1: an older `align` (a downgrade, or the hooks' older copy) writes a notice about a share's state with no
+      // facts after this agent's one-time migration ran.
+      "an older agent's notice, after the migration": async () => {
+        const s = pick(ss);
+        const kind = pick(Object.keys(OLDER_WORDS));
+        const ctx = ctxFor(t);
+        ctx.db.prepare("INSERT OR IGNORE INTO notices(id, local_id, text, created_at, facts) VALUES(?,?,?,?,NULL)").run(`${s.lid}/${kind}${Date.now()}_older`, s.lid, OLDER_WORDS[kind], new Date().toISOString());
+        renderHot(ctx, s.lid);
+        ctx.db.close();
+      },
       prompt: async () => {
         const s = pick(ss);
         const planned = wouldTell(t, s);
@@ -228,6 +248,11 @@ test(`share-state notices agree with the deny and the status views, whatever the
         ctx.db.close();
         assert.equal(live.length, 0, `${where}: signed out with live shares`);
       }
+      // Every web stop here comes before the next pass, which reads the ended sessions before it sends a share: no share
+      // is ever sent to be refused as stopped (`sharing_stopped`; E2E-AGENT cycle 13 follow-up). The server's refusal for
+      // a web stop after that read is told as "stays stopped" (test findings14), outside what this sequence makes.
+      const refused = fake.log.filter((l) => l.method === "PUT" && /\/sessions\/[^/]+$/.test(l.path) && l.status === 409);
+      assert.equal(refused.length, 0, `${where}: a share was sent for a session stopped on the web`);
       const latch = (await runCli(t, ["latch", "status"])).stdout;
       const listed = json((await runCli(t, ["sessions", "--json"])).stdout) as { local_id: string; shared: string }[];
       for (const s of ss) {
@@ -273,7 +298,10 @@ test(`share-state notices agree with the deny and the status views, whatever the
         if (/stays stopped|can't be shared (there )?again from here/.test(n.text)) assert.notEqual(dw, "share", nctx);
         if (dw === "share") assert.doesNotMatch(n.text, /until you run `align stop-sharing/, nctx);
         const hot = readJson<HotState>(layout.hot(t.home, s.lid));
-        if (hot?.share_now?.unread) assert.doesNotMatch(n.text, /signed (in to|out of) Align|`::align share`/, `told while the ended shares are unread\n${nctx}`);
+        // A share its person stopped on the web, already read, stays stopped whatever is unread: its notice names the
+        // earlier end only as what happened (`its share here had ended when this machine signed out of Align`).
+        const forGood = /stays stopped and is not shared again from here \(its share here had ended when [^;]*\); its usage stays on this machine\.$/.test(n.text.split(" It was ")[0]);
+        if (hot?.share_now?.unread && !forGood) assert.doesNotMatch(n.text, /signed (in to|out of) Align|`::align share`/, `told while the ended shares are unread\n${nctx}`);
         // A share its person stopped on the web is never asked for again, so it is never refused as stopped (C12-3).
         assert.doesNotMatch(n.text, /sharing failed \(sharing_stopped\)/, `a share path asked for a share stopped on the web\n${nctx}`);
       }

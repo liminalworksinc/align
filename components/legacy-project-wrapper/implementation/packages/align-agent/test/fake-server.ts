@@ -140,6 +140,9 @@ export class FakeServer {
     for (const e of this.epochs.values()) if (e.session_key === key && !e.ends_at) e.ends_at = new Date().toISOString();
   }
 
+  /** Called as each request arrives, before it is answered (a web action that lands between two calls of one pass). */
+  beforeRequest: ((method: string, path: string) => void) | null = null;
+
   /** The person stops sharing the session on the web. */
   stopOnWeb(key: string): void {
     const s = this.sessions.get(key)!;
@@ -147,6 +150,11 @@ export class FakeServer {
     s.ended = null;
     s.stopped_at = new Date().toISOString();
     for (const e of this.epochs.values()) if (e.session_key === key && !e.ends_at) e.ends_at = new Date().toISOString();
+    // As lib/v2/sessions.ts stopSharing: the requests still waiting on it expire (E2E-AGENT cycle 13).
+    for (const r of this.requests.values()) {
+      const t = r.targets.get(key);
+      if (t && (t.state === "sent" || t.state === "received")) t.state = "expired";
+    }
   }
 
   /** The person deletes a session's shared history on the web. */
@@ -398,6 +406,7 @@ export class FakeServer {
     const p = url.pathname;
     const entry = { method: req.method || "", path: p, status: 0, auth: !!req.headers.authorization, origin: !!req.headers.origin };
     this.log.push(entry);
+    this.beforeRequest?.(req.method || "", p);
     const send = (status: number, body?: unknown, headers?: Record<string, string>) => {
       entry.status = status;
       this.send(res, status, body, headers);
@@ -560,9 +569,7 @@ export class FakeServer {
           return send(204);
         }
         if (sub === "stop-sharing") {
-          sess.state = "stopped";
-          sess.ended = null;
-          sess.stopped_at = new Date().toISOString();
+          this.stopOnWeb(key);
           return send(200, { session_key: key, state: "stopped" });
         }
         if (sub === "epochs") {
@@ -711,6 +718,14 @@ export class FakeServer {
         if (body.auto_accepted !== undefined && (typeof body.auto_accepted !== "boolean" || body.state !== "accepted")) return send(400, { error: "bad_request", message: "auto_accepted" });
         const req = d.kind === "request" && d.request && !d.request.cancelled ? this.requests.get(d.request.id) : null;
         if (auto && req?.wire.type === "switch_goal") return send(400, { error: "bad_request", message: "a switch_goal is never auto-accepted" });
+        // As lib/v2/directives.ts recordReceipt: an answer from a session whose sharing was stopped (or ended) is refused,
+        // its request expired then (E2E-AGENT cycle 13).
+        const sess = this.sessions.get(body.session_key);
+        if (d.kind === "request" && (body.state === "accepted" || body.state === "declined") && sess?.state === "stopped") {
+          const tt = req?.targets.get(body.session_key);
+          if (tt && (tt.state === "sent" || tt.state === "received")) tt.state = "expired";
+          return send(409, { error: "request_expired", message: "This request expired: this session's sharing was stopped, so it no longer takes answers.", ended_reason: sess.ended ?? null });
+        }
         const fresh = !this.receipts.some((r) => r.id === d.id && r.session_key === body.session_key && r.state === body.state && !!r.auto_accepted === auto);
         if (fresh) this.receipts.push({ id: d.id, session_key: body.session_key, state: body.state, at: body.at, ...(auto ? { auto_accepted: true } : {}) });
         const t = req?.targets.get(body.session_key);

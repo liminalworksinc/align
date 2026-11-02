@@ -148,6 +148,7 @@ function expiredWhy(json?: string): string {
     return `the Align server did not take the answer ${j.refused_answer === "declined" ? "declined" : "accepted"} here (${String(j.refused_error || "not_found").slice(0, 40)}): this session's share there has ended`;
   }
   if (reason === "member_removed") return "this session's share ended when this machine lost access to its workspace, and the Align server expired the request";
+  if (reason === "sharing_stopped") return "this session's sharing was stopped (Stop sharing on the web, or `align stop-sharing`), and the Align server expired the request";
   return "this session's share ended, and the Align server expired the request";
 }
 
