@@ -248,6 +248,15 @@ Every tool SHALL evaluate the caller as a v2 policy principal for the chosen wor
 - **WHEN** one person calls `align_list_goals` for the same workspace with an `alm.` token and with an `alnd_` token
 - **THEN** both results list the same goals
 
+### Requirement: The token's person is you in every MCP summary
+
+Every tool's text summary SHALL name the person the token acts for as "you", never by their display name, wherever it names a person: the owner in `align_list_goals` ("owner you") and `align_get_goal` ("Owner you"), who saved a version in `align_get_limits` ("saved by you"), the sender of a request and who held or released a goal in `align_get_directives` ("from you", "held by you", "released by you"), and everyone the change request tools and the brief name (see their outputs). Other people stay named, as people's text. `structuredContent` SHALL keep each person as `{id, name}`.
+
+#### Scenario: The owner reads their own goals and directives
+
+- **WHEN** a person who owns a goal, sent a request to its agents and held and released it calls `align_list_goals`, `align_get_goal`, `align_get_limits` and `align_get_directives`
+- **THEN** the summaries say "owner you", "Owner you", "saved by you", "from you", "held by you" and "released by you" and never contain the person's display name (`scripts/test-v2.mjs` "c10 W2: ..."), while another person reading the same goal sees the owner's name
+
 ### Requirement: People's text is marked as data in MCP results
 
 The MCP server SHALL return every string written by a person inside a marked field: in `structuredContent` as an object `{"untrusted_text": "<the text>"}`, and in the `text` summary between `<untrusted-text>` and `</untrusted-text>`, with each `<` and `>` inside the text replaced by `&lt;` and `&gt;` so that the text cannot close the tag. This covers workspace names, team names, people's display names, goal titles, measure text and targets, limit text and source titles, ask text, who asked (`from_label`), ask source titles and mention text, activity file paths, change request reasons and notes, rejection reasons, the title and measure values in diffs, evidence link URLs and labels, and model names in snapshots. Ids, enumerated values, numbers, timestamps and hashes SHALL be plain values.

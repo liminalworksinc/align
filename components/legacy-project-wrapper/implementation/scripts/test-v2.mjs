@@ -9123,6 +9123,39 @@ try {
       t2Stale.text,
     );
 
+    // -- W2: MCP says "you" for the token's person: their goals' owner, who saved a version, the request they sent and the
+    //    hold they placed and released; another reader sees the name --
+    const rDevice = (u) => {
+      const keys = newDeviceKeys();
+      const d = insertDevice(u.id, `${u.name}'s laptop`);
+      withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, RW));
+      return { ...keys, who: u.who, user: u, id: d.id, access: d.access };
+    };
+    const DD = rDevice(RD);
+    const DC = rDevice(RC);
+    const GD = await rGoal("Dorian's own goal", RD, null);
+    const dKey = sessionKey(DD, RW, "claude-code", "c10-dorian");
+    const dPut = await call("RD", "PUT", `/api/v2/workspaces/${RW}/sessions/${dKey}`, { bearer: DD.access, body: { harness: "claude-code", repo_key: repoKey(DD, RW, "/src/c10"), repo_alias: "c10", started_at: new Date(Date.now() - 600_000).toISOString(), title: null } });
+    const dEp = await call("RD", "POST", `/api/v2/workspaces/${RW}/sessions/${dKey}/epochs`, { bearer: DD.access, body: { epoch_id: epochId(), goal_id: GD?.id, starts_at: new Date(Date.now() - 600_000).toISOString(), root_turn: null, cause: "manual" } });
+    const dReq = await ra(RD, "POST", `/goals/${GD?.id}/requests`, { type: "checkpoint", note: "Commit what you have" });
+    const dHold = await ra(RD, "PUT", `/goals/${GD?.id}/hold`, { reason: "Freeze for audit" });
+    const dRelease = await ra(RD, "DELETE", `/goals/${GD?.id}/hold`);
+    const mGoals = await mcpCall("RD", DD, "align_list_goals", { workspace: RW });
+    const mGoal = await mcpCall("RD", DD, "align_get_goal", { goal_id: GD?.id, workspace: RW });
+    const mLimits = await mcpCall("RD", DD, "align_get_limits", { goal_id: GD?.id, workspace: RW });
+    const mDirs = await mcpCall("RD", DD, "align_get_directives", { workspace: RW });
+    const mOther = await mcpCall("RC", DC, "align_list_goals", { workspace: RW });
+    const mineLine = mGoals.text.split("\n").find((l) => l.includes(GD?.id ?? "-")) ?? "";
+    const leaks = [mGoals, mGoal, mLimits, mDirs].filter((m) => m.text.includes(RD.name)).map((m) => m.text.slice(0, 200));
+    check(
+      "c10 W2: MCP names the token's person \"you\": align_list_goals \"owner you\", align_get_goal \"Owner you\", align_get_limits \"saved by you\", align_get_directives \"from you\", \"held by you\" and \"released by you\", never their own name; another person reading the goal sees the owner's name",
+      dPut.status === 200 && dEp.status === 200 && dReq.status === 201 && dHold.status === 201 && dRelease.status === 200 &&
+        mineLine.includes(", owner you") && mGoal.text.includes("Owner you") && mLimits.text.includes("saved by you:") &&
+        mDirs.text.includes(" from you") && mDirs.text.includes("held by you") && mDirs.text.includes("released by you") && leaks.length === 0 &&
+        mOther.text.includes(`owner <untrusted-text>${RD.name}</untrusted-text>`),
+      `${dPut.status} ${dEp.status} ${dReq.status} ${dHold.status} ${dRelease.status} | ${mineLine} | ${mGoal.text.slice(0, 200)} | ${mLimits.text.slice(0, 200)} | ${mDirs.text.slice(0, 600)} | ${leaks.join(" || ")}`,
+    );
+
     // -- the browser: C10-2 (ui) on an alignment's Decline and Withdraw and a target change's Decline --
     const ua1 = await rAl("u1");
     const ua2 = await rAl("u2");
