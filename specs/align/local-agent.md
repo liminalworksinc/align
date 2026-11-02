@@ -535,8 +535,7 @@ it fails closed until it is shared again and the web lifts them, or the develope
 (<workspace>; this machine signed out)` while it can't be shared again, and `stopped (<workspace>; ended at a sign-out;
 \`::align share\` shares it again)` once this machine is signed in again and reaches its workspace; never as `shared`.
 While this machine is signed out, a share that ended at a lost workspace SHALL show the same way, `stopped (<workspace>;
-this machine signed out)`, as its newest notice then says. A share its person had stopped (Stop sharing on the web, or
-`align stop-sharing` on another of their devices) before a sign-out or a lost workspace ended it here is one the server
+this machine signed out)`, as its newest notice then says. A share its person had stopped (Stop sharing on the web) before a sign-out or a lost workspace ended it here is one the server
 never shares again, so it SHALL never be offered `::align share`: `align login` SHALL read the directives answer's
 `ended_sessions` before it tells sessions this machine is signed in again, and that answer, there and at every later
 pass, SHALL turn such a share into one its person stopped ("Directive intake and receipts"): no signed-in-again notice,
@@ -1344,7 +1343,7 @@ device did not look, so `/me` still lists it) ends the share as a lost workspace
 sharing because you were removed from <workspace> in Align (or left it) while this machine was not in touch; its usage
 from then on stays on this machine. You are a member again, so to share it there again, type \`::align share\` here
 (it counts toward "<goal>" again).`, never as a stop for good; `null` (its person stopped it) `Align: this session's
-sharing was stopped (Stop sharing on the web, or \`align stop-sharing\` on another of your devices), so it stopped
+sharing was stopped (Stop sharing on the web), so it stopped
 sharing here; its usage stays on this machine from now on.`, and a folder rule never shares it again (the same words,
 and the same end of the share, when the directives answer's `ended_sessions` lists it: see "Directive intake and
 receipts");
@@ -1446,7 +1445,7 @@ now): \`::align share\` in the session shares it there again, after which it can
 web`, `::align status` `on (tools blocked; sharing ended: \`::align share\` here shares it again, after which it can be
 resumed from the web)`, and `align status` count those as `<n> can be shared again (\`::align share\` in the session),
 after which the web can lift it`. Every notice about a share that ended (a sign-out, signed in again, a lost workspace or
-its return, a removal this machine never saw, a share its person stopped on the web or on another device, a usage
+its return, a removal this machine never saw, a share its person stopped on the web, a usage
 upload refused) SHALL, for a session stopped or held from the web, end with the sentence built from the same wording as
 the deny and the same `reshare` state: `It was stopped or held from the web, so tools stay blocked until you run
 \`align stop-sharing <lid8>\` in a terminal.`, or, when it can be shared again now, `It was stopped or held from the
@@ -1518,14 +1517,13 @@ A share ends with no directive (Stop sharing on the web, say), so the pass SHALL
 `ended_sessions` (this device's sessions whose share the server ended, `directives` "Device fetch of v2 directives by
 cursor") and end each share that is still `shared` or `suspended` here as the usage upload's `sharing_stopped` refusal
 with that `ended_reason` would end it, with the same notice: `null` as its person's stop (stopped for good, `Align: this
-session's sharing was stopped (Stop sharing on the web, or \`align stop-sharing\` on another of your devices), ...`),
+session's sharing was stopped (Stop sharing on the web), ...`),
 `member_removed` as a removal this machine never saw. The list holds the sessions of every device of the person, so a
 machine that paired again (after `align logout`, or replacing its live pairing) hears a stop made while its earlier
 device held the session; keys this machine never shared match nothing. A share that ended here already at a sign-out or
 a lost workspace (`device_signed_out` or `workspace_access_lost`, which offer `::align share`) and that the list names
 with `ended_reason` null SHALL become a share its person stopped (unless they stopped it here since), with the notice
-`Align: this session's sharing was stopped (Stop sharing on the web, or \`align stop-sharing\` on another of your
-devices) before this machine signed out of Align, so it stays stopped and is not shared again from here; its usage
+`Align: this session's sharing was stopped (Stop sharing on the web) before this machine signed out of Align, so it stays stopped and is not shared again from here; its usage
 stays on this machine.` (`before this machine lost access to <workspace> in Align` for a lost workspace; plus the
 `align stop-sharing <id>` sentence for a session stopped or held from the web). `align login` SHALL apply the first
 page's `ended_sessions` (not its directives) before it reads `/me`, so the signed-in-again notice is never told for such
@@ -1537,7 +1535,7 @@ usage upload.
 #### Scenario: Stopped on the web, then paired again before a sync
 
 - **WHEN** a shared session is stopped with Stop sharing on the web and, before any sync, the machine runs `align logout` and `align login` (or an `align login` that replaces the live pairing), then the session is prompted, `align sessions` runs and the developer types `::align share confirm` (test `findings10` "stopped on the web, then ..."; against the real server in `scripts/test-agent-live.mjs` "web stop-sharing before a re-pairing (E2E-AGENT cycle 9 C9-1) ...")
-- **THEN** the prompt shows only `Align: this session's sharing was stopped (Stop sharing on the web, or \`align stop-sharing\` on another of your devices) before this machine signed out of Align, so it stays stopped and is not shared again from here; ...`, never `signed in to Align again` or `::align share`; `align sessions` lists it as `stopped (Acme)`; `::align share confirm` says it stays stopped and spools nothing; another session whose share the sign-out ended is still told it can be shared again; and a session stopped from the web as well gets the `align stop-sharing <lid8>` sentence its deny names
+- **THEN** the prompt shows only `Align: this session's sharing was stopped (Stop sharing on the web) before this machine signed out of Align, so it stays stopped and is not shared again from here; ...`, never `signed in to Align again` or `::align share`; `align sessions` lists it as `stopped (Acme)`; `::align share confirm` says it stays stopped and spools nothing; another session whose share the sign-out ended is still told it can be shared again; and a session stopped from the web as well gets the `align stop-sharing <lid8>` sentence its deny names
 
 #### Scenario: Replays after a restored database
 

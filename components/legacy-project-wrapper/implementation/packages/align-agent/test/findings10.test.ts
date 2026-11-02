@@ -96,7 +96,7 @@ describe("C9-1: a web Stop sharing before a re-pairing is heard by the new pairi
       assert.doesNotMatch(told, /signed in to Align again|::align share/, told);
       assert.equal(
         told,
-        "Align: this session's sharing was stopped (Stop sharing on the web, or `align stop-sharing` on another of your devices) before this machine signed out of Align, so it stays stopped and is not shared again from here; its usage stays on this machine.",
+        "Align: this session's sharing was stopped (Stop sharing on the web) before this machine signed out of Align, so it stays stopped and is not shared again from here; its usage stays on this machine.",
       );
       const rows = json((await runCli(t, ["sessions", "--json"])).stdout) as { local_id: string; shared: string }[];
       assert.equal(rows.find((r) => r.local_id === A.lid)?.shared, "stopped (Acme)");

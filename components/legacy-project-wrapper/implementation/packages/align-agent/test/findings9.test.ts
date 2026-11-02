@@ -150,7 +150,7 @@ describe("cycle 8, section 5: works, but would confuse a developer", () => {
     assert.equal(hot(t, A.lid).share?.state, "stopped");
     assert.equal(
       prompt(t, A.sid, "go on", A.cwd)?.systemMessage,
-      "Align: this session's sharing was stopped (Stop sharing on the web, or `align stop-sharing` on another of your devices), so it stopped sharing here; its usage stays on this machine from now on.",
+      "Align: this session's sharing was stopped (Stop sharing on the web), so it stopped sharing here; its usage stays on this machine from now on.",
     );
     const again = prompt(t, A.sid, "::align share", A.cwd).reason as string;
     assert.doesNotMatch(again, /already shared/);

@@ -957,7 +957,7 @@ try {
   check(
     "web stop-sharing before a re-pairing (E2E-AGENT cycle 9 C9-1): Stop sharing on the web, then `align logout` and `align login` before any sync: the new device's directives answer lists the session (ended_reason null), and the machine never offers `::align share` for it: its next prompt says its sharing was stopped before this machine signed out, so it stays stopped (never `signed in to Align again`), `align sessions` lists it as `stopped (Ledger Co)`, and `::align share confirm` says it stays stopped, sharing nothing",
     xwStop.status === 200 && /^shared/.test(xwBeforeLogout) && xwListed?.ended_reason === null &&
-      (xwTold.system ?? "").startsWith("Align: this session's sharing was stopped (Stop sharing on the web, or `align stop-sharing` on another of your devices) before this machine signed out of Align, so it stays stopped") &&
+      (xwTold.system ?? "").startsWith("Align: this session's sharing was stopped (Stop sharing on the web) before this machine signed out of Align, so it stays stopped") &&
       !/signed in to Align again|::align share/.test(xwTold.system ?? "") && xwSessions === "stopped (Ledger Co)" &&
       (xwShare.json?.reason ?? "").includes("so it stays stopped") && xwRow?.state === "stopped" && xwRow.ended_reason === null,
     `${xwStop.status} before=${xwBeforeLogout} listed=${JSON.stringify(xwListed)} told=${xwTold.stdout} sessions=${xwSessions} share=${xwShare.stdout} row=${JSON.stringify(xwRow)}`,

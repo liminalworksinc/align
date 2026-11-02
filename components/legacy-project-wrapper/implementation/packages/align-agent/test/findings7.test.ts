@@ -227,7 +227,7 @@ describe("C6-3: a removal the device never saw is not worded as a stop for good"
     await sync(t);
     assert.equal(
       prompt(t, A.sid, "go on", A.cwd).systemMessage,
-      "Align: this session's sharing was stopped (Stop sharing on the web, or `align stop-sharing` on another of your devices), so it stopped sharing here; its usage stays on this machine from now on.",
+      "Align: this session's sharing was stopped (Stop sharing on the web), so it stopped sharing here; its usage stays on this machine from now on.",
     );
     assert.match(prompt(t, A.sid, "::align share --dir confirm", A.cwd).reason, /This session stays private/);
   });

@@ -413,10 +413,10 @@ export function endShareSignedOutByServer(ctx: Ctx, lid: string): void {
   ctx.log(`usage refused: session ${lid.slice(0, 8)} ended on the server when this machine signed out; ended here too`);
 }
 
-/** The words of a share its person stopped elsewhere (Stop sharing on the web, or `align stop-sharing` on another of
- *  their devices), as the server says it (`ended_reason` null). */
+/** The words of a share its person stopped elsewhere (Stop sharing on the web: no other device of theirs can stop a
+ *  session it does not hold), as the server says it (`ended_reason` null). */
 export const STOPPED_ELSEWHERE =
-  "Align: this session's sharing was stopped (Stop sharing on the web, or `align stop-sharing` on another of your devices), so it stopped sharing here; its usage stays on this machine from now on.";
+  "Align: this session's sharing was stopped (Stop sharing on the web), so it stopped sharing here; its usage stays on this machine from now on.";
 
 /** The share of `lid` was stopped by its person elsewhere (the server says so): stopped here too, from then on, for good
  *  (a folder rule never shares it again, C6-1), with one notice. */
@@ -448,7 +448,7 @@ function endedShareStoppedByPerson(ctx: Ctx, lid: string, noticeId: string): voi
       ctx,
       lid,
       noticeId,
-      `Align: this session's sharing was stopped (Stop sharing on the web, or \`align stop-sharing\` on another of your devices) before ${before}, so it stays stopped and is not shared again from here; its usage stays on this machine.${latchTail(ctx, lid)}`,
+      `Align: this session's sharing was stopped (Stop sharing on the web) before ${before}, so it stays stopped and is not shared again from here; its usage stays on this machine.${latchTail(ctx, lid)}`,
     );
   });
   renderHot(ctx, lid);
@@ -464,7 +464,7 @@ export interface EndedOnServer {
 
 /**
  * The directives answer lists the person's sessions whose share the server ended (`ended_sessions`, of all their
- * devices: this machine's earlier device's too): stopped on the web or on another device of the person (`ended_reason`
+ * devices: this machine's earlier device's too): stopped with Stop sharing on the web (`ended_reason`
  * null), or ended while its person was out of the workspace (`member_removed`; they are back, as the device reaches it).
  * Each one still shared or suspended here ends now, as the usage upload's `sharing_stopped` refusal would end it, so
  * `::align share`, `align status` and the session's notices agree with the server at the next pass (E2E-AGENT cycle 8).

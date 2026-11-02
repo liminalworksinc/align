@@ -154,8 +154,8 @@ const ENDED_LOOKBACK_MS = 30 * 86_400_000;
 
 /**
  * The device's person's sessions whose share has ended on the server in the last 30 days, in the workspaces this device
- * reaches now (newest first, at most 200): stopped on the web (Stop sharing) or by another device of the person
- * (`ended_reason` null), ended because the person was removed from the workspace and is back (`member_removed`), or
+ * reaches now (newest first, at most 200): stopped on the web (Stop sharing) or by the device that shared it
+ * (`ended_reason` null; another device can't stop a session it does not hold), ended because the person was removed from the workspace and is back (`member_removed`), or
  * ended when the device holding it signed out (`device_signed_out`). A stop or resume reaches a device as a directive,
  * but an end of sharing has none, and a device would otherwise hear of it only at the session's next usage upload
  * (refused `sharing_stopped`): listed in every directives answer, the device ends its own share at its next pass
