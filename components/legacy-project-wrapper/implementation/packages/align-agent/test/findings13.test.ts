@@ -353,13 +353,16 @@ describe("cycle 12, section 6: works, but would confuse a developer", () => {
     const { fake, t } = await world({ side: true });
     const E = await shared(t);
     await sync(t);
+    // A pairing that was not given Acme (still a member: `/me` names it among the person's other workspaces).
     fake.workspaces = [SIDE];
+    fake.otherWorkspaces = [{ id: ACME.id, name: ACME.name }];
     await login(t);
     assert.equal(
       said(t, E),
       "Align: a new sign-in on this machine (`align login`) ended this session's share from the earlier sign-in, and this sign-in does not reach Acme, so this session can't be shared there again from here; its usage stays on this machine.",
     );
     fake.workspaces = [ACME, SIDE];
+    fake.otherWorkspaces = [];
     await sync(t);
     assert.equal(said(t, E), `Align: this machine can reach Acme in Align again. To share this session there again, type \`::align share\` here (it counts toward "${GOAL}" again).`);
     const RP = await shared(t);
@@ -378,6 +381,7 @@ describe("cycle 12, section 6: works, but would confuse a developer", () => {
     await sync(t);
     await logout(t);
     fake.workspaces = [SIDE];
+    fake.otherWorkspaces = [{ id: ACME.id, name: ACME.name }];
     await login(t);
     const row = (json((await runCli(t, ["sessions", "--json"])).stdout) as { local_id: string; shared: string }[]).find((r) => r.local_id === E.lid)!;
     assert.equal(row.shared, "stopped (Acme; ended at a sign-out; this sign-in does not reach its workspace)");

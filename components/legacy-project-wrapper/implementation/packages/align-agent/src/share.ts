@@ -7,7 +7,7 @@ import { kvGet, kvSet, nowIso, tx } from "./db.ts";
 import { repoKey, sessionKey } from "./keys.ts";
 import path from "node:path";
 import { endEpochs, getSession, sessionCwds, type SessionRow } from "./ledger.ts";
-import { ACCESS_LOST, addNotice, addShareNotice, DEVICE_SIGNED_OUT, ENDED_UNREAD as ENDED_UNREAD_KEY, getShare, notePriorShare, renderEndedShares, renderHot, sharedBefore, snapshot, stoppedByPerson, stoppedOnDeviceKey } from "./hot.ts";
+import { ACCESS_LOST, addNotice, addShareNotice, DEVICE_SIGNED_OUT, ENDED_UNREAD as ENDED_UNREAD_KEY, endedByLogin, getShare, notePriorShare, renderEndedShares, renderHot, sharedBefore, snapshot, stoppedByPerson, stoppedOnDeviceKey } from "./hot.ts";
 
 export { ENDED_UNREAD, notePriorShare, sharedBefore, stoppedByPerson } from "./hot.ts";
 import { clockOffset, loadCredentials, signedIn } from "./api.ts";
@@ -265,7 +265,8 @@ function factsOf(row: { workspace_name: string; goal_json: string | null }, e: S
  * and epoch calls are dropped (they belonged to the old device). Stop latches and goal holds stay: a stopped session
  * stays blocked until the developer runs `align stop-sharing`. Every session whose share had ended already is worded
  * afresh from the state now (its hot and latch files), so a notice that said `::align share` shares it again now gives
- * the sign-out's words at its next prompt, as its deny does (C8-1, cycle 11). Returns how many shares ended.
+ * the sign-out's words at its next prompt, as its deny does (C8-1, cycle 11). Returns how many shares the server had
+ * ended (`pending` ones never reached it).
  */
 export function endSharesSignedOut(ctx: Ctx, via?: "login"): number {
   const at = nowIso();
@@ -283,8 +284,30 @@ export function endSharesSignedOut(ctx: Ctx, via?: "login"): number {
     endShare(ctx, s.local_id, DEVICE_SIGNED_OUT, `signed_out_${at}`, factsOf(s, "signed_out", extra), at, "device_signed_out");
   }
   if (live.length) ctx.log(`signed out: ${live.length} shares ended on this machine`);
+  // A share a new `align login` ended earlier, now that this machine really signed out: from here its words are a
+  // sign-out's, in its notice and its deny alike (E2E-AGENT cycle 13, section 5).
+  if (!via) signedOutSinceLogin(ctx);
   renderEndedShares(ctx);
-  return live.length;
+  // The shares the server had: one still pending had not reached it, so it was not shared and did not stop sharing
+  // (its own notice says so; E2E-AGENT cycle 13, section 5).
+  return live.filter((s) => s.state !== "pending").length;
+}
+
+/** Mark the notices of shares a replacing `align login` ended (`via: "login"`) with `out_since`: this machine signed out
+ *  since. Once each, so a pass that finds this machine still signed out writes nothing. */
+function signedOutSinceLogin(ctx: Ctx): void {
+  const rows = ctx.db
+    .prepare("SELECT n.rowid AS rid, n.facts AS facts FROM notices n JOIN shares s ON s.local_id=n.local_id WHERE s.state='stopped' AND s.error=? AND n.id LIKE n.local_id || '/signed_out_%' AND n.facts IS NOT NULL")
+    .all(DEVICE_SIGNED_OUT) as { rid: number; facts: string }[];
+  for (const r of rows) {
+    let f: ShareFacts;
+    try {
+      f = JSON.parse(r.facts) as ShareFacts;
+    } catch {
+      continue;
+    }
+    if (f.via === "login" && !f.out_since) ctx.db.prepare("UPDATE notices SET facts=? WHERE rowid=?").run(JSON.stringify({ ...f, out_since: true }), r.rid);
+  }
 }
 
 /** End one live share here (the server already ended it, or can no longer be reached for it): stopped with `why`,
@@ -386,16 +409,6 @@ function endedShareStoppedByPerson(ctx: Ctx, lid: string, noticeId: string): voi
     addShareNotice(ctx, lid, noticeId, factsOf(s, "stopped_before_end", { before }));
   });
   renderHot(ctx, lid);
-}
-
-/** The newest notice about a sign-out that ended the share of `lid` says a new `align login` ended it (cycle 12). */
-function endedByLogin(ctx: Ctx, lid: string): boolean {
-  const r = ctx.db.prepare("SELECT facts FROM notices WHERE local_id=? AND id LIKE ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(lid, `${lid}/signed_out_%`) as { facts: string | null } | undefined;
-  try {
-    return !!r?.facts && (JSON.parse(r.facts) as ShareFacts).via === "login";
-  } catch {
-    return false;
-  }
 }
 
 /** One of the person's sessions whose share the server ended, as the directives answer lists it (`ended_sessions`). */

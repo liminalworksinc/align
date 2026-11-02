@@ -194,10 +194,14 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   // While the ended shares are unread since this sign-in, `align sync` comes first (`unread`); signed out, a new
   // `align login` may offer `::align share` (`login`): the deny says so as the status views do (cycle 12, section 6).
   const unread = !!end?.reshare && hot.share_now?.unread === true;
+  // Ended by a new `align login` that replaced this machine's pairing, while signed in: the deny says so, never that this
+  // machine signed out (E2E-AGENT cycle 13, section 5).
+  const relogin = end?.why === "device_signed_out" && hot.share_now?.signed_in === true && endedByLogin(ctx, lid);
   const ended = end
     ? {
         ended: end.why,
         ...(end.reshare ? { reshare: true as const } : {}),
+        ...(relogin ? { relogin: true as const } : {}),
         ...(unread ? { unread: true as const } : {}),
         ...(end.login ? { login: true as const } : {}),
         ...(release ? { release } : {}),
@@ -225,6 +229,18 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   return hot;
 }
 
+/** The newest notice about a sign-out that ended the share of `lid` says a new `align login` ended it (cycle 12), and
+ *  this machine has not signed out since (`out_since`, cycle 13). */
+export function endedByLogin(ctx: Ctx, lid: string): boolean {
+  const r = ctx.db.prepare("SELECT facts FROM notices WHERE local_id=? AND id LIKE ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(lid, `${lid}/signed_out_%`) as { facts: string | null } | undefined;
+  try {
+    const f = r?.facts ? (JSON.parse(r.facts) as ShareFacts) : null;
+    return f?.via === "login" && !f.out_since;
+  } catch {
+    return false;
+  }
+}
+
 /** Stopped (a stop latch) or held (a goal hold) from the web: what a notice about its ended share ends with. */
 export function latchedFromWeb(ctx: Ctx, lid: string): boolean {
   return !!(ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid) || ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(lid));
@@ -244,6 +260,7 @@ export function shareNow(
 ): ShareNow {
   const signed = signedIn(ctx.home);
   const me = readJson<MeFile>(layout.me(ctx.home));
+  const member = !share || !notMember(me, share.workspace_id);
   return {
     live: !!share && (share.state === "shared" || share.state === "pending" || share.state === "suspended"),
     ended: end?.why ?? null,
@@ -254,7 +271,15 @@ export function shareNow(
     login: !!end?.login,
     latched: latchedFromWeb(ctx, lid),
     release,
+    ...(member ? {} : { member: false as const }),
   };
+}
+
+/** Its person is no longer a member of workspace `ws` (removed, or they left): the cached `/me` lists it neither as this
+ *  device's nor among the person's other workspaces. False when that is not known (an older server sends no
+ *  `other_workspaces`). E2E-AGENT cycle 13, section 5. */
+export function notMember(me: MeFile | null, ws: string): boolean {
+  return !!me && Array.isArray(me.other_workspaces) && ![...me.workspaces, ...me.other_workspaces].some((w) => w.id === ws);
 }
 
 /** Why a share can no longer receive directives (a resume or a release), or null while it can. */

@@ -304,7 +304,9 @@ system clock to update automatically.` on stderr, log it, and sign later refresh
 the clock is right again (under a minute off) SHALL clear the saved offset, log it and print nothing. `align logout`
 SHALL call `DELETE /api/v2/devices/self`, wipe the tokens, delete `device_key`, end this machine's shares (as "Signing
 out ends this machine's shares" says), and print `Signed out. Tokens and the device key were removed; local metering
-continues.`, then, when it ended shares, `<n> shared session(s) stopped sharing.`, followed, when a session stopped or
+continues.`, then, when it ended shares the server had, `<n> shared session(s) stopped sharing.` (a share still
+`pending`, which had not reached the server, is not counted: its session is told it was not shared; E2E-AGENT cycle 13,
+section 5), followed, when a session stopped or
 held from the web is among the sessions a sign-out ended, by `Sessions stopped or held from the web stay blocked: after
 \`align login\`, \`::align share\` in such a session shares it again, and then the web can lift the stop or hold.`
 (never `align stop-sharing` as the only way out); when the server could not be told it SHALL keep what revokes the device later (as "A logout the server did
@@ -623,7 +625,20 @@ toward "<goal>" again).`, or, when this sign-in does not reach its workspace, `A
 (\`align login\`) ended this session's share from the earlier sign-in, and this sign-in does not reach <workspace>, so
 this session can't be shared there again from here; its usage stays on this machine.`, and one its person had stopped
 on the web says `(its share here had ended when a new sign-in on this machine (\`align login\`) ended its earlier
-sign-in's shares)`. A session told that this sign-in does not reach its workspace SHALL, once the workspace is given
+sign-in's shares)`. Its deny and `align latch status` SHALL say so too, from the same words (`endedWhyWords`): `Its
+sharing ended (a new sign-in on this machine (\`align login\`) ended its share from the earlier sign-in), so ...` and
+`; sharing ended (a new sign-in on this machine (\`align login\`) ended its share from the earlier sign-in): ...`, and
+`align sessions` `stopped (<workspace>; ended at a new sign-in (\`align login\`); ...)`, never that this machine signed
+out (the latch files carry `relogin`); once this machine really signs out after that, it reads as a sign-out's in every
+view (E2E-AGENT cycle 13, section 5). When the cached `/me` lists the share's workspace neither as this device's nor
+among the person's `other_workspaces` (they were removed from it or left it), the notice SHALL name that, not this
+sign-in's reach: `Align: this machine is signed in to Align again, but you are no longer a member of <workspace> in
+Align (you were removed from it or left it), so this session can't be shared there again from here; its usage stays on
+this machine.` (after a replacing login `Align: a new sign-in on this machine (\`align login\`) ended this session's
+share from the earlier sign-in, and you are no longer a member of <workspace> ...`; after it was told it could be shared
+there again `Align: you are no longer a member of <workspace> in Align (you were removed from it or left it), so ...`),
+and `align sessions` `stopped (<workspace>; ended at a sign-out; you are no longer a member of its workspace)`; a server
+that sends no `other_workspaces` keeps the reach's words. A session told that this sign-in does not reach its workspace SHALL, once the workspace is given
 back, be told `Align: this machine can reach <workspace> in Align again. To share this session there again, type
 \`::align share\` here ...`, never `signed in to Align again`: only the reach changed. A share asked for here that had
 not reached the server yet (still `pending`) when a sign-out ended it SHALL be told `Align: this session's share had not
@@ -657,10 +672,15 @@ whose share ends at a sign-out SHALL expire here ("The developer answers request
 - **WHEN** a shared session's machine signs in again with a pairing that reaches only Side Co, then Acme is given back to the device and a sync runs; and another shared session's machine runs `align login` while still signed in (test `findings13` "a sign-in that does not reach the workspace, then the workspace given back ..."; `findings10` "stopped on the web, then a login that replaces the live pairing ...")
 - **THEN** the first is told `Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in, and this sign-in does not reach Acme, ...`, then `Align: this machine can reach Acme in Align again. ...`; the other `Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in; ... type \`::align share\` here ...`, never `signed out` or `signed in to Align again`; and signed in with a pairing that does not reach Acme, `align sessions` shows `stopped (Acme; ended at a sign-out; this sign-in does not reach its workspace)` (test `findings13` "signed in with a pairing that does not reach its workspace ...")
 
+#### Scenario: A replacing login, and a removal
+
+- **WHEN** a session stopped from the web and a held one are on a machine that runs `align login` while signed in; in another case the person is removed from Acme while this machine is signed out and the new pairing reaches only Side Co, and a session told it could be shared again then loses Acme the same way (tests `findings14` "a share a replacing `align login` ended ..." and "removed from the workspace ...")
+- **THEN** the deny reads `Its sharing ended (a new sign-in on this machine (\`align login\`) ended its share from the earlier sign-in), so ...`, `align latch status` and `align sessions` name the new sign-in, and none says this machine signed out until it really does; the removed one is told `... you are no longer a member of Acme in Align (you were removed from it or left it) ...` and `align sessions` says `you are no longer a member of its workspace`, never `this sign-in does not reach Acme`
+
 #### Scenario: A share that never reached the server
 
-- **WHEN** a session is shared from the terminal while the server can't be reached (`queued to share`), then `align logout` runs and the session is prompted (test `findings13` "a share that never reached the server, then a sign-out ...")
-- **THEN** the notice is `Align: this session's share had not reached the Align server yet when this machine signed out of Align, so it was not shared; ...`, never `stopped sharing`
+- **WHEN** a session is shared from the terminal while the server can't be reached (`queued to share`), then `align logout` runs and the session is prompted (test `findings13` "a share that never reached the server, then a sign-out ..."); in another case another session was shared before the server became unreachable
+- **THEN** the notice is `Align: this session's share had not reached the Align server yet when this machine signed out of Align, so it was not shared; ...`, never `stopped sharing`; in the other case the logout says `1 shared session(s) stopped sharing.` (test `findings14` "`align logout` counts only the shares the server had ...")
 
 #### Scenario: Sharing while signed out
 
@@ -1413,7 +1433,9 @@ Delete shared history on the web's Sessions page; then type \`::align share\` he
 --dir` that replaces the rule of the same folder SHALL say `This replaces the current rule (<workspace>, "<goal>").`
 (`no goal` without one) in its preview and its confirmation, as `align share --dir` does; with no goal named it SHALL
 keep the goal that rule has (its preview says `for "<goal>" (the goal its rule has now; \`::align share --dir none\` for
-no goal)`), and `::align share --dir none` asks for no goal. `::align share` with no goal named, in a session never
+no goal)`), and `::align share --dir none` asks for no goal: its confirmation SHALL say `This session too, with no goal
+(its usage counts as unallocated).` of the session it shares, never that the next prompt carries the goal (E2E-AGENT
+cycle 13, section 5). `::align share` with no goal named, in a session never
 shared that started in a folder before its rule was made there, SHALL share toward the rule's goal while that goal can be
 bound (its preview says `Goal: <goal> (this folder's rule's goal)`), as a session started there is shared (E2E-AGENT
 cycle 12, section 6). `::align bind`, `::align share`
@@ -1460,6 +1482,11 @@ next sync applies like `align stop-sharing`, and `::align unshare --dir` SHALL r
 session's folder at once. `::align task <label>` and `::align claim <file> [why]` SHALL record
 activity (claims last 60 minutes) only for sessions that are shared or covered by a folder rule. A bare `::align`
 SHALL show `::align status`.
+
+#### Scenario: A folder rule with no goal
+
+- **WHEN** the developer types `::align share --dir none confirm` in a private session (test `findings14` "`::align share --dir none confirm` makes a no-goal rule ...")
+- **THEN** the answer says `... are now shared with Acme. This session too, with no goal (its usage counts as unallocated).` and never `carries the goal`
 
 #### Scenario: A rule folder on a machine with two workspaces
 

@@ -1221,6 +1221,14 @@ try {
       rmGoals.code === 0 && rmGoals.stdout.includes("Side Co") && !rmGoals.stdout.includes("Ledger Co") && rmOut.code === 0 && denied(rmFree) === null,
     `${rmSync.stderr} ${JSON.stringify(rmLocal)} told=${rmTold.stdout} deny=${rmDeny} goals=${rmGoals.code} ${rmGoals.stdout} ${rmGoals.stderr} ${rmOut.stderr} free=${rmFree.stdout}`,
   );
+  // E2E-AGENT cycle 13, section 5: the agent names a removal (not this sign-in's reach) when `/me` lists the workspace
+  // neither as the device's nor among the person's `other_workspaces`; the real server's `/me` says so after a removal.
+  const rmMe = JSON.parse(readFileSync(path.join(alignHome, "me.json"), "utf8"));
+  check(
+    "member removed (E2E-AGENT cycle 13, section 5): the cached `/me` lists the workspace neither as this device's nor among the person's `other_workspaces`, which is how the agent tells a removal from a pairing not given the workspace",
+    Array.isArray(rmMe.other_workspaces) && !rmMe.other_workspaces.some((w) => w.id === W) && !(rmMe.workspaces ?? []).some((w) => w.id === W),
+    JSON.stringify({ workspaces: rmMe.workspaces?.map((w) => w.id), other: rmMe.other_workspaces }),
+  );
   // C5-1: a turn made now, while the session's share has ended ("its usage stays on this machine from now on").
   const gapAt = Date.now();
   appendLines(Q1.tr, [userLine(Q1.sid, "q1-gap", new Date(gapAt).toISOString(), repoQ), assistantLine(Q1.sid, "req_q1_gap", new Date(gapAt + 50).toISOString(), repoQ)]);

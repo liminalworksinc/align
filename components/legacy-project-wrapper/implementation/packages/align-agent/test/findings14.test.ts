@@ -1,8 +1,9 @@
 // Regressions for the cycle-13 agent-side E2E report: C13-1 (a notice about a share's state that an older agent stored
 // with no facts after the one-time migration ran, shown word for word; and the hooks' copy in bin/current of another
 // build than the terminal `align`, silently), C13-2 (a session told of a goal hold by its envelope never told of the
-// release). The randomized check of the share-state views, with an older agent's notice written after the migration
-// added, is test/sharestate-property.test.ts.
+// release), and the items of its section 5 (a share a replacing `align login` ended, a removal named as this sign-in's
+// reach, `::align share --dir none confirm`, the logout count). The randomized check of the share-state views, with an
+// older agent's notice written after the migration added, is test/sharestate-property.test.ts.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -234,5 +235,85 @@ describe("C13-2: a session told of a goal hold by its envelope", () => {
     await sync(t);
     const out = prompt(t, s);
     assert.ok(String(out?.hookSpecificOutput?.additionalContext ?? "").includes(`[Align] The hold on goal "${GOAL}" was released, so it no longer blocks tools.`), JSON.stringify(out));
+  });
+});
+
+describe("cycle 13, section 5: works, but would confuse a developer", () => {
+  test("a share a replacing `align login` ended: the deny and `align latch status` say so as its notice does, never that this machine signed out", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    const H = await shared(t);
+    await sync(t);
+    stop(fake, A);
+    fake.holdGoal("ws_acme", "g_ship", [H.key]);
+    await sync(t);
+    await login(t);
+    assert.match(said(t, A), /^Align: a new sign-in on this machine \(`align login`\) ended this session's share from the earlier sign-in;/);
+    for (const s of [A, H]) {
+      const why = deny(t, s);
+      assert.ok(why.includes(`Its sharing ended (${RELOGIN}), so ${latchWayOut(s.lid, true, "model")}`), why);
+      assert.doesNotMatch(why, /signed out/);
+    }
+    const latch = (await runCli(t, ["latch", "status"])).stdout;
+    for (const s of [A, H]) assert.match(latch, new RegExp(`${s.lid.slice(0, 8)} .*; sharing ended \\(a new sign-in on this machine \\(\`align login\`\\) ended its share from the earlier sign-in\\): \`::align share\``));
+    assert.doesNotMatch(latch, /signed out/);
+    assert.match(await sessionRow(t, A), /ended at a new sign-in \(`align login`\); `::align share` shares it again/);
+
+    // A real sign-out and sign-in still read as such.
+    await logout(t);
+    await login(t);
+    assert.ok(deny(t, A).includes("Its sharing ended (this machine signed out of Align, and is signed in again now)"), deny(t, A));
+  });
+
+  test("removed from the workspace: the notice and `align sessions` name the removal, not this sign-in's reach", async () => {
+    const { fake, t } = await world({ side: true });
+    const W = await shared(t);
+    const R = await shared(t);
+    await sync(t);
+    await logout(t);
+    said(t, W);
+    // Removed from Acme while signed out; the new pairing can only reach Side Co.
+    fake.workspaces = [SIDE];
+    fake.otherWorkspaces = [];
+    await login(t);
+    assert.equal(
+      said(t, W),
+      "Align: this machine is signed in to Align again, but you are no longer a member of Acme in Align (you were removed from it or left it), so this session can't be shared there again from here; its usage stays on this machine.",
+    );
+    assert.equal(await sessionRow(t, W), "stopped (Acme; ended at a sign-out; you are no longer a member of its workspace)");
+    // Told it could be shared again, then removed: the removal, not "signed in again".
+    fake.workspaces = [ACME, SIDE];
+    await sync(t);
+    assert.match(said(t, R), /^Align: this machine is signed in to Align again\. To share this session again/);
+    fake.workspaces = [SIDE];
+    await sync(t);
+    assert.equal(said(t, R), "Align: you are no longer a member of Acme in Align (you were removed from it or left it), so this session can't be shared there again from here; its usage stays on this machine.");
+    // A pairing not given Acme, its person still a member: this sign-in's reach.
+    await logout(t);
+    assert.match(said(t, W), /signed out of Align/);
+    fake.otherWorkspaces = [{ id: ACME.id, name: ACME.name }];
+    await login(t);
+    assert.match(said(t, W), /this sign-in does not reach Acme/);
+  });
+
+  test("`::align share --dir none confirm` makes a no-goal rule and never says the next prompt carries the goal", async () => {
+    const { t } = await world();
+    const s = session(t);
+    const done = prompt(t, s, "::align share --dir none confirm").reason as string;
+    assert.match(done, /are now shared with Acme\. This session too, with no goal \(its usage counts as unallocated\)\./);
+    assert.doesNotMatch(done, /carries the goal/);
+  });
+
+  test("`align logout` counts only the shares the server had: one still queued never reached it", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    await sync(t);
+    const q = session(t);
+    fake.setOffline(true);
+    assert.match((await runCli(t, ["share", q.lid.slice(0, 8), "--workspace", "Acme", "--goal", "Ship the v2", "--yes"])).stdout, /queued to share/);
+    const r = await logout(t);
+    assert.match(r.stdout, /^1 shared session\(s\) stopped sharing\.$/m, r.stdout);
+    assert.match(said(t, q), /had not reached the Align server yet when this machine signed out of Align, so it was not shared/);
+    void A;
   });
 });

@@ -38,7 +38,7 @@ import {
 import { myTeams, teamAsks } from "../shared/asks.ts";
 import { crossing, lastReply } from "../shared/drift.ts";
 import { feedHold, feedHoldReason } from "../shared/feedhold.ts";
-import { latchWayOut, SHARE_CHANGED, shareAgainWords, shareNotice, shareRetell, type ReleaseReaches, type ShareAgain, type ShareFacts, type ShareTold } from "../shared/ended.ts";
+import { endedWhyWords, latchWayOut, SHARE_CHANGED, shareAgainWords, shareNotice, shareRetell, type ReleaseReaches, type ShareAgain, type ShareFacts, type ShareTold } from "../shared/ended.ts";
 import { contextGoals, snapshot } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
@@ -914,28 +914,18 @@ export function denyOutput(reason = DENY_REASON): Record<string, unknown> {
   return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } };
 }
 
-const ENDED_WHY = {
-  device_signed_out: "this machine signed out of Align",
-  access_lost: "this machine no longer has access to its Align workspace",
-  sharing_ended: "the Align server no longer has this session's share",
-} as const;
-
-/** Why a share ended, when this machine can share the session there again now (C6-2). */
-const ENDED_AGAIN: Partial<Record<keyof typeof ENDED_WHY, string>> = {
-  device_signed_out: "this machine signed out of Align, and is signed in again now",
-  access_lost: "this machine lost access to its Align workspace, and can reach it again now",
-};
+type EndedWhy = NonNullable<Latch["ended"]>;
 
 /**
  * The way out of a latch nothing can lift from the web any more (B6), or, when the session can be shared there again now
  * (`reshare`), the way back (C6-2), with `align sync` first while the ended shares are unread, and, signed out, both
  * ways in one sentence (`more`, cycle 12, section 6): worded by `latchWayOut`, which every notice about a share that ended
- * uses too, so the deny and the notices never give different advice (C9-2).
+ * uses too, so the deny and the notices never give different advice (C9-2). Why it ended is `endedWhyWords`, as
+ * `align latch status` says it (a share a replacing `align login` ended never reads as signed out, cycle 13).
  */
-function endedNote(ended: keyof typeof ENDED_WHY, lid: string, reshare = false, release: ReleaseReaches | null = null, more: ShareAgain = {}): string {
-  const again = reshare ? ENDED_AGAIN[ended] : undefined;
-  if (again) return `Its sharing ended (${again}), so ${latchWayOut(lid, true, "model", null, more)}`;
-  const why = ENDED_WHY[ended] ?? ENDED_WHY.sharing_ended;
+function endedNote(ended: EndedWhy, lid: string, reshare = false, release: ReleaseReaches | null = null, more: ShareAgain = {}, relogin = false): string {
+  if (reshare && ended !== "sharing_ended") return `Its sharing ended (${endedWhyWords(ended, true, relogin)}), so ${latchWayOut(lid, true, "model", null, more)}`;
+  const why = endedWhyWords(ended, false, relogin);
   // A hold whose release still reaches it can still be lifted from the web; its stop, if any, can't (C10-4).
   if (release?.goals.length) return `Its sharing has since ended (${why}), so ${latchWayOut(lid, false, "model", release)}`;
   if (more.login) return `Its sharing has since ended (${why}), so ${latchWayOut(lid, false, "model", null, more)}`;
@@ -951,12 +941,12 @@ const TELL_USER = "Tell the user and wait for instructions.";
 /** The stop deny: the plain wording, or, when the session's sharing ended, how the user gets out. */
 export function stopReason(latch: Latch | null, lid: string): string {
   if (!latch?.ended) return DENY_REASON;
-  return `Align: this session was stopped from its Align workspace. ${endedNote(latch.ended, lid, !!latch.reshare, latch.release ?? null, againOf(latch))} ${TELL_USER}`;
+  return `Align: this session was stopped from its Align workspace. ${endedNote(latch.ended, lid, !!latch.reshare, latch.release ?? null, againOf(latch), !!latch.relogin)} ${TELL_USER}`;
 }
 
 function holdDenyReason(h: HoldLatch | null, lid: string): string {
   const base = holdReason(h);
-  return `${h?.ended ? `${base} ${endedNote(h.ended, lid, !!h.reshare, h.release ?? null, againOf(h))}` : base} ${TELL_USER}`;
+  return `${h?.ended ? `${base} ${endedNote(h.ended, lid, !!h.reshare, h.release ?? null, againOf(h), !!h.relogin)}` : base} ${TELL_USER}`;
 }
 
 /** The goal-hold latch: a hold file that names a hold, or one that can't be read, blocks every tool (read-only ones too). */
@@ -1510,7 +1500,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         // Its share ended, and whether its person stopped it on the web is not read yet: not asked for (C12-3).
         const waits = !already && !kept && endedUnread(hot);
         if (!already && !kept && !waits) spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed.workspace_id, rule_dir: dir, ts });
-        const self = already ? "" : kept ? " This session stays private: its sharing was stopped (or its history deleted)." : waits ? ` ${DIR_UNREAD}` : " This session too; your next prompt carries the goal.";
+        const self = already ? "" : kept ? " This session stays private: its sharing was stopped (or its history deleted)." : waits ? ` ${DIR_UNREAD}` : goal ? " This session too; your next prompt carries the goal." : " This session too, with no goal (its usage counts as unallocated).";
         return `Align: new sessions in ${dir} are now shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : ""}.${replaces ? ` This replaces the current rule (${replaces}).` : ""}${self}${goal ? heldNote(goal) : ""} \`::align unshare --dir\` turns it off.`;
       }
       if (!confirm) {

@@ -110,6 +110,8 @@ export interface ShareFacts {
   /** "login": a share a new `align login` ended (the pairing it replaced was this machine's), not a sign-out the
    *  developer asked for, so its words never say this machine signed out or is signed in "again" (cycle 12, section 6). */
   via?: "login";
+  /** With `via`: this machine signed out since, so the end now reads as a sign-out's (E2E-AGENT cycle 13, section 5). */
+  out_since?: true;
   /** A share asked for here that had not reached the server yet (still pending) when the sign-out ended it. */
   unsent?: true;
 }
@@ -131,6 +133,10 @@ export interface ShareNow {
   login?: boolean;
   /** a stop latch or a goal hold blocks its tools */
   latched: boolean;
+  /** false when the cached `/me` says its person is no longer a member of its workspace (neither this device's
+   *  workspaces nor `other_workspaces` list it: removed, or they left); absent when that is not known (an older server
+   *  sends no `other_workspaces`) or it is listed (E2E-AGENT cycle 13, section 5). */
+  member?: false;
   release: ReleaseReaches | null;
 }
 
@@ -173,6 +179,12 @@ function words(key: string, f: ShareFacts): string {
       return `Align: this machine is signed in to Align again, but this sign-in does not reach ${f.ws}, so this session can't be shared there again from here; its usage stays on this machine.`;
     case "noreach:relogin_noreach":
       return `Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in, and this sign-in does not reach ${f.ws}, so this session can't be shared there again from here; its usage stays on this machine.`;
+    case "noreach:signed_in_removed":
+      return `Align: this machine is signed in to Align again, but you are no longer a member of ${f.ws} in Align (you were removed from it or left it), so this session can't be shared there again from here; its usage stays on this machine.`;
+    case "noreach:relogin_removed":
+      return `Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in, and you are no longer a member of ${f.ws} in Align (you were removed from it or left it), so this session can't be shared there again from here; its usage stays on this machine.`;
+    case "noreach:removed_again":
+      return `Align: you are no longer a member of ${f.ws} in Align (you were removed from it or left it), so this session can't be shared there again from here; its usage stays on this machine.`;
     case "noreach:access_lost":
       return `Align: this session stopped sharing because you no longer have access to ${f.ws} in Align (you were removed from it or left it); its usage stays on this machine from now on.`;
     case "noreach:access_lost_again":
@@ -257,11 +269,15 @@ export function shareNotice(lid: string, id: string, f: ShareFacts, now: ShareNo
     // page or at a re-invite), not the sign-in (cycle 12, section 6).
     if (was === "noreach") return out("reshare:workspace_back");
     // Ended by a new `align login` that replaced this machine's pairing: it never signed out (cycle 12, section 6).
-    if (!prev && f.via === "login" && now.ended === "device_signed_out") return out("reshare:relogin");
+    if (!prev && f.via === "login" && !f.out_since && now.ended === "device_signed_out") return out("reshare:relogin");
     return out(now.ended === "device_signed_out" || was === "out" ? "reshare:signed_in" : "reshare:workspace_back");
   }
-  if (!prev && f.via === "login" && now.ended === "device_signed_out") return out("noreach:relogin_noreach");
-  if (now.ended === "device_signed_out" || (was === "out" && now.signed_in)) return out("noreach:signed_in_noreach");
+  // Out of its workspace because its person is no longer a member: the removal is named, not this sign-in's reach, so
+  // nobody signs in again hoping to tick it (E2E-AGENT cycle 13, section 5).
+  const removed = now.member === false;
+  if (!prev && f.via === "login" && !f.out_since && now.ended === "device_signed_out") return out(removed ? "noreach:relogin_removed" : "noreach:relogin_noreach");
+  if (removed && now.ended === "device_signed_out") return out(was === "reshare" ? "noreach:removed_again" : "noreach:signed_in_removed");
+  if (now.ended === "device_signed_out" || (was === "out" && now.signed_in)) return out(removed ? "noreach:signed_in_removed" : "noreach:signed_in_noreach");
   return out(was === "reshare" ? "noreach:access_lost_again" : "noreach:access_lost");
 }
 
@@ -270,4 +286,17 @@ export function shareNotice(lid: string, id: string, f: ShareFacts, now: ShareNo
 export function shareRetell(id: string, w: ShareWords, told: ShareTold | null, fresh: boolean): boolean {
   if (fresh || !told || told.id !== id) return fresh;
   return situation(told.key) !== situation(w.key) || (!!w.tail && w.tail !== told.tail);
+}
+
+/**
+ * Why a share ended, as the deny and `align latch status` (`brief`) say it, worded in one place: `again`, it can be
+ * shared there again now; `relogin`, a new `align login` that replaced this machine's pairing ended it while this machine
+ * is signed in, so never that it signed out, as its notice says (E2E-AGENT cycle 13, section 5).
+ */
+export function endedWhyWords(why: NonNullable<ShareNow["ended"]>, again: boolean, relogin = false, brief = false): string {
+  if (why === "device_signed_out" && relogin) return "a new sign-in on this machine (`align login`) ended its share from the earlier sign-in";
+  const out = brief ? "this machine signed out" : "this machine signed out of Align";
+  if (why === "device_signed_out") return again ? `${out}, and is signed in again now` : out;
+  if (why === "access_lost") return again ? "this machine lost access to its Align workspace, and can reach it again now" : "this machine no longer has access to its Align workspace";
+  return "the Align server no longer has this session's share";
 }
