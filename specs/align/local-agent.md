@@ -2796,7 +2796,9 @@ destinations), ignoring variables, globs and `/dev/` targets; `git add` stages a
 is not an edit (A1-local-1); shell writes SHALL never be held. Commit subjects SHALL come from `git commit -m` including
 the heredoc form, and a commit SHALL count only once it was made (A2-local-5): its command's `PostToolUse` (not
 `PostToolUseFailure`) with this build's Claude Code plugin, else the repo's HEAD reflog holding a commit with that
-subject made since (checked at the session's next hook and by the sync pass; a commit still missing when the turn ends
+subject among the lines logged after the call was seen (the reflog's length is recorded at `PreToolUse`, so a line's
+date, which `GIT_COMMITTER_DATE` can set to anything, never decides it; a line an older build recorded without that
+length counts when dated since the call) (checked at the session's next hook and by the sync pass; a commit still missing when the turn ends
 never counts). The `align sync` pass SHALL also detect files changed in a shared session's repo working tree or in
 new commits since its previous pass, attribute them to the session most recently active there with `via: "git"`,
 take only a baseline on the first pass, and never use them to hold an edit. A file whose latest change a hook
@@ -2821,6 +2823,11 @@ nobody again (A2-local-6).
 
 - **WHEN** a Claude Code session's `git commit -m 'Cut over reads to the new cluster'` exits 1 (`PostToolUseFailure`), a Codex session's `git commit -m 'Never ran'` and an older plugin's `git commit -m 'Tweak db'` are seen by the hook but never run, and then the Codex session really commits `Add c` (test `findings19` "a failed `git commit -m` ...")
 - **THEN** another session's card names no commit, and the only commit item that goes up is `Add c`
+
+#### Scenario: A commit dated long ago
+
+- **WHEN** a Codex session's repo already has a commit `Same subject` before its `git commit -m 'Same subject'` is seen and that command never runs, and then its `git commit -m 'Dated long ago'` really runs with `GIT_COMMITTER_DATE` set to 1970 (test `findings19` "a Codex commit counts from the reflog lines logged after its call ...")
+- **THEN** only `Dated long ago` goes up as a commit
 
 #### Scenario: A script's change, then a commit of it
 

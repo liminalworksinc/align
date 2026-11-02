@@ -52,7 +52,7 @@ import { matchRule, readRules, removeRule, setRule } from "../shared/rules.ts";
 import { queueSteering, steeringLine, unsharedNote } from "../shared/steering.ts";
 import type { DriftFile, FeedFile, Goal, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
 import { CLAIM_MS, collisions, commitSubject, crossOverlap, display, editedPaths, liveGoalId, podReport, rawActs, readPaths, record, shellWrites, siblingChanges, siblingNews, activityHot, type Act, type StartingShare } from "./siblings.ts";
-import { changedSince, COMMIT, expectations, settle } from "./evidence.ts";
+import { changedSince, COMMIT, expectations, reflogMark, settle } from "./evidence.ts";
 
 export interface HookInput {
   session_id?: string;
@@ -1186,7 +1186,10 @@ function siblingEdits(home: string, harness: Harness, lid: string, input: HookIn
   const acts: Act[] = [...files.map((p): Act => ({ t: "edit", at, p, g, ...u, ...proof(p), ...ag })), ...shell.map((p): Act => ({ t: "edit", at, p, g, sh: 1, ...u, ...proof(p), ...ag }))];
   for (const p of readPaths(harness, input.tool_name, input.tool_input, cwd)) acts.push({ t: "read", at, p, g, ...ag });
   // A commit counts once its own call ran (PostToolUse), or the repo has it (A2-local-5).
-  if (subject) acts.push({ t: "commit", at, s: subject, g, ...u, ...(post && id ? { c: 1 as const } : cwd ? { d: cwd } : {}) });
+  if (subject) {
+    const mark = !(post && id) && cwd ? reflogMark(cwd) : null;
+    acts.push({ t: "commit", at, s: subject, g, ...u, ...(post && id ? { c: 1 as const } : cwd ? { d: cwd, ...(mark !== null ? { rl: mark } : {}) } : {}) });
+  }
   // Another person (or a claim) on this file: one note, never a hold, since nothing local gets overwritten.
   const cross = crossOverlap(home, lid, hot.share.workspace_id, goalId, [...files, ...shell], cwd);
   if (cross) acts.push({ t: "noted", at, ref: cross.ref });

@@ -231,7 +231,7 @@ export function happened(a: Act, v: Verdicts, confirmed: boolean, lazy: { home: 
     if (!a.u) return true; // an older build's line
     const d = verdictFor(a, v);
     if (d !== null) return d;
-    return !a.c && !!lazy && !!a.d && !!a.s && Date.now() - Date.parse(a.at) < PENDING_MS && committed(a.d, a.s, a.at);
+    return !a.c && !!lazy && !!a.d && !!a.s && Date.now() - Date.parse(a.at) < PENDING_MS && committed(a.d, a.s, a.at, a.rl);
   }
   if (a.t !== "edit" || a.via || !a.p) return true;
   const d = verdictFor(a, v);
@@ -329,19 +329,40 @@ function gitDir(dir: string): string | null {
   return null;
 }
 
-/** A commit with this subject made in the repo at `dir` at or after `at` (a minute of slack), from HEAD's reflog. */
-function committed(dir: string, subject: string, at: string): boolean {
+/** The byte length of HEAD's reflog in the repo at `dir` now (null: no repo or no reflog yet, counted as 0 when a repo
+ *  exists), recorded with a commit at its PreToolUse so the check below reads only what was logged after it. */
+export function reflogMark(dir: string): number | null {
+  const g = gitDir(dir);
+  if (!g) return null;
+  try {
+    return fs.statSync(path.join(g, "logs", "HEAD")).size;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * A commit with this subject made in the repo at `dir` since its call was seen, from HEAD's reflog. With `mark` (the
+ * reflog's length at PreToolUse) only the lines logged after it count, whatever their dates say: a reflog line carries
+ * the committer date, which `GIT_COMMITTER_DATE` (a rebase with `--committer-date-is-author-date`, a reproducible-build
+ * environment) can set to any time. Without one (a line an older build wrote), a line dated at or after `at`, less a
+ * minute, counts. A reflog shorter than the mark (expired or rewritten) falls back to the dates.
+ */
+function committed(dir: string, subject: string, at: string, mark?: number): boolean {
   const g = gitDir(dir);
   if (!g) return false;
   let text = "";
+  let byMark = false;
   try {
     const file = path.join(g, "logs", "HEAD");
     const size = fs.statSync(file).size;
+    byMark = typeof mark === "number" && mark <= size;
+    const from = byMark ? Math.max(mark as number, size - 256 * 1024) : Math.max(0, size - 256 * 1024);
+    const len = size - from;
     const fd = fs.openSync(file, "r");
     try {
-      const len = Math.min(size, 256 * 1024);
       const buf = Buffer.alloc(len);
-      fs.readSync(fd, buf, 0, len, size - len);
+      fs.readSync(fd, buf, 0, len, from);
       text = buf.toString("utf8");
     } finally {
       fs.closeSync(fd);
@@ -352,7 +373,7 @@ function committed(dir: string, subject: string, at: string): boolean {
   const since = Math.floor(Date.parse(at) / 1000) - 60;
   for (const line of text.split("\n")) {
     const m = /^[0-9a-f]+ [0-9a-f]+ .*> (\d+) [+-]\d{4}\tcommit(?: \([^)]*\))?: (.*)$/.exec(line);
-    if (m && Number(m[1]) >= since && m[2].trim().slice(0, 120) === subject) return true;
+    if (m && (byMark || Number(m[1]) >= since) && m[2].trim().slice(0, 120) === subject) return true;
   }
   return false;
 }
@@ -375,7 +396,7 @@ export function settle(home: string, lid: string, final: boolean, record: (acts:
       if (shows(a.p, a.v) && !explained(home, lid, a)) out.push({ t: "ran", at, u: a.u, p: a.p });
       else if (final) out.push({ t: "failed", at, u: a.u, p: a.p });
     } else if (a.t === "commit" && a.s && a.d) {
-      if (committed(a.d, a.s, a.at)) out.push({ t: "ran", at, u: a.u, p: COMMIT });
+      if (committed(a.d, a.s, a.at, a.rl)) out.push({ t: "ran", at, u: a.u, p: COMMIT });
       else if (final) out.push({ t: "failed", at, u: a.u, p: COMMIT });
     }
   }

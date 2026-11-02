@@ -52,6 +52,8 @@ export interface Act {
   v?: Expect;
   /** commit: the folder it was made in, where the repo is checked for it when there is no PostToolUse (A2-local-5). */
   d?: string;
+  /** commit: HEAD's reflog length when the call was seen; only lines logged after it can confirm the commit. */
+  rl?: number;
   /** Recorded from a Claude Code subagent's tool call (A2-local-3). */
   ag?: 1;
   /** edit: written through a shell command, which counts only if the command ran and its file changed. */

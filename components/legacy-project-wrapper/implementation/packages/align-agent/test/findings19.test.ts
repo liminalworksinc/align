@@ -269,6 +269,28 @@ describe("A2-local-5: a commit counts only once it was made", () => {
     const commits = fake.activity.filter((a) => a.kind === "commit" && a.mine).map((a) => a.text);
     assert.deepEqual(commits, ["Add c"]);
   });
+
+  test("a Codex commit counts from the reflog lines logged after its call, whatever date GIT_COMMITTER_DATE gives them; an older commit with that subject does not", async () => {
+    const { fake, t } = await world();
+    const repo = gitRepo(t, "dated");
+    const C = await shared(t, repo, "codex");
+    const old = { ...process.env, GIT_COMMITTER_DATE: "1970-01-01T00:00:00Z", GIT_AUTHOR_DATE: "1970-01-01T00:00:00Z" };
+    // A commit with the same subject made before the call is not this call's commit.
+    fs.writeFileSync(path.join(repo, "a.txt"), "a\n");
+    execFileSync("git", ["-C", repo, "add", "a.txt"]);
+    execFileSync("git", ["-C", repo, "commit", "-qm", "Same subject"]);
+    pre(t, C, "Bash", { command: "git commit -m 'Same subject'" });
+    stop(t, C);
+    // A real commit whose reflog line is dated 1970 (a reproducible-build environment) still counts.
+    fs.writeFileSync(path.join(repo, "b.txt"), "b\n");
+    pre(t, C, "Bash", { command: "git add b.txt && git commit -m 'Dated long ago'" });
+    execFileSync("git", ["-C", repo, "add", "b.txt"], { env: old });
+    execFileSync("git", ["-C", repo, "commit", "-qm", "Dated long ago"], { env: old });
+    stop(t, C);
+    await sync(t);
+    const commits = fake.activity.filter((a) => a.kind === "commit" && a.mine).map((a) => a.text);
+    assert.deepEqual(commits, ["Dated long ago"]);
+  });
 });
 
 describe("A2-local-6: the git pass credits a change once, to the right session", () => {
