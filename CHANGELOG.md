@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- End-to-end test cycles 1 to 12 (real browsers, the hosted edge, MCP clients, and the real `align` CLI and hooks under
+- End-to-end test cycles 1 to 13 (real browsers, the hosted edge, MCP clients, and the real `align` CLI and hooks under
   real Claude Code sessions). Every finding is fixed with a regression test, among them: directives fetched by cursor;
   the server's clock used for every timestamp an agent sends; device sign-out, member removal and re-pairing end or
   keep shares consistently, with pending revokes kept until the server confirms them; login, logout and sync passes
