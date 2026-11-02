@@ -117,3 +117,50 @@ describe("C7-1: shared again toward the goal already in context, after a folder 
     assert.equal(prompt(t, B.sid, "go on", dir)?.hookSpecificOutput?.additionalContext, undefined, "and the prompt after it nothing");
   });
 });
+
+describe("C7-2: signed out and in again, the session's notice says what holds now, as its deny and the status views do", () => {
+  const AGAIN = 'Align: this machine is signed in to Align again. To share this session again, type `::align share` here (it counts toward "Ship the v2 onboarding flow" again).';
+  const LATCHED = " It was stopped or held from the web: once it is shared again, that can be lifted there; until then its tools stay blocked.";
+
+  test("stopped from the web, then `align logout` and `align login`: the next prompt tells the signed-in-again notice, never `align login` or `align stop-sharing`; a session not stopped gets it at its next start", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    const B = await shared(t);
+    fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [A.key], goal: null, binding: null });
+    await sync(t);
+    await relogin(t);
+    const told = prompt(t, A.sid, "go on", A.cwd);
+    assert.equal(told?.systemMessage, AGAIN + LATCHED);
+    assert.match(deny(t, A) ?? "", /so the user can share it there again by typing `::align share` in this session/);
+    assert.equal(start(t, B.sid, "resume", B.cwd)?.systemMessage, AGAIN);
+    assert.equal(prompt(t, A.sid, "go on", A.cwd)?.systemMessage, undefined, "once");
+    assert.match(prompt(t, A.sid, "::align share confirm", A.cwd).reason, /sharing requested/);
+    await sync(t);
+    assert.ok(!hot(t, A.lid).notices.some((x) => /signed (in to|out of) Align/.test(x.text)), "shared again: neither notice is left");
+  });
+
+  test("signed in again and then out again before the next prompt: the sign-out notice holds; signed in with a pairing that does not reach the workspace: it says so, as the deny does", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [A.key], goal: null, binding: null });
+    await sync(t);
+    await relogin(t);
+    assert.equal((await runCli(t, ["logout"])).code, 0);
+    const out = prompt(t, A.sid, "go on", A.cwd);
+    assert.match(out?.systemMessage ?? "", /^Align: this session stopped sharing because this machine signed out of Align; .*run `align login` in a terminal, then type `::align share` here/);
+    assert.doesNotMatch(out.systemMessage, /signed in to Align again/);
+
+    const acme = fake.workspaces[0];
+    fake.workspaces = [];
+    assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
+    const lid8 = A.lid.slice(0, 8);
+    assert.equal(
+      prompt(t, A.sid, "go on", A.cwd)?.systemMessage,
+      `Align: this machine is signed in to Align again, but this sign-in does not reach Acme, so this session can't be shared there again from here; its usage stays on this machine. It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid8}\` in a terminal.`,
+    );
+    assert.match(deny(t, A) ?? "", /tools stay blocked until the user runs `align stop-sharing /);
+    fake.workspaces = [acme];
+    await sync(t);
+    assert.match(prompt(t, A.sid, "go on", A.cwd)?.systemMessage ?? "", new RegExp(`^${AGAIN.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}${LATCHED.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), "it can reach the workspace again: told once more");
+  });
+});

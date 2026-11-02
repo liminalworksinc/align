@@ -123,7 +123,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   const pending = ctx.db.prepare("SELECT * FROM pending_bindings WHERE local_id=?").get(lid) as
     | { id: string; goal_id: string | null; goal_json: string | null; cause: string; directive_id: string | null }
     | undefined;
-  const notices = ctx.db.prepare("SELECT id, text FROM notices WHERE local_id=? ORDER BY created_at").all(lid) as { id: string; text: string }[];
+  const notices = ctx.db.prepare("SELECT id, text FROM notices WHERE local_id=? ORDER BY created_at, rowid").all(lid) as { id: string; text: string }[];
   const pendingDirs = (
     ctx.db
       .prepare("SELECT d.id AS id, d.kind AS kind FROM directive_sessions ds JOIN directives d ON d.id=ds.directive_id WHERE ds.local_id=? AND ds.state='received' ORDER BY d.seq")
