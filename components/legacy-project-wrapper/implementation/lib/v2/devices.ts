@@ -387,6 +387,25 @@ export function userCodeOf(b: Record<string, unknown>): string {
   return t;
 }
 
+/** The workspaces an approval grants, from `workspace_ids`: a list of workspace ids, each kept once. A body that is
+ *  not one is 400 in a person's words, never the field's name (E2E-WEB cycle 12 W3); an id that is no workspace of
+ *  theirs is decided at approval (WORKSPACE_CHOSEN_NOT_YOURS). */
+export function workspaceIdsOf(b: Record<string, unknown>): string[] {
+  const v = b.workspace_ids ?? [];
+  if (!Array.isArray(v) || v.some((x) => typeof x !== "string" || x.trim().length > 64)) throw badRequest(WORKSPACES_UNREADABLE);
+  if (v.length > WORKSPACES_PER_APPROVAL) throw badRequest(TOO_MANY_WORKSPACES);
+  return [...new Set((v as string[]).map((x) => x.trim()).filter(Boolean))];
+}
+
+/** Workspaces one approval may grant. */
+export const WORKSPACES_PER_APPROVAL = 50;
+
+/** An approval whose workspaces are not a list of workspace ids. */
+export const WORKSPACES_UNREADABLE = "This approval doesn't say which of your workspaces the device may use, so nothing was approved. Tick your workspaces again.";
+
+/** An approval naming more workspaces than one may grant. */
+export const TOO_MANY_WORKSPACES = `One approval can give a device at most ${WORKSPACES_PER_APPROVAL} workspaces, so nothing was approved. Tick fewer workspaces.`;
+
 /** A code longer than any align login shows. */
 export const LONG_CODE = "That code is too long. Enter the code shown by align login.";
 

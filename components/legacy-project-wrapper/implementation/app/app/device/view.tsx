@@ -78,10 +78,13 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
 
   /** The field changed to another code: the panel and its ticks belong to the device looked up before, so they go, as
    *  a new Look up would clear them (E2E-WEB cycle 10 C10-1); a Look up still on its way for the code before is dropped
-   *  when it answers (C11-1). */
+   *  when it answers (C11-1). A refusal shown is about the code before ("No device is waiting for that code"), so it
+   *  goes too, also when no panel was open (E2E-WEB cycle 12 W1). */
   const edit = (next: string) => {
+    const other = codeKey(next) !== codeKey(field.current);
     setCode(next);
     field.current = next;
+    if (other) act.setError(null);
     if (pending && codeKey(next) !== codeKey(pending.code)) {
       setPending(null);
       setChosen([]);

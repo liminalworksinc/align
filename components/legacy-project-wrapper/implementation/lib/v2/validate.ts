@@ -51,7 +51,13 @@ const MARK = /(?!\u200D)[\p{M}\p{Grapheme_Extend}\p{Emoji_Modifier}]/gu;
  *  conjuncts fit; a chain of emoji joined into one "character" (`👩‍👩‍…`) does not (E2E-WEB cycle 10 C10-3). */
 export const NAME_PARTS_PER_CHAR = 16;
 
-/** A one-line name (a device name, Z4): cleaned (`cleanName`) and trimmed; nothing left is 400 "<k> is required". At
+/** Combining marks and spaces: a name of only these (a variation selector such as U+FE0F, the combining grapheme joiner
+ *  U+034F, an accent with no letter under it) renders as nothing, so it is blank, as `align login` refuses it locally
+ *  (E2E-AGENT cycle 12, section 6). */
+const MARKS_AND_SPACES = /[\p{M}\s]+/gu;
+
+/** A one-line name (a device name, Z4): cleaned (`cleanName`) and trimmed; nothing left, or nothing but combining marks,
+ *  is 400 "<k> is required". At
  *  most `max` characters as a person reads them (grapheme clusters, W6: never UTF-16 units, so 100 emoji fit), each
  *  with at most `NAME_MARKS_PER_CHAR` combining marks (C9-3), and at most 16 bytes of UTF-8 per character allowed, which
  *  only long emoji sequences (families, flags) reach: refused in words the person can act on, never a byte count they
@@ -60,7 +66,7 @@ export function oneLine(b: Body, k: string, max = 300): string {
   const v = b[k];
   if (typeof v !== "string") throw badRequest(`${k} must be a string`);
   const t = cleanName(v).trim();
-  if (!t) throw badRequest(`${k} is required`);
+  if (!t.replace(MARKS_AND_SPACES, "")) throw badRequest(`${k} is required`);
   const chars = [...graphemes.segment(t)].map((g) => g.segment);
   if (chars.length > max) throw badRequest(`${k} is too long (max ${max} characters)`);
   if (chars.some((c) => (c.match(MARK)?.length ?? 0) > NAME_MARKS_PER_CHAR)) throw badRequest(`${k} has a character with too many accents or marks on it (at most ${NAME_MARKS_PER_CHAR} on one character)`);

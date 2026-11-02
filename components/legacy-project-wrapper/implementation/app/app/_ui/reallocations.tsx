@@ -48,7 +48,7 @@ function recordedLine(action: string, r: Reallocation, after: Reallocation | nul
     case "launch":
       return "Recorded: you launched the new targets. Agents on these goals hear them at their next turn.";
     case "not_yet":
-      return "Recorded: you decided not yet. Agents keep the old targets until someone launches them.";
+      return "Recorded: you decided not yet. Agents keep the old targets until someone launches the new ones.";
     case "counter":
       return `Recorded: you suggested other targets to ${r.requester.name}. They accept them, then they can be approved.`;
     case "accept_counter":

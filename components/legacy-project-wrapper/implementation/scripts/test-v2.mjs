@@ -3143,7 +3143,8 @@ try {
     check(
       "members (E2E-AGENT cycle 2): removing a member ends their live sessions in that workspace in the same transaction (stopped, ended_reason member_removed, open epoch closed) and expires the requests waiting on them; Stop and Resume then -> 409 member_removed with a clear reason and no directive; the owner's list drops the session; a hold no longer reaches it",
       cpB.status === 201 && stopB.status === 200 && rmB.status === 204 && rowB?.state === "stopped" && rowB.ended_reason === "member_removed" && openB === 0 && target(cpB.json.request.id, SB) === "expired" && vB?.state === "expired" &&
-        stopAfter.status === 409 && stopAfter.json?.error === "member_removed" && /no longer a member of this workspace/.test(stopAfter.json?.message ?? "") && /align stop-sharing/.test(stopAfter.json?.message ?? "") &&
+        stopAfter.status === 409 && stopAfter.json?.error === "member_removed" &&
+        stopAfter.json.message === `This session's sharing ended when ${CM.name} left this workspace, so a stop or resume can't reach it. Once ${CM.name} is back in the workspace and the machine that shared it has the workspace again, ::align share in that session shares it again, and then Stop and Resume here reach it.` &&
         resumeAfter.status === 409 && resumeAfter.json?.error === "member_removed" && !allB.some((s) => s.session_key === SB) && holdB.status === 201 && dirCount(SB) === dirsB,
       `${cpB.status} ${stopB.status} ${rmB.status} ${JSON.stringify(rowB)} ${openB} ${stopAfter.text} ${resumeAfter.text} ${JSON.stringify(vB)} ${holdB.status} ${dirsB}/${dirCount(SB)}`,
     );
@@ -3237,6 +3238,27 @@ try {
     const rmAgain = await ca(CO, "DELETE", `/members/${CM.id}`);
     const endedAgain = cRow(SB)?.ended_reason;
     await invite();
+    // E2E-AGENT cycle 12, section 6: back in the workspace, Stop and Resume say what shares the session again now:
+    // its machine given the workspace again, then ::align share there; never only align stop-sharing.
+    const dirsBack = dirCount(SB);
+    const backNoMachine = await ca(CO, "POST", `/sessions/${SB}/stop`, {});
+    const backNoMachineOwn = await ca(CM, "POST", `/sessions/${SB}/resume`, {});
+    // The machine that shared it last: the new pairing (DC) that shared it again after C6-3.
+    const sbDevice = withDb((d) => d.prepare("SELECT device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(CW, SB))?.device_id;
+    withDb((d) => d.prepare("INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(sbDevice, CW));
+    const backMachine = await ca(CO, "POST", `/sessions/${SB}/resume`, {});
+    const backMachineOwn = await ca(CM, "POST", `/sessions/${SB}/stop`, {});
+    const BACK_LEAD = (who) => `This session's sharing ended when ${who} left this workspace, so a stop or resume can't reach it.`;
+    const BACK_THEN = "::align share in that session shares it again, and then Stop and Resume here reach it.";
+    check(
+      "c12 member_removed (E2E-AGENT cycle 12, section 6): Stop or Resume on a session that ended when its person left, once they are back, says what shares it again now: \"Once the machine that shared it has this workspace again, ::align share in that session shares it again, and then Stop and Resume here reach it.\", and once the machine has it again \"Its machine, Cato's laptop, has this workspace again: ::align share …\"; \"you\" to the person themself; never align stop-sharing; no directive",
+      [backNoMachine, backNoMachineOwn, backMachine, backMachineOwn].every((r) => r.status === 409 && r.json?.error === "member_removed" && !/stop-sharing/.test(r.json.message)) &&
+        backNoMachine.json.message === `${BACK_LEAD(CM.name)} Once the machine that shared it has this workspace again, ${BACK_THEN}` &&
+        backNoMachineOwn.json.message === `${BACK_LEAD("you")} Once the machine that shared it has this workspace again, ${BACK_THEN}` &&
+        backMachine.json.message === `${BACK_LEAD(CM.name)} Its machine, Cato's laptop, has this workspace again: ${BACK_THEN}` &&
+        backMachineOwn.json.message === `${BACK_LEAD("you")} Its machine, Cato's laptop, has this workspace again: ${BACK_THEN}` && dirCount(SB) === dirsBack,
+      `${sbDevice === DC.id} ${[backNoMachine, backNoMachineOwn, backMachine, backMachineOwn].map((r) => `${r.status} ${r.text}`).join(" | ")}`,
+    );
     withDb((d) => d.prepare("INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(DC.id, CW));
     const webStopEnded = await ca(CM, "POST", `/sessions/${SB}/stop-sharing`, {});
     const rowStopped = cRow(SB);
@@ -9518,7 +9540,7 @@ try {
     const sRlAct = (u, t, action, body) => sa(u, "POST", `/reallocations/${t?.id}/${action}`, body);
     const sRlNow = (t) => withDb((d) => d.prepare("SELECT state, revision, launch, launch_by FROM v2_reallocations WHERE id = ?").get(t?.id));
     const sRlAudit = (t, action) => withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE action = ? AND object_id = ?").all(action, t?.id).map((r) => r.actor_id));
-    const NOT_YET_RL = (who) => `${who} already decided not yet, so nothing changes: agents keep the old targets until someone launches these.`;
+    const NOT_YET_RL = (who) => `${who} already decided not yet, so nothing changes: agents keep the old targets until someone launches the new ones.`;
     const n1 = await sRl(10);
     const n1Ok = await sRlAct(SO, n1, "approve", { revision: 1 });
     const n1First = await sRlAct(SO, n1, "not_yet", { revision: 1 });
@@ -9527,7 +9549,7 @@ try {
     const n1Read = (await sa(SC, "GET", `/reallocations/${n1?.id}`)).json;
     const n1Launch = await sRlAct(SC, n1, "launch", { revision: 1 });
     check(
-      "c11 W2 (E2E-WEB cycle 11): Not yet on an approved target change already \"not yet\" is 409 wrong_state, \"You already decided not yet, so nothing changes: agents keep the old targets until someone launches these.\" to the person who said it and \"Sasha Owner already decided not yet, …\" to another launcher, and is not recorded again (one reallocation.not_yet, launch_by unchanged); can.not_yet then reads false and can.launch true, and Launch still launches",
+      "c11 W2 (E2E-WEB cycle 11): Not yet on an approved target change already \"not yet\" is 409 wrong_state, \"You already decided not yet, so nothing changes: agents keep the old targets until someone launches the new ones.\" to the person who said it and \"Sasha Owner already decided not yet, …\" to another launcher, and is not recorded again (one reallocation.not_yet, launch_by unchanged); can.not_yet then reads false and can.launch true, and Launch still launches",
       n1Ok.json?.state === "approved" && n1First.status === 200 && n1First.json?.launch === "not_yet" &&
         n1Again.status === 409 && n1Again.json?.error === "wrong_state" && n1Again.json.message === NOT_YET_RL("You") &&
         n1Other.status === 409 && n1Other.json?.error === "wrong_state" && n1Other.json.message === NOT_YET_RL(SO.name) &&
@@ -9630,6 +9652,212 @@ try {
     } else check("ui (Chrome) available for the c11 web fix checks", false, `no Chrome at ${CHROME}`);
   }
   // ==== end fix:c11-web ====
+
+  // ==== fix:c12-web ====
+  // Regression checks for the cycle-12 web walk (e2e-reports/cycle12/web.md): C12-1 (a refusal that opens with a
+  // person's name keeps its letter case), C12-2 (unknown_revision before the body, on every decision), W1 (the approval
+  // page's refusal goes when the code changes), W3 (approval refusals in a person's words) and W4 (one wording for a
+  // target change's Not yet). TO owns the workspace and TG, a Growth goal; "carol twelve" (TC, written in lower case)
+  // leads Growth, so TO and TC both decide on TG; TD, a Growth member, asks.
+  {
+    const tUsers = {};
+    for (const [who, name] of [
+      ["TO", "Tess Owner"],
+      ["TC", "carol twelve"],
+      ["TD", "Tomi Asker"],
+    ])
+      tUsers[who] = await signUp(who, name, `${who.toLowerCase()}@c12web.example.test`);
+    const { TO, TC, TD } = tUsers;
+    const TW = (await call("TO", "POST", "/api/v2/workspaces", { cookie: TO.cookie, body: { name: "C12 web fix workspace" } })).json?.id;
+    const ta = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${TW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const u of [TC, TD]) {
+      const i = await ta(TO, "POST", "/invites", { email: u.email, role: "member" });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const TTm = (await ta(TO, "POST", "/teams", { name: "Growth" })).json?.id;
+    await ta(TO, "POST", `/teams/${TTm}/members`, { user_id: TC.id, role: "lead" });
+    for (const u of [TD, TO]) await ta(TO, "POST", `/teams/${TTm}/members`, { user_id: u.id, role: "member" });
+    const tGoal = async (title, u = TO, team = TTm) => (await ta(u, "POST", "/goals", { title, visibility: "workspace", ...(team ? { team_id: team } : {}) })).json;
+    const TG = await tGoal("Ship 3000 robot arms");
+    const tAl = async (n) => {
+      const src = await tGoal(`Tomi's goal ${n}`, TD, null);
+      return (await ta(TD, "POST", "/alignments", { target_goal_id: TG?.id, source_goal_id: src?.id, choice: "contribution", session_keys: [] })).json;
+    };
+    const tCr = async (n) => {
+      const g = await tGoal(`Twelve change goal ${n}`);
+      const cr = (await ta(TD, "POST", `/goals/${g?.id}/change-requests`, { base_version: 1, changes: { title: `Twelve change goal ${n}, renamed` }, reason: "Cycle 12" })).json;
+      return { g, cr };
+    };
+    const tRl = async (share) => (await ta(TD, "POST", "/reallocations", { targets: [{ goal_id: TG?.id, target_share: share }], note: "More here" })).json;
+    const tAlNow = (al) => withDb((d) => d.prepare("SELECT state, revision FROM v2_alignments WHERE id = ?").get(al?.id));
+    const tCrNow = (x) => withDb((d) => d.prepare("SELECT state, revision, launch FROM v2_change_requests WHERE id = ?").get(x.cr?.id));
+    const tRlNow = (t) => withDb((d) => d.prepare("SELECT state, revision, launch FROM v2_reallocations WHERE id = ?").get(t?.id));
+
+    // -- C12-2: every decision on an alignment, change request or target change sent for a revision it never reached
+    //    is 400 unknown_revision, even when its body is wrong too: the revision is checked before the body --
+    const FUTURE12 = (what) => `This ${what} has no revision 9: it is at revision 1, so nothing was recorded. Read it again and decide again.`;
+    const long = (n) => "x".repeat(n);
+    const c2Al = await tAl("c2");
+    const c2Cr = await tCr("c2");
+    const c2Rl = await tRl(13);
+    const c2Bodies = {
+      al: { revision: 9, choice: "bogus", keep: "x", note: long(5000) },
+      cr: { revision: 9, reason: "", note: long(2001), condition: long(2001), changes: "x", base_version: "x" },
+      rl: { revision: 9, targets: "x", reason: long(1001), note: long(1001) },
+    };
+    const c2Out = [];
+    for (const action of ["approve", "counter", "accept_counter", "reject", "withdraw", "revoke"]) c2Out.push(["alignment", action, "request", await ta(TO, "POST", `/alignments/${c2Al?.id}/${action}`, c2Bodies.al)]);
+    for (const action of ["approve", "approve_and_launch", "launch", "not_yet", "reject", "counter", "accept_counter", "acknowledge", "withdraw", "rebase"])
+      c2Out.push(["change request", action, "request", await ta(TO, "POST", `/goals/${c2Cr.g?.id}/change-requests/${c2Cr.cr?.id}/${action}`, c2Bodies.cr)]);
+    for (const action of ["approve", "approve_and_launch", "launch", "not_yet", "counter", "accept_counter", "reject", "withdraw"]) c2Out.push(["target change", action, "proposal", await ta(TO, "POST", `/reallocations/${c2Rl?.id}/${action}`, c2Bodies.rl)]);
+    const c2Wrong = c2Out.filter(([, , what, r]) => !(r.status === 400 && r.json?.error === "unknown_revision" && r.json.message === FUTURE12(what)));
+    check(
+      "c12 C12-2 (E2E-WEB cycle 12): every decision on an alignment (6 actions), a change request (10) and a target change (8) at revision 1, sent with revision 9 and a body that is wrong too (a bad choice, targets that are not a list, a reason or note over the limit, a bad base_version), is 400 unknown_revision \"This request|proposal has no revision 9: it is at revision 1, …\", never the body's refusal; nothing changes",
+      c2Out.length === 24 && c2Wrong.length === 0 &&
+        JSON.stringify([tAlNow(c2Al), tCrNow(c2Cr), tRlNow(c2Rl)]) === JSON.stringify([{ state: "pending", revision: 1 }, { state: "pending", revision: 1, launch: null }, { state: "pending", revision: 1, launch: null }]),
+      `${c2Wrong.map(([k, a, , r]) => `${k} ${a}: ${r.status} ${r.json?.error} ${r.json?.message}`).join(" | ")} || ${JSON.stringify([tAlNow(c2Al), tCrNow(c2Cr), tRlNow(c2Rl)])}`,
+    );
+
+    // -- W3: an approval whose workspaces are not a list of ids, or too many, is refused in a person's words --
+    const w3Code = insertPairing("Tess's laptop");
+    const w3Out = [];
+    for (const ids of ["x", [123], [long(65)], { a: TW }, Array.from({ length: 51 }, (_, i) => `ws_${String(i).padStart(10, "0")}`)])
+      w3Out.push(await call("TO", "POST", "/api/v2/device/approve", { cookie: TO.cookie, body: { user_code: w3Code.userCode, workspace_ids: ids } }));
+    const W3_LIST = "This approval doesn't say which of your workspaces the device may use, so nothing was approved. Tick your workspaces again.";
+    const W3_MANY = "One approval can give a device at most 50 workspaces, so nothing was approved. Tick fewer workspaces.";
+    const w3State = () => withDb((d) => d.prepare("SELECT state FROM v2_device_requests WHERE user_code = ?").get(w3Code.userCode)?.state);
+    const w3Pending = w3State();
+    const w3Ok = await call("TO", "POST", "/api/v2/device/approve", { cookie: TO.cookie, body: { user_code: w3Code.userCode, workspace_ids: [` ${TW} `, TW] } });
+    check(
+      "c12 W3 (E2E-WEB cycle 12): an approval whose workspace_ids is not a list, holds a number or an id longer than any workspace's, or is an object is 400 \"This approval doesn't say which of your workspaces the device may use, so nothing was approved. Tick your workspaces again.\"; 51 of them is 400 \"One approval can give a device at most 50 workspaces, …\"; never \"workspace_ids …\"; the code stays pending, and a list (spaces and repeats aside) then approves it",
+      w3Out.slice(0, 4).every((r) => r.status === 400 && r.json?.message === W3_LIST) && w3Out[4].status === 400 && w3Out[4].json?.message === W3_MANY &&
+        w3Out.every((r) => !/workspace_ids/.test(r.text)) && w3Pending === "pending" && w3Ok.status === 200 && w3Ok.json?.state === "approved",
+      `${w3Out.map((r) => `${r.status} ${r.json?.message}`).join(" | ")} || ${w3Pending} ${w3Ok.status} ${w3Ok.text.slice(0, 200)}`,
+    );
+
+    // -- W4: a second Not yet on a target change is refused in the words its Recorded line uses --
+    const NOT_YET_RL12 = (who) => `${who} already decided not yet, so nothing changes: agents keep the old targets until someone launches the new ones.`;
+    const w4Rl = await tRl(14);
+    await ta(TO, "POST", `/reallocations/${w4Rl?.id}/approve`, { revision: 1 });
+    await ta(TO, "POST", `/reallocations/${w4Rl?.id}/not_yet`, { revision: 1 });
+    const w4Again = await ta(TO, "POST", `/reallocations/${w4Rl?.id}/not_yet`, { revision: 1 });
+    const w4Other = await ta(TC, "POST", `/reallocations/${w4Rl?.id}/not_yet`, { revision: 1 });
+    check(
+      "c12 W4 (E2E-WEB cycle 12): a second Not yet on a target change is 409 \"You already decided not yet, so nothing changes: agents keep the old targets until someone launches the new ones.\" (\"Tess Owner already decided not yet, …\" to another launcher), the words of the app's Recorded line, never \"launches these\"",
+      w4Again.status === 409 && w4Again.json?.message === NOT_YET_RL12("You") && w4Other.status === 409 && w4Other.json?.message === NOT_YET_RL12(TO.name),
+      `${w4Again.text} | ${w4Other.text}`,
+    );
+
+    // -- the browser: C12-1 (ui) on a target-change card and a change-request card, W4 (ui), W1 (ui) --
+    const c1Rl = await tRl(15);
+    const c1RlOk = await ta(TO, "POST", `/reallocations/${c1Rl?.id}/approve`, { revision: 1 });
+    const w4UiRl = await tRl(16);
+    const w4UiOk = await ta(TO, "POST", `/reallocations/${w4UiRl?.id}/approve`, { revision: 1 });
+    const c1Cr = await tCr("c1");
+    const c1CrOk = await ta(TO, "POST", `/goals/${c1Cr.g?.id}/change-requests/${c1Cr.cr?.id}/approve`, { revision: 1 });
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      const errors = [];
+      const as = async (u) => {
+        const ctx = await browser.createBrowserContext();
+        const pg = await ctx.newPage();
+        pg.on("pageerror", (e) => errors.push(e.message));
+        await pg.setViewport({ width: 1100, height: 900 });
+        await pg.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        return pg;
+      };
+      const open = async (pg, p) => {
+        await pg.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await pg.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      };
+      const press = (pg, scope, label) => pg.evaluate((sc, t) => [...document.querySelectorAll(`${sc} button`)].find((b) => b.textContent?.trim() === t)?.click(), scope, label);
+      const hasButton = (pg, scope, label) => pg.waitForFunction((sc, t) => [...document.querySelectorAll(`${sc} button`)].some((b) => b.textContent?.trim() === t), { timeout: 15000 }, scope, label).catch(() => undefined);
+      const noticeOf = async (pg, card) => {
+        await pg.waitForFunction((c) => !!document.querySelector(`${c} [data-notice]`), { timeout: 15000 }, card).catch(() => undefined);
+        await pg.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        return pg.evaluate((c) => {
+          const n = document.querySelector(`${c} [data-notice]`);
+          return { notice: n?.getAttribute("data-notice") ?? null, text: n?.textContent?.trim() ?? "", focused: !!n && document.activeElement === n, card: document.querySelector(c)?.innerText ?? "" };
+        }, card);
+      };
+      try {
+        // C12-1 (ui): the owner's open target-change card, after carol twelve said not yet elsewhere.
+        const pO = await as(TO);
+        await open(pO, `/app/w/${TW}/alignments`);
+        const rlCard = `[data-reallocation="${c1Rl?.id}"]`;
+        await hasButton(pO, rlCard, "Not yet");
+        const c1RlOther = await ta(TC, "POST", `/reallocations/${c1Rl?.id}/not_yet`, { revision: 1 });
+        await press(pO, rlCard, "Not yet");
+        const c1RlUi = await noticeOf(pO, rlCard);
+        // W4 (ui): Not yet recorded on another card says what the refusal says.
+        const w4Card = `[data-reallocation="${w4UiRl?.id}"]`;
+        await hasButton(pO, w4Card, "Not yet");
+        await press(pO, w4Card, "Not yet");
+        const w4Ui = await noticeOf(pO, w4Card);
+        // C12-1 (ui): the owner's open change-request card, after carol twelve said not yet elsewhere.
+        await open(pO, `/app/w/${TW}/goals/${c1Cr.g?.id}`);
+        const crCard = `[data-cr="${c1Cr.cr?.id}"]`;
+        await hasButton(pO, crCard, "Not yet");
+        const c1CrOther = await ta(TC, "POST", `/goals/${c1Cr.g?.id}/change-requests/${c1Cr.cr?.id}/not_yet`, { revision: 1 });
+        await press(pO, crCard, "Not yet");
+        const c1CrUi = await noticeOf(pO, crCard);
+        check(
+          "c12 C12-1 (ui, E2E-WEB cycle 12): Not yet on a target-change card and on a change-request card left open while \"carol twelve\" (her name written in lower case) said not yet elsewhere reads, focused, \"Not recorded. carol twelve already decided not yet, so nothing changes: …\", the name as she wrote it and as the card spells it (\"carol twelve decided not yet\"), never \"Carol twelve\"",
+          c1RlOk.json?.state === "approved" && c1RlOther.status === 200 && c1RlUi.notice === "refused" && c1RlUi.focused && c1RlUi.text === `Not recorded. ${NOT_YET_RL12(TC.name)}` && c1RlUi.card.includes(`${TC.name} decided not yet`) &&
+            c1CrOk.json?.state === "approved" && c1CrOther.status === 200 && c1CrUi.notice === "refused" && c1CrUi.focused &&
+            c1CrUi.text === `Not recorded. ${TC.name} already decided not yet, so nothing changes: agents stay on version 1 until someone launches version 2.` && c1CrUi.card.includes(`${TC.name} decided not yet`) &&
+            ![c1RlUi.text, c1CrUi.text].some((t) => t.includes("Carol")),
+          `${JSON.stringify(c1RlUi).slice(0, 500)} || ${JSON.stringify(c1CrUi).slice(0, 500)}`,
+        );
+        check(
+          "c12 W4 (ui, E2E-WEB cycle 12): Not yet on a target-change card reads \"Recorded: you decided not yet. Agents keep the old targets until someone launches the new ones.\", the refusal's words (never \"launches them\")",
+          w4UiOk.json?.state === "approved" && w4Ui.notice === "done" && w4Ui.text === "Recorded: you decided not yet. Agents keep the old targets until someone launches the new ones.",
+          JSON.stringify(w4Ui).slice(0, 500),
+        );
+
+        // W1 (ui): a refusal shown for a code goes when the field is edited to another code; the same code in another
+        // format keeps it.
+        const codeField = 'main input[placeholder="BCDF-GHJK"]';
+        const pd = await as(TO);
+        const retype = async (code) => {
+          await pd.focus(codeField);
+          await pd.evaluate((f) => document.querySelector(f)?.select(), codeField);
+          await pd.keyboard.press("Backspace");
+          await pd.type(codeField, code);
+        };
+        const pageText = () => pd.evaluate(() => document.querySelector("main")?.innerText ?? "");
+        const nobody = "BCDF-BCDF";
+        const w1Pending = insertPairing("Tess's desktop");
+        await pd.goto(`${BASE}/app/device?code=${nobody}`, { waitUntil: "networkidle0" });
+        await press(pd, "main", "Look up");
+        await pd.waitForFunction(() => document.body.innerText.includes("No device is waiting for that code"), { timeout: 15000 }).catch(() => undefined);
+        const w1Shown = await pageText();
+        // The same code written another way (a space added at the end): the refusal is still about it.
+        await pd.focus(codeField);
+        await pd.keyboard.press("End");
+        await pd.type(codeField, " ");
+        const w1Same = await pageText();
+        const w1SameField = await pd.evaluate((f) => document.querySelector(f)?.value ?? "", codeField);
+        await retype(w1Pending.userCode);
+        const w1Other = await pageText();
+        await press(pd, "main", "Look up");
+        await pd.waitForFunction(() => document.body.innerText.includes("Tess's desktop"), { timeout: 15000 }).catch(() => undefined);
+        const w1Found = await pageText();
+        check(
+          "c12 W1 (ui, E2E-WEB cycle 12): on the approval page, \"No device is waiting for that code. …\" for a code nobody waits on stays while the field holds that code written another way (a space added), and goes when the field is edited to another code; Look up then opens that device's panel",
+          w1Shown.includes("No device is waiting for that code.") && w1SameField === `${nobody} ` && w1Same.includes("No device is waiting for that code.") && !w1Other.includes("No device is waiting") && w1Found.includes("Tess's desktop") && !w1Found.includes("No device is waiting"),
+          `${w1Shown.slice(0, 200)} || [${w1SameField}] ${w1Same.slice(0, 200)} || ${w1Other.slice(0, 200)} || ${w1Found.slice(0, 200)}`,
+        );
+        check("c12 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));
+      } catch (e) {
+        check("c12 web fix (ui) run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the c12 web fix checks", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end fix:c12-web ====
 
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));
@@ -10315,6 +10543,15 @@ try {
       "W3: a device name drops every invisible format character (Unicode category Cf: U+061C ARABIC LETTER MARK, U+2066 to U+2069, U+202A to U+202E, U+200B to U+200F, U+2060 to U+2064, U+FEFF, U+180E, U+00AD), so \"al<each>m…x laptop\" is stored as \"al\" + 22 \"m\" + \"x laptop\"; a name of only those characters and spaces -> 400 device_name is required",
       w3.status === 200 && w3Name === `al${"m".repeat(CF.length - 1)}x laptop` && w3Empty.status === 400 && w3Empty.json?.message === "device_name is required",
       `${w3.status} ${JSON.stringify(w3Name)} ${w3Empty.status} ${w3Empty.text}`,
+    );
+    // c12 (E2E-AGENT cycle 12, section 6): a name of nothing but combining marks (a variation selector, the combining
+    // grapheme joiner, accents with no letter) renders as nothing: blank, as align login refuses it locally.
+    const marksOnly = [];
+    for (const name of ["\uFE0F", "\u034F", " \uFE0F\u200B \u034F ", "\u0301\u0301"]) marksOnly.push(await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: name, public_key: newDeviceKeys().pub } }));
+    check(
+      "c12 device name (E2E-AGENT cycle 12, section 6): a device name of only U+FE0F, only U+034F, those with spaces and a zero-width space, or two accents with no letter is 400 device_name is required and starts no pairing (a mark on a letter, as in decomposed Vietnamese or a keycap, still counts: C9-3)",
+      marksOnly.every((r) => r.status === 400 && r.json?.message === "device_name is required" && !r.json?.user_code),
+      marksOnly.map((r) => `${r.status} ${r.text}`).join(" | "),
     );
     // W5 (E2E-WEB cycle 8): the zero-width joiner of an emoji sequence and the tags of a subdivision flag are kept (a
     // joiner between letters, and a lone tag, still go); W6: the limit counts characters as a person reads them.
