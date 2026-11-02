@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { CONDITIONS_UNCONFIRMED, companyMeasureId, conditionsUnconfirmedNote, conflictMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
 import type { Proposal, SimulationRun, StateView, TestStatus } from "@/lib/types";
 import type { ViewProps } from "./props";
-import { activeProposal, changedToday, currentGoal, priorVersion } from "./select";
+import { OPEN_STATES, activeProposal, changedToday, composerShowing, currentGoal, priorVersion } from "./select";
 import { Badge, Button, OWNER_LABEL, STATE_LABEL, Section, StateBadge, fmtTime } from "./ui";
 import { api, type Me } from "./useAlign";
 import { NextStepAction, ProgressStrip } from "./Handoff";
@@ -46,8 +46,6 @@ const RUN_KIND: Record<string, string> = {
   normal: "Normal run",
   interruption: "Outage test: the ticket system failed mid-run",
 };
-
-const OPEN_STATES = ["PENDING_SECURITY", "COUNTERED", "ACKNOWLEDGED_BY_PRODUCT", "DRAFT"];
 
 const inputCls =
   "w-full rounded-lg bg-white px-3 py-2 text-[16px] leading-relaxed text-zinc-900 ring-1 ring-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-600";
@@ -143,7 +141,6 @@ function PlanSection({ s, planId, planVersion }: { s: StateView; planId: string;
 
 export function ProposalsView(props: ViewProps) {
   const { s, me, selection } = props;
-  const [composing, setComposing] = useState(false);
   const [busy, setBusy] = useState(false);
   // Custom review (lane C): a stale/refused/recorded notice outlives the remount a state change causes.
   const [notice, setNotice] = useState<{ id: string; n: NonNullable<ReviewNotice> } | null>(null);
@@ -165,8 +162,9 @@ export function ProposalsView(props: ViewProps) {
   const noticed = notice ? s.proposals.find((p) => p.id === notice.id) : undefined;
   const active = selected ?? noticed ?? activeProposal(s);
   const isProduct = me.actor === "product";
-  // + New conflict and the Your turn card ask for the composer (props.compose) until a proposal is picked or sent.
-  const showComposer = isProduct && !openOne && (composing || !!props.compose || !active);
+  // + New conflict, the Your turn card and the inbox's Propose a change ask for the composer (props.compose) until a
+  // proposal is picked or sent. The rule is shared with Home (select.ts composerShowing).
+  const showComposer = composerShowing(s, me.actor, selection ?? null, !!props.compose, noticed);
   const L = labelsFor(s);
   const who = whoFor(L);
 
@@ -176,7 +174,7 @@ export function ProposalsView(props: ViewProps) {
         <div className="mb-2 flex items-center justify-between">
           <h2 className="al-lbl">Inbox</h2>
           {isProduct && !openOne && !showComposer && (
-            <Button kind="secondary" onClick={() => setComposing(true)}>
+            <Button kind="secondary" onClick={() => props.setCompose?.(true)}>
               Propose a change
             </Button>
           )}
@@ -192,7 +190,6 @@ export function ProposalsView(props: ViewProps) {
                   <button
                     type="button"
                     onClick={() => {
-                      setComposing(false);
                       props.setCompose?.(false);
                       props.select({ kind: "proposal", id: p.id });
                     }}
@@ -229,7 +226,7 @@ export function ProposalsView(props: ViewProps) {
 
       <main className="min-w-0 flex-1">
         {showComposer ? (
-          <Composer {...props} busy={busy} run={run} onSent={() => { setComposing(false); props.setCompose?.(false); }} />
+          <Composer {...props} busy={busy} run={run} onSent={() => props.setCompose?.(false)} />
         ) : active ? (
           // Keyed on state and revision count so Detail's local state (the untested tick) never carries over to a new revision.
           <Detail key={`${active.id}:${active.state}:${active.counter_versions.length}`} {...props} p={active} busy={busy} run={run} notice={notice?.id === active.id ? notice.n : null}

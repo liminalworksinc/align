@@ -1,4 +1,5 @@
-import type { Goal, SimulationRun, StateView } from "@/lib/types";
+import type { Goal, Proposal, SimulationRun, StateView } from "@/lib/types";
+import type { Selection } from "./useAlign";
 
 export function currentGoal(s: StateView, owner: "ceo" | "product" | "security"): Goal | undefined {
   const all = s.goals.filter((g) => g.owner_id === owner);
@@ -12,6 +13,19 @@ export function priorVersion(s: StateView, g: Goal | undefined) {
 
 export function activeProposal(s: StateView) {
   return [...s.proposals].reverse().find((p) => p.state !== "REJECTED") ?? null;
+}
+
+/** A proposal still being worked on (at most one is open at a time). */
+export const OPEN_STATES = ["PENDING_SECURITY", "COUNTERED", "ACKNOWLEDGED_BY_PRODUCT", "DRAFT"];
+
+/** Whether Proposals shows the asking team's composer: nothing open, and either a request for it (+ New conflict, the
+ *  Your turn card, the inbox's Propose a change: Home's `compose`) or no request to show. One rule for ProposalsView
+ *  (what it renders) and Home (the rail's + New conflict steps down while the composer is the screen's primary). */
+export function composerShowing(s: StateView, actor: string | null | undefined, selection: Selection | null, compose: boolean, noticed?: Proposal) {
+  if (actor !== "product" || s.proposals.some((p) => OPEN_STATES.includes(p.state))) return false;
+  if (compose) return true;
+  const selected = selection?.kind === "proposal" ? s.proposals.find((p) => p.id === selection.id) : undefined;
+  return !(selected ?? noticed ?? activeProposal(s));
 }
 
 /** Latest baseline and candidate runs (normal scenario) that share mission, seed and checks. Latest regardless of verdict: no cherry-picking a PASS. */

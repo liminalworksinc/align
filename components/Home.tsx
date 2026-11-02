@@ -17,7 +17,7 @@ import { WorkMap } from "@/components/WorkMap";
 import ConnectAI from "@/components/ConnectAI";
 import { ScenarioStudio } from "@/components/v6/ScenarioStudio";
 import { agreementStatus } from "@/components/launch";
-import { accepted, changedToday, currentGoal } from "@/components/select";
+import { accepted, changedToday, composerShowing, currentGoal } from "@/components/select";
 import { Badge, Button } from "@/components/ui";
 import { api, SESSION_ENDED, useAlign, type Selection } from "@/components/useAlign";
 import { NO_ANSWER_HOSTED, NO_ANSWER_WORKSPACE_LOCAL, roleSwitch, companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, poss, type Labels } from "@/lib/labels";
@@ -554,10 +554,11 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
           : { go: "proposals" };
   // One pink primary per screen: the rail's button steps down to secondary where the main column has its own primary
   // (Home's waiting-on-you cards, the decision record's "See work still on the old plan", and the asking team's
-  // composer, whose "Send proposal" is the screen's primary: on Proposals with nothing open, + New conflict only opens
-  // that same composer).
+  // composer while it is actually showing: its "Send proposal" is the screen's primary).
   const railQuiet =
-    (view === "turn" && turnCount > 0) || (view === "decision" && rel?.status === "ACCEPTED" && !!accepted(state)) || (view === "proposals" && !!newConflict.go);
+    (view === "turn" && turnCount > 0) ||
+    (view === "decision" && rel?.status === "ACCEPTED" && !!accepted(state)) ||
+    (view === "proposals" && composerShowing(state, me.actor, selection, compose));
   const myGoal = me.actor === "product" || me.actor === "security" ? currentGoal(state, me.actor) : undefined;
   const kr2 = ceo?.measures.find((m) => m.id === companyMeasureId(state));
   // Custom: the goal's current target. An approval swaps the owner's measure, not its objective.

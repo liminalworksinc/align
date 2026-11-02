@@ -841,8 +841,28 @@ async function phaseLayout(dir) {
       acc.status === 200 && answers >= 4 && want.every((w) => labels.has(w)) && short.length === 0,
       `answers=${answers} seen ${[...labels].join(", ")}; accept=${acc.status}; short: ${short.join(" | ")}`,
     );
-    // (g) part 2: two connected apps, one that read before the plan changed and one after. The rail says "Read the
-    // "Seen since the latest change" / "Last seen before the latest change" (the server's on_current_plan); the phone row counts them.
+    // (h) part 2: the asking team on Proposals after a finished proposal. With the composer showing (+ New conflict), the one
+    // pink primary is "Send proposal"; with a closed proposal open instead (no composer), it is the rail's + New conflict.
+    for (const width of [390, 1440]) {
+      const { page, ctx } = await open("product", width, 844);
+      const pinks = () =>
+        page.evaluate(() => [...document.querySelectorAll("button, a")].filter((b) => b.className.includes("bg-violet-700 text-black") && b.getBoundingClientRect().height > 0).map((b) => b.textContent.trim().slice(0, 40)));
+      await page.evaluate(() => [...document.querySelectorAll("aside button")].find((b) => b.textContent.trim() === "+ New conflict")?.click());
+      await sleep(900);
+      const composing = await pinks();
+      await page.evaluate(() => document.querySelector('main aside[aria-label="Proposal inbox"] li button')?.click());
+      await sleep(900);
+      const closed = await pinks();
+      const composer = await page.evaluate(() => /Send proposal to /.test(document.querySelector("main").innerText));
+      check(
+        `(h) ${width}: Proposals after a finished proposal: the composer showing has one pink (Send proposal); a closed proposal (no composer) has one pink (+ New conflict)`,
+        composing.length === 1 && /^Send proposal/.test(composing[0]) && !composer && closed.length === 1 && closed[0] === "+ New conflict",
+        `composing=${JSON.stringify(composing)} closed=${JSON.stringify(closed)} composerAfter=${composer}`,
+      );
+      await ctx.close();
+    }
+    // (g) part 2: two connected apps, one seen before the latest change and one after. The rail says "Seen since the
+    // latest change" / "Last seen before the latest change" (the server's on_current_plan); the phone row counts them.
     {
       const { createHash, randomBytes } = await import("node:crypto");
       const REDIRECT = "http://127.0.0.1:33418/callback";
