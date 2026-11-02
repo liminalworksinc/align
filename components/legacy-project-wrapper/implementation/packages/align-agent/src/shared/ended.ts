@@ -19,17 +19,48 @@ function quoted(titles: string[]): string {
 }
 
 /**
+ * How a session whose share ended can be shared there again besides now (`reshare`), as its latch files carry it:
+ * `unread`, signed in again (so `reshare`) but this sign-in has not yet read which shares their person stopped on the
+ * web, so `align sync` comes first (one stopped there is never shared again; E2E-AGENT cycle 12, section 6); `login`,
+ * signed out, and the share ended at a sign-out (or at a lost workspace the cached `/me` reaches again), so a new
+ * `align login` offers `::align share` (cycle 12, section 6: the sign-out notice and the deny named one way each).
+ */
+export interface ShareAgain {
+  unread?: boolean;
+  login?: boolean;
+}
+
+/**
+ * How `::align share` (`where`: "here", "in the session") shares a session whose share ended there again now, in every
+ * view that says so (`::align status`, `align latch status`, `align status`, `align sessions`): while the ended shares
+ * are unread since this sign-in, `align sync` first, as `::align share` itself then answers (cycle 12, section 6).
+ */
+export function shareAgainWords(unread: boolean, where: string, there = false): string {
+  const share = `\`::align share\`${where ? ` ${where}` : ""} shares it ${there ? "there " : ""}again`;
+  return unread ? `run \`align sync\` first (this machine has not yet heard whether its sharing was stopped on the web meanwhile), then ${share}` : share;
+}
+
+/**
  * For a session stopped or held from the web whose share ended (B6, C6-2): when it can be shared there again now
  * (`reshare`: signed in again and reaching its workspace), sharing it again with `::align share` in the session, after
- * which the web can lift the stop or hold; otherwise `align stop-sharing <id>` in a terminal. Never both: following
- * `align stop-sharing` makes sharing it again impossible. A hold whose release still reaches the session (`release`)
- * says that the release lifts it too, and, when a stop blocks it as well, that the release lifts only the hold (C10-4).
- * `reader`: the model (a deny, which names "the user") or the user (a notice, which says "you").
+ * which the web can lift the stop or hold, with `align sync` first while the ended shares are unread (`again.unread`);
+ * while signed out after a sign-out ended it (`again.login`), `align stop-sharing <id>` in a terminal or a new
+ * `align login` and then `::align share`, in one sentence (cycle 12, section 6); otherwise `align stop-sharing <id>`.
+ * A hold whose release still reaches the session (`release`) says that the release lifts it too, and, when a stop
+ * blocks it as well, that the release lifts only the hold (C10-4). `reader`: the model (a deny, which names "the user")
+ * or the user (a notice, which says "you").
  */
-export function latchWayOut(lid: string, reshare: boolean, reader: "model" | "user", release: ReleaseReaches | null = null): string {
+export function latchWayOut(lid: string, reshare: boolean, reader: "model" | "user", release: ReleaseReaches | null = null, again: ShareAgain = {}): string {
   const user = reader === "user";
   const run = `${user ? "you run" : "the user runs"} \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal`;
-  if (reshare) return `tools stay blocked until it is shared again (${user ? "you can type" : "the user can type"} \`::align share\` in this session), after which the stop or hold can be lifted from the web.`;
+  const lifted = "after which the stop or hold can be lifted from the web";
+  if (reshare && again.unread) {
+    return `tools stay blocked until it is shared again: ${user ? "run" : "the user runs"} \`align sync\` in a terminal first (this machine has not yet heard from the Align server whether its sharing was stopped on the web meanwhile, and one stopped there is not shared again), then ${user ? "type" : "types"} \`::align share\` in this session, ${lifted}.`;
+  }
+  if (reshare) return `tools stay blocked until it is shared again (${user ? "you can type" : "the user can type"} \`::align share\` in this session), ${lifted}.`;
+  if (again.login) {
+    return `tools stay blocked until ${run}, or until it is shared again once this machine is signed in (${user ? "run" : "the user runs"} \`align login\` in a terminal, then ${user ? "type" : "types"} \`::align share\` in this session), ${lifted}.`;
+  }
   if (release?.goals.length) {
     const hold = `the hold on ${quoted(release.goals)}`;
     return release.stopped
@@ -40,10 +71,15 @@ export function latchWayOut(lid: string, reshare: boolean, reader: "model" | "us
 }
 
 /** What a notice about a share that ended adds for a session stopped or held from the web (leading space included):
- *  which of the two blocks it, when a release still reaches it, and the way out. */
-export function latchNoticeTail(lid: string, reshare: boolean, release: ReleaseReaches | null = null): string {
+ *  which of the two blocks it, when a release still reaches it, and the way out. Signed out (`again.login`), the
+ *  notice has just said to run `align login` and then type `::align share`, so the sentence names that way by
+ *  reference, and `align stop-sharing` as the other, the two ways the deny names (cycle 12, section 6). */
+export function latchNoticeTail(lid: string, reshare: boolean, release: ReleaseReaches | null = null, again: ShareAgain = {}): string {
   const what = !reshare && release?.goals.length ? (release.stopped ? "stopped and held" : "held") : "stopped or held";
-  return ` It was ${what} from the web, so ${latchWayOut(lid, reshare, "user", release)}`;
+  if (!reshare && again.login) {
+    return ` It was ${what} from the web, so tools stay blocked until it is shared again that way, after which the stop or hold can be lifted from the web, or until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
+  }
+  return ` It was ${what} from the web, so ${latchWayOut(lid, reshare, "user", release, again)}`;
 }
 
 // ---------- notices about a session's share, worded when they are shown ----------
@@ -70,6 +106,11 @@ export interface ShareFacts {
   goal: string | null;
   text?: string;
   before?: string;
+  /** "login": a share a new `align login` ended (the pairing it replaced was this machine's), not a sign-out the
+   *  developer asked for, so its words never say this machine signed out or is signed in "again" (cycle 12, section 6). */
+  via?: "login";
+  /** A share asked for here that had not reached the server yet (still pending) when the sign-out ended it. */
+  unsent?: true;
 }
 
 /** A session's share state now, as its latch files and the status views have it (`renderHot`). */
@@ -85,6 +126,8 @@ export interface ShareNow {
   reshare: boolean;
   /** signed in, but which ended shares their person stopped on the web was not read yet since this sign-in */
   unread: boolean;
+  /** as its latch files: signed out, and a new `align login` would offer `::align share` for it (cycle 12) */
+  login?: boolean;
   /** a stop latch or a goal hold blocks its tools */
   latched: boolean;
   release: ReleaseReaches | null;
@@ -111,10 +154,14 @@ function words(key: string, f: ShareFacts): string {
   switch (key) {
     case "out:signed_out":
       return `Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on. To share it again, run \`align login\` in a terminal, then type \`::align share\` here${again}.`;
+    case "out:signed_out_unsent":
+      return `Align: this session's share had not reached the Align server yet when this machine signed out of Align, so it was not shared; its usage stays on this machine. To share it, run \`align login\` in a terminal, then type \`::align share\` here${again}.`;
     case "out:signed_out_ended":
       return `Align: this machine signed out of Align, so this session can't be shared again from here for now; its usage stays on this machine. To share it again, run \`align login\` in a terminal, then type \`::align share\` here${again}.`;
     case "reshare:signed_in":
       return `Align: this machine is signed in to Align again. To share this session again, type \`::align share\` here${again}.`;
+    case "reshare:relogin":
+      return `Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in; its usage stays on this machine until it is shared again. To share it again, type \`::align share\` here${again}.`;
     case "reshare:workspace_back":
       return `Align: this machine can reach ${f.ws} in Align again. To share this session there again, type \`::align share\` here${again}.`;
     case "reshare:removed":
@@ -123,6 +170,8 @@ function words(key: string, f: ShareFacts): string {
       return `Align: this session stopped sharing because the Align server ended its share when this machine signed out of Align (an earlier sign-in); its usage stays on this machine from now on. This machine is signed in now, so to share it again, type \`::align share\` here${again}.`;
     case "noreach:signed_in_noreach":
       return `Align: this machine is signed in to Align again, but this sign-in does not reach ${f.ws}, so this session can't be shared there again from here; its usage stays on this machine.`;
+    case "noreach:relogin_noreach":
+      return `Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in, and this sign-in does not reach ${f.ws}, so this session can't be shared there again from here; its usage stays on this machine.`;
     case "noreach:access_lost":
       return `Align: this session stopped sharing because you no longer have access to ${f.ws} in Align (you were removed from it or left it); its usage stays on this machine from now on.`;
     case "noreach:access_lost_again":
@@ -138,29 +187,23 @@ function words(key: string, f: ShareFacts): string {
 
 const situation = (key: string) => key.slice(0, key.indexOf(":"));
 
-/** The words a notice about `f` has when the state is the one the event left (what the database keeps as its text,
- *  for an older hook): a sign-out signed out, a lost workspace out of reach, and so on. */
-export function eventWords(lid: string, f: ShareFacts, now: ShareNow): string {
-  const key =
-    f.e === "signed_out"
-      ? "out:signed_out"
-      : f.e === "access_lost"
-        ? "noreach:access_lost"
-        : f.e === "removed"
-          ? "reshare:removed"
-          : f.e === "server_signed_out"
-            ? "reshare:server_signed_out"
-            : f.e === "stopped_on_web"
-              ? "stopped:web"
-              : f.e === "stopped_before_end"
-                ? "stopped:before_end"
-                : `${f.e}:text`;
-  return words(key, f) + (key.startsWith("started:") || key.startsWith("share_err:") ? "" : stateTail(lid, now));
+/** What an older hook, which shows a notice's stored text as it is, can be told about a share's state at any time later. */
+export const SHARE_CHANGED = "Align: this session's sharing changed; run `align sessions` in a terminal for what it is now, and `align latch status` if its tools are blocked.";
+
+/**
+ * The text the database keeps for a notice about `f`: this agent's hook words the notice from its facts when it shows
+ * it, but an older hook shows the stored text as it is, so that is never advice from the time of the event, which a
+ * later sign-in, sign-out or `/me` can make wrong (E2E-AGENT cycle 12 C12-1): a share that ended or was stopped is
+ * stored as `SHARE_CHANGED`, which is true whenever it is shown. A share that started or was refused keeps its own words
+ * (they say what happened to that share, not what to do about its state later).
+ */
+export function storedText(f: ShareFacts): string {
+  return f.e === "started" || f.e === "share_err" ? (f.text ?? SHARE_CHANGED) : SHARE_CHANGED;
 }
 
 /** The latch sentence of a notice about a share that ended, from the values its latch files carry. */
 function stateTail(lid: string, now: ShareNow): string {
-  return now.latched && now.ended ? latchNoticeTail(lid, now.reshare, now.reshare ? null : now.release) : "";
+  return now.latched && now.ended ? latchNoticeTail(lid, now.reshare, now.reshare ? null : now.release, { unread: now.unread, login: now.login }) : "";
 }
 
 /**
@@ -196,12 +239,18 @@ export function shareNotice(lid: string, id: string, f: ShareFacts, now: ShareNo
   const sit = !now.signed_in ? (now.ended === "access_lost" && !now.reaches ? "noreach" : "out") : now.reshare ? "reshare" : "noreach";
   if (prev && situation(prev.key) === sit) return out(prev.key);
   const was = prev ? situation(prev.key) : null;
-  if (sit === "out") return out(now.ended === "device_signed_out" ? "out:signed_out" : "out:signed_out_ended");
+  if (sit === "out") return out(now.ended === "device_signed_out" ? (f.unsent ? "out:signed_out_unsent" : "out:signed_out") : "out:signed_out_ended");
   if (sit === "reshare") {
     if (!prev && f.e === "removed") return out("reshare:removed");
     if (!prev && f.e === "server_signed_out") return out("reshare:server_signed_out");
+    // Told this sign-in does not reach its workspace: what changed is the reach (a workspace given back on the Devices
+    // page or at a re-invite), not the sign-in (cycle 12, section 6).
+    if (was === "noreach") return out("reshare:workspace_back");
+    // Ended by a new `align login` that replaced this machine's pairing: it never signed out (cycle 12, section 6).
+    if (!prev && f.via === "login" && now.ended === "device_signed_out") return out("reshare:relogin");
     return out(now.ended === "device_signed_out" || was === "out" ? "reshare:signed_in" : "reshare:workspace_back");
   }
+  if (!prev && f.via === "login" && now.ended === "device_signed_out") return out("noreach:relogin_noreach");
   if (now.ended === "device_signed_out" || (was === "out" && now.signed_in)) return out("noreach:signed_in_noreach");
   return out(was === "reshare" ? "noreach:access_lost_again" : "noreach:access_lost");
 }

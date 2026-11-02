@@ -397,7 +397,7 @@ const targetTitle = (r: HotRequest) => clean(r.target_goal?.title, 100);
 const noteOf = (r: HotRequest) => (r.note ? quoted(r.note, 280) : null);
 
 /** What the request asks for, in a few words (withdrawal notices, accept lines). */
-function requestWhat(r: HotRequest): string {
+export function requestWhat(r: HotRequest): string {
   if (r.type === "switch_goal") return `move this session to goal "${targetTitle(r)}"`;
   if (r.type === "checkpoint") return "make a checkpoint";
   return `replan toward goal "${goalTitle(r)}"`;
@@ -458,9 +458,10 @@ export function holdReason(latch: HoldLatch | null): string {
   if (!h) return "Align: all agents on this session's goal were paused from its Align workspace. Work resumes when the hold is released. Your work so far is saved.";
   const reason = h.reason ? `: ${quoted(h.reason, 200)}` : "";
   const more = latch!.holds.length > 1 ? ` (and ${latch!.holds.length - 1} more goal holds)` : "";
-  // A share that ended where no release reaches it any more: the way out the deny adds is the only one, so "work resumes
-  // when they release it" would send the model the wrong way (E2E-AGENT cycle 10, section 5).
-  const resumes = latch!.ended && !latch!.reshare && !latch!.release ? "" : " Work resumes when they release it.";
+  // A share that ended where no release reaches it now: the way out the deny adds is the only one (sharing it again
+  // first, when it can be), so "work resumes when they release it" would send the model the wrong way, also once the
+  // hold was released on the web, a release that could not reach it (E2E-AGENT cycle 10, section 5; cycle 12, section 6).
+  const resumes = latch!.ended && !latch!.release ? "" : " Work resumes when they release it.";
   return `Align: ${clean(h.by, 50) || "Someone"} paused all agents on goal "${clean(h.goal_title, 100)}"${reason}${more}.${resumes} Your work so far is saved.`;
 }
 

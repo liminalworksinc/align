@@ -96,7 +96,7 @@ export function answerRequest(ctx: Ctx, lid: string, requestId: string, answer: 
   if (!row) return { ok: false, why: "no such request for this session" };
   const share = getShare(ctx, lid);
   if (!share || share.state === "error") return { ok: false, why: "this session is not shared", row };
-  if (!answerable(row.type, row.state, answer) || (auto && row.state !== "pending")) return { ok: false, why: `the request is already ${stateWords(row.state)}`, row };
+  if (!answerable(row.type, row.state, answer) || (auto && row.state !== "pending")) return { ok: false, why: `the request is already ${stateWords(row.state, row.json)}`, row };
   if (auto && (answer !== "accepted" || !SAFE_REQUESTS.has(row.type))) return { ok: false, why: "only a checkpoint or a replan draft is done without the developer's answer", row };
   const q = JSON.parse(row.json) as WireRequest;
   let target = null;
@@ -129,8 +129,26 @@ export function answerRequest(ctx: Ctx, lid: string, requestId: string, answer: 
   return { ok: true, row: { ...row, state, answered_at: at } };
 }
 
-export function stateWords(s: RequestState): string {
+export function stateWords(s: RequestState, json?: string): string {
+  if (s === "expired") return `expired (${expiredWhy(json)})`;
   return s === "auto_accepted" ? "delivered to the agent, not declined" : s === "pending" ? "waiting for an answer" : s;
+}
+
+/** Why a request expired here, from the reason kept with it (`expireRequests`): its share ended as the server says. */
+function expiredWhy(json?: string): string {
+  let reason: unknown = null;
+  try {
+    reason = json ? (JSON.parse(json) as { expired_reason?: unknown }).expired_reason : null;
+  } catch {
+    /* unknown */
+  }
+  if (reason === "device_signed_out") return "this session's share ended when this machine signed out of Align, and the Align server expired the request";
+  if (reason === "receipt_refused") {
+    const j = JSON.parse(json!) as { refused_answer?: string; refused_error?: string };
+    return `the Align server did not take the answer ${j.refused_answer === "declined" ? "declined" : "accepted"} here (${String(j.refused_error || "not_found").slice(0, 40)}): this session's share there has ended`;
+  }
+  if (reason === "member_removed") return "this session's share ended when this machine lost access to its workspace, and the Align server expired the request";
+  return "this session's share ended, and the Align server expired the request";
 }
 
 /** Requests on this device, newest first (`align requests`). */

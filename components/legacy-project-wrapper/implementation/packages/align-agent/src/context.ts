@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { openDb, type Db } from "./db.ts";
 import { deviceSecret } from "./keys.ts";
+import { migrateLocal } from "./migrate.ts";
 import { ensureHome, resolvePaths, type Paths } from "./paths.ts";
 import { layout } from "./shared/layout.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
@@ -70,5 +71,8 @@ export function openCtx(env: NodeJS.ProcessEnv = process.env, log?: (m: string) 
         /* ignore */
       }
     });
-  return { paths, home: paths.alignHome, db, secret: deviceSecret(paths.alignHome), config: loadConfig(paths.alignHome, env), env, log: writeLog };
+  const ctx: Ctx = { paths, home: paths.alignHome, db, secret: deviceSecret(paths.alignHome), config: loadConfig(paths.alignHome, env), env, log: writeLog };
+  // A newer agent's first command or pass brings the database up to date (src/migrate.ts).
+  migrateLocal(ctx);
+  return ctx;
 }

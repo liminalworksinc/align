@@ -186,7 +186,8 @@ describe("C6-2: a stopped session whose share ended says the same thing everywhe
     fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [A.key], goal: null, binding: null });
     await sync(t);
     assert.equal((await runCli(t, ["logout"])).code, 0);
-    assert.match(deny(t, A), /this machine signed out of Align\), so this can no longer be lifted from the web: tools stay blocked until the user runs `align stop-sharing /);
+    // Signed out: `align stop-sharing`, or a new sign-in and `::align share`, in one sentence (cycle 12, section 6).
+    assert.match(deny(t, A), /this machine signed out of Align\), so tools stay blocked until the user runs `align stop-sharing \S+` in a terminal, or until it is shared again once this machine is signed in \(the user runs `align login` in a terminal, then types `::align share` in this session\)/);
     assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
     assert.match(deny(t, A), /Its sharing ended \(this machine signed out of Align, and is signed in again now\), so tools stay blocked until it is shared again \(the user can type `::align share` in this session\)/);
   });

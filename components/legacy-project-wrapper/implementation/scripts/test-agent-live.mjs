@@ -1160,6 +1160,8 @@ try {
   const q3Lid0 = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === Q3.sid)?.local_id ?? "none";
   const q3Shared0 = cli(["share", "--workspace", W, "--goal", G.id, "--yes", "--", q3Lid0.slice(0, 8)]);
   sync();
+  // E2E-AGENT cycle 12 C12-4: a request waiting on Q3 when the removal ends its share.
+  const q3Req = await ws(O2, "POST", `/goals/${rmGoal}/requests`, { type: "replan", session_keys: [Q3.key] });
   const q3Stop = await ws(M, "POST", `/sessions/${Q3.key}/stop`, {});
   sync();
   const rm = await ws(O2, "DELETE", `/members/${M.id}`);
@@ -1172,9 +1174,41 @@ try {
       rmStopAgain.status === 409 && rmStopAgain.json?.error === "member_removed",
     `${rmReq.text.slice(0, 200)} ${rmStop.status} ${rm.status} ${rm.text} ${JSON.stringify(rmRow)} ${rmTarget} ${rmStopAgain.text}`,
   );
+  // E2E-AGENT cycle 12 C12-4: the checkpoint the removal expired was shown in the session, and the developer accepts it
+  // there before the device has heard of the removal: the next pass sends the answer, the server refuses it (404), and
+  // that is said, never dropped; the request is no longer waiting here, and answering it again says it expired.
+  const rmShortId = short(rmReq.json?.request?.id);
+  const rmAccept = prompt(Q1, `::align accept ${rmShortId}`);
   const rmSync = sync();
+  const rmLog = (() => {
+    try {
+      return readFileSync(path.join(alignHome, "logs", "align.log"), "utf8");
+    } catch {
+      return "";
+    }
+  })();
+  const rmWaiting = cli(["requests"]);
+  const rmAll = cli(["requests", "--all"]);
+  const rmAgain = cli(["requests", "accept", rmShortId]);
+  const rmStatus = cli(["status"]);
+  const q3ReqId = q3Req.json?.request?.id ?? "";
+  const q3Answer = cli(["requests", "accept", short(q3ReqId)]);
+  const q3ReqTarget = sdb((d) => d.prepare("SELECT state FROM v2_request_targets WHERE request_id = ? AND session_key = ?").get(q3ReqId, Q3.key))?.state;
+  const rmReceipts = sdb((d) => d.prepare("SELECT state FROM v2_receipts WHERE directive_id = (SELECT directive_id FROM v2_requests WHERE id = ?) AND session_key = ? AND state IN ('accepted','declined')").all(rmReq.json?.request?.id ?? "", Q1.key));
+  const rmTargetAfter = sdb((d) => d.prepare("SELECT state FROM v2_request_targets WHERE request_id = ? AND session_key = ?").get(rmReq.json?.request?.id ?? "", Q1.key))?.state;
   const q3Lost = denied(tool(Q3, "Bash")) ?? "";
   const rmTold = prompt(Q1, "still there?");
+  check(
+    "request to an ended share (E2E-AGENT cycle 12 C12-4): an answer the server refuses (404: the share ended there) is logged and told to the session, never dropped without a word; the request is no longer listed as waiting (`align requests`), `--all` says why it expired, and `align requests accept` again says it expired (exit 2); the server has no answer and the target stays expired; a request still waiting on another session whose share the removal ended expired here with it: `align requests accept` says so (exit 2) and sends nothing",
+    /you accepted/.test(rmAccept.json?.reason ?? "") && rmSync.code === 0 && /receipt accepted for directive \S+ \(session \S+\) refused by the server: not_found/.test(rmLog) &&
+      (rmTold.system ?? "").includes(`Align: the Align server did not take your answer to Olga Owner's request ${rmShortId} (not_found)`) &&
+      rmWaiting.code === 0 && !rmWaiting.stdout.includes(rmShortId) && !new RegExp(`${rmShortId}`).test(rmStatus.stdout) &&
+      new RegExp(`${rmShortId} +checkpoint .*: expired \\(the Align server did not take the answer accepted here \\(not_found\\)`).test(rmAll.stdout) &&
+      rmAgain.code === 2 && /is already expired \(/.test(rmAgain.stderr) && Array.isArray(rmReceipts) && rmReceipts.length === 0 && rmTargetAfter === "expired" &&
+      q3Req.status === 201 && q3Answer.code === 2 &&
+      /is already expired \(this session's share ended when this machine lost access to its workspace, and the Align server expired the request\), so it can't be accepted now/.test(q3Answer.stderr) && q3ReqTarget === "expired",
+    `accept=${rmAccept.stdout} sync=${rmSync.stderr} log=${rmLog.split("\n").filter((l) => /receipt/.test(l)).join(" | ")} told=${rmTold.stdout} waiting=${rmWaiting.stdout} all=${rmAll.stdout} again=${rmAgain.code} ${rmAgain.stderr} status=${rmStatus.stdout} receipts=${JSON.stringify(rmReceipts)} target=${rmTargetAfter} q3req=${q3Req.status} ${q3Req.text.slice(0, 200)} q3answer=${q3Answer.code} ${q3Answer.stdout} ${q3Answer.stderr} q3target=${q3ReqTarget}`,
+  );
   const rmDeny = denied(tool(Q1, "Bash")) ?? "";
   const rmGoals = cli(["goals"]);
   const rmLocal = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === Q1.sid);

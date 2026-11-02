@@ -335,6 +335,25 @@ export class FakeServer {
     return keys.some((k) => this.sessions.get(k)?.device === device);
   }
 
+  /** As lib/v2/devices.ts when a device is revoked on the Devices page: it is refused from then on, and its live sessions
+   *  end (`device_signed_out`) with their open request targets expired. */
+  revokeOnWeb(deviceId: string): void {
+    const d = this.devices.get(deviceId);
+    if (!d) return;
+    d.revoked = true;
+    d.revokedReason = "revoked_on_web";
+    const at = new Date().toISOString();
+    for (const [k, s] of this.sessions) {
+      if (s.device !== deviceId || s.state === "stopped") continue;
+      Object.assign(s, { state: "stopped", ended: "device_signed_out", stopped_at: at });
+      for (const e of this.epochs.values()) if (e.session_key === k && !e.ends_at) e.ends_at = at;
+      for (const r of this.requests.values()) {
+        const t = r.targets.get(k);
+        if (t && (t.state === "sent" || t.state === "received")) t.state = "expired";
+      }
+    }
+  }
+
   revokeAll(): void {
     for (const d of this.devices.values()) d.revoked = true;
     for (const s of this.streams) s.res.destroy();

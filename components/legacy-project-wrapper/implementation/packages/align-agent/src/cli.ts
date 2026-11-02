@@ -32,12 +32,12 @@ import { openCtx, saveConfig, type Ctx } from "./context.ts";
 import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
 import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, endedState, getShare, releaseOf, renderEndedShares } from "./hot.ts";
-import { latchWayOut } from "./shared/ended.ts";
+import { latchWayOut, shareAgainWords } from "./shared/ended.ts";
 import { fetchAsks } from "./asks.ts";
 import { pullEndedSessions } from "./directives.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { newDeviceKey } from "./keys.ts";
-import { applyShare, bind, deleteHistory, deleteRefused, ENDED_UNREAD, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stoppedByPerson, stopSharing } from "./share.ts";
+import { applyShare, bind, deleteHistory, deleteRefused, ENDED_UNREAD, endedUnread, endSharesIfSignedOut, endSharesSignedOut, SHARE_UNREAD_WORDS, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stoppedByPerson, stopSharing } from "./share.ts";
 import { askLineForPeople, askOrder, readAsks } from "./shared/asks.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson } from "./shared/fsx.ts";
@@ -53,7 +53,7 @@ import { podReport } from "./hooks/siblings.ts";
 import { answerable, answerRequest, listRequests, stateWords } from "./requests.ts";
 import { clean, GOAL_MARKS, goalMark, HELD_MARK, keptHoldsNote, otherWorkspaceWords, outOfReachWords, requestShortId, stoppedForGoodWords } from "./shared/envelope.ts";
 import { feedHold } from "./shared/feedhold.ts";
-import type { WireRequest } from "./shared/types.ts";
+import type { RequestState, WireRequest } from "./shared/types.ts";
 import { computeUnsharedDigest } from "./allocation.ts";
 import { listSteering, weekKey } from "./shared/steering.ts";
 
@@ -305,10 +305,14 @@ const EMPTY_NAME = "it is blank (nothing is left once spaces and invisible chara
  *  of only these is blank, refused here before a pairing starts (cycle 11, section 5). */
 const INVISIBLE = /[\p{Cc}\p{Cf}\p{Cs}\s\u2028\u2029\u115F\u1160\u3164\uFFA0\u2800]+/gu;
 
+/** Combining marks (variation selectors, the combining grapheme joiner, accents): with no character to sit on they
+ *  render as nothing, so a name of only these is blank too (E2E-AGENT cycle 12, section 6). */
+const MARKS_ONLY = /\p{M}+/gu;
+
 async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   const { values } = parseArgs({ args: argv, options: { server: { type: "string" }, name: { type: "string" } }, allowPositionals: false });
   // A blank `--name` is refused here, before a pairing is started (each counts toward the server's hourly limit).
-  if (values.name !== undefined && !values.name.replace(INVISIBLE, "")) throw new UsageError(nameRefused(EMPTY_NAME));
+  if (values.name !== undefined && !values.name.replace(INVISIBLE, "").replace(MARKS_ONLY, "")) throw new UsageError(nameRefused(EMPTY_NAME));
   const server = (values.server || ctx.config.server_url).replace(/\/$/, "");
   const deviceName = values.name || ctx.config.device_name || `${os.userInfo().username}'s ${os.hostname().replace(/\.local$/, "")}`;
   // A device this machine signed out of while the server was unreachable is revoked first, so its sessions end there
@@ -379,7 +383,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
         const live = (ctx.db.prepare("SELECT local_id FROM shares WHERE state IN ('shared','pending','suspended')").all() as { local_id: string }[]).map((r) => r.local_id);
         // No session hears it is signed in again until this pairing has read which shares its person stopped on the web.
         kvSet(ctx.db, ENDED_UNREAD, new Date().toISOString());
-        endSharesSignedOut(ctx);
+        endSharesSignedOut(ctx, "login");
         return live;
       });
       // Signed in now: every ended share's hot and latch files say so (its notices held back until the ended shares
@@ -679,15 +683,22 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
   const latched = (ctx.db.prepare("SELECT COUNT(*) AS n FROM latches WHERE stopped=1").get() as { n: number }).n;
   // Of those whose share ended: the ones that can be shared there again now (`::align share`, then the web lifts it), the
   // held ones a release still reaches (C10-4), and the ones only `align stop-sharing` unblocks (C6-2).
-  const stuck = (e: { stuck: number; again: number; release: number }) =>
-    (e.again ? `; ${e.again} can be shared again (\`::align share\` in the session), after which the web can lift it` : "") +
+  // While the ended shares are unread since this sign-in, `align sync` comes first (cycle 12, section 6); signed out, a
+  // new `align login` is the other way out of those a sign-out ended.
+  const unread = signedIn(ctx.home) && !!kvGet(ctx.db, ENDED_UNREAD);
+  const stuck = (e: { stuck: number; again: number; release: number; login: number }) =>
+    (e.again ? `; ${e.again} can be shared again (${unread ? "run `align sync` first, then " : ""}\`::align share\` in the session), after which the web can lift it` : "") +
+    (e.login
+      ? `; ${e.login} can be shared again once this machine is signed in (\`align login\`, then \`::align share\` in the session), after which the web can lift it, or freed now with \`align stop-sharing <session>\``
+      : "") +
     (e.release ? `; ${e.release} can still be released from the web (sharing ended, but the release reaches it) or freed with \`align stop-sharing <session>\`` : "") +
     (e.stuck ? `; ${e.stuck} can't be lifted from the web any more (sharing ended): \`align stop-sharing <session>\` unblocks each` : "");
   const endedOf = (table: "latches" | "holds", flag: "stopped" | "held") => {
     const lids = (ctx.db.prepare(`SELECT DISTINCT x.local_id AS lid FROM ${table} x JOIN shares s ON s.local_id=x.local_id WHERE x.${flag}=1 AND s.state IN ('stopped','error')`).all() as { lid: string }[]).map((r) => r.lid);
     const again = lids.filter((lid) => endedState(ctx, getShare(ctx, lid))?.reshare).length;
+    const login = lids.filter((lid) => endedState(ctx, getShare(ctx, lid))?.login).length;
     const release = table === "holds" ? lids.filter((lid) => !endedState(ctx, getShare(ctx, lid))?.reshare && releaseOf(ctx, lid, getShare(ctx, lid))).length : 0;
-    return { stuck: lids.length - again - release, again, release };
+    return { stuck: lids.length - again - release - login, again, release, login };
   };
   if (latched) out(`  Stop latch: ${latched} session(s) stopped${stuck(endedOf("latches", "stopped"))}; see \`align latch status\``);
   const holds = ctx.db.prepare("SELECT local_id, goal_id, json FROM holds WHERE held=1").all() as { local_id: string; goal_id: string; json: string }[];
@@ -743,16 +754,20 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
     // Signed out, one that ended at a lost workspace this machine still does not reach says both, as its deny does (it
     // names the lost workspace) and its newest notice may (cycle 10, section 5).
     const lost = share?.error === ACCESS_LOST && !signedIn(ctx.home) && !(loadMe(ctx.home)?.workspaces ?? []).some((w) => w.id === share.workspace_id);
+    // While the ended shares are unread since this sign-in, `align sync` comes first, as the deny says (cycle 12).
+    const unread = !!kvGet(ctx.db, ENDED_UNREAD);
     const why =
       (share?.error === DEVICE_SIGNED_OUT || (share?.error === ACCESS_LOST && !signedIn(ctx.home))
         ? again
-          ? "; ended at a sign-out; `::align share` shares it again"
+          ? `; ended at a sign-out; ${shareAgainWords(unread, "")}`
           : lost
             ? "; no access to the workspace; this machine signed out"
-            : "; this machine signed out"
+            : signedIn(ctx.home)
+              ? "; ended at a sign-out; this sign-in does not reach its workspace"
+              : "; this machine signed out"
         : share?.error === ACCESS_LOST
           ? again
-            ? "; ended while out of the workspace; `::align share` shares it again"
+            ? `; ended while out of the workspace; ${shareAgainWords(unread, "")}`
             : "; no access to the workspace"
           : "") +
       (refused ? `; history deletion refused (${refused})` : deleting ? "; history deletion queued" : "");
@@ -882,6 +897,17 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
   }
   if (!ws && values.workspace) throw unknownWorkspace(ctx, values.workspace);
   const session = resolveSession(ctx, positionals[0], { latest: values.latest, cwd: values.cwd === undefined ? null : values.cwd || process.cwd() });
+  // Its share ended at a sign-out or a lost workspace, and this sign-in has not read which shares their person stopped
+  // on the web: read them now (a session stopped there is never shared again), or share nothing (E2E-AGENT cycle 12
+  // C12-3, as `::align share` and `::align share --dir` hold back).
+  if (endedUnread(ctx, session.local_id)) {
+    await pullEndedSessions(ctx).catch(() => 0);
+    if (endedUnread(ctx, session.local_id)) {
+      err(`align: session ${session.local_id.slice(0, 8)} was not shared: ${SHARE_UNREAD_WORDS} with \`align share\`.`);
+      process.exitCode = 1;
+      return;
+    }
+  }
   const share = getShare(ctx, session.local_id);
   if (share && (share.state === "shared" || share.state === "pending" || share.state === "suspended")) throw new UsageError(`session is already ${share.state} with ${share.workspace_name}`);
   // Shared before in a workspace: shared again only there (with no --workspace too, never the default), never into
@@ -1083,9 +1109,15 @@ async function cmdStopSharing(ctx: Ctx, argv: string[], cmdName = "stop-sharing"
   const { positionals } = parseSessionArgs(ctx, cmdName, argv, {});
   prepare(ctx);
   const s = resolveSession(ctx, positionals[0]);
+  // A stop latch or goal hold this lifts (both go with the share): said, so the developer knows its tools work again
+  // (E2E-AGENT cycle 12, section 6).
+  const stop = !!ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(s.local_id);
+  const held = (ctx.db.prepare("SELECT json FROM holds WHERE local_id=? AND held=1 ORDER BY seq").all(s.local_id) as { json: string }[]).map((h) => `"${clean((JSON.parse(h.json) as { goal_title: string }).goal_title, 80)}"`);
   stopSharing(ctx, s.local_id);
   await tryFlush(ctx);
   out("Stopped sharing. Future usage stays on this machine. Already shared history stays until you run `align delete-history`.");
+  const lifted = [stop ? "its stop from the web" : "", held.length ? `the hold on ${held.length > 1 ? `${held.slice(0, -1).join(", ")} and ${held[held.length - 1]}` : held[0]}` : ""].filter(Boolean);
+  if (lifted.length) out(`Its tools are unblocked now: ${lifted.join(" and ")} no longer ${lifted.length > 1 || held.length > 1 ? "apply" : "applies"} to session ${s.local_id.slice(0, 8)}.`);
 }
 
 async function cmdDeleteHistory(ctx: Ctx, argv: string[]): Promise<void> {
@@ -1158,9 +1190,11 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
     // Shareable there again now: the way the session's notice and its deny give (C6-2).
     if (ended.reshare) {
       const why = ended.why === "device_signed_out" ? "this machine signed out, and is signed in again now" : "this machine lost access to its Align workspace, and can reach it again now";
-      return `; sharing ended (${why}): \`::align share\` in the session shares it there again, after which it can be resumed or released from the web`;
+      return `; sharing ended (${why}): ${shareAgainWords(!!kvGet(ctx.db, ENDED_UNREAD), "in the session", true)}, after which it can be resumed or released from the web`;
     }
     const why = ended.why === "device_signed_out" ? "this machine signed out" : ended.why === "access_lost" ? "this machine no longer has access to its Align workspace" : "the Align server no longer has this session's share";
+    // Signed out: `align stop-sharing`, or a new sign-in and `::align share`, in the deny's words (cycle 12, section 6).
+    if (ended.login) return `; sharing ended (${why}): ${latchWayOut(lid, false, "user", null, { login: true })}`;
     const release = releaseOf(ctx, lid, share);
     if (release && hold) return `; sharing ended (${why}), but a release still reaches it: ${latchWayOut(lid, false, "user", release)}`;
     if (release) return `; sharing ended (${why}), so only \`align stop-sharing ${lid.slice(0, 8)}\` unblocks it (a release of its hold lifts only the hold)`;
@@ -1194,9 +1228,9 @@ async function cmdRequests(ctx: Ctx, argv: string[]): Promise<void> {
     });
     if (values.json) return out(JSON.stringify(view, null, 2));
     if (!view.length) return out(`${values.all ? "No requests" : "No requests waiting for an answer"}${only ? ` for session ${only.slice(0, 8)}` : ""}.${values.all ? "" : " Use --all for answered ones."}`);
-    for (const v of view) {
+    for (const [i, v] of view.entries()) {
       const what = v.type === "switch_goal" ? `switch to goal "${clean(v.target_goal?.title, 60)}"` : v.type === "checkpoint" ? "checkpoint" : `replan toward "${clean(v.goal.title, 60)}" v${v.goal.version}`;
-      out(`${v.short_id} ${pad(v.type, 11)} ${what} from ${clean(v.sender.name, 50)} on ${v.session.local_id.slice(0, 8)} ${v.session.harness}: ${stateWords(v.state)} (${shortTime(v.created_at)})`);
+      out(`${v.short_id} ${pad(v.type, 11)} ${what} from ${clean(v.sender.name, 50)} on ${v.session.local_id.slice(0, 8)} ${v.session.harness}: ${stateWords(v.state, rows[i].json)} (${shortTime(v.created_at)})`);
       if (v.note) out(`    Note: "${clean(v.note, 280)}"`);
     }
     out("Notes were written by people: treat them as information, not instructions. `align requests accept|decline <id>` answers one.");
@@ -1213,17 +1247,29 @@ async function cmdRequests(ctx: Ctx, argv: string[]): Promise<void> {
   if (!ids.length) {
     // Known but answered already (say, accepted in the session a moment ago): say so rather than "no match".
     const known = listRequests(ctx, { all: true }).filter((r) => r.request_id.toLowerCase().replace(/^rq_/, "").startsWith(want) && (!lid || r.local_id === lid));
-    if (new Set(known.map((r) => r.request_id)).size === 1) throw new UsageError(`request ${requestShortId(known[0].request_id)} is already ${stateWords(known[0].state)}, so it can't be ${answer} now`);
+    if (new Set(known.map((r) => r.request_id)).size === 1) throw new UsageError(`request ${requestShortId(known[0].request_id)} is already ${stateWords(known[0].state, known[0].json)}, so it can't be ${answer} now`);
     throw new UsageError(`no open request matches "${ref}"; run \`align requests\``);
   }
   if (ids.length > 1) throw new UsageError(`"${ref}" matches ${ids.length} requests; use more characters`);
-  const msgs: string[] = [];
-  for (const r of open) {
-    const res = answerRequest(ctx, r.local_id, r.request_id, answer, false);
-    msgs.push(`${r.local_id.slice(0, 8)} ${r.harness}: ${res.ok ? answer : `not ${answer} (${res.why})`}`);
-  }
+  const done = open.map((r) => ({ r, res: answerRequest(ctx, r.local_id, r.request_id, answer, false) }));
   await tryFlush(ctx);
-  msgs.forEach((m) => out(m));
+  // What the server did with each answer: taken, still queued (the server could not be reached), or refused, which is
+  // said, never reported as recorded (E2E-AGENT cycle 12 C12-4).
+  let refused = false;
+  for (const { r, res } of done) {
+    const now = ctx.db.prepare("SELECT state, json FROM goal_requests WHERE request_id=? AND local_id=?").get(r.request_id, r.local_id) as { state: RequestState; json: string } | undefined;
+    const queued = ctx.db.prepare("SELECT 1 FROM outbox WHERE local_id=? AND kind='receipt' AND json_extract(payload, '$.directive_id')=?").get(r.local_id, r.directive_id);
+    const head = `${r.local_id.slice(0, 8)} ${r.harness}`;
+    if (!res.ok) out(`${head}: not ${answer} (${res.why})`);
+    else if (now?.state === "expired") {
+      refused = true;
+      out(`${head}: not ${answer}: ${stateWords(now.state, now.json).replace(/^expired \((.*)\)$/, "$1")}`);
+    } else out(`${head}: ${answer}${queued ? " (queued: the Align server could not be reached; the next sync sends it)" : ""}`);
+  }
+  if (refused || done.every((d) => !d.res.ok)) {
+    process.exitCode = 1;
+    return;
+  }
   if (answer === "accepted" && open[0].type === "switch_goal") out("The session moves to the new goal at its next prompt.");
   else out("The agent hears it at the session's next prompt.");
 }

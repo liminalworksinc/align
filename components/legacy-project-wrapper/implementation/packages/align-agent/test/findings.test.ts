@@ -160,14 +160,15 @@ describe("E2E findings: server side of the agent", () => {
     const id8 = lid.slice(0, 8);
     const deny = json(runHook(t, "claude", "PreToolUse", { session_id: SID, tool_name: "Bash", cwd }).stdout);
     assert.equal(deny.hookSpecificOutput.permissionDecision, "deny");
-    assert.match(deny.hookSpecificOutput.permissionDecisionReason, new RegExp(`this machine signed out of Align.*can no longer be lifted from the web: tools stay blocked until the user runs \`align stop-sharing ${id8}\``));
+    // Signed out: `align stop-sharing`, or a new sign-in and `::align share`, in one sentence (cycle 12, section 6).
+    assert.match(deny.hookSpecificOutput.permissionDecisionReason, new RegExp(`this machine signed out of Align\\), so tools stay blocked until the user runs \`align stop-sharing ${id8}\` in a terminal, or until it is shared again once this machine is signed in \\(the user runs \`align login\``));
     assert.doesNotMatch(deny.hookSpecificOutput.permissionDecisionReason, /until it is resumed there/);
     const told = json(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "p9", prompt: "go on", cwd }).stdout);
     assert.match(told.systemMessage, /this session stopped sharing because this machine signed out of Align.*run `align login` in a terminal, then type `::align share` here/);
-    assert.match(told.systemMessage, new RegExp(`tools stay blocked until you run \`align stop-sharing ${id8}\``));
-    assert.match((await runCli(t, ["latch", "status"])).stdout, new RegExp(`STOPPED \\(tools blocked\\).*sharing ended \\(this machine signed out\\), so only \`align stop-sharing ${id8}\` unblocks it`));
-    assert.match((await runCli(t, ["status"])).stdout, /Stop latch: 1 session\(s\) stopped; 1 can't be lifted from the web any more/);
-    assert.match(json(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "p10", prompt: "::align status", cwd }).stdout).reason, new RegExp(`sharing ended, so run \`align stop-sharing ${id8}\``));
+    assert.match(told.systemMessage, new RegExp(`tools stay blocked until it is shared again that way, after which the stop or hold can be lifted from the web, or until you run \`align stop-sharing ${id8}\``));
+    assert.match((await runCli(t, ["latch", "status"])).stdout, new RegExp(`STOPPED \\(tools blocked\\).*sharing ended \\(this machine signed out\\): tools stay blocked until you run \`align stop-sharing ${id8}\` in a terminal, or until it is shared again once this machine is signed in`));
+    assert.match((await runCli(t, ["status"])).stdout, /Stop latch: 1 session\(s\) stopped; 1 can be shared again once this machine is signed in \(`align login`, then `::align share` in the session\), after which the web can lift it, or freed now with `align stop-sharing <session>`/);
+    assert.match(json(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "p10", prompt: "::align status", cwd }).stdout).reason, new RegExp(`sharing ended, this machine signed out: tools stay blocked until you run \`align stop-sharing ${id8}\``));
     // Signing in again does not bring the old share back as shared.
     const relogin = await runCli(t, ["login", "--name", "Test Mac"]);
     assert.equal(relogin.code, 0, `${relogin.stdout}\n${relogin.stderr}`);

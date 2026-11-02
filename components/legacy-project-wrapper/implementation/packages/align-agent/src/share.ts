@@ -7,7 +7,7 @@ import { kvGet, kvSet, nowIso, tx } from "./db.ts";
 import { repoKey, sessionKey } from "./keys.ts";
 import path from "node:path";
 import { endEpochs, getSession, sessionCwds, type SessionRow } from "./ledger.ts";
-import { ACCESS_LOST, addNotice, addShareNotice, DEVICE_SIGNED_OUT, getShare, notePriorShare, renderEndedShares, renderHot, sharedBefore, snapshot, stoppedByPerson, stoppedOnDeviceKey } from "./hot.ts";
+import { ACCESS_LOST, addNotice, addShareNotice, DEVICE_SIGNED_OUT, ENDED_UNREAD as ENDED_UNREAD_KEY, getShare, notePriorShare, renderEndedShares, renderHot, sharedBefore, snapshot, stoppedByPerson, stoppedOnDeviceKey } from "./hot.ts";
 
 export { ENDED_UNREAD, notePriorShare, sharedBefore, stoppedByPerson } from "./hot.ts";
 import { clockOffset, loadCredentials, signedIn } from "./api.ts";
@@ -267,28 +267,58 @@ function factsOf(row: { workspace_name: string; goal_json: string | null }, e: S
  * afresh from the state now (its hot and latch files), so a notice that said `::align share` shares it again now gives
  * the sign-out's words at its next prompt, as its deny does (C8-1, cycle 11). Returns how many shares ended.
  */
-export function endSharesSignedOut(ctx: Ctx): number {
+export function endSharesSignedOut(ctx: Ctx, via?: "login"): number {
   const at = nowIso();
-  const live = ctx.db.prepare("SELECT local_id, workspace_name, goal_json FROM shares WHERE state IN ('shared','pending','suspended')").all() as { local_id: string; workspace_name: string; goal_json: string | null }[];
-  // Typed in the session after a new `align login`, `::align share` shares it toward the goal it had (N8).
-  for (const s of live) endShare(ctx, s.local_id, DEVICE_SIGNED_OUT, `signed_out_${at}`, factsOf(s, "signed_out"), at);
+  const live = ctx.db.prepare("SELECT local_id, workspace_name, goal_json, state FROM shares WHERE state IN ('shared','pending','suspended')").all() as {
+    local_id: string;
+    workspace_name: string;
+    goal_json: string | null;
+    state: string;
+  }[];
+  // Typed in the session after a new `align login`, `::align share` shares it toward the goal it had (N8). Ended by a
+  // new `align login` (`via`), its notice never says this machine signed out; one that never reached the server
+  // (`pending`) never says it stopped sharing (cycle 12, section 6).
+  for (const s of live) {
+    const extra: Partial<ShareFacts> = { ...(via ? { via } : {}), ...(s.state === "pending" ? { unsent: true as const } : {}) };
+    endShare(ctx, s.local_id, DEVICE_SIGNED_OUT, `signed_out_${at}`, factsOf(s, "signed_out", extra), at, "device_signed_out");
+  }
   if (live.length) ctx.log(`signed out: ${live.length} shares ended on this machine`);
   renderEndedShares(ctx);
   return live.length;
 }
 
 /** End one live share here (the server already ended it, or can no longer be reached for it): stopped with `why`,
- *  its pending binding and queued session and epoch calls dropped, one notice. Its stop latch and goal holds stay, so
+ *  its pending binding and queued session and epoch calls dropped, its requests still waiting for an answer expired as
+ *  the server expires them (`expired`: the server's `ended_reason`), one notice. Its stop latch and goal holds stay, so
  *  it fails closed, and the notice says how to get out. */
-function endShare(ctx: Ctx, lid: string, why: string, noticeId: string, facts: ShareFacts, at = nowIso()): void {
+function endShare(ctx: Ctx, lid: string, why: string, noticeId: string, facts: ShareFacts, at: string, expired: RequestExpiry): void {
   tx(ctx.db, () => {
     ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=?, error=? WHERE local_id=?").run(at, why, lid);
     endEpochs(ctx.db, lid, at);
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('put_session','post_epoch')").run(lid);
+    expireRequests(ctx, lid, expired, at);
     addShareNotice(ctx, lid, noticeId, facts);
   });
   renderHot(ctx, lid);
+}
+
+/** Why a request to a session expired before an answer: its share ended as the server's `ended_reason` says. */
+export type RequestExpiry = "device_signed_out" | "member_removed";
+
+/**
+ * The requests to `lid` still waiting for an answer expire when its share ends at a sign-out or a lost workspace: the
+ * server expires their targets in the same step (`ended_reason`) and refuses an answer from then on, so none is listed
+ * as waiting, counted in `align status`, or answered as if it went through (E2E-AGENT cycle 12 C12-4). The reason is
+ * kept with the request (`expired_reason`), for what `align requests` and an answer then say.
+ */
+export function expireRequests(ctx: Ctx, lid: string, reason: RequestExpiry, at = nowIso()): number {
+  const rows = ctx.db.prepare("SELECT request_id, json FROM goal_requests WHERE local_id=? AND state='pending'").all(lid) as { request_id: string; json: string }[];
+  for (const r of rows) {
+    const json = JSON.stringify({ ...(JSON.parse(r.json) as object), expired_reason: reason });
+    ctx.db.prepare("UPDATE goal_requests SET state='expired', json=?, answered_at=? WHERE request_id=? AND local_id=? AND state='pending'").run(json, at, r.request_id, lid);
+  }
+  return rows.length;
 }
 
 /**
@@ -301,7 +331,7 @@ export function endShareRemoved(ctx: Ctx, lid: string): void {
   const s = getShare(ctx, lid);
   if (!s || (s.state !== "shared" && s.state !== "pending" && s.state !== "suspended")) return;
   const at = nowIso();
-  endShare(ctx, lid, ACCESS_LOST, `access_lost_rejoined_${s.workspace_id}_${at}`, factsOf(s, "removed"), at);
+  endShare(ctx, lid, ACCESS_LOST, `access_lost_rejoined_${s.workspace_id}_${at}`, factsOf(s, "removed"), at, "member_removed");
   ctx.log(`usage refused: session ${lid.slice(0, 8)} ended on the server when its person was removed from ${s.workspace_name}; ended here too`);
 }
 
@@ -315,7 +345,7 @@ export function endShareSignedOutByServer(ctx: Ctx, lid: string): void {
   const s = getShare(ctx, lid);
   if (!s || (s.state !== "shared" && s.state !== "pending" && s.state !== "suspended")) return;
   const at = nowIso();
-  endShare(ctx, lid, DEVICE_SIGNED_OUT, `upload_refused_signed_out_${at}`, factsOf(s, "server_signed_out"), at);
+  endShare(ctx, lid, DEVICE_SIGNED_OUT, `upload_refused_signed_out_${at}`, factsOf(s, "server_signed_out"), at, "device_signed_out");
   ctx.log(`usage refused: session ${lid.slice(0, 8)} ended on the server when this machine signed out; ended here too`);
 }
 
@@ -344,13 +374,28 @@ function endedShareStoppedByPerson(ctx: Ctx, lid: string, noticeId: string): voi
   if (!s) return;
   // When its person pressed Stop sharing, before or after this machine's end, is not known here (the server keeps the
   // earlier end's time): the notice says what is true either way (E2E-AGENT cycle 10, section 5).
-  const before = s.error === ACCESS_LOST ? `this machine lost access to ${clean(s.workspace_name, 80)} in Align` : "this machine signed out of Align";
+  const before =
+    s.error === ACCESS_LOST
+      ? `this machine lost access to ${clean(s.workspace_name, 80)} in Align`
+      : endedByLogin(ctx, lid)
+        ? "a new sign-in on this machine (`align login`) ended its earlier sign-in's shares"
+        : "this machine signed out of Align";
   tx(ctx.db, () => {
     ctx.db.prepare("UPDATE shares SET error=NULL WHERE local_id=?").run(lid);
     notePriorShare(ctx, lid, true, s.stopped_at ?? nowIso());
     addShareNotice(ctx, lid, noticeId, factsOf(s, "stopped_before_end", { before }));
   });
   renderHot(ctx, lid);
+}
+
+/** The newest notice about a sign-out that ended the share of `lid` says a new `align login` ended it (cycle 12). */
+function endedByLogin(ctx: Ctx, lid: string): boolean {
+  const r = ctx.db.prepare("SELECT facts FROM notices WHERE local_id=? AND id LIKE ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(lid, `${lid}/signed_out_%`) as { facts: string | null } | undefined;
+  try {
+    return !!r?.facts && (JSON.parse(r.facts) as ShareFacts).via === "login";
+  } catch {
+    return false;
+  }
 }
 
 /** One of the person's sessions whose share the server ended, as the directives answer lists it (`ended_sessions`). */
@@ -417,7 +462,7 @@ export function endSharesWithoutAccess(ctx: Ctx, me: MeFile): number {
     goal_json: string | null;
   }[]).filter((s) => !reach.has(s.workspace_id));
   const at = nowIso();
-  for (const s of live) endShare(ctx, s.local_id, ACCESS_LOST, `access_lost_${s.workspace_id}_${at}`, factsOf(s, "access_lost"), at);
+  for (const s of live) endShare(ctx, s.local_id, ACCESS_LOST, `access_lost_${s.workspace_id}_${at}`, factsOf(s, "access_lost"), at, "member_removed");
   // A session whose share there had ended already and that was told it can be shared there again (its workspace back,
   // or a member again) hears it can't any more at its next prompt, whatever it has seen: its notice is worded from the
   // state its deny gives, which the caller's `renderEndedShares` writes (C8-1, cycle 11).
@@ -471,8 +516,24 @@ export function noticeWorkspacesAdded(ctx: Ctx, me: MeFile, added: { id: string;
   return added.map((w) => ({ id: w.id, name: w.name }));
 }
 
+/**
+ * The share of `lid` ended at a sign-out or a lost workspace, and this machine, signed in again, has not yet read which
+ * shares their person stopped on the web (`ENDED_UNREAD`): one stopped there is never shared again, so no share path
+ * shares it until that is read (`::align share`, C11-1; `--dir`, `align share`, spooled shares, C12-3).
+ */
+export function endedUnread(ctx: Ctx, lid: string): boolean {
+  const s = getShare(ctx, lid);
+  return !!s && (s.state === "stopped" || s.state === "error") && (s.error === DEVICE_SIGNED_OUT || s.error === ACCESS_LOST) && signedIn(ctx.home) && !!kvGet(ctx.db, ENDED_UNREAD_KEY);
+}
+
+/** Why such a share is not asked for yet, and what to do. */
+export const SHARE_UNREAD_WORDS =
+  "this machine is signed in to Align again, but has not yet heard from the Align server whether this session's sharing was stopped on the web meanwhile (a session stopped there is not shared again), so nothing was asked for. Run `align sync` in a terminal, then share it again";
+
 /** `endSharesSignedOut` when the credentials say this machine is signed out (a revocation the server reported). */
 export function endSharesIfSignedOut(ctx: Ctx): number {
+  // Also right after a pass heard the revocation (its refresh was refused): the next prompt and deny already say so
+  // (E2E-AGENT cycle 12 C12-2).
   return loadCredentials(ctx.home)?.signed_out ? endSharesSignedOut(ctx) : 0;
 }
 
