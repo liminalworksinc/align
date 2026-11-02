@@ -850,6 +850,33 @@ try {
   const r7Key = sessionKey(W, "claude-code", R7.sid);
   const r7Shared = sdb((d) => d.prepare("SELECT state FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, r7Key))?.state;
   const r7Prompt = (text) => hook("UserPromptSubmit", { session_id: R7.sid, prompt_id: `r7-${++qn}`, prompt: text, cwd: repo, transcript_path: R7.tr });
+  // E2E-AGENT cycle 8: Stop sharing on the web has no directive; the directives answer lists the ended share
+  // (`ended_sessions`), so the device ends it at its next sync, before any usage upload, and `::align share` no longer says
+  // it is already shared.
+  const QW = startQ("w8");
+  const qwLid = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === QW.sid)?.local_id ?? "none";
+  // The folder rule may be gone by now: share it from the terminal unless the rule shared it.
+  if (!sdb((d) => d.prepare("SELECT 1 AS x FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, QW.key))) cli(["share", qwLid.slice(0, 8), "--workspace", W, "--goal", "none", "--yes"]);
+  prompt(QW);
+  sync();
+  const qwStop = await ws(M, "POST", `/sessions/${QW.key}/stop-sharing`, {});
+  const qwAccess = JSON.parse(readFileSync(path.join(alignHome, "credentials.json"), "utf8")).access_token;
+  const qwAnswer = (await call("GET", "/api/v2/directives?cursor=0", { bearer: qwAccess })).json;
+  const qwListed = (qwAnswer?.ended_sessions ?? []).filter((e) => e.session_key === QW.key);
+  const qwOthers = (qwAnswer?.ended_sessions ?? []).filter((e) => e.session_key !== QW.key && sdb((d) => d.prepare("SELECT device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(e.ws, e.session_key))?.device_id !== JSON.parse(readFileSync(path.join(alignHome, "credentials.json"), "utf8")).device_id);
+  const qwRowsBefore = sdb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_usage WHERE ws_id = ? AND session_key = ?").get(W, QW.key))?.n;
+  sync();
+  const qwLocal = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === QW.sid);
+  const qwTold = prompt(QW);
+  const qwShare = prompt(QW, "::align share");
+  check(
+    "web stop-sharing (E2E-AGENT cycle 8): Stop sharing on the web is listed in the device's next directives answer (`ended_sessions`, ended_reason null, with stopped_at; no other device's session), and the next `align sync` ends the share on the machine before any usage upload: `align sessions` no longer says shared, the next prompt says its sharing was stopped (Stop sharing on the web, ...), and `::align share` says it stays stopped, never `already shared`",
+    qwStop.status === 200 && qwListed.length === 1 && qwListed[0].ws === W && qwListed[0].ended_reason === null && !Number.isNaN(Date.parse(qwListed[0].stopped_at)) && qwOthers.length === 0 &&
+      !/^shared/.test(qwLocal?.shared ?? "shared") && (qwTold.system ?? "").includes("this session's sharing was stopped (Stop sharing on the web") &&
+      !(qwShare.json?.reason ?? "").includes("already shared") && (qwShare.json?.reason ?? "").includes("so it stays stopped") &&
+      sdb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_usage WHERE ws_id = ? AND session_key = ?").get(W, QW.key))?.n === qwRowsBefore,
+    `${qwStop.status} ${JSON.stringify(qwListed)} others=${JSON.stringify(qwOthers)} local=${JSON.stringify(qwLocal?.shared)} told=${qwTold.stdout} share=${qwShare.stdout}`,
+  );
   const stopQ1 = await ws(M, "POST", `/sessions/${Q1.key}/stop`, {});
   sync();
   const q1Stopped = tool(Q1, "Bash");

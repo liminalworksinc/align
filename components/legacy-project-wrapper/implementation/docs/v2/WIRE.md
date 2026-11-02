@@ -157,7 +157,7 @@ plus `request` on kind `request` and `hold` on kinds `hold` and `release` (absen
   `enforced`. A session that binds to a held goal later gets its own `hold` directive.
 - `release`: `"hold": { "goal": { "id", "title"|null }, "released_by": { "id", "name" }, "at" }`: lift that goal's hold.
 
-`GET /api/v2/directives?cursor=<seq>` (Bearer) → `{ "directives": [Directive], "next_cursor": "<seq>", "workspaces": [ "<ws id>" ] }` (≤100, this device's sessions only; `workspaces`: the ids, sorted, of the workspaces this device reaches now, so it re-reads `/me` when they changed).
+`GET /api/v2/directives?cursor=<seq>` (Bearer) → `{ "directives": [Directive], "next_cursor": "<seq>", "workspaces": [ "<ws id>" ], "ended_sessions": [ { "ws", "session_key", "ended_reason": null | "member_removed", "stopped_at" } ] }` (≤100, this device's sessions only; `workspaces`: the ids, sorted, of the workspaces this device reaches now, so it re-reads `/me` when they changed; `ended_sessions`: this device's sessions in those workspaces whose share ended in the last 30 days, newest first, at most 200, so a share stopped on the web ends on the device at its next pass, not at the session's next usage upload).
 The device moves its cursor to `next_cursor` after each page, also past directives it had already stored.
 There is no push channel: the local agent has no daemon, and each hook-started sync pass fetches by cursor.
 `POST /api/v2/directives/:id/receipts` (Bearer) → req `{ "session_key", "state": "received"|"applied"|"enforced"|"accepted"|"declined", "at", "auto_accepted"?: bool }` → 200 `{ "fresh": bool }`, plus `"request_state": "sent"|"received"|"accepted"|"declined"|"expired"` on a `request` directive (idempotent, ≤2 KB).

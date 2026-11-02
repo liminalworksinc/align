@@ -1110,8 +1110,10 @@ the person's live devices has: when one already has the requested name (another 
 login at once), it gets the first free `<name> (2)`, `<name> (3)`, ..., so the Devices page and `align login` never show
 two live devices of one name. The name SHALL be decided when the person approves the pairing (the person is known
 then), against their live devices and the names held by their other approved pairings still waiting for their token
-poll, stored on the request, and answered by the approval as `{state:"approved", device_name, asked_as}` (the name
-decided and the name asked for), so the approval page names the device as it is stored; the token poll SHALL store the
+poll, stored on the request, and answered by the approval as `{state:"approved", device_name, asked_as, same_name}`
+(the name decided, the name asked for, and the names of the person's live devices that name is told apart from, the
+asked name and `<asked> (<n>)`, plain first), so the approval page names the device as it is stored and the machines
+whose name a re-login on them keeps; the token poll SHALL store the
 device under that name, unless a device of theirs paired since has taken it (then the next free one). The token poll
 MAY name the device the pairing replaces on the same machine (`replaces`, a device id; malformed is 400); when that
 device is the approving person's own and live, the name SHALL be decided again at the poll with that device left out
@@ -1119,17 +1121,39 @@ of the check, as it is revoked a moment later, so a re-login keeps the plain nam
 `<name> (2)`.
 A device name SHALL be one line as the person reads it everywhere (the approval page, the Devices page, `align
 login`): at `authorize` every run of control characters (C0, DEL and C1) and whitespace, line and paragraph
-separators included, SHALL become one space, every invisible format character (Unicode general category Cf, by
+separators and the blank fillers that render as nothing (Hangul fillers U+115F, U+1160, U+3164, U+FFA0 and the Braille
+blank U+2800) included, SHALL become one space, every invisible format character (Unicode general category Cf, by
 property rather than a list: bidirectional embeddings, overrides and isolates, left-to-right, right-to-left and Arabic
-letter marks, zero-width spaces and joiners, word joiners and invisible operators, the byte order mark, the Mongolian
-vowel separator and soft hyphens) and any lone surrogate SHALL be dropped, and the ends trimmed, before the
-100-character limit applies; a name with nothing left SHALL be 400 `device_name is required`.
+letter marks, zero-width spaces, the zero-width non-joiner, word joiners and invisible operators, the byte order mark,
+the Mongolian vowel separator, soft hyphens and language tags) and any lone surrogate SHALL be dropped, and the ends
+trimmed, before the limit applies. The only Cf characters kept SHALL be those an emoji is made of: a zero-width joiner
+(U+200D) right after an Extended_Pictographic character (optionally followed by a variation selector U+FE0E or U+FE0F
+or a skin-tone modifier U+1F3FB to U+1F3FF) and right before another, as in `👩‍💻`, and a run of tag characters U+E0020
+to U+E007E ended by the cancel tag U+E007F right after an Extended_Pictographic character (optionally followed by
+U+FE0F), as in a subdivision flag; a joiner between letters, or a tag character anywhere else, is dropped. The limit
+SHALL count the characters a person reads (extended grapheme clusters: `👩‍💻` or a flag is one), at most 100, never
+UTF-16 units (`device_name is too long (max 100 characters)`), and the name SHALL also be at most 1600 bytes of UTF-8
+(`device_name is too long (max 1600 bytes)`), so a character built of hundreds of combining marks is refused; a name
+with nothing left SHALL be 400 `device_name is required`.
 A device that revokes itself because a newer pairing on the same machine replaced it (`DELETE
-/api/v2/devices/self?replaced_by=<device id>`) SHALL pass its name on: when the named device is the same person's, live,
-and named `<its name> (<n>)`, and no other live device of the person has the plain name once it is revoked, the named
-device SHALL take the plain name in the same transaction. Two logins approved together on one machine (the second
-named while the first's device was live, then replacing it) so end with the plain name, never `<name> (2)` next to no
-`<name>`; another person's device, or a name still taken, is left as it is.
+/api/v2/devices/self?replaced_by=<device id>`) SHALL pass its name on, whatever that name is: when the named device is
+the same person's and live, is named `<base> (<n>)`, the revoked device's name is `<base>` or `<base> (<m>)` with m
+smaller than n (the plain name counting as 1), and no other live device of the person has the revoked device's name
+once it is revoked, the named device SHALL take that name in the same transaction. Two logins approved together on one
+machine (the second named while the first's device was live, then replacing it) so end with the name the machine had:
+the plain name, never `<name> (2)` next to no `<name>`, and `<name> (2)` (another machine holding `<name>`), never
+`<name> (3)` next to no `<name> (2)`. Another person's device, a name still taken, a replacement that asked for another
+name, or one already named better than the revoked device is left as it is.
+
+#### Scenario: A suffixed machine keeps its name through two logins at once
+
+- **WHEN** a person's device `pass mac (2)` (their other machine is `pass mac`) revokes itself naming their live `pass mac (3)` as its replacement; `pass mac (5)` names their `work mac (2)`; and `pass mac (6)` names their `pass mac (4)` (`scripts/test-v2.mjs` "device (E2E-AGENT cycle 8 C8-2): ...")
+- **THEN** each revoke is 204, `pass mac (3)` becomes `pass mac (2)` and `pass mac` stays, while `work mac (2)` and `pass mac (4)` keep their names
+
+#### Scenario: Emoji in a device name
+
+- **WHEN** a device asks to be named `👩‍💻 dev 🏴󠁧󠁢󠁳󠁣󠁴󠁿 a<ZWJ>b<U+E0041><U+3164>c`, then `👩‍💻` 100 times, `💻` 101 times, and `a` followed by 900 combining acute accents (`scripts/test-v2.mjs` "W5 (E2E-WEB cycle 8): ..." and "W6 (E2E-WEB cycle 8): ...")
+- **THEN** the first is stored as `👩‍💻 dev 🏴󠁧󠁢󠁳󠁣󠁴󠁿 ab c` (the emoji whole, the joiner between letters and the lone tag dropped, the filler a space), the second is accepted, the third is 400 `device_name is too long (max 100 characters)` and the fourth 400 `device_name is too long (max 1600 bytes)`
 
 #### Scenario: A replaced device passes its name on
 

@@ -311,7 +311,10 @@ pass revokes it. A refresh SHALL write credentials only while they are still its
 400 or 401, a second 401) SHALL sign out only the device it was made for: a sync's refresh in flight never writes the
 old device's tokens over a new pairing, nor signs it out. In the same locked step that writes the new pairing, before
 it is written, login SHALL end the shares of the pairing it replaces (as "Signing out ends this machine's shares"
-says), so a session the new pairing shares while the old device's revoke is still in flight keeps its share.
+says), so a session the new pairing shares while the old device's revoke is still in flight keeps its share. Its
+line `<n> session(s) shared from this machine's earlier sign-in stopped sharing; \`::align share\` in a session shares
+it again.` SHALL come after `Signed in as ...` and its `workspace ...` lines, never above them, and also when the
+login then finds another login replaced it meanwhile.
 
 `align logout` SHALL run entirely under the same refresh lock (waiting up to 40 seconds for it; when it can't get it,
 exit 1 saying another Align command is changing the sign-in and nothing was changed): it reads the credentials, revokes
@@ -477,6 +480,11 @@ device <id>, which \`align login\` replaced on this machine; its sessions stoppe
 - **WHEN** after such a logout the device is revoked on the Devices page before the server is reachable again, then `align sync` runs (test `findings3` "already revoked: ...")
 - **THEN** it says `The device this machine signed out of while the server could not be reached was already revoked (on the web, say); nothing was left to do.`, never `Revoked ...`, and `revoke.json` is gone
 
+#### Scenario: Told it can be shared again, then signed out again
+
+- **WHEN** a session stopped from the web and another not stopped are told `this machine is signed in to Align again` after `align logout` and `align login`, then the machine signs out again and each is prompted, a sync runs, and the machine signs in again (test `findings9` "told \"signed in to Align again\", then signed out again ...")
+- **THEN** each prompt shows the sign-out notice again (the stopped one with `align stop-sharing <lid8>`, as its deny says), the next prompt and a pass while signed out add nothing, and after the new sign-in the signed-in-again notice is told again
+
 #### Scenario: Revoked by the next login
 
 - **WHEN** after such a logout the server is back, the old access token has expired, and the developer runs `align login` (test `findings2` "logout while the server is unreachable, then `align login` ..."; against the real server in `scripts/test-agent-live.mjs` "logout offline (E2E-AGENT cycle 2) ...")
@@ -500,8 +508,16 @@ blocked.`), or, when this sign-in does not reach its workspace, `Align: this mac
 this sign-in does not reach <workspace>, so this session can't be shared there again from here; its usage stays on this
 machine.` (plus `It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing <id>\`
 in a terminal.`). It SHALL be told once per sign-in and again when that answer changes; the next sign-out SHALL take it
-back, so the sign-out notice holds again; and such a session SHALL not also get the `can now reach <workspace>` notice
-for its own workspace. Its stop latch and goal holds SHALL stay, so
+back, so the sign-out notice holds again: every session whose newest notice about its share says `::align share` shares
+it again now (signed in again and reaching its workspace, its lost workspace reached again, a member again, a refusal
+naming a sign-out the server ended) SHALL be told the sign-out notice again at that sign-out, whatever it has seen, so
+its newest notice always agrees with its deny (with the `align stop-sharing <id>` sentence for a session stopped or held
+from the web); one whose share ended because its workspace was lost gets `Align: this machine signed out of Align, so
+this session can't be shared again from here for now; its usage stays on this machine. To share it again, run \`align
+login\` in a terminal, then type \`::align share\` here (it counts toward "<goal>" again).`, and hears the next sign-in's
+answer from the signed-in-again notice. A session that has not seen the signed-in-again notice yet is told the
+sign-out notice once, and each further sync pass while signed out tells nothing more. Such a session SHALL not also get
+the `can now reach <workspace>` notice for its own workspace. Its stop latch and goal holds SHALL stay, so
 it fails closed until it is shared again and the web lifts them, or the developer runs `align stop-sharing`. `align sessions` SHALL show such a share as `stopped
 (<workspace>; this machine signed out)` while it can't be shared again, and `stopped (<workspace>; ended at a sign-out;
 \`::align share\` shares it again)` once this machine is signed in again and reaches its workspace; never as `shared`. Sharing it again after a new
@@ -633,7 +649,11 @@ spent.` `--json` SHALL print the same rows with per-basis usage aggregates as JS
 
 The `align goals` command SHALL print each cached workspace as `<name> (cached <time>)` or `<name> (not fetched
 yet; use --refresh)` followed by one line per goal (`*` when bindable, id, `v<version>`, status, visibility as
-`private`, `team` or `workspace`, title) and the legend `* = you can bind a session to it now.` `--refresh` SHALL require sign-in and refetch
+`private`, `team` or `workspace`, title) and the legend `* = you can bind a session to it now.`; a bindable goal the
+feed shows on hold (`allocation.held`) SHALL be marked `h`, never `*`, and then the legend SHALL go on with `h = on
+hold: all agents on it were paused from its Align workspace, so a session bound to it has its tools blocked until the
+hold is released.` (`::align goals` marks and explains it the same way; test `findings9` "`align goals` and `::align
+goals` mark a held goal ..."). `--refresh` SHALL require sign-in and refetch
 `/api/v2/me` and each feed. Feeds SHALL be fetched with `If-None-Match` and a 304 SHALL only update `fetched_at`; a
 fetched feed SHALL keep each goal's `target_share` and `allocation` and the feed's `steering` (`off` when the server sends
 none). A `--workspace` this device can't reach (also for `align share`, `align asks` and `align allocation`) SHALL be
@@ -666,9 +686,26 @@ was deleted since (on the web or with `align delete-history`): this machine SHAL
 shared, and whether its person stopped that share or deleted its history, apart from its share and its epochs (which
 go with the deletion), and the preview SHALL then say `Counting:   from now (<time>)` and `This session was shared
 before, so this share counts from now.` `--alias` SHALL be sent as
-`repo_alias` and remembered for that repo. When the server refuses the share, the command SHALL print `align: session
+`repo_alias` and remembered for that repo. A session that was shared before in a workspace (its share stopped or
+ended there, its history kept) SHALL be shared again only in that workspace, whichever way it is asked for, since its
+work is that workspace's: `align share` without `--workspace` SHALL use that workspace, never the default; `--workspace`
+naming another one SHALL exit 1 with `align: session <id8> was not shared: this session was shared with <workspace>, so
+it is shared again only there (its work is that workspace's), never into <other>.`; while this machine can't reach that
+workspace (its person was removed from it, say), `align share`, `::align share` (preview and `confirm`, whatever goal
+it names) and a spooled share SHALL send nothing and answer `Align: this session was shared with <workspace>, and this
+machine can't reach <workspace> in Align now, so this session can't be shared there again from here, and it is never
+shared into another workspace instead; its usage stays on this machine.` (plus `It was stopped or held from the web, so
+tools stay blocked until you run \`align stop-sharing <lid8>\` in a terminal.` for a stopped or held session; the CLI as
+`align: session <id8> was not shared: ...` with exit 1, a spooled share as `Align: share failed: ...`). A folder
+rule's share never moves such a session either. A session whose shared history was deleted has no workspace of its own
+any more. When the server refuses the share, the command SHALL print `align: session
 <id8> was not shared: <why and what to do>` on stderr (the words of the session's own `sharing failed` notice) and exit
 1, never `Session <id8> is error.`
+
+#### Scenario: Its own workspace out of reach
+
+- **WHEN** a session shared in Acme loses Acme while the device still reaches Side Co (its default now), and the developer types `::align share`, `::align share confirm` and `::align share Side confirm`, an older hook spools a share with no workspace and a sync runs, and the developer runs `align share <id> --goal none --yes` and `align share <id> --workspace "Side Co" --goal none --yes`; then Acme is back (test `findings9` "a session whose own workspace is out of reach is never shared into another one ...")
+- **THEN** every reply is the can't-be-shared-there-again answer, the spooled share fails with it, nothing reaches Side Co, both commands exit 1 with no preview; with Acme back `--workspace "Side Co"` exits 1 with `... so it is shared again only there (its work is that workspace's), never into Side Co.` and `::align share confirm` shares it again in Acme
 
 #### Scenario: Refused by the server
 
@@ -1268,7 +1305,9 @@ sharing because you were removed from <workspace> in Align (or left it) while th
 from then on stays on this machine. You are a member again, so to share it there again, type \`::align share\` here
 (it counts toward "<goal>" again).`, never as a stop for good; `null` (its person stopped it) `Align: this session's
 sharing was stopped (Stop sharing on the web, or \`align stop-sharing\` on another of your devices), so it stopped
-sharing here; its usage stays on this machine from now on.`, and a folder rule never shares it again;
+sharing here; its usage stays on this machine from now on.`, and a folder rule never shares it again (the same words,
+and the same end of the share, when the directives answer's `ended_sessions` lists it: see "Directive intake and
+receipts");
 `device_signed_out` (its share ended when this machine signed out, at a sign-out of an earlier pairing it never saw end
 it) ends the share as a sign-out does (`align sessions`: `stopped (<workspace>; ended at a sign-out; \`::align share\`
 shares it again)` while signed in and reaching the workspace) with `Align: this session stopped sharing because the
@@ -1325,6 +1364,11 @@ is not one of them.
 - **WHEN** a shared session's person is removed from its workspace and let back in while the device does not look, a turn is made and a sync runs; the developer prompts, lists sessions and types `::align share confirm`; in another case its person stops sharing it on the web (tests `findings7` "removed and let back in while this machine did not look ..." and "stopped by its person on the web ...")
 - **THEN** the prompt shows the `you were removed from Acme in Align (or left it) while this machine was not in touch ... type \`::align share\` here` notice, never `sharing_stopped`, `align sessions` shows `stopped (Acme; ended while out of the workspace; \`::align share\` shares it again)`, and the share goes through (the session is shared again on the server); in the other case the prompt says `this session's sharing was stopped (Stop sharing on the web, ...)` and `::align share --dir confirm` leaves it private
 
+#### Scenario: Stop sharing on the web, heard at the next pass
+
+- **WHEN** a shared session is stopped with Stop sharing on the web and `align sync` runs before any usage upload; in another case its person is removed and let back in, it is shared again with `::align share confirm`, and two syncs run while the directives answer still lists the earlier end (test `findings9` "Stop sharing on the web is heard at the next sync's directives answer ..."; against the real server in `scripts/test-agent-live.mjs` "web stop-sharing (E2E-AGENT cycle 8) ...")
+- **THEN** the share is `stopped` here after that sync, the next prompt says `this session's sharing was stopped (Stop sharing on the web, ...)`, `::align share` says it stays stopped (never `already shared`), `::align share --dir confirm` leaves it private, and `align sessions` no longer counts it as shared; in the other case the new share stays `shared`
+
 #### Scenario: A refusal that says the share ended at a sign-out
 
 - **WHEN** the server answers a shared session's usage upload with 409 `sharing_stopped` and `ended_reason` `device_signed_out`, and the developer prompts and lists sessions (test `findings8` "worded as a sign-out the server ended ...")
@@ -1366,7 +1410,9 @@ parsed SHALL deny every tool, and input without a session id SHALL deny when any
 SHALL never deny another session's tools. A `resume` directive SHALL remove the latch file and, when it lifted a stop,
 be told once at the session's next prompt: to the user as `Align: this session was resumed from its Align workspace, so
 its tools work again.` and to the model as `[Align] This session was resumed from its Align workspace, so its tools are
-no longer blocked. Continue the user's task.`, which otherwise goes on believing its tools are blocked. A `stop` that
+no longer blocked. Continue the user's task.`, which otherwise goes on believing its tools are blocked; the model line
+only when the model saw the stop deny one of its tools since the last resume it was told, never for a stop it never
+saw. A `stop` that
 arrives after the resume, before the session was told, SHALL withdraw that notice: the next prompt never says the tools
 work again while they are blocked.
 
@@ -1415,6 +1461,15 @@ session keys this device shares in the directive's workspace, and post receipts:
 `binding_suspended` directive SHALL set the share to `suspended`, withhold the session's later usage, show the user
 `Align: this session's goal binding was revoked, so its usage is paused and stays on this machine. Type
 \`::align bind <goal>\` or run \`align bind\` to pick a goal.` and give the model the unbound delta at the next prompt.
+A share ends with no directive (Stop sharing on the web, say), so the pass SHALL also read the first page's
+`ended_sessions` (this device's sessions whose share the server ended, `directives` "Device fetch of v2 directives by
+cursor") and end each share that is still `shared` or `suspended` here as the usage upload's `sharing_stopped` refusal
+with that `ended_reason` would end it, with the same notice: `null` as its person's stop (stopped for good, `Align: this
+session's sharing was stopped (Stop sharing on the web, or \`align stop-sharing\` on another of your devices), ...`),
+`member_removed` as a removal this machine never saw. A share made here after that end (its first epoch recorded after
+the end, on the server's clock) and a share still `pending` SHALL be left alone. So `::align share`, `align status`,
+`align sessions` and the session's notices agree with the server from the next pass on, not from the session's next
+usage upload.
 
 #### Scenario: Replays after a restored database
 
@@ -1542,8 +1597,11 @@ set the `align` hook SHALL deny every `PreToolUse`, read-only tools too, with `A
 instructions.` (without `: "<reason>"` when there is none; a share that ended puts its `Its sharing ...` sentence before
 the last one, as the stop deny does), without needing a sync; a hold file that cannot be parsed SHALL deny every tool. A `release` directive
 SHALL remove that goal's hold, be acknowledged `received` then `applied`, and show the user `Align: <name> released
-the hold on "<title>".` once in each session it released; since the model saw its tools blocked, that prompt SHALL
-also give it one context line `[Align] <name> released the hold on goal "<title>", so it no longer blocks tools.` A hold SHALL stay on a session that moves to another goal until that goal's `release`
+the hold on "<title>".` once in each session it released; when the model saw that hold deny one of its tools (a hold
+deny, or the cached feed's hold, named that goal since), that prompt SHALL also give it one context line `[Align]
+<name> released the hold on goal "<title>", so it no longer blocks tools.`, and a session whose model never saw it
+block a tool SHALL get no such line (test `findings9` "a hold or stop released before the model saw it block a tool
+..."). A hold SHALL stay on a session that moves to another goal until that goal's `release`
 reaches it (the server sends the release to every session its hold reached). The hold and the stop latch SHALL be independent: a tool runs only when neither blocks
 it, `resume` SHALL NOT lift a hold and `release` SHALL NOT lift a stop. At the end of a turn a held session behaves
 like a stopped one (the `Stop` hook prints nothing). Stopping sharing or deleting history SHALL lift a session's holds
@@ -1710,7 +1768,11 @@ workspace no longer listed: `stopped` with the reason `workspace_access_lost`, i
 and epoch calls dropped, and the notice `Align: this session stopped sharing because you no longer have access to
 <workspace> in Align (you were removed from it or left it); its usage stays on this machine from now on.` (plus the
 `align stop-sharing <lid8>` sentence for a stopped or held session). Its stop latch and goal holds SHALL stay until
-`align stop-sharing`, their denies naming that command; the cached goal, asks and team activity feeds of every
+`align stop-sharing`, their denies naming that command. A session whose share there had ended already and whose newest
+notice said it can be shared there again (its workspace reached again, or a member again) SHALL be told, whatever it
+has seen, `Align: this machine can no longer reach <workspace> in Align (you were removed from it or left it again), so
+this session can't be shared there again from here; its usage stays on this machine.` (plus the `align stop-sharing
+<lid8>` sentence for a stopped or held session), so its newest notice agrees with its deny. The cached goal, asks and team activity feeds of every
 workspace out of reach SHALL be deleted, so no envelope or `::align goals` shows them, and a default workspace out of
 reach is no default any more. The device's default workspace (in `me.json`) SHALL be worked out afresh from each `/me`,
 never carried over from the previous one: the server's, else `default_workspace` in `config.json` (which `align config`
@@ -1730,6 +1792,11 @@ continue, and shares in the person's other workspaces SHALL be unaffected.
 
 - **WHEN** a shared session is stopped from the web, then the person is removed from the workspace and `align sync` runs (test `findings2` "removed from the workspace: the next contact ends the share here ..."; against the real server in `scripts/test-agent-live.mjs` "member removed (E2E-AGENT cycle 2) ...")
 - **THEN** `align sessions` shows it `stopped (Acme; no access to the workspace)`, the next prompt shows the notice naming `align stop-sharing <lid8>`, `Bash` stays denied naming the lost access and that command, the cached feed is gone, a resume gets no goal envelope, and after `align stop-sharing <lid8>` tools run
+
+#### Scenario: Back, then out of reach again
+
+- **WHEN** a session stopped from the web loses its workspace, is told it is back, loses it again, gets it back, and then the machine signs out and in (test `findings9` "told its lost workspace is back, then the workspace is lost again ...")
+- **THEN** after the second loss its next prompt says `this machine can no longer reach Acme in Align ... can't be shared there again from here` with `align stop-sharing <lid8>`, as its deny does; back again it is told so again; at the sign-out it is told `this machine signed out of Align, so this session can't be shared again from here for now ...`; and after the sign-in that it can be shared again
 
 #### Scenario: No workspace left
 

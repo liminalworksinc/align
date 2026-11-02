@@ -12,7 +12,10 @@ import {
   holdReason,
   LIMIT_WORDS,
   limitChange,
+  goalMark,
+  HELD_MARK,
   limitsSeen,
+  outOfReachWords,
   measureKey,
   renderAsksDelta,
   renderAsksGone,
@@ -35,6 +38,7 @@ import { feedHold, feedHoldReason } from "../shared/feedhold.ts";
 import { contextGoals, snapshot } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
+import { isShareStateNotice, noticeKind } from "../shared/notices.ts";
 import { matchRule, readRules, removeRule, setRule } from "../shared/rules.ts";
 import { queueSteering, steeringLine, unsharedNote } from "../shared/steering.ts";
 import type { DriftFile, FeedFile, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
@@ -156,24 +160,17 @@ function reportApplied(home: string, lid: string, inj: InjectedState, ids: (stri
   spoolWrite(home, { type: "applied", local_id: lid, directive_ids: fresh, ts: new Date().toISOString() });
 }
 
-/** Notices about whether this session is shared (started, refused, ended, or this machine signed in again or its lost
- *  workspace back so it can be shared there again): only the newest of them still holds (C5-3, C7-2). A workspace this
- *  device reaches for the first time is not one: it says nothing about this session's own share, so a notice that its
- *  share ended is still told next to it. */
-const SHARE_STATE_NOTICES = ["share_started_", "share_err_", "upload_refused_", "signed_out_", "signed_in_", "access_lost_", "workspace_back_"];
-
 /**
  * The notices still worth telling, of those the session has not seen: one about its share's state (the newest, the
  * earlier ones are stale), a "resumed" one only while that resume still holds (a later stop withdrew it, C4-6), and each
  * text once. All of them count as seen.
  */
 export function currentNotices(hot: HotState, fresh: HotState["notices"]): HotState["notices"] {
-  const kind = (n: { id: string }) => n.id.slice(n.id.indexOf("/") + 1);
-  const lastState = fresh.filter((n) => SHARE_STATE_NOTICES.some((k) => kind(n).startsWith(k))).pop();
+  const lastState = fresh.filter((n) => isShareStateNotice(noticeKind(n.id))).pop();
   const kept = fresh.filter((n) => {
-    const k = kind(n);
+    const k = noticeKind(n.id);
     if (k.startsWith("resumed_")) return !!hot.resumed && k === `resumed_${hot.resumed}`;
-    if (SHARE_STATE_NOTICES.some((p) => k.startsWith(p))) return n === lastState;
+    if (isShareStateNotice(k)) return n === lastState;
     return true;
   });
   return kept.filter((n, i) => !kept.slice(i + 1).some((m) => m.text === n.text));
@@ -541,20 +538,43 @@ function chooseBinding(hot: HotState | null, inj: InjectedState, b: NonNullable<
   inj.local_binding = b;
 }
 
-/** One context line per hold released since the model saw it blocked (it would otherwise go on thinking it paused). */
+/** One context line per hold released since the model saw it block a tool (it would otherwise go on thinking it
+ *  paused); a release of a hold it never saw is not told to it, only to the user (cycle 8). */
 function releaseLines(hot: HotState, inj: InjectedState): string[] {
   const told = inj.releases_told || [];
   const fresh = (hot.released_holds || []).filter((r) => !told.includes(r.directive_id));
   if (!fresh.length) return [];
   inj.releases_told = [...told, ...fresh.map((r) => r.directive_id)].slice(-50);
-  return fresh.map((r) => `[Align] ${clean(r.by, 50) || "Someone"} released the hold on goal "${clean(r.goal_title, 100)}", so it no longer blocks tools.`);
+  const seen = inj.holds_told || [];
+  // A hot file of an older agent names no goal: told when any hold was seen.
+  const lines = fresh.filter((r) => (r.goal_id ? seen.includes(r.goal_id) : seen.length > 0));
+  inj.holds_told = seen.filter((g) => !fresh.some((r) => r.goal_id === g));
+  return lines.map((r) => `[Align] ${clean(r.by, 50) || "Someone"} released the hold on goal "${clean(r.goal_title, 100)}", so it no longer blocks tools.`);
 }
 
-/** A stop lifted from the web since the model was told it was blocked: one context line, once. */
+/** A stop lifted from the web since the model saw the stop block a tool: one context line, once (a stop it never saw
+ *  is not told as lifted to it, only to the user, cycle 8). */
 function resumeLine(hot: HotState, inj: InjectedState): string | null {
   if (!hot.resumed || inj.resume_told === hot.resumed) return null;
   inj.resume_told = hot.resumed;
-  return "[Align] This session was resumed from its Align workspace, so its tools are no longer blocked. Continue the user's task.";
+  const saw = !!inj.stop_told;
+  delete inj.stop_told;
+  return saw ? "[Align] This session was resumed from its Align workspace, so its tools are no longer blocked. Continue the user's task." : null;
+}
+
+/** The model is shown a deny of a tool by the stop latch (`stop`) or by holds on `goals`: recorded, so their lifting is
+ *  told to it later, and only then. */
+function noteBlockTold(home: string, lid: string, block: { stop?: boolean; goals?: string[] }): void {
+  try {
+    const inj = readInjected(home, lid);
+    const goals = [...new Set([...(inj.holds_told || []), ...(block.goals || [])])];
+    if (!(block.stop && !inj.stop_told) && goals.length === (inj.holds_told || []).length) return;
+    if (block.stop) inj.stop_told = true;
+    inj.holds_told = goals.slice(-50);
+    writeInjected(home, lid, inj);
+  } catch {
+    /* best effort: a deny never fails on its bookkeeping */
+  }
 }
 
 export function userPromptSubmit(home: string, harness: Harness, input: HookInput): HookOutput {
@@ -757,6 +777,7 @@ function holdDeny(home: string, lid: string): HookOutput {
   const h = readJsonStrict<HoldLatch>(layout.hold(home, lid));
   if (h.state === "absent") return null;
   if (h.state === "ok" && h.value && Array.isArray(h.value.holds) && !h.value.holds.length) return null;
+  if (h.state === "ok" && h.value && Array.isArray(h.value.holds)) noteBlockTold(home, lid, { goals: h.value.holds.map((x) => x.goal_id) });
   return denyOutput(holdDenyReason(h.state === "ok" ? h.value : null, lid));
 }
 
@@ -801,7 +822,10 @@ export function latchDeny(home: string, harness: Harness, input: HookInput): Hoo
     latch.state === "absent" ||
     (latch.state === "ok" && latch.value && latch.value.stopped !== true) ||
     (latch.state === "ok" && !!input.tool_name && READ_ONLY[harness].has(input.tool_name));
-  if (!allowed) return denyOutput(latch.state === "ok" ? stopReason(latch.value, lid) : DENY_REASON);
+  if (!allowed) {
+    noteBlockTold(home, lid, { stop: true });
+    return denyOutput(latch.state === "ok" ? stopReason(latch.value, lid) : DENY_REASON);
+  }
   return holdDeny(home, lid) || feedHoldDeny(home, lid, input.cwd || null);
 }
 
@@ -809,6 +833,7 @@ export function latchDeny(home: string, harness: Harness, input: HookInput): Hoo
  *  as a hold, fail closed (cycle 6). */
 function feedHoldDeny(home: string, lid: string, cwd: string | null): HookOutput {
   const h = feedHold(home, lid, cwd);
+  if (h) noteBlockTold(home, lid, { goals: [h.goal_id] });
   return h ? denyOutput(`${feedHoldReason(h.goal_title, clean)} ${TELL_USER}`) : null;
 }
 
@@ -1134,9 +1159,11 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
     case "goals": {
       const feed = feedFor(home, hot);
       if (!feed) return "Align: no cached goals. Run `align goals --refresh` in a terminal.";
-      const list = feed.goals.slice(0, 12).map((g) => `  ${g.bindable ? "*" : " "} ${g.title} (${g.id}, v${g.version}, ${g.status})`);
+      const shown = feed.goals.slice(0, 12);
+      const list = shown.map((g) => `  ${goalMark(g)} ${g.title} (${g.id}, v${g.version}, ${g.status})`);
       const age = feed.fetched_at ? `, fetched ${Math.max(0, Math.round((Date.now() - Date.parse(feed.fetched_at)) / 1000))} s ago` : "";
-      return [`Align goals in ${feed.workspace_name} (* = you can bind to it now${age}; each sync fetches them again):`, ...list].join("\n");
+      const held = shown.some((g) => g.bindable && g.allocation?.held) ? [HELD_MARK] : [];
+      return [`Align goals in ${feed.workspace_name} (* = you can bind to it now${age}; each sync fetches them again):`, ...list, ...held].join("\n");
     }
     case "share": {
       const dirMode = /(^|\s)--dir(\s|$)/.test(arg);
@@ -1152,6 +1179,12 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       // Stopped by its person while it was shared there; not one whose share a sign-out or a lost workspace had ended
       // before `align stop-sharing` freed its tools, which the server shares again.
       if (!dirMode && hot?.share?.state === "stopped" && hot.prior_share?.stopped && (hot.share.ended ?? "sharing_ended") === "sharing_ended") return `Align: ${stoppedForGoodWords(lid, "type `::align share` here")}`;
+      // Shared before in a workspace this machine can't reach now (its person was removed from it, say): shared again
+      // only there, never into the default workspace, which would file that workspace's work under another (cycle 8).
+      const own = hot?.share;
+      if (!dirMode && own && !(me.workspaces || []).some((w) => w.id === own.workspace_id)) {
+        return `Align: ${outOfReachWords(own.workspace_name, lid, fs.existsSync(layout.latch(home, lid)) || fs.existsSync(layout.hold(home, lid)))}`;
+      }
       const feed = feedFor(home, hot);
       // With no workspace of its own, no default and more than one in reach, no goal can be looked up either: say why
       // first, whatever goal was named, rather than that the goal is not cached (C4-7); a folder rule can't tell which

@@ -1205,8 +1205,25 @@ try {
       raceStranger.status === 204 && strangerName === "race mac (3)" && raceTaken.status === 204 && nameOf(raceKeep.id)?.name === "race mac (4)",
     `${raceRevoke.status} ${JSON.stringify(raceAfter)} ${raceStranger.status} ${strangerName} ${raceTaken.status} ${JSON.stringify(nameOf(raceKeep.id))}`,
   );
+  // C8-2 (E2E-AGENT cycle 8): the machine was "pass mac (2)" (another machine holds "pass mac"); two logins approved
+  // together leave it "pass mac (3)" replacing "pass mac (2)": the revoke passes "pass mac (2)" on, whatever the name is.
+  // A pairing that asked for another name keeps its own, and one already better named keeps it.
+  const passOther = insertDevice(U1.id, "pass mac");
+  const passOld = insertDevice(U1.id, "pass mac (2)");
+  const passNew = insertDevice(U1.id, "pass mac (3)");
+  const passRevoke = await call("U1", "DELETE", `/api/v2/devices/self?replaced_by=${passNew.id}`, { bearer: passOld.access });
+  const passRenamed = insertDevice(U1.id, "work mac (2)");
+  const passRenamedRevoke = await call("U1", "DELETE", `/api/v2/devices/self?replaced_by=${passRenamed.id}`, { bearer: insertDevice(U1.id, "pass mac (5)").access });
+  const passBetter = insertDevice(U1.id, "pass mac (4)");
+  const passBetterRevoke = await call("U1", "DELETE", `/api/v2/devices/self?replaced_by=${passBetter.id}`, { bearer: insertDevice(U1.id, "pass mac (6)").access });
+  check(
+    "device (E2E-AGENT cycle 8 C8-2): a self-revoke of \"pass mac (2)\" naming its replacement \"pass mac (3)\" (the plain name held by another machine) gives the replacement \"pass mac (2)\", so the machine keeps its name; a replacement that asked for another name (\"work mac (2)\") keeps it, and one already better named than the revoked device (\"(4)\" replacing \"(6)\") keeps its own",
+    passRevoke.status === 204 && nameOf(passNew.id)?.name === "pass mac (2)" && nameOf(passOther.id)?.name === "pass mac" && !!nameOf(passOld.id)?.revoked_at &&
+      passRenamedRevoke.status === 204 && nameOf(passRenamed.id)?.name === "work mac (2)" && passBetterRevoke.status === 204 && nameOf(passBetter.id)?.name === "pass mac (4)",
+    `${passRevoke.status} ${JSON.stringify([nameOf(passNew.id), nameOf(passOther.id), nameOf(passOld.id)])} ${passRenamedRevoke.status} ${nameOf(passRenamed.id)?.name} ${passBetterRevoke.status} ${nameOf(passBetter.id)?.name}`,
+  );
   withDb((d) => {
-    for (const x of [raceB, raceOther, raceKeep]) d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), x.id);
+    for (const x of [raceB, raceOther, raceKeep, passOther, passNew, passRenamed, passBetter]) d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), x.id);
   });
   const ts3 = new Date().toISOString();
   const rr1 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });
@@ -2612,6 +2629,47 @@ try {
         w4Text.includes("U5's zed cart is connected as “U5's zed cart (2)”: you already have a device named “U5's zed cart”. If this is a new align login on that same machine, it keeps that device's name instead. You can close this page.") &&
           w4Tok.status === 200 && w4Name === "U5's zed cart (2)",
         `${w4Text.slice(0, 600)} | ${w4Tok.status} ${w4Name}`,
+      );
+
+      // C8-3 (E2E-AGENT cycle 8): a third "U5's zed cart" while "U5's zed cart" and "(2)" are live is approved as "(3)",
+      // and the page names both machines whose name a re-login keeps; the re-login of "(2)" (its poll names that device)
+      // keeps "(2)", as the page said.
+      const c83 = insertPairing("U5's zed cart");
+      await page.goto(`${BASE}/app/device?code=${c83.userCode}`, { waitUntil: "networkidle0" });
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
+      await page.waitForFunction(() => document.querySelectorAll('main input[type="checkbox"]').length > 0, { timeout: 15000 }).catch(() => undefined);
+      await page.evaluate(() => document.querySelector('main input[type="checkbox"]')?.click());
+      await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve" && !b.disabled), { timeout: 15000 }).catch(() => undefined);
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Approve")?.click());
+      await page.waitForFunction(() => /is connected/.test(document.body.innerText), { timeout: 15000 }).catch(() => undefined);
+      const c83Text = await page.evaluate(() => document.querySelector("main")?.innerText ?? "");
+      const c83Tok = await call("D", "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: c83.deviceCode, replaces: w4Tok.json?.device_id } });
+      // The replaced device then revokes itself naming its replacement, as `align login` does.
+      const c83Revoke = await call("D", "DELETE", `/api/v2/devices/self?replaced_by=${c83Tok.json?.device_id}`, { bearer: w4Tok.json?.access_token });
+      const c83Name = withDb((d) => d.prepare("SELECT name FROM v2_devices WHERE id = ?").get(c83Tok.json?.device_id ?? "")?.name);
+      check(
+        "C8-3 (ui, E2E-AGENT cycle 8): approving \"U5's zed cart\" while \"U5's zed cart\" and \"U5's zed cart (2)\" are live says it is connected as \"(3)\" and that a new align login on one of those machines keeps that machine's name (naming both), never that it keeps \"that device's name\" (the plain one); the re-login of \"(2)\" then keeps \"(2)\"",
+        c83Text.includes("U5's zed cart is connected as “U5's zed cart (3)”: you already have devices named “U5's zed cart” and “U5's zed cart (2)”. If this is a new align login on one of those machines, it keeps that machine's name instead. You can close this page.") &&
+          !c83Text.includes("keeps that device's name") && c83Tok.status === 200 && c83Revoke.status === 204 && c83Name === "U5's zed cart (2)",
+        `${c83Text.slice(0, 600)} | ${c83Tok.status} ${c83Revoke.status} ${c83Name}`,
+      );
+      // W1 (E2E-WEB cycle 8): a code approved in another tab while the page shows its device: Approve refuses, and the
+      // device's panel (name, "Asked ...", workspaces, Approve and Deny) goes; only the refusal stays.
+      const w1c8 = insertPairing("U5's tabbed laptop");
+      await page.goto(`${BASE}/app/device?code=${w1c8.userCode}`, { waitUntil: "networkidle0" });
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
+      await page.waitForFunction(() => document.querySelectorAll('main input[type="checkbox"]').length > 0, { timeout: 15000 }).catch(() => undefined);
+      await page.evaluate(() => document.querySelector('main input[type="checkbox"]')?.click());
+      const w1c8Other = await call("U5", "POST", "/api/v2/device/approve", { cookie: U5.cookie, body: { user_code: w1c8.userCode, workspace_ids: [A] } });
+      await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve" && !b.disabled), { timeout: 15000 }).catch(() => undefined);
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Approve")?.click());
+      await page.waitForFunction(() => document.body.innerText.includes("No device is waiting for that code"), { timeout: 15000 }).catch(() => undefined);
+      const w1c8Page = await page.evaluate(() => ({ text: document.querySelector("main")?.innerText ?? "", buttons: [...document.querySelectorAll("main button")].map((b) => b.textContent), boxes: document.querySelectorAll('main input[type="checkbox"]').length }));
+      check(
+        "W1 (ui, E2E-WEB cycle 8): Approve on a code approved in another tab says \"No device is waiting for that code. Check it, or run align login again.\" and the device's panel goes: no device name, no \"Asked ...\", no workspace boxes, no Approve or Deny",
+        w1c8Other.status === 200 && w1c8Page.text.includes("No device is waiting for that code. Check it, or run align login again.") && !w1c8Page.text.includes("U5's tabbed laptop") && !/Asked \d+/.test(w1c8Page.text) &&
+          w1c8Page.boxes === 0 && !w1c8Page.buttons.includes("Approve") && !w1c8Page.buttons.includes("Deny"),
+        `${w1c8Other.status} ${JSON.stringify(w1c8Page)}`,
       );
 
       // Z3 (ui): Delete shared history on a session already deleted in another tab is done: the row goes, and the page
@@ -9186,6 +9244,24 @@ try {
       "W3: a device name drops every invisible format character (Unicode category Cf: U+061C ARABIC LETTER MARK, U+2066 to U+2069, U+202A to U+202E, U+200B to U+200F, U+2060 to U+2064, U+FEFF, U+180E, U+00AD), so \"al<each>m…x laptop\" is stored as \"al\" + 22 \"m\" + \"x laptop\"; a name of only those characters and spaces -> 400 device_name is required",
       w3.status === 200 && w3Name === `al${"m".repeat(CF.length - 1)}x laptop` && w3Empty.status === 400 && w3Empty.json?.message === "device_name is required",
       `${w3.status} ${JSON.stringify(w3Name)} ${w3Empty.status} ${w3Empty.text}`,
+    );
+    // W5 (E2E-WEB cycle 8): the zero-width joiner of an emoji sequence and the tags of a subdivision flag are kept (a
+    // joiner between letters, and a lone tag, still go); W6: the limit counts characters as a person reads them.
+    const scot = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}";
+    const w5 = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: `\u{1F469}\u200D\u{1F4BB} dev ${scot} a\u200Db\u{E0041}\u3164c`, public_key: newDeviceKeys().pub } });
+    const w5Name = withDb((d) => d.prepare("SELECT device_name FROM v2_device_requests WHERE user_code = ?").get(w5.json?.user_code ?? ""))?.device_name;
+    check(
+      "W5 (E2E-WEB cycle 8): a device name keeps an emoji ZWJ sequence (\"👩‍💻\") and a tag-sequence flag (Scotland) whole, while a joiner between letters, a lone tag character and the invisible Hangul filler still go (the filler becomes a space)",
+      w5.status === 200 && w5Name === `\u{1F469}\u200D\u{1F4BB} dev ${scot} ab c`,
+      `${w5.status} ${JSON.stringify(w5Name)}`,
+    );
+    const w6 = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "\u{1F469}\u200D\u{1F4BB}".repeat(100), public_key: newDeviceKeys().pub } });
+    const w6Long = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "\u{1F4BB}".repeat(101), public_key: newDeviceKeys().pub } });
+    const w6Bytes = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: `a${"\u0301".repeat(900)}`, public_key: newDeviceKeys().pub } });
+    check(
+      "W6 (E2E-WEB cycle 8): the 100-character device-name limit counts what a person reads (grapheme clusters): 100 × \"👩‍💻\" is accepted, 101 × \"💻\" is 400 \"device_name is too long (max 100 characters)\", and one character of 900 combining marks passes no byte cap: 400 \"device_name is too long (max 1600 bytes)\"",
+      w6.status === 200 && w6Long.status === 400 && w6Long.json?.message === "device_name is too long (max 100 characters)" && w6Bytes.status === 400 && w6Bytes.json?.message === "device_name is too long (max 1600 bytes)",
+      `${w6.status} ${w6.text.slice(0, 120)} ${w6Long.status} ${w6Long.text} ${w6Bytes.status} ${w6Bytes.text}`,
     );
     const evEnv = { ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1" };
     const q = (sql, ...a) => withDb((d) => d.prepare(sql).all(...a));
