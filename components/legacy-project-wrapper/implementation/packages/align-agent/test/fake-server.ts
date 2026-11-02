@@ -529,8 +529,10 @@ export class FakeServer {
         // any of their devices (C4-8). Its history may be deleted by any of their live devices (C4-1).
         const reshare = !sub && req.method === "PUT" && !!sess && sess.device !== dev.id && sess.state !== "stopped" && !!this.devices.get(sess.device)?.revoked;
         // A session that ended when its person was removed is shared again by any device of theirs once they are back (as
-        // lib/v2/sessions.ts: a new pairing after a re-invite too).
-        const back = !!sess && !sub && req.method === "PUT" && sess.state === "stopped" && sess.ended === "member_removed";
+        // lib/v2/sessions.ts: a new pairing after a re-invite too), and one a revocation ended (`device_signed_out`) by
+        // their new pairing.
+        const back =
+          !!sess && !sub && req.method === "PUT" && sess.state === "stopped" && (sess.ended === "member_removed" || (sess.ended === "device_signed_out" && sess.device !== dev.id));
         if (sess && !sub && req.method === "PUT" && sess.state === "stopped" && !back) return send(409, { error: "sharing_stopped" });
         const deleting = !sub && req.method === "DELETE";
         if (sess && sess.device !== dev.id && !reshare && !back && !deleting) return send(404, { error: "not_found" });
