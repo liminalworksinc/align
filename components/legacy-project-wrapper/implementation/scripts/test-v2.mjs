@@ -8529,6 +8529,15 @@ try {
   await mustStart({ ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1" });
   dbFile = path.join(evDir, "v2", "align.sqlite");
   {
+    // Z4 (E2E-WEB cycle 6), on this fresh server (the pairing limit of the first one is spent): a device name is one line.
+    const z4 = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "  nl\nhere\t\u0007x \u202e ", public_key: newDeviceKeys().pub } });
+    const z4Name = withDb((d) => d.prepare("SELECT device_name FROM v2_device_requests WHERE user_code = ?").get(z4.json?.user_code ?? ""))?.device_name;
+    const z4Empty = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "\n\t\u0000\u200b", public_key: newDeviceKeys().pub } });
+    check(
+      "Z4: a device name with control characters is kept on one line at pairing (\"  nl\\nhere\\t\\u0007x \\u202e \" -> \"nl here x\": control characters and whitespace runs become one space, direction marks are dropped, the ends trimmed); a name with nothing left -> 400 device_name is required",
+      z4.status === 200 && z4Name === "nl here x" && z4Empty.status === 400 && z4Empty.json?.message === "device_name is required",
+      `${z4.status} ${JSON.stringify(z4Name)} ${z4Empty.status} ${z4Empty.text}`,
+    );
     const evEnv = { ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1" };
     const q = (sql, ...a) => withDb((d) => d.prepare(sql).all(...a));
     const ev = (name, w = null) => (w ? q("SELECT * FROM v2_events WHERE name = ? AND ws_id = ?", name, w) : q("SELECT * FROM v2_events WHERE name = ?", name));

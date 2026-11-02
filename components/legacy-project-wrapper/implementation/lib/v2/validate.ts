@@ -13,6 +13,20 @@ export function str(b: Body, k: string, max = 300, { min = 1 }: { min?: number }
   return t;
 }
 
+/** Characters a one-line name never keeps: controls (C0, DEL, C1) and Unicode line and paragraph separators become a
+ *  space, as runs of whitespace do; bidirectional embeddings, overrides and isolates and zero-width spaces are dropped,
+ *  so a name reads the same wherever it is shown. */
+const NAME_SPACE = /[\p{Cc}\s\u2028\u2029]+/gu;
+const NAME_DROP = /[\u200B\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/gu;
+
+/** A one-line name (a device name, Z4): `str`'s rules after control characters and whitespace runs become one space
+ *  and invisible direction marks are dropped; nothing left is 400 "<k> is required". */
+export function oneLine(b: Body, k: string, max = 300): string {
+  const v = b[k];
+  if (typeof v !== "string") throw badRequest(`${k} must be a string`);
+  return str({ [k]: v.replace(NAME_DROP, "").replace(NAME_SPACE, " ") }, k, max);
+}
+
 export function optStr(b: Body, k: string, max = 300): string | null {
   const v = b[k];
   if (v === undefined || v === null) return null;

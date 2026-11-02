@@ -1104,11 +1104,21 @@ login at once), it gets the first free `<name> (2)`, `<name> (3)`, ..., so the D
 two live devices of one name. The token poll MAY name the device the pairing replaces on the same machine (`replaces`,
 a device id; malformed is 400); that device, counted only when it is the approving person's own, is left out of the
 check, as it is revoked a moment later, so a re-login keeps the plain name instead of alternating with `<name> (2)`.
+A device name SHALL be one line as the person reads it everywhere (the approval page, the Devices page, `align
+login`): at `authorize` every run of control characters (C0, DEL and C1) and whitespace, line and paragraph
+separators included, SHALL become one space, invisible direction marks (bidirectional embeddings, overrides and
+isolates, left-to-right and right-to-left marks) and zero-width spaces SHALL be dropped, and the ends trimmed, before
+the 100-character limit applies; a name with nothing left SHALL be 400 `device_name is required`.
 
 #### Scenario: Starting a pairing
 
 - **WHEN** the CLI POSTs `/api/v2/device/authorize`
 - **THEN** the response is `{device_code, user_code:"XXXX-XXXX", verification_uri:"<origin>/app/device", expires_in:600, interval:5}`, where the user code uses only the letters `BCDFGHJKLMNPQRSTVWXZ`; more than 10 requests per client per hour get 429 `rate_limited` with `retry_after` (seconds, also sent as `Retry-After`) and a message that says how long to wait: in Mode L, where every pairing on the computer is one client, `Align on this computer has started 10 device pairings in the last hour, its limit for everyone who pairs here. Try again in <n> minutes, or restart Align to clear it.`, and when hosted `Too many device pairings were started from this network in the last hour (the limit is 10). Try again in <n> minutes.` (`scripts/test-v2.mjs` "device: authorize is limited to 10 per hour per client ...")
+
+#### Scenario: A device name with control characters
+
+- **WHEN** a pairing is started with the name `"  nl\nhere\t\u0007x \u202e "`, and another with only `"\n\t\u0000\u200b"` (`scripts/test-v2.mjs` "Z4: a device name ...")
+- **THEN** the first is stored (and so shown on the approval page) as `nl here x`; the second is 400 `device_name is required` and starts no pairing
 
 #### Scenario: A second device of one name
 

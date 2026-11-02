@@ -20,6 +20,8 @@ The agent generates an Ed25519 keypair locally (`~/.align/device_key`, 0600; pub
 → 200 `{ "device_code": "<43+ chars>", "user_code": "BCDF-GHJK", "verification_uri": "<origin>/app/device", "expires_in": 600, "interval": 5 }`
 → 429 `{ "error": "rate_limited", "message": "... Try again in <n> minutes ...", "retry_after": <s> }` with `Retry-After: <s>`
   (in Mode L every pairing on the computer counts as one client, and a restart clears the in-memory count)
+  The name is kept on one line: control characters and whitespace runs become one space, invisible direction marks
+  are dropped and the ends trimmed; a name with nothing left is 400.
 
 The user signs in at `/app/device`, types the code, sees device name + request age, ticks workspaces, approves.
 
