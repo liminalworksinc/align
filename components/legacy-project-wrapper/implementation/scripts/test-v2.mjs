@@ -1542,7 +1542,7 @@ try {
   const podMateSource = await al(U3, { target_goal_id: G3.id, source_goal_id: G2.id, choice: "contribution", session_keys: [], note: null });
   const podMateSeen = await getAl(U2, podMateSource.json?.id);
   check("alignment: a team-mate's goal as the source -> pending until its owner approves; the owner can see the request", podMateSource.status === 201 && podMateSource.json.state === "pending" && podMateSource.json.approvers.some((a) => a.id === U2.id) && podMateSeen.status === 200, `${podMateSource.text.slice(0, 300)} ${podMateSeen.status}`);
-  await act(U3, podMateSource.json.id, "withdraw", {});
+  await act(U3, podMateSource.json.id, "withdraw", { revision: 1 });
 
   // -- activity: in-flight work signals between members, kept 24 hours --
   const actPost = (dev, items, extra = {}) => call(dev.who, "POST", `/api/v2/workspaces/${A}/activity`, { bearer: dev.access, body: { items }, ...extra });
@@ -1623,7 +1623,7 @@ try {
   await upload(D3, S3a, [usageRow(D3, "after-align", E4)]);
   const spendAfter = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json;
   check("alignment: future usage counts under G1; past usage did not move", spendAfter.rows.find((r) => r.goal?.id === G1.id)?.requests === 2 && spendAfter.rows.find((r) => r.goal?.id === G2.id)?.requests === 1 && invariantHolds(spendAfter), JSON.stringify(spendAfter.rows.map((r) => [r.label, r.requests])));
-  const revoke = await act(U1, wt.json.id, "revoke");
+  const revoke = await act(U1, wt.json.id, "revoke", { revision: 2 });
   const afterRevoke = await dirs(D3, after.next_cursor);
   const bs = afterRevoke.directives.find((d) => d.kind === "binding_suspended");
   const s3aState = withDb((d) => d.prepare("SELECT state FROM v2_sessions WHERE session_key = ?").get(S3a).state);
@@ -1639,15 +1639,15 @@ try {
   const spendRev = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json;
   check("alignment: revoke is prospective (in-flight usage of the old epoch still lands under G1); G1 needs alignment again; picking an own goal resumes sharing", inflight.json?.accepted === 1 && rebindG1.status === 403 && rebindOwn.status === 200 && spendRev.rows.find((r) => r.goal?.id === G1.id)?.requests === 3, `${inflight.text} ${rebindG1.status} ${rebindOwn.text}`);
   const wd = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S3b] });
-  const wdo = await act(U3, wd.json.id, "withdraw");
+  const wdo = await act(U3, wd.json.id, "withdraw", { revision: 1 });
   const rj = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S3b] });
-  const rjByRequester = await act(U3, rj.json.id, "reject");
-  const rjo = await act(U1, rj.json.id, "reject");
+  const rjByRequester = await act(U3, rj.json.id, "reject", { revision: 1 });
+  const rjo = await act(U1, rj.json.id, "reject", { revision: 1 });
   const afterReject = await act(U1, rj.json.id, "approve", { revision: 1 });
   check("alignment: withdraw by the requester; reject by an approver (not the requester); a decided request can't be approved", wdo.json?.state === "withdrawn" && rjByRequester.status === 403 && rjo.json?.state === "rejected" && afterReject.status === 409, `${wdo.status} ${rjByRequester.status} ${rjo.status} ${afterReject.status}`);
-  const afterWithdraw = await act(U3, wd.json.id, "withdraw");
-  const declinedToRequester = await act(U3, rj.json.id, "withdraw");
-  const withdrawnToApprover = await act(U1, wd.json.id, "reject");
+  const afterWithdraw = await act(U3, wd.json.id, "withdraw", { revision: 1 });
+  const declinedToRequester = await act(U3, rj.json.id, "withdraw", { revision: 1 });
+  const withdrawnToApprover = await act(U1, wd.json.id, "reject", { revision: 1 });
   check(
     "Y5: a decision on a closed alignment says what happened in the app's words and who did it: \"This request was declined by Una One, so nothing changes.\" (never \"is rejected\"), \"This request was withdrawn by <requester>, so nothing changes.\"; to the person who did it, \"you\" (c9 W3): \"You declined this request, …\", \"You withdrew this request, …\"",
     declinedToRequester.json?.error === "wrong_state" && declinedToRequester.json?.message === `This request was declined by ${U1.name}, so nothing changes.` &&
@@ -1698,7 +1698,7 @@ try {
   await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U1.cookie, body: { user_id: U3.id, role: "lead" } });
   const leadAsks = await al(U3, { target_goal_id: G2.id, source_goal_id: G3.id, choice: "contribution", session_keys: [] });
   check("approval: a team lead requesting against their team's goal does not count; the set is the other people in it", leadAsks.status === 201 && leadAsks.json.state === "pending" && reqOf(leadAsks.json, G2.id)?.approvers.map((a) => a.id).join() === U2.id && reqOf(leadAsks.json, G2.id)?.approved_by === null, leadAsks.text);
-  await act(U3, leadAsks.json.id, "withdraw");
+  await act(U3, leadAsks.json.id, "withdraw", { revision: 1 });
   await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U1.cookie, body: { user_id: U3.id, role: "member" } });
 
   // -- cycles --
@@ -1716,7 +1716,7 @@ try {
     xy.json?.state === "pending" && yx.json?.state === "pending" && xyOk.json?.state === "approved" && yxLoop.status === 409 && yxLoop.json?.error === "cycle" && /contribute to each other in a loop/.test(yxLoop.json?.message) && yxAfter.json?.state === "pending" && reqOf(yxAfter.json, GXa.id)?.approved_by === null,
     `${xyOk.status} ${yxLoop.text} ${yxAfter.json?.state}`,
   );
-  await act(U2, yx.json.id, "withdraw");
+  await act(U2, yx.json.id, "withdraw", { revision: 1 });
   const depAB = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${GXa.id}/versions`, { cookie: U3.cookie, body: { version: 1, depends_on: [GYb.id] } });
   const depBA = await call("U2", "POST", `/api/v2/workspaces/${A}/goals/${GYb.id}/versions`, { cookie: U2.cookie, body: { version: 1, depends_on: [GXa.id] } });
   const gybNow = (await call("U2", "GET", `/api/v2/workspaces/${A}/goals/${GYb.id}`, { cookie: U2.cookie })).json?.goal;
@@ -2369,7 +2369,7 @@ try {
     G5?.id && e5.status === 200 && reqOf(setBefore.json, G5.id)?.approvers.map((a) => a.id).sort().join() === [U2.id, U5.id].sort().join(),
     `${e5.status} ${JSON.stringify(setBefore.json?.requirements)}`,
   );
-  await act(U3, setBefore.json.id, "withdraw");
+  await act(U3, setBefore.json.id, "withdraw", { revision: 1 });
 
   const mem = (u, target, body) => call(u.who, body ? "POST" : "DELETE", `/api/v2/workspaces/${A}/members/${target}`, { cookie: u.cookie, ...(body ? { body } : {}) });
   // Recent sign-in: an owner's sensitive member and workspace actions need a sign-in from the last 15 minutes.
@@ -2439,8 +2439,8 @@ try {
     reqOf(setAfter.json, G5.id)?.approvers.map((a) => a.id).join() === U2.id && reqOf(fallback.json, G5.id)?.approvers.map((a) => a.id).join() === U1.id && fallback.json.state === "pending",
     `${JSON.stringify(setAfter.json?.requirements)} ${JSON.stringify(fallback.json?.requirements)}`,
   );
-  await act(U3, setAfter.json.id, "withdraw");
-  await act(U2, fallback.json.id, "withdraw");
+  await act(U3, setAfter.json.id, "withdraw", { revision: 1 });
+  await act(U2, fallback.json.id, "withdraw", { revision: 1 });
   const leave6 = await mem(U6, U6.id);
   const u6Gone = await call("U6", "GET", `/api/v2/workspaces/${A}`, { cookie: U6.cookie });
   check("members: a viewer leaves (DELETE their own id) -> 204, then the workspace is 404 for them", leave6.status === 204 && u6Gone.status === 404, `${leave6.status} ${leave6.text} ${u6Gone.status}`);
@@ -6690,7 +6690,7 @@ try {
     // -- C5-5: an alignment of several sessions agrees in number ("these 2 sessions contribute to") --
     const alC2 = await fa(FB, "POST", "/alignments", { target_goal_id: GG.id, choice: "contribution", session_keys: [SB1.key, SB2.key], note: "Both CI sessions help trials" });
     const effC2 = (alC2.json?.effects ?? []).map((e) => e.text);
-    const alC2Off = await fa(FB, "POST", `/alignments/${alC2.json?.id}/withdraw`, {});
+    const alC2Off = await fa(FB, "POST", `/alignments/${alC2.json?.id}/withdraw`, { revision: 1 });
     check(
       "C5-5: a contribution alignment of 2 sessions reads \"Records that these 2 sessions contribute to …\" (never \"contributes\"), and one of a single session or a source goal still \"contributes\"",
       alC2.status === 201 && effC2.length === 1 && /^Records that these 2 sessions contribute to /.test(effC2[0]) && !/contributes/.test(effC2[0]) && /^Records that .* contributes to /.test(effC[0] ?? "") && /^Records that this session contributes to /.test(effW[0] ?? "") && alC2Off.status === 200,
@@ -8725,9 +8725,9 @@ try {
     const t1Withdraw = await qa(QB, "POST", `/reallocations/${t1.json?.id}/withdraw`, {});
     const GS = await qGoal("Asker's own goal", QB);
     const al1 = await qa(QB, "POST", "/alignments", { target_goal_id: GT1.id, source_goal_id: GS?.id, choice: "contribution", session_keys: [] });
-    const al1No = await qa(QA, "POST", `/alignments/${al1.json?.id}/reject`, {});
-    const al1Again = await qa(QA, "POST", `/alignments/${al1.json?.id}/reject`, {});
-    const al1Withdraw = await qa(QB, "POST", `/alignments/${al1.json?.id}/withdraw`, {});
+    const al1No = await qa(QA, "POST", `/alignments/${al1.json?.id}/reject`, { revision: 1 });
+    const al1Again = await qa(QA, "POST", `/alignments/${al1.json?.id}/reject`, { revision: 1 });
+    const al1Withdraw = await qa(QB, "POST", `/alignments/${al1.json?.id}/withdraw`, { revision: 1 });
     check(
       "c9 W3: a declined target change tells the approver who declined it \"You declined this proposal, so nothing changes.\" (never \"…declined by Quinn Approver…\") and its requester the name; a declined alignment tells its decliner \"You declined this request, so nothing changes.\"",
       t1.status === 201 && t1No.json?.state === "rejected" && t1Again.status === 409 && t1Again.json?.message === "You declined this proposal, so nothing changes." && t1Withdraw.status === 409 && t1Withdraw.json?.message === `This proposal was declined by ${QA.name}, so nothing changes.` &&
@@ -8930,6 +8930,260 @@ try {
     } else check("ui (Chrome) available for the c9 web fix checks", false, `no Chrome at ${CHROME}`);
   }
   // ==== end fix:c9-web ====
+
+  // ==== fix:c10-web ====
+  // Regression checks for the cycle-10 web walk (e2e-reports/cycle10/web.md): C10-2 (every decision names the revision
+  // its person read), W1 (the alignment counter's author hears "You countered…"), W2 (MCP says "you" for the token's
+  // person) and W3 (an ask's card says "marked done by"), on a workspace of their own. RO owns it and GT, a Growth goal;
+  // RC leads Growth, so RO and RC both decide on GT; RD, a Growth member, asks with goals of their own.
+  {
+    const rUsers = {};
+    for (const [who, name] of [
+      ["RO", "Rowan Owner"],
+      ["RC", "Carys Counter"],
+      ["RD", "Dorian Asker"],
+    ])
+      rUsers[who] = await signUp(who, name, `${who.toLowerCase()}@c10web.example.test`);
+    const { RO, RC, RD } = rUsers;
+    const RW = (await call("RO", "POST", "/api/v2/workspaces", { cookie: RO.cookie, body: { name: "C10 web fix workspace" } })).json?.id;
+    const ra = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${RW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const u of [RC, RD]) {
+      const i = await ra(RO, "POST", "/invites", { email: u.email, role: "member" });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const RT = (await ra(RO, "POST", "/teams", { name: "Growth" })).json?.id;
+    await ra(RO, "POST", `/teams/${RT}/members`, { user_id: RC.id, role: "lead" });
+    for (const u of [RD, RO]) await ra(RO, "POST", `/teams/${RT}/members`, { user_id: u.id, role: "member" });
+    const rGoal = async (title, u = RO, team = RT) => (await ra(u, "POST", "/goals", { title, visibility: "workspace", ...(team ? { team_id: team } : {}) })).json;
+    const GT = await rGoal("Ship 1000 robot arms");
+    const rAl = async (n) => {
+      const src = await rGoal(`Dorian's goal ${n}`, RD, null);
+      return (await ra(RD, "POST", "/alignments", { target_goal_id: GT?.id, source_goal_id: src?.id, choice: "contribution", session_keys: [] })).json;
+    };
+    const alAct = (u, al, action, body) => ra(u, "POST", `/alignments/${al?.id}/${action}`, body);
+    const alNow = (al) => withDb((d) => d.prepare("SELECT state, revision FROM v2_alignments WHERE id = ?").get(al?.id));
+    const STALE_AL = (who) => `This request changed after you read it: ${who} countered it, and it is now at revision 2. Read it again and decide again.`;
+
+    // -- C10-2: a decline or withdraw from a view of revision 1 is refused once someone countered (revision 2) --
+    const al1 = await rAl(1);
+    const al1Ctr = await alAct(RC, al1, "counter", { revision: 1, choice: "contribution", note: "Contribution, but say why" });
+    const al1No = await alAct(RO, al1, "reject", { revision: 1 });
+    const al1Out = await alAct(RD, al1, "withdraw", { revision: 1 });
+    const al1Own = await alAct(RC, al1, "reject", { revision: 1 });
+    const al1Bare = await alAct(RO, al1, "reject", {});
+    const al1After = alNow(al1);
+    check(
+      "c10 C10-2: on an alignment countered meanwhile (revision 2), Decline and Withdraw sent for revision 1 are 409 stale_revision \"This request changed after you read it: Carys Counter countered it, and it is now at revision 2. Read it again and decide again.\" (\"you countered it\" to the counter's author); without a revision 400; it stays countered at revision 2",
+      al1?.state === "pending" && al1Ctr.json?.state === "countered" && al1Ctr.json.revision === 2 &&
+        [al1No, al1Out, al1Own].every((r) => r.status === 409 && r.json?.error === "stale_revision") &&
+        al1No.json.message === STALE_AL(RC.name) && al1Out.json.message === STALE_AL(RC.name) && al1Own.json.message === STALE_AL("you") &&
+        al1Bare.status === 400 && al1After?.state === "countered" && al1After.revision === 2,
+      `${al1Ctr.status} ${al1No.text} | ${al1Out.text} | ${al1Own.text} | ${al1Bare.status} ${al1Bare.text} | ${JSON.stringify(al1After)}`,
+    );
+
+    // -- C10-2: every decision route, enumerated. Each [action] route under the workspace is classified; for those whose
+    //    objects have revisions, every action the module lists is sent with a revision that isn't current where it would
+    //    otherwise be allowed, and must be 409 stale_revision with nothing changed. Alignments also need the revision
+    //    (400 without it) and are then decided with the current one, which shows the refusal was the revision's. --
+    const actionRoutes = [];
+    const walk = (dir) => {
+      for (const e of readdirSync(path.join(ROOT, dir), { withFileTypes: true }))
+        if (e.isDirectory()) {
+          if (e.name === "[action]" && existsSync(path.join(ROOT, dir, e.name, "route.ts"))) actionRoutes.push(path.basename(path.dirname(dir)));
+          walk(path.join(dir, e.name));
+        }
+    };
+    walk("app/api/v2");
+    // Asks have no revisions in the spec (an ask's actions are state transitions, refused as wrong_state); typed requests
+    // (DELETE) and holds (PUT/DELETE) aren't [action] routes and have no revisions either.
+    const REVISIONED = { alignments: "lib/v2/alignments.ts", "change-requests": "lib/v2/changes.ts", reallocations: "lib/v2/reallocations.ts" };
+    const STATE_ONLY = ["asks"];
+    const actionsIn = (rel, name) => JSON.parse(new RegExp(`${name} = (\\[[^\\]]*\\])`).exec(readFileSync(path.join(ROOT, rel), "utf8"))?.[1] ?? "[]");
+    const listed = { alignments: actionsIn(REVISIONED.alignments, "ACTIONS"), "change-requests": actionsIn(REVISIONED["change-requests"], "CHANGE_REQUEST_ACTIONS"), reallocations: actionsIn(REVISIONED.reallocations, "REALLOCATION_ACTIONS") };
+    check(
+      "c10 C10-2 (routes): every decision route ([action]) is classified: alignments, change requests and reallocations carry a revision; asks are state-only",
+      JSON.stringify([...new Set(actionRoutes)].sort()) === JSON.stringify([...Object.keys(REVISIONED), ...STATE_ONLY].sort()) && Object.values(listed).every((l) => l.length >= 6),
+      `${JSON.stringify(actionRoutes)} ${JSON.stringify(listed)}`,
+    );
+    const tried = { alignments: {}, "change-requests": {}, reallocations: {} };
+    const staleOk = (r) => r.status === 409 && r.json?.error === "stale_revision" && /changed after you read it/.test(r.json.message ?? "");
+
+    // Alignments: e1 pending, e2 countered, e3 approved.
+    const e1 = await rAl("e1");
+    const e2 = await rAl("e2");
+    const e3 = await rAl("e3");
+    await alAct(RC, e2, "counter", { revision: 1, choice: "contribution", note: "Say why" });
+    const e3Ok = await alAct(RO, e3, "approve", { revision: 1 });
+    const alCases = [
+      ["approve", RO, e1, 1, {}],
+      ["counter", RO, e1, 1, { choice: "contribution", note: "x" }],
+      ["reject", RO, e1, 1, {}],
+      ["withdraw", RD, e1, 1, {}],
+      ["accept_counter", RD, e2, 2, {}],
+      ["revoke", RO, e3, 1, {}],
+    ];
+    for (const [action, u, al, rev, extra] of alCases) {
+      const stale = await alAct(u, al, action, { ...extra, revision: rev + 7 });
+      const bare = await alAct(u, al, action, extra);
+      tried.alignments[action] = staleOk(stale) && bare.status === 400 && JSON.stringify(alNow(al)) === JSON.stringify({ state: action === "accept_counter" ? "countered" : action === "revoke" ? "approved" : "pending", revision: rev }) ? "ok" : `${stale.text} ${bare.status}`;
+    }
+    // With the current revision: the counter's author already approved revision 2, so accepting it completes it.
+    const e2In = await alAct(RD, e2, "accept_counter", { revision: 2 });
+    const e1No = await alAct(RO, e1, "reject", { revision: 1 });
+    const e4 = await rAl("e4");
+    const e4Out = await alAct(RD, e4, "withdraw", { revision: 1 });
+    const e3Off = await alAct(RO, e3, "revoke", { revision: 1 });
+    const alFresh = e3Ok.json?.state === "approved" && e2In.json?.state === "approved" && e1No.json?.state === "rejected" && e4Out.json?.state === "withdrawn" && e3Off.json?.state === "revoked";
+
+    // Change requests: c1 pending, c2 countered with a condition (then accepted), c3 approved.
+    const rCr = async (n) => {
+      const g = await rGoal(`Change request goal ${n}`);
+      const cr = (await ra(RD, "POST", `/goals/${g?.id}/change-requests`, { base_version: 1, changes: { title: `Change request goal ${n}, renamed` }, reason: "Cycle 10" })).json;
+      return { g, cr };
+    };
+    const crAct = (u, x, action, body) => ra(u, "POST", `/goals/${x.g?.id}/change-requests/${x.cr?.id}/${action}`, body);
+    const crNow = (x) => withDb((d) => d.prepare("SELECT state, revision, launch FROM v2_change_requests WHERE id = ?").get(x.cr?.id));
+    const c1 = await rCr(1);
+    const c2 = await rCr(2);
+    const c3 = await rCr(3);
+    await crAct(RO, c2, "counter", { revision: 1, changes: { title: "Change request goal 2, countered" }, note: "Shorter", condition: "The dashboard shows it" });
+    const c2Mid = crNow(c2);
+    const c2In = await crAct(RD, c2, "accept_counter", { revision: 2 });
+    const c3Ok = await crAct(RO, c3, "approve", { revision: 1 });
+    const crCases = [
+      ["approve", RO, c1, {}],
+      ["approve_and_launch", RO, c1, {}],
+      ["reject", RO, c1, { reason: "No" }],
+      ["counter", RO, c1, { changes: { title: "Change request goal 1, countered" }, note: "x" }],
+      ["withdraw", RD, c1, {}],
+      ["rebase", RD, c1, { base_version: 1 }],
+      ["acknowledge", RD, c2, {}],
+      ["launch", RO, c3, {}],
+      ["not_yet", RO, c3, {}],
+    ];
+    const crBefore = (x) => JSON.stringify(crNow(x));
+    for (const [action, u, x, extra] of crCases) {
+      const was = crBefore(x);
+      const stale = await crAct(u, x, action, { ...extra, revision: 9 });
+      tried["change-requests"][action] = staleOk(stale) && crBefore(x) === was ? "ok" : stale.text;
+    }
+    // accept_counter needs a countered request: a fresh one, sent for revision 1 after the counter made revision 2.
+    const c4 = await rCr(4);
+    await crAct(RO, c4, "counter", { revision: 1, changes: { title: "Change request goal 4, countered" }, note: "Shorter" });
+    const c4Stale = await crAct(RD, c4, "accept_counter", { revision: 1 });
+    tried["change-requests"].accept_counter = staleOk(c4Stale) && crNow(c4)?.state === "countered" ? "ok" : c4Stale.text;
+    const crFresh = c2Mid?.state === "countered" && c2In.json?.state === "pending" && c3Ok.json?.state === "approved" && crNow(c1)?.state === "pending";
+
+    // Reallocations: t1 pending, t2 countered, t3 approved.
+    const rRl = async (share) => (await ra(RD, "POST", "/reallocations", { targets: [{ goal_id: GT?.id, target_share: share }], note: "More here" })).json;
+    const rlAct = (u, t, action, body) => ra(u, "POST", `/reallocations/${t?.id}/${action}`, body);
+    const rlNow = (t) => withDb((d) => d.prepare("SELECT state, revision, launch FROM v2_reallocations WHERE id = ?").get(t?.id));
+    const t1 = await rRl(10);
+    const t2 = await rRl(11);
+    const t3 = await rRl(12);
+    await rlAct(RC, t2, "counter", { revision: 1, targets: [{ goal_id: GT?.id, target_share: 9 }], note: "A little less" });
+    const t3Ok = await rlAct(RO, t3, "approve", { revision: 1 });
+    const rlCases = [
+      ["approve", RO, t1, {}],
+      ["approve_and_launch", RO, t1, {}],
+      ["counter", RO, t1, { targets: [{ goal_id: GT?.id, target_share: 8 }] }],
+      ["reject", RO, t1, { reason: "No" }],
+      ["withdraw", RD, t1, {}],
+      ["accept_counter", RD, t2, {}],
+      ["launch", RO, t3, {}],
+      ["not_yet", RO, t3, {}],
+    ];
+    for (const [action, u, t, extra] of rlCases) {
+      const was = JSON.stringify(rlNow(t));
+      const stale = await rlAct(u, t, action, { ...extra, revision: 9 });
+      tried.reallocations[action] = staleOk(stale) && JSON.stringify(rlNow(t)) === was ? "ok" : stale.text;
+    }
+    const rlFresh = t3Ok.json?.state === "approved" && rlNow(t2)?.state === "countered";
+    const uncovered = Object.entries(listed).flatMap(([k, acts]) => acts.filter((a) => a !== "mention" && tried[k][a] !== "ok").map((a) => `${k}/${a}: ${tried[k][a] ?? "not tried"}`));
+    check(
+      "c10 C10-2 (every decision): each action of alignments, change requests and reallocations sent with a revision that isn't current is 409 stale_revision and changes nothing; an alignment action without a revision is 400; with the current revision each alignment action is then recorded",
+      uncovered.length === 0 && alFresh && crFresh && rlFresh,
+      `${uncovered.join(" | ")} ${JSON.stringify({ alFresh, crFresh, rlFresh })}`,
+    );
+    // A target change countered meanwhile names the counter's author, as a change request's and an alignment's refusal do.
+    const t2Stale = await rlAct(RO, t2, "reject", { revision: 1, reason: "No" });
+    check(
+      "c10 C10-2: Decline on a target change countered meanwhile, sent for revision 1, is 409 stale_revision \"This proposal changed after you read it: Carys Counter countered it, and it is now at revision 2. Read it again and decide again.\"",
+      t2Stale.status === 409 && t2Stale.json?.message === `This proposal changed after you read it: ${RC.name} countered it, and it is now at revision 2. Read it again and decide again.` && rlNow(t2)?.state === "countered",
+      t2Stale.text,
+    );
+
+    // -- the browser: C10-2 (ui) on an alignment's Decline and Withdraw and a target change's Decline --
+    const ua1 = await rAl("u1");
+    const ua2 = await rAl("u2");
+    const ut1 = await rRl(13);
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      const errors = [];
+      const as = async (u) => {
+        const ctx = await browser.createBrowserContext();
+        const pg = await ctx.newPage();
+        pg.on("pageerror", (e) => errors.push(e.message));
+        await pg.setViewport({ width: 1100, height: 900 });
+        await pg.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        return pg;
+      };
+      const open = async (pg, p) => {
+        await pg.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await pg.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      };
+      const press = (pg, scope, label) => pg.evaluate((s, t) => [...document.querySelectorAll(`${s} button`)].find((b) => b.textContent?.trim() === t)?.click(), scope, label);
+      const hasButton = (pg, scope, label) => pg.waitForFunction((s, t) => [...document.querySelectorAll(`${s} button`)].some((b) => b.textContent?.trim() === t), { timeout: 15000 }, scope, label).catch(() => undefined);
+      const cardState = (pg, sel) =>
+        pg.evaluate((c) => {
+          const card = document.querySelector(c);
+          const n = card?.querySelector("[data-notice]");
+          return { notice: n?.getAttribute("data-notice") ?? null, noticeText: n?.textContent?.trim() ?? "", focused: !!n && document.activeElement === n, text: card?.innerText ?? "", buttons: [...(card?.querySelectorAll("button") ?? [])].map((b) => b.textContent?.trim()) };
+        }, sel);
+      /** Press `label` on a card left open while `meanwhile` happens in another tab, then read the card once it reloads. */
+      const staleClick = async (pg, card, label, meanwhile) => {
+        await hasButton(pg, card, label);
+        const r = await meanwhile();
+        await press(pg, card, label);
+        await pg.waitForFunction((c) => !!document.querySelector(`${c} [data-notice]`), { timeout: 15000 }, card).catch(() => undefined);
+        await pg.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        return { r, ui: await cardState(pg, card) };
+      };
+      try {
+        const pO = await as(RO);
+        await open(pO, `/app/w/${RW}/alignments`);
+        const d1 = await staleClick(pO, `[data-alignment="${ua1?.id}"]`, "Decline", () => alAct(RC, ua1, "counter", { revision: 1, choice: "contribution", note: "Say why" }));
+        check(
+          "c10 C10-2 (ui): Decline on an alignment card left at revision 1 while another approver countered it reads, focused, \"Not recorded. This request changed after you read it: Carys Counter countered it, and it is now at revision 2. Read it again and decide again.\"; the card reloads at revision 2 and the request stays countered",
+          d1.r.status === 200 && d1.ui.notice === "refused" && d1.ui.focused && d1.ui.noticeText === `Not recorded. ${STALE_AL(RC.name)}` && d1.ui.text.includes("revision 2") && alNow(ua1)?.state === "countered",
+          JSON.stringify(d1.ui).slice(0, 700),
+        );
+        const pD = await as(RD);
+        await open(pD, `/app/w/${RW}/alignments`);
+        const w1 = await staleClick(pD, `[data-alignment="${ua2?.id}"]`, "Withdraw", () => alAct(RC, ua2, "counter", { revision: 1, choice: "contribution", note: "Say why" }));
+        check(
+          "c10 C10-2 (ui): Withdraw on the requester's card left at revision 1 while an approver countered reads \"Not recorded. This request changed after you read it: Carys Counter countered it, …\" and the request stays countered, offering Accept the change",
+          w1.r.status === 200 && w1.ui.notice === "refused" && w1.ui.noticeText === `Not recorded. ${STALE_AL(RC.name)}` && w1.ui.buttons.includes("Accept the change") && alNow(ua2)?.state === "countered",
+          JSON.stringify(w1.ui).slice(0, 700),
+        );
+        await open(pO, `/app/w/${RW}/alignments`);
+        const tCard = `[data-reallocation="${ut1?.id}"]`;
+        const d2 = await staleClick(pO, tCard, "Decline", () => rlAct(RC, ut1, "counter", { revision: 1, targets: [{ goal_id: GT?.id, target_share: 7 }], note: "Less" }));
+        check(
+          "c10 C10-2 (ui): Decline on a target change left at revision 1 while another approver countered it reads \"Not recorded. This proposal changed after you read it: Carys Counter countered it, and it is now at revision 2. Read it again and decide again.\" and the proposal stays countered",
+          d2.r.status === 200 && d2.ui.notice === "refused" && d2.ui.noticeText === `Not recorded. This proposal changed after you read it: ${RC.name} countered it, and it is now at revision 2. Read it again and decide again.` && rlNow(ut1)?.state === "countered",
+          JSON.stringify(d2.ui).slice(0, 700),
+        );
+        check("c10 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));
+      } catch (e) {
+        check("c10 web fix (ui) run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the c10 web fix checks", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end fix:c10-web ====
 
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));
