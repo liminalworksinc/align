@@ -13,7 +13,7 @@ import type { Principal } from "./http";
 import { need } from "./workspaces";
 import { expireStoppedSessionTargets, holdNewlyBound } from "./requests";
 import { personName } from "./retention";
-import { shareAgainText, shareAgainWords } from "./share-again.mts";
+import { shareAgainText, shareAgainWords, sharingStoppedText } from "./share-again.mts";
 import { b64url, iso, nonNegInt, oneOf, optInt, optStr, str, type Body } from "./validate";
 
 // Shared sessions, binding epochs and usage. docs/v2/WIRE.md "Shared sessions".
@@ -441,7 +441,7 @@ export async function setAgentStop(pp: PolicyPrincipal, key: string, stop: boole
     );
   }
   if (s.ended_reason === "member_removed") throw conflict("member_removed", memberRemovedRefusal(pp, s));
-  if (s.state === "stopped") throw conflict("sharing_stopped", "Sharing was stopped for this session");
+  if (s.state === "stopped") throw conflict("sharing_stopped", sharingStoppedRefusal(pp, s));
   const at = nowIso();
   const id = await tx(() => {
     run("UPDATE v2_sessions SET agent_stopped = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?", stop ? 1 : 0, at, pp.wsId, key);
@@ -469,6 +469,15 @@ function memberRemovedRefusal(pp: PolicyPrincipal, s: SessionRow): string {
     return `${lead} Once ${you ? "you are" : `${name} is`} back in the workspace and the machine that shared it has the workspace again, ::align share in that session shares it again, and then Stop and Resume here reach it.`;
   }
   return `${lead} ${shareAgainText(shareAgainWords(sharedFrom(pp.wsId, s.device_id), you ? null : name))} Then Stop and Resume here reach it.`;
+}
+
+/** Why a stop or resume can't reach a session that is stopped with no `ended_reason`: its person stopped sharing it (only
+ *  they can), for good (E2E-WEB cycle 14 W3). Its person is "you" to the reader; once their account is deleted, nothing
+ *  shares their work again. */
+function sharingStoppedRefusal(pp: PolicyPrincipal, s: SessionRow): string {
+  if (s.user_id === pp.userId) return sharingStoppedText(null);
+  const user = get<{ name: string }>("SELECT name FROM ba_user WHERE id = ?", s.user_id);
+  return sharingStoppedText(personName(s.user_id, user?.name), { deleted: !user });
 }
 
 /** The machine that shared one of the caller's own sessions, as the Sessions tab words how to share it again (W7): its

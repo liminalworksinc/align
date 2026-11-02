@@ -17,15 +17,18 @@ export function str(b: Body, k: string, max = 300, { min = 1 }: { min?: number }
   return t;
 }
 
+const CONTROL_CHAR = /\p{Cc}/gu;
+
 /** Characters a one-line name never keeps (W3): controls (category Cc: C0, DEL, C1), Unicode line and paragraph
  *  separators and the blank fillers that render as nothing (lib/v2/text-core.mts) become a space, as runs of whitespace
  *  do; invisible format characters and lone surrogates are dropped as in all people's text (`dropInvisible`, which keeps
  *  emoji sequences whole), so a name reads the same wherever it is shown. */
 const NAME_SPACE = new RegExp(`[\\p{Cc}\\s\\u2028\\u2029${BLANK_FILLERS}]+`, "gu");
 
-/** `v` with the characters a one-line name never keeps dropped (or made spaces), keeping emoji sequences whole. */
+/** `v` with the characters a one-line name never keeps dropped (or made spaces), keeping emoji sequences whole. Its
+ *  control characters become spaces before `dropInvisible`, which would drop them. */
 export function cleanName(v: string): string {
-  return dropInvisible(v).replace(NAME_SPACE, " ");
+  return dropInvisible(v.replace(CONTROL_CHAR, " ")).replace(NAME_SPACE, " ");
 }
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });

@@ -3409,6 +3409,63 @@ try {
             [w4Six, w4SixNew].every((r) => r.status === 400 && r.json?.error === "too_many_dependencies" && r.json.message === W4_WORDS) && errors.length === 0,
           `${JSON.stringify(w4Before)} ${JSON.stringify(w4After)} ${w4Note} | ${w4Six.text} | ${w4SixNew.text} ${errors.join(" | ")}`,
         );
+
+        // E2E-WEB cycle 14 C14-2: the forms treat text of only invisible characters as they treat spaces. A measure of
+        // U+200B U+2060 on New goal is left out (the goal is created); on New version a measure and a limit of them are
+        // left out (the version is saved with the real measure); the request-access form keeps Send request disabled
+        // while the name or the use case is only invisible characters.
+        const INVIS = "​⁠";
+        const btnIn = (root, label) => page.evaluate((r, l) => [...document.querySelectorAll(`${r} button`)].find((b) => b.textContent?.trim() === l)?.click(), root, label);
+        await page.goto(`${BASE}/app/w/${CW}/goals`, { waitUntil: "networkidle0" });
+        await page.waitForSelector('input[aria-label="Measure 1"]', { timeout: 15000 });
+        await page.type("main form input:not([aria-label])", "C14 form goal");
+        await page.type('input[aria-label="Measure 1"]', INVIS);
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create goal")?.click());
+        await page.waitForFunction(() => document.body.innerText.includes("C14 form goal") || /text is required/.test(document.body.innerText), { timeout: 15000 }).catch(() => undefined);
+        await sleep(300);
+        const c14NewText = await page.evaluate(() => document.body.innerText);
+        const c14NewGoal = withDb((d) => d.prepare("SELECT id, version FROM v2_goals WHERE ws_id = ? AND title = ?").get(CW, "C14 form goal"));
+        const c14NewMeasures = c14NewGoal ? (await ca(CO, "GET", `/goals/${c14NewGoal.id}`)).json?.goal?.measures : null;
+        await page.goto(`${BASE}/app/w/${CW}/goals/${w4Main.id}`, { waitUntil: "networkidle0" });
+        await page.waitForSelector("#new-version form", { timeout: 15000 });
+        await btnIn("#new-version", "Add a measure");
+        await btnIn("#new-version", "Add a measure");
+        await page.waitForSelector('#new-version input[aria-label="Measure 2"]', { timeout: 15000 });
+        await page.type('#new-version input[aria-label="Measure 1"]', INVIS);
+        await page.type('#new-version input[aria-label="Measure 2"]', "C14 real measure");
+        await btnIn("#new-version", "Add a limit");
+        await page.waitForSelector('#new-version input[aria-label="Limit 1"]', { timeout: 15000 });
+        await page.type('#new-version input[aria-label="Limit 1"]', INVIS);
+        await btnIn("#new-version", `Save version ${w4Main.version + 1}`);
+        let c14Ver = null;
+        for (let i = 0; i < 40 && !(c14Ver?.version > w4Main.version) && !/text is required/.test(await page.evaluate(() => document.body.innerText)); i++) {
+          await sleep(200);
+          c14Ver = (await ca(CO, "GET", `/goals/${w4Main.id}`)).json?.goal;
+        }
+        c14Ver = (await ca(CO, "GET", `/goals/${w4Main.id}`)).json?.goal;
+        const c14VerText = await page.evaluate(() => document.body.innerText);
+        await page.goto(`${BASE}/app/request-access`, { waitUntil: "networkidle0" });
+        await page.waitForSelector('input[name="name"]', { timeout: 15000 });
+        const sendDisabled = () => page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Send request")?.disabled ?? null);
+        await page.type('input[name="email"]', "c14-form@example.test");
+        await page.type('input[name="name"]', INVIS);
+        await page.type('textarea[name="use_case"]', "Goals for our agents");
+        const raNameBlank = await sendDisabled();
+        await page.goto(`${BASE}/app/request-access`, { waitUntil: "networkidle0" });
+        await page.waitForSelector('input[name="name"]', { timeout: 15000 });
+        await page.type('input[name="email"]', "c14-form@example.test");
+        await page.type('input[name="name"]', "Cy Form");
+        await page.type('textarea[name="use_case"]', INVIS);
+        const raUseBlank = await sendDisabled();
+        await page.type('textarea[name="use_case"]', "Goals");
+        const raFilled = await sendDisabled();
+        check(
+          "c14 C14-2 (ui, E2E-WEB cycle 14): a form treats text of only invisible characters (U+200B U+2060) as blank, as spaces: New goal leaves such a measure out and creates the goal; New version leaves such a measure and limit out and saves the version with the real measure; Send request on request access stays disabled while the name or the use case is only such text; no \"text is required\" or \"limits[0].text is required\"",
+          !!c14NewGoal && Array.isArray(c14NewMeasures) && c14NewMeasures.length === 0 && !/text is required/.test(c14NewText) &&
+            c14Ver?.version === w4Main.version + 1 && c14Ver.measures?.map((m) => m.text).join() === "C14 real measure" && (c14Ver.limits ?? []).length === 0 && !/text is required/.test(c14VerText) &&
+            raNameBlank === true && raUseBlank === true && raFilled === false && errors.length === 0,
+          `${JSON.stringify(c14NewGoal)} ${JSON.stringify(c14NewMeasures)} ${c14NewText.match(/.{0,80}text is required.{0,40}/)?.[0] ?? ""} | ${c14Ver?.version} ${JSON.stringify(c14Ver?.measures)} ${JSON.stringify(c14Ver?.limits)} ${c14VerText.match(/.{0,80}text is required.{0,40}/)?.[0] ?? ""} | ${raNameBlank} ${raUseBlank} ${raFilled} ${errors.join(" | ")}`,
+        );
       } finally {
         await browser.close();
       }
@@ -3431,6 +3488,75 @@ try {
         [goneStop, goneResume].every((r) => r.status === 409 && r.json?.error === "member_removed" && goneLead.test(r.json.message) && !/is back|::align share/.test(r.json.message)) &&
         dirCount(SF) === 0,
       `${delCM.status} ${delCM.text} ${JSON.stringify(rowF)} | ${goneStop.text} | ${goneResume.text}`,
+    );
+
+    // E2E-WEB cycle 14 C14-1: control characters (C0 but tab and line feed, DEL, C1) are dropped from people's text as
+    // invisible characters are, so a title, measure, reason, decline reason, request note or session title of only
+    // them is missing, and MCP never passes one on to an AI app.
+    const CN = await signUp("CN", "Cy New", "cn@ended.example.test");
+    const cnInv = await ca(CO, "POST", "/invites", { email: CN.email, role: "member" });
+    await call("CN", "POST", `/api/v2/invites/${cnInv.json?.token}/accept`, { cookie: CN.cookie, body: {} });
+    const CONTROLS = ["\u007f", "\u0001\u0002", "\u0007", "\u0085", "\u0080\u009f", " \u0000\u001b\u009b "];
+    const c14Titles = [];
+    for (const v of CONTROLS) c14Titles.push(await ca(CN, "POST", "/goals", { title: v, visibility: "workspace" }));
+    const c14Measure = await ca(CN, "POST", "/goals", { title: "C14 goal", visibility: "workspace", measures: [{ text: "\u0080\u009f", target: null }] });
+    const CNG = (await ca(CN, "POST", "/goals", { title: "Cy's\u0007 goal\u0085", visibility: "workspace", measures: [{ text: "Latency\u007f p95", target: "200\u0001ms" }] })).json;
+    const c14Reasons = [];
+    for (const v of CONTROLS) c14Reasons.push(await ca(CO, "POST", `/goals/${CNG?.id}/change-requests`, { base_version: 1, changes: { title: "Cy's goal, sooner" }, reason: v }));
+    const c14Cr = await ca(CO, "POST", `/goals/${CNG?.id}/change-requests`, { base_version: 1, changes: { title: "Cy's goal, sooner" }, reason: "Needs\u0007 review\r\nby May" });
+    const c14Declines = [];
+    for (const v of CONTROLS) c14Declines.push(await ca(CN, "POST", `/goals/${CNG?.id}/change-requests/${c14Cr.json?.id}/reject`, { revision: 1, reason: v }));
+    const c14CrRow = withDb((d) => d.prepare("SELECT state, reason FROM v2_change_requests WHERE id = ?").get(c14Cr.json?.id ?? ""));
+    const DN = insertDevice(CN.id, "Cy's laptop");
+    withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(DN.id, CW));
+    const dn = { ...newDeviceKeys(), who: "CN", user: CN, id: DN.id, access: DN.access };
+    const cnPut = (key, title) =>
+      call("CN", "PUT", `/api/v2/workspaces/${CW}/sessions/${key}`, { bearer: dn.access, body: { harness: "claude-code", repo_key: repoKey(dn, CW, "/src/cy"), repo_alias: "cy\u0007-repo", started_at: cT0, title } });
+    const SN1 = sessionKey(dn, CW, "claude-code", "c14-one");
+    const SN2 = sessionKey(dn, CW, "claude-code", "c14-two");
+    const sn1Put = await cnPut(SN1, "\u0001\u0002\u007f");
+    const sn2Put = await cnPut(SN2, "Desk\u007f session\u0085");
+    for (const k of [SN1, SN2]) await call("CN", "POST", `/api/v2/workspaces/${CW}/sessions/${k}/epochs`, { bearer: dn.access, body: { epoch_id: epochId(), goal_id: CNG?.id, starts_at: cT0, root_turn: null, cause: "manual" } });
+    const snRows = withDb((d) => d.prepare("SELECT session_key, title, repo_alias FROM v2_sessions WHERE ws_id = ? AND session_key IN (?, ?)").all(CW, SN1, SN2));
+    const c14ReqBlank = await ca(CN, "POST", `/goals/${CNG?.id}/requests`, { type: "checkpoint", note: "\u007f\u0085" });
+    const c14Req = await ca(CN, "POST", `/goals/${CNG?.id}/requests`, { type: "replan", note: "Commit\u0007 what you have" });
+    const c14ReqNotes = withDb((d) => d.prepare("SELECT id, note FROM v2_requests WHERE id IN (?, ?)").all(c14ReqBlank.json?.request?.id ?? "", c14Req.json?.request?.id ?? ""));
+    const c14Goal = withDb((d) => d.prepare("SELECT title FROM v2_goals WHERE id = ?").get(CNG?.id ?? ""));
+    check(
+      "c14 C14-1 (E2E-WEB cycle 14): a goal title, a measure, a change-request reason and a decline reason of only control characters (DEL, C0, BEL, C1 U+0085, U+0080 U+009F, NUL ESC CSI with spaces) are missing: 400 \"<field> is required\", nothing recorded; control characters inside are dropped (a title, measure and target, a reason keeping its line break, a session title and repo alias, a request note), and a session title or request note of only them is stored as none",
+      c14Titles.every((r) => r.status === 400 && r.json?.message === "title is required") && c14Measure.status === 400 && /text is required/.test(c14Measure.json?.message ?? "") &&
+        CNG?.title === "Cy's goal" && c14Goal?.title === "Cy's goal" && CNG.measures?.[0]?.text === "Latency p95" && CNG.measures[0].target === "200ms" &&
+        c14Reasons.every((r) => r.status === 400 && r.json?.message === "reason is required") && c14Cr.status === 201 && c14CrRow?.reason === "Needs review\nby May" &&
+        c14Declines.every((r) => r.status === 400 && r.json?.message === "reason is required") && c14CrRow?.state === "pending" &&
+        sn1Put.status === 200 && sn2Put.status === 200 && snRows.find((r) => r.session_key === SN1)?.title === null && snRows.find((r) => r.session_key === SN2)?.title === "Desk session" && snRows.every((r) => r.repo_alias === "cy-repo") &&
+        c14ReqBlank.status === 201 && c14Req.status === 201 && c14ReqNotes.find((r) => r.id === c14ReqBlank.json?.request?.id)?.note === null && c14ReqNotes.find((r) => r.id === c14Req.json?.request?.id)?.note === "Commit what you have",
+      `${c14Titles.map((r) => r.text).join(" | ")} | ${c14Measure.text} | ${JSON.stringify(c14Goal)} | ${c14Reasons.map((r) => r.status).join(",")} ${c14Cr.text.slice(0, 200)} ${JSON.stringify(c14CrRow)} | ${c14Declines.map((r) => r.text).join(" | ")} | ${JSON.stringify(snRows)} | ${c14ReqBlank.status} ${c14Req.text.slice(0, 200)} ${JSON.stringify(c14ReqNotes)}`,
+    );
+    // Text stored before the rule (written here straight to the database) reaches an AI app without its control
+    // characters, in structuredContent and in the text summary.
+    withDb((d) => d.prepare("UPDATE v2_goals SET title = ? WHERE id = ?").run("Legacy\u0007 title\u0085\u007f", CNG?.id ?? ""));
+    const c14Mcp = await mcpCall("CN", dn, "align_list_goals");
+    withDb((d) => d.prepare("UPDATE v2_goals SET title = ? WHERE id = ?").run("Cy's goal", CNG?.id ?? ""));
+    check(
+      "c14 C14-1 (E2E-WEB cycle 14): MCP drops control characters from people's text it passes on, also from text stored before the rule: a goal title \"Legacy<BEL> title<NEL><DEL>\" reads \"Legacy title\" in untrusted_text and in the <untrusted-text> summary",
+      c14Mcp.status === 200 && c14Mcp.sc?.goals?.find((g) => g.id === CNG?.id)?.title?.untrusted_text === "Legacy title" && c14Mcp.text.includes("<untrusted-text>Legacy title</untrusted-text>") && !/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/.test(c14Mcp.text + JSON.stringify(c14Mcp.sc)),
+      `${c14Mcp.status} ${JSON.stringify(c14Mcp.sc?.goals?.find((g) => g.id === CNG?.id)?.title)} ${JSON.stringify(c14Mcp.text.slice(0, 300))}`,
+    );
+    // E2E-WEB cycle 14 W3: Cy stops sharing SN1 on the web; the owner's Stop and Cy's own Resume say who stopped it and
+    // what shares the work again, in a full sentence.
+    const cnStopShare = await ca(CN, "POST", `/sessions/${SN1}/stop-sharing`, {});
+    const sn1Dirs = dirCount(SN1);
+    const coStopStopped = await ca(CO, "POST", `/sessions/${SN1}/stop`, {});
+    const cnResumeStopped = await ca(CN, "POST", `/sessions/${SN1}/resume`, {});
+    check(
+      "c14 W3 (E2E-WEB cycle 14): Stop or Resume on a session its person stopped sharing -> 409 sharing_stopped in a full sentence that says who stopped it and what shares the work again: to an owner \"Cy New stopped sharing this session, so a stop or resume can't reach it, and it won't be shared again, even if its machine runs ::align share. To share their work again, Cy New starts a new session and runs ::align share in it.\", to the person \"You stopped sharing …, start a new session and run ::align share in it.\"; no directive",
+      cnStopShare.status === 200 &&
+        coStopStopped.status === 409 && coStopStopped.json?.error === "sharing_stopped" &&
+        coStopStopped.json.message === "Cy New stopped sharing this session, so a stop or resume can't reach it, and it won't be shared again, even if its machine runs ::align share. To share their work again, Cy New starts a new session and runs ::align share in it." &&
+        cnResumeStopped.status === 409 && cnResumeStopped.json?.error === "sharing_stopped" &&
+        cnResumeStopped.json.message === "You stopped sharing this session, so a stop or resume can't reach it, and it won't be shared again, even if its machine runs ::align share. To share your work again, start a new session and run ::align share in it." &&
+        dirCount(SN1) === sn1Dirs,
+      `${cnStopShare.status} | ${coStopStopped.text} | ${cnResumeStopped.text} | ${sn1Dirs} ${dirCount(SN1)}`,
     );
   }
   const totalBefore = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json.total.requests;
@@ -4106,6 +4232,49 @@ try {
         audit: d.prepare("SELECT actor_id FROM v2_audit WHERE action = 'passkey.deleted' AND object_id = ?").get(pkRow[0]?.id)?.actor_id,
       }));
       check("ui (Chrome): Rename names the passkey; Delete (confirmed) removes it and its use record, and audits passkey.deleted", pkGone.rows === 0 && pkGone.use === 0 && pkGone.audit === pkUser(), JSON.stringify(pkGone));
+      // E2E-WEB cycle 14 C14-2 and C14-3: a passkey name of only invisible characters is no name, so nothing is sent to
+      // name the passkey; when naming a new passkey fails, the list is reloaded, so its row is there to rename.
+      const pkPatches = [];
+      let pkFailPatch = false;
+      const pkIntercept = (r) => {
+        if (r.method() === "PATCH" && r.url().includes("/api/v2/account/passkeys/")) {
+          pkPatches.push(r.postData() ?? "");
+          if (pkFailPatch) return void r.respond({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "server_error", message: "Server error" }) });
+        }
+        void r.continue();
+      };
+      await pk.setRequestInterception(true);
+      pk.on("request", pkIntercept);
+      await pk.type('main input[maxlength="100"]:not([aria-label])', "​⁠");
+      await pkClick("Add a passkey");
+      await pk.waitForFunction(() => document.body.innerText.includes("Unnamed passkey") || document.body.innerText.includes("naming it didn't work"), { timeout: 15000 }).catch(() => undefined);
+      await sleep(300);
+      const pkInvisText = await pkText();
+      const pkInvisRows = withDb((d) => d.prepare("SELECT name FROM ba_passkey WHERE userId = ?").all(pkUser()));
+      const pkInvisPatches = pkPatches.length;
+      if (pkInvisRows.length) {
+        await pkClick("Delete");
+        await pk.waitForFunction(() => document.body.innerText.includes("No passkeys yet."), { timeout: 15000 }).catch(() => undefined);
+      }
+      pkFailPatch = true;
+      await pk.click('main input[maxlength="100"]:not([aria-label])', { clickCount: 3 });
+      await pk.type('main input[maxlength="100"]:not([aria-label])', "Desk key");
+      await pkClick("Add a passkey");
+      await pk.waitForFunction(() => document.body.innerText.includes("naming it didn't work") && document.body.innerText.includes("Unnamed passkey"), { timeout: 15000 }).catch(() => undefined);
+      const pkFailText = await pkText();
+      const pkFailRows = withDb((d) => d.prepare("SELECT name FROM ba_passkey WHERE userId = ?").all(pkUser()));
+      pk.off("request", pkIntercept);
+      await pk.setRequestInterception(false);
+      check(
+        "c14 C14-2 and C14-3 (ui, E2E-WEB cycle 14): Add a passkey with a name of only invisible characters (U+200B U+2060) adds it unnamed and sends no name (no rename, no error); when naming a new passkey fails the card says \"The passkey was added, but naming it didn't work. Rename it below.\" and the list is reloaded: it shows the passkey (\"Unnamed passkey\"), never \"No passkeys yet.\"",
+        pkInvisRows.length === 1 && !pkInvisRows[0].name && pkInvisPatches === 0 && pkInvisText.includes("Unnamed passkey") && !pkInvisText.includes("naming it didn't work") && !pkInvisText.includes("No passkeys yet.") &&
+          pkFailRows.length === 1 && pkPatches.length === 1 && pkFailText.includes("The passkey was added, but naming it didn't work. Rename it below.") && pkFailText.includes("Unnamed passkey") && !pkFailText.includes("No passkeys yet."),
+        `${JSON.stringify(pkInvisRows)} ${pkInvisPatches} ${JSON.stringify(pkPatches)} | ${pkInvisText.slice(0, 400)} | ${JSON.stringify(pkFailRows)} | ${pkFailText.slice(0, 400)}`,
+      );
+      if (pkFailRows.length) {
+        await pkClick("Delete");
+        await pk.waitForFunction(() => document.body.innerText.includes("No passkeys yet."), { timeout: 15000 }).catch(() => undefined);
+      }
       // Sign out everywhere, also unpairing devices.
       await pk.evaluate(() => document.querySelector('input[name="devices"]')?.click());
       await Promise.all([pk.waitForNavigation({ waitUntil: "networkidle0" }), pkClick("Sign out everywhere")]);
@@ -9006,7 +9175,7 @@ try {
       mcpAll.slice(0, 900),
     );
     // A count followed by a fixed plural noun, without count() (lib/v2/plural.mts), in any MCP or server message.
-    const VERBS = new Set(["is", "was", "has", "does", "needs", "counts", "contributes", "stays", "updates", "yours", "runs", "gives"]);
+    const VERBS = new Set(["is", "was", "has", "does", "needs", "counts", "contributes", "stays", "updates", "yours", "runs", "gives", "starts"]);
     const PLURAL_OK = [
       ["lib/v2/validate.ts", "${k} items are too long"], // k is a field name
       ["lib/v2/goals.ts", "anchors.${k} items are too long"], // k is a field name
@@ -11568,6 +11737,20 @@ try {
     "align-admin (hosted): requests approve refuses without ALIGN_SECRET; with it, emails the code through the email API (subject, sign-in link, the code, its address and expiry) and prints only the code's id, never the code",
     noSecret.status === 1 && /ALIGN_SECRET/.test(noSecret.err) && approveG.status === 0 && /emailed a creation code \(cc_/.test(approveG.out) && aliceMail?.auth === `Bearer ${MAIL_KEY}` && aliceMail.body.subject === "Your Align workspace creation code" && aliceMail.body.text.includes(`https://${HOSTED_HOST}/app/sign-in?email=alice%40example.test`) && aliceCode && aliceMail.body.text.includes("only for alice@example.test") && codesIn(approveG.out + approveG.err).length === 0 && dbFilesLack(dbFile, aliceCode),
     `${noSecret.status} ${noSecret.err} | ${approveG.status} ${approveG.out} ${approveG.err} ${JSON.stringify(aliceMail?.body)}`,
+  );
+  // E2E-WEB cycle 14 C14-4: without ALIGN_PUBLIC_ORIGIN, an id that names no request, or one already approved, is said
+  // as it is, never "<id> is still pending".
+  const mailsBeforeC14 = mails.length;
+  const c14Unknown = await adminAsync(["requests", "approve", "ar_doesnotexist000000000000"], { ...opGate, ALIGN_PUBLIC_ORIGIN: undefined });
+  const c14Approved = await adminAsync(["requests", "approve", aliceReq.id], { ...opGate, ALIGN_PUBLIC_ORIGIN: undefined });
+  const c14ApprovedHttps = await adminAsync(["requests", "approve", aliceReq.id], opGate);
+  check(
+    "c14 C14-4 (E2E-WEB cycle 14): align-admin requests approve, hosted with no ALIGN_PUBLIC_ORIGIN, of an unknown id exits 1 with \"No pending request <id>: no access request has that id, so nothing was approved.\", and of a request already approved \"No pending request <id>: it was already approved on <day>, so nothing was approved.\" (as with the origin set), never \"is still pending\"; no code, no email",
+    c14Unknown.status === 1 && c14Unknown.err.includes("No pending request ar_doesnotexist000000000000: no access request has that id, so nothing was approved.") &&
+      [c14Approved, c14ApprovedHttps].every((r) => r.status === 1 && r.err.includes(`No pending request ${aliceReq.id}: it was already approved on ${new Date().toISOString().slice(0, 10)}, so nothing was approved.`)) &&
+      ![c14Unknown, c14Approved].some((r) => /still pending|ALIGN_PUBLIC_ORIGIN/.test(r.err)) && mails.length === mailsBeforeC14 &&
+      withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_creation_codes WHERE request_id = ?").get(aliceReq.id).n) === 1,
+    `${c14Unknown.status} ${c14Unknown.err} | ${c14Approved.status} ${c14Approved.err} | ${c14ApprovedHttps.err}`,
   );
   // -- the approved person can sign in by email code (no invite needed) and spends the code once --
   const ALICE = await gSignIn("alice@example.test");

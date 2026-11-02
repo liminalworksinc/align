@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Shell, SignInAgain, go, useAction, useApi, when } from "../_ui/kit";
 import { addPasskey, usePasskeyPlace } from "../_ui/passkey";
 import type { Me, SignInOptions } from "../_ui/server";
+import { isBlankText } from "@/lib/v2/text-core.mts";
 
 interface Passkey {
   id: string;
@@ -47,7 +48,7 @@ function PasskeyItem({ p, busy, onRename, onDelete }: { p: Passkey; busy: boolea
           <span className="flex-1">
             <Input aria-label="Passkey name" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} required />
           </span>
-          <Btn type="submit" kind="secondary" disabled={busy || !name.trim()}>
+          <Btn type="submit" kind="secondary" disabled={busy || isBlankText(name)}>
             Save
           </Btn>
         </form>
@@ -78,9 +79,12 @@ function Passkeys({ options, onReauth }: { options: SignInOptions; onReauth: (me
   useEffect(() => {
     if (act.reauth) onReauth(act.reauth);
   }, [act.reauth, onReauth]);
+  // A name of only spaces or invisible characters is no name (E2E-WEB cycle 14 C14-2). Once the passkey is added the
+  // list is reloaded whatever its naming did, so a failed rename leaves its row below to rename (C14-3).
   const add = () =>
     act.run(async () => {
-      const e = await addPasskey(name.trim());
+      const e = await addPasskey(isBlankText(name) ? "" : name.trim());
+      if (e?.code === "rename_failed") list.reload();
       if (e?.code === "reauth_required") return onReauth(e.message);
       if (e) throw new Error(/cancel|abort|NotAllowed/i.test(e.code + e.message) ? "Adding a passkey was cancelled. Nothing was added." : e.message);
       setName("");

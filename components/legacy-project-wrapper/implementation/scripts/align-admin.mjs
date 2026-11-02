@@ -36,6 +36,7 @@ import {
   REQUEST_STATUSES,
   RESTORE_DAYS,
   SCHEMA_VERSION,
+  accessRequest,
   approveAccessRequest,
   codeEmail,
   declineAccessRequest,
@@ -232,6 +233,11 @@ async function main() {
     const days = intOpt("days", CODE_DAYS, 365);
     const api = opt.print ? null : emailApi();
     const link = linkOrigin();
+    // The request first (E2E-WEB cycle 14 C14-4): an id that names no pending request is said as it is, never "still
+    // pending" because of the check below.
+    const found = accessRequest(db, arg);
+    if (!found) fail(`No pending request ${arg}: no access request has that id, so nothing was approved. requests list shows them.`);
+    if (found.status !== "pending") fail(`No pending request ${arg}: it was already ${found.status} on ${day(found.decided_at)}, so nothing was approved.`);
     // Checked before anything is approved: hosted, an email whose link points at this machine is never sent.
     if (api && !link) {
       fail(

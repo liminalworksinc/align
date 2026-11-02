@@ -1,6 +1,7 @@
 "use client";
 import { Btn, Field, Input, TextArea, listOf } from "./kit";
 import type { Goal } from "./types";
+import { isBlankText } from "@/lib/v2/text-core.mts";
 
 // Measures and anchors editors, shared by "new goal" and "new version". The limits editor lives in limits.tsx and is
 // re-exported here with them.
@@ -16,7 +17,10 @@ export const anchorsDraft = (g?: Goal): AnchorDraft => ({
   issues: g?.anchors.issues.join("\n") ?? "",
 });
 
-export const measuresOut = (m: MeasureDraft[]) => m.filter((x) => x.text.trim()).map((x) => ({ ...(x.id ? { id: x.id } : {}), text: x.text.trim(), target: x.target.trim() || null }));
+/** The measures to send: a row with nothing a person can read (spaces, or only invisible characters: E2E-WEB cycle 14
+ *  C14-2) left out, as the server would refuse it; a blank target is none. */
+export const measuresOut = (m: MeasureDraft[]) =>
+  m.filter((x) => !isBlankText(x.text)).map((x) => ({ ...(x.id ? { id: x.id } : {}), text: x.text.trim(), target: isBlankText(x.target) ? null : x.target.trim() }));
 export const anchorsOut = (a: AnchorDraft) => ({ repos: listOf(a.repos), branch_patterns: listOf(a.branch_patterns), issues: listOf(a.issues) });
 
 export function MeasuresEditor({ value, onChange }: { value: MeasureDraft[]; onChange: (v: MeasureDraft[]) => void }) {

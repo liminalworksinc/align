@@ -7,6 +7,7 @@ import { CHANGE_REQUEST_STATES, getChangeRequest, listChangeRequests, type Chang
 import { launchWords } from "../v2/launch-words";
 import { diffWords, type FieldDiff } from "../v2/change-words.mts";
 import { count } from "../v2/plural.mts";
+import { dropControls } from "../v2/text-core.mts";
 import { usd } from "../v2/money.mts";
 import { noteGoalsSent, noteGrantRead } from "../oauth/grants";
 import { EVIDENCE_SCOPE } from "../oauth/server";
@@ -102,9 +103,11 @@ function enter(ctx: ServerContext, workspace: string | undefined, { read = true 
 
 const UT = z.object({ untrusted_text: z.string() });
 type UT = z.infer<typeof UT>;
-const ut = (s: string): UT => ({ untrusted_text: s });
-/** For the text summary: < and > escaped, so the text can't close its tag. */
-const tag = (s: string) => `<untrusted-text>${s.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</untrusted-text>`;
+/** People's text as stored is cleaned already (lib/v2/text-core.mts); control characters are dropped again here (but
+ *  tabs and line breaks), so none reaches an AI app from text stored before that rule (E2E-WEB cycle 14 C14-1). */
+const ut = (s: string): UT => ({ untrusted_text: dropControls(s) });
+/** For the text summary: control characters dropped as in `ut`, < and > escaped, so the text can't close its tag. */
+const tag = (s: string) => `<untrusted-text>${dropControls(s).replace(/</g, "&lt;").replace(/>/g, "&gt;")}</untrusted-text>`;
 /** A person in a summary: "you" for the person the token acts for, as the web app says it (c9 W3), else their name as
  *  people's text. */
 const who = (p: { id: string; name: { untrusted_text: string } }, me: string) => (p.id === me ? "you" : tag(p.name.untrusted_text));

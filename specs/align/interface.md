@@ -207,7 +207,12 @@ let the person add, rename and delete passkeys.
 #### Scenario: Add a passkey
 
 - **WHEN** the person, on the relying party's host, optionally types a name and presses **Add a passkey**
-- **THEN** the page runs Better Auth's passkey registration (`/api/v2/auth/passkey/generate-register-options`, the browser's passkey dialog, `/verify-registration`), then names the new passkey with `PATCH /api/v2/account/passkeys/<id>` if a name was given, and lists it; a cancelled dialog shows "Adding a passkey was cancelled. Nothing was added."
+- **THEN** the page runs Better Auth's passkey registration (`/api/v2/auth/passkey/generate-register-options`, the browser's passkey dialog, `/verify-registration`), then names the new passkey with `PATCH /api/v2/account/passkeys/<id>` if a name was given (a name of only spaces or invisible characters is none), and lists it; a cancelled dialog shows "Adding a passkey was cancelled. Nothing was added."
+
+#### Scenario: Naming a new passkey fails
+
+- **WHEN** the person adds a passkey with a name of only invisible characters (U+200B U+2060), and, another time, adds one whose naming request fails (`scripts/test-v2.mjs` "c14 C14-2 and C14-3 (ui, E2E-WEB cycle 14): ...")
+- **THEN** the first is added unnamed with no naming request and no error; for the second the card says "The passkey was added, but naming it didn't work. Rename it below." and the list is reloaded whatever the naming did, so it shows the new passkey ("Unnamed passkey") to rename, never "No passkeys yet." (E2E-WEB cycle 14 C14-3)
 
 #### Scenario: Rename and delete
 
