@@ -8,9 +8,9 @@ import { repoKey, sessionKey } from "./keys.ts";
 import path from "node:path";
 import { endEpochs, getSession, sessionCwds, type SessionRow } from "./ledger.ts";
 import { isShareStateNotice, noticeKind, offersReshare } from "./shared/notices.ts";
-import { ACCESS_LOST, addNotice, DEVICE_SIGNED_OUT, endedState, getShare, notePriorShare, renderEndedLatches, renderHot, sharedBefore, snapshot, stoppedByPerson } from "./hot.ts";
+import { ACCESS_LOST, addNotice, DEVICE_SIGNED_OUT, ENDED_UNREAD, endedState, getShare, notePriorShare, releaseOf, renderEndedLatches, renderHot, sharedBefore, snapshot, stoppedByPerson, stoppedOnDeviceKey } from "./hot.ts";
 
-export { notePriorShare, sharedBefore, stoppedByPerson } from "./hot.ts";
+export { ENDED_UNREAD, notePriorShare, sharedBefore, stoppedByPerson } from "./hot.ts";
 import { clockOffset, loadCredentials, signedIn } from "./api.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { clean } from "./shared/envelope.ts";
@@ -195,6 +195,12 @@ export function stopSharing(ctx: Ctx, lid: string): void {
 /** The share of `lid` is stopped (here, or the server says so), from when it first stopped: its epochs end there, so
  *  usage after it stays on this machine (C5-1). */
 export function markStopped(ctx: Ctx, lid: string): void {
+  // Live here until now: the server's session row names this machine's device, so a goal's release still reaches the
+  // session (C10-4). Any other stop (a pending share refused) names none.
+  const was = getShare(ctx, lid);
+  const c = loadCredentials(ctx.home);
+  if (was && (was.state === "shared" || was.state === "suspended") && c && !c.signed_out) kvSet(ctx.db, stoppedOnDeviceKey(lid), c.device_id);
+  else if (was && was.state !== "stopped" && was.state !== "error") ctx.db.prepare("DELETE FROM kv WHERE key=?").run(stoppedOnDeviceKey(lid));
   ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=COALESCE(stopped_at, ?) WHERE local_id=?").run(nowIso(), lid);
   const row = ctx.db.prepare("SELECT stopped_at FROM shares WHERE local_id=?").get(lid) as { stopped_at: string } | undefined;
   if (row) endEpochs(ctx.db, lid, row.stopped_at);
@@ -329,6 +335,10 @@ function latchedFromWeb(ctx: Ctx, lid: string): boolean {
  */
 export function noticeSignedInAgain(ctx: Ctx): void {
   if (!signedIn(ctx.home)) return;
+  // The server's `ended_sessions` were not read since this sign-in (the directives call failed at `align login`): a
+  // share its person stopped on the web would be told `::align share` shares it again, which the server refuses. Told
+  // once they are read, at the next pass (E2E-AGENT cycle 10, section 5).
+  if (kvGet(ctx.db, ENDED_UNREAD)) return;
   const rows = ctx.db
     .prepare(`SELECT DISTINCT s.local_id AS lid FROM shares s JOIN notices n ON n.local_id=s.local_id WHERE s.state IN ('stopped','error') AND s.error IN (?,?) AND ${noticeOfKind("signed_out_", "n.")}`)
     .all(DEVICE_SIGNED_OUT, ACCESS_LOST) as { lid: string }[];
@@ -366,7 +376,9 @@ function endShare(ctx: Ctx, lid: string, why: string, noticeId: string, text: st
  *  `reshare` state its latch file carries, so the two never differ (C9-2). Empty for a session that is not. */
 export function latchTail(ctx: Ctx, lid: string): string {
   if (!latchedFromWeb(ctx, lid)) return "";
-  return latchNoticeTail(lid, !!endedState(ctx, getShare(ctx, lid))?.reshare);
+  const share = getShare(ctx, lid);
+  const reshare = !!endedState(ctx, share)?.reshare;
+  return latchNoticeTail(lid, reshare, reshare ? null : releaseOf(ctx, lid, share));
 }
 
 /**
@@ -440,6 +452,8 @@ export function endShareStoppedByPerson(ctx: Ctx, lid: string, noticeId: string)
 function endedShareStoppedByPerson(ctx: Ctx, lid: string, noticeId: string): void {
   const s = getShare(ctx, lid);
   if (!s) return;
+  // When its person pressed Stop sharing, before or after this machine's end, is not known here (the server keeps the
+  // earlier end's time): the notice says what is true either way (E2E-AGENT cycle 10, section 5).
   const before = s.error === ACCESS_LOST ? `this machine lost access to ${clean(s.workspace_name, 80)} in Align` : "this machine signed out of Align";
   tx(ctx.db, () => {
     ctx.db.prepare("UPDATE shares SET error=NULL WHERE local_id=?").run(lid);
@@ -448,7 +462,7 @@ function endedShareStoppedByPerson(ctx: Ctx, lid: string, noticeId: string): voi
       ctx,
       lid,
       noticeId,
-      `Align: this session's sharing was stopped (Stop sharing on the web) before ${before}, so it stays stopped and is not shared again from here; its usage stays on this machine.${latchTail(ctx, lid)}`,
+      `Align: this session's sharing was stopped (Stop sharing on the web), so it stays stopped and is not shared again from here (its share here had ended when ${before}); its usage stays on this machine.${latchTail(ctx, lid)}`,
     );
   });
   renderHot(ctx, lid);

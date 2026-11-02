@@ -1,4 +1,5 @@
 // Types shared by the CLI, the sync job and the hooks. Wire shapes follow docs/v2/WIRE.md.
+import type { ReleaseReaches } from "./ended.ts";
 
 export type Harness = "claude-code" | "codex";
 
@@ -153,6 +154,9 @@ export interface HoldLatch {
   ended?: EndedWhy;
   /** As on the stop latch: `::align share` can share it again now, after which a release reaches it. */
   reshare?: true;
+  /** With `ended`: the holds' release still reaches this session (its sharing was stopped while this device held it),
+   *  and whether a stop blocks it too (C10-4). */
+  release?: ReleaseReaches;
   holds: { goal_id: string; goal_title: string; by: string; reason: string | null; directive_id: string; seq: number; at: string }[];
 }
 
@@ -199,6 +203,9 @@ export interface InjectedState {
   /** The epoch this hook opened last, and its goal, until the sync has recorded it (hot `epochs_seen`): until then the
    *  hot file's goal is the one before it, which must not read as another switch (N1). */
   opened_epoch?: { epoch_id: string; goal: GoalSnapshot | null; at: string };
+  /** The share a folder rule asked for at this session's start, until the sync has made it (hot `share`): `::align
+   *  status` says it is on its way rather than "private" (cycle 10, section 5). */
+  rule_share?: { workspace_id: string; workspace_name: string; goal_id: string | null; goal_title: string | null; at: string };
   /** Release directives already told to the model as a context line. */
   releases_told?: string[];
   /** Goals whose hold the model saw block a tool (a hold deny), so a release of it is told to the model (cycle 8). */
@@ -230,6 +237,8 @@ export interface Latch {
   /** With `ended`: this machine can share the session there again now (signed in again, its workspace in reach again),
    *  so `::align share` shares it again, after which the web can resume it (C6-2). */
   reshare?: true;
+  /** With `ended`: the session is held too, and the hold's release still reaches it, lifting only the hold (C10-4). */
+  release?: ReleaseReaches;
 }
 
 /** Why a share ended so that nothing from the web can lift its latches any more. */

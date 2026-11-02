@@ -31,12 +31,13 @@ import {
 import { openCtx, saveConfig, type Ctx } from "./context.ts";
 import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
-import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, endedState, getShare } from "./hot.ts";
+import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, endedState, getShare, releaseOf } from "./hot.ts";
+import { latchWayOut } from "./shared/ended.ts";
 import { fetchAsks } from "./asks.ts";
 import { pullEndedSessions } from "./directives.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { newDeviceKey } from "./keys.ts";
-import { applyShare, bind, deleteHistory, deleteRefused, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stoppedByPerson, stopSharing } from "./share.ts";
+import { applyShare, bind, deleteHistory, deleteRefused, ENDED_UNREAD, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stoppedByPerson, stopSharing } from "./share.ts";
 import { askLineForPeople, askOrder, readAsks } from "./shared/asks.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson } from "./shared/fsx.ts";
@@ -50,7 +51,7 @@ import { MIN_NODE, unsupportedNode } from "./node-version.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { podReport } from "./hooks/siblings.ts";
 import { answerable, answerRequest, listRequests, stateWords } from "./requests.ts";
-import { clean, GOAL_MARKS, goalMark, HELD_MARK, otherWorkspaceWords, outOfReachWords, requestShortId, stoppedForGoodWords } from "./shared/envelope.ts";
+import { clean, GOAL_MARKS, goalMark, HELD_MARK, keptHoldsNote, otherWorkspaceWords, outOfReachWords, requestShortId, stoppedForGoodWords } from "./shared/envelope.ts";
 import { feedHold } from "./shared/feedhold.ts";
 import type { WireRequest } from "./shared/types.ts";
 import { computeUnsharedDigest } from "./allocation.ts";
@@ -278,8 +279,15 @@ function distDir(): string {
 }
 
 // ---------- commands ----------
+/** A device name the server (or this check) refused, with why in the person's words and what to do (cycle 9). */
+const nameRefused = (why: string) => `the device name was refused: ${why}. Pass another with \`align login --name <name>\`.`;
+/** A name with nothing a person can read in it: said as that, not as "it is required" (cycle 10, section 5). */
+const EMPTY_NAME = "it is blank (nothing is left once spaces and invisible characters are dropped)";
+
 async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   const { values } = parseArgs({ args: argv, options: { server: { type: "string" }, name: { type: "string" } }, allowPositionals: false });
+  // A blank `--name` is refused here, before a pairing is started (each counts toward the server's hourly limit).
+  if (values.name !== undefined && !values.name.trim()) throw new UsageError(nameRefused(EMPTY_NAME));
   const server = (values.server || ctx.config.server_url).replace(/\/$/, "");
   const deviceName = values.name || ctx.config.device_name || `${os.userInfo().username}'s ${os.hostname().replace(/\.local$/, "")}`;
   // A device this machine signed out of while the server was unreachable is revoked first, so its sessions end there
@@ -291,7 +299,13 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   // The device this pairing replaces (this machine's own, on this server): the server leaves it out when it makes the
   // new device's name unique, so a re-login keeps the plain name instead of "<name> (2)" (cycle 5).
   const before = loadCredentials(ctx.home);
-  const replaces = before && before.server_url.replace(/\/$/, "") === server ? before.device_id : null;
+  // Read again at each poll: another `align login` on this machine that finished while this one waited replaced the
+  // device this one started from, and this pairing replaces that one's device, whose name the machine has now, so it
+  // keeps it (two logins at once on "X (5)" stay "X (5)", E2E-AGENT cycle 10 C10-6).
+  const replacing = () => {
+    const now = loadCredentials(ctx.home);
+    return now && now.server_url.replace(/\/$/, "") === server ? now.device_id : null;
+  };
   const a = await rawRequest(server, "POST", "/api/v2/device/authorize", { body: { device_name: deviceName, public_key: key.publicKeyB64 } });
   if (a.status === 429) {
     // The server says how long to wait; an older one only sends Retry-After (or nothing).
@@ -301,13 +315,14 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
     throw new Error(`could not start pairing this device: ${said || `too many device pairings were started recently.${wait}`}`);
   }
   // A refused name says why in the person's words (too many marks on a character, too many long emoji, cycle 9).
-  if (a.status === 400 && typeof a.json?.message === "string" && /^device_name /.test(a.json.message)) throw new UsageError(`the device name was refused: ${a.json.message.replace(/^device_name /, "it ")}. Pass another with \`align login --name <name>\`.`);
+  if (a.status === 400 && typeof a.json?.message === "string" && /^device_name /.test(a.json.message)) throw new UsageError(nameRefused(a.json.message === "device_name is required" ? EMPTY_NAME : a.json.message.replace(/^device_name /, "it ")));
   if (a.status !== 200 || !a.json?.device_code) throw new Error(`device authorize failed: ${a.status} ${a.json?.error || ""}`);
   const { device_code, user_code, verification_uri } = a.json;
   let interval = Number(a.json.interval || 5);
   const expiresAt = Date.now() + Number(a.json.expires_in || 600) * 1000;
   let pairedAs: string | null = null;
-  let endedLine: string | null = null;
+  /** The live shares of this machine's earlier sign-in that this login ended. */
+  let endedLids: string[] = [];
   let concurrent: string | null = null;
   out(`To connect this device, open ${verification_uri} and enter the code ${user_code}`);
   if (!ctx.env.ALIGN_NO_BROWSER && process.platform === "darwin") execFile("open", [verification_uri], () => undefined);
@@ -317,6 +332,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
     await new Promise((r) => setTimeout(r, interval * scale));
     let t;
     try {
+      const replaces = replacing();
       t = await rawRequest(server, "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code, ...(replaces ? { replaces } : {}) } });
     } catch (e) {
       // A dropped connection (the server restarting, say) is retried until the code expires, like a pending answer (N7).
@@ -338,7 +354,13 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
       // the pairing it replaces end in the same step, before anything can share as the new device: a session the new
       // pairing shares while the old device's revoke is in flight keeps its share (C4-2). Each is told how to share
       // it again.
-      const { replaced, committed: ended } = await commitPairing(ctx, creds, key.pem, () => endSharesSignedOut(ctx));
+      const { replaced, committed: ended } = await commitPairing(ctx, creds, key.pem, () => {
+        const live = (ctx.db.prepare("SELECT local_id FROM shares WHERE state IN ('shared','pending','suspended')").all() as { local_id: string }[]).map((r) => r.local_id);
+        // No session hears it is signed in again until this pairing has read which shares its person stopped on the web.
+        kvSet(ctx.db, ENDED_UNREAD, new Date().toISOString());
+        endSharesSignedOut(ctx);
+        return live;
+      });
       // The device this pairing replaced is not the one this machine was signed in as when this login started: another
       // `align login` paired it meanwhile, and may have said it signed in as it. This login says so, and so does this
       // machine's next command and `align status`, which name the device it is now (cycle 9).
@@ -360,7 +382,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
         }
       }
       // Said after "Signed in as ..." and its workspace lines, which name the sign-in first (cycle 8).
-      if (ended) endedLine = `${ended} session(s) shared from this machine's earlier sign-in stopped sharing; \`::align share\` in a session shares it again.`;
+      endedLids = ended;
       pairedAs = creds.device_id;
       break;
     }
@@ -387,7 +409,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
     me = await refreshMe(ctx);
   } catch (e) {
     // Another login replaced this pairing (DeviceChanged), or a logout signed it out (SignedOut), while it finished.
-    if (endedLine) out(endedLine);
+    if (endedLids.length) out(endedLine(ctx, endedLids));
     if (e instanceof SignedOut) return replacedMeanwhile(ctx, pairedAs!);
     throw e;
   }
@@ -399,7 +421,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
     if (concurrent) out(`Another \`align login\` on this machine paired device ${concurrent} while this one waited; this login replaced it, so this machine is ${clean(name, 60)} (${pairedAs}).`);
   };
   if (!(await whileSignedInAs(ctx, pairedAs!, said))) {
-    if (endedLine) out(endedLine);
+    if (endedLids.length) out(endedLine(ctx, endedLids));
     return replacedMeanwhile(ctx, pairedAs!);
   }
   for (const w of me.workspaces) {
@@ -412,9 +434,31 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
       /* feed later */
     }
   }
-  if (endedLine) out(endedLine);
+  if (endedLids.length) out(endedLine(ctx, endedLids));
   // After the workspace lines, which belong with "Signed in as" (cycle 6).
   await mentionOtherDevices(ctx, server, pairedAs!);
+}
+
+/**
+ * What `align login` says of the live shares of this machine's earlier sign-in that it ended (`lids`), read after the
+ * server's `ended_sessions` were applied: only those that can be shared again are offered `::align share`; those whose
+ * person had stopped them on the web stay stopped, and those in a workspace this sign-in does not reach can't be shared
+ * from here (E2E-AGENT cycle 10 C10-5).
+ */
+function endedLine(ctx: Ctx, lids: string[]): string {
+  const head = `${lids.length} session(s) shared from this machine's earlier sign-in stopped sharing`;
+  // Which of them its person stopped on the web could not be read: each hears at the next sync whether it can be.
+  if (kvGet(ctx.db, ENDED_UNREAD)) return `${head}; the next sync tells each session whether \`::align share\` shares it again.`;
+  const again = lids.filter((lid) => !stoppedByPerson(ctx, lid) && endedState(ctx, getShare(ctx, lid))?.reshare).length;
+  if (again === lids.length) return `${head}; \`::align share\` in a session shares it again.`;
+  const gone = lids.filter((lid) => stoppedByPerson(ctx, lid)).length;
+  const away = lids.length - again - gone;
+  const parts = [
+    again ? `${again} can be shared again (\`::align share\` in the session)` : "",
+    gone ? `${gone} stay stopped (their sharing was stopped with Stop sharing on the web)` : "",
+    away ? `${away} can't be shared again from here (this sign-in does not reach their workspace)` : "",
+  ].filter(Boolean);
+  return `${head}: ${parts.join("; ")}.`;
 }
 
 /** kv: a pairing a second `align login` replaced moments after another login paired it (two logins at once, cycle 9). */
@@ -588,10 +632,11 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
   // The device by name too, as the Devices page shows it, so two logins at once leave no doubt which one this is (cycle 9).
   const meNow = loadMe(ctx.home);
   const devName = meNow?.device?.id === c?.device_id ? meNow?.device?.name : null;
+  // One Identity line, signed in or out; the one-time Pairing note is a line of its own after it (C10-1).
   if (c && !c.signed_out) out(`  Identity:   ${who?.name || "?"} <${who?.email || "?"}> device ${devName ? `${clean(devName, 60)} (${c.device_id})` : c.device_id} on ${c.server_url}`);
+  else out(`  Identity:   signed out${c?.signed_out_reason ? ` (${signedOutWords(c.signed_out_reason)})` : ""}; local metering only`);
   const note = takePairingNote(ctx);
   if (note) out(`  Pairing:    ${note.charAt(0).toUpperCase()}${note.slice(1)}`);
-  else out(`  Identity:   signed out${c?.signed_out_reason ? ` (${signedOutWords(c.signed_out_reason)})` : ""}; local metering only`);
   if (c && !c.signed_out && c.clock_offset_ms) {
     out(`  Clock:      this computer's clock is ${clockWords(c.clock_offset_ms)} the server's; Align sends times on the server's clock. Set the system clock to update automatically.`);
   }
@@ -608,23 +653,27 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
   const unpriced = ctx.db.prepare("SELECT unpriced, COUNT(*) AS n FROM requests WHERE unpriced IS NOT NULL GROUP BY unpriced").all() as { unpriced: string; n: number }[];
   out(`  Unpriced:   ${unpriced.length ? unpriced.map((u) => `${u.n} ${u.unpriced}`).join(", ") : "0"}`);
   const latched = (ctx.db.prepare("SELECT COUNT(*) AS n FROM latches WHERE stopped=1").get() as { n: number }).n;
-  // Of those whose share ended: the ones that can be shared there again now (`::align share`, then the web lifts it), and
-  // the ones only `align stop-sharing` unblocks (C6-2).
-  const stuck = (e: { stuck: number; again: number }) =>
+  // Of those whose share ended: the ones that can be shared there again now (`::align share`, then the web lifts it), the
+  // held ones a release still reaches (C10-4), and the ones only `align stop-sharing` unblocks (C6-2).
+  const stuck = (e: { stuck: number; again: number; release: number }) =>
     (e.again ? `; ${e.again} can be shared again (\`::align share\` in the session), after which the web can lift it` : "") +
+    (e.release ? `; ${e.release} can still be released from the web (sharing ended, but the release reaches it) or freed with \`align stop-sharing <session>\`` : "") +
     (e.stuck ? `; ${e.stuck} can't be lifted from the web any more (sharing ended): \`align stop-sharing <session>\` unblocks each` : "");
   const endedOf = (table: "latches" | "holds", flag: "stopped" | "held") => {
     const lids = (ctx.db.prepare(`SELECT DISTINCT x.local_id AS lid FROM ${table} x JOIN shares s ON s.local_id=x.local_id WHERE x.${flag}=1 AND s.state IN ('stopped','error')`).all() as { lid: string }[]).map((r) => r.lid);
     const again = lids.filter((lid) => endedState(ctx, getShare(ctx, lid))?.reshare).length;
-    return { stuck: lids.length - again, again };
+    const release = table === "holds" ? lids.filter((lid) => !endedState(ctx, getShare(ctx, lid))?.reshare && releaseOf(ctx, lid, getShare(ctx, lid))).length : 0;
+    return { stuck: lids.length - again - release, again, release };
   };
   if (latched) out(`  Stop latch: ${latched} session(s) stopped${stuck(endedOf("latches", "stopped"))}; see \`align latch status\``);
-  const holds = ctx.db.prepare("SELECT json FROM holds WHERE held=1").all() as { json: string }[];
+  const holds = ctx.db.prepare("SELECT local_id, json FROM holds WHERE held=1").all() as { local_id: string; json: string }[];
   const fromFeed = feedHolds(ctx);
   if (holds.length || fromFeed.length) {
     const goals = [...new Set([...holds.map((h) => (JSON.parse(h.json) as { goal_title: string }).goal_title), ...fromFeed.map((f) => f.goal_title)].map((t) => `"${clean(t, 80)}"`))];
     const early = fromFeed.length ? ` (${fromFeed.length} from the cached goals, before the hold reaches them)` : "";
-    out(`  Goal hold:  ${holds.length + fromFeed.length} session(s) paused on ${goals.join(", ")}${early}${stuck(endedOf("holds", "held"))}; see \`align latch status\``);
+    // Sessions, not holds: one session held on two goals is one session paused (cycle 10 audit).
+    const sessions = new Set([...holds.map((h) => h.local_id), ...fromFeed.map((f) => f.local_id)]).size;
+    out(`  Goal hold:  ${sessions} session(s) paused on ${goals.join(", ")}${early}${stuck(endedOf("holds", "held"))}; see \`align latch status\``);
   }
   const pending = (ctx.db.prepare("SELECT COUNT(*) AS n FROM goal_requests WHERE state='pending'").get() as { n: number }).n;
   if (pending) out(`  Requests:   ${pending} waiting for your answer; see \`align requests\``);
@@ -652,11 +701,16 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
     // Signed out, a share that ended at a lost workspace reads as its newest notice does then: this machine signed out,
     // so it can't be shared again from here for now (cycle 9).
     const again = endedState(ctx, share)?.reshare;
+    // Signed out, one that ended at a lost workspace this machine still does not reach says both, as its deny does (it
+    // names the lost workspace) and its newest notice may (cycle 10, section 5).
+    const lost = share?.error === ACCESS_LOST && !signedIn(ctx.home) && !(loadMe(ctx.home)?.workspaces ?? []).some((w) => w.id === share.workspace_id);
     const why =
       (share?.error === DEVICE_SIGNED_OUT || (share?.error === ACCESS_LOST && !signedIn(ctx.home))
         ? again
           ? "; ended at a sign-out; `::align share` shares it again"
-          : "; this machine signed out"
+          : lost
+            ? "; no access to the workspace; this machine signed out"
+            : "; this machine signed out"
         : share?.error === ACCESS_LOST
           ? again
             ? "; ended while out of the workspace; `::align share` shares it again"
@@ -1028,7 +1082,10 @@ async function cmdBind(ctx: Ctx, argv: string[]): Promise<void> {
   if (!share) throw new UsageError("session is not shared; run `align share` first");
   const goal = await goalFor(ctx, share.workspace_id, values.goal);
   bind(ctx, s.local_id, goal);
-  out(`Binding to ${goal ? `"${goal.title}"` : "no goal"} takes effect at the session's next prompt.`);
+  const kept = (ctx.db.prepare("SELECT goal_id, json FROM holds WHERE local_id=? AND held=1 ORDER BY seq").all(s.local_id) as { goal_id: string; json: string }[])
+    .filter((h) => h.goal_id !== goal?.id)
+    .map((h) => (JSON.parse(h.json) as { goal_title: string }).goal_title);
+  out(`Binding to ${goal ? `"${goal.title}"` : "no goal"} takes effect at the session's next prompt.${keptHoldsNote(kept)}`);
 }
 
 async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
@@ -1053,9 +1110,11 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
   }[];
   const fromFeed = feedHolds(ctx);
   if (!rows.length && !holds.length && !fromFeed.length) return out("No stop latches or goal holds.");
-  /** A latch or hold whose share ended can't be lifted from the web: say how to get out. */
-  const way = (lid: string) => {
-    const ended = endedState(ctx, getShare(ctx, lid));
+  /** A latch or hold whose share ended can't be lifted from the web, unless a hold's release still reaches it: say how
+   *  to get out, as the deny and the session's notices do (C10-4). */
+  const way = (lid: string, hold = false) => {
+    const share = getShare(ctx, lid);
+    const ended = endedState(ctx, share);
     if (!ended) return "";
     // Shareable there again now: the way the session's notice and its deny give (C6-2).
     if (ended.reshare) {
@@ -1063,6 +1122,9 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
       return `; sharing ended (${why}): \`::align share\` in the session shares it there again, after which it can be resumed or released from the web`;
     }
     const why = ended.why === "device_signed_out" ? "this machine signed out" : ended.why === "access_lost" ? "this machine no longer has access to its Align workspace" : "the Align server no longer has this session's share";
+    const release = releaseOf(ctx, lid, share);
+    if (release && hold) return `; sharing ended (${why}), but a release still reaches it: ${latchWayOut(lid, false, "user", release)}`;
+    if (release) return `; sharing ended (${why}), so only \`align stop-sharing ${lid.slice(0, 8)}\` unblocks it (a release of its hold lifts only the hold)`;
     return `; sharing ended (${why}), so only \`align stop-sharing ${lid.slice(0, 8)}\` unblocks it`;
   };
   for (const r of rows) {
@@ -1073,7 +1135,7 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
     const j = JSON.parse(h.json) as { goal_title: string; by: string; reason: string | null };
     const file = fs.existsSync(layout.hold(ctx.home, h.local_id));
     out(
-      `${h.local_id.slice(0, 8)} ${h.harness} HELD on goal "${clean(j.goal_title, 80)}" by ${clean(j.by, 50) || "someone"} since ${shortTime(h.at)}${j.reason ? ` (${clean(j.reason, 80)})` : ""} (all tools blocked)${file ? "" : " (hold file missing!)"}${way(h.local_id)}`,
+      `${h.local_id.slice(0, 8)} ${h.harness} HELD on goal "${clean(j.goal_title, 80)}" by ${clean(j.by, 50) || "someone"} since ${shortTime(h.at)}${j.reason ? ` (${clean(j.reason, 80)})` : ""} (all tools blocked)${file ? "" : " (hold file missing!)"}${way(h.local_id, true)}`,
     );
   }  for (const f of fromFeed) out(`${f.local_id.slice(0, 8)} ${f.harness} HELD on goal "${clean(f.goal_title, 80)}" (held in Align's cached goals; the hold reaches this session at the next sync) (all tools blocked)`);
 }
@@ -1283,8 +1345,9 @@ function allocationTargets(ctx: Ctx, ref: string | undefined): { id: string; nam
 
 /** A gap as the web's Spend tab words it (app/app/w/[ws]/spend/allocation.tsx): whole points, rounded toward zero, so a
  *  9.6-point gap reads "9 points over", agreeing with steering's "at least 10 points" (which compares the exact gap). */
-export function gapWords(gap: number | null): string {
-  if (gap === null) return "no target";
+export function gapWords(gap: number | null, target: number | null = null): string {
+  // A goal with a target in a workspace with no shared agent time: the gap is undefined, not "no target" (C10-7).
+  if (gap === null) return target === null ? "no target" : "no shared time";
   if (Math.abs(gap) < 1) return "on target";
   const n = Math.floor(Math.abs(gap));
   return `${n} ${n === 1 ? "point" : "points"} ${gap > 0 ? "over" : "under"}`;
@@ -1308,11 +1371,18 @@ async function cmdAllocation(ctx: Ctx, argv: string[]): Promise<void> {
       all.push({ workspace: w.name, ...r.json });
     }
     if (values.json) return out(JSON.stringify(all, null, 2));
-    for (const a of all as { workspace: string; window: { rows: { kind: string; goal: { title: string } | null; share: number; target_share: number | null; gap: number | null }[] }; steering: { steering: string; total: number } }[]) {
+    for (const a of all as {
+      workspace: string;
+      window: { total_fresh_tokens?: number; rows: { kind: string; goal: { title: string } | null; share: number; target_share: number | null; gap: number | null }[] };
+      steering: { steering: string; total: number };
+    }[]) {
       out(`${a.workspace}, week of ${from.toISOString().slice(0, 10)} (steering ${a.steering.steering}, ${a.steering.total} lines shown)`);
+      // No shared agent time that week: every gap is undefined, as the web's Spend tab says it (C10-7).
+      const none = a.window.total_fresh_tokens === 0;
+      if (none) out("  No shared agent time that week.");
       for (const r of a.window.rows) {
         const label = r.kind === "goal" ? r.goal!.title : r.kind === "private" ? "Goals you can't see" : "Not bound to a goal";
-        out(`  ${pad(`${r.share}%`, 7)} ${pad(r.target_share === null ? "-" : `${r.target_share}%`, 6)} ${pad(gapWords(r.gap), 16)} ${label}`);
+        out(`  ${pad(`${r.share}%`, 7)} ${pad(r.target_share === null ? "-" : `${r.target_share}%`, 6)} ${pad(gapWords(none ? null : r.gap, r.target_share), 16)} ${label}`);
       }
     }
     return;
@@ -1327,9 +1397,13 @@ async function cmdAllocation(ctx: Ctx, argv: string[]): Promise<void> {
     out(`${f.workspace}, last 7 days${f.feed ? ` (cached ${shortTime(f.feed.fetched_at)}, steering ${f.feed.steering ?? "off"})` : " (not fetched yet; use --refresh)"}`);
     out(`  ${pad("SHARE", 7)} ${pad("TARGET", 6)} ${pad("GAP", 16)} GOAL`);
     const goals = [...(f.feed?.goals ?? [])].filter((g) => g.status === "active").sort((a, b) => (b.allocation?.share_7d ?? 0) - (a.allocation?.share_7d ?? 0));
+    // The feed leaves a goal's gap out (null) only when it has no target or the workspace has no shared agent time yet:
+    // a target with no gap says the latter, in the words of the web's Spend tab (C10-7).
+    if (goals.some((g) => g.allocation && g.allocation.target_share !== null && g.allocation.gap_7d === null)) out("  No shared agent time in the last 7 days yet.");
     for (const g of goals) {
       const a = g.allocation;
-      out(`  ${pad(a ? `${a.share_7d}%` : "-", 7)} ${pad(a?.target_share === null || a?.target_share === undefined ? "-" : `${a.target_share}%`, 6)} ${pad(gapWords(a ? a.gap_7d : null), 16)} ${g.title}`);
+      const target = a?.target_share ?? null;
+      out(`  ${pad(a ? `${a.share_7d}%` : "-", 7)} ${pad(target === null ? "-" : `${target}%`, 6)} ${pad(gapWords(a ? a.gap_7d : null, target), 16)} ${g.title}`);
     }
   }
   if (digest && digest.total_tokens) {
