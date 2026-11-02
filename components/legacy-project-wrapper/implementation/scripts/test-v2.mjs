@@ -8663,6 +8663,14 @@ try {
 
     // X3 setup: YA proposes a new target for YO's goal with a reason; YO counters without a note.
     const rl = await ya(YA, "POST", "/reallocations", { targets: [{ goal_id: GT?.id, target_share: 15 }], note: "Docs need more time" });
+    // E2E-WEB cycle 13 W5: a counter with exactly the proposal's targets is refused as a change request's is.
+    const rlSame = await ya(YO, "POST", `/reallocations/${rl.json?.id}/counter`, { revision: 1, targets: [{ goal_id: GT?.id, target_share: 15 }], note: "Same again" });
+    const rlAfterSame = (await ya(YO, "GET", `/reallocations/${rl.json?.id}`)).json;
+    check(
+      "c13 W5 (E2E-WEB cycle 13): a target-change counter asking for exactly the proposal's targets -> 409 no_change \"That's what the proposal already asks for: approve it instead.\" (as a change request's counter says); nothing recorded: still pending at revision 1",
+      rlSame.status === 409 && rlSame.json?.error === "no_change" && rlSame.json.message === "That's what the proposal already asks for: approve it instead." && rlAfterSame?.state === "pending" && rlAfterSame.revision === 1,
+      `${rlSame.status} ${rlSame.text} ${rlAfterSame?.state} ${rlAfterSame?.revision}`,
+    );
     const rlCtr = await ya(YO, "POST", `/reallocations/${rl.json?.id}/counter`, { revision: 1, targets: [{ goal_id: GT?.id, target_share: 12 }] });
     check("c4 web fix setup (X3): a proposal with a reason, countered with no note", rl.status === 201 && rlCtr.status === 200 && rlCtr.json?.state === "countered" && rlCtr.json.note === null, `${rl.status} ${rl.text.slice(0, 200)} ${rlCtr.status} ${rlCtr.text.slice(0, 200)}`);
 

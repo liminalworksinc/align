@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api, ApiError, Btn, Card, Err, Field, Input, Loading, Note, Pill, sentence, TextArea, useAction, useApi, when } from "./kit";
 import { NoticeBox, useNotice, type Notice } from "./crparts";
 import type { Me } from "./server";
+import { COUNTER_SAME_AS_PROPOSAL } from "@/lib/v2/change-words.mts";
 import type { Goal, Reallocation, WsDetail } from "./types";
 
 // Target changes on the Alignments page (lib/v2/reallocations.ts): proposals to change the target share of agent time
@@ -66,6 +67,8 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
   const act = useAction();
   const [countering, setCountering] = useState(false);
   const [values, setValues] = useState<string[]>(r.targets.map((t) => (t.target_share === null ? "" : String(t.target_share))));
+  // A counter asking for exactly the proposal's targets is refused (approve instead), so it is never sent (W5).
+  const sameAsProposal = values.every((v, i) => (v.trim() === "" ? null : Number(v)) === r.targets[i].target_share);
   const [note, setNote] = useState("");
   // The item is keyed by its revision, state and launch, so a decision remounts it: the notice outlives that.
   const [notice, setNotice] = useNotice(`reallocation:${r.id}`);
@@ -194,7 +197,12 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
           <Field label="Note (optional)">
             <TextArea rows={2} maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
-          <Btn type="submit" disabled={act.busy}>
+          {sameAsProposal && (
+            <p className="mb-2 text-[14px] text-zinc-600" data-counter-same>
+              {COUNTER_SAME_AS_PROPOSAL}
+            </p>
+          )}
+          <Btn type="submit" disabled={act.busy || sameAsProposal}>
             Send counter
           </Btn>
         </form>

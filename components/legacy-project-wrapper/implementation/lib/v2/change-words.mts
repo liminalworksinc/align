@@ -135,6 +135,10 @@ export function counterSameAsBase(baseVersion: number, goalVersion: number): str
 
 /** A counter identical to the request with no "Accept if…" condition: the server's 409 no_change and the form's reason
  *  (W4). A request behind its goal is approved once its requester updates it. */
+/** A target-change counter that asks for exactly the proposal's targets (409 no_change; the counter form says it before
+ *  sending): approving the proposal is what it means (E2E-WEB cycle 13 W5). */
+export const COUNTER_SAME_AS_PROPOSAL = "That's what the proposal already asks for: approve it instead.";
+
 export function counterSameAsRequest(requester: string, baseVersion: number, goalVersion: number): string {
   return baseVersion === goalVersion ? "That's what the request already asks for: approve it instead." : `That's what the request already asks for: approve it once ${requester} updates it to version ${goalVersion}.`;
 }

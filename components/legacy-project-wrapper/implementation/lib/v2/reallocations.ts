@@ -6,6 +6,7 @@ import { assertTargetsFit, contentOf, goalObj, goalRow, visibleGoal, writeGoalVe
 import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { memberName, nameTo } from "./workspaces";
 import { assertRevisionReached, optStr, revisionRead, type Body } from "./validate";
+import { COUNTER_SAME_AS_PROPOSAL } from "./change-words.mts";
 
 // Reallocations (PORT29, main #29): a proposal to change the target share of agent time of one or more goals at once,
 // so time can move from one goal to another without passing 100% in between. It follows the change request model
@@ -91,6 +92,12 @@ function targetsIn(pp: PolicyPrincipal, v: unknown): Target[] {
   }
   if (!out.length) throw conflict("no_change", "These targets are already set, so there is nothing to propose.");
   return out;
+}
+
+/** Whether two revisions ask for the same targets: the same goals, each with the same target share. */
+function sameTargets(a: Target[], b: Target[]): boolean {
+  const of = new Map(b.map((t) => [t.goal_id, t.target_share]));
+  return a.length === b.length && a.every((t) => of.has(t.goal_id) && of.get(t.goal_id) === t.target_share);
 }
 
 const fits = (ws: string, targets: Target[]) => assertTargetsFit(ws, new Map(targets.map((t) => [t.goal_id, t.target_share])));
@@ -302,6 +309,9 @@ export async function actOnReallocation(pp: PolicyPrincipal, id: string, action:
         if (isRequester) throw forbidden("not_an_approver", "Withdraw and propose again to change your own proposal.");
         inState("pending");
         expectRevision(false);
+        // A counter that asks for exactly the proposal's targets suggests nothing: approving it is, as a change
+        // request's counter says (E2E-WEB cycle 13 W5).
+        if (sameTargets(countered!, targets)) throw conflict("no_change", COUNTER_SAME_AS_PROPOSAL);
         fits(r.ws_id, countered!);
         const next = r.revision + 1;
         writeRevision(r, next, countered!, note, me, at);
