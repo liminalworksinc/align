@@ -374,6 +374,19 @@ function siblingLine(s: SiblingSummary, maxFiles: number, detail = 2): string {
   return `${name}${parts.length ? `: ${parts.join("; ")}` : ""}.`;
 }
 
+/** Senders in words: `1 teammate`, `2 local sessions`, `1 teammate and 1 local session`; with `more`, `1 more local
+ *  session` (E2E acycle3 A3-cross-5: a bare `(1 more)` said neither what nor that it was left out). */
+export function sendersWords(sibs: SiblingSummary[], more = ""): string {
+  const people = sibs.filter((s) => s.remote).length;
+  const here = sibs.length - people;
+  return [
+    people ? `${people} ${more}teammate${people > 1 ? "s" : ""}` : "",
+    here ? `${here} ${more}local session${here > 1 ? "s" : ""}` : "",
+  ]
+    .filter(Boolean)
+    .join(" and ");
+}
+
 /** What other sessions toward this goal (or related ones) did since this session last heard. Drops detail until it fits. */
 export function renderCard(sibs: SiblingSummary[]): string | null {
   if (!sibs.length) return null;
@@ -391,13 +404,13 @@ export function renderCard(sibs: SiblingSummary[]): string | null {
         for (const maxFiles of [3, 2, 1, 0].filter((n) => n >= minFiles)) {
           const lines = sibs.slice(0, keep).map((s, i) => siblingLine(s, maxFiles, i === 0 ? Math.max(detail, 1) : detail));
           const rest = sibs.length - keep;
-          const text = [head, ...lines, ...(rest > 0 ? [`(${rest} more)`] : []), tail].join(" ");
+          const text = [head, ...lines, ...(rest > 0 ? [`Also ${sendersWords(sibs.slice(keep), "more ")}.`] : []), tail].join(" ");
           if (text.length <= CARD_MAX) return text;
         }
       }
     }
   }
-  return `${head} ${sibs.length} other senders. ${tail}`.slice(0, CARD_MAX);
+  return `${head} ${sendersWords(sibs)}. ${tail}`.slice(0, CARD_MAX);
 }
 
 /**

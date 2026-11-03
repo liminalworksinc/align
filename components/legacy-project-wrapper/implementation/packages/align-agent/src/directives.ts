@@ -137,12 +137,10 @@ function applyOne(ctx: Ctx, d: Directive, lid: string, seq: number, at: string):
       if (!share) return "stale";
       ctx.db.prepare("UPDATE shares SET state='suspended', suspended_at=? WHERE local_id=? AND state IN ('shared','pending','suspended')").run(at, lid);
       ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
-      addNotice(
-        ctx,
-        lid,
-        `susp_${d.id}`,
-        "Align: this session's goal binding was revoked, so its usage is paused and stays on this machine. Type `::align bind <goal>` or run `align bind` to pick a goal.",
-      );
+      // `goal_closed:<alignment>`: the goal it followed through an alignment was achieved or dropped (E2E acycle3
+      // A3-cross-2), not a revocation.
+      const why = d.binding?.cause?.startsWith("goal_closed:") ? "the goal this session followed through an alignment was achieved or dropped" : "this session's goal binding was revoked";
+      addNotice(ctx, lid, `susp_${d.id}`, `Align: ${why}, so its usage is paused and stays on this machine. Type \`::align bind <goal>\` or run \`align bind\` to pick a goal.`);
       return "received";
     }
     case "stop": {
