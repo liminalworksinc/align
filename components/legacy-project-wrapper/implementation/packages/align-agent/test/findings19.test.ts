@@ -12,6 +12,7 @@ import path from "node:path";
 import { after, describe, test } from "node:test";
 import { sessionKey } from "../src/keys.ts";
 import { pathHash, repoIdentity, type Act, type PodFeed } from "../src/hooks/siblings.ts";
+import { shortId } from "../src/shared/envelope.ts";
 import { readJson } from "../src/shared/fsx.ts";
 import { layout, localId } from "../src/shared/layout.ts";
 import { FakeServer } from "./fake-server.ts";
@@ -79,6 +80,7 @@ interface S {
 }
 
 const hk = (k: Kind) => (k === "codex" ? "codex" : "claude");
+const hk2 = (s: S) => (s.kind === "codex" ? "codex" : "claude-code");
 
 /** Run the installed hook as the harness would, with the plugin's arguments. */
 function hook(t: TestEnv, s: S, event: string, input: Record<string, unknown>): string {
@@ -89,7 +91,7 @@ function hook(t: TestEnv, s: S, event: string, input: Record<string, unknown>): 
 
 let n = 0;
 async function shared(t: TestEnv, cwd: string, kind: Kind = "new", goal = "Ship the v2"): Promise<S> {
-  const sid = kind === "codex" ? `019a${String(++n).padStart(4, "0")}-0000-7000-8000-000000000000` : `${String(++n).padStart(8, "c")}-1111-2222-3333-444444444444`;
+  const sid = kind === "codex" ? `019a0000-0000-7000-8000-${String(++n).padStart(12, "0")}` : `${String(++n).padStart(8, "c")}-1111-2222-3333-444444444444`;
   const harness = kind === "codex" ? "codex" : "claude-code";
   const s: S = { sid, lid: localId(harness, sid), key: "", kind, cwd };
   hook(t, s, "SessionStart", { source: "startup" });
@@ -176,11 +178,11 @@ describe("A2-local-1, A2-local-2: an edit counts only on evidence that its own t
       const C = await shared(t, repo, "codex");
       const held = denyText(pre(t, C, "apply_patch", { command: "*** Begin Patch\n*** Update File: docs/plan.md\n@@\n-Cut over reads first.\n+Cut over writes first.\n*** End Patch\n" }).out);
       assert.match(held, new RegExp(`^Align: Claude Code session ${A.sid.slice(0, 8)}, working toward the same goal, edited docs/plan\\.md`));
-      assert.doesNotMatch(held, new RegExp(X.sid.slice(0, 8)));
+      assert.doesNotMatch(held, new RegExp(shortId(hk2(X), X.sid)));
       // And `align team` names no edit of X's, and Y's ok.md.
       const team = (await runCli(t, ["team", "--cwd", repo])).stdout;
-      assert.doesNotMatch(team, new RegExp(X.sid.slice(0, 8)), team);
-      assert.match(team.split("\n").find((l) => l.includes(Y.sid.slice(0, 8))) || "", /edited docs\/ok\.md/, team);
+      assert.doesNotMatch(team, new RegExp(shortId(hk2(X), X.sid)), team);
+      assert.match(team.split("\n").find((l) => l.includes(shortId(hk2(Y), Y.sid))) || "", /edited docs\/ok\.md/, team);
     });
   }
 

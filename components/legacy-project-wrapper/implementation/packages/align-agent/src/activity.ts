@@ -10,11 +10,13 @@ import type { Ctx } from "./context.ts";
 import { api, clockOffset, postTimed } from "./api.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { getSession } from "./ledger.ts";
-import { activityBase, confirming, madeActs, pathHash, rawActs, record, relTo, repoIdentity, type Act, type PodFeed, type RemoteItem } from "./hooks/siblings.ts";
+import { activityBase, confirming, liveGoalId, madeActs, pathHash, rawActs, record, relTo, repoIdentity, type Act, type PodFeed, type RemoteItem } from "./hooks/siblings.ts";
+import { privateActivity, sharedNow } from "./hooks/private.ts";
 import { activityLids, PENDING_MS, settle, verdictFor, verdictsOf } from "./hooks/evidence.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
 import { layout } from "./shared/layout.ts";
+import type { HotState, InjectedState } from "./shared/types.ts";
 import { matchRule, readRules } from "./shared/rules.ts";
 
 const KEEP_MS = 6 * 3_600_000;
@@ -112,13 +114,15 @@ function addCover(ctx: Ctx, edits: Act[]): void {
 
 /**
  * Decide, by their evidence, the waiting edits and commits of every session that recorded activity here (those whose
- * own next hook has not come yet): made ones only, the rest wait for that hook or for their hour (A2-local-1).
+ * own next hook has not come yet): made ones only, the rest wait for that hook or for their hour (A2-local-1); a Claude
+ * Code call whose PostToolUse has not come within a minute (its session was killed or interrupted mid-tool) is decided
+ * from its content evidence too (A3-local-5).
  */
 export function settleActivity(ctx: Ctx): number {
   let n = 0;
   for (const lid of activityLids(ctx.home, PENDING_MS)) {
     try {
-      n += settle(ctx.home, lid, false, (acts) => record(ctx.home, lid, acts));
+      n += settle(ctx.home, lid, { by: "pass" }, (acts) => record(ctx.home, lid, acts));
     } catch {
       /* the next pass */
     }
@@ -157,17 +161,55 @@ function hookSeen(ctx: Ctx, since: number): { paths: Set<string>; made: Act[] } 
 }
 
 /**
+ * Sessions on this machine that worked in the repo at `top` since the previous pass (at `prevAt`, ms) and are not
+ * shared toward `workspace`: unshared ones (private, a share stopped or ended), from the local marks their hooks leave
+ * and from the sessions this machine meters (whose last activity, read from transcripts, may lag: two minutes of
+ * slack), and those shared to another workspace (A3-local-2).
+ */
+function othersActive(ctx: Ctx, top: string, prevAt: number, workspace: string): boolean {
+  // Hook marks carry the time of the work itself; a session shared since then is read through its own activity.
+  if (privateActivity(ctx.home, ctx.secret, top, prevAt - 1000).some((m) => !sharedNow(ctx.home, m.lid))) return true;
+  const since = prevAt - 120_000;
+  const rows = ctx.db
+    .prepare("SELECT s.local_id AS lid, s.cwd AS cwd, s.last_active AS last, h.state AS state, h.workspace_id AS ws FROM sessions s LEFT JOIN shares h ON h.local_id = s.local_id WHERE s.last_active IS NOT NULL AND s.cwd IS NOT NULL")
+    .all() as { lid: string; cwd: string; last: string; state: string | null; ws: string | null }[];
+  for (const r of rows) {
+    if (!(Date.parse(r.last) >= since)) continue;
+    const shared = r.state === "shared" || r.state === "pending" || fs.existsSync(layout.activityStarting(ctx.home, r.lid));
+    if (shared && (r.ws === workspace || r.ws === null)) continue;
+    let real = r.cwd;
+    try {
+      real = fs.realpathSync(r.cwd);
+    } catch {
+      /* gone */
+    }
+    if (real === top || real.startsWith(top + path.sep)) return true;
+  }
+  return false;
+}
+
+/** The goal a session counts toward now, as its hooks read it (null: none known). */
+function goalNow(ctx: Ctx, lid: string): string | null {
+  const hot = readJson<HotState>(layout.hot(ctx.home, lid));
+  return hot ? liveGoalId(hot, readJson<InjectedState>(layout.injected(ctx.home, lid))) : null;
+}
+
+/**
  * Files changed in a shared session's repo since the previous pass (working tree, and commits made since), recorded as
- * edits of the session most recently active there. Hooks see edit tools and plain shell writes; this catches the rest
- * (a script, a code-mode tool). The first pass only takes a baseline, so earlier changes are never attributed. A file
- * whose latest change a hook already recorded, in any session here, is never credited again, whenever it is committed
- * (A1-local-2, A2-local-6); nor is one an earlier pass already credited, when it is committed later (A2-local-6).
+ * edits of the session most recently active there, with the goal it counts toward then (A3-cross-4). Hooks see edit
+ * tools and plain shell writes; this catches the rest (a script, a code-mode tool). The first pass only takes a
+ * baseline, so earlier changes are never attributed. A file whose latest change a hook already recorded, in any session
+ * here, is never credited again, whenever it is committed (A1-local-2, A2-local-6); nor is one an earlier pass already
+ * credited or left alone, when it is committed later (A2-local-6: a committed file that was already changed, with the
+ * same change time, at the previous pass is no new change). When a session that is not shared toward that workspace
+ * (private, its share stopped or ended, or shared elsewhere) worked in the repo since the previous pass, nothing is
+ * credited there at all: its work is no one's to report, and missed credit beats a leaked path (A3-local-2).
  */
 export function detectGitEdits(ctx: Ctx): number {
   const rows = ctx.db
-    .prepare("SELECT s.local_id AS lid, s.cwd AS cwd, s.last_active AS last FROM shares h JOIN sessions s ON s.local_id = h.local_id WHERE h.state = 'shared'")
-    .all() as { lid: string; cwd: string | null; last: string | null }[];
-  const byRepo = new Map<string, { lid: string; last: string | null }[]>();
+    .prepare("SELECT s.local_id AS lid, s.cwd AS cwd, s.last_active AS last, h.workspace_id AS ws FROM shares h JOIN sessions s ON s.local_id = h.local_id WHERE h.state = 'shared'")
+    .all() as { lid: string; cwd: string | null; last: string | null; ws: string }[];
+  const byRepo = new Map<string, { lid: string; last: string | null; ws: string }[]>();
   for (const r of rows) {
     const top = r.cwd ? gitInfo(r.cwd)?.toplevel : null;
     if (!top) continue;
@@ -187,7 +229,17 @@ export function detectGitEdits(ctx: Ctx): number {
     const changed = new Set(Object.keys(cur.files).filter((f) => cur.files[f] !== prev.files[f]));
     if (prev.head && cur.head && prev.head !== cur.head) {
       try {
-        for (const f of git(top, ["diff", "--name-only", prev.head, cur.head]).split("\n")) if (f && fs.existsSync(path.join(top, f))) changed.add(f);
+        for (const f of git(top, ["diff", "--name-only", prev.head, cur.head]).split("\n")) {
+          if (!f) continue;
+          let m: number;
+          try {
+            m = Math.floor(fs.statSync(path.join(top, f)).mtimeMs);
+          } catch {
+            continue;
+          }
+          // Committing a change the previous pass already saw (credited, hook-seen or left alone) is no new change.
+          if (prev.files[f] !== m) changed.add(f);
+        }
       } catch {
         /* history rewritten */
       }
@@ -195,6 +247,7 @@ export function detectGitEdits(ctx: Ctx): number {
     if (!changed.size) continue;
     const owner = sessions.filter((s) => s.last && Date.parse(s.last) >= prev.at - 120_000).sort((a, b) => Date.parse(b.last!) - Date.parse(a.last!))[0];
     if (!owner) continue;
+    if (othersActive(ctx, top, prev.at, owner.ws)) continue;
     // A change a hook already recorded, in any session here (shared now or not), is that session's edit and goes up
     // with it once: one recorded since the last pass, one recorded earlier whose file was only written later (an edit
     // approved after a pass read it, C4-5), or one an earlier pass took as made, while the file has not changed since
@@ -215,10 +268,11 @@ export function detectGitEdits(ctx: Ctx): number {
       }
     };
     const at = new Date().toISOString();
+    const g = goalNow(ctx, owner.lid);
     const acts: Act[] = [...changed]
       .map((f) => path.join(top, f))
       .filter((p) => !seen.has(p) && !covered(p))
-      .map((p) => ({ t: "edit", at, p, via: "git" }));
+      .map((p) => ({ t: "edit", at, p, via: "git", g }));
     record(ctx.home, owner.lid, acts);
     // Credited once: a commit of the same change later credits nobody (A2-local-6).
     addCover(ctx, acts);

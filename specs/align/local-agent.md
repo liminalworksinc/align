@@ -2712,10 +2712,15 @@ parents and dependencies in the cached feed, which then count as seen.
 ### Requirement: Same-machine sessions toward one goal
 
 The `align` hook SHALL record each shared session's edits, reads, commit subjects, task labels and claims in
-`~/.align/activity/<lid>.jsonl`, each with the goal the session counted toward when it was recorded (nothing for
-private sessions). Above 128 KB the file SHALL be trimmed to its last 300 lines, dropping only lines the sync pass has
-uploaded (it writes how far it got to `activity/<lid>.uploaded`), unless the file passes 4 MB; a trimmed file starts
-with `{"t":"base","b":<n>}`, the bytes dropped so far, so the pass's offsets stay right (A1-local-8). Reads are Claude
+`~/.align/activity/<lid>.jsonl`, each with the goal the session counted toward when it was recorded (task labels and
+claims included; an edit the git pass credits carries the goal its session counts toward at that pass, or none when
+none is known, and a record with no goal counts toward no goal, E2E acycle3 A3-cross-4), and nothing for sessions that
+are not shared (see "Unshared sessions are never credited"). Above 128 KB the file SHALL be trimmed to its last 300
+lines, dropping only lines the sync pass has uploaded (it writes how far it got to `activity/<lid>.uploaded`) and never
+a line from the last 20 minutes, which the edit hold and the change note read, nor an edit or commit still waiting for
+its verdict, nor anything after them (A3-local-8: a burst of verdict lines pushed out the edits they were about), unless
+the file passes 4 MB; a trimmed file starts with `{"t":"base","b":<n>}`, the bytes dropped so far, so the pass's
+offsets stay right (A1-local-8). Reads are Claude
 Code's `Read` and plain shell reads of a path (`cat`, `head`, `tail`, `less`, `more`, `nl`, `bat`, `sed` without
 `-i`, `git diff <path>`), which is how Codex reads (A1-local-4). Another session counts toward the same goal by the
 goal it counts toward now: from the prompt after a move made in the session (`::align bind`, an accepted
@@ -2727,17 +2732,25 @@ that record removes it (at most 10 minutes), so its edits are recorded and held 
 `SessionStart` SHALL always start a sync pass (waiting for one already running), never skipped because another
 session's pass was started within the last 3 seconds (E2E acycle2 A2-local-7). At a
 prompt it SHALL add one card of at most 300 characters, `[Align] Also working toward this goal on this machine:
-...`, about other local sessions bound to the same goal (at most once per 10 minutes per session, sooner only when
-another person's work overlaps this session's files, and 0 bytes when nothing is new; the same card is also added at
-`SessionStart`); a card SHALL name at least one edited file per sender it lists, listing fewer senders (`(<n> more)`)
-rather than only counts of files. Before an edit it SHALL deny, once, an edit to a file another same-goal session on this
+... Read their changes before editing the same files.`, about other local sessions bound to the same goal (at most
+once per 10 minutes per session, sooner only when another person's work overlaps this session's files, and 0 bytes
+when nothing is new; the same card is also added at `SessionStart`); a card SHALL name at least one edited file per
+sender it lists, listing fewer senders (`(<n> more)`) rather than only counts of files. When the card also reports
+other people's work (`In flight toward this goal and related ones: ... The user can type \`::align team\` for
+details.`), the sessions on this machine keep their own part with their own header and closing line, the part with the
+most relevant sender first, and the card may run to 450 characters (A3-local-7: one header for both put local
+siblings under the other-people header). A session is named everywhere (cards, holds, notes, `align team`) by
+`<id8>`: the first 8 characters of a Claude Code session id, and the last 8 hex digits of a Codex one, whose ids are
+time-ordered (UUIDv7), so their first 8 digits are the same for sessions started within about a minute of each other
+(A3-local-9). Before an edit it SHALL deny, once, an edit to a file another same-goal session on this
 machine changed in the last 20 minutes through a hook-seen edit, unless this session read or edited it since, with
 the reason `Align: <harness> session <id8>, working toward the same goal, edited <file> <n> min ago. Read the file
 again so you keep its changes, then retry this edit.` (with `less than a minute ago` in place of `<n> min ago` when the
 edit is under a minute old). When several such sessions changed the files the edit touches, it SHALL deny it once,
 naming them all, `Align: <harness> session <id8> edited <file> <ago> and <harness> session <id8> edited <file> <ago>,
 all working toward the same goal. Read the file again so you keep their changes, then retry this edit.` (`the files`
-when they differ; up to four sessions, then `and <n> more`), so the retry passes (A2-local-4). Claude Code refuses an edit of a file changed since it was read with its own error before
+when they differ; the names joined as `A and B`, `A, B and C`, up to four sessions, then `A, B, C, D and <n> more`,
+A3-local-10), so the retry passes (A2-local-4). Claude Code refuses an edit of a file changed since it was read with its own error before
 any hook runs, so the hold rarely reaches a Claude Code model (A1-local-3); so at every prompt (whatever the card's
 throttle) and every tool call of the main agent, of any tool, the hook SHALL add, once per sibling edit, `[Align] <harness> session <id8>,
 working toward the same goal, edited <file> <n> min ago, after this session last read it. Read the file again before
@@ -2751,7 +2764,7 @@ replace the hold: an edit without a read since is still held once.
 #### Scenario: Card, then hold once
 
 - **WHEN** a Codex session patches two files and commits, then a Claude Code session on the same goal prompts and then edits one of those files twice (test `hooks` "sessions toward the same goal: a card ...")
-- **THEN** the prompt card names `Codex session 019a-cod`, both files and `committed "Add held-out read path"`; the next prompt prints nothing; the first edit is denied with the reason above; the retry passes; and a session on another goal gets no card and no hold
+- **THEN** the prompt card names `Codex session 1a9cd3b7` (the session `019a2c4e-...-5e2f1a9cd3b7`), both files and `committed "Add held-out read path"`; the next prompt prints nothing; the first edit is denied with the reason above; the retry passes; and a session on another goal gets no card and no hold
 
 #### Scenario: Claude Code hears which session changed a file it read
 
@@ -2785,23 +2798,54 @@ replace the hold: an edit without a read since is still held once.
 
 #### Scenario: A trim keeps what is not uploaded
 
-- **WHEN** a session's one `touch` of 1,200 files takes its activity file past 128 KB before a sync, a sync runs, and then it edits one more file (test `findings16` "drops only uploaded lines ...")
+- **WHEN** a session's one `touch` of 1,200 files takes its activity file past 128 KB before a sync, a sync runs, and, more than 20 minutes on, it edits one more file (test `findings17` "drops only uploaded lines ...")
 - **THEN** all 1,201 edits go up once, with its own key and none credited to another session, the next record trims the file to start with `{"t":"base",...}`, and the later edit goes up exactly once
+
+#### Scenario: A trim keeps what the hold reads
+
+- **WHEN** session T touches 1,100 files in one command, a sync uploads them, T makes another call, and another session toward the same goal then writes `gen/f0001.txt` and `gen/f1100.txt` (test `findings20` "after a burst of 1,100 shell edits ...")
+- **THEN** T's edit lines are all kept, each write is held naming T, and once those lines are more than 20 minutes old the next record trims the file
+
+#### Scenario: Sessions on this machine and other people in one card
+
+- **WHEN** Lena on another machine edited `docs/runbook.md` toward the same goal and Claude Code session B on this machine wrote `docs/ca.md`, and session A prompts (test `findings20` "the card has an on-this-machine part and an in-flight part")
+- **THEN** A's card reads `[Align] Also working toward this goal on this machine: Claude Code session <B> (active just now): edited docs/ca.md. Read their changes before editing the same files. In flight toward this goal and related ones: Lena (1 session, just now): edited docs/runbook.md. The user can type \`::align team\` for details.`
+
+#### Scenario: Codex sessions started together, and three at once
+
+- **WHEN** Codex sessions `019a2c4e-7b10-...-5e2f1a9cd3b7` and `019a2c4e-8c20-...-6f303b0de4c8` each patch a file, `align team` runs, then both and a Claude Code session change `docs/three.md` and another session writes it without reading it (test `findings20` "two Codex sessions started together ...")
+- **THEN** `align team` lists `Codex session 1a9cd3b7` and `Codex session 3b0de4c8`, and the write is held with `Align: Codex session 1a9cd3b7 edited docs/three.md less than a minute ago, Codex session 3b0de4c8 edited docs/three.md less than a minute ago and Claude Code session <id8> edited docs/three.md less than a minute ago, all working toward the same goal. ...`
+
+#### Scenario: A session's earlier task, claim and git-credited edit after it moves
+
+- **WHEN** session L1 toward "Cut hook latency" types `::align task tune the cache` and `::align claim docs/RUNBOOK.md for the cutover`, a pass credits it a script's `docs/script.md`, and L1 then moves to "Ship the v2" (test `findings20` "a task label, a claim and a git-credited edit ...")
+- **THEN** all three records carry `"g":"g_perf"`, and neither `align team` nor another "Ship the v2" session's card shows any of them
 
 ### Requirement: Edits seen through tools, the shell and git
 
 The `align` hook SHALL treat as edits Claude Code `Edit`, `Write`, `MultiEdit` and `NotebookEdit` paths, Codex
-`apply_patch` file headers, and plain path targets of shell writes (`>`, `>>`, `tee`, `sed -i`, `touch`, `cp`/`mv`
-destinations), ignoring variables, globs and `/dev/` targets; `git add` stages a file and changes nothing in it, so it
-is not an edit (A1-local-1); shell writes SHALL never be held. Commit subjects SHALL come from `git commit -m` including
-the heredoc form, and a commit SHALL count only once it was made (A2-local-5): its command's `PostToolUse` (not
-`PostToolUseFailure`) with this build's Claude Code plugin, else the repo's HEAD reflog holding a commit with that
-subject among the lines logged after the call was seen (the reflog's length is recorded at `PreToolUse`, so a line's
-date, which `GIT_COMMITTER_DATE` can set to anything, never decides it; a line an older build recorded without that
-length counts when dated since the call) (checked at the session's next hook and by the sync pass; a commit still missing when the turn ends
-never counts). The `align sync` pass SHALL also detect files changed in a shared session's repo working tree or in
-new commits since its previous pass, attribute them to the session most recently active there with `via: "git"`,
-take only a baseline on the first pass, and never use them to hold an edit. A file whose latest change a hook
+`apply_patch` file headers, and plain path targets of shell writes (`>`, `>>`, `>|`, `&>`, `tee`, `sed -i`, `touch`,
+`cp`/`mv` destinations, a file inside the destination when it is a folder or `-t <folder>`, and the source a `mv`
+removes), ignoring variables, globs, `/dev/` targets and option values (`touch -d <date>`); `git add` stages a file and
+changes nothing in it, so it is not an edit (A1-local-1); shell writes SHALL never be held. The command SHALL be read
+with its quoting: heredoc bodies (every shape: `<<EOF`, `<<'EOF'`, `<<"EOF"`, `<<-EOF`, inside `$( ... )` and inside
+double quotes), quoted strings and comments are data, never redirections, commands, reads or commits, while commands
+inside `$( ... )` count (E2E acycle3 A3-local-11: the `>` of the e-mail address in Claude Code's heredoc commit
+message, followed by the `EOF` line, read as a write to a file named `EOF`). Commit subjects SHALL come from
+`git commit -m` including the heredoc form, only when the command line runs `git commit`. A commit SHALL count only
+once it was made (A2-local-5), and an exit status says nothing about which parts of a command ran: with or without
+`PostToolUse`, and also on `PostToolUseFailure` (`git commit ... && git push` whose push fails, A3-local-6), it counts
+when the repo's HEAD reflog holds a commit with that subject among the lines logged after the call was seen (the
+reflog's length is recorded at `PreToolUse`, so a line's date, which `GIT_COMMITTER_DATE` can set to anything, never
+decides it; a line an older build recorded without that length counts when dated since the call); a plain
+`git commit` that failed logs no line and never counts. Its `PostToolUse` or `PostToolUseFailure` checks; without one,
+the session's next hook and the sync pass do, and a commit still missing when the call is over (see "Team activity
+upload") never counts. The `align sync` pass SHALL also detect files changed in a shared session's repo working tree
+or in new commits since its previous pass, attribute them to the session most recently active there with
+`via: "git"` and the goal it counts toward then, take only a baseline on the first pass, and never use them to hold an
+edit; a committed file whose change time is the one the previous pass saw it changed with is no new change (it was
+credited, hook-seen or left alone then), and nothing at all is credited in a repo where a session that is not shared
+toward that workspace worked since the previous pass (see "Unshared sessions are never credited"). A file whose latest change a hook
 recorded SHALL never be credited this way: one recorded since the previous pass, one waiting for its verdict, or one an
 earlier pass took as made while the file has not changed since (its change time is kept for 6 hours), in any session
 that recorded activity on this machine, shared now or not (a share a sign-out or `align stop-sharing` ended keeps its
@@ -2818,6 +2862,11 @@ nobody again (A2-local-6).
 
 - **WHEN** a shared Codex session's repo gets a rewritten `DESIGN.md` and a committed `TESTING.md` with no hook seeing either (test `pod` "a file a script wrote ...")
 - **THEN** the first `detectGitEdits` pass records 0, the second records both files with `via: "git"`, and a third records 0
+
+#### Scenario: Shell commands: their writes and commit, by exit status and by what changed
+
+- **WHEN** for each of `printf 'WF-LINE\n' > docs/wf.md && ls missing-dir`, `mv docs/mvsrc.md docs/mvdst.md` (the source 30 minutes old), `cp -p a.md b.md` over an older `b.md` of the same change time, `touch -d '2 days ago' t.md`, `touch same.md` of an existing file, `echo hi > missing2/f.md`, `sed -i 's/a/b/' s.md && npm test`, `cat > plan.md <<'EOF'` with `>` in its body, `git add faw.md && git commit -q -m 'Add faw doc' && git push -q origin main` and Claude Code's heredoc commit, the command exits 0 or not (`PostToolUse` or `PostToolUseFailure`) and changes its files or not, while a read-only session in the repo is active after every call (test `findings20` "table: each command's writes and commit ...")
+- **THEN** each command reads as the writes and commit listed (never a file named `EOF`), each file is `ran` exactly when its content or existence changed (never `touch same.md`) and each commit exactly when it was made, whatever the exit status, those go up once for the session that ran them, and nothing is credited to the read-only session
 
 #### Scenario: A commit that was never made
 
@@ -2847,25 +2896,41 @@ pass resume mid-file. The hook records an edit at
 `PreToolUse`, before the harness's own permission check, with the tool call's id, so a refused or failed call is
 recorded too, and its file changing afterwards proves nothing (another session may have written it). An edit SHALL
 count, for the upload and for the sibling card and hold, only on evidence that this session's own tool call made it
-(A1-local-1, E2E acycle2 A2-local-1, A2-local-2):
+(A1-local-1, E2E acycle2 A2-local-1, A2-local-2), and an exit status says nothing about which parts of a shell command
+ran, so each effect is decided from its artifact (E2E acycle3 A3-local-1):
 - With this build's Claude Code plugin (its `PreToolUse` command says `--post-tool-use`), from the session's first tool
-  call: once the call's own `PostToolUse` ran (recorded as `ran`; for a shell command, per written file, only when the
-  file changed since the call was recorded). A refused call fires no hook, and `PostToolUseFailure` (a command that
-  exited non-zero, an edit tool that failed) records `failed`: neither ever counts.
+  call: an edit tool counts once its own `PostToolUse` ran (recorded as `ran`; `PostToolUseFailure`, an edit tool that
+  failed, records `failed`). A shell command's `PostToolUse` or `PostToolUseFailure` alike decides each file it was to
+  write: `ran` when the file's content (or existence) differs from what it was at `PreToolUse` (the hook records a
+  hash of each target's content, or that it is absent; past 2 MB, or past 16 MB read in one call, its size, change
+  time and inode stand for it), so a `mv` that keeps the old change time and a command that writes and then fails
+  both count, a target left as it was (`touch` of an existing file) never does, and neither does one whose change
+  another session's edit explains (below). A call refused at the prompt fires no hook; one whose session was killed or
+  interrupted mid-tool never gets its `PostToolUse` (A3-local-5): either is decided from its content evidence, as
+  below, by the session's next hook (any hook of the same agent at least 2 seconds after the call, its next prompt,
+  `Stop`, or a `SessionStart` on resume), or by the sync pass once a minute has passed without a verdict, which only
+  records it made.
 - Otherwise (Codex, whose `PostToolUse` Align does not install and which documents nothing reliable for a refused
-  `apply_patch`; an older Claude Code plugin): when the file shows what the call was to do and did not before, as the
-  hook recorded it at `PreToolUse` from the call's own input, by line hashes only (lines a patch, `Write`, `Edit` or
-  `MultiEdit` adds that were absent, else lines it removes that were present once, else whether the file then exists;
-  a shell write, or a call that says nothing about lines, needs the file changed), and no other session's edit of that
-  file explains the change (one that ran with the same lines, or, when lines say nothing, after this edit was recorded).
-  The session's next hook decides (`ran`), and its next `UserPromptSubmit` or `Stop` decides the rest as not made
-  (`failed`); the sync pass also records those it finds made. A session with an older plugin whose `PostToolUse` runs
-  (it had one, without the flag) counts an edit on either.
+  `apply_patch`; an older Claude Code plugin): when the file shows what the call was to do and did not at `PreToolUse`,
+  as the hook recorded it from the call's own input, by hashes only (A3-local-3): every region of lines the file is to
+  hold afterwards, contiguous, none of them in the file before (the whole content of a `Write` or a patch's `Add File`,
+  the changed lines of an `Edit` or `MultiEdit` with two lines of context on each side, each patch hunk's lines after
+  it); with no such region, lines it removes that were present once; else whether the file then exists; a shell write
+  needs its content changed as above; a call that says nothing about lines needs the file changed.
+- Either way, the content must appear after the call's `PreToolUse` and before the call is over: the session's next
+  hook from the same agent, at least 2 seconds after the call (a call running beside it may not have written yet),
+  decides it made or not; the end of its turn (`Stop`, the next `UserPromptSubmit`) or a new `SessionStart` decides
+  the rest; the sync pass only records those it finds made (A3-local-4: the user or a script writing the same content
+  later never makes it count). And nothing else may explain the change: another session's edit of the file that ran
+  after this one was recorded (whatever its lines, since two changes in one file cannot be told apart, and missed
+  credit beats wrong credit), one still waiting whose own evidence is in the file, a change the git pass found in the
+  file since, or a call of a session that is not shared writing it since. A session with an older plugin whose
+  `PostToolUse` runs (it had one, without the flag) counts an edit on either.
 Lines older builds wrote, with no evidence, keep the rule that their file changed at or after the time they were
 recorded (one second of slack). Either way an edit the user refused is never reported as made, whoever writes its
-file later, the same content included. An edit not decided yet when a pass reads it (the user is still on the
-permission prompt) SHALL wait, for up to an hour, and go up for its own session once it is decided as made, exactly
-once; after an hour undecided it counts as refused. `align logout` SHALL upload what the shared sessions recorded since
+file later, the same content included; what stays undecidable is listed under "Known limits of edit evidence". An edit
+not decided yet when a pass reads it (the user is still on the permission prompt) SHALL wait, for up to an hour, and go
+up for its own session once it is decided as made, exactly once; after an hour undecided it counts as refused. `align logout` SHALL upload what the shared sessions recorded since
 the last pass before it signs out (best effort), so their last edits are reported for their own sessions
 (A2-local-6). Edits the sync pass finds in the working
 tree count as they are, except a change some session's hook recorded (since the last pass, or waiting so): that is
@@ -2904,8 +2969,18 @@ people's recent work out of the 1,000 (A2-local-8).
 
 #### Scenario: A failed shell write
 
-- **WHEN** a Claude Code session's `echo hi > docs/missing2/f.md` exits 1 (`PostToolUseFailure`) and another session then creates the file (test `findings19` "a shell write whose command failed never counts ..."; `findings17` "a shell write counts once its command ran and its file changed ...")
-- **THEN** only the other session's edit goes up, and the failed one is recorded `failed`
+- **WHEN** a Claude Code session's `echo hi > docs/missing2/f.md` exits 1 (`PostToolUseFailure`) and another session then creates the file (test `findings19` "a shell write whose command failed never counts ..."); in another case its `printf 'q\n' > out.txt; false` writes the file and exits 1 (test `findings17` "a shell write counts once its file changed, also when its command then exited non-zero ..."); in a third, another session writes the file while the command runs and the command leaves it as it was (test `findings20` "a shell write whose file another session's confirmed edit changed meanwhile ...")
+- **THEN** in the first and third only the other session's edit goes up and the shell write is recorded `failed`; in the second `out.txt` goes up for its own session
+
+#### Scenario: A Claude Code session killed or interrupted mid-tool
+
+- **WHEN** session KL runs `printf 'KILL-LINE\n' > docs/kill.md && python3 -c 'import time; time.sleep(40)'` and is killed during the sleep (no `PostToolUse`, no `Stop`), KL2 runs the same writing `docs/int.md` and is interrupted, so its next hook is its next prompt, and R's `Write` of `docs/r.md` is refused, R makes another call, and another session then writes exactly R's content (test `findings20` "killed mid-tool ..."; with real `claude -p`, a run killed during the sleep)
+- **THEN** a sync within the minute uploads nothing for `docs/kill.md`; after it, `docs/kill.md` goes up for KL and holds a sibling's edit of it, `docs/int.md` for KL2, and `docs/r.md` only for the other session
+
+#### Scenario: A refused Codex patch whose content appears otherwise
+
+- **WHEN** Codex session K3's patch adding `export const k3 = "late";` to `src/db.ts` is refused and session M then writes the file with 9 comment lines before that same line; then K3's `Add File: docs/k2.md` is refused, K3's next hook comes, and the user writes exactly those two lines; then a patch of K3's runs (test `findings20` "a sibling's write with the patch's line past its first 8 new lines ...")
+- **THEN** `src/db.ts` goes up only for M, `docs/k2.md` for no one, the patch that ran for K3, and an edit of `src/db.ts` by a session that has not read it is held naming M and not K3
 
 #### Scenario: Own items stay out of the feed cache
 
@@ -2916,6 +2991,51 @@ people's recent work out of the 1,000 (A2-local-8).
 
 - **WHEN** one repo is shared by folder rule with `--signals` and another without, and each session edits `src/sso.ts` and commits (test `e2e` "pod activity: uploaded inside the sync pass ...")
 - **THEN** the first uploads `path: "src/sso.ts"`, the commit subject, its `::align task` label and `branch feat/sso`; the second uploads `path: null`, a 32-hex `path_hash`, a null commit text and no task; and no upload contains an absolute path
+
+### Requirement: Unshared sessions are never credited
+
+A session that is not shared (never shared, its share stopped with `::align unshare`, `align stop-sharing` or Stop
+sharing on the web, or ended by a sign-out) SHALL record none of its work, and none of its work SHALL ever be credited
+to any session or uploaded, through the git pass or otherwise (E2E acycle3 A3-local-2: its edits in a folder where
+other sessions are shared went up, with their paths, as another session's edits). Its hooks SHALL keep only a local
+mark, `~/.align/private/<lid>.json` (0600, never uploaded): which repos it worked in and which files its calls wrote,
+and when, each as a keyed hash made with the device secret of the repo's top folder or the file's path (never a path,
+a file name or any content), refreshed at each of its hooks (`PreToolUse` and `PostToolUse` with the files the call
+writes and their repos, `UserPromptSubmit`, `Stop`) and kept for 7 days (at most 200 repos and 500 files). The git pass SHALL credit nothing in a repo where, since its previous pass, a session not shared toward the
+workspace of the session it would credit worked: from those marks (a session shared since is read through its own
+activity instead), and from the sessions this machine meters whose folder is in the repo and whose last activity
+(read from transcripts, two minutes of slack) is that recent, which also covers a session whose hooks are not
+installed; sessions shared to another workspace count the same. What it left alone stays no one's when committed
+later. Missed credit is preferred to a leaked path: while such a session works in a repo, scripts' changes there are
+credited to no one. A shared session's edit whose file an unshared session's call wrote after the edit was recorded is
+decided not made (its content evidence cannot tell the two apart).
+
+#### Scenario: A private or stopped session's edits in a shared folder
+
+- **WHEN** in a repo where session CB is shared, session P, never shared, or having typed `::align unshare`, or stopped with `align stop-sharing`, writes `docs/private.md`; in a fourth case P has no hooks and a script of its writes the file while the sessions this machine meters show P active there; CB is the most recently active session, two syncs run, the file is committed and a sync runs; then, with P done, a script writes `docs/later.md` (test `findings20` "never shared: ...", "`::align unshare`: ...", "`align stop-sharing`: ...", "seen only in the sessions this machine meters: ..."; with real `claude -p`, a session that typed `::align unshare` and a session whose share was stopped)
+- **THEN** no upload holds `docs/private.md` or its path, nothing is credited to CB, nothing is recorded for P, P's mark names neither the repo's path nor the file, and `docs/later.md` goes up for CB
+
+### Requirement: Known limits of edit evidence
+
+The agent SHALL count an edit or commit only on evidence about the session's own call and SHALL prefer missed credit
+to wrong credit where that evidence cannot decide; these cases stay undecidable and are documented in
+`HARNESS_FACTS.md`:
+- A refused Codex patch (or a refused call of a Claude Code session with an older plugin, or one whose `PostToolUse`
+  never came) whose exact content the user or a script writes after its `PreToolUse` and before the session's next
+  hook (usually seconds) counts: Codex tells hooks nothing about a refused patch, and the file alone cannot tell the
+  two writers apart. A Claude Code call still on its permission prompt a minute on is decided made by the sync pass if
+  its file shows its content by then (written by someone else); its later refusal does not undo that.
+- Two changes to one file in that window, by this session and another session (or one the git pass found, or an
+  unshared session's call), credit neither to this session (missed credit, as K4 in the acycle3 report).
+- A Codex session killed mid-call has no next hook: its edit waits up to an hour and the sync pass records it made
+  when its content shows, so a write of exactly that content by someone else meanwhile counts for it.
+- An unshared session's work that no hook of it sees and that happens outside the window its marks and its metered
+  activity cover (a script it started that runs on after the session ends) can still be credited by the git pass.
+
+#### Scenario: Two changes meet in one file
+
+- **WHEN** Codex session K4's patch really adds a line to `docs/r.md` and, before K4's next hook, another session's `sed -i` on the same file runs (the acycle3 report, section 2)
+- **THEN** only the other session's edit is credited; K4's is decided not made
 
 ### Requirement: Other people's work reaches the agent safely
 

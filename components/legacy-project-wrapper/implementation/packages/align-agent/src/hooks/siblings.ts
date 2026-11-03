@@ -10,8 +10,9 @@ import { gitInfo } from "../shared/anchors.ts";
 import { asksSection } from "../shared/asks.ts";
 import { readJson, writeFileAtomic } from "../shared/fsx.ts";
 import { layout } from "../shared/layout.ts";
-import { happened, verdictsOf, type Expect, type Verdicts } from "./evidence.ts";
-import { clean, NAME_NOT_SHARED, personName, quoted, remotePath, SELF_ELSEWHERE, type SiblingSummary } from "../shared/envelope.ts";
+import { happened, PENDING_MS, verdictFor, verdictsOf, type Expect, type Lazy, type Verdicts } from "./evidence.ts";
+import { commandWords, parseShell } from "./shell.ts";
+import { clean, NAME_NOT_SHARED, personName, quoted, remotePath, SELF_ELSEWHERE, shortId, type SiblingSummary } from "../shared/envelope.ts";
 import type { FeedFile, Goal, GoalSnapshot, Harness, HotState, InjectedState } from "../shared/types.ts";
 
 /** An edit by another session this recent holds an edit to the same file once. */
@@ -50,13 +51,16 @@ export interface Act {
   c?: 1;
   /** edit: what its file should show once the call ran, checked when there is no PostToolUse (A2-local-1). */
   v?: Expect;
-  /** commit: the folder it was made in, where the repo is checked for it when there is no PostToolUse (A2-local-5). */
+  /** commit: the folder it was made in, where HEAD's reflog decides it, with or without PostToolUse (A2-local-5, A3-local-6). */
   d?: string;
   /** commit: HEAD's reflog length when the call was seen; only lines logged after it can confirm the commit. */
   rl?: number;
   /** Recorded from a Claude Code subagent's tool call (A2-local-3). */
   ag?: 1;
-  /** edit: written through a shell command, which counts only if the command ran and its file changed. */
+  /** edit, commit: the subagent's id (`agent_id`), so only that agent's next hook takes the call as over (A3-local-5). */
+  ai?: string;
+  /** edit: written through a shell command, which counts when its file's content (or existence) differs from what it
+   *  was at PreToolUse, whatever the command's exit status (A3-local-1). */
   sh?: 1;
   /** The goal the session counted toward when this was recorded (null: none); absent in lines older builds wrote. */
   g?: string | null;
@@ -132,35 +136,82 @@ export function editedPaths(harness: Harness, tool: string | undefined, input: R
 
 const PATHLIKE = /^[\w.@+~/-]+$/;
 
-/** Adds a plain path-like shell token to `out` as an absolute path; variables, globs, flags and /dev targets never. */
+/** Adds a plain path-like shell word to `out` as an absolute path; variables, globs, flags and /dev targets never. */
 function pathAdder(out: Set<string>, cwd: string | null): (raw: string | undefined) => void {
   return (raw) => {
-    const p = (raw || "").replace(/^['"]|['"]$/g, "");
+    const p = raw || "";
     if (!p || !PATHLIKE.test(p) || p.startsWith("-") || p.startsWith("/dev/") || p === "." || p === "..") return;
     out.add(path.resolve(cwd || "/", p));
   };
 }
 
+/** Redirections that write their target (`>&` only to a file, not to a descriptor). */
+const WRITE_REDIRS = new Set([">", ">>", ">|", "&>", "&>>", ">&"]);
+
+/** The words of a command that are not options, past the values of the options listed in `takesValue`. */
+function positional(args: string[], takesValue: Set<string>): { pos: string[]; opts: Map<string, string> } {
+  const pos: string[] = [];
+  const opts = new Map<string, string>();
+  for (let k = 0; k < args.length; k++) {
+    const a = args[k];
+    if (a === "--") {
+      pos.push(...args.slice(k + 1));
+      break;
+    }
+    if (a.startsWith("-") && a.length > 1) {
+      const eq = a.indexOf("=");
+      if (eq > 0) opts.set(a.slice(0, eq), a.slice(eq + 1));
+      else if (takesValue.has(a)) opts.set(a, args[++k] ?? "");
+      else opts.set(a, "");
+      continue;
+    }
+    pos.push(a);
+  }
+  return { pos, opts };
+}
+
+const isDir = (p: string) => {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
 /**
- * Files a shell command will write: redirect targets (`>`, `>>`), `tee`, `sed -i`, `touch`, and the destination of
- * `cp` and `mv`. Agents often edit through the shell instead of an edit tool. Heuristic by design: only plain path-like
- * tokens count, never variables, globs or /dev targets. `git add` stages a file and changes nothing in it, so it is no
- * edit (A1-local-1).
+ * Files a shell command will write: redirect targets (`>`, `>>`, `&>`, `>|`), `tee` files, `sed -i` files, `touch`
+ * files, the destination of `cp` and `mv` (a file inside it when it is a folder) and the source `mv` removes. Agents
+ * often edit through the shell instead of an edit tool. Heuristic by design: only plain path-like words count, never
+ * variables, globs or /dev targets, and the command is read with its quoting, so heredoc bodies and quoted text are
+ * never taken for redirections (A3-local-11). `git add` stages a file and changes nothing in it, so it is no edit
+ * (A1-local-1).
  */
 export function shellWrites(tool: string | undefined, input: Record<string, unknown> | undefined, cwd: string | null): string[] {
   if (tool !== "Bash" || typeof input?.command !== "string") return [];
-  const cmd = input.command;
   const out = new Set<string>();
   const add = pathAdder(out, cwd);
-  for (const m of cmd.matchAll(/(?:^|[^<>&\d])\d?>>?\s*(?!&)("[^"\n]+"|'[^'\n]+'|[^\s;&|<>()]+)/g)) add(m[1]);
-  for (const m of cmd.matchAll(/\btee\s+(?:-\w+\s+)*("[^"\n]+"|'[^'\n]+'|[^\s;&|<>()]+)/g)) add(m[1]);
-  for (const seg of cmd.split(/&&|\|\||;|\||\n/)) {
-    const t = seg.trim().split(/\s+/).filter(Boolean);
-    if (!t.length) continue;
-    const args = t.slice(1).filter((x) => !x.startsWith("-"));
-    if (t[0] === "sed" && t.some((x) => /^-i/.test(x) || x === "--in-place") && args.length) add(args[args.length - 1]);
-    else if (t[0] === "touch") args.forEach(add);
-    else if ((t[0] === "cp" || t[0] === "mv") && args.length >= 2) add(args[args.length - 1]);
+  const abs = (p: string) => path.resolve(cwd || "/", p);
+  for (const c of parseShell(input.command)) {
+    for (const r of c.redirs) if (WRITE_REDIRS.has(r.op) && r.target !== null && !(r.op === ">&" && /^(\d+|-)$/.test(r.target))) add(r.target);
+    const [name, ...args] = commandWords(c.words);
+    if (name === "tee") positional(args, new Set()).pos.forEach(add);
+    else if (name === "sed" && args.some((x) => /^-[a-zA-Z]*i/.test(x) || x.startsWith("--in-place"))) {
+      const { pos, opts } = positional(args, new Set(["-e", "--expression", "-f", "--file", "-l"]));
+      const files = pos.filter(Boolean);
+      (opts.has("-e") || opts.has("--expression") || opts.has("-f") || opts.has("--file") ? files : files.slice(1)).forEach(add);
+    } else if (name === "touch") positional(args, new Set(["-d", "-t", "-r", "--date", "--reference"])).pos.forEach(add);
+    else if (name === "cp" || name === "mv") {
+      const { pos, opts } = positional(args, new Set(["-t", "--target-directory", "-S", "--suffix"]));
+      const dir = opts.get("-t") ?? opts.get("--target-directory");
+      const srcs = dir !== undefined ? pos : pos.slice(0, -1);
+      const dest = dir !== undefined ? dir : pos[pos.length - 1];
+      if (!dest || !srcs.length || !PATHLIKE.test(dest)) continue;
+      const into = dir !== undefined || dest.endsWith("/") || isDir(abs(dest));
+      if (into) for (const s of srcs) add(PATHLIKE.test(s) ? path.join(dest, path.basename(s)) : undefined);
+      else add(dest);
+      // A move removes its source: that file changes too.
+      if (name === "mv") srcs.forEach(add);
+    }
   }
   return [...out];
 }
@@ -170,32 +221,32 @@ const SHELL_READERS = new Set(["cat", "head", "tail", "less", "more", "nl", "bat
 /**
  * Files a tool call is about to read, so a later edit of them is not held: Claude Code's `Read`, and plain shell reads
  * (`cat`, `head`, `tail`, `less`, `more`, `nl`, `bat`, `sed` without `-i`, `git diff <path>`), which is how Codex reads
- * (A1-local-4). The same path-like rule as for shell writes; a token after a redirect is never a read.
+ * (A1-local-4). The same path-like rule as for shell writes; a redirection's target is never a read.
  */
 export function readPaths(harness: Harness, tool: string | undefined, input: Record<string, unknown> | undefined, cwd: string | null): string[] {
   if (harness === "claude-code" && tool === "Read" && typeof input?.file_path === "string") return [path.resolve(cwd || "/", input.file_path)];
   if (tool !== "Bash" || typeof input?.command !== "string") return [];
   const out = new Set<string>();
   const add = pathAdder(out, cwd);
-  for (const seg of input.command.split(/&&|\|\||;|\||\n/)) {
-    const t = seg.trim().split(/\s+/).filter(Boolean);
-    if (!t.length) continue;
-    const words: string[] = [];
-    for (const x of t.slice(1)) {
-      if (/^\d?[<>]/.test(x)) break;
-      words.push(x);
-    }
+  for (const c of parseShell(input.command)) {
+    const [name, ...words] = commandWords(c.words);
     const args = words.filter((x) => !x.startsWith("-"));
-    if (SHELL_READERS.has(t[0])) args.forEach(add);
-    else if (t[0] === "sed" && !words.some((x) => /^-i/.test(x) || x === "--in-place") && args.length >= 2) args.slice(1).forEach(add);
-    else if (t[0] === "git" && t[1] === "diff") args.slice(1).forEach(add);
+    if (SHELL_READERS.has(name)) args.forEach(add);
+    else if (name === "sed" && !words.some((x) => /^-[a-zA-Z]*i/.test(x) || x.startsWith("--in-place")) && args.length >= 2) args.slice(1).forEach(add);
+    else if (name === "git" && words[0] === "diff") args.slice(1).forEach(add);
   }
   return [...out];
 }
 
-/** Subject of a `git commit -m "..."` in a shell command, if any. */
+/** Subject of a `git commit -m "..."` in a shell command, if any: only when the command line runs `git commit` (not when
+ *  the words are inside a heredoc or a quoted string). */
 export function commitSubject(tool: string | undefined, input: Record<string, unknown> | undefined): string | null {
   if (tool !== "Bash" || typeof input?.command !== "string") return null;
+  const runs = parseShell(input.command).some((c) => {
+    const [name, ...args] = commandWords(c.words);
+    return name === "git" && args.filter((a, k) => !a.startsWith("-") && !(k > 0 && /^-[Cc]$/.test(args[k - 1])))[0] === "commit";
+  });
+  if (!runs) return null;
   const m = input.command.match(/\bgit\b[^\n;&|]*\bcommit\b[^\n;&|]*?\s-[a-zA-Z]*m\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')/);
   let body = m ? (m[1] ?? m[2] ?? "") : "";
   const heredoc = body.match(/^\$\(cat <<-?\s*'?\w+'?\s*\n([^\n]*)/); // -m "$(cat <<'EOF' ... EOF)"
@@ -245,7 +296,10 @@ export function uploadedOffset(home: string, lid: string): number {
 
 /**
  * Keep the last 300 lines, dropping only lines the sync pass has uploaded (A1-local-8: dropping lines it had not read
- * lost them from the upload and from the git pass's view of what hooks saw). Above 4 MB the oldest go anyway.
+ * lost them from the upload and from the git pass's view of what hooks saw), and never a line from the last 20 minutes,
+ * which the edit hold and the change note read, nor an edit or commit still waiting for its verdict, nor anything after
+ * them (A3-local-8: a burst of verdict lines pushed out the edits they were about, so those stopped holding). Above 4 MB
+ * the oldest go anyway.
  */
 function trimActivity(home: string, lid: string, size: number): void {
   const file = layout.activity(home, lid);
@@ -268,11 +322,37 @@ function trimActivity(home: string, lid: string, size: number): void {
       break;
     }
   }
-  let cut = Math.min(keepFrom, uploaded);
+  let cut = Math.min(keepFrom, uploaded, inUse(body));
   if (body.length > HARD_BYTES) cut = Math.max(cut, keepFrom);
   cut = cut > 0 ? body.lastIndexOf(10, cut - 1) + 1 : 0;
   if (cut <= 0) return;
   writeFileAtomic(file, Buffer.concat([Buffer.from(`${JSON.stringify({ t: "base", b: head.base + cut })}\n`), body.subarray(cut)]), 0o600);
+}
+
+/** The offset of the first line still in use: one from the last 20 minutes (the hold's window), or an edit or commit
+ *  that has no verdict yet and may still get one. */
+function inUse(body: Buffer): number {
+  const now = Date.now();
+  const lines: { at: number; off: number; a: Act }[] = [];
+  let off = 0;
+  for (const line of body.toString("utf8").split("\n")) {
+    const start = off;
+    off += Buffer.byteLength(line, "utf8") + 1;
+    if (!line) continue;
+    try {
+      const a = JSON.parse(line) as Act;
+      if (a && typeof a.at === "string") lines.push({ at: Date.parse(a.at), off: start, a });
+    } catch {
+      /* torn line */
+    }
+  }
+  const v = verdictsOf(lines.map((l) => l.a));
+  for (const l of lines) {
+    if (now - l.at < COLLIDE_MS) return l.off;
+    const waits = (l.a.t === "edit" && !l.a.via) || l.a.t === "commit";
+    if (waits && l.a.u && now - l.at < PENDING_MS && verdictFor(l.a, v) === null) return l.off;
+  }
+  return body.length;
 }
 
 /** The session's PostToolUse hook runs, so its edits count only once it confirms them (A1-local-1). */
@@ -338,7 +418,7 @@ export function localKeys(home: string): Set<string> {
  * sync pass found in the working tree (`via: "git"`) and every other kind of act are kept. `lazy`: an edit still
  * waiting for its own session's next hook counts once its file shows it and no other session explains that.
  */
-export function madeActs(acts: Act[], confirmed = false, verdicts?: Verdicts, lazy: { home: string; lid: string } | null = null): Act[] {
+export function madeActs(acts: Act[], confirmed = false, verdicts?: Verdicts, lazy: Lazy | null = null): Act[] {
   const v = verdicts ?? verdictsOf(acts);
   return acts.filter((a) => happened(a, v, confirmed, lazy));
 }
@@ -676,7 +756,7 @@ export function crossOverlap(
     const c = sib.acts.filter((a) => a.t === "claim" && a.p && files.includes(a.p) && now - ms(a.at) < CLAIM_MS).pop();
     if (!c || noted.has(`claim:${sib.lid}@${c.at}`)) continue;
     return {
-      who: `${sib.hot.harness === "codex" ? "Codex" : "Claude Code"} session ${sib.hot.native_session_id.slice(0, 8)}`,
+      who: `${sib.hot.harness === "codex" ? "Codex" : "Claude Code"} session ${shortId(sib.hot.harness, sib.hot.native_session_id)}`,
       file: display(c.p as string, cwd),
       minutes: minutes(c.at, now),
       goal: null,
@@ -715,7 +795,7 @@ export function podReport(home: string, lid: string | null, ws: string, goalId: 
   const head = `Align team: work in flight toward ${quoted(related.get(goalId)?.title || goalId, 120)} and related goals, last 6 hours.`;
   const line = (s: SiblingSummary) => {
     const remote = !!s.remote;
-    const name = remote ? `${personName(s.who)} (${s.sessions ?? 1} session${(s.sessions ?? 1) > 1 ? "s" : ""})` : `${s.harness === "codex" ? "Codex" : "Claude Code"} session ${clean(String(s.id).slice(0, 8), 20)} (this machine)`;
+    const name = remote ? `${personName(s.who)} (${s.sessions ?? 1} session${(s.sessions ?? 1) > 1 ? "s" : ""})` : `${s.harness === "codex" ? "Codex" : "Claude Code"} session ${shortId(s.harness, String(s.id))} (this machine)`;
     const file = (f: string) => (remote ? remotePath(f) : clean(f, 120));
     const bits = [
       s.goal ? `toward ${quoted(s.goal, 100)}` : "",
