@@ -8,6 +8,7 @@ import { limitsIn, limitsOf, type Limit } from "./goal-limits";
 import { need } from "./workspaces";
 import { personName } from "./retention";
 import { expireOpenRequests, releaseHold } from "./requests";
+import { endAlignmentsToClosedGoal } from "./alignments";
 import { feedAllocation } from "./allocation";
 import { workspaceSteering } from "./steering";
 import { supersedeReallocations } from "./reallocations";
@@ -540,7 +541,8 @@ export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
  *  actor, review against the parents as they are now, one goal_version directive for every session bound to or
  *  governed by the goal, every other approved change request still waiting for launch is superseded before launch,
  *  and, when the goal becomes achieved or dropped, every open change request on it is superseded, the requests to its
- *  agents (and switch_goal requests toward it) still waiting for an answer expire, and a hold on it is released.
+ *  agents (and switch_goal requests toward it) still waiting for an answer expire, a hold on it is released, and every
+ *  approved work_toward alignment toward it ends its sessions' binding (lib/v2/alignments.ts).
  *  Every open or approved-unlaunched reallocation that names the goal is superseded (lib/v2/reallocations.ts). An
  *  active goal whose target is set or raised, or that becomes active with one, must keep the workspace's targets at
  *  100 or less (409 targets_over_100). 409 stale_version if the goal moved since `g` was read. */
@@ -597,6 +599,7 @@ export function writeGoalVersion(g: GoalRow, content: GoalContent, actorId: stri
     supersedeOpenRequests(g.ws_id, g.id, actorId, at);
     expireOpenRequests(g.ws_id, g.id, actorId, at); // nobody can act on a request toward a goal that is done
     releaseHold(g.ws_id, g.id, actorId, at); // a goal that is done holds no agents
+    endAlignmentsToClosedGoal(g.ws_id, g.id, actorId, at); // and governs no session through an alignment
   }
   return next;
 }

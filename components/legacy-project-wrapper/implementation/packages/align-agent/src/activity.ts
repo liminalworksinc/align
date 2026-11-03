@@ -352,7 +352,9 @@ function saveOffset(ctx: Ctx, lid: string, next: number): void {
 /** Activity items this machine's shared sessions recorded that wait to upload (what the next pass would send, branch
  *  label aside): counted when a pass could not reach the server, so its message does not say nothing waits. */
 export function waitingActivity(ctx: Ctx): number {
-  const shares = ctx.db.prepare("SELECT local_id, workspace_id FROM shares WHERE state='shared'").all() as { local_id: string; workspace_id: string }[];
+  // Shares the server has not confirmed yet (`pending`) wait too: their activity goes up once it does (E2E acycle3
+  // A3-cross-6, where a count of 0 was printed while a commit and an edit waited).
+  const shares = ctx.db.prepare("SELECT local_id, workspace_id FROM shares WHERE state IN ('shared','pending')").all() as { local_id: string; workspace_id: string }[];
   let n = 0;
   for (const s of shares) {
     const all = [...undecidedEdits(ctx, s.local_id), ...newActs(layout.activity(ctx.home, s.local_id), Number(kvGet(ctx.db, `act_off:${s.local_id}`) || 0)).acts];
@@ -361,7 +363,9 @@ export function waitingActivity(ctx: Ctx): number {
     if (!repo) continue;
     const named = signalsAllowed(ctx, s.local_id, cwd);
     const v = verdictsOf([...rawActs(ctx.home, s.local_id), ...all]);
-    for (const a of madeActs(all, confirming(ctx.home, s.local_id), v)) {
+    const made = madeActs(all, confirming(ctx.home, s.local_id), v);
+    // Edits and commits held for their call's verdict (or their file's change) wait as well, until they are decided.
+    for (const a of [...made, ...stillUndecided(all, made, v)]) {
       if ((a.t === "edit" || a.t === "claim") && a.p) n += relTo(repo.toplevel, a.p) ? 1 : 0;
       else if (a.t === "commit" || (a.t === "task" && named && a.s)) n++;
     }

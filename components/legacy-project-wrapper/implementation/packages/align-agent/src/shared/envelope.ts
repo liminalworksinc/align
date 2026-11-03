@@ -394,6 +394,20 @@ const LOCAL_HEAD = "Also working toward this goal on this machine:";
 const LOCAL_TAIL = "Read their changes before editing the same files.";
 const REMOTE_HEAD = "In flight toward this goal and related ones:";
 
+
+/** Senders in words: `1 teammate`, `2 local sessions`, `1 teammate and 1 local session`; with `more`, `1 more local
+ *  session` (E2E acycle3 A3-cross-5: a bare `(1 more)` said neither what nor that it was left out). */
+export function sendersWords(sibs: SiblingSummary[], more = ""): string {
+  const people = sibs.filter((s) => s.remote).length;
+  const here = sibs.length - people;
+  return [
+    people ? `${people} ${more}teammate${people > 1 ? "s" : ""}` : "",
+    here ? `${here} ${more}local session${here > 1 ? "s" : ""}` : "",
+  ]
+    .filter(Boolean)
+    .join(" and ");
+}
+
 /**
  * What other sessions toward this goal (or related ones) did since this session last heard. Sessions on this machine
  * and other people's work each keep their own header and closing line, so a session here is never carded as someone
@@ -412,7 +426,7 @@ export function renderCard(sibs: SiblingSummary[]): string | null {
   const part = (g: (typeof groups)[number], keep: number, detail: number, maxFiles: number, first: boolean) => {
     const lines = g.sibs.slice(0, keep).map((s, i) => siblingLine(s, maxFiles, i === 0 && first ? Math.max(detail, 1) : detail));
     const rest = g.sibs.length - keep;
-    return [g.head, ...lines, ...(rest > 0 ? [`(${rest} more)`] : []), g.tail].join(" ");
+    return [g.head, ...lines, ...(rest > 0 ? [`Also ${sendersWords(g.sibs.slice(keep), "more ")}.`] : []), g.tail].join(" ");
   };
   // Keep as many senders as fit while each still names a file it edited (a card that tells the agent to read their
   // changes names which files), at least one per part, shedding detail before dropping anyone; the first (overlap
@@ -437,7 +451,7 @@ export function renderCard(sibs: SiblingSummary[]): string | null {
     }
   }
   const g0 = groups[0];
-  return `[Align] ${g0.head} ${g0.sibs.length} other senders. ${g0.tail}${groups[1] ? ` ${groups[1].head} ${groups[1].sibs.length} other senders. ${groups[1].tail}` : ""}`.slice(0, max);
+  return `[Align] ${g0.head} ${sendersWords(g0.sibs)}. ${g0.tail}${groups[1] ? ` ${groups[1].head} ${sendersWords(groups[1].sibs)}. ${groups[1].tail}` : ""}`.slice(0, max);
 }
 
 /**

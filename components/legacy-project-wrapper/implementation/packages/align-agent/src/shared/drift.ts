@@ -3,7 +3,9 @@
 // next prompt as a systemMessage naming the limit. Nothing is uploaded, nothing reaches the model, nothing blocks, and
 // no reply text is kept: only the limit's id and a short digest of each crossing sentence, so one sentence is never told
 // twice while a later, different one still is. It is a word check, so the notice says "may", and where a word rule
-// can't tell it says nothing: a missed notice costs less than a false alarm (E2E acycle2 A2-cross-1, A2-cross-2).
+// can't tell it says nothing: a missed notice costs less than a false alarm (E2E acycle2 A2-cross-1, A2-cross-2). Only
+// an explicit statement of the agent's own intent or act counts; an agent refusing a limit, explaining it, warning of
+// it or recommending against it never does (E2E acycle3 A3-cross-1).
 // Hook-safe: node:fs and node:crypto only.
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -72,6 +74,8 @@ function tokens(text: string): string[] {
     .replace(/ outside of /g, " outside ")
     .replace(/ (hold|holds|holding|held) off /g, " avoid ")
     .replace(/ (instead of|rather than|refrain from|refrained from|refraining from|stay away from|steer clear of) /g, " avoid ")
+    .replace(/ (push|pushes|pushed|pushing) back (on|against) /g, " against ")
+    .replace(/ (warn|warns|warned|warning|advise|advises|advised|advising|argue|argues|argued|arguing) (against|about) /g, " against ")
     .replace(/ out of scope /g, " outofscope ")
     .replace(/ no longer /g, " not ")
     .replace(/ can not /g, " cannot ");
@@ -87,8 +91,52 @@ const negator = (t: string) => NEGATORS.has(t) || t.endsWith("n't");
 /** Words that end a clause; a comma does when a new subject or a conjunction follows it ("No rush, we will drop ..."). */
 const BOUNDARY_WORDS = new Set("so but because since although though whereas while then however therefore which".split(" "));
 const AFTER_COMMA = new Set("i we i'll we'll i'm we're i've we've i'd we'd you they it it's he she let's there there's this that so but and then which or".split(" "));
-/** Words that make the clause someone else's ask or a condition, not what the agent says it does. */
-const NOT_A_STATEMENT = new Set("if unless whether suppose supposing asked asks ask asking requested requests request suggested suggests proposed proposes told tells wants wanted".split(" "));
+/** Words that make the clause someone else's ask, a report of what someone said, or a condition, not what the agent
+ *  says it does. */
+const NOT_A_STATEMENT = new Set(
+  "if unless whether suppose supposing assuming imagine hypothetically asked asks ask asking requested requests request suggested suggests proposed proposes told tells wants wanted say says said claim claims claimed according".split(" "),
+);
+/** Words that make the whole sentence a condition or a hypothetical, wherever they come before the anchor (`If Olga
+ *  signs off, we will drop ...`), or after it in its clause (`We will drop it ... only if Olga signs off`). */
+const CONDITION = new Set("if unless whether suppose supposing assuming imagine hypothetically".split(" "));
+/** Words before the anchor in its clause that oppose the act or speak of its harm: a recommendation against it, a
+ *  warning, a prevention, a risk ("I recommend against dropping ...", "This step prevents anyone from dropping ..."). */
+const OPPOSE = new Set(
+  "against prevent prevents prevented preventing block blocks blocked blocking forbid forbids forbade forbidden ban bans banned risk risks risky danger dangerous mistake bad wrong unsafe oppose opposes opposed".split(" "),
+);
+/** Words of the agent's own verb group, read backwards from the anchor to its subject. */
+const ADVERBS = new Set("also then just now first next tonight today tomorrow finally actually still immediately already only soon simply really definitely right go ahead and".split(" "));
+const FUTURE = new Set(["will", "shall", "gonna"]);
+/** Words before `to` that make it the agent's plan ("going to", "plan to", "about to", "decided to"). */
+const INTENT_TO = new Set("going plan plans planning planned about intend intends intending decided ready want".split(" "));
+/** Words that start an act and leave it to the anchor ("start rewriting"); the past ones say it was done. */
+const ASPECT = new Set("start starts started starting begin begins began continue continues continued".split(" "));
+const ASPECT_PAST = new Set(["started", "began", "continued"]);
+const BE = new Set("am are is was were be been being".split(" "));
+const HAVE = new Set(["have", "has", "had"]);
+/** Modals of a hypothetical, a recommendation or an ability: never a statement of doing ("would", "should", "can"). */
+const SOFT = new Set("would could should might may must can need needs".split(" "));
+const SOFT_NEG = /^(wouldn't|couldn't|shouldn't|mightn't|mustn't|needn't)$/;
+const GROUP = new Set([
+  ...ADVERBS,
+  ...FUTURE,
+  ...INTENT_TO,
+  ...ASPECT,
+  ...BE,
+  ...HAVE,
+  ...SOFT,
+  ..."do does did to able unable not never let me us cannot avoid avoids avoided avoiding skip skips skipped skipping decline declines declined declining refuse refuses refused refusing".split(" "),
+]);
+const SUBJECTS = new Set("i we you they he she it this that".split(" "));
+/** Subjects that are other people: their acts are not the agent's statement. */
+const OTHERS = new Set("you they he she someone somebody anyone anybody nobody everyone everybody people".split(" "));
+const DETERMINERS = new Set("the this that these those our my its a an every each".split(" "));
+/** After a gerund that opens a clause, words that make it a subject spoken of, not an act ("Dropping it ... means"). */
+const CONSEQUENCE = new Set(
+  "would could might will should can may must is are was were means mean meant takes took leaves left causes caused puts breaks removes risks needs".split(" "),
+);
+/** Words a noun anchor may follow as an object of talk, not of the act ("about SSO", "of the billing rewrite"). */
+const PREPOSITIONS = new Set("of about on from for against with without into regarding".split(" "));
 /** The contrast a limit's qualifier turns on ("without downtime", "before the cutover"), and its opposite. */
 const OPPOSITE: Record<string, string> = { with: "without", without: "with", before: "after", after: "before", during: "outside", outside: "during" };
 const PREPS = new Set([...Object.keys(OPPOSITE), "until"]);
@@ -103,6 +151,9 @@ function boundary(toks: string[], i: number): boolean {
 interface Shape {
   ban: boolean;
   anchor: string;
+  /** Whether the anchor is the limit's verb ("Drop ...", "Rewriting ...", "must never run"); else it names a thing
+   *  ("SSO for the admin console is out of scope"), which the agent's own verb before it acts on. */
+  verb: boolean;
   key: Set<string>;
   qual: { prep: string; words: Set<string> } | null;
 }
@@ -155,7 +206,9 @@ function shapeOf(l: Pick<Limit, "text" | "type">): Shape | null {
       if (words.size) qual = { prep: rest[p], words };
     }
   }
-  return { ban: forbids(l), anchor, key, qual };
+  const lead0 = NEG_LEAD.exec(text)?.[1]?.toLowerCase();
+  const verb = m ? true : lead0 ? lead0 !== "no" : l.type !== "out_of_scope" || rest[at].endsWith("ing");
+  return { ban: forbids(l), anchor, verb, key, qual };
 }
 
 /** Prose only: code blocks and inline code are full of identifiers that would match by accident, and quoted text is
@@ -242,6 +295,109 @@ function qualPrep(toks: string[], words: Set<string>): string | null {
   return null;
 }
 
+const PAST_FORMS = new Set(Object.keys(IRREGULAR));
+/** The form of the reply's anchor word: "dropping" (ing), "dropped" / "rewrote" (past), "drops" (s), else base. */
+function formOf(t: string): "ing" | "past" | "s" | "base" {
+  if (t.endsWith("ing")) return "ing";
+  if (t.endsWith("ed") || PAST_FORMS.has(t) || (t.startsWith("re") && PAST_FORMS.has(t.slice(2)))) return "past";
+  if (t.endsWith("s") && !t.endsWith("ss")) return "s";
+  return "base";
+}
+
+/** The verb group before the anchor, read backwards to its subject (`I`, `we`, `the cutover`, a contraction's). */
+function verbGroup(toks: string[], a: number, i: number): { group: string[]; subj: string | null; subjAt: number } {
+  const group: string[] = [];
+  let j = i - 1;
+  for (; j >= a; j--) {
+    const t = toks[j];
+    if (t === "let's") return { group: ["let", "us", ...group], subj: "we", subjAt: j };
+    const c = /^([a-z]+)'(ll|m|re|ve|d|s)$/.exec(t);
+    if (c) return { group: [t, ...group], subj: c[1], subjAt: j };
+    if (SUBJECTS.has(t) || OTHERS.has(t)) return { group, subj: t, subjAt: j };
+    if (!GROUP.has(t) && !t.endsWith("n't")) return { group, subj: t, subjAt: j };
+    group.unshift(t);
+  }
+  return { group, subj: null, subjAt: j };
+}
+
+/** A subject the agent speaks for: itself (`I`, `we`, `let me`), or a thing of the plan (`it`, `this`, `the cutover`,
+ *  `our team`), never another person (`you`, `they`, `Lena`, `Finance`: a name has no determiner before it). */
+function subjectOf(toks: string[], a: number, g: ReturnType<typeof verbGroup>): { first: boolean; ok: boolean } {
+  const first = g.subj === "i" || g.subj === "we" || (g.group.includes("let") && (g.group.includes("me") || g.group.includes("us")));
+  if (first) return { first, ok: true };
+  if (!g.subj || OTHERS.has(g.subj) || !isWord(g.subj)) return { first, ok: false };
+  if (g.subj === "it" || g.subj === "this" || g.subj === "that") return { first, ok: true };
+  for (let k = g.subjAt - 1; k >= Math.max(a, g.subjAt - 3); k--) {
+    if (DETERMINERS.has(toks[k])) return { first, ok: !OTHERS.has(toks[k]) };
+    if (!isWord(toks[k])) break;
+  }
+  return { first, ok: false };
+}
+
+/**
+ * Whether the clause `toks[a..b)` is the agent's own explicit statement about the act at `i` (affirmed or, with the
+ * negation the caller counts, denied): a first-person or plain future or done marker on the anchor's own verb group.
+ * Counted: `I/we will`, `'ll`, `shall`, `I'm going to`, `we plan to`, `I'm about to`, `we decided to` (first person),
+ * `the cutover will` (a thing of the plan); `I am dropping`; `I dropped`, `I've dropped`, `I did drop`, `I started
+ * rewriting`; `I drop`, `next we drop`; `let me drop`, `let's drop`; a clause that opens with the gerund and says `now`
+ * (`Dropping it now.`); and a verb joined by `and` / `then` to an earlier `will` of the same subject (`I'll take a
+ * backup and then drop ...`). Never counted: a gerund or noun use of the anchor (`Dropping it ... means`, `against
+ * dropping`, `the risk of dropping`, `prevents anyone from dropping`, `signed off on dropping`); `would`, `could`,
+ * `should`, `might`, `may`, `must`, `can`, `need to`, `have to`; another person's act (`you`, `they`, a name).
+ */
+function voice(sh: Shape, toks: string[], a: number, b: number, i: number): boolean {
+  const form = formOf(toks[i]);
+  if (!sh.verb) {
+    // A noun anchor: the agent's own verb before it in its clause ("I added SSO to the admin console").
+    if (PREPOSITIONS.has(toks[i - 1] || "")) return false;
+    for (let s = a; s < i; s++) {
+      const c = /^([a-z]+)'(ll|m|re|ve)$/.exec(toks[s]);
+      const who = c ? c[1] : toks[s];
+      if (who !== "i" && who !== "we") continue;
+      const verbs = toks.slice(c ? s : s + 1, i);
+      if (verbs.some((t) => SOFT.has(t) || SOFT_NEG.test(t) || /'d$/.test(t))) return false;
+      return verbs.some((t) => FUTURE.has(t) || /'(ll|m|re|ve)$/.test(t) || /^(am|are)$/.test(t) || (isWord(t) && formOf(t) === "past"));
+    }
+    return false;
+  }
+  const g = verbGroup(toks, a, i);
+  const { first, ok } = subjectOf(toks, a, g);
+  const grp = g.group;
+  if (grp.some((t, k) => SOFT.has(t) || SOFT_NEG.test(t) || /'d$/.test(t) || (HAVE.has(t) && grp[k + 1] === "to"))) return false;
+  const words = grp.filter((t) => !ADVERBS.has(t));
+  const will = grp.some((t) => FUTURE.has(t) || /'ll$/.test(t));
+  const to = grp.some((t, k) => t === "to" && INTENT_TO.has(grp[k - 1] || ""));
+  const be = grp.some((t) => /^(am|are|is)$/.test(t) || /'(m|re|s)$/.test(t));
+  const did = grp.includes("did") || grp.some((t) => ASPECT_PAST.has(t));
+  const have = grp.some((t) => HAVE.has(t) || /'ve$/.test(t));
+  const let_ = grp.includes("let") && (grp.includes("me") || grp.includes("us"));
+  const negWord = grp.some((t) => negator(t) || t === "unable");
+  let statement =
+    (will && ok) ||
+    (to && first) ||
+    (be && ok && form === "ing") ||
+    let_ ||
+    (first && (did || (have && form === "past") || (!words.length && (form === "past" || form === "base")))) ||
+    (ok && negWord);
+  // A clause that opens with the gerund and says "now": "Dropping it now, ahead of the cutover."
+  if (!statement && g.subj === null && !words.length && form === "ing" && toks.slice(a, b).includes("now")) {
+    statement = !toks.slice(i + 1, b).some((t) => CONSEQUENCE.has(t) || /'s$/.test(t));
+  }
+  // A verb joined to an earlier `will` / `'ll` of the agent's: "I'll take a backup and then drop ...".
+  if (!statement && (form === "base" || form === "ing") && (grp[0] === "and" || (g.subj === null && /^(then|and)$/.test(toks[a - 1] || "")))) {
+    for (let k = (g.subj === null ? a : g.subjAt + 1) - 1; k >= 0; k--) {
+      const t = toks[k];
+      if (t === ";" || t === ":" || t === "—" || t === "–" || (BOUNDARY_WORDS.has(t) && t !== "then") || negator(t) || SOFT.has(t) || OPPOSE.has(t) || NOT_A_STATEMENT.has(t)) break;
+      if (FUTURE.has(t) || /'ll$/.test(t)) {
+        const h = verbGroup(toks, 0, k + 1);
+        statement = subjectOf(toks, 0, h).ok;
+        break;
+      }
+    }
+  }
+  return statement;
+}
+
 /** Whether one sentence crosses the limit: see `crossings`. */
 function crossesSentence(sh: Shape, sen: string): boolean {
   const toks = tokens(sen);
@@ -257,24 +413,26 @@ function crossesSentence(sh: Shape, sen: string): boolean {
     let b = i + 1;
     while (b < toks.length && !boundary(toks, b)) b++;
     const before = toks.slice(a, i);
-    if (before.some((t) => NOT_A_STATEMENT.has(t))) continue;
     const after = toks.slice(i + 1, b);
-    let neg = before.filter(negator).length;
+    if (before.some((t) => NOT_A_STATEMENT.has(t) || OPPOSE.has(t))) continue;
+    if (toks.slice(0, i).some((t) => CONDITION.has(t)) || after.some((t) => CONDITION.has(t))) continue;
+    if (!voice(sh, toks, a, b, i)) continue;
+    let neg = before.filter((t) => negator(t) || t === "unable").length;
     if (after.includes("outofscope") || after.some((t, j) => /^(isn't|aren't|wasn't|weren't)$/.test(t) || (/^(is|are|was|were|be)$/.test(t) && /^(not|never)$/.test(after[j + 1] || "")))) neg++;
-    let pos = neg % 2 === 0;
+    let does = neg % 2 === 0;
     let qual: "same" | "opposite" | "none" = "none";
     if (sh.qual) {
       let prep = qualPrep(toks, sh.qual.words);
       // "won't drop it until after the cutover" says it drops it after the cutover.
       if (prep === "until") {
-        if (!pos) {
-          pos = true;
+        if (!does) {
+          does = true;
           prep = "after";
         } else prep = null;
       }
       qual = !prep ? "none" : prep === sh.qual.prep ? "same" : OPPOSITE[sh.qual.prep] === prep ? "opposite" : "none";
     }
-    const hit = sh.ban ? pos && (!sh.qual || qual === "same") : (!pos && qual !== "opposite") || (pos && qual === "opposite");
+    const hit = sh.ban ? does && (!sh.qual || qual === "same") : (!does && qual !== "opposite") || (does && qual === "opposite");
     if (hit) return true;
   }
   return false;
@@ -291,17 +449,22 @@ export interface DriftKnown {
  * The sentences of a reply that may cross a limit, normalized (lower-case words only; for a digest, never kept). A
  * sentence crosses when, outside code and quotes, it uses the limit's anchor word (the first word after its modal, or
  * its first word, as a stem: "dropping" is "drop") and two more of its key words (or all of them, when it has fewer),
- * in the sense the limit rules out. The sense is read from the clause that holds the anchor, never from a negation
- * elsewhere in the sentence: a negation word before the anchor in that clause ("not", "never", "won't", "without",
- * "avoid", "hold off on", "instead of"), or "is not" / "out of scope" after it, makes the clause say it won't (two
- * cancel). A limit whose text qualifies the act with with/without, before/after or during/outside is read with its
- * qualifier: the reply's contrast word before the qualifier's words is the same (it says that), the opposite (it says
- * the contrary: "with two hours of downtime" against "without downtime"), or absent. A ban (`must_not`,
- * `out_of_scope`, or a `must` whose own modal is negative) is crossed by a clause that says it will, and, when the ban
- * has a qualifier, says it with that qualifier; a requirement by a clause that says it won't (unless it says it won't
- * do the contrary), or says it will do it the contrary way. "won't X until (after) Q" says it will X after Q. Not a
- * crossing: a question; a clause that is a condition or someone else's ask ("if", "unless", "Milo asked to ..."); a
- * sentence that lists limits (see `lists`); the words of a goal title or measure as written.
+ * and the clause that holds the anchor is the agent's own explicit statement about the act (see `voice`: `I/we will`,
+ * `'ll`, `going to`, `plan to`, `about to`, `I dropped`, `I've dropped`, `I am dropping`, `let me`, `Dropping it now`,
+ * `the cutover will run`) in the sense the limit rules out. A clause with no such marker on the anchor's own verb says
+ * nothing: a gerund subject ("Dropping it before the cutover means ..."), a recommendation against, a warning, a
+ * prevention, a risk, someone else's act, ask or words ("Finance says ...", "asked", "Lena dropped ..."), `would`,
+ * `could`, `should`, `can`, `need to`, and a condition or hypothetical anywhere before the anchor or after it in its
+ * clause ("if", "unless", "hypothetically"). The sense is read from that clause, never from a negation elsewhere in
+ * the sentence: an odd number of negation words before the anchor in it ("not", "never", "won't", "without", "avoid",
+ * "hold off on", "instead of"), or "is not" / "out of scope" after it, makes it say it won't. A limit whose text
+ * qualifies the act with with/without, before/after or during/outside is read with its qualifier: the reply's contrast
+ * word before the qualifier's words is the same (it says that), the opposite (it says the contrary: "with two hours of
+ * downtime" against "without downtime"), or absent. A ban (`must_not`, `out_of_scope`, or a `must` whose own modal is
+ * negative) is crossed by a statement that the agent does it, and, when the ban has a qualifier, with that qualifier; a
+ * requirement by a statement that the agent won't (unless it won't do the contrary), or will do it the contrary way.
+ * "won't X until (after) Q" says it will X after Q. Not a crossing: a question; a sentence that lists limits (see
+ * `lists`); the words of a goal title or measure as written.
  */
 export function crossings(l: Pick<Limit, "text" | "type">, reply: string, known: string[] | DriftKnown = []): string[] {
   const k: DriftKnown = Array.isArray(known) ? { titles: known } : known;

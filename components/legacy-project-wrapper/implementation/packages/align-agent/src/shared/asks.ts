@@ -56,13 +56,20 @@ export function myTeams(me: MeFile | null, ws: string): { id: string; name: stri
   return (w?.teams || w?.pods || []).map((t) => ({ id: t.id, name: t.name }));
 }
 
-/** One ask on one line for people (never model context): team, quoted text, who asked and where, its state. */
+/**
+ * One ask on one line for people (never model context), safe for an agent to read too, since an agent may run `align
+ * asks` or `align team` itself (E2E acycle3 A3-cross-3): people by first name only, letters only, else `A teammate`
+ * (as model context names them); every other piece of other people's text (the team's name, the ask, a `from` label,
+ * the meeting or source title) only inside double quotes, their own double quotes turned to single ones; a source date
+ * only when it is a date. Mentions are counted, never quoted.
+ */
 export function askLineForPeople(a: Ask, textMax = 140): string {
-  const where = [a.source?.title ? clean(a.source.title, 60) : "", clean(a.source?.date, 10)].filter(Boolean).join(", ");
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(a.source?.date ?? "")) ? String(a.source.date) : "";
+  const where = [a.source?.title ? quoted(a.source.title, 60) : "", day].filter(Boolean).join(", ");
   const again = a.mentions?.length ? ` · came up again ${a.mentions.length} time${a.mentions.length > 1 ? "s" : ""}` : "";
-  const by = a.from_label ? `"${clean(a.from_label, 40)}"` : clean(a.requester?.name, 40);
-  const state = a.state === "accepted" && a.decided_by ? `accepted by ${clean(a.decided_by.name, 40)}` : clean(a.state, 12);
-  return `${clean(a.team?.name, 40)}: ${quoted(a.text, textMax)} (asked by ${by}${where ? `, ${where}` : ""}${again}; ${state}${a.waiting_on_me ? "; waiting on you" : ""})`;
+  const by = a.from_label ? quoted(a.from_label, 40) : personName(a.requester?.name);
+  const state = a.state === "accepted" && a.decided_by ? `accepted by ${personName(a.decided_by.name)}` : clean(a.state, 12);
+  return `To ${quoted(a.team?.name, 40)}: ${quoted(a.text, textMax)} (asked by ${by}${where ? `, ${where}` : ""}${again}; ${state}${a.waiting_on_me ? "; waiting on you" : ""})`;
 }
 
 /**

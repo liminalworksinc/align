@@ -1698,6 +1698,92 @@ try {
   const privSource = await call("U2", "POST", `/api/v2/workspaces/${A}/alignments`, { cookie: U2.cookie, body: { target_goal_id: G1.id, source_goal_id: GP.id, choice: "contribution", session_keys: [] } });
   const privSourceSeen = await getAl(U1, privSource.json?.id);
   check("alignment: a private source goal is unnamed for the approver", privSource.status === 201 && privSourceSeen.status === 200 && privSourceSeen.json.source_goal.visible === false && /a goal you can't see/.test(privSourceSeen.json.effects[0].text), privSourceSeen.text.slice(0, 300));
+
+  // -- A3-cross-2: a goal achieved or dropped after an alignment request was made takes no alignment, and an approved
+  //    work_toward toward a goal that is then dropped ends its sessions' binding the way a revocation does --
+  {
+    const GD = (await mkGoal(U1, { title: "Tune ledger indexes", visibility: "workspace", measures: [{ text: "p99 under 20ms" }] })).json;
+    const GS = (await mkGoal(U3, { title: "Index advisor", visibility: "workspace" })).json;
+    const wtD = await al(U3, { target_goal_id: GD.id, choice: "work_toward", session_keys: [S3b] });
+    const wtC = await al(U3, { target_goal_id: GD.id, choice: "work_toward", session_keys: [S3b] });
+    const ctS = await al(U3, { target_goal_id: G1.id, source_goal_id: GS.id, choice: "contribution", session_keys: [] });
+    const counteredC = await act(U1, wtC.json?.id, "counter", { revision: 1, keep: [0], note: "only this one" });
+    const cur0 = (await dirs(D3, 0)).next_cursor;
+    const dropD = await call("U1", "POST", `/api/v2/workspaces/${A}/goals/${GD.id}/versions`, { cookie: U1.cookie, body: { version: 1, status: "dropped" } });
+    const dropS = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${GS.id}/versions`, { cookie: U3.cookie, body: { version: 1, status: "dropped" } });
+    const viewD = await getAl(U1, wtD.json?.id);
+    const approvalsOf = (id) => withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_alignment_approvals WHERE alignment_id = ?").get(id).n);
+    const approvalsBefore = approvalsOf(wtD.json?.id);
+    const apD = await act(U1, wtD.json?.id, "approve", { revision: 1 });
+    const coD = await act(U1, wtD.json?.id, "counter", { revision: 1, keep: [0] });
+    const acC = await act(U3, wtC.json?.id, "accept_counter", { revision: 2 });
+    const apS = await act(U1, ctS.json?.id, "approve", { revision: 1 });
+    const newFromDropped = await al(U3, { target_goal_id: G1.id, source_goal_id: GS.id, choice: "contribution", session_keys: [] });
+    const afterD = await getAl(U3, wtD.json?.id);
+    const afterC = await getAl(U3, wtC.json?.id);
+    const afterS = await getAl(U3, ctS.json?.id);
+    const s3b = withDb((d) => d.prepare("SELECT governing_goal_id, governing_alignment_id FROM v2_sessions WHERE session_key = ?").get(S3b));
+    const approvalsD = approvalsOf(wtD.json?.id);
+    const dirsAfterDrop = (await dirs(D3, cur0)).directives;
+    const msgD = `"Tune ledger indexes" was dropped after the request was made, so nothing can align with it. Decline or withdraw this request instead.`;
+    check(
+      "A3-cross-2: approving, countering or accepting a counter on a work_toward whose target was dropped after the request -> 409 goal_not_active naming the goal, nothing recorded (still pending/countered, no approval, no binding_changed, the session governs nothing)",
+      wtD.json?.state === "pending" && counteredC.json?.state === "countered" && dropD.status === 201 && dropD.json?.status === "dropped" &&
+        apD.status === 409 && apD.json?.error === "goal_not_active" && apD.json?.message === msgD &&
+        coD.status === 409 && coD.json?.error === "goal_not_active" && acC.status === 409 && acC.json?.error === "goal_not_active" &&
+        afterD.json?.state === "pending" && afterD.json?.revision === 1 && afterC.json?.state === "countered" && afterC.json?.revision === 2 &&
+        approvalsD === approvalsBefore && s3b.governing_goal_id === null && s3b.governing_alignment_id === null && !dirsAfterDrop.some((d) => d.kind === "binding_changed" && d.session_keys.includes(S3b)),
+      `${apD.text} ${coD.text} ${acC.text} ${afterD.json?.state} ${afterC.json?.state} approvals=${approvalsD} ${JSON.stringify(s3b)} ${JSON.stringify(dirsAfterDrop.map((d) => d.kind))}`,
+    );
+    check(
+      "A3-cross-2: such a request offers only decline (approver) or withdraw (requester), waits on no one, and both still close it",
+      viewD.json?.can?.approve === false && viewD.json?.can?.counter === false && viewD.json?.can?.reject === true && viewD.json?.waiting_on_me === false && afterC.json?.can?.accept_counter === false && afterC.json?.can?.withdraw === true,
+      JSON.stringify([viewD.json?.can, viewD.json?.waiting_on_me, afterC.json?.can]),
+    );
+    check(
+      "A3-cross-2: a contribution whose source goal was dropped after the request -> 409 goal_not_active (\"... so it can't contribute to another goal ...\"), still pending; a new request from a dropped goal -> 409 goal_not_active",
+      ctS.json?.state === "pending" && dropS.status === 201 && apS.status === 409 && apS.json?.error === "goal_not_active" && apS.json?.message === `"Index advisor" was dropped after the request was made, so it can't contribute to another goal. Decline or withdraw this request instead.` &&
+        afterS.json?.state === "pending" && newFromDropped.status === 409 && newFromDropped.json?.error === "goal_not_active",
+      `${apS.text} ${afterS.json?.state} ${newFromDropped.text}`,
+    );
+    const rjD = await act(U1, wtD.json?.id, "reject", { revision: 1 });
+    const wdC = await act(U3, wtC.json?.id, "withdraw", { revision: 2 });
+    const wdS = await act(U3, ctS.json?.id, "withdraw", { revision: 1 });
+    check("A3-cross-2: declining and withdrawing still close them", rjD.json?.state === "rejected" && wdC.json?.state === "withdrawn" && wdS.json?.state === "withdrawn", `${rjD.text} ${wdC.text} ${wdS.text}`);
+
+    // Approved first, then the target is dropped: the session stops following it, as on a revocation.
+    const GF = (await mkGoal(U1, { title: "Shard the ledger", visibility: "workspace" })).json;
+    const wtF = await al(U3, { target_goal_id: GF.id, choice: "work_toward", session_keys: [S3a] });
+    const c1 = (await dirs(D3, 0)).next_cursor;
+    const apF = await act(U1, wtF.json?.id, "approve", { revision: 1 });
+    const dF = await dirs(D3, c1);
+    const bcF = dF.directives.find((d) => d.kind === "binding_changed" && d.session_keys.includes(S3a));
+    const eF = await epoch(D3, S3a, { epoch_id: epochId(), goal_id: GF.id, starts_at: new Date().toISOString(), cause: `directive:${bcF?.id}` });
+    const dropF = await call("U1", "POST", `/api/v2/workspaces/${A}/goals/${GF.id}/versions`, { cookie: U1.cookie, body: { version: 1, status: "dropped" } });
+    const dF2 = await dirs(D3, dF.next_cursor);
+    const gvF = dF2.directives.find((d) => d.kind === "goal_version" && d.goal?.id === GF.id);
+    const bsF = dF2.directives.find((d) => d.kind === "binding_suspended" && d.session_keys.includes(S3a));
+    const s3a = withDb((d) => d.prepare("SELECT state, governing_goal_id FROM v2_sessions WHERE session_key = ?").get(S3a));
+    const openF = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_epochs WHERE session_key = ? AND ends_at IS NULL").get(S3a).n);
+    const viewF = await getAl(U3, wtF.json?.id);
+    const auditF = withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE action = 'alignment.goal_closed' AND object_id = ?").all(wtF.json?.id)).map((r) => r.actor_id);
+    check(
+      "A3-cross-2: an approved work_toward whose target is then dropped -> in that transaction the session's governing goal is cleared, its alignment epoch ends, it is suspended and gets binding_suspended (cause goal_closed:<id>) after the goal_version; audit alignment.goal_closed names the owner",
+      apF.json?.state === "approved" && eF.status === 200 && eF.json?.goal_id === GF.id && dropF.status === 201 &&
+        gvF && bsF && dF2.directives.indexOf(gvF) < dF2.directives.indexOf(bsF) && bsF.binding?.cause === `goal_closed:${wtF.json?.id}` && bsF.binding?.goal_id === GF.id && bsF.goal === null &&
+        s3a.state === "suspended" && s3a.governing_goal_id === null && openF === 0 && auditF.join() === U1.id,
+      `${apF.text} ${eF.text} ${JSON.stringify(dF2.directives.map((d) => [d.kind, d.binding?.cause]))} ${JSON.stringify(s3a)} open=${openF} audit=${auditF}`,
+    );
+    check(
+      "A3-cross-2: the alignment stays approved and its effects say the session no longer follows the dropped goal and its usage no longer counts there (no view says it still does)",
+      viewF.json?.state === "approved" &&
+        viewF.json?.effects.find((e) => e.kind === "governing_goal")?.text === `This session no longer follows "Shard the ledger": that goal was dropped.` &&
+        viewF.json?.effects.find((e) => e.kind === "allocation_transfer")?.text === `Future usage from this session no longer counts under "Shard the ledger": that goal was dropped. Past usage stays where it is.`,
+      JSON.stringify(viewF.json?.effects),
+    );
+    // Back on its own goal for the rest of the run.
+    await epoch(D3, S3a, { epoch_id: epochId(), goal_id: G3.id, starts_at: new Date().toISOString() });
+  }
   check("alignment: the requirement for a goal the approver can't read has for: null (its id is not shown)", privSourceSeen.json?.requirements?.some((r) => r.for === null) && !privSourceSeen.text.includes(GP.id), JSON.stringify(privSourceSeen.json?.requirements));
 
   // -- company goals --
