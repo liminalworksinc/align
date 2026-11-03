@@ -300,6 +300,9 @@ export function renderContextDelta(c: ContextGoal, before?: string[]): string {
 }
 
 export const CARD_MAX = 300;
+/** A card with both parts (sessions on this machine, and other people's work), each with its own header and closing
+ *  line (A3-local-7). */
+export const CARD_MAX_BOTH = 450;
 
 export interface SiblingSummary {
   harness: "claude-code" | "codex";
@@ -348,6 +351,19 @@ export function remotePath(p: unknown): string {
 }
 
 const harnessLabel = (h: SiblingSummary["harness"]) => (h === "codex" ? "Codex" : "Claude Code");
+
+/**
+ * The short id a session goes by in cards, holds, notes and `align team`: the first 8 characters of a Claude Code
+ * session id (random), the last 8 hex digits of a Codex one. Codex ids are time-ordered (UUIDv7): their first 8 digits
+ * are the top of a millisecond timestamp and are the same for sessions started within about a minute of each other,
+ * while the last ones are random (E2E acycle3 A3-local-9).
+ */
+export function shortId(harness: SiblingSummary["harness"], id: string): string {
+  const s = String(id);
+  if (harness !== "codex") return clean(s.slice(0, 8), 20);
+  const hex = s.replace(/-/g, "");
+  return clean(/^[0-9a-fA-F]{9,}$/.test(hex) ? hex.slice(-8) : s.slice(-8), 20);
+}
 const ago = (m: number) => (m < 1 ? "just now" : `${m} min ago`);
 
 /**
@@ -358,7 +374,7 @@ function siblingLine(s: SiblingSummary, maxFiles: number, detail = 2): string {
   const remote = !!s.remote;
   const name = remote
     ? `${personName(s.who)} (${s.sessions ?? 1} session${(s.sessions ?? 1) > 1 ? "s" : ""}, ${ago(s.minutes_ago)})`
-    : `${harnessLabel(s.harness)} session ${clean(String(s.id).slice(0, 8), 20)} (active ${ago(s.minutes_ago)})`;
+    : `${harnessLabel(s.harness)} session ${shortId(s.harness, s.id)} (active ${ago(s.minutes_ago)})`;
   const overlap = (s.overlap || []).slice(0, Math.max(1, maxFiles)).map((f) => clean(f, 60));
   const path = (f: string) => (remote ? remotePath(f) : clean(f, 60));
   const files = s.files.filter((f) => !(s.overlap || []).includes(f)).slice(0, Math.max(0, maxFiles - overlap.length)).map(path);
@@ -374,30 +390,54 @@ function siblingLine(s: SiblingSummary, maxFiles: number, detail = 2): string {
   return `${name}${parts.length ? `: ${parts.join("; ")}` : ""}.`;
 }
 
-/** What other sessions toward this goal (or related ones) did since this session last heard. Drops detail until it fits. */
+const LOCAL_HEAD = "Also working toward this goal on this machine:";
+const LOCAL_TAIL = "Read their changes before editing the same files.";
+const REMOTE_HEAD = "In flight toward this goal and related ones:";
+
+/**
+ * What other sessions toward this goal (or related ones) did since this session last heard. Sessions on this machine
+ * and other people's work each keep their own header and closing line, so a session here is never carded as someone
+ * else's work (E2E acycle3 A3-local-7); the part with the first (most relevant) sender comes first. Drops detail until
+ * it fits.
+ */
 export function renderCard(sibs: SiblingSummary[]): string | null {
   if (!sibs.length) return null;
-  const remote = sibs.some((s) => s.remote);
-  const head = remote ? "[Align] In flight toward this goal and related ones:" : "[Align] Also working toward this goal on this machine:";
   // Details are for the user (a blocked prompt), never a command the agent is pointed to: `align team` would put other
   // people's text into its context (E2E acycle1 A1-cross-6).
-  const tail = remote ? TEAM_POINTER : "Read their changes before editing the same files.";
+  const groups = [
+    { sibs: sibs.filter((s) => !s.remote), head: LOCAL_HEAD, tail: LOCAL_TAIL },
+    { sibs: sibs.filter((s) => s.remote), head: REMOTE_HEAD, tail: TEAM_POINTER },
+  ].filter((g) => g.sibs.length);
+  if (groups.length === 2 && sibs[0].remote) groups.reverse();
+  const part = (g: (typeof groups)[number], keep: number, detail: number, maxFiles: number, first: boolean) => {
+    const lines = g.sibs.slice(0, keep).map((s, i) => siblingLine(s, maxFiles, i === 0 && first ? Math.max(detail, 1) : detail));
+    const rest = g.sibs.length - keep;
+    return [g.head, ...lines, ...(rest > 0 ? [`(${rest} more)`] : []), g.tail].join(" ");
+  };
   // Keep as many senders as fit while each still names a file it edited (a card that tells the agent to read their
-  // changes names which files), shedding detail before dropping anyone; the first (overlap first) keeps the most. Only
-  // when no sender fits with a file name are names dropped for counts.
+  // changes names which files), at least one per part, shedding detail before dropping anyone; the first (overlap
+  // first) keeps the most. Only when no sender fits with a file name are names dropped for counts.
+  const caps = groups.map((g) => Math.min(g.sibs.length, 3));
+  const max = groups.length > 1 ? CARD_MAX_BOTH : CARD_MAX;
+  const splits: number[][] = [];
+  for (let total = caps.reduce((x, y) => x + y, 0); total >= groups.length; total--) {
+    for (let k0 = Math.min(caps[0], total - (groups.length - 1)); k0 >= 1; k0--) {
+      const k1 = total - k0;
+      if (groups.length === 1 ? k1 === 0 : k1 >= 1 && k1 <= caps[1]) splits.push(groups.length === 1 ? [k0] : [k0, k1]);
+    }
+  }
   for (const minFiles of [1, 0]) {
-    for (let keep = Math.min(sibs.length, 3); keep >= 1; keep--) {
+    for (const keep of splits) {
       for (const detail of [2, 1, 0]) {
         for (const maxFiles of [3, 2, 1, 0].filter((n) => n >= minFiles)) {
-          const lines = sibs.slice(0, keep).map((s, i) => siblingLine(s, maxFiles, i === 0 ? Math.max(detail, 1) : detail));
-          const rest = sibs.length - keep;
-          const text = [head, ...lines, ...(rest > 0 ? [`(${rest} more)`] : []), tail].join(" ");
-          if (text.length <= CARD_MAX) return text;
+          const text = ["[Align]", ...groups.map((g, i) => part(g, keep[i], detail, maxFiles, i === 0))].join(" ");
+          if (text.length <= max) return text;
         }
       }
     }
   }
-  return `${head} ${sibs.length} other senders. ${tail}`.slice(0, CARD_MAX);
+  const g0 = groups[0];
+  return `[Align] ${g0.head} ${g0.sibs.length} other senders. ${g0.tail}${groups[1] ? ` ${groups[1].head} ${groups[1].sibs.length} other senders. ${groups[1].tail}` : ""}`.slice(0, max);
 }
 
 /**
@@ -420,7 +460,7 @@ export function crossNote(
 
 export function collisionReason(harness: SiblingSummary["harness"], id: string, file: string, minutesAgo: number): string {
   const ago = minutesAgo < 1 ? "less than a minute ago" : `${minutesAgo} min ago`;
-  return `Align: ${harnessLabel(harness)} session ${clean(String(id).slice(0, 8), 20)}, working toward the same goal, edited ${clean(file, 80)} ${ago}. Read the file again so you keep its changes, then retry this edit.`;
+  return `Align: ${harnessLabel(harness)} session ${shortId(harness, id)}, working toward the same goal, edited ${clean(file, 80)} ${ago}. Read the file again so you keep its changes, then retry this edit.`;
 }
 
 /**
@@ -431,9 +471,9 @@ export function collisionReason(harness: SiblingSummary["harness"], id: string, 
 export function collisionsReason(hits: { harness: SiblingSummary["harness"]; id: string; file: string; minutesAgo: number }[]): string {
   if (hits.length === 1) return collisionReason(hits[0].harness, hits[0].id, hits[0].file, hits[0].minutesAgo);
   const ago = (m: number) => (m < 1 ? "less than a minute ago" : `${m} min ago`);
-  const parts = hits.slice(0, 4).map((h) => `${harnessLabel(h.harness)} session ${clean(String(h.id).slice(0, 8), 20)} edited ${clean(h.file, 80)} ${ago(h.minutesAgo)}`);
-  const more = hits.length > 4 ? `, and ${hits.length - 4} more` : "";
-  const list = parts.length === 2 && !more ? `${parts[0]} and ${parts[1]}` : `${parts.join(", ")}${more}`;
+  const parts = hits.slice(0, 4).map((h) => `${harnessLabel(h.harness)} session ${shortId(h.harness, h.id)} edited ${clean(h.file, 80)} ${ago(h.minutesAgo)}`);
+  // "A and B", "A, B and C", up to four, then "A, B, C, D and 2 more" (A3-local-10).
+  const list = hits.length > 4 ? `${parts.join(", ")} and ${hits.length - 4} more` : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
   const files = new Set(hits.map((h) => h.file)).size > 1;
   return `Align: ${list}, all working toward the same goal. Read the ${files ? "files" : "file"} again so you keep their changes, then retry this edit.`;
 }
@@ -445,7 +485,7 @@ export function collisionsReason(hits: { harness: SiblingSummary["harness"]; id:
  */
 export function siblingChangeNote(harness: SiblingSummary["harness"], id: string, file: string, minutesAgo: number): string {
   const ago = minutesAgo < 1 ? "less than a minute ago" : `${minutesAgo} min ago`;
-  return `[Align] ${harnessLabel(harness)} session ${clean(String(id).slice(0, 8), 20)}, working toward the same goal, edited ${clean(file, 80)} ${ago}, after this session last read it. Read the file again before editing it so you keep its changes. No added authority.`;
+  return `[Align] ${harnessLabel(harness)} session ${shortId(harness, id)}, working toward the same goal, edited ${clean(file, 80)} ${ago}, after this session last read it. Read the file again before editing it so you keep its changes. No added authority.`;
 }
 
 /**

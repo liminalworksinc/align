@@ -65,6 +65,15 @@ Source: https://code.claude.com/docs/en/hooks (markdown at https://code.claude.c
   the same content (rA2); in rB8 a subagent's `cat`, `git log` and `ls` ran after a sibling edit, got no note, and the
   main agent's re-read after Claude Code's "File has been modified since read" refusal got the note naming the
   sibling; rB11's `git commit -m` with nothing staged fired `PostToolUseFailure` and was recorded `failed`.
+- Observed with Claude Code 2.1.316 (E2E acycle3, real `claude -p`): a run killed with SIGKILL or interrupted with
+  SIGINT during a Bash call that had already written its file fires no `PostToolUse`, `PostToolUseFailure` or `Stop`
+  for it; an interactive Esc interrupt fires the next `UserPromptSubmit` only. A Bash command that writes and then
+  exits non-zero fires `PostToolUseFailure` though its file was written, and `mv` keeps the source's change time. Hence
+  a shell write is decided by its file's content (hashed at `PreToolUse`) on either event, a commit by HEAD's reflog on
+  either event, and a call with no verdict by its content evidence at the session's next hook or, a minute on, by the
+  sync pass (A3-local-1, 5, 6). Claude Code runs a hook command through `/bin/sh -c`, so the hook's parent process is
+  that shell, not Claude Code (checked 11-02 with a logging hook): the hook cannot cheaply tell whether its session's
+  process is still alive, so liveness is not used.
 - Plugins: a folder in `~/.claude/skills/` "that contains a `.claude-plugin/plugin.json` is a skills-directory plugin"
   that Claude Code "loads ... when a session starts, with no flag and no install step"; its `hooks/hooks.json` uses
   the settings `hooks` shape. `claude plugin disable <name>@skills-dir` turns it off. Checked with 2.1.309:
@@ -123,13 +132,22 @@ Source: https://learn.chatgpt.com/docs/hooks (markdown at https://learn.chatgpt.
   (whether `PostToolUse` fires, and with what), and `PermissionRequest` "doesn't run for commands that don't need
   approval". A `matcher` of `apply_patch` also matches `Edit` and `Write`, with `tool_name` still `apply_patch`.
   So Align installs no Codex `PostToolUse` (a new hook is also skipped until the user trusts it in `/hooks`) and
-  confirms a Codex edit by content instead: at `PreToolUse` the hook keeps hashes of the patch's added lines that are
-  not in the file yet (else of the removed lines present once, else whether the file exists), and the edit counts once
-  they are in the file and no other session's edit of it explains them; the session's next hook decides, its `Stop`
-  or next prompt decides what is still missing as not made (`src/hooks/evidence.ts`). A Codex commit counts once
-  HEAD's reflog has its subject. No Codex binary or account was available here, so these were exercised through the
-  installed `hook.js codex <event>`, as the acycle2 tester did. A failed Codex shell write that leaves its file
-  unchanged never counts; one that exits non-zero after writing cannot be told apart without `PostToolUse`.
+  confirms a Codex edit by content instead: at `PreToolUse` the hook keeps hashes of the regions of lines the file is
+  to hold afterwards that are not in it yet (each hunk's lines after the patch, context included; an `Add File`'s
+  whole content), else of the removed lines present once, else whether the file exists, and of a shell write's target
+  content; the edit counts once the file shows them and nothing else explains the change (another session's edit of
+  the file that ran meanwhile, one the git pass found, an unshared session's write). The session's next hook from the
+  same agent at least 2 seconds on decides either way, so content that appears later never counts (E2E acycle3
+  A3-local-3, 4); its `Stop` or next prompt decides the rest (`src/hooks/evidence.ts`). A Codex commit counts once
+  HEAD's reflog has its subject after the reflog length recorded at `PreToolUse`. No Codex binary or account was
+  available here, so these were exercised through the installed `hook.js codex <event>`, as the acycle2 and acycle3
+  testers did. A Codex shell write counts when its file's content changed, whatever the command's exit status.
+- Remaining limits of that content evidence (11-03): Codex tells hooks nothing about a refused `apply_patch`, so when
+  the user or a script writes exactly the patch's content between its `PreToolUse` and the session's next hook
+  (usually seconds), it counts; when another change meets it in the same file in that window, neither counts for it
+  (missed credit); a Codex session killed mid-call has no next hook, so its edit is decided by the sync pass within the
+  hour, from content. The rollout records the outcome, but reading it is outside a hook's 300 ms and was not verified
+  here.
 
 ## Codex telemetry
 

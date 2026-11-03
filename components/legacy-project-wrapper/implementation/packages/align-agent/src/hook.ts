@@ -90,6 +90,8 @@ async function main(): Promise<void> {
   switch (event) {
     case "SessionStart": {
       const out = (decided = sessionStart(home, harness, input, process.env));
+      // A session starting again (a resume, `/clear`, a compaction): its earlier calls are all over (A3-local-5).
+      settleQuietly(input);
       // A folder rule shared it just now: a pass always runs (waiting for one already running), so its share is made
       // within seconds even when another session's pass just started (A2-local-7).
       await kickSync(home, process.argv[1] || "", process.env, startedShare(input) ? "Command" : event).catch(() => undefined);

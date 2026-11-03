@@ -63,6 +63,10 @@ export const layout = {
   activityStarting: (h: string, lid: string) => path.join(h, "activity", `${safe(lid)}.starting`),
   /** How far the sync pass has uploaded the session's activity (a logical byte offset), so the hook trims only that. */
   activityUploaded: (h: string, lid: string) => path.join(h, "activity", `${safe(lid)}.uploaded`),
+  /** A session that is not shared: which repos it was active in and when, as keyed hashes (never paths, never content,
+   *  never uploaded), so the git pass credits no one with its changes (A3-local-2). */
+  privateMarks: (h: string) => path.join(h, "private"),
+  privateMark: (h: string, lid: string) => path.join(h, "private", `${safe(lid)}.json`),
   /** Team activity fetched from the server for one workspace (other machines' sessions). */
   podFeed: (h: string, ws: string) => path.join(h, "feeds", `activity-${safe(ws)}.json`),
   /** Asks of this person's teams and their own, for one workspace (`align asks`, `align team`, the envelope). */

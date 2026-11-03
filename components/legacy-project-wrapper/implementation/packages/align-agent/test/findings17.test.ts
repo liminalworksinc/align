@@ -154,7 +154,7 @@ describe("A1-local-1: an edit counts only when its own tool call ran", () => {
     assert.doesNotMatch(card, new RegExp(B.sid.slice(0, 8)), "B's refused edit is in no card");
   });
 
-  test("a shell write counts once its command ran and its file changed; one that exited non-zero never does (E2E acycle2 A2-local-2); nor a refused one in a session with no PostToolUse hook", async () => {
+  test("a shell write counts once its file changed, also when its command then exited non-zero (E2E acycle3 A3-local-1, which replaces A2-local-2's rule); a refused one in a session with no PostToolUse hook never does", async () => {
     const { fake, t } = await world();
     const repo = gitRepo(t, "r1b");
     const A = await shared(t, repo);
@@ -168,7 +168,7 @@ describe("A1-local-1: an edit counts only when its own tool call ran", () => {
     const C = await shared(t, repo, "codex");
     pre(t, C, "Bash", { command: "echo x > never.txt" });
     await sync(t);
-    assert.deepEqual(edits(fake).map((e) => e.path), ["ok.txt"]);
+    assert.deepEqual(edits(fake).map((e) => e.path).sort(), ["ok.txt", "out.txt"]);
   });
 });
 
@@ -295,7 +295,8 @@ describe("A1-local-5 and A1-local-6: a session that moves to another goal", () =
     pre(t, E, "apply_patch", { command: "*** Begin Patch\n*** Add File: NOTES.md\n+n\n*** End Patch\n" });
     fs.writeFileSync(notes, "n\n");
     const card = ctxText(prompt(t, A, "next"));
-    assert.match(card, /Codex session 019a0000 \(active just now\): edited NOTES\.md\./, card);
+    // A Codex session goes by the last 8 digits of its time-ordered id (A3-local-9).
+    assert.match(card, new RegExp(`Codex session ${E.sid.slice(-8)} \\(active just now\\): edited NOTES\\.md\\.`), card);
     assert.doesNotMatch(card, /src\/db\.ts/);
     assert.equal(pre(t, A, "Edit", { file_path: db, old_string: "x", new_string: "y" }).out, "", "E's edit toward its old goal holds nothing here");
   });
@@ -331,6 +332,13 @@ describe("A1-local-7: `align team` from a terminal", () => {
   });
 });
 
+/** Make a session's recorded lines older by `ms` (same byte length, so the pass's offsets stay right). */
+function age(t: TestEnv, s: { lid: string }, ms: number): void {
+  const file = layout.activity(t.home, s.lid);
+  const text = fs.readFileSync(file, "utf8").replace(/"at":"([^"]+)"/g, (_m, at: string) => `"at":"${new Date(Date.parse(at) - ms).toISOString()}"`);
+  fs.writeFileSync(file, text);
+}
+
 describe("A1-local-8: trimming the activity file", () => {
   test("drops only uploaded lines: a burst of 1,200 shell edits all go up for their own session, once, and later lines after a trim too", async () => {
     const { fake, t } = await world();
@@ -351,7 +359,9 @@ describe("A1-local-8: trimming the activity file", () => {
     assert.equal(mine(D.key).length, 1201, "every edit of D went up");
     assert.equal(new Set(mine(D.key).map((e) => e.path)).size, 1201, "once each");
     assert.equal(mine(A.key).length, 0, "none credited to A");
-    // The next record trims what went up; what comes after still goes up exactly once.
+    // The next record trims what went up, once it is past the edit hold's 20 minutes (A3-local-8); what comes after
+    // still goes up exactly once.
+    age(t, D, 30 * 60_000);
     const before = fs.statSync(layout.activity(t.home, D.lid)).size;
     ranTool(t, D, "Write", { file_path: path.join(repo, "after.txt"), content: "z" }, () => fs.writeFileSync(path.join(repo, "after.txt"), "z\n"));
     assert.ok(fs.statSync(layout.activity(t.home, D.lid)).size < before, "trimmed");

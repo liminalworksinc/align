@@ -52,7 +52,8 @@ import { matchRule, readRules, removeRule, setRule } from "../shared/rules.ts";
 import { queueSteering, steeringLine, unsharedNote } from "../shared/steering.ts";
 import type { DriftFile, FeedFile, Goal, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
 import { CLAIM_MS, collisions, commitSubject, crossOverlap, display, editedPaths, liveGoalId, podReport, rawActs, readPaths, record, shellWrites, siblingChanges, siblingNews, activityHot, type Act, type StartingShare } from "./siblings.ts";
-import { changedSince, COMMIT, expectations, reflogMark, settle } from "./evidence.ts";
+import { changedSince, COMMIT, commitMade, expectations, explainer, reflogMark, settle, shows, type SettleBy } from "./evidence.ts";
+import { markPrivate } from "./private.ts";
 
 export interface HookInput {
   session_id?: string;
@@ -1155,13 +1156,20 @@ function feedHoldDeny(home: string, lid: string, cwd: string | null): HookOutput
  */
 function siblingEdits(home: string, harness: Harness, lid: string, input: HookInput, opts: ToolHookOpts): { held?: HookOutput; note?: string } {
   const hot = activityHot(home, lid, readHot(home, lid));
-  if (hot?.share?.state !== "shared") return {};
+  if (hot?.share?.state !== "shared") {
+    // Not shared: nothing is recorded, only a local mark that it works in this repo, so the git pass credits its
+    // changes to no one (A3-local-2).
+    markUnshared(home, harness, lid, input);
+    return {};
+  }
   const goalId = liveGoalId(hot, readInjected(home, lid));
   if (!goalId) return {};
   const cwd = input.cwd || hot.cwd;
-  // Calls this session made before this one, which its PostToolUse does not confirm: decided by their evidence now.
+  const agent = typeof input.agent_id === "string" && input.agent_id ? input.agent_id.slice(0, 64) : null;
+  // Calls this agent made before this one are over: those still undecided (no PostToolUse came, or none is installed)
+  // are decided by their evidence now (A2-local-1, A3-local-4, 5).
   const post = harness === "claude-code" && !!opts.post;
-  if (!post) settleQuietly(home, lid, false);
+  settleQuietly(home, lid, { by: "hook", agent });
   const files = editedPaths(harness, input.tool_name, input.tool_input, cwd);
   const subject = commitSubject(input.tool_name, input.tool_input);
   const at = new Date().toISOString();
@@ -1178,17 +1186,19 @@ function siblingEdits(home: string, harness: Harness, lid: string, input: HookIn
   // The tool call's id, so its PostToolUse hook (or, without one, its evidence) can confirm it ran (A1-local-1).
   const id = typeof input.tool_use_id === "string" && input.tool_use_id ? input.tool_use_id : (files.length || shell.length || subject) && !post ? randomId("call_") : null;
   const u = id ? { u: id } : {};
-  const ag = input.agent_id ? { ag: 1 as const } : {};
-  // With PostToolUse installed, that hook decides; otherwise what the files should show afterwards. Recorded either
-  // way, so an edit of the same lines by another session is known for what it is (`evidence.ts` `explained`).
+  const ag = agent ? { ag: 1 as const, ai: agent } : {};
+  // What the files should show afterwards, recorded either way: with PostToolUse installed it decides a shell write by
+  // its file's content (A3-local-1) and is the fallback when that hook never comes (A3-local-5); an edit of the same
+  // lines by another session is known for what it is (`evidence.ts` `explained`).
   const expect = id ? expectations(harness, input.tool_name, input.tool_input, cwd, files, shell) : null;
   const proof = (p: string) => ({ ...(post && id ? { c: 1 as const } : {}), ...(expect?.get(p) ? { v: expect.get(p)! } : {}) });
   const acts: Act[] = [...files.map((p): Act => ({ t: "edit", at, p, g, ...u, ...proof(p), ...ag })), ...shell.map((p): Act => ({ t: "edit", at, p, g, sh: 1, ...u, ...proof(p), ...ag }))];
   for (const p of readPaths(harness, input.tool_name, input.tool_input, cwd)) acts.push({ t: "read", at, p, g, ...ag });
-  // A commit counts once its own call ran (PostToolUse), or the repo has it (A2-local-5).
+  // A commit counts once HEAD's reflog has it among the lines logged after this call (A2-local-5, A3-local-6), whatever
+  // the command's exit status; its PostToolUse (or PostToolUseFailure) checks, else its evidence.
   if (subject) {
-    const mark = !(post && id) && cwd ? reflogMark(cwd) : null;
-    acts.push({ t: "commit", at, s: subject, g, ...u, ...(post && id ? { c: 1 as const } : cwd ? { d: cwd, ...(mark !== null ? { rl: mark } : {}) } : {}) });
+    const mark = cwd ? reflogMark(cwd) : null;
+    acts.push({ t: "commit", at, s: subject, g, ...u, ...(post && id ? { c: 1 as const } : {}), ...(cwd ? { d: cwd, ...(mark !== null ? { rl: mark } : {}) } : {}), ...ag });
   }
   // Another person (or a claim) on this file: one note, never a hold, since nothing local gets overwritten.
   const cross = crossOverlap(home, lid, hot.share.workspace_id, goalId, [...files, ...shell], cwd);
@@ -1198,26 +1208,47 @@ function siblingEdits(home: string, harness: Harness, lid: string, input: HookIn
   return notes.length ? { note: notes.join("\n") } : {};
 }
 
-/** Decide this session's waiting edits and commits by their evidence (`hooks/evidence.ts`); never fails a hook. */
-function settleQuietly(home: string, lid: string, final: boolean): void {
+/** The goal a session counts toward now, recorded with its task labels and claims so they count toward that goal only
+ *  (A3-cross-4); null when none is known yet. */
+function goalNowOf(home: string, lid: string, hot: HotState | null): string | null {
+  const h = activityHot(home, lid, hot);
+  return h ? liveGoalId(h, readInjected(home, lid)) : null;
+}
+
+/** A session that is not shared works in the repo of its folder and of the files this call writes: a local mark only
+ *  (`hooks/private.ts`). */
+function markUnshared(home: string, harness: Harness, lid: string, input: HookInput): void {
   try {
-    settle(home, lid, final, (acts) => record(home, lid, acts));
+    const cwd = input.cwd || null;
+    markPrivate(home, lid, cwd, [...editedPaths(harness, input.tool_name, input.tool_input, cwd), ...shellWrites(input.tool_name, input.tool_input, cwd)]);
+  } catch {
+    /* best effort */
+  }
+}
+
+/** Decide this session's waiting edits and commits by their evidence (`hooks/evidence.ts`); never fails a hook. */
+function settleQuietly(home: string, lid: string, when: SettleBy): void {
+  try {
+    settle(home, lid, when, (acts) => record(home, lid, acts));
   } catch {
     /* decided by a later hook or pass */
   }
 }
 
 /**
- * The turn is over (Stop) or a new one starts (UserPromptSubmit): every tool call before it is done, so a shared
- * session's edits and commits that no PostToolUse confirms are decided now, those whose evidence is missing as not
- * made (A2-local-1). Prints nothing.
+ * The turn is over (Stop), a new one starts (UserPromptSubmit) or the session starts again (SessionStart, as after a
+ * resume): every tool call before it is done, so a shared session's edits and commits still undecided (no PostToolUse
+ * came: refused, or the session was killed or interrupted mid-tool; or none is installed) are decided now by their
+ * evidence, those whose evidence is missing as not made (A2-local-1, A3-local-5). An unshared session leaves its local
+ * mark (A3-local-2). Prints nothing.
  */
 export function settleTurn(home: string, harness: Harness, input: HookInput): void {
   const sid = input.session_id;
   if (!sid) return;
   const lid = localId(harness, sid);
+  if (activityHot(home, lid, readHot(home, lid))?.share?.state !== "shared") markUnshared(home, harness, lid, { ...input, tool_name: undefined, tool_input: undefined });
   if (!fs.existsSync(layout.activity(home, lid))) return;
-  settleQuietly(home, lid, true);
+  settleQuietly(home, lid, { by: "final" });
 }
 
 /** The sibling-change notes for this session (at most three), each recorded as told so it is never repeated. */
@@ -1231,19 +1262,23 @@ function changeNotes(home: string, lid: string, goalId: string, cwd: string | nu
 
 // ---------- PostToolUse ----------
 /**
- * Claude Code's PostToolUse (and, for a call that failed, PostToolUseFailure): the tool call ran. For a shared session it
- * records, once, that its edits now count only when confirmed, and the verdict on a call that edits or commits: `ran`
- * for an edit tool that succeeded and a commit whose command succeeded, per file for a shell command's writes (`ran`
- * when the file changed since the call was recorded, else `failed`), and `failed` for every one of them when the call
- * failed (A2-local-2, 5). An edit refused at the permission prompt fires no hook at all, so it is never reported as
- * made, whoever changes its file later (A1-local-1). Prints nothing.
+ * Claude Code's PostToolUse (and, for a call that failed, PostToolUseFailure). For a shared session it records, once,
+ * that its edits now count only when confirmed, and the verdict on a call that edits or commits: an edit tool's own
+ * outcome (`ran`, or `failed` on PostToolUseFailure); for a shell command, whatever its exit status, per file `ran`
+ * when the file's content or existence changed since PreToolUse and no other session explains it, and its commit `ran`
+ * when HEAD's reflog has it (A3-local-1, 6). An edit refused at the permission prompt fires no hook at all; the
+ * session's next hook decides it from its evidence (A1-local-1, A3-local-5). An unshared session leaves its local mark
+ * (A3-local-2). Prints nothing.
  */
 export function postToolUse(home: string, harness: Harness, input: HookInput, failed: boolean): void {
   const sid = input.session_id;
   if (!sid) return;
   const lid = localId(harness, sid);
   const hot = activityHot(home, lid, readHot(home, lid));
-  if (hot?.share?.state !== "shared") return;
+  if (hot?.share?.state !== "shared") {
+    markUnshared(home, harness, lid, input);
+    return;
+  }
   const marker = layout.activityConfirmed(home, lid);
   if (!fs.existsSync(marker)) {
     fs.mkdirSync(layout.activityDir(home), { recursive: true, mode: 0o700 });
@@ -1253,15 +1288,23 @@ export function postToolUse(home: string, harness: Harness, input: HookInput, fa
   if (typeof u !== "string" || !u) return;
   const cwd = input.cwd || hot.cwd;
   const at = new Date().toISOString();
-  const t = failed ? "failed" : "ran";
   const acts: Act[] = [];
-  if (editedPaths(harness, input.tool_name, input.tool_input, cwd).length) acts.push({ t, at, u });
-  if (shellWrites(input.tool_name, input.tool_input, cwd).length) {
+  // An edit tool reports its own outcome.
+  if (editedPaths(harness, input.tool_name, input.tool_input, cwd).length) acts.push({ t: failed ? "failed" : "ran", at, u });
+  // A shell command's exit status says nothing about which of its parts ran (A3-local-1, 6): each file it was to write
+  // counts when its content (or existence) now differs from what it was at PreToolUse and nothing else explains that,
+  // and its commit when HEAD's reflog has it after the call's mark.
+  const subject = commitSubject(input.tool_name, input.tool_input);
+  if (shellWrites(input.tool_name, input.tool_input, cwd).length || subject) {
+    let explains: ((a: Act) => boolean) | null = null;
     for (const a of rawActs(home, lid)) {
-      if (a.t === "edit" && a.sh && a.u === u && a.p) acts.push({ t: !failed && changedSince(a) ? "ran" : "failed", at, u, p: a.p });
+      if (a.u !== u) continue;
+      if (a.t === "edit" && a.sh && a.p) {
+        const made = (a.v ? shows(a.p, a.v) : !failed && changedSince(a)) && !(explains ??= explainer(home, lid))(a);
+        acts.push({ t: made ? "ran" : "failed", at, u, p: a.p });
+      } else if (a.t === "commit") acts.push({ t: commitMade(a, !failed) ? "ran" : "failed", at, u, p: COMMIT });
     }
   }
-  if (commitSubject(input.tool_name, input.tool_input)) acts.push({ t, at, u, p: COMMIT });
   record(home, lid, acts);
 }
 
@@ -1788,7 +1831,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
     case "task": {
       if (!willShare(home, hot, cwd)) return "Align: this session is not shared, so there is no one to tell.";
       if (!arg) return "Align: usage is `::align task <what this session is working on>`.";
-      record(home, lid, [{ t: "task", at: ts, s: arg.slice(0, 120) }]);
+      record(home, lid, [{ t: "task", at: ts, s: arg.slice(0, 120), g: goalNowOf(home, lid, hot) }]);
       return endSentence(`Align: sessions toward related goals will see this session is on "${arg.slice(0, 120)}"`);
     }
     case "claim": {
@@ -1796,7 +1839,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       if (!arg) return "Align: usage is `::align claim <file> [what for]`.";
       const [file, ...why] = arg.split(/\s+/);
       const abs = path.resolve(cwd || "/", file);
-      record(home, lid, [{ t: "claim", at: ts, p: abs, s: why.join(" ").slice(0, 120) || undefined }]);
+      record(home, lid, [{ t: "claim", at: ts, p: abs, s: why.join(" ").slice(0, 120) || undefined, g: goalNowOf(home, lid, hot) }]);
       const until = new Date(Date.now() + CLAIM_MS).toTimeString().slice(0, 5);
       return `Align: ${display(abs, cwd)} is claimed by this session until ${until}. Sessions toward related goals get a note before editing it.`;
     }

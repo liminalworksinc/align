@@ -175,7 +175,7 @@ describe("claude hooks", () => {
       fs.writeFileSync(path.join(repo, f), text);
     };
     const a = "sess-claude-sib";
-    const b = "019a-codex-sib";
+    const b = "019a2c4e-7b10-7c3e-9f21-5e2f1a9cd3b7";
     shareSession(ctx, "claude-code", a);
     shareSession(ctx, "codex", b);
     const other = "sess-other-goal";
@@ -193,7 +193,7 @@ describe("claude hooks", () => {
     git("commit", "-qm", "Add held-out read path");
 
     const card = JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: a, prompt_id: "p2", prompt: "continue", cwd: repo }).stdout).hookSpecificOutput.additionalContext;
-    assert.match(card, /^\[Align\] Also working toward this goal on this machine: Codex session 019a-cod/);
+    assert.match(card, /^\[Align\] Also working toward this goal on this machine: Codex session 1a9cd3b7/);
     assert.match(card, /fair\/campaign_v5\.py/);
     assert.match(card, /infra\/queue\.sh/);
     assert.match(card, /committed "Add held-out read path"/);
@@ -205,7 +205,7 @@ describe("claude hooks", () => {
     const edit = { session_id: a, cwd: repo, tool_name: "Edit", tool_input: { file_path: `${repo}/fair/campaign_v5.py`, old_string: "y", new_string: "z" } };
     const held = JSON.parse(runHook(t, "claude", "PreToolUse", edit).stdout).hookSpecificOutput;
     assert.equal(held.permissionDecision, "deny");
-    assert.match(held.permissionDecisionReason, /^Align: Codex session 019a-cod, working toward the same goal, edited fair\/campaign_v5\.py (less than a minute|\d+ min) ago\. Read the file again/);
+    assert.match(held.permissionDecisionReason, /^Align: Codex session 1a9cd3b7, working toward the same goal, edited fair\/campaign_v5\.py (less than a minute|\d+ min) ago\. Read the file again/);
     assert.equal(runHook(t, "claude", "PreToolUse", edit).stdout, "", "retry after re-reading goes through");
     put("fair/campaign_v5.py", "z\n");
     // A file Claude read after Codex changed it is not held.

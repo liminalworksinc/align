@@ -344,9 +344,12 @@ describe("e2e", () => {
     for (const [sid, cwd] of [[A, named], [B, hashed]]) {
       runHook(t, "claude", "PreToolUse", { session_id: sid, cwd, tool_name: "Edit", tool_input: { file_path: path.join(cwd, "src/sso.ts") } });
       touch(path.join(cwd, "src/sso.ts"));
-      // The commit ran: its PostToolUse says so (a commit the hook saw that never ran is not one, A2-local-5).
+      // The commit ran: HEAD's reflog has it after the call (a commit the hook saw that never ran is not one, A2-local-5;
+      // the command's exit status alone decides nothing, A3-local-6).
       const commit = { session_id: sid, cwd, tool_name: "Bash", tool_input: { command: 'git commit -am "Wire SSO callback"' }, tool_use_id: `toolu_commit_${sid}` };
       runHook(t, "claude", "PreToolUse", commit);
+      fs.mkdirSync(path.join(cwd, ".git", "logs"), { recursive: true });
+      fs.appendFileSync(path.join(cwd, ".git", "logs", "HEAD"), `${"0".repeat(40)} ${"1".repeat(40)} T <t@example.test> ${Math.floor(Date.now() / 1000)} +0000\tcommit: Wire SSO callback\n`);
       runHook(t, "claude", "PostToolUse", commit);
     }
     const kA = hot(t, A)!.share!.session_key;
