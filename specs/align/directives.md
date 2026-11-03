@@ -182,10 +182,20 @@ The server SHALL, when a `work_toward` alignment becomes approved, for each list
 
 The server SHALL, when an approved `work_toward` alignment is revoked, clear the governing goal of the sessions it governed, end the open epoch of every session whose open binding exists only through that alignment, move those sessions from `shared` to `suspended`, and write one `binding_suspended` directive targeting exactly those sessions with `goal` null and `binding` `{ goal_id: <target goal id>, effective: "next_root_turn", cause: "alignment:<alignment id>" }`.
 
+The server SHALL do the same, with `binding.cause` `goal_closed:<alignment id>`, for every approved `work_toward`
+alignment whose target goal becomes `achieved` or `dropped`, in the transaction that writes that version and after its
+`goal_version` directive (`goals-and-proposals` "An alignment needs active goals until it is decided"; E2E acycle3
+A3-cross-2).
+
 #### Scenario: Revocation suspends the binding
 
 - **WHEN** the requester revokes an approved `work_toward` alignment under which session S opened its current epoch
 - **THEN** S's open epoch ends, S's state is `suspended`, and one `binding_suspended` directive targets S
+
+#### Scenario: The followed goal is dropped
+
+- **WHEN** session S opened its current epoch under an approved `work_toward` alignment and the alignment's target goal is then dropped (`scripts/test-v2.mjs` "A3-cross-2: an approved work_toward whose target is then dropped ...")
+- **THEN** S gets the `goal_version` directive and then one `binding_suspended` whose `binding.cause` is `goal_closed:<alignment id>`, its open epoch ends, and S is `suspended`
 
 #### Scenario: Revocation with no epoch from the alignment
 

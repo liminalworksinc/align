@@ -26,7 +26,9 @@ import { assertRevisionReached, oneOf, optStr, revisionRead, strList, type Body 
 // A counter is a new revision by an approver; it voids every earlier approval. Every decision names the revision the
 // person read (c10 C10-2): one sent from an older view is refused, never recorded against a revision they never saw.
 // Revocation is prospective: a session whose current binding exists only because of the revoked alignment is
-// suspended (binding_suspended), never moved back.
+// suspended (binding_suspended), never moved back. A goal that is achieved or dropped takes no alignment: a request
+// toward it (or from it) can no longer be approved, countered or accepted (409 goal_not_active, nothing recorded), and
+// an approved work_toward toward it ends its sessions' binding the way a revocation does (E2E acycle3 A3-cross-2).
 
 export type Choice = "contribution" | "work_toward";
 export type AlignmentState = "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "revoked";
@@ -178,6 +180,19 @@ function involved(a: AlignmentRow): string[] {
   return [...set];
 }
 
+/** 409 goal_not_active, before anything is recorded, when the alignment's target or source goal is no longer active
+ *  (achieved or dropped after the request was made): approving, countering or accepting it would bind sessions to, or
+ *  record a contribution of, a goal that is done (E2E acycle3 A3-cross-2). Declining, withdrawing and revoking stay open. */
+function refuseClosedGoals(pp: PolicyPrincipal, a: AlignmentRow): void {
+  for (const [id, role] of [[a.target_goal_id, "target"], [a.source_goal_id, "source"]] as const) {
+    const g = id ? goalRow(a.ws_id, id) : undefined;
+    if (!g || g.status === "active") continue;
+    const what = canReadGoal(pp, goalObj(g)) ? `"${g.title}"` : "A goal in this request";
+    const why = role === "target" ? "so nothing can align with it" : "so it can't contribute to another goal";
+    throw conflict("goal_not_active", `${what} was ${g.status} after the request was made, ${why}. Decline or withdraw this request instead.`);
+  }
+}
+
 /** Approve, if every requirement of the current revision is satisfied (409 cycle if the link would loop). Applies the
  *  effects in this transaction.
  *  `actor` is whoever's action completed the approvals; the audit row names them. */
@@ -213,6 +228,7 @@ export async function createAlignment(pp: PolicyPrincipal, b: Body) {
   const source = sourceId ? visibleGoal(pp, sourceId) : undefined;
   if (source && source.id === target.id) throw badRequest("A goal can't align with itself");
   if (source && !canBind(pp, goalObj(source), false)) throw forbidden("source_not_yours", "The source goal must be yours or your team's.");
+  if (source && source.status !== "active") throw conflict("goal_not_active", "Your goal is achieved or dropped, so it can't contribute to another goal.");
   if (source && contributionCycle(pp.wsId, source.id, target.id)) throw conflict("cycle", CONTRIBUTION_CYCLE);
   const choice = oneOf(b, "choice", ["contribution", "work_toward"] as const);
   const keys = strList(b, "session_keys", { max: 50, itemMax: 43 });
@@ -325,6 +341,7 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
         inState("pending");
         expectRevision();
         if (!isApprover) throw forbidden("not_an_approver", "Your approval is not needed on this request.");
+        refuseClosedGoals(pp, a);
         recordApproval(a.ws_id, a.id, a.revision, me, at);
         run("UPDATE v2_alignments SET updated_at = ? WHERE id = ?", at, a.id);
         maybeApprove(a, at, me);
@@ -334,6 +351,7 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
         inState("pending");
         expectRevision();
         if (!isApprover || isRequester) throw forbidden("not_an_approver", "Only an approver can suggest a change.");
+        refuseClosedGoals(pp, a);
         const prevKeys = keysOf(a.id, a.revision);
         const choice = b.choice === undefined ? rev.choice : oneOf(b, "choice", ["contribution", "work_toward"] as const);
         let keys = prevKeys;
@@ -357,6 +375,7 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
         inState("countered");
         expectRevision();
         if (!isRequester) throw forbidden("not_requester", "Only the person who asked can accept a suggested change.");
+        refuseClosedGoals(pp, a);
         if (isApprover) recordApproval(a.ws_id, a.id, a.revision, me, at);
         run("UPDATE v2_alignments SET state = 'pending', updated_at = ? WHERE id = ?", at, a.id);
         maybeApprove({ ...a, state: "pending" }, at, me);
@@ -383,27 +402,45 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
         expectRevision();
         if (!isRequester && !isApprover) throw forbidden("not_an_approver", "Only the person who asked or an approver can revoke.");
         run("UPDATE v2_alignments SET state = 'revoked', revoked_at = ?, revoked_by = ?, updated_at = ? WHERE id = ?", at, me, at, a.id);
-        if (rev.choice === "work_toward") {
-          run("UPDATE v2_sessions SET governing_goal_id = NULL, governing_alignment_id = NULL, updated_at = ? WHERE ws_id = ? AND governing_alignment_id = ?", at, a.ws_id, a.id);
-          // Sessions whose current binding exists only because of this alignment lose it: their open epoch ends now
-          // and they wait for their owner to pick a goal. History never moves.
-          const suspended = all<{ session_key: string }>(
-            "SELECT session_key FROM v2_epochs WHERE ws_id = ? AND ends_at IS NULL AND authority = 'alignment' AND alignment_id = ?",
-            a.ws_id,
-            a.id,
-          ).map((r) => r.session_key);
-          for (const k of suspended) {
-            run("UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL", at, a.ws_id, k);
-            run("UPDATE v2_sessions SET state = 'suspended', updated_at = ? WHERE ws_id = ? AND session_key = ? AND state = 'shared'", at, a.ws_id, k);
-          }
-          writeDirective(a.ws_id, "binding_suspended", suspended, null, { goal_id: a.target_goal_id, effective: "next_root_turn", cause: `alignment:${a.id}` });
-        }
+        if (rev.choice === "work_toward") endGovernance(a, at, `alignment:${a.id}`);
         audit(a.ws_id, me, "alignment.revoked", a.id, at);
         break;
       }
     }
   });
   return alignmentView(pp, alignmentRow(pp.wsId, id)!);
+}
+
+/** The sessions an approved work_toward alignment governs stop following its target (inside the caller's tx): their
+ *  governing goal is cleared, and a session whose current binding exists only because of this alignment loses it:
+ *  its open epoch ends now, it waits for its owner to pick a goal (`suspended`), and it gets one binding_suspended
+ *  directive with `cause`. History never moves. */
+function endGovernance(a: AlignmentRow, at: string, cause: string): void {
+  run("UPDATE v2_sessions SET governing_goal_id = NULL, governing_alignment_id = NULL, updated_at = ? WHERE ws_id = ? AND governing_alignment_id = ?", at, a.ws_id, a.id);
+  const suspended = all<{ session_key: string }>(
+    "SELECT session_key FROM v2_epochs WHERE ws_id = ? AND ends_at IS NULL AND authority = 'alignment' AND alignment_id = ?",
+    a.ws_id,
+    a.id,
+  ).map((r) => r.session_key);
+  for (const k of suspended) {
+    run("UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL", at, a.ws_id, k);
+    run("UPDATE v2_sessions SET state = 'suspended', updated_at = ? WHERE ws_id = ? AND session_key = ? AND state = 'shared'", at, a.ws_id, k);
+  }
+  writeDirective(a.ws_id, "binding_suspended", suspended, null, { goal_id: a.target_goal_id, effective: "next_root_turn", cause });
+}
+
+/** In the transaction that makes a goal achieved or dropped (lib/v2/goals.ts writeGoalVersion): every approved
+ *  work_toward alignment toward it ends its sessions' binding as a revocation does, with `cause`
+ *  `goal_closed:<alignment id>`, so no agent keeps being told it counts toward a goal that is done and its usage stops
+ *  counting there (E2E acycle3 A3-cross-2). The alignment stays `approved` on the record; its effects say the goal
+ *  closed. Requests still pending or countered stay as they are, and can only be declined or withdrawn. */
+export function endAlignmentsToClosedGoal(ws: string, goalId: string, actorId: string, at: string): void {
+  const rows = all<AlignmentRow>("SELECT * FROM v2_alignments WHERE ws_id = ? AND target_goal_id = ? AND state = 'approved'", ws, goalId);
+  for (const a of rows) {
+    if (revisionOf(a.id, a.revision).choice !== "work_toward") continue;
+    endGovernance(a, at, `goal_closed:${a.id}`);
+    audit(ws, actorId, "alignment.goal_closed", a.id, at);
+  }
 }
 
 // ---- what a person sees (plain words; goals they can't see stay unnamed) ----
@@ -447,6 +484,9 @@ function alignmentView(pp: PolicyPrincipal, a: AlignmentRow) {
   // accepted, a goal its owner picked, sharing stopped) no longer does, and its effect lines must not claim it does.
   const following = a.state === "approved" && kinds.includes("governing_goal") ? keys.filter((k) => sessionRow(a.ws_id, k)?.governing_alignment_id === a.id).length : sessions.length;
   const gone = sessions.length - following;
+  // An approved work_toward whose target was achieved or dropped since governs nothing: its effects say so.
+  const targetRow = goalRow(a.ws_id, a.target_goal_id);
+  const closed = a.state === "approved" && !!targetRow && targetRow.status !== "active" ? targetRow.status : null;
   // "No usage moves" only when nothing else in this alignment moves it (contribution only); work toward also transfers
   // the sessions' future usage, said in its own line.
   const movesUsage = kinds.includes("allocation_transfer");
@@ -455,28 +495,35 @@ function alignmentView(pp: PolicyPrincipal, a: AlignmentRow) {
     text:
       kind === "contributes_to"
         ? `Records that ${a.source_goal_id ? `${named(source)} contributes` : `${who} ${sessions.length === 1 ? "contributes" : "contribute"}`} to ${named(target)}.${movesUsage ? "" : " No usage moves."}`
-        : kind === "governing_goal"
-          ? gone === 0
-            ? sessions.length === 1
-              ? `This session follows ${named(target)}: its agent gets that goal and its changes.`
-              : `${who[0].toUpperCase()}${who.slice(1)} follow ${named(target)}: their agents get that goal and its changes.`
-            : following === 0
-              ? `${sessions.length === 1 ? "This session no longer follows" : `${who[0].toUpperCase()}${who.slice(1)} no longer follow`} ${named(target)}: ${sessions.length === 1 ? "it" : "they"} moved to another goal or stopped sharing.`
-              : `${following} of ${who} still ${following === 1 ? "follows" : "follow"} ${named(target)}: ${following === 1 ? "its agent gets" : "their agents get"} that goal and its changes. The other ${gone} moved to another goal or stopped sharing.`
-          : gone === 0
-            ? `Future usage from ${who} counts under ${named(target)}. Past usage stays where it is.`
-            : following === 0
-              ? `Future usage from ${who} no longer counts under ${named(target)}. Past usage stays where it is.`
-              : `Future usage from the ${following} still following counts under ${named(target)}. Past usage stays where it is.`,
+        : closed
+          ? kind === "governing_goal"
+            ? `${sessions.length === 1 ? "This session no longer follows" : `${who[0].toUpperCase()}${who.slice(1)} no longer follow`} ${named(target)}: that goal was ${closed}.`
+            : `Future usage from ${who} no longer counts under ${named(target)}: that goal was ${closed}. Past usage stays where it is.`
+          : kind === "governing_goal"
+            ? gone === 0
+              ? sessions.length === 1
+                ? `This session follows ${named(target)}: its agent gets that goal and its changes.`
+                : `${who[0].toUpperCase()}${who.slice(1)} follow ${named(target)}: their agents get that goal and its changes.`
+              : following === 0
+                ? `${sessions.length === 1 ? "This session no longer follows" : `${who[0].toUpperCase()}${who.slice(1)} no longer follow`} ${named(target)}: ${sessions.length === 1 ? "it" : "they"} moved to another goal or stopped sharing.`
+                : `${following} of ${who} still ${following === 1 ? "follows" : "follow"} ${named(target)}: ${following === 1 ? "its agent gets" : "their agents get"} that goal and its changes. The other ${gone} moved to another goal or stopped sharing.`
+            : gone === 0
+              ? `Future usage from ${who} counts under ${named(target)}. Past usage stays where it is.`
+              : following === 0
+                ? `Future usage from ${who} no longer counts under ${named(target)}. Past usage stays where it is.`
+                : `Future usage from the ${following} still following counts under ${named(target)}. Past usage stays where it is.`,
   }));
   const me = pp.userId;
   const isRequester = a.requester_id === me;
   const isApprover = approvers.includes(me);
+  // A request whose target or source goal was achieved or dropped since can only be declined or withdrawn (409
+  // goal_not_active otherwise), so it offers nothing else and waits on no one.
+  const goalsOpen = [a.target_goal_id, a.source_goal_id].every((id) => !id || goalRow(a.ws_id, id)?.status === "active");
   const can = {
-    approve: a.state === "pending" && isApprover && !approved.has(me),
-    counter: a.state === "pending" && isApprover && !isRequester,
+    approve: a.state === "pending" && isApprover && !approved.has(me) && goalsOpen,
+    counter: a.state === "pending" && isApprover && !isRequester && goalsOpen,
     reject: (a.state === "pending" || a.state === "countered") && isApprover && !isRequester,
-    accept_counter: a.state === "countered" && isRequester,
+    accept_counter: a.state === "countered" && isRequester && goalsOpen,
     withdraw: (a.state === "pending" || a.state === "countered") && isRequester,
     revoke: a.state === "approved" && (isRequester || isApprover),
   };

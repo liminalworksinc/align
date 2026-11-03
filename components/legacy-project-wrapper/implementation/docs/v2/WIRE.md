@@ -132,12 +132,13 @@ and the key is kept 13 months), 404 to anyone else.
 ## Directives
 Only structured content reaches agents: ratified goal fields, enumerated states and Align's typed requests (REQ-001).
 Never alignment notes or counters; the only person-written text is a request's quoted `note` and a hold's `reason`.
-`Directive = { "id": "dir_...", "seq": <int>, "ws", "kind": "goal_version"|"binding_changed"|"binding_suspended"|"stop"|"resume"|"request"|"hold"|"release", "session_keys": [string], "goal": Goal|null, "binding": { "goal_id", "effective": "next_root_turn", "cause": "alignment:<al_id>"|"manual" } | null, "created_at" }`,
+`Directive = { "id": "dir_...", "seq": <int>, "ws", "kind": "goal_version"|"binding_changed"|"binding_suspended"|"stop"|"resume"|"request"|"hold"|"release", "session_keys": [string], "goal": Goal|null, "binding": { "goal_id", "effective": "next_root_turn", "cause": "alignment:<al_id>"|"goal_closed:<al_id>"|"manual" } | null, "created_at" }`,
 plus `request` on kind `request` and `hold` on kinds `hold` and `release` (absent on the other kinds).
 - `goal_version`: a goal bound/governing for these sessions got a new version or status. Its `goal` snapshot carries
   that version's `limits` (a snapshot stored before limits existed reads `[]`); limit text reaches agents only this way.
 - `binding_changed`: open a new epoch at the next root turn with `binding.goal_id` (approved allocation transfer).
-- `binding_suspended`: the current binding lost its authority (revoked alignment): stop uploading usage for the session
+- `binding_suspended`: the current binding lost its authority (revoked alignment, or, with `cause`
+  `goal_closed:<al_id>`, the alignment's target goal was achieved or dropped): stop uploading usage for the session
   until the user picks a goal; the agent continues privately.
 - `stop` / `resume`: set / clear the local stop latch.
 - `request` (`goal` and `binding` null): `"request": { "id": "rq_...", "type": "replan"|"checkpoint"|"switch_goal",

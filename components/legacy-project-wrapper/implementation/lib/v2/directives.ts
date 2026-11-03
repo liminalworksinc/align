@@ -17,7 +17,7 @@ export type DirectiveKind = "goal_version" | "binding_changed" | "binding_suspen
 export interface Binding {
   goal_id: string | null;
   effective: "next_root_turn";
-  cause: string; // "alignment:<al_id>" | "manual"
+  cause: string; // "alignment:<al_id>" | "goal_closed:<al_id>" (binding_suspended: the target was achieved or dropped) | "manual"
 }
 
 interface DirectiveRow {
