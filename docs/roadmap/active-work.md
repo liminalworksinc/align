@@ -395,3 +395,20 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [ ] scripts/test-image.sh passes on a machine with Docker
   - [ ] Backup and rollback rehearsed on the hosted volume
   - [ ] Hosted smoke test after deploy, and fly ssh console shows the secrets set
+
+### [ ] SPEND-001 — AI spend tracking across sessions that need alignment
+
+- **Priority:** P0
+- **Owner:** components/legacy-project-wrapper/implementation (metering, spend, allocation; align-agent)
+- **Direction:** Owner question on #37 (2026-11-03): does Align track AI spend properly? The alignment E2E cycles (acycle1-3) tested how sessions coordinate, but not that every request's tokens and list-price estimate land once, under the right goal, as sessions move between goals.
+- **Conclusion:** Show with real Claude Code sessions (and Codex through its rollouts) that each request is metered once and priced from the price table, uploaded only while shared and under the goal of its epoch through share, bind, alignment approve/revoke, switch_goal, hold, stop, goal close, re-share and sign-out; that the Spend tab (by goal, team, session), the allocation view, align allocation, MCP and the steering line agree with the local ledger; that private or unshared usage never leaves the machine; fix every difference with a regression test.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [ ] Spend tester added to the alignment E2E loop (two people, several sessions, moves between goals)
+  - [ ] A reconciliation script: local ledger per session and epoch against the server's spend and allocation totals
+  - [ ] Fixes for every spend difference found, each with a regression test and spec update
+- **Evidence:**
+  - [ ] An E2E cycle whose spend report finds no bugs, with the reconciliation totals matching to the micro-USD
+  - [ ] test-v2 and align-agent tests for each fix; litai spec validate ok
+  - [ ] Retained test receipt recorded on the commit that closes it
