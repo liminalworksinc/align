@@ -1,0 +1,36 @@
+{
+  "company": "Quillmere",
+  "company_note": "Example company (fictional), based on an anonymized real workflow.",
+  "timeframe": "This quarter",
+  "leadership": { "team": "Executive Team", "lead": "Chief Operating Officer" },
+  "company_goal": {
+    "objective": "Grow expansion revenue from existing customers through partners, without raising renewal risk.",
+    "measures": ["Partner-sourced expansion revenue grows every quarter", "Renewal risk across the customer base does not rise"]
+  },
+  "company_measure": 0,
+  "asking": {
+    "team": "Partner Programs",
+    "lead": "Head of Partner Programs",
+    "objective": "Launch a partner co-investment program that grows partner-sourced expansion revenue.",
+    "measures": ["First cohort of partners signed to the co-investment terms by quarter end"]
+  },
+  "owning": {
+    "team": "Revenue Operations",
+    "lead": "Revenue Operations Lead",
+    "objective": "Keep renewals safe and expansion revenue predictable across the customer base.",
+    "measures": ["Only the assigned account team sells expansion into existing customers", "Every at-risk renewal has a named owner and a recovery plan within one week"]
+  },
+  "owner_measure": 0,
+  "dependency": "Partner Programs needs Revenue Operations to let approved partners sell expansion in named existing accounts and credit them for it. Only Revenue Operations decides who may sell into existing customers, and it answers for renewal risk.",
+  "work_items": [
+    { "team": "asking", "task": "Draft the partner policy and co-investment terms for Legal, Revenue Operations and Product review", "status": "in progress" },
+    { "team": "asking", "task": "Build the partner investment-versus-return model", "status": "in progress" },
+    { "team": "asking", "task": "Shortlist the first partner cohort", "status": "planned" },
+    { "team": "owning", "task": "Quarterly renewal-risk review of top accounts", "status": "in progress" },
+    { "team": "owning", "task": "Next year's account assignment rules: one seller per account", "status": "planned" }
+  ],
+  "plan": {
+    "title": "Partner co-investment program, first cohort in named accounts",
+    "text": "Partner Programs drafted the policy itself and wants to launch a co-investment program with a first cohort of partners. Partners put their own budget into campaigns for a shared list of named expansion accounts, so they need a credible return: credit for the expansion they help sell. Today only the assigned account team may sell into an existing customer, so this needs Revenue Operations to change that rule. In return, Partner Programs registers every partner-touched account, the account team stays the owner of each relationship and renewal, and Partner Programs pauses the program for any account whose renewal risk rises. Two other sign-offs are still open and are not part of this agreement. Legal: partners see only the customer data each account has agreed to share. Product: every partner in the cohort is trained on the current release. Agreement between these two teams is not approval to launch: the executive team approves the launch only when Legal, Revenue Operations and Product have all said yes."
+  }
+}
