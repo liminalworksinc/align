@@ -54,6 +54,12 @@ export const layout = {
   activity: (h: string, lid: string) => path.join(h, "activity", `${safe(lid)}.jsonl`),
   /** Pod activity fetched from the server for one workspace (other machines' sessions). */
   podFeed: (h: string, ws: string) => path.join(h, "feeds", `activity-${safe(ws)}.json`),
+  /** Steering lines shown, one file each, until the sync pass reports them. */
+  steeringDir: (h: string) => path.join(h, "steering"),
+  /** This machine's agent time outside shared sessions, last 7 days (computed by sync, read by hooks; never uploaded). */
+  unsharedDigest: (h: string) => path.join(h, "unshared-digest.json"),
+  /** The week (Monday, UTC) the unshared-work note was last shown. */
+  unsharedShown: (h: string) => path.join(h, "unshared-shown.json"),
 };
 
 function safe(s: string): string {

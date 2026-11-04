@@ -508,6 +508,27 @@ async function main() {
       s14.status === 200 && rj.status === 200 && yt && dl,
       JSON.stringify({ setup: s14.status, reject: rj.status, body: rj.text.slice(0, 120), yt, dl, tail: (await text(A)).slice(0, 300) }),
     );
+
+    // U15 A decline after the teams agreed still reaches the asking team: once they agree the propose card is gone, so
+    // Your turn shows the declined request on its own, neutral, with a way to open it.
+    const sec15 = await signIn(BASE, "security");
+    const prod15 = await signIn(BASE, "product");
+    const ask15 = (measure) => api(prod15, "POST", "/api/proposals", { proposed_measure_text: measure, rationale: "UILOOP U15.", reciprocal_commitment: "UILOOP nothing extra." });
+    const agreed15 = await ask15(`${MEASURE} (agreed first)`);
+    const ok15 = await api(sec15, "POST", `/api/proposals/${agreed15.json?.id}/accept`, { rationale: "ok", accept_untested: true });
+    const later15 = await ask15(`${MEASURE} (declined after agreement)`);
+    const rj15 = await api(sec15, "POST", `/api/proposals/${later15.json?.id}/reject`, {});
+    await A.reload({ waitUntil: "networkidle2" });
+    await click(A, "Your turn");
+    const yt15 = await waitText(A, "declined your last proposal");
+    const t15 = await text(A);
+    await click(A, "See the request");
+    const opened15 = await waitText(A, "declined this proposal");
+    check(
+      "U15 after an agreement, a later declined request shows on the asking team's Your turn and opens that request",
+      agreed15.status === 200 && ok15.status === 200 && later15.status === 200 && rj15.status === 200 && yt15 && t15.includes("(declined after agreement)") && !t15.includes("Propose a change") && opened15,
+      JSON.stringify({ agreed: agreed15.status, accept: ok15.status, later: later15.status, reject: rj15.status, yt15, opened15, tail: t15.slice(0, 400) }),
+    );
   } finally {
     await browser.close();
   }

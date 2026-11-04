@@ -32,8 +32,10 @@ function verifyToken(req: Request, bearerToken?: string): AuthInfo | undefined {
   if (!bearerToken) return undefined;
   const app = readMcpToken(bearerToken, resourceFor(originOf(req)));
   if (app) {
-    noteGrantUse(app.ws, app.grant);
-    return { token: bearerToken, clientId: app.client_id, scopes: [SCOPE], expiresAt: app.exp, extra: { ws: app.ws, role: app.role } };
+    // Only a tool call marks the app as seen: initialize, tools/list, ping and notifications read nothing (`claude mcp
+    // list` sends those). The body is cloned here, after the token checked out and before the transport reads it.
+    if (req.method === "POST") void callsTool(req.clone()).then((yes) => yes && noteGrantUse(app.ws, app.grant));
+    return { token: bearerToken, clientId: app.client_id, scopes: [SCOPE], expiresAt: app.exp, extra: { ws: app.ws, role: app.role, grant: app.grant } };
   }
   if (config().hosted) return undefined; // hosted: Align's OAuth tokens only (go-C, amended for connected apps)
   const agent = readAgentToken(bearerToken);
@@ -44,6 +46,16 @@ function verifyToken(req: Request, bearerToken?: string): AuthInfo | undefined {
   const b = Buffer.from(expected);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return undefined;
   return { token: bearerToken, clientId: "align-local", scopes: [SCOPE] };
+}
+
+/** A JSON-RPC message, or a batch, that includes a tools/call. Anything unreadable counts as no call. */
+async function callsTool(req: Request): Promise<boolean> {
+  try {
+    const body: unknown = await req.json();
+    return (Array.isArray(body) ? body : [body]).some((m) => (m as { method?: unknown } | null)?.method === "tools/call");
+  } catch {
+    return false;
+  }
 }
 
 async function route(req: Request): Promise<Response> {

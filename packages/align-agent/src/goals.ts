@@ -39,6 +39,7 @@ export async function refreshFeed(ctx: Ctx, ws: string): Promise<{ changed: bool
     etag: r.headers.get("etag"),
     fetched_at: new Date().toISOString(),
     goals: Array.isArray(r.json?.goals) ? (r.json.goals as Goal[]) : [],
+    steering: r.json?.steering === "on" ? "on" : "off",
   };
   writeJsonAtomic(layout.feed(ctx.home, ws), feed);
   syncSnapshots(ctx, feed);

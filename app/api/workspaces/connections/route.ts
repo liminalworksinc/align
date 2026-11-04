@@ -4,6 +4,7 @@ import { bodyFor, handle } from "@/lib/http";
 import { clearGrants, liveGrants, removeGrant } from "@/lib/oauth/grants";
 import { MCP_PATH, originOf } from "@/lib/oauth/server";
 import { planChangedAt, planRev } from "@/lib/plan-rev";
+import { acceptedPlan } from "@/lib/policy";
 import { takeWorkspaceAction } from "@/lib/ratelimit";
 import { HttpError, readState } from "@/lib/store";
 import { bumpAgentEpoch, type CustomWsId } from "@/lib/workspace";
@@ -25,14 +26,23 @@ export async function GET(req: Request) {
     // plan may still be working on it; Align can't see what it does (capture is off), only what it last read.
     const state = await readState(who.ws);
     const rev = planRev(state);
+    // The agreed plan as align_get_accepted_plan serves it now. An app's receipt (lib/oauth/grants.ts notePlanReceipt)
+    // counts for it only if it names the same acceptance, goal version and launch state: a newer approval, or a launch
+    // decision since, means Align hasn't sent that app the current plan yet.
+    const plan = acceptedPlan(state).agreement;
+    const acc = state.acceptances.at(-1);
+    const current = plan?.status === "agreed" && acc ? { proposal_id: acc.proposal_id, accepted_version: acc.accepted_version, launch: plan.launch } : null;
     const apps = liveGrants(who.ws).map((g) => ({
       id: g.id,
       name: g.client_name,
       redirect_host: g.redirect_host,
       role: g.role,
       approved_at: g.created_at,
-      last_used_at: g.last_used_at, // null until its first successful read: the app is not shown as connected before
+      last_used_at: g.last_used_at, // null until its first tool call (app/api/mcp/route.ts): the app is not shown as connected before
       on_current_plan: !!g.last_used_at && g.last_read_rev === rev,
+      plan_receipt: g.plan_receipt ?? null, // the last agreed plan Align sent it: proposal_id, accepted_version, launch, at
+      received_current_plan:
+        !!current && !!g.plan_receipt && g.plan_receipt.proposal_id === current.proposal_id && g.plan_receipt.accepted_version === current.accepted_version && g.plan_receipt.launch === current.launch,
     }));
     return Response.json({ url: `${originOf(req)}${MCP_PATH}`, plan: { changed_at: planChangedAt(state) }, apps }, { headers: { "cache-control": "no-store" } });
   });
