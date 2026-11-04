@@ -11,7 +11,8 @@ import { activeRegistry, currentGoals } from "../registry";
 import { readState } from "../store";
 import { AGREED_NOT_LAUNCH, AGREED_STATUS, agreedStatus, customStateLabel, labelsFor, leadOf, poss, scenarioOf, teamOf } from "../labels";
 import type { AgentSession, AppState, Owner, SessionMapping } from "../types";
-import type { WsId } from "../workspace";
+import type { CustomWsId, WsId } from "../workspace";
+import { notePlanReceipt } from "../oauth/grants";
 import { scopeToGrant, type AgentHarness } from "../agent-token";
 
 // Read-only MCP surface for Align. Every tool reads via readState() and never mutates.
@@ -45,6 +46,12 @@ async function sessionState(ctx: ServerContext): Promise<AppState> {
   const s = await readState(storeOf(ctx));
   const g = grantOf(ctx);
   return g ? scopeToGrant(s, g) : s;
+}
+
+/** The grant of an app signed in through Align's OAuth (app/api/mcp/route.ts); null for agent and local tokens. */
+function appGrantOf(ctx: ServerContext): string | null {
+  const g = ctx.http?.authInfo?.extra?.grant;
+  return typeof g === "string" ? g : null;
 }
 
 /** The goal slot of an app signed in through Align's OAuth (leadership holds the company goal); null otherwise. */
@@ -521,6 +528,12 @@ export function registerAlign(server: McpServer, { apps = false }: { apps?: bool
         const approved = a.status === "agreed" && launchApproved(s);
         const pending = a.status === "agreed" && !approved;
         const out = { ...rest, run_command: pending ? `${NO_RUN} ${LAUNCH_PENDING}` : NO_RUN, agreement: a }; // agreement last, after run_command
+        // A connected app was sent an agreed plan: record that on its grant, so the workspace can show which apps Align
+        // sent this plan to (lib/oauth/grants.ts notePlanReceipt). Nothing is recorded before the teams agree.
+        const acc = s.acceptances.at(-1);
+        const grant = apps ? appGrantOf(ctx) : null;
+        if (grant && acc && a.status === "agreed")
+          notePlanReceipt(storeOf(ctx) as CustomWsId, grant, { proposal_id: acc.proposal_id, accepted_version: acc.accepted_version, launch: approved ? "approved" : "pending" });
         const lines =
           a.status === "agreed"
             ? [

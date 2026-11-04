@@ -3,7 +3,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { recordFacts } from "@/components/launch";
 import type { ViewProps } from "@/components/props";
 import { accepted, currentGoal } from "@/components/select";
-import { Button } from "@/components/ui";
+import { Badge, Button } from "@/components/ui";
+import type { AgentsRead } from "@/components/useAgents";
 import { api } from "@/components/useAlign";
 import { stillOnOldPlan } from "@/components/v6/OldPlanWork";
 import { companyMeasureId, conflictMeasureId, labelsFor, poss } from "@/lib/labels";
@@ -38,13 +39,45 @@ function when(iso?: string | null) {
 
 const post = (workspace: string, body: Record<string, unknown>) => api<{ ok: boolean; report?: ValueReport }>("/api/timer", { body, workspace });
 
-/** The card, or nothing until the latest proposal is RATIFIED in a custom scenario. */
-export function DecisionValueCard(props: ViewProps) {
+/** The card, or nothing until the latest proposal is RATIFIED in a custom scenario. `agents`: the decision record's
+ *  connected-app poll (components/useAgents.ts), shown as which apps Align sent this plan to; Home leaves it out, since
+ *  its own Connected AI apps section says the same. */
+export function DecisionValueCard({ agents, ...props }: ViewProps & { agents?: AgentsRead }) {
   const L = labelsFor(props.s);
   const acc = accepted(props.s);
   const p = acc ? props.s.proposals.find((x) => x.id === acc.proposal_id) : undefined;
   if (L.northstar || !acc || !p || p.state !== "RATIFIED") return null;
-  return <ValueCard props={props} acc={acc} p={p} />;
+  return <ValueCard props={props} acc={acc} p={p} agents={agents} />;
+}
+
+/** The connected apps Align sent this approved plan to (align_get_accepted_plan, lib/oauth/grants.ts notePlanReceipt):
+ *  what Align sent and when, never what an agent did with it. A receipt from before the launch decision says so. */
+function PlanReceipts({ read, acc, teamOf }: { read: AgentsRead; acc: Acceptance; teamOf: (role: string) => string }) {
+  if (read === null) return <span className="text-zinc-500">Checking connected apps…</span>;
+  if (read === "unknown") return <span className="text-zinc-500">Couldn’t check connected apps just now. Align retries every 15 seconds.</span>;
+  const got = read.apps.filter((a) => a.plan_receipt?.proposal_id === acc.proposal_id && a.plan_receipt.accepted_version === acc.accepted_version);
+  if (got.length === 0) return <span className="text-zinc-500">Align hasn’t sent this plan to a connected app yet</span>;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <ul aria-label="Apps Align sent this approved plan to" className="flex flex-col gap-1.5">
+          {got.map((a) => (
+            <li key={a.id} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span>
+                <span className="font-semibold">{a.name}</span> ({teamOf(a.role)})
+              </span>
+              <Badge tone="violet" wrap>
+                Align sent it this approved plan
+              </Badge>
+              <span className="text-zinc-600">
+                {when(a.plan_receipt!.at)}
+                {a.plan_receipt!.launch === "approved" ? ", after the launch was approved" : ", before the launch decision"}
+              </span>
+            </li>
+          ))}
+      </ul>
+      <span className="text-[13.5px] text-zinc-500">Align sent it this plan. Align can’t see what the agent does next.</span>
+    </div>
+  );
 }
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -56,7 +89,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function ValueCard({ props, acc, p }: { props: ViewProps; acc: Acceptance; p: Proposal }) {
+function ValueCard({ props, acc, p, agents }: { props: ViewProps; acc: Acceptance; p: Proposal; agents?: AgentsRead }) {
   const { s, me, workspace, nextStep } = props;
   const L = labelsFor(s);
   const actor = me.actor;
@@ -159,7 +192,7 @@ function ValueCard({ props, acc, p }: { props: ViewProps; acc: Acceptance; p: Pr
           </li>
           {company && (
             <li>
-              {poss(L.team.ceo)} goal it serves: {company}
+              {poss(L.team.ceo)} requirement it serves: {company}
             </li>
           )}
           <li>Teams: {[L.team.ceo, L.team.product, L.team.security].join(", ")}</li>
@@ -182,6 +215,12 @@ function ValueCard({ props, acc, p }: { props: ViewProps; acc: Acceptance; p: Pr
           </div>
         )}
       </Row>
+
+      {agents !== undefined && (
+        <Row label="Connected AI apps">
+          <PlanReceipts read={agents} acc={acc} teamOf={(r) => L.role[r as keyof typeof L.role] ?? r} />
+        </Row>
+      )}
 
       <Row label="Measured in Align">
         <ul className="flex flex-col gap-1">
@@ -212,7 +251,7 @@ function ValueCard({ props, acc, p }: { props: ViewProps; acc: Acceptance; p: Pr
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={() => mark("waitlist_clicked")}
-                className="inline-flex min-h-11 items-center justify-center rounded-[10px] border border-transparent bg-violet-700 px-[18px] text-[15px] font-semibold text-black hover:brightness-112 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700"
+                className="inline-flex min-h-11 items-center justify-center rounded-[10px] border border-zinc-300 bg-transparent px-[18px] text-[15px] font-semibold text-zinc-900 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700"
               >
                 Join the Align waitlist
               </a>

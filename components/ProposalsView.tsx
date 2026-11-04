@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { CONDITIONS_UNCONFIRMED, companyMeasureId, conditionsUnconfirmedNote, conflictMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
 import type { Proposal, SimulationRun, StateView, TestStatus } from "@/lib/types";
 import type { ViewProps } from "./props";
-import { activeProposal, changedToday, currentGoal, priorVersion } from "./select";
+import { OPEN_STATES, changedToday, composerShowing, currentGoal, priorVersion, shownProposal } from "./select";
 import { Badge, Button, OWNER_LABEL, STATE_LABEL, Section, StateBadge, fmtTime } from "./ui";
 import { api, type Me } from "./useAlign";
 import { NextStepAction, ProgressStrip } from "./Handoff";
@@ -11,7 +11,7 @@ import { ProofStrip } from "./ProofStrip";
 import { SpartaProof } from "./SpartaProof";
 import { STALE_APPROVAL_NOTE, agreementStatus, approvedStale, launchLine } from "./launch";
 import { Chip, Collapsible, InkPill, Lbl, Msg, NumberedLines, Old, Option, conditionLines } from "./v6/thread";
-import { ReviewDecide, type ReviewNotice } from "./ReviewDecide";
+import { NoticeBox, ReviewDecide, type ReviewNotice } from "./ReviewDecide";
 
 /** Mirrors lib/flow.ts MAX_CONDITIONS (the server refuses longer conditions). */
 const MAX_CONDITIONS = 1000;
@@ -46,8 +46,6 @@ const RUN_KIND: Record<string, string> = {
   normal: "Normal run",
   interruption: "Outage test: the ticket system failed mid-run",
 };
-
-const OPEN_STATES = ["PENDING_SECURITY", "COUNTERED", "ACKNOWLEDGED_BY_PRODUCT", "DRAFT"];
 
 const inputCls =
   "w-full rounded-lg bg-white px-3 py-2 text-[16px] leading-relaxed text-zinc-900 ring-1 ring-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-600";
@@ -143,7 +141,6 @@ function PlanSection({ s, planId, planVersion }: { s: StateView; planId: string;
 
 export function ProposalsView(props: ViewProps) {
   const { s, me, selection } = props;
-  const [composing, setComposing] = useState(false);
   const [busy, setBusy] = useState(false);
   // Custom review (lane C): a stale/refused/recorded notice outlives the remount a state change causes.
   const [notice, setNotice] = useState<{ id: string; n: NonNullable<ReviewNotice> } | null>(null);
@@ -159,11 +156,14 @@ export function ProposalsView(props: ViewProps) {
 
   const list = [...s.proposals].reverse();
   const openOne = s.proposals.find((p) => OPEN_STATES.includes(p.state)) ?? null;
-  const selected = selection?.kind === "proposal" ? s.proposals.find((p) => p.id === selection.id) : undefined;
-  const active = selected ?? activeProposal(s);
+  // A request with a notice stays on screen: a declined one leaves activeProposal(), which would show another request
+  // and drop the notice.
+  const noticed = notice ? s.proposals.find((p) => p.id === notice.id) : undefined;
+  const active = shownProposal(s, me.actor, selection ?? null, noticed);
   const isProduct = me.actor === "product";
-  // + New conflict and the Your turn card ask for the composer (props.compose) until a proposal is picked or sent.
-  const showComposer = isProduct && !openOne && (composing || !!props.compose || !active);
+  // + New conflict, the Your turn card and the inbox's Propose a change ask for the composer (props.compose) until a
+  // proposal is picked or sent. The rule is shared with Home (select.ts composerShowing).
+  const showComposer = composerShowing(s, me.actor, selection ?? null, !!props.compose, noticed);
   const L = labelsFor(s);
   const who = whoFor(L);
 
@@ -173,7 +173,7 @@ export function ProposalsView(props: ViewProps) {
         <div className="mb-2 flex items-center justify-between">
           <h2 className="al-lbl">Inbox</h2>
           {isProduct && !openOne && !showComposer && (
-            <Button kind="secondary" onClick={() => setComposing(true)}>
+            <Button kind="secondary" onClick={() => props.setCompose?.(true)}>
               Propose a change
             </Button>
           )}
@@ -189,7 +189,6 @@ export function ProposalsView(props: ViewProps) {
                   <button
                     type="button"
                     onClick={() => {
-                      setComposing(false);
                       props.setCompose?.(false);
                       props.select({ kind: "proposal", id: p.id });
                     }}
@@ -226,10 +225,14 @@ export function ProposalsView(props: ViewProps) {
 
       <main className="min-w-0 flex-1">
         {showComposer ? (
-          <Composer {...props} busy={busy} run={run} onSent={() => { setComposing(false); props.setCompose?.(false); }} />
+          <Composer {...props} busy={busy} run={run} onSent={() => props.setCompose?.(false)} />
         ) : active ? (
           // Keyed on state and revision count so Detail's local state (the untested tick) never carries over to a new revision.
-          <Detail key={`${active.id}:${active.state}:${active.counter_versions.length}`} {...props} p={active} busy={busy} run={run} notice={notice?.id === active.id ? notice.n : null} setNotice={(n) => setNotice(n ? { id: active.id, n } : null)} />
+          <Detail key={`${active.id}:${active.state}:${active.counter_versions.length}`} {...props} p={active} busy={busy} run={run} notice={notice?.id === active.id ? notice.n : null}
+            setNotice={(n) => {
+              setNotice(n ? { id: active.id, n } : null);
+            }}
+          />
         ) : (
           <Card tone="readonly">
             <p className="text-[18px] font-semibold text-zinc-900">No proposals to your goal yet.</p>
@@ -545,6 +548,8 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run; notic
         </p>
         <ProgressStrip p={p} acc={acc} L={L} viewer={me.actor ?? ""} />
       </header>
+
+      {props.notice && <NoticeBox notice={props.notice} />}
 
       <ol className="space-y-3.5" aria-label="Conversation about this proposal">
         <Msg name={who(p.proposing_owner)} tag={<Chip>proposal · {p.target_goal_version}</Chip>} at={fmtTime(p.created_at)} me={me.actor === p.proposing_owner}>
