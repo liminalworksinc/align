@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      # literate-ai at the exact revision this project's locks and receipt were produced with.
-      LITAI_SOURCE: git+https://github.com/allsmog/literate-ai@2867597f11241306ff14118449af74e93bf50f92
+      # literate-ai at the exact revision this project's locks, native children and conversion stage were produced with.
+      LITAI_SOURCE: git+https://github.com/jordanhubbard/literate-ai@b26dd359b32f6138a1b199b79ffbbf8c935b48db
     steps:
       - uses: actions/checkout@v4
         with:

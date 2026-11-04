@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The MCP paste lines (`lib/paste-lines.ts`: `shq`, `safeMcpUrl`, `claudeCodeLine`, `codexLine`) are specified as
+  their own component in `.literate/native-projects/local-paste-lines`. Two clean builds generated from that
+  specification alone pass their tests and match the original on 49 cases (hostile URLs, quoting edges), so the
+  project's release authority is now its specification. CI checks this at the same tool revision it was produced with.
 - End-to-end test cycles 1 to 14 (real browsers, the hosted edge, MCP clients, and the real `align` CLI and hooks under
   real Claude Code sessions). Every finding is fixed with a regression test, among them: directives fetched by cursor;
   the server's clock used for every timestamp an agent sends; device sign-out, member removal and re-pairing end or
