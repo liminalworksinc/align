@@ -1,0 +1,58 @@
+# Align hosted mode (HOSTED=1); deploy steps in docs/HOSTING.md. Secrets (ALIGN_SECRET, BETTER_AUTH_SECRET,
+# ALIGN_EMAIL_API_KEY, any Google or GitHub client) are set with fly secrets, never here.
+# One machine only: most limits are in process memory and the volume attaches to a single machine (docs/HOSTING.md).
+app = "align-pg-draft"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  HOSTED = "1"
+  ALIGN_DATA_DIR = "/data"
+  ALIGN_HOSTS = "align-pg-draft.fly.dev"
+  ALIGN_PUBLIC_ORIGIN = "https://align-pg-draft.fly.dev"
+  # Sign-in codes by email (all three settings, or none and a Google or GitHub client; the key is a secret).
+  ALIGN_EMAIL_API_URL = "https://api.resend.com/emails"
+  ALIGN_EMAIL_FROM = "Align <signin@align-pg-draft.fly.dev>"
+  # The one address that may make the first account by email code. Set it before the first deploy.
+  # ALIGN_FIRST_OWNER_EMAIL = "owner@example.com"
+  # Who may create workspaces: codes (default; issue them with scripts/align-admin.mjs), open, or closed. Caps
+  # (defaults shown) and the Turnstile site key (its secret key is a secret) are optional.
+  # ALIGN_CREATION = "codes"
+  # ALIGN_MAX_WORKSPACES = "100"
+  # ALIGN_MAX_OWNED_WORKSPACES = "2"
+  # ALIGN_MAX_MEMBERS = "25"
+  # ALIGN_MAX_SESSIONS_PER_DEVICE_DAY = "500"
+  # ALIGN_TURNSTILE_SITE_KEY = "0x…"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+
+  # The health check comes from inside Fly's network, so it sends what Fly's edge would: the allowlisted Host,
+  # forwarded https and a Fly-Client-IP. Without them proxy.ts answers 421 or 403 and the check would fail.
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/api/v2/auth/get-session"
+    [http_service.checks.headers]
+      Host = "align-pg-draft.fly.dev"
+      X-Forwarded-Proto = "https"
+      Fly-Client-IP = "fly-health-check"
+
+[[mounts]]
+  source = "align_data"
+  destination = "/data"
+  # Daily volume snapshots, kept 7 days (the retention schedule in docs/RETENTION.md counts on it).
+  scheduled_snapshots = true
+  snapshot_retention = 7
+
+[[vm]]
+  memory = "1gb"
+  cpus = 1

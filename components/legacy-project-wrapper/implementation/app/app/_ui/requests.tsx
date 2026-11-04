@@ -1,0 +1,308 @@
+"use client";
+import { useEffect, useRef, useState } from "react";
+import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, SignInAgain, TextArea, useAction, useApi, when } from "./kit";
+import type { Me } from "./server";
+import type { Goal } from "./types";
+import { EvidencePill } from "./evidence";
+import { answerEvidence } from "@/lib/v2/home-core.mts";
+
+// The goal page's "Agents on this goal" card (REQ-001): requests to the agents working on the goal (replan,
+// checkpoint, switch goal) and the goal hold. Align writes the wording the developer and the agent see; the sender is
+// named and their note is quoted. Holding and releasing need a sign-in from the last 15 minutes
+// (GET/POST .../goals/<goal>/requests, DELETE .../requests/<id>, PUT/DELETE .../goals/<goal>/hold).
+
+type RequestType = "replan" | "checkpoint" | "switch_goal";
+type TargetState = "sent" | "received" | "accepted" | "declined" | "expired";
+type EndedReason = "device_signed_out" | "member_removed";
+interface Person {
+  id: string;
+  name: string;
+}
+interface RequestView {
+  id: string;
+  type: RequestType;
+  goal: { id: string; title: string; version: number };
+  target_goal: { id: string | null; title: string | null; version: number | null; private?: boolean } | null;
+  note: string | null;
+  sender: Person & { role: "approver" | "owner" };
+  created_at: string;
+  cancelled_at: string | null;
+  cancelled_by: Person | null;
+  state: "open" | "answered" | "cancelled" | "expired";
+  /** Why an expired request expired: its goal closed, or every session it waited on ended (C3-1). */
+  expired_reason: "goal_closed" | "sessions_ended" | null;
+  counts: { pending: number; accepted: number; declined: number; expired: number; not_declined: number };
+  sessions: {
+    session_key: string;
+    owner: Person;
+    mine: boolean;
+    repo_alias: string | null;
+    harness: string;
+    title: string | null;
+    started_at: string;
+    state: TargetState;
+    /** Why an expired session's sharing ended (its device signed out, or its person left the workspace), else null. */
+    ended_reason: EndedReason | null;
+    auto_accepted: boolean;
+    updated_at: string;
+  }[];
+  can_cancel: boolean;
+}
+export interface HoldState {
+  held: { held_by: Person; reason: string | null; held_at: string } | null;
+  can_hold: boolean;
+}
+interface RequestsData {
+  requests: RequestView[];
+  can_send: boolean;
+  sessions: { session_key: string; owner: Person; mine: boolean; repo_alias: string | null; harness: string; title: string | null; started_at: string }[] | null;
+  hold: HoldState;
+}
+
+export const TYPE_LABEL: Record<RequestType, string> = { replan: "Replan", checkpoint: "Checkpoint", switch_goal: "Switch goal" };
+const TYPE_HELP: Record<RequestType, string> = {
+  replan: "The agent re-reads this goal and drafts an updated plan for the developer. It keeps working as before until the developer agrees.",
+  checkpoint: "At the end of its current step the agent commits its work and summarizes where it is, then continues. A safe step: it reaches the agent without waiting for the developer, who can still decline. Align shows it as delivered, not as done.",
+  switch_goal: "The sessions you pick move to another goal, only if their developer accepts. Until then they keep working toward this goal.",
+};
+
+/** One session's answer, with its evidence class (lib/v2/home-core.mts answerEvidence): received, or delivered and not
+ *  declined, is a delivery receipt; the developer's answer is agent reported; nothing back is not observed. */
+function statePill(s: { state: TargetState; ended_reason: EndedReason | null; auto_accepted: boolean }) {
+  return (
+    <>
+      {answerPill(s)}
+      <EvidencePill c={answerEvidence(s.state, s.auto_accepted)} />
+    </>
+  );
+}
+
+/** pending / accepted / declined / expired. A safe request the developer did not decline by the end of the turn it
+ *  reached is "delivered, not declined": Align knows it reached the agent, not what the agent did with it. A session
+ *  that ended before it answered says why, as the Sessions tab does (C3-1). */
+function answerPill(s: { state: TargetState; ended_reason: EndedReason | null; auto_accepted: boolean }) {
+  if (s.state === "accepted") return s.auto_accepted ? <Pill>delivered, not declined</Pill> : <Pill tone="green">accepted by the developer</Pill>;
+  if (s.state === "declined") return <Pill tone="red">declined</Pill>;
+  if (s.state === "expired" && s.ended_reason === "device_signed_out") return <Pill>ended: device signed out</Pill>;
+  if (s.state === "expired" && s.ended_reason === "member_removed") return <Pill>ended: left the workspace</Pill>;
+  if (s.state === "expired") return <Pill>expired</Pill>;
+  return <Pill tone="amber">pending</Pill>;
+}
+
+const sessionName = (s: { owner: Person; mine: boolean; repo_alias: string | null; harness: string; title?: string | null }) =>
+  `${s.mine ? "Your" : `${s.owner.name}'s`} ${s.title || s.repo_alias || s.harness} session`;
+
+/** The hold banner for the top of the goal page (also shown on the Goals and Sessions tabs). */
+export function HoldBanner({ hold, goalTitle, me }: { hold: HoldState["held"]; goalTitle?: string; me?: string }) {
+  if (!hold) return null;
+  return (
+    <div data-hold-banner className="mb-5 rounded-[14px] border border-red-700 bg-red-50 px-4 py-3 text-[15px] text-red-800">
+      <strong>All agents on {goalTitle ? `"${goalTitle}"` : "this goal"} are on hold.</strong> {hold.held_by.id === me ? "You" : hold.held_by.name} paused them {when(hold.held_at)}
+      {hold.reason ? `: ${hold.reason}` : ""}. Their tools are blocked until someone who can approve for the goal releases it.
+    </div>
+  );
+}
+
+/** What holding and releasing ask for, said beside each button: a sign-in from the last 15 minutes, and what happens
+ *  with an older one (Sign in again comes back to this page, where the button is pressed again). */
+export const HOLD_HINT =
+  "Align blocks their tools until someone who can approve for the goal releases it. Holding, like releasing, needs a sign-in from the last 15 minutes: with an older one, Align asks you to sign in again and brings you back here.";
+export const RELEASE_HINT = "Releasing needs a sign-in from the last 15 minutes: with an older one, Align asks you to sign in again and brings you back here to press Release again.";
+
+function HoldControls({ ws, goal, me, hold, onDone }: { ws: string; goal: Goal; me: Me; hold: HoldState; onDone: () => void }) {
+  const [reason, setReason] = useState("");
+  const act = useAction();
+  if (!hold.can_hold) return null;
+  const path = `/api/v2/workspaces/${ws}/goals/${goal.id}/hold`;
+  if (act.reauth)
+    return (
+      <SignInAgain me={me} next={`/app/w/${ws}/goals/${goal.id}`}>
+        {act.reauth}
+      </SignInAgain>
+    );
+  return (
+    <div className="mb-4 border-b border-zinc-200 pb-4">
+      {hold.held ? (
+        <>
+          <Btn kind="secondary" disabled={act.busy} onClick={() => void act.run(() => api(path, { method: "DELETE" }), onDone)}>
+            Release
+          </Btn>
+          {/* Said before the press, as for holding: a developer told to lift a hold "from the web" otherwise meets the
+              recent sign-in only as a refusal (E2E-AGENT cycle 13, section 5). */}
+          <p className="mt-1 text-[13px] text-zinc-500" data-hold-hint>
+            {RELEASE_HINT}
+          </p>
+        </>
+      ) : (
+        goal.status === "active" && (
+          <>
+            <Field label="Reason (optional, shown to the developers)">
+              <Input value={reason} maxLength={280} onChange={(e) => setReason(e.target.value)} />
+            </Field>
+            <Btn kind="danger" disabled={act.busy} onClick={() => void act.run(() => api(path, { method: "PUT", body: { reason: reason || null } }), onDone)}>
+              Hold all agents on this goal
+            </Btn>
+            <p className="mt-1 text-[13px] text-zinc-500" data-hold-hint>
+              {HOLD_HINT}
+            </p>
+          </>
+        )
+      )}
+      <Err>{act.error}</Err>
+    </div>
+  );
+}
+
+function SendRequest({ ws, goal, data, onDone }: { ws: string; goal: Goal; data: RequestsData; onDone: () => void }) {
+  const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
+  const [type, setType] = useState<RequestType>("checkpoint");
+  const [keys, setKeys] = useState<string[]>([]);
+  const [target, setTarget] = useState("");
+  const [note, setNote] = useState("");
+  const act = useAction();
+  const sessions = data.sessions ?? [];
+  const others = feed.data?.goals.filter((g) => g.id !== goal.id && g.status === "active") ?? [];
+  if (!sessions.length) return <Note>No shared session is working on this goal, so there is no one to send a request to.</Note>;
+  return (
+    <div className="mb-4 border-b border-zinc-200 pb-4" id="send-request">
+      <p className="mb-2 text-[15px] font-medium text-zinc-900">Send a request</p>
+      {(Object.keys(TYPE_LABEL) as RequestType[]).map((t) => (
+        <label key={t} className="mb-2 flex items-start gap-2 text-[15px]">
+          <input type="radio" name="request-type" value={t} checked={type === t} onChange={() => setType(t)} className="mt-1" />
+          <span>
+            <strong className="text-zinc-900">{TYPE_LABEL[t]}.</strong> {TYPE_HELP[t]}
+          </span>
+        </label>
+      ))}
+      {type === "switch_goal" && (
+        <>
+          <p className="mb-1 text-[14px] text-zinc-600">Sessions to move (pick at least one)</p>
+          {sessions.map((s) => (
+            <label key={s.session_key} className="mb-1 flex items-center gap-2 text-[15px]">
+              <input type="checkbox" checked={keys.includes(s.session_key)} onChange={(e) => setKeys((k) => (e.target.checked ? [...k, s.session_key] : k.filter((x) => x !== s.session_key)))} />
+              <span>
+                {sessionName(s)}
+                {/* Two sessions can share a name (one person, one repository): the start time and the key's end tell them apart. */}
+                <span className="text-zinc-500">
+                  {" "}
+                  · started {when(s.started_at)} · …{s.session_key.slice(-6)}
+                </span>
+              </span>
+            </label>
+          ))}
+          <Field label="Move them to">
+            <Select value={target} onChange={(e) => setTarget(e.target.value)}>
+              <option value="">Pick a goal</option>
+              {others.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.title}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </>
+      )}
+      <Field label="Note (optional; shown to the developer and the agent, quoted)">
+        <TextArea rows={2} value={note} maxLength={280} onChange={(e) => setNote(e.target.value)} />
+      </Field>
+      <Btn
+        disabled={act.busy || (type === "switch_goal" && (!keys.length || !target))}
+        onClick={() =>
+          void act.run(
+            () => api(`/api/v2/workspaces/${ws}/goals/${goal.id}/requests`, { body: { type, note: note || null, ...(type === "switch_goal" ? { session_keys: keys, target_goal_id: target } : {}) } }),
+            () => {
+              setNote("");
+              setKeys([]);
+              onDone();
+            },
+          )
+        }
+      >
+        Send
+      </Btn>
+      <Err>{act.error}</Err>
+    </div>
+  );
+}
+
+function RequestRow({ ws, r, me, onDone }: { ws: string; r: RequestView; me: string; onDone: () => void }) {
+  const act = useAction();
+  const c = r.counts;
+  return (
+    <li className="py-3" data-request={r.id}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[16px] text-zinc-900">{TYPE_LABEL[r.type]}</span>
+        {r.state === "cancelled" ? <Pill>cancelled</Pill> : r.state === "expired" ? <Pill>{r.expired_reason === "sessions_ended" ? "expired: its sessions ended" : "expired: the goal closed"}</Pill> : r.state === "open" ? <Pill tone="amber">waiting</Pill> : <Pill tone="green">answered</Pill>}
+        <span className="text-[14px] text-zinc-500">
+          from {r.sender.id === me ? "you" : r.sender.name} ({r.sender.role === "approver" ? "approver" : "workspace owner"}), {when(r.created_at)}, goal version {r.goal.version}
+        </span>
+        {r.can_cancel && (
+          <span className="ml-auto">
+            <Btn kind="secondary" disabled={act.busy} onClick={() => void act.run(() => api(`/api/v2/workspaces/${ws}/goals/${r.goal.id}/requests/${r.id}`, { method: "DELETE" }), onDone)}>
+              Cancel
+            </Btn>
+          </span>
+        )}
+      </div>
+      {r.target_goal && <p className="text-[14px] text-zinc-600">Move to: {r.target_goal.private ? "a goal you can't see" : r.target_goal.title}</p>}
+      {r.note && <p className="text-[14px] text-zinc-600">Note: &ldquo;{r.note}&rdquo;</p>}
+      {r.cancelled_by && <p className="text-[14px] text-zinc-500">Cancelled by {r.cancelled_by.id === me ? "you" : r.cancelled_by.name}, {when(r.cancelled_at)}</p>}
+      <p className="text-[14px] text-zinc-500">
+        {c.pending} pending, {c.accepted} accepted by the developer{c.not_declined ? `, ${c.not_declined} delivered and not declined` : ""}, {c.declined} declined
+        {c.expired ? `, ${c.expired} expired` : ""}
+      </p>
+      {r.sessions.map((s) => (
+        <p key={s.session_key} className="flex flex-wrap items-center gap-2 text-[14px] text-zinc-700">
+          {sessionName(s)}
+          {/* Two sessions can share a name (one person, one repository): the start time and the key's end tell them apart (X4). */}
+          <span className="text-zinc-500">
+            {" "}
+            · started {when(s.started_at)} · …{s.session_key.slice(-6)}
+          </span>{" "}
+          {statePill(s)}
+        </p>
+      ))}
+      <Err>{act.error}</Err>
+    </li>
+  );
+}
+
+/** "Agents on this goal": hold and release, send a request, and the requests sent so far with each session's answer.
+ *  A new goal version (a launch, a version saved above, the goal closing) reloads it in place, keeping what is on
+ *  screen and anything typed meanwhile: never a remount and its "Loading…" (C3-4, as the change-request list, C2 N3). */
+export function AgentsOnGoalCard({ ws, goal, me, onHoldChanged }: { ws: string; goal: Goal; me: Me; onHoldChanged: () => void }) {
+  const d = useApi<RequestsData>(`/api/v2/workspaces/${ws}/goals/${goal.id}/requests`);
+  const data = d.data;
+  const { reload: reloadList } = d;
+  const seenVersion = useRef(goal.version);
+  useEffect(() => {
+    if (seenVersion.current === goal.version) return;
+    seenVersion.current = goal.version;
+    reloadList();
+  }, [goal.version, reloadList]);
+  const reload = () => {
+    d.reload();
+    onHoldChanged();
+  };
+  if (d.loading && !data) return <Loading />;
+  if (!data) return null;
+  if (!data.can_send && !data.hold.can_hold && !data.requests.length) return null;
+  return (
+    <section id="agents-on-goal">
+      <Card title="Agents on this goal">
+        <HoldControls ws={ws} goal={goal} me={me} hold={data.hold} onDone={reload} />
+        {data.can_send && <SendRequest ws={ws} goal={goal} data={data} onDone={d.reload} />}
+        <Err>{d.error}</Err>
+        {data.requests.length === 0 ? (
+          <Note>No requests sent to agents on this goal yet.</Note>
+        ) : (
+          <ul className="divide-y divide-zinc-200">
+            {data.requests.map((r) => (
+              <RequestRow key={`${r.id}:${r.state}`} ws={ws} r={r} me={me.id} onDone={d.reload} />
+            ))}
+          </ul>
+        )}
+      </Card>
+    </section>
+  );
+}

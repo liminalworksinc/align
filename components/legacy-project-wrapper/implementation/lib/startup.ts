@@ -1,0 +1,47 @@
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { assertStartupConfig, config } from "./config";
+import { dcrDir } from "./oauth/clients";
+import { v2Warnings } from "./v2/config";
+
+// Some state lives in this process's memory (locks, rate limits, authorization codes), so two servers on one data
+// directory would disagree. A pid file, <data>/.pid, records the live server; a second one refuses to start.
+const pidFile = () => path.join(config().dataDir, ".pid");
+
+function alive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** An atomic write's temp file: _oauth_clients.json.<hex>.tmp, written then renamed over the client list
+ *  (lib/oauth/clients.ts). A crash between the write and the rename leaves it behind; startup removes it. */
+const TEMP_FILE = /^_oauth_clients\.json\.[0-9a-f]{8,}\.tmp$/;
+function sweepLeftovers() {
+  const dir = dcrDir();
+  if (!existsSync(dir)) return;
+  for (const n of readdirSync(dir)) if (TEMP_FILE.test(n)) rmSync(path.join(dir, n), { force: true });
+}
+
+export function startup() {
+  assertStartupConfig();
+  if (process.env.NEXT_PHASE === "phase-production-build") return;
+  const PID_FILE = pidFile();
+  const held = existsSync(PID_FILE) ? Number(readFileSync(PID_FILE, "utf8").trim()) : 0;
+  if (held && held !== process.pid && alive(held)) {
+    throw new Error(`Another Align server (pid ${held}) is using ${path.dirname(PID_FILE)}. Stop it first.`);
+  }
+  mkdirSync(path.dirname(PID_FILE), { recursive: true, mode: 0o700 });
+  writeFileSync(PID_FILE, String(process.pid), { mode: 0o600 });
+  chmodSync(PID_FILE, 0o600); // the mode above applies only when the file is new
+  sweepLeftovers();
+  for (const w of v2Warnings()) console.warn(w); // allowed settings worth one line (lib/v2/config.ts), said once
+  process.once("exit", () => {
+    try {
+      if (readFileSync(PID_FILE, "utf8").trim() === String(process.pid)) unlinkSync(PID_FILE);
+    } catch {}
+  });
+}

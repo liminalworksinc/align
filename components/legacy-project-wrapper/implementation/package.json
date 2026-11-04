@@ -1,0 +1,49 @@
+{
+  "name": "align",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -H 127.0.0.1 -p 3100",
+    "build": "next build",
+    "start": "next start -H 127.0.0.1 -p 3100",
+    "sign-in-link": "node scripts/sign-in-link.mjs",
+    "admin": "node scripts/align-admin.mjs",
+    "lint": "eslint",
+    "test": "bash scripts/test-all.sh ${ALIGN_TEST_PORT:-3600}"
+  },
+  "dependencies": {
+    "@better-auth/passkey": "1.7.10",
+    "@modelcontextprotocol/server": "^2.3.1",
+    "better-auth": "1.7.10",
+    "mcp-handler": "^2.3.0",
+    "next": "16.4.2",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.2",
+    "puppeteer-core": "^25.13.0",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "overrides": {
+    "@better-auth/core": "1.7.10",
+    "@peculiar/asn1-android": "2.11.0",
+    "@peculiar/asn1-cms": "2.11.0",
+    "@peculiar/asn1-csr": "2.11.0",
+    "@peculiar/asn1-ecc": "2.11.0",
+    "@peculiar/asn1-pfx": "2.11.0",
+    "@peculiar/asn1-pkcs8": "2.11.0",
+    "@peculiar/asn1-pkcs9": "2.11.0",
+    "@peculiar/asn1-rsa": "2.11.0",
+    "@peculiar/asn1-schema": "2.11.0",
+    "@peculiar/asn1-x509": "2.11.0",
+    "@peculiar/asn1-x509-attr": "2.11.0"
+  }
+}

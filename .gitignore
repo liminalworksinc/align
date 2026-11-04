@@ -1,52 +1,30 @@
-# dependencies
-node_modules/
-.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+# Literate AI local derivation caches are disposable and must not be committed.
+# The project-relative source-cache target is the deliberate exception: a repository
+# may check generated source in there for efficiency. A committed entry can never go
+# stale, because a cache hit requires an exact generation-key match and that key binds
+# the ordered specification set.
+generated/*
+!generated/committed-source-cache/
+.litai-cache-locks/
+.component*.write.lock
 
-# next.js / build
-/.next/
-/out/
-/build
-*.tsbuildinfo
-next-env.d.ts
+# Per-user or session worker assignments. Keep the checked-in example synthetic.
+/literate.test.json
+/literate.workers.json
+/literate.worker-observations.json
 
-# env + secrets (never commit keys)
-.env
-.env.*
-!.env.example
-*.pem
-data/.secret
+# Common Python development output.
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+_build/
+dist/
 
-# Align runtime state (regenerated from data/fixture.json)
-data/state.json
-data/*.tmp
+# pytest-testmon maps are local skip evidence, never Git authority.
+.testmondata
+.testmondata-journal
+.testmondata.identity.json
 
-# Custom workspaces and the single-server guard
-data/workspaces/
-data/.pid
-
-# Goal sessions database and its generated auth secret (ALIGN_GOAL_SESSIONS=1)
-data/v2/
-
-# Sparta local runtime (worlds, dashboard state)
-.worlds/
-.worlds-dashboard/
-sparta/walkthrough-lab/projects/*/.env
-
-# misc
-.DS_Store
-coverage/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-.vercel
-.claude/settings.local.json
-
-# Saved custom-scenario setup input (operator text; never committed)
-data/custom-scenario.json
+# literate-ai run locks (transient)
+/.litai-locks/

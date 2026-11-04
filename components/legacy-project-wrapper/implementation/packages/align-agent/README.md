@@ -1,0 +1,260 @@
+# @liminal/align-agent
+
+The local half of goal sessions: the `align` CLI, Claude Code and Codex hooks, and local metering from transcripts.
+There is no daemon and no telemetry setup. Hooks answer from local files and, at most every 10 to 30 seconds, start a
+short `align sync` in the background that makes one pass and exits.
+
+Provider traffic never passes through Align. Sessions are private until you share one, and only shared sessions ever
+reach the server. Wire contract: `docs/v2/WIRE.md`. Harness facts and sources: `HARNESS_FACTS.md`.
+
+Zero runtime dependencies (Node 24+: `node:sqlite`, `node:crypto`, `fetch`).
+
+## Commands
+
+```
+align login [--server <url>] [--name <device name>]   device flow; key-bound tokens; names your other paired devices
+align logout                                          revokes this device, wipes tokens and the device key; this
+                                                      machine's shares stop (sessions stopped or held from the web
+                                                      stay blocked: after `align login`, `::align share` shares one
+                                                      again and the web can lift it). If the server can't be
+                                                      reached, the next `align sync` or `align login` revokes it
+align status                                          identity, last sync, hooks + hash, outbox, unpriced
+align sessions [--all] [--json]                       local sessions, tokens, basis, list-price estimate (offline)
+align goals [--workspace <name|id>] [--refresh]       cached goal feed
+align share --dir [folder] --workspace W --goal G [--signals]   share every new session started in a folder (rule stays local)
+align share --dir <folder> --past <days> --workspace W --goal G [--signals] [--yes]
+                                                      also share that folder's sessions of the last 1-14 days, from their start
+align share <session|--latest> [--cwd [dir]] --workspace W --goal <ref|none> [--alias <name>] [--from start|now] [--yes]
+align unshare --dir [folder] · align rules            remove a folder rule · list them
+align team [--cwd <dir>]                              work in flight toward this folder's goal and related goals, and what
+                                                      was asked of your teams (offline; alias align pod; open asks only
+                                                      in a terminal, never where an agent may read it)
+align asks [--workspace W] [--all] [--json]           asks of your teams and your own asks, from the cache (offline)
+align config [drift on|off]                           local settings; drift notice on by default
+align stop-sharing <session>                          future usage stays local
+align delete-history <session> [--yes]                server hard delete (from any of your paired devices); totals change
+align bind <session> --goal <ref|none>                takes effect at the next prompt (root turn)
+align requests [--all] [--json] [--session <s>]      requests sent to your sessions and their answers (offline)
+align requests accept|decline <id> [--session S]      answer one; the receipt goes to the sender
+align latch status                                    stop latches and goal holds (they come from the web)
+align allocation [--workspace W] [--week YYYY-MM-DD] [--refresh] [--json]
+                                                      agent time per goal against its target, and this machine's
+                                                      unshared share (local only)
+align steering status [--workspace W]                 steering switch, lines shown this week, lines waiting to report
+align install [--claude] [--codex] [--dry-run]
+align uninstall [--purge]                             --purge also revokes this device first (its key goes)
+align sync                                            one pass: spool, transcripts, outbox, directives, upload;
+                                                      exits 1 naming the server when it can't be reached
+align doctor                                          checks plus hook latency
+```
+
+In a session: `::align status`, `::align goals`, `::align share [--dir] [--signals] [goal]` (then `... confirm`),
+`::align bind <goal>`, `::align unshare [--dir]`, `::align task <label>`, `::align claim <file> [what for]`,
+`::align team`, `::align requests`, `::align accept <id>`, `::align decline <id>`. These are answered locally and never
+reach the model.
+
+## How updates reach a session
+
+1. A hook fires (SessionStart always; UserPromptSubmit at most every 10 s; PreToolUse at most every 30 s) and starts
+   `align sync --hook` detached, then returns. The hook itself never touches the network.
+2. The sync pass reads new transcript lines, uploads usage for shared sessions, fetches new directives by cursor and
+   writes them to local files (`hot/`, `latch/`), then exits. A lock file keeps passes from overlapping.
+3. The next hook reads those files: a goal change goes into context at the next prompt as a short delta; a stop or a
+   goal hold makes the next tool call fail closed.
+
+So a goal change, request, stop or hold issued from the web lands within one sync interval, at the next prompt or tool
+call.
+
+## Requests and goal holds
+
+- **Requests.** Someone who can approve a goal (or a workspace owner) can send its sessions a `replan`, `checkpoint`
+  or `switch_goal` request. The sync stores it and posts `received`. At the session's next prompt (never mid-turn,
+  once) you see a notice naming the sender, and the model gets fixed Align wording for that type, with the sender's
+  note quoted as data. A checkpoint and drafting an updated plan are safe: they reach the agent without waiting for
+  you, and if you have not declined by the end of that turn, the Stop hook reports the request as delivered to the
+  agent and not declined (an `accepted` receipt with `auto_accepted: true`). That is not a report that the agent did
+  it: Align has no agent-reported completion. You can still decline. A replan never changes course until you agree (tell the agent,
+  or `::align accept <id>`, which tells it to follow the updated plan), and a
+  `switch_goal` waits for `::align accept <id>` (or `align requests accept <id>`), which moves the session to the
+  target goal at its next prompt like `align bind`. Your answer goes back as an `accepted` or `declined` receipt and
+  reaches the model as one line at the next prompt. A request withdrawn by its sender, or whose goal was achieved or dropped
+  before you answered, is one notice for you and nothing for the model. After a compact, requests still waiting are put back into context.
+- **Goal holds.** A `hold` directive writes `latch/<lid>.hold.json`; while it exists, every tool (read-only ones too)
+  is denied with who paused the goal and why, without needing a sync, and an unreadable file denies too. `release`
+  removes it and tells you once. A session that moves to another goal stays held until that goal's release reaches it.
+  Holds and the stop latch are independent: a tool runs only when neither blocks it.
+  Stopping sharing lifts both.
+
+## Goal tree and pod awareness
+
+- A session's starting context also names the goal its goal contributes to (with its measures) and the goals it depends
+  on. A new version of either reaches every session under the child goal as one short note at its next prompt or tool
+  call, flagged when the child's owner has not reviewed the child against it yet.
+- Each shared session's PreToolUse hook records the files it edits and reads, its commit subjects, and its
+  `::align task` and `::align claim` lines in `ALIGN_HOME/activity/<lid>.jsonl`. The sync pass uploads them (paths and
+  text only with `--signals`, otherwise keyed hashes) and caches other machines' activity in `feeds/activity-<ws>.json`.
+- At a prompt, a session gets one card (<= 300 chars) about work in flight toward its goal and related goals (parents,
+  dependencies, children, and goals under the same parent): this machine's sessions and other people's, grouped per
+  person, overlap with its own files first. At most one card per 10 minutes unless work overlaps; 0 bytes when nothing
+  is new. The card ends ``The user can type `::align team` for details.``; nothing points the agent at `align team`.
+- Edits are seen three ways: edit tools (Claude Edit/Write/MultiEdit, Codex apply_patch), plain shell writes (`>`,
+  `>>`, `tee`, `sed -i`, `touch`, `cp`/`mv` targets; `git add` is no edit), and, in the sync pass, the repo's working
+  tree and new commits since the previous pass (for files a script wrote), credited to the session most recently
+  active there unless a hook (in any session here, shared now or not) already recorded the file's latest change, or an
+  earlier pass credited it. An edit or commit counts only on evidence that its own tool call made it: with this
+  build's Claude Code plugin, its `PostToolUse` (never a refused call, which fires no hook, nor `PostToolUseFailure`);
+  in Codex and with an older plugin, the lines the call was to write are in the file and were not before, no other
+  session's edit explains them (a commit: the repo's reflog has it), checked at the session's next hook
+  (`src/hooks/evidence.ts`). So a refused or failed edit is never reported, whoever writes the file later, the same
+  content included. Reads are Claude's `Read` and plain shell reads (`cat`, `head`, `sed -n`, `git
+  diff <path>` ...). Activity carries the goal it was recorded toward, so a session that moves to another goal brings
+  none of its earlier work along. The activity file is trimmed only of lines the sync pass has uploaded.
+- On this machine, an edit to a file another same-goal session changed in the last 20 minutes (and this session has not
+  read since) is held once with the reason. Claude Code refuses such an edit itself before any hook runs, so every
+  prompt and tool call of the main agent (never a subagent's) also tells the session, once, which session changed a file it read or edited. When several sessions changed it, one hold names them all. A session a folder rule shares at its start counts from its first tool call, before the sync makes its share. Only hook-seen edits can hold an edit. Across people nothing is held; the next edit of an overlapping or claimed
+  file gets one short note.
+
+## Limits, accepted asks and the drift notice
+
+- **Limits.** A goal version can carry up to 5 limits (must / must not / out of scope), set by the people who approve
+  the goal. The envelope lists them after the measures, quoted, as context set by the goal's approvers (budget 1,800
+  characters when there are limits; they are clipped to 100 characters before one is ever dropped). A later version
+  whose limits changed reaches the session as the usual `updated` delta naming the first added or removed limit
+  (`limits_seen` in `injected/<lid>.json`); when it adds more than one, all the goal's limits follow the note, since a
+  running session gets the envelope again only at startup, clear or compact.
+- **Accepted asks.** The sync pass revalidates `GET /api/v2/workspaces/:ws/asks` (ETag) into `feeds/asks-<ws>.json`,
+  keeping the asks of your teams and the ones you recorded (at most 200). The envelope of a shared session adds the
+  *accepted* asks addressed to its goal's team (at most 5, newest first, each at most 280 characters), quoted with who
+  asked and who accepted them, as information, not instructions. When that accepted set changes, the next prompt gets
+  one note quoting every newly accepted ask (one line for one, a list within the 2,200-character budget for several);
+  otherwise nothing. Open, declined, done or withdrawn asks and other teams' asks are never put into the model's
+  context by Align: hooks never carry them, `::align team` shows them to the user only, and `align team` lists open
+  asks only when a person runs it in a terminal (not when its output is piped, or inside Claude Code's or Codex's
+  shell, where an agent may read it). `align asks` lists them for whoever runs it; nothing tells the agent to. An
+  accepted ask of a team you are not in, kept because a session here follows that team's goal through an approved
+  alignment, is listed apart in `align asks` as read-only.
+- **Drift notice.** After each turn of a shared session whose goal has limits, the Stop hook reads the agent's last
+  reply on this machine (the hook input's `last_assistant_message`, else the end of the transcript) and runs a word
+  check against each limit: a sentence that uses the limit's own verb (the word after its "must"/"not", or its first
+  word) and two more of its words, in the sense the limit rules out, read from the clause that holds that verb (a
+  "no" elsewhere in the sentence doesn't count) and from the limit's own with/without, before/after or during/outside
+  contrast. Lists of the limits, quotes, questions, code, conditions, someone else's ask and Align's own goal titles
+  and measures never count. If one may conflict, the next prompt shows *you* a `systemMessage` naming every limit it
+  may conflict with (up to 3 per prompt; at most 3 notices per limit per session). Each crossing sentence is told
+  once (only a digest of it is kept), so a false alarm never silences a later, different crossing. Nothing is
+  uploaded, nothing is added to the model's context, no reply text is kept, and it never blocks. `align config drift
+  off` turns it off.
+- **Past sessions.** `align share --dir <folder> --past <days>` writes the folder rule and also shares the sessions
+  already metered on this machine in the last 1 to 14 days whose own recorded folders (the first one and any it later
+  reported) are all the folder or inside it (`/work/app-secret` is not inside `/work/app`). Each is shared from its own
+  start after a preview that lists them by start time and harness. Sessions with no folder, sessions that were ever
+  shared, and sessions whose shared history was deleted (on the web or with `align delete-history`) are skipped; a
+  session shared before, even one whose history was deleted since, is only ever shared again from now, by an explicit
+  `align share <session>` or `::align share`. The server also refuses an epoch that would start before history it already holds
+  (`epoch_overlap`), and the CLI reports that session as skipped.
+
+## Allocation and steering
+
+- Each goal can carry a target share of the workspace's agent time. It is versioned goal content: the owner sets it in
+  a new version, and anyone else proposes new targets (for one goal or several at once) that each goal's approvers
+  approve and someone launches, on the web. The goals feed carries each active goal's trailing-7-day share (a whole
+  percent) and gap (to one decimal, as the Spend tab shows it), whether it is on hold, and the workspace's steering switch (owners turn it on or off on the web).
+- With steering on, a shared session that starts (or `/clear`s) on a goal at least 10 points over its target, while
+  another goal you can see is at least 10 points under, gets one line in context naming both goals and shares. Once
+  per session; never at resume or compaction, never while the session is stopped or held, never from or toward a goal
+  on hold; never names people. Each line shown is queued in `ALIGN_HOME/steering/` and reported by the next sync
+  (session key, goal ids and whole percents only).
+- Once a week, at the first fresh session, a user-only note says how much of this machine's agent time in the last 7
+  days was in sessions not shared toward any goal, and in which folders. The sync pass computes it from local
+  transcripts into `ALIGN_HOME/unshared-digest.json`; it is never uploaded and never reaches the model.
+- `align allocation` prints share, target and gap per goal from the cached feed (`--refresh` refetches; `--week`
+  asks the server for a past week) and the local unshared share. `align steering status` shows the switch, the lines
+  shown this week and those waiting to be reported.
+
+## What `align install` changes
+
+Copies the built `dist/` to `ALIGN_HOME/bin/<version>/` (adds a `package.json` with `"type": "module"`) and points the
+symlink `ALIGN_HOME/bin/current` at it, so hooks never run from a git checkout. `ALIGN_HOME/install.json` records
+what was added. Each build records its identity in `dist/build.json` (version and a hash of the built files): when
+the hooks' copy is another build than the `align` you run (an older `align` still on `PATH`, a newer one not installed
+yet), every command says so on stderr and `align doctor` shows a `WARN hooks build` line until `align install` runs
+with that `align`. `build.json` also carries the build's writer generation (`gen`, ordered), and every command and
+pass records in `align.db` the newest build that has written to it: an older build that finds a newer one's record
+writes no share-state notice or hot file (it still meters and writes the stop latch and hold file for a stop or hold it hears, and says so on stderr and in `align doctor`),
+and the newest build re-renders every session from the state now whenever another build wrote. `--dry-run` writes
+nothing, not even `ALIGN_HOME`.
+
+- `--claude` (default when no flag is given): writes the Claude Code plugin folder
+  `$CLAUDE_CONFIG_DIR/skills/align/` (default `~/.claude/skills/align/`): `.claude-plugin/plugin.json` and
+  `hooks/hooks.json` with one handler each for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and
+  `PostToolUseFailure` (matcher `"*"`; these two confirm that an edit recorded at `PreToolUse` ran), `Stop` and
+  `StopFailure`: `'<node>' '<ALIGN_HOME>/bin/current/hook.js' claude <Event>`, timeout 5 (`PreToolUse` adds
+  `--post-tool-use`: this plugin has `PostToolUse`, so edits wait for it from the first call; `align status` and
+  `align doctor` name a plugin an older Align wrote). Claude Code
+  loads it in every new session with no install step (`claude plugin list` shows `align@skills-dir`);
+  `claude plugin disable align@skills-dir` turns it off. `settings.json` is not edited, except that handlers an
+  earlier Align merged there are removed (with a `settings.json.align-backup-<timestamp>` copy first). Install
+  refuses to replace a `skills/align` folder that is not Align's.
+- `--codex` (default when no flag is given): `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`) gets
+  `SessionStart`, `UserPromptSubmit`, `PreToolUse` and `Stop` with `codex`, after a
+  `hooks.json.align-backup-<timestamp>` copy. Codex lists new hooks for review; trust them in Codex `/hooks`.
+  `config.toml` is not edited.
+- `--dry-run` prints the plan and writes nothing. A reinstall that changes nothing writes no backup. `align uninstall`
+  deletes the plugin folder (and the `skills/` folder when Align's install created it and it is empty again), removes
+  only Align's Codex handlers (and the backups Align made of those files) and keeps `ALIGN_HOME` unless `--purge`.
+
+Workspaces: a device reaches the workspaces you ticked when you approved it. When you accept an invite to a workspace
+(joining it, or rejoining after being removed), the invite page lists your paired devices: tick a device there and its
+next sync picks the workspace up (`align sync` and the sessions that lost it say so once), with no `align login`, so
+shares in your other workspaces carry on. A workspace you joined without ticking this device can be given to it later
+on the Devices page ("Give this device the workspace"); until then `--workspace <it>` says so and points there.
+
+## State (`ALIGN_HOME`, default `~/.align`, 0700, must be owned by you)
+
+`config.json`, `credentials.json` (0600; `clock_offset_ms` while this computer's clock is a minute or more off the
+server's, measured from its answers' `Date` header: every time the CLI sends is put on the server's clock),
+`revoke.json` (0600, only while a revoke waits for the server: each device an offline logout signed out or a login
+replaced and could not revoke, with its tokens and key, kept until the server confirms it),
+`device_key` (Ed25519 PKCS#8, 0600), `device_secret` (32 random bytes,
+0600, never sent), `align.db` (SQLite WAL: sessions, root turns, epochs, request ledger, file offsets, outbox,
+directives, requests, holds, shares, aliases), `rules.json` folder share rules, `hot/` and `injected/` per-session JSON for hooks,
+`latch/` stop latches and goal holds, `spool/` hook records for the next sync, `feeds/` cached goals (`<ws>.json`), team activity
+(`activity-<ws>.json`) and asks (`asks-<ws>.json`), `drift/` drift notices waiting for the next prompt (limit ids and sentence digests only),
+`steering/` steering lines shown and not yet reported, `unshared-digest.json` and `unshared-shown.json` (this machine's
+agent time outside shared sessions, by folder, and the week its note was shown; never sent), `me.json`,
+`last-sync.json`, `logs/`.
+
+Set `"default_workspace": "<ws id>"` in `config.json` if you belong to several workspaces and want `::align share`
+without `--dir`; `align config` shows it. Otherwise the default is the only workspace this device reaches, or none.
+
+## Privacy rules in code
+
+- Hooks read only local state, never the network or credentials, and exit within 300 ms. The one transcript read is
+  the Stop hook's drift check, which keeps no text. The only thing they start is the detached sync. A stop latch or a
+  goal hold denies tools fail-closed, even if the sync never ran.
+- Uploads: session key and repo key are per-workspace HMACs; folder rules are never sent; titles are sent as null.
+  Branch names and repo-relative paths go up only as work signals with `--signals`; without it, keyed hashes only.
+  What reaches the model: ratified goal fields (with the version's limits) inside a fixed envelope (<= 1,200 chars, or
+  1,800 with limits) or delta (<= 300 chars), the accepted asks of the goal's team (<= 2,200 more, quoted with who
+  asked and who accepted), Align-worded requests that name their sender and quote the sender's note as data, and the
+  pod card and notes (<= 300 chars), at most one steering line per session (<= 320 chars: two goal titles and whole
+  percents), all passed through the same sanitizer, and
+  nothing at all when unchanged. From
+  this machine's own sessions the card carries file paths, task labels and commit subjects. From other people it
+  carries only a first name (letters only) and paths made of path characters (overlap is named by this session's own
+  path); their task labels, commit subjects and claim reasons are free text from someone else's machine, so they
+  appear only in `::align team` and `align team` (alias `align pod`), which mark them as information, not
+  instructions.
+
+## Development
+
+```
+npm install
+npm run build     # tsc -> dist/
+npm test          # build, then node --test test/*.test.ts (temp dirs and a localhost fake server only)
+```
+
+Every location is overridable for tests and dry runs: `HOME`, `ALIGN_HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+`ALIGN_SERVER`. `ALIGN_NO_AUTOSTART=1` stops hooks from starting syncs. Below Node 24 the CLI refuses to run (one
+line on stderr, exit 1) and the hooks do nothing but keep stop latches and goal holds closed;
+`ALIGN_ALLOW_UNSUPPORTED_NODE=1` skips that check (the tests set it, since a test machine may run an older Node).
