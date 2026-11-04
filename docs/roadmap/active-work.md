@@ -46,6 +46,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PRESEED-001 — Retire the hosted closing date
 
 - **Priority:** P0
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (hosted config)
 - **Direction:** Hosted Align must not require ALIGN_DELETE_BY or shut itself down; it was a demo-era restriction.
 - **Conclusion:** Remove the closing-date check, the 410 close and their tests; data lifetime is governed by PRESEED-004's retention schedule.
@@ -61,6 +62,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PRESEED-002 — Hosted workspace creation gate and request access
 
 - **Priority:** P0
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (workspaces)
 - **Direction:** Gate hosted workspace creation behind single-use creation codes and a request-access form answered by hand; local mode stays open. Folds in the request-access and follow-up/LOI calls to action from GitHub issue #30.
 - **Conclusion:** Codes are issued by an operator script (the v2 replacement for ws-admin); a global workspace cap and a creation kill switch are environment settings.
@@ -77,6 +79,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PRESEED-003 — Abuse controls for hosted sign-up
 
 - **Priority:** P0
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (auth)
 - **Direction:** Add cheap abuse controls before inviting outsiders: bot check, durable rate limits, disposable-domain block, per-account caps.
 - **Conclusion:** Turnstile through Better Auth's captcha plugin when keys are set, including the email-code send route; database-backed rate limits; disposable-domain block at workspace creation and access requests; environment-tunable caps.
@@ -94,6 +97,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PRESEED-004 — Account deletion and the retention schedule
 
 - **Priority:** P0
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (lifecycle)
 - **Direction:** People can delete their account, and data has a published lifetime.
 - **Conclusion:** Session rows 13 months then rolled up without the person; audit log 1 year; removed members shown as Former member after 30 days; deleted workspaces restorable for 30 days then purged; Fly snapshots 7 days.
@@ -111,6 +115,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PRESEED-005 — Passkeys, session cap and sign-out everywhere
 
 - **Priority:** P0
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (auth)
 - **Direction:** Offer passkeys, cap sessions at 30 days absolute, add sign-out everywhere, and require a fresh sign-in for every sensitive action.
 - **Conclusion:** Use @better-auth/passkey pinned to the better-auth version; keep 7-day rolling sessions.
@@ -128,6 +133,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PRESEED-006 — Evidence on change requests
 
 - **Priority:** P1
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (change requests)
 - **Direction:** Evidence is advisory: typed links labelled by who reported them, an Align-attached goal snapshot, and an audited approval without evidence.
 - **Conclusion:** Evidence is frozen per revision; agent-reported evidence is never shown as verified.
@@ -145,6 +151,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PRESEED-007 — Funnel events and operator report
 
 - **Priority:** P1
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (metrics)
 - **Direction:** Measure activation and retention without content, following the funnel convention in GitHub issue #30.
 - **Conclusion:** A content-free events table and an operator report: funnel counts, time to first value, weekly active workspaces, week-1 and week-4 retention, share of sessions and spend bound to goals.
@@ -161,6 +168,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PRESEED-008 — Security pack and public trust pages
 
 - **Priority:** P1
+- **Release target:** 2.0.0
 - **Owner:** documentation / components/legacy-project-wrapper/implementation (public pages)
 - **Direction:** Publish what buyers and directories ask for: privacy policy, DPA, subprocessors, retention, security overview and questionnaire answers.
 - **Conclusion:** Drafts marked for counsel review, accurate to the code; public /privacy and /trust pages so the hosted allowlist serves them.
@@ -176,6 +184,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PORT-001 — Port foundation: schema, stubs and test slots
 
 - **Priority:** P0
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (v2 schema)
 - **Direction:** Port the LIM-2437 and LIM-2445 / #30 features merged on main (PRs #32, #33, #35, #36) from the retired v1 app onto v2 without losing behaviour; owner decisions D1-D6 of 2026-10-30.
 - **Conclusion:** One additive migration (limits_json, asks, ask mentions, value reports, event indexes), stub modules and empty UI and test slots so the ports build in parallel.
@@ -190,6 +199,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PORT-002 — Port limits as goal content and suggestions from notes
 
 - **Priority:** P0
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (goals)
 - **Direction:** Port the LIM-2437 and LIM-2445 / #30 features merged on main (PRs #32, #33, #35, #36) from the retired v1 app onto v2 without losing behaviour; owner decisions D1-D6 of 2026-10-30.
 - **Conclusion:** Limits (must / must not / out of scope, at most 5) are part of each goal version, confirmed by the approval set, delivered with goal versions; pasted notes return suggestions and store nothing.
@@ -205,6 +215,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PORT-003 — Port asks and goal activity
 
 - **Priority:** P0
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (asks, activity)
 - **Direction:** Port the LIM-2437 and LIM-2445 / #30 features merged on main (PRs #32, #33, #35, #36) from the retired v1 app onto v2 without losing behaviour; owner decisions D1-D6 of 2026-10-30.
 - **Conclusion:** Asks between teams with accept, decline, done, reopen, withdraw and mention; goal activity from bindings, usage and work signals, never prompts; retention for closed asks and value reports.
@@ -221,6 +232,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PORT-004 — Port MCP tools, paste lines and the decision value card
 
 - **Priority:** P0
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (MCP, app surface)
 - **Direction:** Port the LIM-2437 and LIM-2445 / #30 features merged on main (PRs #32, #33, #35, #36) from the retired v1 app onto v2 without losing behaviour; owner decisions D1-D6 of 2026-10-30.
 - **Conclusion:** align_get_asks, align_get_goal_activity, align_get_limits and align_get_brief under the founder's 2026-10-29 read scoping in v2 terms; quoted paste lines; strict Host; the value card with per-decision value reports and notes; funnel reconciliation.
@@ -237,6 +249,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PORT-005 — Port agent context: limits, accepted asks, drift notice, past sessions
 
 - **Priority:** P0
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation/packages/align-agent
 - **Direction:** Port the LIM-2437 and LIM-2445 / #30 features merged on main (PRs #32, #33, #35, #36) from the retired v1 app onto v2 without losing behaviour; owner decisions D1-D6 of 2026-10-30.
 - **Conclusion:** The hook envelope carries the bound goal's limits and accepted asks as quoted, attributed data; a local-only drift notice shown to the user; align asks; align share --dir --past replaces the import script.
@@ -253,6 +266,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] REQ-001 — Requests and goal holds: server, app and spec
 
 - **Priority:** P0
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (directives)
 - **Direction:** Owner decision 2026-10-30: between informing and instructing agents, add typed requests (replan, checkpoint, switch goal) from a goal's approvers and workspace owners, plus an enforced goal hold; safe requests run on their own, anything that changes direction asks the developer first.
 - **Conclusion:** New request, hold and release directives with per-session receipts (accepted, declined, auto-accepted), routes and UI on the goal page, audit, retention and MCP read-out; answers the instruct-or-inform open question.
@@ -269,6 +283,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] REQ-002 — Requests and goal holds: local agent
 
 - **Priority:** P0
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation/packages/align-agent
 - **Direction:** Owner decision 2026-10-30: between informing and instructing agents, add typed requests (replan, checkpoint, switch goal) from a goal's approvers and workspace owners, plus an enforced goal hold; safe requests run on their own, anything that changes direction asks the developer first.
 - **Conclusion:** The agent tells the developer about every request, does checkpoints and replan drafts on its own, waits for the developer on switch goal, records accept or decline, and enforces goal holds like the stop latch.
@@ -285,6 +300,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] LAUNCH-001 — Launch releases an approved change to agents (#39 D1)
 
 - **Priority:** P0
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (change requests)
 - **Direction:** Founder ruling LIM-2454 33ad545d and owner answers 2026-10-31: approving records the decision; agents get the new version only at launch; anyone in the goal's approval set or a workspace owner may launch; one-step Approve and launch when the same person may do both; an unlaunched change is superseded if the goal gets a newer version or closes first.
 - **Conclusion:** Split the approve transaction: approve holds the version unlaunched; launch (or not yet, replaceable) publishes through writeGoalVersion with goal_version directives in one transaction; MCP, feed and directives show the launched version only.
@@ -301,6 +317,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] LAUNCH-002 — Accept if conditions on a counter (#39 D2)
 
 - **Priority:** P0
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (change requests)
 - **Direction:** Founder ruling LIM-2454 35376283 and owner answer 2026-10-31: a counter may carry a condition; only the requester acknowledges it, as a separate step from accepting the counter; it never gates approval or launch; no verified state.
 - **Conclusion:** A condition field on counter revisions, an acknowledge action for the requester only, shown as Not confirmed yet until acknowledged, exposed through MCP as untrusted text.
@@ -316,6 +333,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PORT2-001 — Port main's Home attention queue, phone layout and README (#41, #42, #40, #22)
 
 - **Priority:** P1
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (app surface) / README
 - **Direction:** main's new v1 work, merged at 5b6d19f with v1 files resolved away, must not be lost on v2.
 - **Conclusion:** A v2 Home that shows what needs you and others, active goals and which apps last read the plan, with one evidence class on every agent-status item (#39 E2); /app fits a 390px phone; the root README describes v2 in #22's structure.
@@ -332,6 +350,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PORT3-001 — Port main's #29: targets, allocation, steering, reallocation
 
 - **Priority:** P0
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (allocation, agent)
 - **Direction:** main merged #29 (7099ee1) on its old v2 layout; merged at db2be8c keeping the v2 tree, so its behaviour must be rebuilt on v2 without loss.
 - **Conclusion:** Rebuild per-goal targets, the allocation view, steering and reallocations on v2's approval sets, directive path, launch and holds; agent-side allocation and steering in align-agent.
@@ -348,6 +367,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PORT3-002 — Port Shruti's Lanes B and C: first run, understand then decide (#43, #47, #49)
 
 - **Priority:** P0
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (app surface)
 - **Direction:** main merged #43, #47 and #49 (v1 UI); v2 must keep their behaviour on its change-request page and Home.
 - **Conclusion:** Change-request review: compare, what would change, one decision from the server's can flags, confirm before sending, freshness check; decline while a counter waits; a first-run card on Home until an app is seen.
@@ -364,6 +384,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [x] PORT3-003 — Port #44 cycle-2 layout fixes and audit the LIM-2455 checklist (#39)
 
 - **Priority:** P1
+- **Release target:** 2.0.0
 - **Owner:** components/legacy-project-wrapper/implementation (app surface) / design/acceptance
 - **Direction:** Shruti's draft #44 fixes phone chrome, Goals map stacking, tap targets and app copy on v1; her draft #39 is the founder's v2 acceptance checklist.
 - **Conclusion:** Apply #44's intent where v2 has an equivalent; audit every #39 item to pass, fixed or open with a reason in design/acceptance/LIM-2455.v2-audit.md.
