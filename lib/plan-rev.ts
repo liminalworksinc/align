@@ -2,10 +2,12 @@ import { createHash } from "node:crypto";
 import type { AppState } from "./types";
 
 // The plan an agent should be working from, as one short fingerprint: the approved goal versions, every proposal
-// and where it stands, and every acceptance with its launch decision. When it changes, an agent that read the
-// workspace before the change may still be working on the old plan. A connected AI app records the fingerprint it
-// last read (lib/oauth/grants.ts noteGrantUse), so the workspace can show which agents are on the current plan
-// without capturing what they do (capture stays off when hosted).
+// and where it stands, and every acceptance with its launch decision. Open and declined requests count because the
+// agent-facing tools report them (align_get_accepted_plan says a proposed plan is "not agreed"; align_get_decision_record
+// returns the latest request), so the UI calls a change here "the latest change", not "the plan". When it changes, an
+// agent that read the workspace before the change may still be working from what it read. A connected AI app records
+// the fingerprint it last read (lib/oauth/grants.ts noteGrantUse), so the workspace can show which agents were seen
+// since the latest change without capturing what they do (capture stays off when hosted).
 
 export function planRev(s: AppState): string {
   const parts = [

@@ -207,6 +207,7 @@ Passed	9 of 9	<TIME>
 WHO DID WHAT, WHEN
 Names come from who was signed in, so a request can't claim to be someone else.
 TIME	WHO	WHAT THEY DID
+<TIME>	Product Director	opened Evidence
 <TIME>	Product Director	opened the plan test
 <TIME>	Product Director	saw the CEO's change
 <TIME>	CEO / Leadership	approved the company goal and sent it to every team
@@ -220,13 +221,16 @@ Still running
 Not counted
 27 practice test runs done beforehand (<DUR> <DUR> in total)
 For engineers
-STEPS (2)
+STEPS (3)
 <TIME>
 Product Director
 saw the CEO's change
 <TIME>
 Product Director
 opened the plan test
+<TIME>
+Product Director
+opened Evidence
 DETAILS
 New plan: beta issues first
 ✓

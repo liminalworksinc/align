@@ -6,9 +6,10 @@ import { accepted, changedToday, currentGoal, isToday } from "@/components/selec
 import { Badge, STATE_LABEL, type Tone } from "@/components/ui";
 import { companyMeasureId, dependencyId, labelsFor, poss, slotOf, type Labels } from "@/lib/labels";
 import { LIMIT_WORDS, limitDrift } from "@/lib/limits";
-import type { Actor, Ask, Limit, Proposal, StateView } from "@/lib/types";
+import type { Actor, Ask, Goal, Limit, Proposal, StateView } from "@/lib/types";
 import { api } from "@/components/useAlign";
 import { DecisionValueCard } from "@/components/DecisionValueCard";
+import { useAgents, type AgentsRead } from "@/components/useAgents";
 
 // v6 "Your turn": the landing view for every role, built from state only. Waiting on you = proposals whose next action
 // is the signed-in actor's (the same rules the server enforces in lib/flow.ts), each quoting the exact measure text with
@@ -123,6 +124,116 @@ function Card({ it, hot }: { it: Item; hot?: boolean }) {
   );
 }
 
+function ago(iso: string) {
+  const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} h ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+/** Small count tiles: only numbers Align has. Each jumps to its section. */
+function Tile({ n, label, href, hot }: { n: ReactNode; label: string; href: string; hot?: boolean }) {
+  return (
+    <a
+      href={href}
+      className={`flex min-w-0 flex-col gap-1 rounded-[14px] border bg-white px-4 py-3 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 ${hot ? "border-violet-700" : "border-zinc-200"}`}
+    >
+      <span className="text-[24px] font-semibold leading-none tabular-nums text-zinc-900">{n}</span>
+      <span className="text-[13px] leading-snug text-zinc-500">{label}</span>
+    </a>
+  );
+}
+
+function AgentsSection({ agents: read, teamOf }: { agents: AgentsRead; teamOf: (role: string) => string }) {
+  const agents = read === "unknown" ? null : read;
+  const reading = agents?.apps.filter((a) => a.last_used_at) ?? [];
+  const waiting = agents?.apps.filter((a) => !a.last_used_at) ?? [];
+  const older = reading.filter((a) => !a.on_current_plan);
+  return (
+    <section id="agents" aria-label="Connected AI apps" className="flex scroll-mt-4 flex-col gap-2.5">
+      <h2 className="al-lbl">Connected AI apps · when Align last saw them</h2>
+      {read === "unknown" ? (
+        <div className="rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 text-[15px] text-zinc-500">Couldn’t check connected apps just now, so whether they’ve been seen since the latest change is unknown. Align retries every 15 seconds.</div>
+      ) : !agents ? (
+        <div className="rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 text-[15px] text-zinc-500">Checking connected apps…</div>
+      ) : reading.length === 0 && waiting.length === 0 ? (
+        <div className="rounded-[14px] border border-dashed border-zinc-300 px-[18px] py-4 text-[15px] text-zinc-600">
+          No AI app has connected yet, so there is nothing to observe. Use <b className="text-zinc-900">Connect an AI app</b> to connect Claude Code, Codex, Claude or ChatGPT.
+        </div>
+      ) : (
+        <div className="flex flex-col divide-y divide-zinc-200 rounded-[14px] border border-zinc-200 bg-white">
+          {reading.map((a) => (
+            <div key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-[18px] py-3">
+              <span aria-hidden className={a.on_current_plan ? "text-violet-700" : "text-amber-700"}>
+                {a.on_current_plan ? "✓" : "▲"}
+              </span>
+              <span className="min-w-0 font-semibold text-zinc-900">{a.name}</span>
+              <span className="text-[14px] text-zinc-500">as {teamOf(a.role)}</span>
+              {a.received_current_plan && a.plan_receipt && (
+                <span className="ml-auto flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px] text-zinc-700 @max-md:ml-6 @max-md:basis-full">
+                  <Badge tone="violet">Align sent it the approved plan ({a.plan_receipt.accepted_version})</Badge>
+                  <span>sent by Align {ago(a.plan_receipt.at)}</span>
+                </span>
+              )}
+              {/* Both can be true: the approved plan is unchanged, but a newer request changed the workspace. */}
+              {!(a.received_current_plan && a.plan_receipt && a.on_current_plan) && (
+                <span className={`ml-auto text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"} @max-md:ml-6 @max-md:basis-full`}>
+                  {a.on_current_plan ? "Seen since the latest change" : "Last seen before the latest change"} · last seen by Align {ago(a.last_used_at!)}
+                </span>
+              )}
+            </div>
+          ))}
+          {waiting.map((a) => (
+            <div key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-[18px] py-3 text-zinc-500">
+              <span aria-hidden>○</span>
+              <span className="min-w-0 font-semibold text-zinc-700">{a.name}</span>
+              <span className="text-[14px]">as {teamOf(a.role)}</span>
+              <span className="ml-auto text-[14px] @max-md:ml-6 @max-md:basis-full">Approved, not seen by Align yet</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {agents && reading.length > 0 && (
+        <p className="text-[13px] leading-snug text-zinc-500">
+          {older.length > 0 && agents.changedAt ? `The workspace changed ${ago(agents.changedAt)}; ${older.length === 1 ? "one app hasn’t" : `${older.length} apps haven’t`} been seen since. ` : ""}
+          {agents.apps.some((a) => a.received_current_plan)
+            ? "Align sees when each app last called it and which approved plan it sent the app, not what the app does next."
+            : "Align sees when each app last contacted it, not what it read or does."}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function GoalsSection({ goals, L, onOpen }: { goals: { who: "ceo" | "product" | "security"; g: Goal }[]; L: Labels; onOpen: (g: Goal) => void }) {
+  if (!goals.length) return null;
+  return (
+    <section id="goals" aria-label="Active goals" className="flex scroll-mt-4 flex-col gap-2.5">
+      <h2 className="al-lbl">Active goals</h2>
+      {goals.map(({ who, g }) => (
+        <button
+          key={g.id}
+          type="button"
+          onClick={() => onOpen(g)}
+          className="flex w-full items-start gap-3.5 rounded-[14px] border border-zinc-200 bg-white px-[18px] py-3.5 text-left hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700"
+        >
+          <span className="flex min-w-0 flex-1 flex-col gap-1">
+            <span className="flex flex-wrap items-center gap-2 text-[13px] text-zinc-500">
+              <span className="al-lbl">{who === "ceo" ? (L.northstar ? "Company" : L.team.ceo) : L.team[who]}</span>
+              <Badge tone="neutral" icon={false}>{g.version}</Badge>
+              {changedToday(g) && <Badge tone="amber">Changed today</Badge>}
+            </span>
+            <span className="text-[15px] font-semibold leading-snug text-zinc-900">{g.objective}</span>
+          </span>
+          <span className="inline-flex min-h-[34px] shrink-0 items-center self-center rounded-[10px] px-3 text-[14px] font-semibold text-zinc-700 @max-md:hidden">Open</span>
+        </button>
+      ))}
+    </section>
+  );
+}
+
 /** What waits on the signed-in actor. Exported so the shell's nav badge counts the same list. */
 /** Where an ask came from, and how often it came up again. */
 function askSub(a: Ask) {
@@ -175,7 +286,7 @@ export function waitingOnMe(
       me: true,
       title: "Suggested limit for your goal",
       quote: `${LIMIT_WORDS[l.type]}: ${l.text}`,
-      sub: `${limitSub(l)}. Agents follow it once you confirm.`,
+      sub: `${limitSub(l)}. Agents can read it once you confirm.`,
       cta: "",
       open: () => undefined,
       actions: [
@@ -342,17 +453,64 @@ export function YourTurnView(props: ViewProps) {
         ? { text: "Not agreed yet", tone: "amber" }
         : { text: "Proposal in progress", tone: "violet" };
   const decided = acc ? recordFacts(s, acc) : null;
+  // The asking team's latest request was declined. While nothing is agreed the propose card says so; after an agreement
+  // (or alongside other work) this card does, so "the asking team sees that you declined" (ReviewDecide) stays true.
+  // Requests are appended, so the last one sent is newer than any agreement or open request.
+  const lastSent = [...s.proposals].reverse().find((p) => p.state !== "DRAFT" && p.proposing_owner === actor);
+  const declined = !L.northstar && lastSent?.state === "REJECTED" && !mine.some((it) => it.key === "propose") ? lastSent : null;
+
+  // Home as an attention queue, from real state only: which connected apps Align has seen since the latest change, what needs
+  // this person, and the goals in play. Tiles carry only numbers Align has.
+  // Only a custom workspace has connected apps: Northstar and a Mode L /setup scenario (workspace "northstar") have no
+  // connections endpoint, so they never poll it.
+  const connectable = !L.northstar && !!props.workspace && props.workspace !== "northstar";
+  const agentsRead = useAgents(connectable ? props.workspace : undefined);
+  const agents = agentsRead === "unknown" ? null : agentsRead;
+  const reading = agents?.apps.filter((a) => a.last_used_at) ?? [];
+  const onCurrent = reading.filter((a) => a.on_current_plan).length;
+  const goals = (["ceo", "product", "security"] as const)
+    .map((who) => ({ who, g: currentGoal(s, who) }))
+    .filter((x): x is { who: "ceo" | "product" | "security"; g: Goal } => !!x.g);
+  const teamOf = (r: string) => L.role[r as Actor] ?? r;
+  const openGoal = (g: Goal) => {
+    select({ kind: "goal", id: g.id });
+    go("goals");
+  };
 
   return (
     <div className="flex max-w-[880px] flex-col gap-[22px]">
       <div>
-        <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">Your turn</h1>
+        <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">Know what needs you</h1>
         <p className="mt-1.5 text-[16px] text-zinc-500">
           {mine.length ? `${mine.length} thing${mine.length === 1 ? "" : "s"} waiting on you.` : "Nothing waiting on you."}
+          {connectable && agents && reading.length > 0 && ` ${onCurrent} of ${reading.length} connected app${reading.length === 1 ? " was" : "s were"} seen since the latest change.`}
         </p>
       </div>
 
-      <section aria-label="Waiting on you" className="flex flex-col gap-2.5">
+      <div className="grid grid-cols-2 gap-2.5 @[36rem]:grid-cols-4">
+        <Tile n={mine.length} label="Waiting on you" href="#waiting" hot={mine.length > 0} />
+        <Tile n={others.length} label="Waiting on others" href={others.length ? "#others" : "#waiting"} />
+        {connectable && (
+          <Tile
+            n={agentsRead === "unknown" ? "?" : !agents ? "–" : reading.length ? `${onCurrent}/${reading.length}` : 0}
+            label={
+              agentsRead === "unknown"
+                ? "Apps: unknown"
+                : agents && reading.length
+                  ? "Apps seen since the latest change"
+                  : agents && agents.apps.length
+                    ? `Apps seen · ${agents.apps.length} approved`
+                    : "Apps connected"
+            }
+            href="#agents"
+          />
+        )}
+        <Tile n={goals.length} label="Active goals" href="#goals" />
+      </div>
+
+      {connectable && <AgentsSection agents={agentsRead} teamOf={teamOf} />}
+
+      <section id="waiting" aria-label="Waiting on you" className="flex scroll-mt-4 flex-col gap-2.5">
         <div className="flex items-center gap-2.5">
           <h2 className="al-lbl">Waiting on you</h2>
           <span className={`grid h-[22px] min-w-[22px] place-items-center rounded-full px-1.5 text-[12px] font-bold ${mine.length ? "bg-violet-700 text-black" : "bg-zinc-100 text-zinc-900"}`}>
@@ -366,7 +524,7 @@ export function YourTurnView(props: ViewProps) {
       </section>
 
       {others.length > 0 && (
-        <section aria-label="Waiting on others" className="flex flex-col gap-2.5">
+        <section id="others" aria-label="Waiting on others" className="flex scroll-mt-4 flex-col gap-2.5">
           <h2 className="al-lbl">Waiting on others</h2>
           {others.map((it) => (
             <Card key={it.key} it={it} />
@@ -374,11 +532,29 @@ export function YourTurnView(props: ViewProps) {
         </section>
       )}
 
+      <GoalsSection goals={goals} L={L} onOpen={openGoal} />
+
       {!L.northstar && <LimitNotes workspace={props.workspace} />}
 
-      {(kr || (acc && decided)) && (
+      {(kr || (acc && decided) || declined) && (
         <section aria-label="What changed" className="flex flex-col gap-2.5">
           <h2 className="al-lbl">{changedToday(ceo) || isToday(acc?.ratified_at) ? "Changed today" : "What changed"}</h2>
+          {declined && (
+            <Card
+              it={{
+                key: "declined",
+                team: L.person.security,
+                title: `${L.person.security} declined your last proposal`,
+                quote: declined.counter_versions.at(-1)?.proposed_measure_text ?? declined.proposed_measure_text,
+                sub: `${poss(L.team.security)} goal stays as it was`,
+                cta: "See the request",
+                open: () => {
+                  select({ kind: "proposal", id: declined.id });
+                  go("proposals");
+                },
+              }}
+            />
+          )}
           {kr && (
             <div className="flex items-start gap-3.5 rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 @max-md:flex-wrap">
               <Badge tone="amber" icon={false}>

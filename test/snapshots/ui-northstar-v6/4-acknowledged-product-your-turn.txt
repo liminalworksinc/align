@@ -32,10 +32,16 @@ Beta customers' issues handled first: marked urgent, tagged as beta, a private n
 Product and Security: not agreed yet
 YOUR GOAL · V3
 Ship the beta and clear anything blocking the launch.
-Your turn
+Know what needs you
 
 Nothing waiting on you.
 
+0
+Waiting on you
+1
+Waiting on others
+3
+Active goals
 WAITING ON YOU
 0
 Nothing is waiting on you.
@@ -44,6 +50,21 @@ SE
 Alex / Security Lead gives the final approval
 “Beta incidents triaged within <DUR>; P0 within <DUR>”
 Security’s goal v1
+Open
+ACTIVE GOALS
+COMPANY
+v2
+▲
+Changed today
+Launch the beta of our new monitoring product, with support ready to help beta customers quickly and safely.
+Open
+PRODUCT
+v3
+Ship the beta and clear anything blocking the launch.
+Open
+SECURITY
+v1
+Handle customer and security issues quickly and correctly.
 Open
 CHANGED TODAY
 CEO

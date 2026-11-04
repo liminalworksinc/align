@@ -23,10 +23,16 @@ CL
 CEO / Leadership
 Leadership · Owner
 Sign out
-Your turn
+Know what needs you
 
 Nothing waiting on you.
 
+0
+Waiting on you
+1
+Waiting on others
+3
+Active goals
 WAITING ON YOU
 0
 Nothing is waiting on you.
@@ -35,6 +41,21 @@ SE
 Alex / Security Lead reviews the proposal
 “Beta incidents triaged per launch-readiness policy within <DUR>”
 Security’s goal v1
+Open
+ACTIVE GOALS
+COMPANY
+v2
+▲
+Changed today
+Launch the beta of our new monitoring product, with support ready to help beta customers quickly and safely.
+Open
+PRODUCT
+v3
+Ship the beta and clear anything blocking the launch.
+Open
+SECURITY
+v1
+Handle customer and security issues quickly and correctly.
 Open
 CHANGED TODAY
 CEO

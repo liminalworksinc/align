@@ -33,10 +33,16 @@ Beta customers' issues handled first: marked urgent, tagged as beta, a private n
 Product and Security: not agreed yet
 YOUR GOAL · V1
 Handle customer and security issues quickly and correctly.
-Your turn
+Know what needs you
 
 1 thing waiting on you.
 
+1
+Waiting on you
+0
+Waiting on others
+3
+Active goals
 WAITING ON YOU
 1
 SE
@@ -44,6 +50,21 @@ Product Director accepted your changes. Your final approval is next
 “Beta incidents triaged within <DUR>; P0 within <DUR>”
 Security’s goal v1
 Review and approve
+ACTIVE GOALS
+COMPANY
+v2
+▲
+Changed today
+Launch the beta of our new monitoring product, with support ready to help beta customers quickly and safely.
+Open
+PRODUCT
+v3
+Ship the beta and clear anything blocking the launch.
+Open
+SECURITY
+v1
+Handle customer and security issues quickly and correctly.
+Open
 CHANGED TODAY
 CEO
 Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer

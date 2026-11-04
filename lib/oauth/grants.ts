@@ -17,8 +17,8 @@ import { agentEpochOf, readAuth, wsDir, type CustomWsId } from "../workspace";
 // connected app, and the agent epoch it was approved under: Restart and
 // "Disconnect all" bump that epoch, so every grant from before stops at once. Each grant also records which
 // ALIGN_SECRET it was made under (kid): after a rotation its refresh token can never work again, so it is treated as
-// gone, not listed, and dropped on the next write. last_used_at is set by the first
-// successful MCP call, and the workspace shows an app as connected only from then on.
+// gone, not listed, and dropped on the next write. last_used_at is set by the app's first tool call
+// (app/api/mcp/route.ts), and the workspace shows an app as connected only from then on.
 
 export interface Grant {
   id: string;
@@ -30,10 +30,21 @@ export interface Grant {
   created_at: string;
   last_used_at: string | null;
   last_read_rev?: string | null; // lib/plan-rev.ts: the plan fingerprint as of this app's last read
+  plan_receipt?: PlanReceipt; // the last agreed plan Align sent this app (notePlanReceipt)
   refresh_hash: string;
   prev_refresh_hash: string | null;
   refresh_exp: number;
   kid: string;
+}
+
+/** What Align sent an app from align_get_accepted_plan: an agreed plan (lib/policy.ts), by its acceptance, the goal
+ *  version it set and its launch state then, and when Align first sent it. Align observed this; it says nothing about
+ *  what the agent did next. */
+export interface PlanReceipt {
+  proposal_id: string;
+  accepted_version: string;
+  launch: "pending" | "approved";
+  at: string;
 }
 
 const MAX_GRANTS = 20;
@@ -173,9 +184,9 @@ export async function clearGrants(ws: CustomWsId): Promise<number> {
   return update(ws, (list) => ({ grants: [], out: list.length }));
 }
 
-/** Record a successful MCP call. The first one is written at once (that is what makes an app show as connected),
- *  and so is any call made after the plan changed (lib/plan-rev.ts), so the workspace knows the moment an agent has
- *  read the new plan; otherwise at most every 5 minutes per grant, so the file isn't rewritten on every tool call.
+/** Record a tool call (app/api/mcp/route.ts; initialize, tools/list, ping and notifications don't count). The first
+ *  one is written at once (that is what makes an app show as connected), and so is any call made after the plan
+ *  changed (lib/plan-rev.ts), so the workspace knows the moment an agent has read the new plan; otherwise at most every 5 minutes per grant, so the file isn't rewritten on every tool call.
  *  Failures are logged by name, never thrown. */
 export function noteGrantUse(ws: CustomWsId, id: string) {
   const now = Date.now();
@@ -192,4 +203,16 @@ export function noteGrantUse(ws: CustomWsId, id: string) {
     while (lastRev.size > 10_000) lastRev.delete(lastRev.keys().next().value!);
     await update(ws, (list) => ({ grants: list.map((x) => (x.id === id ? { ...x, last_used_at: new Date(now).toISOString(), ...(rev !== null ? { last_read_rev: rev } : {}) } : x)), out: null }));
   })().catch((e) => console.error("grant use not recorded", (e as Error)?.name));
+}
+
+/** Record that Align sent this app an agreed plan (lib/mcp/register.ts align_get_accepted_plan). Written only when it
+ *  differs from the receipt on file (another acceptance, goal version or launch state), so re-reads don't rewrite the
+ *  file and `at` stays the first time Align sent that plan. Failures are logged by name, never thrown. */
+export function notePlanReceipt(ws: CustomWsId, id: string, r: Omit<PlanReceipt, "at">) {
+  const match = (x?: PlanReceipt) => !!x && x.proposal_id === r.proposal_id && x.accepted_version === r.accepted_version && x.launch === r.launch;
+  if (match(readGrants(ws).find((x) => x.id === id)?.plan_receipt)) return;
+  const at = new Date().toISOString();
+  void update(ws, (list) => ({ grants: list.map((x) => (x.id === id && !match(x.plan_receipt) ? { ...x, plan_receipt: { ...r, at } } : x)), out: null })).catch((e) =>
+    console.error("plan receipt not recorded", (e as Error)?.name),
+  );
 }
