@@ -14,3 +14,4 @@ export { Timeline, type TimelineEvent, type TimelineSource } from "./timeline";
 export { Compare, VersionsCompare, type CompareProps, type VersionRow } from "./compare";
 export { DecisionRecord } from "./decision-record";
 export { WorkPanels } from "./work";
+export { GoalDependencies } from "./dependencies";

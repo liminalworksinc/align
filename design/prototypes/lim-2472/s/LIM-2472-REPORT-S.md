@@ -15,6 +15,9 @@ schema, spec or script changes; `globals.css` untouched (tokens come from founda
 | `_ui/ds/read.ts` | `useRead`: a GET that keeps the HTTP status, so 403 and 404 are said as what they mean. |
 | `w/[ws]/record/` | `/app/w/<ws>/record` (`?cr=<id>`, `?goal=<id>`), the record body inside today's `Shell`. |
 | `w/[ws]/work/` | `/app/w/<ws>/work` (`?goal=<id>`), the Work body inside today's `Shell`. |
+| `_ui/ds/dependencies.tsx` | `GoalDependencies`: goals as an indented list under the goal each contributes to, depends-on counts, stale contributions flagged, selected goal's details and a `VersionsCompare` drilldown. |
+| `w/[ws]/dependencies/` | `/app/w/<ws>/dependencies` (`?goal=<id>`). |
+| `w/[ws]/sessions/parts.tsx` | The Sessions tab's Btn, Note, Err, Pill, Loading on the tokens, same names and words as the kit pieces. |
 
 Outside the app: `design/prototypes/lim-2472/s/shots.mjs` (screenshots) and this report.
 
@@ -24,9 +27,13 @@ Outside the app: `design/prototypes/lim-2472/s/shots.mjs` (screenshots) and this
 |---|---|
 | `w/[ws]/apps/view.tsx` | The Apps tab as self-contained panels: Set up (MCP URL, Claude Code and Codex lines, approve), What Align can tell (Last connected vs Last read the goals, with Receipt / Not observed), counts, and Connections. The table keeps its column names, `data-label` cells, `data-paste-line`, `data-apps-times` and the empty sentence, so the existing Apps checks should still read it. Disconnect is shown only to the app's person or an owner; anyone else reads who can. |
 
+| `w/[ws]/sessions/view.tsx` | Sessions in the panel system (Yours | Everyone's); behaviour, API calls, button labels, `data-session-row`, `data-session-detail`, `data-row-refusal` and the `main li` structure unchanged; useful empty states. |
+| `_ui/evidence.tsx` | `EvidencePill` on the evidence tokens (words unchanged, Not observed dashed). |
+| `_ui/activity.tsx` | The goal card says "Reported activity, last 90 min" and "Last reported activity" (was "Active now", "Last activity"). |
+
 ## DELETED
 
-Nothing. Sessions and the goal page's activity card are unchanged; Work links to Sessions for stop and resume.
+Nothing. Work links to Sessions for stop and resume.
 
 ## Truth rules as built
 
@@ -41,7 +48,7 @@ Nothing. Sessions and the goal page's activity card are unchanged; Work links to
 
 1. `GET …/goals/<goal>/versions/<n>` (or full content in the goal GET's `versions`): a version's measures, limits and dependencies, so `VersionsCompare` can compare more than title, status and target share.
 2. A channel on audit rows (browser, device, MCP), so the record can drop "source not recorded".
-3. The per-app "Align sent it the approved plan (vN)" receipt (backed by `v2_oauth_goal_sends`) exposed on `GET …/apps`, and which goal a read returned. Work says "Not recorded per goal yet" until then.
+3. Which goal an app's read returned. (Correction: the per-app "Align sent it v<n>" receipt exists for launched changes, `GET …/change-requests/<id>/value` → `apps.items[].sent_at`, and Work now shows it; outside a launched change Work says nothing was sent.)
 4. `GET …/activity` is device-bearer only; a cookie read (or the goal activity read already used) is enough for the web, so no ask unless a concept wants the in-flight items.
 5. Audit is owners only and capped at the newest 200 rows; a paged read would let the record go further back.
 
@@ -53,7 +60,9 @@ Not run here (the brief says no `npm test` / `next build`). By reading `scripts/
 - Apps columns (`6633-6653`): headings, cell labels and the `data-apps-times` sentence unchanged; the App cell now also holds an evidence label, so a row's text starts with the app's name as before.
 - Apps empty (`4204`): "No AI apps are connected to this workspace." kept verbatim.
 - Buttons at 390 (`3780-3797`): every bordered button on Apps is 44px below 640px.
-- No check covers `/record` or `/work` (new pages).
+- Goal activity card (`5088`): matches `/Active now\s+1/` on `#goal-activity`; the label is now "Reported activity, last 90 min" on purpose (an "Active" label reads as Align observing the session). The check needs the new label.
+- Sessions: the restyle keeps every string and hook the checks at `2997-3021`, `3432-3470`, `8886-8893` and `10688-10693` read; not run.
+- No check covers `/record`, `/work` or `/dependencies` (new pages).
 
 ## How to boot and see it
 
@@ -72,7 +81,10 @@ Screenshots (dark 1440/390/320, light 1440; flags any sideways scroll):
 ALIGN_DATA_DIR=… node design/prototypes/lim-2472/s/shots.mjs http://127.0.0.1:3803 /tmp/lim-2472-s
 ```
 
+## Work and Sessions truth additions
+
+- Work: "Launched v<n>" from the goal's newest launched change request; per app "Align sent it v<n>" (Receipt) with its time; agent time over 7 days against target (Agent reported, from align CLI usage) with held; your sessions "bound at v<n>" (the version at binding, never "applied").
+
 ## Not done
 
-- P1 goal dependencies view: not started.
-- The Sessions page itself was not reworked; Work carries the goal-scoped session panel and links to Sessions for stop and resume.
+- A graph view of dependencies: deliberately not built; the indented list is the view while plans are small.
