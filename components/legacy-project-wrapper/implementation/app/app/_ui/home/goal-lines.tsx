@@ -1,18 +1,20 @@
 "use client";
 import Link from "next/link";
-import { EvidenceLabel, StatusPill } from "../ds";
+import { EvidenceSummary, StatusPill } from "../ds";
 import { useApi } from "../kit";
 import type { ChangeRequest, Goal } from "../types";
 import { crStatus } from "./cr-status";
 
-// Home, third section (LIM-2472 ruling 9b5b870f): Goals, one line per goal. Each line holds the plan state (the goal's
-// latest approved change: launched, or approved and not launched), the receipt line where Align has one for that launch,
-// the agent time on the goal over 7 days as the agents reported it, and one link to the goal's work. Sessions live on
-// Work. A line is about 44px tall on a desktop, so twelve goals fit one screen; on a phone a line wraps to two rows.
+// Home, third section (LIM-2472 ruling 9b5b870f): Goals, one line per goal: title, version and team, and one link to the
+// goal's work. Chips appear only where there is something to say: an approved change not launched yet, Held, the newest
+// launch's delivery, agent time above zero. Sessions live on Work. A line is about 44px tall on a desktop, so twelve
+// goals fit one screen; on a phone a quiet line is two rows at most.
 // When nothing needs the person this is the Home's body, and it stays this compact.
 //
-// Reads: the goals feed (GET …/goals, for allocation) and, per launched change shown, GET …/value (that launch's
-// delivery counts). The goals and change requests come from the Home's own reads.
+// The evidence is the shared EvidenceSummary (goalFacts), so this line, Home's rows and the review say the same thing:
+// the newest launch's delivery from that change's own …/value read, then agent time as reported. Nothing here comes
+// from an app's last_read_at. Reads: the goals feed (GET …/goals); EvidenceSummary reads each goal's newest launch.
+// The goals and change requests for the plan pill come from the Home's own reads.
 
 export interface GoalLine {
   id: string;
@@ -22,32 +24,23 @@ export interface GoalLine {
   team: { id: string; name: string } | null;
   owner: { id: string; name: string };
 }
-interface Delivery {
-  delivery: { sessions: number; received: number; applied: number } | null;
-}
-
-/** What Align delivered for the goal's launched version: the launch's own counts. */
-function Delivered({ ws, cr }: { ws: string; cr: ChangeRequest }) {
-  const v = useApi<Delivery>(`/api/v2/workspaces/${ws}/goals/${cr.goal.id}/change-requests/${cr.id}/value`);
-  if (!v.data) return v.error ? <EvidenceLabel kind="unobserved" size="s" detail="delivery unknown" /> : null;
-  const d = v.data.delivery;
-  if (!d || d.sessions === 0) return <EvidenceLabel kind="unobserved" size="s" detail={`v${cr.version} reached no bound session`} />;
-  if (d.received === 0) return <EvidenceLabel kind="unobserved" size="s" detail={`sent v${cr.version} to ${d.sessions}, no receipt`} />;
-  return <EvidenceLabel kind="receipt" size="s" detail={`sent v${cr.version}, ${d.received} of ${d.sessions} received`} />;
-}
-
 /** The goal's latest approved change: what its plan pill says. */
 export function latestApproved(changes: ChangeRequest[] | null, goal: string): ChangeRequest | null {
   const on = (changes ?? []).filter((x) => x.goal.id === goal && x.state === "approved").sort((a, b) => (b.decided_at ?? "").localeCompare(a.decided_at ?? ""));
   return on[0] ?? null;
 }
 
-function Line({ ws, me, g, latest, alloc, onReview }: { ws: string; me: string; g: GoalLine; latest: ChangeRequest | null; alloc: Goal["allocation"] | undefined; onReview?: (goal: string, id: string) => void }) {
-  const st = latest ? crStatus(latest) : null;
-  const pill = st && latest && <StatusPill kind={st.kind} size="s" label={st.kind === "launched" ? `Launched v${latest.version}` : st.kind === "approved" ? "Approved, not launched" : st.label} />;
+function Line({ ws, me, g, latest, fed, onReview }: { ws: string; me: string; g: GoalLine; latest: ChangeRequest | null; fed: Goal | undefined; onReview?: (goal: string, id: string) => void }) {
+  // A line earns a chip only when it has something to say: an approved change still waiting on launch, Held, the newest
+  // launch's delivery, or agent time above zero. Zero agent time and "no approved change" show nothing.
+  const waiting = latest && latest.state === "approved" && latest.launch !== "launched" ? latest : null;
+  const st = waiting ? crStatus(waiting) : null;
+  const pill = st && <StatusPill kind={st.kind} size="s" label={st.label} />;
+  const a = fed?.allocation;
+  const quietGoal = fed && { ...fed, allocation: a && a.share_7d > 0 ? a : null };
   return (
-    <li className="grid min-h-[44px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-1.5 max-md:grid-cols-1 max-md:py-2.5" data-goal-line={g.id}>
-      <div className="flex min-w-0 items-baseline gap-2">
+    <li className="flex min-h-[44px] flex-wrap items-center gap-x-3 gap-y-1 px-4 py-1.5 max-md:py-2" data-goal-line={g.id}>
+      <div className="flex min-w-0 flex-1 basis-56 items-baseline gap-2">
         <span className="truncate text-[14px] font-medium text-(--text-1)" title={g.title}>
           {g.title}
         </span>
@@ -56,25 +49,23 @@ function Line({ ws, me, g, latest, alloc, onReview }: { ws: string; me: string; 
           {g.owner.id === me ? " · yours" : ""}
         </span>
       </div>
-      <div className="flex flex-wrap items-center gap-1.5 md:justify-end">
+      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
         {pill &&
-          (onReview && latest ? (
+          (onReview && waiting ? (
             <button
               type="button"
-              onClick={() => onReview(latest.goal.id, latest.id)}
+              onClick={() => onReview(waiting.goal.id, waiting.id)}
               className="rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) max-sm:min-h-[44px]"
-              aria-label={`Review the latest change on ${g.title}`}
+              aria-label={`Review the approved change on ${g.title}`}
             >
               {pill}
             </button>
           ) : (
             pill
           ))}
-        {!latest && <span className="text-[12px] text-(--text-3)">No approved change yet</span>}
-        {latest?.launch === "launched" && <Delivered ws={ws} cr={latest} />}
-        {alloc?.held && <StatusPill kind="held" size="s" label="Held" />}
-        {/* Agent time over 7 days, from the usage agents report: their own word, never a measure of progress. */}
-        {alloc && <EvidenceLabel kind="reported" size="s" detail={`${alloc.share_7d > 0 ? `${alloc.share_7d}% of agent time, 7d` : "no agent time, 7d"}${alloc.target_share !== null ? `, target ${alloc.target_share}%` : ""}`} />}
+        {a?.held && <StatusPill kind="held" size="s" label="Held" />}
+        {/* The shared summary: the newest launch's delivery from its own …/value read, then agent time as reported. */}
+        {quietGoal && <EvidenceSummary ws={ws} goal={quietGoal} variant="inline" max={2} />}
         <Link href={`/app/w/${ws}/work?goal=${g.id}`} className="inline-flex min-h-[32px] items-center px-1 text-[13px] font-medium text-(--accent-text) hover:underline max-sm:min-h-[44px]" aria-label={`Work on ${g.title}`} data-goal-work>
           Work
         </Link>
@@ -124,7 +115,7 @@ export default function GoalLines({
           {changes === null && <p className="text-[13px] text-(--text-2)">Align couldn&apos;t read change requests just now, so the plan state of each goal is unknown.</p>}
           <ul className="divide-y divide-(--line) overflow-hidden rounded-(--radius-m) border border-(--line) bg-(--bg-panel)">
             {goals.map((g) => (
-              <Line key={g.id} ws={ws} me={me} g={g} latest={latestApproved(changes, g.id)} alloc={feed.data?.goals.find((x) => x.id === g.id)?.allocation} onReview={onReview} />
+              <Line key={g.id} ws={ws} me={me} g={g} latest={latestApproved(changes, g.id)} fed={feed.data?.goals.find((x) => x.id === g.id)} onReview={onReview} />
             ))}
           </ul>
         </>

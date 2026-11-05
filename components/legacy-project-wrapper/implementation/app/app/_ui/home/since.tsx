@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Timeline, type EvidenceKind, type TimelineEvent } from "../ds";
-import { api, when } from "../kit";
+import { api } from "../kit";
 import type { ChangeRequest } from "../types";
 import type { EvidenceClass } from "@/lib/v2/home-core.mts";
 
@@ -98,6 +98,17 @@ function useVersions(ws: string, goals: SinceGoal[] | null, on: boolean): Versio
   return v;
 }
 
+/** "today 12:28 PM", "yesterday 9:05 AM", "Monday 4:10 PM" within the last week, else "Oct 28, 4:10 PM". */
+function visitWords(iso: string): string {
+  const d = new Date(iso);
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((day(new Date()) - day(d)) / 86400000);
+  if (days <= 0) return `today ${time}`;
+  if (days === 1) return `yesterday ${time}`;
+  if (days < 7) return `${d.toLocaleDateString(undefined, { weekday: "long" })} ${time}`;
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
 const after = (iso: string | null | undefined, since: string) => !!iso && iso > since;
 const same = (a: string | null, b: string | null) => !!a && !!b && Math.abs(Date.parse(a) - Date.parse(b)) < 2000;
 
@@ -206,7 +217,7 @@ export default function Since({
         <h2 id="since-title" className="text-[16px] font-semibold text-(--text-1)">
           Since you last looked
         </h2>
-        {since && <p className="text-[13px] text-(--text-3)">Since your last visit on this device, {when(since)}</p>}
+        {since && <p className="text-[13px] text-(--text-3)">since your last visit on this device, {visitWords(since)}</p>}
       </div>
       {!visit.ready ? null : !since ? (
         <p className="rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3 text-[14px] text-(--text-2)" data-since-first>

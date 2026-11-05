@@ -316,7 +316,7 @@ for (const width of [390, 320]) {
   await p.waitForFunction(() => location.pathname.endsWith("/requests"), { timeout: 30_000 }).catch(() => {
     throw new Error(`Menu at ${width}: Requests did not navigate`);
   });
-  await ready(p, "Requests");
+  await ready(p, "Change requests");
   if ((await p.$eval(menuBtn, (b) => b.getAttribute("aria-expanded"))) !== "false" || (await p.$("[data-menu-sheet]"))) throw new Error(`Menu at ${width}: the next page opened with the sheet open`);
   await ctx.close();
 }
