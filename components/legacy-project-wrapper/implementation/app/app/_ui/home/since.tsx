@@ -196,11 +196,12 @@ export default function Since({
     return out.sort((x, y) => y.when.localeCompare(x.when));
   }, [since, changes, goals, versions, apps, me, ws, onReview]);
 
+  const reading = !!since && goals !== null && versions === null;
   const missing = [changes === null && "change requests", goals === null && "goals", apps === null && "connected apps"].filter(Boolean) as string[];
   const shown = all ? events : events.slice(0, SHOWN);
 
   return (
-    <section aria-labelledby="since-title" className="flex min-w-0 flex-col gap-3" data-since={!visit.ready ? "reading" : since ? events.length : "first"}>
+    <section aria-labelledby="since-title" className="flex min-w-0 flex-col gap-3" data-since={!visit.ready || reading ? "reading" : since ? events.length : "first"}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h2 id="since-title" className="text-[16px] font-semibold text-(--text-1)">
           Since you last looked
@@ -215,11 +216,9 @@ export default function Since({
       ) : (
         <div className="flex flex-col gap-2 rounded-(--radius-m) border border-(--line) bg-(--bg-panel) px-4 py-3">
           {missing.length > 0 && <p className="text-[13px] text-(--text-2)">Align couldn&apos;t read the {missing.join(" or ")} just now, so this list may be missing changes.</p>}
-          {since && changes !== null && goals !== null && versions === null ? (
-            <p className="text-[14px] text-(--text-3)">Reading goal versions…</p>
-          ) : (
-            <Timeline events={shown} empty={<p className="text-[14px] text-(--text-2)">Nothing changed on what you can see since then.</p>} />
-          )}
+          {/* Requests and app reads show at once; new goal versions join when their reads land. */}
+          <Timeline events={shown} empty={<p className="text-[14px] text-(--text-2)">{reading ? "Reading what changed…" : "Nothing changed on what you can see since then."}</p>} />
+          {reading && events.length > 0 && <p className="text-[13px] text-(--text-3)">Still reading new goal versions.</p>}
           {events.length > SHOWN && (
             <button type="button" onClick={() => setAll((x) => !x)} className="inline-flex min-h-[40px] w-fit items-center text-[14px] font-medium text-(--accent-text) hover:underline max-sm:min-h-[44px]" aria-expanded={all}>
               {all ? "Show fewer" : `Show all ${events.length}`}
