@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ApiError, api, sentence } from "../kit";
 import type { ChangeFields, ChangeRequest, Goal } from "../types";
 import { changeWaits, launchWaits } from "@/lib/v2/home-core.mts";
@@ -122,6 +122,23 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id }: { ws: string; c
 
 // ---------------------------------------------------------------------------------------------------------------------
 
+/** Below 640px (Tailwind's sm). Server render and first paint say "not a phone". */
+const PHONE = "(max-width: 639.98px)";
+function usePhone() {
+  return useSyncExternalStore(
+    (cb) => {
+      const m = window.matchMedia(PHONE);
+      m.addEventListener("change", cb);
+      return () => m.removeEventListener("change", cb);
+    },
+    () => window.matchMedia(PHONE).matches,
+    () => false,
+  );
+}
+/** Choices whose only text is an optional note: in compact mode on a phone they go straight to a one-row confirmation,
+ *  the note behind "Add a note". */
+const NOTE_ONLY: Choice[] = ["approve", "approve_and_launch"];
+
 const NO_TEXT: Choice[] = ["launch", "not_yet", "accept_counter", "acknowledge", "rebase", "withdraw"];
 
 type Notice = { kind: "done" | "refused" | "retry"; text: string };
@@ -198,9 +215,14 @@ export function ReviewActions({
   };
 
   const choices = choicesFor(cr);
+  const phone = usePhone();
+  const oneRow = compact && phone;
   const first = initialChoice && choices.includes(initialChoice) ? initialChoice : null;
   const [choice, setChoiceState] = useState<Choice | null>(first);
   const [step, setStep] = useState<"input" | "confirm">(first && NO_TEXT.includes(first) ? "confirm" : "input");
+  // On a phone in compact mode a note-only choice shows the one-row confirmation (the note behind "Add a note"), also
+  // when it was picked before the page knew it was on a phone (initialChoice): derived, never a second state.
+  const shown: "input" | "confirm" = oneRow && choice && NOTE_ONLY.includes(choice) ? "confirm" : step;
   const setChoice = (c: Choice | null) => {
     setChoiceState(c);
     onChoice?.(c);
@@ -215,8 +237,8 @@ export function ReviewActions({
   const confirmRef = useRef<HTMLHeadingElement | null>(null);
   const noticeRef = useRef<HTMLParagraphElement | null>(null);
   useEffect(() => {
-    if (step === "confirm") confirmRef.current?.focus();
-  }, [step]);
+    if (shown === "confirm") confirmRef.current?.focus();
+  }, [shown]);
   useEffect(() => {
     if (notice) noticeRef.current?.focus();
   }, [notice]);
@@ -226,7 +248,7 @@ export function ReviewActions({
     setErr(null);
     setNotice(null);
     // Launch, Not yet, Accept the change, Acknowledge, Update and Withdraw need no text: straight to the confirmation.
-    setStep(NO_TEXT.includes(c) ? "confirm" : "input");
+    setStep(NO_TEXT.includes(c) || (oneRow && NOTE_ONLY.includes(c)) ? "confirm" : "input");
   };
 
   function invalid(): string | null {
@@ -338,7 +360,7 @@ export function ReviewActions({
   return (
     <div className="flex min-w-0 flex-col gap-3" data-review-actions={cr.id}>
       {notice && <NoticeLine n={notice} r={noticeRef} />}
-      {step !== "confirm" && (
+      {shown !== "confirm" && (
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" data-decision={TITLE[dominant]} aria-pressed={choice === dominant} className={PRIMARY} onClick={() => pick(dominant)}>
             {TITLE[dominant]}
@@ -374,7 +396,7 @@ export function ReviewActions({
         </div>
       )}
 
-      {choice && step === "input" && (
+      {choice && shown === "input" && (
         <div data-decision-input={choice} className="flex flex-col gap-3 rounded-(--radius-m) border border-(--line) bg-(--bg-raised) p-3">
           <p className="text-[14px] text-(--text-2)">{SAYS[choice]}</p>
           {(choice === "approve" || choice === "approve_and_launch") && (
@@ -422,22 +444,28 @@ export function ReviewActions({
         </div>
       )}
 
-      {choice && step === "confirm" && (
+      {choice && shown === "confirm" && (
         <div role="region" aria-labelledby={`confirm-${cr.id}`} data-confirm={choice} className="flex flex-col gap-2 rounded-(--radius-m) border border-(--accent) bg-(--bg-raised) p-3">
           <h4 id={`confirm-${cr.id}`} ref={confirmRef} tabIndex={-1} className="text-[15px] font-semibold text-(--text-1) focus-visible:outline-2 focus-visible:outline-(--focus)">
             {TITLE[choice]}: {cr.goal.title}
           </h4>
-          <p className="text-[14px] text-(--text-2)">{SAYS[choice]}</p>
-          {(choice === "approve" || choice === "approve_and_launch") && cr.evidence_count === 0 && <p className="text-[14px] text-(--text-2)">No evidence: the record will say it was approved without evidence.</p>}
+          {!oneRow && <p className="text-[14px] text-(--text-2)">{SAYS[choice]}</p>}
+          {!oneRow && (choice === "approve" || choice === "approve_and_launch") && cr.evidence_count === 0 && <p className="text-[14px] text-(--text-2)">No evidence: the record will say it was approved without evidence.</p>}
+          {oneRow && NOTE_ONLY.includes(choice) && (
+            <details data-add-note className="text-[14px]" open={note.trim() !== "" || undefined}>
+              <summary className="inline-flex min-h-[44px] cursor-pointer items-center text-(--accent-text) [&::-webkit-details-marker]:hidden">Add a note</summary>
+              <textarea aria-label="Note (optional)" className={FIELD} rows={2} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
+            </details>
+          )}
           {choice === "reject" && <p className="text-[14px] text-(--text-1)">Your reason: {reason.trim()}</p>}
           {choice === "accept_if" && <p className="text-[14px] text-(--text-1)">Accept if: {condition.trim()}</p>}
-          <p className="text-[13px] text-(--text-3)">Align reads the request again before sending. If it changed meanwhile, nothing is sent.</p>
-          <div className="flex flex-wrap gap-2">
+          {!oneRow && <p className="text-[13px] text-(--text-3)">Align reads the request again before sending. If it changed meanwhile, nothing is sent.</p>}
+          <div className={`flex gap-2 ${oneRow ? "flex-nowrap [&>button]:min-w-0 [&>button:first-child]:flex-1" : "flex-wrap"}`}>
             <button type="button" className={PRIMARY} disabled={sending} onClick={() => void send()}>
               Confirm: {TITLE[choice]}
             </button>
-            <button type="button" className={SECONDARY} disabled={sending} onClick={() => (NO_TEXT.includes(choice) ? setChoice(null) : setStep("input"))}>
-              Back
+            <button type="button" className={SECONDARY} disabled={sending} onClick={() => (NO_TEXT.includes(choice) || oneRow ? setChoice(null) : setStep("input"))}>
+              {oneRow ? "Cancel" : "Back"}
             </button>
           </div>
         </div>

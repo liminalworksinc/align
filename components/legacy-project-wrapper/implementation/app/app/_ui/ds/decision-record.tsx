@@ -221,7 +221,7 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
           <div className="flex flex-col gap-4">
             <ReviewBody ws={ws} cr={reviewing} me={me} titleOf={titleOf} />
             <div className="border-t border-(--line) pt-3">
-              <ReviewActions key={reviewing.id} ws={ws} cr={reviewing} me={me} onDone={crs.reload} />
+              <ReviewActions key={reviewing.id} ws={ws} cr={reviewing} me={me} onDone={crs.reload} compact />
             </div>
           </div>
         </Panel>
