@@ -13,10 +13,10 @@ import { Who } from "./parts";
 // flag, from the request's current state) is a live button; one someone else may take says who; the rest are drawn
 // but inert. Nothing here sends anything: a live connector hands its action to the page, which confirms first.
 
-type Node = "asked" | "update" | "suggested" | "withdrawn" | "deciding" | "declined" | "approved" | "launched";
+export type Node = "asked" | "update" | "suggested" | "withdrawn" | "deciding" | "declined" | "approved" | "launched";
 type Lane = "asking" | "approvers" | "launch";
 
-interface Edge {
+export interface Edge {
   from: Node;
   to: Node;
   label: string;
@@ -39,7 +39,7 @@ export function currentNode(cr: ChangeRequest): Node | null {
   return null;
 }
 
-function cards(cr: ChangeRequest, me: string): Record<Node, { title: string; meaning: string }> {
+export function cards(cr: ChangeRequest, me: string): Record<Node, { title: string; meaning: string }> {
   const v = proposedVersion(cr);
   const req = cr.requester.id === me ? "You" : cr.requester.name;
   return {
@@ -63,7 +63,7 @@ function cards(cr: ChangeRequest, me: string): Record<Node, { title: string; mea
   };
 }
 
-function edges(cr: ChangeRequest): Edge[] {
+export function edges(cr: ChangeRequest): Edge[] {
   const c = cr.can;
   const req = [cr.requester];
   return [
@@ -83,7 +83,7 @@ function edges(cr: ChangeRequest): Edge[] {
 }
 
 /** Cards already passed on the way to the current one. */
-function passed(cur: Node | null, cr: ChangeRequest): Set<Node> {
+export function passed(cur: Node | null, cr: ChangeRequest): Set<Node> {
   const s = new Set<Node>(["asked"]);
   if (cur === "approved" || cur === "launched" || cur === "declined" || cur === "suggested") s.add("deciding");
   // Launched in a separate step (not "Approve and launch", which records both at one time) passed through Approved.

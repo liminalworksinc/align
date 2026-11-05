@@ -12,6 +12,7 @@ import { AgentsLine, type HomeApp } from "../../_ui/b/agents";
 import { Desk } from "../../_ui/b/desk";
 import { decisionHref, recordHref } from "../../_ui/b/model";
 import { Facts } from "../../_ui/b/parts";
+import { WhoDecides } from "../../_ui/b/who-decides";
 import { DeskShell } from "../../_ui/b/shell";
 import { NeedsList } from "../../_ui/home/needs-list";
 import FirstRun, { seenApp } from "./first-run";
@@ -141,6 +142,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
           id={review[2]!}
           goal={review[1]!}
           act={choice}
+          onPick={(a) => router.replace(`${pathname}?review=${review![1]}.${review![2]}&choice=${a}`, { scroll: false })}
           apps={apps}
           onClose={close}
           onDone={() => {
@@ -153,7 +155,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   );
 }
 
-function DecisionDrawer({ ws, me, id, goal, act, apps, onClose, onDone }: { ws: string; me: Me; id: string; goal: string; act: Act | undefined; apps: { everyone: boolean; items: HomeApp[] } | null | undefined; onClose: () => void; onDone: () => void }) {
+function DecisionDrawer({ ws, me, id, goal, act, apps, onClose, onDone, onPick }: { ws: string; me: Me; id: string; goal: string; act: Act | undefined; apps: { everyone: boolean; items: HomeApp[] } | null | undefined; onClose: () => void; onDone: () => void; onPick: (a: Act) => void }) {
   const d = useApi<ChangeRequest>(`/api/v2/workspaces/${ws}/goals/${goal}/change-requests/${id}`);
   const titles = useGoalTitles(ws);
   const cr = d.data;
@@ -198,6 +200,15 @@ function DecisionDrawer({ ws, me, id, goal, act, apps, onClose, onDone }: { ws: 
               }}
             />
           </div>
+          {/* Desktop only; a step the person may take opens it in the action bar above (&choice=). */}
+          <WhoDecides
+            cr={cr}
+            me={me.id}
+            onAct={(a) => {
+              onPick(a);
+              document.querySelector("[data-drawer] [data-action-bar]")?.scrollIntoView({ block: "nearest" });
+            }}
+          />
           <ReviewBody ws={ws} cr={cr} me={me.id} titleOf={(gid) => titles.get(gid) ?? "a goal"} onDone={() => { d.reload(); onDone(); }} />
           <div className="flex flex-col gap-1.5">
             <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--text-3)">What Align observed of agents</p>

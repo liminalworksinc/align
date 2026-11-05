@@ -260,6 +260,60 @@ try {
   await shoot(vp, "13", "decision-viewer", "dark", [1440], "Where this request is");
   await vp.close();
 
+  // "See who decides": in the real review drawer, by keyboard. Closed by default; Enter opens it; the map draws its lines;
+  // a step of this person's, pressed from the keyboard, opens that choice in the drawer's action bar. Not rendered on phones.
+  {
+    // A fresh request for the owner to decide (the journey above used the seeded ones).
+    const rafiC = await login(s.people.rafi);
+    const gs = (await apiAs(owner, "GET", `/api/v2/workspaces/${s.ws}/goals`)).goals;
+    const pg = gs.find((g) => g.title === "Partner pilot ready for review") ?? gs.find((g) => g.owner.id === s.people.dana.id && g.status === "active");
+    const pend = await apiAs(rafiC, "POST", `/api/v2/workspaces/${s.ws}/goals/${pg.id}/change-requests`, { base_version: pg.version, changes: { title: `${pg.title} (who decides check)` }, reason: "A request to show who decides (fictional)." });
+    for (const theme of ["dark", "light"]) {
+      const wp = await newPage(browser, owner, theme);
+      await wp.setViewport({ width: 1440, height: 900 });
+      await go(wp, `${desk}?review=${pend.goal.id}.${pend.id}`, "See who decides");
+      const closed = await wp.evaluate(() => !document.querySelector("[data-who-decides]")?.closest("details")?.open);
+      // Keyboard: Tab until the summary has focus, then Enter.
+      let found = false;
+      for (let i = 0; i < 80 && !found; i++) {
+        await wp.keyboard.press("Tab");
+        found = await wp.evaluate(() => document.activeElement?.tagName === "SUMMARY" && /See who decides/.test(document.activeElement.textContent ?? ""));
+      }
+      await wp.keyboard.press("Enter");
+      await settle(wp);
+      await sleep(300);
+      const open = await wp.evaluate(() => ({ open: !!document.querySelector("[data-who-decides]")?.closest("details")?.open, cards: document.querySelectorAll("[data-who-decides] [data-lane-card]").length, now: document.querySelector('[data-who-decides] [data-state="now"]')?.getAttribute("data-lane-card"), lines: document.querySelectorAll("[data-who-decides] path[data-link]").length, live: document.querySelectorAll('[data-who-decides] path[data-link="live"]').length }));
+      check(`${theme}: "See who decides" is closed by default, opens from the keyboard, lights the request's state and draws its lines`, closed && found && open.open && open.cards === 8 && open.now === "deciding" && open.lines > 0 && open.live > 0);
+      await wp.screenshot({ path: path.join(OUT, `14-who-decides-${theme}-1440.png`), fullPage: false });
+      console.log(`wrote 14-who-decides-${theme}-1440.png`);
+      if (theme === "dark") {
+        // Tab to the card's "Approve and launch" step and press it: the action bar opens on that choice; nothing is sent.
+        let step = false;
+        for (let i = 0; i < 40 && !step; i++) {
+          await wp.keyboard.press("Tab");
+          step = await wp.evaluate(() => !!document.activeElement?.closest("[data-steps]") && /Approve and launch/.test(document.activeElement?.textContent ?? ""));
+        }
+        await wp.keyboard.press("Enter");
+        await settle(wp);
+        const r = await wp.evaluate(() => ({ url: location.search, input: document.querySelector("[data-action-bar] [data-decision-input], [data-action-bar] [data-confirm]")?.getAttribute("data-decision-input") ?? document.querySelector("[data-action-bar] [data-confirm]")?.getAttribute("data-confirm") }));
+        const after = (await apiAs(owner, "GET", `/api/v2/workspaces/${s.ws}/goals/${pend.goal.id}/change-requests/${pend.id}`)).state;
+        check("a step pressed from the keyboard opens that choice in the review's action bar, and sends nothing", step && /choice=approve_and_launch/.test(r.url) && r.input === "approve_and_launch" && after === "pending");
+      }
+      await wp.close();
+    }
+    for (const w of [390, 320]) {
+      const pp = await newPage(browser, owner, "dark");
+      await pp.setViewport({ width: w, height: 844 });
+      await go(pp, `${desk}?review=${pend.goal.id}.${pend.id}`, "change request");
+      const shown = await pp.evaluate(() => {
+        const d = document.querySelector("[data-who-decides]")?.closest("details");
+        return !!d && d.offsetParent !== null;
+      });
+      check(`${w}: "See who decides" is not rendered on a phone (the one-sentence answer stands alone)`, !shown);
+      await pp.close();
+    }
+  }
+
   // A source that fails (forced 500 on one read at a time): the list never says "Nothing needs you", never shows a bare 0
   // in its filter, and reports partial to the page.
   const SOURCES = [
