@@ -1,5 +1,4 @@
 "use client";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useGoalTitles } from "../../_ui/changes";
 import { useCallback, useEffect, useState } from "react";
@@ -15,12 +14,8 @@ import type { ChangeRequest } from "../../_ui/types";
 
 export { crStatus };
 
-const quiet = "inline-flex min-h-[44px] items-center text-[13px] text-(--accent-text) hover:underline";
-
 function Loaded({ ws, cr, me, choice, onClose, done }: { ws: string; cr: ChangeRequest; me: string; choice?: ReviewChoice; onClose: () => void; done: () => void }) {
   const titles = useGoalTitles(ws);
-  const base = `/app/w/${ws}`;
-  const record = `${base}/record?cr=${cr.id}`;
   return (
     <Drawer
       open
@@ -28,19 +23,7 @@ function Loaded({ ws, cr, me, choice, onClose, done }: { ws: string; cr: ChangeR
       width="l"
       eyebrow="Review"
       title={cr.goal.title}
-      footer={
-        <div className="flex w-full flex-col gap-1">
-          <div className="flex flex-wrap gap-x-4">
-            <Link href={record} className={quiet} data-review-record>
-              Open the full record
-            </Link>
-            <Link href={`${base}/work?goal=${cr.goal.id}`} className={quiet} data-review-work>
-              Work and evidence for this goal
-            </Link>
-          </div>
-          <ReviewActions ws={ws} cr={cr} me={me} onDone={done} compact initialChoice={choice} />
-        </div>
-      }
+      footer={<ReviewActions ws={ws} cr={cr} me={me} onDone={done} compact initialChoice={choice} />}
     >
       <div data-review={cr.id}>
         <ReviewBody ws={ws} cr={cr} me={me} titleOf={(id) => titles.get(id) ?? "a goal you can't see"} onDone={done} />
