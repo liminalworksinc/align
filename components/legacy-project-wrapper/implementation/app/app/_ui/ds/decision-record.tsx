@@ -42,7 +42,9 @@ function source(e: RecordEvent): TimelineSource {
 }
 
 /** The card's detail, or null when there is none (the Timeline draws a box for any detail it gets). */
-function detail(e: RecordEvent, titleOf: (id: string) => string): ReactNode {
+/** `openCompare`: the before/after tables start open (the workspace-wide record); closed when a ReviewBody for the same
+ *  request is on the page, so its table isn't shown three times (open on click). */
+function detail(e: RecordEvent, titleOf: (id: string) => string, openCompare: boolean): ReactNode {
   const parts: ReactNode[] = [];
   if (e.source === "unrecorded")
     parts.push(
@@ -68,7 +70,7 @@ function detail(e: RecordEvent, titleOf: (id: string) => string): ReactNode {
     );
   if (e.compare)
     parts.push(
-      <details key="c" className="group">
+      <details key="c" className="group" open={openCompare || undefined}>
         <summary className={SUMMARY}>
           {e.kind === "counter" ? "What this revision changed" : "What the plan was and what it would become"}
         </summary>
@@ -80,7 +82,7 @@ function detail(e: RecordEvent, titleOf: (id: string) => string): ReactNode {
   if (e.kind === "decision" && e.cr?.state === "approved") {
     const cr = e.cr;
     parts.push(
-      <details key="d" className="group">
+      <details key="d" className="group" open={openCompare || undefined}>
         <summary className={SUMMARY}>What the plan was and what it became</summary>
         <div className="mt-2">
           <Compare before={cr.diff.before} after={cr.diff.after} hidden={cr.diff.hidden_depends_on ?? null} beforeLabel={`Version ${cr.base_version}`} afterLabel={cr.version ? `Version ${cr.version}` : "Approved"} titleOf={titleOf} />
@@ -152,7 +154,7 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
         </span>
       ),
       source: source(e),
-      detail: detail(e, titleOf),
+      detail: detail(e, titleOf, !crId),
     };
   });
 

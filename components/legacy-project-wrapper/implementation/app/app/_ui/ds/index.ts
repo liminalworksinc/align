@@ -15,4 +15,4 @@ export { Compare, VersionsCompare, type CompareProps, type VersionRow } from "./
 export { DecisionRecord } from "./decision-record";
 export { WorkPanels } from "./work";
 export { GoalDependencies } from "./dependencies";
-export { ReviewActions, ReviewBody } from "./review";
+export { ReviewActions, ReviewBody, type ReviewChoice } from "./review";

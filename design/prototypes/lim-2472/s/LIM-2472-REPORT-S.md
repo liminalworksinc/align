@@ -12,6 +12,7 @@ schema, spec or script changes; `globals.css` untouched (tokens come from founda
 | `_ui/ds/decision-record.tsx` | `DecisionRecord`: the decision record as a timeline on the foundation `Timeline`, filters by who and what, order newest/oldest, change detail through `Compare`. |
 | `_ui/ds/record-events.ts` | Builds the record's events from a change request (revisions, evidence, condition acknowledgement, decision, launch decision) and from audit rows; says each event's source only as far as Align records it. |
 | `_ui/ds/work.tsx` | `WorkPanels`: goals, sessions shared toward the chosen goal, evidence on its change requests, connected apps' goal reads. |
+| `_ui/ds/review.tsx` | `ReviewBody {ws, cr, me, titleOf?}` and `ReviewActions {ws, cr, me, onDone, compact?, initialChoice?, onChoice?}`: a compact review of one change request with the real decisions its `can` flags allow; mounted on `/record?cr=`. |
 | `_ui/ds/read.ts` | `useRead`: a GET that keeps the HTTP status, so 403 and 404 are said as what they mean. |
 | `w/[ws]/record/` | `/app/w/<ws>/record` (`?cr=<id>`, `?goal=<id>`), the record body inside today's `Shell`. |
 | `w/[ws]/work/` | `/app/w/<ws>/work` (`?goal=<id>`), the Work body inside today's `Shell`. |
@@ -43,6 +44,22 @@ Nothing. Work links to Sessions for stop and resume.
 - Approval is not launch: an approved, unlaunched change says so on the record and reads "Approved, not launched" on Work.
 - Sessions: "Active in the last 90 minutes" (the server's definition), never "live" or "running".
 - No `launchWords` output anywhere.
+
+## Main strings that assert an agent-side effect
+
+Left as main has them (server copy or the concepts' files), listed so the truth audit can rule on them. The first three
+can reach the shared surfaces verbatim: ReviewActions shows a 409's message as the server wrote it.
+
+| Where | String |
+|---|---|
+| `lib/v2/changes.ts:540` (409 wrong_state) | "… already decided not yet, so nothing changes: agents stay on version N until someone launches version N+1" |
+| `lib/v2/reallocations.ts:302` (409 wrong_state) | "… agents keep the old targets until someone launches the new ones." |
+| `lib/v2/sample.ts:26` (the sample request's reason) | "… then launch it, which is when agents get the new version …" |
+| `lib/v2/launch-words.ts:12` | "Launched, agents on v<n>" (not displayed by workstream S) |
+| `lib/v2/alignments.ts:506, 509` | "… their agents get that goal and its changes." |
+| `app/app/_ui/decide.tsx:249-250` | "Agents stay on version N …", "launches version N+1 to agents now" |
+| `app/app/_ui/changes.tsx:149-151` | "you launched version N to agents. They get it at their next turn.", "Agents stay on version N …" |
+| `app/app/_ui/reallocations.tsx:45, 52, 56, 145` | "agents keep the old targets …", "Approve (agents switch at launch)" |
 
 ## Server asks (nothing faked in their place)
 

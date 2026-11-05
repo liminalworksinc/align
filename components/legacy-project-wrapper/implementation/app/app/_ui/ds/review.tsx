@@ -144,7 +144,29 @@ function choicesFor(cr: ChangeRequest): Choice[] {
   return out;
 }
 
-export function ReviewActions({ ws, cr, me, onDone }: { ws: string; cr: ChangeRequest; me: string; onDone: () => void }) {
+export type ReviewChoice = Choice;
+
+/** `compact`: below 640px the secondary actions fold into a "More actions" menu (the dominant one stays a button).
+ *  `initialChoice`: open with this choice already picked (its input, or its confirmation for a choice that needs no
+ *  text), e.g. from a concept's own "Decline" or "Launch" button; ignored when this person can't make it. Remount (a new
+ *  `key`) to apply a different one. `onChoice` hears every pick and cancel (null). */
+export function ReviewActions({
+  ws,
+  cr,
+  me,
+  onDone,
+  compact = false,
+  initialChoice,
+  onChoice,
+}: {
+  ws: string;
+  cr: ChangeRequest;
+  me: string;
+  onDone: () => void;
+  compact?: boolean;
+  initialChoice?: ReviewChoice;
+  onChoice?: (c: ReviewChoice | null) => void;
+}) {
   const path = crPath(ws, cr);
   const next = cr.version ?? cr.goal.version + 1;
   const n = cr.goal.version;
@@ -176,8 +198,13 @@ export function ReviewActions({ ws, cr, me, onDone }: { ws: string; cr: ChangeRe
   };
 
   const choices = choicesFor(cr);
-  const [choice, setChoice] = useState<Choice | null>(null);
-  const [step, setStep] = useState<"input" | "confirm">("input");
+  const first = initialChoice && choices.includes(initialChoice) ? initialChoice : null;
+  const [choice, setChoiceState] = useState<Choice | null>(first);
+  const [step, setStep] = useState<"input" | "confirm">(first && NO_TEXT.includes(first) ? "confirm" : "input");
+  const setChoice = (c: Choice | null) => {
+    setChoiceState(c);
+    onChoice?.(c);
+  };
   const [note, setNote] = useState("");
   const [condition, setCondition] = useState("");
   const [reason, setReason] = useState("");
@@ -317,10 +344,33 @@ export function ReviewActions({ ws, cr, me, onDone }: { ws: string; cr: ChangeRe
             {TITLE[dominant]}
           </button>
           {rest.map((c) => (
-            <button key={c} type="button" data-decision={TITLE[c]} aria-pressed={choice === c} className={SECONDARY} onClick={() => pick(c)}>
+            <button key={c} type="button" data-decision={TITLE[c]} aria-pressed={choice === c} className={`${SECONDARY} ${compact ? "max-sm:hidden" : ""}`} onClick={() => pick(c)}>
               {TITLE[c]}
             </button>
           ))}
+          {compact && rest.length > 0 && (
+            // Phones only: the same choices in a menu, so the dominant action stands alone on a narrow drawer.
+            <details className="relative sm:hidden" data-more-actions>
+              <summary className={`${SECONDARY} list-none [&::-webkit-details-marker]:hidden`}>More actions</summary>
+              <div role="menu" aria-label="More actions" className="absolute left-0 z-10 mt-1 flex min-w-[12rem] flex-col gap-1 rounded-(--radius-m) border border-(--line-strong) bg-(--bg-overlay) p-1">
+                {rest.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    role="menuitem"
+                    data-decision={TITLE[c]}
+                    className="flex min-h-[44px] items-center rounded-(--radius-s) px-3 text-left text-[14px] text-(--text-1) hover:bg-(--bg-raised) focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-(--focus)"
+                    onClick={(e) => {
+                      (e.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open");
+                      pick(c);
+                    }}
+                  >
+                    {TITLE[c]}
+                  </button>
+                ))}
+              </div>
+            </details>
+          )}
         </div>
       )}
 
