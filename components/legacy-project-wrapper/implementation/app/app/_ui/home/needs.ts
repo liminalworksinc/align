@@ -194,8 +194,8 @@ function crNeed(cr: ChangeRequest, me: string): Need | null {
     const since = last ? { at: last.created_at, field: "revisions[latest].created_at" } : { at: cr.created_at, field: "created_at" };
     // (a) A decision waiting on you: your `can` has a decision (approve, approve_and_launch, reject or counter).
     if ((w.next === "decide" || w.next === "resolve_loop") && (c.approve || c.approve_and_launch || c.reject || c.counter)) {
-      const label = c.approve_and_launch ? "Approve and launch" : c.approve ? "Approve" : c.counter ? "Suggest a change" : "Decline";
-      return { ...base, kind: "decide", phase: "needs_you", tone: "pending", cause: asker, since, action: { label: `Review: ${label}`, opens: "review" }, who: null };
+      // "Review", not a decision's name: the choice is made in the review.
+      return { ...base, kind: "decide", phase: "needs_you", tone: "pending", cause: asker, since, action: { label: "Review", opens: "review" }, who: null };
     }
     // (c) Your request that came back: a suggested change to accept, a condition to acknowledge, an update to the
     // goal's current version.
@@ -238,7 +238,7 @@ function alignmentNeed(a: Alignment, me: string): Need | null {
   const lastH = a.history.reduce<Alignment["history"][number] | null>((m, h) => (!m || h.revision > m.revision ? h : m), null);
   const since = lastH ? { at: lastH.created_at, field: "history[latest].created_at" } : { at: a.created_at, field: "created_at" };
   if (a.waiting_on_me) {
-    const label = a.can.accept_counter ? "Accept the change" : a.can.approve ? "Approve" : "Review";
+    const label = a.can.accept_counter ? "Accept the change" : "Review";
     return { ...base, phase: "needs_you", tone: a.state === "countered" ? "countered" : "pending", cause, since, action: { label, opens: "alignments" }, who: null };
   }
   const waiting = a.state === "countered" ? [a.requester] : a.requirements.filter((r) => !r.approved_by).flatMap((r) => r.approvers);

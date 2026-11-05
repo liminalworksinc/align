@@ -22,7 +22,8 @@ const PHASES: { value: NeedPhase; label: string }[] = [
 export function waited(iso: string | undefined): string {
   if (!iso) return "";
   const ms = Date.now() - new Date(iso).getTime();
-  const m = Math.max(1, Math.floor(ms / 60_000));
+  const m = Math.floor(ms / 60_000);
+  if (m < 1) return "just now";
   if (m < 60) return `${m}m`;
   const h = Math.floor(m / 60);
   if (h < 48) return `${h}h`;
@@ -111,7 +112,10 @@ function useSends(W: string, crs: ChangeRequest[] | null, failed: boolean) {
   return { sends: ready ? state.sends : undefined, values: ready ? state.values : new Map<string, ValueLite>(), unchecked: ready ? state.unchecked : 0, loading: !ready };
 }
 
-export function NeedsList({ ws, me, selected, reviewBase = "" }: { ws: string; me: string; selected?: string | null; reviewBase?: string }) {
+/** Search shows only when a phase has more rows than this. */
+const SEARCH_FROM = 8;
+
+export function NeedsList({ ws, me, selected, reviewBase = "", heading = true }: { ws: string; me: string; selected?: string | null; reviewBase?: string; heading?: boolean }) {
   const W = `/api/v2/workspaces/${ws}`;
   const cr = useApi<Groups<ChangeRequest>>(`${W}/change-requests`);
   const asks = useApi<{ asks: AskLite[] }>(`${W}/asks?state=open,accepted,done,declined`);
@@ -146,14 +150,26 @@ export function NeedsList({ ws, me, selected, reviewBase = "" }: { ws: string; m
   }, [rows, phase, q]);
 
   return (
-    <section aria-labelledby="needs-h" data-needs className="flex min-w-0 flex-col gap-3">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <section aria-labelledby={heading ? "needs-h" : undefined} aria-label={heading ? undefined : "Needs you"} data-needs className="@container/needs flex min-w-0 flex-col gap-2">
+      {heading && (
         <h2 id="needs-h" className="text-[18px] font-semibold text-(--text-1)">
           Needs you
         </h2>
-        <div className="flex min-w-0 flex-wrap items-end gap-2">
-          <Segmented label="Show" hideLabel size="s" options={PHASES.map((p) => ({ value: p.value, label: `${p.label} ${loading ? "" : counts[p.value]}`.trim() }))} value={phase} onChange={setPhase} />
-          <label className="flex min-w-[200px] flex-1">
+      )}
+      <div className="flex min-w-0 flex-wrap items-end gap-2">
+        <Segmented
+          label="Show"
+          hideLabel
+          size="s"
+          options={PHASES.map((p) => ({ value: p.value, label: loading ? p.label : `${p.label} ${counts[p.value]}` }))}
+          value={phase}
+          onChange={(v) => {
+            setPhase(v);
+            setQ("");
+          }}
+        />
+        {!loading && counts[phase] > SEARCH_FROM && (
+          <label className="flex min-w-[200px] flex-1 sm:max-w-[320px]">
             <span className="sr-only">Search what needs you</span>
             <input
               type="search"
@@ -163,7 +179,7 @@ export function NeedsList({ ws, me, selected, reviewBase = "" }: { ws: string; m
               className="min-h-[36px] w-full rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) px-3 text-[14px] text-(--text-1) placeholder:text-(--text-3) max-sm:min-h-[44px]"
             />
           </label>
-        </div>
+        )}
       </div>
       {unknown.length > 0 && !loading && (
         <p role="status" className="rounded-(--radius-s) border border-(--st-retry)/50 bg-(--st-retry-soft) px-3 py-2 text-[13px] text-(--text-1)">
@@ -175,6 +191,13 @@ export function NeedsList({ ws, me, selected, reviewBase = "" }: { ws: string; m
           {sent.loading && !reqs.loading ? "Checking what Align sent…" : "Reading what needs you…"}
         </p>
       ) : (
+        <div className="min-w-0 [&>div>p:first-child]:hidden">
+        {shown.length > 1 && (
+          <details className="mb-1.5 px-1 text-[12px] text-(--text-3)" data-rank-note>
+            <summary className="inline-flex min-h-[44px] cursor-pointer items-center">Ranked by kind, oldest first. How it&apos;s ranked</summary>
+            <p className="pb-1">{rankNote(reqs.unchecked, sent.unchecked)}</p>
+          </details>
+        )}
         <NeedList
           rankNote={rankNote(reqs.unchecked, sent.unchecked)}
           empty={q ? `Nothing here mentions "${q}".` : phase === "needs_you" ? "Nothing needs you." : phase === "waiting_on_others" ? "Nothing you're part of is waiting on someone else." : "Nothing decided yet."}
@@ -188,7 +211,9 @@ export function NeedsList({ ws, me, selected, reviewBase = "" }: { ws: string; m
               sub={n.goal ? (n.who ? `${n.cause} · ${n.who}` : n.cause) : (n.who ?? undefined)}
               waited={n.since ? waited(n.since.at) : "time not recorded"}
               evidence={
-                n.cr ? (
+                n.kind === "decide" && n.phase === "needs_you" && !n.evidence.agent_reported && !n.evidence.self_reported ? (
+                  <span className="text-[12px] text-(--text-3)">No evidence attached</span>
+                ) : n.cr ? (
                   // The shared summary, from the same value read the review uses; none for a request not launched.
                   <EvidenceSummary ws={ws} cr={n.cr} variant="inline" max={2} value={n.cr.launch === "launched" ? sent.values.get(n.cr.id) : null} />
                 ) : (
@@ -201,6 +226,7 @@ export function NeedsList({ ws, me, selected, reviewBase = "" }: { ws: string; m
             />
           ))}
         </NeedList>
+        </div>
       )}
     </section>
   );
