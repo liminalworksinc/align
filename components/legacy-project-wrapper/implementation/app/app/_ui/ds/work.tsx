@@ -22,6 +22,11 @@ import { StatusPill } from "./status-pill";
 
 const HARNESS = { "claude-code": "Claude Code", codex: "Codex" } as const;
 const at = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
+/** "12 min ago", "3 h ago", else the date: how long since something was reported, never "now". */
+const ago = (iso: string) => {
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  return m < 1 ? "under a minute ago" : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : at(iso);
+};
 const LINK = "text-(--accent-text) underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)";
 
 interface Activity {
@@ -68,7 +73,7 @@ function SessionsPanel({ ws, goal }: { ws: string; goal: Goal }) {
             <EvidenceLabel kind={EV[d.evidence_class]} size="s" detail="align CLI" />
             Last {d.window_days} days, from bindings and usage times, never from what agents wrote.
           </p>
-          <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[14px]">
+          <dl className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[14px]">
             <Row label="Sessions">
               <span className="font-mono tabular-nums">{d.sessions}</span>
               {d.sessions > 0 && (
@@ -83,10 +88,10 @@ function SessionsPanel({ ws, goal }: { ws: string; goal: Goal }) {
                 </span>
               )}
             </Row>
-            <Row label="Active in the last 90 minutes">
+            <Row label="Last reported activity">{d.last_activity_at ? <span title={at(d.last_activity_at)}>{ago(d.last_activity_at)}</span> : "None reported"}</Row>
+            <Row label="Sessions that reported activity in the last 90 minutes">
               <span className="font-mono tabular-nums">{d.active_now}</span>
             </Row>
-            <Row label="Last activity reported">{d.last_activity_at ? at(d.last_activity_at) : "None"}</Row>
           </dl>
           {d.detail && d.detail.files.length > 0 && (
             <div>
@@ -114,6 +119,9 @@ function SessionsPanel({ ws, goal }: { ws: string; goal: Goal }) {
                 {x.repo_alias && <span className="font-mono text-[12.5px] text-(--text-2)">{x.repo_alias}</span>}
                 <span className="text-(--text-3)">· {x.state === "shared" ? "shared" : x.state}</span>
                 {x.agent_stopped && <span className="text-(--st-declined)">· stop requested</span>}
+                {(x.current_epoch as { goal_version_at_start?: number | null } | null)?.goal_version_at_start ? (
+                  <span className="text-[13px] text-(--text-2)">bound at v{(x.current_epoch as { goal_version_at_start?: number }).goal_version_at_start}</span>
+                ) : null}
                 <span className="text-[13px] text-(--text-3)">since {at(x.started_at)}</span>
               </li>
             ))}
@@ -174,9 +182,54 @@ function EvidencePanel({ ws, goal }: { ws: string; goal: Goal }) {
   );
 }
 
-function AppsPanel({ ws }: { ws: string }) {
+/** The newest launched change request on the goal: the only kind for which Align records what it sent each app. */
+function useLaunched(ws: string, goal: Goal) {
+  const crs = useRead<{ change_requests: ChangeRequest[] }>(`/api/v2/workspaces/${ws}/goals/${goal.id}/change-requests?state=approved`);
+  const cr = (crs.data?.change_requests ?? []).filter((c) => c.launch === "launched" && c.version).sort((a, b) => (b.version ?? 0) - (a.version ?? 0))[0] ?? null;
+  // GET …/value: once launched, the connected apps a goal read sent this version to, each with when Align first sent it
+  // (lib/v2/value.ts apps.items[].sent_at): a delivery receipt per app. A workspace owner sees every app, anyone else their own.
+  const value = useRead<{ apps: { everyone: boolean; items: { id: string; name: string; connected_by: { id: string; name: string }; sent_at: string }[] } | null }>(
+    cr ? `/api/v2/workspaces/${ws}/goals/${goal.id}/change-requests/${cr.id}/value` : null,
+  );
+  return { cr, sent: value.data?.apps ?? null, loading: crs.loading || (!!cr && value.loading) };
+}
+
+function LaunchRows({ ws, goal }: { ws: string; goal: Goal }) {
+  const { cr, sent, loading } = useLaunched(ws, goal);
+  if (loading) return null;
+  if (!cr)
+    return (
+      <Row label="Launched">
+        <span className="text-(--text-2)">Nothing launched through a change request yet</span>
+      </Row>
+    );
+  return (
+    <>
+      <Row label="Launched">
+        <span className="flex flex-wrap items-center gap-2">
+          <StatusPill kind="launched" label={`Launched v${cr.version}`} size="s" />
+          <span className="text-(--text-2)">{at(cr.launch_decided_at)}</span>
+        </span>
+      </Row>
+      <Row label="Align sent it to">
+        {sent && sent.items.length > 0 ? (
+          <span>
+            {sent.items.length} connected {sent.items.length === 1 ? "app" : "apps"}
+            {!sent.everyone && <span className="text-(--text-3)"> (yours; owners see everyone&apos;s)</span>}
+          </span>
+        ) : (
+          <span className="text-(--text-2)">No app yet. Align sends it when a connected app next reads the goals.</span>
+        )}
+      </Row>
+    </>
+  );
+}
+
+function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
   const apps = useRead<{ apps: App[] }>(`/api/v2/workspaces/${ws}/apps`);
   const list = apps.data?.apps ?? [];
+  const { cr, sent } = useLaunched(ws, goal);
+  const sentTo = new Map((sent?.items ?? []).map((i) => [i.id, i]));
   return (
     <Panel eyebrow="Connected apps" title="Goal reads Align recorded" actions={<Link href={`/app/w/${ws}/apps`} className={`${LINK} text-[14px]`}>Apps</Link>}>
       {apps.loading && <p className="text-[14px] text-(--text-2)">Loading…</p>}
@@ -189,12 +242,21 @@ function AppsPanel({ ws }: { ws: string }) {
               <span className="min-w-0">
                 <span className="font-medium text-(--text-1)">{a.name}</span> <span className="text-(--text-3)">· {a.user.name}</span>
               </span>
-              {a.last_read_at ? <EvidenceLabel kind="receipt" size="s" detail={`read the goals ${at(a.last_read_at)}`} /> : <EvidenceLabel kind="unobserved" size="s" detail="no goal read yet" />}
+              <span className="flex flex-wrap items-center gap-1.5">
+                {cr && sentTo.has(a.id) && <EvidenceLabel kind="receipt" size="s" detail={`Align sent it v${cr.version} ${at(sentTo.get(a.id)!.sent_at)}`} />}
+                {a.last_read_at ? <EvidenceLabel kind="receipt" size="s" detail={`read the goals ${at(a.last_read_at)}`} /> : <EvidenceLabel kind="unobserved" size="s" detail="no goal read yet" />}
+              </span>
             </li>
           ))}
         </ul>
       )}
-      <p className="mt-3 text-[13px] text-(--text-3)">Align records when an app read the workspace&apos;s goals, not which goal it read or which version it holds.</p>
+      <p className="mt-3 text-[13px] text-(--text-3)">
+        {cr && !list.length
+          ? `Launched v${cr.version} reaches an app when it reads the goals; none is connected.`
+          : cr
+          ? `"Align sent it v${cr.version}" is a delivery receipt: a goal read served this goal's launched version to that app. Align can't see what the app does with it.`
+          : "Nothing is launched on this goal yet, so Align has sent no version of it to an app. Goal reads are recorded for the workspace, not per goal."}
+      </p>
     </Panel>
   );
 }
@@ -250,19 +312,29 @@ export function WorkPanels({ ws, goalId }: { ws: string; goalId?: string }) {
         <>
           <div className="flex min-w-0 flex-col gap-4">
             <Panel eyebrow={goal.level === "company" ? "Company goal" : (goal.team?.name ?? "Goal")} title={goal.title} actions={<Link href={`/app/w/${ws}/goals/${goal.id}`} className={`${LINK} text-[14px]`}>Open goal</Link>}>
-              <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[14px]">
+              <dl className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[14px]">
                 <Row label="Current version">v{goal.version}</Row>
                 <Row label="Owner">{goal.owner.name}</Row>
-                <Row label="Version Align sent to agents">
-                  <span className="text-(--text-2)">Not recorded per goal yet</span>
-                </Row>
+                <LaunchRows ws={ws} goal={goal} />
+                {goal.allocation && (
+                  <Row label="Agent time, last 7 days">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span>
+                        <span className="font-mono tabular-nums">{goal.allocation.share_7d}%</span>
+                        {goal.allocation.target_share !== null && <span className="text-(--text-2)"> of the workspace&apos;s, target {goal.allocation.target_share}%</span>}
+                        {goal.allocation.held && <span className="text-(--st-pending)"> · held</span>}
+                      </span>
+                      <EvidenceLabel kind="reported" size="s" detail="usage from align CLI" />
+                    </span>
+                  </Row>
+                )}
               </dl>
             </Panel>
             <SessionsPanel key={`s-${goal.id}`} ws={ws} goal={goal} />
           </div>
           <div className="flex min-w-0 flex-col gap-4 lg:col-start-2 xl:col-start-3">
             <EvidencePanel key={`e-${goal.id}`} ws={ws} goal={goal} />
-            <AppsPanel ws={ws} />
+            <AppsPanel key={`a-${goal.id}`} ws={ws} goal={goal} />
           </div>
         </>
       )}

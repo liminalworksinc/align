@@ -95,7 +95,9 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
         </div>
 
         <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_minmax(0,0.8fr)]">
-          <Panel eyebrow="Set up" title="Connect an AI app" className="lg:col-span-2 xl:col-span-1">
+          {/* Stable anchor: Home and first run in both concepts link to /app/w/<ws>/apps#connect. */}
+          <div id="connect" className="min-w-0 scroll-mt-4 lg:col-span-2 xl:col-span-1">
+            <Panel eyebrow="Set up" title="Connect an AI app" className="h-full">
             {!apps.data || !role ? (
               <p className="text-[14px] text-(--text-2)">{apps.error ?? "Loading…"}</p>
             ) : role === "viewer" ? (
@@ -119,7 +121,8 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
                 </Step>
               </ol>
             )}
-          </Panel>
+            </Panel>
+          </div>
 
           <Panel eyebrow="What Align can tell" title="Connected is not the same as read">
             <dl className="flex flex-col gap-3 text-[14px]">
