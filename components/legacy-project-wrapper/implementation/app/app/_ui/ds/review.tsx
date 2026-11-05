@@ -106,7 +106,6 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
                 </span>
               </li>
             ))}
-            <li className="text-[13px] text-(--text-3)">Align doesn&apos;t verify links.</li>
           </ul>
         )}
         {evNotice && <NoticeLine n={evNotice} r={evRef} />}
