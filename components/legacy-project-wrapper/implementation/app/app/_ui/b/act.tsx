@@ -56,7 +56,7 @@ export function notYours(cr: ChangeRequest, me: string): string {
   return `Waiting on ${nameList(w.people, me)} for the ${w.for}.`;
 }
 
-const base = "inline-flex min-h-[36px] shrink-0 items-center justify-center whitespace-nowrap rounded-(--radius-s) px-3 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]";
+const base = "inline-flex min-h-[36px] shrink-0 items-center justify-center whitespace-nowrap rounded-(--radius-s) px-3 text-[13px] font-medium transition-[color,background-color,border-color] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]";
 
 export function PrimaryBtn({ children, onClick, disabled }: { children: ReactNode; onClick?: () => void; disabled?: boolean }) {
   return (
