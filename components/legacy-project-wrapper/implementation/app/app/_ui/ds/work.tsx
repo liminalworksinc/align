@@ -73,7 +73,7 @@ function SessionsPanel({ ws, goal }: { ws: string; goal: Goal }) {
             <EvidenceLabel kind={EV[d.evidence_class]} size="s" detail="align CLI" />
             Last {d.window_days} days, from bindings and usage times, never from what agents wrote.
           </p>
-          <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[14px]">
+          <dl className="grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[14px]">
             <Row label="Sessions">
               <span className="font-mono tabular-nums">{d.sessions}</span>
               {d.sessions > 0 && (
@@ -255,7 +255,7 @@ export function WorkPanels({ ws, goalId }: { ws: string; goalId?: string }) {
         <>
           <div className="flex min-w-0 flex-col gap-4">
             <Panel eyebrow={goal.level === "company" ? "Company goal" : (goal.team?.name ?? "Goal")} title={goal.title} actions={<Link href={`/app/w/${ws}/goals/${goal.id}`} className={`${LINK} text-[14px]`}>Open goal</Link>}>
-              <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[14px]">
+              <dl className="grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[14px]">
                 <Row label="Current version">v{goal.version}</Row>
                 <Row label="Owner">{goal.owner.name}</Row>
                 <Row label="Version Align sent to agents">

@@ -1,6 +1,7 @@
 // LIM-2472 workstream S screenshots: node design/prototypes/lim-2472/s/shots.mjs <BASE> <OUT>
 //   BASE: a running Align, e.g. http://127.0.0.1:3803
-//   OUT:  a directory for the PNGs (never committed): <nn>-<screen>-<theme>-<width>.png
+//   OUT:  a directory for the PNGs (never committed): <nn>-<screen>-<theme>-<width>.png, and .profile (the browser
+//         profile that keeps the sign-in between runs)
 // Signs in with ALIGN_SIGNIN_URL (the link the server prints, or `npm run sign-in-link`), or with the newest link in
 // $ALIGN_DATA_DIR/v2/sign-in.txt. Uses the first workspace on /app, creating the fictional Northstar sample when there
 // is none. Dark at 1440/390/320, light at 1440. Chrome from CHROME_PATH or the usual macOS path.
@@ -24,7 +25,8 @@ function signInUrl() {
 }
 
 const chrome = process.env.CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const browser = await puppeteer.launch({ executablePath: chrome, headless: true, args: ["--no-first-run"] });
+// A profile beside the shots keeps the sign-in, so a re-run needs no new code (codes are limited per address).
+const browser = await puppeteer.launch({ executablePath: chrome, headless: true, userDataDir: join(OUT, ".profile"), args: ["--no-first-run"] });
 const page = await browser.newPage();
 await page.setViewport({ width: 1440, height: 1000 });
 
@@ -41,9 +43,10 @@ const clickText = async (sel, text) => {
   if (!ok) throw new Error(`No ${sel} "${text}" on ${page.url()}`);
 };
 
-// Sign in: the link fills the email and code; Sign in submits.
-await page.goto(signInUrl(), { waitUntil: "networkidle0" });
+// Sign in when the profile has no session: the link fills the email and code; Sign in submits.
+await page.goto(`${BASE}/app`, { waitUntil: "networkidle0" });
 if (page.url().includes("/sign-in")) {
+  await page.goto(signInUrl(), { waitUntil: "networkidle0" });
   await clickText("button", "Sign in");
   await page.waitForFunction(() => !location.pathname.startsWith("/app/sign-in"), { timeout: 20000 });
 }
