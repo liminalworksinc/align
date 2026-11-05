@@ -163,7 +163,7 @@ function RequestAlignment({ ws, goal, me }: { ws: string; goal: Goal; me: Me }) 
       )}
       <p className="mb-1 text-[14px] text-zinc-600">Your shared sessions{choice === "work_toward" ? " (pick at least one)" : ""}</p>
       {sessions.loading && <Loading />}
-      {live.length === 0 && !sessions.loading && <Note>You have no shared sessions in this workspace. Share one with align share.</Note>}
+      {live.length === 0 && !sessions.loading && <Note>{sessions.error ? "Couldn't read your sessions just now. Reload to try again." : "You have no shared sessions in this workspace. Share one with align share."}</Note>}
       {/* Each session as the Alignments tab names it, "started <time> · …<key end>", so two of one person in one
           repository can be told apart before one is ticked (A1-cross-4). */}
       {shared.map((s) => (

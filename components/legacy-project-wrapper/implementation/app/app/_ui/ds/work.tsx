@@ -212,8 +212,10 @@ function LaunchRows({ ws, goal }: { ws: string; goal: Goal }) {
             {sent.items.length} connected {sent.items.length === 1 ? "app" : "apps"}
             {!sent.everyone && <span className="text-(--text-3)"> (yours; owners see everyone&apos;s)</span>}
           </span>
-        ) : (
+        ) : sent?.everyone ? (
           <span className="text-(--text-2)">No app yet. Align sends it when a connected app next reads the goals.</span>
+        ) : (
+          <span className="text-(--text-2)">Align hasn&apos;t sent v{cr.version} to an app you connected yet. You see your own apps here.</span>
         )}
       </Row>
     </>
@@ -229,7 +231,7 @@ function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
     <Panel eyebrow="Connected apps" title="Goal reads Align recorded" actions={<Link href={`/app/w/${ws}/apps`} className={`${LINK} text-[14px]`}>Apps</Link>}>
       {apps.loading && <p className="text-[14px] text-(--text-2)">Loading…</p>}
       {apps.status !== 0 && <p className="text-[14px] text-(--text-2)">{apps.message}</p>}
-      {apps.data && list.length === 0 && <EmptyState title="No AI apps connected" body="Nothing has read this workspace's goals through an app." action={<Link href={`/app/w/${ws}/apps`} className={LINK}>Connect one</Link>} />}
+      {apps.data && list.length === 0 && <EmptyState title="No AI app you can see is connected." body="You see your own apps here; workspace owners see everyone's." action={<Link href={`/app/w/${ws}/apps`} className={LINK}>Connect one</Link>} />}
       {list.length > 0 && (
         <ul className="flex flex-col gap-2">
           {list.map((a) => (
@@ -250,7 +252,7 @@ function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
           {launchUnread || sentUnread
             ? NOT_READ
             : cr && apps.data && !list.length
-            ? `Launched v${cr.version} reaches an app when it reads the goals; none is connected.`
+            ? `Launched v${cr.version} reaches an app when it reads the goals; none you can see is connected.`
             : cr
             ? `"Align sent it v${cr.version}" is a delivery receipt: a goal read served this goal's launched version to that app. Align can't see what the app does with it.`
             : "Nothing is launched on this goal yet, so Align has sent no version of it to an app. Goal reads are recorded for the workspace, not per goal."}

@@ -248,8 +248,8 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
           events={events}
           empty={
             <EmptyState
-              title={all.length ? "No events match these filters" : "Nothing recorded yet"}
-              body={all.length ? "Choose Everyone and Every kind to see the whole record." : `When someone proposes a change, decides one or launches it, it is recorded here with who did it and when. Nothing has happened on ${scope} yet.`}
+              title={all.length ? "No events match these filters" : "Nothing you can see recorded yet"}
+              body={all.length ? "Choose Everyone and Every kind to see the whole record." : `When someone proposes a change, decides one or launches it, it is recorded here with who did it and when. Nothing you can see has happened on ${scope} yet.`}
             />
           }
         />

@@ -17,6 +17,8 @@ Read the sections in order of date. "Direction: Home and Requests" below is the 
 - **Home, viewer link.** "Create a goal" is hidden for viewers on the empty goals state. `view.tsx` passes `role` to `GoalLines`. It reads `/api/v2/workspaces` only when the goals list is empty, so a normal Home makes no extra read. Unknown role: no link. Owners and members keep it, and it reaches the New goal form on `/goals`.
 - **Checks added:** `design/prototypes/lim-2472/integration/work-delivery.check.mjs` and `goal-line-delivery.check.mjs`. `b/needs-check.mts` updated to the `b0d47c8` version.
 
+**One commit on top of `d20857c`:** a non-owner's app lists are their own, so Work, Apps and the evidence facts no longer make whole-workspace claims from them; the goal page says when its sessions read failed; "you can see" wording on Dependencies and the record. `work-delivery.check`: 12 failed on `d20857c`, all 34 rules pass after. The audits below were not re-run on it.
+
 ### Results
 - `work-delivery.check`: 9 failed on `67db56b`, all 19 rules pass on this tree.
   - Failed read: owner and member, no "No app yet", no "not sent", no receipt, and it says not read.

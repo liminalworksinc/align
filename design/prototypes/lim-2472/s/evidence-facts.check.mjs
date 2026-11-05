@@ -86,6 +86,17 @@ expect("launch that targeted no session, one app sent it", changeFacts({ revisio
   if (!ok) failed++;
   console.log(`${ok ? "ok  " : "FAIL"} ...and says no session on this goal: ${say(f)}`);
 }
+// A member's or viewer's apps are their own only: an empty list says nothing about the workspace's apps.
+{
+  const facts = (everyone) => changeFacts({ revision: 1, revisions: [rev(1, [])], launch: "launched", version: 2 }, { delivery: null, apps: { everyone, items: [] } });
+  const check = (name, f, short, long) => {
+    const ok = f.length === 1 && f[0].kind === "unobserved" && f[0].short === short && f[0].long === long;
+    if (!ok) failed++;
+    console.log(`${ok ? "ok  " : "FAIL"} ${name}: ${say(f)}`);
+  };
+  check("no session, owner's list empty: whole workspace", facts(true), "v2 · no session or app yet", "No session was on this goal when v2 was launched, and no connected app has been sent it in a goal read since.");
+  check("no session, a member's own list empty: own apps only", facts(false), "v2 · no session on this goal", "No session was on this goal when v2 was launched. None of your connected apps has been sent it yet; owners see everyone's.");
+}
 expect("goal with 35% agent time and nothing launched", goalFacts({ allocation: { target_share: 40, share_7d: 35, gap_7d: -5, held: false } }, null), "reported", "35% of reported agent time, 7 days");
 none("goal with no agent time, not quiet: no fact", goalFacts({ allocation: { target_share: null, share_7d: 0, gap_7d: null, held: false } }, null));
 
