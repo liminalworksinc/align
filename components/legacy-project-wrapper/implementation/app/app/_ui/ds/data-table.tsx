@@ -8,7 +8,8 @@ export type Column<T> = {
   /** Present for a sortable column: the value to sort by. */
   sortValue?: (row: T) => string | number | null;
   align?: "start" | "end";
-  /** A CSS width for the column at desktop widths, e.g. "120px" or "30%". */
+  /** A CSS width for the column at desktop widths, e.g. "120px" or "30%". A hint: the header never wraps, so the
+   *  column is at least as wide as its header. */
   width?: string;
 };
 
@@ -67,7 +68,7 @@ export function DataTable<T>({
                 scope="col"
                 style={c.width ? { width: c.width } : undefined}
                 aria-sort={dir === "asc" ? "ascending" : dir === "desc" ? "descending" : undefined}
-                className={`px-3 py-2 font-mono text-[11px] font-normal uppercase tracking-[0.08em] text-(--text-3) ${c.align === "end" ? "text-right" : "text-left"}`}
+                className={`whitespace-nowrap px-3 py-2 font-mono text-[11px] font-normal uppercase tracking-[0.08em] text-(--text-3) ${c.align === "end" ? "text-right" : "text-left"}`}
               >
                 {c.sortValue ? (
                   <button
