@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { EvidenceLabel, EvidenceSummary, hasEvidence, NeedAction, NeedList, NeedRow, Segmented, type Delivery } from "../ds";
 import { api, useApi } from "../kit";
 import type { Alignment, ChangeRequest, Goal } from "../types";
-import { buildNeeds, inPhase, KIND_WORDS, latestLaunches, rankNote, REQ_GOALS_MAX, SENT_GOALS_MAX, type AppLite, type AskLite, type EvidenceCounts, type Need, type NeedPhase, type NeedsInput, type RequestLite } from "./needs";
+import { buildNeeds, inPhase, KIND_WORDS, latestLaunches, ORDER_LINE, ORDER_WHY, rankNote, REQ_GOALS_MAX, SENT_GOALS_MAX, type AppLite, type AskLite, type EvidenceCounts, type Need, type NeedPhase, type NeedsInput, type RequestLite } from "./needs";
 
 // LIM-2472 Home, section 1: the "Needs you" list (direction LIM-2472 9b5b870f). Four cookie reads, the model in needs.ts,
 // and the foundation's NeedList / NeedRow / NeedAction. Filters: Needs you (default), Waiting on others, Done; search over
@@ -161,6 +161,8 @@ export function NeedsList({
   const al = useApi<Groups<Alignment>>(`${W}/alignments`);
   const home = useApi<{ apps: { items: AppLite[] } | null }>(`${W}/home`);
   const goals = useApi<{ goals: Goal[] }>(`${W}/goals`);
+  // The approver rule's other read: this workspace's role and the teams this person leads.
+  const wsList = useApi<{ workspaces: { id: string; role: "owner" | "member" | "viewer"; teams: { id: string; role: "lead" | "member" }[] }[] }>("/api/v2/workspaces");
   const reqs = useRequestsToAgents(W, me, goals.data?.goals ?? null, !!goals.error);
   const crList = useMemo(() => (cr.data ? [...cr.data.waiting_on_me, ...cr.data.mine, ...cr.data.others] : null), [cr.data]);
   const sent = useSends(W, crList, !!cr.error);
@@ -168,8 +170,17 @@ export function NeedsList({
   const narrow = useNarrow();
   const [q, setQ] = useState("");
 
-  const loading = [cr, asks, al, home].some((r) => r.loading && !r.data && !r.error) || reqs.loading || sent.loading;
-  const { rows, unknown: unreadSources, notices } = useMemo(
+  const loading = [cr, asks, al, home, goals, wsList].some((r) => r.loading && !r.data && !r.error) || reqs.loading || sent.loading;
+  const wsRow = wsList.data?.workspaces.find((w) => w.id === ws) ?? null;
+  const approver = useMemo(
+    () => ({
+      role: wsRow?.role ?? null,
+      leads: wsRow ? wsRow.teams.filter((t) => t.role === "lead").map((t) => t.id) : null,
+      goals: goals.data?.goals ?? null,
+    }),
+    [wsRow, goals.data],
+  );
+  const { rows, unknown: unreadSources, notices, order, orderFallback } = useMemo(
     () =>
       buildNeeds({
         ws,
@@ -180,8 +191,9 @@ export function NeedsList({
         apps: home.data?.apps?.items ?? null,
         requests: reqs.groups,
         sends: sent.sends,
+        approver,
       }),
-    [ws, me, crList, asks.data, al.data, home.data, reqs.groups, sent.sends],
+    [ws, me, crList, asks.data, al.data, home.data, reqs.groups, sent.sends, approver],
   );
   // A failed per-goal read is an unread source like any other (amber line, lower-bound counts, partial); only the
   // deliberate cap stays in the rank note, with one short visible line.
@@ -267,11 +279,15 @@ export function NeedsList({
           rankNote={
             <details data-rank-note>
               <summary className="inline-flex min-h-[44px] cursor-pointer items-center gap-1">
-                Ranked by kind, oldest first.{" "}
+                <span data-rank-order={order}>{ORDER_LINE[order]}</span>{" "}
                 <span className="text-(--text-2) underline underline-offset-4 hover:text-(--text-1)">How it&apos;s ranked</span>
                 <span aria-hidden="true">▾</span>
               </summary>
-              <p className="pb-1">{rankNote(reqs.unchecked, sent.unchecked)}</p>
+              <p className="pb-1">{rankNote(reqs.unchecked, sent.unchecked, order)}</p>
+              <p className="pb-1">
+                {orderFallback ? "Align couldn't read what says whether you approve on a goal here, so this is the approvers' order, which leaves nothing out. " : ""}
+                {ORDER_WHY[order]}
+              </p>
             </details>
           }
           // No empty line when a read failed (the amber line says what is unknown) or in Needs you (the page's heading

@@ -1,59 +1,64 @@
-rank note: Ranked: approved changes waiting to launch, then decisions waiting on you, then your requests that came back, then requests an agent declined, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.
+order: approver
+rank note: Ranked for someone who approves on a goal here: approved changes waiting to launch, then decisions waiting on you, then your requests that came back, then requests an agent declined, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.
 == owner (Mara Quill): 13 rows, 1 notice(s)
   notice            app_never_read Codex | connected by Theo Vance | See apps
-  needs_you         launch     Expand to regulated customers | Theo Vance's request, approved by you | since 2026-11-05T21:28:58.535Z (decided_at) | evidence: none | action: Launch v2 -> review: launch | ?review=g_izugnj5vo4j7ahhecktitu2k.cr_trpsewy3o4p2eidcpojb7b2a
-  needs_you         launch     Partner pilot ready for review | Mina Torres's request, approved by you | since 2026-11-05T21:29:00.771Z (decided_at) | evidence: none | action: Launch v2 -> review: launch | ?review=g_tsqdjgvywvxa775iwt5bn327.cr_56rj2ofvgzbt3sqxxuz6d7fe
-  needs_you         decide     Ship self-serve onboarding | Theo Vance's request | since 2026-11-05T21:28:58.553Z (revisions[latest].created_at) | evidence: agent_reported 1 | action: Review -> review | ?review=g_bfiuh3mu3oxoj7ib33hdq22c.cr_ogylw2si3eegz7frciz6d66m
-  needs_you         decide     New customers reach a first approved plan in one day | Rafi Haddad's request | since 2026-11-05T21:29:00.706Z (revisions[latest].created_at) | evidence: self_reported 2 | action: Review -> review | ?review=g_wuaf7xgc4t55qu2tnyvuhcc2.cr_f3fpdwulpvcpvtwj4ntncghy
-  needs_you         app_behind Every release carries its audit evidence | Align has not sent v2 to Claude Code. | since 2026-11-05T21:29:00.853Z (launch_decided_at) | evidence: not_observed 1 | action: See apps -> apps
-  waiting_on_others decide     Reviewer queue under 48 hours | Jun Okada's request | since 2026-11-05T21:29:00.789Z (revisions[latest].created_at) | evidence: none | Waiting on Mina Torres | ?review=g_54bhlisjjtoh5vzbpajks66t.cr_x5uckuoybomxa3x7t3wsj35u
-  waiting_on_others decide     Docs answer the top ten setup questions | Your request | since 2026-11-05T21:29:00.807Z (revisions[latest].created_at) | evidence: none | Waiting on Mina Torres | ?review=g_ce6dbrqsujkqhk4yhaxyvudt.cr_6erlnewbbubukhulpq3k4vhm
-  waiting_on_others returned   CI under ten minutes | Jun Okada's request | since 2026-11-05T21:29:00.911Z (revisions[latest].created_at) | evidence: none | Waiting on Jun Okada | ?review=g_esqjrdv3msceuqrykfunpo2x.cr_g6qpkou7on5wkrbmfsqh4o4e
-  done              decide     New customers reach a first approved plan in one day | Jun Okada's request | since 2026-11-05T21:29:00.879Z (decided_at) | evidence: none | no action | ?review=g_wuaf7xgc4t55qu2tnyvuhcc2.cr_pgawely3kt7a5jlc3h6tu3f7
-  done              launch     Every release carries its audit evidence | Rafi Haddad's request | since 2026-11-05T21:29:00.853Z (launch_decided_at) | evidence: self_reported 1 | no action | ?review=g_z5dqwczrh7lkl2lbwo5uj5k6.cr_mhtmhps7v2qivm6rakukofat
-  done              launch     Pass the security review | Your request | since 2026-11-05T21:28:56.486Z (launch_decided_at) | evidence: self_reported 1 | no action | ?review=g_sgozi5qfe4iqn5s5n5vs76zc.cr_oqebphifiu6eoslur7jz53ha
-  done              alignment  Expand to regulated customers | From Pass the security review: you ask to align with this goal | since 2026-11-05T21:28:50.788Z (updated_at) | evidence: none | no action
-  done              alignment  Expand to regulated customers | From Ship self-serve onboarding: you ask to align with this goal | since 2026-11-05T21:28:50.788Z (updated_at) | evidence: none | no action
+  needs_you         launch     Expand to regulated customers | Theo Vance's request, approved by you | since 2026-11-05T21:40:04.971Z (decided_at) | evidence: none | action: Launch v2 -> review: launch | ?review=g_vnpo5fsot7vosp3q5i2bojfz.cr_rv4anfqdsk6artss2iavuzki
+  needs_you         launch     Partner pilot ready for review | Mina Torres's request, approved by you | since 2026-11-05T21:40:07.284Z (decided_at) | evidence: none | action: Launch v2 -> review: launch | ?review=g_mdiimq4guf22guqjfu3jvxul.cr_62x636jcyi3ikvql6dm6g4ou
+  needs_you         decide     Ship self-serve onboarding | Theo Vance's request | since 2026-11-05T21:40:05.000Z (revisions[latest].created_at) | evidence: agent_reported 1 | action: Review -> review | ?review=g_rbua4v2maw6va6j4l3gkmyjt.cr_nsvvaxxywzzqtjf7sleatgg6
+  needs_you         decide     New customers reach a first approved plan in one day | Rafi Haddad's request | since 2026-11-05T21:40:07.207Z (revisions[latest].created_at) | evidence: self_reported 2 | action: Review -> review | ?review=g_a64aypv2qsnmn2f6hh76a2s5.cr_hp7ju457zzssmsenzgcy555d
+  needs_you         app_behind Every release carries its audit evidence | Align has not sent v2 to Claude Code. | since 2026-11-05T21:40:07.384Z (launch_decided_at) | evidence: not_observed 1 | action: See apps -> apps
+  waiting_on_others decide     Reviewer queue under 48 hours | Jun Okada's request | since 2026-11-05T21:40:07.303Z (revisions[latest].created_at) | evidence: none | Waiting on Mina Torres | ?review=g_tziirl3swwh3z6milmmslefs.cr_nbrplsypbonsv2uttzsimaga
+  waiting_on_others decide     Docs answer the top ten setup questions | Your request | since 2026-11-05T21:40:07.326Z (revisions[latest].created_at) | evidence: none | Waiting on Mina Torres | ?review=g_7uwbzuyes5lpj34yxdonofr6.cr_dkwhidx5dqcbzemftxawza5p
+  waiting_on_others returned   CI under ten minutes | Jun Okada's request | since 2026-11-05T21:40:07.469Z (revisions[latest].created_at) | evidence: none | Waiting on Jun Okada | ?review=g_sj2pgw6axsi64f6owmc37hm5.cr_pv4bla7qscpxadxk5m4rr4sj
+  done              decide     New customers reach a first approved plan in one day | Jun Okada's request | since 2026-11-05T21:40:07.432Z (decided_at) | evidence: none | no action | ?review=g_a64aypv2qsnmn2f6hh76a2s5.cr_nr3j73qtn7s37ypbtn577xom
+  done              launch     Every release carries its audit evidence | Rafi Haddad's request | since 2026-11-05T21:40:07.384Z (launch_decided_at) | evidence: self_reported 1 | no action | ?review=g_tppuvlaznqdmx6kxhpaqijt6.cr_vzdgjgo2uits4npprgvot3hp
+  done              launch     Pass the security review | Your request | since 2026-11-05T21:40:02.147Z (launch_decided_at) | evidence: self_reported 1 | no action | ?review=g_jj6tmpioti6rajshik5eeui5.cr_2bvvvysj6yfotuepsocqlt25
+  done              alignment  Expand to regulated customers | From Pass the security review: you ask to align with this goal | since 2026-11-05T21:39:56.400Z (updated_at) | evidence: none | no action
+  done              alignment  Expand to regulated customers | From Ship self-serve onboarding: you ask to align with this goal | since 2026-11-05T21:39:56.400Z (updated_at) | evidence: none | no action
 PASS  owner: every Needs-you row has an action and a since
 PASS  owner: no row outside Needs you has an action
-PASS  owner: Needs you is in kind order, oldest first within a kind
+PASS  owner: Needs you is in its order's kind order (approver), oldest first within a kind
+PASS  owner (seeded): approver order
 PASS  owner: "Your request came back" only on this person's own requests
 PASS  owner: at least one launch, one decision and one app row
 PASS  owner (seeded): no app row for the security goal, whose v2 Align sent the reading app
 PASS  owner (seeded): an app row for the audit goal, launched after that app's read
 
-rank note: Ranked: approved changes waiting to launch, then decisions waiting on you, then your requests that came back, then requests an agent declined, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.
+order: requester
+rank note: Ranked for someone who approves on a goal here: approved changes waiting to launch, then decisions waiting on you, then your requests that came back, then requests an agent declined, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.
 == member (Theo Vance): 9 rows, 1 notice(s)
   notice            app_never_read Codex | connected by Theo Vance | See apps
-  waiting_on_others launch     Expand to regulated customers | Your request | since 2026-11-05T21:28:58.535Z (decided_at) | evidence: none | Mara Quill can launch it | ?review=g_izugnj5vo4j7ahhecktitu2k.cr_trpsewy3o4p2eidcpojb7b2a
-  waiting_on_others launch     Partner pilot ready for review | Mina Torres's request | since 2026-11-05T21:29:00.771Z (decided_at) | evidence: none | Mara Quill can launch it | ?review=g_tsqdjgvywvxa775iwt5bn327.cr_56rj2ofvgzbt3sqxxuz6d7fe
-  waiting_on_others decide     Ship self-serve onboarding | Your request | since 2026-11-05T21:28:58.553Z (revisions[latest].created_at) | evidence: agent_reported 1 | Waiting on Mara Quill | ?review=g_bfiuh3mu3oxoj7ib33hdq22c.cr_ogylw2si3eegz7frciz6d66m
-  waiting_on_others decide     New customers reach a first approved plan in one day | Rafi Haddad's request | since 2026-11-05T21:29:00.706Z (revisions[latest].created_at) | evidence: self_reported 2 | Waiting on Mara Quill | ?review=g_wuaf7xgc4t55qu2tnyvuhcc2.cr_f3fpdwulpvcpvtwj4ntncghy
-  waiting_on_others decide     Docs answer the top ten setup questions | Mara Quill's request | since 2026-11-05T21:29:00.807Z (revisions[latest].created_at) | evidence: none | Waiting on Mina Torres | ?review=g_ce6dbrqsujkqhk4yhaxyvudt.cr_6erlnewbbubukhulpq3k4vhm
-  waiting_on_others returned   CI under ten minutes | Jun Okada's request | since 2026-11-05T21:29:00.911Z (revisions[latest].created_at) | evidence: none | Waiting on Jun Okada | ?review=g_esqjrdv3msceuqrykfunpo2x.cr_g6qpkou7on5wkrbmfsqh4o4e
-  done              decide     New customers reach a first approved plan in one day | Jun Okada's request | since 2026-11-05T21:29:00.879Z (decided_at) | evidence: none | no action | ?review=g_wuaf7xgc4t55qu2tnyvuhcc2.cr_pgawely3kt7a5jlc3h6tu3f7
-  done              launch     Every release carries its audit evidence | Rafi Haddad's request | since 2026-11-05T21:29:00.853Z (launch_decided_at) | evidence: self_reported 1 | no action | ?review=g_z5dqwczrh7lkl2lbwo5uj5k6.cr_mhtmhps7v2qivm6rakukofat
-  done              launch     Pass the security review | Mara Quill's request | since 2026-11-05T21:28:56.486Z (launch_decided_at) | evidence: self_reported 1 | no action | ?review=g_sgozi5qfe4iqn5s5n5vs76zc.cr_oqebphifiu6eoslur7jz53ha
+  waiting_on_others returned   CI under ten minutes | Jun Okada's request | since 2026-11-05T21:40:07.469Z (revisions[latest].created_at) | evidence: none | Waiting on Jun Okada | ?review=g_sj2pgw6axsi64f6owmc37hm5.cr_pv4bla7qscpxadxk5m4rr4sj
+  waiting_on_others decide     Ship self-serve onboarding | Your request | since 2026-11-05T21:40:05.000Z (revisions[latest].created_at) | evidence: agent_reported 1 | Waiting on Mara Quill | ?review=g_rbua4v2maw6va6j4l3gkmyjt.cr_nsvvaxxywzzqtjf7sleatgg6
+  waiting_on_others decide     New customers reach a first approved plan in one day | Rafi Haddad's request | since 2026-11-05T21:40:07.207Z (revisions[latest].created_at) | evidence: self_reported 2 | Waiting on Mara Quill | ?review=g_a64aypv2qsnmn2f6hh76a2s5.cr_hp7ju457zzssmsenzgcy555d
+  waiting_on_others decide     Docs answer the top ten setup questions | Mara Quill's request | since 2026-11-05T21:40:07.326Z (revisions[latest].created_at) | evidence: none | Waiting on Mina Torres | ?review=g_7uwbzuyes5lpj34yxdonofr6.cr_dkwhidx5dqcbzemftxawza5p
+  waiting_on_others launch     Expand to regulated customers | Your request | since 2026-11-05T21:40:04.971Z (decided_at) | evidence: none | Mara Quill can launch it | ?review=g_vnpo5fsot7vosp3q5i2bojfz.cr_rv4anfqdsk6artss2iavuzki
+  waiting_on_others launch     Partner pilot ready for review | Mina Torres's request | since 2026-11-05T21:40:07.284Z (decided_at) | evidence: none | Mara Quill can launch it | ?review=g_mdiimq4guf22guqjfu3jvxul.cr_62x636jcyi3ikvql6dm6g4ou
+  done              decide     New customers reach a first approved plan in one day | Jun Okada's request | since 2026-11-05T21:40:07.432Z (decided_at) | evidence: none | no action | ?review=g_a64aypv2qsnmn2f6hh76a2s5.cr_nr3j73qtn7s37ypbtn577xom
+  done              launch     Every release carries its audit evidence | Rafi Haddad's request | since 2026-11-05T21:40:07.384Z (launch_decided_at) | evidence: self_reported 1 | no action | ?review=g_tppuvlaznqdmx6kxhpaqijt6.cr_vzdgjgo2uits4npprgvot3hp
+  done              launch     Pass the security review | Mara Quill's request | since 2026-11-05T21:40:02.147Z (launch_decided_at) | evidence: self_reported 1 | no action | ?review=g_jj6tmpioti6rajshik5eeui5.cr_2bvvvysj6yfotuepsocqlt25
 PASS  member: every Needs-you row has an action and a since
 PASS  member: no row outside Needs you has an action
-PASS  member: Needs you is in kind order, oldest first within a kind
+PASS  member: Needs you is in its order's kind order (requester), oldest first within a kind
 PASS  member (seeded): the never-read app Theo connected is a notice, not a Needs-you row
 PASS  member: "Your request came back" only on this person's own requests
 
-rank note: Ranked: approved changes waiting to launch, then decisions waiting on you, then your requests that came back, then requests an agent declined, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.
+order: requester
+rank note: Ranked for someone who approves on a goal here: approved changes waiting to launch, then decisions waiting on you, then your requests that came back, then requests an agent declined, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.
 == viewer (Ines Park): 9 rows, 0 notice(s)
-  waiting_on_others launch     Expand to regulated customers | Theo Vance's request | since 2026-11-05T21:28:58.535Z (decided_at) | evidence: none | Mara Quill can launch it | ?review=g_izugnj5vo4j7ahhecktitu2k.cr_trpsewy3o4p2eidcpojb7b2a
-  waiting_on_others launch     Partner pilot ready for review | Mina Torres's request | since 2026-11-05T21:29:00.771Z (decided_at) | evidence: none | Mara Quill can launch it | ?review=g_tsqdjgvywvxa775iwt5bn327.cr_56rj2ofvgzbt3sqxxuz6d7fe
-  waiting_on_others decide     Ship self-serve onboarding | Theo Vance's request | since 2026-11-05T21:28:58.553Z (revisions[latest].created_at) | evidence: agent_reported 1 | Waiting on Mara Quill | ?review=g_bfiuh3mu3oxoj7ib33hdq22c.cr_ogylw2si3eegz7frciz6d66m
-  waiting_on_others decide     New customers reach a first approved plan in one day | Rafi Haddad's request | since 2026-11-05T21:29:00.706Z (revisions[latest].created_at) | evidence: self_reported 2 | Waiting on Mara Quill | ?review=g_wuaf7xgc4t55qu2tnyvuhcc2.cr_f3fpdwulpvcpvtwj4ntncghy
-  waiting_on_others decide     Docs answer the top ten setup questions | Mara Quill's request | since 2026-11-05T21:29:00.807Z (revisions[latest].created_at) | evidence: none | Waiting on Mina Torres | ?review=g_ce6dbrqsujkqhk4yhaxyvudt.cr_6erlnewbbubukhulpq3k4vhm
-  waiting_on_others returned   CI under ten minutes | Jun Okada's request | since 2026-11-05T21:29:00.911Z (revisions[latest].created_at) | evidence: none | Waiting on Jun Okada | ?review=g_esqjrdv3msceuqrykfunpo2x.cr_g6qpkou7on5wkrbmfsqh4o4e
-  done              decide     New customers reach a first approved plan in one day | Jun Okada's request | since 2026-11-05T21:29:00.879Z (decided_at) | evidence: none | no action | ?review=g_wuaf7xgc4t55qu2tnyvuhcc2.cr_pgawely3kt7a5jlc3h6tu3f7
-  done              launch     Every release carries its audit evidence | Rafi Haddad's request | since 2026-11-05T21:29:00.853Z (launch_decided_at) | evidence: self_reported 1 | no action | ?review=g_z5dqwczrh7lkl2lbwo5uj5k6.cr_mhtmhps7v2qivm6rakukofat
-  done              launch     Pass the security review | Mara Quill's request | since 2026-11-05T21:28:56.486Z (launch_decided_at) | evidence: self_reported 1 | no action | ?review=g_sgozi5qfe4iqn5s5n5vs76zc.cr_oqebphifiu6eoslur7jz53ha
+  waiting_on_others returned   CI under ten minutes | Jun Okada's request | since 2026-11-05T21:40:07.469Z (revisions[latest].created_at) | evidence: none | Waiting on Jun Okada | ?review=g_sj2pgw6axsi64f6owmc37hm5.cr_pv4bla7qscpxadxk5m4rr4sj
+  waiting_on_others decide     Ship self-serve onboarding | Theo Vance's request | since 2026-11-05T21:40:05.000Z (revisions[latest].created_at) | evidence: agent_reported 1 | Waiting on Mara Quill | ?review=g_rbua4v2maw6va6j4l3gkmyjt.cr_nsvvaxxywzzqtjf7sleatgg6
+  waiting_on_others decide     New customers reach a first approved plan in one day | Rafi Haddad's request | since 2026-11-05T21:40:07.207Z (revisions[latest].created_at) | evidence: self_reported 2 | Waiting on Mara Quill | ?review=g_a64aypv2qsnmn2f6hh76a2s5.cr_hp7ju457zzssmsenzgcy555d
+  waiting_on_others decide     Docs answer the top ten setup questions | Mara Quill's request | since 2026-11-05T21:40:07.326Z (revisions[latest].created_at) | evidence: none | Waiting on Mina Torres | ?review=g_7uwbzuyes5lpj34yxdonofr6.cr_dkwhidx5dqcbzemftxawza5p
+  waiting_on_others launch     Expand to regulated customers | Theo Vance's request | since 2026-11-05T21:40:04.971Z (decided_at) | evidence: none | Mara Quill can launch it | ?review=g_vnpo5fsot7vosp3q5i2bojfz.cr_rv4anfqdsk6artss2iavuzki
+  waiting_on_others launch     Partner pilot ready for review | Mina Torres's request | since 2026-11-05T21:40:07.284Z (decided_at) | evidence: none | Mara Quill can launch it | ?review=g_mdiimq4guf22guqjfu3jvxul.cr_62x636jcyi3ikvql6dm6g4ou
+  done              decide     New customers reach a first approved plan in one day | Jun Okada's request | since 2026-11-05T21:40:07.432Z (decided_at) | evidence: none | no action | ?review=g_a64aypv2qsnmn2f6hh76a2s5.cr_nr3j73qtn7s37ypbtn577xom
+  done              launch     Every release carries its audit evidence | Rafi Haddad's request | since 2026-11-05T21:40:07.384Z (launch_decided_at) | evidence: self_reported 1 | no action | ?review=g_tppuvlaznqdmx6kxhpaqijt6.cr_vzdgjgo2uits4npprgvot3hp
+  done              launch     Pass the security review | Mara Quill's request | since 2026-11-05T21:40:02.147Z (launch_decided_at) | evidence: self_reported 1 | no action | ?review=g_jj6tmpioti6rajshik5eeui5.cr_2bvvvysj6yfotuepsocqlt25
 PASS  viewer: every Needs-you row has an action and a since
 PASS  viewer: no row outside Needs you has an action
-PASS  viewer: Needs you is in kind order, oldest first within a kind
+PASS  viewer: Needs you is in its order's kind order (requester), oldest first within a kind
+PASS  viewer (seeded): requester order
 PASS  viewer: "Your request came back" only on this person's own requests
 PASS  viewer: nothing needs a viewer (viewers can't act)
 
@@ -65,3 +70,15 @@ PASS  model: an approved change that would close a dependency loop shows, waitin
 PASS  model: a row with no recorded time sorts last within its kind
 PASS  model: my request a session declined is one Agent-reported row; someone else's request isn't mine to act on
 PASS  model: when the goal has a newer version than the launch checked, the row names the current version
+PASS  rule: a workspace owner with no goals but named as an approver gets approver order
+PASS  rule: a team lead whose team owns an active goal gets approver order
+PASS  rule: a member who owns one active goal gets approver order
+PASS  rule: a member who owns no goal and is named nowhere gets requester order
+PASS  rule: a viewer gets requester order, even if a request names them
+PASS  rule: a workspace owner with an active company goal gets approver order
+PASS  rule: role read failing, named on a request -> approver order
+PASS  rule: role read failing, named nowhere -> requester order
+PASS  rule: goals read failing and requests failing -> approver order, flagged as a fallback
+PASS  rule: requests failing but the goals show none owned -> approver order as a fallback (requests unknown)
+PASS  orders: approver ranks the decision first, requester ranks the returned request first
+PASS  orders: the same rows and actions in both orders

@@ -11,7 +11,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildNeeds, latestLaunches, rankNote, REQ_GOALS_MAX, SENT_GOALS_MAX, type Need } from "../../../../components/legacy-project-wrapper/implementation/app/app/_ui/home/needs.ts";
+import { buildNeeds, latestLaunches, ORDERS, rankNeeds, rankNote, rankOrder, REQ_GOALS_MAX, SENT_GOALS_MAX, type Need } from "../../../../components/legacy-project-wrapper/implementation/app/app/_ui/home/needs.ts";
 // @ts-expect-error plain .mjs seed
 import { seed } from "./seed.mjs";
 
@@ -63,7 +63,8 @@ for (const [role, acct] of people) {
   const al = await get(cookie, `${W}/alignments`);
   const home = await get(cookie, `${W}/home`);
   // REQ: requests to agents on up to REQ_GOALS_MAX active goals, own goals first (as needs-list.tsx reads them).
-  const goals = ((await get(cookie, `${W}/goals`))?.goals ?? []).filter((g: { status: string }) => g.status === "active");
+  const goalsAll = (await get(cookie, `${W}/goals`))?.goals ?? null;
+  const goals = (goalsAll ?? []).filter((g: { status: string }) => g.status === "active");
   goals.sort((a: { owner: { id: string }; id: string }, b: { owner: { id: string }; id: string }) => Number(b.owner.id === me) - Number(a.owner.id === me) || a.id.localeCompare(b.id));
   const pick = goals.slice(0, REQ_GOALS_MAX);
   // SENT: the value read of the latest launch per goal, as needs-list.tsx reads it.
@@ -71,7 +72,9 @@ for (const [role, acct] of people) {
   const launches = latestLaunches(crs).slice(0, SENT_GOALS_MAX);
   const sends = await Promise.all(launches.map(async (c) => ({ goal: { id: c.goal.id, title: c.goal.title }, cr: c.id, version: c.version!, launched_at: c.launch_decided_at!, current_version: c.goal.version, apps: (await get(cookie, `${W}/goals/${c.goal.id}/change-requests/${c.id}/value`))?.apps?.items ?? [] })));
   const reqs = (await Promise.all(pick.map(async (g: { id: string; title: string }) => ({ goal: { id: g.id, title: g.title }, requests: (await get(cookie, `${W}/goals/${g.id}/requests`))?.requests ?? [] }))));
-  const { rows, unknown, notices } = buildNeeds({
+  const wsRow = (await get(cookie, "/api/v2/workspaces"))?.workspaces?.find((w: { id: string }) => w.id === s.ws);
+  const approver = { role: wsRow?.role ?? null, leads: wsRow ? wsRow.teams.filter((t: { role: string }) => t.role === "lead").map((t: { id: string }) => t.id) : null, goals: goalsAll ?? null };
+  const { rows, unknown, notices, order } = buildNeeds({
     ws: s.ws,
     me,
     crs: cr ? [...cr.waiting_on_me, ...cr.mine, ...cr.others] : null,
@@ -80,7 +83,9 @@ for (const [role, acct] of people) {
     apps: home?.apps?.items ?? null,
     requests: reqs,
     sends,
+    approver,
   });
+  console.log(`order: ${order}`);
   console.log(`rank note: ${rankNote(goals.length - pick.length)}`);
   console.log(`== ${role} (${acct.name}): ${rows.length} rows, ${notices.length} notice(s)${unknown.length ? `, unknown: ${unknown.join(", ")}` : ""}`);
   for (const n of notices) console.log(`  notice            ${n.kind} ${n.app.name} | connected by ${n.connected_by.name} | ${n.action.label}`);
@@ -91,8 +96,10 @@ for (const [role, acct] of people) {
   const needs = rows.filter((r: Need) => r.phase === "needs_you");
   rule(`${role}: every Needs-you row has an action and a since`, needs.every((r) => r.action && r.since));
   rule(`${role}: no row outside Needs you has an action`, rows.filter((r) => r.phase !== "needs_you").every((r) => !r.action));
-  const order = ["launch", "decide", "returned", "agent_declined", "team_ask", "alignment", "app_behind"];
-  rule(`${role}: Needs you is in kind order, oldest first within a kind`, needs.every((r, i) => i === 0 || order.indexOf(needs[i - 1].kind) < order.indexOf(r.kind) || (needs[i - 1].kind === r.kind && (needs[i - 1].since?.at ?? "") <= (r.since?.at ?? ""))));
+  const ko = ORDERS[order];
+  rule(`${role}: Needs you is in its order's kind order (${order}), oldest first within a kind`, needs.every((r, i) => i === 0 || ko.indexOf(needs[i - 1].kind) < ko.indexOf(r.kind) || (needs[i - 1].kind === r.kind && (needs[i - 1].since?.at ?? "") <= (r.since?.at ?? ""))));
+  if (role === "owner") rule("owner (seeded): approver order", order === "approver");
+  if (role === "viewer") rule("viewer (seeded): requester order", order === "requester");
   if (role === "member") rule("member (seeded): the never-read app Theo connected is a notice, not a Needs-you row", needs.length === 0 && notices.length === 1 && notices[0]!.kind === "app_never_read");
   rule(`${role}: "Your request came back" only on this person's own requests`, rows.filter((r) => r.word === "Your request came back").every((r) => r.cr?.requester.id === me));
   if (role === "viewer") rule("viewer: nothing needs a viewer (viewers can't act)", needs.length === 0);
@@ -139,5 +146,28 @@ const dec = buildNeeds({ ws: "w", me: "me", crs: [], asks: [], alignments: [], a
 rule("model: my request a session declined is one Agent-reported row; someone else's request isn't mine to act on", dec.length === 1 && dec[0]!.kind === "agent_declined" && dec[0]!.evidence.agent_reported === 1 && /claude-code in web declined your switch goal request/.test(dec[0]!.cause) && !/blocked|stuck/i.test(dec[0]!.cause));
 const newer = buildNeeds({ ws: "w", me: "me", crs: [], asks: [], alignments: [], apps: [app], sends: [{ goal: { id: "gA", title: "A" }, cr: "crA", version: 4, launched_at: "2026-01-02T00:00:00Z", apps: [], current_version: 5 }] }).rows.filter((r) => r.kind === "app_behind");
 rule("model: when the goal has a newer version than the launch checked, the row names the current version", newer.length === 1 && /not sent v4/.test(newer[0]!.cause) && /now at v5/.test(newer[0]!.cause));
+// ---- the approver rule, fixed cases (it orders rows only; never what anyone may do) ----
+const g = (owner: string, o: Partial<{ team: { id: string } | null; level: "company" | "team"; status: string }> = {}) => ({ owner: { id: owner }, team: null, level: "team" as const, status: "active", ...o });
+const named = crOf({ id: "crN", state: "pending", launch: null, version: null, approvers: [person("me")], launchers: [person("me")], can: {} });
+const notNamed = crOf({ id: "crX", state: "pending", launch: null, version: null, approvers: [person("x")], launchers: [person("x")], can: {} });
+const ro = (role: "owner" | "member" | "viewer" | null, leads: string[] | null, goals: ReturnType<typeof g>[] | null, crs: unknown[] | null) => rankOrder("me", { role, leads, goals }, crs as never);
+rule("rule: a workspace owner with no goals but named as an approver gets approver order", ro("owner", [], [], [named]).order === "approver");
+rule("rule: a team lead whose team owns an active goal gets approver order", ro("member", ["t1"], [g("x", { team: { id: "t1" } })], [notNamed]).order === "approver");
+rule("rule: a member who owns one active goal gets approver order", ro("member", [], [g("me")], [notNamed]).order === "approver");
+rule("rule: a member who owns no goal and is named nowhere gets requester order", ro("member", [], [g("x")], [notNamed]).order === "requester");
+rule("rule: a viewer gets requester order, even if a request names them", ro("viewer", [], [g("me")], [named]).order === "requester");
+rule("rule: a workspace owner with an active company goal gets approver order", ro("owner", [], [g("x", { level: "company" })], [notNamed]).order === "approver");
+rule("rule: role read failing, named on a request -> approver order", ro(null, null, null, [named]).order === "approver");
+rule("rule: role read failing, named nowhere -> requester order", ro(null, null, null, [notNamed]).order === "requester");
+rule("rule: goals read failing and requests failing -> approver order, flagged as a fallback", (() => { const r = ro("member", [], null, null); return r.order === "approver" && r.fallback; })());
+rule("rule: requests failing but the goals show none owned -> approver order as a fallback (requests unknown)", (() => { const r = ro("member", [], [g("x")], null); return r.order === "approver" && r.fallback; })());
+// The order changes ranks only: the same rows, the same actions. (A request that lets you approve makes you an approver
+// by clause (d), so the two orders are compared on one set of rows.)
+const mix = [crOf({ id: "crD", state: "pending", launch: null, version: null, can: { approve: true }, waiting_on_me: true }), crOf({ id: "crR", state: "countered", launch: null, version: null, requester: person("me"), can: { accept_counter: true }, waiting_on_me: true })];
+const base = buildNeeds({ ws: "w", me: "me", crs: mix, asks: [], alignments: [], apps: [] }).rows;
+const asA = { order: "approver", rows: rankNeeds(base, "approver") };
+const asR = { order: "requester", rows: rankNeeds(base, "requester") };
+rule("orders: approver ranks the decision first, requester ranks the returned request first", asA.rows[0]!.kind === "decide" && asR.rows[0]!.kind === "returned");
+rule("orders: the same rows and actions in both orders", JSON.stringify(asA.rows.map((r) => [r.key, r.action?.label]).sort()) === JSON.stringify(asR.rows.map((r) => [r.key, r.action?.label]).sort()));
 
 process.exitCode = failed ? 1 : 0;
