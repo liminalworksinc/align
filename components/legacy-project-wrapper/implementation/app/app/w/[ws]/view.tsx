@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useCallback, useState } from "react";
 import { Drawer, EmptyState } from "../../_ui/ds";
 import GoalLines from "../../_ui/home/goal-lines";
@@ -58,6 +59,10 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const d = useRead<HomeData>(`/api/v2/workspaces/${ws}/home`);
   const s = useApi<{ mine: MySession[]; all: AnySession[] | null }>(`/api/v2/workspaces/${ws}/sessions`);
   const c = useApi<Groups>(`/api/v2/workspaces/${ws}/change-requests`);
+  // A viewer can't connect an app (app/oauth/authorize/AuthorizeForm.tsx): nothing here offers it until the role is known.
+  const list = useApi<{ workspaces: { id: string; role: string }[] }>("/api/v2/workspaces");
+  const role = list.data?.workspaces.find((w) => w.id === ws)?.role;
+  const canConnect = !!role && role !== "viewer";
   const [review, setReview] = useReview();
   // Stable: the Drawer re-takes focus whenever onClose changes, which would pull it off a notice that just took it.
   const closeReview = useCallback(() => setReview(null), [setReview]);
@@ -92,12 +97,12 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
     <Shell me={me} ws={ws} tab="Home">
       <div className="flex flex-col gap-5">
         <header className="flex flex-wrap items-center justify-between gap-3">
-          <h1 tabIndex={-1} className="min-w-0 text-[24px] font-semibold leading-tight text-(--text-1)" data-home-count={needCount ?? "reading"}>
+          <h1 tabIndex={-1} className={`${PAGE_H1} min-w-0`} data-home-count={needCount ?? "reading"}>
             {needCount === null ? "Needs you" : needCount === 0 ? "Nothing needs you" : `${needCount} ${needCount === 1 ? "thing needs" : "things need"} you`}
           </h1>
           {/* First run's action: with an app connected the header has none. With nothing connected at all, the note below
               carries it, so it appears once. */}
-          {apps?.items.length === 0 && !nothingOfMine && (
+          {canConnect && apps?.items.length === 0 && !nothingOfMine && (
             <button
               type="button"
               onClick={() => setConnect(true)}
@@ -125,11 +130,13 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
         {nothingOfMine && !ownerView && (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3" data-home-role-note>
             <p className="min-w-0 flex-1 basis-64 text-[14px] text-(--text-2)">
-              You haven&apos;t connected an agent here. Other people&apos;s sessions and apps are shown to workspace owners only, so this Home shows the plan and what Align released, not their agents.
+              {canConnect ? "You haven't connected an agent here. " : ""}Other people&apos;s sessions and apps are shown to workspace owners only, so this Home shows the plan and what Align released, not their agents.
             </p>
-            <button type="button" className={outlineBtn} onClick={() => setConnect(true)} data-connect-empty>
-              Connect your agent
-            </button>
+            {canConnect && (
+              <button type="button" className={outlineBtn} onClick={() => setConnect(true)} data-connect-empty>
+                Connect your agent
+              </button>
+            )}
           </div>
         )}
 

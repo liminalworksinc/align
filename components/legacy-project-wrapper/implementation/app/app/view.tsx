@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useState } from "react";
 import { api, go, Btn, Err, Field, Input, Loading, Note, Pill, Shell, SignInAgain, useAction, useApi, when, type WsSummary } from "./_ui/kit";
@@ -10,7 +11,7 @@ import { isBlankText } from "@/lib/v2/text-core.mts";
 
 // LIM-2472 (stream R): the signed-in landing, token-only in both themes. The workspaces lead (left, or first on a
 // phone); creating one and connecting a device sit beside them. Behaviour and every request are unchanged.
-const H1 = "font-display text-[32px] leading-[1.1] text-(--text-1) max-sm:text-[28px]";
+const H1 = PAGE_H1;
 
 interface DeletedWs {
   id: string;

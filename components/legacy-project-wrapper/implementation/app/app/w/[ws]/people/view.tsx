@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useState } from "react";
 import { api, go, Btn, Err, Field, Input, Loading, Note, Pill, Select, Shell, SignInAgain, useAction, useApi, when } from "../../../_ui/kit";
 import { EmptyState, Panel } from "../../../_ui/ds";
@@ -23,7 +24,7 @@ interface Invite {
 const ROLE_LABEL: Record<WsRole, string> = { owner: "Owner", member: "Member", viewer: "Viewer" };
 
 // LIM-2472 (stream R): token-only styling in both themes. A text button is 44px tall below 640px (globals.css base).
-const H1 = "mb-5 font-display text-[32px] leading-[1.1] text-(--text-1) max-sm:text-[28px]";
+const H1 = `${PAGE_H1} mb-5`;
 const TEXT_DANGER = "ml-auto rounded-(--radius-s) px-2 text-[14px] font-medium text-(--st-declined) hover:bg-(--st-declined-soft)";
 const REMOVE_PANEL = "mt-1 w-full rounded-(--radius-s) border border-(--st-declined)/40 bg-(--st-declined-soft) p-3";
 

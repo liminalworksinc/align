@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useState } from "react";
 import { api, ApiError, Btn, Err, Loading, Note, Pill, Select, Shell, SignInAgain, useAction, useApi, when, type WsSummary } from "../_ui/kit";
 import { Panel } from "../_ui/ds";
@@ -55,7 +56,7 @@ export default function Devices({ me }: { me: Me }) {
   }
   return (
     <Shell me={me}>
-      <h1 className="mb-5 font-display text-[32px] leading-[1.1] text-(--text-1) max-sm:text-[28px]">Your devices</h1>
+      <h1 className={`${PAGE_H1} mb-5`}>Your devices</h1>
       <Panel className="mb-4">
         {list.loading && <Loading />}
         <Err>{list.error ?? act.error}</Err>

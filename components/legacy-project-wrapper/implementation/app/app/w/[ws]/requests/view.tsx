@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useCallback, useState } from "react";
 import { Desk } from "@/app/app/_ui/b/desk";
 import { Shell } from "../../../_ui/kit";
@@ -15,7 +16,7 @@ export default function Requests({ me, ws }: { me: Me; ws: string }) {
   const changed = useCallback(() => setReloadToken((t) => t + 1), []);
   return (
     <Shell me={me} ws={ws} tab="Requests">
-      <h1 className="mb-5 font-display text-[32px] leading-[1.1] text-(--text-1) max-sm:text-[28px]">Change requests</h1>
+      <h1 className={`${PAGE_H1} mb-5`}>Change requests</h1>
       <Desk ws={ws} me={me.id} selectedId={review?.id ?? null} reloadToken={reloadToken} />
       {/* The drawers break words only where needed, so a short label ("Close", "Esc") never splits at 320. */}
       <div className="[overflow-wrap:break-word]">

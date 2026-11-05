@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useEffect, useState } from "react";
 import { api, Btn, Err, Field, Input, Loading, Note, Pill, Shell, SignInAgain, go, useAction, useApi, when } from "../_ui/kit";
 import { Panel } from "../_ui/ds";
@@ -27,7 +28,7 @@ const LABELS: Record<string, string> = { ...PROVIDERS, credential: "Test passwor
 
 // LIM-2472 (stream R): token-only styling in both themes. Each row is a name over its detail, and the rows wrap, so a
 // long email never squeezes a label to one letter per line at 320 (defect 5).
-const H1 = "mb-5 font-display text-[32px] leading-[1.1] text-(--text-1) max-sm:text-[28px]";
+const H1 = `${PAGE_H1} mb-5`;
 const ROW = "flex flex-wrap items-center gap-x-3 gap-y-1 py-3 first:pt-0 last:pb-0";
 const ROW_NAME = "min-w-0 flex-1 basis-[12rem] text-[15px] font-medium text-(--text-1)";
 const TEXT_BTN = "rounded-(--radius-s) px-2 text-[14px] font-medium";

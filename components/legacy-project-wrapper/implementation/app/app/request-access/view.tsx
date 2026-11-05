@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useState } from "react";
 import { api, Btn, Err, Field, Input, Note, Select, TextArea, TrustLinks, useAction } from "../_ui/kit";
@@ -62,7 +63,7 @@ export default function RequestAccess({
   return (
     <main className="grid min-h-screen place-items-center bg-(--bg-page) p-6 text-(--text-1) max-sm:p-3">
       <div className="al-in w-full max-w-[560px] rounded-(--radius-l) border border-(--line) bg-(--bg-panel) p-8 max-sm:p-5">
-        <h1 className="mb-1 font-display text-[34px] leading-[1.05] max-sm:text-[28px]">Request access to Align</h1>
+        <h1 className={`${PAGE_H1} mb-1`}>Request access to Align</h1>
         {sent ? (
           <>
             <p className="mt-4 text-[16px] text-(--text-2)">Thanks. We got your request and will answer it by email at {sent}, usually within a day.</p>

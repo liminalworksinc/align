@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Btn, Err, Field, Input, Note, TrustLinks, go } from "../_ui/kit";
@@ -147,7 +148,7 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
   return (
     <main className="grid min-h-screen place-items-center bg-(--bg-page) p-6 text-(--text-1) max-sm:p-3">
       <div className="al-in w-full max-w-[460px] rounded-(--radius-l) border border-(--line) bg-(--bg-panel) p-8 max-sm:p-5">
-        <h1 className="mb-1 font-display text-[38px] leading-none">Align</h1>
+        <h1 className={`${PAGE_H1} mb-1`}>Align</h1>
         <p className="mb-6 text-[16px] text-(--text-2)">Sign in as yourself to see your workspaces, goals and shared sessions.</p>
         {(options.google || options.github) && (
           <div className="mb-5 flex flex-col gap-2">

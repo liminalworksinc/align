@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useState } from "react";
 import { Err, Loading, Note, PHONE_TABLE, Select, Shell, num, usd, useApi } from "../../../_ui/kit";
 import { Panel } from "../../../_ui/ds";
@@ -60,7 +61,7 @@ export default function SpendPage({ me, ws }: { me: Me; ws: string }) {
   const detail = useApi<WsDetail>(`/api/v2/workspaces/${ws}`);
   return (
     <Shell me={me} ws={ws} tab="Spend">
-      <h1 className="mb-2 font-display text-[32px] leading-[1.1] text-(--text-1) max-sm:text-[28px]">Usage by goal</h1>
+      <h1 className={`${PAGE_H1} mb-2`}>Usage by goal</h1>
       <p className="mb-5 max-w-prose text-[15px] text-(--text-2)">Tokens from shared sessions, counted under the goal each session was bound to when the work happened.</p>
       <AllocationCard ws={ws} detail={detail.data} />
       <Panel className="mb-4"

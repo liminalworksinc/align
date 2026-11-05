@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useState } from "react";
 import { api, ApiError, Btn, Err, Field, Loading, Pill, sentence, Shell, TextArea, useAction, useApi, when } from "../../../_ui/kit";
 import { Panel, StatusPill, type StatusKind } from "../../../_ui/ds";
@@ -244,7 +245,7 @@ export default function Alignments({ me, ws }: { me: Me; ws: string }) {
   );
   return (
     <Shell me={me} ws={ws} tab="Alignments">
-      <h1 className="mb-5 font-display text-[32px] leading-[1.1] text-(--text-1) max-sm:text-[28px]">Alignments</h1>
+      <h1 className={`${PAGE_H1} mb-5`}>Alignments</h1>
       {d.loading && <Loading />}
       <Err>{d.error}</Err>
       {d.data && (

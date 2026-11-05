@@ -1,3 +1,4 @@
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { headers } from "next/headers";
 import { connection } from "next/server";
 import { Suspense } from "react";
@@ -52,7 +53,7 @@ function Refused({ children }: { children: React.ReactNode }) {
     <main className="grid min-h-screen place-items-center bg-(--bg-page) p-6 text-[16px] text-(--text-1) max-sm:p-3">
       <div className="w-full max-w-[560px] rounded-(--radius-l) border border-(--line) bg-(--bg-panel) p-8 max-sm:p-5">
         <p className="mb-4 font-display text-[26px] leading-none">Align</p>
-        <h1 className="mb-3 text-[24px] font-semibold">Can’t connect this app</h1>
+        <h1 className={`${PAGE_H1} mb-3`}>Can’t connect this app</h1>
         {children}
       </div>
     </main>

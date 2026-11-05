@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useState } from "react";
 import { api, ApiError, Btn, Err, Field, Input, Loading, Note, Pill, Select, sentence, Shell, TextArea, useAction, useApi } from "../../../_ui/kit";
@@ -297,7 +298,7 @@ export default function Asks({ me, ws }: { me: Me; ws: string }) {
   );
   return (
     <Shell me={me} ws={ws} tab="Asks">
-      <h1 className="mb-2 font-display text-[32px] leading-[1.1] text-(--text-1) max-sm:text-[28px]">Asks</h1>
+      <h1 className={`${PAGE_H1} mb-2`}>Asks</h1>
       <p className="mb-5 max-w-prose text-[15px] text-(--text-2)">What people asked of a team, from meetings or recorded by hand. An open ask is not an agreed goal until a lead of the team accepts it.</p>
       {d.loading && <Loading />}
       <Err>{d.error}</Err>

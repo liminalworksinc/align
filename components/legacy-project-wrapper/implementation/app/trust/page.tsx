@@ -1,3 +1,4 @@
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { DocBlocks, TrustFrame } from "../_trust/doc";
@@ -17,7 +18,7 @@ const contact = (s: string) => <DocBlocks blocks={[{ t: "para", c: parseInline(s
 export default function Page() {
   return (
     <TrustFrame>
-      <h1 className="mb-3 font-display text-[36px] leading-none text-(--text-1)">Trust</h1>
+      <h1 className={`${PAGE_H1} mb-3`}>Trust</h1>
       <p className="mb-4">
         What Align holds, where, for how long, and how it is protected. Align stores no prompts, agent output or code on its servers, and Align in local mode keeps everything on your own machine.
         These documents describe the code as it is today, including what isn&apos;t done yet, and are drafts under review.

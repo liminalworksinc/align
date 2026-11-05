@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useState } from "react";
 import { api, ApiError, go, Btn, Err, Loading, Note, Shell, signInAgain, useAction, useApi, when } from "../../_ui/kit";
@@ -70,7 +71,7 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
     });
   return (
     <Shell me={me}>
-      <h1 className="mb-5 font-display text-[32px] leading-[1.1] text-(--text-1) max-sm:text-[28px]">Workspace invite</h1>
+      <h1 className={`${PAGE_H1} mb-5`}>Workspace invite</h1>
       <Panel className="mb-4">
         {p.loading && <Loading />}
         {gone && <Err>{GONE}</Err>}

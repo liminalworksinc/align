@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, useAction, useApi } from "../../../_ui/kit";
@@ -31,7 +32,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
 
   return (
     <Shell me={me} ws={ws} tab="Goals">
-      <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">Goals</h1>
+      <h1 className={`${PAGE_H1} mb-5`}>Goals</h1>
       <Err>{detail.error ?? feed.error}</Err>
       <Card>
         {feed.loading && <Loading />}

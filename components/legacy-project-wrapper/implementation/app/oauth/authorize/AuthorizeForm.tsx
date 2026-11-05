@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useState } from "react";
 import { Btn, Card, Err, SignInAgain } from "@/app/app/_ui/kit";
 
@@ -70,7 +71,7 @@ export default function AuthorizeForm(props: {
   return (
     <main className="mx-auto min-h-screen max-w-[600px] bg-(--bg-page) p-6 text-[16px] text-(--text-1) max-sm:p-4">
       <p className="font-display mb-4 text-[26px] leading-none text-(--text-1)">Align</p>
-      <h1 className="mb-1 text-[24px] font-semibold text-(--text-1)">Connect {clientName} to Align</h1>
+      <h1 className={`${PAGE_H1} mb-1`}>Connect {clientName} to Align</h1>
       <p className="mb-5 text-(--text-2)">
         {selfNamed ? "This app named itself. " : ""}After you allow it, Align sends you back to <span className="font-mono">{redirectHost}</span>.
       </p>

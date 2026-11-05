@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useRef, useState } from "react";
 import { api, ApiError, Btn, Err, Field, Input, Note, Shell, SignInAgain, useAction, useApi, type WsSummary } from "../_ui/kit";
 import { Panel } from "../_ui/ds";
@@ -133,7 +134,7 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
 
   return (
     <Shell me={me}>
-      <h1 className="mb-5 font-display text-[32px] leading-[1.1] text-(--text-1) max-sm:text-[28px]">Connect a device</h1>
+      <h1 className={`${PAGE_H1} mb-5`}>Connect a device</h1>
       {stale ? (
         <SignInAgain me={me} next={code.trim() ? `/app/device?code=${encodeURIComponent(code.trim())}` : "/app/device"}>
           Sign in again to approve a device. Approving needs a sign-in from the last 15 minutes.

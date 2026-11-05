@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { Shell } from "./kit";
 import { Panel } from "./ds";
@@ -10,7 +11,7 @@ export function NotInWorkspace({ me }: { me: Me }) {
   return (
     <Shell me={me}>
       <Panel className="mx-auto mt-6 max-w-[620px]">
-        <h1 className="mb-2 font-display text-[28px] leading-[1.1] text-(--text-1)" data-not-in-workspace>
+        <h1 className={`${PAGE_H1} mb-2`} data-not-in-workspace>
           This workspace doesn&apos;t exist or you&apos;re not in it
         </h1>
         <p className="mb-3 text-[15px] text-(--text-2)">It may have been deleted, or you may have been removed from it. Ask a workspace owner for an invite if you should be in it.</p>
