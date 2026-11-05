@@ -118,6 +118,11 @@ The goal page's own request cards (`5506-5543` and the U/B checks that call `car
 
 **Viewer connect.** Home no longer offers a viewer "Connect your agent" or the header "Connect an agent" (`AuthorizeForm.tsx:15,119`: viewers can't connect apps). Nothing is offered until the role is known, from `GET /api/v2/workspaces`, the read the shell already makes, so Home adds one read. A viewer keeps the note's second sentence. A freshly invited member still gets the offer. `NeedsList`'s notice says "See apps", which is not a connect offer.
 
+### Notes for the PR body
+**Files outside `app/app/**` touched by the H1 change:** `app/oauth/authorize/AuthorizeForm.tsx`, `app/oauth/authorize/page.tsx` and `app/trust/page.tsx`. Class-only, no logic: each `h1` takes `PAGE_H1` and the file gains that one import. The consent page's form, handlers and headers are unchanged.
+
+**The display face.** Screenshots from this iMac show the real Nineties Headliner because it is installed here. A tester's machine won't show it until the private host lands (LIM-2454 1cb2b974); until then it falls through to Iowan Old Style or Georgia. The current CSP is only `frame-ancestors` (`proxy.ts:37`, `next.config.ts:16`), so `font-src` blocks nothing today.
+
 ### Local delta on Mini S1's file
 `_ui/home/needs-list.tsx` carries one addition on top of `f4a7609`: an `onCount?: (n: number | null) => void` prop and one `useEffect`, marked "Local delta (integration)". It reports Needs-you rows only, and null while reading or when a read failed and the rest found nothing. Home's H1 reads it. A by-path re-take drops it, and the H1 then stays on "Needs you". It has been asked for upstream.
 

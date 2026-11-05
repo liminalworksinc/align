@@ -55,6 +55,13 @@ const primaryBtn =
 const outlineBtn =
   "inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) border border-(--line-strong) px-3.5 text-[14px] font-medium text-(--text-1) hover:bg-(--bg-raised) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) max-sm:min-h-[44px]";
 
+/** The page's heading: the Needs-you count; neutral while reading, or when a failed read leaves zero unknown. */
+function needsHeading(n: number | null) {
+  if (n === null) return "Needs you";
+  if (n === 0) return "Nothing needs you";
+  return `${n} ${n === 1 ? "thing needs" : "things need"} you`;
+}
+
 export default function Home({ me, ws }: { me: Me; ws: string }) {
   const d = useRead<HomeData>(`/api/v2/workspaces/${ws}/home`);
   const s = useApi<{ mine: MySession[]; all: AnySession[] | null }>(`/api/v2/workspaces/${ws}/sessions`);
@@ -67,6 +74,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   // Stable: the Drawer re-takes focus whenever onClose changes, which would pull it off a notice that just took it.
   const closeReview = useCallback(() => setReview(null), [setReview]);
   const [connect, setConnect] = useState(false);
+  const closeConnect = useCallback(() => setConnect(false), []);
   // NeedsList holds its own reads: a new key reads them again after a decision in the drawer.
   const [needsKey, setNeedsKey] = useState(0);
   // The Needs-you count, from NeedsList's own rows; null until its reads finish, or when one failed and it found nothing.
@@ -98,7 +106,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
       <div className="flex flex-col gap-5">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <h1 tabIndex={-1} className={`${PAGE_H1} min-w-0`} data-home-count={needCount ?? "reading"}>
-            {needCount === null ? "Needs you" : needCount === 0 ? "Nothing needs you" : `${needCount} ${needCount === 1 ? "thing needs" : "things need"} you`}
+            {needsHeading(needCount)}
           </h1>
           {/* First run's action: with an app connected the header has none. With nothing connected at all, the note below
               carries it, so it appears once. */}
@@ -152,7 +160,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
         {/* The drawers break words only where needed, so a short label ("Close", "Esc") never splits at 320. */}
         <div className="[overflow-wrap:break-word]">
           {review && <ReviewDrawer key={`${review.id}:${review.choice ?? ""}`} ws={ws} goal={review.goal} id={review.id} me={me.id} choice={review.choice} onClose={closeReview} onChanged={reloadAll} />}
-          <Drawer open={connect} onClose={() => setConnect(false)} title="Connect an agent" eyebrow="Get started">
+          <Drawer open={connect} onClose={closeConnect} title="Connect an agent" eyebrow="Get started">
             <FirstRun ws={ws} onSeen={reloadAll} always />
           </Drawer>
         </div>
