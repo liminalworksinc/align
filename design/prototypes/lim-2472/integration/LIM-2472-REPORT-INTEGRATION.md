@@ -94,6 +94,7 @@ Routes: `/app`, account, devices, device, people, alignments, asks, spend, reque
 | H2 | High | Verified | Add evidence refused with 409 (the request was declined in another session while the form was open) | 1440, 390 | both | owner | The POST gets 409 ("You declined this request, so nothing changes.") but no notice is ever shown: `AddEvidence` sets its red notice and calls `onDone`, the re-read request no longer allows `add_evidence`, and ReviewBody unmounts `AddEvidence` along with its notice. The person sees the form vanish and nothing else. | `app/app/_ui/ds/review.tsx:103` (and 196-199) | `w-dark-1440-409-Add-evidence.png` (and light, 390) |
 | M7 | Medium | Verified | Record timeline after Withdraw and after Accept the change | 1440, 390 | both | member (and anyone reading `?cr=`) | Withdraw and Accept the change both POST 200, but the single-request record gains no event. A withdrawn request has `decided_at: null`, so `changeRequestEvents` adds no "withdrew the request". Accepting a counter keeps the revision, and no event kind covers it. With `?cr=` the audit log isn't read, so owners don't see these either. | `app/app/_ui/ds/record-events.ts:125`; server `decided_at` on withdraw | `w-dark-1440-write-Withdraw.png`, `w-dark-1440-write-Accept-the-change.png` |
 | M8 | Medium | Verified | 409 on Not yet (server copy) | 1440, 390 | both | owner | The refusal reads "…so nothing changes: agents stay on version 4 until someone launches version 5." Align releases versions; it doesn't know which version agents are on. | `lib/v2/changes.ts:540` (server) | `w-dark-1440-409-Not-yet-after-another-session-decided-not-yet.png` |
+| M9 | Medium | Verified | Add evidence form on a phone | 320 (same class at 390) | dark | owner | The "Link (https)" and "What it shows" inputs are 37px tall (the Kind select is 44px through the base-layer rule). `FIELD` has no phone minimum. | `app/app/_ui/ds/review.tsx:29` (`FIELD`) | `320-dark-add-evidence-1-form-filled.png` |
 | L1 | Low | Verified | Compare on the record and on Requests (light) | all | light | all | "Added"/"Changed" marks are 4.45:1 at 12px. A changed row's " · target …" (`--text-3` on `--accent-soft`) is 4.18:1 at 14px. | `app/app/_ui/ds/compare.tsx:26,62` | `light-owner-record-goal-security-1440.png` |
 | L2 | Low | Verified | Evidence label detail on Work (light) | all | light | owner, member | The `opacity-90` detail text ("read the goals …", "no goal read yet") is 4.27-4.47:1 at 12px. | `app/app/_ui/ds/evidence-label.tsx:25` | `light-owner-work-1440.png` |
 | L3 | Low | Verified | Work "Apps", dependencies "Work", trust/privacy "Trust" | 390 | both | all, signed out | 44px tall but only 34-35px wide. | `app/app/_ui/ds/work.tsx:234`, `app/app/_ui/ds/dependencies.tsx:73`, `app/_trust/doc.tsx:138` | `dark-owner-work-390.png`, `dark-owner-dependencies-390.png`, `dark-signed-out-trust-390.png` |
@@ -102,7 +103,7 @@ Routes: `/app`, account, devices, device, people, alignments, asks, spend, reque
 | L6 | Low | Suspected | Tab order at 1440: Work, Work?goal, dependencies; Sessions (owner) | 1440 | both | all | Focus moves up 166-275px because the right column follows the left (reading order of a two-column layout, probably fine). On Sessions, "Delete shared history" is followed by a "Stop agent" 200px higher. | `app/app/_ui/ds/work.tsx`, `app/app/w/[ws]/sessions/view.tsx:209,247` | `dark-owner-work-1440.png`, `dark-owner-sessions-1440.png` |
 | I1 | Info | Verified | Server-side: a request that fell behind can still be declined | 1440 | both | owner | After the owner saved a new version of the goal, a stale tab's Decline on a request asked against the old version was accepted (200), not refused. That may be intended (declining changes nothing). The real 409 is walked in "Write path" below. | server (decline route) | `dark-flow-49-stale-409-1440.png` |
 
-Counts after the `340ead6` re-walk: open High 1 (H2), Medium 5 (M2, M5, M6 pending the concept, M7, M8), Low 6 (two Suspected), Info 1. Fixed and re-walked: H1, M1, M3, M4.
+Counts after the `340ead6` re-walk and the 320 pass: open High 1 (H2), Medium 6 (M2, M5, M6 pending the concept, M7, M8, M9), Low 6 (two Suspected), Info 1. Fixed and re-walked: H1, M1, M3, M4.
 
 ## Write path: every write as a real POST (`f0d3def`, after `340ead6`)
 
@@ -189,15 +190,15 @@ The keyboard (Tab) pass ran at 1440 and 390 only; 320 got the page audit without
 | Cancel path (choose, Cancel, choices return, choose another) | O | walked | walked | not reached: flows at 1440/390 only | walked | walked | not reached: flows at 1440/390 only |
 | Consequence line (Approve only vs Approve and launch) | O | walked | walked | not reached: flows at 1440/390 only | walked | walked | not reached: flows at 1440/390 only |
 | Write: Approve only | O | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
-| Write: Approve and launch | O | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
+| Write: Approve and launch | O | walked | walked | walked (320 pass, keyboard only) | walked | walked | not reached: write passes at 1440/390 |
 | Write: Accept if… | O | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
 | Write: Suggest a change | O | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
-| Write: Decline | O | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
+| Write: Decline | O | walked | walked | walked (320 pass, keyboard only) | walked | walked | not reached: write passes at 1440/390 |
 | Write: Acknowledge | M | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
 | Write: Accept the change | M | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
 | Write: Update to version n | M | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
 | Write: Withdraw | M | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
-| Write: Add evidence (Requests tab) | O | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
+| Write: Add evidence (Requests tab) | O | walked | walked | walked (320 pass, keyboard only) | walked | walked | not reached: write passes at 1440/390 |
 | Write: Launch | O | walked | not reached: the successful POST ran at 1440; at 390 only its 409 | not reached | walked | not reached: as dark 390 | not reached |
 | Write: Not yet | O | walked | not reached: the successful POST ran at 1440; at 390 only its 409 | not reached | walked | not reached: as dark 390 | not reached |
 | 409, real (Approve only, Suggest a change, Not yet, Launch, Withdraw, Decline) | O, M | walked | walked | not reached: 1440/390 only | walked | walked | not reached: 1440/390 only |
@@ -228,11 +229,26 @@ The keyboard (Tab) pass ran at 1440 and 390 only; 320 got the page audit without
 | R: OAuth authorize (no params) | S | read only: after-set screenshot | read only | read only | read only | read only | read only |
 | Home and workspace shell | all | not reached: pending the concept | not reached: pending the concept | not reached: pending the concept | not reached: pending the concept | not reached: pending the concept | not reached: pending the concept |
 
-Totals over 42 flows x 6 columns = 252 cells: **walked 188, read only 8, not reached 56**. Of the 56, 6 are Home and the shell (pending the concept) and most of the rest are 320 cells for flows that only ran at 1440 and 390. The shell's targets and contrast were still measured; see M6. The page audit of the routes above was run on `0107890`; the four shared-surface files that changed after it (`review.tsx`, `decision-record.tsx`, `work.tsx`) were re-walked on `f0d3def` through the write, 409, retry, unknown-id and link rows.
+Totals over 42 flows x 6 columns = 252 cells: **walked 191, read only 8, not reached 53** (after the 320 dark pass below). Of the 53, 6 are Home and the shell (pending the concept) and most of the rest are 320 cells for flows that only ran at 1440 and 390. The shell's targets and contrast were still measured; see M6. The page audit of the routes above was run on `0107890`; the four shared-surface files that changed after it (`review.tsx`, `decision-record.tsx`, `work.tsx`) were re-walked on `f0d3def` through the write, 409, retry, unknown-id and link rows.
+
+### 320 x 640, dark: three writes, keyboard only (`da9c33b`)
+
+Fresh data dir, one `next dev`, the same seed. The owner works keyboard only: Tab to reach each control, Enter to press it, typing into fields. Every write is a real POST. Raw rows: `I-base/walk/320-dark-writes.json`; screenshots: `I-base/walk/320-dark-*.png`.
+
+| Write | POST, state | Sideways scroll | Controls under 44px | Focus ring | Confirmation's consequence line | Notice (exact) | Timeline |
+|---|---|---|---|---|---|---|---|
+| Approve and launch, through the one-row confirmation | 200, approved and launched | 0px at every step | none in the review | 2px solid on every stop in the card | "Approves revision 1 and releases version 2.": 14px, 8.89:1, not clipped, inside the viewport | "Recorded: you approved revision 1 and launched version 2." (focused) | 1 → 3 |
+| Decline with a typed reason (from More actions) | 200, rejected | 0px at every step | none in the menu, input or confirmation | 2px solid on every stop | "The goal stays at version 2. Theo Vance sees your reason." (14px, 8.89:1), then "Your reason: Walk at 320: not this quarter (fictional)." | "Recorded: you declined this request." (focused) | 1 → 2 |
+| Add evidence: kind, https link, label | 201, evidence 0 → 1 | 0px | **the url and label inputs are 37px tall (M9)**; the Kind select is 44px | 2px solid on every stop | – (no confirmation step) | "Recorded: your link was added, shown as self-reported." (focused). The new link is 44px tall with rel "noopener noreferrer" | 1 → 2 |
+
+Remaining unwalked 320 cells: no rule in `app/` separates 320 from 390. Every width rule there is a Tailwind breakpoint at 640px or above, the `width < 40rem` button and select minimum in `globals.css`, or the `max-width: 639.98px` phone query in `review.tsx`, so it applies to both widths or to neither. Those cells therefore render the same components and CSS as their walked 390 cells. The exceptions are the 404 (workspace deleted under a staged decision) and stale-tab rows, walked at 1440 only, and the successful Launch and Not yet POSTs, walked at 1440 only (at 390 only their 409s). No sideways scroll at 320 was measured on:
+- all 64 audited pages per theme (20 signed-in routes x 3 roles, plus 4 signed-out; document `scrollWidth`, 0px over);
+- the three 320 writes above;
+- 72 of the 74 after-set screens per theme (full-page screenshot width exactly 320px). Not measured: 72 and 73 (the loading screens, captured viewport-only).
 
 ## Needed outside my files (listed, not changed)
 
-- `_ui/ds/review.tsx` (S): keep Add evidence's refusal on screen after the request stops allowing evidence (H2); the no-evidence line in the phone confirmation (L5). H1, M3 and M4 are fixed in `340ead6`.
+- `_ui/ds/review.tsx` (S): keep Add evidence's refusal on screen after the request stops allowing evidence (H2); a 44px phone minimum on `FIELD` inputs (M9); the no-evidence line in the phone confirmation (L5). H1, M3 and M4 are fixed in `340ead6`.
 - `_ui/ds/record-events.ts` (S) and the server: events for Withdraw and Accept the change (M7). M1 is fixed in `340ead6`.
 - `_ui/ds/compare.tsx`, `_ui/ds/evidence-label.tsx` (S/foundation): light-theme contrast (L1, L2). `_ui/ds/work.tsx:234`, `_ui/ds/dependencies.tsx:73`, `app/_trust/doc.tsx:138`: 44px width (L3).
 - `app/globals.css` (foundation): dark `--accent` vs `--text-on-accent` at 4.29:1 (M2).
