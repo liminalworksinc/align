@@ -149,7 +149,7 @@ function PasskeyPrompt() {
 
 const navLink = (on: boolean) =>
   `flex min-h-[36px] items-center rounded-(--radius-s) px-2.5 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-(--focus) max-lg:min-h-[44px] ${
-    on ? "bg-(--accent-soft) font-medium text-(--text-1) shadow-[inset_2px_0_0_var(--accent)]" : "text-(--text-2) hover:bg-(--bg-raised) hover:text-(--text-1)"
+    on ? "bg-(--accent-soft) font-medium text-(--text-1) shadow-[inset_2px_0_0_var(--accent-text)]" : "text-(--text-2) hover:bg-(--bg-raised) hover:text-(--text-1)"
   }`;
 
 /** The workspace switcher: the native select, so its list never runs off a narrow window. */
