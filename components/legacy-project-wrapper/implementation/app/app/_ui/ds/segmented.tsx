@@ -53,7 +53,7 @@ export function Segmented<V extends string>({
               aria-checked={on}
               tabIndex={on ? 0 : -1}
               onClick={() => onChange(o.value)}
-              className={`inline-flex items-center gap-1.5 rounded-[7px] font-medium transition-colors max-sm:min-h-[44px] ${size === "s" ? "px-2.5 py-1 text-[13px]" : "px-3.5 py-1.5 text-[14px]"} ${on ? "bg-(--accent) text-(--text-on-accent)" : "text-(--text-2) hover:bg-(--bg-raised) hover:text-(--text-1)"}`}
+              className={`inline-flex items-center gap-1.5 rounded-[7px] font-medium transition-[color,background-color,border-color] max-sm:min-h-[44px] ${size === "s" ? "px-2.5 py-1 text-[13px]" : "px-3.5 py-1.5 text-[14px]"} ${on ? "bg-(--accent) text-(--text-on-accent)" : "text-(--text-2) hover:bg-(--bg-raised) hover:text-(--text-1)"}`}
             >
               {o.icon}
               {o.label}
