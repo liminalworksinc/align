@@ -149,8 +149,19 @@ export function NeedsList({ ws, me, selected, reviewBase = "", heading = true }:
     return inPhase(rows, phase).filter((n) => !needle || [n.goal?.title, n.cause, n.quote, n.who, KIND_WORDS[n.kind]].join(" ").toLowerCase().includes(needle));
   }, [rows, phase, q]);
 
+  // Every read refused or failed (a signed-in non-member gets 404 on all of them): say so, never "Nothing needs you".
+  const unreadable = !loading && cr.error !== null && asks.error !== null && al.error !== null && home.error !== null;
+  if (unreadable)
+    return (
+      <section aria-label="Needs you" data-needs="unreadable" className="flex min-w-0 flex-col gap-2">
+        <p role="status" className="rounded-(--radius-m) border border-(--line) bg-(--bg-panel) px-3 py-2.5 text-[14px] text-(--text-2)">
+          Align couldn&apos;t read this workspace for you, so what needs you here is unknown. If you aren&apos;t a member, ask a workspace owner for an invite.
+        </p>
+      </section>
+    );
+
   return (
-    <section aria-labelledby={heading ? "needs-h" : undefined} aria-label={heading ? undefined : "Needs you"} data-needs className="@container/needs flex min-w-0 flex-col gap-2">
+    <section aria-labelledby={heading ? "needs-h" : undefined} aria-label={heading ? undefined : "Needs you"} data-needs="list" className="@container/needs flex min-w-0 flex-col gap-2">
       {heading && (
         <h2 id="needs-h" className="text-[18px] font-semibold text-(--text-1)">
           Needs you
