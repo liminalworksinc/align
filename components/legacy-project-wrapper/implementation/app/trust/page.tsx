@@ -17,26 +17,26 @@ const contact = (s: string) => <DocBlocks blocks={[{ t: "para", c: parseInline(s
 export default function Page() {
   return (
     <TrustFrame>
-      <h1 className="mb-3 font-display text-[34px] leading-none text-(--text-1)">Trust</h1>
+      <h1 className="mb-3 font-display text-[36px] leading-none text-(--text-1)">Trust</h1>
       <p className="mb-4">
         What Align holds, where, for how long, and how it is protected. Align stores no prompts, agent output or code on its servers, and Align in local mode keeps everything on your own machine.
         These documents describe the code as it is today, including what isn&apos;t done yet, and are drafts under review.
       </p>
       <ul className="mb-6 list-disc pl-6">
         {sections.map((d) => (
-          <li key={d.id} className="mb-1">
-            <a href={`#${d.id}`} className="underline decoration-(--text-3) underline-offset-2 hover:text-(--text-1)">
+          <li key={d.id} className="mb-1 max-sm:mb-0">
+            <a href={`#${d.id}`} className="inline-flex items-center underline decoration-(--text-3) underline-offset-2 hover:text-(--text-1) max-sm:min-h-[44px]">
               {d.title}
             </a>
           </li>
         ))}
-        <li className="mb-1">
-          <Link href="/privacy" className="underline decoration-(--text-3) underline-offset-2 hover:text-(--text-1)">
+        <li className="mb-1 max-sm:mb-0">
+          <Link href="/privacy" className="inline-flex items-center underline decoration-(--text-3) underline-offset-2 hover:text-(--text-1) max-sm:min-h-[44px]">
             Privacy policy
           </Link>
         </li>
-        <li className="mb-1">
-          <a href="#contact" className="underline decoration-(--text-3) underline-offset-2 hover:text-(--text-1)">
+        <li className="mb-1 max-sm:mb-0">
+          <a href="#contact" className="inline-flex items-center underline decoration-(--text-3) underline-offset-2 hover:text-(--text-1) max-sm:min-h-[44px]">
             Contact
           </a>
         </li>

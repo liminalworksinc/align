@@ -170,11 +170,13 @@ function SignOutEverywhere({ onReauth }: { onReauth: (message: string) => void }
       <p className="mb-3 text-[15px] text-(--text-2)">Ends your Align sign-in on every browser, this one included. Use it if you lost a device or signed in somewhere you shouldn&apos;t have.</p>
       <label className="mb-1 flex min-h-[44px] items-center gap-2 text-[15px] text-(--text-1)">
         <input type="checkbox" className="size-4 shrink-0 accent-(--accent)" name="devices" checked={devices} onChange={(e) => setDevices(e.target.checked)} />
-        Also unpair all my devices (each <code>align</code> CLI has to run <code>align login</code> again)
+        <span className="min-w-0">
+          Also unpair all my devices (each <code className="font-mono text-[13px]">align</code> CLI has to run <code className="font-mono text-[13px]">align login</code> again)
+        </span>
       </label>
       <label className="mb-3 flex min-h-[44px] items-center gap-2 text-[15px] text-(--text-1)">
         <input type="checkbox" className="size-4 shrink-0 accent-(--accent)" name="apps" checked={apps} onChange={(e) => setApps(e.target.checked)} />
-        Also disconnect all my AI apps, in every workspace
+        <span className="min-w-0">Also disconnect all my AI apps, in every workspace</span>
       </label>
       <Btn kind="danger" disabled={act.busy} onClick={signOutAll}>
         Sign out everywhere

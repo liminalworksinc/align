@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, SignInAgain, TextArea, useAction, useApi, when } from "./kit";
+import { api, Btn, Err, Field, Input, Loading, Note, Pill, Select, SignInAgain, TextArea, useAction, useApi, when } from "./kit";
+import { Panel } from "./ds";
 import type { Me } from "./server";
 import type { Goal } from "./types";
 import { EvidencePill } from "./evidence";
@@ -96,7 +97,7 @@ const sessionName = (s: { owner: Person; mine: boolean; repo_alias: string | nul
 export function HoldBanner({ hold, goalTitle, me }: { hold: HoldState["held"]; goalTitle?: string; me?: string }) {
   if (!hold) return null;
   return (
-    <div data-hold-banner className="mb-5 rounded-[14px] border border-(--st-declined) bg-(--st-declined-soft) px-4 py-3 text-[15px] text-(--st-declined)">
+    <div data-hold-banner className="mb-5 rounded-(--radius-m) border border-(--st-pending)/50 bg-(--st-pending-soft) px-4 py-3 text-[15px] text-(--text-1)">
       <strong>All agents on {goalTitle ? `"${goalTitle}"` : "this goal"} are on hold.</strong> {hold.held_by.id === me ? "You" : hold.held_by.name} paused them {when(hold.held_at)}
       {hold.reason ? `: ${hold.reason}` : ""}. Their tools are blocked until someone who can approve for the goal releases it.
     </div>
@@ -167,8 +168,8 @@ function SendRequest({ ws, goal, data, onDone }: { ws: string; goal: Goal; data:
     <div className="mb-4 border-b border-(--line) pb-4" id="send-request">
       <p className="mb-2 text-[15px] font-medium text-(--text-1)">Send a request</p>
       {(Object.keys(TYPE_LABEL) as RequestType[]).map((t) => (
-        <label key={t} className="mb-2 flex items-start gap-2 text-[15px]">
-          <input type="radio" name="request-type" value={t} checked={type === t} onChange={() => setType(t)} className="mt-1" />
+        <label key={t} className="mb-2 flex min-h-[44px] items-start gap-2 text-[15px] text-(--text-1)">
+          <input type="radio" className="mt-1 size-4 shrink-0 accent-(--accent)" name="request-type" value={t} checked={type === t} onChange={() => setType(t)} />
           <span>
             <strong className="text-(--text-1)">{TYPE_LABEL[t]}.</strong> {TYPE_HELP[t]}
           </span>
@@ -178,8 +179,8 @@ function SendRequest({ ws, goal, data, onDone }: { ws: string; goal: Goal; data:
         <>
           <p className="mb-1 text-[14px] text-(--text-2)">Sessions to move (pick at least one)</p>
           {sessions.map((s) => (
-            <label key={s.session_key} className="mb-1 flex items-center gap-2 text-[15px]">
-              <input type="checkbox" checked={keys.includes(s.session_key)} onChange={(e) => setKeys((k) => (e.target.checked ? [...k, s.session_key] : k.filter((x) => x !== s.session_key)))} />
+            <label key={s.session_key} className="mb-1 flex min-h-[44px] items-center gap-2 text-[15px] text-(--text-1)">
+              <input type="checkbox" className="size-4 shrink-0 accent-(--accent)" checked={keys.includes(s.session_key)} onChange={(e) => setKeys((k) => (e.target.checked ? [...k, s.session_key] : k.filter((x) => x !== s.session_key)))} />
               <span>
                 {sessionName(s)}
                 {/* Two sessions can share a name (one person, one repository): the start time and the key's end tell them apart. */}
@@ -289,7 +290,7 @@ export function AgentsOnGoalCard({ ws, goal, me, onHoldChanged }: { ws: string; 
   if (!data.can_send && !data.hold.can_hold && !data.requests.length) return null;
   return (
     <section id="agents-on-goal">
-      <Card title="Agents on this goal">
+      <Panel className="mb-4" title="Agents on this goal">
         <HoldControls ws={ws} goal={goal} me={me} hold={data.hold} onDone={reload} />
         {data.can_send && <SendRequest ws={ws} goal={goal} data={data} onDone={d.reload} />}
         <Err>{d.error}</Err>
@@ -302,7 +303,7 @@ export function AgentsOnGoalCard({ ws, goal, me, onHoldChanged }: { ws: string; 
             ))}
           </ul>
         )}
-      </Card>
+      </Panel>
     </section>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
-import { api, ApiError, Btn, Card, Err, Loading, Note, Pill, Select, Shell, SignInAgain, useAction, useApi, when, type WsSummary } from "../_ui/kit";
+import { api, ApiError, Btn, Err, Loading, Note, Pill, Select, Shell, SignInAgain, useAction, useApi, when, type WsSummary } from "../_ui/kit";
+import { Panel } from "../_ui/ds";
 import type { Me } from "../_ui/server";
 
 interface Device {
@@ -54,8 +55,8 @@ export default function Devices({ me }: { me: Me }) {
   }
   return (
     <Shell me={me}>
-      <h1 className="mb-5 text-[26px] font-semibold text-(--text-1)">Your devices</h1>
-      <Card>
+      <h1 className="mb-5 font-display text-[32px] leading-[1.1] text-(--text-1) max-sm:text-[28px]">Your devices</h1>
+      <Panel className="mb-4">
         {list.loading && <Loading />}
         <Err>{list.error ?? act.error}</Err>
         {list.data?.devices.length === 0 && <Note>No devices yet. Run align login on your machine to connect one.</Note>}
@@ -111,7 +112,7 @@ export default function Devices({ me }: { me: Me }) {
         {list.data?.devices.some((d) => !d.revoked_at) && (
           <Note>A device reaches only the workspaces it was given. Giving one a workspace here needs a sign-in from the last 15 minutes; the device picks it up at its next sync.</Note>
         )}
-      </Card>
+      </Panel>
     </Shell>
   );
 }

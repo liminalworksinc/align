@@ -1,5 +1,5 @@
 "use client";
-import { Card, Err, Loading, Note, Shell, useApi } from "../../../_ui/kit";
+import { Err, Loading, Shell, useApi } from "../../../_ui/kit";
 import { ChangeRequestCard, useGoalTitles } from "../../../_ui/changes";
 import type { Me } from "../../../_ui/server";
 import type { ChangeRequest } from "../../../_ui/types";
@@ -8,17 +8,23 @@ import type { ChangeRequest } from "../../../_ui/types";
 export default function Requests({ me, ws }: { me: Me; ws: string }) {
   const d = useApi<{ waiting_on_me: ChangeRequest[]; mine: ChangeRequest[]; others: ChangeRequest[] }>(`/api/v2/workspaces/${ws}/change-requests`);
   const titles = useGoalTitles(ws);
+  // LIM-2472 (stream R): each section is a heading with its count over the request cards themselves (the cards are their
+  // own panels), so a request is never a box inside a box; an empty section is one quiet line.
   const section = (title: string, list: ChangeRequest[] | undefined, empty: string) => (
-    <Card title={title}>
-      {list?.length === 0 && <Note>{empty}</Note>}
+    <section aria-label={title} className="mb-7">
+      <h2 className="mb-3 flex items-baseline gap-2 border-b border-(--line) pb-2 text-[17px] font-semibold text-(--text-1)">
+        {title}
+        {!!list?.length && <span className="font-mono text-[12px] font-normal text-(--text-3)">{list.length}</span>}
+      </h2>
+      {list?.length === 0 && <p className="text-[15px] text-(--text-2)">{empty}</p>}
       {list?.map((cr) => (
         <ChangeRequestCard key={`${cr.id}:${cr.revision}:${cr.state}:${cr.goal.version}`} ws={ws} cr={cr} me={me.id} showGoal titles={titles} onDone={d.reload} />
       ))}
-    </Card>
+    </section>
   );
   return (
     <Shell me={me} ws={ws} tab="Requests">
-      <h1 className="mb-5 text-[26px] font-semibold text-(--text-1)">Change requests</h1>
+      <h1 className="mb-5 font-display text-[32px] leading-[1.1] text-(--text-1) max-sm:text-[28px]">Change requests</h1>
       {d.loading && <Loading />}
       <Err>{d.error}</Err>
       {d.data && (

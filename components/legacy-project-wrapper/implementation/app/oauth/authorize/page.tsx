@@ -49,9 +49,12 @@ async function personFrom(h: Headers): Promise<Person | null> {
 
 function Refused({ children }: { children: React.ReactNode }) {
   return (
-    <main className="mx-auto min-h-screen max-w-[560px] bg-(--bg-page) p-6 text-[16px] text-(--text-1)">
-      <h1 className="mb-3 text-[24px] font-semibold">Can’t connect this app</h1>
-      {children}
+    <main className="grid min-h-screen place-items-center bg-(--bg-page) p-6 text-[16px] text-(--text-1) max-sm:p-3">
+      <div className="w-full max-w-[560px] rounded-(--radius-l) border border-(--line) bg-(--bg-panel) p-8 max-sm:p-5">
+        <p className="mb-4 font-display text-[26px] leading-none">Align</p>
+        <h1 className="mb-3 text-[24px] font-semibold">Can’t connect this app</h1>
+        {children}
+      </div>
     </main>
   );
 }
@@ -83,7 +86,7 @@ async function Authorize({ searchParams }: { searchParams: PageProps<"/oauth/aut
     return (
       <Refused>
         <p className="mb-4">The app sent a request Align can’t accept. Go back to the app and try again.</p>
-        <a className="text-(--accent-text) underline" href={check.redirect}>
+        <a className="inline-flex min-h-[44px] items-center font-medium text-(--accent-text) underline underline-offset-2" href={check.redirect}>
           Return to the app
         </a>
       </Refused>

@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
-import { api, ApiError, Btn, Card, Err, Field, Input, Loading, Note, Pill, sentence, TextArea, useAction, useApi, when } from "./kit";
+import { api, ApiError, Btn, Err, Field, Input, Loading, Note, Pill, sentence, TextArea, useAction, useApi, when } from "./kit";
+import { Panel, StatusPill, type StatusKind } from "./ds";
 import { NoticeBox, useNotice, type Notice } from "./crparts";
 import type { Me } from "./server";
 import { COUNTER_SAME_AS_PROPOSAL } from "@/lib/v2/change-words.mts";
@@ -17,6 +18,9 @@ const said = (p: { id: string; name: string } | null, me: string) => (!p ? "some
 const names = (l: { id: string; name: string }[], me: string) => l.map((p) => said(p, me)).join(", ");
 /** Closed: nothing more can happen to it, so a goal not approved in it needs nobody (c9 W7). */
 const closed = (r: Reallocation) => r.state === "rejected" || r.state === "withdrawn" || r.state === "superseded";
+
+// LIM-2472 (stream R): the state as a word and a shape (ds StatusPill), in the product's own words; launched is cerulean.
+const STATE_KIND: Partial<Record<string, StatusKind>> = { pending: "pending", countered: "countered", approved: "approved", rejected: "declined" };
 
 const STATE_WORDS: Record<Reallocation["state"], string> = {
   pending: "waiting for approval",
@@ -100,9 +104,9 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
     <li className="py-3" data-reallocation={r.id}>
       {notice && <NoticeBox notice={notice} />}
       <div className="mb-1 flex flex-wrap items-center gap-2">
-        <span className="text-[15px] text-(--text-1)">{r.requester.id === me.id ? "You" : r.requester.name} proposed new targets</span>
-        <Pill tone={r.state === "approved" ? "green" : r.state === "pending" || r.state === "countered" ? "amber" : "neutral"}>{STATE_WORDS[r.state]}</Pill>
-        {r.launch === "launched" && <Pill tone="violet">launched</Pill>}
+        <span className="min-w-0 text-[15px] font-semibold text-(--text-1)">{r.requester.id === me.id ? "You" : r.requester.name} proposed new targets</span>
+        {STATE_KIND[r.state] ? <StatusPill kind={STATE_KIND[r.state]!} label={STATE_WORDS[r.state]} size="s" /> : <Pill>{STATE_WORDS[r.state]}</Pill>}
+        {r.launch === "launched" && <StatusPill kind="launched" label="launched" size="s" />}
         <span className="text-[13px] text-(--text-3)">
           revision {r.revision} · {when(r.updated_at)}
         </span>
@@ -183,7 +187,7 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
       </div>
       {countering && (
         <form
-          className="mt-3 rounded-[10px] border border-(--line) p-3"
+          className="mt-3 rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) p-3"
           onSubmit={(e) => {
             e.preventDefault();
             decide("counter", { targets: r.targets.map((t, i) => ({ goal_id: t.goal!.id, target_share: values[i].trim() === "" ? null : Number(values[i]) })), note: note || null }, () => setCountering(false));
@@ -229,14 +233,14 @@ export function ProposalsCard({ ws, me, detail }: { ws: string; me: Me; detail: 
   };
   return (
     <section id="target-changes">
-      <Card title="Target changes">
+      <Panel className="mb-4" title="Target changes">
         <Note>
           A proposal changes the target share of agent time of one or more goals. Someone who can approve for each goal approves its part; then someone who can launch for every goal launches it, and
           only then do agents on those goals hear the new targets.
         </Note>
         {list.loading && <Loading />}
         <Err>{list.error}</Err>
-        {all.length === 0 && !list.loading && <p className="text-[15px] text-(--text-3)">No proposals yet.</p>}
+        {all.length === 0 && !list.loading && <p className="text-[15px] text-(--text-2)">No proposals yet.</p>}
         <ul className="divide-y divide-(--line)">
           {all.map((r) => (
             <ProposalItem key={`${r.id}:${r.revision}:${r.state}:${r.launch}`} ws={ws} r={r} me={me} onDone={reload} />
@@ -260,7 +264,7 @@ export function ProposalsCard({ ws, me, detail }: { ws: string; me: Me; detail: 
               );
             }}
           >
-            <p className="mb-2 text-[15px] font-medium text-(--text-1)">Propose new targets</p>
+            <h3 className="mb-2 text-[15px] font-semibold text-(--text-1)">Propose new targets</h3>
             {proposed && <NoticeBox notice={proposed} />}
             <div className="grid gap-2 sm:grid-cols-2">
               {active.map((g) => (
@@ -278,7 +282,7 @@ export function ProposalsCard({ ws, me, detail }: { ws: string; me: Me; detail: 
             <Err>{act.error}</Err>
           </form>
         )}
-      </Card>
+      </Panel>
     </section>
   );
 }

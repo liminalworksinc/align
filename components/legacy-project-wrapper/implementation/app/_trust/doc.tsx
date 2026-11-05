@@ -14,7 +14,7 @@ function Inlines({ c }: { c: Inline[] }) {
             return x.v;
           case "code":
             return (
-              <code key={i} className="rounded bg-(--bg-raised) px-1 font-mono text-[0.9em]">
+              <code key={i} className="rounded-[5px] bg-(--bg-raised) px-1 font-mono text-[0.9em] text-(--text-1)">
                 {x.v}
               </code>
             );
@@ -108,7 +108,7 @@ export function DocBlocks({ blocks, shift = 0 }: { blocks: Block[]; shift?: numb
             );
           case "code":
             return (
-              <pre key={i} className="mb-4 overflow-x-auto rounded bg-(--bg-raised) p-3 font-mono text-[13px]">
+              <pre key={i} className="mb-4 overflow-x-auto rounded-(--radius-s) border border-(--line) bg-(--bg-inset) p-3 font-mono text-[13px] text-(--text-1)">
                 {b.v}
               </pre>
             );
@@ -129,23 +129,23 @@ export function DocBlocks({ blocks, shift = 0 }: { blocks: Block[]; shift?: numb
 /** The frame of a public trust page: the Align mark, the page, and links between the two pages and to sign-in. */
 export function TrustFrame({ children }: { children: ReactNode }) {
   return (
-    <main className="min-h-screen bg-(--bg-page) px-4 py-8 text-[15px] leading-relaxed text-(--text-2) sm:px-6">
+    <main className="min-h-screen bg-(--bg-page) px-4 py-8 text-[15px] leading-relaxed text-(--text-2) sm:px-6 max-sm:px-3">
       <div className="mx-auto w-full max-w-[860px]">
-        <nav className="mb-8 flex flex-wrap items-baseline gap-x-5 gap-y-2 text-[14px]">
-          <Link href="/app" className="font-display text-[24px] leading-none text-(--text-1)">
+        <nav className="mb-8 flex flex-wrap items-center gap-x-5 gap-y-1 text-[14px] text-(--text-2)">
+          <Link href="/app" className="inline-flex items-center font-display text-[24px] leading-none text-(--text-1) max-sm:min-h-[44px]">
             Align
           </Link>
-          <Link href="/trust" className="underline-offset-2 hover:underline">
+          <Link href="/trust" className="inline-flex items-center underline-offset-2 hover:underline max-sm:min-h-[44px]">
             Trust
           </Link>
-          <Link href="/privacy" className="underline-offset-2 hover:underline">
+          <Link href="/privacy" className="inline-flex items-center underline-offset-2 hover:underline max-sm:min-h-[44px]">
             Privacy
           </Link>
-          <Link href="/app/sign-in" className="underline-offset-2 hover:underline">
+          <Link href="/app/sign-in" className="inline-flex items-center underline-offset-2 hover:underline max-sm:min-h-[44px]">
             Sign in
           </Link>
         </nav>
-        <article className="al-in rounded-[14px] border border-(--line) bg-(--bg-panel) p-5 sm:p-8">{children}</article>
+        <article className="al-in rounded-(--radius-l) border border-(--line) bg-(--bg-panel) p-5 [overflow-wrap:break-word] sm:p-8 max-sm:p-4">{children}</article>
       </div>
     </main>
   );

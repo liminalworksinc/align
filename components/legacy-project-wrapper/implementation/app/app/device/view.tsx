@@ -1,6 +1,7 @@
 "use client";
 import { useRef, useState } from "react";
-import { api, ApiError, Btn, Card, Err, Field, Input, Note, Shell, SignInAgain, useAction, useApi, type WsSummary } from "../_ui/kit";
+import { api, ApiError, Btn, Err, Field, Input, Note, Shell, SignInAgain, useAction, useApi, type WsSummary } from "../_ui/kit";
+import { Panel } from "../_ui/ds";
 import type { Me } from "../_ui/server";
 import { count } from "@/lib/v2/plural.mts";
 
@@ -132,13 +133,13 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
 
   return (
     <Shell me={me}>
-      <h1 className="mb-5 text-[26px] font-semibold text-(--text-1)">Connect a device</h1>
+      <h1 className="mb-5 font-display text-[32px] leading-[1.1] text-(--text-1) max-sm:text-[28px]">Connect a device</h1>
       {stale ? (
         <SignInAgain me={me} next={code.trim() ? `/app/device?code=${encodeURIComponent(code.trim())}` : "/app/device"}>
           Sign in again to approve a device. Approving needs a sign-in from the last 15 minutes.
         </SignInAgain>
       ) : (
-        <Card>
+        <Panel className="mb-4">
           <Note>Only enter a code that your own terminal just showed you. Approving gives that device access to the workspaces you tick.</Note>
           <form
             onSubmit={(e) => {
@@ -154,13 +155,13 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
             </Btn>
           </form>
           {pending && (
-            <div className="mt-5 rounded-[12px] border border-(--edge) p-4">
+            <div className="mt-5 rounded-(--radius-m) border border-(--edge) p-4">
               <p className="overflow-hidden text-[17px] text-(--text-1) [overflow-wrap:anywhere]">{pending.device_name}</p>
               <p className="mb-3 text-[14px] text-(--text-3)">Asked {ago(pending.age_seconds)}</p>
               <p className="mb-2 text-[15px] text-(--text-2)">Workspaces this device may use:</p>
               {list.data?.workspaces.map((w) => (
-                <label key={w.id} className="mb-1 flex items-center gap-2 text-[15px]">
-                  <input type="checkbox" checked={chosen.includes(w.id)} onChange={(e) => setChosen((c) => (e.target.checked ? [...c, w.id] : c.filter((x) => x !== w.id)))} />
+                <label key={w.id} className="mb-1 flex min-h-[44px] items-center gap-2 text-[15px] text-(--text-1)">
+                  <input type="checkbox" className="size-4 shrink-0 accent-(--accent)" checked={chosen.includes(w.id)} onChange={(e) => setChosen((c) => (e.target.checked ? [...c, w.id] : c.filter((x) => x !== w.id)))} />
                   {w.name}
                 </label>
               ))}
@@ -181,7 +182,7 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
             </Note>
           )}
           <Err>{act.error}</Err>
-        </Card>
+        </Panel>
       )}
     </Shell>
   );

@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api, ApiError, Btn, Card, Err, Field, go, Input, Note, Pill, Select, TextArea, useAction, useApi } from "./kit";
+import { api, ApiError, Btn, Err, Field, go, Input, Note, Pill, Select, TextArea, useAction, useApi } from "./kit";
+import { Panel } from "./ds";
 import type { Goal, Limit, WsDetail } from "./types";
 import { isBlankText } from "@/lib/v2/text-core.mts";
 
@@ -98,7 +99,7 @@ export function GoalLimits({ ws, goal, canEdit, onDone }: { ws: string; goal: Go
   const member = !!detail.data && detail.data.role !== "viewer";
   const canPropose = member && !canEdit && goal.owner.id !== detail.data?.me && goal.status === "active";
   return (
-    <Card title="Limits">
+    <Panel className="mb-4" title="Limits">
       {ls.length === 0 ? (
         <Note>No limits on this version.</Note>
       ) : (
@@ -124,7 +125,7 @@ export function GoalLimits({ ws, goal, canEdit, onDone }: { ws: string; goal: Go
       )}
       {canPropose && suggesting && <SuggestLimit ws={ws} goal={goal} onClose={() => setSuggesting(false)} onDone={onDone} />}
       {member && goal.status === "active" && <NotesSuggest ws={ws} preferGoalId={goal.id} onDone={onDone} />}
-    </Card>
+    </Panel>
   );
 }
 
@@ -137,7 +138,7 @@ function SuggestLimit({ ws, goal, onClose, onDone }: { ws: string; goal: Goal; o
   const changed = !sameLimits(limits, goal.limits ?? []);
   return (
     <form
-      className="mb-3 rounded-[12px] border border-(--edge) p-3"
+      className="mb-3 rounded-(--radius-m) border border-(--edge) p-3"
       onSubmit={(e) => {
         e.preventDefault();
         setError(null);
@@ -168,7 +169,7 @@ function SuggestLimit({ ws, goal, onClose, onDone }: { ws: string; goal: Goal; o
       </div>
       {error?.code === "already_open" ? (
         <Err>
-          You already have an open change request on this goal. <a href="#change-requests" className="underline">See it below.</a>
+          You already have an open change request on this goal. <a href="#change-requests" className="font-medium text-(--accent-text) underline underline-offset-2">See it below.</a>
         </Err>
       ) : (
         <Err>{error?.message ?? null}</Err>
@@ -241,7 +242,7 @@ function GoalGroup({ ws, group, title, date, onDone }: { ws: string; group: Goal
     return { goal, all };
   };
   return (
-    <div className="mb-3 rounded-[12px] border border-(--line) p-3">
+    <div className="mb-3 rounded-(--radius-m) border border-(--line) p-3">
       <p className="mb-1 text-[15px]">
         <Link href={goalPath} className="font-medium text-(--text-1) underline">
           {group.goal.title}
@@ -251,7 +252,7 @@ function GoalGroup({ ws, group, title, date, onDone }: { ws: string; group: Goal
         {group.limits.map((l, i) => (
           <li key={i} className="py-1 text-[15px]">
             <label className="flex items-start gap-2">
-              <input type="checkbox" className="mt-1" checked={chosen[i]} onChange={(e) => setChosen((c) => c.map((x, j) => (j === i ? e.target.checked : x)))} />
+              <input type="checkbox" className="mt-1 size-4 shrink-0 accent-(--accent)" checked={chosen[i]} onChange={(e) => setChosen((c) => c.map((x, j) => (j === i ? e.target.checked : x)))} />
               <span>
                 <Pill tone={l.type === "must_not" ? "red" : l.type === "must" ? "violet" : "neutral"}>{LIMIT_WORDS[l.type]}</Pill> {l.text}
                 {l.already && <span className="text-[13px] text-(--text-3)"> (the goal already has a limit like this)</span>}
@@ -263,7 +264,7 @@ function GoalGroup({ ws, group, title, date, onDone }: { ws: string; group: Goal
       </ul>
       {sent ? (
         <Note>
-          Proposed. The goal&apos;s owner or a lead of its team decides on the <Link href={`/app/w/${ws}/requests`} className="underline">Requests</Link> tab.
+          Proposed. The goal&apos;s owner or a lead of its team decides on the <Link href={`/app/w/${ws}/requests`} className="font-medium text-(--accent-text) underline underline-offset-2">Requests</Link> tab.
         </Note>
       ) : (
         <div className="mt-2 flex flex-wrap gap-2">
@@ -367,10 +368,10 @@ export function NotesSuggest({ ws, preferGoalId, onDone }: { ws: string; preferG
           Paste meeting notes
         </button>
       );
-    return <div className="mt-2 rounded-[12px] border border-(--edge) p-3">{body}</div>;
+    return <div className="mt-2 rounded-(--radius-m) border border-(--edge) p-3">{body}</div>;
   }
   return (
-    <Card title="Paste meeting notes">
+    <Panel className="mb-4" title="Paste meeting notes">
       {open ? (
         body
       ) : (
@@ -378,6 +379,6 @@ export function NotesSuggest({ ws, preferGoalId, onDone }: { ws: string; preferG
           Paste meeting notes
         </Btn>
       )}
-    </Card>
+    </Panel>
   );
 }

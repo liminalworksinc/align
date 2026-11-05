@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
-import { Card, Err, Loading, Note, PHONE_TABLE, Select, Shell, num, usd, useApi } from "../../../_ui/kit";
+import { Err, Loading, Note, PHONE_TABLE, Select, Shell, num, usd, useApi } from "../../../_ui/kit";
+import { Panel } from "../../../_ui/ds";
 import type { Me } from "../../../_ui/server";
 import type { WsDetail } from "../../../_ui/types";
 import { AllocationCard } from "./allocation";
@@ -59,10 +60,10 @@ export default function SpendPage({ me, ws }: { me: Me; ws: string }) {
   const detail = useApi<WsDetail>(`/api/v2/workspaces/${ws}`);
   return (
     <Shell me={me} ws={ws} tab="Spend">
-      <h1 className="mb-2 text-[26px] font-semibold text-(--text-1)">Usage by goal</h1>
-      <p className="mb-5 text-[15px] text-(--text-2)">Tokens from shared sessions, counted under the goal each session was bound to when the work happened.</p>
+      <h1 className="mb-2 font-display text-[32px] leading-[1.1] text-(--text-1) max-sm:text-[28px]">Usage by goal</h1>
+      <p className="mb-5 max-w-prose text-[15px] text-(--text-2)">Tokens from shared sessions, counted under the goal each session was bound to when the work happened.</p>
       <AllocationCard ws={ws} detail={detail.data} />
-      <Card
+      <Panel className="mb-4"
         actions={
           <Select aria-label="Group by" value={by} onChange={(e) => setBy(e.target.value as "goal" | "team" | "session")}>
             <option value="goal">By goal</option>
@@ -80,7 +81,7 @@ export default function SpendPage({ me, ws }: { me: Me; ws: string }) {
             <div className="overflow-x-auto">
               <table className={`w-full text-[15px] ${PHONE_TABLE.table}`}>
                 <thead className={PHONE_TABLE.head}>
-                  <tr className="text-left text-[13px] text-(--text-3)">
+                  <tr className="border-b border-(--line-strong) text-left font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3)">
                     <th className="py-2 pr-3 font-normal">{by === "goal" ? "Goal" : by === "team" ? "Team" : "Session"}</th>
                     <th className="py-2 pr-3 text-right font-normal">Requests</th>
                     <th className="py-2 pr-3 text-right font-normal">Input</th>
@@ -102,7 +103,7 @@ export default function SpendPage({ me, ws }: { me: Me; ws: string }) {
             {d.data.unpriced_requests > 0 && <p className="mt-2 text-[14px] text-(--st-retry)">{num(d.data.unpriced_requests)} {d.data.unpriced_requests === 1 ? "request" : "requests"} used a model with no list price, so {d.data.unpriced_requests === 1 ? "it is" : "they are"} not in the estimate.</p>}
           </>
         )}
-      </Card>
+      </Panel>
     </Shell>
   );
 }
