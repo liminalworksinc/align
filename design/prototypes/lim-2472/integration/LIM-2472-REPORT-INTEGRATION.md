@@ -16,6 +16,8 @@ What the base holds: foundation (`e6ea124`), Stream R (rest of app, `3cc0f71`), 
 
 | `d482bc1e2da23654f275d9999127640637172923` (Add evidence's refusal kept in ReviewBody outside the `add_evidence` gate; record events for withdraw, supersede and accepted counters; unknown goal on the record) | `dd0bca27ffb1bb3be1f9f507da946e2252e5d676` | clean: `review.tsx`, `record-events.ts`, `decision-record.tsx` |
 | `327ec1c0ae7a704d7912f6d33f155aacc35f6e67` (44px phone minimum on every input, select and textarea in the review) | `246df2fdbf2a175e05cbfdb3eba1b348a69345f0` | clean: `review.tsx` |
+| foundation `6a97ca9144bb31531239da65fe56eb6b5f9f3830` (dark `--accent` #BF0078, `--accent-hover` #94005C) | `b797d8286d7422e2d23dc058a9642f1ce30f8627` | clean: `globals.css`, `LIM-2472-FOUNDATION.md`, `foundation.html` |
+| `46cd27f58bca85b6d4a14fc474bce336d4f42e2e` (contains `6a97ca9`; thin marks to `--accent-text`: Work and Dependencies selected goal, Confirm panel border) | `7f74d799219016ea932fdcca8fa5fed945d3a926` | clean: `work.tsx`, `dependencies.tsx`, `review.tsx` |
 
 No conflicts, so no file needed a side chosen. No rebase, no force push, no stash.
 
@@ -89,7 +91,7 @@ Routes: `/app`, account, devices, device, people, alignments, asks, spend, reque
 |---|---|---|---|---|---|---|---|---|---|
 | H1 | Fixed in `340ead6`, re-walked | Verified | Shared review, retryable failure (network drop; a 503) | 1440 | both | owner | The retry notice is orchid/purple, not amber. Its border is `--st-pending` (dark 217,117,255; light 147,18,184). The foundation has `--st-retry` (amber) for this, and the brief says retryable errors are amber. The copy is right ("Not recorded yet. … Nothing changed; try again."). | `app/app/_ui/ds/review.tsx:492` (`NoticeLine`) | `dark-flow-48-retry-amber-1440.png`, `light-flow-48-retry-amber-1440.png` |
 | M1 | Fixed in `340ead6`, re-walked | Verified | Record with another workspace's request id (`/record?cr=<ws2 id>`) | 1440 | both | owner | There is no not-found message. The page shows an empty single-request record, "Everyone (0)", and "Nothing has happened on this change request yet". That is false: this is not this workspace's request. Nothing from the other workspace leaks. | `app/app/_ui/ds/decision-record.tsx:249` (and how the record treats an unknown `cr`) | `dark-flow-54-record-other-ws-cr-1440.png`, `light-flow-54-record-other-ws-cr-1440.png` |
-| M2 | Medium | Verified | Primary and selected controls in dark: Approve and launch, Launch v2, Withdraw, Sign in, Create invite link, Newest first, Appearance "Dark" | all | dark | all | White on `--accent` #e90095 is 4.29:1 for 13-15px labels (4.5 needed). Light (#bf0078) passes. | `app/globals.css:35,42` | `dark-owner-requests-1440.png`, `dark-owner-account-1440.png` |
+| M2 | Fixed (founder ruling: dark `--accent` #BF0078, hover #94005C; `6a97ca9` via `46cd27f`), re-measured | Verified | Primary and selected controls in dark: Approve and launch, Launch v2, Withdraw, Sign in, Create invite link, Newest first, Appearance "Dark" | all | dark | all | White on `--accent` #e90095 is 4.29:1 for 13-15px labels (4.5 needed). Light (#bf0078) passes. | `app/globals.css:35,42` | `dark-owner-requests-1440.png`, `dark-owner-account-1440.png` |
 | M3 | Fixed in `340ead6`, re-walked | Verified | Evidence links in the review and the record; the record's "Change to …" links | 390 | both | all | 18-20px tall at 390, under the 44px rule. They are list-row links, not words inside a sentence, so the inline-text exception does not apply. | `app/app/_ui/ds/review.tsx:91`, `app/app/_ui/ds/decision-record.tsx:65,147` | `dark-owner-requests-390.png`, `dark-owner-record-390.png` |
 | M4 | Fixed (`340ead6` + `f0d3def`), re-walked | Verified | Requests tab, adding evidence | all | both | owner, member | The shared review has no Add evidence control (`cr.can.add_evidence` is never used). The Requests tab lost main's "Add evidence / Add link", so evidence can only be added from the goal page. | `app/app/_ui/ds/review.tsx` (ReviewBody evidence section) | `I-base/dark/19-requests-no-add-evidence-control-1440.png` |
 | M5 | Medium | Verified | Sample request text on Requests and the record | all | both | all | "…approve it (then launch it, which is when agents get the new version)…". Align releases a version; it does not see agents get it. Server copy. | `lib/v2/sample.ts:26` (server) | `dark-owner-requests-390.png` |
@@ -106,7 +108,7 @@ Routes: `/app`, account, devices, device, people, alignments, asks, spend, reque
 | L6 | Low | Suspected | Tab order at 1440: Work, Work?goal, dependencies; Sessions (owner) | 1440 | both | all | Focus moves up 166-275px because the right column follows the left (reading order of a two-column layout, probably fine). On Sessions, "Delete shared history" is followed by a "Stop agent" 200px higher. | `app/app/_ui/ds/work.tsx`, `app/app/w/[ws]/sessions/view.tsx:209,247` | `dark-owner-work-1440.png`, `dark-owner-sessions-1440.png` |
 | I1 | Info | Verified | Server-side: a request that fell behind can still be declined | 1440 | both | owner | After the owner saved a new version of the goal, a stale tab's Decline on a request asked against the old version was accepted (200), not refused. That may be intended (declining changes nothing). The real 409 is walked in "Write path" below. | server (decline route) | `dark-flow-49-stale-409-1440.png` |
 
-Counts after the `327ec1c` re-walk: open High 0, Medium 4 (M2, M5, M6 pending the concept, M8), Low 6 (two Suspected), Info 1. Fixed and re-walked: H1, H2, M1, M3, M4, M7, M9.
+Counts after the dark-accent ruling: open High 0, Medium 3 (M5, M6 pending the concept, M8), Low 6 (two Suspected), Info 1. Fixed and re-walked: H1, H2, M1, M2, M3, M4, M7, M9.
 
 ## Write path: every write as a real POST (`f0d3def`, after `340ead6`)
 
@@ -281,12 +283,45 @@ Known limit (by design in `d482bc1`): only the latest counter is detected as acc
 - Decline's reason textarea is 58px.
 - No sideways scroll (0px).
 
+### Dark accent ruling (M2), re-measured
+
+Founder ruling: the dark primary is white on #BF0078, hover #94005C. Merged as foundation `6a97ca9` and shared surfaces `46cd27f`. Measured in dark at 1440 with computed styles in a real browser, on a fresh `next dev` and seed. Raw: `I-base/walk/m2-dark.json`; screenshots: `I-base/walk/m2-dark-*.png`.
+
+| What | Colours | Ratio |
+|---|---|---|
+| Primary label on a panel (the real "Approve and launch" on a Requests card), rest | white on #BF0078 | **6.02:1** |
+| same, hover | white on #94005C | **8.70:1** |
+| Primary label on the overlay surface, rest (no Drawer is mounted in the base, so the real button was cloned into a box painted `--bg-overlay` on the live page: a browser-only fixture) | white on #BF0078 | **6.02:1** |
+| same, hover | white on #94005C | **8.70:1** |
+| Button fill against its surface (for the record; the label carries the meaning) | #BF0078 on panel #121316 / overlay #202126; hover #94005C on the same | 3.08 / 2.67; hover 2.14 / 1.85 |
+| Work: selected goal marker (2px left border, `46cd27f`) | #FF3DB4 on panel #121316 | 5.82:1 |
+| Dependencies: selected goal marker (2px left border, `46cd27f`) | #FF3DB4 on panel #121316 | 5.82:1 |
+| Confirm panel border (1px, `46cd27f`) | #FF3DB4 against the panel outside it (#121316) / its own raised fill (#191A1E) | 5.82 / 5.45:1 |
+| Request access: selected choice row border and radio (switched in this commit) | #FF3DB4 on panel #121316 | 5.82:1 |
+
+For comparison, `--accent` as a mark measured 3.08 on the panel, 2.89 on raised and 2.67 on overlay. `--accent-text` measures 5.82, 5.45 and 5.03 on the same surfaces.
+
+**Marks switched to `--accent-text` in R's files (this commit):**
+- Native radio and checkbox fills (`accent-(--accent)` → `accent-(--accent-text)`):
+  - `app/app/request-access/view.tsx` (2 radios)
+  - `app/oauth/authorize/AuthorizeForm.tsx` (workspace radio)
+  - `app/app/device/view.tsx` (workspace checkbox)
+  - `app/app/_ui/requests.tsx` (request-type radio, session checkbox)
+  - `app/app/_ui/limits.tsx` (limit checkbox)
+  - `app/app/account/view.tsx` (2 checkboxes)
+  - `app/app/w/[ws]/people/view.tsx` (delete-sessions checkbox)
+  - `app/app/w/[ws]/alignments/view.tsx` (2 radios, session checkbox)
+- `app/app/request-access/view.tsx`, the selected choice row's border (`CHOICE_ON`). It had also never shown before: the base classes already set `border-(--line-strong) bg-(--bg-inset)` on the same element, and the CSS order picked those. The row now takes either `CHOICE_ON` or `CHOICE_OFF`, never both, and the walk measured the pink border and soft fill on the selected row.
+- In light, `--accent-text` is #BF0078, the same as light `--accent`, so light is unchanged.
+
+Outside R's set I found three thin marks (Work selected marker, Dependencies selected marker, Confirm border). They were already switched in `46cd27f`. `kit.tsx` `Btn` primary and `segmented.tsx` selected use `--accent` as a fill behind white text, which is the ruled 6.02:1 case, so they need no switch.
+
+
 ## Needed outside my files (listed, not changed)
 
 - `_ui/ds/review.tsx` (S): the no-evidence line in the phone confirmation (L5). H1, H2, M3, M4 and M9 are fixed.
 - Server: record the time of accepting a suggested change on the request, so non-owners see it, and detect every accepted counter, not only the latest (M7's remaining limit). M1 and M7 are fixed in the front end.
 - `_ui/ds/compare.tsx`, `_ui/ds/evidence-label.tsx` (S/foundation): light-theme contrast (L1, L2). `_ui/ds/work.tsx:234`, `_ui/ds/dependencies.tsx:73`, `app/_trust/doc.tsx:138`: 44px width (L3).
-- `app/globals.css` (foundation): dark `--accent` vs `--text-on-accent` at 4.29:1 (M2).
 - `_ui/kit.tsx` shell: header links, tab links, workspace select (M6), pending the concept.
 - Server: `lib/v2/sample.ts:26` sample copy (M5); `lib/v2/changes.ts:540` "agents stay on version N" (M8); `lib/v2/launch-words.ts:12` "Launched, agents on v…" is still the MCP record's wording (SERVER_ASKS 6; not shown on the screens walked here).
 - Fields: none. The shared review needed nothing the Requests tab doesn't already fetch.

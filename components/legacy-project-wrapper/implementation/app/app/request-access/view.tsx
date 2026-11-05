@@ -18,8 +18,10 @@ const SIZES: [string, string][] = [
 ];
 
 // LIM-2472 (stream R): token-only styling in both themes; each interest is a whole-row choice at least 44px tall.
-const CHOICE = "flex min-h-[44px] cursor-pointer gap-2.5 rounded-(--radius-s) border border-(--line-strong) bg-(--bg-inset) p-3 text-[15px]";
-const CHOICE_ON = "border-(--accent) bg-(--accent-soft)";
+const CHOICE = "flex min-h-[44px] cursor-pointer gap-2.5 rounded-(--radius-s) border p-3 text-[15px]";
+// Selected or not, one border colour and one background each (two border colours on one element let the CSS order pick).
+const CHOICE_ON = "border-(--accent-text) bg-(--accent-soft)";
+const CHOICE_OFF = "border-(--line-strong) bg-(--bg-inset)";
 
 export default function RequestAccess({
   captchaSiteKey,
@@ -99,14 +101,14 @@ export default function RequestAccess({
             </Field>
             <fieldset className="mb-4">
               <legend className="mb-2 text-[14px] text-(--text-2)">What are you interested in?</legend>
-              <label className={`mb-2 ${CHOICE} ${interest === "try" ? CHOICE_ON : ""}`}>
-                <input type="radio" className="mt-1 size-4 shrink-0 accent-(--accent)" name="interest" value="try" checked={interest === "try"} onChange={() => setInterest("try")} />
+              <label className={`mb-2 ${CHOICE} ${interest === "try" ? CHOICE_ON : CHOICE_OFF}`}>
+                <input type="radio" className="mt-1 size-4 shrink-0 accent-(--accent-text)" name="interest" value="try" checked={interest === "try"} onChange={() => setInterest("try")} />
                 <span>
                   <strong className="font-medium">Try Align.</strong> Get a creation code so I can try it with my team.
                 </span>
               </label>
-              <label className={`${CHOICE} ${interest === "evaluate" ? CHOICE_ON : ""}`}>
-                <input type="radio" className="mt-1 size-4 shrink-0 accent-(--accent)" name="interest" value="evaluate" checked={interest === "evaluate"} onChange={() => setInterest("evaluate")} />
+              <label className={`${CHOICE} ${interest === "evaluate" ? CHOICE_ON : CHOICE_OFF}`}>
+                <input type="radio" className="mt-1 size-4 shrink-0 accent-(--accent-text)" name="interest" value="evaluate" checked={interest === "evaluate"} onChange={() => setInterest("evaluate")} />
                 <span>
                   <strong className="font-medium">Evaluate Align on a real workflow.</strong> Also follow up with me about an evaluation and, if it fits, a non-binding letter of intent.
                 </span>

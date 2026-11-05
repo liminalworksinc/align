@@ -121,7 +121,7 @@ export default function AuthorizeForm(props: {
               <div className="space-y-2">
                 {person.workspaces.map((w) => (
                   <label key={w.id} className="flex min-h-[44px] items-start gap-2 rounded-(--radius-s) py-2 text-[15px]">
-                    <input type="radio" name="workspace" className="mt-1 size-4 shrink-0 accent-(--accent)" checked={ws === w.id} onChange={() => setWs(w.id)} />
+                    <input type="radio" name="workspace" className="mt-1 size-4 shrink-0 accent-(--accent-text)" checked={ws === w.id} onChange={() => setWs(w.id)} />
                     <span>
                       {w.name} <span className="al-lbl ml-1">{w.role}</span>
                     </span>

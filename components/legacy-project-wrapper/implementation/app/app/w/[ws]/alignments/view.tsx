@@ -88,15 +88,15 @@ function Counter({ a, busy, onSend }: { a: Alignment; busy: boolean; onSend: (bo
     <div className="mt-3 rounded-(--radius-s) border border-(--edge) bg-(--bg-panel) p-3">
       <p className="mb-2 text-[15px] text-(--text-2)">Suggest a change. It replaces the request and needs everyone&apos;s approval again.</p>
       <label className="mb-1 flex min-h-[44px] items-center gap-2 text-[15px] text-(--text-1)">
-        <input type="radio" className="size-4 shrink-0 accent-(--accent)" checked={choice === "contribution"} onChange={() => setChoice("contribution")} /> Recognize contribution only
+        <input type="radio" className="size-4 shrink-0 accent-(--accent-text)" checked={choice === "contribution"} onChange={() => setChoice("contribution")} /> Recognize contribution only
       </label>
       <label className="mb-2 flex min-h-[44px] items-center gap-2 text-[15px] text-(--text-1)">
-        <input type="radio" className="size-4 shrink-0 accent-(--accent)" checked={choice === "work_toward"} onChange={() => setChoice("work_toward")} /> Work toward the goal and count future usage there
+        <input type="radio" className="size-4 shrink-0 accent-(--accent-text)" checked={choice === "work_toward"} onChange={() => setChoice("work_toward")} /> Work toward the goal and count future usage there
       </label>
       {keep.length > 0 && <p className="mb-1 text-[14px] text-(--text-2)">Sessions to keep</p>}
       {keep.map((s) => (
         <label key={s.ref} className="mb-1 flex min-h-[44px] items-center gap-2 text-[15px] text-(--text-1)">
-          <input type="checkbox" className="size-4 shrink-0 accent-(--accent)" checked={!drop.includes(s.ref)} onChange={(e) => setDrop((d) => (e.target.checked ? d.filter((x) => x !== s.ref) : [...d, s.ref]))} />
+          <input type="checkbox" className="size-4 shrink-0 accent-(--accent-text)" checked={!drop.includes(s.ref)} onChange={(e) => setDrop((d) => (e.target.checked ? d.filter((x) => x !== s.ref) : [...d, s.ref]))} />
           <span className="min-w-0">
             {s.label} <span className="text-(--text-3)">({s.owner.name}{sessionId(s)})</span>
           </span>

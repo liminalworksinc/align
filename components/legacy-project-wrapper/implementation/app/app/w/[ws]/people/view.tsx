@@ -224,7 +224,7 @@ export default function People({ me, ws }: { me: Me; ws: string }) {
                         Remove {m.name} from {wsName}? Their team places, device access and connected apps for this workspace end. Their goals, sessions and history stay, under their name for 30 days and then as &quot;Former member&quot;.
                       </p>
                       <label className="mb-3 flex min-h-[44px] items-center gap-2 text-[15px] text-(--text-1)">
-                        <input type="checkbox" className="size-4 shrink-0 accent-(--accent)" checked={dropSessions} onChange={(e) => setDropSessions(e.target.checked)} />
+                        <input type="checkbox" className="size-4 shrink-0 accent-(--accent-text)" checked={dropSessions} onChange={(e) => setDropSessions(e.target.checked)} />
                         Also delete their shared sessions in this workspace now
                       </label>
                       <div className="flex flex-wrap gap-2">

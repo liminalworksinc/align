@@ -169,7 +169,7 @@ function SendRequest({ ws, goal, data, onDone }: { ws: string; goal: Goal; data:
       <p className="mb-2 text-[15px] font-medium text-(--text-1)">Send a request</p>
       {(Object.keys(TYPE_LABEL) as RequestType[]).map((t) => (
         <label key={t} className="mb-2 flex min-h-[44px] items-start gap-2 text-[15px] text-(--text-1)">
-          <input type="radio" className="mt-1 size-4 shrink-0 accent-(--accent)" name="request-type" value={t} checked={type === t} onChange={() => setType(t)} />
+          <input type="radio" className="mt-1 size-4 shrink-0 accent-(--accent-text)" name="request-type" value={t} checked={type === t} onChange={() => setType(t)} />
           <span>
             <strong className="text-(--text-1)">{TYPE_LABEL[t]}.</strong> {TYPE_HELP[t]}
           </span>
@@ -180,7 +180,7 @@ function SendRequest({ ws, goal, data, onDone }: { ws: string; goal: Goal; data:
           <p className="mb-1 text-[14px] text-(--text-2)">Sessions to move (pick at least one)</p>
           {sessions.map((s) => (
             <label key={s.session_key} className="mb-1 flex min-h-[44px] items-center gap-2 text-[15px] text-(--text-1)">
-              <input type="checkbox" className="size-4 shrink-0 accent-(--accent)" checked={keys.includes(s.session_key)} onChange={(e) => setKeys((k) => (e.target.checked ? [...k, s.session_key] : k.filter((x) => x !== s.session_key)))} />
+              <input type="checkbox" className="size-4 shrink-0 accent-(--accent-text)" checked={keys.includes(s.session_key)} onChange={(e) => setKeys((k) => (e.target.checked ? [...k, s.session_key] : k.filter((x) => x !== s.session_key)))} />
               <span>
                 {sessionName(s)}
                 {/* Two sessions can share a name (one person, one repository): the start time and the key's end tell them apart. */}

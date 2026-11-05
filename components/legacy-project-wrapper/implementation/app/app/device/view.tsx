@@ -161,7 +161,7 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
               <p className="mb-2 text-[15px] text-(--text-2)">Workspaces this device may use:</p>
               {list.data?.workspaces.map((w) => (
                 <label key={w.id} className="mb-1 flex min-h-[44px] items-center gap-2 text-[15px] text-(--text-1)">
-                  <input type="checkbox" className="size-4 shrink-0 accent-(--accent)" checked={chosen.includes(w.id)} onChange={(e) => setChosen((c) => (e.target.checked ? [...c, w.id] : c.filter((x) => x !== w.id)))} />
+                  <input type="checkbox" className="size-4 shrink-0 accent-(--accent-text)" checked={chosen.includes(w.id)} onChange={(e) => setChosen((c) => (e.target.checked ? [...c, w.id] : c.filter((x) => x !== w.id)))} />
                   {w.name}
                 </label>
               ))}

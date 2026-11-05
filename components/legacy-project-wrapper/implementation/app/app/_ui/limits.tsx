@@ -252,7 +252,7 @@ function GoalGroup({ ws, group, title, date, onDone }: { ws: string; group: Goal
         {group.limits.map((l, i) => (
           <li key={i} className="py-1 text-[15px]">
             <label className="flex items-start gap-2">
-              <input type="checkbox" className="mt-1 size-4 shrink-0 accent-(--accent)" checked={chosen[i]} onChange={(e) => setChosen((c) => c.map((x, j) => (j === i ? e.target.checked : x)))} />
+              <input type="checkbox" className="mt-1 size-4 shrink-0 accent-(--accent-text)" checked={chosen[i]} onChange={(e) => setChosen((c) => c.map((x, j) => (j === i ? e.target.checked : x)))} />
               <span>
                 <Pill>{LIMIT_WORDS[l.type]}</Pill> {l.text}
                 {l.already && <span className="text-[13px] text-(--text-3)"> (the goal already has a limit like this)</span>}
