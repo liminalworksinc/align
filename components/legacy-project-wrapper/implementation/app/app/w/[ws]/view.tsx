@@ -1,7 +1,6 @@
 "use client";
 import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useCallback, useState } from "react";
-import { Drawer, EmptyState } from "../../_ui/ds";
 import GoalLines from "../../_ui/home/goal-lines";
 import { NeedsList } from "../../_ui/home/needs-list";
 import Since from "../../_ui/home/since";
@@ -9,8 +8,8 @@ import { useRead } from "../../_ui/ds/read";
 import { Loading, Shell, useApi } from "../../_ui/kit";
 import { NotInWorkspace } from "../../_ui/missing";
 import type { Me } from "../../_ui/server";
-import type { AnySession, ChangeRequest, MySession } from "../../_ui/types";
-import FirstRun, { seenApp } from "./first-run";
+import type { ChangeRequest, Goal } from "../../_ui/types";
+import FirstRun from "./first-run";
 import { ReviewDrawer, useReview } from "./review-drawer";
 import type { EvidenceClass, HomePerson } from "@/lib/v2/home-core.mts";
 
@@ -19,8 +18,8 @@ import type { EvidenceClass, HomePerson } from "@/lib/v2/home-core.mts";
 // Work and apps on Apps. A change request opens in the review drawer over the Home (?review=<goal>.<id>), and closing it
 // returns to the same picture.
 //
-// Reads: GET …/home (goals, apps), GET …/sessions (whether the person has connected anything), GET …/change-requests.
-// NeedsList, Since and GoalLines make their own further reads.
+// Reads: GET …/home (goals, apps), GET …/change-requests, GET …/goals (the goal lines' feed). NeedsList, Since, FirstRun and
+// the goal lines' shared value cache (_ui/home/value-cache.ts) make their own further reads.
 
 interface HomeGoal {
   id: string;
@@ -50,11 +49,6 @@ interface Groups {
   others: ChangeRequest[];
 }
 const UNREAD: HomeData = { goals: null, apps: null };
-const primaryBtn =
-  "inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) bg-(--accent) px-3.5 text-[14px] font-medium text-(--text-on-accent) hover:bg-(--accent-hover) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) max-sm:min-h-[44px]";
-const outlineBtn =
-  "inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) border border-(--line-strong) px-3.5 text-[14px] font-medium text-(--text-1) hover:bg-(--bg-raised) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) max-sm:min-h-[44px]";
-
 /** The page's heading, from NeedsList: its Needs-you count (null while reading, or when nothing is readable); `partial`
  *  when some source couldn't be read, so the count is a lower bound and zero is never claimed. */
 function needsHeading(n: number | null, partial: boolean) {
@@ -66,40 +60,26 @@ function needsHeading(n: number | null, partial: boolean) {
 
 export default function Home({ me, ws }: { me: Me; ws: string }) {
   const d = useRead<HomeData>(`/api/v2/workspaces/${ws}/home`);
-  const s = useApi<{ mine: MySession[]; all: AnySession[] | null }>(`/api/v2/workspaces/${ws}/sessions`);
   const c = useApi<Groups>(`/api/v2/workspaces/${ws}/change-requests`);
-  // A viewer can't connect an app (app/oauth/authorize/AuthorizeForm.tsx): nothing here offers it until the role is known.
-  const list = useApi<{ workspaces: { id: string; role: string }[] }>("/api/v2/workspaces");
-  const role = list.data?.workspaces.find((w) => w.id === ws)?.role;
-  const canConnect = !!role && role !== "viewer";
+  const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
   const [review, setReview] = useReview();
   // Stable: the Drawer re-takes focus whenever onClose changes, which would pull it off a notice that just took it.
   const closeReview = useCallback(() => setReview(null), [setReview]);
-  const [connect, setConnect] = useState(false);
-  const closeConnect = useCallback(() => setConnect(false), []);
   // NeedsList holds its own reads: a new key reads them again after a decision in the drawer.
   const [needsKey, setNeedsKey] = useState(0);
   const [count, setCount] = useState<{ n: number | null; partial: boolean }>({ n: null, partial: false });
   const onCount = useCallback((n: number | null, partial: boolean) => setCount({ n, partial }), []);
   const h = d.data ?? (d.status ? UNREAD : null);
+  // Stable (the reloads are): FirstRun's polling restarts whenever onSeen changes.
+  const { reload: reloadHome } = d;
+  const { reload: reloadChanges } = c;
   const reloadAll = useCallback(() => {
-    d.reload();
-    s.reload();
-    c.reload();
+    reloadHome();
+    reloadChanges();
     setNeedsKey((k) => k + 1);
-  }, [d, s, c]);
+  }, [reloadHome, reloadChanges]);
 
   const allCrs = c.data ? [...c.data.waiting_on_me, ...c.data.mine, ...c.data.others] : [];
-  const mine = s.data?.mine.filter((x) => x.state !== "stopped") ?? [];
-  const mineKeys = new Set(mine.map((x) => x.session_key));
-  const teammates = s.data?.all?.filter((x) => !mineKeys.has(x.session_key)) ?? null;
-
-  const apps = h?.apps ?? null;
-  /** The person has connected nothing here. Only an owner sees everyone's apps and sessions, so only for an owner does
-   *  "no agent is sharing work here" hold for the whole workspace; anyone else is told what their role can't see. */
-  const nothingOfMine = !!apps && !apps.items.some(seenApp) && s.data !== null && mine.length === 0 && !teammates?.length;
-  const ownerView = !!apps?.everyone;
-  const noAgents = nothingOfMine && ownerView;
   // The page checks membership before Home mounts; this is the person removed while Home is open (every read is a 404).
   if (d.status === 404) return <NotInWorkspace me={me} />;
 
@@ -110,61 +90,24 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
           <h1 tabIndex={-1} className={`${PAGE_H1} min-w-0`} data-home-count={count.n ?? "reading"}>
             {needsHeading(count.n, count.partial)}
           </h1>
-          {/* First run's action: with an app connected the header has none. With nothing connected at all, the note below
-              carries it, so it appears once. */}
-          {canConnect && apps?.items.length === 0 && !nothingOfMine && (
-            <button
-              type="button"
-              onClick={() => setConnect(true)}
-              className="inline-flex min-h-[40px] items-center rounded-(--radius-s) border border-(--line-strong) px-3 text-[14px] text-(--text-1) hover:bg-(--bg-raised) max-sm:min-h-[44px]"
-              data-connect-open
-            >
-              Connect an agent
-            </button>
-          )}
         </header>
 
-        <NeedsList key={needsKey} ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} />
+        {h && <FirstRun ws={ws} onSeen={reloadAll} me={me.id} hasGoals={(h.goals?.length ?? 0) > 0} />}
 
-        {noAgents && (
-          <EmptyState
-            title="No agent is sharing work here yet"
-            body="Align shows the work once an agent connects: which goal each session is bound to, which version Align sent it, and whether a receipt came back. Connect one agent to see your first goal read in about a minute."
-            action={
-              <button type="button" className={primaryBtn} onClick={() => setConnect(true)} data-connect-empty>
-                Connect an agent
-              </button>
-            }
-          />
-        )}
-        {nothingOfMine && !ownerView && (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3" data-home-role-note>
-            <p className="min-w-0 flex-1 basis-64 text-[14px] text-(--text-2)">
-              {canConnect ? "You haven't connected an agent here. " : ""}Other people&apos;s sessions and apps are shown to workspace owners only, so this Home shows the plan and what was launched, not their agents.
-            </p>
-            {canConnect && (
-              <button type="button" className={outlineBtn} onClick={() => setConnect(true)} data-connect-empty>
-                Connect your agent
-              </button>
-            )}
-          </div>
-        )}
+        <NeedsList key={needsKey} ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} />
 
         {!h ? (
           <Loading />
         ) : (
           <>
             <Since ws={ws} me={me.id} changes={c.data ? allCrs : null} goals={h.goals} apps={h.apps?.items ?? null} onReview={(goal, id) => setReview({ goal, id })} />
-            <GoalLines ws={ws} me={me.id} goals={h.goals} changes={c.data ? allCrs : null} onReview={(goal, id) => setReview({ goal, id })} />
+            <GoalLines ws={ws} goals={h.goals} changes={c.data ? allCrs : null} feed={feed.data?.goals ?? null} onReview={(goal, id) => setReview({ goal, id })} />
           </>
         )}
 
         {/* The drawers break words only where needed, so a short label ("Close", "Esc") never splits at 320. */}
         <div className="[overflow-wrap:break-word]">
           {review && <ReviewDrawer key={`${review.id}:${review.choice ?? ""}`} ws={ws} goal={review.goal} id={review.id} me={me.id} choice={review.choice} onClose={closeReview} onChanged={reloadAll} />}
-          <Drawer open={connect} onClose={closeConnect} title="Connect an agent" eyebrow="Get started">
-            <FirstRun ws={ws} onSeen={reloadAll} always />
-          </Drawer>
         </div>
       </div>
     </Shell>
