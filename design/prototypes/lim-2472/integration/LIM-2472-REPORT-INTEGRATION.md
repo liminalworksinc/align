@@ -106,6 +106,18 @@ The goal page's own request cards (`5506-5543` and the U/B checks that call `car
 - **Review drawer (`w/[ws]/review-drawer.tsx`).** `useReview` moved here and now reads `useSearchParams`, so a plain link from a row opens the drawer on any page. It honours `&choice=`, passed to `ReviewActions` as `initialChoice`. The drawer's own record and work links are gone: `DecisionLinks` in ReviewBody is the one set. One drawer in the app; B's DecisionDrawer is not in the base.
 - **Stable `onClose` on Home and Requests.** `ds/drawer.tsx` re-takes focus whenever `onClose` changes, which pulled focus off a notice that had just taken it. The hosts pass a stable callback; the Drawer itself is unchanged.
 
+### One screen H1 (`bfaa8f5`; founder ruling LIM-2454 0e0f6774, item 4)
+`PAGE_H1` in `app/app/_ui/page-title.ts` is the one class (display face, 32px, 28px on phones). The foundation has no primitive for this. Screens add only their own spacing beside it; don't re-add a face, size or colour to an `h1`. This edit touched the H1 class only.
+- **Screens on it, outside integration's own files, so owners don't re-diverge:**
+  - S: `w/[ws]/sessions/view.tsx`, `apps/view.tsx`, `record/view.tsx`, `dependencies/view.tsx`, `work/view.tsx`
+  - R: `app/view.tsx`, `sign-in`, `request-access`, `invite/[token]`, `account`, `device`, `devices`, `w/[ws]/people`, `alignments`, `asks`, `spend`, `_ui/missing.tsx`, `app/trust/page.tsx`, `app/oauth/authorize/{page,AuthorizeForm}.tsx`
+  - Main's: `w/[ws]/goals/view.tsx`, `goals/[goal]/view.tsx`
+  - Ours: `w/[ws]/view.tsx` (the count, its neutral reading state and "Nothing needs you"), `w/[ws]/requests/view.tsx`
+- **Measured** on 21 screens at 1440, 390 and 320 (owner, and signed out): 32px / 28px / 28px, `"Nineties Headliner"` first in the computed family, no sideways scroll. Read, not rendered: `invite/[token]` (needs a real token) and `AuthorizeForm` (needs a real client).
+- **The face does NOT load as a webfont.** `--font-display` resolves to `"Nineties Headliner", "Perfectly Nineties", "Iowan Old Style", Georgia, serif`, with no Anton (`globals.css` names it only in a comment). But `globals.css:8-12` is `@font-face { src: local(...) }`, the comment says the font is "NEVER committed to this public repo", there is no font file in the repo, and `next/font` loads only Space Grotesk and Space Mono. The ruling's words are "load Nineties Headliner as a webfont". On this Mac the face is installed, so it renders; on a machine without it the H1 falls through to Perfectly Nineties or a serif. Foundation's to resolve, and the two statements need a founder ruling.
+
+**Viewer connect.** Home no longer offers a viewer "Connect your agent" or the header "Connect an agent" (`AuthorizeForm.tsx:15,119`: viewers can't connect apps). Nothing is offered until the role is known, from `GET /api/v2/workspaces`, the read the shell already makes, so Home adds one read. A viewer keeps the note's second sentence. A freshly invited member still gets the offer. `NeedsList`'s notice says "See apps", which is not a connect offer.
+
 ### Local delta on Mini S1's file
 `_ui/home/needs-list.tsx` carries one addition on top of `f4a7609`: an `onCount?: (n: number | null) => void` prop and one `useEffect`, marked "Local delta (integration)". It reports Needs-you rows only, and null while reading or when a read failed and the rest found nothing. Home's H1 reads it. A by-path re-take drops it, and the H1 then stays on "Needs you". It has been asked for upstream.
 
