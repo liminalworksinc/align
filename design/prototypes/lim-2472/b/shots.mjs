@@ -176,13 +176,16 @@ try {
   // 03: a live connector opens the shared ReviewActions on that choice.
   await go(page, dec(rafis), "Where this request is");
   await clickText(page, "button[data-edge-from]", "Approve and launch");
+  await clickText(page, "[data-action-bar] button", "Review this decision");
   check("connector Approve and launch opens its confirmation", await has(page, '[data-confirm="approve_and_launch"]'));
   await shoot(page, "03", "approve-and-launch-confirm", "dark", ALL, "Confirm: Approve and launch");
   await clickText(page, "[data-confirm] button", "Back");
-  check("Back from the confirmation returns to the choices", !(await has(page, "[data-confirm]")) && (await has(page, "[data-decision]")));
+  await clickText(page, "[data-action-bar] button", "Cancel");
+  check("Back, then Cancel, returns to the choices with nothing sent", !(await has(page, "[data-confirm]")) && (await has(page, "[data-decision]")) && !(await has(page, "[data-notice]")));
   await clickText(page, "button[data-edge-from]", "Decline");
-  check("a different connector (Decline) opens its own input", await page.evaluate(() => !!document.querySelector("textarea, input[type=text]") && document.body.innerText.includes("Decline")));
+  check("a different connector (Decline) opens its own input", await page.evaluate(() => !!document.querySelector("[data-action-bar] textarea")));
   await clickText(page, "button[data-edge-from]", "Approve and launch");
+  await clickText(page, "[data-action-bar] button", "Review this decision");
   await clickText(page, "[data-confirm] button", "Confirm: Approve and launch");
   await expectText(page, "Launched as v");
   check("Approve and launch: a done notice and the map lit on Launched", (await has(page, '[data-notice="done"]')) && (await has(page, '[data-node="launched"][data-current="1"]')));
@@ -209,6 +212,7 @@ try {
   await settle(page);
   await expectText(page, "Approve only");
   await clickText(page, "[data-drawer] [data-decision]", "Approve only");
+  await clickText(page, "[data-drawer] button", "Review this decision");
   await clickText(page, "[data-confirm] button", "Confirm: Approve only");
   await expectText(page, "Approved, not launched");
   check("drawer: still open after Approve only, with the done notice", (await has(page, `[data-drawer="${toApprove.id}"]`)) && (await has(page, '[data-drawer] [data-notice="done"]')));
@@ -226,6 +230,7 @@ try {
   await expectText(page, "Approve only");
   await apiAs(owner, "POST", `/api/v2/workspaces/${s.ws}/goals/${audit.goal.id}/change-requests/${fresh.id}/reject`, { revision: fresh.revision, reason: "Declined elsewhere for the click check (fictional)." });
   await clickText(page, "[data-drawer] [data-decision]", "Approve only");
+  await clickText(page, "[data-drawer] button", "Review this decision");
   await clickText(page, "[data-confirm] button", "Confirm: Approve only");
   await sleep(500);
   check("drawer: a decision refused after a decline elsewhere shows the refused notice and stays open", (await has(page, `[data-drawer="${fresh.id}"]`)) && (await page.evaluate(() => !!document.querySelector('[data-drawer] [data-notice="refused"], [data-drawer] [data-notice="retry"]'))));

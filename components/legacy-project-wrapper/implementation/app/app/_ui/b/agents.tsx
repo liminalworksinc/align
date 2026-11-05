@@ -21,7 +21,7 @@ export interface HomeApp {
 export const EV: Record<EvidenceClass, EvidenceKind> = { delivery_receipt: "receipt", agent_reported: "reported", not_observed: "unobserved" };
 
 /** One line on whether any connected app has read the goals, for a decision's evidence panel. */
-export function AgentsLine({ ws, apps }: { ws: string; apps: { everyone: boolean; items: HomeApp[] } | null | undefined }) {
+export function AgentsLine({ ws, apps, scope = "goal" }: { ws: string; apps: { everyone: boolean; items: HomeApp[] } | null | undefined; scope?: "goal" | "workspace" }) {
   if (apps === undefined) return null;
   if (apps === null)
     return <p className="text-[13px] text-(--text-2)">Align couldn&apos;t read the connected apps just now, so whether any agent read the goals is unknown.</p>;
@@ -30,7 +30,7 @@ export function AgentsLine({ ws, apps }: { ws: string; apps: { everyone: boolean
       <div className="flex flex-col gap-1.5" data-agents="none">
         <EvidenceLabel kind="unobserved" detail="no app connected" />
         <p className="text-[13px] text-(--text-2)">
-          {apps.everyone ? "No AI app is connected to this workspace" : "You haven't connected an AI app here"}, so Align has observed no agent reading this goal.{" "}
+          {apps.everyone ? "No AI app is connected to this workspace" : "You haven't connected an AI app here"}, so Align has observed no agent reading {scope === "goal" ? "this goal" : "this workspace's goals"}.{" "}
           <Link href={`/app/w/${ws}/apps`} className="text-(--accent-text) underline-offset-4 hover:underline">
             Connect an agent
           </Link>

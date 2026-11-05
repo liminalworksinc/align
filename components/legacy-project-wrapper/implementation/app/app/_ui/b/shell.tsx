@@ -95,27 +95,27 @@ export function DeskShell({ me, ws, active, crumbs, primary, children }: { me: {
           data-desk-nav={n.key}
           className={
             compact
-              ? `relative flex h-10 w-10 items-center justify-center rounded-(--radius-s) ${on ? "bg-(--accent-soft) text-(--accent-text)" : "text-(--text-3) hover:bg-(--bg-raised) hover:text-(--text-1)"}`
+              ? `relative flex h-10 w-10 items-center justify-center rounded-(--radius-s) min-[1400px]:w-full min-[1400px]:justify-start min-[1400px]:gap-3 min-[1400px]:px-3 min-[1400px]:text-[14px] ${on ? "bg-(--accent-soft) text-(--accent-text)" : "text-(--text-3) hover:bg-(--bg-raised) hover:text-(--text-1)"}`
               : `flex min-h-[44px] items-center gap-3 rounded-(--radius-s) px-3 text-[15px] ${on ? "bg-(--accent-soft) text-(--accent-text)" : "text-(--text-2) hover:bg-(--bg-raised) hover:text-(--text-1)"}`
           }
         >
-          {on && compact && <span aria-hidden="true" className="absolute -left-2 top-2 h-6 w-0.5 rounded-full bg-(--accent)" />}
+          {on && compact && <span aria-hidden="true" className="absolute -left-2 top-2 min-[1400px]:-left-3 h-6 w-0.5 rounded-full bg-(--accent-text)" />}
           {ICON[n.key]}
-          <span className={compact ? "sr-only" : ""}>{n.label}</span>
+          <span className={compact ? "sr-only min-[1400px]:not-sr-only" : ""}>{n.label}</span>
         </Link>
       );
     });
 
   return (
-    <div className="min-h-screen bg-(--bg-page) text-(--text-1) sm:grid sm:grid-cols-[60px_minmax(0,1fr)]">
-      <aside className="sticky top-0 hidden h-screen flex-col items-center gap-1 border-r border-(--line) bg-(--bg-inset) py-3 sm:flex">
+    <div className="min-h-screen bg-(--bg-page) text-(--text-1) [--rail:60px] sm:grid sm:grid-cols-[var(--rail)_minmax(0,1fr)] min-[1400px]:[--rail:208px]">
+      <aside className="sticky top-0 hidden h-screen flex-col items-center gap-1 self-start border-r border-(--line) bg-(--bg-inset) py-3 sm:flex min-[1400px]:items-stretch min-[1400px]:px-3">
         <Link href="/app" className="mb-3 flex h-10 w-10 items-center justify-center rounded-(--radius-s) font-display text-[22px] leading-none text-(--text-1)" title="All workspaces">
           A<span className="sr-only">lign, all workspaces</span>
         </Link>
-        <nav aria-label="Workspace" className="flex flex-col items-center gap-1">
+        <nav aria-label="Workspace" className="flex flex-col items-center gap-1 min-[1400px]:items-stretch">
           {navItems(true)}
         </nav>
-        <div className="mt-auto flex flex-col items-center gap-1">
+        <div className="mt-auto flex flex-col items-center gap-1 min-[1400px]:items-start">
           <Link href="/app/account" title="Account" className="flex h-10 w-10 items-center justify-center rounded-full border border-(--line-strong) bg-(--bg-raised) font-mono text-[12px] text-(--text-2) hover:text-(--text-1)">
             {initials(me.name)}
             <span className="sr-only">Account, {me.name}</span>

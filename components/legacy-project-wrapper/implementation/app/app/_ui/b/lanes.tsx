@@ -101,7 +101,7 @@ export function LaneMap({ cr, me, onAct, picked = null }: { cr: ChangeRequest; m
   const all = edges(cr);
   const box = useRef<HTMLDivElement>(null);
   const [lines, setLines] = useState<Line[]>([]);
-  // Below 1024px the map is a list: the way here, where it is now and where it can go next; the rest on request.
+  // The map shows the way here, where it is now and where it can go next; every other state and transition on request.
   const [every, setEvery] = useState(false);
   const near = new Set<Node>([...done, ...(cur ? [cur] : []), ...all.filter((e) => e.from === cur).map((e) => e.to)]);
 
@@ -172,7 +172,6 @@ export function LaneMap({ cr, me, onAct, picked = null }: { cr: ChangeRequest; m
       "data-drawn": fromCur || (done.has(e.from) && (done.has(e.to) || e.to === cur)) ? "1" : "0",
     };
     if (live) {
-      const dominant = e.act === "approve_and_launch" || e.act === "launch" || e.act === "accept_counter" || e.act === "rebase";
       return (
         <button
           key={e.label}
@@ -180,7 +179,7 @@ export function LaneMap({ cr, me, onAct, picked = null }: { cr: ChangeRequest; m
           {...common}
           aria-pressed={picked === e.act}
           onClick={() => onAct(e.act!)}
-          className={`flex min-h-[36px] w-full items-center justify-between gap-2 rounded-(--radius-s) px-2.5 py-1 text-left text-[13px] font-medium max-sm:min-h-[44px] ${dominant ? "bg-(--accent) text-(--text-on-accent) hover:bg-(--accent-hover)" : "border border-(--accent) text-(--accent-text) hover:bg-(--accent-soft)"} ${picked === e.act ? "outline-2 outline-offset-2 outline-(--focus)" : ""}`}
+          className={`flex min-h-[36px] w-full items-center justify-between gap-2 rounded-(--radius-s) px-2.5 py-1 text-left text-[13px] font-medium max-sm:min-h-[44px] border border-(--accent-text) text-(--accent-text) hover:bg-(--accent-soft) ${picked === e.act ? "bg-(--accent-soft) outline-2 outline-offset-2 outline-(--focus)" : ""}`}
         >
           <span>{e.label}</span>
           <span aria-hidden="true">→</span>
@@ -202,15 +201,30 @@ export function LaneMap({ cr, me, onAct, picked = null }: { cr: ChangeRequest; m
   const nodeCard = (n: Node) => {
     const on = n === cur;
     const was = done.has(n);
-    const out = all.filter((e) => e.from === n);
-    const tucked = !every && !near.has(n);
+    // Transitions out of other states are hidden until "Show every state" (the historical Ask stays).
+    const out = all.filter((e) => e.from === n && (every || e.from === cur || e.from === "asked"));
+    // A state neither passed, current nor one step away is a one-line chip until "Show every state".
+    if (!every && !near.has(n))
+      return (
+        <button
+          key={n}
+          type="button"
+          data-node={n}
+          onClick={() => setEvery(true)}
+          title={words[n].meaning}
+          className="relative z-10 flex min-h-[36px] min-w-0 items-center rounded-(--radius-s) border border-dashed border-(--line) bg-(--bg-inset) px-3 text-left text-[12px] text-(--text-3) hover:text-(--text-2) max-sm:min-h-[44px] lg:[grid-column:var(--col)]"
+          style={{ "--col": COL[n] + 1 } as CSSProperties}
+        >
+          {words[n].title}
+        </button>
+      );
     return (
       <div
         key={n}
         data-node={n}
         data-current={on ? "1" : undefined}
         aria-current={on ? "step" : undefined}
-        className={`relative z-10 min-w-0 flex-col lg:flex lg:[grid-column:var(--col)] ${tucked ? "hidden" : "flex"} gap-2 rounded-(--radius-m) border p-3 ${on ? "border-(--accent) bg-(--bg-raised) shadow-[0_0_0_1px_var(--accent)]" : was ? "border-(--line-strong) bg-(--bg-panel)" : "border-(--line) bg-(--bg-inset)"}`}
+        className={`relative z-10 flex min-w-0 flex-col gap-2 lg:[grid-column:var(--col)] rounded-(--radius-m) border p-3 ${on ? "border-(--accent-text) bg-(--bg-raised) shadow-[0_0_0_1px_var(--accent-text)]" : was ? "border-(--line-strong) bg-(--bg-panel)" : "border-(--line) bg-(--bg-inset)"}`}
         style={{ "--col": COL[n] + 1 } as CSSProperties}
       >
         <div className="flex items-center justify-between gap-2">
@@ -242,11 +256,11 @@ export function LaneMap({ cr, me, onAct, picked = null }: { cr: ChangeRequest; m
               <path d="M0,0 L8,4 L0,8 z" fill="var(--edge)" />
             </marker>
             <marker id="lm-arrow-live" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M0,0 L8,4 L0,8 z" fill="var(--accent)" />
+              <path d="M0,0 L8,4 L0,8 z" fill="var(--accent-text)" />
             </marker>
           </defs>
           {lines.map((l) => (
-            <path key={l.key} d={l.d} fill="none" strokeLinejoin="round" stroke={l.live ? "var(--accent)" : "var(--line-strong)"} strokeWidth={l.live ? 1.5 : 1} strokeDasharray={l.live ? undefined : "4 4"} markerEnd={`url(#${l.live ? "lm-arrow-live" : "lm-arrow"})`} />
+            <path key={l.key} d={l.d} fill="none" strokeLinejoin="round" stroke={l.live ? "var(--accent-text)" : "var(--line-strong)"} strokeWidth={l.live ? 1.5 : 1} strokeDasharray={l.live ? undefined : "4 4"} markerEnd={`url(#${l.live ? "lm-arrow-live" : "lm-arrow"})`} />
           ))}
         </svg>
         <div className="flex flex-col">
@@ -255,7 +269,7 @@ export function LaneMap({ cr, me, onAct, picked = null }: { cr: ChangeRequest; m
               key={lane.key}
               aria-label={`${lane.label} lane`}
               data-lane={lane.key}
-              className="grid items-start gap-x-10 gap-y-3 border-b border-dashed border-(--line-strong) py-4 first:border-t lg:grid-cols-[160px_repeat(4,minmax(0,1fr))]"
+              className="grid items-start gap-x-10 gap-y-2 border-b border-dashed border-(--line-strong) py-3 first:border-t lg:grid-cols-[160px_repeat(4,minmax(0,1fr))]"
             >
               <header className="flex min-w-0 flex-col gap-1.5 lg:col-start-1 lg:pr-2">
                 <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--text-3)">{lane.label}</p>
@@ -268,8 +282,8 @@ export function LaneMap({ cr, me, onAct, picked = null }: { cr: ChangeRequest; m
             </section>
           ))}
         </div>
-        <button type="button" onClick={() => setEvery((v) => !v)} aria-expanded={every} className="mt-3 min-h-[44px] rounded-(--radius-s) border border-(--edge) px-3 text-[13px] text-(--text-2) lg:hidden">
-          {every ? "Show only the steps around this request" : "Show every state"}
+        <button type="button" onClick={() => setEvery((v) => !v)} aria-expanded={every} className="mt-3 min-h-[36px] rounded-(--radius-s) border border-(--edge) px-3 text-[13px] text-(--text-2) hover:text-(--text-1) max-sm:min-h-[44px]">
+          {every ? "Show only the steps around this request" : "Show every state and transition"}
         </button>
       </div>
     </div>
@@ -298,7 +312,7 @@ export function LaneLegend(): ReactNode {
         <span aria-hidden="true" className="inline-block h-3 w-5 rounded-[4px] border border-dashed border-(--line-strong)" /> Someone else&apos;s, or not from this state
       </li>
       <li className="flex items-center gap-1.5">
-        <span aria-hidden="true" className="inline-block h-3 w-5 rounded-[4px] border border-(--accent)" /> Where this request is now
+        <span aria-hidden="true" className="inline-block h-3 w-5 rounded-[4px] border border-(--accent-text)" /> Where this request is now
       </li>
     </ul>
   );

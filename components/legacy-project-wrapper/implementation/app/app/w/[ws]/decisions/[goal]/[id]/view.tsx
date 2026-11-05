@@ -6,7 +6,7 @@ import { useGoalTitles } from "../../../../../_ui/changes";
 import { useApi } from "../../../../../_ui/kit";
 import type { Me } from "../../../../../_ui/server";
 import type { ChangeRequest } from "../../../../../_ui/types";
-import { actsFor, ActBtn, notYours, QuietLink, type Act } from "../../../../../_ui/b/act";
+import { actsFor, notYours, QuietLink, type Act } from "../../../../../_ui/b/act";
 import { AgentsLine, type HomeApp } from "../../../../../_ui/b/agents";
 import { LaneLegend, LaneMap } from "../../../../../_ui/b/lanes";
 import { crStatus } from "../../../../../_ui/b/model";
@@ -15,8 +15,8 @@ import { DeskShell } from "../../../../../_ui/b/shell";
 
 // LIM-2472 concept B: one change request as a decision. The role-lane state map leads (who asks, who approves, who can
 // launch, where it is now, and which connectors are this person's); the shared ReviewActions is the action bar and the
-// only code that sends a decision. A live connector, or the one primary action top right, opens ReviewActions on that
-// choice (initialChoice); ReviewActions tells the map which choice is being confirmed (onChoice). ReviewActions is keyed
+// only code that sends a decision and holds the page's one filled pink button. A live connector opens ReviewActions on
+// that choice (initialChoice); ReviewActions tells the map which choice is being confirmed (onChoice). ReviewActions is keyed
 // by the request id and a counter that changes only on such a press, never on a reload, so a decision's done or refused
 // notice survives the re-read. The shared ReviewBody carries the reason, the compare, evidence and the snapshot. A
 // request this person can't read is the server's 404, shown as "doesn't exist or you can't see it", never which.
@@ -44,7 +44,6 @@ export default function DecisionPage({ me, ws, goal, id }: { me: Me; ws: string;
       ws={ws}
       active="desk"
       crumbs={[{ label: "Decision desk", href: base }, { label: cr?.goal.title ?? "Change request" }]}
-      primary={cr && acts.length ? <ActBtn a={acts[0]!} cr={cr} onClick={() => open(acts[0]!)} /> : null}
     >
       {!cr && d.loading && <p className="text-[14px] text-(--text-2)">Reading the change request…</p>}
       {!cr && d.error && (

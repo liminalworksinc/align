@@ -6,7 +6,7 @@ import { useGoalTitles } from "../../_ui/changes";
 import { useApi } from "../../_ui/kit";
 import type { Me } from "../../_ui/server";
 import type { ChangeRequest } from "../../_ui/types";
-import { ActBtn, actsFor, notYours, QuietBtn, QuietLink, type Act } from "../../_ui/b/act";
+import { ActBtn, actsFor, DOMINANT, notYours, QuietBtn, QuietLink, type Act } from "../../_ui/b/act";
 import { AgentsLine, type HomeApp } from "../../_ui/b/agents";
 import { ago, crStatus, decisionHref, nameList, oneLine, PHASE_WORDS, phaseOf, recordHref, versions, waitsOn, type Phase } from "../../_ui/b/model";
 import { Facts } from "../../_ui/b/parts";
@@ -75,7 +75,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
     {
       key: "request",
       header: "Request",
-      width: "34%",
+      width: "26%",
       sortValue: (r) => r.goal.title.toLowerCase(),
       render: (r) => (
         <span className="flex min-w-0 flex-col gap-0.5" data-row={r.id}>
@@ -86,7 +86,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
         </span>
       ),
     },
-    { key: "state", header: "State", sortValue: (r) => crStatus(r).label, width: "170px", render: (r) => <StatusPill kind={crStatus(r).kind} label={crStatus(r).label} size="s" /> },
+    { key: "state", header: "State", sortValue: (r) => crStatus(r).label, width: "210px", render: (r) => <span className="sm:whitespace-nowrap"><StatusPill kind={crStatus(r).kind} label={crStatus(r).label} size="s" /></span> },
     {
       key: "waiting",
       header: "Waits on",
@@ -108,18 +108,20 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
         );
       },
     },
-    { key: "evidence", header: "Links", align: "end", width: "80px", sortValue: (r) => r.evidence_count, render: (r) => <span className="font-mono text-[12px] text-(--text-2)">{r.evidence_count}</span> },
-    { key: "age", header: "Updated", align: "end", width: "100px", sortValue: (r) => r.updated_at, render: (r) => <span className="font-mono text-[12px] text-(--text-3) sm:whitespace-nowrap">{ago(r.updated_at)} ago</span> },
+    { key: "evidence", header: "Links", align: "end", width: "96px", sortValue: (r) => r.evidence_count, render: (r) => <span className="font-mono text-[12px] text-(--text-2)">{r.evidence_count}</span> },
+    { key: "age", header: "Updated", align: "end", width: "116px", sortValue: (r) => r.updated_at, render: (r) => <span className="font-mono text-[12px] text-(--text-3) sm:whitespace-nowrap">{ago(r.updated_at)} ago</span> },
   ];
 
+  // One filled pink in the table: the first shown row whose first choice moves a request forward.
+  const filledId = shown.find((r) => actsFor(r).length && DOMINANT.includes(actsFor(r)[0]!))?.id ?? null;
   const rowActions = (r: ChangeRequest) => {
     const acts = actsFor(r);
     if (!acts.length) {
       return <span className="text-[12px] text-(--text-3)">{phaseOf(r) === "decided" ? "No action" : "Not yours"}</span>;
     }
     return (
-      <span className="inline-flex flex-wrap justify-end gap-1.5 max-sm:justify-start sm:flex-nowrap">
-        <ActBtn a={acts[0]!} cr={r} onClick={() => openRow(r, acts[0]!)} />
+      <span className="inline-flex flex-wrap justify-end gap-1.5 whitespace-nowrap max-sm:justify-start sm:min-w-[220px] sm:flex-nowrap">
+        <ActBtn a={acts[0]!} cr={r} filled={r.id === filledId} onClick={() => openRow(r, acts[0]!)} />
         {acts.length > 1 && <QuietBtn onClick={() => openRow(r)}>More</QuietBtn>}
       </span>
     );
@@ -230,7 +232,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
 
         <aside className="grid min-w-0 content-start gap-4 lg:grid-cols-2 2xl:grid-cols-1">
           <Panel eyebrow="Agents" title="Connected AI apps">
-            <AgentsLine ws={ws} apps={apps} />
+            <AgentsLine ws={ws} apps={apps} scope="workspace" />
           </Panel>
           {home.data && (home.data.asks?.waiting_on_me.length || home.data.alignments?.waiting_on_me.length) ? (
             <Panel eyebrow="Also waiting on you" title="Outside change requests">
@@ -286,7 +288,7 @@ function DecisionDrawer({ ws, me, id, goal, act, n, apps, onClose, onDone }: { w
         <>
           <QuietLink href={recordHref(ws, { id })}>Decision record</QuietLink>
           <QuietLink href={`${base}/work?goal=${goal}`}>Work and evidence</QuietLink>
-          <Link href={decisionHref(ws, { id, goal: { id: goal } })} className="inline-flex min-h-[36px] items-center rounded-(--radius-s) border border-(--accent) px-3 text-[13px] font-medium text-(--accent-text) hover:bg-(--accent-soft) max-sm:min-h-[44px]">
+          <Link href={decisionHref(ws, { id, goal: { id: goal } })} className="inline-flex min-h-[36px] items-center rounded-(--radius-s) border border-(--accent-text) px-3 text-[13px] font-medium text-(--accent-text) hover:bg-(--accent-soft) max-sm:min-h-[44px]">
             Open the lane map
           </Link>
         </>

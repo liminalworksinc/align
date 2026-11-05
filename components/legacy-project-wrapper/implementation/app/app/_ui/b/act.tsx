@@ -56,7 +56,7 @@ export function notYours(cr: ChangeRequest, me: string): string {
   return `Waiting on ${nameList(w.people, me)} for the ${w.for}.`;
 }
 
-const base = "inline-flex min-h-[36px] items-center justify-center rounded-(--radius-s) px-3 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]";
+const base = "inline-flex min-h-[36px] shrink-0 items-center justify-center whitespace-nowrap rounded-(--radius-s) px-3 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]";
 
 export function PrimaryBtn({ children, onClick, disabled }: { children: ReactNode; onClick?: () => void; disabled?: boolean }) {
   return (
@@ -82,10 +82,14 @@ export function QuietLink({ children, href }: { children: ReactNode; href: strin
   );
 }
 
-/** The button for a choice: pink for the dominant ones, quiet for the rest. */
-export function ActBtn({ a, cr, onClick }: { a: Act; cr: ChangeRequest; onClick: () => void }) {
+/** The button for a choice. One filled pink per view (`filled`, for the view's first dominant choice); other dominant
+ *  choices are outlined in pink text; declining and withdrawing are quiet. */
+export function ActBtn({ a, cr, onClick, filled = false }: { a: Act; cr: ChangeRequest; onClick: () => void; filled?: boolean }) {
+  if (DOMINANT.includes(a) && filled) return <PrimaryBtn onClick={onClick}>{actWords(a, cr)}</PrimaryBtn>;
   return DOMINANT.includes(a) ? (
-    <PrimaryBtn onClick={onClick}>{actWords(a, cr)}</PrimaryBtn>
+    <button type="button" onClick={onClick} className={`${base} border border-(--accent-text) text-(--accent-text) hover:bg-(--accent-soft)`}>
+      {actWords(a, cr)}
+    </button>
   ) : (
     <QuietBtn danger={a === "reject"} onClick={onClick}>
       {actWords(a, cr)}
