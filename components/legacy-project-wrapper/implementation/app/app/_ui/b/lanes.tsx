@@ -4,7 +4,7 @@ import { when } from "../kit";
 import type { ChangeRequest } from "../types";
 import type { Act } from "./act";
 import { nameList, proposedVersion } from "./model";
-import { Who } from "./shell";
+import { Who } from "./parts";
 
 // The role-lane state map of one change request (LIM-2472 concept B). One lane per role, in order: the person asking,
 // the goal's approvers (who approve, suggest a change or decline), and the people who can launch (the approvers and the

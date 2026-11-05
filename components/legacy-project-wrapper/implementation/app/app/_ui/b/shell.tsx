@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { ThemeSettingCompact } from "../ds";
 import { go, useApi, type WsSummary } from "../kit";
+import { initials } from "./parts";
 
 // LIM-2472 concept B shell: a narrow icon rail (the desk first, everything else one layer down), a breadcrumb, and one
 // slot top right for the page's single primary action. Below 640px the rail folds into a Menu sheet so nothing scrolls
@@ -198,28 +199,5 @@ export function DeskShell({ me, ws, active, crumbs, primary, children }: { me: {
         <main className="mx-auto max-w-[1280px] px-6 py-5 [overflow-wrap:anywhere] max-sm:px-4 max-sm:py-4">{children}</main>
       </div>
     </div>
-  );
-}
-
-export function initials(name: string) {
-  return (
-    name
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((p) => p[0]!.toUpperCase())
-      .join("") || "?"
-  );
-}
-
-/** A person: initials avatar and name. */
-export function Who({ p, me, size = "m" }: { p: { id: string; name: string }; me?: string; size?: "s" | "m" }) {
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
-      <span aria-hidden="true" className={`inline-flex shrink-0 items-center justify-center rounded-full border border-(--line-strong) bg-(--bg-raised) font-mono text-(--text-2) ${size === "s" ? "h-5 w-5 text-[9px]" : "h-6 w-6 text-[10px]"}`}>
-        {initials(p.name)}
-      </span>
-      <span className="min-w-0 truncate">{p.id === me ? "You" : p.name}</span>
-    </span>
   );
 }

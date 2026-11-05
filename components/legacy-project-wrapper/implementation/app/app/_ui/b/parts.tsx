@@ -4,7 +4,6 @@ import { StatusPill } from "../ds";
 import { when } from "../kit";
 import type { ChangeRequest } from "../types";
 import { crStatus, nameList, versions, waitsOn } from "./model";
-import { Who } from "./shell";
 
 // The facts of a request the desk's drawer and the decision page show beside the shared ReviewBody: state, who it
 // waits on, who asked, who approves, and the launched and approved versions, all from the change-request read.
@@ -42,5 +41,28 @@ export function Facts({ cr, me }: { cr: ChangeRequest; me: string }) {
         </Fact>
       )}
     </dl>
+  );
+}
+
+export function initials(name: string) {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => p[0]!.toUpperCase())
+      .join("") || "?"
+  );
+}
+
+/** A person: initials avatar and name. */
+export function Who({ p, me, size = "m" }: { p: { id: string; name: string }; me?: string; size?: "s" | "m" }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <span aria-hidden="true" className={`inline-flex shrink-0 items-center justify-center rounded-full border border-(--line-strong) bg-(--bg-raised) font-mono text-(--text-2) ${size === "s" ? "h-5 w-5 text-[9px]" : "h-6 w-6 text-[10px]"}`}>
+        {initials(p.name)}
+      </span>
+      <span className="min-w-0 truncate">{p.id === me ? "You" : p.name}</span>
+    </span>
   );
 }
