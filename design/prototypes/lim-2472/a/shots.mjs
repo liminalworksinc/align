@@ -482,6 +482,43 @@ for (const width of [390, 320]) {
       throw new Error("keyboard at 320: Escape did not close the drawer");
     });
     await k.ctx.close();
+
+    // "Propose a change" at 390 as the member, where the shell offers it (round 2): from the throwaway goal's page, the
+    // Menu's control opens the form with that goal chosen; Send with nothing else filled shows the form's own words and
+    // focuses the first field it names; then a new title, a why and a link send, and the request carries the link.
+    {
+      const m = await page("member", "dark", 390);
+      await goto(m.p, `/app/w/${WS}/goals/${goal}`);
+      await ready(m.p, "Drawer check");
+      await m.p.click('button[aria-controls="ca-menu"]');
+      await m.p.waitForSelector("[data-menu-sheet]", { timeout: 5000 });
+      if (!(await m.p.$("[data-menu-sheet] [data-propose-open]"))) console.log("Propose a change: not in this shell, asserts skipped");
+      else {
+        await m.p.click("[data-menu-sheet] [data-propose-open]");
+        await ready(m.p, "Nothing changes until they approve", "[role=dialog]");
+        if ((await m.p.$eval('[data-propose-field="goal"]', (e) => e.value)) !== goal) throw new Error("Propose: the goal's page didn't pre-fill the goal");
+        await m.p.click("[data-propose-send]");
+        await m.p.waitForFunction(() => [...document.querySelectorAll("[role=dialog] [role=alert]")].some((e) => e.textContent?.includes("Say why this should change.")), { timeout: 5000 }).catch(() => {
+          throw new Error("Propose: an empty send didn't say what's missing");
+        });
+        if ((await m.p.evaluate(() => document.activeElement?.getAttribute("data-propose-field"))) !== "part") throw new Error("Propose: focus didn't go to the first field named");
+        if (await m.p.evaluate(() => /reason is required/i.test(document.querySelector("[role=dialog]")?.innerText ?? ""))) throw new Error("Propose: the server's words reached an empty field");
+        await m.p.select('[data-propose-field="part"]', "title");
+        await m.p.$eval('[data-propose-field="text"]', (e) => e.select());
+        await m.p.type('[data-propose-field="text"]', "Drawer check (proposed, fictional)");
+        await m.p.type('[data-propose-field="why"]', "Proposed from the shell by shots.mjs. Fictional.");
+        await m.p.type('[data-propose-field="link"]', "https://docs.example.test/propose-check");
+        await m.p.click("[data-propose-send]");
+        await m.p.waitForSelector('[role=dialog] [data-propose="sent"]', { timeout: 20_000 }).catch(() => {
+          throw new Error("Propose: Send for approval didn't reach the sent state");
+        });
+        const open = (await call(theo, "GET", `/api/v2/workspaces/${WS}/goals/${goal}/change-requests?state=pending`)).change_requests ?? [];
+        const mineNow = open.find((c) => c.changes?.title === "Drawer check (proposed, fictional)");
+        if (!mineNow) throw new Error("Propose: no pending request with the proposed title");
+        if (mineNow.evidence_count !== 1) throw new Error(`Propose: the request has ${mineNow.evidence_count} links, wanted 1`);
+      }
+      await m.ctx.close();
+    }
   } finally {
     await ctx.close();
     await call(mara, "POST", `/api/v2/workspaces/${WS}/goals/${goal}/versions`, { version: await version(), status: "dropped" });
