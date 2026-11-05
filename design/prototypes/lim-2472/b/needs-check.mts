@@ -115,7 +115,7 @@ const two = buildNeeds({ ws: "w", me: "me", crs: [A, B], asks: [], alignments: [
 ] }).rows.filter((r) => r.kind === "app_behind");
 rule("model: an app that read only goal A after goal B launched keeps B's row and has none for A", two.some((r) => r.goal?.id === "gB") && !two.some((r) => r.goal?.id === "gA"));
 const fresh = buildNeeds({ ws: "w", me: "me", crs: [], asks: [], alignments: [], apps: [{ ...app, last_read_at: null }], sends: [] }).rows.filter((r) => r.kind === "app_behind");
-rule("model: an app never seen reading the goals has a row even with no launch, naming no goal or version", fresh.length === 1 && fresh[0]!.goal === null && !/v\d/.test(fresh[0]!.cause));
+rule("model: an app Align has recorded no goal read from has a row even with no launch, naming no goal or version", fresh.length === 1 && fresh[0]!.goal === null && !/v\d/.test(fresh[0]!.cause));
 const pend = crOf({ id: "crP", state: "pending", launch: null, version: null, launch_decided_at: null, decided_at: null, approved_by: null, updated_at: "2026-02-01T00:00:00Z", can: { approve: true }, waiting_on_me: true, revisions: [{ revision: 1, created_at: "2026-01-10T00:00:00Z", evidence: [] }] });
 const p = buildNeeds({ ws: "w", me: "me", crs: [pend], asks: [], alignments: [], apps: [] }).rows[0]!;
 rule("model: a decision waits from its latest revision, not from updated_at (adding evidence doesn't restart it)", p.since?.at === "2026-01-10T00:00:00Z");

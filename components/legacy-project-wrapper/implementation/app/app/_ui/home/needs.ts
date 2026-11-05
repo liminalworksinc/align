@@ -29,10 +29,10 @@ export type NeedKind = "launch" | "decide" | "returned" | "agent_declined" | "te
 export type NeedPhase = "needs_you" | "waiting_on_others" | "done";
 
 /** The ranking, said once on the page. Launches first: approved work Align hasn't released yet; then what is yours to
- *  decide; then your own requests that came back; then team asks; then alignments; then apps that haven't read the goals
- *  since a launch. Oldest first inside a kind. */
+ *  decide; then your own requests that came back; then requests an agent declined; then team asks; then alignments;
+ *  then launched versions Align has not sent to an app. Oldest first inside a kind. */
 export const RANK_NOTE =
-  "Ranked: approved changes waiting to launch, then decisions waiting on you, then your requests that came back, then requests an agent declined, then team asks, then alignments, then apps that haven't read the goals since a launch. Oldest first within each.";
+  "Ranked: approved changes waiting to launch, then decisions waiting on you, then your requests that came back, then requests an agent declined, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.";
 /** The rank note, plus what wasn't checked: requests to agents are read per goal, at most REQ_GOALS_MAX goals. */
 export const rankNote = (unchecked: number, unsent = 0) =>
   [RANK_NOTE, unchecked ? `Requests to agents not checked on ${unchecked} goal${unchecked === 1 ? "" : "s"}.` : "", unsent ? `What Align sent apps not checked on ${unsent} launch${unsent === 1 ? "" : "es"}.` : ""].filter(Boolean).join(" ");
@@ -62,7 +62,7 @@ export const KIND_WORDS: Record<NeedKind, string> = {
   agent_declined: "Agent declined",
   team_ask: "Team ask",
   alignment: "Alignment",
-  app_behind: "App behind a launch",
+  app_behind: "Launched, not sent",
 };
 
 /** Evidence counts by class. Self-reported is a person's link; agent reported is a link a connected app added; a receipt
@@ -272,7 +272,7 @@ function appNeeds(apps: AppLite[], sends: NonNullable<NeedsInput["sends"]> | und
     if (a.last_read_at) continue;
     const e = none();
     e.not_observed = 1;
-    out.push(row(a, `app:${a.id}`, null, `Align has seen no goal read from ${a.name}`, { at: a.approved_at, field: "approved_at" }, e));
+    out.push(row(a, `app:${a.id}`, null, `Align has recorded no goal read from ${a.name}`, { at: a.approved_at, field: "approved_at" }, e));
   }
   for (const s of sends ?? []) {
     const sent = new Set(s.apps.map((x) => x.id));
@@ -281,7 +281,7 @@ function appNeeds(apps: AppLite[], sends: NonNullable<NeedsInput["sends"]> | und
       const e = none();
       e.not_observed = 1;
       e.receipt = 1;
-      out.push(row(a, `app:${a.id}:${s.goal.id}:${s.version}`, s.goal, `Align has not sent v${s.version} to ${a.name}; it has served it other goal reads`, { at: s.launched_at, field: "launch_decided_at" }, e));
+      out.push(row(a, `app:${a.id}:${s.goal.id}:${s.version}`, s.goal, `Align has not sent v${s.version} to ${a.name}; it has served ${a.name} other goal reads`, { at: s.launched_at, field: "launch_decided_at" }, e));
     }
   }
   return out;
