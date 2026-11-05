@@ -434,7 +434,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [ ] test-v2 and align-agent tests for each fix; litai spec validate ok
   - [ ] Retained test receipt recorded on the commit that closes it
 
-### [ ] VERIFY-001 — Repair the retained-test blockers for PR 60
+### [x] VERIFY-001 — Repair the retained-test blockers for PR 60
 
 - **Priority:** P1
 - **Owner:** components/legacy-project-wrapper/implementation (agent hooks and retained test harness)
@@ -448,8 +448,8 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [x] Use fresh connections in the live-agent test client
 - **Evidence:**
   - [x] Focused folder-rule and unchanged latency tests 2/0; repaired live client against unchanged main 62/0, including offline revoke and re-pairing
-  - [ ] Full retained suite passes and a checked current receipt is committed
-  - [ ] litai verify, spec validation and final-head CI pass; PR stays draft and nothing is deployed
+  - [x] Full retained suite passes: lint/typecheck/syntax, paste-lines 23/0, v2 937/0, OAuth 187/0, live agent 62/0, CLI 592/0; supported receipt committed in `75420dd` and candidate check matches (the collector's 937 count is tracked in VERIFY-002)
+  - [x] `litai verify` and spec validation pass; `litai-verify` and `rebased-on-main` both pass at `75420dd` ([verification run](https://github.com/liminalworksinc/align/actions/runs/41958037099)); PR remains draft and nothing is deployed
 
 ### [ ] VERIFY-002 — Investigate retained aggregate test-count reporting
 
