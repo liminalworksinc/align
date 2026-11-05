@@ -16,22 +16,18 @@ import { useRead } from "./read";
 
 type ValueRead = Delivery & { goal?: unknown };
 
-export type EvidenceSummaryProps = { ws: string; variant?: "inline" | "full" } & (
+export type EvidenceSummaryProps = {
+  ws: string;
+  variant?: "inline" | "full";
+  /** inline: the most chips shown before "+N more" (fewer when they don't fit). Default 2, for NeedRow's evidence slot. */
+  max?: number;
+} & (
   | { cr: ChangeRequest; goal?: never; value?: Delivery | null; launched?: never }
   | { goal: Goal; cr?: never; value?: never; launched?: { version: number; value: Delivery | null } | null }
 );
 
-function SelfChip({ detail }: { detail?: string }) {
-  return (
-    <span data-evidence="self" className="inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-(--radius-s) border border-(--edge) px-1.5 py-0.5 text-[12px] text-(--text-2)">
-      <span className="whitespace-nowrap font-medium">{FACT_WORD.self}</span>
-      {detail && <span className="min-w-0 break-words font-mono text-[12px] opacity-90">{detail}</span>}
-    </span>
-  );
-}
-
 function Chip({ f, detail }: { f: Fact; detail?: string }) {
-  return f.kind === "self" ? <SelfChip detail={detail} /> : <EvidenceLabel kind={f.kind} size="s" detail={detail} />;
+  return <EvidenceLabel kind={f.kind} size="s" detail={detail} />;
 }
 
 /** The newest launched version on a goal and its delivery, unless the caller passed it. */
@@ -46,10 +42,10 @@ function useGoalLaunch(ws: string, goal: Goal | undefined, skip: boolean) {
 }
 
 /** Fits chips on one line: how many of them show before "+N more", re-measured when the row's width changes. */
-function useFit(count: number) {
+function useFit(count: number, max: number) {
   const box = useRef<HTMLSpanElement | null>(null);
   const probe = useRef<HTMLSpanElement | null>(null);
-  const [shown, setShown] = useState(count);
+  const [shown, setShown] = useState(Math.min(count, max));
   useLayoutEffect(() => {
     const el = box.current;
     const p = probe.current;
@@ -60,7 +56,7 @@ function useFit(count: number) {
       const more = kids[count]?.offsetWidth ?? 0;
       const gap = 6;
       const room = el.clientWidth;
-      let k = count;
+      let k = Math.min(count, max);
       const width = (m: number) => chips.slice(0, m).reduce((s, w) => s + w, 0) + Math.max(0, m - 1) * gap + (m < count ? gap + more : 0);
       while (k > 1 && width(k) > room) k--;
       setShown(k);
@@ -69,12 +65,12 @@ function useFit(count: number) {
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [count]);
+  }, [count, max]);
   return { box, probe, shown };
 }
 
-function Inline({ facts }: { facts: Fact[] }) {
-  const { box, probe, shown } = useFit(facts.length);
+function Inline({ facts, max }: { facts: Fact[]; max: number }) {
+  const { box, probe, shown } = useFit(facts.length, max);
   const hidden = facts.length - shown;
   return (
     <span ref={box} data-evidence-summary="inline" className="relative flex w-full min-w-0 flex-nowrap items-center gap-1.5 overflow-hidden whitespace-nowrap">
@@ -119,7 +115,7 @@ function Full({ facts }: { facts: Fact[] }) {
 }
 
 export function EvidenceSummary(props: EvidenceSummaryProps) {
-  const { ws, variant = "inline" } = props;
+  const { ws, variant = "inline", max = 2 } = props;
   const cr = props.cr;
   const needValue = !!cr && cr.launch === "launched" && !!cr.version && props.value === undefined;
   const value = useRead<ValueRead>(needValue ? `/api/v2/workspaces/${ws}/goals/${cr!.goal.id}/change-requests/${cr!.id}/value` : null);
@@ -133,5 +129,5 @@ export function EvidenceSummary(props: EvidenceSummaryProps) {
       ? goalFacts(props.goal, props.launched !== undefined ? props.launched : g.launched)
       : [];
   if (!facts.length) return null;
-  return variant === "full" ? <Full facts={facts} /> : <Inline facts={facts} />;
+  return variant === "full" ? <Full facts={facts} /> : <Inline facts={facts} max={max} />;
 }

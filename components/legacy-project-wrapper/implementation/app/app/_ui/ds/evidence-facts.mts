@@ -10,6 +10,7 @@ import type { ChangeRequest, Goal } from "../types";
 //   Not observed    Align has nothing for it.
 // Never what an agent did with something, and never "verified": Align doesn't check links.
 
+/** The four evidence classes, the same ids as EvidenceLabel's kinds. */
 export type FactKind = "receipt" | "reported" | "self" | "unobserved";
 export interface Fact {
   kind: FactKind;

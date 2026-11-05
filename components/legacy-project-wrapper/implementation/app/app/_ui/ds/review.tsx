@@ -97,7 +97,7 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
           <ul className="flex flex-col gap-1.5">
             {evidence.map((e) => (
               <li key={e.id} className="flex flex-wrap items-center gap-2 text-[14px]">
-                {e.reported_as === "agent-reported" ? <EvidenceLabel kind="reported" size="s" detail="connected app" /> : <span className="rounded-(--radius-s) border border-(--edge) px-1.5 text-[12px] leading-5 text-(--text-2)">Self-reported</span>}
+                {e.reported_as === "agent-reported" ? <EvidenceLabel kind="reported" size="s" detail="connected app" /> : <EvidenceLabel kind="self" size="s" />}
                 <a href={e.url} target="_blank" rel="noopener noreferrer" className="max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center text-(--accent-text) underline underline-offset-2 [overflow-wrap:anywhere]">
                   {e.label || e.url}
                 </a>
