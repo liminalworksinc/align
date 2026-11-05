@@ -27,6 +27,7 @@ Hues (canon): accent wholeness `#BF0078` (hover `#94005C`) in both themes, ruled
 
 - Every Tab stop gets the 2px `--focus` ring (`:focus-visible:not([tabindex="-1"])`, unlayered).
 - An element that only code focuses (`tabindex="-1"`: a heading after navigation, an error or confirm message, a dialog panel) gets no ring and not the browser's default one (`[tabindex="-1"]:focus { outline: none }` in `@layer base`, so a utility can still add a ring). No builder needs `outline-none` for these.
+- The Drawer's Tab trap counts `summary`, and only controls that can take focus now, read on every Tab: a control that is hidden or inside a closed `<details>` has no box and is skipped. Checked in Chrome at 1440, 390 and 320, Tab forward and back through a drawer with closed, open and `hidden md:block` disclosures: focus never left the dialog, summaries were reached, closed content was skipped, and opening a disclosure added its controls to the loop. The static specimens have no drawer, so re-run this on a real one after changing the trap.
 - Checked in Chrome by keyboard: Tab stops, the roving Segmented choice after an arrow key, a code-focused heading, the Drawer panel and a control inside it; the real goal page passes test-v2:3880's check (29 stops, all with a 2px ring).
 
 ## Round 2 primitives
