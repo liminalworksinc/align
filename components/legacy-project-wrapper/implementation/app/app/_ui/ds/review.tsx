@@ -214,6 +214,13 @@ export function ReviewActions({
     withdraw: "Closes your request. The goal doesn't change.",
   };
 
+  /** The phone confirmation's one line: what the action does, nothing more. */
+  const SHORT: Record<Choice, string> = {
+    ...SAYS,
+    approve_and_launch: `Approves revision ${cr.revision} and releases version ${next}.`,
+    approve: `Approves revision ${cr.revision}. Nothing is released until someone launches it.`,
+    launch: `Releases version ${next}.`,
+  };
   const choices = choicesFor(cr);
   const phone = usePhone();
   const oneRow = compact && phone;
@@ -451,7 +458,12 @@ export function ReviewActions({
           <h4 id={`confirm-${cr.id}`} ref={confirmRef} tabIndex={-1} className="text-[15px] font-semibold text-(--text-1) focus-visible:outline-2 focus-visible:outline-(--focus)">
             {TITLE[choice]}: {cr.goal.title}
           </h4>
-          {!oneRow && <p className="text-[14px] text-(--text-2)">{SAYS[choice]}</p>}
+          {oneRow ? (
+            // One short consequence line at every width: approval and launch stay distinguishable in words.
+            <p data-consequence className="text-[14px] text-(--text-2)">{SHORT[choice]}</p>
+          ) : (
+            <p className="text-[14px] text-(--text-2)">{SAYS[choice]}</p>
+          )}
           {!oneRow && (choice === "approve" || choice === "approve_and_launch") && cr.evidence_count === 0 && <p className="text-[14px] text-(--text-2)">No evidence: the record will say it was approved without evidence.</p>}
           {oneRow && NOTE_ONLY.includes(choice) && (
             <details data-add-note className="text-[14px]" open={note.trim() !== "" || undefined}>
