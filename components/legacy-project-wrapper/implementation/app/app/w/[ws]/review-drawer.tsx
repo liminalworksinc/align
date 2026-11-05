@@ -38,7 +38,7 @@ function Loaded({ ws, cr, me, choice, onClose, done }: { ws: string; cr: ChangeR
             <Link href={record} className={quiet} data-review-record>
               Open the full record
             </Link>
-            <Link href={`${base}/goals/${cr.goal.id}`} className={quiet} data-review-work>
+            <Link href={`${base}/work?goal=${cr.goal.id}`} className={quiet} data-review-work>
               Work and evidence for this goal
             </Link>
           </div>

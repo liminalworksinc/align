@@ -21,15 +21,17 @@ What the base holds: foundation (`e6ea124`), Stream R (rest of app, `3cc0f71`), 
 | `45bfc92b8a736e19967616b5a39e64336b28b389` (contains foundation `da51b0c`: the ring is `:focus-visible:not([tabindex="-1"])`, plus a base-layer `[tabindex="-1"]:focus { outline: none }`) | `50a8dc7fb41d6db202352960cd6c5f8ec61cf72c` | clean: `globals.css`, `ds/data-table.tsx`, `LIM-2472-FOUNDATION.md`, `foundation.html` |
 | `4c7cd1532534ba016a251eeaedb7c198c1d9d2d3` (contains foundation `3b90f1a`: DataTable `th` nowrap; EvidenceLabel icon and word kept together) | `9a4c3a82ea3f3799ecfae651804ecab171e97787` | clean: `ds/data-table.tsx`, `ds/evidence-label.tsx` |
 | `eb1b357221b6be23b68325f152eaa1b2727bad14` (contains `4c7cd15` and foundation `1a4e6d7`: no outline-colour transition on Segmented and kit `Btn`) | `4ba62b0ad85f87e1599911f9d0ae1cda63f5ef7a` | clean: `ds/segmented.tsx`, `kit.tsx` |
+| concept A `3f90b9cad56136c17a11b27b060788c2396242f7` (rail shell, review drawer, first run, A's Home as the starting file) | `1ce4a1a1e8dd3adb62355af7151867775dae78ff` | clean: `kit.tsx`, `w/[ws]/view.tsx`, `w/[ws]/first-run.tsx`, `w/[ws]/review-drawer.tsx`, `design/prototypes/lim-2472/a/*` |
+| foundation `27a686b5c541db46d457f121acc0dd0d62336d04` (`NeedRow`, `NeedList`, `NeedAction`) | merge commit before this report update | clean: `_ui/ds/need.tsx`, `_ui/ds/index.ts` |
 
 No conflicts, so no file needed a side chosen. No rebase, no force push, no stash.
 
 ## ADDED / REPLACED / DELETED (whole base against main `b16f8d1`)
 
-78 files: 33 added, 45 modified, 0 deleted. No file under `app/api/**`, `lib/**`, `proxy.ts`, migrations or tests is touched.
+COUNTS_PLACEHOLDER No file under `app/api/**`, `lib/**`, `proxy.ts`, migrations or tests is touched.
 
 ### Foundation
-- ADDED: `app/app/_ui/ds/{data-table,drawer,empty-state,evidence-label,icons,kbd,panel,segmented,status-pill,theme,theme-script,timeline}.tsx|ts`, `app/app/_ui/ds/index.ts` (one import path, `@/app/app/_ui/ds`), `LIM-2472-FOUNDATION.md` (repo root), `design/prototypes/lim-2472/foundation.html` (specimen).
+- ADDED: `app/app/_ui/ds/{data-table,drawer,empty-state,evidence-label,icons,kbd,panel,segmented,status-pill,theme,theme-script,timeline}.tsx|ts`, `app/app/_ui/ds/index.ts` (one import path, `@/app/app/_ui/ds`), `design/prototypes/lim-2472/LIM-2472-FOUNDATION.md`, `design/prototypes/lim-2472/foundation.html` (specimen).
 - REPLACED: `app/globals.css` (semantic tokens for both themes: surfaces, text, lines, `--accent`, `--st-*` states, `--focus`, radii), `app/layout.tsx` (theme script before first paint, fonts), `app/app/_ui/kit.tsx` (kit on tokens; `Btn` primary on `--accent`; secondary and `Input`/`Select`/`TextArea` on `--edge` with a 44px phone minimum), `app/app/account/view.tsx` (Appearance setting: System, Light, Dark).
 
 ### Stream R (rest of app)
@@ -39,7 +41,13 @@ REPLACED (restyle; requests and logic unchanged, see `design/prototypes/lim-2472
 - ADDED: `_ui/ds/compare.tsx` (Compare, VersionsCompare), `_ui/ds/decision-record.tsx`, `_ui/ds/record-events.ts`, `_ui/ds/read.ts`, `_ui/ds/review.tsx` (ReviewBody, ReviewActions), `_ui/ds/work.tsx` (WorkPanels), `_ui/ds/dependencies.tsx`; routes `w/[ws]/record/{page,view}.tsx`, `w/[ws]/work/{page,view}.tsx`, `w/[ws]/dependencies/{page,view}.tsx`; `w/[ws]/sessions/parts.tsx`; `design/prototypes/lim-2472/s/{LIM-2472-REPORT-S.md,seed-agent.mjs,shots.mjs}`.
 - REPLACED: `w/[ws]/apps/view.tsx` (set-up panels, `#connect` anchor), `w/[ws]/sessions/view.tsx` (panel system), `_ui/evidence.tsx`, `_ui/activity.tsx` ("Reported activity", not "Active").
 
+### Concept A and the Needs parts
+- ADDED: `w/[ws]/review-drawer.tsx`, `_ui/ds/need.tsx`, `design/prototypes/lim-2472/a/{LIM-2472-REPORT-A.md,seed.mjs,shots.mjs}`.
+- REPLACED: `_ui/kit.tsx` (Shell: the rail, and a top bar with Menu on phones), `w/[ws]/view.tsx` (A's Home as the starting file for the direction's Home), `w/[ws]/first-run.tsx`.
+
 ### This step (integration)
+- MOVED: `LIM-2472-FOUNDATION.md`, repo root → `design/prototypes/lim-2472/LIM-2472-FOUNDATION.md`. Every branch adds it at the root, which is outside the allowed paths. A later merge of a foundation branch that edits it should follow the rename; check that it does.
+- REPLACED: the review drawer's "Work and evidence for this goal" link now goes to `/app/w/<ws>/work?goal=<goal>`, not the goal page (`w/[ws]/review-drawer.tsx`). Shared surfaces doesn't carry this file, so nothing upstream was changing it.
 - REPLACED: `app/app/w/[ws]/requests/view.tsx`. Each change request is now the shared review from `@/app/app/_ui/ds` in a ds `Panel`: `ReviewBody {ws, cr, me, titleOf}` over `ReviewActions {ws, cr, me, onDone: reload, compact}`, with "Goal" and "Record" links (44px on phones). The tab no longer imports `_ui/decide.tsx`, `_ui/crparts.tsx` or `_ui/changes.tsx` (those files are unchanged; the goal page still uses them).
   - Same two reads as before: `GET /api/v2/workspaces/<ws>/change-requests` and `GET /api/v2/workspaces/<ws>/goals` (the goal titles that `useGoalTitles` read, now read in the tab itself for `titleOf`). No new API call. Every decision is the shared review's own POST to `…/change-requests/<id>/<action>`.
   - The three sections are headings in ONE flat keyed list, so a request that moves section after a decision keeps its `ReviewActions` mounted and its "Recorded: …" or "Not recorded. …" notice stays on screen (main's card kept notices in a module map, `crparts.tsx:496`; the shared review keeps them in component state). Cost: the sections are no longer `<section aria-label>` landmarks; each is an `h2` with an id.
