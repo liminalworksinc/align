@@ -53,7 +53,11 @@ function deliveryFacts(version: number, d: Delivery): Fact[] {
     });
   // No directive target (…/value delivery null after a launch, or 0 sessions): no session was on the goal at launch.
   const noSession = !s || s.sessions === 0;
-  if (noSession && apps === 0)
+  // A non-owner's apps are their own: an empty list says nothing about anyone else's apps.
+  const everyone = !!d.apps?.everyone;
+  if (noSession && apps === 0 && !everyone)
+    out.push({ kind: "unobserved", short: `v${version} · no session on this goal`, long: `No session was on this goal when v${version} was launched. None of your connected apps has been sent it yet; owners see everyone's.` });
+  if (noSession && apps === 0 && everyone)
     out.push({
       kind: "unobserved",
       short: `v${version} · no session or app yet`,
@@ -99,7 +103,7 @@ export function sentToLine(s: { loading: boolean; failed: boolean; apps: { every
   if (s.loading) return null;
   if (s.failed) return NOT_LOADED;
   const n = s.apps?.items.length ?? 0;
-  if (!n) return "No app yet. Align sends it when a connected app next reads the goals.";
+  if (!n) return s.apps?.everyone ? "No app yet. Align sends it when a connected app next reads the goals." : "None of your apps yet (owners see everyone's). Align sends it when a connected app next reads the goals.";
   return `${n} connected ${n === 1 ? "app" : "apps"}${s.apps?.everyone ? "" : " (yours; owners see everyone's)"}`;
 }
 

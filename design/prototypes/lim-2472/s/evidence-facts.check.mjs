@@ -114,6 +114,15 @@ line("loading", sentToLine({ loading: true, failed: false, apps: null }), null);
 line("failed", sentToLine({ loading: false, failed: true, apps: null }), NOT_LOADED);
 line("empty (a read that found none)", sentToLine({ loading: false, failed: false, apps: { everyone: true, items: [] } }), "No app yet. Align sends it when a connected app next reads the goals.");
 line("non-empty, member", sentToLine({ loading: false, failed: false, apps: { everyone: false, items: [{ id: "a" }, { id: "b" }] } }), "2 connected apps (yours; owners see everyone's)");
+line("empty, member (own apps only)", sentToLine({ loading: false, failed: false, apps: { everyone: false, items: [] } }), "None of your apps yet (owners see everyone's). Align sends it when a connected app next reads the goals.");
+// Partial lists: a member's or viewer's apps are their own, so an empty list never says no app was sent.
+expect("member: no session, none of their apps", changeFacts({ revision: 1, revisions: [rev(1, [])], launch: "launched", version: 2 }, { delivery: null, apps: { everyone: false, items: [] } }), "unobserved", "v2 · no session on this goal");
+{
+  const f = changeFacts({ revision: 1, revisions: [rev(1, [])], launch: "launched", version: 2 }, { delivery: null, apps: { everyone: false, items: [] } });
+  const bad = f.some((x) => /or app|No connected app/.test(x.short + x.long));
+  if (bad) failed++;
+  console.log(`${bad ? "FAIL" : "ok  "} member: no claim about apps that aren't theirs: ${f.map((x) => x.long).join(" | ")}`);
+}
 if (/not read/i.test(NOT_LOADED)) (failed++, console.log(`FAIL NOT_LOADED says "not read": ${NOT_LOADED}`));
 
 const at = process.argv.indexOf("--seed");

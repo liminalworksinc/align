@@ -169,12 +169,15 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
               </p>
             )}
             {apps.data && list.length === 0 && (
+              // Owners get every connection; anyone else only their own, so only an owner's empty list is about the workspace.
               <EmptyState
-                title="No AI apps are connected to this workspace."
+                title={role === "owner" ? "No AI apps are connected to this workspace." : "None of your AI apps is connected."}
                 body={
-                  role === "viewer"
-                    ? "Nothing is reading this workspace's goals through an app."
-                    : "Nothing is reading this workspace's goals through an app yet. Connect one above; it is listed here once you approve it, and its first goal read is recorded under Last read the goals."
+                  role === "owner"
+                    ? "Nothing is reading this workspace's goals through an app yet. Connect one above; it is listed here once you approve it, and its first goal read is recorded under Last read the goals."
+                    : role === "viewer"
+                      ? "You see your own apps here; workspace owners see everyone's."
+                      : "You see your own apps here; workspace owners see everyone's. Connect one above; it is listed here once you approve it, and its first goal read is recorded under Last read the goals."
                 }
               />
             )}
