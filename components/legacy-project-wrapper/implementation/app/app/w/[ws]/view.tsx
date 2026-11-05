@@ -1,64 +1,25 @@
 "use client";
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Drawer, EmptyState, EvidenceLabel, NeedAction, NeedList, NeedRow, Panel, StatusPill, type EvidenceKind, type ReviewChoice } from "../../_ui/ds";
-import { buildNeeds, inPhase, KIND_WORDS, RANK_NOTE, type AskLite, type EvidenceCounts, type Need } from "../../_ui/home/needs";
-import { Loading, Note, Shell, useApi, when } from "../../_ui/kit";
+import { Drawer, EmptyState, EvidenceLabel, EvidenceSummary, NeedAction, NeedList, NeedRow, StatusPill, type ReviewChoice } from "../../_ui/ds";
+import GoalLines from "../../_ui/home/goal-lines";
+import { buildNeeds, inPhase, KIND_WORDS, RANK_NOTE, type AskLite, type Need } from "../../_ui/home/needs";
+import Since from "../../_ui/home/since";
+import { Loading, Note, Shell, useApi } from "../../_ui/kit";
 import type { Me } from "../../_ui/server";
-import type { Alignment, AnySession, ChangeRequest, Goal, MySession } from "../../_ui/types";
+import type { Alignment, AnySession, ChangeRequest, MySession } from "../../_ui/types";
 import FirstRun, { seenApp } from "./first-run";
-import { crStatus, ReviewDrawer } from "./review-drawer";
-import { appStatusWords, type EvidenceClass, type HomeNext, type HomePerson } from "@/lib/v2/home-core.mts";
+import { ReviewDrawer } from "./review-drawer";
+import type { EvidenceClass, HomePerson } from "@/lib/v2/home-core.mts";
 
-// Home (LIM-2472 direction, 2026-11-05): first the one ranked list of what needs a human (_ui/home/needs.ts, rendered
-// with NeedRow), then the work: every goal the person can read, with the plan in force (the version, and whether its
-// latest change is launched or only approved), what Align delivered for that version (the launch's receipts), and the
-// shared sessions bound to it. A change request opens in the review drawer over the Home, and closing it returns to the
-// same picture. Only what Align knows is shown, each with its evidence class: a delivery receipt (Align
-// delivered something and recorded it), agent reported (a session's own binding or answer), not observed (nothing).
-// Nothing says what an agent is doing, whether it follows the plan, or how far along it is. A connected app's last
-// connection is never a read: apps are judged by last_read_at only (LIM-2454 cc0df90c).
+// Home (LIM-2472 direction, 2026-11-05), in this order: Needs you, one ranked list of what needs a human (_ui/home/needs.ts
+// in NeedRow, its evidence from the one EvidenceSummary); Since you last looked (_ui/home/since.tsx); Goals, one line per
+// goal (_ui/home/goal-lines.tsx). Sessions live on Work and apps on Apps. A change request opens in the review drawer over
+// the Home, and closing it returns to the same picture. Only what Align knows is shown, each with its evidence class.
+// Nothing says what an agent is doing, whether it follows the plan, or how far along it is.
 //
-// Reads: GET …/home (goals, apps), GET …/sessions (mine, and for owners everyone's), GET …/change-requests (the list, and
-// each goal's latest decided change), GET …/asks and GET …/alignments (the list), and per launched change GET …/value
-// (that launch's delivery counts).
+// Reads: GET …/home (goals, apps), GET …/sessions (whether the person has connected anything), GET …/change-requests,
+// GET …/asks and GET …/alignments (the list). Since and GoalLines make their own further reads.
 
-interface QueueChange {
-  id: string;
-  goal: { id: string; title: string; version: number };
-  state: string;
-  requester: HomePerson;
-  reason: string;
-  next: HomeNext;
-  waiting_on: HomePerson[];
-}
-interface Declined {
-  id: string;
-  goal: { id: string; title: string; version: number };
-  rejected_by: HomePerson | null;
-  rejection_reason: string | null;
-  decided_at: string | null;
-}
-interface Ask {
-  id: string;
-  team: { id: string; name: string };
-  goal: { id: string; title: string } | null;
-  text: string;
-  from_label: string | null;
-  requester: HomePerson;
-  next: HomeNext;
-}
-interface QueueAlignment {
-  id: string;
-  requester: HomePerson;
-  target_goal: {
-    id: string | null;
-    title: string | null;
-    visible: boolean;
-  } | null;
-  next: HomeNext;
-  waiting_on: HomePerson[];
-}
 interface HomeGoal {
   id: string;
   title: string;
@@ -78,17 +39,6 @@ interface App {
   evidence_class: EvidenceClass;
 }
 interface HomeData {
-  me: string;
-  change_requests: {
-    waiting_on_me: QueueChange[];
-    waiting_on_others: QueueChange[];
-    declined?: Declined[];
-  } | null;
-  asks: { waiting_on_me: Ask[] } | null;
-  alignments: {
-    waiting_on_me: QueueAlignment[];
-    waiting_on_others: QueueAlignment[];
-  } | null;
   goals: HomeGoal[] | null;
   apps: { everyone: boolean; items: App[] } | null;
 }
@@ -97,28 +47,7 @@ interface Groups {
   mine: ChangeRequest[];
   others: ChangeRequest[];
 }
-interface Delivery {
-  launched_at: string | null;
-  delivery: { sessions: number; received: number; applied: number } | null;
-}
-
-const UNREAD: HomeData = {
-  me: "",
-  change_requests: null,
-  asks: null,
-  alignments: null,
-  goals: null,
-  apps: null,
-};
-const EV: Record<EvidenceClass, EvidenceKind> = {
-  delivery_receipt: "receipt",
-  agent_reported: "reported",
-  not_observed: "unobserved",
-};
-const HARNESS: Record<string, string> = {
-  "claude-code": "Claude Code",
-  codex: "Codex",
-};
+const UNREAD: HomeData = { goals: null, apps: null };
 const ago = (iso: string) => {
   const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
   return m < 60 ? `${m}m ago` : m < 48 * 60 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
@@ -151,26 +80,18 @@ const primaryBtn =
   "inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) bg-(--accent) px-3.5 text-[14px] font-medium text-(--text-on-accent) hover:bg-(--accent-hover) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) max-sm:min-h-[44px]";
 const outlineBtn =
   "inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) border border-(--line-strong) px-3.5 text-[14px] font-medium text-(--text-1) hover:bg-(--bg-raised) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) max-sm:min-h-[44px]";
-const quietLink = "inline-flex min-h-[40px] items-center text-[14px] font-medium text-(--accent-text) hover:underline max-sm:min-h-[44px]";
 
-const EV_KINDS: [keyof EvidenceCounts, EvidenceKind][] = [
-  ["receipt", "receipt"],
-  ["agent_reported", "reported"],
-  ["self_reported", "self"],
-  ["not_observed", "unobserved"],
-];
-/** A row's evidence as labels with counts. A change request with no links says so; other kinds carry no evidence. */
-function NeedEvidence({ r }: { r: Need }) {
-  const shown = EV_KINDS.filter(([k]) => r.evidence[k] > 0);
-  if (!shown.length) return r.review ? <span className="text-[12px] text-(--text-3)">No evidence</span> : null;
-  return shown.map(([k, kind]) => <EvidenceLabel key={k} kind={kind} size="s" detail={String(r.evidence[k])} />);
+/** A row's evidence: the one renderer. A launched request reads its …/value when the row mounts; others have none. */
+function NeedEvidence({ ws, cr }: { ws: string; cr: ChangeRequest | undefined }) {
+  if (!cr) return null;
+  return <EvidenceSummary ws={ws} cr={cr} variant="inline" max={2} value={cr.launch === "launched" ? undefined : null} />;
 }
 const waited = (iso: string) => {
   const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
   return m < 60 ? `${m}m` : m < 48 * 60 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`;
 };
 /** One row of the list: its action opens the review drawer for a change request, or the tab that holds the rest. */
-function NeedItem({ r, base, onReview }: { r: Need; base: string; onReview: (r: Need) => void }) {
+function NeedItem({ r, ws, cr, onReview }: { r: Need; ws: string; cr: ChangeRequest | undefined; onReview: (r: Need) => void }) {
   const label = r.action?.label ?? "View";
   const tab = r.action?.opens ?? (r.kind === "team_ask" ? "asks" : r.kind === "alignment" ? "alignments" : "apps");
   return (
@@ -180,89 +101,23 @@ function NeedItem({ r, base, onReview }: { r: Need; base: string; onReview: (r: 
       title={r.goal?.title ?? r.quote ?? r.cause}
       sub={[r.cause, r.who].filter(Boolean).join(" · ")}
       waited={r.since ? (r.phase === "done" ? ago(r.since.at) : waited(r.since.at)) : undefined}
-      evidence={<NeedEvidence r={r} />}
-      action={r.review ? <NeedAction onClick={() => onReview(r)}>{label}</NeedAction> : <NeedAction href={`${base}/${tab}`}>{label}</NeedAction>}
+      evidence={<NeedEvidence ws={ws} cr={cr} />}
+      action={r.review ? <NeedAction onClick={() => onReview(r)}>{label}</NeedAction> : <NeedAction href={`/app/w/${ws}/${tab}`}>{label}</NeedAction>}
     />
   );
 }
 
-/** What Align delivered for a goal's launched version: the launch's own counts (GET …/value). */
-function Delivered({ ws, cr }: { ws: string; cr: ChangeRequest }) {
-  const v = useApi<Delivery>(`/api/v2/workspaces/${ws}/goals/${cr.goal.id}/change-requests/${cr.id}/value`);
-  if (!v.data) return v.error ? <EvidenceLabel kind="unobserved" size="s" detail="delivery unknown" /> : null;
-  const d = v.data.delivery;
-  if (!d || d.sessions === 0) return <EvidenceLabel kind="unobserved" size="s" detail={`v${cr.version} reached no bound session`} />;
-  if (d.received === 0) return <EvidenceLabel kind="unobserved" size="s" detail={`Align sent v${cr.version} to ${d.sessions} · no receipt`} />;
-  return <EvidenceLabel kind="receipt" size="s" detail={`Align sent v${cr.version} · ${d.received} of ${d.sessions} received`} />;
-}
-
-/** One shared session row: what Align holds about it and the evidence class of each claim. */
-function SessionRow({ s, me, bound = true }: { s: MySession; me: Me; bound?: boolean }) {
-  const stopped = s.stop_status && s.stop_status.receipts.length > 0;
+/** A phase the list's filters will replace. Its rows mount only once it is opened, so their evidence reads wait too. */
+function ClosedPhase({ title, id, rows, children }: { title: string; id: string; rows: number; children: () => React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  if (!rows) return null;
   return (
-    <li className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 px-4 py-2.5 max-sm:grid-cols-1" data-home-session={s.session_key.slice(-6)}>
-      <div className="min-w-0">
-        <p className="truncate text-[14px] text-(--text-1)">{s.title ?? s.repo_alias ?? "Untitled session"}</p>
-        <p className="truncate font-mono text-[12px] text-(--text-3)">
-          {HARNESS[s.harness] ?? s.harness} · {s.repo_alias ?? "repo hidden"} · {me.name.split(" ")[0]} · started {ago(s.started_at)}
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
-        {s.state === "suspended" && <StatusPill kind="held" size="s" label="Sharing paused" />}
-        {s.stop_status ? (
-          <EvidenceLabel kind={stopped ? "receipt" : "unobserved"} size="s" detail={`${s.stop_status.kind} ${stopped ? "received" : "sent, no receipt"}`} />
-        ) : (
-          <EvidenceLabel kind="reported" size="s" detail={bound ? "binding" : "no goal set"} />
-        )}
-      </div>
-    </li>
-  );
-}
-
-function GoalGroup({ ws, g, me, latest, sessions, alloc, onReview }: { ws: string; g: HomeGoal; me: Me; latest: ChangeRequest | null; sessions: MySession[]; alloc: Goal["allocation"] | undefined; onReview: (cr: ChangeRequest) => void }) {
-  const st = latest ? crStatus(latest) : null;
-  return (
-    <li className="overflow-hidden rounded-(--radius-m) border border-(--line) bg-(--bg-panel)" data-home-goal={g.id}>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-(--line) px-4 py-3">
-        <div className="min-w-0 flex-1 basis-60">
-          <Link href={`/app/w/${ws}/goals/${g.id}`} className="text-[15px] font-semibold text-(--text-1) hover:underline">
-            {g.title}
-          </Link>
-          <p className="font-mono text-[12px] text-(--text-3)">
-            {g.level === "company" ? "Company" : (g.team?.name ?? "Team")} · {g.owner.id === me.id ? "yours" : g.owner.name} · v{g.version} approved
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {latest && st && (
-            <button
-              type="button"
-              onClick={() => onReview(latest)}
-              className="rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)"
-              aria-label={`Review the latest change on ${g.title}`}
-            >
-              <StatusPill kind={st.kind} size="s" label={st.kind === "launched" ? `Launched v${latest.version}` : st.kind === "approved" ? "Change approved, not launched" : st.label} />
-            </button>
-          )}
-          {latest?.launch === "launched" && <Delivered ws={ws} cr={latest} />}
-          {alloc?.held && <StatusPill kind="held" size="s" label="Held" />}
-          {/* Agent time on this goal over 7 days, from usage the CLI reports: agent reported, never a measure of progress. */}
-          {alloc && (
-            <EvidenceLabel kind="reported" size="s" detail={`${alloc.share_7d > 0 ? `${alloc.share_7d}% of agent time, 7 days` : "No agent time reported, 7 days"}${alloc.target_share !== null ? ` · target ${alloc.target_share}%` : ""}`} />
-          )}
-        </div>
-      </div>
-      {sessions.length ? (
-        <ul className="divide-y divide-(--line)">
-          {sessions.map((s) => (
-            <SessionRow key={s.session_key} s={s} me={me} />
-          ))}
-        </ul>
-      ) : (
-        <p className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-[13px] text-(--text-2)">
-          <EvidenceLabel kind="unobserved" size="s" /> None of your shared sessions is bound to this goal.
-        </p>
-      )}
-    </li>
+    <details id={id} data-needs={id} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary className="inline-flex min-h-[36px] cursor-pointer items-center text-[14px] text-(--text-2) max-sm:min-h-[44px]">
+        {title} · {rows}
+      </summary>
+      {open && children()}
+    </details>
   );
 }
 
@@ -270,13 +125,11 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const d = useApi<HomeData>(`/api/v2/workspaces/${ws}/home`);
   const s = useApi<{ mine: MySession[]; all: AnySession[] | null }>(`/api/v2/workspaces/${ws}/sessions`);
   const c = useApi<Groups>(`/api/v2/workspaces/${ws}/change-requests`);
-  const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
   const asks = useApi<{ asks: AskLite[] }>(`/api/v2/workspaces/${ws}/asks?state=open,accepted,done,declined`);
   const al = useApi<{ waiting_on_me: Alignment[]; mine: Alignment[]; others: Alignment[] }>(`/api/v2/workspaces/${ws}/alignments`);
   const [review, setReview] = useReview();
   const [connect, setConnect] = useState(false);
   const h = d.data ?? (d.error ? UNREAD : null);
-  const base = `/app/w/${ws}`;
   const reloadAll = useCallback(() => {
     d.reload();
     s.reload();
@@ -286,15 +139,8 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   }, [d, s, c, asks, al]);
 
   const allCrs = c.data ? [...c.data.waiting_on_me, ...c.data.mine, ...c.data.others] : [];
-  /** Each goal's latest decided change, or an open one when nothing has been decided: what its plan pill says. */
-  const latestFor = (goal: string) => {
-    const on = allCrs.filter((x) => x.goal.id === goal && x.state === "approved").sort((a, b) => (b.decided_at ?? "").localeCompare(a.decided_at ?? ""));
-    return on[0] ?? null;
-  };
+  const crById = new Map(allCrs.map((x) => [x.id, x]));
   const mine = s.data?.mine.filter((x) => x.state !== "stopped") ?? [];
-  const byGoal = (goal: string) => mine.filter((x) => (x.current_epoch?.goal?.id ?? x.governing_goal?.id) === goal);
-  const goalIds = new Set(h?.goals?.map((g) => g.id) ?? []);
-  const unbound = mine.filter((x) => !goalIds.has(x.current_epoch?.goal?.id ?? x.governing_goal?.id ?? ""));
   const mineKeys = new Set(mine.map((x) => x.session_key));
   const teammates = s.data?.all?.filter((x) => !mineKeys.has(x.session_key)) ?? null;
 
@@ -303,9 +149,12 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const needs = needsRead
     ? buildNeeds({ ws, me: me.id, crs: c.data ? allCrs : null, asks: asks.data?.asks ?? null, alignments: al.data ? [...al.data.waiting_on_me, ...al.data.mine, ...al.data.others] : null, apps: h?.apps?.items ?? null })
     : null;
-  const needsYou = needs ? inPhase(needs.rows, "needs_you") : [];
-  const waitingOthers = needs ? inPhase(needs.rows, "waiting_on_others") : [];
-  const done = needs ? inPhase(needs.rows, "done") : [];
+  // Audit (Medium, Mini S3): app_behind is wrong across goals: last_read_at is one time per app, so a read of goal A can
+  // hide goal B's row. Left out until Mini S1's rebuilt model lands; remove this line then.
+  const rows = needs ? needs.rows.filter((r) => r.kind !== "app_behind") : [];
+  const needsYou = inPhase(rows, "needs_you");
+  const waitingOthers = inPhase(rows, "waiting_on_others");
+  const done = inPhase(rows, "done");
   const apps = h?.apps ?? null;
   const readers = apps?.items.filter((a) => a.last_read_at).length ?? 0;
   /** The person has connected nothing here. Only an owner sees everyone's apps and sessions, so only for an owner does
@@ -352,39 +201,70 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
         </header>
 
         <section id="waiting" aria-label="Needs you" data-needs="needs_you" className="flex min-w-0 flex-col gap-2">
-          <h2 className="text-[16px] font-semibold text-(--text-1)">Needs you{needs ? ` · ${needsYou.length}` : ""}</h2>
           {!needs ? (
             <Loading />
           ) : (
             <>
+              {needsYou.length > 0 && <h2 className="text-[16px] font-semibold text-(--text-1)">Needs you · {needsYou.length}</h2>}
               {needs.unknown.length > 0 && <Note>Align couldn&apos;t read {needs.unknown.join(", ")} just now, so this list may be missing what they hold.</Note>}
               <NeedList rankNote={RANK_NOTE} empty={needs.unknown.length ? "Nothing else Align could read needs you." : undefined}>
                 {needsYou.map((r) => (
-                  <NeedItem key={r.key} r={r} base={base} onReview={openNeed} />
+                  <NeedItem key={r.key} r={r} ws={ws} cr={crById.get(r.key.slice(3))} onReview={openNeed} />
                 ))}
               </NeedList>
               {/* Until the list's filters land, the other two phases stay reachable here. */}
-              {[
-                ["Waiting on others", waitingOthers, "others"] as const,
-                ["Done", done, "done"] as const,
-              ].map(
-                ([title, rows, id]) =>
-                  rows.length > 0 && (
-                    <details key={id} id={id} data-needs={id}>
-                      <summary className="inline-flex min-h-[36px] cursor-pointer items-center text-[14px] text-(--text-2) max-sm:min-h-[44px]">
-                        {title} · {rows.length}
-                      </summary>
-                      <NeedList rankNote="">
-                        {rows.map((r) => (
-                          <NeedItem key={r.key} r={r} base={base} onReview={openNeed} />
-                        ))}
-                      </NeedList>
-                    </details>
-                  ),
-              )}
+              <ClosedPhase title="Waiting on others" id="others" rows={waitingOthers.length}>
+                {() => (
+                  <NeedList rankNote={RANK_NOTE}>
+                    {waitingOthers.map((r) => (
+                      <NeedItem key={r.key} r={r} ws={ws} cr={crById.get(r.key.slice(3))} onReview={openNeed} />
+                    ))}
+                  </NeedList>
+                )}
+              </ClosedPhase>
+              <ClosedPhase title="Done" id="done" rows={done.length}>
+                {() => (
+                  <NeedList rankNote="Newest first.">
+                    {done.map((r) => (
+                      <NeedItem key={r.key} r={r} ws={ws} cr={crById.get(r.key.slice(3))} onReview={openNeed} />
+                    ))}
+                  </NeedList>
+                )}
+              </ClosedPhase>
             </>
           )}
         </section>
+
+        {noAgents && (
+          <EmptyState
+            title="No agent is sharing work here yet"
+            body="Align shows the work once an agent connects: which goal each session is bound to, which version Align sent it, and whether a receipt came back. Connect one agent to see your first goal read in about a minute."
+            action={
+              <button type="button" className={primaryBtn} onClick={() => setConnect(true)} data-connect-empty>
+                Connect an agent
+              </button>
+            }
+          />
+        )}
+        {nothingOfMine && !ownerView && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3" data-home-role-note>
+            <p className="min-w-0 flex-1 basis-64 text-[14px] text-(--text-2)">
+              You haven&apos;t connected an agent here. Other people&apos;s sessions and apps are shown to workspace owners only, so this Home shows the plan and what Align released, not their agents.
+            </p>
+            <button type="button" className={outlineBtn} onClick={() => setConnect(true)} data-connect-empty>
+              Connect your agent
+            </button>
+          </div>
+        )}
+
+        {!h ? (
+          <Loading />
+        ) : (
+          <>
+            <Since ws={ws} me={me.id} changes={c.data ? allCrs : null} goals={h.goals} apps={h.apps?.items ?? null} onReview={(goal, id) => open(goal, id)} />
+            <GoalLines ws={ws} me={me.id} goals={h.goals} changes={c.data ? allCrs : null} onReview={(goal, id) => open(goal, id)} />
+          </>
+        )}
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-(--radius-m) border border-(--line) bg-(--bg-inset) px-4 py-2.5 text-[13px] text-(--text-2) [overflow-wrap:break-word]" data-three-states>
           <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">Read it as</span>
@@ -398,126 +278,6 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
             <EvidenceLabel kind="unobserved" size="s" /> Align has no record
           </span>
         </div>
-
-        {!h ? (
-          <Loading />
-        ) : (
-            <section className="flex min-w-0 flex-col gap-4" aria-label="The work">
-              {noAgents && (
-                <EmptyState
-                  title="No agent is sharing work here yet"
-                  body="Align shows the work once an agent connects: which goal each session is bound to, which version Align sent it, and whether a receipt came back. Connect one agent to see your first goal read in about a minute."
-                  action={
-                    <button type="button" className={primaryBtn} onClick={() => setConnect(true)} data-connect-empty>
-                      Connect an agent
-                    </button>
-                  }
-                />
-              )}
-              {nothingOfMine && !ownerView && (
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3" data-home-role-note>
-                  <p className="min-w-0 flex-1 basis-64 text-[14px] text-(--text-2)">
-                    You haven&apos;t connected an agent here. Other people&apos;s sessions and apps are shown to workspace owners only, so this Home shows the plan and what Align released, not their agents.
-                  </p>
-                  <button type="button" className={outlineBtn} onClick={() => setConnect(true)} data-connect-empty>
-                    Connect your agent
-                  </button>
-                </div>
-              )}
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="text-[16px] font-semibold text-(--text-1)">Work by goal</h2>
-                <Link href={`${base}/sessions`} className="text-[13px] text-(--accent-text) hover:underline">
-                  All sessions
-                </Link>
-              </div>
-              {!h.goals ? (
-                <Note>Align couldn&apos;t read the goals just now, so the work by goal is unknown.</Note>
-              ) : h.goals.length === 0 ? (
-                <EmptyState
-                  title="No active goals you can see"
-                  body="Agents read approved goals. Create the first one, then connect an agent to it."
-                  action={
-                    <Link href={`${base}/goals`} className={primaryBtn}>
-                      Create a goal
-                    </Link>
-                  }
-                />
-              ) : (
-                <ul className="flex flex-col gap-3">
-                  {h.goals.map((g) => (
-                    <GoalGroup key={g.id} ws={ws} g={g} me={me} latest={latestFor(g.id)} sessions={byGoal(g.id)} alloc={feed.data?.goals.find((x) => x.id === g.id)?.allocation} onReview={(cr) => open(cr.goal.id, cr.id)} />
-                  ))}
-                </ul>
-              )}
-
-              {unbound.length > 0 && (
-                <Panel eyebrow="No goal" title="Your sessions not bound to a goal" padded={false}>
-                  <ul className="divide-y divide-(--line)">
-                    {unbound.map((x) => (
-                      <SessionRow key={x.session_key} s={x} me={me} bound={false} />
-                    ))}
-                  </ul>
-                </Panel>
-              )}
-
-              {teammates && teammates.length > 0 && (
-                <Panel eyebrow="Teammates" title="Other people's shared sessions" padded={false}>
-                  <ul className="divide-y divide-(--line)">
-                    {teammates.map((x) => (
-                      <li key={x.session_key} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5" data-home-session={x.session_key.slice(-6)}>
-                        <span className="min-w-0 font-mono text-[12px] text-(--text-2)">
-                          {HARNESS[x.harness] ?? x.harness} · {x.repo_alias ?? "repo hidden"} · {x.owner.name} · started {ago(x.started_at)}
-                        </span>
-                        <EvidenceLabel kind="unobserved" size="s" detail="goal not shown to owners yet" />
-                      </li>
-                    ))}
-                  </ul>
-                </Panel>
-              )}
-
-              <Panel
-                eyebrow="Connected apps"
-                title="When each app last read the goals"
-                padded={false}
-                actions={
-                  <Link href={`${base}/apps`} className="text-[13px] text-(--accent-text) hover:underline">
-                    Manage apps
-                  </Link>
-                }
-              >
-                {!apps ? (
-                  <p className="px-4 py-3 text-[14px] text-(--text-2)">Align couldn&apos;t read the connected apps just now, so whether any read the goals is unknown.</p>
-                ) : apps.items.length === 0 ? (
-                  <div className="flex flex-wrap items-center gap-2 px-4 py-3 text-[14px] text-(--text-2)" data-home-app="none">
-                    <EvidenceLabel kind="unobserved" size="s" />
-                    {apps.everyone ? "No AI app is connected to this workspace" : "You have not connected an AI app here"}, so Align has seen no goal reads.
-                    <button type="button" className={quietLink} onClick={() => setConnect(true)}>
-                      Connect one
-                    </button>
-                  </div>
-                ) : (
-                  <ul className="divide-y divide-(--line)">
-                    {apps.items.map((a) => (
-                      <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5" data-home-app={a.id}>
-                        <span className="min-w-0">
-                          <span className="text-[14px] font-medium text-(--text-1)">{a.name}</span>{" "}
-                          <span className="text-[12px] text-(--text-3)">connected by {a.connected_by.id === me.id ? "you" : a.connected_by.name}</span>
-                        </span>
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="text-[13px] text-(--text-2)">{appStatusWords(a, when)}</span>
-                          <EvidenceLabel kind={EV[a.evidence_class]} size="s" />
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Panel>
-              <p className="text-[12px] text-(--text-3)">
-                Receipt: Align delivered it and recorded that. Agent reported: the agent&apos;s own word, never checked. Not observed: Align has nothing. Align does not see what an agent does with a
-                goal.
-              </p>
-            </section>
-        )}
 
         {/* The drawers break words only where needed, so a short label ("Close", "Esc") never splits at 320. */}
         <div className="[overflow-wrap:break-word]">
