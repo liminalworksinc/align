@@ -62,6 +62,14 @@ if (B.some((f) => f.kind === "receipt")) {
   failed++;
   console.log("FAIL goal B carries a receipt it has no read for");
 }
+// quiet (goal lines): no fact of pure absence, but a launched version's Not observed delivery stays.
+const idle = { allocation: { target_share: null, share_7d: 0, gap_7d: null, held: false } };
+const quietIdle = goalFacts(idle, null, { quiet: true });
+if (quietIdle.length) failed++;
+console.log(`${quietIdle.length ? "FAIL" : "ok  "} quiet goal with no agent time and nothing launched: ${say(quietIdle) || "(no facts)"}`);
+expect("quiet goal, launched v2 not sent yet, no agent time", goalFacts(idle, { version: 2, value: { delivery: null, apps: { everyone: true, items: [] } } }, { quiet: true }), "unobserved", "v2 · not sent yet");
+expect("quiet goal, launched v2, 0 of 2 received", goalFacts(idle, { version: 2, value: { delivery: { sessions: 2, received: 0, applied: 0 }, apps: { everyone: true, items: [] } } }, { quiet: true }), "unobserved", "v2 · 0 of 2 received");
+expect("decision row keeps no links", changeFacts({ revision: 1, revisions: [rev(1, [])], launch: null, version: null }), "unobserved", "no links");
 expect("goal with 35% agent time and nothing launched", goalFacts({ allocation: { target_share: 40, share_7d: 35, gap_7d: -5, held: false } }, null), "reported", "35% agent time");
 expect("goal with no agent time", goalFacts({ allocation: { target_share: null, share_7d: 0, gap_7d: null, held: false } }, null), "unobserved", "no agent time");
 

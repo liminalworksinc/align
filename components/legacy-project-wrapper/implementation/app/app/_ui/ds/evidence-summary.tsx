@@ -23,7 +23,14 @@ export type EvidenceSummaryProps = {
   max?: number;
 } & (
   | { cr: ChangeRequest; goal?: never; value?: Delivery | null; launched?: never }
-  | { goal: Goal; cr?: never; value?: never; launched?: { version: number; value: Delivery | null } | null }
+  | {
+      goal: Goal;
+      cr?: never;
+      value?: never;
+      launched?: { version: number; value: Delivery | null } | null;
+      /** Goal lines: omit facts of pure absence (no agent time); a launched version's Not observed delivery stays. */
+      quiet?: boolean;
+    }
 );
 
 function Chip({ f, detail }: { f: Fact; detail?: string }) {
@@ -126,7 +133,7 @@ export function EvidenceSummary(props: EvidenceSummaryProps) {
   const facts = cr
     ? changeFacts(cr, props.value !== undefined ? props.value : needValue ? (value.status === 0 ? (value.data ?? null) : null) : undefined)
     : props.goal
-      ? goalFacts(props.goal, props.launched !== undefined ? props.launched : g.launched)
+      ? goalFacts(props.goal, props.launched !== undefined ? props.launched : g.launched, { quiet: props.quiet })
       : [];
   if (!facts.length) return null;
   return variant === "full" ? <Full facts={facts} /> : <Inline facts={facts} max={max} />;
