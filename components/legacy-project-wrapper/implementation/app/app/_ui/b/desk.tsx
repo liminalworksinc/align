@@ -1,11 +1,11 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { DataTable, EmptyState, NeedAction, Segmented, StatusPill, type Column } from "../ds";
+import { DataTable, EmptyState, EvidenceSummary, hasEvidence, NeedAction, Segmented, sendChoice, StatusPill, type Column, type SendResult } from "../ds";
 import { useApi } from "../kit";
 import type { ChangeRequest } from "../types";
 import { needForChangeRequest } from "../home/needs";
-import { waited } from "../home/needs-list";
+import { useNarrow, waited } from "../home/needs-list";
 import { actsFor, QuietBtn } from "./act";
 import { crStatus, nameList, oneLine, PHASE_WORDS, phaseOf, versions, waitsOn, type Phase } from "./model";
 
@@ -19,6 +19,13 @@ import { crStatus, nameList, oneLine, PHASE_WORDS, phaseOf, versions, waitsOn, t
 
 type Groups = { waiting_on_me: ChangeRequest[]; mine: ChangeRequest[]; others: ChangeRequest[] };
 type Filter = Phase | "all";
+
+/** "Mina Torres can decide": whose move an open request is, when it isn't this person's. */
+function whoCan(r: ChangeRequest, me: string): string {
+  const w = waitsOn(r);
+  if (!w) return "No action";
+  return `${nameList(w.people, me)} can ${w.for === "decision" ? "decide" : w.for === "launch" ? "launch it" : "act on it"}`;
+}
 
 export function Desk({
   ws,
@@ -46,6 +53,9 @@ export function Desk({
   }, [reloadToken, reload]);
   const [filter, setFilter] = useState<Filter | null>(null);
   const [q, setQ] = useState("");
+  const narrow = useNarrow();
+  const [notes, setNotes] = useState<Map<string, SendResult>>(new Map());
+  const [busy, setBusy] = useState<string | null>(null);
 
   const open = (r: ChangeRequest) => (onOpen ? onOpen(r) : router.push(`?review=${r.goal.id}.${r.id}`, { scroll: false }));
 
@@ -116,20 +126,69 @@ export function Desk({
         );
       },
     },
-    { key: "evidence", header: "Links", align: "end", width: "96px", sortValue: (r) => r.evidence_count, render: (r) => <span className="font-mono text-[12px] text-(--text-2)">{r.evidence_count}</span> },
+    {
+      key: "evidence",
+      header: "Evidence",
+      width: "190px",
+      sortValue: (r) => r.evidence_count,
+      // The same chips the review shows, beside the click they back; none for a request not launched reads no delivery.
+      render: (r) => <EvidenceSummary ws={ws} cr={r} variant="inline" max={2} value={r.launch === "launched" ? undefined : null} />,
+    },
     { key: "age", header: "Updated", align: "end", width: "116px", sortValue: (r) => r.updated_at, render: (r) => <span className="font-mono text-[12px] text-(--text-3) sm:whitespace-nowrap">{waited(r.updated_at)}</span> },
   ];
 
+  /** The row shortcut (founder ruling, LIM-2472 eaa5cf92): a quiet "Approve only" beside Review, only when the request has
+   *  evidence on its current revision and this person's `cr.can` allows approve; never on a row whose action is a
+   *  launch. One click sends Approve only through the review's own send path (sendChoice), which re-reads first and,
+   *  with requireEvidence, sends nothing if the evidence was removed meanwhile. Never a launch from a row. */
+  const shortcut = (r: ChangeRequest, label: string) => r.can.approve && hasEvidence(r) && label === "Review";
+  const approveRow = async (r: ChangeRequest) => {
+    setBusy(r.id);
+    const res = await sendChoice(ws, r, "approve", null, { requireEvidence: true });
+    setBusy(null);
+    setNotes((m) => new Map(m).set(r.id, res));
+    if (res.reread) feed.reload();
+  };
   const rowActions = (r: ChangeRequest) => {
     const n = needForChangeRequest(r, me);
     const label = n?.action?.label ?? (actsFor(r).length ? "Review" : null);
-    if (!label) return <span className="text-[12px] text-(--text-3)">{phaseOf(r) === "decided" ? "No action" : "Not yours"}</span>;
-    return onOpen ? <NeedAction onClick={() => onOpen(r)}>{label}</NeedAction> : <NeedAction href={`?review=${r.goal.id}.${r.id}`}>{label}</NeedAction>;
+    const note = notes.get(r.id);
+    const noteLine = note && (
+      <p
+        role={note.kind === "done" ? "status" : "alert"}
+        data-row-notice={note.kind}
+        className={`mt-1 max-w-[22rem] text-left text-[12px] sm:ml-auto ${note.kind === "done" ? "text-(--text-2)" : note.kind === "retry" ? "text-(--st-retry)" : "text-(--st-declined)"}`}
+      >
+        {note.text}
+      </p>
+    );
+    if (!label)
+      return (
+        <span className="flex flex-col items-end max-sm:items-start">
+          <span className="text-[12px] text-(--text-3)">{phaseOf(r) === "decided" ? "No action" : whoCan(r, me)}</span>
+          {noteLine}
+        </span>
+      );
+    const review = onOpen ? <NeedAction onClick={() => onOpen(r)}>{label}</NeedAction> : <NeedAction href={`?review=${r.goal.id}.${r.id}`}>{label}</NeedAction>;
+    return (
+      <span className="flex flex-col items-end max-sm:items-start">
+        <span className="inline-flex items-center gap-1">
+          {shortcut(r, label) && (
+            <NeedAction quiet name={`Approve only: ${r.goal.title}. This does not launch it.`} disabled={busy === r.id} onClick={() => void approveRow(r)}>
+              {busy === r.id ? "Approving…" : "Approve only"}
+            </NeedAction>
+          )}
+          {review}
+        </span>
+        {noteLine}
+      </span>
+    );
   };
 
+  // Below 400px the same short words as Home's filter ("Waiting"), so the row stays on one line at 320.
   const filters: { value: Filter; label: string }[] = [
-    { value: "on_me", label: `${PHASE_WORDS.on_me} ${counts.on_me}` },
-    { value: "on_others", label: `${PHASE_WORDS.on_others} ${counts.on_others}` },
+    { value: "on_me", label: `${narrow ? "On me" : PHASE_WORDS.on_me} ${counts.on_me}` },
+    { value: "on_others", label: `${narrow ? "Waiting" : PHASE_WORDS.on_others} ${counts.on_others}` },
     { value: "decided", label: `${PHASE_WORDS.decided} ${counts.decided}` },
     { value: "all", label: `All ${rows.length}` },
   ];

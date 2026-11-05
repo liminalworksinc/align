@@ -20,7 +20,7 @@ const PHASES: { value: NeedPhase; label: string; short: string }[] = [
 ];
 
 /** True below 400px, so the phase filter stays on one line at 320. Null until mounted (server and first render agree). */
-function useNarrow() {
+export function useNarrow() {
   const [narrow, setNarrow] = useState(false);
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 399px)");

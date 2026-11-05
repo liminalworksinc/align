@@ -108,7 +108,7 @@ for (const [role, acct] of people) {
     // seed-agent's app read the security goal after its launch; concept B's seed launched the audit goal afterwards.
     const appRows = rows.filter((r) => r.kind === "app_behind");
     rule("owner (seeded): no app row for the security goal, whose v2 Align sent the reading app", !appRows.some((r) => r.goal?.title === "Pass the security review" && /Claude Code/.test(r.cause)));
-    rule("owner (seeded): an app row for the audit goal, launched after that app's read", appRows.some((r) => r.goal?.title === "Every release carries its audit evidence" && /not sent v2 to Claude Code/.test(r.cause)));
+    rule("owner (seeded): an app row for the audit goal, launched after that app's read", appRows.some((r) => r.goal?.title === "Every release carries its audit evidence" && /not sent v2 to the app Claude Code/.test(r.cause)));
   }
   console.log("");
 }

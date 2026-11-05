@@ -173,7 +173,7 @@ try {
     await clickText(page, '[role="radio"]', "All");
     await shoot(page, "00", "three-states", theme, [1440], "Launched as v");
     await go(page, desk, "Decision desk");
-    await shoot(page, "01", "home", theme, theme === "dark" ? ALL : [1440, 390], "Waiting on me");
+    await shoot(page, "01", "home", theme, theme === "dark" ? ALL : [1440, 390], "Decision desk");
     await go(page, dec(rafis), "Where this request is");
     await shoot(page, "02", "decision", theme, theme === "dark" ? ALL : [1440], "Where this request is");
     await page.close();
@@ -312,6 +312,68 @@ try {
       check(`${w}: "See who decides" is not rendered on a phone (the one-sentence answer stands alone)`, !shown);
       await pp.close();
     }
+  }
+
+  // The Desk's "Approve only" shortcut (founder ruling eaa5cf92): only with evidence and this person's approve; one
+  // click records Approve only through the review's send path; never on a launch row or for a viewer; and when the
+  // evidence is removed elsewhere after the page rendered, nothing is sent.
+  {
+    const rafiS = await login(s.people.rafi);
+    const gs2 = (await apiAs(owner, "GET", `/api/v2/workspaces/${s.ws}/goals`)).goals;
+    const mk = async (title, withLink) => {
+      const g = gs2.find((x) => x.title === title);
+      const cr = await apiAs(rafiS, "POST", `/api/v2/workspaces/${s.ws}/goals/${g.id}/change-requests`, { base_version: g.version, changes: { title: `${g.title} (shortcut check)` }, reason: "Shortcut check (fictional)." });
+      const ev = withLink ? await apiAs(rafiS, "POST", `/api/v2/workspaces/${s.ws}/goals/${g.id}/change-requests/${cr.id}/evidence`, { revision: 1, kind: "doc", url: "https://example.test/kestrel/docs/shortcut", label: "Shortcut note (fictional)" }) : null;
+      return { cr, g, ev };
+    };
+    const withEv = await mk("Every release carries its audit evidence", true);
+    const noEv = await mk("New customers reach a first approved plan in one day", false);
+    const vanish = await mk("Pass the security review", true);
+    const reqs = `/app/w/${s.ws}`;
+    const dp = await newPage(browser, owner, "dark");
+    await go(dp, reqs, "Decision desk");
+    await clickText(dp, '[role="radio"]', "All");
+    const rowHas = (id) => dp.evaluate((x) => { const tr = document.querySelector(`[data-row="${x}"]`)?.closest("tr"); return { quiet: !!tr && [...tr.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Approve only"), launch: !!tr && /Launch v/.test(tr.innerText) }; }, id);
+    const a = await rowHas(withEv.cr.id);
+    const b = await rowHas(noEv.cr.id);
+    const launchRows = await dp.evaluate(() => [...document.querySelectorAll("tr")].filter((tr) => /Launch v\d/.test(tr.innerText) && [...tr.querySelectorAll("button")].some((x) => x.textContent?.trim() === "Approve only")).length);
+    check("Desk: 'Approve only' shows on a row with evidence that is yours to approve, not on one without evidence, never on a launch row", a.quiet && !b.quiet && launchRows === 0);
+    await dp.evaluate((x) => document.querySelector(`[data-row="${x}"]`)?.scrollIntoView({ block: "center" }), withEv.cr.id);
+    await dp.screenshot({ path: path.join(OUT, "15-desk-shortcut-dark-1440.png"), fullPage: false });
+    // Evidence removed elsewhere after render: nothing is sent.
+    await apiAs(rafiS, "DELETE", `/api/v2/workspaces/${s.ws}/goals/${vanish.g.id}/change-requests/${vanish.cr.id}/evidence/${(await apiAs(rafiS, "GET", `/api/v2/workspaces/${s.ws}/goals/${vanish.g.id}/change-requests/${vanish.cr.id}`)).revisions[0].evidence[0].id}`);
+    await dp.evaluate((x) => [...(document.querySelector(`[data-row="${x}"]`)?.closest("tr")?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.trim() === "Approve only")?.click(), vanish.cr.id);
+    await sleep(800);
+    await settle(dp);
+    const v = await dp.evaluate((x) => document.querySelector(`[data-row="${x}"]`)?.closest("tr")?.querySelector("[data-row-notice]")?.textContent ?? "", vanish.cr.id);
+    const vState = (await apiAs(owner, "GET", `/api/v2/workspaces/${s.ws}/goals/${vanish.g.id}/change-requests/${vanish.cr.id}`)).state;
+    check("Desk: evidence removed after the page rendered: 'Approve only' sends nothing and says why", /evidence was removed/i.test(v) && vState === "pending");
+    // One click records Approve only (never a launch).
+    await dp.evaluate((x) => [...(document.querySelector(`[data-row="${x}"]`)?.closest("tr")?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.trim() === "Approve only")?.click(), withEv.cr.id);
+    await sleep(800);
+    await settle(dp);
+    const n = await dp.evaluate((x) => [...document.querySelectorAll("[data-row-notice]")].map((e) => e.textContent ?? "").find((t) => /Recorded/.test(t)) ?? "", withEv.cr.id);
+    const after = await apiAs(owner, "GET", `/api/v2/workspaces/${s.ws}/goals/${withEv.g.id}/change-requests/${withEv.cr.id}`);
+    check("Desk: one click on 'Approve only' records the approval, not a launch, and says so", /Recorded: you approved revision 1/.test(n) && after.state === "approved" && after.launch === "pending");
+    await dp.evaluate(() => document.querySelector('[data-row-notice="done"]')?.scrollIntoView({ block: "center" }));
+    await dp.screenshot({ path: path.join(OUT, "15-desk-shortcut-done-dark-1440.png"), fullPage: false });
+    await dp.close();
+    const vp2 = await newPage(browser, viewer, "dark");
+    await go(vp2, reqs, "Decision desk");
+    const vq = await vp2.evaluate(() => [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Approve only"));
+    check("Desk: a viewer never sees 'Approve only'", !vq);
+    await vp2.close();
+  }
+
+  // The deliberate cap, shown: more active goals than the requests-to-agents read covers.
+  {
+    for (let i = 0; i < 14; i++) await apiAs(owner, "POST", `/api/v2/workspaces/${s.ws}/goals`, { title: `Cap specimen goal ${i + 1} (fictional)`, visibility: "workspace" });
+    const cp = await newPage(browser, owner, "dark");
+    await go(cp, desk, "Decision desk");
+    const capLine = await cp.evaluate(() => document.querySelector("[data-needs-capped]")?.textContent ?? "");
+    check(`the cap line shows when there are more goals than the read covers ("${capLine.trim()}")`, /Requests to agents not checked on \d+ goals?\./.test(capLine));
+    await cp.screenshot({ path: path.join(OUT, "16-cap-line-dark-1440.png"), fullPage: false });
+    await cp.close();
   }
 
   // A source that fails (forced 500 on one read at a time): the list never says "Nothing needs you", never shows a bare 0

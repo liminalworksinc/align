@@ -347,7 +347,7 @@ function appNeeds(apps: AppLite[], sends: NonNullable<NeedsInput["sends"]> | und
       // A newer version saved directly (no change request) may have been sent; these reads can't tell, so the row
       // names the goal's current version rather than reading as "behind".
       const now = s.current_version && s.current_version > s.version ? ` The goal is now at v${s.current_version}.` : "";
-      out.push(row(a, `app:${a.id}:${s.goal.id}:${s.version}`, s.goal, `Align has not sent v${s.version} to ${a.name}.${now}`, { at: s.launched_at, field: "launch_decided_at" }, e));
+      out.push(row(a, `app:${a.id}:${s.goal.id}:${s.version}`, s.goal, `Align has not sent v${s.version} to the app ${a.name}.${now}`, { at: s.launched_at, field: "launch_decided_at" }, e));
     }
   }
   return out;
