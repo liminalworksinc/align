@@ -39,8 +39,8 @@
   --edge: #6e6e78; /* control borders, 3:1 or more on every surface */
   --focus: #b48cff;
 
-  --accent: #e90095; /* wholeness-500 */
-  --accent-hover: #bf0078; /* wholeness-600 */
+  --accent: #bf0078; /* wholeness-600: founder ruling 2026-11-05 (option c), white labels at 6:1 */
+  --accent-hover: #94005c; /* wholeness-700 */
   --accent-soft: rgb(233 0 149 / 0.14);
   --accent-text: #ff3db4; /* pink as text on dark surfaces (accent itself is under 4.5:1 on charcoal) */
   --between: #d975ff; /* orchid, lifted for charcoal */

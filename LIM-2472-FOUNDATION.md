@@ -21,7 +21,7 @@ Branch `agent/LIM-2472-foundation` from `origin/main` b16f8d1. Front end only. S
 | Evidence | `--ev-receipt --ev-reported --ev-unobserved`, each with `-soft` |
 | Shape, type | `--radius-s 9px --radius-m 13px --radius-l 19px`, `--font-display --font-sans --font-mono`, `--shadow-pop` |
 
-Hues (canon): accent wholeness `#E90095` / `#BF0078`; between orchid; approved connection green; **launched cerulean `#197EEB` (proposed)**, lifted to `#5aa7ff` on dark and `#0f62c0` on light, with its own arrow icon; declined stability red (`--alarm`); retry watch amber; urgent Surge coral; receipt expression teal; reported clarity violet; not observed neutral grey with a dashed shape.
+Hues (canon): accent wholeness `#BF0078` (hover `#94005C`) in both themes, ruled 2026-11-05; between orchid; approved connection green; **launched cerulean `#197EEB` (proposed)**, lifted to `#5aa7ff` on dark and `#0f62c0` on light, with its own arrow icon; declined stability red (`--alarm`); retry watch amber; urgent Surge coral; receipt expression teal; reported clarity violet; not observed neutral grey with a dashed shape.
 
 ## Measured contrast (WCAG ratio, lowest across all five surface tiers)
 
@@ -30,7 +30,7 @@ Hues (canon): accent wholeness `#E90095` / `#BF0078`; between orchid; approved c
 | Dark | 14.37 | 8.22 | 5.46 | 3.19 | 6.23 | 5.03 or more |
 | Light | 15.43 | 7.82 | 4.83 | 3.07 | 4.79 | 4.61 or more |
 
-**Open (founder):** the label on the dark primary button. White on `#E90095` is 4.29:1 (under 4.5). Options, shown side by side in the specimen: (a) keep white, 4.29:1; (b) near-black `#0b0b0d` on `#E90095`, 4.59:1; (c) white on `#BF0078`, 6.02:1. Light already uses (c). Every button reads `--text-on-accent` and `--accent`, so the ruling is a one-token change.
+**Ruled 2026-11-05 (founder, option c):** the primary action is a white label on `#BF0078` in both themes (dark `--accent: #bf0078`, `--accent-hover: #94005c`; light was already this). White on `#BF0078` is 6.02:1 and on the hover `#94005c` 8.70:1. As a non-text colour, `#BF0078` is 3.26 on page, 3.32 on inset and 3.08 on panel, but 2.89 on raised and 2.67 on overlay: a pink fill there is told apart by its label, and any pink state marker on raised or overlay surfaces should use `--accent-text` (`#ff3db4`, 5.03:1 or more on every tier). `--accent-soft` is unchanged (text-1 on it 13.31:1 or more; `--accent-text` on it 4.66:1 or more).
 
 ## Checked in Chrome (local dev, real clicks)
 
