@@ -166,7 +166,7 @@ function EvidencePanel({ ws, goal }: { ws: string; goal: Goal }) {
             <li key={e.id} className="flex flex-col gap-1 text-[14px]">
               <span className="flex flex-wrap items-center gap-2">
                 {e.reported_as === "agent-reported" ? <EvidenceLabel kind="reported" size="s" detail="connected app via MCP" /> : <span className="rounded-(--radius-s) border border-(--edge) px-1.5 text-[12px] leading-5 text-(--text-2)">Self-reported</span>}
-                <a href={e.url} target="_blank" rel="noreferrer noopener" className={`${LINK} [overflow-wrap:anywhere]`}>
+                <a href={e.url} target="_blank" rel="noopener noreferrer" className={`${LINK} [overflow-wrap:anywhere]`}>
                   {e.label || e.url}
                 </a>
               </span>
