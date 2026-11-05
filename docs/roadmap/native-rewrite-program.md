@@ -28,6 +28,100 @@ until each boundary earns transfer under ADR 0002.
 7. [ ] Prove no unclassified retained file remains; archive this program only after
    full parity and current project verification.
 
+## B09 recovery
+
+The operator requested continuation with the Codex provider on 2026-11-04. The prior
+session accepted B09's specification and prepared 110 verifier-owned parity cases,
+but did not qualify a generated implementation. The installed framework refuses
+`spec accept --integrate-project` after the parent reaches `qualified`.
+
+The recovery first creates the native child through `spec accept --project-target`,
+then runs the ordinary two-clean-build qualification. Parent registration must verify
+the parent's existing qualification, the child's fresh qualification, and the exact
+registry identities before updating the registry and its qualified evidence together.
+An unqualified child must never leave a current qualified parent claim. Keep the
+shared framework installation unchanged and retain a reviewable local extension if
+the framework lacks this operation.
+
+The resumed qualification uncovered two verifier-format constraints. Fractional
+invalid-counter inputs must be carried as JSON text because canonical evidence
+permits integer numbers only. The independent library oracle permits at most 64
+cases and must exactly match the qualification profile. The revised verifier keeps
+all 110 original inputs and expected results in 11 capability batches. A baseline
+replay passed every input; canonical profile identity:
+`sha256:7c8b80c90909e24be01db863d327e5eaaff6d78d89462366aeb11dd6ba610b67`.
+
+Codex's lifecycle invocation exposed contradictory request transport guidance: the
+request must be read from a file, while the source-generation prompt prohibited
+shell access needed for bounded file reads. The existing local framework commit
+`162fc7ab66cb2acef9d6baaa27005a8a6c2bc2e7` permits read-only access to that one
+request file. A separate non-editable runtime was built from the existing local
+framework revision `d935813eba84b391cacd842be848b31dae17a582`; wheel identity:
+`sha256:2354a32fa3ffdaaab041b32c8f58c2c0ca0af08259bad03b527b8b9824786f50`.
+The shared installed runtime remains unchanged. The unqualified promotion is
+recreated with this runtime through ordinary acceptance; no lifecycle pin is edited
+by hand. The framework revisions are local and have not been published by this work.
+
+The old lifecycle formatter also rejected its own redacted failure diagnostic,
+obscuring the actual failure code. The optional `litai-local.py` launcher performs
+additional redaction and retains the original failure code and phase. It changes no
+validation, execution, build or acceptance gate. Seven helper tests pass, covering
+metadata rollback, retry after rollback, stale-plan refusal and diagnostic redaction.
+
+- [x] Confirm the accepted specification, review, and 110 baseline cases are intact.
+- [x] Search upstream issues for the integration-stage defect. No exact match was
+  found; issues #48 and #307 cover adjacent update and retained-library concerns.
+- [x] Draft the portable upstream defect report locally; filing needs operator go.
+- [x] Generate and qualify B09 with the Codex provider on two independent clean builds.
+  Both runs pass all 110 inputs in 11 parity batches. Their independently generated
+  test suites pass 16 and 23 cases. The
+  [qualification decision](../../.literate/native-projects/local-spend-meter/provenance/qualification/5700553ab7a6564e3fb5a17ad316a79d405ad9fd21e547305aa4573aa8bb431b.json)
+  has decision identity
+  `sha256:5700553ab7a6564e3fb5a17ad316a79d405ad9fd21e547305aa4573aa8bb431b`.
+  The current [qualified projection](../../.literate/native-projects/local-spend-meter/provenance/component-authority/41c451dbfd63af666ef2488dacdf5fe4a61a795f97e4a16c52cebb54a02bf8e5/current.json) is
+  `sha256:2c4c1bd11ee8b83467797ce174fa77974575d32b950c6c66dcfda8c2f129b45b`.
+- [x] Verify and register the qualified child without weakening existing gates.
+  The reviewed local addition binds both current qualified projections in the
+  [parent authority](../../.literate/conversion-authority.json), identity
+  `sha256:8fd6f24346024776d6aecb5d8d6f09e5e05f3500beee6510638624a6aca5f53c`.
+  Prior registry and authority metadata are preserved under `.literate/native-additions`.
+- [x] Run project verification, validation, and owned agent-entrypoint audits.
+  Root and child `verify` pass with current receipts, current locks and no failed
+  gates. Root verification also passes with the existing CI-pinned runtime. Both
+  project validation and agent-entrypoint audits pass; the child's parent README
+  links are current. Its recorded host build passes 11 acceptance batches with
+  receipt identity `sha256:cde8c4ad554c7aee5bc20e4233faa6618fd4cd396a0ab1e4b261804dba21b59c`.
+- [ ] Review application consumption and full parity before removing retained files.
+
+Qualification and the receipt above cover macOS arm64. The agent still uses the four
+retained TypeScript files. Package consumption, end-to-end spend accounting and
+deployment remain separate unfinished work; this result does not close ADOPT-002,
+SPEND-001 or DEPLOY-001.
+
+The qualified surface has seven capabilities, including whole-file batch parser
+functions. The retained agent consumes incremental parser state:
+`packages/align-agent/src/tailer.ts:11-12,74,157` uses `initClaudeState`,
+`parseClaudeLine`, `initCodexState` and `parseCodexLine`. Those interfaces, the
+remaining helper exports and the shared event types need a reviewed compatibility
+mapping and direct probes before switching the agent to the native package. Batch
+qualification alone does not establish that the four retained files can be retired.
+
+### Upstream defect draft
+
+**Title:** Allow verified native child additions after an adopted project qualifies
+
+An adopted project can qualify its first native library, but adding a second library
+through `spec accept --integrate-project` then fails with
+`promotion.integration_stage_invalid`. Conversion stages only advance, so the
+documented one-boundary-at-a-time migration cannot continue after its first success.
+Allow an explicit reviewed addition of an already-qualified native child. Validate
+the current parent evidence, child evidence, registry and project-definition identities;
+update registry and qualified evidence together; preserve prior state for rollback.
+Reject unqualified children, stale evidence, collisions, unsafe paths and source drift.
+Use a portable fixture with two tiny JavaScript libraries and prove that a failed
+addition leaves both parent authority and registry unchanged. Do not permit a
+qualified parent claim to cover an unqualified child.
+
 ## Boundary inventory
 
 Paths are relative to `components/legacy-project-wrapper/implementation/` unless they
