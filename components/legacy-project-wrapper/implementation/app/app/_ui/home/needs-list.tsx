@@ -308,7 +308,7 @@ export function NeedsList({
   const items = useMemo<NextItem[] | null | undefined>(() => {
     if (loading || !reread || reqs.loading || sent.loading) return undefined;
     if (unknown.length || cr.error) return null;
-    return needsNow.map((n) => ({ key: n.key, kind: n.word, title: n.goal?.title ?? n.cause, waited: n.since ? waited(n.since.at) : undefined, href: needHref(ws, n, reviewBase), review: !!n.review, actionable: !!n.action }));
+    return needsNow.map((n) => ({ key: n.key, kind: n.word, title: n.goal?.title ?? n.cause, waited: n.since && waited(n.since.at) !== "just now" ? waited(n.since.at) : undefined, href: needHref(ws, n, reviewBase), review: !!n.review, actionable: !!n.action }));
   }, [loading, reread, reqs.loading, sent.loading, unknown.length, cr.error, needsNow, ws, reviewBase]);
   const itemsCb = useRef(onItems);
   useEffect(() => {
@@ -368,9 +368,10 @@ export function NeedsList({
         )}
       </div>
       {capped > 0 && !loading && (
-        <p data-needs-capped className="px-1 text-[12px] text-(--text-3)">
-          {reqs.unchecked ? `Requests to agents not checked on ${reqs.unchecked} goal${reqs.unchecked === 1 ? "" : "s"}. ` : ""}
-          {sent.unchecked ? `Deliveries to apps not checked on ${sent.unchecked} launch${sent.unchecked === 1 ? "" : "es"}.` : ""}
+        // What WAS checked, then what wasn't: a statement of scope, not an alarm.
+        <p data-needs-capped className="mt-1 mb-1.5 px-1 text-[12px] text-(--text-3)">
+          {reqs.unchecked ? `Checked ${REQ_GOALS_MAX} goals for requests to agents, yours first; ${reqs.unchecked} more not checked. ` : ""}
+          {sent.unchecked ? `Checked the ${SENT_GOALS_MAX} most recent launches for what Align sent apps; ${sent.unchecked} more not checked.` : ""}
         </p>
       )}
       {unknown.length > 0 && !loading && (
@@ -385,6 +386,7 @@ export function NeedsList({
       ) : (
         <NeedList
           rankNote={
+            shown.length < 2 ? undefined :
             <details data-rank-note>
               <summary className="inline-flex min-h-[44px] cursor-pointer items-center gap-1">
                 <span data-rank-order={order}>{ORDER_LINE[order]}</span>{" "}

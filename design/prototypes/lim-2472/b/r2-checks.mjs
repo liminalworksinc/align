@@ -167,6 +167,43 @@ try {
     }
     await p.close();
   }
+  // A viewer (no steps of their own) reaches and opens "See who decides" by keyboard at 1440 (the drawer's focus trap
+  // includes <summary>).
+  {
+    const p = await open(viewer, `${HOME}?review=${pilot.id}.${pend.id}`);
+    await p.waitForSelector("[data-review]", { timeout: 15000 });
+    let found = false;
+    for (let i = 0; i < 120 && !found; i++) {
+      await p.keyboard.press("Tab");
+      found = await p.evaluate(() => document.activeElement?.tagName === "SUMMARY" && /See who decides/.test(document.activeElement.textContent ?? ""));
+    }
+    await p.keyboard.press("Enter");
+    await sleep(400);
+    const r = await p.evaluate(() => ({ open: !!document.querySelector("[data-who-decides]")?.closest("details")?.open, live: document.querySelectorAll('[data-who-decides] [data-steps] button').length, can: /can/.test(document.querySelector("[data-who-decides] [data-steps]")?.textContent ?? "") }));
+    check("review, viewer at 1440: 'See who decides' reached and opened by keyboard; no step is theirs, each says who can", found && r.open && r.live === 0 && r.can, JSON.stringify({ found, ...r }));
+    await p.close();
+  }
+  // A lead at 390 tabs past "More actions" and focus stays inside the drawer (the hidden disclosure is not the trap's end).
+  {
+    const mina = await login(s.people.mina);
+    const crs = await apiAs(mina, "GET", `${W}/change-requests`);
+    const mine = crs.waiting_on_me.find((c) => c.can.approve);
+    const p = await open(mina, `${HOME}?review=${mine.goal.id}.${mine.id}`, { width: 390 });
+    await p.waitForSelector("[data-review]", { timeout: 15000 });
+    let reached = false;
+    let left = false;
+    for (let i = 0; i < 80; i++) {
+      await p.keyboard.press("Tab");
+      const st = await p.evaluate(() => ({ inDialog: !!document.activeElement?.closest('[role="dialog"]'), more: /More actions/.test(document.activeElement?.textContent ?? "") }));
+      if (st.more) reached = true;
+      if (!st.inDialog && !left) {
+        left = true;
+        console.log("   focus left the dialog at tab", i, await p.evaluate(() => ({ tag: document.activeElement?.tagName, text: (document.activeElement?.textContent ?? "").slice(0, 40), cls: (document.activeElement?.className ?? "").toString().slice(0, 60) })));
+      }
+    }
+    check("review, lead at 390: Tab passes 'More actions' and never leaves the dialog", reached && !left, JSON.stringify({ reached, left }));
+    await p.close();
+  }
   for (const w of [390, 320]) {
     const p = await open(owner, `${HOME}?review=${pilot.id}.${pend.id}`, { width: w });
     await p.waitForSelector("[data-review]", { timeout: 15000 });
@@ -229,7 +266,7 @@ try {
     for (let i = 0; i < 14; i++) await apiAs(owner, "POST", `${W}/goals`, { title: `Cap specimen goal ${i + 1} (fictional)`, visibility: "workspace" });
     const p = await open(owner, HOME);
     const cap = await p.evaluate(() => document.querySelector("[data-needs-capped]")?.textContent?.trim() ?? "");
-    check(`Home: the cap line renders ("${cap}")`, /Requests to agents not checked on \d+ goals?\./.test(cap));
+    check(`Home: the cap line renders ("${cap}")`, /Checked \d+ goals for requests to agents, yours first; \d+ more not checked\./.test(cap));
     await shot(p, "r2-cap-line-dark-1440");
     await p.close();
   }

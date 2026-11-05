@@ -88,6 +88,9 @@ export function Desk({
           <span className="text-[12px] font-normal text-(--text-3)">
             {oneLine(r)} · {r.requester.id === me ? "your request" : `${r.requester.name}'s request`}
           </span>
+          {/* The one-click result reads on its own line under the title, the row's widest cell, never squeezed in
+              beside the buttons. */}
+          {rowNote(r)}
         </span>
       ),
     },
@@ -129,10 +132,15 @@ export function Desk({
     {
       key: "evidence",
       header: "Evidence",
-      width: "190px",
+      width: "200px",
       sortValue: (r) => r.evidence_count,
       // The same chips the review shows, beside the click they back; none for a request not launched reads no delivery.
-      render: (r) => <EvidenceSummary ws={ws} cr={r} variant="inline" max={2} value={r.launch === "launched" ? undefined : null} />,
+      // One chip on one line ("+N more" says the rest); the title column takes any wrap.
+      render: (r) => (
+        <span className="block sm:whitespace-nowrap">
+          <EvidenceSummary ws={ws} cr={r} variant="inline" max={1} value={r.launch === "launched" ? undefined : null} />
+        </span>
+      ),
     },
     { key: "age", header: "Updated", align: "end", width: "116px", sortValue: (r) => r.updated_at, render: (r) => <span className="font-mono text-[12px] text-(--text-3) sm:whitespace-nowrap">{waited(r.updated_at)}</span> },
   ];
@@ -149,24 +157,26 @@ export function Desk({
     setNotes((m) => new Map(m).set(r.id, res));
     if (res.reread) feed.reload();
   };
+  const rowNote = (r: ChangeRequest) => {
+    const note = notes.get(r.id);
+    if (!note) return null;
+    return (
+      <span
+        role={note.kind === "done" ? "status" : "alert"}
+        data-row-notice={note.kind}
+        className={`mt-1 block text-[12px] font-normal ${note.kind === "done" ? "text-(--text-2)" : note.kind === "retry" ? "text-(--st-retry)" : "text-(--st-declined)"}`}
+      >
+        {note.text}
+      </span>
+    );
+  };
   const rowActions = (r: ChangeRequest) => {
     const n = needForChangeRequest(r, me);
     const label = n?.action?.label ?? (actsFor(r).length ? "Review" : null);
-    const note = notes.get(r.id);
-    const noteLine = note && (
-      <p
-        role={note.kind === "done" ? "status" : "alert"}
-        data-row-notice={note.kind}
-        className={`mt-1 max-w-[22rem] text-left text-[12px] sm:ml-auto ${note.kind === "done" ? "text-(--text-2)" : note.kind === "retry" ? "text-(--st-retry)" : "text-(--st-declined)"}`}
-      >
-        {note.text}
-      </p>
-    );
     if (!label)
       return (
         <span className="flex flex-col items-end max-sm:items-start">
           <span className="text-[12px] text-(--text-3)">{phaseOf(r) === "decided" ? "No action" : whoCan(r, me)}</span>
-          {noteLine}
         </span>
       );
     const review = onOpen ? <NeedAction onClick={() => onOpen(r)}>{label}</NeedAction> : <NeedAction href={`?review=${r.goal.id}.${r.id}`}>{label}</NeedAction>;
@@ -180,7 +190,6 @@ export function Desk({
           )}
           {review}
         </span>
-        {noteLine}
       </span>
     );
   };

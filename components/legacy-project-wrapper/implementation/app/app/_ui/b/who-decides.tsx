@@ -38,7 +38,7 @@ export function WhoDecides({ cr, me, onAct }: { cr: ChangeRequest; me: string; o
       {es.map((e) => (
         <li key={e.label} className="flex flex-wrap items-baseline gap-x-1.5 text-[12px]">
           {e.can && e.act && onAct ? (
-            <NeedAction quiet onClick={() => onAct(e.act!)}>
+            <NeedAction quiet dense onClick={() => onAct(e.act!)}>
               {e.label}
             </NeedAction>
           ) : (
