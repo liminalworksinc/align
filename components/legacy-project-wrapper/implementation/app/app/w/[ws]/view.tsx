@@ -7,7 +7,7 @@ import Since from "../../_ui/home/since";
 import { useRead } from "../../_ui/ds/read";
 import { Loading, Shell, useApi } from "../../_ui/kit";
 import { NotInWorkspace } from "../../_ui/missing";
-import type { Me } from "../../_ui/server";
+import type { CreationOptions, Me } from "../../_ui/server";
 import type { ChangeRequest, Goal } from "../../_ui/types";
 import FirstRun from "./first-run";
 import { ReviewDrawer, useReview } from "./review-drawer";
@@ -58,7 +58,7 @@ function needsHeading(n: number | null, partial: boolean) {
   return `${n} ${n === 1 ? "thing needs" : "things need"} you`;
 }
 
-export default function Home({ me, ws }: { me: Me; ws: string }) {
+export default function Home({ me, ws, creation }: { me: Me; ws: string; creation?: CreationOptions }) {
   const d = useRead<HomeData>(`/api/v2/workspaces/${ws}/home`);
   const c = useApi<Groups>(`/api/v2/workspaces/${ws}/change-requests`);
   const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
@@ -96,7 +96,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
           </h1>
         </header>
 
-        {h && <FirstRun ws={ws} onSeen={reloadAll} me={me.id} hasGoals={(h.goals?.length ?? 0) > 0} />}
+        {h && <FirstRun ws={ws} onSeen={reloadAll} me={me.id} hasGoals={(h.goals?.length ?? 0) > 0} creation={creation} />}
 
         <div className={quietList ? "hidden" : "contents"}>
         <NeedsList key={needsKey} ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} />

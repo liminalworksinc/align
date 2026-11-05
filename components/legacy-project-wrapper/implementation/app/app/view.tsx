@@ -3,7 +3,7 @@ import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useState } from "react";
 import { api, go, Btn, Err, Field, Input, Loading, Note, Pill, Shell, SignInAgain, useAction, useApi, when, type WsSummary } from "./_ui/kit";
-import { EmptyState, Panel } from "./_ui/ds";
+import { Panel } from "./_ui/ds";
 import type { CreationOptions, Me } from "./_ui/server";
 import { useTurnstile } from "./_ui/turnstile";
 import { firstRunWords } from "./_ui/words";
@@ -38,14 +38,17 @@ export default function Home({ me, creation }: { me: Me; creation: CreationOptio
   const sampleOffered = newcomer && !creation.closed && !creation.needsCode;
   return (
     <Shell me={me}>
-      <h1 className={`${H1} mb-5`}>Your workspaces</h1>
+      {/* With no workspace the heading is the fact, and the one useful sentence sits under it instead of in a card. */}
+      <h1 className={`${H1} ${newcomer ? "mb-1" : "mb-5"}`}>{newcomer ? "No workspaces yet" : "Your workspaces"}</h1>
+      {newcomer && <p className="mb-5 max-w-prose text-[15px] text-(--text-2)">{firstRunWords(creation)}</p>}
       <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col gap-4">
+      {!newcomer && (
       <Panel title="Workspaces" padded={false}>
         <div className="px-4 py-3 empty:hidden">
           {list.loading && <Loading />}
           <Err>{list.error}</Err>
-          {list.data && list.data.workspaces.length === 0 && <EmptyState title="No workspaces yet" body={firstRunWords(creation)} />}
+
         </div>
         {!!list.data?.workspaces.length && (
           <ul className="divide-y divide-(--line)">
@@ -68,6 +71,7 @@ export default function Home({ me, creation }: { me: Me; creation: CreationOptio
           </ul>
         )}
       </Panel>
+      )}
       {/* Where a workspace needs a creation code, the code goes to the person's real workspace: no sample offer. */}
       {list.data && list.data.workspaces.length === 0 && !creation.closed && !creation.needsCode && (
         <Panel title="Try Align with a sample" actions={<Pill tone="violet">Fictional</Pill>}>

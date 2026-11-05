@@ -1,6 +1,7 @@
 "use client";
 import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, useAction, useApi } from "../../../_ui/kit";
 import { AnchorsEditor, LimitEditor, MeasuresEditor, TargetShareField, VISIBILITY_LABEL, anchorsDraft, anchorsOut, limitsOut, measuresDraft, measuresOut, takenBy, targetOut, type LimitDraft } from "../../../_ui/goalform";
@@ -12,6 +13,9 @@ import { isBlankText } from "@/lib/v2/text-core.mts";
 const STATUS_TONE = { active: "violet", achieved: "green", dropped: "neutral" } as const;
 
 export default function Goals({ me, ws }: { me: Me; ws: string }) {
+  // ?first=1: arrived from an empty workspace's "Set the first goal". The form is the point: its Goal field takes focus
+  // and the empty line above it, which the person has just been told, is left out.
+  const first = useSearchParams().get("first") === "1";
   const detail = useApi<WsDetail>(`/api/v2/workspaces/${ws}`);
   const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
   const holds = useApi<{ holds: { goal: { id: string } }[] }>(`/api/v2/workspaces/${ws}/holds`);
@@ -36,7 +40,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
       <Err>{detail.error ?? feed.error}</Err>
       <Card>
         {feed.loading && <Loading />}
-        {feed.data?.goals.length === 0 && <Note>No goals you can see yet.</Note>}
+        {feed.data?.goals.length === 0 && !first && <Note>No goals you can see yet.</Note>}
         <ul className="divide-y divide-zinc-200">
           {feed.data?.goals.map((g) => (
             <li key={g.id} className="py-3">
@@ -93,7 +97,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
             }}
           >
             <Field label="Goal">
-              <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required />
+              <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required autoFocus={first} />
             </Field>
             <MeasuresEditor value={measures} onChange={setMeasures} />
             <LimitEditor value={limits} onChange={setLimits} />

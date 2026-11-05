@@ -1,7 +1,9 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api, Btn, when, type WsSummary } from "../../_ui/kit";
+import { api, Btn, go, when, type WsSummary } from "../../_ui/kit";
+import type { CreationOptions } from "../../_ui/server";
+import { useTurnstile } from "../../_ui/turnstile";
 import { READ_TOOLS } from "@/lib/mcp/read-tools";
 import { claudeCodeLine } from "@/lib/paste-lines";
 
@@ -77,8 +79,27 @@ function CopyLine({ line }: { line: string }) {
  *  and someone else's agent doesn't end this person's setup). `hasGoals`: the person can read a goal, so this panel
  *  sits above Home's list and stays compact (two lines and the two actions); a viewer, who can't connect an agent,
  *  then gets no panel at all. */
-export default function FirstRun({ ws, onSeen, always = false, me, hasGoals = false }: { ws: string; onSeen: () => void; always?: boolean; me?: string; hasGoals?: boolean }) {
+export default function FirstRun({
+  ws,
+  onSeen,
+  always = false,
+  me,
+  hasGoals = false,
+  creation,
+}: {
+  ws: string;
+  onSeen: () => void;
+  always?: boolean;
+  me?: string;
+  hasGoals?: boolean;
+  /** The server's rules for creating a workspace, so an empty workspace offers to create the sample only when it can. */
+  creation?: CreationOptions;
+}) {
   const [open, setOpen] = useState(false);
+  // Creating the sample from an empty workspace: the same route and gate as /app's "Create the Northstar sample". The
+  // bot check (hosted) is shown only once the person asks for the sample.
+  const [makeSample, setMakeSample] = useState<{ asked: boolean; busy: boolean; error: string | null }>({ asked: false, busy: false, error: null });
+  const bot = useTurnstile(makeSample.asked ? (creation?.captchaSiteKey ?? null) : null);
   const [apps, setApps] = useState<{ url: string; apps: FirstRunApp[]; at: number } | null>(null);
   const [failed, setFailed] = useState(false);
   const [list, setList] = useState<WsSummary[] | null>(null);
@@ -205,23 +226,49 @@ export default function FirstRun({ ws, onSeen, always = false, me, hasGoals = fa
         </p>
       );
     const pathBtn =
-      "inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) border border-(--line-strong) px-3.5 text-[14px] font-medium text-(--text-1) hover:bg-(--bg-raised) max-sm:min-h-[44px]";
+      "inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) border border-(--line-strong) px-3.5 text-[14px] font-medium text-(--text-1) hover:bg-(--bg-raised) disabled:opacity-50 max-sm:min-h-[44px]";
+    // The sample is always offered when it can be had: a link when this person already has one, else created on click.
+    const canMake = !!creation && !creation.closed && !creation.needsCode;
+    const sampleHere = sample && !inSample ? sample : null;
+    const offerSample = !!sampleHere || canMake;
+    const createSample = async () => {
+      if (!bot.ready) {
+        setMakeSample((m) => ({ ...m, asked: true }));
+        return;
+      }
+      setMakeSample((m) => ({ ...m, asked: true, busy: true, error: null }));
+      try {
+        const w = await api<{ id: string }>("/api/v2/workspaces/sample", { body: {}, headers: bot.headers });
+        go(`/app/w/${w.id}`);
+      } catch (e) {
+        bot.reset();
+        setMakeSample((m) => ({ ...m, busy: false, error: e instanceof Error ? e.message : "Align couldn't create the sample just now." }));
+      }
+    };
+    // Only what the page shows is promised.
+    const next = offerSample ? "Set the first one, or look around the sample first." : !connected ? "Set the first one, or connect one agent first." : "Set the first one.";
     return (
       <section aria-label="Get started" className="min-w-0 rounded-(--radius-m) border border-(--line-strong) bg-(--bg-panel) px-4 py-4 text-[14px] text-(--text-1)" data-first-run="empty">
         <p className="text-[16px] font-semibold">Start with a goal</p>
-        <p className="mt-1 max-w-prose text-(--text-2)">Agents read the goals you can read, as you. Set the first one{sample || !connected ? ", or look around first" : ""}.</p>
+        <p className="mt-1 max-w-prose text-(--text-2)">A goal comes first: it is what people decide on here, and what Align sends to agents. {next}</p>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <Link
-            href={`/app/w/${ws}/goals`}
+            href={`/app/w/${ws}/goals?first=1`}
             className="inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) bg-(--accent) px-3.5 text-[14px] font-medium text-(--text-on-accent) hover:bg-(--accent-hover) max-sm:min-h-[44px]"
             data-first-goal
           >
             Set the first goal
           </Link>
-          {sample && !inSample && (
-            <Link href={`/app/w/${sample.id}`} className={pathBtn} aria-label="Explore the Northstar sample (fictional)" data-sample-link>
+          {sampleHere ? (
+            <Link href={`/app/w/${sampleHere.id}`} className={pathBtn} aria-label="Explore the Northstar sample (fictional)" data-sample-link>
               Explore the sample
             </Link>
+          ) : (
+            canMake && (
+              <button type="button" className={pathBtn} disabled={makeSample.busy} onClick={() => void createSample()} aria-label="Explore the sample: create the Northstar sample (fictional)" data-sample-create>
+                {makeSample.busy ? "Creating the sample…" : "Explore the sample"}
+              </button>
+            )
           )}
           {!connected && (
             <button type="button" className={pathBtn} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
@@ -229,6 +276,18 @@ export default function FirstRun({ ws, onSeen, always = false, me, hasGoals = fa
             </button>
           )}
         </div>
+        {makeSample.asked && !sampleHere && (
+          <div className="mt-3 flex min-w-0 flex-col gap-1 text-[14px] text-(--text-2)">
+            <p>The sample is Northstar, a made-up company in its own workspace, with goals and a change request to try. Nothing in it is real.</p>
+            {bot.widget}
+            {creation?.captchaSiteKey && !bot.ready && <p>Complete the check, then press Explore the sample again.</p>}
+            {makeSample.error && (
+              <p role="alert" className="font-medium text-(--st-declined)">
+                Not created. {makeSample.error}
+              </p>
+            )}
+          </div>
+        )}
         {open && !connected && (
           <div className="mt-3 flex min-w-0 flex-col gap-2 border-t border-(--line) pt-3 text-[15px]" data-first-run-path="connect">
             {connect}

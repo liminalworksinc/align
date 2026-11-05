@@ -533,5 +533,101 @@ for (const width of [390, 320]) {
   }
 }
 
+// 11: an empty workspace (round 2), screenshots and asserts in both modes. Fresh people through the real routes: an owner
+// who creates a workspace with no goals, and a member and a viewer invited to it. Owner and member: the H1 is the fact,
+// "Set the first goal" is the one filled action, the sample is offered, and nothing else of the Home shows; the rail
+// offers no "Propose a change". Viewer: one line, no action. Then "Set the first goal" lands on the Goals form with focus
+// in its Goal field, "Explore the sample" creates the sample and opens it, and /app for someone with no workspace says so.
+{
+  const H = { origin: BASE, "content-type": "application/json" };
+  const stamp = Date.now();
+  const signUp = async (name) => {
+    const email = `${name.toLowerCase().replace(/ /g, "-")}-${stamp}@example.test`;
+    const r = await fetch(`${BASE}/api/v2/auth/sign-up/email`, { method: "POST", headers: H, body: JSON.stringify({ name, email, password: `pw-${stamp}-${Math.random().toString(36).slice(2)}-Aa1!` }) });
+    if (r.status !== 200) throw new Error(`sign-up ${name}: ${r.status}`);
+    return { email, cookies: r.headers.getSetCookie() };
+  };
+  const jar = (u) => u.cookies.map((c) => c.split(";")[0]).join("; ");
+  const owner = await signUp("Empty Owner");
+  const made = await (await fetch(`${BASE}/api/v2/workspaces`, { method: "POST", headers: { ...H, cookie: jar(owner) }, body: JSON.stringify({ name: "No goals yet (fictional)" }) })).json();
+  const ews = made.id;
+  const people = { owner };
+  for (const role of ["member", "viewer"]) {
+    const u = await signUp(`Empty ${role}`);
+    const inv = await (await fetch(`${BASE}/api/v2/workspaces/${ews}/invites`, { method: "POST", headers: { ...H, cookie: jar(owner) }, body: JSON.stringify({ email: u.email, role }) })).json();
+    const acc = await fetch(`${BASE}/api/v2/invites/${inv.token}/accept`, { method: "POST", headers: { ...H, cookie: jar(u) }, body: "{}" });
+    if (acc.status !== 200) throw new Error(`invite ${role}: ${acc.status}`);
+    people[role] = u;
+  }
+  const as = async (who, width, theme = "dark") => {
+    const ctx = await browser.createBrowserContext();
+    const p = await ctx.newPage();
+    await p.setViewport({ width, height: width >= 1024 ? 900 : 844 });
+    await p.evaluateOnNewDocument((t) => {
+      try {
+        localStorage.setItem("align-theme", t);
+      } catch {}
+    }, theme);
+    const host = new URL(BASE).hostname;
+    for (const c of people[who].cookies) {
+      const [pair] = c.split(";");
+      const at = pair.indexOf("=");
+      await ctx.setCookie({ name: pair.slice(0, at), value: pair.slice(at + 1), domain: host, path: "/", httpOnly: true });
+    }
+    return { p, ctx };
+  };
+  // A filled action carries the accent background class (kit's primary Btn and the page links alike).
+  const filled = (p) => p.evaluate(() => [...document.querySelectorAll("main a, main button")].filter((b) => b.offsetParent !== null && /(^|\s)bg-\(--accent\)(\s|$)/.test(b.className)).map((b) => b.textContent.trim()));
+  for (const [who, width] of [["owner", 1440], ["owner", 390], ["member", 390], ["viewer", 390], ["owner", 320]]) {
+    const { p, ctx } = await as(who, width);
+    await goto(p, `/app/w/${ews}`);
+    await ready(p, "No goals here yet");
+    const h1 = await p.$eval("main h1", (e) => e.textContent.trim());
+    if (h1 !== "No goals here yet") throw new Error(`empty workspace, ${who} at ${width}: H1 "${h1}"`);
+    const fr = await p.$eval("[data-first-run]", (e) => e.getAttribute("data-first-run")).catch(() => "none");
+    const f = await filled(p);
+    if (who === "viewer") {
+      if (fr !== "viewer-empty" || f.length) throw new Error(`empty workspace, viewer: wanted one line and no action, got ${fr}, ${f.join(",")}`);
+    } else {
+      if (fr !== "empty" || f.length !== 1 || f[0] !== "Set the first goal") throw new Error(`empty workspace, ${who} at ${width}: wanted one filled "Set the first goal", got ${fr}, [${f.join(", ")}]`);
+      if (!(await p.$("[data-sample-link], [data-sample-create]"))) throw new Error(`empty workspace, ${who} at ${width}: the sample isn't offered`);
+    }
+    if (await p.$("[data-since], [data-goal-lines]")) throw new Error(`empty workspace, ${who} at ${width}: Since or Goals shows with nothing in it`);
+    if (await p.$("[data-propose-open]")) throw new Error(`empty workspace, ${who} at ${width}: the rail offers Propose a change with no goals`);
+    await shot(p, `11-empty-${who}`, "dark", width, false);
+    await ctx.close();
+  }
+  {
+    const { p, ctx } = await as("owner", 390);
+    await goto(p, `/app/w/${ews}`);
+    await ready(p, "No goals here yet");
+    await p.click("[data-first-goal]");
+    await p.waitForFunction(() => location.pathname.endsWith("/goals") && document.activeElement?.tagName === "INPUT", { timeout: 30_000 }).catch(() => {
+      throw new Error("Set the first goal: the Goals form's field didn't take focus");
+    });
+    if (await p.evaluate(() => document.querySelector("main")?.innerText.includes("No goals you can see yet."))) throw new Error("Set the first goal: the empty line still shows above the form");
+    await goto(p, `/app/w/${ews}`);
+    await ready(p, "No goals here yet");
+    if (await p.$("[data-sample-create]")) {
+      await p.click("[data-sample-create]");
+      await p.waitForFunction((w) => /\/app\/w\/[^/]+$/.test(location.pathname) && !location.pathname.endsWith(w), { timeout: 60_000 }, ews).catch(() => {
+        throw new Error("Explore the sample: no sample workspace opened");
+      });
+      await ready(p, "needs you");
+    }
+    await ctx.close();
+  }
+  {
+    const lone = await signUp("No Workspace");
+    people.lone = lone;
+    const { p, ctx } = await as("lone", 390);
+    await goto(p, "/app");
+    await ready(p, "No workspaces yet");
+    if ((await p.$eval("main h1", (e) => e.textContent.trim())) !== "No workspaces yet") throw new Error("/app with no workspace: the H1 isn't the fact");
+    await shot(p, "12-no-workspace", "dark", 390, false);
+    await ctx.close();
+  }
+}
+
 await browser.close();
 console.log(`wrote ${written.length} screenshots to ${OUT}`);

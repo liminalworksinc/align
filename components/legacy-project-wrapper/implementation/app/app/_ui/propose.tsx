@@ -278,32 +278,31 @@ function goalHere(): string | undefined {
   return m?.[1] ?? new URLSearchParams(window.location.search).get("goal") ?? undefined;
 }
 
-/** The shell's control and its drawer. Not shown to a viewer (the server refuses viewers' proposals). */
+/** The shell's control and its drawer. Not shown to a viewer (the server refuses viewers' proposals), nor while the
+ *  workspace has no goals (nothing to propose against; the empty Home leads with setting the first one). The goals are
+ *  read once here and handed to the drawer. */
 export function ProposeControl({ ws, me, className }: { ws: string; me?: string; className?: string }) {
   const [open, setOpen] = useState<{ start?: string } | null>(null);
+  const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
+  if (feed.data && feed.data.goals.length === 0) return null;
   return (
     <>
       <button type="button" className={className ?? outline} onClick={() => setOpen({ start: goalHere() })} data-propose-open>
         Propose a change
       </button>
-      {open && <ProposeDrawer ws={ws} me={me} start={open.start} onClose={() => setOpen(null)} />}
+      {open && (
+        <div className="[overflow-wrap:break-word]">
+          <Drawer open onClose={() => setOpen(null)} eyebrow="Change the plan" title="Propose a change">
+            {feed.data ? (
+              <Form ws={ws} me={me} goals={feed.data.goals} start={open.start} onClose={() => setOpen(null)} />
+            ) : feed.error ? (
+              <p className="text-[15px] text-(--text-2)">Align couldn&apos;t read the goals just now: {feed.error}</p>
+            ) : (
+              <p className="text-[15px] text-(--text-3)">Reading the goals…</p>
+            )}
+          </Drawer>
+        </div>
+      )}
     </>
-  );
-}
-
-function ProposeDrawer({ ws, me, start, onClose }: { ws: string; me?: string; start?: string; onClose: () => void }) {
-  const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
-  return (
-    <div className="[overflow-wrap:break-word]">
-      <Drawer open onClose={onClose} eyebrow="Change the plan" title="Propose a change">
-        {feed.data ? (
-          <Form ws={ws} me={me} goals={feed.data.goals} start={start} onClose={onClose} />
-        ) : feed.error ? (
-          <p className="text-[15px] text-(--text-2)">Align couldn&apos;t read the goals just now: {feed.error}</p>
-        ) : (
-          <p className="text-[15px] text-(--text-3)">Reading the goals…</p>
-        )}
-      </Drawer>
-    </div>
   );
 }
