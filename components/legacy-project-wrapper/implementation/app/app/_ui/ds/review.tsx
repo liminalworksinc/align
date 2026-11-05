@@ -63,7 +63,23 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
   const waits = changeWaits(cr);
   const launch = launchWaits(cr);
   const n = cr.base_version;
-  const proposedLabel = cr.state === "approved" && cr.version ? `Version ${cr.version}` : cr.state === "countered" ? `Revision ${cr.revision} (suggested)` : "Proposed";
+  // The columns are named by the request's state: what it asks while undecided, what was decided once it is.
+  const undecided = cr.state === "pending" || cr.state === "countered";
+  const currentLabel = undecided ? `Current (v${n})` : `Version ${n}`;
+  const proposedLabel =
+    cr.state === "approved"
+      ? cr.launch === "launched" && cr.version
+        ? `Launched v${cr.version}`
+        : "Approved"
+      : cr.state === "countered"
+        ? `Suggested (revision ${cr.revision})`
+        : cr.state === "rejected"
+          ? "Declined"
+          : cr.state === "withdrawn"
+            ? "Withdrawn"
+            : cr.state === "superseded"
+              ? "Superseded"
+              : "Proposed";
   return (
     <div className="flex min-w-0 flex-col gap-4" data-cr={cr.id} data-cr-view="review">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -88,7 +104,7 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
         </p>
       )}
 
-      <Compare before={cr.diff.before} after={cr.diff.after} hidden={cr.diff.hidden_depends_on ?? null} beforeLabel={`Version ${n}`} afterLabel={proposedLabel} titleOf={titleOf} />
+      <Compare before={cr.diff.before} after={cr.diff.after} hidden={cr.diff.hidden_depends_on ?? null} beforeLabel={currentLabel} afterLabel={proposedLabel} titleOf={titleOf} />
       {cr.behind && <p className="text-[14px] text-(--st-pending)">The goal moved on to version {cr.goal.version} since this was asked against version {n}.</p>}
 
       <section aria-label="Evidence" className="flex flex-col gap-2">
@@ -129,7 +145,7 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
         {waits?.next === "resolve_loop" && `Waits on ${people(waits.waiting_on, me)}: nobody can approve it as it stands. ${cr.dependency_loop ?? ""}`}
         {waits?.next === "decide" && `Waits on ${people(waits.waiting_on, me)} to decide.`}
         {waits?.next === "accept_counter" && `Waits on ${people(waits.waiting_on, me)} to accept the suggested change.`}
-        {!waits && launch && `Approved. Approval is not launch: version ${cr.version ?? cr.goal.version + 1} is released only when ${people(launch.launchers, me)} launch${launch.launchers.length === 1 && launch.launchers[0].id !== me ? "es" : ""} it.`}
+        {!waits && launch && `Approval is not launch: version ${cr.version ?? cr.goal.version + 1} is released only when ${people(launch.launchers, me)} launch${launch.launchers.length === 1 && launch.launchers[0].id !== me ? "es" : ""} it.`}
         {!waits && !launch && cr.state === "approved" && cr.launch === "launched" && `Launched by ${who(cr.launch_decided_by, me)}, ${at(cr.launch_decided_at)}: Align released version ${cr.version}.`}
         {!waits && !launch && cr.state !== "approved" && cr.state_note}
       </p>
@@ -406,7 +422,9 @@ export function ReviewActions({
 
   const DONE: Record<Choice, string> = {
     approve_and_launch: `you approved revision ${cr.revision} and launched version ${next}`,
-    approve: `you approved revision ${cr.revision}. It is not launched yet`,
+    // One job each: this says what was recorded; the waits line under the request says approval is not launch, and who
+    // launches, once (it is there on a cold open too).
+    approve: `you approved revision ${cr.revision}`,
     launch: `you launched version ${next}`,
     not_yet: "you decided not yet",
     accept_if: `you accepted it if ${cr.requester.name} acknowledges your condition`,

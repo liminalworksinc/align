@@ -8,7 +8,8 @@
 // Start the server with ALIGN_TEST_IDP=1 and a fresh ALIGN_DATA_DIR, e.g.
 //   ALIGN_TEST_IDP=1 ALIGN_DATA_DIR=/tmp/align-seed npx next dev -H 127.0.0.1 -p 3803
 //
-// What it makes (everything fictional; URLs are example.test; titles a tester could read as real say "(fictional)"):
+// What it makes (everything fictional, with no marker in names or text: the workspace is the "(sample)" one and URLs are
+// example.test):
 //   - three test-IdP people: an owner, a member and a viewer;
 //   - the Northstar sample workspace, created by the owner (--workspace <ws> uses an existing workspace instead, but
 //     only one the owner account can already reach, which on a fresh server means none: the accounts are new, so
@@ -168,16 +169,16 @@ const security = byTitle("Pass the security review") ?? goals.find((g) => g.id !
 
 // Devices and sessions first, so the launch below has a bound session to deliver its version to. Theo's session stays
 // unbound: binding to a goal he doesn't own needs an approved alignment first.
-const ownerDev = await pair(owner, ws, "Mara's laptop (fictional)");
+const ownerDev = await pair(owner, ws, "Mara's laptop");
 const sOnb = await share(ownerDev, ws, "n1", { repo: "web-onboarding", title: "Signup flow, step 2 copy", startedH: 5, goal: onboarding.id, requests: 14 });
 const sSec = await share(ownerDev, ws, "n2", { repo: "security-review", title: "Pen-test scope checklist", harness: "codex", startedH: 3, goal: security.id, requests: 8 });
 await share(ownerDev, ws, "n3", { repo: "infra", title: "Audit log retention script", startedH: 26 });
-const memberDev = await pair(member, ws, "Theo's desktop (fictional)");
+const memberDev = await pair(member, ws, "Theo's desktop");
 await share(memberDev, ws, "m1", { repo: "web-onboarding", title: "Pricing page for regulated tier", startedH: 2 });
-await pair(viewer, ws, "Ines's laptop (fictional)");
+await pair(viewer, ws, "Ines's laptop");
 
 // The connected app: approved by Mara, scoped to read goals and add evidence links.
-const app = await connectApp(owner, ws, "Claude Code (fictional seed)");
+const app = await connectApp(owner, ws, "Claude Code");
 
 // 1. Approved AND launched: the sample's own pending request on the security goal. Its device answers the launch
 // directive received, then applied, for the session bound to that goal.
@@ -190,14 +191,14 @@ if (!launchedCr) {
     "propose security",
     call("POST", `/api/v2/workspaces/${ws}/goals/${security.id}/change-requests`, {
       cookie: member.cookie,
-      body: { base_version: g.goal.version, changes: { measures: [...g.goal.measures, { text: "Pen test window booked (fictional)", target: "before launch" }] }, reason: "Book the pen test before launch. (Fictional seed.)" },
+      body: { base_version: g.goal.version, changes: { measures: [...g.goal.measures, { text: "Pen test window booked", target: "before launch" }] }, reason: "Book the pen test before launch." },
     }),
   );
 }
 // A self-reported link from a person before the decision, so the record and Work show one of each kind.
 await must(
   "self-reported evidence",
-  call("POST", `/api/v2/workspaces/${ws}/goals/${security.id}/change-requests/${launchedCr.id}/evidence`, { cookie: owner.cookie, body: { kind: "doc", url: "https://docs.example.test/pen-test-scope", label: "Pen-test scope (fictional)" } }),
+  call("POST", `/api/v2/workspaces/${ws}/goals/${security.id}/change-requests/${launchedCr.id}/evidence`, { cookie: owner.cookie, body: { kind: "doc", url: "https://docs.example.test/pen-test-scope", label: "Pen-test scope" } }),
 );
 await must("approve and launch", call("POST", `/api/v2/workspaces/${ws}/goals/${security.id}/change-requests/${launchedCr.id}/approve_and_launch`, { cookie: owner.cookie, body: { revision: launchedCr.revision } }));
 const dirs = (await must("directives", call("GET", "/api/v2/directives?cursor=0", { bearer: ownerDev.access }))).directives;
@@ -214,7 +215,7 @@ await tool(app, "align_get_goal", { goal_id: security.id });
 
 // A second app that only connects (initialize and tools/list, no tool call that returns goals): Apps lists it with a
 // Last connected time and "Not seen yet" under Last read the goals, so all three evidence classes have something.
-const idle = await connectApp(member, ws, "Codex (fictional seed, connected only)");
+const idle = await connectApp(member, ws, "Codex");
 await call("POST", "/api/mcp", { bearer: idle.access, headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: ++rpc, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "seed", version: "0" } } } });
 await call("POST", "/api/mcp", { bearer: idle.access, headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: ++rpc, method: "tools/list", params: {} } });
 
@@ -224,7 +225,7 @@ const coCr = await must(
   "propose company",
   call("POST", `/api/v2/workspaces/${ws}/goals/${company.id}/change-requests`, {
     cookie: member.cookie,
-    body: { base_version: co.goal.version, changes: { measures: co.goal.measures.map((m, i) => (i === 0 ? { ...m, target: "4 this year" } : m)) }, reason: "A fourth design partner signed a pilot letter. Raise the target from 3 to 4. (Fictional seed.)" },
+    body: { base_version: co.goal.version, changes: { measures: co.goal.measures.map((m, i) => (i === 0 ? { ...m, target: "4 this year" } : m)) }, reason: "A fourth design partner signed a pilot letter. Raise the target from 3 to 4." },
   }),
 );
 await must("approve only", call("POST", `/api/v2/workspaces/${ws}/goals/${company.id}/change-requests/${coCr.id}/approve`, { cookie: owner.cookie, body: { revision: coCr.revision, without_evidence: true } }));
@@ -235,10 +236,10 @@ const onbCr = await must(
   "propose onboarding",
   call("POST", `/api/v2/workspaces/${ws}/goals/${onboarding.id}/change-requests`, {
     cookie: member.cookie,
-    body: { base_version: onb.goal.version, changes: { title: "Ship self-serve onboarding for regulated teams (fictional)" }, reason: "Two design partners asked for SSO before they can trial it. This narrows the goal to the regulated tier first. (Fictional seed.)" },
+    body: { base_version: onb.goal.version, changes: { title: "Ship self-serve onboarding for regulated teams" }, reason: "Two design partners asked for SSO before they can trial it. This narrows the goal to the regulated tier first." },
   }),
 );
-await tool(app, "align_add_change_request_evidence", { change_request_id: onbCr.id, kind: "pr", url: "https://git.example.test/northstar/web-onboarding/pull/42", label: "SSO entry point draft (fictional)" });
+await tool(app, "align_add_change_request_evidence", { change_request_id: onbCr.id, kind: "pr", url: "https://git.example.test/northstar/web-onboarding/pull/42", label: "SSO entry point draft" });
 
 const out = {
   base: BASE,
