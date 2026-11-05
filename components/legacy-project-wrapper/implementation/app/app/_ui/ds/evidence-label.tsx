@@ -18,11 +18,11 @@ export function EvidenceLabel({ kind, detail, size = "m" }: { kind: EvidenceKind
   return (
     <span
       data-evidence={kind}
-      className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-(--radius-s) border ${TONE[kind]} ${size === "s" ? "px-1.5 py-0.5 text-[12px]" : "px-2 py-1 text-[13px]"}`}
+      className={`inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-(--radius-s) border ${TONE[kind]} ${size === "s" ? "px-1.5 py-0.5 text-[12px]" : "px-2 py-1 text-[13px]"}`}
     >
       <I />
-      <span className="font-medium">{WORD[kind]}</span>
-      {detail && <span className="font-mono text-[12px] opacity-90">{detail}</span>}
+      <span className="whitespace-nowrap font-medium">{WORD[kind]}</span>
+      {detail && <span className="min-w-0 break-words font-mono text-[12px] opacity-90">{detail}</span>}
     </span>
   );
 }

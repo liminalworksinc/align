@@ -30,10 +30,12 @@ export function StatusPill({ kind, label, size = "m" }: { kind: StatusKind; labe
   return (
     <span
       data-status={kind}
-      className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border font-medium ${TONE[kind]} ${size === "s" ? "px-2 py-0.5 text-[12px]" : "px-2.5 py-1 text-[13px]"}`}
+      className={`inline-flex max-w-full items-center gap-1.5 rounded-full border font-medium ${TONE[kind]} ${size === "s" ? "px-2 py-0.5 text-[12px]" : "px-2.5 py-1 text-[13px]"}`}
     >
-      <I />
-      {label ?? WORD[kind]}
+      <span className="shrink-0">
+        <I />
+      </span>
+      <span className="min-w-0">{label ?? WORD[kind]}</span>
     </span>
   );
 }
