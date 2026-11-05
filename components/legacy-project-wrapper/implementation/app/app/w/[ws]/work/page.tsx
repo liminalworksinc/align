@@ -16,5 +16,5 @@ async function Inner({ params, searchParams }: { params: PageProps<"/app/w/[ws]/
   const q = await searchParams;
   const me = await requireUser(`/app/w/${ws}/work`);
   if (!(await inWorkspace(me, ws))) return <NotInWorkspace me={me} />;
-  return <Work me={me} ws={ws} goal={param(q.goal) || undefined} />;
+  return <Work me={me} ws={ws} goal={param(q.goal) || undefined} cr={param(q.cr) || undefined} />;
 }

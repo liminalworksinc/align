@@ -1,26 +1,28 @@
 "use client";
 import Link from "next/link";
-import { useMemo, useState } from "react";
 import type { ChangeRequest, Evidence, Goal, MySession } from "../types";
-import { DecisionLinks } from "./decision-links";
+import { DecisionPanel, NoDecisionPanel } from "./decision-panel";
 import { EmptyState } from "./empty-state";
+import { hasEvidence } from "./evidence-facts.mts";
 import { EvidenceLabel } from "./evidence-label";
 import { EvidenceSummary } from "./evidence-summary";
 import { Panel } from "./panel";
 import { useRead } from "./read";
 import { StatusPill } from "./status-pill";
 
-// Work and evidence drill-down (LIM-2472 workstream S, item 2): one goal at a time, as three connected panels: the
-// goals, the sessions people shared toward the selected one, and what Align holds about it (evidence on its change
-// requests, connected apps' goal reads). Exactly what Align knows, each with its evidence class:
-//  - GET …/goals: the goals the reader can read (current version, owner, status);
+// Work (LIM-2472; round 2, founder ruling eaa5cf92: evidence serves a decision). Opened from a decision or a goal, never
+// browsed as a feed: /work?goal=<g>&cr=<id> puts the decision at the top, then its evidence, what Align sent, the
+// sessions on the goal and connected apps' goal reads; /work?goal=<g> takes the goal's open request (else its latest
+// decided one); bare /work is a plain index of goals. Exactly what Align knows, each with its evidence class:
+//  - GET …/goals: the goals the reader can read (current version, owner, status, agent time share);
+//  - GET …/goals/<goal>/change-requests: the decision, and the evidence links on its current revision, self-reported or
+//    agent reported, never verified;
 //  - GET …/goals/<goal>/activity: sessions shared toward it in the last 14 days, from the align CLI: Agent reported;
 //  - GET …/sessions: the reader's own sessions and which goal each is working toward now;
-//  - GET …/goals/<goal>/change-requests: evidence links on each revision, self-reported or agent reported, never
-//    verified;
+//  - GET …/change-requests/<id>/value: per app, when Align sent the launched version (a Receipt);
 //  - GET …/apps: when each connected app last read the goals (last_read_at): a Receipt. Align doesn't record which goal
 //    an app read or which version it holds, so the panel says that instead of implying it.
-// Body only: A's and B's shells wrap it (/app/w/<ws>/work?goal=<id>).
+// Body only: the shell wraps it.
 
 const HARNESS = { "claude-code": "Claude Code", codex: "Codex" } as const;
 const at = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
@@ -134,53 +136,32 @@ function SessionsPanel({ ws, goal }: { ws: string; goal: Goal }) {
   );
 }
 
-function EvidencePanel({ ws, goal }: { ws: string; goal: Goal }) {
-  const crs = useRead<{ change_requests: ChangeRequest[] }>(`/api/v2/workspaces/${ws}/goals/${goal.id}/change-requests`);
-  const items = useMemo(() => {
-    const out: { cr: ChangeRequest; e: Evidence }[] = [];
-    for (const cr of crs.data?.change_requests ?? []) for (const r of cr.revisions) for (const e of r.evidence) out.push({ cr, e });
-    return out.sort((x, y) => y.e.added_at.localeCompare(x.e.added_at));
-  }, [crs.data]);
-  const list = crs.data?.change_requests ?? [];
+/** The decision's own evidence: every fact on it (EvidenceSummary full) and the links on its current revision. */
+function DecisionEvidence({ ws, cr, me }: { ws: string; cr: ChangeRequest; me: string }) {
+  const links = cr.revisions.find((r) => r.revision === cr.revision)?.evidence ?? [];
   return (
-    <Panel eyebrow="Evidence" title="On this goal's changes" actions={<Link href={`/app/w/${ws}/record?goal=${goal.id}`} className={`${LINK} text-[14px]`}>Record</Link>}>
-      {crs.loading && <p className="text-[14px] text-(--text-2)">Loading…</p>}
-      {crs.status !== 0 && <p className="text-[14px] text-(--text-2)">{crs.message}</p>}
-      {crs.data && list.length === 0 && <EmptyState title="No change requests on this goal" body="Evidence is attached to a change request's revision, so there is none to show." />}
-      {list.length > 0 && (
-        <ul className="mb-3 flex flex-col gap-1.5">
-          {list.slice(0, 5).map((cr) => (
-            <li key={cr.id} className="flex flex-wrap items-center gap-2 text-[14px]">
-              <StatusPill kind={cr.state === "approved" ? (cr.launch === "launched" ? "launched" : "approved") : cr.state === "rejected" ? "declined" : cr.state === "countered" ? "countered" : cr.state === "pending" ? "pending" : "draft"} label={cr.state === "approved" && cr.launch !== "launched" ? "Approved, not launched" : cr.state === "withdrawn" ? "Withdrawn" : cr.state === "superseded" ? "Superseded" : undefined} size="s" />
-              <span className="text-(--text-1)">
-                {cr.requester.name}&apos;s change, revision {cr.revision}
-              </span>
-              <span className="text-[13px] text-(--text-3)">
-                {cr.evidence_count} evidence {cr.evidence_count === 1 ? "link" : "links"}
-              </span>
-              <DecisionLinks ws={ws} goalId={goal.id} crId={cr.id} here="work" className="basis-full" />
-            </li>
-          ))}
-        </ul>
-      )}
-      {items.length > 0 && (
-        <ul className="flex flex-col gap-2 border-t border-(--line) pt-3">
-          {items.map(({ cr, e }) => (
-            <li key={e.id} className="flex flex-col gap-1 text-[14px]">
-              <span className="flex flex-wrap items-center gap-2">
-                {e.reported_as === "agent-reported" ? <EvidenceLabel kind="reported" size="s" detail="connected app via MCP" /> : <EvidenceLabel kind="self" size="s" />}
-                <a href={e.url} target="_blank" rel="noopener noreferrer" className={`${LINK} [overflow-wrap:anywhere]`}>
-                  {e.label || e.url}
-                </a>
-              </span>
-              <span className="text-[13px] text-(--text-3)">
-                {e.kind.replace("_", " ")} · revision {e.revision} of {cr.requester.name}&apos;s change · added by {e.added_by.name}, {at(e.added_at)}
-              </span>
-            </li>
-          ))}
-          <li className="text-[13px] text-(--text-3)">Align doesn&apos;t verify evidence links: each is as its author gave it.</li>
-        </ul>
-      )}
+    <Panel eyebrow="Its evidence" title={`On revision ${cr.revision}`}>
+      <div className="flex flex-col gap-3">
+        <EvidenceSummary ws={ws} cr={cr} variant="full" />
+        {!hasEvidence(cr) && <p className="text-[14px] text-(--text-2)">No evidence attached.</p>}
+        {links.length > 0 && (
+          <ul className="flex flex-col gap-2 border-t border-(--line) pt-3">
+            {links.map((e: Evidence) => (
+              <li key={e.id} className="flex flex-col gap-1 text-[14px]">
+                <span className="flex flex-wrap items-center gap-2">
+                  <EvidenceLabel kind={e.reported_as === "agent-reported" ? "reported" : "self"} size="s" />
+                  <a href={e.url} target="_blank" rel="noopener noreferrer" className={`${LINK} [overflow-wrap:anywhere]`}>
+                    {e.label || e.url}
+                  </a>
+                </span>
+                <span className="text-[13px] text-(--text-3)">
+                  {e.kind.replace("_", " ")} · added by {e.added_by.id === me ? "you" : e.added_by.name}, {at(e.added_at)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </Panel>
   );
 }
@@ -264,23 +245,18 @@ function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
   );
 }
 
-export function WorkPanels({ ws, goalId }: { ws: string; goalId?: string }) {
+/** Requests that are still open: undecided, or approved and not launched. */
+const isOpen = (c: ChangeRequest) => c.state === "pending" || c.state === "countered" || (c.state === "approved" && c.launch !== "launched");
+const newest = (a: ChangeRequest, b: ChangeRequest) => b.updated_at.localeCompare(a.updated_at);
+
+/** No goal named: a plain index. Work is opened from a decision or a goal, never browsed as a feed. */
+function WorkIndex({ ws }: { ws: string }) {
   const feed = useRead<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
-  const goals = useMemo(() => (feed.data?.goals ?? []).filter((g) => g.status === "active").concat((feed.data?.goals ?? []).filter((g) => g.status !== "active")), [feed.data]);
-  const [picked, setPicked] = useState<string | undefined>(goalId);
-  const goal = goals.find((g) => g.id === picked) ?? goals[0];
-
-  const choose = (id: string) => {
-    setPicked(id);
-    // Keep the choice in the address, so the page can be shared and Back works within it.
-    const u = new URL(window.location.href);
-    u.searchParams.set("goal", id);
-    window.history.replaceState(null, "", u);
-  };
-
+  const goals = (feed.data?.goals ?? []).filter((g) => g.status === "active").concat((feed.data?.goals ?? []).filter((g) => g.status !== "active"));
   return (
-    <div data-surface="work" className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,17rem)_minmax(0,1fr)_minmax(0,1fr)]">
-      <Panel eyebrow="Goals" title="Choose a goal" padded={false} className="lg:row-span-2">
+    <div data-surface="work" data-work-mode="index" className="flex min-w-0 flex-col gap-3">
+      <p className="max-w-prose text-[14px] text-(--text-2)">Work is opened from a decision or a goal. Choose a goal to see the decision on it and what Align knows about the work behind it.</p>
+      <Panel eyebrow="Goals" title={feed.data ? `${goals.length} ${goals.length === 1 ? "goal" : "goals"} you can read` : "Goals"} padded={false}>
         {feed.loading && <p className="p-4 text-[14px] text-(--text-2)">Loading…</p>}
         {feed.status !== 0 && <p className="p-4 text-[14px] text-(--text-2)">{feed.message}</p>}
         {feed.data && goals.length === 0 && (
@@ -288,61 +264,92 @@ export function WorkPanels({ ws, goalId }: { ws: string; goalId?: string }) {
             <EmptyState title="No goals you can read" body="Goals you own, your team's and the workspace's appear here." />
           </div>
         )}
-        <ul role="listbox" aria-label="Goals" className="flex flex-col p-1.5">
-          {goals.map((g) => {
-            const on = g.id === goal?.id;
-            return (
-              <li key={g.id} role="option" aria-selected={on}>
-                <button
-                  type="button"
-                  onClick={() => choose(g.id)}
-                  className={`flex min-h-[44px] w-full flex-col items-start gap-0.5 rounded-(--radius-s) border-l-2 px-3 py-2 text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-(--focus) ${
-                    on ? "border-(--accent-text) bg-(--accent-soft)" : "border-transparent hover:bg-(--bg-raised)"
-                  }`}
-                >
-                  <span className="text-[14px] font-medium text-(--text-1) [overflow-wrap:anywhere]">{g.title}</span>
-                  <span className="text-[12.5px] text-(--text-3)">
-                    v{g.version} · {g.owner.name}
-                    {g.status !== "active" ? ` · ${g.status}` : ""}
-                  </span>
-                  <EvidenceSummary ws={ws} goal={g} />
-                </button>
-              </li>
-            );
-          })}
+        <ul aria-label="Goals" className="flex flex-col">
+          {goals.map((g) => (
+            <li key={g.id} className="border-b border-(--line) last:border-b-0">
+              <Link href={`/app/w/${ws}/work?goal=${g.id}`} className="flex min-h-[44px] flex-col gap-1 px-4 py-2.5 hover:bg-(--bg-raised) focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-(--focus)">
+                <span className="text-[14px] font-medium text-(--text-1) [overflow-wrap:anywhere]">{g.title}</span>
+                <span className="text-[12.5px] text-(--text-3)">
+                  v{g.version} · {g.owner.name}
+                  {g.status !== "active" ? ` · ${g.status}` : ""}
+                </span>
+                <EvidenceSummary ws={ws} goal={g} quiet />
+              </Link>
+            </li>
+          ))}
         </ul>
       </Panel>
-      {goal && (
-        <>
-          <div className="flex min-w-0 flex-col gap-4">
-            <Panel eyebrow={goal.level === "company" ? "Company goal" : (goal.team?.name ?? "Goal")} title={goal.title} actions={<Link href={`/app/w/${ws}/goals/${goal.id}`} className={`${LINK} text-[14px]`}>Open goal</Link>}>
-              <dl className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[14px]">
-                <Row label="Current version">v{goal.version}</Row>
-                <Row label="Owner">{goal.owner.name}</Row>
-                <LaunchRows ws={ws} goal={goal} />
-                {goal.allocation && (
-                  <>
-                    <Row label="Agent time, last 7 days">
-                      <span className="font-mono tabular-nums">{goal.allocation.share_7d}%</span>
-                      {goal.allocation.target_share !== null && <span className="text-(--text-2)"> of the workspace&apos;s, target {goal.allocation.target_share}%</span>}
-                      {goal.allocation.held && <span className="text-(--st-pending)"> · held</span>}
-                    </Row>
-                    {/* The label under the row at full width, so the narrow value column never wraps it. */}
-                    <dd className="col-span-2 -mt-0.5">
-                      <EvidenceLabel kind="reported" size="s" detail="align CLI usage" />
-                    </dd>
-                  </>
-                )}
-              </dl>
-            </Panel>
-            <SessionsPanel key={`s-${goal.id}`} ws={ws} goal={goal} />
-          </div>
-          <div className="flex min-w-0 flex-col gap-4 lg:col-start-2 xl:col-start-3">
-            <EvidencePanel key={`e-${goal.id}`} ws={ws} goal={goal} />
-            <AppsPanel key={`a-${goal.id}`} ws={ws} goal={goal} />
-          </div>
-        </>
-      )}
+    </div>
+  );
+}
+
+/**
+ * Work for one goal, entered from a decision (LIM-2472 round 2, founder ruling eaa5cf92: evidence serves a decision).
+ * Top: the decision it belongs to (`crId`; else the goal's open request; else its latest decided one; else none). Then,
+ * in this order: its evidence, what Align sent, sessions on the goal, goal reads by connected apps. No goal picker.
+ * Without `goalId`, the plain index.
+ */
+export function WorkPanels({ ws, goalId, crId, me = "" }: { ws: string; goalId?: string; crId?: string; me?: string }) {
+  const feed = useRead<{ goals: Goal[] }>(goalId ? `/api/v2/workspaces/${ws}/goals` : null);
+  const crs = useRead<{ change_requests: ChangeRequest[] }>(goalId ? `/api/v2/workspaces/${ws}/goals/${goalId}/change-requests` : null);
+  if (!goalId) return <WorkIndex ws={ws} />;
+  const goal = feed.data?.goals.find((g) => g.id === goalId);
+  const list = crs.data?.change_requests ?? [];
+  const named = crId ? list.find((c) => c.id === crId) : undefined;
+  const open = list.filter(isOpen).sort(newest)[0];
+  const latest = [...list].sort(newest)[0];
+  const decision = named ?? (crId ? undefined : (open ?? latest));
+
+  if (feed.loading || crs.loading) return <p className="text-[14px] text-(--text-2)">Loading…</p>;
+  if (feed.data && !goal)
+    return (
+      <EmptyState
+        title="No such goal in this workspace"
+        body="Align has no goal with this address here that you can read. It may be in another workspace, or a goal you can't see."
+        action={
+          <Link href={`/app/w/${ws}/work`} className={LINK}>
+            All goals
+          </Link>
+        }
+      />
+    );
+  if (!goal) return <p className="text-[14px] text-(--text-2)">{feed.message || crs.message}</p>;
+
+  return (
+    <div data-surface="work" data-work-mode={decision ? "decision" : "goal"} className="flex min-w-0 flex-col gap-4">
+      {decision ? <DecisionPanel ws={ws} cr={decision} me={me} latest={!named} /> : crs.status === 0 ? <NoDecisionPanel ws={ws} goalId={goal.id} missing={!!crId} /> : <p className="text-[14px] text-(--text-2)">{crs.message}</p>}
+      <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="flex min-w-0 flex-col gap-4">
+          {decision && <DecisionEvidence ws={ws} cr={decision} me={me} />}
+          <Panel eyebrow="What Align sent" title={goal.title} actions={<Link href={`/app/w/${ws}/goals/${goal.id}`} className={`${LINK} text-[14px]`}>Open goal</Link>}>
+            <dl className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[14px]">
+              <Row label="Current version">v{goal.version}</Row>
+              <Row label="Owner">{goal.owner.name}</Row>
+              <LaunchRows ws={ws} goal={goal} />
+              {goal.allocation && (
+                <>
+                  <Row label="Agent time">
+                    <span className="tabular-nums">{goal.allocation.share_7d}% of reported agent time, 7 days</span>
+                    {goal.allocation.target_share !== null && <span className="text-(--text-2)"> (target {goal.allocation.target_share}%)</span>}
+                    {goal.allocation.held && <span className="text-(--st-pending)"> · held</span>}
+                  </Row>
+                  {/* The label under the row at full width, so the narrow value column never wraps it. */}
+                  <dd className="col-span-2 -mt-0.5">
+                    <EvidenceLabel kind="reported" size="s" detail="align CLI usage" />
+                  </dd>
+                </>
+              )}
+            </dl>
+          </Panel>
+        </div>
+        <div className="flex min-w-0 flex-col gap-4">
+          <SessionsPanel key={`s-${goal.id}`} ws={ws} goal={goal} />
+          <AppsPanel key={`a-${goal.id}`} ws={ws} goal={goal} />
+        </div>
+      </div>
+      <Link href={`/app/w/${ws}/work`} className={`${LINK} self-start text-[14px]`}>
+        All goals
+      </Link>
     </div>
   );
 }

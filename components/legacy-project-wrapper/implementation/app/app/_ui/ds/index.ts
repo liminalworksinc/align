@@ -20,3 +20,4 @@ export { defaultBody, ReviewActions, ReviewBody, sendChoice, type ReviewChoice, 
 export { EvidenceSummary, type EvidenceSummaryProps } from "./evidence-summary";
 export { changeFacts, goalFacts, hasEvidence, FACT_WORD, type Fact, type FactKind, type Delivery } from "./evidence-facts.mts";
 export { DecisionLinks, DECISION_LINK, type DecisionPlace } from "./decision-links";
+export { DecisionPanel, NoDecisionPanel, decisionSentence } from "./decision-panel";
