@@ -79,7 +79,9 @@ function Inline({ facts }: { facts: Fact[] }) {
   return (
     <span ref={box} data-evidence-summary="inline" className="relative flex w-full min-w-0 flex-nowrap items-center gap-1.5 overflow-hidden whitespace-nowrap">
       {facts.slice(0, shown).map((f, i) => (
-        <span key={i} className="shrink-0">
+        // The strongest chip may shrink when even it and "+N more" don't fit: its detail ends in an ellipsis (the full
+        // words stay in the text and the title); the icon and the word never shrink or split.
+        <span key={i} title={`${FACT_WORD[f.kind]}: ${f.short}`} className={`flex ${i === 0 ? "min-w-0 shrink" : "shrink-0"} [&>[data-evidence]]:flex-nowrap [&>[data-evidence]>span:nth-child(2)]:truncate`}>
           <Chip f={f} detail={f.short} />
         </span>
       ))}
