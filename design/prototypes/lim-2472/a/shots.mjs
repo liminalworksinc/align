@@ -516,6 +516,10 @@ for (const width of [390, 320]) {
         const mineNow = open.find((c) => c.changes?.title === "Drawer check (proposed, fictional)");
         if (!mineNow) throw new Error("Propose: no pending request with the proposed title");
         if (mineNow.evidence_count !== 1) throw new Error(`Propose: the request has ${mineNow.evidence_count} links, wanted 1`);
+        // The summary said "1 link, from you (Self-reported)": the review must say the same of that link.
+        await m.p.click('[role=dialog] [data-propose="sent"] a');
+        await ready(m.p, "Work on this goal", "[role=dialog]");
+        if (!(await m.p.$('[role=dialog] [data-evidence="self"]'))) throw new Error("Propose: the review doesn't label the proposer's link Self-reported");
       }
       await m.ctx.close();
     }

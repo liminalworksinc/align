@@ -31,6 +31,11 @@ export default function Home({ me, creation }: { me: Me; creation: CreationOptio
   // Hosted: the bot check (one token per create, reset after each try) and, in codes mode, a creation code.
   const bot = useTurnstile(creation.closed ? null : creation.captchaSiteKey);
   const create = (path: string, body: Record<string, string>) => api<{ id: string }>(path, { body, headers: bot.headers }).finally(bot.reset);
+  // Someone with no workspace yet gets the same two paths as a workspace's first run (founder pick 9fae06af, "A at
+  // empty/first time"): look around the sample, the one filled action, or start their own. Connecting a device needs a
+  // workspace first, so it is not offered as a first step.
+  const newcomer = !!list.data && list.data.workspaces.length === 0;
+  const sampleOffered = newcomer && !creation.closed && !creation.needsCode;
   return (
     <Shell me={me}>
       <h1 className={`${H1} mb-5`}>Your workspaces</h1>
@@ -71,6 +76,7 @@ export default function Home({ me, creation }: { me: Me; creation: CreationOptio
           </p>
           <Btn
             disabled={sample.busy || !bot.ready}
+            kind="primary"
             onClick={() =>
               void sample.run(async () => {
                 const w = await create("/api/v2/workspaces/sample", {});
@@ -80,7 +86,7 @@ export default function Home({ me, creation }: { me: Me; creation: CreationOptio
           >
             Create the Northstar sample
           </Btn>
-          {!bot.ready && <Note>Complete the check under &quot;Create a workspace&quot; first.</Note>}
+          {!bot.ready && <Note>Complete the check under &quot;Or start your own&quot; first.</Note>}
           <Err>{sample.error}</Err>
         </Panel>
       )}
@@ -115,7 +121,7 @@ export default function Home({ me, creation }: { me: Me; creation: CreationOptio
       )}
       </div>
       <div className="flex min-w-0 flex-col gap-4">
-      <Panel title="Create a workspace">
+      <Panel title={sampleOffered ? "Or start your own" : "Create a workspace"}>
         {creation.closed ? (
           <Note>New workspaces can&apos;t be created on this server right now. Contact its operator.</Note>
         ) : (
@@ -145,22 +151,23 @@ export default function Home({ me, creation }: { me: Me; creation: CreationOptio
               </>
             )}
             {bot.widget}
-            <Btn type="submit" disabled={act.busy || isBlankText(name) || (creation.needsCode && !code.trim()) || !bot.ready}>
+            <Btn type="submit" kind={sampleOffered ? "secondary" : "primary"} disabled={act.busy || isBlankText(name) || (creation.needsCode && !code.trim()) || !bot.ready}>
               Create
             </Btn>
             <Err>{act.error}</Err>
           </form>
         )}
       </Panel>
-      <Panel title="Connect a device">
-        <p className="text-[15px] text-(--text-2)">
-          Run <code className="rounded-[6px] bg-(--bg-inset) px-1.5 py-0.5 font-mono text-[13px] text-(--text-1)">align login</code> on your machine, then enter the code it shows at{" "}
-          <Link href="/app/device" className="font-medium text-(--accent-text) underline underline-offset-2">
-            /app/device
+      {list.data && !newcomer && (
+        <Panel title="Connect a device">
+          <p className="text-[15px] text-(--text-2)">
+            Run <code className="rounded-[6px] bg-(--bg-inset) px-1.5 py-0.5 font-mono text-[13px] text-(--text-1)">align login</code> on your machine, then enter the code it shows on the device page.
+          </p>
+          <Link href="/app/device" className="mt-2 inline-flex min-h-[44px] items-center text-[15px] font-medium text-(--text-1) underline underline-offset-2 sm:min-h-[36px]">
+            Enter a device code
           </Link>
-          .
-        </p>
-      </Panel>
+        </Panel>
+      )}
       </div>
       </div>
     </Shell>

@@ -51,7 +51,7 @@ function Line({ ws, g, latest, launch, fed, onReview }: { ws: string; g: GoalLin
     // Desktop: title | chips | Work on one row. Phone: title and Work on the first row, chips (if any) on a second, so
     // a quiet line is one row and never three. On a phone the chips cell is hidden when none of its children has content;
     // on a desktop it stays, empty, so Work keeps its column.
-    <li className="grid min-h-[44px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-1.5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto] max-md:py-2" data-goal-line={g.id}>
+    <li className="grid min-h-[44px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 px-4 py-1.5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto] max-md:items-start max-md:py-2.5" data-goal-line={g.id}>
       {/* The title wins: it wraps to two lines before it is cut, and the metadata goes first (team, then version). */}
       <div className="flex min-w-0 items-baseline gap-2">
         <span className="line-clamp-2 min-w-0 text-[14px] font-medium text-(--text-1)" title={g.title}>
@@ -87,7 +87,9 @@ function Line({ ws, g, latest, launch, fed, onReview }: { ws: string; g: GoalLin
           </span>
         )}
       </div>
-      <Link href={`/app/w/${ws}/work?goal=${g.id}`} className="inline-flex min-h-[32px] items-center px-1 text-[13px] text-(--text-2) hover:text-(--text-1) hover:underline max-sm:min-h-[44px]" aria-label={`Work on ${g.title}`} data-goal-work>
+      {/* On a phone the row aligns to the top and Work takes a 20px line with a 44px tap area from the pseudo-element, so
+          a two-line title sits as far from its chips as a one-line title does. */}
+      <Link href={`/app/w/${ws}/work?goal=${g.id}`} className="relative inline-flex min-h-[32px] items-center px-1 text-[13px] text-(--text-2) hover:text-(--text-1) hover:underline max-md:min-h-0 max-md:leading-5 max-md:before:absolute max-md:before:inset-x-0 max-md:before:top-1/2 max-md:before:h-[44px] max-md:before:-translate-y-1/2 max-md:before:content-['']" aria-label={`Work on ${g.title}`} data-goal-work>
         Work
       </Link>
     </li>
