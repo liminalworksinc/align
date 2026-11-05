@@ -47,7 +47,7 @@ function Loaded({ ws, cr, me, choice, onClose, done }: { ws: string; cr: ChangeR
       }
     >
       <div data-review={cr.id}>
-        <ReviewBody ws={ws} cr={cr} me={me} titleOf={(id) => titles.get(id) ?? "a goal you can't see"} />
+        <ReviewBody ws={ws} cr={cr} me={me} titleOf={(id) => titles.get(id) ?? "a goal you can't see"} onDone={done} />
       </div>
     </Drawer>
   );

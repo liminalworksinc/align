@@ -184,6 +184,21 @@ for (const width of W) {
     await openCard(p);
     if (theme === "dark" || width === 1440) await shot(p, "02-decision-drawer", theme, width, false);
     if (theme === "dark") {
+      // Asserted at 390, no screenshot: Add evidence (an https example.test link and a label) adds a Self-reported item.
+      if (width === 390) {
+        const count = () => p.evaluate(() => [...document.querySelectorAll("[role=dialog] span")].filter((e) => e.textContent?.trim() === "Self-reported").length);
+        const before = await count();
+        await p.evaluate(() => [...document.querySelectorAll("[role=dialog] button")].find((b) => b.offsetParent !== null && b.textContent?.trim() === "Add evidence")?.click());
+        await p.waitForSelector("[role=dialog] [data-add-evidence] input[type=url]", { visible: true, timeout: 10_000 });
+        const stamp = new Date().toISOString().slice(11, 19).replace(/:/g, "");
+        await p.type("[role=dialog] [data-add-evidence] input[type=url]", `https://docs.example.test/shots-${stamp}`);
+        const inputs = await p.$$("[role=dialog] [data-add-evidence] input");
+        await inputs[inputs.length - 1].type(`Shots check ${stamp} (fictional)`);
+        await p.$eval("[role=dialog] [data-add-evidence] button[type=submit]", (b) => b.click());
+        await p.waitForFunction((n) => [...document.querySelectorAll("[role=dialog] span")].filter((e) => e.textContent?.trim() === "Self-reported").length > n, { timeout: 20_000 }, before).catch(() => {
+          throw new Error("Add evidence: no new Self-reported item in the drawer");
+        });
+      }
       // Asserted, no screenshot: Approve and launch -> Cancel -> choices back -> Decline -> reason field -> Cancel ->
       // choices back (a Cancel once left the drawer with neither choices nor a confirmation).
       await pick(p, "Approve and launch");
