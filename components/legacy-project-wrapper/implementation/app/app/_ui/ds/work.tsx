@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { ChangeRequest, Evidence, Goal, MySession } from "../types";
 import { DecisionPanel, NoDecisionPanel } from "./decision-panel";
 import { EmptyState } from "./empty-state";
-import { hasEvidence, type Delivery } from "./evidence-facts.mts";
+import { hasEvidence, NOT_LOADED, sentToLine, type Delivery } from "./evidence-facts.mts";
 import { EvidenceLabel } from "./evidence-label";
 import { EvidenceSummary, useDelivery } from "./evidence-summary";
 import { Panel } from "./panel";
@@ -176,18 +176,17 @@ function useLaunched(ws: string, goal: Goal) {
     cr ? `/api/v2/workspaces/${ws}/goals/${goal.id}/change-requests/${cr.id}/value` : null,
   );
   // A failed read says nothing about what was launched or sent: neither is the same as a read that found none.
-  return { cr, sent: value.data?.apps ?? null, loading: crs.loading || (!!cr && value.loading), launchUnread: crs.status !== 0 && !cr, sentUnread: !!cr && value.status !== 0 };
+  return { cr, sent: value.data?.apps ?? null, loading: crs.loading || (!!cr && value.loading), crsLoading: crs.loading, sentLoading: !!cr && value.loading, launchUnread: crs.status !== 0 && !cr, sentUnread: !!cr && value.status !== 0 };
 }
 
-const NOT_READ = "Not read just now. Reload to try again.";
 
 function LaunchRows({ ws, goal }: { ws: string; goal: Goal }) {
-  const { cr, sent, loading, launchUnread, sentUnread } = useLaunched(ws, goal);
-  if (loading) return null;
+  const { cr, sent, crsLoading, sentLoading, launchUnread, sentUnread } = useLaunched(ws, goal);
+  if (crsLoading) return null;
   if (launchUnread)
     return (
       <Row label="Launched">
-        <span className="text-(--text-2)">{NOT_READ}</span>
+        <span className="text-(--text-2)">{NOT_LOADED}</span>
       </Row>
     );
   if (!cr)
@@ -205,18 +204,8 @@ function LaunchRows({ ws, goal }: { ws: string; goal: Goal }) {
         </span>
       </Row>
       <Row label="Align sent it to">
-        {sentUnread ? (
-          <span className="text-(--text-2)">{NOT_READ}</span>
-        ) : sent && sent.items.length > 0 ? (
-          <span>
-            {sent.items.length} connected {sent.items.length === 1 ? "app" : "apps"}
-            {!sent.everyone && <span className="text-(--text-3)"> (yours; owners see everyone&apos;s)</span>}
-          </span>
-        ) : sent?.everyone ? (
-          <span className="text-(--text-2)">No app yet. Align sends it when a connected app next reads the goals.</span>
-        ) : (
-          <span className="text-(--text-2)">Align hasn&apos;t sent v{cr.version} to an app you connected yet. You see your own apps here.</span>
-        )}
+        {/* While its read is in flight: "Reading…", never "No app yet" (which would be a fact the read hasn't given). */}
+        <span className={sentUnread || !sent?.items.length ? "text-(--text-2)" : undefined}>{sentToLine({ loading: sentLoading, failed: sentUnread, apps: sent }) ?? "Reading…"}</span>
       </Row>
     </>
   );
@@ -225,13 +214,27 @@ function LaunchRows({ ws, goal }: { ws: string; goal: Goal }) {
 function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
   const apps = useRead<{ apps: App[] }>(`/api/v2/workspaces/${ws}/apps`);
   const list = apps.data?.apps ?? [];
+  // The apps read is everyone's for a workspace owner and the reader's own for anyone else, without saying which: the
+  // role decides how an empty list is worded. Unknown role reads as "yours", which is never false.
+  const role = useRead<{ role: "owner" | "member" | "viewer" }>(`/api/v2/workspaces/${ws}`);
+  const everyone = role.data?.role === "owner";
   const { cr, sent, loading, launchUnread, sentUnread } = useLaunched(ws, goal);
   const sentTo = new Map((sent?.items ?? []).map((i) => [i.id, i]));
   return (
     <Panel eyebrow="Connected apps" title="Goal reads Align recorded" actions={<Link href={`/app/w/${ws}/apps`} className={`${LINK} text-[14px]`}>Apps</Link>}>
       {apps.loading && <p className="text-[14px] text-(--text-2)">Loading…</p>}
       {apps.status !== 0 && <p className="text-[14px] text-(--text-2)">{apps.message}</p>}
-      {apps.data && list.length === 0 && <EmptyState title="No AI app you can see is connected." body="You see your own apps here; workspace owners see everyone's." action={<Link href={`/app/w/${ws}/apps`} className={LINK}>Connect one</Link>} />}
+      {apps.data && list.length === 0 &&
+        (everyone ? (
+          <EmptyState title="No AI apps connected" body="Nothing has read this workspace's goals through an app." action={<Link href={`/app/w/${ws}/apps`} className={LINK}>Connect one</Link>} />
+        ) : (
+          // A viewer can't connect an app, so nothing is offered; a member can, on the Apps tab.
+          <EmptyState
+            title="None of your AI apps is connected"
+            body="You see your own apps here; workspace owners see everyone's."
+            action={role.data?.role === "member" ? <Link href={`/app/w/${ws}/apps`} className={LINK}>Connect one</Link> : undefined}
+          />
+        ))}
       {list.length > 0 && (
         <ul className="flex flex-col gap-2">
           {list.map((a) => (
@@ -250,9 +253,9 @@ function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
       {!loading && (
         <p className="mt-3 text-[13px] text-(--text-3)">
           {launchUnread || sentUnread
-            ? NOT_READ
+            ? NOT_LOADED
             : cr && apps.data && !list.length
-            ? `Launched v${cr.version} reaches an app when it reads the goals; none you can see is connected.`
+            ? `Launched v${cr.version} reaches an app when it reads the goals; ${everyone ? "none is connected" : "none of yours is connected"}.`
             : cr
             ? `"Align sent it v${cr.version}" is a delivery receipt: a goal read served this goal's launched version to that app. Align can't see what the app does with it.`
             : "Nothing is launched on this goal yet, so Align has sent no version of it to an app. Goal reads are recorded for the workspace, not per goal."}
@@ -348,14 +351,17 @@ export function WorkPanels({ ws, goalId, crId, me = "" }: { ws: string; goalId?:
               {goal.allocation && (
                 <>
                   <Row label="Agent time">
-                    <span className="tabular-nums">{goal.allocation.share_7d}% of reported agent time, 7 days</span>
+                    {/* No reported time is an absence, not an agent's report: said in words, with no Agent reported label. */}
+                    {goal.allocation.share_7d > 0 ? <span className="tabular-nums">{goal.allocation.share_7d}% of reported agent time, 7 days</span> : <span className="text-(--text-2)">None reported in the last 7 days</span>}
                     {goal.allocation.target_share !== null && <span className="text-(--text-2)"> (target {goal.allocation.target_share}%)</span>}
                     {goal.allocation.held && <span className="text-(--st-pending)"> · held</span>}
                   </Row>
-                  {/* The label under the row at full width, so the narrow value column never wraps it. */}
-                  <dd className="col-span-2 -mt-0.5">
-                    <EvidenceLabel kind="reported" size="s" detail="align CLI usage" />
-                  </dd>
+                  {goal.allocation.share_7d > 0 && (
+                    // The label under the row at full width, so the narrow value column never wraps it.
+                    <dd className="col-span-2 -mt-0.5">
+                      <EvidenceLabel kind="reported" size="s" detail="align CLI usage" />
+                    </dd>
+                  )}
                 </>
               )}
             </dl>

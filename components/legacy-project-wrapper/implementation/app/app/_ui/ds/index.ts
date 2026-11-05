@@ -21,7 +21,7 @@ export { WorkPanels } from "./work";
 export { GoalDependencies } from "./dependencies";
 export { defaultBody, ReviewActions, ReviewBody, sendChoice, type ReviewChoice, type SendResult } from "./review";
 export { EvidenceSummary, useDelivery, type EvidenceSummaryProps } from "./evidence-summary";
-export { changeFacts, deliveryStatement, goalFacts, hasEvidence, FACT_WORD, type Fact, type FactKind, type Delivery } from "./evidence-facts.mts";
+export { changeFacts, deliveryStatement, goalFacts, hasEvidence, NOT_LOADED, sentToLine, FACT_WORD, type Fact, type FactKind, type Delivery } from "./evidence-facts.mts";
 export { DecisionLinks, DECISION_LINK, type DecisionPlace } from "./decision-links";
 export { DecisionPanel, NoDecisionPanel, decisionSentence } from "./decision-panel";
 export { NextAfterDecision } from "./next";

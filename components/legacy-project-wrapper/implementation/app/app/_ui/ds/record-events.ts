@@ -212,6 +212,8 @@ export function changeRequestEvents(ws: string, cr: ChangeRequest, audit: AuditR
 export function deliveryEvent(ws: string, cr: ChangeRequest, d: Delivery | null): RecordEvent {
   const s = d?.delivery;
   const got = !!d && ((s?.received ?? 0) > 0 || (d.apps?.items.length ?? 0) > 0);
+  // Not observed only when the reader sees every app (an owner): a non-owner's empty list is only their own apps.
+  const cls = !d ? undefined : got ? ("receipt" as const) : d.apps?.everyone ? ("unobserved" as const) : undefined;
   return {
     id: `${cr.id}:delivery`,
     at: new Date(new Date(cr.launch_decided_at ?? cr.updated_at).getTime() + 1).toISOString(),
@@ -222,7 +224,7 @@ export function deliveryEvent(ws: string, cr: ChangeRequest, d: Delivery | null)
     // The timeline names Align as the actor, so the statement's own "Align …" starts lower case after it.
     what: deliveryStatement(cr.version!, d).replace(/^Align /, ""),
     asOfNow: true,
-    evidence: d ? (got ? "receipt" : "unobserved") : undefined,
+    evidence: cls,
   };
 }
 
