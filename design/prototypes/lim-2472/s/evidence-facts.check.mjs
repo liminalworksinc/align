@@ -51,6 +51,25 @@ expect(
   "reported",
   "2 links",
 );
+// One app read the goals after both launches but Align served it only goal A's launched version (…/value per launched
+// request, lib/oauth/grants.ts appsSentGoalVersion): goal B's fact must stay Not observed. An app's single last_read_at
+// never stands in for which goal's version it was sent.
+const A = goalFacts({ allocation: null }, { version: 2, value: { delivery: null, apps: { everyone: true, items: [{ id: "app1" }] } } });
+const B = goalFacts({ allocation: null }, { version: 4, value: { delivery: null, apps: { everyone: true, items: [] } } });
+expect("two goals, one app read: goal A (sent)", A, "receipt", "v2 · 1 app");
+expect("two goals, one app read: goal B (not sent)", B, "unobserved", "v4 · not sent yet");
+if (B.some((f) => f.kind === "receipt")) {
+  failed++;
+  console.log("FAIL goal B carries a receipt it has no read for");
+}
+// quiet (goal lines): no fact of pure absence, but a launched version's Not observed delivery stays.
+const idle = { allocation: { target_share: null, share_7d: 0, gap_7d: null, held: false } };
+const quietIdle = goalFacts(idle, null, { quiet: true });
+if (quietIdle.length) failed++;
+console.log(`${quietIdle.length ? "FAIL" : "ok  "} quiet goal with no agent time and nothing launched: ${say(quietIdle) || "(no facts)"}`);
+expect("quiet goal, launched v2 not sent yet, no agent time", goalFacts(idle, { version: 2, value: { delivery: null, apps: { everyone: true, items: [] } } }, { quiet: true }), "unobserved", "v2 · not sent yet");
+expect("quiet goal, launched v2, 0 of 2 received", goalFacts(idle, { version: 2, value: { delivery: { sessions: 2, received: 0, applied: 0 }, apps: { everyone: true, items: [] } } }, { quiet: true }), "unobserved", "v2 · 0 of 2 received");
+expect("decision row keeps no links", changeFacts({ revision: 1, revisions: [rev(1, [])], launch: null, version: null }), "unobserved", "no links");
 expect("goal with 35% agent time and nothing launched", goalFacts({ allocation: { target_share: 40, share_7d: 35, gap_7d: -5, held: false } }, null), "reported", "35% agent time");
 expect("goal with no agent time", goalFacts({ allocation: { target_share: null, share_7d: 0, gap_7d: null, held: false } }, null), "unobserved", "no agent time");
 

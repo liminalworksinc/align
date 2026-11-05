@@ -74,9 +74,11 @@ export function changeFacts(cr: ChangeInput, value?: Delivery | null): Fact[] {
 /**
  * A goal's evidence: its newest launched version's delivery (`launched`: the version and its …/value read; null when
  * nothing is launched, undefined when not read) and its share of the workspace's agent time over 7 days (align CLI
- * usage, so agent reported; the goals feed carries it for active goals only).
+ * usage, so agent reported; the goals feed carries it for active goals only). `quiet`: for a list of goal lines, leave
+ * out facts of pure absence (no agent time), which repeat on most lines and say nothing; a launched version that wasn't
+ * sent or received stays, because that absence is the point.
  */
-export function goalFacts(goal: GoalInput, launched?: { version: number; value: Delivery | null } | null): Fact[] {
+export function goalFacts(goal: GoalInput, launched?: { version: number; value: Delivery | null } | null, opts: { quiet?: boolean } = {}): Fact[] {
   const facts: Fact[] = [];
   if (launched?.value) facts.push(...deliveryFacts(launched.version, launched.value));
   const a = goal.allocation;
@@ -86,6 +88,6 @@ export function goalFacts(goal: GoalInput, launched?: { version: number; value: 
       short: `${a.share_7d}% agent time`,
       long: `${a.share_7d}% of the workspace's agent time in the last 7 days${a.target_share !== null ? ` (target ${a.target_share}%)` : ""}, from align CLI usage.`,
     });
-  if (a && a.share_7d === 0) facts.push({ kind: "unobserved", short: "no agent time", long: "No agent time reported toward it in the last 7 days." });
+  if (a && a.share_7d === 0 && !opts.quiet) facts.push({ kind: "unobserved", short: "no agent time", long: "No agent time reported toward it in the last 7 days." });
   return byStrength(facts);
 }

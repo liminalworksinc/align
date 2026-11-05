@@ -83,6 +83,7 @@ export function changeRequestEvents(ws: string, cr: ChangeRequest, audit: AuditR
         compare: { before: base, after: { ...base, ...r.changes }, beforeLabel: `Version ${r.base_version}`, afterLabel: "Proposed" },
         quote: cr.reason || undefined,
         tone: "neutral",
+        cr,
       });
     } else {
       const prev = revs[i - 1];

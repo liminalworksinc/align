@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { ChangeRequest, Evidence, Goal, MySession } from "../types";
+import { DecisionLinks } from "./decision-links";
 import { EmptyState } from "./empty-state";
 import { EvidenceLabel } from "./evidence-label";
 import { EvidenceSummary } from "./evidence-summary";
@@ -151,12 +152,13 @@ function EvidencePanel({ ws, goal }: { ws: string; goal: Goal }) {
           {list.slice(0, 5).map((cr) => (
             <li key={cr.id} className="flex flex-wrap items-center gap-2 text-[14px]">
               <StatusPill kind={cr.state === "approved" ? (cr.launch === "launched" ? "launched" : "approved") : cr.state === "rejected" ? "declined" : cr.state === "countered" ? "countered" : cr.state === "pending" ? "pending" : "draft"} label={cr.state === "approved" && cr.launch !== "launched" ? "Approved, not launched" : cr.state === "withdrawn" ? "Withdrawn" : cr.state === "superseded" ? "Superseded" : undefined} size="s" />
-              <Link href={`/app/w/${ws}/record?cr=${cr.id}`} className={LINK}>
+              <span className="text-(--text-1)">
                 {cr.requester.name}&apos;s change, revision {cr.revision}
-              </Link>
+              </span>
               <span className="text-[13px] text-(--text-3)">
                 {cr.evidence_count} evidence {cr.evidence_count === 1 ? "link" : "links"}
               </span>
+              <DecisionLinks ws={ws} goalId={goal.id} crId={cr.id} here="work" className="basis-full" />
             </li>
           ))}
         </ul>

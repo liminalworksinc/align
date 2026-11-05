@@ -4,6 +4,7 @@ import { ApiError, api, sentence } from "../kit";
 import type { ChangeFields, ChangeRequest, Goal } from "../types";
 import { changeWaits, launchWaits } from "@/lib/v2/home-core.mts";
 import { Compare } from "./compare";
+import { DecisionLinks } from "./decision-links";
 import { EvidenceLabel } from "./evidence-label";
 import { EvidenceSummary } from "./evidence-summary";
 import { StatusPill, type StatusKind } from "./status-pill";
@@ -72,6 +73,7 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
           {cr.revision > 1 && ` · revision ${cr.revision}`}
         </p>
       </header>
+      <DecisionLinks ws={ws} goalId={cr.goal.id} crId={cr.id} here="review" className="-mt-2" />
 
       {!blank(cr.reason) && (
         <blockquote className="border-l-2 border-(--line-strong) pl-3 text-[15px] text-(--text-1) [overflow-wrap:anywhere]">
@@ -303,7 +305,7 @@ export function ReviewActions({
   const SAYS: Record<Choice, string> = {
     approve_and_launch: `Approves revision ${cr.revision}, then launches it: Align releases version ${next} of the goal.`,
     approve: `Records the approval. Approval is not launch: version ${next} is released only when someone launches it.`,
-    launch: `Align releases version ${next} of the goal. Connected apps and bound sessions get it when they next ask.`,
+    launch: `Align releases version ${next} of the goal. Connected apps and bound sessions can get it the next time they read the goal.`,
     not_yet: `Records that it isn't launched yet. The goal stays at version ${n}.`,
     accept_if: `Keeps this change and adds a condition ${cr.requester.name} acknowledges.`,
     counter: `Sends different values back to ${cr.requester.name}, who accepts them before it can be approved.`,
@@ -419,8 +421,16 @@ export function ReviewActions({
     try {
       // Read it again first: if it changed since it was shown, nothing is sent (the server checks again on the write).
       const now = await api<ChangeRequest>(path);
-      if (now.revision !== cr.revision || now.state !== cr.state || now.launch !== cr.launch) {
-        setNotice({ kind: "refused", text: `Not recorded. ${now.state !== cr.state || now.launch !== cr.launch ? now.state_note : `It changed after you opened it: it is now at revision ${now.revision}.`} Nothing was sent. Read it again and decide again.` });
+      // The goal's version too: the confirmation names the version a launch releases (goal version + 1), so a goal that
+      // moved meanwhile would make it name a stale one. Re-read and show the choice again with the right number.
+      if (now.revision !== cr.revision || now.state !== cr.state || now.launch !== cr.launch || now.goal.version !== cr.goal.version) {
+        const what =
+          now.state !== cr.state || now.launch !== cr.launch
+            ? now.state_note
+            : now.revision !== cr.revision
+              ? `It changed after you opened it: it is now at revision ${now.revision}.`
+              : `The goal moved to version ${now.goal.version} after you opened it.`;
+        setNotice({ kind: "refused", text: `Not recorded. ${what} Nothing was sent. Read it again and decide again.` });
         setChoice(null);
         onDone();
         return;
