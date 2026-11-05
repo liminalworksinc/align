@@ -26,9 +26,8 @@ type Decision = "approve" | "approve_and_launch" | "accept_if" | "counter" | "re
 export function decisionsFor(cr: ChangeRequest): Decision[] {
   const c = cr.can;
   const out: Decision[] = [];
-  // Approve and launch first: the one-step decision for whoever may do both (ruling LIM-2454 18efed56); Approve only next.
-  if (c.approve_and_launch) out.push("approve_and_launch");
   if (c.approve) out.push("approve");
+  if (c.approve_and_launch) out.push("approve_and_launch");
   if (c.counter && !cr.dependency_loop) out.push("accept_if");
   if (c.counter) out.push("counter");
   if (c.reject) out.push("reject");

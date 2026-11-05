@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Drawer, EmptyState, EvidenceLabel, Panel, StatusPill, type EvidenceKind } from "../../_ui/ds";
+import { Drawer, EmptyState, EvidenceLabel, Panel, StatusPill, type EvidenceKind, type ReviewChoice } from "../../_ui/ds";
 import { Loading, Note, Shell, useApi, when } from "../../_ui/kit";
 import type { Me } from "../../_ui/server";
 import type { AnySession, ChangeRequest, Goal, MySession } from "../../_ui/types";
@@ -124,8 +124,8 @@ const ago = (iso: string) => {
 const names = (ps: HomePerson[], me: string) => ps.map((p) => (p.id === me ? "you" : p.name)).join(", ");
 
 /** The review drawer's place in the URL (?review=<goal>.<id>), so Back, a reload and a shared link reopen it. */
-function useReview(): [{ goal: string; id: string } | null, (r: { goal: string; id: string } | null) => void] {
-  const [r, setR] = useState<{ goal: string; id: string } | null>(null);
+function useReview(): [{ goal: string; id: string; choice?: ReviewChoice } | null, (r: { goal: string; id: string; choice?: ReviewChoice } | null) => void] {
+  const [r, setR] = useState<{ goal: string; id: string; choice?: ReviewChoice } | null>(null);
   useEffect(() => {
     const read = () => {
       const v = new URLSearchParams(window.location.search).get("review");
@@ -136,7 +136,7 @@ function useReview(): [{ goal: string; id: string } | null, (r: { goal: string; 
     window.addEventListener("popstate", read);
     return () => window.removeEventListener("popstate", read);
   }, []);
-  const set = useCallback((next: { goal: string; id: string } | null) => {
+  const set = useCallback((next: { goal: string; id: string; choice?: ReviewChoice } | null) => {
     const u = new URL(window.location.href);
     if (next) u.searchParams.set("review", `${next.goal}.${next.id}`);
     else u.searchParams.delete("review");
@@ -281,7 +281,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const apps = h?.apps ?? null;
   const readers = apps?.items.filter((a) => a.last_read_at).length ?? 0;
   const noAgents = !!apps && !apps.items.some(seenApp) && s.data !== null && mine.length === 0 && !teammates?.length;
-  const open = (goal: string, id: string) => setReview({ goal, id });
+  const open = (goal: string, id: string, choice?: ReviewChoice) => setReview({ goal, id, choice });
 
   const changeCard = (q: QueueChange, onMine: boolean, first = false) => {
     const full = crById.get(q.id);
@@ -317,7 +317,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
             : `Waiting on ${names(q.waiting_on, me.id) || "nobody yet"}.`
         }
         action={
-          <button type="button" className={onMine ? (first ? primaryBtn : outlineBtn) : quietLink} onClick={() => open(q.goal.id, q.id)} data-review-open={q.id}>
+          <button type="button" className={onMine ? (first ? primaryBtn : outlineBtn) : quietLink} onClick={() => open(q.goal.id, q.id, onMine && launch ? "launch" : undefined)} data-review-open={q.id}>
             {onMine ? (launch ? "Review and launch" : "Review") : "View"}
           </button>
         }
@@ -566,7 +566,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
 
         {/* The drawers break words only where needed, so a short label ("Close", "Esc") never splits at 320. */}
         <div className="[overflow-wrap:break-word]">
-          {review && <ReviewDrawer ws={ws} goal={review.goal} id={review.id} me={me.id} onClose={() => setReview(null)} onChanged={reloadAll} />}
+          {review && <ReviewDrawer key={`${review.id}:${review.choice ?? ""}`} ws={ws} goal={review.goal} id={review.id} me={me.id} choice={review.choice} onClose={() => setReview(null)} onChanged={reloadAll} />}
           <Drawer open={connect} onClose={() => setConnect(false)} title="Connect an agent" eyebrow="Get started">
             <FirstRun ws={ws} onSeen={reloadAll} />
           </Drawer>

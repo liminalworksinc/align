@@ -1,16 +1,14 @@
 "use client";
 import Link from "next/link";
-import { useCompactReview } from "../../_ui/a/compact-review";
 import { useGoalTitles } from "../../_ui/changes";
-import { Drawer, StatusPill, type StatusKind } from "../../_ui/ds";
-import { Loading, Note, useApi, when } from "../../_ui/kit";
+import { Drawer, ReviewActions, ReviewBody, type ReviewChoice, type StatusKind } from "../../_ui/ds";
+import { Loading, Note, useApi } from "../../_ui/kit";
 import type { ChangeRequest } from "../../_ui/types";
 
 // Concept A's review drawer (LIM-2472): a change request opens beside the Home's work, never instead of it. The body is
-// the decision at a glance (who asked, when, why, once), then the change and what Align holds about it; the footer is
-// the decision bar, always on screen: this person's dominant action first, the others beside it, or "Not yours" with
-// who can. Every action is the real POST (_ui/a/compact-review.tsx). Quiet links lead to the full record and the
-// goal's work and evidence.
+// the shared ReviewBody (who asked, the reason once, Compare, evidence, what it waits on); the footer is the shared
+// ReviewActions, always on screen: this person's dominant action, the rest folded into "More actions" on a phone, or
+// "Not yours" with who can. Every action is the real POST. Quiet links lead to the full record and the goal's work.
 
 /** The request's state as a pill: launch is its own state, so an approved, unlaunched change never reads as launched. */
 export function crStatus(cr: Pick<ChangeRequest, "state" | "launch">): { kind: StatusKind; label?: string } {
@@ -23,12 +21,10 @@ export function crStatus(cr: Pick<ChangeRequest, "state" | "launch">): { kind: S
 
 const quiet = "inline-flex min-h-[44px] items-center text-[13px] text-(--accent-text) hover:underline";
 
-function Loaded({ ws, cr, me, onClose, done }: { ws: string; cr: ChangeRequest; me: string; onClose: () => void; done: () => void }) {
+function Loaded({ ws, cr, me, choice, onClose, done }: { ws: string; cr: ChangeRequest; me: string; choice?: ReviewChoice; onClose: () => void; done: () => void }) {
   const titles = useGoalTitles(ws);
   const base = `/app/w/${ws}`;
   const record = `${base}/record?cr=${cr.id}`;
-  const { body, footer } = useCompactReview({ ws, cr, me, titles, recordHref: record, onDone: done });
-  const st = crStatus(cr);
   return (
     <Drawer
       open
@@ -46,30 +42,18 @@ function Loaded({ ws, cr, me, onClose, done }: { ws: string; cr: ChangeRequest; 
               Work and evidence for this goal
             </Link>
           </div>
-          {footer}
+          <ReviewActions ws={ws} cr={cr} me={me} onDone={done} compact initialChoice={choice} />
         </div>
       }
     >
-      <div className="flex flex-col gap-4" data-review={cr.id}>
-        <div className="flex flex-col gap-1.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusPill kind={st.kind} label={st.label} />
-            <span className="font-mono text-[12px] text-(--text-3)">
-              revision {cr.revision} · v{cr.goal.version} approved now{cr.version ? ` · became v${cr.version}` : ""}
-            </span>
-          </div>
-          <p className="text-[15px] text-(--text-1)">
-            {cr.requester.id === me ? "You asked" : `${cr.requester.name} asked`} {when(cr.created_at)}
-          </p>
-          {cr.reason && <p className="text-[14px] text-(--text-2)">&ldquo;{cr.reason}&rdquo;</p>}
-        </div>
-        {body}
+      <div data-review={cr.id}>
+        <ReviewBody ws={ws} cr={cr} me={me} titleOf={(id) => titles.get(id) ?? "a goal you can't see"} />
       </div>
     </Drawer>
   );
 }
 
-export function ReviewDrawer({ ws, goal, id, me, onClose, onChanged }: { ws: string; goal: string; id: string; me: string; onClose: () => void; onChanged: () => void }) {
+export function ReviewDrawer({ ws, goal, id, me, choice, onClose, onChanged }: { ws: string; goal: string; id: string; me: string; choice?: ReviewChoice; onClose: () => void; onChanged: () => void }) {
   const r = useApi<ChangeRequest>(`/api/v2/workspaces/${ws}/goals/${goal}/change-requests/${id}`);
   if (!r.data)
     return (
@@ -83,6 +67,7 @@ export function ReviewDrawer({ ws, goal, id, me, onClose, onChanged }: { ws: str
       ws={ws}
       cr={r.data}
       me={me}
+      choice={choice}
       onClose={onClose}
       done={() => {
         r.reload();

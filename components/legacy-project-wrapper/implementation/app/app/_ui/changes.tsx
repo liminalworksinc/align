@@ -147,13 +147,11 @@ function RequestRecord({
         kind: "done",
         text:
           action === "launch"
-            ? `Recorded: you launched version ${next}. Align sends it to the sessions bound to this goal; receipts show which received it.`
-            : `Recorded: you decided not yet. Version ${cr.goal.version} stays the released one until someone launches version ${next}.`,
+            ? `Recorded: you launched version ${next} to agents. They get it at their next turn.`
+            : `Recorded: you decided not yet. Agents stay on version ${cr.goal.version} until someone launches version ${next}.`,
       });
       onDone();
     });
-  // Launch is a deliberate press (LIM-2472): the first asks to confirm, saying what it sends; only the second posts.
-  const [confirmLaunch, setConfirmLaunch] = useState(false);
   const mine = cr.requester.id === me;
   const current = cr.revisions.find((r) => r.revision === cr.revision);
   const earlier = cr.revisions.filter((r) => r.revision !== cr.revision && r.evidence.length > 0);
@@ -265,27 +263,12 @@ function RequestRecord({
             Confirm the condition is met
           </Btn>
         )}
-        {cr.can.launch && !confirmLaunch && (
-          <Btn disabled={act.busy} onClick={() => setConfirmLaunch(true)}>
+        {cr.can.launch && (
+          <Btn disabled={act.busy} onClick={() => decideLaunch("launch")}>
             Launch version {next} to agents
           </Btn>
         )}
-        {cr.can.launch && confirmLaunch && (
-          <div className="flex w-full flex-col gap-2 rounded-[10px] border border-zinc-300 p-3" data-launch-confirm>
-            <p className="text-[14px] text-zinc-800">
-              Launch version {next}? Align releases it and sends it to the sessions bound to this goal. A launch can&apos;t be taken back; a later change replaces it.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <Btn disabled={act.busy} onClick={() => decideLaunch("launch")}>
-                Confirm: launch version {next}
-              </Btn>
-              <Btn kind="secondary" disabled={act.busy} onClick={() => setConfirmLaunch(false)}>
-                Cancel
-              </Btn>
-            </div>
-          </div>
-        )}
-        {cr.can.not_yet && cr.launch !== "not_yet" && !confirmLaunch && (
+        {cr.can.not_yet && cr.launch !== "not_yet" && (
           <Btn kind="secondary" disabled={act.busy} onClick={() => decideLaunch("not_yet")}>
             Not yet
           </Btn>

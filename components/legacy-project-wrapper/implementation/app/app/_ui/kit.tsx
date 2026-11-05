@@ -157,7 +157,7 @@ function WsSwitch({ ws, list }: { ws?: string; list: WsSummary[] }) {
   return (
     <select
       aria-label="Switch workspace"
-      className="min-h-[36px] w-full min-w-0 rounded-(--radius-s) border border-(--line-strong) bg-(--bg-inset) px-2 text-[14px] text-(--text-1) max-lg:min-h-[44px]"
+      className="min-h-[36px] w-full min-w-0 rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) px-2 text-[14px] text-(--text-1) max-lg:min-h-[44px]"
       value={ws ?? ""}
       onChange={(e) => {
         if (e.target.value) go(`/app/w/${e.target.value}`);
