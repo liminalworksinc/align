@@ -95,7 +95,8 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
           </h1>
         </header>
 
-        {h && <FirstRun ws={ws} onSeen={reloadAll} me={me.id} hasGoals={(h.goals?.length ?? 0) > 0} />}
+        {/* Only on what was read: an unread Home says nothing about goals or apps, so it can't choose a first-run card. */}
+        {h?.goals && h.apps && <FirstRun ws={ws} onSeen={reloadAll} me={me.id} hasGoals={h.goals.length > 0} />}
 
         <NeedsList key={needsKey} ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} />
 
