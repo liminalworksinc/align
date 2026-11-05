@@ -53,12 +53,21 @@ function deliveryFacts(version: number, d: Delivery): Fact[] {
     });
   // No directive target (…/value delivery null after a launch, or 0 sessions): no session was on the goal at launch.
   const noSession = !s || s.sessions === 0;
+  // Only an owner's list is the whole workspace's; anyone else's holds their own apps, so it can't say none was sent it.
   if (noSession && apps === 0)
-    out.push({
-      kind: "unobserved",
-      short: `v${version} · no session or app yet`,
-      long: `No session was on this goal when v${version} was launched, and no connected app has been sent it in a goal read since.`,
-    });
+    out.push(
+      d.apps?.everyone
+        ? {
+            kind: "unobserved",
+            short: `v${version} · no session or app yet`,
+            long: `No session was on this goal when v${version} was launched, and no connected app has been sent it in a goal read since.`,
+          }
+        : {
+            kind: "unobserved",
+            short: `v${version} · no session on this goal`,
+            long: `No session was on this goal when v${version} was launched. None of your connected apps has been sent it yet; owners see everyone's.`,
+          },
+    );
   if (noSession && apps > 0) out.push({ kind: "unobserved", short: `v${version} · no session on this goal`, long: `No session was on this goal when v${version} was launched.` });
   return out;
 }
