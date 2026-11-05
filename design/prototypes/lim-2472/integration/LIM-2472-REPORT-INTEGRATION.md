@@ -19,6 +19,8 @@ What the base holds: foundation (`e6ea124`), Stream R (rest of app, `3cc0f71`), 
 | foundation `6a97ca9144bb31531239da65fe56eb6b5f9f3830` (dark `--accent` #BF0078, `--accent-hover` #94005C) | `b797d8286d7422e2d23dc058a9642f1ce30f8627` | clean: `globals.css`, `LIM-2472-FOUNDATION.md`, `foundation.html` |
 | `46cd27f58bca85b6d4a14fc474bce336d4f42e2e` (contains `6a97ca9`; thin marks to `--accent-text`: Work and Dependencies selected goal, Confirm panel border) | `7f74d799219016ea932fdcca8fa5fed945d3a926` | clean: `work.tsx`, `dependencies.tsx`, `review.tsx` |
 | `45bfc92b8a736e19967616b5a39e64336b28b389` (contains foundation `da51b0c`: the ring is `:focus-visible:not([tabindex="-1"])`, plus a base-layer `[tabindex="-1"]:focus { outline: none }`) | `50a8dc7fb41d6db202352960cd6c5f8ec61cf72c` | clean: `globals.css`, `ds/data-table.tsx`, `LIM-2472-FOUNDATION.md`, `foundation.html` |
+| `4c7cd1532534ba016a251eeaedb7c198c1d9d2d3` (contains foundation `3b90f1a`: DataTable `th` nowrap; EvidenceLabel icon and word kept together) | `9a4c3a82ea3f3799ecfae651804ecab171e97787` | clean: `ds/data-table.tsx`, `ds/evidence-label.tsx` |
+| `eb1b357221b6be23b68325f152eaa1b2727bad14` (contains `4c7cd15` and foundation `1a4e6d7`: no outline-colour transition on Segmented and kit `Btn`) | `4ba62b0ad85f87e1599911f9d0ae1cda63f5ef7a` | clean: `ds/segmented.tsx`, `kit.tsx` |
 
 No conflicts, so no file needed a side chosen. No rebase, no force push, no stash.
 
@@ -339,7 +341,13 @@ Fresh `next dev` and seed; owner; dark and light at 1440 and 390, Tab, Shift+Tab
 
 The light Requests page has more stops than dark because each pass's data set differs (light runs after dark on the same server), not because the theme changes the controls.
 
-**One transient, noted (not counted as a finding):** the selected Segmented option on the record ("Newest first") reads `outline-color` white right after Tab and the focus colour 500ms later. Its `transition-colors` animates the outline colour from `currentColor` (white on pink) to `--focus` (`ds/segmented.tsx`). In light the ring flashes white against the page for a moment before it settles.
+**Transient white ring: closed in `eb1b357`.** Before, the selected Segmented option read a white `outline-color` right after Tab; its `transition-colors` animated the outline from `currentColor`. Re-checked in light, 1440, keyboard only, on a fresh `.next`, server and seed. The outline colour was read inside the `focusin` event (the first frame), on the next animation frame, and 500ms later:
+- selected "Newest first" on the record: rgb(111,77,218) / rgb(111,77,218) / rgb(111,77,218), 2px solid;
+- kit `Btn` "Create invite link" on People: rgb(111,77,218) at all three samples, 2px solid.
+
+That is `--focus` (#6f4dda) every time, never white. Raw: `I-base/walk/ring-light.json`; screenshots: `ring-light-{segmented,kit-btn}-1440.png`.
+
+**Hydration (`4c7cd15` + `eb1b357`, EvidenceLabel):** fresh `.next`, `next dev` and seed. I opened Requests, the record for the pending request (3 evidence labels), the record for the launched request and the workspace record (2 labels), in dark and light at 1440 and 390: 16 page loads. Every console error and warning was captured, and none appeared: no hydration warning and nothing else. The server log had no errors either. Raw: `I-base/walk/hydration.json`; screenshots: `hyd-*.png`.
 
 
 ## Needed outside my files (listed, not changed)
