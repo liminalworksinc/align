@@ -43,6 +43,12 @@ Hues (canon): accent wholeness `#E90095` / `#BF0078`; between orchid; approved c
 
 Predicted to stay green: the 390px 44px check counts only bordered buttons in `<main>` (the Appearance options have no border and are 44px on phones); the 2px focus-ring check uses the unchanged global `:focus-visible`; the account text checks ("Your account", "Ways you can sign in", the email) are unchanged. Nothing in `scripts/test-v2.mjs` pins fonts, colours or the `<html>` attributes.
 
+## Specimen wording (truth check)
+
+- Pills say what Align released or sent ("Launched v4"), never what agents are on or doing.
+- "Receipt · applied v3" in the Timeline sample is a real receipt state on main: `RECEIPT_STATES = ["received", "applied", "enforced", "accepted", "declined"]` (`lib/v2/directives.ts:186` at b16f8d1).
+- Main's own record copy still says "Launched, agents on v…" (`lib/v2/launch-words.ts:12` at b16f8d1). That over-claims the same way, but `lib/` is out of scope for the front end: a server copy ask.
+
 ## Known rough edges
 
 - `/app/account` at 320: "Ways you can sign in" wraps one letter per line. That layout predates this branch (only the Appearance card was added); not fixed here.
