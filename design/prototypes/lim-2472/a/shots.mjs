@@ -122,6 +122,34 @@ async function openCard(p, match = "Ship self-serve onboarding") {
   if (!ok) throw new Error(`no Home card for "${match}"`);
   await ready(p, "Open the full record", "[role=dialog]");
 }
+/** Click the visible decision `title` in the drawer; on a phone a secondary one sits in "More actions". */
+async function pick(p, title) {
+  const clicked = await p.evaluate((t) => {
+    const vis = (e) => !!e && e.offsetParent !== null;
+    const find = () => [...document.querySelectorAll(`[role=dialog] [data-decision="${t}"]`)].find(vis);
+    let b = find();
+    if (!b) {
+      const more = [...document.querySelectorAll("[role=dialog] summary")].find((e) => e.textContent?.trim() === "More actions" && vis(e));
+      more?.click();
+      b = find();
+    }
+    b?.click();
+    return !!b;
+  }, title);
+  if (!clicked) throw new Error(`no visible decision "${title}" in the drawer`);
+}
+/** Whether the drawer shows its choices again (the dominant decision is visible). */
+const choicesShown = (p, dominant) =>
+  p.evaluate((t) => [...document.querySelectorAll(`[role=dialog] [data-decision="${t}"]`)].some((e) => e.offsetParent !== null), dominant);
+/** Press the drawer's visible Cancel (or a confirmation's Back) and assert the choices come back. */
+async function cancelToChoices(p, dominant, where) {
+  await p.evaluate(() => {
+    const b = [...document.querySelectorAll("[role=dialog] button")].find((e) => e.offsetParent !== null && /^(Cancel|Back)$/.test(e.textContent?.trim() ?? ""));
+    b?.click();
+  });
+  await p.waitForFunction((t) => [...document.querySelectorAll(`[role=dialog] [data-decision="${t}"]`)].some((e) => e.offsetParent !== null), { timeout: 10_000 }, dominant).catch(() => undefined);
+  if (!(await choicesShown(p, dominant))) throw new Error(`after Cancel (${where}) the drawer shows no choices`);
+}
 const dialogHref = (p, attr) => p.$eval(`[role=dialog] [${attr}]`, (a) => a.getAttribute("href"));
 const goalTitle = "Ship self-serve onboarding";
 
@@ -156,10 +184,18 @@ for (const width of W) {
     await openCard(p);
     if (theme === "dark" || width === 1440) await shot(p, "02-decision-drawer", theme, width, false);
     if (theme === "dark") {
-      // 03 Pick "Approve and launch": its confirmation, not sent.
-      await p.$eval('[role=dialog] [data-decision="Approve and launch"]', (b) => b.click());
-      await ready(p, "Review this decision", "[role=dialog]");
-      await p.evaluate(() => [...document.querySelectorAll("[role=dialog] button")].find((b) => b.textContent?.trim() === "Review this decision")?.click());
+      // Asserted, no screenshot: Approve and launch -> Cancel -> choices back -> Decline -> reason field -> Cancel ->
+      // choices back (a Cancel once left the drawer with neither choices nor a confirmation).
+      await pick(p, "Approve and launch");
+      await cancelToChoices(p, "Approve and launch", "Approve and launch");
+      await pick(p, "Decline");
+      await p.waitForSelector("[role=dialog] textarea", { visible: true, timeout: 10_000 }).catch(() => {
+        throw new Error("Decline shows no reason field");
+      });
+      await cancelToChoices(p, "Approve and launch", "Decline");
+      // 03 Pick "Approve and launch": its confirmation, not sent. On a phone it goes straight to a one-row confirm.
+      await pick(p, "Approve and launch");
+      await p.evaluate(() => [...document.querySelectorAll("[role=dialog] button")].find((b) => b.offsetParent !== null && b.textContent?.trim() === "Review this decision")?.click());
       await ready(p, "Confirm", "[role=dialog]");
       await shot(p, "03-approve-and-launch-confirm", theme, width, false);
       // 05 The full record and 06 the goal's work and evidence: the drawer's own links.
