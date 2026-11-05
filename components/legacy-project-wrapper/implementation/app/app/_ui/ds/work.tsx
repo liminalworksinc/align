@@ -294,7 +294,7 @@ export function WorkPanels({ ws, goalId }: { ws: string; goalId?: string }) {
                   type="button"
                   onClick={() => choose(g.id)}
                   className={`flex min-h-[44px] w-full flex-col items-start gap-0.5 rounded-(--radius-s) border-l-2 px-3 py-2 text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-(--focus) ${
-                    on ? "border-(--accent) bg-(--accent-soft)" : "border-transparent hover:bg-(--bg-raised)"
+                    on ? "border-(--accent-text) bg-(--accent-soft)" : "border-transparent hover:bg-(--bg-raised)"
                   }`}
                 >
                   <span className="text-[14px] font-medium text-(--text-1) [overflow-wrap:anywhere]">{g.title}</span>
