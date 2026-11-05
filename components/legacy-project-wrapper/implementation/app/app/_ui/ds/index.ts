@@ -1,9 +1,12 @@
 // LIM-2472 foundation primitives: token-only, both themes. Import from "@/app/app/_ui/ds".
 export { DataTable, type Column } from "./data-table";
+export { Disclosure } from "./disclosure";
 export { Drawer } from "./drawer";
 export { EmptyState } from "./empty-state";
 export { EvidenceLabel, type EvidenceKind } from "./evidence-label";
+export { FormField, FormSummary, SelectInput, TextArea, TextInput } from "./form";
 export { Kbd } from "./kbd";
+export { LaneMap, type Lane, type LaneCard, type LaneCardState, type LaneLink, type LaneLinkKind } from "./lane-map";
 export { NeedAction, NeedList, NeedRow } from "./need";
 export { Panel } from "./panel";
 export { Segmented, type SegmentedOption } from "./segmented";

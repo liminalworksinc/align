@@ -29,6 +29,15 @@ Hues (canon): accent wholeness `#BF0078` (hover `#94005C`) in both themes, ruled
 - An element that only code focuses (`tabindex="-1"`: a heading after navigation, an error or confirm message, a dialog panel) gets no ring and not the browser's default one (`[tabindex="-1"]:focus { outline: none }` in `@layer base`, so a utility can still add a ring). No builder needs `outline-none` for these.
 - Checked in Chrome by keyboard: Tab stops, the roving Segmented choice after an arrow key, a code-focused heading, the Drawer panel and a control inside it; the real goal page passes test-v2:3880's check (29 stops, all with a 2px ring).
 
+## Round 2 primitives
+
+Specimen: `round-2.html` in this folder.
+
+- `Disclosure`: closed by default, a native `<details>`, with a chevron and underline so it reads as a control.
+- `LaneMap`: lanes as columns, so it fits the review drawer. The caller declares `lanes`, `cards` and `links` (`live`, `done`, `muted`); the map routes the lines. Hidden below 42rem of its own width. Wrap its `Disclosure` in `className="hidden md:block"` so nothing opens onto nothing.
+- `FormField`, `TextInput`, `TextArea`, `SelectInput`, `FormSummary`: a short form with errors beside their fields, "Optional" in words, and a summary of what happens before it is sent.
+- `NeedAction quiet`: a shortcut beside the outlined action. On the Desk: "Approve only" (quiet) beside "Review" (outlined), only with evidence.
+
 ## The hosted display face
 
 `NINETIES_HEADLINER_URL` in `app/globals.css` is the one place the URL goes (a commented `src` line, because a CSS variable can't be used in `@font-face`). Before it is filled in: (1) the founder confirms the licence allows web embedding; (2) the private host is chosen; (3) `font-src` allows it in `next.config.ts` and `proxy.ts` (Sean's: deploy and security work). Until then, a tester sees Iowan Old Style on a Mac, Georgia on Windows and a generic serif on Linux or Android. Screenshots from a machine with the face installed do not show this.
