@@ -57,6 +57,8 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const s = useApi<{ mine: MySession[]; all: AnySession[] | null }>(`/api/v2/workspaces/${ws}/sessions`);
   const c = useApi<Groups>(`/api/v2/workspaces/${ws}/change-requests`);
   const [review, setReview] = useReview();
+  // Stable: the Drawer re-takes focus whenever onClose changes, which would pull it off a notice that just took it.
+  const closeReview = useCallback(() => setReview(null), [setReview]);
   const [connect, setConnect] = useState(false);
   // NeedsList holds its own reads: a new key reads them again after a decision in the drawer.
   const [needsKey, setNeedsKey] = useState(0);
@@ -137,7 +139,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
 
         {/* The drawers break words only where needed, so a short label ("Close", "Esc") never splits at 320. */}
         <div className="[overflow-wrap:break-word]">
-          {review && <ReviewDrawer key={`${review.id}:${review.choice ?? ""}`} ws={ws} goal={review.goal} id={review.id} me={me.id} choice={review.choice} onClose={() => setReview(null)} onChanged={reloadAll} />}
+          {review && <ReviewDrawer key={`${review.id}:${review.choice ?? ""}`} ws={ws} goal={review.goal} id={review.id} me={me.id} choice={review.choice} onClose={closeReview} onChanged={reloadAll} />}
           <Drawer open={connect} onClose={() => setConnect(false)} title="Connect an agent" eyebrow="Get started">
             <FirstRun ws={ws} onSeen={reloadAll} always />
           </Drawer>

@@ -11,7 +11,7 @@ import type { ChangeRequest } from "../../_ui/types";
 // Concept A's review drawer (LIM-2472): a change request opens beside the Home's work, never instead of it. The body is
 // the shared ReviewBody (who asked, the reason once, Compare, evidence, what it waits on); the footer is the shared
 // ReviewActions, always on screen: this person's dominant action, the rest folded into "More actions" on a phone, or
-// "Not yours" with who can. Every action is the real POST. Quiet links lead to the full record and the goal's work.
+// "Not yours" with who can. Every action is the real POST. ReviewBody carries the links to the work and the record.
 
 export { crStatus };
 
