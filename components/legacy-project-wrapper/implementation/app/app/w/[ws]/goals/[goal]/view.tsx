@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, TextArea, useAction, useApi, when } from "../../../../_ui/kit";
@@ -341,7 +342,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
       {g && (
         <>
           <HoldBanner hold={hold.data?.held ?? null} me={me.id} />
-          <h1 className="mb-2 text-[26px] font-semibold text-zinc-900">{g.title}</h1>
+          <h1 className={`${PAGE_H1} mb-2`}>{g.title}</h1>
           <div className="mb-5 flex flex-wrap gap-2">
             <Pill tone="violet">{g.status}</Pill>
             <Pill>{g.level === "company" ? "company goal" : "team goal"}</Pill>

@@ -99,8 +99,8 @@ export function goalFacts(goal: GoalInput, launched?: { version: number; value: 
   if (a && a.share_7d > 0)
     facts.push({
       kind: "reported",
-      short: `${a.share_7d}% agent time`,
-      long: `${a.share_7d}% of the workspace's agent time in the last 7 days${a.target_share !== null ? ` (target ${a.target_share}%)` : ""}, from align CLI usage.`,
+      short: `${a.share_7d}% of reported agent time, 7 days`,
+      long: `${a.share_7d}% of the workspace's reported agent time in the last 7 days${a.target_share !== null ? ` (target ${a.target_share}%)` : ""}, from align CLI usage.`,
     });
   void opts;
   return byStrength(facts);

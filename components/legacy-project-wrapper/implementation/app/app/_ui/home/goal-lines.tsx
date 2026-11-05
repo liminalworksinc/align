@@ -49,7 +49,8 @@ function Line({ ws, g, latest, launch, fed, onReview }: { ws: string; g: GoalLin
   const a = fed?.allocation;
   return (
     // Desktop: title | chips | Work on one row. Phone: title and Work on the first row, chips (if any) on a second, so
-    // a quiet line is one row and never three. The chips cell is hidden when none of its children has content.
+    // a quiet line is one row and never three. On a phone the chips cell is hidden when none of its children has content;
+    // on a desktop it stays, empty, so Work keeps its column.
     <li className="grid min-h-[44px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-1.5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto] max-md:py-2" data-goal-line={g.id}>
       {/* The title wins: it wraps to two lines before it is cut, and the metadata goes first (team, then version). */}
       <div className="flex min-w-0 items-baseline gap-2">
@@ -62,7 +63,7 @@ function Line({ ws, g, latest, launch, fed, onReview }: { ws: string; g: GoalLin
         </span>
       </div>
       {/* The chips cell has real width on a desktop, so the summary can measure how many chips fit (it sizes to its parent). */}
-      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5 [&:not(:has(>:not(:empty)))]:hidden max-md:order-3 max-md:col-span-2 md:flex-nowrap md:justify-end">
+      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5 max-md:[&:not(:has(>:not(:empty)))]:hidden max-md:order-3 max-md:col-span-2 md:flex-nowrap md:justify-end">
         {pill &&
           (onReview && waiting ? (
             // The phone base rule gives every button 44px of height, which opened a gap under the title row; the pill

@@ -26,7 +26,7 @@ export const anchorsOut = (a: AnchorDraft) => ({ repos: listOf(a.repos), branch_
 export function MeasuresEditor({ value, onChange }: { value: MeasureDraft[]; onChange: (v: MeasureDraft[]) => void }) {
   return (
     <div className="mb-3">
-      <span className="mb-1 block text-[14px] text-zinc-600">Measures</span>
+      <span className="mb-1 block text-[14px] text-(--text-2)">Measures</span>
       {value.map((m, i) => (
         // Below 640px (sm) the measure takes its own line and the target and Remove share the next, so the row fits a
         // 320px phone (the measure never collapses, nothing scrolls sideways).
@@ -50,7 +50,7 @@ export function MeasuresEditor({ value, onChange }: { value: MeasureDraft[]; onC
 export function AnchorsEditor({ value, onChange }: { value: AnchorDraft; onChange: (v: AnchorDraft) => void }) {
   return (
     <details className="mb-3">
-      <summary className="cursor-pointer text-[14px] text-zinc-600">Anchors (matched on your machine only, to suggest this goal for a session)</summary>
+      <summary className="cursor-pointer text-[14px] text-(--text-2)">Anchors (matched on your machine only, to suggest this goal for a session)</summary>
       <div className="mt-2 grid gap-2 sm:grid-cols-3">
         <Field label="Repos (one per line)">
           <TextArea rows={3} value={value.repos} onChange={(e) => onChange({ ...value, repos: e.target.value })} />

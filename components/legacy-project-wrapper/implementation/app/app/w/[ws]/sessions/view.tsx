@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiError, Shell, num, useAction, useApi, when } from "../../../_ui/kit";
@@ -140,7 +141,7 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
 
   return (
     <Shell me={me} ws={ws} tab="Sessions">
-      <h1 className="mb-2 text-[26px] font-semibold text-(--text-1)">Shared sessions</h1>
+      <h1 className={`${PAGE_H1} mb-2`}>Shared sessions</h1>
       <p className="mb-5 max-w-prose text-[15px] text-(--text-2)">Sessions you shared from your machine with align share. Nothing else from your machine reaches this workspace.</p>
       {holds.data?.holds.map((h) => (
         <HoldBanner key={h.goal.id} hold={h} goalTitle={h.goal.title} me={me.id} />
