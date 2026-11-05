@@ -62,7 +62,7 @@ function detail(e: RecordEvent, titleOf: (id: string) => string, openCompare: bo
     parts.push(
       <p key="l" className="flex flex-wrap items-center gap-2 text-[14px]">
         {e.link.reported === "agent-reported" ? <EvidenceLabel kind="reported" size="s" /> : <span className="rounded-(--radius-s) border border-(--edge) px-1.5 text-[12px] leading-5 text-(--text-2)">Self-reported</span>}
-        <a href={e.link.url} target="_blank" rel="noreferrer noopener" className="text-(--accent-text) underline underline-offset-2 [overflow-wrap:anywhere]">
+        <a href={e.link.url} target="_blank" rel="noopener noreferrer" className="max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center text-(--accent-text) underline underline-offset-2 [overflow-wrap:anywhere]">
           {e.link.label || e.link.url}
         </a>
         <span className="text-[13px] text-(--text-3)">Align doesn&apos;t verify links.</span>
@@ -144,7 +144,7 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
       ),
       when: e.at,
       object: e.object.href ? (
-        <Link href={e.object.href} className="text-(--accent-text) underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-(--focus)">
+        <Link href={e.object.href} className="max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center text-(--accent-text) underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-(--focus)">
           {e.object.label}
         </Link>
       ) : (
@@ -219,7 +219,7 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
       {reviewing && (
         <Panel eyebrow="Review" title={`Change to ${reviewing.goal.title}`}>
           <div className="flex flex-col gap-4">
-            <ReviewBody ws={ws} cr={reviewing} me={me} titleOf={titleOf} />
+            <ReviewBody ws={ws} cr={reviewing} me={me} titleOf={titleOf} onDone={crs.reload} />
             <div className="border-t border-(--line) pt-3">
               <ReviewActions key={reviewing.id} ws={ws} cr={reviewing} me={me} onDone={crs.reload} compact />
             </div>
@@ -240,7 +240,10 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
       <Panel title={`${shown.length} ${shown.length === 1 ? "event" : "events"}`} eyebrow={scope}>
         {loading && <p className="text-[14px] text-(--text-2)">Loading the record…</p>}
         {crs.status !== 0 && <EmptyState title={crs.status === 404 ? "Not found" : "The record didn't load"} body={crs.message} />}
-        {!loading && crs.status === 0 && (
+        {!loading && crs.status === 0 && crId && !reviewing && (
+          <EmptyState title="No such request in this workspace" body="Align has no change request with this address here that you can read. It may be in another workspace, or on a goal you can't see." action={<Link href={`/app/w/${ws}/record`} className="text-(--accent-text) underline">Whole workspace record</Link>} />
+        )}
+        {!loading && crs.status === 0 && !(crId && !reviewing) && (
           <Timeline
             events={events}
             empty={

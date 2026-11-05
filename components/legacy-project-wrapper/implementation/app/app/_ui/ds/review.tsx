@@ -44,8 +44,9 @@ function statusOf(cr: ChangeRequest): { kind: StatusKind; label?: string } {
 // ---------------------------------------------------------------------------------------------------------------------
 
 /** The request itself: everything a reviewer needs before choosing, nothing they don't. */
-export function ReviewBody({ ws, cr, me, titleOf = (id) => id }: { ws: string; cr: ChangeRequest; me: string; titleOf?: (id: string) => string }) {
-  void ws;
+/** `onDone`: called after an evidence link is added (or refused), to re-read the request; without it the Add evidence
+ *  control isn't offered. */
+export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: string; cr: ChangeRequest; me: string; titleOf?: (id: string) => string; onDone?: () => void }) {
   const s = statusOf(cr);
   const current = cr.revisions.find((r) => r.revision === cr.revision) ?? cr.revisions[cr.revisions.length - 1];
   const evidence = cr.revisions.flatMap((r) => r.evidence);
@@ -88,7 +89,7 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id }: { ws: string; c
             {evidence.map((e) => (
               <li key={e.id} className="flex flex-wrap items-center gap-2 text-[14px]">
                 {e.reported_as === "agent-reported" ? <EvidenceLabel kind="reported" size="s" detail="connected app" /> : <span className="rounded-(--radius-s) border border-(--edge) px-1.5 text-[12px] leading-5 text-(--text-2)">Self-reported</span>}
-                <a href={e.url} target="_blank" rel="noreferrer noopener" className="text-(--accent-text) underline underline-offset-2 [overflow-wrap:anywhere]">
+                <a href={e.url} target="_blank" rel="noopener noreferrer" className="max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center text-(--accent-text) underline underline-offset-2 [overflow-wrap:anywhere]">
                   {e.label || e.url}
                 </a>
                 <span className="text-[13px] text-(--text-3)">
@@ -99,6 +100,7 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id }: { ws: string; c
             <li className="text-[13px] text-(--text-3)">Align doesn&apos;t verify links.</li>
           </ul>
         )}
+        {cr.can.add_evidence && onDone && <AddEvidence ws={ws} cr={cr} onDone={onDone} />}
       </section>
 
       {current?.snapshot && (
@@ -140,6 +142,97 @@ function usePhone() {
 const NOTE_ONLY: Choice[] = ["approve", "approve_and_launch"];
 
 const NO_TEXT: Choice[] = ["launch", "not_yet", "accept_counter", "acknowledge", "rebase", "withdraw"];
+
+const EVIDENCE_KINDS = { pr: "Pull request", ci_run: "CI run", incident: "Incident", dashboard: "Dashboard", doc: "Doc", other: "Link" } as const;
+
+/** Add a link to the current revision, as main's card does (POST …/evidence {kind, url, label, revision}): shown as
+ *  self-reported, never verified. Kept from main for its tests: the "Add evidence" and "Add link" buttons, the
+ *  url input, the 120-character label input and the "Link (https)" / "What it shows" labels. Refusals as ReviewActions:
+ *  403/404/409 red, then the request is read again; anything else amber, try again. */
+function AddEvidence({ ws, cr, onDone }: { ws: string; cr: ChangeRequest; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState<keyof typeof EVIDENCE_KINDS>("pr");
+  const [url, setUrl] = useState("");
+  const [label, setLabel] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const ref = useRef<HTMLParagraphElement | null>(null);
+  useEffect(() => {
+    if (notice) ref.current?.focus();
+  }, [notice]);
+  const https = /^https:\/\//i.test(url.trim());
+  const typing = url.trim() !== "" && !https && !"https://".startsWith(url.trim().toLowerCase());
+  if (!open)
+    return (
+      <div className="flex flex-col gap-2">
+        {notice && <NoticeLine n={notice} r={ref} />}
+        <div>
+          <button type="button" className={SECONDARY} onClick={() => setOpen(true)}>
+            Add evidence
+          </button>
+        </div>
+      </div>
+    );
+  return (
+    <form
+      data-add-evidence
+      className="flex flex-col gap-3 rounded-(--radius-m) border border-(--line) bg-(--bg-raised) p-3"
+      onSubmit={(ev) => {
+        ev.preventDefault();
+        if (busy || !https || blank(label)) return;
+        setBusy(true);
+        setNotice(null);
+        api(`${crPath(ws, cr)}/evidence`, { body: { kind, url: url.trim(), label: label.trim(), revision: cr.revision } })
+          .then(
+            () => {
+              setNotice({ kind: "done", text: "Recorded: your link was added, shown as self-reported." });
+              setOpen(false);
+              setUrl("");
+              setLabel("");
+              onDone();
+            },
+            (e: Error) => {
+              const status = e instanceof ApiError ? e.status : 0;
+              if (status === 403 || status === 404 || status === 409) {
+                setNotice({ kind: "refused", text: `Not recorded. ${sentence(e.message)}${status === 409 ? " Here it is as it stands now." : " Nothing changed."}` });
+                setOpen(false);
+                onDone();
+              } else setNotice({ kind: "retry", text: `Not recorded yet. ${sentence(e.message)} Nothing changed; try again.` });
+            },
+          )
+          .finally(() => setBusy(false));
+      }}
+    >
+      {notice && <NoticeLine n={notice} r={ref} />}
+      <p className="text-[14px] text-(--text-2)">A link that supports this change. It is shown as self-reported: Align doesn&apos;t check it.</p>
+      <Labelled label="Kind">
+        <select className={FIELD} value={kind} onChange={(e) => setKind(e.target.value as keyof typeof EVIDENCE_KINDS)}>
+          {(Object.keys(EVIDENCE_KINDS) as (keyof typeof EVIDENCE_KINDS)[]).map((k) => (
+            <option key={k} value={k}>
+              {EVIDENCE_KINDS[k]}
+            </option>
+          ))}
+        </select>
+      </Labelled>
+      <Labelled label="Link (https)">
+        <input className={FIELD} type="url" value={url} onChange={(e) => setUrl(e.target.value)} maxLength={2048} placeholder="https://" required />
+      </Labelled>
+      {typing && <p className="-mt-2 text-[13px] text-(--st-declined)">Use an https:// link: Align keeps only https links.</p>}
+      <Labelled label="What it shows">
+        <input className={FIELD} value={label} onChange={(e) => setLabel(e.target.value)} maxLength={120} required />
+      </Labelled>
+      <p className="-mt-2 text-[13px] text-(--text-3)">At most 120 characters.</p>
+      <div className="flex flex-wrap gap-2">
+        <button type="submit" className={PRIMARY} disabled={busy || !https || blank(label)}>
+          Add link
+        </button>
+        <button type="button" className={SECONDARY} onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
 
 type Notice = { kind: "done" | "refused" | "retry"; text: string };
 
@@ -489,7 +582,7 @@ export function ReviewActions({
 }
 
 function NoticeLine({ n, r }: { n: Notice; r: React.RefObject<HTMLParagraphElement | null> }) {
-  const tone = n.kind === "done" ? "border-(--st-approved) text-(--text-1)" : n.kind === "retry" ? "border-(--st-pending) bg-(--st-pending-soft) text-(--text-1)" : "border-(--st-declined) bg-(--st-declined-soft) text-(--text-1)";
+  const tone = n.kind === "done" ? "border-(--line-strong) bg-(--bg-inset) text-(--text-1)" : n.kind === "retry" ? "border-(--st-retry) bg-(--st-retry-soft) text-(--text-1)" : "border-(--st-declined) bg-(--st-declined-soft) text-(--text-1)";
   return (
     <p ref={r} tabIndex={-1} role={n.kind === "done" ? "status" : "alert"} data-notice={n.kind} className={`rounded-(--radius-s) border px-3 py-2 text-[14px] [overflow-wrap:anywhere] outline-none ${tone}`}>
       {n.text}
