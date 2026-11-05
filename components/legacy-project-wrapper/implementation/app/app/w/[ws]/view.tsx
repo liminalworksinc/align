@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Drawer, EmptyState, EvidenceLabel, Panel, StatusPill, type EvidenceKind } from "../../_ui/ds";
-import { Loading, Note, useApi, when } from "../../_ui/kit";
+import { Loading, Note, Shell, useApi, when } from "../../_ui/kit";
 import type { Me } from "../../_ui/server";
 import type { AnySession, ChangeRequest, MySession } from "../../_ui/types";
 import FirstRun, { seenApp } from "./first-run";
@@ -49,7 +49,11 @@ interface Ask {
 interface QueueAlignment {
   id: string;
   requester: HomePerson;
-  target_goal: { id: string | null; title: string | null; visible: boolean } | null;
+  target_goal: {
+    id: string | null;
+    title: string | null;
+    visible: boolean;
+  } | null;
   next: HomeNext;
   waiting_on: HomePerson[];
 }
@@ -73,9 +77,16 @@ interface App {
 }
 interface HomeData {
   me: string;
-  change_requests: { waiting_on_me: QueueChange[]; waiting_on_others: QueueChange[]; declined?: Declined[] } | null;
+  change_requests: {
+    waiting_on_me: QueueChange[];
+    waiting_on_others: QueueChange[];
+    declined?: Declined[];
+  } | null;
   asks: { waiting_on_me: Ask[] } | null;
-  alignments: { waiting_on_me: QueueAlignment[]; waiting_on_others: QueueAlignment[] } | null;
+  alignments: {
+    waiting_on_me: QueueAlignment[];
+    waiting_on_others: QueueAlignment[];
+  } | null;
   goals: HomeGoal[] | null;
   apps: { everyone: boolean; items: App[] } | null;
 }
@@ -89,9 +100,23 @@ interface Delivery {
   delivery: { sessions: number; received: number; applied: number } | null;
 }
 
-const UNREAD: HomeData = { me: "", change_requests: null, asks: null, alignments: null, goals: null, apps: null };
-const EV: Record<EvidenceClass, EvidenceKind> = { delivery_receipt: "receipt", agent_reported: "reported", not_observed: "unobserved" };
-const HARNESS: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex" };
+const UNREAD: HomeData = {
+  me: "",
+  change_requests: null,
+  asks: null,
+  alignments: null,
+  goals: null,
+  apps: null,
+};
+const EV: Record<EvidenceClass, EvidenceKind> = {
+  delivery_receipt: "receipt",
+  agent_reported: "reported",
+  not_observed: "unobserved",
+};
+const HARNESS: Record<string, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+};
 const ago = (iso: string) => {
   const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
   return m < 60 ? `${m}m ago` : m < 48 * 60 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
@@ -147,12 +172,12 @@ function Delivered({ ws, cr }: { ws: string; cr: ChangeRequest }) {
   if (!v.data) return v.error ? <EvidenceLabel kind="unobserved" size="s" detail="delivery unknown" /> : null;
   const d = v.data.delivery;
   if (!d || d.sessions === 0) return <EvidenceLabel kind="unobserved" size="s" detail={`v${cr.version} reached no bound session`} />;
-  if (d.received === 0) return <EvidenceLabel kind="unobserved" size="s" detail={`v${cr.version} sent to ${d.sessions}, no receipt yet`} />;
-  return <EvidenceLabel kind="receipt" size="s" detail={`v${cr.version} received by ${d.received} of ${d.sessions}`} />;
+  if (d.received === 0) return <EvidenceLabel kind="unobserved" size="s" detail={`Align sent v${cr.version} to ${d.sessions} · no receipt`} />;
+  return <EvidenceLabel kind="receipt" size="s" detail={`Align sent v${cr.version} · ${d.received} of ${d.sessions} received`} />;
 }
 
 /** One shared session row: what Align holds about it and the evidence class of each claim. */
-function SessionRow({ s, me }: { s: MySession; me: Me }) {
+function SessionRow({ s, me, bound = true }: { s: MySession; me: Me; bound?: boolean }) {
   const stopped = s.stop_status && s.stop_status.receipts.length > 0;
   return (
     <li className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 px-4 py-2.5 max-sm:grid-cols-1" data-home-session={s.session_key.slice(-6)}>
@@ -167,7 +192,7 @@ function SessionRow({ s, me }: { s: MySession; me: Me }) {
         {s.stop_status ? (
           <EvidenceLabel kind={stopped ? "receipt" : "unobserved"} size="s" detail={`${s.stop_status.kind} ${stopped ? "received" : "sent, no receipt"}`} />
         ) : (
-          <EvidenceLabel kind="reported" size="s" detail="bound by its agent" />
+          <EvidenceLabel kind="reported" size="s" detail={bound ? "binding" : "no goal set"} />
         )}
       </div>
     </li>
@@ -189,15 +214,24 @@ function GoalGroup({ ws, g, me, latest, sessions, onReview }: { ws: string; g: H
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {latest && st && (
-            <button type="button" onClick={() => onReview(latest)} className="rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)" aria-label={`Review the latest change on ${g.title}`}>
-              <StatusPill kind={st.kind} size="s" label={st.kind === "launched" ? `v${latest.version} launched` : st.kind === "approved" ? `v${latest.version} approved, not launched` : st.label} />
+            <button
+              type="button"
+              onClick={() => onReview(latest)}
+              className="rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)"
+              aria-label={`Review the latest change on ${g.title}`}
+            >
+              <StatusPill kind={st.kind} size="s" label={st.kind === "launched" ? `Launched v${latest.version}` : st.kind === "approved" ? "Change approved, not launched" : st.label} />
             </button>
           )}
           {latest?.launch === "launched" && <Delivered ws={ws} cr={latest} />}
         </div>
       </div>
       {sessions.length ? (
-        <ul className="divide-y divide-(--line)">{sessions.map((s) => <SessionRow key={s.session_key} s={s} me={me} />)}</ul>
+        <ul className="divide-y divide-(--line)">
+          {sessions.map((s) => (
+            <SessionRow key={s.session_key} s={s} me={me} />
+          ))}
+        </ul>
       ) : (
         <p className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-[13px] text-(--text-2)">
           <EvidenceLabel kind="unobserved" size="s" /> None of your shared sessions is bound to this goal.
@@ -243,7 +277,11 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
 
   const changeCard = (q: QueueChange, onMine: boolean) => {
     const full = crById.get(q.id);
-    const st = full ? crStatus(full) : { kind: q.next === "launch" ? ("approved" as const) : ("pending" as const) };
+    const st = full
+      ? crStatus(full)
+      : {
+          kind: q.next === "launch" ? ("approved" as const) : ("pending" as const),
+        };
     const launch = q.next === "launch";
     return (
       <NextCard
@@ -260,7 +298,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
         need={
           onMine
             ? launch
-              ? `Agents stay on v${q.goal.version} until you launch it.`
+              ? `Approved, not released: Align has released v${q.goal.version} only. Launch it to send the change.`
               : q.next === "decide"
                 ? "Approve and launch, approve only, suggest a change or decline."
                 : q.next === "rebase"
@@ -280,232 +318,252 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   };
 
   return (
-    <div className="flex flex-col gap-5">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
-          <p className="font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">Command center</p>
-          <h1 tabIndex={-1} className="text-[24px] font-semibold leading-tight text-(--text-1) focus:outline-none">
-            The work, and what needs you
-          </h1>
-          {h && (
-            <p className="mt-1 text-[14px] text-(--text-2)" data-home-summary>
-              {onMe === null ? "What waits on you is unknown: Align couldn't read all of it." : onMe ? `${onMe} need${onMe === 1 ? "s" : ""} your judgment.` : "Nothing needs your judgment."}{" "}
-              {s.data ? `${mine.length} of your shared session${mine.length === 1 ? "" : "s"}` : "Your sessions are unknown"}
-              {h.goals ? ` across ${h.goals.length} goal${h.goals.length === 1 ? "" : "s"}.` : "."}{" "}
-              {apps ? `${readers} of ${apps.items.length} connected app${apps.items.length === 1 ? "" : "s"} read the goals.` : ""}
-            </p>
-          )}
-        </div>
-        <button type="button" onClick={() => setConnect(true)} className="inline-flex min-h-[40px] items-center rounded-(--radius-s) border border-(--line-strong) px-3 text-[14px] text-(--text-1) hover:bg-(--bg-raised) max-sm:min-h-[44px]" data-connect-open>
-          Connect an agent
-        </button>
-      </header>
-
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-(--radius-m) border border-(--line) bg-(--bg-inset) px-4 py-2.5 text-[13px] text-(--text-2)" data-three-states>
-        <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">Read it as</span>
-        <span className="flex items-center gap-2">
-          <StatusPill kind="pending" size="s" /> waiting on a decision
-        </span>
-        <span className="flex items-center gap-2">
-          <StatusPill kind="launched" size="s" /> agents were sent this version
-        </span>
-        <span className="flex items-center gap-2">
-          <EvidenceLabel kind="unobserved" size="s" /> Align has no record
-        </span>
-      </div>
-
-      {!h ? (
-        <Loading />
-      ) : (
-        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-          <aside className="flex flex-col gap-4 lg:sticky lg:top-5 lg:order-2" aria-label="Needs your judgment">
-            <Panel eyebrow="Next steps" title={onMe === null ? "Needs you: unknown" : `Needs you · ${onMe}`} padded={false}>
-              <div className="flex flex-col gap-2 p-3">
-                {!h.change_requests && <Note>Align couldn&apos;t read change requests just now.</Note>}
-                {onMe === 0 && <p className="px-1 py-2 text-[14px] text-(--text-2)">Nothing needs your judgment right now.</p>}
-                <ul className="flex flex-col gap-2" id="waiting">
-                  {h.change_requests?.waiting_on_me.map((q) => changeCard(q, true))}
-                  {h.asks?.waiting_on_me.map((a) => (
-                    <NextCard
-                      key={a.id}
-                      testId={`ask:${a.id}`}
-                      status={<StatusPill kind="pending" size="s" />}
-                      kicker="Ask"
-                      title={
-                        <>
-                          {a.from_label ?? a.requester.name} asked <b className="font-semibold">{a.team.name}</b>
-                        </>
-                      }
-                      quote={a.text}
-                      need={a.next === "accept" ? "Accept it or decline it for your team." : "Mark it done once it is."}
-                      action={
-                        <Link href={`${base}/asks`} className={primaryBtn}>
-                          Open in Asks
-                        </Link>
-                      }
-                    />
-                  ))}
-                  {h.alignments?.waiting_on_me.map((a) => (
-                    <NextCard
-                      key={a.id}
-                      testId={`alignment:${a.id}`}
-                      status={<StatusPill kind={a.next === "accept_counter" ? "countered" : "pending"} size="s" />}
-                      kicker="Alignment"
-                      title={
-                        <>
-                          {a.requester.id === me.id ? "You ask" : `${a.requester.name} asks`} to work toward <b className="font-semibold">{a.target_goal?.visible && a.target_goal.title ? a.target_goal.title : "a goal you can't see"}</b>
-                        </>
-                      }
-                      need="Approve it, suggest a change or decline it."
-                      action={
-                        <Link href={`${base}/alignments`} className={primaryBtn}>
-                          Open in Alignments
-                        </Link>
-                      }
-                    />
-                  ))}
-                </ul>
-              </div>
-            </Panel>
-            {!!(h.change_requests?.waiting_on_others.length || h.alignments?.waiting_on_others.length) && (
-              <Panel eyebrow="Waiting on others" title="You are part of these" padded={false}>
-                <ul className="flex flex-col gap-2 p-3" id="others">
-                  {h.change_requests?.waiting_on_others.map((q) => changeCard(q, false))}
-                  {h.alignments?.waiting_on_others.map((a) => (
-                    <li key={a.id} className="px-1 text-[13px] text-(--text-2)" data-home-item={`alignment:${a.id}`}>
-                      Alignment with {a.target_goal?.visible && a.target_goal.title ? a.target_goal.title : "a goal you can't see"}: waiting on {names(a.waiting_on, me.id) || "nobody yet"}.
-                    </li>
-                  ))}
-                </ul>
-              </Panel>
+    <Shell me={me} ws={ws} tab="Home">
+      <div className="flex flex-col gap-5">
+        <header className="flex flex-wrap items-end justify-between gap-3">
+          <div className="min-w-0">
+            <p className="font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">Command center</p>
+            <h1 tabIndex={-1} className="text-[24px] font-semibold leading-tight text-(--text-1) focus:outline-none">
+              The work, and what needs you
+            </h1>
+            {h && (
+              <p className="mt-1 text-[14px] text-(--text-2)" data-home-summary>
+                {onMe === null ? "What waits on you is unknown: Align couldn't read all of it." : onMe ? `${onMe} need${onMe === 1 ? "s" : ""} your judgment.` : "Nothing needs your judgment."}{" "}
+                {s.data ? `You share ${mine.length} session${mine.length === 1 ? "" : "s"}` : "Your sessions are unknown"}
+                {h.goals ? ` · ${h.goals.length} active goal${h.goals.length === 1 ? "" : "s"}` : ""}
+                {apps ? (apps.items.length ? ` · ${readers} of ${apps.items.length} connected app${apps.items.length === 1 ? "" : "s"} read the goals.` : " · no connected apps.") : "."}
+              </p>
             )}
-            {!!h.change_requests?.declined?.length && (
-              <Panel eyebrow="Declined" title="Your declined requests" padded={false}>
-                <ul className="flex flex-col gap-2 p-3">
-                  {h.change_requests.declined.map((x) => (
-                    <li key={x.id} className="flex flex-col gap-1 px-1 text-[13px] text-(--text-2)" data-home-item={`declined:${x.id}`}>
-                      <StatusPill kind="declined" size="s" />
-                      <span>
-                        {x.rejected_by ? (x.rejected_by.id === me.id ? "You" : x.rejected_by.name) : "An approver"} declined your request on <b className="font-semibold text-(--text-1)">{x.goal.title}</b>
-                        {x.rejection_reason ? `: “${x.rejection_reason}”` : "."} The goal stays at v{x.goal.version}.
-                      </span>
-                      <button type="button" className={quietLink} onClick={() => open(x.goal.id, x.id)}>
-                        View the decision
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </Panel>
-            )}
-          </aside>
-
-          <section className="flex min-w-0 flex-col gap-4 lg:order-1" aria-label="The work">
-            {noAgents && (
-              <EmptyState
-                title="No agent is sharing work here yet"
-                body="Align shows the work once an agent connects: which goal each session is bound to, which version Align sent it, and whether a receipt came back. Connect one agent to see your first goal read in about a minute."
-                action={
-                  <button type="button" className={primaryBtn} onClick={() => setConnect(true)} data-connect-empty>
-                    Connect an agent
-                  </button>
-                }
-              />
-            )}
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="text-[16px] font-semibold text-(--text-1)">Work by goal</h2>
-              <Link href={`${base}/sessions`} className="text-[13px] text-(--accent-text) hover:underline">
-                All sessions
-              </Link>
-            </div>
-            {!h.goals ? (
-              <Note>Align couldn&apos;t read the goals just now, so the work by goal is unknown.</Note>
-            ) : h.goals.length === 0 ? (
-              <EmptyState
-                title="No active goals you can see"
-                body="Agents read approved goals. Create the first one, then connect an agent to it."
-                action={
-                  <Link href={`${base}/goals`} className={primaryBtn}>
-                    Create a goal
-                  </Link>
-                }
-              />
-            ) : (
-              <ul className="flex flex-col gap-3">
-                {h.goals.map((g) => (
-                  <GoalGroup key={g.id} ws={ws} g={g} me={me} latest={latestFor(g.id)} sessions={byGoal(g.id)} onReview={(cr) => open(cr.goal.id, cr.id)} />
-                ))}
-              </ul>
-            )}
-
-            {unbound.length > 0 && (
-              <Panel eyebrow="No goal" title="Your sessions not bound to a goal" padded={false}>
-                <ul className="divide-y divide-(--line)">{unbound.map((x) => <SessionRow key={x.session_key} s={x} me={me} />)}</ul>
-              </Panel>
-            )}
-
-            {teammates && teammates.length > 0 && (
-              <Panel eyebrow="Teammates" title="Other people's shared sessions" padded={false}>
-                <ul className="divide-y divide-(--line)">
-                  {teammates.map((x) => (
-                    <li key={x.session_key} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5" data-home-session={x.session_key.slice(-6)}>
-                      <span className="min-w-0 font-mono text-[12px] text-(--text-2)">
-                        {HARNESS[x.harness] ?? x.harness} · {x.repo_alias ?? "repo hidden"} · {x.owner.name} · started {ago(x.started_at)}
-                      </span>
-                      <EvidenceLabel kind="unobserved" size="s" detail="goal not shown to owners yet" />
-                    </li>
-                  ))}
-                </ul>
-              </Panel>
-            )}
-
-            <Panel
-              eyebrow="Connected apps"
-              title="When each app last read the goals"
-              padded={false}
-              actions={
-                <Link href={`${base}/apps`} className="text-[13px] text-(--accent-text) hover:underline">
-                  Manage apps
-                </Link>
-              }
+          </div>
+          {/* With no agent yet, the empty state below carries this action, so it appears once. */}
+          {!noAgents && (
+            <button
+              type="button"
+              onClick={() => setConnect(true)}
+              className="inline-flex min-h-[40px] items-center rounded-(--radius-s) border border-(--line-strong) px-3 text-[14px] text-(--text-1) hover:bg-(--bg-raised) max-sm:min-h-[44px]"
+              data-connect-open
             >
-              {!apps ? (
-                <p className="px-4 py-3 text-[14px] text-(--text-2)">Align couldn&apos;t read the connected apps just now, so whether any read the goals is unknown.</p>
-              ) : apps.items.length === 0 ? (
-                <div className="flex flex-wrap items-center gap-2 px-4 py-3 text-[14px] text-(--text-2)" data-home-app="none">
-                  <EvidenceLabel kind="unobserved" size="s" />
-                  {apps.everyone ? "No AI app is connected to this workspace" : "You have not connected an AI app here"}, so Align has seen no goal reads.
-                  <button type="button" className={quietLink} onClick={() => setConnect(true)}>
-                    Connect one
-                  </button>
+              Connect an agent
+            </button>
+          )}
+        </header>
+
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-(--radius-m) border border-(--line) bg-(--bg-inset) px-4 py-2.5 text-[13px] text-(--text-2) [overflow-wrap:break-word]" data-three-states>
+          <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">Read it as</span>
+          <span className="flex items-center gap-2">
+            <StatusPill kind="pending" size="s" /> waiting on a decision
+          </span>
+          <span className="flex items-center gap-2">
+            <StatusPill kind="launched" size="s" /> Align released this version to agents
+          </span>
+          <span className="flex items-center gap-2">
+            <EvidenceLabel kind="unobserved" size="s" /> Align has no record
+          </span>
+        </div>
+
+        {!h ? (
+          <Loading />
+        ) : (
+          <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+            <aside className="flex flex-col gap-4 lg:sticky lg:top-5 lg:order-2" aria-label="Needs your judgment">
+              <Panel eyebrow="Next steps" title={onMe === null ? "Needs you: unknown" : `Needs you · ${onMe}`} padded={false}>
+                <div className="flex flex-col gap-2 p-3">
+                  {!h.change_requests && <Note>Align couldn&apos;t read change requests just now.</Note>}
+                  {onMe === 0 && <p className="px-1 py-2 text-[14px] text-(--text-2)">Nothing needs your judgment right now.</p>}
+                  <ul className="flex flex-col gap-2" id="waiting">
+                    {h.change_requests?.waiting_on_me.map((q) => changeCard(q, true))}
+                    {h.asks?.waiting_on_me.map((a) => (
+                      <NextCard
+                        key={a.id}
+                        testId={`ask:${a.id}`}
+                        status={<StatusPill kind="pending" size="s" />}
+                        kicker="Ask"
+                        title={
+                          <>
+                            {a.from_label ?? a.requester.name} asked <b className="font-semibold">{a.team.name}</b>
+                          </>
+                        }
+                        quote={a.text}
+                        need={a.next === "accept" ? "Accept it or decline it for your team." : "Mark it done once it is."}
+                        action={
+                          <Link href={`${base}/asks`} className={primaryBtn}>
+                            Open in Asks
+                          </Link>
+                        }
+                      />
+                    ))}
+                    {h.alignments?.waiting_on_me.map((a) => (
+                      <NextCard
+                        key={a.id}
+                        testId={`alignment:${a.id}`}
+                        status={<StatusPill kind={a.next === "accept_counter" ? "countered" : "pending"} size="s" />}
+                        kicker="Alignment"
+                        title={
+                          <>
+                            {a.requester.id === me.id ? "You ask" : `${a.requester.name} asks`} to work toward{" "}
+                            <b className="font-semibold">{a.target_goal?.visible && a.target_goal.title ? a.target_goal.title : "a goal you can't see"}</b>
+                          </>
+                        }
+                        need="Approve it, suggest a change or decline it."
+                        action={
+                          <Link href={`${base}/alignments`} className={primaryBtn}>
+                            Open in Alignments
+                          </Link>
+                        }
+                      />
+                    ))}
+                  </ul>
                 </div>
+              </Panel>
+              {!!(h.change_requests?.waiting_on_others.length || h.alignments?.waiting_on_others.length) && (
+                <Panel eyebrow="Waiting on others" title="You are part of these" padded={false}>
+                  <ul className="flex flex-col gap-2 p-3" id="others">
+                    {h.change_requests?.waiting_on_others.map((q) => changeCard(q, false))}
+                    {h.alignments?.waiting_on_others.map((a) => (
+                      <li key={a.id} className="px-1 text-[13px] text-(--text-2)" data-home-item={`alignment:${a.id}`}>
+                        Alignment with {a.target_goal?.visible && a.target_goal.title ? a.target_goal.title : "a goal you can't see"}: waiting on {names(a.waiting_on, me.id) || "nobody yet"}.
+                      </li>
+                    ))}
+                  </ul>
+                </Panel>
+              )}
+              {!!h.change_requests?.declined?.length && (
+                <Panel eyebrow="Declined" title="Your declined requests" padded={false}>
+                  <ul className="flex flex-col gap-2 p-3">
+                    {h.change_requests.declined.map((x) => (
+                      <li key={x.id} className="flex flex-col gap-1 px-1 text-[13px] text-(--text-2)" data-home-item={`declined:${x.id}`}>
+                        <StatusPill kind="declined" size="s" />
+                        <span>
+                          {x.rejected_by ? (x.rejected_by.id === me.id ? "You" : x.rejected_by.name) : "An approver"} declined your request on{" "}
+                          <b className="font-semibold text-(--text-1)">{x.goal.title}</b>
+                          {x.rejection_reason ? `: “${x.rejection_reason}”` : "."} The goal stays at v{x.goal.version}.
+                        </span>
+                        <button type="button" className={quietLink} onClick={() => open(x.goal.id, x.id)}>
+                          View the decision
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </Panel>
+              )}
+            </aside>
+
+            <section className="flex min-w-0 flex-col gap-4 lg:order-1" aria-label="The work">
+              {noAgents && (
+                <EmptyState
+                  title="No agent is sharing work here yet"
+                  body="Align shows the work once an agent connects: which goal each session is bound to, which version Align sent it, and whether a receipt came back. Connect one agent to see your first goal read in about a minute."
+                  action={
+                    <button type="button" className={primaryBtn} onClick={() => setConnect(true)} data-connect-empty>
+                      Connect an agent
+                    </button>
+                  }
+                />
+              )}
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-[16px] font-semibold text-(--text-1)">Work by goal</h2>
+                <Link href={`${base}/sessions`} className="text-[13px] text-(--accent-text) hover:underline">
+                  All sessions
+                </Link>
+              </div>
+              {!h.goals ? (
+                <Note>Align couldn&apos;t read the goals just now, so the work by goal is unknown.</Note>
+              ) : h.goals.length === 0 ? (
+                <EmptyState
+                  title="No active goals you can see"
+                  body="Agents read approved goals. Create the first one, then connect an agent to it."
+                  action={
+                    <Link href={`${base}/goals`} className={primaryBtn}>
+                      Create a goal
+                    </Link>
+                  }
+                />
               ) : (
-                <ul className="divide-y divide-(--line)">
-                  {apps.items.map((a) => (
-                    <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5" data-home-app={a.id}>
-                      <span className="min-w-0">
-                        <span className="text-[14px] font-medium text-(--text-1)">{a.name}</span>{" "}
-                        <span className="text-[12px] text-(--text-3)">connected by {a.connected_by.id === me.id ? "you" : a.connected_by.name}</span>
-                      </span>
-                      <span className="flex flex-wrap items-center gap-2">
-                        <span className="text-[13px] text-(--text-2)">{appStatusWords(a, when)}</span>
-                        <EvidenceLabel kind={EV[a.evidence_class]} size="s" />
-                      </span>
-                    </li>
+                <ul className="flex flex-col gap-3">
+                  {h.goals.map((g) => (
+                    <GoalGroup key={g.id} ws={ws} g={g} me={me} latest={latestFor(g.id)} sessions={byGoal(g.id)} onReview={(cr) => open(cr.goal.id, cr.id)} />
                   ))}
                 </ul>
               )}
-            </Panel>
-            <p className="text-[12px] text-(--text-3)">
-              Receipt: Align delivered it and recorded that. Agent reported: the agent&apos;s own word, never checked. Not observed: Align has nothing. Align does not see what an agent does with a goal.
-            </p>
-          </section>
-        </div>
-      )}
 
-      {review && <ReviewDrawer ws={ws} goal={review.goal} id={review.id} me={me.id} onClose={() => setReview(null)} onChanged={reloadAll} />}
-      <Drawer open={connect} onClose={() => setConnect(false)} title="Connect an agent" eyebrow="Get started">
-        <FirstRun ws={ws} onSeen={reloadAll} />
-      </Drawer>
-    </div>
+              {unbound.length > 0 && (
+                <Panel eyebrow="No goal" title="Your sessions not bound to a goal" padded={false}>
+                  <ul className="divide-y divide-(--line)">
+                    {unbound.map((x) => (
+                      <SessionRow key={x.session_key} s={x} me={me} bound={false} />
+                    ))}
+                  </ul>
+                </Panel>
+              )}
+
+              {teammates && teammates.length > 0 && (
+                <Panel eyebrow="Teammates" title="Other people's shared sessions" padded={false}>
+                  <ul className="divide-y divide-(--line)">
+                    {teammates.map((x) => (
+                      <li key={x.session_key} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5" data-home-session={x.session_key.slice(-6)}>
+                        <span className="min-w-0 font-mono text-[12px] text-(--text-2)">
+                          {HARNESS[x.harness] ?? x.harness} · {x.repo_alias ?? "repo hidden"} · {x.owner.name} · started {ago(x.started_at)}
+                        </span>
+                        <EvidenceLabel kind="unobserved" size="s" detail="goal not shown to owners yet" />
+                      </li>
+                    ))}
+                  </ul>
+                </Panel>
+              )}
+
+              <Panel
+                eyebrow="Connected apps"
+                title="When each app last read the goals"
+                padded={false}
+                actions={
+                  <Link href={`${base}/apps`} className="text-[13px] text-(--accent-text) hover:underline">
+                    Manage apps
+                  </Link>
+                }
+              >
+                {!apps ? (
+                  <p className="px-4 py-3 text-[14px] text-(--text-2)">Align couldn&apos;t read the connected apps just now, so whether any read the goals is unknown.</p>
+                ) : apps.items.length === 0 ? (
+                  <div className="flex flex-wrap items-center gap-2 px-4 py-3 text-[14px] text-(--text-2)" data-home-app="none">
+                    <EvidenceLabel kind="unobserved" size="s" />
+                    {apps.everyone ? "No AI app is connected to this workspace" : "You have not connected an AI app here"}, so Align has seen no goal reads.
+                    <button type="button" className={quietLink} onClick={() => setConnect(true)}>
+                      Connect one
+                    </button>
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-(--line)">
+                    {apps.items.map((a) => (
+                      <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5" data-home-app={a.id}>
+                        <span className="min-w-0">
+                          <span className="text-[14px] font-medium text-(--text-1)">{a.name}</span>{" "}
+                          <span className="text-[12px] text-(--text-3)">connected by {a.connected_by.id === me.id ? "you" : a.connected_by.name}</span>
+                        </span>
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="text-[13px] text-(--text-2)">{appStatusWords(a, when)}</span>
+                          <EvidenceLabel kind={EV[a.evidence_class]} size="s" />
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Panel>
+              <p className="text-[12px] text-(--text-3)">
+                Receipt: Align delivered it and recorded that. Agent reported: the agent&apos;s own word, never checked. Not observed: Align has nothing. Align does not see what an agent does with a
+                goal.
+              </p>
+            </section>
+          </div>
+        )}
+
+        {/* The drawers break words only where needed, so a short label ("Close", "Esc") never splits at 320. */}
+        <div className="[overflow-wrap:break-word]">
+          {review && <ReviewDrawer ws={ws} goal={review.goal} id={review.id} me={me.id} onClose={() => setReview(null)} onChanged={reloadAll} />}
+          <Drawer open={connect} onClose={() => setConnect(false)} title="Connect an agent" eyebrow="Get started">
+            <FirstRun ws={ws} onSeen={reloadAll} />
+          </Drawer>
+        </div>
+      </div>
+    </Shell>
   );
 }

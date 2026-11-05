@@ -37,7 +37,7 @@ function Who({ cr, me }: { cr: ChangeRequest; me: string }) {
   if (unlaunched && !cr.can.launch)
     return (
       <p className="text-[14px] text-(--text-2)" data-review-not-yours>
-        <b className="font-semibold text-(--text-1)">Not yours to launch.</b> {people(cr.launchers, me)} can launch it. Until then agents stay on version {cr.goal.version}.
+        <b className="font-semibold text-(--text-1)">Not yours to launch.</b> {people(cr.launchers, me)} can launch it. Until then Align has released v{cr.goal.version} only.
       </p>
     );
   return null;
@@ -58,7 +58,11 @@ export function ReviewDrawer({ ws, goal, id, me, onClose, onChanged }: { ws: str
       title={cr ? cr.goal.title : "Change request"}
       footer={
         <>
-          <Link href={`${base}/goals/${goal}#change-requests`} className="inline-flex min-h-[44px] items-center rounded-(--radius-s) px-3 text-[14px] text-(--accent-text) hover:underline" data-review-record>
+          <Link
+            href={`${base}/goals/${goal}#change-requests`}
+            className="inline-flex min-h-[44px] items-center rounded-(--radius-s) px-3 text-[14px] text-(--accent-text) hover:underline"
+            data-review-record
+          >
             Open the full record
           </Link>
           <Link href={`${base}/goals/${goal}`} className="inline-flex min-h-[44px] items-center rounded-(--radius-s) px-3 text-[14px] text-(--accent-text) hover:underline" data-review-work>
@@ -68,7 +72,11 @@ export function ReviewDrawer({ ws, goal, id, me, onClose, onChanged }: { ws: str
       }
     >
       {!cr ? (
-        r.error ? <Note>Align couldn&apos;t read this request just now: {r.error}</Note> : <Loading />
+        r.error ? (
+          <Note>Align couldn&apos;t read this request just now: {r.error}</Note>
+        ) : (
+          <Loading />
+        )
       ) : (
         <div className="flex flex-col gap-4" data-review={cr.id}>
           <div className="grid gap-3 rounded-(--radius-m) border border-(--line) bg-(--bg-panel) p-4 sm:grid-cols-[1fr_auto]">
@@ -88,9 +96,15 @@ export function ReviewDrawer({ ws, goal, id, me, onClose, onChanged }: { ws: str
               <dt className="text-(--text-3)">Proposed</dt>
               <dd className="font-mono text-(--text-1)">{cr.version ? `v${cr.version}` : `v${cr.goal.version + 1} on approval`}</dd>
               <dt className="text-(--text-3)">Evidence</dt>
-              <dd>{cr.evidence_count ? <EvidenceLabel kind="reported" size="s" detail={`${cr.evidence_count} link${cr.evidence_count === 1 ? "" : "s"}`} /> : <EvidenceLabel kind="unobserved" size="s" detail="no links" />}</dd>
+              <dd>
+                {cr.evidence_count ? (
+                  <EvidenceLabel kind="reported" size="s" detail={`${cr.evidence_count} link${cr.evidence_count === 1 ? "" : "s"}`} />
+                ) : (
+                  <EvidenceLabel kind="unobserved" size="s" detail="no links" />
+                )}
+              </dd>
             </dl>
-            <p className="text-[13px] text-(--text-3) sm:col-span-2">Approving records the decision. Agents get the new version only when someone launches it.</p>
+            <p className="text-[13px] text-(--text-3) sm:col-span-2">Approving records the decision. Align sends the new version to agents only when someone launches it.</p>
           </div>
           <Who cr={cr} me={me} />
           <ChangeRequestCard
