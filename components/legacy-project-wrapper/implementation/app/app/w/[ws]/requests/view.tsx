@@ -5,7 +5,7 @@ import { Panel, ReviewActions, ReviewBody } from "@/app/app/_ui/ds";
 import type { Me } from "../../../_ui/server";
 import type { ChangeRequest, Goal } from "../../../_ui/types";
 
-const LINK = "max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center text-[14px] text-(--accent-text) underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)";
+const LINK = "max-sm:inline-flex max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:items-center max-sm:justify-center text-[14px] text-(--accent-text) underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)";
 
 type Section = { id: string; title: string; list: ChangeRequest[]; empty: string };
 
