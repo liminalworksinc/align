@@ -3,6 +3,7 @@ import Link from "next/link";
 import { diffWords } from "@/lib/v2/change-words.mts";
 import { changeWaits, launchWaits } from "@/lib/v2/home-core.mts";
 import type { ChangeRequest } from "../types";
+import { deliveryStatement, type Delivery } from "./evidence-facts.mts";
 import { DECISION_LINK, DecisionLinks } from "./decision-links";
 import { Panel } from "./panel";
 import { StatusPill, type StatusKind } from "./status-pill";
@@ -62,7 +63,9 @@ export function decisionSentence(cr: ChangeRequest, me: string): string {
   return `A later version of the goal replaced it on ${at(cr.updated_at)}.`;
 }
 
-export function DecisionPanel({ ws, cr, me, latest = false }: { ws: string; cr: ChangeRequest; me: string; latest?: boolean }) {
+/** `delivery`: the launch's …/value read for a launched request (undefined while reading, null when it failed), for the
+ *  one-sentence delivery statement under "now the launched version". */
+export function DecisionPanel({ ws, cr, me, latest = false, delivery }: { ws: string; cr: ChangeRequest; me: string; latest?: boolean; delivery?: Delivery | null }) {
   const s = status(cr);
   return (
     <Panel eyebrow={latest ? (cr.state === "pending" || cr.state === "countered" || (cr.state === "approved" && cr.launch !== "launched") ? "Open decision on this goal" : "Latest decision on this goal") : "The decision this belongs to"} title={`${cr.requester.name}'s change, revision ${cr.revision}`}>
@@ -72,6 +75,11 @@ export function DecisionPanel({ ws, cr, me, latest = false }: { ws: string; cr: 
           <span className="min-w-0 text-[14px] text-(--text-1) [overflow-wrap:anywhere]">{changeLine(cr)}</span>
         </div>
         <p className="text-[14px] text-(--text-1)">{decisionSentence(cr, me)}</p>
+        {cr.launch === "launched" && cr.version && delivery !== undefined && (
+          <p data-delivery-statement className="text-[14px] text-(--text-1)">
+            {deliveryStatement(cr.version, delivery)}
+          </p>
+        )}
         {cr.state === "rejected" && cr.rejection_reason && <blockquote className="border-l-2 border-(--line-strong) pl-3 text-[14px] text-(--text-1) [overflow-wrap:anywhere]">{cr.rejection_reason}</blockquote>}
         <DecisionLinks ws={ws} goalId={cr.goal.id} crId={cr.id} here="work" />
       </div>

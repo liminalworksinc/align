@@ -3,9 +3,9 @@ import Link from "next/link";
 import type { ChangeRequest, Evidence, Goal, MySession } from "../types";
 import { DecisionPanel, NoDecisionPanel } from "./decision-panel";
 import { EmptyState } from "./empty-state";
-import { hasEvidence } from "./evidence-facts.mts";
+import { hasEvidence, type Delivery } from "./evidence-facts.mts";
 import { EvidenceLabel } from "./evidence-label";
-import { EvidenceSummary } from "./evidence-summary";
+import { EvidenceSummary, useDelivery } from "./evidence-summary";
 import { Panel } from "./panel";
 import { useRead } from "./read";
 import { StatusPill } from "./status-pill";
@@ -137,12 +137,12 @@ function SessionsPanel({ ws, goal }: { ws: string; goal: Goal }) {
 }
 
 /** The decision's own evidence: every fact on it (EvidenceSummary full) and the links on its current revision. */
-function DecisionEvidence({ ws, cr, me }: { ws: string; cr: ChangeRequest; me: string }) {
+function DecisionEvidence({ ws, cr, me, value }: { ws: string; cr: ChangeRequest; me: string; value: Delivery | null | undefined }) {
   const links = cr.revisions.find((r) => r.revision === cr.revision)?.evidence ?? [];
   return (
     <Panel eyebrow="Its evidence" title={`On revision ${cr.revision}`}>
       <div className="flex flex-col gap-3">
-        <EvidenceSummary ws={ws} cr={cr} variant="full" />
+        {cr.launch === "launched" && value === undefined ? <p className="text-[13px] text-(--text-3)">Reading evidence…</p> : <EvidenceSummary ws={ws} cr={cr} variant="full" value={cr.launch === "launched" ? value : null} />}
         {!hasEvidence(cr) && <p className="text-[14px] text-(--text-2)">No evidence attached.</p>}
         {links.length > 0 && (
           <ul className="flex flex-col gap-2 border-t border-(--line) pt-3">
@@ -292,13 +292,15 @@ function WorkIndex({ ws }: { ws: string }) {
 export function WorkPanels({ ws, goalId, crId, me = "" }: { ws: string; goalId?: string; crId?: string; me?: string }) {
   const feed = useRead<{ goals: Goal[] }>(goalId ? `/api/v2/workspaces/${ws}/goals` : null);
   const crs = useRead<{ change_requests: ChangeRequest[] }>(goalId ? `/api/v2/workspaces/${ws}/goals/${goalId}/change-requests` : null);
-  if (!goalId) return <WorkIndex ws={ws} />;
   const goal = feed.data?.goals.find((g) => g.id === goalId);
   const list = crs.data?.change_requests ?? [];
   const named = crId ? list.find((c) => c.id === crId) : undefined;
   const open = list.filter(isOpen).sort(newest)[0];
   const latest = [...list].sort(newest)[0];
   const decision = named ?? (crId ? undefined : (open ?? latest));
+  // Read once for the decision's delivery statement and its evidence summary.
+  const delivery = useDelivery(ws, decision);
+  if (!goalId) return <WorkIndex ws={ws} />;
 
   if (feed.loading || crs.loading) return <p className="text-[14px] text-(--text-2)">Loading…</p>;
   if (feed.data && !goal)
@@ -317,10 +319,10 @@ export function WorkPanels({ ws, goalId, crId, me = "" }: { ws: string; goalId?:
 
   return (
     <div data-surface="work" data-work-mode={decision ? "decision" : "goal"} className="flex min-w-0 flex-col gap-4">
-      {decision ? <DecisionPanel ws={ws} cr={decision} me={me} latest={!named} /> : crs.status === 0 ? <NoDecisionPanel ws={ws} goalId={goal.id} missing={!!crId} /> : <p className="text-[14px] text-(--text-2)">{crs.message}</p>}
+      {decision ? <DecisionPanel ws={ws} cr={decision} me={me} latest={!named} delivery={delivery.value} /> : crs.status === 0 ? <NoDecisionPanel ws={ws} goalId={goal.id} missing={!!crId} /> : <p className="text-[14px] text-(--text-2)">{crs.message}</p>}
       <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-4">
-          {decision && <DecisionEvidence ws={ws} cr={decision} me={me} />}
+          {decision && <DecisionEvidence ws={ws} cr={decision} me={me} value={delivery.value} />}
           <Panel eyebrow="What Align sent" title={goal.title} actions={<Link href={`/app/w/${ws}/goals/${goal.id}`} className={`${LINK} text-[14px]`}>Open goal</Link>}>
             <dl className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[14px]">
               <Row label="Current version">v{goal.version}</Row>

@@ -6,8 +6,8 @@ import { changeWaits, launchWaits } from "@/lib/v2/home-core.mts";
 import { Compare } from "./compare";
 import { DecisionLinks } from "./decision-links";
 import { EvidenceLabel } from "./evidence-label";
-import { hasEvidence } from "./evidence-facts.mts";
-import { EvidenceSummary } from "./evidence-summary";
+import { deliveryStatement, hasEvidence } from "./evidence-facts.mts";
+import { EvidenceSummary, useDelivery } from "./evidence-summary";
 import { StatusPill, type StatusKind } from "./status-pill";
 
 // A compact review of one change request (LIM-2472 workstream S), for both concepts in place of main's long decision
@@ -63,6 +63,8 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
   const waits = changeWaits(cr);
   const launch = launchWaits(cr);
   const n = cr.base_version;
+  // Read once: the state line's delivery statement and the evidence summary both use it.
+  const delivery = useDelivery(ws, cr);
   // The columns are named by the request's state: what it asks while undecided, what was decided once it is.
   const undecided = cr.state === "pending" || cr.state === "countered";
   const currentLabel = undecided ? `Current (v${n})` : `Version ${n}`;
@@ -109,7 +111,11 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
 
       <section aria-label="Evidence" className="flex flex-col gap-2">
         <p className="text-[13px] font-medium text-(--text-2)">Evidence</p>
-        <EvidenceSummary ws={ws} cr={cr} variant="full" />
+        {delivery.launched && delivery.value === undefined ? (
+          <p className="text-[13px] text-(--text-3)">Reading evidence…</p>
+        ) : (
+          <EvidenceSummary ws={ws} cr={cr} variant="full" value={delivery.launched ? delivery.value : null} />
+        )}
         {!hasEvidence(cr) && (
           <p className="text-[14px] text-(--text-2)">
             {cr.state === "approved"
@@ -152,7 +158,7 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
         {waits?.next === "decide" && `Waits on ${people(waits.waiting_on, me)} to decide.`}
         {waits?.next === "accept_counter" && `Waits on ${people(waits.waiting_on, me)} to accept the suggested change.`}
         {!waits && launch && `Approval is not launch: version ${cr.version ?? cr.goal.version + 1} becomes the launched version only when ${people(launch.launchers, me)} launch${launch.launchers.length === 1 && launch.launchers[0].id !== me ? "es" : ""} it.`}
-        {!waits && !launch && cr.state === "approved" && cr.launch === "launched" && `Launched by ${who(cr.launch_decided_by, me)}, ${at(cr.launch_decided_at)}: version ${cr.version} is now the launched version.`}
+        {!waits && !launch && cr.state === "approved" && cr.launch === "launched" && `Launched by ${who(cr.launch_decided_by, me)}, ${at(cr.launch_decided_at)}: version ${cr.version} is now the launched version.${delivery.value !== undefined ? ` ${deliveryStatement(cr.version!, delivery.value)}` : ""}`}
         {!waits && !launch && cr.state !== "approved" && cr.state_note}
       </p>
     </div>
