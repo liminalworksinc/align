@@ -308,7 +308,7 @@ export function NeedsList({
   const items = useMemo<NextItem[] | null | undefined>(() => {
     if (loading || !reread || reqs.loading || sent.loading) return undefined;
     if (unknown.length || cr.error) return null;
-    return needsNow.map((n) => ({ key: n.key, kind: n.word, title: n.goal?.title ?? n.cause, waited: n.since && waited(n.since.at) !== "just now" ? waited(n.since.at) : undefined, href: needHref(ws, n, reviewBase), review: !!n.review, actionable: !!n.action }));
+    return needsNow.map((n) => ({ key: n.key, kind: n.word, title: n.goal?.title ?? n.cause, waited: n.since ? waited(n.since.at) : undefined, href: needHref(ws, n, reviewBase), review: !!n.review, actionable: !!n.action }));
   }, [loading, reread, reqs.loading, sent.loading, unknown.length, cr.error, needsNow, ws, reviewBase]);
   const itemsCb = useRef(onItems);
   useEffect(() => {

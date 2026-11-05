@@ -244,7 +244,7 @@ try {
     await sleep(1000);
     const done = await p.evaluate(() => [...document.querySelectorAll("[data-row-notice]")].map((e) => e.textContent ?? "").find((t) => /Recorded/.test(t)) ?? "");
     const after = await apiAs(owner, "GET", `${W}/goals/${withEv.g.id}/change-requests/${withEv.cr.id}`);
-    check("Requests: one click records Approve only (approved, launch pending) and says so", /Recorded: you approved revision 1/.test(done) && after.state === "approved" && after.launch === "pending", done);
+    check("Requests: one click records Approve only (approved, launch pending) and says so", /Recorded: you approved revision 1\. Not launched yet\./.test(done) && after.state === "approved" && after.launch === "pending", done);
     await p.evaluate(() => document.querySelector('[data-row-notice="done"]')?.scrollIntoView({ block: "center" }));
     await shot(p, "r2-requests-shortcut-dark-1440");
     await p.close();

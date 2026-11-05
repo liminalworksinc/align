@@ -24,7 +24,8 @@ type Filter = Phase | "all";
 function whoCan(r: ChangeRequest, me: string): string {
   const w = waitsOn(r);
   if (!w) return "No action";
-  return `${nameList(w.people, me)} can ${w.for === "decision" ? "decide" : w.for === "launch" ? "launch it" : "act on it"}`;
+  const verb = w.for === "decision" ? "decide" : w.for === "launch" ? "launch it" : w.for.startsWith("answer") ? "answer the suggested change" : w.for.startsWith("update") ? "update it" : "act on it";
+  return `${nameList(w.people, me)} can ${verb}`;
 }
 
 export function Desk({
@@ -135,9 +136,9 @@ export function Desk({
       width: "200px",
       sortValue: (r) => r.evidence_count,
       // The same chips the review shows, beside the click they back; none for a request not launched reads no delivery.
-      // One chip on one line ("+N more" says the rest); the title column takes any wrap.
+      // One chip ("+N more" says the rest). Whether its words wrap inside the chip is EvidenceLabel's (foundation).
       render: (r) => (
-        <span className="block sm:whitespace-nowrap">
+        <span className="block">
           <EvidenceSummary ws={ws} cr={r} variant="inline" max={1} value={r.launch === "launched" ? undefined : null} />
         </span>
       ),
@@ -152,7 +153,7 @@ export function Desk({
   const shortcut = (r: ChangeRequest, label: string) => r.can.approve && hasEvidence(r) && label === "Review";
   const approveRow = async (r: ChangeRequest) => {
     setBusy(r.id);
-    const res = await sendChoice(ws, r, "approve", null, { requireEvidence: true });
+    const res = await sendChoice(ws, r, "approve", null, { requireEvidence: true, launchNote: true });
     setBusy(null);
     setNotes((m) => new Map(m).set(r.id, res));
     if (res.reread) feed.reload();
