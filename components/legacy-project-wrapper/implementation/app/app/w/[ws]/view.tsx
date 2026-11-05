@@ -140,7 +140,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
         {nothingOfMine && !ownerView && (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3" data-home-role-note>
             <p className="min-w-0 flex-1 basis-64 text-[14px] text-(--text-2)">
-              {canConnect ? "You haven't connected an agent here. " : ""}Other people&apos;s sessions and apps are shown to workspace owners only, so this Home shows the plan and what Align released, not their agents.
+              {canConnect ? "You haven't connected an agent here. " : ""}Other people&apos;s sessions and apps are shown to workspace owners only, so this Home shows the plan and what was launched, not their agents.
             </p>
             {canConnect && (
               <button type="button" className={outlineBtn} onClick={() => setConnect(true)} data-connect-empty>

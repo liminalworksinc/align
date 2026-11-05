@@ -13,11 +13,27 @@ import { buildNeeds, inPhase, KIND_WORDS, latestLaunches, rankNote, REQ_GOALS_MA
 
 type Groups<T> = { waiting_on_me: T[]; mine: T[]; others: T[] };
 
-const PHASES: { value: NeedPhase; label: string }[] = [
-  { value: "needs_you", label: "Needs you" },
-  { value: "waiting_on_others", label: "Waiting on others" },
-  { value: "done", label: "Done" },
+const PHASES: { value: NeedPhase; label: string; short: string }[] = [
+  { value: "needs_you", label: "Needs you", short: "Needs you" },
+  { value: "waiting_on_others", label: "Waiting on others", short: "Waiting" },
+  { value: "done", label: "Done", short: "Done" },
 ];
+
+/** True below 400px, so the phase filter stays on one line at 320. Null until mounted (server and first render agree). */
+function useNarrow() {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 399px)");
+    const on = () => setNarrow(mq.matches);
+    const t = setTimeout(on, 0);
+    mq.addEventListener("change", on);
+    return () => {
+      clearTimeout(t);
+      mq.removeEventListener("change", on);
+    };
+  }, []);
+  return narrow;
+}
 
 /** How long a row has waited, from its `since` time. */
 export function waited(iso: string | undefined): string {
@@ -53,10 +69,10 @@ export function needHref(ws: string, n: Need, base = ""): string {
 }
 
 /** REQ: the requests to agents on up to REQ_GOALS_MAX active goals this person reads, their own goals first, read in
- *  parallel. `unchecked` counts the active goals past the cap; `groups` is null when the goals couldn't be read. A goal
- *  whose requests read fails is counted as unchecked too. */
+ *  parallel. `unchecked` counts the active goals past the cap (deliberate); `failed` counts goals whose read failed,
+ *  which makes "requests to agents" unknown like any unread source. `groups` is null when the goals couldn't be read. */
 function useRequestsToAgents(W: string, me: string, goals: Goal[] | null, failed: boolean) {
-  const [state, setState] = useState<{ key: string; groups: NonNullable<NeedsInput["requests"]>; unchecked: number } | null>(null);
+  const [state, setState] = useState<{ key: string; groups: NonNullable<NeedsInput["requests"]>; unchecked: number; failed: number } | null>(null);
   const list = useMemo(
     () => (goals ? goals.filter((g) => g.status === "active").sort((a, b) => Number(b.owner.id === me) - Number(a.owner.id === me) || a.id.localeCompare(b.id)) : null),
     [goals, me],
@@ -69,15 +85,15 @@ function useRequestsToAgents(W: string, me: string, goals: Goal[] | null, failed
     void Promise.all(pick.map((g) => api<{ requests: RequestLite[] }>(`${W}/goals/${g.id}/requests`).then((r) => ({ goal: { id: g.id, title: g.title }, requests: r.requests }), () => null))).then((res) => {
       if (!live) return;
       const ok = res.filter((x): x is NonNullable<typeof x> => !!x);
-      setState({ key, groups: ok, unchecked: list.length - pick.length + (res.length - ok.length) });
+      setState({ key, groups: ok, unchecked: list.length - pick.length, failed: res.length - ok.length });
     });
     return () => {
       live = false;
     };
   }, [W, list, key]);
-  if (failed) return { groups: null, unchecked: 0, loading: false };
+  if (failed) return { groups: null, unchecked: 0, failed: 0, loading: false };
   const ready = state && state.key === key;
-  return { groups: ready ? state.groups : undefined, unchecked: ready ? state.unchecked : 0, loading: !ready };
+  return { groups: ready ? state.groups : undefined, unchecked: ready ? state.unchecked : 0, failed: ready ? state.failed : 0, loading: !ready };
 }
 
 /** The value read's delivery fields (ds/evidence-facts.mts Delivery): sessions with receipts, and apps sent the version. */
@@ -85,11 +101,12 @@ type ValueLite = Delivery;
 
 /** SENT: for the latest launch on up to SENT_GOALS_MAX goals (newest first), the value read's list of apps Align sent
  *  that version. `values` keeps each read for the rows' evidence summaries, so a row and the review never disagree.
- *  A read that fails, and every launch past the cap, counts as unsent-unchecked. */
+ *  Launches past the cap are `unchecked` (deliberate); a value read that fails is `failed`, which makes "what Align
+ *  sent apps" unknown like any unread source. */
 function useSends(W: string, crs: ChangeRequest[] | null, failed: boolean) {
   const launches = useMemo(() => (crs ? latestLaunches(crs) : null), [crs]);
   const key = launches ? launches.map((c) => `${c.id}:${c.version}`).join(",") : null;
-  const [state, setState] = useState<{ key: string; sends: NonNullable<NeedsInput["sends"]>; values: Map<string, ValueLite>; unchecked: number } | null>(null);
+  const [state, setState] = useState<{ key: string; sends: NonNullable<NeedsInput["sends"]>; values: Map<string, ValueLite>; unchecked: number; failed: number } | null>(null);
   useEffect(() => {
     if (!launches || key === null) return;
     let live = true;
@@ -101,16 +118,17 @@ function useSends(W: string, crs: ChangeRequest[] | null, failed: boolean) {
         key,
         sends: ok.map(({ c, v }) => ({ goal: { id: c.goal.id, title: c.goal.title }, cr: c.id, version: c.version!, launched_at: c.launch_decided_at!, apps: v.apps?.items ?? [], current_version: c.goal.version })),
         values: new Map(ok.map(({ c, v }) => [c.id, v])),
-        unchecked: launches.length - pick.length + (res.length - ok.length),
+        unchecked: launches.length - pick.length,
+        failed: res.length - ok.length,
       });
     });
     return () => {
       live = false;
     };
   }, [W, launches, key]);
-  if (failed) return { sends: null, values: new Map<string, ValueLite>(), unchecked: 0, loading: false };
+  if (failed) return { sends: null, values: new Map<string, ValueLite>(), unchecked: 0, failed: 0, loading: false };
   const ready = state && state.key === key;
-  return { sends: ready ? state.sends : undefined, values: ready ? state.values : new Map<string, ValueLite>(), unchecked: ready ? state.unchecked : 0, loading: !ready };
+  return { sends: ready ? state.sends : undefined, values: ready ? state.values : new Map<string, ValueLite>(), unchecked: ready ? state.unchecked : 0, failed: ready ? state.failed : 0, loading: !ready };
 }
 
 /** "a", "a and b", "a, b and c". */
@@ -147,10 +165,11 @@ export function NeedsList({
   const crList = useMemo(() => (cr.data ? [...cr.data.waiting_on_me, ...cr.data.mine, ...cr.data.others] : null), [cr.data]);
   const sent = useSends(W, crList, !!cr.error);
   const [phase, setPhase] = useState<NeedPhase>("needs_you");
+  const narrow = useNarrow();
   const [q, setQ] = useState("");
 
   const loading = [cr, asks, al, home].some((r) => r.loading && !r.data && !r.error) || reqs.loading || sent.loading;
-  const { rows, unknown, notices } = useMemo(
+  const { rows, unknown: unreadSources, notices } = useMemo(
     () =>
       buildNeeds({
         ws,
@@ -164,6 +183,10 @@ export function NeedsList({
       }),
     [ws, me, crList, asks.data, al.data, home.data, reqs.groups, sent.sends],
   );
+  // A failed per-goal read is an unread source like any other (amber line, lower-bound counts, partial); only the
+  // deliberate cap stays in the rank note, with one short visible line.
+  const unknown: string[] = [...unreadSources, ...(sent.failed ? ["what Align sent apps"] : []), ...(reqs.failed ? ["requests to agents"] : [])].filter((x, i, a) => a.indexOf(x) === i);
+  const capped = reqs.unchecked + sent.unchecked;
   const counts = Object.fromEntries(PHASES.map((p) => [p.value, inPhase(rows, p.value).length])) as Record<NeedPhase, number>;
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -192,7 +215,7 @@ export function NeedsList({
     );
 
   return (
-    <section aria-labelledby={heading ? "needs-h" : undefined} aria-label={heading ? undefined : "Needs you"} data-needs="list" className="@container/needs flex min-w-0 flex-col gap-2">
+    <section aria-labelledby={heading ? "needs-h" : undefined} aria-label={heading ? undefined : "Needs you"} data-needs="list" className="@container/needs flex min-w-0 flex-col gap-1.5">
       {heading && (
         <h2 id="needs-h" className="text-[18px] font-semibold text-(--text-1)">
           Needs you
@@ -204,7 +227,7 @@ export function NeedsList({
           hideLabel
           size="s"
           // With a source unread, a count is a lower bound ("2+"), and a zero is unknown ("?"), never a bare 0.
-          options={PHASES.map((p) => ({ value: p.value, label: loading ? p.label : `${p.label} ${partial ? (counts[p.value] ? `${counts[p.value]}+` : "?") : counts[p.value]}` }))}
+          options={PHASES.map((p) => ({ value: p.value, label: loading ? (narrow ? p.short : p.label) : `${narrow ? p.short : p.label} ${partial ? (counts[p.value] ? `${counts[p.value]}+` : "?") : counts[p.value]}` }))}
           value={phase}
           onChange={(v) => {
             setPhase(v);
@@ -224,6 +247,12 @@ export function NeedsList({
           </label>
         )}
       </div>
+      {capped > 0 && !loading && (
+        <p data-needs-capped className="px-1 text-[12px] text-(--text-3)">
+          {reqs.unchecked ? `Requests to agents not checked on ${reqs.unchecked} goal${reqs.unchecked === 1 ? "" : "s"}. ` : ""}
+          {sent.unchecked ? `What Align sent apps not checked on ${sent.unchecked} launch${sent.unchecked === 1 ? "" : "es"}.` : ""}
+        </p>
+      )}
       {unknown.length > 0 && !loading && (
         <p role="status" data-needs-partial className="rounded-(--radius-s) border border-(--st-retry)/50 bg-(--st-retry-soft) px-3 py-2 text-[13px] text-(--text-1)">
           Align couldn&apos;t read the {listWords(unknown)} just now, so this list may be missing items and its counts are at least what you see. Reload to try again.
@@ -260,6 +289,9 @@ export function NeedsList({
               evidence={
                 n.kind === "decide" && n.phase === "needs_you" && n.cr && !hasEvidence(n.cr) ? (
                   <span className="text-[12px] text-(--text-3)">No evidence attached</span>
+                ) : n.kind === "launch" && n.phase !== "done" && n.cr?.approved_without_evidence ? (
+                  // The approval was recorded with no links (the server's own flag); the launcher should know.
+                  <span className="text-[12px] text-(--text-3)">Approved without evidence</span>
                 ) : n.cr ? (
                   // The shared summary, from the same value read the review uses; none for a request not launched.
                   <EvidenceSummary ws={ws} cr={n.cr} variant="inline" max={2} value={n.cr.launch === "launched" ? sent.values.get(n.cr.id) : null} />
@@ -278,8 +310,9 @@ export function NeedsList({
         <p data-needs-notice className="px-1 text-[12px] text-(--text-3)">
           Align has recorded no goal read from {notices[0]!.app.name}
           {notices[0]!.connected_by.id === me ? "" : ` (connected by ${notices[0]!.connected_by.name})`}
-          {notices.length > 1 ? ` or ${notices.length - 1} other app${notices.length === 2 ? "" : "s"}` : ""}.{" "}
-          <Link href={`/app/w/${ws}/apps`} className="inline-flex items-center whitespace-nowrap text-(--text-2) underline underline-offset-4 hover:text-(--text-1) max-sm:min-h-[44px]">
+          {notices.length > 1 ? ` or ${notices.length - 1} other app${notices.length === 2 ? "" : "s"}` : ""}.
+          {/* On its own line, so its 44px target never stretches the sentence's line. */}
+          <Link href={`/app/w/${ws}/apps`} className="flex w-fit items-center whitespace-nowrap text-(--text-2) underline underline-offset-4 hover:text-(--text-1) max-sm:min-h-[44px]">
             See apps
           </Link>
         </p>

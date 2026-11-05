@@ -31,7 +31,7 @@ export function Facts({ cr, me }: { cr: ChangeRequest; me: string }) {
         <Who p={cr.requester} me={me} /> <span className="text-[12px] text-(--text-3)">{when(cr.created_at)}</span>
       </Fact>
       <Fact k="Approvers">{cr.approvers.length ? cr.approvers.map((p) => (p.id === me ? "You" : p.name)).join(", ") : "Nobody yet"}</Fact>
-      <Fact k="Launched">{v.launched}</Fact>
+      <Fact k="Current">{v.launched}</Fact>
       <Fact k="Approved">{v.approved}</Fact>
       {cr.approved_by && <Fact k="Approved by">{cr.approved_by.id === me ? "You" : cr.approved_by.name}</Fact>}
       {cr.rejected_by && <Fact k="Declined by">{cr.rejected_by.id === me ? "You" : cr.rejected_by.name}</Fact>}
