@@ -22,13 +22,13 @@ What the base holds: foundation (`e6ea124`), Stream R (rest of app, `3cc0f71`), 
 | `4c7cd1532534ba016a251eeaedb7c198c1d9d2d3` (contains foundation `3b90f1a`: DataTable `th` nowrap; EvidenceLabel icon and word kept together) | `9a4c3a82ea3f3799ecfae651804ecab171e97787` | clean: `ds/data-table.tsx`, `ds/evidence-label.tsx` |
 | `eb1b357221b6be23b68325f152eaa1b2727bad14` (contains `4c7cd15` and foundation `1a4e6d7`: no outline-colour transition on Segmented and kit `Btn`) | `4ba62b0ad85f87e1599911f9d0ae1cda63f5ef7a` | clean: `ds/segmented.tsx`, `kit.tsx` |
 | concept A `3f90b9cad56136c17a11b27b060788c2396242f7` (rail shell, review drawer, first run, A's Home as the starting file) | `1ce4a1a1e8dd3adb62355af7151867775dae78ff` | clean: `kit.tsx`, `w/[ws]/view.tsx`, `w/[ws]/first-run.tsx`, `w/[ws]/review-drawer.tsx`, `design/prototypes/lim-2472/a/*` |
-| foundation `27a686b5c541db46d457f121acc0dd0d62336d04` (`NeedRow`, `NeedList`, `NeedAction`) | merge commit before this report update | clean: `_ui/ds/need.tsx`, `_ui/ds/index.ts` |
+| foundation `27a686b5c541db46d457f121acc0dd0d62336d04` (`NeedRow`, `NeedList`, `NeedAction`) | `9645fcd3364f7c2c4fcf737101a378e1996e187c` | clean: `_ui/ds/need.tsx`, `_ui/ds/index.ts` |
 
 No conflicts, so no file needed a side chosen. No rebase, no force push, no stash.
 
 ## ADDED / REPLACED / DELETED (whole base against main `b16f8d1`)
 
-COUNTS_PLACEHOLDER No file under `app/api/**`, `lib/**`, `proxy.ts`, migrations or tests is touched.
+86 files: 39 added, 47 modified, 0 deleted. No file under `app/api/**`, `lib/**`, `proxy.ts`, migrations or tests is touched.
 
 ### Foundation
 - ADDED: `app/app/_ui/ds/{data-table,drawer,empty-state,evidence-label,icons,kbd,panel,segmented,status-pill,theme,theme-script,timeline}.tsx|ts`, `app/app/_ui/ds/index.ts` (one import path, `@/app/app/_ui/ds`), `design/prototypes/lim-2472/LIM-2472-FOUNDATION.md`, `design/prototypes/lim-2472/foundation.html` (specimen).
