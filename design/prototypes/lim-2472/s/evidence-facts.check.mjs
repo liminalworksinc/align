@@ -86,7 +86,7 @@ expect("launch that targeted no session, one app sent it", changeFacts({ revisio
   if (!ok) failed++;
   console.log(`${ok ? "ok  " : "FAIL"} ...and says no session on this goal: ${say(f)}`);
 }
-expect("goal with 35% agent time and nothing launched", goalFacts({ allocation: { target_share: 40, share_7d: 35, gap_7d: -5, held: false } }, null), "reported", "35% agent time");
+expect("goal with 35% agent time and nothing launched", goalFacts({ allocation: { target_share: 40, share_7d: 35, gap_7d: -5, held: false } }, null), "reported", "35% of reported agent time, 7 days");
 none("goal with no agent time, not quiet: no fact", goalFacts({ allocation: { target_share: null, share_7d: 0, gap_7d: null, held: false } }, null));
 
 const at = process.argv.indexOf("--seed");
