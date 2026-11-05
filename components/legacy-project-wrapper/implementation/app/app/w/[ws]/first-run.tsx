@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, Btn, when, type WsSummary } from "../../_ui/kit";
 import { READ_TOOLS } from "@/lib/mcp/read-tools";
 import { claudeCodeLine } from "@/lib/paste-lines";
@@ -94,6 +94,8 @@ export default function FirstRun({ ws, onSeen, always = false, me, hasGoals = fa
     };
   }, []);
 
+  // This mount has seen the person with no app that made a request: only then does a seen app mean Home changed.
+  const sawUnseen = useRef(false);
   // The status: read now, then every few seconds while the card is shown and the tab visible.
   useEffect(() => {
     let live = true;
@@ -106,9 +108,11 @@ export default function FirstRun({ ws, onSeen, always = false, me, hasGoals = fa
           setApps({ ...d, at: Date.now() });
           setFailed(false);
           if (!always && d.apps.some((a) => seenApp(a) && (!me || a.user?.id === me))) {
-            onSeen(); // the Home reads again and shows the app in its own section; this card is done
+            // They just connected: the Home reads again. Already connected on load: nothing changed, just stop checking.
+            if (sawUnseen.current) onSeen();
             return;
           }
+          sawUnseen.current = true;
         } catch {
           if (!live) return;
           setFailed(true);
@@ -196,7 +200,7 @@ export default function FirstRun({ ws, onSeen, always = false, me, hasGoals = fa
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="min-w-0 flex-1 basis-64">
             <p className="font-semibold">Connect your agent</p>
-            <p className="text-(--text-2)">Your agent reads the goals you can read, as you. It can&apos;t change anything here.</p>
+            <p className="text-(--text-2)">Your agent reads the goals you can read, as you. It can&apos;t approve or change a goal.</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             {sample && !inSample && (
