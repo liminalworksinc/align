@@ -500,6 +500,7 @@ export function ReviewActions({
   compact = false,
   initialChoice,
   onChoice,
+  after,
 }: {
   ws: string;
   cr: ChangeRequest;
@@ -508,6 +509,8 @@ export function ReviewActions({
   compact?: boolean;
   initialChoice?: ReviewChoice;
   onChoice?: (c: ReviewChoice | null) => void;
+  /** Shown under a recorded decision's notice only (never under a refusal or a retry): the host's "Next" (NextAfterDecision). */
+  after?: ReactNode;
 }) {
   const next = cr.version ?? cr.goal.version + 1;
   const n = cr.goal.version;
@@ -644,6 +647,7 @@ export function ReviewActions({
     return (
       <div className="flex flex-col gap-2">
         {notice && <NoticeLine n={notice} r={noticeRef} />}
+        {notice?.kind === "done" && after}
         {line && (
           <p data-not-yours className="text-[14px] text-(--text-2)">
             {line}
@@ -658,6 +662,7 @@ export function ReviewActions({
   return (
     <div className="flex min-w-0 flex-col gap-3" data-review-actions={cr.id}>
       {notice && <NoticeLine n={notice} r={noticeRef} />}
+        {notice?.kind === "done" && after}
       {shown !== "confirm" && (
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" data-decision={TITLE[dominant]} aria-pressed={choice === dominant} className={PRIMARY} onClick={() => pick(dominant)}>

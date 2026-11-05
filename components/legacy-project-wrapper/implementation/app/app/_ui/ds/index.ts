@@ -21,3 +21,5 @@ export { EvidenceSummary, useDelivery, type EvidenceSummaryProps } from "./evide
 export { changeFacts, deliveryStatement, goalFacts, hasEvidence, FACT_WORD, type Fact, type FactKind, type Delivery } from "./evidence-facts.mts";
 export { DecisionLinks, DECISION_LINK, type DecisionPlace } from "./decision-links";
 export { DecisionPanel, NoDecisionPanel, decisionSentence } from "./decision-panel";
+export { NextAfterDecision } from "./next";
+export { pickNext, NEXT_WORDS, type NextItem, type NextState } from "./next-core.mts";
