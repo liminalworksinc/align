@@ -211,7 +211,7 @@ export default function Since({
         <h2 id="since-title" className="text-[16px] font-semibold text-(--text-1)">
           Since you last looked
         </h2>
-        {since && <p className="text-[13px] text-(--text-3)">since your last visit on this device, {stamp(since)}</p>}
+        {since && <p className="text-[13px] text-(--text-3)">Since your last visit on this device, {stamp(since)}</p>}
       </div>
       {!visit.ready ? null : !since ? (
         <p className="rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-2.5 text-[14px] text-(--text-2)" data-since-first>

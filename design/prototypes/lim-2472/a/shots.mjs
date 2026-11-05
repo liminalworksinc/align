@@ -350,6 +350,37 @@ for (const width of [390, 320]) {
     const second = await sinceState(again);
     const text2 = await again.$eval("[data-since]", (e) => e.innerText);
     if (second !== "0" || !text2.includes("Nothing changed since your last visit.")) throw new Error(`Since, second visit: wanted "Nothing changed since your last visit.", got data-since=${second}: ${text2.slice(0, 200)}`);
+    // A source Align couldn't read is no evidence that nothing changed: with one read forced to fail, the section names
+    // what it couldn't read and never says "Nothing changed since your last visit."
+    const failures = [
+      ["change requests", (u) => u.pathname === `/api/v2/workspaces/${WS}/change-requests` && !u.search],
+      ["goals", (u) => u.pathname === `/api/v2/workspaces/${WS}/home`],
+      ["goal versions", (u) => /^\/api\/v2\/workspaces\/[^/]+\/goals\/[^/]+$/.test(u.pathname)],
+    ];
+    for (const [source, match] of failures) {
+      const f = await ctx.newPage();
+      await f.setViewport({ width: 1440, height: 900 });
+      await f.setRequestInterception(true);
+      f.on("request", (q) => (q.method() === "GET" && match(new URL(q.url())) ? q.respond({ status: 500, contentType: "application/json", body: '{"error":"forced","message":"Forced failure (shots.mjs)."}' }) : q.continue()));
+      await goto(f, `/app/w/${WS}`);
+      await f.waitForSelector("[data-since]", { timeout: 60_000 });
+      await f.waitForFunction(() => document.querySelector("[data-since]")?.getAttribute("data-since") !== "reading", { timeout: 60_000 }).catch(() => undefined);
+      await f.waitForNetworkIdle({ idleTime: 500, timeout: 20_000 }).catch(() => undefined);
+      const t = await f.$eval("[data-since]", (e) => e.innerText);
+      if (!t.includes(`couldn't read the`) || !t.includes(source)) throw new Error(`Since with ${source} unread: wanted the couldn't-read line naming it, got: ${t.slice(0, 240)}`);
+      if (t.includes("Nothing changed since your last visit.")) throw new Error(`Since with ${source} unread: still says nothing changed: ${t.slice(0, 240)}`);
+      // Goals unread is not goals absent: no empty-workspace state and no "No goals here yet" over a failed read.
+      if (source === "goals") {
+        const h1 = await f.$eval("main h1", (e) => e.textContent.trim());
+        const fr = await f.$eval("[data-first-run]", (e) => e.getAttribute("data-first-run")).catch(() => null);
+        if (h1 === "No goals here yet" || fr !== null) throw new Error(`goals unread read as goals absent: H1 "${h1}", first run ${fr}`);
+        // Every sentence a "no goals" first run has said, in this design and the one before it.
+        const body = await f.$eval("main", (e) => e.innerText);
+        const said = ["No goals here yet", "Start with a goal", "This workspace has no goals yet", "while this workspace has no goals", "Look around first", "Two ways to start", "Explore a sample", "Connect one agent"].filter((x) => body.includes(x));
+        if (said.length) throw new Error(`goals unread read as goals absent: the page says ${JSON.stringify(said)}`);
+      }
+      await f.close();
+    }
   }
   await ctx.close();
 }
@@ -457,6 +488,17 @@ for (const width of [390, 320]) {
     const k = await page("owner", "dark", 320);
     await goto(k.p, `/app/w/${WS}?review=${goal}.${kb.id}`);
     await ready(k.p, "Work on this goal", "[role=dialog]");
+    // The drawer keeps focus: 30 Tabs at 320 never leave the dialog, and they pass "More actions" (a summary) on the way
+    // round, so a disclosure is a stop of the trap, not a way out of it.
+    {
+      const seen = [];
+      for (let i = 0; i < 30; i++) {
+        await k.p.keyboard.press("Tab");
+        seen.push(await k.p.evaluate(() => { const a = document.activeElement; return `${a?.closest("[role=dialog]") ? "in" : "OUT"}:${a?.tagName}:${(a?.textContent ?? "").trim().slice(0, 20)}`; }));
+      }
+      if (seen.some((x) => x.startsWith("OUT"))) throw new Error(`keyboard at 320: Tab left the drawer: ${seen.join(" | ")}`);
+      if (!seen.some((x) => x.startsWith("in:SUMMARY:More actions"))) throw new Error(`keyboard at 320: Tab never reached More actions: ${seen.join(" | ")}`);
+    }
     await tabTo(k.p, { sel: '[role=dialog] [data-decision="Approve and launch"]' }, "Approve and launch");
     await k.p.keyboard.press("Enter");
     const step = await k.p
@@ -482,6 +524,47 @@ for (const width of [390, 320]) {
       throw new Error("keyboard at 320: Escape did not close the drawer");
     });
     await k.ctx.close();
+
+    // "Propose a change" at 390 as the member, where the shell offers it (round 2): from the throwaway goal's page, the
+    // Menu's control opens the form with that goal chosen; Send with nothing else filled shows the form's own words and
+    // focuses the first field it names; then a new title, a why and a link send, and the request carries the link.
+    {
+      const m = await page("member", "dark", 390);
+      await goto(m.p, `/app/w/${WS}/goals/${goal}`);
+      await ready(m.p, "Drawer check");
+      await m.p.click('button[aria-controls="ca-menu"]');
+      await m.p.waitForSelector("[data-menu-sheet]", { timeout: 5000 });
+      if (!(await m.p.$("[data-menu-sheet] [data-propose-open]"))) console.log("Propose a change: not in this shell, asserts skipped");
+      else {
+        await m.p.click("[data-menu-sheet] [data-propose-open]");
+        await ready(m.p, "Nothing changes until they approve", "[role=dialog]");
+        if ((await m.p.$eval('[data-propose-field="goal"]', (e) => e.value)) !== goal) throw new Error("Propose: the goal's page didn't pre-fill the goal");
+        await m.p.click("[data-propose-send]");
+        await m.p.waitForFunction(() => [...document.querySelectorAll("[role=dialog] [role=alert]")].some((e) => e.textContent?.includes("Say why this should change.")), { timeout: 5000 }).catch(() => {
+          throw new Error("Propose: an empty send didn't say what's missing");
+        });
+        if ((await m.p.evaluate(() => document.activeElement?.getAttribute("data-propose-field"))) !== "part") throw new Error("Propose: focus didn't go to the first field named");
+        if (await m.p.evaluate(() => /reason is required/i.test(document.querySelector("[role=dialog]")?.innerText ?? ""))) throw new Error("Propose: the server's words reached an empty field");
+        await m.p.select('[data-propose-field="part"]', "title");
+        await m.p.$eval('[data-propose-field="text"]', (e) => e.select());
+        await m.p.type('[data-propose-field="text"]', "Drawer check (proposed, fictional)");
+        await m.p.type('[data-propose-field="why"]', "Proposed from the shell by shots.mjs. Fictional.");
+        await m.p.type('[data-propose-field="link"]', "https://docs.example.test/propose-check");
+        await m.p.click("[data-propose-send]");
+        await m.p.waitForSelector('[role=dialog] [data-propose="sent"]', { timeout: 20_000 }).catch(() => {
+          throw new Error("Propose: Send for approval didn't reach the sent state");
+        });
+        const open = (await call(theo, "GET", `/api/v2/workspaces/${WS}/goals/${goal}/change-requests?state=pending`)).change_requests ?? [];
+        const mineNow = open.find((c) => c.changes?.title === "Drawer check (proposed, fictional)");
+        if (!mineNow) throw new Error("Propose: no pending request with the proposed title");
+        if (mineNow.evidence_count !== 1) throw new Error(`Propose: the request has ${mineNow.evidence_count} links, wanted 1`);
+        // The summary said "1 link, from you (Self-reported)": the review must say the same of that link.
+        await m.p.click('[role=dialog] [data-propose="sent"] a');
+        await ready(m.p, "Work on this goal", "[role=dialog]");
+        if (!(await m.p.$('[role=dialog] [data-evidence="self"]'))) throw new Error("Propose: the review doesn't label the proposer's link Self-reported");
+      }
+      await m.ctx.close();
+    }
   } finally {
     await ctx.close();
     await call(mara, "POST", `/api/v2/workspaces/${WS}/goals/${goal}/versions`, { version: await version(), status: "dropped" });
@@ -489,6 +572,102 @@ for (const width of [390, 320]) {
       const g = await call(mara, "GET", `/api/v2/workspaces/${WS}/goals/${privGoal}`);
       await call(mara, "POST", `/api/v2/workspaces/${WS}/goals/${privGoal}/versions`, { version: g.version ?? g.goal?.version, status: "dropped" });
     }
+  }
+}
+
+// 11: an empty workspace (round 2), screenshots and asserts in both modes. Fresh people through the real routes: an owner
+// who creates a workspace with no goals, and a member and a viewer invited to it. Owner and member: the H1 is the fact,
+// "Set the first goal" is the one filled action, the sample is offered, and nothing else of the Home shows; the rail
+// offers no "Propose a change". Viewer: one line, no action. Then "Set the first goal" lands on the Goals form with focus
+// in its Goal field, "Explore the sample" creates the sample and opens it, and /app for someone with no workspace says so.
+{
+  const H = { origin: BASE, "content-type": "application/json" };
+  const stamp = Date.now();
+  const signUp = async (name) => {
+    const email = `${name.toLowerCase().replace(/ /g, "-")}-${stamp}@example.test`;
+    const r = await fetch(`${BASE}/api/v2/auth/sign-up/email`, { method: "POST", headers: H, body: JSON.stringify({ name, email, password: `pw-${stamp}-${Math.random().toString(36).slice(2)}-Aa1!` }) });
+    if (r.status !== 200) throw new Error(`sign-up ${name}: ${r.status}`);
+    return { email, cookies: r.headers.getSetCookie() };
+  };
+  const jar = (u) => u.cookies.map((c) => c.split(";")[0]).join("; ");
+  const owner = await signUp("Empty Owner");
+  const made = await (await fetch(`${BASE}/api/v2/workspaces`, { method: "POST", headers: { ...H, cookie: jar(owner) }, body: JSON.stringify({ name: "No goals yet (fictional)" }) })).json();
+  const ews = made.id;
+  const people = { owner };
+  for (const role of ["member", "viewer"]) {
+    const u = await signUp(`Empty ${role}`);
+    const inv = await (await fetch(`${BASE}/api/v2/workspaces/${ews}/invites`, { method: "POST", headers: { ...H, cookie: jar(owner) }, body: JSON.stringify({ email: u.email, role }) })).json();
+    const acc = await fetch(`${BASE}/api/v2/invites/${inv.token}/accept`, { method: "POST", headers: { ...H, cookie: jar(u) }, body: "{}" });
+    if (acc.status !== 200) throw new Error(`invite ${role}: ${acc.status}`);
+    people[role] = u;
+  }
+  const as = async (who, width, theme = "dark") => {
+    const ctx = await browser.createBrowserContext();
+    const p = await ctx.newPage();
+    await p.setViewport({ width, height: width >= 1024 ? 900 : 844 });
+    await p.evaluateOnNewDocument((t) => {
+      try {
+        localStorage.setItem("align-theme", t);
+      } catch {}
+    }, theme);
+    const host = new URL(BASE).hostname;
+    for (const c of people[who].cookies) {
+      const [pair] = c.split(";");
+      const at = pair.indexOf("=");
+      await ctx.setCookie({ name: pair.slice(0, at), value: pair.slice(at + 1), domain: host, path: "/", httpOnly: true });
+    }
+    return { p, ctx };
+  };
+  // A filled action carries the accent background class (kit's primary Btn and the page links alike).
+  const filled = (p) => p.evaluate(() => [...document.querySelectorAll("main a, main button")].filter((b) => b.offsetParent !== null && /(^|\s)bg-\(--accent\)(\s|$)/.test(b.className)).map((b) => b.textContent.trim()));
+  for (const [who, width] of [["owner", 1440], ["owner", 390], ["member", 390], ["viewer", 390], ["owner", 320]]) {
+    const { p, ctx } = await as(who, width);
+    await goto(p, `/app/w/${ews}`);
+    await ready(p, "No goals here yet");
+    const h1 = await p.$eval("main h1", (e) => e.textContent.trim());
+    if (h1 !== "No goals here yet") throw new Error(`empty workspace, ${who} at ${width}: H1 "${h1}"`);
+    const fr = await p.$eval("[data-first-run]", (e) => e.getAttribute("data-first-run")).catch(() => "none");
+    const f = await filled(p);
+    if (who === "viewer") {
+      if (fr !== "viewer-empty" || f.length) throw new Error(`empty workspace, viewer: wanted one line and no action, got ${fr}, ${f.join(",")}`);
+    } else {
+      if (fr !== "empty" || f.length !== 1 || f[0] !== "Set the first goal") throw new Error(`empty workspace, ${who} at ${width}: wanted one filled "Set the first goal", got ${fr}, [${f.join(", ")}]`);
+      if (!(await p.$("[data-sample-link], [data-sample-create]"))) throw new Error(`empty workspace, ${who} at ${width}: the sample isn't offered`);
+    }
+    if (await p.$("[data-since], [data-goal-lines]")) throw new Error(`empty workspace, ${who} at ${width}: Since or Goals shows with nothing in it`);
+    if (await p.$("[data-propose-open]")) throw new Error(`empty workspace, ${who} at ${width}: the rail offers Propose a change with no goals`);
+    await shot(p, `11-empty-${who}`, "dark", width, false);
+    await ctx.close();
+  }
+  {
+    const { p, ctx } = await as("owner", 390);
+    await goto(p, `/app/w/${ews}`);
+    await ready(p, "No goals here yet");
+    await p.click("[data-first-goal]");
+    await p.waitForFunction(() => location.pathname.endsWith("/goals") && document.activeElement?.tagName === "INPUT", { timeout: 30_000 }).catch(() => {
+      throw new Error("Set the first goal: the Goals form's field didn't take focus");
+    });
+    if (await p.evaluate(() => document.querySelector("main")?.innerText.includes("No goals you can see yet."))) throw new Error("Set the first goal: the empty line still shows above the form");
+    await goto(p, `/app/w/${ews}`);
+    await ready(p, "No goals here yet");
+    if (await p.$("[data-sample-create]")) {
+      await p.click("[data-sample-create]");
+      await p.waitForFunction((w) => /\/app\/w\/[^/]+$/.test(location.pathname) && !location.pathname.endsWith(w), { timeout: 60_000 }, ews).catch(() => {
+        throw new Error("Explore the sample: no sample workspace opened");
+      });
+      await ready(p, "needs you");
+    }
+    await ctx.close();
+  }
+  {
+    const lone = await signUp("No Workspace");
+    people.lone = lone;
+    const { p, ctx } = await as("lone", 390);
+    await goto(p, "/app");
+    await ready(p, "No workspaces yet");
+    if ((await p.$eval("main h1", (e) => e.textContent.trim())) !== "No workspaces yet") throw new Error("/app with no workspace: the H1 isn't the fact");
+    await shot(p, "12-no-workspace", "dark", 390, false);
+    await ctx.close();
   }
 }
 

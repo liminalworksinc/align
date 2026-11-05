@@ -1,7 +1,9 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api, Btn, when, type WsSummary } from "../../_ui/kit";
+import { api, Btn, go, when, type WsSummary } from "../../_ui/kit";
+import type { CreationOptions } from "../../_ui/server";
+import { useTurnstile } from "../../_ui/turnstile";
 import { READ_TOOLS } from "@/lib/mcp/read-tools";
 import { claudeCodeLine } from "@/lib/paste-lines";
 
@@ -64,7 +66,7 @@ function CopyLine({ line }: { line: string }) {
           {copied ? "Copied" : "Copy"}
         </Btn>
       </div>
-      <code className="block max-h-36 overflow-y-auto break-all rounded-[8px] bg-(--bg-inset) px-3 py-2 font-mono text-[14px] text-(--text-1)" data-first-run-line>
+      <code className="block max-h-36 overflow-auto whitespace-pre [overflow-wrap:normal] rounded-[8px] bg-(--bg-inset) px-3 py-2 font-mono text-[14px] text-(--text-1)" data-first-run-line>
         {line}
       </code>
     </div>
@@ -77,8 +79,27 @@ function CopyLine({ line }: { line: string }) {
  *  and someone else's agent doesn't end this person's setup). `hasGoals`: the person can read a goal, so this panel
  *  sits above Home's list and stays compact (two lines and the two actions); a viewer, who can't connect an agent,
  *  then gets no panel at all. */
-export default function FirstRun({ ws, onSeen, always = false, me, hasGoals = false }: { ws: string; onSeen: () => void; always?: boolean; me?: string; hasGoals?: boolean }) {
+export default function FirstRun({
+  ws,
+  onSeen,
+  always = false,
+  me,
+  hasGoals = false,
+  creation,
+}: {
+  ws: string;
+  onSeen: () => void;
+  always?: boolean;
+  me?: string;
+  hasGoals?: boolean;
+  /** The server's rules for creating a workspace, so an empty workspace offers to create the sample only when it can. */
+  creation?: CreationOptions;
+}) {
   const [open, setOpen] = useState(false);
+  // Creating the sample from an empty workspace: the same route and gate as /app's "Create the Northstar sample". The
+  // bot check (hosted) is shown only once the person asks for the sample.
+  const [makeSample, setMakeSample] = useState<{ asked: boolean; busy: boolean; error: string | null }>({ asked: false, busy: false, error: null });
+  const bot = useTurnstile(makeSample.asked ? (creation?.captchaSiteKey ?? null) : null);
   const [apps, setApps] = useState<{ url: string; apps: FirstRunApp[]; at: number } | null>(null);
   const [failed, setFailed] = useState(false);
   const [list, setList] = useState<WsSummary[] | null>(null);
@@ -128,12 +149,13 @@ export default function FirstRun({ ws, onSeen, always = false, me, hasGoals = fa
   }, [ws, onSeen, always, me]);
 
   if (!list) return null;
-  if (!always && apps?.apps.some((a) => seenApp(a) && (!me || a.user?.id === me))) return null;
-
+  const connected = !!apps?.apps.some((a) => seenApp(a) && (!me || a.user?.id === me));
   const self = list.find((w) => w.id === ws);
   const viewer = self?.role === "viewer";
+  // An empty workspace is its own state (below), shown whether or not this person has connected an agent: the first
+  // goal is the step that matters, and it must not vanish with the connect panel.
+  if (!always && hasGoals && connected) return null;
   if (!always && viewer && hasGoals) return null;
-  const compact = !always && hasGoals;
   const sample = self?.name === SAMPLE_NAME ? self : list.find((w) => w.name === SAMPLE_NAME && w.id !== ws);
   const inSample = sample?.id === ws;
   const approvedOnly = apps?.apps.filter((a) => !seenApp(a) && (!me || a.user?.id === me)) ?? [];
@@ -187,14 +209,96 @@ export default function FirstRun({ ws, onSeen, always = false, me, hasGoals = fa
       <p className="text-[14px] text-(--text-2)">
         Once it connects, the Apps tab shows when it last connected (any request to Align) and, separately, when it last read the goals. Connecting is not a read.
       </p>
-      <Link href={`/app/w/${ws}/apps`} className="w-fit text-[14px] font-medium text-(--accent-text) underline">
+      <Link href={`/app/w/${ws}/apps`} className="w-fit text-[14px] font-medium text-(--text-1) underline underline-offset-2">
         Using Codex or another app? See the Apps tab.
       </Link>
     </>
   );
 
+  // A workspace with no goals (LIM-2472 round 2): what this person can do first. An owner or member: "Set the first goal"
+  // is the one filled action, then the two paths (the sample, one agent) outlined, the connect steps folded behind
+  // their action. A viewer, who can do neither, gets one line.
+  if (!always && !hasGoals) {
+    if (viewer)
+      return (
+        <p className="rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3 text-[14px] text-(--text-2)" data-first-run="viewer-empty">
+          This workspace has no goals yet. A workspace owner or member sets them.
+        </p>
+      );
+    const pathBtn =
+      "inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) border border-(--line-strong) px-3.5 text-[14px] font-medium text-(--text-1) hover:bg-(--bg-raised) disabled:opacity-50 max-sm:min-h-[44px]";
+    // The sample is always offered when it can be had: a link when this person already has one, else created on click.
+    const canMake = !!creation && !creation.closed && !creation.needsCode;
+    const sampleHere = sample && !inSample ? sample : null;
+    const offerSample = !!sampleHere || canMake;
+    const createSample = async () => {
+      if (!bot.ready) {
+        setMakeSample((m) => ({ ...m, asked: true }));
+        return;
+      }
+      setMakeSample((m) => ({ ...m, asked: true, busy: true, error: null }));
+      try {
+        const w = await api<{ id: string }>("/api/v2/workspaces/sample", { body: {}, headers: bot.headers });
+        go(`/app/w/${w.id}`);
+      } catch (e) {
+        bot.reset();
+        setMakeSample((m) => ({ ...m, busy: false, error: e instanceof Error ? e.message : "Align couldn't create the sample just now." }));
+      }
+    };
+    // Only what the page shows is promised.
+    const next = offerSample ? "Set the first one, or look around the sample first." : !connected ? "Set the first one, or connect one agent first." : "Set the first one.";
+    return (
+      <section aria-label="Get started" className="min-w-0 rounded-(--radius-m) border border-(--line-strong) bg-(--bg-panel) px-4 py-4 text-[14px] text-(--text-1)" data-first-run="empty">
+        <p className="text-[16px] font-semibold">Start with a goal</p>
+        <p className="mt-1 max-w-prose text-(--text-2)">A goal comes first: it is what people decide on here, and what Align sends to agents. {next}</p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <Link
+            href={`/app/w/${ws}/goals?first=1`}
+            className="inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) bg-(--accent) px-3.5 text-[14px] font-medium text-(--text-on-accent) hover:bg-(--accent-hover) max-sm:min-h-[44px]"
+            data-first-goal
+          >
+            Set the first goal
+          </Link>
+          {sampleHere ? (
+            <Link href={`/app/w/${sampleHere.id}`} className={pathBtn} aria-label="Explore the Northstar sample (fictional)" data-sample-link>
+              Explore the sample
+            </Link>
+          ) : (
+            canMake && (
+              <button type="button" className={pathBtn} disabled={makeSample.busy} onClick={() => void createSample()} aria-label="Explore the sample: create the Northstar sample (fictional)" data-sample-create>
+                {makeSample.busy ? "Creating the sample…" : "Explore the sample"}
+              </button>
+            )
+          )}
+          {!connected && (
+            <button type="button" className={pathBtn} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+              {open ? "Hide the steps" : "Connect one agent"}
+            </button>
+          )}
+        </div>
+        {makeSample.asked && !sampleHere && (
+          <div className="mt-3 flex min-w-0 flex-col gap-1 text-[14px] text-(--text-2)">
+            <p>The sample is Northstar, a made-up company in its own workspace, with goals and a change request to try. Nothing in it is real.</p>
+            {bot.widget}
+            {creation?.captchaSiteKey && !bot.ready && <p>Complete the check, then press Explore the sample again.</p>}
+            {makeSample.error && (
+              <p role="alert" className="font-medium text-(--st-declined)">
+                Not created. {makeSample.error}
+              </p>
+            )}
+          </div>
+        )}
+        {open && !connected && (
+          <div className="mt-3 flex min-w-0 flex-col gap-2 border-t border-(--line) pt-3 text-[15px]" data-first-run-path="connect">
+            {connect}
+          </div>
+        )}
+      </section>
+    );
+  }
+
   // Above a list that has something in it: two lines and the two actions; the connect steps open in place.
-  if (compact)
+  if (!always)
     return (
       <section aria-label="Get started" className="min-w-0 rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3 text-[14px] text-(--text-1)" data-first-run="compact">
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -255,14 +359,14 @@ export default function FirstRun({ ws, onSeen, always = false, me, hasGoals = fa
                 <p className="text-(--text-2)">
                   You are in the Northstar sample. Its company, teams, goals and change request are fictional: Align made them up so you can try each step. Its change request is waiting on you.
                 </p>
-                <Link href={`/app/w/${ws}/requests`} className="w-fit text-[15px] font-medium text-(--accent-text) underline">
+                <Link href={`/app/w/${ws}/requests`} className="w-fit text-[15px] font-medium text-(--text-1) underline underline-offset-2">
                   Open the sample&apos;s change request
                 </Link>
               </>
             ) : (
               <>
                 <p className="text-(--text-2)">Northstar is a made-up company in its own workspace, with two teams, their goals and one change request to try. Nothing in it is real.</p>
-                <Link href={`/app/w/${sample.id}`} aria-label="Open the Northstar sample (fictional)" className="w-fit text-[15px] font-medium text-(--accent-text) underline" data-sample-link>
+                <Link href={`/app/w/${sample.id}`} aria-label="Open the Northstar sample (fictional)" className="w-fit text-[15px] font-medium text-(--text-1) underline underline-offset-2" data-sample-link>
                   Open the Northstar sample
                 </Link>
               </>
