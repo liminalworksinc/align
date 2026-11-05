@@ -1,9 +1,9 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { EvidenceLabel, NeedAction, NeedList, NeedRow, Segmented } from "../ds";
-import { useApi } from "../kit";
-import type { Alignment, ChangeRequest } from "../types";
-import { buildNeeds, inPhase, KIND_WORDS, RANK_NOTE, type AppLite, type AskLite, type EvidenceCounts, type Need, type NeedPhase } from "./needs";
+import { api, useApi } from "../kit";
+import type { Alignment, ChangeRequest, Goal } from "../types";
+import { buildNeeds, inPhase, KIND_WORDS, rankNote, REQ_GOALS_MAX, type AppLite, type AskLite, type EvidenceCounts, type Need, type NeedPhase, type NeedsInput, type RequestLite } from "./needs";
 
 // LIM-2472 Home, section 1: the "Needs you" list (direction LIM-2472 9b5b870f). Four cookie reads, the model in needs.ts,
 // and the foundation's NeedList / NeedRow / NeedAction. Filters: Needs you (default), Waiting on others, Done; search over
@@ -29,18 +29,14 @@ export function waited(iso: string | undefined): string {
   return `${Math.floor(h / 24)}d`;
 }
 
-/** Evidence counts as labelled chips; Self-reported (a person's link) as its own plain chip until EvidenceLabel has it. */
+/** Evidence counts as labelled chips, one per class present. */
 export function EvidenceChips({ e }: { e: EvidenceCounts }) {
   return (
     <>
       {e.receipt > 0 && <EvidenceLabel kind="receipt" detail={e.receipt > 1 ? String(e.receipt) : undefined} size="s" />}
       {e.agent_reported > 0 && <EvidenceLabel kind="reported" detail={String(e.agent_reported)} size="s" />}
       {e.not_observed > 0 && <EvidenceLabel kind="unobserved" size="s" />}
-      {e.self_reported > 0 && (
-        <span data-evidence="self-reported" className="inline-flex items-center gap-1 rounded-(--radius-s) border border-(--line-strong) px-1.5 py-0.5 text-[12px] text-(--text-2)">
-          Self-reported <span className="font-mono">{e.self_reported}</span>
-        </span>
-      )}
+      {e.self_reported > 0 && <EvidenceLabel kind="self" detail={String(e.self_reported)} size="s" />}
     </>
   );
 }
@@ -49,8 +45,37 @@ export function EvidenceChips({ e }: { e: EvidenceCounts }) {
  *  that holds that kind. */
 export function needHref(ws: string, n: Need, base = ""): string {
   if (n.review) return `${base}${n.review}`;
+  if (n.kind === "agent_declined" && n.goal) return `/app/w/${ws}/goals/${n.goal.id}#agents-on-goal`;
   const tab = n.kind === "team_ask" ? "asks" : n.kind === "alignment" ? "alignments" : n.kind === "app_behind" ? "apps" : "";
   return `/app/w/${ws}${tab ? `/${tab}` : ""}`;
+}
+
+/** REQ: the requests to agents on up to REQ_GOALS_MAX active goals this person reads, their own goals first, read in
+ *  parallel. `unchecked` counts the active goals past the cap; `groups` is null when the goals couldn't be read. A goal
+ *  whose requests read fails is counted as unchecked too. */
+function useRequestsToAgents(W: string, me: string, goals: Goal[] | null, failed: boolean) {
+  const [state, setState] = useState<{ key: string; groups: NonNullable<NeedsInput["requests"]>; unchecked: number } | null>(null);
+  const list = useMemo(
+    () => (goals ? goals.filter((g) => g.status === "active").sort((a, b) => Number(b.owner.id === me) - Number(a.owner.id === me) || a.id.localeCompare(b.id)) : null),
+    [goals, me],
+  );
+  const key = list ? list.map((g) => g.id).join(",") : null;
+  useEffect(() => {
+    if (!list || key === null) return;
+    let live = true;
+    const pick = list.slice(0, REQ_GOALS_MAX);
+    void Promise.all(pick.map((g) => api<{ requests: RequestLite[] }>(`${W}/goals/${g.id}/requests`).then((r) => ({ goal: { id: g.id, title: g.title }, requests: r.requests }), () => null))).then((res) => {
+      if (!live) return;
+      const ok = res.filter((x): x is NonNullable<typeof x> => !!x);
+      setState({ key, groups: ok, unchecked: list.length - pick.length + (res.length - ok.length) });
+    });
+    return () => {
+      live = false;
+    };
+  }, [W, list, key]);
+  if (failed) return { groups: null, unchecked: 0, loading: false };
+  const ready = state && state.key === key;
+  return { groups: ready ? state.groups : undefined, unchecked: ready ? state.unchecked : 0, loading: !ready };
 }
 
 export function NeedsList({ ws, me, selected, reviewBase = "" }: { ws: string; me: string; selected?: string | null; reviewBase?: string }) {
@@ -59,10 +84,12 @@ export function NeedsList({ ws, me, selected, reviewBase = "" }: { ws: string; m
   const asks = useApi<{ asks: AskLite[] }>(`${W}/asks?state=open,accepted,done,declined`);
   const al = useApi<Groups<Alignment>>(`${W}/alignments`);
   const home = useApi<{ apps: { items: AppLite[] } | null }>(`${W}/home`);
+  const goals = useApi<{ goals: Goal[] }>(`${W}/goals`);
+  const reqs = useRequestsToAgents(W, me, goals.data?.goals ?? null, !!goals.error);
   const [phase, setPhase] = useState<NeedPhase>("needs_you");
   const [q, setQ] = useState("");
 
-  const loading = [cr, asks, al, home].some((r) => r.loading && !r.data && !r.error);
+  const loading = [cr, asks, al, home].some((r) => r.loading && !r.data && !r.error) || reqs.loading;
   const { rows, unknown } = useMemo(
     () =>
       buildNeeds({
@@ -72,8 +99,9 @@ export function NeedsList({ ws, me, selected, reviewBase = "" }: { ws: string; m
         asks: asks.data?.asks ?? null,
         alignments: al.data ? [...al.data.waiting_on_me, ...al.data.mine, ...al.data.others] : null,
         apps: home.data?.apps?.items ?? null,
+        requests: reqs.groups,
       }),
-    [ws, me, cr.data, asks.data, al.data, home.data],
+    [ws, me, cr.data, asks.data, al.data, home.data, reqs.groups],
   );
   const counts = Object.fromEntries(PHASES.map((p) => [p.value, inPhase(rows, p.value).length])) as Record<NeedPhase, number>;
   const shown = useMemo(() => {
@@ -110,7 +138,7 @@ export function NeedsList({ ws, me, selected, reviewBase = "" }: { ws: string; m
         <p className="text-[14px] text-(--text-2)">Reading what needs you…</p>
       ) : (
         <NeedList
-          rankNote={RANK_NOTE}
+          rankNote={rankNote(reqs.unchecked)}
           empty={q ? `Nothing here mentions "${q}".` : phase === "needs_you" ? "Nothing needs you." : phase === "waiting_on_others" ? "Nothing you're part of is waiting on someone else." : "Nothing decided yet."}
         >
           {shown.map((n) => (

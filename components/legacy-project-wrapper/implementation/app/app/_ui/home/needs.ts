@@ -9,6 +9,9 @@
 //   AL     GET /api/v2/workspaces/<ws>/alignments              -> { waiting_on_me, mine, others } (lib/v2/alignments.ts:577)
 //   HOME   GET /api/v2/workspaces/<ws>/home                    -> apps.items: { last_used_at, last_read_at, ... }
 //          (lib/v2/home.ts workspaceHome; an owner sees every app, anyone else their own)
+//   REQ    GET /api/v2/workspaces/<ws>/goals/<g>/requests      -> { requests: RequestView[] } per goal (lib/v2/requests.ts
+//          requestView: type, sender, sessions[].state incl. "declined" with updated_at), read for at most REQ_GOALS_MAX
+//          goals this person reads (their own first), in parallel
 //
 // LEFT OUT, no read backs them for the browser:
 //   - "An agent's ask waiting on a person": v2 has no agent-originated ask. Asks (lib/v2/asks.ts) are what one team was
@@ -17,27 +20,32 @@
 //   - "A session not on the launched plan": the sessions read (GET …/sessions) gives a session's current goal but not
 //     which version it was last sent or applied; per-session receipts exist only on the goal's value read after a launch.
 //     Saying a session is "not on" a version would be a claim Align can't make from these reads.
-//   - A request to agents a session declined (lib/v2/requests.ts): readable only per goal (GET …/goals/<g>/requests), so a
-//     workspace-wide list would mean one read per goal. A candidate kind if the integrator wants that fan-out.
 
 import type { StatusKind } from "../ds";
 import type { Alignment, ChangeRequest } from "../types";
 import { changeWaits, launchWaits, type HomePerson } from "../../../../lib/v2/home-core.mts";
 
-export type NeedKind = "launch" | "decide" | "returned" | "team_ask" | "alignment" | "app_behind";
+export type NeedKind = "launch" | "decide" | "returned" | "agent_declined" | "team_ask" | "alignment" | "app_behind";
 export type NeedPhase = "needs_you" | "waiting_on_others" | "done";
 
 /** The ranking, said once on the page. Launches first: approved work Align hasn't released yet; then what is yours to
  *  decide; then your own requests that came back; then team asks; then alignments; then apps that haven't read the goals
  *  since a launch. Oldest first inside a kind. */
 export const RANK_NOTE =
-  "Ranked: approved changes waiting to launch, then decisions waiting on you, then your requests that came back, then team asks, then alignments, then apps that haven't read the goals since a launch. Oldest first within each.";
-export const KIND_ORDER: NeedKind[] = ["launch", "decide", "returned", "team_ask", "alignment", "app_behind"];
+  "Ranked: approved changes waiting to launch, then decisions waiting on you, then your requests that came back, then requests an agent declined, then team asks, then alignments, then apps that haven't read the goals since a launch. Oldest first within each.";
+/** The rank note, plus what wasn't checked: requests to agents are read per goal, at most REQ_GOALS_MAX goals. */
+export const rankNote = (unchecked: number) => (unchecked ? `${RANK_NOTE} Requests to agents not checked on ${unchecked} goal${unchecked === 1 ? "" : "s"}.` : RANK_NOTE);
+/** Goals whose requests to agents are read for this list. */
+export const REQ_GOALS_MAX = 12;
+// Rows rank by what the person can do about them. An app that hasn't read the launched plan comes last: the person's
+// action there is the weakest (Align notifies nobody), and its real home as evidence is the launched goal's line.
+export const KIND_ORDER: NeedKind[] = ["launch", "decide", "returned", "agent_declined", "team_ask", "alignment", "app_behind"];
 
 export const KIND_WORDS: Record<NeedKind, string> = {
   launch: "Approved, not launched",
   decide: "Decision",
   returned: "Your request came back",
+  agent_declined: "Agent declined",
   team_ask: "Team ask",
   alignment: "Alignment",
   app_behind: "App behind a launch",
@@ -84,6 +92,17 @@ export interface NeedsInput {
   alignments: Alignment[] | null;
   /** HOME apps.items. */
   apps: AppLite[] | null;
+  /** REQ, per goal read; null when none could be read. */
+  requests?: { goal: { id: string; title: string }; requests: RequestLite[] }[] | null;
+}
+
+/** The fields of a request to agents (lib/v2/requests.ts requestView) this model reads. */
+export interface RequestLite {
+  id: string;
+  type: "replan" | "checkpoint" | "switch_goal";
+  sender: HomePerson;
+  state: "open" | "answered" | "expired" | "cancelled";
+  sessions: { session_key: string; owner: HomePerson; repo_alias: string | null; harness: string; state: string; updated_at: string }[];
 }
 
 /** The fields of an AskView (lib/v2/asks.ts:57-80) this model reads. */
@@ -233,12 +252,48 @@ function appNeeds(apps: AppLite[], crs: ChangeRequest[], me: string): Need[] {
   return out;
 }
 
+const TYPE_WORDS: Record<RequestLite["type"], string> = { replan: "replan", checkpoint: "checkpoint", switch_goal: "switch goal" };
+
+/** Your requests to agents that a session declined (REQ). The decline is the session's own answer, so it is Agent
+ *  reported, never "the agent is blocked". One row per request; done once the request is cancelled. */
+function declinedNeeds(groups: NonNullable<NeedsInput["requests"]>, me: string): Need[] {
+  const out: Need[] = [];
+  for (const { goal, requests } of groups)
+    for (const r of requests) {
+      if (r.sender.id !== me) continue;
+      const declined = r.sessions.filter((x) => x.state === "declined");
+      if (!declined.length) continue;
+      const first = declined[0]!;
+      const latest = declined.reduce((a, b) => (b.updated_at > a.updated_at ? b : a));
+      const who = `${first.harness}${first.repo_alias ? ` in ${first.repo_alias}` : ""}${declined.length > 1 ? ` and ${declined.length - 1} more` : ""}`;
+      const e = none();
+      e.agent_reported = declined.length;
+      out.push({
+        key: `req:${r.id}`,
+        kind: "agent_declined",
+        phase: r.state === "cancelled" ? "done" : "needs_you",
+        goal,
+        cause: `${who} declined your ${TYPE_WORDS[r.type]} request`,
+        quote: null,
+        since: { at: latest.updated_at, field: "sessions[].updated_at" },
+        evidence: e,
+        action: r.state === "cancelled" ? null : { label: "Open the requests", opens: "goal requests" },
+        who: null,
+        review: null,
+        tone: "draft",
+      });
+    }
+  return out;
+}
+
 /** Every row this person's reads support, ranked, in its phase. A read that failed (null) contributes no rows; the
  *  renderer says that kind is unknown rather than showing nothing. */
-export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: ("change requests" | "asks" | "alignments" | "apps")[] } {
+export type Unknown = "change requests" | "asks" | "alignments" | "apps" | "requests to agents";
+
+export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[] } {
   const { me } = input;
   const rows: Need[] = [];
-  const unknown: ("change requests" | "asks" | "alignments" | "apps")[] = [];
+  const unknown: Unknown[] = [];
   if (input.crs) for (const cr of input.crs) {
     const n = crNeed(cr, me);
     if (n) rows.push(n);
@@ -251,6 +306,8 @@ export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: ("change
     if (n) rows.push(n);
   }
   else unknown.push("alignments");
+  if (input.requests) rows.push(...declinedNeeds(input.requests, me));
+  else if (input.requests === null) unknown.push("requests to agents");
   if (input.apps && input.crs) rows.push(...appNeeds(input.apps, input.crs, me));
   else if (!input.apps) unknown.push("apps");
   return { rows: rankNeeds(rows), unknown };

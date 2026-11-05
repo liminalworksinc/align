@@ -11,7 +11,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildNeeds, RANK_NOTE, type Need } from "../../../../components/legacy-project-wrapper/implementation/app/app/_ui/home/needs.ts";
+import { buildNeeds, rankNote, REQ_GOALS_MAX, type Need } from "../../../../components/legacy-project-wrapper/implementation/app/app/_ui/home/needs.ts";
 // @ts-expect-error plain .mjs seed
 import { seed } from "./seed.mjs";
 
@@ -48,7 +48,7 @@ const rule = (name: string, ok: boolean) => {
   if (!ok) failed++;
 };
 
-console.log(`rank note: ${RANK_NOTE}\n`);
+
 const people: [string, { email: string; password: string; name: string }][] = [
   ["owner", agent.accounts.owner],
   ["member", agent.accounts.member],
@@ -62,6 +62,11 @@ for (const [role, acct] of people) {
   const asks = await get(cookie, `${W}/asks?state=open,accepted,done,declined`);
   const al = await get(cookie, `${W}/alignments`);
   const home = await get(cookie, `${W}/home`);
+  // REQ: requests to agents on up to REQ_GOALS_MAX active goals, own goals first (as needs-list.tsx reads them).
+  const goals = ((await get(cookie, `${W}/goals`))?.goals ?? []).filter((g: { status: string }) => g.status === "active");
+  goals.sort((a: { owner: { id: string }; id: string }, b: { owner: { id: string }; id: string }) => Number(b.owner.id === me) - Number(a.owner.id === me) || a.id.localeCompare(b.id));
+  const pick = goals.slice(0, REQ_GOALS_MAX);
+  const reqs = (await Promise.all(pick.map(async (g: { id: string; title: string }) => ({ goal: { id: g.id, title: g.title }, requests: (await get(cookie, `${W}/goals/${g.id}/requests`))?.requests ?? [] }))));
   const { rows, unknown } = buildNeeds({
     ws: s.ws,
     me,
@@ -69,7 +74,9 @@ for (const [role, acct] of people) {
     asks: asks?.asks ?? null,
     alignments: al ? [...al.waiting_on_me, ...al.mine, ...al.others] : null,
     apps: home?.apps?.items ?? null,
+    requests: reqs,
   });
+  console.log(`rank note: ${rankNote(goals.length - pick.length)}`);
   console.log(`== ${role} (${acct.name}): ${rows.length} rows${unknown.length ? `, unknown: ${unknown.join(", ")}` : ""}`);
   for (const r of rows) {
     const ev = Object.entries(r.evidence).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(", ") || "none";
@@ -78,7 +85,7 @@ for (const [role, acct] of people) {
   const needs = rows.filter((r: Need) => r.phase === "needs_you");
   rule(`${role}: every Needs-you row has an action and a since`, needs.every((r) => r.action && r.since));
   rule(`${role}: no row outside Needs you has an action`, rows.filter((r) => r.phase !== "needs_you").every((r) => !r.action));
-  const order = ["launch", "decide", "returned", "team_ask", "alignment", "app_behind"];
+  const order = ["launch", "decide", "returned", "agent_declined", "team_ask", "alignment", "app_behind"];
   rule(`${role}: Needs you is in kind order, oldest first within a kind`, needs.every((r, i) => i === 0 || order.indexOf(needs[i - 1].kind) < order.indexOf(r.kind) || (needs[i - 1].kind === r.kind && (needs[i - 1].since?.at ?? "") <= (r.since?.at ?? ""))));
   if (role === "viewer") rule("viewer: nothing needs a viewer (viewers can't act)", needs.length === 0);
   if (role === "owner") rule("owner: at least one launch, one decision and one app row", ["launch", "decide", "app_behind"].every((k) => needs.some((r) => r.kind === k)));
