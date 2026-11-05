@@ -36,6 +36,8 @@ const TONE_STATUS: Partial<Record<NonNullable<RecordEvent["tone"]>, StatusKind>>
 function source(e: RecordEvent): TimelineSource {
   if (e.source === "align") return { kind: "system" };
   if (e.source === "app") return { kind: "reported", detail: "connected app via MCP" };
+  // A person's evidence link is Self-reported (reported_as on the request read), the fourth evidence class.
+  if (e.link?.reported === "self-reported") return { kind: "self" };
   if (e.source === "device") return { kind: "reported", detail: "align CLI" };
   if (e.source === "unrecorded") return { kind: "person", detail: "source not recorded" };
   return { kind: "person" };
@@ -73,7 +75,7 @@ function detail(e: RecordEvent, titleOf: (id: string) => string, openCompare: bo
   if (e.link)
     parts.push(
       <p key="l" className="flex flex-wrap items-center gap-2 text-[14px]">
-        {e.link.reported === "agent-reported" ? <EvidenceLabel kind="reported" size="s" /> : <span className="rounded-(--radius-s) border border-(--edge) px-1.5 text-[12px] leading-5 text-(--text-2)">Self-reported</span>}
+        {e.link.reported === "agent-reported" ? <EvidenceLabel kind="reported" size="s" /> : <EvidenceLabel kind="self" size="s" />}
         <a href={e.link.url} target="_blank" rel="noopener noreferrer" className="max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center text-(--accent-text) underline underline-offset-2 [overflow-wrap:anywhere]">
           {e.link.label || e.link.url}
         </a>
