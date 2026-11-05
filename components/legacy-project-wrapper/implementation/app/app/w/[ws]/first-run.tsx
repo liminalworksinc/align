@@ -11,16 +11,17 @@ import { claudeCodeLine } from "@/lib/paste-lines";
 // (lib/mcp/read-tools.ts, checked against the server's tools/list), what it can't do, and its status as Align sees it.
 // The sample is never created from here: it is offered on /app only to someone with no workspace who needs no creation
 // code, so this card links to a sample the person already has (or says they are in it) and otherwise shows only the
-// connect path. Hidden per workspace in localStorage. While shown it checks the Apps endpoint every few seconds (only
+// connect path. While shown it checks the Apps endpoint every few seconds (only
 // while the tab is visible); once an app has made any request it yields to the Home's "Connected AI apps" section.
 //
-// LIM-2472 (ruling 9b5b870f): first run is the Home in its empty state, not a separate screen. The Home renders this
-// card where "Needs you" would lead, with the same two paths only, on the theme tokens so it reads in dark and light.
+// LIM-2472 (ruling 9b5b870f; founder pick 9fae06af, "A at empty/first time, b after"): first run is the Home in its
+// empty state, not a separate screen, and it ends by rule, never by a dismiss: the Home shows it only while the person
+// can read no goal, and it yields once an app has connected. Viewers get no connect path (they can't connect one).
+// The Home renders it where "Needs you" would lead, on the theme tokens so it reads in dark and light.
 
 /** The name lib/v2/sample.ts gives the sample workspace. */
 const SAMPLE_NAME = "Northstar (sample)";
 const POLL_MS = 5000;
-const hiddenKey = (ws: string) => `align.firstRun.hidden:${ws}`;
 
 export interface FirstRunApp {
   id: string;
@@ -67,25 +68,12 @@ function CopyLine({ line }: { line: string }) {
   );
 }
 
-/** `always`: the Connect drawer (LIM-2472 concept A) shows the connect paths even after an app has connected or the
- *  person hid the card, and never hands off to the Home. */
+/** `always`: the Connect drawer (LIM-2472 concept A) shows the connect paths even after an app has connected, and
+ *  never hands off to the Home. */
 export default function FirstRun({ ws, onSeen, always = false }: { ws: string; onSeen: () => void; always?: boolean }) {
-  // Read after mount, so the server render and the first client render agree; blocked storage keeps the card shown.
-  const [hidden, setHidden] = useState<boolean | null>(null);
   const [apps, setApps] = useState<{ url: string; apps: FirstRunApp[]; at: number } | null>(null);
   const [failed, setFailed] = useState(false);
   const [list, setList] = useState<WsSummary[] | null>(null);
-
-  useEffect(() => {
-    let v = false;
-    try {
-      v = localStorage.getItem(hiddenKey(ws)) === "1";
-    } catch {
-      /* storage blocked: show the card */
-    }
-    const t = setTimeout(() => setHidden(always ? false : v), 0);
-    return () => clearTimeout(t);
-  }, [ws, always]);
 
   useEffect(() => {
     let live = true;
@@ -100,7 +88,6 @@ export default function FirstRun({ ws, onSeen, always = false }: { ws: string; o
 
   // The status: read now, then every few seconds while the card is shown and the tab visible.
   useEffect(() => {
-    if (hidden !== false) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const check = async () => {
@@ -126,20 +113,9 @@ export default function FirstRun({ ws, onSeen, always = false }: { ws: string; o
       live = false;
       clearTimeout(timer);
     };
-  }, [hidden, ws, onSeen, always]);
+  }, [ws, onSeen, always]);
 
-  function hide() {
-    setHidden(true);
-    try {
-      localStorage.setItem(hiddenKey(ws), "1");
-    } catch {
-      /* storage blocked: hidden until the page reloads */
-    }
-    // Focus goes back to the page's heading rather than to nothing.
-    document.querySelector<HTMLElement>("main h1")?.focus();
-  }
-
-  if (hidden !== false || !list) return null;
+  if (!list) return null;
   if (!always && apps?.apps.some(seenApp)) return null;
 
   const self = list.find((w) => w.id === ws);
@@ -183,10 +159,15 @@ export default function FirstRun({ ws, onSeen, always = false }: { ws: string; o
         </ul>
       </div>
       <p className="text-(--text-2)">
-        <span className="font-semibold text-(--text-1)">It can&apos;t</span> propose, approve, launch or change anything here. If you allow it when you connect, it can add evidence links to change requests, labelled
-        agent-reported.
+        <span className="font-semibold text-(--text-1)">It can&apos;t</span> propose, approve, launch or change anything here. If you allow it when you connect, it can add evidence links to change
+        requests, labelled agent-reported.
       </p>
-      <p role="status" aria-live="polite" className={failed ? "text-(--st-retry)" : "text-(--text-2)"} data-first-run-status={failed ? "error" : !apps ? "checking" : approvedOnly.length ? "approved" : "none"}>
+      <p
+        role="status"
+        aria-live="polite"
+        className={failed ? "text-(--st-retry)" : "text-(--text-2)"}
+        data-first-run-status={failed ? "error" : !apps ? "checking" : approvedOnly.length ? "approved" : "none"}
+      >
         {status}
       </p>
       <p className="text-[14px] text-(--text-2)">
@@ -199,21 +180,26 @@ export default function FirstRun({ ws, onSeen, always = false }: { ws: string; o
   );
 
   return (
-    <section aria-label="Get started" className="min-w-0 rounded-(--radius-l) border border-(--line-strong) bg-(--bg-panel) p-5 text-[15px] text-(--text-1)" data-first-run={sample ? "two" : "connect"}>
+    <section
+      aria-label="Get started"
+      className="min-w-0 rounded-(--radius-l) border border-(--line-strong) bg-(--bg-panel) p-5 text-[15px] text-(--text-1)"
+      data-first-run={sample ? "two" : "connect"}
+    >
       <div className="mb-3 flex flex-wrap items-start gap-2">
         <div className="min-w-0 flex-1 basis-60">
-          <h2 className="text-[20px] font-semibold">{sample ? "Two ways to start" : "Connect one agent"}</h2>
+          <h2 className="text-[20px] font-semibold">{sample ? (viewer ? "Look around first" : "Two ways to start") : viewer ? "Nothing here yet" : "Connect one agent"}</h2>
           <p className="text-(--text-2)">
-            {sample
-              ? inSample
-                ? "Look around this made-up company, or connect one AI agent to it."
-                : "Look around a made-up company first, or connect one AI agent to this workspace."
-              : "Connect Claude Code to this workspace. It can read the goals; it can't change them."}
+            {sample && viewer
+              ? "Look around a made-up company while this workspace has no goals."
+              : sample
+                ? inSample
+                  ? "Look around this made-up company, or connect one AI agent to it."
+                  : "Look around a made-up company first, or connect one AI agent to this workspace."
+                : viewer
+                  ? "A workspace owner or member adds the goals."
+                  : "Connect Claude Code to this workspace. It can read the goals; it can't change them."}
           </p>
         </div>
-        <Btn kind="secondary" onClick={hide}>
-          Hide
-        </Btn>
       </div>
       {sample ? (
         <div className="grid min-w-0 gap-3 lg:grid-cols-2">
@@ -221,8 +207,7 @@ export default function FirstRun({ ws, onSeen, always = false }: { ws: string; o
             {inSample ? (
               <>
                 <p className="text-(--text-2)">
-                  You are in the Northstar sample. Its company, teams, goals and change request are fictional: Align made them up so you can try each step. Its change request is
-                  waiting on you.
+                  You are in the Northstar sample. Its company, teams, goals and change request are fictional: Align made them up so you can try each step. Its change request is waiting on you.
                 </p>
                 <Link href={`/app/w/${ws}/requests`} className="w-fit text-[15px] font-medium text-(--accent-text) underline">
                   Open the sample&apos;s change request
@@ -237,10 +222,16 @@ export default function FirstRun({ ws, onSeen, always = false }: { ws: string; o
               </>
             )}
           </Path>
-          <Path title="Connect one agent" tag="Claude Code" testId="connect">
-            {connect}
-          </Path>
+          {!viewer && (
+            <Path title="Connect one agent" tag="Claude Code" testId="connect">
+              {connect}
+            </Path>
+          )}
         </div>
+      ) : viewer ? (
+        <p className="text-(--text-2)" data-first-run-path="viewer">
+          Viewers can&apos;t connect AI apps here. This Home shows the goals once a workspace owner or member adds them.
+        </p>
       ) : (
         <div className="flex min-w-0 flex-col gap-2" data-first-run-path="connect">
           {connect}

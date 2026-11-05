@@ -109,7 +109,11 @@ async function shot(p, name, theme, width, full = true) {
 const goto = (p, url) => p.goto(url.startsWith("http") ? url : `${BASE}${url}`, { waitUntil: "domcontentloaded" });
 const home = async (p, ws = WS) => {
   await goto(p, `/app/w/${ws}`);
-  await ready(p, "Work by goal");
+  // Concept A's Home says "Work by goal"; the integrated Home has the Goals lines instead.
+  await p.waitForFunction(() => { const m = document.querySelector("main"); return !!m && (m.innerText.includes("Work by goal") || !!m.querySelector("[data-goal-lines]")) && !/Loading/.test(m.innerText); }, { timeout: 90_000, polling: 250 }).catch(async () => {
+    throw new Error(`Home not ready at ${p.url()}: ${await p.evaluate(() => document.querySelector("main")?.innerText.slice(0, 300) ?? "(none)").catch(() => "(navigating)")}`);
+  });
+  await p.waitForNetworkIdle({ idleTime: 400, timeout: 20000 }).catch(() => undefined);
 };
 /** Open the review drawer from a Home card: by default the onboarding request, which waits on the owner. */
 async function openCard(p, match = "Ship self-serve onboarding") {
@@ -176,7 +180,10 @@ const dialogHref = (p, attr) => p.$eval(`[role=dialog] [${attr}]`, (a) => a.getA
 const goalTitle = "Ship self-serve onboarding";
 
 const W = [1440, 390, 320];
-for (const theme of ["dark", "light"]) {
+// ALIGN_SHOTS_ONLY_ASSERTS=1 skips the screenshots and runs only the asserted steps (Menu by keyboard, decisions, review
+// link arrivals, the keyboard decision at 320): how this script verifies a branch whose Home is not concept A's.
+const ONLY_ASSERTS = process.env.ALIGN_SHOTS_ONLY_ASSERTS === "1";
+if (!ONLY_ASSERTS) for (const theme of ["dark", "light"]) {
   // 00: the three states together (pending decision, launched plan, an unobserved outcome) at desktop width.
   const { p, ctx } = await page("owner", theme, 1440);
   await home(p);
@@ -185,7 +192,7 @@ for (const theme of ["dark", "light"]) {
 }
 
 // 09, 10: Home as each role sees it: a member (Theo) and a viewer (Ines), dark, desktop and phone.
-for (const [person, n] of [["member", "09-home-member"], ["viewer", "10-home-viewer"]]) {
+if (!ONLY_ASSERTS) for (const [person, n] of [["member", "09-home-member"], ["viewer", "10-home-viewer"]]) {
   if (!who(person)) continue;
   for (const width of [1440, 390]) {
     const { p, ctx } = await page(person, "dark", width);
@@ -195,7 +202,7 @@ for (const [person, n] of [["member", "09-home-member"], ["viewer", "10-home-vie
   }
 }
 
-for (const width of W) {
+if (!ONLY_ASSERTS) for (const width of W) {
   for (const theme of ["dark", "light"]) {
     if (theme === "light" && width === 320) continue;
     const { p, ctx } = await page("owner", theme, width);
