@@ -264,8 +264,9 @@ export function Btn({
   ref?: Ref<HTMLButtonElement>;
 }) {
   const k = {
-    primary: "border-violet-700 bg-violet-700 text-[var(--al-bg)] hover:opacity-90",
-    secondary: "border-zinc-300 bg-zinc-50 text-zinc-800 hover:bg-zinc-100",
+    // The one primary action is wholeness pink (founder ruling 0e0f6774); orchid means in-between, never "do this".
+    primary: "border-(--accent) bg-(--accent) text-(--text-on-accent) hover:border-(--accent-hover) hover:bg-(--accent-hover)",
+    secondary: "border-(--edge) bg-zinc-50 text-zinc-800 hover:bg-zinc-100",
     danger: "border-red-700 bg-transparent text-red-700 hover:bg-red-50",
   }[kind];
   return (
@@ -275,7 +276,8 @@ export function Btn({
   );
 }
 
-const fieldClass = "w-full rounded-[10px] border border-zinc-300 bg-zinc-50 px-3 py-2 text-[15px] text-zinc-900";
+// Control edge 3:1 or more (--edge); 44px tall on phones, in px for the same reason as Btn.
+const fieldClass = "w-full rounded-[10px] border border-(--edge) bg-zinc-50 px-3 py-2 text-[15px] text-zinc-900 max-sm:min-h-[44px]";
 
 /** A labelled control. The label still wraps the control (a click on it focuses the control), but the control's
  *  accessible name is the label's text alone (aria-labelledby) and the hint is its description: a <select> named by a
