@@ -7,8 +7,10 @@ import type { ChangeRequest, Goal } from "../types";
 //   Receipt         Align recorded it: a launch directive's received receipts, or a goal read that served the version;
 //   Agent reported  an agent's own account: evidence links added through a connected app, align CLI usage times;
 //   Self-reported   a person's own evidence links;
-//   Not observed    Align has nothing for it.
-// Never what an agent did with something, and never "verified": Align doesn't check links.
+//   Not observed    only for a launched version's delivery: Align sent it nowhere yet, or nothing sent a receipt.
+// An absence is never a fact of its own otherwise: no agent time and no links give no chip (no report is not an agent's
+// report; no links is a fact about the request, not an observation of work); `hasEvidence` lets a consumer say "No
+// evidence attached" in words. Never what an agent did with something, and never "verified": Align doesn't check links.
 
 /** The four evidence classes, the same ids as EvidenceLabel's kinds. */
 export type FactKind = "receipt" | "reported" | "self" | "unobserved";
@@ -41,7 +43,9 @@ function deliveryFacts(version: number, d: Delivery): Fact[] {
   const apps = d.apps?.items.length ?? 0;
   if (s && s.received > 0)
     out.push({ kind: "receipt", short: `v${version} · ${s.received} of ${s.sessions} received`, long: `${s.received} of ${n(s.sessions, "session")} that Align sent v${version} to sent a receipt for it.` });
-  if (s && s.received === 0)
+  if (s && s.sessions === 0)
+    out.push({ kind: "unobserved", short: `v${version} · no session on this goal`, long: `v${version} reached no session: none was on this goal when it was launched.` });
+  if (s && s.sessions > 0 && s.received === 0)
     out.push({ kind: "unobserved", short: `v${version} · 0 of ${s.sessions} received`, long: `Align sent v${version} to ${n(s.sessions, "session")}; none has sent a receipt yet.` });
   if (apps > 0)
     out.push({
@@ -51,6 +55,12 @@ function deliveryFacts(version: number, d: Delivery): Fact[] {
     });
   if (!s && apps === 0) out.push({ kind: "unobserved", short: `v${version} · not sent yet`, long: `Align hasn't sent v${version} to a session or a connected app yet.` });
   return out;
+}
+
+/** Whether the request's current revision has any evidence link: a consumer says "No evidence attached" in words when
+ *  it doesn't, never as an evidence chip. */
+export function hasEvidence(cr: Pick<ChangeRequest, "revision" | "revisions">): boolean {
+  return (cr.revisions.find((r) => r.revision === cr.revision)?.evidence.length ?? 0) > 0;
 }
 
 const byStrength = (facts: Fact[]) => facts.map((f, i) => [f, i] as const).sort((a, b) => RANK[a[0].kind] - RANK[b[0].kind] || a[1] - b[1]).map(([f]) => f);
@@ -67,16 +77,16 @@ export function changeFacts(cr: ChangeInput, value?: Delivery | null): Fact[] {
   const self = ev.length - agent;
   if (agent) facts.push({ kind: "reported", short: n(agent, "link"), long: `${n(agent, "evidence link")} added through a connected app. Align doesn't check links.` });
   if (self) facts.push({ kind: "self", short: n(self, "link"), long: `${n(self, "evidence link")} added by a person. Align doesn't check links.` });
-  if (!ev.length) facts.push({ kind: "unobserved", short: "no links", long: `No evidence links on revision ${cr.revision}.` });
   return byStrength(facts);
 }
 
 /**
  * A goal's evidence: its newest launched version's delivery (`launched`: the version and its …/value read; null when
  * nothing is launched, undefined when not read) and its share of the workspace's agent time over 7 days (align CLI
- * usage, so agent reported; the goals feed carries it for active goals only).
+ * usage, so agent reported; the goals feed carries it for active goals only). No agent time gives no fact. `quiet` is
+ * kept for callers that pass it and changes nothing now: no fact of pure absence is ever produced for a goal.
  */
-export function goalFacts(goal: GoalInput, launched?: { version: number; value: Delivery | null } | null): Fact[] {
+export function goalFacts(goal: GoalInput, launched?: { version: number; value: Delivery | null } | null, opts: { quiet?: boolean } = {}): Fact[] {
   const facts: Fact[] = [];
   if (launched?.value) facts.push(...deliveryFacts(launched.version, launched.value));
   const a = goal.allocation;
@@ -86,6 +96,6 @@ export function goalFacts(goal: GoalInput, launched?: { version: number; value: 
       short: `${a.share_7d}% agent time`,
       long: `${a.share_7d}% of the workspace's agent time in the last 7 days${a.target_share !== null ? ` (target ${a.target_share}%)` : ""}, from align CLI usage.`,
     });
-  if (a && a.share_7d === 0) facts.push({ kind: "unobserved", short: "no agent time", long: "No agent time reported toward it in the last 7 days." });
+  void opts;
   return byStrength(facts);
 }
