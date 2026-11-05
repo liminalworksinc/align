@@ -1,18 +1,17 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { EmptyState, Panel, StatusPill } from "../../../../../_ui/ds";
+import { Compare, EmptyState, Panel, StatusPill } from "../../../../../_ui/ds";
 import { useGoalTitles } from "../../../../../_ui/changes";
-import { Diff } from "../../../../../_ui/crparts";
 import { useApi } from "../../../../../_ui/kit";
 import type { Me } from "../../../../../_ui/server";
 import type { ChangeRequest } from "../../../../../_ui/types";
-import { ACT_WORDS, actsFor, Confirm, notYours, OutcomeLine, PrimaryBtn, QuietLink, type Act, type Outcome } from "../../../../../_ui/desk/act";
-import { AgentsLine, type HomeApp } from "../../../../../_ui/desk/agents";
-import { LaneLegend, LaneMap } from "../../../../../_ui/desk/lanes";
-import { crStatus, recordHref } from "../../../../../_ui/desk/model";
-import { currentEvidence, EvidenceList, Facts, Reason, WouldChange } from "../../../../../_ui/desk/parts";
-import { DeskShell } from "../../../../../_ui/desk/shell";
+import { ACT_WORDS, actsFor, Confirm, DOMINANT, notYours, OutcomeLine, PrimaryBtn, QuietBtn, QuietLink, type Act, type Outcome } from "../../../../../_ui/b/act";
+import { AgentsLine, type HomeApp } from "../../../../../_ui/b/agents";
+import { LaneLegend, LaneMap } from "../../../../../_ui/b/lanes";
+import { crStatus, recordHref } from "../../../../../_ui/b/model";
+import { currentEvidence, EvidenceList, Facts, Reason } from "../../../../../_ui/b/parts";
+import { DeskShell } from "../../../../../_ui/b/shell";
 
 // LIM-2472 concept B: one change request as a decision. The role-lane state map leads (who asks, who approves, who can
 // launch, where it is now, and which connectors are this person's), then what it would change beside what is approved
@@ -36,15 +35,16 @@ export default function DecisionPage({ me, ws, goal, id }: { me: Me; ws: string;
   }, [act]);
 
   const acts = cr ? actsFor(cr) : [];
+  const Top = acts.length && DOMINANT.includes(acts[0]!) ? PrimaryBtn : QuietBtn;
   const primary = cr && acts.length ? (
-    <PrimaryBtn
+    <Top
       onClick={() => {
         setOutcome(null);
         setAct(acts[0]!);
       }}
     >
       {ACT_WORDS[acts[0]!]}
-    </PrimaryBtn>
+    </Top>
   ) : null;
   const apps = home.data?.apps ?? (home.error ? null : undefined);
 
@@ -116,11 +116,16 @@ export default function DecisionPage({ me, ws, goal, id }: { me: Me; ws: string;
 
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,380px)]">
             <div className="flex min-w-0 flex-col gap-5">
-              <Panel eyebrow="Compare" title={`v${cr.base_version} now, beside what this request asks for`}>
-                <Diff cr={cr} titles={titles} />
-                <div className="mt-3">
-                  <WouldChange cr={cr} titles={titles} />
-                </div>
+              <Panel eyebrow="Compare" title={`Version ${cr.base_version} beside what this request asks for`}>
+                <Compare
+                  before={cr.diff.before}
+                  after={cr.diff.after}
+                  hidden={cr.diff.hidden_depends_on ?? null}
+                  beforeLabel={`Version ${cr.base_version}`}
+                  afterLabel={cr.state === "approved" && cr.version ? `Version ${cr.version}` : `Proposed v${cr.base_version + 1}`}
+                  titleOf={(gid) => titles.get(gid) ?? "a goal"}
+                  caption="From the request's own fields. Only what differs is shown."
+                />
               </Panel>
               <Panel eyebrow="Why" title="The request, in its own words">
                 <Reason cr={cr} />

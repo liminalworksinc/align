@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { when } from "../kit";
 import type { ChangeRequest } from "../types";
 import type { Act } from "./act";
 import { nameList, proposedVersion } from "./model";
@@ -45,14 +46,20 @@ function cards(cr: ChangeRequest, me: string): Record<Node, { title: string; mea
   const req = cr.requester.id === me ? "You" : cr.requester.name;
   return {
     asked: { title: "Asked", meaning: `${req} asked to change v${cr.base_version} into v${v}.` },
-    update: { title: "Needs an update", meaning: `The goal moved on to v${cr.goal.version}; the request must be updated before anyone can approve it.` },
+    update: {
+      title: "Needs an update",
+      meaning: cr.behind ? `The goal moved on to v${cr.goal.version}; the request must be updated before anyone can approve it.` : "If the goal gets a newer version first, the request must be updated before anyone can approve it.",
+    },
     suggested: { title: "Change suggested", meaning: "An approver suggested a different change; the person asking accepts it or withdraws." },
     withdrawn: { title: "Withdrawn", meaning: "The person asking withdrew it. The goal doesn't change." },
     deciding: { title: "Waiting for a decision", meaning: "An approver approves it, suggests a change, or declines it." },
     declined: { title: "Declined", meaning: "Declined with a reason. The goal doesn't change." },
     approved: {
       title: cr.launch === "not_yet" ? "Approved, launch not yet" : "Approved, not launched",
-      meaning: `Approval is recorded. Align keeps serving v${cr.goal.version} until someone launches v${v}.`,
+      meaning:
+        cr.launch === "not_yet" && cr.launch_decided_by
+          ? `${cr.launch_decided_by.id === me ? "You" : cr.launch_decided_by.name} chose Not yet ${when(cr.launch_decided_at)}. Align keeps serving v${cr.base_version}; v${v} can still be launched.`
+          : `Approval is recorded. Align keeps serving v${cr.base_version} until someone launches v${v}.`,
     },
     launched: { title: cr.launch === "launched" ? `Launched as v${cr.version}` : "Launched", meaning: "Align launched it as the goal's new version and serves it to any connected app that reads the goal." },
   };
@@ -81,7 +88,8 @@ function edges(cr: ChangeRequest): Edge[] {
 function passed(cur: Node | null, cr: ChangeRequest): Set<Node> {
   const s = new Set<Node>(["asked"]);
   if (cur === "approved" || cur === "launched" || cur === "declined" || cur === "suggested") s.add("deciding");
-  if (cur === "launched" && cr.launch_decided_by) s.add("approved");
+  // Launched in a separate step (not "Approve and launch", which records both at one time) passed through Approved.
+  if (cur === "launched" && cr.launch_decided_at && cr.decided_at && cr.launch_decided_at !== cr.decided_at) s.add("approved");
   s.delete(cur as Node);
   return s;
 }
@@ -95,26 +103,47 @@ export function LaneMap({ cr, me, ws, onAct }: { cr: ChangeRequest; me: string; 
   const all = edges(cr);
   const box = useRef<HTMLDivElement>(null);
   const [lines, setLines] = useState<Line[]>([]);
+  // Below 1024px the map is a list: the way here, where it is now and where it can go next; the rest on request.
+  const [every, setEvery] = useState(false);
+  const near = new Set<Node>([...done, ...(cur ? [cur] : []), ...all.filter((e) => e.from === cur).map((e) => e.to)]);
 
   const measure = useCallback(() => {
     const root = box.current;
     if (!root || !window.matchMedia("(min-width: 64rem)").matches) return setLines([]);
     const r0 = root.getBoundingClientRect();
     const out: Line[] = [];
+    // Orthogonal routes through the gaps between columns: out of the source card's side at the connector's height, along
+    // the gap to the target's row, then into the target's side. Cards sit above the lines, so a route never crosses text.
+    const fan = new Map<string, number>();
     root.querySelectorAll<HTMLElement>("[data-edge-from]").forEach((chip) => {
       const to = chip.dataset.edgeTo!;
-      if (to === chip.dataset.edgeFrom) return;
+      if (to === chip.dataset.edgeFrom || chip.dataset.drawn !== "1") return;
       const target = root.querySelector<HTMLElement>(`[data-node="${to}"]`);
-      if (!target) return;
-      const a = chip.getBoundingClientRect();
+      const card = chip.closest<HTMLElement>("[data-node]");
+      if (!target || !card) return;
+      const c = chip.getBoundingClientRect();
+      const k = card.getBoundingClientRect();
       const b = target.getBoundingClientRect();
-      const x1 = a.right - r0.left;
-      const y1 = a.top + a.height / 2 - r0.top;
-      const forward = b.left > a.right;
-      const x2 = forward ? b.left - r0.left - 4 : b.left + b.width / 2 - r0.left;
-      const y2 = forward ? b.top + Math.min(28, b.height / 2) - r0.top : b.top - r0.top + (b.top > a.top ? -4 : b.height + 4);
-      const mx = forward ? (x1 + x2) / 2 : x1 + 24;
-      out.push({ key: `${chip.dataset.edgeFrom}-${to}-${chip.dataset.edgeLabel}`, live: chip.dataset.live === "1", d: forward ? `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}` : `M${x1},${y1} C${mx},${y1} ${x2},${y1} ${x2},${y2}` });
+      const X = (v: number) => Math.round(v - r0.left);
+      const Y = (v: number) => Math.round(v - r0.top);
+      const from = chip.dataset.edgeFrom!;
+      const i = fan.get(from) ?? 0;
+      fan.set(from, i + 1);
+      const y1 = Y(c.top + c.height / 2);
+      const y2 = Y(b.top + 18 + Math.min(i, 3) * 6);
+      let d: string;
+      if (b.left >= k.right) {
+        const gx = X(k.right) + 12 + i * 6;
+        d = `M${X(k.right)},${y1} H${gx} V${y2} H${X(b.left) - 3}`;
+      } else if (b.right <= k.left) {
+        const gx = X(k.left) - 12 - i * 6;
+        d = `M${X(k.left)},${y1} H${gx} V${y2} H${X(b.right) + 3}`;
+      } else {
+        const down = b.top > k.bottom;
+        const x = X(k.left + 24 + i * 8);
+        d = `M${x},${Y(down ? k.bottom : k.top)} V${Y(down ? b.top : b.bottom) + (down ? -3 : 3)}`;
+      }
+      out.push({ key: `${from}-${to}-${chip.dataset.edgeLabel}`, live: chip.dataset.live === "1", d });
     });
     setLines(out);
   }, []);
@@ -141,6 +170,8 @@ export function LaneMap({ cr, me, ws, onAct }: { cr: ChangeRequest; me: string; 
       "data-edge-to": e.to,
       "data-edge-label": e.label,
       "data-live": live ? "1" : "0",
+      // Lines only for the way this request came and the ways out of where it is now; the rest stay as dashed chips.
+      "data-drawn": fromCur || (done.has(e.from) && (done.has(e.to) || e.to === cur)) ? "1" : "0",
     };
     if (live && e.form) {
       return (
@@ -182,13 +213,14 @@ export function LaneMap({ cr, me, ws, onAct }: { cr: ChangeRequest; me: string; 
     const on = n === cur;
     const was = done.has(n);
     const out = all.filter((e) => e.from === n);
+    const tucked = !every && !near.has(n);
     return (
       <div
         key={n}
         data-node={n}
         data-current={on ? "1" : undefined}
         aria-current={on ? "step" : undefined}
-        className={`relative z-10 flex min-w-0 flex-col lg:[grid-column:var(--col)] gap-2 rounded-(--radius-m) border p-3 ${on ? "border-(--accent) bg-(--bg-raised) shadow-[0_0_0_1px_var(--accent)]" : was ? "border-(--line-strong) bg-(--bg-panel)" : "border-(--line) bg-(--bg-inset)"}`}
+        className={`relative z-10 min-w-0 flex-col lg:flex lg:[grid-column:var(--col)] ${tucked ? "hidden" : "flex"} gap-2 rounded-(--radius-m) border p-3 ${on ? "border-(--accent) bg-(--bg-raised) shadow-[0_0_0_1px_var(--accent)]" : was ? "border-(--line-strong) bg-(--bg-panel)" : "border-(--line) bg-(--bg-inset)"}`}
         style={{ "--col": COL[n] + 1 } as CSSProperties}
       >
         <div className="flex items-center justify-between gap-2">
@@ -200,6 +232,7 @@ export function LaneMap({ cr, me, ws, onAct }: { cr: ChangeRequest; me: string; 
           ) : null}
         </div>
         <p className={`text-[12px] leading-snug ${on ? "text-(--text-2)" : "text-(--text-3)"}`}>{words[n].meaning}</p>
+        {n === "approved" && <ReachNote cr={cr} />}
         {out.length > 0 && <div className="flex flex-col gap-1">{out.map(chip)}</div>}
       </div>
     );
@@ -223,7 +256,7 @@ export function LaneMap({ cr, me, ws, onAct }: { cr: ChangeRequest; me: string; 
             </marker>
           </defs>
           {lines.map((l) => (
-            <path key={l.key} d={l.d} fill="none" stroke={l.live ? "var(--accent)" : "var(--line-strong)"} strokeWidth={l.live ? 1.5 : 1} strokeDasharray={l.live ? undefined : "4 4"} markerEnd={`url(#${l.live ? "lm-arrow-live" : "lm-arrow"})`} />
+            <path key={l.key} d={l.d} fill="none" strokeLinejoin="round" stroke={l.live ? "var(--accent)" : "var(--line-strong)"} strokeWidth={l.live ? 1.5 : 1} strokeDasharray={l.live ? undefined : "4 4"} markerEnd={`url(#${l.live ? "lm-arrow-live" : "lm-arrow"})`} />
           ))}
         </svg>
         <div className="flex flex-col">
@@ -232,7 +265,7 @@ export function LaneMap({ cr, me, ws, onAct }: { cr: ChangeRequest; me: string; 
               key={lane.key}
               aria-label={`${lane.label} lane`}
               data-lane={lane.key}
-              className="grid gap-x-10 gap-y-3 border-b border-dashed border-(--line-strong) py-4 first:border-t lg:grid-cols-[160px_repeat(4,minmax(0,1fr))]"
+              className="grid items-start gap-x-10 gap-y-3 border-b border-dashed border-(--line-strong) py-4 first:border-t lg:grid-cols-[160px_repeat(4,minmax(0,1fr))]"
             >
               <header className="flex min-w-0 flex-col gap-1.5 lg:col-start-1 lg:pr-2">
                 <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--text-3)">{lane.label}</p>
@@ -245,8 +278,23 @@ export function LaneMap({ cr, me, ws, onAct }: { cr: ChangeRequest; me: string; 
             </section>
           ))}
         </div>
+        <button type="button" onClick={() => setEvery((v) => !v)} aria-expanded={every} className="mt-3 min-h-[44px] rounded-(--radius-s) border border-(--edge) px-3 text-[13px] text-(--text-2) lg:hidden">
+          {every ? "Show only the steps around this request" : "Show every state"}
+        </button>
       </div>
     </div>
+  );
+}
+
+/** Before a launch the only "who would this reach" Align has is the snapshot it recorded with the revision: how many
+ *  shared sessions were bound to the goal then. Delivery counts exist only after a launch. */
+function ReachNote({ cr }: { cr: ChangeRequest }) {
+  const snap = cr.revisions.find((r) => r.revision === cr.revision)?.snapshot;
+  if (!snap) return <p className="text-[11px] text-(--text-3)">No Align snapshot on this revision, so how many sessions it would reach is unknown.</p>;
+  return (
+    <p className="text-[11px] text-(--text-3)" data-reach>
+      Align&apos;s snapshot when revision {snap.revision} was written: {snap.bound_sessions} shared session{snap.bound_sessions === 1 ? "" : "s"} bound to this goal. Recorded by Align, not a delivery.
+    </p>
   );
 }
 

@@ -50,9 +50,9 @@ export const proposedVersion = (cr: ChangeRequest) => cr.base_version + 1;
 /** What is launched (the goal's current version, the one Align serves) and what is approved but not launched. */
 export function versions(cr: ChangeRequest): { launched: string; approved: string } {
   const launched = `v${cr.goal.version}`;
-  if (cr.state === "approved" && cr.launch === "launched") return { launched, approved: `v${cr.version} (launched)` };
+  if (cr.state === "approved" && cr.launch === "launched") return { launched, approved: `v${cr.version}` };
   if (cr.state === "approved" && (cr.launch === "pending" || cr.launch === "not_yet")) return { launched, approved: `v${proposedVersion(cr)}, not launched` };
-  if (cr.state === "pending" || cr.state === "countered") return { launched, approved: `none yet (asks for v${proposedVersion(cr)})` };
+  if (cr.state === "pending" || cr.state === "countered") return { launched, approved: `none yet, asks for v${proposedVersion(cr)}` };
   return { launched, approved: "none" };
 }
 
@@ -72,4 +72,4 @@ export const ago = (iso: string) => {
 };
 
 export const decisionHref = (ws: string, cr: { id: string; goal: { id: string } }) => `/app/w/${ws}/decisions/${cr.goal.id}/${cr.id}`;
-export const recordHref = (ws: string, cr: { goal: { id: string } }) => `/app/w/${ws}/goals/${cr.goal.id}#change-requests`;
+export const recordHref = (ws: string, cr: { id: string }) => `/app/w/${ws}/record?cr=${cr.id}`;

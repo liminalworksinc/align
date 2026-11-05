@@ -57,6 +57,9 @@ export function actsFor(cr: ChangeRequest): Act[] {
   return out;
 }
 
+/** The decisions that move a request forward get the pink primary; withdrawing or declining never does. */
+export const DOMINANT: readonly Act[] = ["approve_and_launch", "launch", "accept_counter", "approve"];
+
 /** Decisions that need the goal page's full form. */
 export function formLinks(ws: string, cr: ChangeRequest): { label: string; href: string }[] {
   const out: { label: string; href: string }[] = [];

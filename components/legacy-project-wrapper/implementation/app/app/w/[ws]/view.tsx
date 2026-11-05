@@ -6,11 +6,11 @@ import { useGoalTitles } from "../../_ui/changes";
 import { useApi } from "../../_ui/kit";
 import type { Me } from "../../_ui/server";
 import type { ChangeRequest } from "../../_ui/types";
-import { ACT_WORDS, actsFor, Confirm, formLinks, notYours, OutcomeLine, PrimaryBtn, QuietBtn, QuietLink, type Act, type Outcome } from "../../_ui/desk/act";
-import { AgentsLine, type HomeApp } from "../../_ui/desk/agents";
-import { ago, crStatus, decisionHref, nameList, oneLine, PHASE_WORDS, phaseOf, recordHref, versions, waitsOn, type Phase } from "../../_ui/desk/model";
-import { currentEvidence, EvidenceList, Facts, Reason, WouldChange } from "../../_ui/desk/parts";
-import { DeskShell } from "../../_ui/desk/shell";
+import { ACT_WORDS, actsFor, Confirm, DOMINANT, formLinks, notYours, OutcomeLine, PrimaryBtn, QuietBtn, QuietLink, type Act, type Outcome } from "../../_ui/b/act";
+import { AgentsLine, type HomeApp } from "../../_ui/b/agents";
+import { ago, crStatus, decisionHref, nameList, oneLine, PHASE_WORDS, phaseOf, recordHref, versions, waitsOn, type Phase } from "../../_ui/b/model";
+import { currentEvidence, EvidenceList, Facts, Reason, WouldChange } from "../../_ui/b/parts";
+import { DeskShell } from "../../_ui/b/shell";
 import FirstRun, { seenApp } from "./first-run";
 
 // LIM-2472 concept B: the workspace Home is a decision desk. One table of the change requests this person can read
@@ -92,30 +92,30 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
         </span>
       ),
     },
-    { key: "state", header: "State", sortValue: (r) => crStatus(r).label, render: (r) => <StatusPill kind={crStatus(r).kind} label={crStatus(r).label} size="s" /> },
+    { key: "state", header: "State", sortValue: (r) => crStatus(r).label, width: "170px", render: (r) => <StatusPill kind={crStatus(r).kind} label={crStatus(r).label} size="s" /> },
     {
       key: "waiting",
-      header: "Waiting on",
+      header: "Waits on",
       render: (r) => {
         const w = waitsOn(r);
-        return <span className="text-[13px] text-(--text-2)">{w ? nameList(w.people, me.id) : "Decided"}</span>;
+        return <span className="text-[13px] text-(--text-2) sm:whitespace-nowrap">{w ? nameList(w.people, me.id) : "Decided"}</span>;
       },
     },
     {
       key: "versions",
-      header: "Launched · Approved",
+      header: "Versions",
       render: (r) => {
         const v = versions(r);
         return (
-          <span className="flex flex-col font-mono text-[12px] text-(--text-2)">
-            <span>{v.launched}</span>
-            <span className="text-(--text-3)">{v.approved}</span>
+          <span className="flex flex-col font-mono text-[12px] text-(--text-2) sm:whitespace-nowrap">
+            <span>Launched {v.launched}</span>
+            <span className="text-(--text-3)">Approved {v.approved}</span>
           </span>
         );
       },
     },
-    { key: "evidence", header: "Evidence", align: "end", sortValue: (r) => r.evidence_count, render: (r) => <span className="font-mono text-[12px] text-(--text-2)">{r.evidence_count === 1 ? "1 link" : `${r.evidence_count} links`}</span> },
-    { key: "age", header: "Updated", align: "end", sortValue: (r) => r.updated_at, render: (r) => <span className="font-mono text-[12px] text-(--text-3)">{ago(r.updated_at)} ago</span> },
+    { key: "evidence", header: "Links", align: "end", width: "80px", sortValue: (r) => r.evidence_count, render: (r) => <span className="font-mono text-[12px] text-(--text-2)">{r.evidence_count}</span> },
+    { key: "age", header: "Updated", align: "end", width: "100px", sortValue: (r) => r.updated_at, render: (r) => <span className="font-mono text-[12px] text-(--text-3) sm:whitespace-nowrap">{ago(r.updated_at)} ago</span> },
   ];
 
   const rowActions = (r: ChangeRequest) => {
@@ -126,8 +126,14 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
       return <span className="text-[12px] text-(--text-3)">{phaseOf(r) === "decided" ? "No action" : "Not yours"}</span>;
     }
     return (
-      <span className="inline-flex flex-wrap justify-end gap-1.5 max-sm:justify-start">
-        <PrimaryBtn onClick={() => openRow(r, acts[0]!)}>{ACT_WORDS[acts[0]!]}</PrimaryBtn>
+      <span className="inline-flex flex-wrap justify-end gap-1.5 max-sm:justify-start sm:flex-nowrap">
+        {DOMINANT.includes(acts[0]!) ? (
+          <PrimaryBtn onClick={() => openRow(r, acts[0]!)}>{ACT_WORDS[acts[0]!]}</PrimaryBtn>
+        ) : (
+          <QuietBtn danger={acts[0] === "reject"} onClick={() => openRow(r, acts[0]!)}>
+            {ACT_WORDS[acts[0]!]}
+          </QuietBtn>
+        )}
         {acts.length > 1 && <QuietBtn onClick={() => openRow(r)}>More</QuietBtn>}
       </span>
     );
@@ -146,7 +152,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
 
   return (
     <DeskShell me={me} ws={ws} active="desk" crumbs={[{ label: "Decision desk" }]}>
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0">
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div className="min-w-0">
@@ -236,7 +242,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
           )}
         </div>
 
-        <aside className="flex min-w-0 flex-col gap-4">
+        <aside className="grid min-w-0 content-start gap-4 lg:grid-cols-2 2xl:grid-cols-1">
           <Panel eyebrow="Agents" title="Connected AI apps">
             <AgentsLine ws={ws} apps={apps} />
           </Panel>
@@ -262,7 +268,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
           ) : null}
           <Panel eyebrow="How to read this" tone="inset">
             <ul className="flex flex-col gap-1.5 text-[13px] text-(--text-2)">
-              <li>Approval is not launch. An approved change reaches agents only when someone who can launch it does.</li>
+              <li>Approval is not launch. Align serves an approved change only once someone who can launch it does.</li>
               <li>Evidence links are what people or agents report. Align doesn&apos;t check them.</li>
               <li>Only the actions you may take are buttons. The rest say who can.</li>
             </ul>
@@ -316,7 +322,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
               <EvidenceList items={currentEvidence(open)} me={me.id} />
             </div>
             <div className="flex flex-col gap-1.5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--text-3)">Agents on this goal</p>
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--text-3)">What Align observed of agents</p>
               <AgentsLine ws={ws} apps={apps} />
             </div>
           </div>
@@ -333,7 +339,7 @@ function DrawerActions({ ws, cr, me, onAct }: { ws: string; cr: ChangeRequest; m
   return (
     <div className="flex flex-wrap gap-2" data-actions>
       {acts.map((a, i) =>
-        i === 0 ? (
+        i === 0 && DOMINANT.includes(a) ? (
           <PrimaryBtn key={a} onClick={() => onAct(a)}>
             {ACT_WORDS[a]}
           </PrimaryBtn>

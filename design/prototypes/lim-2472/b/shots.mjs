@@ -147,8 +147,8 @@ try {
   await go(page, dec(notMine));
   await shoot(page, "06", "not-yours", "dark", ALL);
 
-  // 07: the decision record (the goal page); 08: Work.
-  await go(page, `/app/w/${s.ws}/goals/${rafis.goal.id}#change-requests`);
+  // 07: the decision record (shared record page, in the desk shell); 08: Work.
+  await go(page, `/app/w/${s.ws}/record?cr=${rafis.id}`);
   await shoot(page, "07", "record", "dark", ALL);
   await go(page, `/app/w/${s.ws}/sessions`);
   await shoot(page, "08", "work", "dark", ALL);
