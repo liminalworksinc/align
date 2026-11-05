@@ -22,6 +22,11 @@ import { StatusPill } from "./status-pill";
 
 const HARNESS = { "claude-code": "Claude Code", codex: "Codex" } as const;
 const at = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
+/** "12 min ago", "3 h ago", else the date: how long since something was reported, never "now". */
+const ago = (iso: string) => {
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  return m < 1 ? "under a minute ago" : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : at(iso);
+};
 const LINK = "text-(--accent-text) underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)";
 
 interface Activity {
@@ -83,10 +88,10 @@ function SessionsPanel({ ws, goal }: { ws: string; goal: Goal }) {
                 </span>
               )}
             </Row>
-            <Row label="Active in the last 90 minutes">
+            <Row label="Last reported activity">{d.last_activity_at ? <span title={at(d.last_activity_at)}>{ago(d.last_activity_at)}</span> : "None reported"}</Row>
+            <Row label="Sessions that reported activity in the last 90 minutes">
               <span className="font-mono tabular-nums">{d.active_now}</span>
             </Row>
-            <Row label="Last activity reported">{d.last_activity_at ? at(d.last_activity_at) : "None"}</Row>
           </dl>
           {d.detail && d.detail.files.length > 0 && (
             <div>
