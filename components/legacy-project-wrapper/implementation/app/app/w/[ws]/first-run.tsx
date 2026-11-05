@@ -185,7 +185,7 @@ export default function FirstRun({ ws, onSeen, always = false, me, hasGoals = fa
         {status}
       </p>
       <p className="text-[14px] text-(--text-2)">
-        Once it connects, the Home and the Apps tab show when it last connected (any request to Align) and, separately, when it last read the goals. Connecting is not a read.
+        Once it connects, the Apps tab shows when it last connected (any request to Align) and, separately, when it last read the goals. Connecting is not a read.
       </p>
       <Link href={`/app/w/${ws}/apps`} className="w-fit text-[14px] font-medium text-(--accent-text) underline">
         Using Codex or another app? See the Apps tab.
