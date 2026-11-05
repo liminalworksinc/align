@@ -260,6 +260,27 @@ try {
   await shoot(vp, "13", "decision-viewer", "dark", [1440], "Where this request is");
   await vp.close();
 
+  // A source that fails (forced 500 on one read at a time): the list never says "Nothing needs you", never shows a bare 0
+  // in its filter, and reports partial to the page.
+  for (const [who, cookies] of [["owner", owner], ["viewer", viewer]]) {
+    for (const src of ["change-requests", "asks", "alignments", "home"]) {
+      const fp = await newPage(browser, cookies, "dark");
+      await fp.setRequestInterception(true);
+      const re = new RegExp(`/api/v2/workspaces/${s.ws}/${src}(\\?|$)`);
+      fp.on("request", (req) => (req.method() === "GET" && re.test(new URL(req.url()).pathname + (new URL(req.url()).search ? "?" : "")) ? req.respond({ status: 500, contentType: "application/json", body: '{"error":"forced"}' }) : req.continue()));
+      await fp.goto(BASE + desk, { waitUntil: "networkidle0" });
+      await fp.waitForFunction(() => document.querySelector("h1[data-need-partial]")?.getAttribute("data-need-partial") === "1", { timeout: 20000 }).catch(() => undefined);
+      const r = await fp.evaluate(() => ({
+        partial: document.querySelector("h1[data-need-partial]")?.getAttribute("data-need-partial"),
+        nothing: /Nothing needs you/.test(document.body.innerText),
+        zeros: [...document.querySelectorAll('[data-needs="list"] [role="radio"]')].map((b) => b.textContent ?? "").filter((t) => / 0$/.test(t.trim())),
+        amber: !!document.querySelector("[data-needs-partial]"),
+      }));
+      check(`${who}, ${src} read failing: partial reported, amber line shown, no "Nothing needs you", no bare 0 in the filter`, r.partial === "1" && r.amber && !r.nothing && r.zeros.length === 0);
+      await fp.close();
+    }
+  }
+
   // 07: first run for a clean person (an empty workspace); 08: connect an agent.
   const ep = await newPage(browser, eli, "dark");
   await go(ep, `/app/w/${s.empty}`, "No decisions yet");

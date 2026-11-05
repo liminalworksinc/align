@@ -37,7 +37,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const pathname = usePathname();
   const params = useSearchParams();
   const [token, setToken] = useState(0);
-  const [needCount, setNeedCount] = useState<number | null>(null);
+  const [need, setNeed] = useState<{ n: number | null; partial: boolean }>({ n: null, partial: false });
   const base = `/app/w/${ws}`;
   // ?review=<goal>.<id>: the request to show; &choice= opens ReviewActions on that choice.
   const review = /^([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/.exec(params.get("review") ?? "");
@@ -54,10 +54,18 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
         <div className="flex min-w-0 flex-col gap-8">
           <div className="flex flex-col gap-3">
             {/* The count is the Needs-you rows only, from the list itself; unknown while it reads. */}
-            <h1 tabIndex={-1} data-need-count={needCount ?? ""} className="text-[24px] font-semibold tracking-[-0.01em] text-(--text-1) focus:outline-none">
-              {needCount === null ? "Home" : needCount === 0 ? "Nothing needs you" : `${needCount} thing${needCount === 1 ? "" : "s"} need${needCount === 1 ? "s" : ""} you`}
+            <h1 tabIndex={-1} data-need-count={need.n ?? ""} data-need-partial={need.partial ? "1" : "0"} className="text-[24px] font-semibold tracking-[-0.01em] text-(--text-1) focus:outline-none">
+              {need.n === null
+                ? "Home"
+                : need.partial
+                  ? need.n > 0
+                    ? `At least ${need.n} thing${need.n === 1 ? "" : "s"} need${need.n === 1 ? "s" : ""} you`
+                    : "Some of this could not be read"
+                  : need.n === 0
+                    ? "Nothing needs you"
+                    : `${need.n} thing${need.n === 1 ? "" : "s"} need${need.n === 1 ? "s" : ""} you`}
             </h1>
-            <NeedsList key={token} ws={ws} me={me.id} heading={false} onCount={setNeedCount} selected={review ? `cr:${review[2]}` : null} />
+            <NeedsList key={token} ws={ws} me={me.id} heading={false} onCount={(n, partial) => setNeed({ n, partial })} selected={review ? `cr:${review[2]}` : null} />
           </div>
           <section aria-labelledby="desk-h" className="flex min-w-0 flex-col gap-2">
             <h2 id="desk-h" className="text-[18px] font-semibold text-(--text-1)">
