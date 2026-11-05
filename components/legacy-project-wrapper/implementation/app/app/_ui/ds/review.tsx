@@ -114,7 +114,7 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
         {delivery.launched && delivery.value === undefined ? (
           <p className="text-[13px] text-(--text-3)">Reading evidence…</p>
         ) : (
-          <EvidenceSummary ws={ws} cr={cr} variant="full" value={delivery.launched ? delivery.value : null} />
+          <EvidenceSummary ws={ws} cr={cr} variant="full" value={delivery.launched ? delivery.value : null} sayUnread={false} />
         )}
         {!hasEvidence(cr) && (
           <p className="text-[14px] text-(--text-2)">

@@ -24,6 +24,9 @@ export type EvidenceSummaryProps = {
   variant?: "inline" | "full";
   /** inline: the most chips shown before "+N more" (fewer when they don't fit). Default: as many as fit. */
   max?: number;
+  /** false where the page already says a failed delivery read in its own words (the review's state line, Work's
+   *  delivery statement), so it isn't said twice. */
+  sayUnread?: boolean;
 } & (
   | { cr: ChangeRequest; goal?: never; value?: Delivery | null; launched?: never }
   | {
@@ -148,7 +151,7 @@ export function useDelivery(ws: string, cr: ChangeRequest | null | undefined): {
 }
 
 export function EvidenceSummary(props: EvidenceSummaryProps) {
-  const { ws, variant = "inline", max = Infinity } = props;
+  const { ws, variant = "inline", max = Infinity, sayUnread = true } = props;
   const cr = props.cr;
   const needValue = !!cr && cr.launch === "launched" && !!cr.version && props.value === undefined;
   const value = useRead<ValueRead>(needValue ? `/api/v2/workspaces/${ws}/goals/${cr!.goal.id}/change-requests/${cr!.id}/value` : null);
@@ -161,7 +164,8 @@ export function EvidenceSummary(props: EvidenceSummaryProps) {
   const facts = cr ? changeFacts(cr, crValue) : props.goal ? goalFacts(props.goal, launched, { quiet: props.quiet }) : [];
   // A launched version whose delivery couldn't be read: said in words, never dropped (its facts would otherwise vanish
   // and read as nothing to say). Not an evidence class: Align has the facts, this page couldn't get them.
-  const unread = cr ? (cr.launch === "launched" && cr.version && crValue === null ? cr.version : null) : launched && launched.value === null ? launched.version : null;
+  const failed = cr ? (cr.launch === "launched" && cr.version && crValue === null ? cr.version : null) : launched && launched.value === null ? launched.version : null;
+  const unread = sayUnread ? failed : null;
   if (!facts.length && unread === null) return null;
   return variant === "full" ? <Full facts={facts} unread={unread} /> : <Inline facts={facts} max={max} unread={unread} />;
 }

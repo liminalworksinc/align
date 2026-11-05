@@ -142,7 +142,7 @@ function DecisionEvidence({ ws, cr, me, value }: { ws: string; cr: ChangeRequest
   return (
     <Panel eyebrow="Its evidence" title={`On revision ${cr.revision}`}>
       <div className="flex flex-col gap-3">
-        {cr.launch === "launched" && value === undefined ? <p className="text-[13px] text-(--text-3)">Reading evidence…</p> : <EvidenceSummary ws={ws} cr={cr} variant="full" value={cr.launch === "launched" ? value : null} />}
+        {cr.launch === "launched" && value === undefined ? <p className="text-[13px] text-(--text-3)">Reading evidence…</p> : <EvidenceSummary ws={ws} cr={cr} variant="full" value={cr.launch === "launched" ? value : null} sayUnread={false} />}
         {!hasEvidence(cr) && <p className="text-[14px] text-(--text-2)">No evidence attached.</p>}
         {links.length > 0 && (
           <ul className="flex flex-col gap-2 border-t border-(--line) pt-3">
