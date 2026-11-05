@@ -11,7 +11,7 @@ const lib = resolve("components/legacy-project-wrapper/implementation/app/app/_u
 const { changeFacts, goalFacts, hasEvidence, FACT_WORD } = await import(pathToFileURL(lib).href);
 
 // Claims about what an agent did or is, and "verified": Align never knows either from what it records.
-const BANNED = /\b(followed|live|running|compliant|agents? (?:are |is )?on|applied|verified|is on v|has v\d)\b/i;
+const BANNED = /\b(followed|live|running|compliant|agents? (?:are |is )?on|applied|verified|released|is on v|has v\d)\b/i;
 let failed = 0;
 const say = (facts) => facts.map((f) => `${FACT_WORD[f.kind]} · ${f.short}`).join(" | ");
 function expect(name, facts, firstKind, firstShort) {
@@ -66,7 +66,7 @@ expect(
 const A = goalFacts({ allocation: null }, { version: 2, value: { delivery: null, apps: { everyone: true, items: [{ id: "app1" }] } } });
 const B = goalFacts({ allocation: null }, { version: 4, value: { delivery: null, apps: { everyone: true, items: [] } } });
 expect("two goals, one app read: goal A (sent)", A, "receipt", "v2 · 1 app");
-expect("two goals, one app read: goal B (not sent)", B, "unobserved", "v4 · not sent yet");
+expect("two goals, one app read: goal B (not sent)", B, "unobserved", "v4 · no session or app yet");
 if (B.some((f) => f.kind === "receipt")) {
   failed++;
   console.log("FAIL goal B carries a receipt it has no read for");
@@ -76,9 +76,16 @@ const idle = { allocation: { target_share: null, share_7d: 0, gap_7d: null, held
 const quietIdle = goalFacts(idle, null, { quiet: true });
 if (quietIdle.length) failed++;
 console.log(`${quietIdle.length ? "FAIL" : "ok  "} quiet goal with no agent time and nothing launched: ${say(quietIdle) || "(no facts)"}`);
-expect("quiet goal, launched v2 not sent yet, no agent time", goalFacts(idle, { version: 2, value: { delivery: null, apps: { everyone: true, items: [] } } }, { quiet: true }), "unobserved", "v2 · not sent yet");
+expect("quiet goal, launched v2 to no session or app, no agent time", goalFacts(idle, { version: 2, value: { delivery: null, apps: { everyone: true, items: [] } } }, { quiet: true }), "unobserved", "v2 · no session or app yet");
 expect("quiet goal, launched v2, 0 of 2 received", goalFacts(idle, { version: 2, value: { delivery: { sessions: 2, received: 0, applied: 0 }, apps: { everyone: true, items: [] } } }, { quiet: true }), "unobserved", "v2 · 0 of 2 received");
-expect("launch that targeted no session", changeFacts({ revision: 1, revisions: [rev(1, [])], launch: "launched", version: 5 }, { delivery: { sessions: 0, received: 0, applied: 0 }, apps: { everyone: true, items: [] } }), "unobserved", "v5 · no session on this goal");
+expect("launch that targeted no session, no app since", changeFacts({ revision: 1, revisions: [rev(1, [])], launch: "launched", version: 5 }, { delivery: { sessions: 0, received: 0, applied: 0 }, apps: { everyone: true, items: [] } }), "unobserved", "v5 · no session or app yet");
+expect("launch that targeted no session, one app sent it", changeFacts({ revision: 1, revisions: [rev(1, [])], launch: "launched", version: 5 }, { delivery: null, apps: { everyone: true, items: [{ id: "a" }] } }), "receipt", "v5 · 1 app");
+{
+  const f = changeFacts({ revision: 1, revisions: [rev(1, [])], launch: "launched", version: 5 }, { delivery: null, apps: { everyone: true, items: [{ id: "a" }] } });
+  const ok = f[1]?.kind === "unobserved" && f[1]?.short === "v5 · no session on this goal";
+  if (!ok) failed++;
+  console.log(`${ok ? "ok  " : "FAIL"} ...and says no session on this goal: ${say(f)}`);
+}
 expect("goal with 35% agent time and nothing launched", goalFacts({ allocation: { target_share: 40, share_7d: 35, gap_7d: -5, held: false } }, null), "reported", "35% agent time");
 none("goal with no agent time, not quiet: no fact", goalFacts({ allocation: { target_share: null, share_7d: 0, gap_7d: null, held: false } }, null));
 
