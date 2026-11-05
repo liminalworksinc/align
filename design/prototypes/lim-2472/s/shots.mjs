@@ -59,13 +59,15 @@ if (!ws) {
 }
 const cr = await page.evaluate(async (w) => {
   const r = await fetch(`/api/v2/workspaces/${w}/change-requests`).then((x) => x.json());
-  return [...(r.waiting_on_me ?? []), ...(r.mine ?? []), ...(r.others ?? [])][0]?.id ?? null;
+  const c = [...(r.waiting_on_me ?? []), ...(r.mine ?? []), ...(r.others ?? [])][0];
+  return c ? { id: c.id, goal: c.goal.id } : null;
 }, ws);
 
 const SCREENS = [
   ["record", `/app/w/${ws}/record`],
-  ...(cr ? [["record-cr", `/app/w/${ws}/record?cr=${cr}`]] : []),
+  ...(cr ? [["record-cr", `/app/w/${ws}/record?cr=${cr.id}`]] : []),
   ["work", `/app/w/${ws}/work`],
+  ...(cr ? [["work-goal", `/app/w/${ws}/work?goal=${cr.goal}`]] : []),
   ["apps", `/app/w/${ws}/apps`],
   ["sessions", `/app/w/${ws}/sessions`],
 ];
