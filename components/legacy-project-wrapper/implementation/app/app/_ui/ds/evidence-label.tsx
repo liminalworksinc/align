@@ -20,8 +20,11 @@ export function EvidenceLabel({ kind, detail, size = "m" }: { kind: EvidenceKind
       data-evidence={kind}
       className={`inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-(--radius-s) border ${TONE[kind]} ${size === "s" ? "px-1.5 py-0.5 text-[12px]" : "px-2 py-1 text-[13px]"}`}
     >
-      <I />
-      <span className="whitespace-nowrap font-medium">{WORD[kind]}</span>
+      {/* The icon and the word stay together; only the detail wraps. */}
+      <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-medium">
+        <I />
+        {WORD[kind]}
+      </span>
       {detail && <span className="min-w-0 break-words font-mono text-[12px] opacity-90">{detail}</span>}
     </span>
   );
