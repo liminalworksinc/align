@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useGoalTitles } from "../../_ui/changes";
 import { useCallback, useEffect, useState } from "react";
 import { Drawer, ReviewActions, ReviewBody, type ReviewChoice } from "../../_ui/ds";
@@ -18,8 +19,6 @@ const quiet = "inline-flex min-h-[44px] items-center text-[13px] text-(--accent-
 
 function Loaded({ ws, cr, me, choice, onClose, done }: { ws: string; cr: ChangeRequest; me: string; choice?: ReviewChoice; onClose: () => void; done: () => void }) {
   const titles = useGoalTitles(ws);
-  const base = `/app/w/${ws}`;
-  const record = `${base}/record?cr=${cr.id}`;
   return (
     <Drawer
       open
@@ -27,25 +26,37 @@ function Loaded({ ws, cr, me, choice, onClose, done }: { ws: string; cr: ChangeR
       width="l"
       eyebrow="Review"
       title={cr.goal.title}
-      footer={
-        <div className="flex w-full flex-col gap-1">
-          <div className="flex flex-wrap gap-x-4">
-            <Link href={record} className={quiet} data-review-record>
-              Open the full record
-            </Link>
-            <Link href={`${base}/work?goal=${cr.goal.id}`} className={quiet} data-review-work>
-              Work and evidence for this goal
-            </Link>
-          </div>
-          <ReviewActions ws={ws} cr={cr} me={me} onDone={done} compact initialChoice={choice} />
-        </div>
-      }
+      footer={<ReviewActions ws={ws} cr={cr} me={me} onDone={done} compact initialChoice={choice} />}
     >
       <div data-review={cr.id}>
         <ReviewBody ws={ws} cr={cr} me={me} titleOf={(id) => titles.get(id) ?? "a goal you can't see"} onDone={done} />
       </div>
     </Drawer>
   );
+}
+
+export interface ReviewTarget {
+  goal: string;
+  id: string;
+  choice?: ReviewChoice;
+}
+
+/** The review's place in the URL (?review=<goal>.<id>[&choice=<choice>]), so Back, a reload, a shared link and a plain
+ *  link from a row all open it, on any page that mounts the drawer. */
+export function useReview(): [ReviewTarget | null, (r: ReviewTarget | null) => void] {
+  const sp = useSearchParams();
+  const [goal, id] = (sp.get("review") ?? "").split(".");
+  const choice = (sp.get("choice") as ReviewChoice | null) ?? undefined;
+  const set = useCallback((next: ReviewTarget | null) => {
+    const u = new URL(window.location.href);
+    u.searchParams.delete("choice");
+    if (next) {
+      u.searchParams.set("review", `${next.goal}.${next.id}`);
+      if (next.choice) u.searchParams.set("choice", next.choice);
+    } else u.searchParams.delete("review");
+    window.history[next ? "pushState" : "replaceState"](null, "", u);
+  }, []);
+  return [goal && id ? { goal, id, choice } : null, set];
 }
 
 /** Read by id and kept mounted until the person closes it: a decision or a refusal re-reads the request in place, so
@@ -72,10 +83,10 @@ export function ReviewDrawer({ ws, goal, id, me, choice, onClose, onChanged }: {
 
   if (!r.cr && (r.status === 404 || r.status === 400))
     return (
-      <Drawer open onClose={onClose} width="l" eyebrow="Review" title="Not found">
+      <Drawer open onClose={onClose} width="l" eyebrow="Review" title="No such request in this workspace">
         <div className="flex flex-col gap-3 text-[15px] text-(--text-2)" data-review-missing>
-          <p>This link doesn&apos;t open a change request you can read. The request may not exist, or it may be on a goal you can&apos;t see.</p>
-          <p>If someone sent you this link, ask them to check it, or to add you to the goal.</p>
+          {/* The same words as the record page's missing state (decision-record.tsx), so both say one thing. */}
+          <p>Align has no change request with this address here that you can read. It may be in another workspace, or on a goal you can&apos;t see.</p>
           <Link href={`/app/w/${ws}/requests`} className={quiet}>
             Open Requests
           </Link>

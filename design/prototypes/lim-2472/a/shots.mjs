@@ -120,7 +120,7 @@ async function openCard(p, match = "Ship self-serve onboarding") {
     return !!b;
   }, match);
   if (!ok) throw new Error(`no Home card for "${match}"`);
-  await ready(p, "Open the full record", "[role=dialog]");
+  await ready(p, "Work on this goal", "[role=dialog]");
 }
 /** Click the visible decision `title` in the drawer; on a phone a secondary one sits in "More actions". */
 async function pick(p, title) {
@@ -235,8 +235,8 @@ for (const width of W) {
       await ready(p, "Confirm", "[role=dialog]");
       await shot(p, "03-approve-and-launch-confirm", theme, width, false);
       // 05 The full record and 06 the goal's work and evidence: the drawer's own links.
-      const record = await dialogHref(p, "data-review-record");
-      const work = await dialogHref(p, "data-review-work");
+      const record = await dialogHref(p, 'data-to="record"');
+      const work = await dialogHref(p, 'data-to="work"');
       await goto(p, record);
       await ready(p, goalTitle);
       await shot(p, "05-record", theme, width);
@@ -367,7 +367,7 @@ for (const width of [390, 320]) {
     // Success: Approve only -> the drawer stays, with the done notice and the request as approved, not launched.
     const ok = await propose("approve only");
     await goto(p, `/app/w/${WS}?review=${goal}.${ok.id}`);
-    await ready(p, "Open the full record", "[role=dialog]");
+    await ready(p, "Work on this goal", "[role=dialog]");
     await approveOnly(p);
     await p.waitForSelector('[role=dialog] [data-notice="done"]', { timeout: 20_000 }).catch(() => {
       throw new Error("Approve only: the drawer shows no done notice (or closed)");
@@ -377,7 +377,7 @@ for (const width of [390, 320]) {
     // Refusal: the request is declined from Node while the drawer is open -> Approve only -> the drawer stays, red.
     const no = await propose("refused");
     await goto(p, `/app/w/${WS}?review=${goal}.${no.id}`);
-    await ready(p, "Open the full record", "[role=dialog]");
+    await ready(p, "Work on this goal", "[role=dialog]");
     await call(mara, "POST", `/api/v2/workspaces/${WS}/goals/${goal}/change-requests/${no.id}/reject`, { revision: no.revision, reason: "Declined from Node by shots.mjs (fictional)." });
     await approveOnly(p);
     await p.waitForSelector('[role=dialog] [data-notice="refused"]', { timeout: 20_000 }).catch(() => {
@@ -403,14 +403,14 @@ for (const width of [390, 320]) {
       for (const width of W) {
         const c = await page(person, "dark", width);
         await goto(c.p, `/app/w/${WS}?review=${pendingGoal}.${pendingCr}`);
-        await ready(c.p, "Open the full record", "[role=dialog]");
+        await ready(c.p, "Work on this goal", "[role=dialog]");
         if (!(await c.p.$eval("[role=dialog]", (d, t) => d.innerText.includes(t), goalTitle))) throw new Error(`review link, ${person} at ${width}: the drawer doesn't show the goal`);
         await goto(c.p, `/app/w/${WS}?review=${pendingGoal}.cr_shotsdoesnotexist`);
-        await ready(c.p, "Not found", "[role=dialog]");
+        await ready(c.p, "No such request", "[role=dialog]");
         if (!(await c.p.$("[role=dialog] [data-review-missing]"))) throw new Error(`review link, ${person} at ${width}: a made-up id shows no not-found state`);
         if (person !== "owner") {
           await goto(c.p, `/app/w/${WS}?review=${privGoal}.${privCr}`);
-          await ready(c.p, "Not found", "[role=dialog]");
+          await ready(c.p, "No such request", "[role=dialog]");
           const leaks = await c.p.$eval("[role=dialog]", (d) => /Private check/.test(d.innerText));
           if (leaks || !(await c.p.$("[role=dialog] [data-review-missing]"))) throw new Error(`review link, ${person} at ${width}: a hidden goal's request is not a plain not-found`);
         }
@@ -423,7 +423,7 @@ for (const width of [390, 320]) {
     const kb = await propose("keyboard at 320");
     const k = await page("owner", "dark", 320);
     await goto(k.p, `/app/w/${WS}?review=${goal}.${kb.id}`);
-    await ready(k.p, "Open the full record", "[role=dialog]");
+    await ready(k.p, "Work on this goal", "[role=dialog]");
     await tabTo(k.p, { sel: '[role=dialog] [data-decision="Approve and launch"]' }, "Approve and launch");
     await k.p.keyboard.press("Enter");
     const step = await k.p

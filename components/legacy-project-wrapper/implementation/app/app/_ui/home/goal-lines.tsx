@@ -30,23 +30,23 @@ export function latestApproved(changes: ChangeRequest[] | null, goal: string): C
   return on[0] ?? null;
 }
 
-function Line({ ws, me, g, latest, fed, onReview }: { ws: string; me: string; g: GoalLine; latest: ChangeRequest | null; fed: Goal | undefined; onReview?: (goal: string, id: string) => void }) {
+function Line({ ws, g, latest, fed, onReview }: { ws: string; g: GoalLine; latest: ChangeRequest | null; fed: Goal | undefined; onReview?: (goal: string, id: string) => void }) {
   // A line earns a chip only when it has something to say: an approved change still waiting on launch, Held, the newest
   // launch's delivery, or agent time above zero. Zero agent time and "no approved change" show nothing.
   const waiting = latest && latest.state === "approved" && latest.launch !== "launched" ? latest : null;
   const st = waiting ? crStatus(waiting) : null;
   const pill = st && <StatusPill kind={st.kind} size="s" label={st.label} />;
   const a = fed?.allocation;
-  const quietGoal = fed && { ...fed, allocation: a && a.share_7d > 0 ? a : null };
   return (
     <li className="flex min-h-[44px] flex-wrap items-center gap-x-3 gap-y-1 px-4 py-1.5 max-md:py-2" data-goal-line={g.id}>
+      {/* The title wins: it wraps to two lines before it is cut, and the metadata goes first (team, then version). */}
       <div className="flex min-w-0 flex-1 basis-56 items-baseline gap-2">
-        <span className="truncate text-[14px] font-medium text-(--text-1)" title={g.title}>
+        <span className="line-clamp-2 min-w-0 text-[14px] font-medium text-(--text-1)" title={g.title}>
           {g.title}
         </span>
-        <span className="shrink-0 font-mono text-[12px] text-(--text-3)">
-          v{g.version} · {g.level === "company" ? "Company" : (g.team?.name ?? "Team")}
-          {g.owner.id === me ? " · yours" : ""}
+        <span className="shrink-0 font-mono text-[12px] text-(--text-3) max-[359px]:hidden">
+          v{g.version}
+          <span className="max-sm:hidden"> · {g.level === "company" ? "Company" : (g.team?.name ?? "Team")}</span>
         </span>
       </div>
       <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
@@ -65,8 +65,8 @@ function Line({ ws, me, g, latest, fed, onReview }: { ws: string; me: string; g:
           ))}
         {a?.held && <StatusPill kind="held" size="s" label="Held" />}
         {/* The shared summary: the newest launch's delivery from its own …/value read, then agent time as reported. */}
-        {quietGoal && <EvidenceSummary ws={ws} goal={quietGoal} variant="inline" max={2} />}
-        <Link href={`/app/w/${ws}/work?goal=${g.id}`} className="inline-flex min-h-[32px] items-center px-1 text-[13px] font-medium text-(--accent-text) hover:underline max-sm:min-h-[44px]" aria-label={`Work on ${g.title}`} data-goal-work>
+        {fed && <EvidenceSummary ws={ws} goal={fed} variant="inline" max={2} quiet />}
+        <Link href={`/app/w/${ws}/work?goal=${g.id}`} className="inline-flex min-h-[32px] items-center px-1 text-[13px] text-(--text-2) hover:text-(--text-1) hover:underline max-sm:min-h-[44px]" aria-label={`Work on ${g.title}`} data-goal-work>
           Work
         </Link>
       </div>
@@ -76,13 +76,13 @@ function Line({ ws, me, g, latest, fed, onReview }: { ws: string; me: string; g:
 
 export default function GoalLines({
   ws,
-  me,
   goals,
   changes,
   onReview,
 }: {
   ws: string;
-  me: string;
+  /** Unused since lines stopped saying "yours" (an owner's every line said it); kept so callers need no change. */
+  me?: string;
   /** The Home's goals (GET …/home → goals), or null when that read failed. */
   goals: GoalLine[] | null;
   /** Every change request the person can read, or null when that read failed (the lines then show no plan pill). */
@@ -97,7 +97,7 @@ export default function GoalLines({
         <h2 id="goal-lines-title" className="text-[16px] font-semibold text-(--text-1)">
           Goals
         </h2>
-        <Link href={`/app/w/${ws}/goals`} className="text-[13px] text-(--accent-text) hover:underline">
+        <Link href={`/app/w/${ws}/goals`} className="text-[13px] text-(--text-2) hover:text-(--text-1) hover:underline">
           All goals
         </Link>
       </div>
@@ -115,7 +115,7 @@ export default function GoalLines({
           {changes === null && <p className="text-[13px] text-(--text-2)">Align couldn&apos;t read change requests just now, so the plan state of each goal is unknown.</p>}
           <ul className="divide-y divide-(--line) overflow-hidden rounded-(--radius-m) border border-(--line) bg-(--bg-panel)">
             {goals.map((g) => (
-              <Line key={g.id} ws={ws} me={me} g={g} latest={latestApproved(changes, g.id)} fed={feed.data?.goals.find((x) => x.id === g.id)} onReview={onReview} />
+              <Line key={g.id} ws={ws} g={g} latest={latestApproved(changes, g.id)} fed={feed.data?.goals.find((x) => x.id === g.id)} onReview={onReview} />
             ))}
           </ul>
         </>
