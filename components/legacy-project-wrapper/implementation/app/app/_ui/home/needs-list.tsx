@@ -1,6 +1,7 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { EvidenceLabel, EvidenceSummary, NeedAction, NeedList, NeedRow, Segmented, type Delivery } from "../ds";
+import { EvidenceLabel, EvidenceSummary, hasEvidence, NeedAction, NeedList, NeedRow, Segmented, type Delivery } from "../ds";
 import { api, useApi } from "../kit";
 import type { Alignment, ChangeRequest, Goal } from "../types";
 import { buildNeeds, inPhase, KIND_WORDS, latestLaunches, rankNote, REQ_GOALS_MAX, SENT_GOALS_MAX, type AppLite, type AskLite, type EvidenceCounts, type Need, type NeedPhase, type NeedsInput, type RequestLite } from "./needs";
@@ -115,7 +116,7 @@ function useSends(W: string, crs: ChangeRequest[] | null, failed: boolean) {
 /** Search shows only when a phase has more rows than this. */
 const SEARCH_FROM = 8;
 
-export function NeedsList({ ws, me, selected, reviewBase = "", heading = true, onCount }: { ws: string; me: string; selected?: string | null; reviewBase?: string; heading?: boolean; onCount?: (n: number | null) => void }) {
+export function NeedsList({ ws, me, selected, reviewBase = "", heading = true }: { ws: string; me: string; selected?: string | null; reviewBase?: string; heading?: boolean }) {
   const W = `/api/v2/workspaces/${ws}`;
   const cr = useApi<Groups<ChangeRequest>>(`${W}/change-requests`);
   const asks = useApi<{ asks: AskLite[] }>(`${W}/asks?state=open,accepted,done,declined`);
@@ -129,7 +130,7 @@ export function NeedsList({ ws, me, selected, reviewBase = "", heading = true, o
   const [q, setQ] = useState("");
 
   const loading = [cr, asks, al, home].some((r) => r.loading && !r.data && !r.error) || reqs.loading || sent.loading;
-  const { rows, unknown } = useMemo(
+  const { rows, unknown, notices } = useMemo(
     () =>
       buildNeeds({
         ws,
@@ -144,17 +145,24 @@ export function NeedsList({ ws, me, selected, reviewBase = "", heading = true, o
     [ws, me, crList, asks.data, al.data, home.data, reqs.groups, sent.sends],
   );
   const counts = Object.fromEntries(PHASES.map((p) => [p.value, inPhase(rows, p.value).length])) as Record<NeedPhase, number>;
-  // For the page's heading: null while reading, and when a read failed and the rest found nothing (zero isn't known then).
-  useEffect(() => {
-    onCount?.(loading || (unknown.length > 0 && counts.needs_you === 0) ? null : counts.needs_you);
-  }, [onCount, loading, unknown.length, counts.needs_you]);
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return inPhase(rows, phase).filter((n) => !needle || [n.goal?.title, n.cause, n.quote, n.who, KIND_WORDS[n.kind]].join(" ").toLowerCase().includes(needle));
   }, [rows, phase, q]);
 
+  // Every read refused or failed (a signed-in non-member gets 404 on all of them): say so, never "Nothing needs you".
+  const unreadable = !loading && cr.error !== null && asks.error !== null && al.error !== null && home.error !== null;
+  if (unreadable)
+    return (
+      <section aria-label="Needs you" data-needs="unreadable" className="flex min-w-0 flex-col gap-2">
+        <p role="status" className="rounded-(--radius-m) border border-(--line) bg-(--bg-panel) px-3 py-2.5 text-[14px] text-(--text-2)">
+          Align couldn&apos;t read this workspace for you, so what needs you here is unknown. If you aren&apos;t a member, ask a workspace owner for an invite.
+        </p>
+      </section>
+    );
+
   return (
-    <section aria-labelledby={heading ? "needs-h" : undefined} aria-label={heading ? undefined : "Needs you"} data-needs className="@container/needs flex min-w-0 flex-col gap-2">
+    <section aria-labelledby={heading ? "needs-h" : undefined} aria-label={heading ? undefined : "Needs you"} data-needs="list" className="@container/needs flex min-w-0 flex-col gap-2">
       {heading && (
         <h2 id="needs-h" className="text-[18px] font-semibold text-(--text-1)">
           Needs you
@@ -179,7 +187,7 @@ export function NeedsList({ ws, me, selected, reviewBase = "", heading = true, o
               type="search"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search goal, person, words"
+              placeholder="Search"
               className="min-h-[36px] w-full rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) px-3 text-[14px] text-(--text-1) placeholder:text-(--text-3) max-sm:min-h-[44px]"
             />
           </label>
@@ -215,7 +223,7 @@ export function NeedsList({ ws, me, selected, reviewBase = "", heading = true, o
               sub={n.goal ? (n.who ? `${n.cause} · ${n.who}` : n.cause) : (n.who ?? undefined)}
               waited={n.since ? waited(n.since.at) : "time not recorded"}
               evidence={
-                n.kind === "decide" && n.phase === "needs_you" && !n.evidence.agent_reported && !n.evidence.self_reported ? (
+                n.kind === "decide" && n.phase === "needs_you" && n.cr && !hasEvidence(n.cr) ? (
                   <span className="text-[12px] text-(--text-3)">No evidence attached</span>
                 ) : n.cr ? (
                   // The shared summary, from the same value read the review uses; none for a request not launched.
@@ -231,6 +239,16 @@ export function NeedsList({ ws, me, selected, reviewBase = "", heading = true, o
           ))}
         </NeedList>
         </div>
+      )}
+      {!loading && notices.length > 0 && (
+        <p data-needs-notice className="px-1 text-[12px] text-(--text-3)">
+          Align has recorded no goal read from {notices[0]!.app.name}
+          {notices[0]!.connected_by.id === me ? "" : ` (connected by ${notices[0]!.connected_by.name})`}
+          {notices.length > 1 ? ` or ${notices.length - 1} other app${notices.length === 2 ? "" : "s"}` : ""}.{" "}
+          <Link href={`/app/w/${ws}/apps`} className="text-(--text-2) underline underline-offset-4 hover:text-(--text-1)">
+            See apps
+          </Link>
+        </p>
       )}
     </section>
   );

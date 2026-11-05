@@ -97,6 +97,15 @@ export interface Need {
   cr?: ChangeRequest;
 }
 
+/** Not a judgment, so never a row and never counted: a connected app Align has recorded no goal read from (a setup
+ *  state, with no goal). Home prints at most one muted line for these under the list. */
+export interface Notice {
+  kind: "app_never_read";
+  app: { id: string; name: string };
+  connected_by: HomePerson;
+  action: { label: "See apps"; opens: "apps" };
+}
+
 export interface NeedsInput {
   ws: string;
   me: string;
@@ -247,10 +256,10 @@ function alignmentNeed(a: Alignment, me: string): Need | null {
 
 /** Connected apps Align has not sent a launched version to (HOME apps + SENT). For the latest launch on each goal
  *  (at most SENT_GOALS_MAX goals, newest launches first), the value read lists the apps an MCP goal read was sent that
- *  version (lib/oauth/grants.ts appsSentGoalVersion, recorded per app, goal and version); an app this person can see
- *  that isn't in that list gets a row: "Align has not sent v<n> to <app>". Not observed for v<n>; Receipt when Align
- *  has served this app some other goal read. An app Align has seen no goal read from at all gets one row with no goal
- *  or version, launches or not. Nothing is said about what the app or its agent is doing. */
+ *  version (lib/oauth/grants.ts appsSentGoalVersion, recorded per app, goal and version); an app this person can see,
+ *  that Align has served some goal read, and that isn't in that list gets a row: "Align has not sent v<n> to <app>."
+ *  Not observed for v<n>. An app with no goal read at all is a notice, not a row (neverRead). Nothing is said about
+ *  what the app or its agent is doing. */
 function appNeeds(apps: AppLite[], sends: NonNullable<NeedsInput["sends"]> | undefined, me: string): Need[] {
   const out: Need[] = [];
   const mine = (a: AppLite) => a.connected_by.id === me;
@@ -263,31 +272,29 @@ function appNeeds(apps: AppLite[], sends: NonNullable<NeedsInput["sends"]> | und
     quote: null,
     since,
     evidence: e,
-    action: mine(a) ? { label: "Open the app", opens: "apps" } : null,
+    action: mine(a) ? { label: "See apps", opens: "apps" } : null,
     who: mine(a) ? null : `Connected by ${a.connected_by.name}`,
     review: null,
     tone: "draft",
   });
-  for (const a of apps) {
-    if (a.last_read_at) continue;
-    const e = none();
-    e.not_observed = 1;
-    out.push(row(a, `app:${a.id}`, null, `Align has recorded no goal read from ${a.name}`, { at: a.approved_at, field: "approved_at" }, e));
-  }
   for (const s of sends ?? []) {
     const sent = new Set(s.apps.map((x) => x.id));
     for (const a of apps) {
       if (!a.last_read_at || sent.has(a.id)) continue;
       const e = none();
       e.not_observed = 1;
-      e.receipt = 1;
       // A newer version saved directly (no change request) may have been sent; these reads can't tell, so the row
       // names the goal's current version rather than reading as "behind".
-      const now = s.current_version && s.current_version > s.version ? ` (the goal is now at v${s.current_version}; whether Align sent that is not checked here)` : "";
-      out.push(row(a, `app:${a.id}:${s.goal.id}:${s.version}`, s.goal, `Align has not sent v${s.version} to ${a.name}${now}; it has served ${a.name} other goal reads`, { at: s.launched_at, field: "launch_decided_at" }, e));
+      const now = s.current_version && s.current_version > s.version ? ` The goal is now at v${s.current_version}.` : "";
+      out.push(row(a, `app:${a.id}:${s.goal.id}:${s.version}`, s.goal, `Align has not sent v${s.version} to ${a.name}.${now}`, { at: s.launched_at, field: "launch_decided_at" }, e));
     }
   }
   return out;
+}
+
+/** Apps Align has recorded no goal read from (HOME apps): notices, launches or not. */
+function neverRead(apps: AppLite[]): Notice[] {
+  return apps.filter((a) => !a.last_read_at).map((a) => ({ kind: "app_never_read", app: { id: a.id, name: a.name }, connected_by: a.connected_by, action: { label: "See apps", opens: "apps" } }));
 }
 
 const TYPE_WORDS: Record<RequestLite["type"], string> = { replan: "replan", checkpoint: "checkpoint", switch_goal: "switch goal" };
@@ -328,7 +335,7 @@ function declinedNeeds(groups: NonNullable<NeedsInput["requests"]>, me: string):
  *  renderer says that kind is unknown rather than showing nothing. */
 export type Unknown = "change requests" | "asks" | "alignments" | "apps" | "requests to agents" | "what Align sent apps";
 
-export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[] } {
+export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[]; notices: Notice[] } {
   const { me } = input;
   const rows: Need[] = [];
   const unknown: Unknown[] = [];
@@ -349,7 +356,7 @@ export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[
   if (input.apps) rows.push(...appNeeds(input.apps, input.sends ?? undefined, me));
   else unknown.push("apps");
   if (input.sends === null) unknown.push("what Align sent apps");
-  return { rows: rankNeeds(rows), unknown };
+  return { rows: rankNeeds(rows), unknown, notices: input.apps ? neverRead(input.apps) : [] };
 }
 
 const PHASE_ORDER: NeedPhase[] = ["needs_you", "waiting_on_others", "done"];
