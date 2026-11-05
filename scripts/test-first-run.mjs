@@ -403,7 +403,11 @@ async function phaseLocal(dir) {
     await page.reload({ waitUntil: "networkidle2" });
     const older = await waitFor(page, async () => /Claude Code\s*Last seen before the latest change/.test(await sidebar()));
     check("after a request the sidebar says Claude Code was last seen before the latest change, and no card comes back", p.status === 200 && stale && older && !(await card(page)), `${p.status} ${await sidebar()}`);
-    check("Home's section says the same, and that the workspace (not the plan) changed", /Claude Code[\s\S]*Last seen before the latest change/.test(await home()) && /The workspace changed/.test(await home()) && !/older plan|The plan changed/.test(await home()), await home());
+    check(
+      "Home's section says the same in one clause ('Last seen by Align <when>, before the latest change', never 'before the latest change · last seen …'), and that the workspace (not the plan) changed",
+      /Claude Code[\s\S]*Last seen by Align [^·\n]{1,40}, before the latest change/.test(await home()) && !/before the latest change · last seen/.test(await home()) && /The workspace changed/.test(await home()) && !/older plan|The plan changed/.test(await home()),
+      await home(),
+    );
     await shots(page, "older");
     // Why a request counts as a change: what the agent reads changed. Its agreed-plan answer now names the open request
     // as proposed and not agreed; reading it brings the app back to seen since the latest change.
@@ -564,9 +568,9 @@ async function phaseHosted(dir) {
     const both = await untilApi(w, (j) => j?.apps?.[0]?.received_current_plan === true && j.apps[0].on_current_plan === false);
     await page.reload({ waitUntil: "networkidle2" });
     const sideBoth = await waitFor(page, async () => /Align sent it the approved plan \(v2\)/.test(await side()) && /Last seen before the latest change/.test(await side()));
-    const homeBoth = /Align sent it the approved plan \(v2\)/.test(await home()) && /Last seen before the latest change/.test(await home());
+    const homeBoth = /Align sent it the approved plan \(v2\)/.test(await home()) && /Last seen by Align [^·\n]{1,40}, before the latest change/.test(await home());
     check(
-      "hosted: after a newer request the sidebar and Home show both 'Align sent it the approved plan (v2)' and 'Last seen before the latest change'",
+      "hosted: after a newer request the sidebar and Home show both 'Align sent it the approved plan (v2)' and that it was last seen before the latest change",
       p3.status === 200 && r3.status === 200 && both && sideBoth && homeBoth,
       `${p3.status} ${r3.status} ${JSON.stringify(await app0())} || ${await side()} || ${await home()}`,
     );

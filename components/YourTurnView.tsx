@@ -180,7 +180,8 @@ function AgentsSection({ agents: read, teamOf }: { agents: AgentsRead; teamOf: (
               {/* Both can be true: the approved plan is unchanged, but a newer request changed the workspace. */}
               {!(a.received_current_plan && a.plan_receipt && a.on_current_plan) && (
                 <span className={`ml-auto text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"} @max-md:ml-6 @max-md:basis-full`}>
-                  {a.on_current_plan ? "Seen since the latest change" : "Last seen before the latest change"} · last seen by Align {ago(a.last_used_at!)}
+                  {/* One clause when stale: "Last seen before the latest change · last seen just now" read as a contradiction. */}
+                  {a.on_current_plan ? `Seen since the latest change · last seen by Align ${ago(a.last_used_at!)}` : `Last seen by Align ${ago(a.last_used_at!)}, before the latest change`}
                 </span>
               )}
             </div>
