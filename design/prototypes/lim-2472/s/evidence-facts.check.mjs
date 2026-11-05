@@ -8,7 +8,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const lib = resolve("components/legacy-project-wrapper/implementation/app/app/_ui/ds/evidence-facts.mts");
-const { changeFacts, goalFacts, FACT_WORD } = await import(pathToFileURL(lib).href);
+const { changeFacts, goalFacts, hasEvidence, FACT_WORD } = await import(pathToFileURL(lib).href);
 
 // Claims about what an agent did or is, and "verified": Align never knows either from what it records.
 const BANNED = /\b(followed|live|running|compliant|agents? (?:are |is )?on|applied|verified|is on v|has v\d)\b/i;
@@ -44,7 +44,16 @@ expect(
   "self",
   "1 link",
 );
-expect("approved, not launched, no links", changeFacts({ revision: 1, revisions: [rev(1, [])], launch: "pending", version: null }), "unobserved", "no links");
+// Absences are not evidence: no links and no agent time give no chip; hasEvidence lets the consumer say so in words.
+function none(name, facts, extra = true) {
+  const ok = facts.length === 0 && extra;
+  if (!ok) failed++;
+  console.log(`${ok ? "ok  " : "FAIL"} ${name}: ${say(facts) || "(no facts)"}`);
+}
+const bare = { revision: 1, revisions: [rev(1, [])], launch: "pending", version: null };
+none("approved, not launched, no links: no chip, hasEvidence false", changeFacts(bare), hasEvidence(bare) === false);
+none("pending, no links: no chip", changeFacts({ ...bare, launch: null }));
+none("a link on an older revision only: hasEvidence false", [], hasEvidence({ revision: 2, revisions: [rev(1, [ev("self-reported")]), rev(2, [])] }) === false);
 expect(
   "pending, two agent links and one self-reported on the current revision (an older revision's link not counted)",
   changeFacts({ revision: 2, revisions: [rev(1, [ev("agent-reported")]), rev(2, [ev("agent-reported"), ev("agent-reported"), ev("self-reported")])], launch: null, version: null }),
@@ -69,9 +78,9 @@ if (quietIdle.length) failed++;
 console.log(`${quietIdle.length ? "FAIL" : "ok  "} quiet goal with no agent time and nothing launched: ${say(quietIdle) || "(no facts)"}`);
 expect("quiet goal, launched v2 not sent yet, no agent time", goalFacts(idle, { version: 2, value: { delivery: null, apps: { everyone: true, items: [] } } }, { quiet: true }), "unobserved", "v2 · not sent yet");
 expect("quiet goal, launched v2, 0 of 2 received", goalFacts(idle, { version: 2, value: { delivery: { sessions: 2, received: 0, applied: 0 }, apps: { everyone: true, items: [] } } }, { quiet: true }), "unobserved", "v2 · 0 of 2 received");
-expect("decision row keeps no links", changeFacts({ revision: 1, revisions: [rev(1, [])], launch: null, version: null }), "unobserved", "no links");
+expect("launch that targeted no session", changeFacts({ revision: 1, revisions: [rev(1, [])], launch: "launched", version: 5 }, { delivery: { sessions: 0, received: 0, applied: 0 }, apps: { everyone: true, items: [] } }), "unobserved", "v5 · no session on this goal");
 expect("goal with 35% agent time and nothing launched", goalFacts({ allocation: { target_share: 40, share_7d: 35, gap_7d: -5, held: false } }, null), "reported", "35% agent time");
-expect("goal with no agent time", goalFacts({ allocation: { target_share: null, share_7d: 0, gap_7d: null, held: false } }, null), "unobserved", "no agent time");
+none("goal with no agent time, not quiet: no fact", goalFacts({ allocation: { target_share: null, share_7d: 0, gap_7d: null, held: false } }, null));
 
 const at = process.argv.indexOf("--seed");
 if (at > 0) {
