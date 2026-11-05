@@ -37,10 +37,20 @@ export function NeedRow({
       aria-current={selected ? "true" : undefined}
       className={`group/need relative grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1.5 border-b border-(--line) px-3 py-3 last:border-b-0 @3xl:col-span-full @3xl:grid-cols-subgrid @3xl:items-center @3xl:gap-y-0 @3xl:py-1.5 ${selected ? "bg-(--accent-soft) shadow-[inset_2px_0_0_var(--accent-text)]" : href ? "hover:bg-(--bg-raised)" : ""}`}
     >
-      <div className="col-start-1 row-start-1 min-w-0 @3xl:col-start-auto @3xl:row-start-auto">
+      {/* Stacked, the top line (kind, time) and the bottom line (evidence, action) size apart, so a long action can never
+          squeeze the kind. Wide, the bottom wrapper dissolves and `order` puts all five cells in the subgrid's columns. */}
+      <div className="min-w-0 @3xl:order-1">
         <StatusPill kind={tone} label={kind} size="s" />
       </div>
-      <div className="col-span-2 min-w-0 @3xl:col-span-1">
+      <div className="whitespace-nowrap pt-0.5 text-right font-mono text-[12px] tabular-nums text-(--text-3) @3xl:order-4 @3xl:pt-0">
+        {waited && (
+          <>
+            <span className="sr-only">Waiting </span>
+            {waited}
+          </>
+        )}
+      </div>
+      <div className="col-span-2 min-w-0 @3xl:order-2 @3xl:col-span-1">
         {href ? (
           <Link href={href} className={`${heading} block underline-offset-4 after:absolute after:inset-0 after:content-[''] hover:underline @3xl:truncate`}>
             {title}
@@ -50,16 +60,10 @@ export function NeedRow({
         )}
         {sub && <p className="text-[13px] leading-[18px] text-(--text-2) @3xl:truncate">{sub}</p>}
       </div>
-      <div className="col-start-1 flex min-h-[44px] min-w-0 flex-wrap items-center gap-1 empty:hidden @3xl:col-start-auto @3xl:min-h-0 @3xl:empty:block">{evidence}</div>
-      <div className="col-start-2 row-start-1 whitespace-nowrap pt-0.5 text-right font-mono text-[12px] tabular-nums text-(--text-3) @3xl:col-start-auto @3xl:row-start-auto @3xl:pt-0">
-        {waited && (
-          <>
-            <span className="sr-only">Waiting </span>
-            {waited}
-          </>
-        )}
+      <div className="col-span-2 flex flex-wrap items-center justify-end gap-x-2 gap-y-1.5 empty:hidden @3xl:contents">
+        <div className="flex min-h-[44px] max-w-full flex-[1_1_auto] flex-wrap items-center gap-1 empty:hidden @3xl:order-3 @3xl:min-h-0 @3xl:flex-none @3xl:empty:block">{evidence}</div>
+        <div className="relative z-10 max-w-full empty:hidden @3xl:order-5 @3xl:self-center @3xl:text-right @3xl:empty:block">{action}</div>
       </div>
-      <div className="relative z-10 col-start-2 self-end text-right empty:hidden @3xl:col-start-auto @3xl:self-center @3xl:empty:block">{action}</div>
     </li>
   );
 }
