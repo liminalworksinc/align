@@ -68,6 +68,7 @@ const SCREENS = [
   ...(cr ? [["record-cr", `/app/w/${ws}/record?cr=${cr.id}`]] : []),
   ["work", `/app/w/${ws}/work`],
   ...(cr ? [["work-goal", `/app/w/${ws}/work?goal=${cr.goal}`]] : []),
+  ["dependencies", `/app/w/${ws}/dependencies`],
   ["apps", `/app/w/${ws}/apps`],
   ["sessions", `/app/w/${ws}/sessions`],
 ];

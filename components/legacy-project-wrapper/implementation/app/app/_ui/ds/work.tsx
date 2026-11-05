@@ -27,7 +27,7 @@ const ago = (iso: string) => {
   const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
   return m < 1 ? "under a minute ago" : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : at(iso);
 };
-const LINK = "text-(--accent-text) underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)";
+const LINK = "max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center text-(--accent-text) underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)";
 
 interface Activity {
   window_days: number;
