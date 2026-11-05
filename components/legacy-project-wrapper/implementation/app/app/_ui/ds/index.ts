@@ -16,3 +16,5 @@ export { DecisionRecord } from "./decision-record";
 export { WorkPanels } from "./work";
 export { GoalDependencies } from "./dependencies";
 export { ReviewActions, ReviewBody, type ReviewChoice } from "./review";
+export { EvidenceSummary, type EvidenceSummaryProps } from "./evidence-summary";
+export { changeFacts, goalFacts, FACT_WORD, type Fact, type FactKind, type Delivery } from "./evidence-facts.mts";

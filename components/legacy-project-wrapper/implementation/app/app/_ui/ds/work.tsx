@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { ChangeRequest, Evidence, Goal, MySession } from "../types";
 import { EmptyState } from "./empty-state";
 import { EvidenceLabel } from "./evidence-label";
+import { EvidenceSummary } from "./evidence-summary";
 import { Panel } from "./panel";
 import { useRead } from "./read";
 import { StatusPill } from "./status-pill";
@@ -302,6 +303,7 @@ export function WorkPanels({ ws, goalId }: { ws: string; goalId?: string }) {
                     v{g.version} · {g.owner.name}
                     {g.status !== "active" ? ` · ${g.status}` : ""}
                   </span>
+                  <EvidenceSummary ws={ws} goal={g} />
                 </button>
               </li>
             );

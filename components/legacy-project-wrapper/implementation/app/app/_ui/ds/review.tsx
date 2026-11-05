@@ -5,6 +5,7 @@ import type { ChangeFields, ChangeRequest, Goal } from "../types";
 import { changeWaits, launchWaits } from "@/lib/v2/home-core.mts";
 import { Compare } from "./compare";
 import { EvidenceLabel } from "./evidence-label";
+import { EvidenceSummary } from "./evidence-summary";
 import { StatusPill, type StatusKind } from "./status-pill";
 
 // A compact review of one change request (LIM-2472 workstream S), for both concepts in place of main's long decision
@@ -89,8 +90,9 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
 
       <section aria-label="Evidence" className="flex flex-col gap-2">
         <p className="text-[13px] font-medium text-(--text-2)">Evidence</p>
+        <EvidenceSummary ws={ws} cr={cr} variant="full" />
         {evidence.length === 0 ? (
-          <p className="text-[14px] text-(--text-2)">None. Approving without evidence is recorded as such.</p>
+          <p className="text-[13px] text-(--text-3)">Approving without evidence is recorded as such.</p>
         ) : (
           <ul className="flex flex-col gap-1.5">
             {evidence.map((e) => (
