@@ -225,6 +225,8 @@ export function ReviewActions({
   const shown: "input" | "confirm" = oneRow && choice && NOTE_ONLY.includes(choice) ? "confirm" : step;
   const setChoice = (c: Choice | null) => {
     setChoiceState(c);
+    // Clearing a choice (Cancel, Back from a no-text confirmation, or after a decision) always returns to the choices.
+    if (c === null) setStep("input");
     onChoice?.(c);
   };
   const [note, setNote] = useState("");
