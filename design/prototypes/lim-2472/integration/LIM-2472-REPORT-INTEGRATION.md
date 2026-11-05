@@ -14,6 +14,9 @@ What the base holds: foundation (`e6ea124`), Stream R (rest of app, `3cc0f71`), 
 | `origin/agent/LIM-2472-shared-surfaces` `db544d3e17dea486e5d1e64946eb068d12e95817` (contains `d1d0ca1`: ReviewActions returns to the choices after Cancel or a decision; compact phone confirmation on one row; one consequence line) | `010789001fecb7878e482e059d6de531067f0b10` | clean, `_ui/ds/review.tsx` and `_ui/ds/decision-record.tsx` only |
 | `340ead6cc6b4a1c5d7ef9e39073dce35af64d657` (notices: retry amber, refused red, done neutral; unknown `cr` on the record says so; 44px evidence and object links on phones, rel `noopener noreferrer`; Add evidence back in ReviewBody behind `onDone`) | `eeed05cf3c9cde9a75419901466e303452f8e37c` | clean, `_ui/ds/review.tsx`, `_ui/ds/decision-record.tsx`, `_ui/ds/work.tsx` |
 
+| `d482bc1e2da23654f275d9999127640637172923` (Add evidence's refusal kept in ReviewBody outside the `add_evidence` gate; record events for withdraw, supersede and accepted counters; unknown goal on the record) | `dd0bca27ffb1bb3be1f9f507da946e2252e5d676` | clean: `review.tsx`, `record-events.ts`, `decision-record.tsx` |
+| `327ec1c0ae7a704d7912f6d33f155aacc35f6e67` (44px phone minimum on every input, select and textarea in the review) | `246df2fdbf2a175e05cbfdb3eba1b348a69345f0` | clean: `review.tsx` |
+
 No conflicts, so no file needed a side chosen. No rebase, no force push, no stash.
 
 ## ADDED / REPLACED / DELETED (whole base against main `b16f8d1`)
@@ -91,10 +94,10 @@ Routes: `/app`, account, devices, device, people, alignments, asks, spend, reque
 | M4 | Fixed (`340ead6` + `f0d3def`), re-walked | Verified | Requests tab, adding evidence | all | both | owner, member | The shared review has no Add evidence control (`cr.can.add_evidence` is never used). The Requests tab lost main's "Add evidence / Add link", so evidence can only be added from the goal page. | `app/app/_ui/ds/review.tsx` (ReviewBody evidence section) | `I-base/dark/19-requests-no-add-evidence-control-1440.png` |
 | M5 | Medium | Verified | Sample request text on Requests and the record | all | both | all | "…approve it (then launch it, which is when agents get the new version)…". Align releases a version; it does not see agents get it. Server copy. | `lib/v2/sample.ts:26` (server) | `dark-owner-requests-390.png` |
 | M6 | Medium | Verified, pending the concept | Workspace shell on every signed-in page | 390 | both | all | Header links Align, Devices and Account are 22-26px tall; tab links are 37-38px. The workspace select's border is 1.64:1 (dark) and 1.34:1 (light), under 3:1. | `app/app/_ui/kit.tsx:156-157,171,188` | `dark-owner-people-390.png`, `light-owner-people-390.png` |
-| H2 | High | Verified | Add evidence refused with 409 (the request was declined in another session while the form was open) | 1440, 390 | both | owner | The POST gets 409 ("You declined this request, so nothing changes.") but no notice is ever shown: `AddEvidence` sets its red notice and calls `onDone`, the re-read request no longer allows `add_evidence`, and ReviewBody unmounts `AddEvidence` along with its notice. The person sees the form vanish and nothing else. | `app/app/_ui/ds/review.tsx:103` (and 196-199) | `w-dark-1440-409-Add-evidence.png` (and light, 390) |
-| M7 | Medium | Verified | Record timeline after Withdraw and after Accept the change | 1440, 390 | both | member (and anyone reading `?cr=`) | Withdraw and Accept the change both POST 200, but the single-request record gains no event. A withdrawn request has `decided_at: null`, so `changeRequestEvents` adds no "withdrew the request". Accepting a counter keeps the revision, and no event kind covers it. With `?cr=` the audit log isn't read, so owners don't see these either. | `app/app/_ui/ds/record-events.ts:125`; server `decided_at` on withdraw | `w-dark-1440-write-Withdraw.png`, `w-dark-1440-write-Accept-the-change.png` |
+| H2 | Fixed in `d482bc1`, re-walked | Verified | Add evidence refused with 409 (the request was declined in another session while the form was open) | 1440, 390 | both | owner | The POST gets 409 ("You declined this request, so nothing changes.") but no notice is ever shown: `AddEvidence` sets its red notice and calls `onDone`, the re-read request no longer allows `add_evidence`, and ReviewBody unmounts `AddEvidence` along with its notice. The person sees the form vanish and nothing else. | `app/app/_ui/ds/review.tsx:103` (and 196-199) | `w-dark-1440-409-Add-evidence.png` (and light, 390) |
+| M7 | Fixed in `d482bc1` (limit: only the latest counter is detected as accepted), re-walked | Verified | Record timeline after Withdraw and after Accept the change | 1440, 390 | both | member (and anyone reading `?cr=`) | Withdraw and Accept the change both POST 200, but the single-request record gains no event. A withdrawn request has `decided_at: null`, so `changeRequestEvents` adds no "withdrew the request". Accepting a counter keeps the revision, and no event kind covers it. With `?cr=` the audit log isn't read, so owners don't see these either. | `app/app/_ui/ds/record-events.ts:125`; server `decided_at` on withdraw | `w-dark-1440-write-Withdraw.png`, `w-dark-1440-write-Accept-the-change.png` |
 | M8 | Medium | Verified | 409 on Not yet (server copy) | 1440, 390 | both | owner | The refusal reads "…so nothing changes: agents stay on version 4 until someone launches version 5." Align releases versions; it doesn't know which version agents are on. | `lib/v2/changes.ts:540` (server) | `w-dark-1440-409-Not-yet-after-another-session-decided-not-yet.png` |
-| M9 | Medium | Verified | Add evidence form on a phone | 320 (same class at 390) | dark | owner | The "Link (https)" and "What it shows" inputs are 37px tall (the Kind select is 44px through the base-layer rule). `FIELD` has no phone minimum. | `app/app/_ui/ds/review.tsx:29` (`FIELD`) | `320-dark-add-evidence-1-form-filled.png` |
+| M9 | Fixed in `327ec1c`, re-measured | Verified | Add evidence form on a phone | 320 (same class at 390) | dark | owner | The "Link (https)" and "What it shows" inputs are 37px tall (the Kind select is 44px through the base-layer rule). `FIELD` has no phone minimum. | `app/app/_ui/ds/review.tsx:29` (`FIELD`) | `320-dark-add-evidence-1-form-filled.png` |
 | L1 | Low | Verified | Compare on the record and on Requests (light) | all | light | all | "Added"/"Changed" marks are 4.45:1 at 12px. A changed row's " · target …" (`--text-3` on `--accent-soft`) is 4.18:1 at 14px. | `app/app/_ui/ds/compare.tsx:26,62` | `light-owner-record-goal-security-1440.png` |
 | L2 | Low | Verified | Evidence label detail on Work (light) | all | light | owner, member | The `opacity-90` detail text ("read the goals …", "no goal read yet") is 4.27-4.47:1 at 12px. | `app/app/_ui/ds/evidence-label.tsx:25` | `light-owner-work-1440.png` |
 | L3 | Low | Verified | Work "Apps", dependencies "Work", trust/privacy "Trust" | 390 | both | all, signed out | 44px tall but only 34-35px wide. | `app/app/_ui/ds/work.tsx:234`, `app/app/_ui/ds/dependencies.tsx:73`, `app/_trust/doc.tsx:138` | `dark-owner-work-390.png`, `dark-owner-dependencies-390.png`, `dark-signed-out-trust-390.png` |
@@ -103,7 +106,7 @@ Routes: `/app`, account, devices, device, people, alignments, asks, spend, reque
 | L6 | Low | Suspected | Tab order at 1440: Work, Work?goal, dependencies; Sessions (owner) | 1440 | both | all | Focus moves up 166-275px because the right column follows the left (reading order of a two-column layout, probably fine). On Sessions, "Delete shared history" is followed by a "Stop agent" 200px higher. | `app/app/_ui/ds/work.tsx`, `app/app/w/[ws]/sessions/view.tsx:209,247` | `dark-owner-work-1440.png`, `dark-owner-sessions-1440.png` |
 | I1 | Info | Verified | Server-side: a request that fell behind can still be declined | 1440 | both | owner | After the owner saved a new version of the goal, a stale tab's Decline on a request asked against the old version was accepted (200), not refused. That may be intended (declining changes nothing). The real 409 is walked in "Write path" below. | server (decline route) | `dark-flow-49-stale-409-1440.png` |
 
-Counts after the `340ead6` re-walk and the 320 pass: open High 1 (H2), Medium 6 (M2, M5, M6 pending the concept, M7, M8, M9), Low 6 (two Suspected), Info 1. Fixed and re-walked: H1, M1, M3, M4.
+Counts after the `327ec1c` re-walk: open High 0, Medium 4 (M2, M5, M6 pending the concept, M8), Low 6 (two Suspected), Info 1. Fixed and re-walked: H1, H2, M1, M3, M4, M7, M9.
 
 ## Write path: every write as a real POST (`f0d3def`, after `340ead6`)
 
@@ -246,10 +249,36 @@ Remaining unwalked 320 cells: no rule in `app/` separates 320 from 390. Every wi
 - the three 320 writes above;
 - 72 of the 74 after-set screens per theme (full-page screenshot width exactly 320px). Not measured: 72 and 73 (the loading screens, captured viewport-only).
 
+### Re-walk after `327ec1c` (H2, M7, unknown goal, M9), dark
+
+Fresh data dir, one `next dev`, the same seed. Raw rows: `I-base/walk/re-dark.json`. Screenshots: `I-base/walk/re-dark-*.png`. The 64-page audit was not re-run; it still stands on base `0107890`.
+
+**H2: Add evidence's 409 on the Requests tab.** Add evidence was opened and filled, the owner declined the request through the API, then Add link was pressed. All four runs passed, at 1440 and 390:
+- The POST got 409. The notice is red (`--st-declined`), focused, inside the request's card, and the form is gone.
+- **Member:** "Not recorded. This request was declined by Mara Quill, so nothing changes. Here it is as it stands now." His request stayed under "Your requests".
+- **Owner:** "Not recorded. You declined this request, so nothing changes. Here it is as it stands now." The server names the decider as "You" here, because the owner both declined it and reads it.
+- **Section move:** the owner's request moved from "Waiting on you" to "Others", and the notice survived the move. The keyed flat list (`19b27b9`) keeps the review mounted, so `requests/*` needed no change.
+
+**M7: record events on `/record?cr=`, 1440.**
+
+| Event | Owner sees | Member sees |
+|---|---|---|
+| Withdraw | "Theo Vance withdrew the request" with a time, and "Time of the request's last change: withdrawing closed it, so nothing changed after." | the same, as "Theo Vance (you) …" |
+| Accept the change | "Theo Vance accepted the suggested change (revision 2)" with a time (from the `change_request.counter_accepted` audit row) | the same event with no time, and "Time not recorded in what you can read: the request doesn't carry it, and the audit log that does is for workspace owners." |
+
+Known limit (by design in `d482bc1`): only the latest counter is detected as accepted. Supersede is read only (code), not walked: the seed can't make the goal change another way first without new setup.
+
+**Unknown goal:** `/record?goal=<made-up id>` says "No such goal in this workspace" and links to `/app/w/<ws>/record`, for owner and member.
+
+**M9: field heights at 320.**
+- Add evidence: Kind select, link input and label input are 44px each.
+- Decline's reason textarea is 58px.
+- No sideways scroll (0px).
+
 ## Needed outside my files (listed, not changed)
 
-- `_ui/ds/review.tsx` (S): keep Add evidence's refusal on screen after the request stops allowing evidence (H2); a 44px phone minimum on `FIELD` inputs (M9); the no-evidence line in the phone confirmation (L5). H1, M3 and M4 are fixed in `340ead6`.
-- `_ui/ds/record-events.ts` (S) and the server: events for Withdraw and Accept the change (M7). M1 is fixed in `340ead6`.
+- `_ui/ds/review.tsx` (S): the no-evidence line in the phone confirmation (L5). H1, H2, M3, M4 and M9 are fixed.
+- Server: record the time of accepting a suggested change on the request, so non-owners see it, and detect every accepted counter, not only the latest (M7's remaining limit). M1 and M7 are fixed in the front end.
 - `_ui/ds/compare.tsx`, `_ui/ds/evidence-label.tsx` (S/foundation): light-theme contrast (L1, L2). `_ui/ds/work.tsx:234`, `_ui/ds/dependencies.tsx:73`, `app/_trust/doc.tsx:138`: 44px width (L3).
 - `app/globals.css` (foundation): dark `--accent` vs `--text-on-accent` at 4.29:1 (M2).
 - `_ui/kit.tsx` shell: header links, tab links, workspace select (M6), pending the concept.
