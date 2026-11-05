@@ -58,7 +58,7 @@ export const ORDER_WHY: Record<RankOrder, string> = {
 export const RANK_NOTE = ORDER_SENTENCE.approver;
 /** The rank note, plus what wasn't checked: requests to agents are read per goal, at most REQ_GOALS_MAX goals. */
 export const rankNote = (unchecked: number, unsent = 0, order: RankOrder = "approver") =>
-  [ORDER_SENTENCE[order], unchecked ? `Requests to agents not checked on ${unchecked} goal${unchecked === 1 ? "" : "s"}.` : "", unsent ? `What Align sent apps not checked on ${unsent} launch${unsent === 1 ? "" : "es"}.` : ""].filter(Boolean).join(" ");
+  [ORDER_SENTENCE[order], unchecked ? `Requests to agents not checked on ${unchecked} goal${unchecked === 1 ? "" : "s"}.` : "", unsent ? `Deliveries to apps not checked on ${unsent} launch${unsent === 1 ? "" : "es"}.` : ""].filter(Boolean).join(" ");
 
 /** What the approver rule reads. `role` and `leads` come from GET /api/v2/workspaces (this workspace's role and the teams
  *  this person leads); `goals` from GET …/goals. null: that read failed. */
@@ -405,7 +405,9 @@ export function needForChangeRequest(cr: ChangeRequest, me: string): Need | null
 
 /** Every row this person's reads support, ranked, in its phase. A read that failed (null) contributes no rows; the
  *  renderer says that kind is unknown rather than showing nothing. */
-export type Unknown = "change requests" | "asks" | "alignments" | "apps" | "requests to agents" | "what Align sent apps";
+/** A source Align couldn't read, as a noun phrase that reads after "the" ("Align couldn't read the asks and the
+ *  deliveries to apps"). */
+export type Unknown = "change requests" | "asks" | "alignments" | "workspace summary" | "requests to agents" | "deliveries to apps";
 
 export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[]; notices: Notice[]; order: RankOrder; orderFallback: boolean } {
   const { me } = input;
@@ -426,8 +428,8 @@ export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[
   if (input.requests) rows.push(...declinedNeeds(input.requests, me));
   else if (input.requests === null) unknown.push("requests to agents");
   if (input.apps) rows.push(...appNeeds(input.apps, input.sends ?? undefined, me));
-  else unknown.push("apps");
-  if (input.sends === null) unknown.push("what Align sent apps");
+  else unknown.push("workspace summary");
+  if (input.sends === null) unknown.push("deliveries to apps");
   const { order, fallback } = rankOrder(me, input.approver, input.crs);
   return { rows: rankNeeds(rows.map(withWord), order), unknown, notices: input.apps ? neverRead(input.apps) : [], order, orderFallback: fallback };
 }
