@@ -8,7 +8,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const lib = resolve("components/legacy-project-wrapper/implementation/app/app/_ui/ds/evidence-facts.mts");
-const { changeFacts, deliveryStatement, goalFacts, hasEvidence, FACT_WORD } = await import(pathToFileURL(lib).href);
+const { changeFacts, deliveryStatement, goalFacts, hasEvidence, sentToLine, NOT_LOADED, FACT_WORD } = await import(pathToFileURL(lib).href);
 
 // Claims about what an agent did or is, and "verified": Align never knows either from what it records.
 const BANNED = /\b(followed|live|running|compliant|agents? (?:are |is )?on|applied|verified|released|is on v|has v\d)\b/i;
@@ -102,6 +102,19 @@ says("all received, no app (member)", deliveryStatement(3, { delivery: { session
 says("none received, two apps (member)", deliveryStatement(2, { delivery: { sessions: 3, received: 0, applied: 0 }, apps: { everyone: false, items: [app("a", "Claude Code"), app("b", "Codex")] } }), "Align sent v2 to 3 sessions; none has sent a receipt yet. Your Claude Code and Codex were sent it when they read the goals.");
 says("no session, no app", deliveryStatement(2, { delivery: null, apps: { everyone: true, items: [] } }), "No session was on this goal when v2 was launched. No connected app has been sent it in a goal read yet.");
 says("the read failed", deliveryStatement(2, null), "Align couldn't read where v2 was sent. Reload to try again.");
+
+// Work's "Align sent it to" row: loading says nothing yet, a failed read says it couldn't load, never "No app yet".
+function line(name, got, want) {
+  const ok = got === want && !/not read|No app yet/i.test(want === null ? "" : name.includes("empty") ? "" : String(got));
+  if (!ok) failed++;
+  console.log(`${ok ? "ok  " : "FAIL"} sent-to, ${name}: ${JSON.stringify(got)}`);
+  if (!ok) console.log(`     expected: ${JSON.stringify(want)}`);
+}
+line("loading", sentToLine({ loading: true, failed: false, apps: null }), null);
+line("failed", sentToLine({ loading: false, failed: true, apps: null }), NOT_LOADED);
+line("empty (a read that found none)", sentToLine({ loading: false, failed: false, apps: { everyone: true, items: [] } }), "No app yet. Align sends it when a connected app next reads the goals.");
+line("non-empty, member", sentToLine({ loading: false, failed: false, apps: { everyone: false, items: [{ id: "a" }, { id: "b" }] } }), "2 connected apps (yours; owners see everyone's)");
+if (/not read/i.test(NOT_LOADED)) (failed++, console.log(`FAIL NOT_LOADED says "not read": ${NOT_LOADED}`));
 
 const at = process.argv.indexOf("--seed");
 if (at > 0) {

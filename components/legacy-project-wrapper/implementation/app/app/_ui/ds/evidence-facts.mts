@@ -86,6 +86,23 @@ export function deliveryStatement(version: number, d: Delivery | null): string {
   return `${sessions} ${appWords}`;
 }
 
+/** One wording for a read this page couldn't load: never "not read", which on a page about apps reading the goals can be
+ *  heard as the apps not reading. */
+export const NOT_LOADED = "Couldn't load this just now. Reload to try again.";
+
+/**
+ * Work's "Align sent it to" row for a launched version (the …/value read's apps), in four cases: still loading (null:
+ * say nothing yet, never "No app yet" before the read answers), the read failed (NOT_LOADED), no app was sent it, and
+ * the apps it was sent to. `everyone`: a workspace owner sees every app, anyone else their own.
+ */
+export function sentToLine(s: { loading: boolean; failed: boolean; apps: { everyone: boolean; items: { id: string }[] } | null }): string | null {
+  if (s.loading) return null;
+  if (s.failed) return NOT_LOADED;
+  const n = s.apps?.items.length ?? 0;
+  if (!n) return "No app yet. Align sends it when a connected app next reads the goals.";
+  return `${n} connected ${n === 1 ? "app" : "apps"}${s.apps?.everyone ? "" : " (yours; owners see everyone's)"}`;
+}
+
 /** Whether the request's current revision has any evidence link: a consumer says "No evidence attached" in words when
  *  it doesn't, never as an evidence chip. */
 export function hasEvidence(cr: Pick<ChangeRequest, "revision" | "revisions">): boolean {
