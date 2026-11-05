@@ -4,7 +4,8 @@ import { useId, useRef, type KeyboardEvent, type ReactNode } from "react";
 export type SegmentedOption<V extends string> = { value: V; label: string; icon?: ReactNode };
 
 /** A single choice among a few options (a radio group): arrow keys move and choose, one tab stop. 44px tall below
- *  640px; the active option is the pink selection. */
+ *  640px; the active option is the pink selection. Options wrap onto more rows when the container is narrow, so five
+ *  or more options never push the page sideways at 320. */
 export function Segmented<V extends string>({
   label,
   hideLabel = false,
@@ -38,7 +39,7 @@ export function Segmented<V extends string>({
       <span id={id} className={hideLabel ? "sr-only" : "text-[13px] font-medium text-(--text-2)"}>
         {label}
       </span>
-      <div role="radiogroup" aria-labelledby={id} onKeyDown={onKey} className="inline-flex w-fit rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) p-0.5">
+      <div role="radiogroup" aria-labelledby={id} onKeyDown={onKey} className="inline-flex w-fit max-w-full flex-wrap gap-0.5 rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) p-0.5">
         {options.map((o, i) => {
           const on = o.value === value;
           return (
