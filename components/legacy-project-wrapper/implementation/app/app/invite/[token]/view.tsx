@@ -1,7 +1,9 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useState } from "react";
-import { api, ApiError, go, Btn, Card, Err, Loading, Note, Shell, signInAgain, useAction, useApi, when } from "../../_ui/kit";
+import { api, ApiError, go, Btn, Err, Loading, Note, Shell, signInAgain, useAction, useApi, when } from "../../_ui/kit";
+import { Panel } from "../../_ui/ds";
 import type { Me } from "../../_ui/server";
 
 interface Preview {
@@ -69,19 +71,19 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
     });
   return (
     <Shell me={me}>
-      <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">Workspace invite</h1>
-      <Card>
+      <h1 className={`${PAGE_H1} mb-5`}>Workspace invite</h1>
+      <Panel className="mb-4">
         {p.loading && <Loading />}
         {gone && <Err>{GONE}</Err>}
         {p.error && !gone && <Err>This invite link is not valid. It may have been used, withdrawn or expired.</Err>}
         {p.data && !gone && (
           <>
-            <p className="mb-3 text-[16px] text-zinc-700">
-              {p.data.email_matches ? "You are" : `${p.data.invited_email} is`} invited to <strong className="text-zinc-900">{p.data.workspace.name}</strong> as {p.data.role}
+            <p className="mb-3 text-[16px] text-(--text-2)">
+              {p.data.email_matches ? "You are" : `${p.data.invited_email} is`} invited to <strong className="text-(--text-1)">{p.data.workspace.name}</strong> as {p.data.role}
               {p.data.team ? (
                 <>
                   {" "}
-                  and to the team <strong className="text-zinc-900">{p.data.team.name}</strong> as {p.data.team_role ?? "member"}.
+                  and to the team <strong className="text-(--text-1)">{p.data.team.name}</strong> as {p.data.team_role ?? "member"}.
                 </>
               ) : (
                 "."
@@ -93,9 +95,9 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
                   // A fieldset is at least as wide as its widest content by default (min-inline-size: min-content), so it
                   // would grow past the card for a name it can't wrap: min-w-0 lets it shrink, and the name clips inside
                   // it, as on the Devices page (E2E-WEB cycle 11 C11-2).
-                  <fieldset className="mb-4 min-w-0 overflow-hidden rounded-[12px] border border-zinc-300 p-4">
-                    <legend className="px-1 text-[15px] text-zinc-700">Your paired devices</legend>
-                    <p className="mb-2 text-[15px] text-zinc-600">
+                  <fieldset className="mb-4 min-w-0 overflow-hidden rounded-(--radius-m) border border-(--edge) p-4">
+                    <legend className="px-1 text-[15px] text-(--text-2)">Your paired devices</legend>
+                    <p className="mb-2 text-[15px] text-(--text-2)">
                       Tick the devices that should reach {p.data.workspace.name} too. Each one picks it up the next time it syncs, without signing in again; its other workspaces stay as they are.
                     </p>
                     {!fresh && (
@@ -108,7 +110,7 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
                       </Note>
                     )}
                     {p.data.devices.map((d) => (
-                      <label key={d.id} className="mb-1 flex items-center gap-2 text-[15px]">
+                      <label key={d.id} className="mb-1 flex min-h-[44px] items-center gap-2 text-[15px] text-(--text-1)">
                         <input
                           type="checkbox"
                           disabled={!fresh}
@@ -116,7 +118,7 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
                           onChange={(e) => setChosen((c) => (e.target.checked ? [...c, d.id] : c.filter((x) => x !== d.id)))}
                         />
                         <span className="min-w-0 overflow-hidden [overflow-wrap:anywhere]">
-                          {d.name} <span className="text-zinc-500">(last seen {when(d.last_seen_at)})</span>
+                          {d.name} <span className="text-(--text-3)">(last seen {when(d.last_seen_at)})</span>
                         </span>
                       </label>
                     ))}
@@ -129,13 +131,13 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
                       <span data-devices-not-given>
                         {joined.ticked === 1 ? "The device you ticked was" : `The ${joined.ticked} devices you ticked were`} not given {p.data.workspace.name}: give it to{" "}
                         {joined.ticked === 1 ? "that device" : "them"} on your{" "}
-                        <Link href="/app/devices" className="underline">
+                        <Link href="/app/devices" className="font-medium text-(--accent-text) underline underline-offset-2">
                           Devices page
                         </Link>
                         .{" "}
                       </span>
                     )}
-                    <Link href={`/app/w/${p.data.workspace.id}`} className="underline">
+                    <Link href={`/app/w/${p.data.workspace.id}`} className="font-medium text-(--accent-text) underline underline-offset-2">
                       Open {p.data.workspace.name}
                     </Link>
                   </Note>
@@ -167,7 +169,7 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
           </>
         )}
         <Err>{act.error}</Err>
-      </Card>
+      </Panel>
     </Shell>
   );
 }

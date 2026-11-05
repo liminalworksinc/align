@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useState } from "react";
 import { api, Shell, useAction, useApi, when } from "../../../_ui/kit";
 import { EmptyState, EvidenceLabel, Panel } from "../../../_ui/ds";
@@ -88,7 +89,7 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
     <Shell me={me} ws={ws} tab="Apps">
       <div data-surface="apps" className="flex min-w-0 flex-col gap-4">
         <div>
-          <h1 className="mb-1 text-[26px] font-semibold text-(--text-1)">Connected AI apps</h1>
+          <h1 className={`${PAGE_H1} mb-1`}>Connected AI apps</h1>
           <p className="max-w-prose text-[15px] text-(--text-2)">
             Apps connected to this workspace through Align&apos;s MCP server, each reading as the person who connected it. They can read; they can&apos;t change anything.
           </p>

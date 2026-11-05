@@ -1,221 +1,115 @@
 "use client";
-import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
-import { Drawer, EmptyState, Panel, ReviewActions, ReviewBody } from "../../_ui/ds";
-import { useGoalTitles } from "../../_ui/changes";
-import { useApi } from "../../_ui/kit";
-import type { Me } from "../../_ui/server";
-import type { ChangeRequest } from "../../_ui/types";
-import { actsFor, notYours, QuietLink, type Act } from "../../_ui/b/act";
-import { AgentsLine, type HomeApp } from "../../_ui/b/agents";
-import { Desk } from "../../_ui/b/desk";
-import { decisionHref, recordHref } from "../../_ui/b/model";
-import { Facts } from "../../_ui/b/parts";
-import { WhoDecides } from "../../_ui/b/who-decides";
-import { DeskShell } from "../../_ui/b/shell";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
+import { useCallback, useState } from "react";
+import GoalLines from "../../_ui/home/goal-lines";
 import { NeedsList } from "../../_ui/home/needs-list";
-import FirstRun, { seenApp } from "./first-run";
+import Since from "../../_ui/home/since";
+import { useRead } from "../../_ui/ds/read";
+import { Loading, Shell, useApi } from "../../_ui/kit";
+import { NotInWorkspace } from "../../_ui/missing";
+import type { Me } from "../../_ui/server";
+import type { ChangeRequest, Goal } from "../../_ui/types";
+import FirstRun from "./first-run";
+import { ReviewDrawer, useReview } from "./review-drawer";
+import type { EvidenceClass, HomePerson } from "@/lib/v2/home-core.mts";
 
-// LIM-2472 concept B Home, on the founder's direction of Nov 5 (LIM-2472 9b5b870f): "Needs you", one ranked list of what
-// needs a human with its evidence (_ui/home/needs-list.tsx), then the decision desk of every change request
-// (_ui/b/desk.tsx). Both open a request as `?review=<goal>.<id>[&choice=<choice>]`; this page reads that from the URL and
-// shows the request in a drawer, read by id, so a link opens it complete and it stays open while the lists move behind
-// it. The side column has the only agent facts Align has: which connected apps read the goals (GET …/home apps).
+// Home (LIM-2472 direction, 2026-11-05), in this order: Needs you (NeedsList: the one ranked list, with its filters and
+// search), Since you last looked (_ui/home/since.tsx), Goals, one line per goal (_ui/home/goal-lines.tsx). Sessions live on
+// Work and apps on Apps. A change request opens in the review drawer over the Home (?review=<goal>.<id>), and closing it
+// returns to the same picture.
+//
+// Reads: GET …/home (goals, apps), GET …/change-requests, GET …/goals (the goal lines' feed). NeedsList, Since, FirstRun and
+// the goal lines' shared value cache (_ui/home/value-cache.ts) make their own further reads.
 
-interface HomeData {
-  goals: { id: string }[] | null;
-  apps: { everyone: boolean; items: HomeApp[] } | null;
-  asks: { waiting_on_me: unknown[] } | null;
-  alignments: { waiting_on_me: unknown[]; waiting_on_others: unknown[] } | null;
+interface HomeGoal {
+  id: string;
+  title: string;
+  version: number;
+  level: "company" | "team";
+  team: { id: string; name: string } | null;
+  owner: HomePerson;
+  mine: boolean;
 }
-
-const CHOICES: readonly Act[] = ["approve_and_launch", "approve", "launch", "not_yet", "accept_if", "counter", "reject", "accept_counter", "acknowledge", "rebase", "withdraw"];
+interface App {
+  id: string;
+  name: string;
+  connected_by: HomePerson;
+  approved_at: string;
+  last_used_at: string | null;
+  last_read_at: string | null;
+  evidence_class: EvidenceClass;
+}
+interface HomeData {
+  goals: HomeGoal[] | null;
+  apps: { everyone: boolean; items: App[] } | null;
+}
+interface Groups {
+  waiting_on_me: ChangeRequest[];
+  mine: ChangeRequest[];
+  others: ChangeRequest[];
+}
+const UNREAD: HomeData = { goals: null, apps: null };
+/** The page's heading, from NeedsList: its Needs-you count (null while reading, or when nothing is readable); `partial`
+ *  when some source couldn't be read, so the count is a lower bound and zero is never claimed. */
+function needsHeading(n: number | null, partial: boolean) {
+  if (n === null) return "Needs you";
+  if (partial) return n === 0 ? "Some of this could not be read" : `At least ${n} ${n === 1 ? "thing needs" : "things need"} you`;
+  if (n === 0) return "Nothing needs you";
+  return `${n} ${n === 1 ? "thing needs" : "things need"} you`;
+}
 
 export default function Home({ me, ws }: { me: Me; ws: string }) {
-  const home = useApi<HomeData>(`/api/v2/workspaces/${ws}/home`);
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
-  const [token, setToken] = useState(0);
-  const [need, setNeed] = useState<{ n: number | null; partial: boolean }>({ n: null, partial: false });
-  const base = `/app/w/${ws}`;
-  // ?review=<goal>.<id>: the request to show; &choice= opens ReviewActions on that choice.
-  const review = /^([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/.exec(params.get("review") ?? "");
-  const choiceParam = params.get("choice") as Act | null;
-  const choice = choiceParam && CHOICES.includes(choiceParam) ? choiceParam : undefined;
-  const apps = home.data?.apps ?? (home.error ? null : undefined);
-  const noAppSeen = !!home.data?.apps && !home.data.apps.items.some(seenApp);
-  const noGoals = home.data?.goals?.length === 0;
-  const close = () => router.replace(pathname, { scroll: false });
+  const d = useRead<HomeData>(`/api/v2/workspaces/${ws}/home`);
+  const c = useApi<Groups>(`/api/v2/workspaces/${ws}/change-requests`);
+  const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
+  const [review, setReview] = useReview();
+  // Stable: the Drawer re-takes focus whenever onClose changes, which would pull it off a notice that just took it.
+  const closeReview = useCallback(() => setReview(null), [setReview]);
+  // NeedsList holds its own reads: a new key reads them again after a decision in the drawer.
+  const [needsKey, setNeedsKey] = useState(0);
+  const [count, setCount] = useState<{ n: number | null; partial: boolean }>({ n: null, partial: false });
+  const onCount = useCallback((n: number | null, partial: boolean) => setCount({ n, partial }), []);
+  const h = d.data ?? (d.status ? UNREAD : null);
+  // Stable (the reloads are): FirstRun's polling restarts whenever onSeen changes.
+  const { reload: reloadHome } = d;
+  const { reload: reloadChanges } = c;
+  const reloadAll = useCallback(() => {
+    reloadHome();
+    reloadChanges();
+    setNeedsKey((k) => k + 1);
+  }, [reloadHome, reloadChanges]);
+
+  const allCrs = c.data ? [...c.data.waiting_on_me, ...c.data.mine, ...c.data.others] : [];
+  // The page checks membership before Home mounts; this is the person removed while Home is open (every read is a 404).
+  if (d.status === 404) return <NotInWorkspace me={me} />;
 
   return (
-    <DeskShell me={me} ws={ws} active="desk" crumbs={[{ label: "Home" }]}>
-      <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="flex min-w-0 flex-col gap-8">
-          <div className="flex flex-col gap-3">
-            {/* The count is the Needs-you rows only, from the list itself; unknown while it reads. */}
-            <h1 tabIndex={-1} data-need-count={need.n ?? ""} data-need-partial={need.partial ? "1" : "0"} className="text-[24px] font-semibold tracking-[-0.01em] text-(--text-1) focus:outline-none">
-              {need.n === null
-                ? "Home"
-                : need.partial
-                  ? need.n > 0
-                    ? `At least ${need.n} thing${need.n === 1 ? "" : "s"} need${need.n === 1 ? "s" : ""} you`
-                    : "Some of this could not be read"
-                  : need.n === 0
-                    ? "Nothing needs you"
-                    : `${need.n} thing${need.n === 1 ? "" : "s"} need${need.n === 1 ? "s" : ""} you`}
-            </h1>
-            <NeedsList key={token} ws={ws} me={me.id} heading={false} onCount={(n, partial) => setNeed({ n, partial })} selected={review ? `cr:${review[2]}` : null} />
-          </div>
-          <section aria-labelledby="desk-h" className="flex min-w-0 flex-col gap-2">
-            <h2 id="desk-h" className="text-[18px] font-semibold text-(--text-1)">
-              Decision desk
-            </h2>
-            <Desk
-              ws={ws}
-              me={me.id}
-              selectedId={review?.[2] ?? null}
-              reloadToken={token}
-              empty={
-                <div className="flex flex-col gap-4" data-desk-empty>
-                  <EmptyState
-                    title="No decisions yet"
-                    body={
-                      noGoals
-                        ? "A decision starts when someone asks to change a goal. This workspace has no goals you can see yet. Create one, then anyone can propose a change to it and you decide here."
-                        : "Nobody has asked to change a goal you can see. When someone does, it lands here with who decides and what they may do."
-                    }
-                    action={
-                      <span className="flex flex-wrap gap-2">
-                        <QuietLink href={`${base}/goals`}>{noGoals ? "Create a goal" : "Open the goals"}</QuietLink>
-                        <QuietLink href={`${base}/apps`}>Connect an agent</QuietLink>
-                      </span>
-                    }
-                  />
-                  {noAppSeen && <FirstRun ws={ws} onSeen={home.reload} />}
-                </div>
-              }
-            />
-          </section>
-        </div>
+    <Shell me={me} ws={ws} tab="Home">
+      <div className="flex flex-col gap-5">
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <h1 tabIndex={-1} className={`${PAGE_H1} min-w-0`} data-home-count={count.n ?? "reading"}>
+            {needsHeading(count.n, count.partial)}
+          </h1>
+        </header>
 
-        <aside className="grid min-w-0 content-start gap-4 lg:grid-cols-2 2xl:grid-cols-1">
-          <Panel eyebrow="Agents" title="Connected AI apps">
-            <AgentsLine ws={ws} apps={apps} scope="workspace" />
-          </Panel>
-          {home.data && (home.data.asks?.waiting_on_me.length || home.data.alignments?.waiting_on_me.length) ? (
-            <Panel eyebrow="Also waiting on you" title="Outside change requests">
-              <ul className="flex flex-col gap-2 text-[14px]">
-                {!!home.data.alignments?.waiting_on_me.length && (
-                  <li>
-                    <Link href={`${base}/alignments`} className="text-(--accent-text) underline-offset-4 hover:underline">
-                      {home.data.alignments.waiting_on_me.length} alignment request{home.data.alignments.waiting_on_me.length === 1 ? "" : "s"}
-                    </Link>
-                  </li>
-                )}
-                {!!home.data.asks?.waiting_on_me.length && (
-                  <li>
-                    <Link href={`${base}/asks`} className="text-(--accent-text) underline-offset-4 hover:underline">
-                      {home.data.asks.waiting_on_me.length} ask{home.data.asks.waiting_on_me.length === 1 ? "" : "s"} for your team
-                    </Link>
-                  </li>
-                )}
-              </ul>
-            </Panel>
-          ) : null}
-          <Panel eyebrow="How to read this" tone="inset">
-            <ul className="flex flex-col gap-1.5 text-[13px] text-(--text-2)">
-              <li>Approval is not launch. Align serves an approved change only once someone who can launch it does.</li>
-              <li>Evidence links are what people or agents report. Align doesn&apos;t check them.</li>
-              <li>Only the actions you may take are buttons. The rest say who can.</li>
-            </ul>
-          </Panel>
-        </aside>
+        {h && <FirstRun ws={ws} onSeen={reloadAll} me={me.id} hasGoals={(h.goals?.length ?? 0) > 0} />}
+
+        <NeedsList key={needsKey} ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} />
+
+        {!h ? (
+          <Loading />
+        ) : (
+          <>
+            <Since ws={ws} me={me.id} changes={c.data ? allCrs : null} goals={h.goals} apps={h.apps?.items ?? null} onReview={(goal, id) => setReview({ goal, id })} />
+            <GoalLines ws={ws} goals={h.goals} changes={c.data ? allCrs : null} feed={feed.data?.goals ?? null} onReview={(goal, id) => setReview({ goal, id })} />
+          </>
+        )}
+
+        {/* The drawers break words only where needed, so a short label ("Close", "Esc") never splits at 320. */}
+        <div className="[overflow-wrap:break-word]">
+          {review && <ReviewDrawer key={`${review.id}:${review.choice ?? ""}`} ws={ws} goal={review.goal} id={review.id} me={me.id} choice={review.choice} onClose={closeReview} onChanged={reloadAll} />}
+        </div>
       </div>
-
-      {review && (
-        <DecisionDrawer
-          key={review[2]}
-          ws={ws}
-          me={me}
-          id={review[2]!}
-          goal={review[1]!}
-          act={choice}
-          onPick={(a) => router.replace(`${pathname}?review=${review![1]}.${review![2]}&choice=${a}`, { scroll: false })}
-          apps={apps}
-          onClose={close}
-          onDone={() => {
-            setToken((t) => t + 1);
-            home.reload();
-          }}
-        />
-      )}
-    </DeskShell>
-  );
-}
-
-function DecisionDrawer({ ws, me, id, goal, act, apps, onClose, onDone, onPick }: { ws: string; me: Me; id: string; goal: string; act: Act | undefined; apps: { everyone: boolean; items: HomeApp[] } | null | undefined; onClose: () => void; onDone: () => void; onPick: (a: Act) => void }) {
-  const d = useApi<ChangeRequest>(`/api/v2/workspaces/${ws}/goals/${goal}/change-requests/${id}`);
-  const titles = useGoalTitles(ws);
-  const cr = d.data;
-  const base = `/app/w/${ws}`;
-  return (
-    <Drawer
-      open
-      onClose={onClose}
-      width="l"
-      eyebrow={cr ? `${cr.requester.id === me.id ? "Your" : `${cr.requester.name}'s`} change request` : "Change request"}
-      title={cr?.goal.title ?? "Reading…"}
-      footer={
-        <>
-          <QuietLink href={recordHref(ws, { id })}>Decision record</QuietLink>
-          <QuietLink href={`${base}/work?goal=${goal}`}>Work and evidence</QuietLink>
-          <Link href={decisionHref(ws, { id, goal: { id: goal } })} className="inline-flex min-h-[36px] items-center rounded-(--radius-s) border border-(--accent-text) px-3 text-[13px] font-medium text-(--accent-text) hover:bg-(--accent-soft) max-sm:min-h-[44px]">
-            Open the lane map
-          </Link>
-        </>
-      }
-    >
-      {!cr && d.error && <p className="text-[14px] text-(--text-2)">This change request doesn&apos;t exist or you can&apos;t see it.</p>}
-      {cr && (
-        <div className="flex flex-col gap-5" data-drawer={cr.id}>
-          <Facts cr={cr} me={me.id} />
-          <div className="rounded-(--radius-m) border border-(--line-strong) bg-(--bg-panel) p-3" data-action-bar>
-            {!actsFor(cr).length && (
-              <p className="mb-2 text-[13px] text-(--text-2)" data-not-yours>
-                {notYours(cr, me.id)}
-              </p>
-            )}
-            <ReviewActions
-              key={`${cr.id}:${act ?? ""}`}
-              ws={ws}
-              cr={cr}
-              me={me.id}
-              compact
-              initialChoice={act}
-              onDone={() => {
-                d.reload();
-                onDone();
-              }}
-            />
-          </div>
-          {/* Desktop only; a step the person may take opens it in the action bar above (&choice=). */}
-          <WhoDecides
-            cr={cr}
-            me={me.id}
-            onAct={(a) => {
-              onPick(a);
-              document.querySelector("[data-drawer] [data-action-bar]")?.scrollIntoView({ block: "nearest" });
-            }}
-          />
-          <ReviewBody ws={ws} cr={cr} me={me.id} titleOf={(gid) => titles.get(gid) ?? "a goal"} onDone={() => { d.reload(); onDone(); }} />
-          <div className="flex flex-col gap-1.5">
-            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--text-3)">What Align observed of agents</p>
-            <AgentsLine ws={ws} apps={apps} />
-          </div>
-        </div>
-      )}
-    </Drawer>
+    </Shell>
   );
 }

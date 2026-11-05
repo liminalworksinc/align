@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import { cloneElement, isValidElement, useCallback, useEffect, useId, useState, type ReactNode, type Ref } from "react";
+import { cloneElement, isValidElement, useCallback, useEffect, useId, useRef, useState, type ReactNode, type Ref } from "react";
+import { ThemeSettingCompact } from "./ds";
 
 // Shared client pieces for the goal sessions web app: the API helper, a data hook, layout and form controls.
 
@@ -94,16 +95,28 @@ export interface WsSummary {
   teams: { id: string; name: string; role: "lead" | "member" }[];
 }
 
-const WS_TABS = [
-  { href: "", label: "Home" },
-  { href: "/goals", label: "Goals" },
-  { href: "/people", label: "People" },
-  { href: "/sessions", label: "Sessions" },
-  { href: "/alignments", label: "Alignments" },
-  { href: "/requests", label: "Requests" },
-  { href: "/asks", label: "Asks" },
-  { href: "/spend", label: "Spend" },
-  { href: "/apps", label: "Apps" },
+/** Concept A navigation (LIM-2472): grouped by what a person is doing, the command center first. Labels keep the
+ *  existing tab names so every page's `tab` prop still marks its place. */
+const NAV: { group: string; items: { href: string; label: string }[] }[] = [
+  { group: "Command", items: [{ href: "", label: "Home" }] },
+  {
+    group: "Plan",
+    items: [
+      { href: "/goals", label: "Goals" },
+      { href: "/alignments", label: "Alignments" },
+      { href: "/requests", label: "Requests" },
+      { href: "/asks", label: "Asks" },
+    ],
+  },
+  {
+    group: "Work",
+    items: [
+      { href: "/sessions", label: "Sessions" },
+      { href: "/apps", label: "Apps" },
+      { href: "/spend", label: "Spend" },
+    ],
+  },
+  { group: "Team", items: [{ href: "/people", label: "People" }] },
 ];
 
 async function signOut() {
@@ -120,88 +133,145 @@ function PasskeyPrompt() {
     void fetch("/api/v2/account/passkey-prompt", { method: "DELETE", credentials: "same-origin" }).catch(() => undefined);
   };
   return (
-    <div id="passkey-prompt" className="flex flex-wrap items-center gap-3 border-b border-zinc-200 bg-violet-50 px-6 py-2 text-[15px] text-zinc-800 max-sm:px-4">
+    <div id="passkey-prompt" className="flex flex-wrap items-center gap-3 border-b border-(--line) bg-(--bg-raised) px-6 py-2 text-[14px] text-(--text-2) max-sm:px-4">
       {/* Below 640px (sm) the prompt is one short line, so it takes less of a phone's first screen. */}
       <span className="flex-1 max-sm:hidden">Add a passkey to sign in with your fingerprint, face or device PIN instead of an email code. A passkey can&apos;t be phished.</span>
       <span className="flex-1 sm:hidden">Sign in with a passkey instead of an email code.</span>
-      <Link href="/app/account#passkeys" className="font-medium text-violet-700 hover:underline max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center">
+      <Link href="/app/account#passkeys" className="inline-flex min-h-[44px] items-center font-medium text-(--accent-text) hover:underline sm:min-h-0">
         Add a passkey
       </Link>
-      <button type="button" onClick={notNow} className="text-zinc-600 hover:text-zinc-900">
+      <button type="button" onClick={notNow} className="inline-flex min-h-[44px] items-center text-(--text-2) hover:text-(--text-1) sm:min-h-0">
         Not now
       </button>
     </div>
   );
 }
 
-/** Page frame: top bar (workspace switcher, devices, sign out), the passkey prompt when due and, inside a workspace,
- *  its tabs. Every bar wraps, below 640px (sm) the padding narrows, and a word longer than its line (a 120-character
- *  link label, a URL, a pasted path) breaks rather than running off the side, so every /app page fits a 390px phone
- *  without sideways scrolling (LIM-2452, PORT2-001; scripts/test-v2.mjs checks each page at 390x844). Below 640px the
- *  chrome is compact (main #44): the top bar drops the person's name (Account has it), the passkey prompt is one short
- *  line, and the tab row drops the workspace's name and role (the switcher shows the name), so a page's heading starts
- *  in the top third of a 390x844 screen. The switcher is the native select: its list is the browser's, so it never
- *  runs off a narrow window, and it lists only the person's own workspaces (GET /api/v2/workspaces). */
-export function Shell({ me, ws, tab, children }: { me: { name: string; email: string; passkeyPrompt?: boolean }; ws?: string; tab?: string; children: ReactNode }) {
-  const list = useApi<{ workspaces: WsSummary[] }>("/api/v2/workspaces");
-  const current = list.data?.workspaces.find((w) => w.id === ws);
+const navLink = (on: boolean) =>
+  `flex min-h-[36px] items-center rounded-(--radius-s) px-2.5 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-(--focus) max-lg:min-h-[44px] ${
+    on ? "bg-(--accent-soft) font-medium text-(--text-1) shadow-[inset_2px_0_0_var(--accent-text)]" : "text-(--text-2) hover:bg-(--bg-raised) hover:text-(--text-1)"
+  }`;
+
+/** The workspace switcher: the native select, so its list never runs off a narrow window. */
+function WsSwitch({ ws, list }: { ws?: string; list: WsSummary[] }) {
   return (
-    <div className="min-h-screen bg-[var(--al-bg)] text-zinc-800">
-      <header className="flex flex-wrap items-center gap-3 border-b border-zinc-200 bg-[var(--al-rail)] px-6 py-3 max-sm:gap-x-3 max-sm:gap-y-1 max-sm:px-4 max-sm:py-2">
-        <Link href="/app" className="font-display text-[26px] leading-none">
-          Align
-        </Link>
-        {list.data && list.data.workspaces.length > 0 && (
-          <select
-            aria-label="Switch workspace"
-            className="rounded-[8px] border border-zinc-300 bg-zinc-50 px-2 py-1.5 text-[15px]"
-            value={ws ?? ""}
-            onChange={(e) => {
-              if (e.target.value) go(`/app/w/${e.target.value}`);
-            }}
-          >
-            <option value="">Workspaces</option>
-            {list.data.workspaces.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
-              </option>
-            ))}
-          </select>
-        )}
-        <nav className="ml-auto flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-[15px] text-zinc-600">
-          <Link href="/app/devices" className="hover:text-zinc-900">
-            Devices
-          </Link>
-          <Link href="/app/account" className="hover:text-zinc-900">
-            Account
-          </Link>
-          <span className="text-zinc-500 max-sm:hidden" title={me.email}>
-            {me.name}
-          </span>
-          <button type="button" onClick={signOut} className="hover:text-zinc-900">
-            Sign out
-          </button>
-        </nav>
-      </header>
-      {me.passkeyPrompt && <PasskeyPrompt />}
+    <select
+      aria-label="Switch workspace"
+      className="min-h-[36px] w-full min-w-0 rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) px-2 text-[14px] text-(--text-1) max-lg:min-h-[44px]"
+      value={ws ?? ""}
+      onChange={(e) => {
+        if (e.target.value) go(`/app/w/${e.target.value}`);
+      }}
+    >
+      <option value="">All workspaces</option>
+      {list.map((w) => (
+        <option key={w.id} value={w.id}>
+          {w.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function NavBody({ ws, tab, list, me, current }: { ws?: string; tab?: string; list: WsSummary[] | null; me: { name: string; email: string }; current?: WsSummary }) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      {list && list.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <WsSwitch ws={ws} list={list} />
+          {current && <p className="px-1 font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">You are {current.role === "owner" ? "an owner" : `a ${current.role}`}</p>}
+        </div>
+      )}
       {ws && (
-        <nav className="flex flex-wrap gap-1 border-b border-zinc-200 px-6 pt-2 max-sm:gap-0.5 max-sm:px-3 max-sm:pt-1" aria-label="Workspace">
-          <span className="mr-4 self-center text-[15px] text-zinc-500 max-sm:hidden">
-            {current?.name ?? ""}
-            {current && <span className="al-lbl ml-2">{current.role}</span>}
-          </span>
-          {WS_TABS.map((t) => (
-            <Link
-              key={t.href}
-              href={`/app/w/${ws}${t.href}`}
-              className={`rounded-t-[8px] px-3 py-2 text-[15px] max-sm:px-2.5 ${tab === t.label ? "border border-b-0 border-zinc-200 bg-white text-zinc-900" : "text-zinc-500 hover:text-zinc-900"}`}
-            >
-              {t.label}
-            </Link>
+        <nav aria-label="Workspace" className="flex flex-col gap-3">
+          {NAV.map((g) => (
+            <div key={g.group} className="flex flex-col gap-0.5">
+              <p className="px-2.5 font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">{g.group}</p>
+              {g.items.map((t) => (
+                <Link key={t.href} href={`/app/w/${ws}${t.href}`} aria-current={tab === t.label ? "page" : undefined} className={navLink(tab === t.label)}>
+                  {t.label}
+                </Link>
+              ))}
+            </div>
           ))}
         </nav>
       )}
-      <main className="mx-auto max-w-[1100px] p-6 [overflow-wrap:anywhere] max-sm:p-4">{children}</main>
+      <div className="mt-auto flex flex-col gap-0.5 border-t border-(--line) pt-3">
+        <Link href="/app/devices" aria-current={tab === "Devices" ? "page" : undefined} className={navLink(tab === "Devices")}>
+          Devices
+        </Link>
+        <Link href="/app/account" aria-current={tab === "Account" ? "page" : undefined} className={navLink(tab === "Account")}>
+          Account
+        </Link>
+        <button type="button" onClick={signOut} className={`${navLink(false)} w-full text-left`}>
+          Sign out
+        </button>
+        <p className="truncate px-2.5 pt-1 text-[13px] text-(--text-3)" title={me.email}>
+          {me.name}
+        </p>
+        <div className="px-1 pt-2">
+          <ThemeSettingCompact />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Page frame (LIM-2472 concept A): a dense left rail at 1024px and up (workspace switcher, grouped navigation,
+ *  devices, account, appearance); below that a top bar with a Menu button that opens the same navigation as a sheet.
+ *  Every bar wraps and a word longer than its line breaks, so no /app page scrolls sideways at 390 or 320. */
+export function Shell({ me, ws, tab, children }: { me: { name: string; email: string; passkeyPrompt?: boolean }; ws?: string; tab?: string; children: ReactNode }) {
+  const list = useApi<{ workspaces: WsSummary[] }>("/api/v2/workspaces");
+  const current = list.data?.workspaces.find((w) => w.id === ws);
+  const [menu, setMenu] = useState(false);
+  const menuBtn = useRef<HTMLButtonElement>(null);
+  const sheet = useRef<HTMLDivElement>(null);
+  // The sheet takes focus when it opens (its first control) and gives it back to Menu when it closes; Escape closes it.
+  useEffect(() => {
+    if (!menu) return;
+    sheet.current?.querySelector<HTMLElement>("a[href], button, select")?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setMenu(false);
+      menuBtn.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [menu]);
+  return (
+    <div className="min-h-screen bg-(--bg-page) text-(--text-1) lg:flex">
+      <aside className="sticky top-0 hidden h-screen w-[232px] shrink-0 flex-col gap-5 overflow-y-auto border-r border-(--line) bg-(--bg-inset) px-3 py-4 lg:flex">
+        <Link href="/app" className="px-2 font-display text-[26px] leading-none text-(--text-1)">
+          Align
+        </Link>
+        <NavBody ws={ws} tab={tab} list={list.data?.workspaces ?? null} me={me} current={current} />
+      </aside>
+      <div className="min-w-0 flex-1">
+        <header className="flex items-center gap-3 border-b border-(--line) bg-(--bg-inset) px-4 py-2 lg:hidden">
+          <Link href="/app" className="font-display text-[24px] leading-none text-(--text-1)">
+            Align
+          </Link>
+          <span className="min-w-0 flex-1 truncate text-[14px] text-(--text-2)">{current?.name ?? ""}</span>
+          <button
+            ref={menuBtn}
+            type="button"
+            aria-expanded={menu}
+            aria-controls="ca-menu"
+            onClick={() => setMenu((m) => !m)}
+            className="inline-flex min-h-[44px] items-center rounded-(--radius-s) border border-(--line-strong) px-3 text-[14px] text-(--text-1)"
+          >
+            {menu ? "Close" : "Menu"}
+          </button>
+        </header>
+        {menu && (
+          // A link in the sheet closes it, so the page it opens starts with the navigation folded away.
+          <div id="ca-menu" ref={sheet} onClick={(e) => (e.target as HTMLElement).closest("a") && setMenu(false)} className="flex flex-col border-b border-(--line) bg-(--bg-inset) px-3 py-3 lg:hidden" data-menu-sheet>
+            <NavBody ws={ws} tab={tab} list={list.data?.workspaces ?? null} me={me} current={current} />
+          </div>
+        )}
+        {me.passkeyPrompt && <PasskeyPrompt />}
+        <main className="mx-auto max-w-[1280px] px-6 py-5 [overflow-wrap:anywhere] max-sm:px-4 max-sm:py-4">{children}</main>
+      </div>
     </div>
   );
 }
