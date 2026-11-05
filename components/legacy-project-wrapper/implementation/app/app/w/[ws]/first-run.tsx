@@ -14,10 +14,11 @@ import { claudeCodeLine } from "@/lib/paste-lines";
 // connect path. While shown it checks the Apps endpoint every few seconds (only
 // while the tab is visible); once an app has made any request it yields to the Home's "Connected AI apps" section.
 //
-// LIM-2472 (ruling 9b5b870f; founder pick 9fae06af, "A at empty/first time, b after"): first run is the Home in its
-// empty state, not a separate screen, and it ends by rule, never by a dismiss: the Home shows it only while the person
-// can read no goal, and it yields once an app has connected. Viewers get no connect path (they can't connect one).
-// The Home renders it where "Needs you" would lead, on the theme tokens so it reads in dark and light.
+// LIM-2472 (ruling 9b5b870f; founder rulings 9fae06af and eaa5cf92): first run is part of the Home, not a separate
+// screen, and it ends by rule, never by a dismiss: it stays until this person has connected an agent (an app they
+// connected has made a request), whether or not goals exist. A waiting decision is never hidden behind setup: once the
+// person can read a goal the Home puts this panel ABOVE its list, compact (two lines and the two actions). Viewers get
+// no connect path (they can't connect one), and no panel at all once a goal exists. On the theme tokens throughout.
 
 /** The name lib/v2/sample.ts gives the sample workspace. */
 const SAMPLE_NAME = "Northstar (sample)";
@@ -29,6 +30,8 @@ export interface FirstRunApp {
   approved_at: string;
   last_used_at: string | null;
   last_read_at: string | null;
+  /** Who connected it (the grant's person); an owner sees everyone's apps. */
+  user?: { id: string; name: string };
 }
 
 /** An app Align has seen make a request (a connection; a goal read is one too). */
@@ -70,7 +73,12 @@ function CopyLine({ line }: { line: string }) {
 
 /** `always`: the Connect drawer (LIM-2472 concept A) shows the connect paths even after an app has connected, and
  *  never hands off to the Home. */
-export default function FirstRun({ ws, onSeen, always = false }: { ws: string; onSeen: () => void; always?: boolean }) {
+/** `me`: the person; first run lasts until an app THEY connected has made a request (an owner sees everyone's apps,
+ *  and someone else's agent doesn't end this person's setup). `hasGoals`: the person can read a goal, so this panel
+ *  sits above Home's list and stays compact (two lines and the two actions); a viewer, who can't connect an agent,
+ *  then gets no panel at all. */
+export default function FirstRun({ ws, onSeen, always = false, me, hasGoals = false }: { ws: string; onSeen: () => void; always?: boolean; me?: string; hasGoals?: boolean }) {
+  const [open, setOpen] = useState(false);
   const [apps, setApps] = useState<{ url: string; apps: FirstRunApp[]; at: number } | null>(null);
   const [failed, setFailed] = useState(false);
   const [list, setList] = useState<WsSummary[] | null>(null);
@@ -97,7 +105,7 @@ export default function FirstRun({ ws, onSeen, always = false }: { ws: string; o
           if (!live) return;
           setApps({ ...d, at: Date.now() });
           setFailed(false);
-          if (!always && d.apps.some(seenApp)) {
+          if (!always && d.apps.some((a) => seenApp(a) && (!me || a.user?.id === me))) {
             onSeen(); // the Home reads again and shows the app in its own section; this card is done
             return;
           }
@@ -113,16 +121,18 @@ export default function FirstRun({ ws, onSeen, always = false }: { ws: string; o
       live = false;
       clearTimeout(timer);
     };
-  }, [ws, onSeen, always]);
+  }, [ws, onSeen, always, me]);
 
   if (!list) return null;
-  if (!always && apps?.apps.some(seenApp)) return null;
+  if (!always && apps?.apps.some((a) => seenApp(a) && (!me || a.user?.id === me))) return null;
 
   const self = list.find((w) => w.id === ws);
   const viewer = self?.role === "viewer";
+  if (!always && viewer && hasGoals) return null;
+  const compact = !always && hasGoals;
   const sample = self?.name === SAMPLE_NAME ? self : list.find((w) => w.name === SAMPLE_NAME && w.id !== ws);
   const inSample = sample?.id === ws;
-  const approvedOnly = apps?.apps.filter((a) => !seenApp(a)) ?? [];
+  const approvedOnly = apps?.apps.filter((a) => !seenApp(a) && (!me || a.user?.id === me)) ?? [];
   const line = apps ? claudeCodeLine(apps.url) : null;
 
   const status = failed
@@ -178,6 +188,38 @@ export default function FirstRun({ ws, onSeen, always = false }: { ws: string; o
       </Link>
     </>
   );
+
+  // Above a list that has something in it: two lines and the two actions; the connect steps open in place.
+  if (compact)
+    return (
+      <section aria-label="Get started" className="min-w-0 rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3 text-[14px] text-(--text-1)" data-first-run="compact">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="min-w-0 flex-1 basis-64">
+            <p className="font-semibold">Connect your agent</p>
+            <p className="text-(--text-2)">Your agent reads the goals you can read, as you. It can&apos;t change anything here.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            {sample && !inSample && (
+              <Link
+                href={`/app/w/${sample.id}`}
+                className="inline-flex min-h-[40px] items-center text-[14px] text-(--text-2) hover:text-(--text-1) hover:underline max-sm:min-h-[44px]"
+                data-sample-link
+              >
+                Explore the sample
+              </Link>
+            )}
+            <Btn kind="secondary" onClick={() => setOpen((o) => !o)}>
+              {open ? "Hide the steps" : "Connect an agent"}
+            </Btn>
+          </div>
+        </div>
+        {open && (
+          <div className="mt-3 flex min-w-0 flex-col gap-2 border-t border-(--line) pt-3 text-[15px]" data-first-run-path="connect">
+            {connect}
+          </div>
+        )}
+      </section>
+    );
 
   return (
     <section
