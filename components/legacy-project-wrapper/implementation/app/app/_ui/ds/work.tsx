@@ -228,7 +228,12 @@ function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
         (everyone ? (
           <EmptyState title="No AI apps connected" body="Nothing has read this workspace's goals through an app." action={<Link href={`/app/w/${ws}/apps`} className={LINK}>Connect one</Link>} />
         ) : (
-          <EmptyState title="None of your AI apps is connected" body="You see your own apps here; workspace owners see everyone's." action={<Link href={`/app/w/${ws}/apps`} className={LINK}>Apps</Link>} />
+          // A viewer can't connect an app, so nothing is offered; a member can, on the Apps tab.
+          <EmptyState
+            title="None of your AI apps is connected"
+            body="You see your own apps here; workspace owners see everyone's."
+            action={role.data?.role === "member" ? <Link href={`/app/w/${ws}/apps`} className={LINK}>Connect one</Link> : undefined}
+          />
         ))}
       {list.length > 0 && (
         <ul className="flex flex-col gap-2">

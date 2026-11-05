@@ -456,13 +456,15 @@ export interface SendResult {
  * The one way a decision is sent, for the review and for any shortcut to it (the Desk's one-click Approve only):
  *  1. Read the request again. If its revision, state, launch decision or its goal's version changed since `cr` was read,
  *     nothing is sent (a confirmation can name a version a moved goal makes stale): refused, saying what changed.
+ *  `launchNote`: for a caller with no state line of its own (the Desk row), an approval that leaves launch pending ends
+ *  "Not launched yet."; the review leaves it off because its state line already says approval is not launch.
  *  2. `requireEvidence`: the caller offered this only because the request had evidence; if the re-read has none on its
  *     current revision (a link removed in another session meanwhile), nothing is sent.
  *  3. POST …/<action> with `body` (default: defaultBody, for the choices that need no words; throws for one that does).
  *  4. 403/404/409: refused, in the server's words (409 adds "Here it is as it stands now."). Anything else (network, 429,
  *     5xx): retry, nothing changed. The server checks every rule again on the write; this never decides for it.
  */
-export async function sendChoice(ws: string, cr: ChangeRequest, choice: Choice, body?: Record<string, unknown> | null, opts: { requireEvidence?: boolean } = {}): Promise<SendResult> {
+export async function sendChoice(ws: string, cr: ChangeRequest, choice: Choice, body?: Record<string, unknown> | null, opts: { requireEvidence?: boolean; launchNote?: boolean } = {}): Promise<SendResult> {
   const b = body ?? defaultBody(cr, choice);
   if (!b) throw new Error(`sendChoice: "${choice}" needs a body (a note, a condition, changes or a reason)`);
   const path = crPath(ws, cr);
@@ -481,7 +483,8 @@ export async function sendChoice(ws: string, cr: ChangeRequest, choice: Choice, 
       return { kind: "refused", text: "Not recorded. Its evidence was removed after you opened it. Nothing was sent. Open it to decide.", reread: true };
     await api(`${path}/${ACTION[choice]}`, { body: b });
     const words = doneWords(cr, choice);
-    return { kind: "done", text: words ? `Recorded: ${words}.` : "Recorded.", reread: true };
+    const note = opts.launchNote && choice === "approve" ? " Not launched yet." : "";
+    return { kind: "done", text: `${words ? `Recorded: ${words}.` : "Recorded."}${note}`, reread: true };
   } catch (e) {
     const status = e instanceof ApiError ? e.status : 0;
     if (status === 403 || status === 404 || status === 409)

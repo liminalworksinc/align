@@ -36,7 +36,7 @@ export function NextAfterDecision({
           <Link href={s.item.href} data-next-item={s.item.key} data-next-review={s.item.review ? "true" : "false"} className={OUTLINE} onClick={() => onGo?.(s.item)}>
             <span className="min-w-0 [overflow-wrap:anywhere]">
               Next: {s.item.kind} · {s.item.title}
-              {s.item.waited && <span className="font-normal text-(--text-3)"> · waiting {s.item.waited}</span>}
+              {s.item.waited && <span className="font-normal text-(--text-3)"> · {s.item.waited === "just now" ? "just now" : `waiting ${s.item.waited}`}</span>}
             </span>
           </Link>
           <button type="button" className={DECISION_LINK} onClick={onBack}>
