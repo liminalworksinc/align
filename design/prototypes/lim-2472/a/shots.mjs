@@ -109,7 +109,11 @@ async function shot(p, name, theme, width, full = true) {
 const goto = (p, url) => p.goto(url.startsWith("http") ? url : `${BASE}${url}`, { waitUntil: "domcontentloaded" });
 const home = async (p, ws = WS) => {
   await goto(p, `/app/w/${ws}`);
-  await ready(p, "Work by goal");
+  // Concept A's Home says "Work by goal"; the integrated Home has the Goals lines instead.
+  await p.waitForFunction(() => { const m = document.querySelector("main"); return !!m && (m.innerText.includes("Work by goal") || !!m.querySelector("[data-goal-lines]")) && !/Loading/.test(m.innerText); }, { timeout: 90_000, polling: 250 }).catch(async () => {
+    throw new Error(`Home not ready at ${p.url()}: ${await p.evaluate(() => document.querySelector("main")?.innerText.slice(0, 300) ?? "(none)").catch(() => "(navigating)")}`);
+  });
+  await p.waitForNetworkIdle({ idleTime: 400, timeout: 20000 }).catch(() => undefined);
 };
 /** Open the review drawer from a Home card: by default the onboarding request, which waits on the owner. */
 async function openCard(p, match = "Ship self-serve onboarding") {
@@ -144,7 +148,8 @@ const choicesShown = (p, dominant) =>
 /** Press the drawer's visible Cancel (or a confirmation's Back) and assert the choices come back. */
 async function cancelToChoices(p, dominant, where) {
   await p.evaluate(() => {
-    const b = [...document.querySelectorAll("[role=dialog] button")].find((e) => e.offsetParent !== null && /^(Cancel|Back)$/.test(e.textContent?.trim() ?? ""));
+    // The decision's own Cancel, not the Add evidence form's (which can still be open above it).
+    const b = [...document.querySelectorAll("[role=dialog] button")].find((e) => e.offsetParent !== null && !e.closest("[data-add-evidence]") && /^(Cancel|Back)$/.test(e.textContent?.trim() ?? ""));
     b?.click();
   });
   await p.waitForFunction((t) => [...document.querySelectorAll(`[role=dialog] [data-decision="${t}"]`)].some((e) => e.offsetParent !== null), { timeout: 10_000 }, dominant).catch(() => undefined);
@@ -175,7 +180,10 @@ const dialogHref = (p, attr) => p.$eval(`[role=dialog] [${attr}]`, (a) => a.getA
 const goalTitle = "Ship self-serve onboarding";
 
 const W = [1440, 390, 320];
-for (const theme of ["dark", "light"]) {
+// ALIGN_SHOTS_ONLY_ASSERTS=1 skips the screenshots and runs only the asserted steps (Menu by keyboard, decisions, review
+// link arrivals, the keyboard decision at 320): how this script verifies a branch whose Home is not concept A's.
+const ONLY_ASSERTS = process.env.ALIGN_SHOTS_ONLY_ASSERTS === "1";
+if (!ONLY_ASSERTS) for (const theme of ["dark", "light"]) {
   // 00: the three states together (pending decision, launched plan, an unobserved outcome) at desktop width.
   const { p, ctx } = await page("owner", theme, 1440);
   await home(p);
@@ -184,7 +192,7 @@ for (const theme of ["dark", "light"]) {
 }
 
 // 09, 10: Home as each role sees it: a member (Theo) and a viewer (Ines), dark, desktop and phone.
-for (const [person, n] of [["member", "09-home-member"], ["viewer", "10-home-viewer"]]) {
+if (!ONLY_ASSERTS) for (const [person, n] of [["member", "09-home-member"], ["viewer", "10-home-viewer"]]) {
   if (!who(person)) continue;
   for (const width of [1440, 390]) {
     const { p, ctx } = await page(person, "dark", width);
@@ -194,7 +202,7 @@ for (const [person, n] of [["member", "09-home-member"], ["viewer", "10-home-vie
   }
 }
 
-for (const width of W) {
+if (!ONLY_ASSERTS) for (const width of W) {
   for (const theme of ["dark", "light"]) {
     if (theme === "light" && width === 320) continue;
     const { p, ctx } = await page("owner", theme, width);
@@ -207,8 +215,6 @@ for (const width of W) {
     if (theme === "dark") {
       // Asserted at 390, no screenshot: Add evidence (an https example.test link and a label) adds a Self-reported item.
       if (width === 390) {
-        const count = () => p.evaluate(() => [...document.querySelectorAll("[role=dialog] span")].filter((e) => e.textContent?.trim() === "Self-reported").length);
-        const before = await count();
         await p.evaluate(() => [...document.querySelectorAll("[role=dialog] button")].find((b) => b.offsetParent !== null && b.textContent?.trim() === "Add evidence")?.click());
         await p.waitForSelector("[role=dialog] [data-add-evidence] input[type=url]", { visible: true, timeout: 10_000 });
         const stamp = new Date().toISOString().slice(11, 19).replace(/:/g, "");
@@ -216,9 +222,12 @@ for (const width of W) {
         const inputs = await p.$$("[role=dialog] [data-add-evidence] input");
         await inputs[inputs.length - 1].type(`Shots check ${stamp} (fictional)`);
         await p.$eval("[role=dialog] [data-add-evidence] button[type=submit]", (b) => b.click());
-        await p.waitForFunction((n) => [...document.querySelectorAll("[role=dialog] span")].filter((e) => e.textContent?.trim() === "Self-reported").length > n, { timeout: 20_000 }, before).catch(() => {
-          throw new Error("Add evidence: no new Self-reported item in the drawer");
-        });
+        // The new link shows in the drawer, and the drawer has a Self-reported label (EvidenceLabel kind "self").
+        await p
+          .waitForFunction((t) => document.querySelector("[role=dialog]")?.innerHTML.includes(t) && !!document.querySelector('[role=dialog] [data-evidence="self"]'), { timeout: 20_000 }, `shots-${stamp}`)
+          .catch(() => {
+            throw new Error("Add evidence: the new link or its Self-reported label is not in the drawer");
+          });
       }
       // Asserted, no screenshot: Approve and launch -> Cancel -> choices back -> Decline -> reason field -> Cancel ->
       // choices back (a Cancel once left the drawer with neither choices nor a confirmation).
@@ -318,6 +327,30 @@ for (const width of [390, 320]) {
   });
   await ready(p, "Change requests");
   if ((await p.$eval(menuBtn, (b) => b.getAttribute("aria-expanded"))) !== "false" || (await p.$("[data-menu-sheet]"))) throw new Error(`Menu at ${width}: the next page opened with the sheet open`);
+  await ctx.close();
+}
+
+// Asserted at 1440, no screenshot, where the Home mounts "Since you last looked" (data-since): a fresh browser has no
+// last visit, so the section shows only the first-visit line and never the words "last visit"; a second visit in the
+// same browser (a new tab, so a new baseline) with nothing changed by anyone else shows "Nothing changed since your
+// last visit." A Home without the section (concept A's own) skips this, and says so.
+{
+  const { p, ctx } = await page("owner", "dark", 1440);
+  await home(p);
+  const sinceState = (pg) =>
+    pg.waitForFunction(() => { const e = document.querySelector("[data-since]"); return !e ? "absent" : e.getAttribute("data-since") === "reading" ? false : e.getAttribute("data-since"); }, { timeout: 30_000 }).then((h) => h.jsonValue());
+  if ((await p.$("[data-since]")) === null) console.log("Since: not on this Home, first-visit asserts skipped");
+  else {
+    const first = await sinceState(p);
+    const text = await p.$eval("[data-since]", (e) => e.innerText);
+    if (first !== "first" || !text.includes("First visit on this device") || /last visit/i.test(text)) throw new Error(`Since, first visit: wanted only the first-visit line, got data-since=${first}: ${text.slice(0, 200)}`);
+    const again = await ctx.newPage();
+    await again.setViewport({ width: 1440, height: 900 });
+    await home(again);
+    const second = await sinceState(again);
+    const text2 = await again.$eval("[data-since]", (e) => e.innerText);
+    if (second !== "0" || !text2.includes("Nothing changed since your last visit.")) throw new Error(`Since, second visit: wanted "Nothing changed since your last visit.", got data-since=${second}: ${text2.slice(0, 200)}`);
+  }
   await ctx.close();
 }
 
