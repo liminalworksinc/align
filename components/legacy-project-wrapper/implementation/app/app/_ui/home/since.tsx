@@ -212,9 +212,8 @@ export default function Since({
         {since && <p className="text-[13px] text-(--text-3)">since your last visit on this device, {stamp(since)}</p>}
       </div>
       {!visit.ready ? null : !since ? (
-        <p className="rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3 text-[14px] text-(--text-2)" data-since-first>
-          This is your first visit on this device, so there is nothing to compare with yet. From your next visit, this lists what changed in between: requests made, decided, launched or
-          withdrawn on goals you can read, new goal versions, and when connected apps read the goals.
+        <p className="rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-2.5 text-[14px] text-(--text-2)" data-since-first>
+          First visit on this device, so nothing to compare yet.
         </p>
       ) : (
         <div className="flex flex-col gap-2 rounded-(--radius-m) border border-(--line) bg-(--bg-panel) px-4 py-3">

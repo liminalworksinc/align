@@ -4,6 +4,7 @@ import { EvidenceSummary, StatusPill } from "../ds";
 import { useApi } from "../kit";
 import type { ChangeRequest, Goal } from "../types";
 import { crStatus } from "./cr-status";
+import { useValue } from "./value-cache";
 
 // Home, third section (LIM-2472 ruling 9b5b870f): Goals, one line per goal: title, version and team, and one link to the
 // goal's work. Chips appear only where there is something to say: an approved change not launched yet, Held, the newest
@@ -25,12 +26,21 @@ export interface GoalLine {
   owner: { id: string; name: string };
 }
 /** The goal's latest approved change: what its plan pill says. */
+/** The goal's newest launched change in the Home's own change-request read, or null when it has none. */
+export function newestLaunch(changes: ChangeRequest[], goal: string): ChangeRequest | null {
+  return changes.filter((x) => x.goal.id === goal && x.launch === "launched" && x.version !== null).sort((a, b) => (b.version ?? 0) - (a.version ?? 0))[0] ?? null;
+}
+
 export function latestApproved(changes: ChangeRequest[] | null, goal: string): ChangeRequest | null {
   const on = (changes ?? []).filter((x) => x.goal.id === goal && x.state === "approved").sort((a, b) => (b.decided_at ?? "").localeCompare(a.decided_at ?? ""));
   return on[0] ?? null;
 }
 
-function Line({ ws, g, latest, fed, onReview }: { ws: string; g: GoalLine; latest: ChangeRequest | null; fed: Goal | undefined; onReview?: (goal: string, id: string) => void }) {
+function Line({ ws, g, latest, launch, fed, onReview }: { ws: string; g: GoalLine; latest: ChangeRequest | null; launch: ChangeRequest | null | undefined; fed: Goal | undefined; onReview?: (goal: string, id: string) => void }) {
+  // The newest launch comes from the Home's change-request read and its delivery from the shared value cache, so the
+  // summary makes no read of its own. `launch` undefined (that read failed) lets the summary read for itself.
+  const v = useValue(ws, g.id, launch ? launch.id : null);
+  const launched = launch === undefined ? undefined : launch ? { version: launch.version!, value: v.value } : null;
   // A line earns a chip only when it has something to say: an approved change still waiting on launch, Held, the newest
   // launch's delivery, or agent time above zero. Zero agent time and "no approved change" show nothing.
   const waiting = latest && latest.state === "approved" && latest.launch !== "launched" ? latest : null;
@@ -54,10 +64,12 @@ function Line({ ws, g, latest, fed, onReview }: { ws: string; g: GoalLine; lates
       <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5 empty:hidden max-md:order-3 max-md:col-span-2 md:justify-end">
         {pill &&
           (onReview && waiting ? (
+            // The phone base rule gives every button 44px of height, which opened a gap under the title row; the pill
+            // keeps its own height and a 44px tap area from the pseudo-element instead.
             <button
               type="button"
               onClick={() => onReview(waiting.goal.id, waiting.id)}
-              className="rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) max-sm:min-h-[44px]"
+              className="relative rounded-full max-sm:min-h-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) max-sm:before:absolute max-sm:before:-inset-y-3 max-sm:before:inset-x-0 max-sm:before:content-['']"
               aria-label={`Review the approved change on ${g.title}`}
             >
               {pill}
@@ -67,7 +79,7 @@ function Line({ ws, g, latest, fed, onReview }: { ws: string; g: GoalLine; lates
           ))}
         {a?.held && <StatusPill kind="held" size="s" label="Held" />}
         {/* The shared summary: the newest launch's delivery from its own …/value read, then agent time as reported. */}
-        {fed && <EvidenceSummary ws={ws} goal={fed} variant="inline" max={2} />}
+        {fed && <EvidenceSummary ws={ws} goal={fed} variant="inline" max={2} launched={launched} />}
       </div>
       <Link href={`/app/w/${ws}/work?goal=${g.id}`} className="inline-flex min-h-[32px] items-center px-1 text-[13px] text-(--text-2) hover:text-(--text-1) hover:underline max-sm:min-h-[44px]" aria-label={`Work on ${g.title}`} data-goal-work>
         Work
@@ -81,6 +93,7 @@ export default function GoalLines({
   goals,
   changes,
   onReview,
+  feed,
 }: {
   ws: string;
   /** Unused since lines stopped saying "yours" (an owner's every line said it); kept so callers need no change. */
@@ -91,8 +104,11 @@ export default function GoalLines({
   changes: ChangeRequest[] | null;
   /** Opens a change request in the review drawer; without it the plan pill is not a button. */
   onReview?: (goal: string, id: string) => void;
+  /** The goals feed (GET …/goals, for allocation) when the Home already read it; without it the lines read it once. */
+  feed?: Goal[] | null;
 }) {
-  const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
+  const own = useApi<{ goals: Goal[] }>(feed === undefined ? `/api/v2/workspaces/${ws}/goals` : null);
+  const fedGoals = feed === undefined ? own.data?.goals : feed;
   return (
     <section aria-labelledby="goal-lines-title" className="flex min-w-0 flex-col gap-3" data-goal-lines={goals?.length ?? "unknown"}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -117,7 +133,7 @@ export default function GoalLines({
           {changes === null && <p className="text-[13px] text-(--text-2)">Align couldn&apos;t read change requests just now, so the plan state of each goal is unknown.</p>}
           <ul className="divide-y divide-(--line) overflow-hidden rounded-(--radius-m) border border-(--line) bg-(--bg-panel)">
             {goals.map((g) => (
-              <Line key={g.id} ws={ws} g={g} latest={latestApproved(changes, g.id)} fed={feed.data?.goals.find((x) => x.id === g.id)} onReview={onReview} />
+              <Line key={g.id} ws={ws} g={g} latest={latestApproved(changes, g.id)} launch={changes ? newestLaunch(changes, g.id) : undefined} fed={fedGoals?.find((x) => x.id === g.id)} onReview={onReview} />
             ))}
           </ul>
         </>
