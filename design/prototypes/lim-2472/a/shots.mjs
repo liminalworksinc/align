@@ -373,7 +373,11 @@ for (const width of [390, 320]) {
       if (source === "goals") {
         const h1 = await f.$eval("main h1", (e) => e.textContent.trim());
         const fr = await f.$eval("[data-first-run]", (e) => e.getAttribute("data-first-run")).catch(() => null);
-        if (h1 === "No goals here yet" || fr === "empty" || fr === "viewer-empty") throw new Error(`goals unread read as goals absent: H1 "${h1}", first run ${fr}`);
+        if (h1 === "No goals here yet" || fr !== null) throw new Error(`goals unread read as goals absent: H1 "${h1}", first run ${fr}`);
+        // Every sentence a "no goals" first run has said, in this design and the one before it.
+        const body = await f.$eval("main", (e) => e.innerText);
+        const said = ["No goals here yet", "Start with a goal", "This workspace has no goals yet", "while this workspace has no goals", "Look around first", "Two ways to start", "Explore a sample", "Connect one agent"].filter((x) => body.includes(x));
+        if (said.length) throw new Error(`goals unread read as goals absent: the page says ${JSON.stringify(said)}`);
       }
       await f.close();
     }
