@@ -68,11 +68,11 @@ export function NeedRow({
   );
 }
 
-/** A row's action: a link or a button. Outlined by default. `quiet` is a shortcut beside it: no outline, plain text, so
- *  the outlined action stays the row's main one. Its word must say what it does and doesn't do ("Approve only"), and
+/** A row's action: a link or a button. Outlined by default. `quiet` is a shortcut beside it: underlined text with no
+ *  outline, so it is plainly a control and the outlined action stays the row's main one. Its word must say what it does and doesn't do ("Approve only"), and
  *  `name` can say the rest to a screen reader. 44px when the row stacks. */
 export function NeedAction({ children, href, onClick, disabled, quiet = false, name }: { children: ReactNode; href?: string; onClick?: () => void; disabled?: boolean; quiet?: boolean; name?: string }) {
-  const look = quiet ? "px-2 font-normal text-(--text-2) underline-offset-4 hover:text-(--text-1) hover:underline" : "border border-(--edge) px-3 font-medium text-(--text-1) hover:bg-(--bg-overlay)";
+  const look = quiet ? "px-2 font-normal text-(--text-2) underline underline-offset-4 hover:text-(--text-1)" : "border border-(--edge) px-3 font-medium text-(--text-1) hover:bg-(--bg-overlay)";
   const cls = `inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) text-[13px] transition-[color,background-color,border-color] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px] ${look}`;
   return href ? (
     <Link href={href} aria-label={name} className={cls}>
