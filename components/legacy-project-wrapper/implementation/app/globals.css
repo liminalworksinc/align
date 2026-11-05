@@ -229,7 +229,12 @@ body {
   line-height: 1.45;
 }
 
-:focus-visible {
+/*
+ * The focus ring for every Tab stop. Elements that only receive focus from code (tabindex="-1": a page heading after
+ * navigation, an error or confirm message, a dialog panel) get none: this rule is unlayered, so it would otherwise beat
+ * an outline-none utility and outline the whole element.
+ */
+:focus-visible:not([tabindex="-1"]) {
   outline: 2px solid var(--al-focus);
   outline-offset: 2px;
   border-radius: 6px;
@@ -270,6 +275,12 @@ body {
  * utility classes still win where they set more.
  */
 @layer base {
+  /* A focus target that only code reaches (tabindex="-1") shows no ring, not the browser's default one; in the base
+     layer, so a component can still add a ring with a utility. Tab stops keep the ring above. */
+  [tabindex="-1"]:focus {
+    outline: none;
+  }
+
   @media (width < 40rem) {
     button,
     select {
