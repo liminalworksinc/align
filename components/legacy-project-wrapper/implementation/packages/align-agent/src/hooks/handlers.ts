@@ -48,7 +48,7 @@ import { contextGoals, snapshot } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
 import { isShareStateNotice, noticeKind, resumedButHeld } from "../shared/notices.ts";
-import { matchRule, readRules, removeRule, setRule } from "../shared/rules.ts";
+import { matchRule, readRules, realDir, removeRule, setRule } from "../shared/rules.ts";
 import { queueSteering, steeringLine, unsharedNote } from "../shared/steering.ts";
 import type { DriftFile, FeedFile, Goal, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
 import { CLAIM_MS, collisions, commitSubject, crossOverlap, display, editedPaths, liveGoalId, podReport, rawActs, readPaths, record, shellWrites, siblingChanges, siblingNews, activityHot, type Act, type StartingShare } from "./siblings.ts";
@@ -1536,6 +1536,13 @@ function heldNote(g: { allocation?: { held?: boolean } | null }): string {
 }
 
 /** The folder rule a new `--dir` rule for `dir` replaces, in words (as `align share --dir` says it). */
+/** The folder a `--dir` rule covers for `cwd`: its git top level, or the folder itself, as a realpath, the way
+ *  `align share --dir` and setRule store it (a cwd under a symlink, such as macOS's /var or /tmp, must match too). */
+function ruleDirFor(cwd: string): string {
+  const real = realDir(cwd);
+  return gitInfo(real)?.toplevel || real;
+}
+
 function replacedRule(home: string, dir: string): string | null {
   const prev = matchRule(readRules(home), dir);
   if (!prev || prev.dir !== dir) return null;
@@ -1714,7 +1721,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       if (noGoal) arg = "";
       const rule = !arg && !noGoal && !before && feed ? matchRule(readRules(home), cwd) : null;
       const ruleGoal =
-        rule && feed && rule.workspace_id === feed.workspace_id && rule.goal_id && (!dirMode || rule.dir === (gitInfo(cwd || "")?.toplevel || cwd))
+        rule && feed && rule.workspace_id === feed.workspace_id && rule.goal_id && (!dirMode || (!!cwd && rule.dir === ruleDirFor(cwd)))
           ? feed.goals.find((g) => g.id === rule.goal_id && g.bindable && g.status === "active") || null
           : null;
       const goal = arg && feed ? feed.goals.find((g) => g.id === arg) || feed.goals.find((g) => g.title.toLowerCase().startsWith(arg.toLowerCase())) || null : before || ruleGoal;
@@ -1742,7 +1749,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         if (!feed) return "Align: no cached workspace. Run `align goals --refresh` in a terminal.";
         if (!cwd) return "Align: this session has no working folder to share.";
         if (goal && !goal.bindable) return `Align: "${goal.title}" needs an approved alignment before sessions can count toward it.`;
-        const dir = gitInfo(cwd)?.toplevel || cwd;
+        const dir = ruleDirFor(cwd);
         const replaces = replacedRule(home, dir);
         if (!confirm) {
           return [

@@ -365,6 +365,8 @@ describe("cycle 7, section 5: works, but would confuse a developer", () => {
 
   test("`::align share --dir confirm` that replaces the folder's rule says so, as `align share --dir` does", async () => {
     const { t } = await world();
+    // The folder as the session reports it, which may sit under a symlink (macOS's tmpdir is /var -> /private/var):
+    // the rule is stored, and named, by its realpath, and must still be found from here.
     const dir = path.join(t.root, "rule-replace");
     fs.mkdirSync(dir, { recursive: true });
     assert.equal((await runCli(t, ["share", "--dir", dir, "--workspace", "Acme", "--goal", "Ship the v2", "--yes"])).code, 0);
@@ -376,7 +378,7 @@ describe("cycle 7, section 5: works, but would confuse a developer", () => {
     const none = prompt(t, sid, "::align share --dir none", dir).reason;
     assert.match(none, /with no goal, from its start\.\n {2}This replaces the current rule \(Acme, "Ship the v2 onboarding flow"\)\./);
     assert.match(none, /Type `::align share --dir none confirm` to turn it on\./);
-    assert.match(prompt(t, sid, "::align share --dir none confirm", dir).reason, new RegExp(`^Align: new sessions in ${dir.replace(/[.]/g, "\\.")} are now shared with Acme\\. This replaces the current rule \\(Acme, "Ship the v2 onboarding flow"\\)\\.`));
+    assert.match(prompt(t, sid, "::align share --dir none confirm", dir).reason, new RegExp(`^Align: new sessions in ${fs.realpathSync(dir).replace(/[.]/g, "\\.")} are now shared with Acme\\. This replaces the current rule \\(Acme, "Ship the v2 onboarding flow"\\)\\.`));
     assert.match((await runCli(t, ["rules"])).stdout, /Acme \/ no goal/);
   });
 

@@ -75,12 +75,19 @@ async function call(method, p, { body, cookie, bearer, headers = {} } = {}) {
   if (bearer) h.authorization = `Bearer ${bearer}`;
   const send = () => fetch(BASE + p, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body), redirect: "manual" });
   // The CLI and hooks run synchronously (spawnSync), so while one runs this process can't see the server close an idle
-  // keep-alive connection: the next request on it fails "other side closed" before reaching the server. Sent once more
-  // on a fresh connection then (nothing reached the server the first time).
-  const res = await send().catch((e) => {
-    if (e?.cause?.code === "UND_ERR_SOCKET") return send();
-    throw e;
-  });
+  // keep-alive connection: the next request on it fails before reaching the server, as "other side closed"
+  // (UND_ERR_SOCKET) or, on macOS, as a reset (ECONNRESET: the offline logout below blocks for ~30 s). Sent again on a
+  // fresh connection then; each failure drops its dead socket, and more than one may be pooled.
+  const stale = (e) => e?.cause?.code === "UND_ERR_SOCKET" || e?.cause?.code === "ECONNRESET";
+  let res;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      res = await send();
+      break;
+    } catch (e) {
+      if (attempt >= 4 || !stale(e)) throw e;
+    }
+  }
   const text = await res.text();
   let json = null;
   try {
