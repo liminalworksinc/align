@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useGoalTitles } from "../../_ui/changes";
 import { useCallback, useEffect, useState } from "react";
 import { Drawer, ReviewActions, ReviewBody, type ReviewChoice } from "../../_ui/ds";
@@ -46,6 +47,30 @@ function Loaded({ ws, cr, me, choice, onClose, done }: { ws: string; cr: ChangeR
       </div>
     </Drawer>
   );
+}
+
+export interface ReviewTarget {
+  goal: string;
+  id: string;
+  choice?: ReviewChoice;
+}
+
+/** The review's place in the URL (?review=<goal>.<id>[&choice=<choice>]), so Back, a reload, a shared link and a plain
+ *  link from a row all open it, on any page that mounts the drawer. */
+export function useReview(): [ReviewTarget | null, (r: ReviewTarget | null) => void] {
+  const sp = useSearchParams();
+  const [goal, id] = (sp.get("review") ?? "").split(".");
+  const choice = (sp.get("choice") as ReviewChoice | null) ?? undefined;
+  const set = useCallback((next: ReviewTarget | null) => {
+    const u = new URL(window.location.href);
+    u.searchParams.delete("choice");
+    if (next) {
+      u.searchParams.set("review", `${next.goal}.${next.id}`);
+      if (next.choice) u.searchParams.set("choice", next.choice);
+    } else u.searchParams.delete("review");
+    window.history[next ? "pushState" : "replaceState"](null, "", u);
+  }, []);
+  return [goal && id ? { goal, id, choice } : null, set];
 }
 
 /** Read by id and kept mounted until the person closes it: a decision or a refusal re-reads the request in place, so
