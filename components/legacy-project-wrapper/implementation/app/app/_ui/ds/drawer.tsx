@@ -71,6 +71,9 @@ export function Drawer({
         aria-modal="true"
         aria-labelledby={id}
         tabIndex={-1}
+        // The panel takes focus only as a starting point; the global :focus-visible ring (unlayered, so it beats
+        // outline-none) would otherwise outline the whole drawer. Controls inside keep their rings.
+        style={{ outline: "none" }}
         className={`relative flex h-full w-full flex-col border-l border-(--line-strong) bg-(--bg-overlay) shadow-(--shadow-pop) outline-none ${width === "l" ? "sm:max-w-[720px]" : "sm:max-w-[480px]"}`}
       >
         <header className="flex items-start justify-between gap-3 border-b border-(--line) px-5 py-4">
