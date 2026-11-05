@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useGoalTitles } from "../changes";
 import type { ChangeRequest } from "../types";
 import { Compare } from "./compare";
+import { DECISION_LINK, DecisionLinks } from "./decision-links";
 import { EmptyState } from "./empty-state";
 import { EvidenceLabel } from "./evidence-label";
 import { Panel } from "./panel";
@@ -46,7 +47,8 @@ function source(e: RecordEvent): TimelineSource {
 /** The card's detail, or null when there is none (the Timeline draws a box for any detail it gets). */
 /** `openCompare`: the before/after tables start open (the workspace-wide record); closed when a ReviewBody for the same
  *  request is on the page, so its table isn't shown three times (open on click). */
-function detail(e: RecordEvent, titleOf: (id: string) => string, openCompare: boolean): ReactNode {
+/** `ws`: given outside a single request's page, for the proposal's links to its review and its goal's work. */
+function detail(e: RecordEvent, titleOf: (id: string) => string, openCompare: boolean, ws?: string): ReactNode {
   const parts: ReactNode[] = [];
   if (e.noTime)
     parts.push(
@@ -111,6 +113,8 @@ function detail(e: RecordEvent, titleOf: (id: string) => string, openCompare: bo
       );
     if (cr.approved_without_evidence) parts.push(<p key="ne" className="text-[13px] text-(--text-2)">Approved without evidence.</p>);
   }
+  // Workspace and goal scope: from a request's proposal, one click to its review and to the work on its goal.
+  if (ws && e.kind === "proposal" && e.cr) parts.push(<DecisionLinks key="dl" ws={ws} goalId={e.cr.goal.id} crId={e.cr.id} here="record" />);
   return parts.length ? <div className="flex flex-col gap-2">{parts}</div> : null;
 }
 
@@ -170,7 +174,7 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
         </span>
       ),
       source: source(e),
-      detail: detail(e, titleOf, !crId),
+      detail: detail(e, titleOf, !crId, crId ? undefined : ws),
     };
   });
 
@@ -181,13 +185,140 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
   const reviewing = crId && crs.data ? [...crs.data.waiting_on_me, ...crs.data.mine, ...crs.data.others].find((c) => c.id === crId) : undefined;
   const loading = crs.loading || audit.loading;
 
+  const filters = (
+    <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+      <label className="flex flex-col gap-1.5 text-[13px] font-medium text-(--text-2)">
+        Who
+        <select className={FIELD} value={actor} onChange={(e) => setActor(e.target.value)}>
+          <option value="all">Everyone ({all.length})</option>
+          {actors.map(([id, name]) => (
+            <option key={id} value={id}>
+              {id === me ? `${name} (you)` : name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1.5 text-[13px] font-medium text-(--text-2)">
+        What
+        <select className={FIELD} value={kind} onChange={(e) => setKind(e.target.value as Kind | "all")}>
+          <option value="all">Every kind</option>
+          {(Object.keys(KIND_WORDS) as Kind[])
+            .filter((k) => kinds.includes(k))
+            .map((k) => (
+              <option key={k} value={k}>
+                {KIND_WORDS[k]}
+              </option>
+            ))}
+        </select>
+      </label>
+      <Segmented<Order>
+        label="Order"
+        size="s"
+        options={[
+          { value: "newest", label: "Newest first" },
+          { value: "oldest", label: "Oldest first" },
+        ]}
+        value={order}
+        onChange={setOrder}
+      />
+    </div>
+  );
+
+  const timeline = (
+    <>
+      {loading && <p className="text-[14px] text-(--text-2)">Loading the record…</p>}
+      {crs.status !== 0 && !crId && <EmptyState title={crs.status === 404 ? "Not found" : "The record didn't load"} body={crs.message} />}
+      {!loading && crs.status === 0 && unknownGoal && (
+        <EmptyState title="No such goal in this workspace" body="Align has no goal with this address here that you can read. It may be in another workspace, or a goal you can't see." action={<Link href={`/app/w/${ws}/record`} className={DECISION_LINK}>Whole workspace record</Link>} />
+      )}
+      {!loading && crs.status === 0 && !(crId && !reviewing) && !unknownGoal && (
+        <Timeline
+          events={events}
+          empty={
+            <EmptyState
+              title={all.length ? "No events match these filters" : "Nothing recorded yet"}
+              body={all.length ? "Choose Everyone and Every kind to see the whole record." : `When someone proposes a change, decides one or launches it, it is recorded here with who did it and when. Nothing has happened on ${scope} yet.`}
+            />
+          }
+        />
+      )}
+    </>
+  );
+  const footnote = (
+    <p className="text-[12.5px] text-(--text-3)">
+      &quot;Recorded in Align&quot; is an action a person took that Align recorded. Agent reported is what a connected app or the align CLI sent. Self-reported is a link a person added. Align doesn&apos;t check evidence links.
+    </p>
+  );
+
+  // ?cr=: a link arrival (a message, an agent, Home's list). The review leads, complete on its own at 320: what is asked,
+  // its evidence and the decision; then its record. Filters are folded into the record, which one request rarely needs.
+  if (crId)
+    return (
+      <div data-surface="decision-record" className="flex min-w-0 flex-col gap-4">
+        <section data-arrival="review" data-arrival-state={loading ? "loading" : reviewing ? "ready" : crs.status !== 0 ? "error" : "missing"} aria-label="Review" className="flex min-w-0 flex-col gap-3">
+          <Link href={`/app/w/${ws}`} data-to="needs-you" className={`${DECISION_LINK} self-start`}>
+            <span aria-hidden="true" className="mr-1.5 font-mono">&lt;</span>Needs you
+          </Link>
+          {crs.loading && !crs.data && (
+            <Panel eyebrow="Review" title="Loading the request…">
+              <p className="text-[14px] text-(--text-2)">Reading the change request and its evidence.</p>
+            </Panel>
+          )}
+          {crs.status !== 0 && (
+            <Panel eyebrow="Review" title={crs.status === 403 ? "You can't read this workspace's requests" : crs.status === 404 ? "Not found" : "The request didn't load"}>
+              <p className="text-[14px] text-(--text-2)">{crs.message}</p>
+            </Panel>
+          )}
+          {crs.status === 0 && crs.data && !reviewing && (
+            <Panel eyebrow="Review" title="No such request in this workspace">
+              <EmptyState
+                title="Nothing to review here"
+                body="Align has no change request with this address here that you can read. It may be in another workspace, or on a goal you can't see."
+                action={<Link href={`/app/w/${ws}`} className={DECISION_LINK}>Back to what needs you</Link>}
+              />
+            </Panel>
+          )}
+          {reviewing && (
+            <Panel eyebrow="Review" title={`Change to ${reviewing.goal.title}`}>
+              <div className="flex flex-col gap-4">
+                <ReviewBody ws={ws} cr={reviewing} me={me} titleOf={titleOf} onDone={crs.reload} />
+                <div className="border-t border-(--line) pt-3">
+                  <ReviewActions key={reviewing.id} ws={ws} cr={reviewing} me={me} onDone={crs.reload} compact />
+                </div>
+              </div>
+            </Panel>
+          )}
+        </section>
+        {reviewing && (
+          <section id="record" aria-label="Its record" className="flex min-w-0 scroll-mt-4 flex-col gap-4">
+            <Panel
+              eyebrow="Its record"
+              title={`${shown.length} ${shown.length === 1 ? "event" : "events"}`}
+              actions={
+                <Link href={`/app/w/${ws}/record`} className={DECISION_LINK}>
+                  Whole workspace
+                </Link>
+              }
+            >
+              <details className="group mb-4">
+                <summary className={SUMMARY}>Filter and order</summary>
+                <div className="mt-3">{filters}</div>
+              </details>
+              {timeline}
+            </Panel>
+            {footnote}
+          </section>
+        )}
+      </div>
+    );
+
   return (
     <div data-surface="decision-record" className="flex min-w-0 flex-col gap-4">
       <Panel
         eyebrow="Decision record"
-        title={crId ? "One change request, step by step" : goalId ? "Everything decided on this goal" : "Everything Align recorded here"}
+        title={goalId ? "Everything decided on this goal" : "Everything Align recorded here"}
         actions={
-          (crId || goalId) && (
+          goalId && (
             <Link href={`/app/w/${ws}/record`} className="inline-flex min-h-[36px] items-center rounded-(--radius-s) border border-(--edge) px-3 text-[14px] text-(--text-1) max-sm:min-h-[44px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)">
               Whole workspace
             </Link>
@@ -197,54 +328,8 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
         <p className="max-w-prose text-[14px] text-(--text-2)">
           Who did what, when, to which object, and where it came from, as Align recorded it. Nothing here is inferred from what agents wrote.
         </p>
-        <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-3">
-          <label className="flex flex-col gap-1.5 text-[13px] font-medium text-(--text-2)">
-            Who
-            <select className={FIELD} value={actor} onChange={(e) => setActor(e.target.value)}>
-              <option value="all">Everyone ({all.length})</option>
-              {actors.map(([id, name]) => (
-                <option key={id} value={id}>
-                  {id === me ? `${name} (you)` : name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1.5 text-[13px] font-medium text-(--text-2)">
-            What
-            <select className={FIELD} value={kind} onChange={(e) => setKind(e.target.value as Kind | "all")}>
-              <option value="all">Every kind</option>
-              {(Object.keys(KIND_WORDS) as Kind[])
-                .filter((k) => kinds.includes(k))
-                .map((k) => (
-                  <option key={k} value={k}>
-                    {KIND_WORDS[k]}
-                  </option>
-                ))}
-            </select>
-          </label>
-          <Segmented<Order>
-            label="Order"
-            size="s"
-            options={[
-              { value: "newest", label: "Newest first" },
-              { value: "oldest", label: "Oldest first" },
-            ]}
-            value={order}
-            onChange={setOrder}
-          />
-        </div>
+        <div className="mt-3">{filters}</div>
       </Panel>
-
-      {reviewing && (
-        <Panel eyebrow="Review" title={`Change to ${reviewing.goal.title}`}>
-          <div className="flex flex-col gap-4">
-            <ReviewBody ws={ws} cr={reviewing} me={me} titleOf={titleOf} onDone={crs.reload} />
-            <div className="border-t border-(--line) pt-3">
-              <ReviewActions key={reviewing.id} ws={ws} cr={reviewing} me={me} onDone={crs.reload} compact />
-            </div>
-          </div>
-        </Panel>
-      )}
       {audit.status === 403 && !scoped && (
         <p role="status" className="rounded-(--radius-m) border border-(--line) bg-(--bg-inset) px-4 py-2.5 text-[14px] text-(--text-2)">
           You see the change requests on goals you can read. The workspace&apos;s full audit log (invites, roles, devices, apps) is for workspace owners.
@@ -255,31 +340,10 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
           The audit log didn&apos;t load: {audit.message}
         </p>
       )}
-
       <Panel title={`${shown.length} ${shown.length === 1 ? "event" : "events"}`} eyebrow={scope}>
-        {loading && <p className="text-[14px] text-(--text-2)">Loading the record…</p>}
-        {crs.status !== 0 && <EmptyState title={crs.status === 404 ? "Not found" : "The record didn't load"} body={crs.message} />}
-        {!loading && crs.status === 0 && crId && !reviewing && (
-          <EmptyState title="No such request in this workspace" body="Align has no change request with this address here that you can read. It may be in another workspace, or on a goal you can't see." action={<Link href={`/app/w/${ws}/record`} className="text-(--accent-text) underline">Whole workspace record</Link>} />
-        )}
-        {!loading && crs.status === 0 && unknownGoal && (
-          <EmptyState title="No such goal in this workspace" body="Align has no goal with this address here that you can read. It may be in another workspace, or a goal you can't see." action={<Link href={`/app/w/${ws}/record`} className="text-(--accent-text) underline">Whole workspace record</Link>} />
-        )}
-        {!loading && crs.status === 0 && !(crId && !reviewing) && !unknownGoal && (
-          <Timeline
-            events={events}
-            empty={
-              <EmptyState
-                title={all.length ? "No events match these filters" : "Nothing recorded yet"}
-                body={all.length ? "Choose Everyone and Every kind to see the whole record." : `When someone proposes a change, decides one or launches it, it is recorded here with who did it and when. Nothing has happened on ${scope} yet.`}
-              />
-            }
-          />
-        )}
+        {timeline}
       </Panel>
-      <p className="text-[12.5px] text-(--text-3)">
-        &quot;Recorded in Align&quot; is an action a person took that Align recorded. Agent reported is what a connected app or the align CLI sent. Evidence links are as their author gave them; Align doesn&apos;t verify them.
-      </p>
+      {footnote}
     </div>
   );
 }

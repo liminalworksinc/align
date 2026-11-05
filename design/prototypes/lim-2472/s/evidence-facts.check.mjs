@@ -51,6 +51,17 @@ expect(
   "reported",
   "2 links",
 );
+// One app read the goals after both launches but Align served it only goal A's launched version (…/value per launched
+// request, lib/oauth/grants.ts appsSentGoalVersion): goal B's fact must stay Not observed. An app's single last_read_at
+// never stands in for which goal's version it was sent.
+const A = goalFacts({ allocation: null }, { version: 2, value: { delivery: null, apps: { everyone: true, items: [{ id: "app1" }] } } });
+const B = goalFacts({ allocation: null }, { version: 4, value: { delivery: null, apps: { everyone: true, items: [] } } });
+expect("two goals, one app read: goal A (sent)", A, "receipt", "v2 · 1 app");
+expect("two goals, one app read: goal B (not sent)", B, "unobserved", "v4 · not sent yet");
+if (B.some((f) => f.kind === "receipt")) {
+  failed++;
+  console.log("FAIL goal B carries a receipt it has no read for");
+}
 expect("goal with 35% agent time and nothing launched", goalFacts({ allocation: { target_share: 40, share_7d: 35, gap_7d: -5, held: false } }, null), "reported", "35% agent time");
 expect("goal with no agent time", goalFacts({ allocation: { target_share: null, share_7d: 0, gap_7d: null, held: false } }, null), "unobserved", "no agent time");
 
