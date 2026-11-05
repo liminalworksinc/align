@@ -64,6 +64,25 @@ Not run here (the brief says no `npm test` / `next build`). By reading `scripts/
 - Sessions: the restyle keeps every string and hook the checks at `2997-3021`, `3432-3470`, `8886-8893` and `10688-10693` read; not run.
 - No check covers `/record`, `/work` or `/dependencies` (new pages).
 
+## Seeded data (seed-agent.mjs)
+
+`design/prototypes/lim-2472/s/seed-agent.mjs <BASE> <out.json>` fills a Mode L server started with `ALIGN_TEST_IDP=1`
+and a fresh `ALIGN_DATA_DIR`, through the real HTTP API only: three test-IdP people (owner Mara Quill, member Theo
+Vance, viewer Ines Park, all @example.test), the Northstar sample, a paired device each (device flow), shared sessions
+bound to goals with usage rows (onboarding 65% and security 35% of the 7-day agent time), one change request approved
+and launched with its directive receipt received then applied, one approved not launched, one pending, a
+self-reported evidence link and an agent-reported one (added by the connected app over MCP), one OAuth app that reads
+the goals after the launch (Apps: Last connected and Last read the goals; `…/value` `apps.items[].sent_at`) and a second
+that only connects (Not observed). Writes ids and the throwaway test passwords to out.json, mode 600. One Next dev
+server runs per folder, so a seeded server beside a clean one needs a second worktree.
+
+```sh
+ALIGN_TEST_IDP=1 ALIGN_DATA_DIR=/tmp/align-seed npx next dev -H 127.0.0.1 -p 3804   # in the implementation folder
+node design/prototypes/lim-2472/s/seed-agent.mjs http://127.0.0.1:3804 /tmp/align-seed.json
+node design/prototypes/lim-2472/s/shots.mjs http://127.0.0.1:3804 /tmp/shots --seed /tmp/align-seed.json   # full set, 00-three-states first
+node design/prototypes/lim-2472/s/shots.mjs http://127.0.0.1:3803 /tmp/shots --clean                     # clean sample, dark 1440 and 390
+```
+
 ## How to boot and see it
 
 ```sh

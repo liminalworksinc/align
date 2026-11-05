@@ -89,7 +89,7 @@ function SessionsPanel({ ws, goal }: { ws: string; goal: Goal }) {
               )}
             </Row>
             <Row label="Last reported activity">{d.last_activity_at ? <span title={at(d.last_activity_at)}>{ago(d.last_activity_at)}</span> : "None reported"}</Row>
-            <Row label="Sessions that reported activity in the last 90 minutes">
+            <Row label="Reported activity, last 90 min">
               <span className="font-mono tabular-nums">{d.active_now}</span>
             </Row>
           </dl>
@@ -111,7 +111,7 @@ function SessionsPanel({ ws, goal }: { ws: string; goal: Goal }) {
       )}
       {mine.length > 0 && (
         <div className="mt-4 border-t border-(--line) pt-3">
-          <p className="mb-2 text-[13px] font-medium text-(--text-2)">Your sessions on it now</p>
+          <p className="mb-2 text-[13px] font-medium text-(--text-2)">Your sessions bound to it</p>
           <ul className="flex flex-col gap-2">
             {mine.map((x) => (
               <li key={x.session_key} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-(--radius-s) border border-(--line) bg-(--bg-raised) px-3 py-2 text-[14px]">
@@ -317,16 +317,17 @@ export function WorkPanels({ ws, goalId }: { ws: string; goalId?: string }) {
                 <Row label="Owner">{goal.owner.name}</Row>
                 <LaunchRows ws={ws} goal={goal} />
                 {goal.allocation && (
-                  <Row label="Agent time, last 7 days">
-                    <span className="flex flex-wrap items-center gap-2">
-                      <span>
-                        <span className="font-mono tabular-nums">{goal.allocation.share_7d}%</span>
-                        {goal.allocation.target_share !== null && <span className="text-(--text-2)"> of the workspace&apos;s, target {goal.allocation.target_share}%</span>}
-                        {goal.allocation.held && <span className="text-(--st-pending)"> · held</span>}
-                      </span>
-                      <EvidenceLabel kind="reported" size="s" detail="usage from align CLI" />
-                    </span>
-                  </Row>
+                  <>
+                    <Row label="Agent time, last 7 days">
+                      <span className="font-mono tabular-nums">{goal.allocation.share_7d}%</span>
+                      {goal.allocation.target_share !== null && <span className="text-(--text-2)"> of the workspace&apos;s, target {goal.allocation.target_share}%</span>}
+                      {goal.allocation.held && <span className="text-(--st-pending)"> · held</span>}
+                    </Row>
+                    {/* The label under the row at full width, so the narrow value column never wraps it. */}
+                    <dd className="col-span-2 -mt-0.5">
+                      <EvidenceLabel kind="reported" size="s" detail="align CLI usage" />
+                    </dd>
+                  </>
                 )}
               </dl>
             </Panel>
