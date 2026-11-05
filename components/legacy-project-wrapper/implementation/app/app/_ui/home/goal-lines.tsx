@@ -81,7 +81,10 @@ function Line({ ws, g, latest, launch, fed, onReview }: { ws: string; g: GoalLin
           ))}
         {a?.held && <StatusPill kind="held" size="s" label="Held" />}
         {/* The shared summary: the newest launch's delivery from its own …/value read, then agent time as reported. */}
-        {fed && (
+        {/* Held back while the shared delivery read is in flight: a null value means a FAILED read ("Delivery not read"),
+            so passing it while loading would flash that on every load, and passing undefined would make the summary read
+            for itself (one read per goal, which the shared cache is here to avoid). */}
+        {fed && !v.loading && (
           <span className="flex min-w-0 flex-1 md:order-first md:[&_[data-evidence-summary=inline]]:justify-end">
             <EvidenceSummary ws={ws} goal={fed} variant="inline" launched={launched} />
           </span>
@@ -102,6 +105,7 @@ export default function GoalLines({
   changes,
   onReview,
   feed,
+  canCreate = false,
 }: {
   ws: string;
   /** Unused since lines stopped saying "yours" (an owner's every line said it); kept so callers need no change. */
@@ -114,6 +118,8 @@ export default function GoalLines({
   onReview?: (goal: string, id: string) => void;
   /** The goals feed (GET …/goals, for allocation) when the Home already read it; without it the lines read it once. */
   feed?: Goal[] | null;
+  /** Whether the person may create a goal (anyone but a viewer); the empty list offers "Create a goal" only then. */
+  canCreate?: boolean;
 }) {
   const own = useApi<{ goals: Goal[] }>(feed === undefined ? `/api/v2/workspaces/${ws}/goals` : null);
   const fedGoals = feed === undefined ? own.data?.goals : feed;
@@ -133,9 +139,11 @@ export default function GoalLines({
       ) : goals.length === 0 ? (
         <p className="rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3 text-[14px] text-(--text-2)">
           No active goals you can see.{" "}
-          <Link href={`/app/w/${ws}/goals`} className="font-medium text-(--accent-text) hover:underline">
-            Create a goal
-          </Link>
+          {canCreate && (
+            <Link href={`/app/w/${ws}/goals`} className="font-medium text-(--text-1) underline underline-offset-2">
+              Create a goal
+            </Link>
+          )}
         </p>
       ) : (
         <>

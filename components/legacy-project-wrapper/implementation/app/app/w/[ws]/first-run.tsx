@@ -64,7 +64,7 @@ function CopyLine({ line }: { line: string }) {
           {copied ? "Copied" : "Copy"}
         </Btn>
       </div>
-      <code className="block max-h-36 overflow-y-auto break-all rounded-[8px] bg-(--bg-inset) px-3 py-2 font-mono text-[14px] text-(--text-1)" data-first-run-line>
+      <code className="block max-h-36 overflow-auto whitespace-pre [overflow-wrap:normal] rounded-[8px] bg-(--bg-inset) px-3 py-2 font-mono text-[14px] text-(--text-1)" data-first-run-line>
         {line}
       </code>
     </div>

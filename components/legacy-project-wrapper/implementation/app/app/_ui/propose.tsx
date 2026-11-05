@@ -30,10 +30,11 @@ const outline =
 const filled =
   "inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) bg-(--accent) px-3.5 text-[14px] font-medium text-(--text-on-accent) hover:bg-(--accent-hover) disabled:opacity-50 max-sm:min-h-[44px]";
 
+/** Who usually decides, worded so it can't be wrong: the approval set drops the requester and can fall back to the
+ *  workspace owners, which the goal read can't show (server ask 22), so the exact people are named only once it's sent. */
 function deciders(g: Goal): string {
-  if (g.level === "company") return `${g.owner.name}, the goal's owner, or a workspace owner`;
-  if (g.team) return `${g.owner.name}, the goal's owner, or a lead of ${g.team.name}`;
-  return `${g.owner.name}, the goal's owner`;
+  const usual = g.level === "company" ? `${g.owner.name}, the goal's owner, or a workspace owner` : g.team ? `${g.owner.name}, the goal's owner, or a lead of ${g.team.name}` : `${g.owner.name}, the goal's owner`;
+  return `Usually ${usual}. You can't decide your own request. The exact people are named when it is sent.`;
 }
 
 /** The change the server takes, from the pick and its words; null when it would change nothing. */
@@ -198,9 +199,9 @@ function Form({ ws, me, goals, start, onClose }: { ws: string; me?: string; goal
         hint={
           g ? (
             <>
-              Limits and dependencies are changed on{" "}
+              Limits and dependencies are changed in{" "}
               <Link href={`/app/w/${ws}/goals/${g.id}#change-requests`} className="underline" onClick={onClose}>
-                the goal&apos;s page
+                the goal page&apos;s full change form
               </Link>
               .
             </>
