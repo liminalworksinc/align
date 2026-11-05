@@ -38,9 +38,11 @@ function Line({ ws, g, latest, fed, onReview }: { ws: string; g: GoalLine; lates
   const pill = st && <StatusPill kind={st.kind} size="s" label={st.label} />;
   const a = fed?.allocation;
   return (
-    <li className="flex min-h-[44px] flex-wrap items-center gap-x-3 gap-y-1 px-4 py-1.5 max-md:py-2" data-goal-line={g.id}>
+    // Desktop: title | chips | Work on one row. Phone: title and Work on the first row, chips (if any) on a second, so
+    // a quiet line is one row and never three. The chips cell is empty, and hidden, when nothing earns a chip.
+    <li className="grid min-h-[44px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-1.5 md:grid-cols-[minmax(0,1fr)_auto_auto] max-md:py-2" data-goal-line={g.id}>
       {/* The title wins: it wraps to two lines before it is cut, and the metadata goes first (team, then version). */}
-      <div className="flex min-w-0 flex-1 basis-56 items-baseline gap-2">
+      <div className="flex min-w-0 items-baseline gap-2">
         <span className="line-clamp-2 min-w-0 text-[14px] font-medium text-(--text-1)" title={g.title}>
           {g.title}
         </span>
@@ -49,7 +51,7 @@ function Line({ ws, g, latest, fed, onReview }: { ws: string; g: GoalLine; lates
           <span className="max-sm:hidden"> · {g.level === "company" ? "Company" : (g.team?.name ?? "Team")}</span>
         </span>
       </div>
-      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5 empty:hidden max-md:order-3 max-md:col-span-2 md:justify-end">
         {pill &&
           (onReview && waiting ? (
             <button
@@ -65,11 +67,11 @@ function Line({ ws, g, latest, fed, onReview }: { ws: string; g: GoalLine; lates
           ))}
         {a?.held && <StatusPill kind="held" size="s" label="Held" />}
         {/* The shared summary: the newest launch's delivery from its own …/value read, then agent time as reported. */}
-        {fed && <EvidenceSummary ws={ws} goal={fed} variant="inline" max={2} quiet />}
-        <Link href={`/app/w/${ws}/work?goal=${g.id}`} className="inline-flex min-h-[32px] items-center px-1 text-[13px] text-(--text-2) hover:text-(--text-1) hover:underline max-sm:min-h-[44px]" aria-label={`Work on ${g.title}`} data-goal-work>
-          Work
-        </Link>
+        {fed && <EvidenceSummary ws={ws} goal={fed} variant="inline" max={2} />}
       </div>
+      <Link href={`/app/w/${ws}/work?goal=${g.id}`} className="inline-flex min-h-[32px] items-center px-1 text-[13px] text-(--text-2) hover:text-(--text-1) hover:underline max-sm:min-h-[44px]" aria-label={`Work on ${g.title}`} data-goal-work>
+        Work
+      </Link>
     </li>
   );
 }
