@@ -48,7 +48,7 @@ import { contextGoals, snapshot } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
 import { isShareStateNotice, noticeKind, resumedButHeld } from "../shared/notices.ts";
-import { matchRule, readRules, removeRule, setRule } from "../shared/rules.ts";
+import { matchRule, readRules, realDir, removeRule, setRule } from "../shared/rules.ts";
 import { queueSteering, steeringLine, unsharedNote } from "../shared/steering.ts";
 import type { DriftFile, FeedFile, Goal, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
 import { CLAIM_MS, collisions, commitSubject, crossOverlap, display, editedPaths, liveGoalId, podReport, rawActs, readPaths, record, shellWrites, siblingChanges, siblingNews, activityHot, type Act, type StartingShare } from "./siblings.ts";
@@ -1538,7 +1538,7 @@ function heldNote(g: { allocation?: { held?: boolean } | null }): string {
 /** The folder rule a new `--dir` rule for `dir` replaces, in words (as `align share --dir` says it). */
 function replacedRule(home: string, dir: string): string | null {
   const prev = matchRule(readRules(home), dir);
-  if (!prev || prev.dir !== dir) return null;
+  if (!prev || prev.dir !== realDir(dir)) return null;
   const title = (prev.goal_id && readJson<FeedFile>(layout.feed(home, prev.workspace_id))?.goals.find((g) => g.id === prev.goal_id)?.title) || prev.goal_title;
   return `${clean(prev.workspace_name, 80)}, ${title ? `"${clean(title, 100)}"` : "no goal"}`;
 }
@@ -1714,7 +1714,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       if (noGoal) arg = "";
       const rule = !arg && !noGoal && !before && feed ? matchRule(readRules(home), cwd) : null;
       const ruleGoal =
-        rule && feed && rule.workspace_id === feed.workspace_id && rule.goal_id && (!dirMode || rule.dir === (gitInfo(cwd || "")?.toplevel || cwd))
+        rule && feed && rule.workspace_id === feed.workspace_id && rule.goal_id && (!dirMode || rule.dir === realDir(gitInfo(cwd || "")?.toplevel || cwd || ""))
           ? feed.goals.find((g) => g.id === rule.goal_id && g.bindable && g.status === "active") || null
           : null;
       const goal = arg && feed ? feed.goals.find((g) => g.id === arg) || feed.goals.find((g) => g.title.toLowerCase().startsWith(arg.toLowerCase())) || null : before || ruleGoal;

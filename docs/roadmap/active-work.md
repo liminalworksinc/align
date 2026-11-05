@@ -433,3 +433,34 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [ ] An E2E cycle whose spend report finds no bugs, with the reconciliation totals matching to the micro-USD
   - [ ] test-v2 and align-agent tests for each fix; litai spec validate ok
   - [ ] Retained test receipt recorded on the commit that closes it
+
+### [ ] VERIFY-001 — Repair the retained-test blockers for PR 60
+
+- **Priority:** P1
+- **Owner:** components/legacy-project-wrapper/implementation (agent hooks and retained test harness)
+- **Direction:** Run PR 60 on this machine, investigate failures on main, repair demonstrated defects and refresh the branch receipt without merging or deploying.
+- **Conclusion:** The initial PR run passed 1787 checks and failed two. Clean main reproduces the dead-proxy fetch reset and folder-rule goal loss through a filesystem alias. Normalize folder identity and avoid stale HTTP connections in the live-test client; preserve all assertions and the latency budget.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Reproduce the two failures on clean main and retain diagnostic logs (main `cff1d34`: live 46/1, focused folder rule 0/1; network cause `ECONNRESET`)
+  - [x] Repair canonical folder-rule comparisons with a symlink regression (focused alias and unchanged latency tests 2/0 on macOS arm64 / Node 26.3.0)
+  - [x] Use fresh connections in the live-agent test client
+- **Evidence:**
+  - [x] Focused folder-rule and unchanged latency tests 2/0; repaired live client against unchanged main 62/0, including offline revoke and re-pairing
+  - [ ] Full retained suite passes and a checked current receipt is committed
+  - [ ] litai verify, spec validation and final-head CI pass; PR stays draft and nothing is deployed
+
+### [ ] VERIFY-002 — Investigate retained aggregate test-count reporting
+
+- **Priority:** P2
+- **Owner:** retained harness reporting (local test-all adapter / upstream Literate AI collector)
+- **Direction:** Investigate why the pinned collector records the v2 summary count rather than the complete test-all aggregate.
+- **Conclusion:** The full run passed all eight steps: 1804 checks by the per-step totals, while the supported candidate records 937 tests. Keep the generated receipt unchanged. Determine the narrow owner and search upstream before any parent implementation; this count discrepancy does not bypass any failing gate.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [ ] Compare collector summary precedence with the Node 26 aggregate footer
+  - [ ] Resolve ownership and record an upstream issue before changing parent authority if applicable
+- **Evidence:**
+  - [ ] A fixture reports the complete aggregate and still rejects a failure in any stage
