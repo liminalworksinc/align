@@ -11,7 +11,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildNeeds, rankNote, REQ_GOALS_MAX, type Need } from "../../../../components/legacy-project-wrapper/implementation/app/app/_ui/home/needs.ts";
+import { buildNeeds, latestLaunches, rankNote, REQ_GOALS_MAX, SENT_GOALS_MAX, type Need } from "../../../../components/legacy-project-wrapper/implementation/app/app/_ui/home/needs.ts";
 // @ts-expect-error plain .mjs seed
 import { seed } from "./seed.mjs";
 
@@ -66,6 +66,10 @@ for (const [role, acct] of people) {
   const goals = ((await get(cookie, `${W}/goals`))?.goals ?? []).filter((g: { status: string }) => g.status === "active");
   goals.sort((a: { owner: { id: string }; id: string }, b: { owner: { id: string }; id: string }) => Number(b.owner.id === me) - Number(a.owner.id === me) || a.id.localeCompare(b.id));
   const pick = goals.slice(0, REQ_GOALS_MAX);
+  // SENT: the value read of the latest launch per goal, as needs-list.tsx reads it.
+  const crs = cr ? [...cr.waiting_on_me, ...cr.mine, ...cr.others] : [];
+  const launches = latestLaunches(crs).slice(0, SENT_GOALS_MAX);
+  const sends = await Promise.all(launches.map(async (c) => ({ goal: { id: c.goal.id, title: c.goal.title }, cr: c.id, version: c.version!, launched_at: c.launch_decided_at!, apps: (await get(cookie, `${W}/goals/${c.goal.id}/change-requests/${c.id}/value`))?.apps?.items ?? [] })));
   const reqs = (await Promise.all(pick.map(async (g: { id: string; title: string }) => ({ goal: { id: g.id, title: g.title }, requests: (await get(cookie, `${W}/goals/${g.id}/requests`))?.requests ?? [] }))));
   const { rows, unknown } = buildNeeds({
     ws: s.ws,
@@ -75,6 +79,7 @@ for (const [role, acct] of people) {
     alignments: al ? [...al.waiting_on_me, ...al.mine, ...al.others] : null,
     apps: home?.apps?.items ?? null,
     requests: reqs,
+    sends,
   });
   console.log(`rank note: ${rankNote(goals.length - pick.length)}`);
   console.log(`== ${role} (${acct.name}): ${rows.length} rows${unknown.length ? `, unknown: ${unknown.join(", ")}` : ""}`);
@@ -88,7 +93,38 @@ for (const [role, acct] of people) {
   const order = ["launch", "decide", "returned", "agent_declined", "team_ask", "alignment", "app_behind"];
   rule(`${role}: Needs you is in kind order, oldest first within a kind`, needs.every((r, i) => i === 0 || order.indexOf(needs[i - 1].kind) < order.indexOf(r.kind) || (needs[i - 1].kind === r.kind && (needs[i - 1].since?.at ?? "") <= (r.since?.at ?? ""))));
   if (role === "viewer") rule("viewer: nothing needs a viewer (viewers can't act)", needs.length === 0);
-  if (role === "owner") rule("owner: at least one launch, one decision and one app row", ["launch", "decide", "app_behind"].every((k) => needs.some((r) => r.kind === k)));
+  if (role === "owner") {
+    rule("owner: at least one launch, one decision and one app row", ["launch", "decide", "app_behind"].every((k) => needs.some((r) => r.kind === k)));
+    // seed-agent's app read the security goal after its launch; concept B's seed launched the audit goal afterwards.
+    const appRows = rows.filter((r) => r.kind === "app_behind");
+    rule("owner (seeded): no app row for the security goal, whose v2 Align sent the reading app", !appRows.some((r) => r.goal?.title === "Pass the security review" && /Claude Code/.test(r.cause)));
+    rule("owner (seeded): an app row for the audit goal, launched after that app's read", appRows.some((r) => r.goal?.title === "Every release carries its audit evidence" && /not sent v2 to Claude Code/.test(r.cause)));
+  }
   console.log("");
 }
+// ---- model rules on fixed inputs (no server): the audit's cases ----
+const person = (id: string) => ({ id, name: id.toUpperCase() });
+const crOf = (o: Record<string, unknown>) =>
+  ({ id: "cr", goal: { id: "gA", title: "A", version: 2 }, state: "approved", revision: 1, base_version: 1, behind: false, requester: person("req"), changes: {}, reason: "r", revisions: [{ revision: 1, created_at: "2026-01-01T00:00:00Z", evidence: [] }], approvers: [person("me")], launchers: [person("me")], approved_by: person("me"), version: 2, launch: "launched", launch_decided_at: "2026-01-02T00:00:00Z", decided_at: "2026-01-02T00:00:00Z", can: {}, waiting_on_me: false, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-02T00:00:00Z", ...o }) as never;
+const app = { id: "app1", name: "App", connected_by: person("me"), approved_at: "2026-01-01T00:00:00Z", last_used_at: "2026-01-05T00:00:00Z", last_read_at: "2026-01-05T00:00:00Z" };
+const A = crOf({ id: "crA" });
+const B = crOf({ id: "crB", goal: { id: "gB", title: "B", version: 2 }, launch_decided_at: "2026-01-03T00:00:00Z" });
+const two = buildNeeds({ ws: "w", me: "me", crs: [A, B], asks: [], alignments: [], apps: [app], sends: [
+  { goal: { id: "gA", title: "A" }, cr: "crA", version: 2, launched_at: "2026-01-02T00:00:00Z", apps: [{ id: "app1" }] },
+  { goal: { id: "gB", title: "B" }, cr: "crB", version: 2, launched_at: "2026-01-03T00:00:00Z", apps: [] },
+] }).rows.filter((r) => r.kind === "app_behind");
+rule("model: an app that read only goal A after goal B launched keeps B's row and has none for A", two.some((r) => r.goal?.id === "gB") && !two.some((r) => r.goal?.id === "gA"));
+const fresh = buildNeeds({ ws: "w", me: "me", crs: [], asks: [], alignments: [], apps: [{ ...app, last_read_at: null }], sends: [] }).rows.filter((r) => r.kind === "app_behind");
+rule("model: an app never seen reading the goals has a row even with no launch, naming no goal or version", fresh.length === 1 && fresh[0]!.goal === null && !/v\d/.test(fresh[0]!.cause));
+const pend = crOf({ id: "crP", state: "pending", launch: null, version: null, launch_decided_at: null, decided_at: null, approved_by: null, updated_at: "2026-02-01T00:00:00Z", can: { approve: true }, waiting_on_me: true, revisions: [{ revision: 1, created_at: "2026-01-10T00:00:00Z", evidence: [] }] });
+const p = buildNeeds({ ws: "w", me: "me", crs: [pend], asks: [], alignments: [], apps: [] }).rows[0]!;
+rule("model: a decision waits from its latest revision, not from updated_at (adding evidence doesn't restart it)", p.since?.at === "2026-01-10T00:00:00Z");
+const loop = crOf({ id: "crL", launch: "pending", version: null, launch_decided_at: null, dependency_loop: "A dependency it adds would close a loop.", can: {} });
+const l = buildNeeds({ ws: "w", me: "me", crs: [loop], asks: [], alignments: [], apps: [] }).rows[0];
+rule("model: an approved change that would close a dependency loop shows, waiting on nobody, with the reason", !!l && l.phase === "waiting_on_others" && /Nobody can launch/.test(l.who ?? ""));
+const t1 = crOf({ id: "crT1", launch: "pending", version: null, launch_decided_at: null, decided_at: null, can: { launch: true } });
+const t2 = crOf({ id: "crT2", goal: { id: "gB", title: "B", version: 1 }, launch: "pending", version: null, launch_decided_at: null, decided_at: "2026-01-04T00:00:00Z", can: { launch: true } });
+const ord = buildNeeds({ ws: "w", me: "me", crs: [t1, t2], asks: [], alignments: [], apps: [] }).rows.filter((r) => r.kind === "launch").map((r) => r.key);
+rule("model: a row with no recorded time sorts last within its kind", ord[0] === "cr:crT2" && ord[1] === "cr:crT1");
+
 process.exitCode = failed ? 1 : 0;

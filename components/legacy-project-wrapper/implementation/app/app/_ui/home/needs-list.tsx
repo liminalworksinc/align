@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { EvidenceLabel, NeedAction, NeedList, NeedRow, Segmented } from "../ds";
+import { EvidenceLabel, EvidenceSummary, NeedAction, NeedList, NeedRow, Segmented, type Delivery } from "../ds";
 import { api, useApi } from "../kit";
 import type { Alignment, ChangeRequest, Goal } from "../types";
-import { buildNeeds, inPhase, KIND_WORDS, rankNote, REQ_GOALS_MAX, type AppLite, type AskLite, type EvidenceCounts, type Need, type NeedPhase, type NeedsInput, type RequestLite } from "./needs";
+import { buildNeeds, inPhase, KIND_WORDS, latestLaunches, rankNote, REQ_GOALS_MAX, SENT_GOALS_MAX, type AppLite, type AskLite, type EvidenceCounts, type Need, type NeedPhase, type NeedsInput, type RequestLite } from "./needs";
 
 // LIM-2472 Home, section 1: the "Needs you" list (direction LIM-2472 9b5b870f). Four cookie reads, the model in needs.ts,
 // and the foundation's NeedList / NeedRow / NeedAction. Filters: Needs you (default), Waiting on others, Done; search over
@@ -78,6 +78,39 @@ function useRequestsToAgents(W: string, me: string, goals: Goal[] | null, failed
   return { groups: ready ? state.groups : undefined, unchecked: ready ? state.unchecked : 0, loading: !ready };
 }
 
+/** The value read's delivery fields (ds/evidence-facts.mts Delivery): sessions with receipts, and apps sent the version. */
+type ValueLite = Delivery;
+
+/** SENT: for the latest launch on up to SENT_GOALS_MAX goals (newest first), the value read's list of apps Align sent
+ *  that version. `values` keeps each read for the rows' evidence summaries, so a row and the review never disagree.
+ *  A read that fails, and every launch past the cap, counts as unsent-unchecked. */
+function useSends(W: string, crs: ChangeRequest[] | null, failed: boolean) {
+  const launches = useMemo(() => (crs ? latestLaunches(crs) : null), [crs]);
+  const key = launches ? launches.map((c) => `${c.id}:${c.version}`).join(",") : null;
+  const [state, setState] = useState<{ key: string; sends: NonNullable<NeedsInput["sends"]>; values: Map<string, ValueLite>; unchecked: number } | null>(null);
+  useEffect(() => {
+    if (!launches || key === null) return;
+    let live = true;
+    const pick = launches.slice(0, SENT_GOALS_MAX);
+    void Promise.all(pick.map((c) => api<ValueLite>(`${W}/goals/${c.goal.id}/change-requests/${c.id}/value`).then((v) => ({ c, v }), () => null))).then((res) => {
+      if (!live) return;
+      const ok = res.filter((x): x is NonNullable<typeof x> => !!x);
+      setState({
+        key,
+        sends: ok.map(({ c, v }) => ({ goal: { id: c.goal.id, title: c.goal.title }, cr: c.id, version: c.version!, launched_at: c.launch_decided_at!, apps: v.apps?.items ?? [] })),
+        values: new Map(ok.map(({ c, v }) => [c.id, v])),
+        unchecked: launches.length - pick.length + (res.length - ok.length),
+      });
+    });
+    return () => {
+      live = false;
+    };
+  }, [W, launches, key]);
+  if (failed) return { sends: null, values: new Map<string, ValueLite>(), unchecked: 0, loading: false };
+  const ready = state && state.key === key;
+  return { sends: ready ? state.sends : undefined, values: ready ? state.values : new Map<string, ValueLite>(), unchecked: ready ? state.unchecked : 0, loading: !ready };
+}
+
 export function NeedsList({ ws, me, selected, reviewBase = "" }: { ws: string; me: string; selected?: string | null; reviewBase?: string }) {
   const W = `/api/v2/workspaces/${ws}`;
   const cr = useApi<Groups<ChangeRequest>>(`${W}/change-requests`);
@@ -86,22 +119,25 @@ export function NeedsList({ ws, me, selected, reviewBase = "" }: { ws: string; m
   const home = useApi<{ apps: { items: AppLite[] } | null }>(`${W}/home`);
   const goals = useApi<{ goals: Goal[] }>(`${W}/goals`);
   const reqs = useRequestsToAgents(W, me, goals.data?.goals ?? null, !!goals.error);
+  const crList = useMemo(() => (cr.data ? [...cr.data.waiting_on_me, ...cr.data.mine, ...cr.data.others] : null), [cr.data]);
+  const sent = useSends(W, crList, !!cr.error);
   const [phase, setPhase] = useState<NeedPhase>("needs_you");
   const [q, setQ] = useState("");
 
-  const loading = [cr, asks, al, home].some((r) => r.loading && !r.data && !r.error) || reqs.loading;
+  const loading = [cr, asks, al, home].some((r) => r.loading && !r.data && !r.error) || reqs.loading || sent.loading;
   const { rows, unknown } = useMemo(
     () =>
       buildNeeds({
         ws,
         me,
-        crs: cr.data ? [...cr.data.waiting_on_me, ...cr.data.mine, ...cr.data.others] : null,
+        crs: crList,
         asks: asks.data?.asks ?? null,
         alignments: al.data ? [...al.data.waiting_on_me, ...al.data.mine, ...al.data.others] : null,
         apps: home.data?.apps?.items ?? null,
         requests: reqs.groups,
+        sends: sent.sends,
       }),
-    [ws, me, cr.data, asks.data, al.data, home.data, reqs.groups],
+    [ws, me, crList, asks.data, al.data, home.data, reqs.groups, sent.sends],
   );
   const counts = Object.fromEntries(PHASES.map((p) => [p.value, inPhase(rows, p.value).length])) as Record<NeedPhase, number>;
   const shown = useMemo(() => {
@@ -138,7 +174,7 @@ export function NeedsList({ ws, me, selected, reviewBase = "" }: { ws: string; m
         <p className="text-[14px] text-(--text-2)">Reading what needs you…</p>
       ) : (
         <NeedList
-          rankNote={rankNote(reqs.unchecked)}
+          rankNote={rankNote(reqs.unchecked, sent.unchecked)}
           empty={q ? `Nothing here mentions "${q}".` : phase === "needs_you" ? "Nothing needs you." : phase === "waiting_on_others" ? "Nothing you're part of is waiting on someone else." : "Nothing decided yet."}
         >
           {shown.map((n) => (
@@ -148,8 +184,15 @@ export function NeedsList({ ws, me, selected, reviewBase = "" }: { ws: string; m
               tone={n.tone}
               title={n.goal?.title ?? n.cause}
               sub={n.goal ? (n.who ? `${n.cause} · ${n.who}` : n.cause) : (n.who ?? undefined)}
-              waited={n.since ? waited(n.since.at) : undefined}
-              evidence={<EvidenceChips e={n.evidence} />}
+              waited={n.since ? waited(n.since.at) : "time not recorded"}
+              evidence={
+                n.cr ? (
+                  // The shared summary, from the same value read the review uses; none for a request not launched.
+                  <EvidenceSummary ws={ws} cr={n.cr} variant="inline" max={2} value={n.cr.launch === "launched" ? sent.values.get(n.cr.id) : null} />
+                ) : (
+                  <EvidenceChips e={n.evidence} />
+                )
+              }
               action={n.action ? <NeedAction href={needHref(ws, n, reviewBase)}>{n.action.label}</NeedAction> : undefined}
               href={needHref(ws, n, reviewBase)}
               selected={!!selected && n.key === selected}

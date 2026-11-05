@@ -34,9 +34,23 @@ export type NeedPhase = "needs_you" | "waiting_on_others" | "done";
 export const RANK_NOTE =
   "Ranked: approved changes waiting to launch, then decisions waiting on you, then your requests that came back, then requests an agent declined, then team asks, then alignments, then apps that haven't read the goals since a launch. Oldest first within each.";
 /** The rank note, plus what wasn't checked: requests to agents are read per goal, at most REQ_GOALS_MAX goals. */
-export const rankNote = (unchecked: number) => (unchecked ? `${RANK_NOTE} Requests to agents not checked on ${unchecked} goal${unchecked === 1 ? "" : "s"}.` : RANK_NOTE);
+export const rankNote = (unchecked: number, unsent = 0) =>
+  [RANK_NOTE, unchecked ? `Requests to agents not checked on ${unchecked} goal${unchecked === 1 ? "" : "s"}.` : "", unsent ? `What Align sent apps not checked on ${unsent} launch${unsent === 1 ? "" : "es"}.` : ""].filter(Boolean).join(" ");
+
+/** The latest launch on each goal, newest first: the change requests whose value read SENT checks. */
+export function latestLaunches(crs: ChangeRequest[]): ChangeRequest[] {
+  const by = new Map<string, ChangeRequest>();
+  for (const c of crs) {
+    if (c.launch !== "launched" || !c.launch_decided_at || !c.version) continue;
+    const p = by.get(c.goal.id);
+    if (!p || c.version > p.version!) by.set(c.goal.id, c);
+  }
+  return [...by.values()].sort((a, b) => b.launch_decided_at!.localeCompare(a.launch_decided_at!) || a.id.localeCompare(b.id));
+}
 /** Goals whose requests to agents are read for this list. */
 export const REQ_GOALS_MAX = 12;
+/** Goals whose latest launch is checked for what Align sent each app. */
+export const SENT_GOALS_MAX = 12;
 // Rows rank by what the person can do about them. An app that hasn't read the launched plan comes last: the person's
 // action there is the weakest (Align notifies nobody), and its real home as evidence is the launched goal's line.
 export const KIND_ORDER: NeedKind[] = ["launch", "decide", "returned", "agent_declined", "team_ask", "alignment", "app_behind"];
@@ -79,6 +93,8 @@ export interface Need {
   /** The review link target, "?review=<goal>.<id>", for a change request. */
   review: string | null;
   tone: StatusKind;
+  /** The change request a row is about, for the renderer's evidence summary. */
+  cr?: ChangeRequest;
 }
 
 export interface NeedsInput {
@@ -92,6 +108,9 @@ export interface NeedsInput {
   alignments: Alignment[] | null;
   /** HOME apps.items. */
   apps: AppLite[] | null;
+  /** SENT: per goal, the latest launch and the apps the value read says Align sent that version
+   *  (GET …/change-requests/<id>/value apps.items); null when it couldn't be read. */
+  sends?: { goal: { id: string; title: string }; cr: string; version: number; launched_at: string; apps: { id: string }[] }[] | null;
   /** REQ, per goal read; null when none could be read. */
   requests?: { goal: { id: string; title: string }; requests: RequestLite[] }[] | null;
 }
@@ -149,7 +168,7 @@ const goalOf = (cr: ChangeRequest) => ({ id: cr.goal.id, title: cr.goal.title })
 
 /** One change request as at most one row (CR read). */
 function crNeed(cr: ChangeRequest, me: string): Need | null {
-  const base = { key: `cr:${cr.id}`, goal: goalOf(cr), quote: cr.reason, evidence: crEvidence(cr), review: reviewOf(cr) };
+  const base = { key: `cr:${cr.id}`, goal: goalOf(cr), quote: cr.reason, evidence: crEvidence(cr), review: reviewOf(cr), cr };
   const asker = cr.requester.id === me ? "Your request" : `${cr.requester.name}'s request`;
   const c = cr.can;
   const next = cr.version ?? cr.base_version + 1;
@@ -157,7 +176,9 @@ function crNeed(cr: ChangeRequest, me: string): Need | null {
   // (b) An approved change not launched (launchWaits: state approved, launch pending or not_yet).
   const lw = launchWaits(cr);
   if (lw) {
-    if (cr.dependency_loop) return null; // can't launch as it stands; nobody is waited on (lib/v2/home.ts:139)
+    // Nobody can launch it as it stands: a dependency it adds would close a loop (C5-1). Shown, with the server's reason.
+    if (cr.dependency_loop)
+      return { ...base, kind: "launch", phase: "waiting_on_others", tone: "held", cause: asker, since: cr.decided_at ? { at: cr.decided_at, field: "decided_at" } : null, action: null, who: `Nobody can launch it as it stands: ${cr.dependency_loop}` };
     const since = cr.launch === "not_yet" && cr.launch_decided_at ? { at: cr.launch_decided_at, field: "launch_decided_at" } : cr.decided_at ? { at: cr.decided_at, field: "decided_at" } : null;
     return lw.can_launch
       ? { ...base, kind: "launch", phase: "needs_you", tone: cr.launch === "not_yet" ? "held" : "approved", cause: `${asker}, approved by ${cr.approved_by?.id === me ? "you" : (cr.approved_by?.name ?? "an approver")}`, since, action: { label: `Launch v${next}`, opens: "review: launch" }, who: null }
@@ -167,7 +188,10 @@ function crNeed(cr: ChangeRequest, me: string): Need | null {
   // (a) and (c): open requests (changeWaits: pending, countered).
   const w = changeWaits(cr);
   if (w) {
-    const since = { at: cr.updated_at, field: "updated_at" };
+    // The wait starts at the latest revision (a counter or an update writes one); updated_at would restart it whenever
+    // evidence is added or a condition acknowledged.
+    const last = cr.revisions.reduce<ChangeRequest["revisions"][number] | null>((m, r) => (!m || r.revision > m.revision ? r : m), null);
+    const since = last ? { at: last.created_at, field: "revisions[latest].created_at" } : { at: cr.created_at, field: "created_at" };
     // (a) A decision waiting on you: your `can` has a decision (approve, approve_and_launch, reject or counter).
     if ((w.next === "decide" || w.next === "resolve_loop") && (c.approve || c.approve_and_launch || c.reject || c.counter)) {
       const label = c.approve_and_launch ? "Approve and launch" : c.approve ? "Approve" : c.counter ? "Suggest a change" : "Decline";
@@ -211,7 +235,8 @@ function alignmentNeed(a: Alignment, me: string): Need | null {
   const cause = `${a.requester.id === me ? "You ask" : `${a.requester.name} asks`} to align with ${target ? target.title : "a goal you can't see"}${from}`;
   if (a.state === "approved" || a.state === "rejected" || a.state === "withdrawn" || a.state === "revoked")
     return { ...base, phase: "done", tone: a.state === "approved" ? "approved" : a.state === "rejected" ? "declined" : "draft", cause, since: { at: a.closed_at ?? a.updated_at, field: a.closed_at ? "closed_at" : "updated_at" }, action: null, who: null };
-  const since = { at: a.updated_at, field: "updated_at" };
+  const lastH = a.history.reduce<Alignment["history"][number] | null>((m, h) => (!m || h.revision > m.revision ? h : m), null);
+  const since = lastH ? { at: lastH.created_at, field: "history[latest].created_at" } : { at: a.created_at, field: "created_at" };
   if (a.waiting_on_me) {
     const label = a.can.accept_counter ? "Accept the change" : a.can.approve ? "Approve" : "Review";
     return { ...base, phase: "needs_you", tone: a.state === "countered" ? "countered" : "pending", cause, since, action: { label, opens: "alignments" }, who: null };
@@ -220,34 +245,44 @@ function alignmentNeed(a: Alignment, me: string): Need | null {
   return { ...base, phase: "waiting_on_others", tone: a.state === "countered" ? "countered" : "pending", cause, since, action: null, who: `Waiting on ${names(waiting, me)}` };
 }
 
-/** Connected apps that haven't read the goals since the latest launch this person can see (HOME apps + CR read).
- *  A launch here is a change request with launch "launched" and its launch_decided_at; a version an owner saved directly
- *  has no time on these reads, so it isn't counted. Receipt: an older goal read Align served; Not observed: no goal
- *  read ever. Nothing is said about what the app or its agent is doing. */
-function appNeeds(apps: AppLite[], crs: ChangeRequest[], me: string): Need[] {
-  const launches = crs.filter((c) => c.launch === "launched" && c.launch_decided_at).sort((a, b) => b.launch_decided_at!.localeCompare(a.launch_decided_at!));
-  const latest = launches[0];
-  if (!latest) return [];
+/** Connected apps Align has not sent a launched version to (HOME apps + SENT). For the latest launch on each goal
+ *  (at most SENT_GOALS_MAX goals, newest launches first), the value read lists the apps an MCP goal read was sent that
+ *  version (lib/oauth/grants.ts appsSentGoalVersion, recorded per app, goal and version); an app this person can see
+ *  that isn't in that list gets a row: "Align has not sent v<n> to <app>". Not observed for v<n>; Receipt when Align
+ *  has served this app some other goal read. An app Align has seen no goal read from at all gets one row with no goal
+ *  or version, launches or not. Nothing is said about what the app or its agent is doing. */
+function appNeeds(apps: AppLite[], sends: NonNullable<NeedsInput["sends"]> | undefined, me: string): Need[] {
   const out: Need[] = [];
+  const mine = (a: AppLite) => a.connected_by.id === me;
+  const row = (a: AppLite, key: string, goal: Need["goal"], cause: string, since: Need["since"], e: EvidenceCounts): Need => ({
+    key,
+    kind: "app_behind",
+    phase: mine(a) ? "needs_you" : "waiting_on_others",
+    goal,
+    cause,
+    quote: null,
+    since,
+    evidence: e,
+    action: mine(a) ? { label: "Open the app", opens: "apps" } : null,
+    who: mine(a) ? null : `Connected by ${a.connected_by.name}`,
+    review: null,
+    tone: "draft",
+  });
   for (const a of apps) {
-    if (a.last_read_at && a.last_read_at >= latest.launch_decided_at!) continue;
+    if (a.last_read_at) continue;
     const e = none();
-    if (a.last_read_at) e.receipt = 1;
-    else e.not_observed = 1;
-    out.push({
-      key: `app:${a.id}`,
-      kind: "app_behind",
-      phase: a.connected_by.id === me ? "needs_you" : "waiting_on_others",
-      goal: { id: latest.goal.id, title: latest.goal.title },
-      cause: a.last_read_at ? `${a.name} last read the goals before v${latest.version} launched` : `${a.name} has connected but Align has seen no goal read`,
-      quote: null,
-      since: { at: latest.launch_decided_at!, field: "launch_decided_at" },
-      evidence: e,
-      action: a.connected_by.id === me ? { label: "Open the app", opens: "apps" } : null,
-      who: a.connected_by.id === me ? null : `Connected by ${a.connected_by.name}`,
-      review: null,
-      tone: "draft",
-    });
+    e.not_observed = 1;
+    out.push(row(a, `app:${a.id}`, null, `Align has seen no goal read from ${a.name}`, { at: a.approved_at, field: "approved_at" }, e));
+  }
+  for (const s of sends ?? []) {
+    const sent = new Set(s.apps.map((x) => x.id));
+    for (const a of apps) {
+      if (!a.last_read_at || sent.has(a.id)) continue;
+      const e = none();
+      e.not_observed = 1;
+      e.receipt = 1;
+      out.push(row(a, `app:${a.id}:${s.goal.id}:${s.version}`, s.goal, `Align has not sent v${s.version} to ${a.name}; it has served it other goal reads`, { at: s.launched_at, field: "launch_decided_at" }, e));
+    }
   }
   return out;
 }
@@ -288,7 +323,7 @@ function declinedNeeds(groups: NonNullable<NeedsInput["requests"]>, me: string):
 
 /** Every row this person's reads support, ranked, in its phase. A read that failed (null) contributes no rows; the
  *  renderer says that kind is unknown rather than showing nothing. */
-export type Unknown = "change requests" | "asks" | "alignments" | "apps" | "requests to agents";
+export type Unknown = "change requests" | "asks" | "alignments" | "apps" | "requests to agents" | "what Align sent apps";
 
 export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[] } {
   const { me } = input;
@@ -308,8 +343,9 @@ export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[
   else unknown.push("alignments");
   if (input.requests) rows.push(...declinedNeeds(input.requests, me));
   else if (input.requests === null) unknown.push("requests to agents");
-  if (input.apps && input.crs) rows.push(...appNeeds(input.apps, input.crs, me));
-  else if (!input.apps) unknown.push("apps");
+  if (input.apps) rows.push(...appNeeds(input.apps, input.sends ?? undefined, me));
+  else unknown.push("apps");
+  if (input.sends === null) unknown.push("what Align sent apps");
   return { rows: rankNeeds(rows), unknown };
 }
 
@@ -323,6 +359,8 @@ export function rankNeeds(rows: Need[]): Need[] {
     if (ph) return ph;
     const k = KIND_ORDER.indexOf(x.kind) - KIND_ORDER.indexOf(y.kind);
     if (x.phase !== "done" && k) return k;
+    // A row with no recorded time goes last within its kind (the renderer says "time not recorded").
+    if (!x.since !== !y.since) return x.since ? -1 : 1;
     const ax = x.since?.at ?? "";
     const ay = y.since?.at ?? "";
     if (ax !== ay) return x.phase === "done" ? ay.localeCompare(ax) : ax.localeCompare(ay);
