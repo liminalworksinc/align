@@ -259,6 +259,12 @@ Fresh data dir, one `next dev`, the same seed. Raw rows: `I-base/walk/re-dark.js
 - **Owner:** "Not recorded. You declined this request, so nothing changes. Here it is as it stands now." The server names the decider as "You" here, because the owner both declined it and reads it.
 - **Section move:** the owner's request moved from "Waiting on you" to "Others", and the notice survived the move. The keyed flat list (`19b27b9`) keeps the review mounted, so `requests/*` needed no change.
 
+**Notice survives a section move (runtime check, `e51b594`).** Owner on the Requests tab, dark, at 1440 and 390, 4 of 4 passed. Before acting, the walk marked the card's DOM nodes. After the request moved from "Waiting on you" to "Others", the same nodes were still in place: the card content, the ReviewBody and the actions slot were not remounted. The notice was in the DOM, visible and focused:
+- **Success** (Decline): "Recorded: you declined this request."
+- **Refusal** (a forced 409: the re-read was replayed with the copy the page showed, after another session declined): "Not recorded. You declined this request, so nothing changes. Here it is as it stands now."
+
+Inside the same ReviewActions, the slot switches from the choices branch to the "Not yours" branch, and the notice moves with it. `RequestReview` is keyed on `cr.id` only (`requests/view.tsx`), so `requests/*` needed no change. Screenshots: `keep-dark-{success,409}-{1440,390}.png`; raw rows: `keep-dark.json`.
+
 **M7: record events on `/record?cr=`, 1440.**
 
 | Event | Owner sees | Member sees |
