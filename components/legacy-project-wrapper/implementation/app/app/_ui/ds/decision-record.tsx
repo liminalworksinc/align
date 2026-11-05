@@ -46,6 +46,18 @@ function source(e: RecordEvent): TimelineSource {
  *  request is on the page, so its table isn't shown three times (open on click). */
 function detail(e: RecordEvent, titleOf: (id: string) => string, openCompare: boolean): ReactNode {
   const parts: ReactNode[] = [];
+  if (e.noTime)
+    parts.push(
+      <p key="t" className="text-[13px] text-(--text-3)">
+        Time not recorded in what you can read: the request doesn&apos;t carry it, and the audit log that does is for workspace owners.
+      </p>,
+    );
+  if (e.timeNote)
+    parts.push(
+      <p key="tn" className="text-[13px] text-(--text-3)">
+        {e.timeNote}
+      </p>,
+    );
   if (e.source === "unrecorded")
     parts.push(
       <p key="src" className="text-[13px] text-(--text-3)">
@@ -105,7 +117,9 @@ type Order = "newest" | "oldest";
 export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: string; goalId?: string; crId?: string }) {
   const crs = useRead<{ waiting_on_me: ChangeRequest[]; mine: ChangeRequest[]; others: ChangeRequest[] }>(`/api/v2/workspaces/${ws}/change-requests`);
   // Workspace owners only; anyone else gets a 403, which is shown as what it means, not as an error.
-  const audit = useRead<{ audit: AuditRow[] }>(goalId || crId ? null : `/api/v2/workspaces/${ws}/audit`);
+  // On ?cr= and ?goal= it is read only for times the request read doesn't carry; its rows are listed only workspace-wide.
+  const audit = useRead<{ audit: AuditRow[] }>(`/api/v2/workspaces/${ws}/audit`);
+  const scoped = !!(goalId || crId);
   const titles = useGoalTitles(ws);
   const titleOf = (id: string) => titles.get(id) ?? "A goal";
   const [actor, setActor] = useState("all");
@@ -114,11 +128,11 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
 
   const all = useMemo(() => {
     const list = crs.data ? [...crs.data.waiting_on_me, ...crs.data.mine, ...crs.data.others] : [];
-    const scoped = list.filter((c) => (!crId || c.id === crId) && (!goalId || c.goal.id === goalId));
-    const events = scoped.flatMap((c) => changeRequestEvents(ws, c));
-    if (audit.data) events.push(...auditEvents(audit.data.audit, new Set(list.map((c) => c.id))));
+    const inScope = list.filter((c) => (!crId || c.id === crId) && (!goalId || c.goal.id === goalId));
+    const events = inScope.flatMap((c) => changeRequestEvents(ws, c, audit.data?.audit ?? []));
+    if (audit.data && !scoped) events.push(...auditEvents(audit.data.audit, new Set(list.map((c) => c.id))));
     return events;
-  }, [crs.data, audit.data, ws, crId, goalId]);
+  }, [crs.data, audit.data, ws, crId, goalId, scoped]);
 
   const actors = useMemo(() => {
     const m = new Map<string, string>();
@@ -142,7 +156,7 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
           {status && <StatusPill kind={status} size="s" />}
         </span>
       ),
-      when: e.at,
+      when: e.noTime ? "" : e.at,
       object: e.object.href ? (
         <Link href={e.object.href} className="max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center text-(--accent-text) underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-(--focus)">
           {e.object.label}
@@ -163,7 +177,7 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
   const feed = useRead<{ goals: { id: string }[] }>(goalId ? `/api/v2/workspaces/${ws}/goals` : null);
   const unknownGoal = !!goalId && !!feed.data && !feed.data.goals.some((g) => g.id === goalId);
   const reviewing = crId && crs.data ? [...crs.data.waiting_on_me, ...crs.data.mine, ...crs.data.others].find((c) => c.id === crId) : undefined;
-  const loading = crs.loading || (!goalId && !crId && audit.loading);
+  const loading = crs.loading || audit.loading;
 
   return (
     <div data-surface="decision-record" className="flex min-w-0 flex-col gap-4">
@@ -229,12 +243,12 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
           </div>
         </Panel>
       )}
-      {audit.status === 403 && (
+      {audit.status === 403 && !scoped && (
         <p role="status" className="rounded-(--radius-m) border border-(--line) bg-(--bg-inset) px-4 py-2.5 text-[14px] text-(--text-2)">
           You see the change requests on goals you can read. The workspace&apos;s full audit log (invites, roles, devices, apps) is for workspace owners.
         </p>
       )}
-      {audit.status !== 0 && audit.status !== 403 && audit.message && (
+      {!scoped && audit.status !== 0 && audit.status !== 403 && audit.message && (
         <p role="alert" className="text-[14px] text-(--st-declined)">
           The audit log didn&apos;t load: {audit.message}
         </p>
