@@ -100,6 +100,7 @@ export default function GoalLines({
   changes,
   onReview,
   feed,
+  role,
 }: {
   ws: string;
   /** Unused since lines stopped saying "yours" (an owner's every line said it); kept so callers need no change. */
@@ -112,6 +113,8 @@ export default function GoalLines({
   onReview?: (goal: string, id: string) => void;
   /** The goals feed (GET …/goals, for allocation) when the Home already read it; without it the lines read it once. */
   feed?: Goal[] | null;
+  /** The person's role here: "Create a goal" is offered only when it is known and they can. */
+  role?: "owner" | "member" | "viewer" | null;
 }) {
   const own = useApi<{ goals: Goal[] }>(feed === undefined ? `/api/v2/workspaces/${ws}/goals` : null);
   const fedGoals = feed === undefined ? own.data?.goals : feed;
@@ -131,9 +134,11 @@ export default function GoalLines({
       ) : goals.length === 0 ? (
         <p className="rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3 text-[14px] text-(--text-2)">
           No active goals you can see.{" "}
-          <Link href={`/app/w/${ws}/goals`} className="font-medium text-(--accent-text) hover:underline">
-            Create a goal
-          </Link>
+          {(role === "owner" || role === "member") && (
+            <Link href={`/app/w/${ws}/goals`} className="font-medium text-(--accent-text) hover:underline">
+              Create a goal
+            </Link>
+          )}
         </p>
       ) : (
         <>
