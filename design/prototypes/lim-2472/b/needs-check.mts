@@ -69,7 +69,7 @@ for (const [role, acct] of people) {
   // SENT: the value read of the latest launch per goal, as needs-list.tsx reads it.
   const crs = cr ? [...cr.waiting_on_me, ...cr.mine, ...cr.others] : [];
   const launches = latestLaunches(crs).slice(0, SENT_GOALS_MAX);
-  const sends = await Promise.all(launches.map(async (c) => ({ goal: { id: c.goal.id, title: c.goal.title }, cr: c.id, version: c.version!, launched_at: c.launch_decided_at!, apps: (await get(cookie, `${W}/goals/${c.goal.id}/change-requests/${c.id}/value`))?.apps?.items ?? [] })));
+  const sends = await Promise.all(launches.map(async (c) => ({ goal: { id: c.goal.id, title: c.goal.title }, cr: c.id, version: c.version!, launched_at: c.launch_decided_at!, current_version: c.goal.version, apps: (await get(cookie, `${W}/goals/${c.goal.id}/change-requests/${c.id}/value`))?.apps?.items ?? [] })));
   const reqs = (await Promise.all(pick.map(async (g: { id: string; title: string }) => ({ goal: { id: g.id, title: g.title }, requests: (await get(cookie, `${W}/goals/${g.id}/requests`))?.requests ?? [] }))));
   const { rows, unknown } = buildNeeds({
     ws: s.ws,
@@ -133,5 +133,7 @@ const dec = buildNeeds({ ws: "w", me: "me", crs: [], asks: [], alignments: [], a
   ] },
 ] }).rows;
 rule("model: my request a session declined is one Agent-reported row; someone else's request isn't mine to act on", dec.length === 1 && dec[0]!.kind === "agent_declined" && dec[0]!.evidence.agent_reported === 1 && /claude-code in web declined your switch goal request/.test(dec[0]!.cause) && !/blocked|stuck/i.test(dec[0]!.cause));
+const newer = buildNeeds({ ws: "w", me: "me", crs: [], asks: [], alignments: [], apps: [app], sends: [{ goal: { id: "gA", title: "A" }, cr: "crA", version: 4, launched_at: "2026-01-02T00:00:00Z", apps: [], current_version: 5 }] }).rows.filter((r) => r.kind === "app_behind");
+rule("model: when the goal has a newer version than the launch checked, the row names the current version", newer.length === 1 && /not sent v4/.test(newer[0]!.cause) && /now at v5/.test(newer[0]!.cause));
 
 process.exitCode = failed ? 1 : 0;

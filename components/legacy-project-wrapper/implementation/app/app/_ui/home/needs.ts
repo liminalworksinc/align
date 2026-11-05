@@ -110,7 +110,7 @@ export interface NeedsInput {
   apps: AppLite[] | null;
   /** SENT: per goal, the latest launch and the apps the value read says Align sent that version
    *  (GET …/change-requests/<id>/value apps.items); null when it couldn't be read. */
-  sends?: { goal: { id: string; title: string }; cr: string; version: number; launched_at: string; apps: { id: string }[] }[] | null;
+  sends?: { goal: { id: string; title: string }; cr: string; version: number; launched_at: string; apps: { id: string }[]; current_version?: number }[] | null;
   /** REQ, per goal read; null when none could be read. */
   requests?: { goal: { id: string; title: string }; requests: RequestLite[] }[] | null;
 }
@@ -281,7 +281,10 @@ function appNeeds(apps: AppLite[], sends: NonNullable<NeedsInput["sends"]> | und
       const e = none();
       e.not_observed = 1;
       e.receipt = 1;
-      out.push(row(a, `app:${a.id}:${s.goal.id}:${s.version}`, s.goal, `Align has not sent v${s.version} to ${a.name}; it has served ${a.name} other goal reads`, { at: s.launched_at, field: "launch_decided_at" }, e));
+      // A newer version saved directly (no change request) may have been sent; these reads can't tell, so the row
+      // names the goal's current version rather than reading as "behind".
+      const now = s.current_version && s.current_version > s.version ? ` (the goal is now at v${s.current_version}; whether Align sent that is not checked here)` : "";
+      out.push(row(a, `app:${a.id}:${s.goal.id}:${s.version}`, s.goal, `Align has not sent v${s.version} to ${a.name}${now}; it has served ${a.name} other goal reads`, { at: s.launched_at, field: "launch_decided_at" }, e));
     }
   }
   return out;

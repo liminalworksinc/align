@@ -97,7 +97,7 @@ function useSends(W: string, crs: ChangeRequest[] | null, failed: boolean) {
       const ok = res.filter((x): x is NonNullable<typeof x> => !!x);
       setState({
         key,
-        sends: ok.map(({ c, v }) => ({ goal: { id: c.goal.id, title: c.goal.title }, cr: c.id, version: c.version!, launched_at: c.launch_decided_at!, apps: v.apps?.items ?? [] })),
+        sends: ok.map(({ c, v }) => ({ goal: { id: c.goal.id, title: c.goal.title }, cr: c.id, version: c.version!, launched_at: c.launch_decided_at!, apps: v.apps?.items ?? [], current_version: c.goal.version })),
         values: new Map(ok.map(({ c, v }) => [c.id, v])),
         unchecked: launches.length - pick.length + (res.length - ok.length),
       });
@@ -171,7 +171,9 @@ export function NeedsList({ ws, me, selected, reviewBase = "" }: { ws: string; m
         </p>
       )}
       {loading ? (
-        <p className="text-[14px] text-(--text-2)">Reading what needs you…</p>
+        <p className="text-[14px] text-(--text-2)" data-needs-loading>
+          {sent.loading && !reqs.loading ? "Checking what Align sent…" : "Reading what needs you…"}
+        </p>
       ) : (
         <NeedList
           rankNote={rankNote(reqs.unchecked, sent.unchecked)}
