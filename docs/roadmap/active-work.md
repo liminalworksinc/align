@@ -39,10 +39,12 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Next action:** Review the proposed classes in the
-  [boundary inventory](native-rewrite-program.md#boundary-inventory) (done 2026-11-04: 30
-  boundaries, all 362 files mapped), then author B09, the agent spend parsers and price table,
-  as the next native Component.
+- **Next action:** Specify B09's incremental parser state API and map its remaining
+  exports before package integration and full parity. The spend-meter child is qualified and
+  registered: two clean host builds match all 110 original inputs; root and child
+  verification, validation and agent-entrypoint audits pass. See
+  [B09 recovery](native-rewrite-program.md#b09-recovery) for the exact evidence and
+  local runtime needed to reproduce qualification.
 - **Evidence:** Phase 1.2 lift-and-shift identity `sha256:316a4e6b641a46788febb1c21b004ad3c00b6d812c10006deb1d05a48207aa49`.
 
 ### [x] PRESEED-001 — Retire the hosted closing date

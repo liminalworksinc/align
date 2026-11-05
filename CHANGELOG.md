@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Spend parsing and pricing have their own reviewed specification in
+  `.literate/native-projects/local-spend-meter`. Two clean builds pass their tests
+  and match the original on all 110 inputs. The agent continues to use its retained
+  implementation while package integration and full parity are reviewed.
 - The MCP paste lines (`lib/paste-lines.ts`: `shq`, `safeMcpUrl`, `claudeCodeLine`, `codexLine`) are specified as
   their own component in `.literate/native-projects/local-paste-lines`. Two clean builds generated from that
   specification alone pass their tests and match the original on 49 cases (hostile URLs, quoting edges), so the
