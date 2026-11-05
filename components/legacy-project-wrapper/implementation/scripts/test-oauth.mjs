@@ -45,6 +45,11 @@ const ALIGN_SECRET = "o".repeat(48);
 let pass = 0;
 let fail = 0;
 let phaseName = "";
+/** A response header from req() (node's lowercase object); repeated values joined, so a doubled header fails the exact match. */
+const header = (r, k) => [r.headers?.[k.toLowerCase()]].flat().filter(Boolean).join(", ") || null;
+/** Never framed: exactly one X-Frame-Options DENY and one CSP frame-ancestors 'none' (LIM-2437 security headers). */
+const unframed = (r) => header(r, "x-frame-options") === "DENY" && header(r, "content-security-policy") === "frame-ancestors 'none'";
+const framing = (r) => `${r.status} xfo=${header(r, "x-frame-options")} csp=${header(r, "content-security-policy")} hsts=${header(r, "strict-transport-security")}`;
 function check(name, ok, detail = "") {
   if (ok) pass++;
   else fail++;
@@ -395,6 +400,11 @@ async function local(env) {
   check("MCP without a token -> 401, its challenge names <origin>/.well-known/oauth-protected-resource/api/mcp", anon.status === 401 && (anon.headers["www-authenticate"] ?? "").includes(`${origin()}/.well-known/oauth-protected-resource/api/mcp`), `${anon.status} ${anon.headers["www-authenticate"]}`);
   const rebound = await Promise.all(["/api/mcp", "/oauth/authorize", "/api/oauth/approve", "/.well-known/oauth-authorization-server"].map((p) => req("GET", p, { host: "evil.example" })));
   check("Mode L: a DNS-rebound Host (evil.example) -> 421 on /api/mcp, /oauth/*, /api/oauth/*, /.well-known/*", rebound.every((r) => r.status === 421 && r.text.includes("Misdirected request: this server answers to localhost only")), rebound.map((r) => r.status).join(","));
+  // SH1 Mode L (LIM-2437 security headers): the app, an API route, a 404, the consent page, the redirect from / and the
+  // rebound refusals above all refuse framing, each value once; nothing sends HSTS (it would pin 127.0.0.1 to https).
+  const shL = [await req("GET", "/app"), await req("GET", "/api/v2/me"), await req("GET", "/api/nope"), await req("GET", "/oauth/authorize"), await req("GET", "/"), ...rebound];
+  check("SH1 Mode L: /app, /api/v2/me, /api/nope, /oauth/authorize, / and the 421s send X-Frame-Options DENY and frame-ancestors 'none', once each", shL.every(unframed), shL.map(framing).join(" | "));
+  check("SH1 Mode L: no Strict-Transport-Security on any of them", shL.every((r) => !header(r, "strict-transport-security")), shL.map(framing).join(" | "));
 
   // -- people and workspaces --
   const U1 = await signUp("Ola Owner", "u1@example.test"); // owns A and E; member of B; viewer of C
@@ -1559,6 +1569,12 @@ async function hosted(env) {
   const as = await req("GET", "/.well-known/oauth-authorization-server");
   const prm = await req("GET", "/.well-known/oauth-protected-resource/api/mcp");
   check("hosted metadata: issuer and resource use https://<host>", as.json?.issuer === `https://${HOSTED_HOST}` && as.json.token_endpoint === `https://${HOSTED_HOST}/oauth/token` && prm.json?.resource === `https://${HOSTED_HOST}/api/mcp` && prm.json.authorization_servers[0] === `https://${HOSTED_HOST}`, `${as.text} ${prm.text}`);
+  // SH2 hosted (LIM-2437 security headers): the same framing headers on the app, an API route, the proxy's 404 for an
+  // unlisted path, the consent page, the redirect from /, an https refusal and the metadata, plus HSTS (one year, no
+  // preload) on every one of them.
+  const shH = [await req("GET", "/app"), await req("GET", "/api/v2/me"), await req("GET", "/new"), await req("GET", "/oauth/authorize"), await req("GET", "/"), await req("GET", "/app", { headers: { "x-forwarded-proto": "http" } }), as];
+  check("SH2 hosted: /app, /api/v2/me, an unlisted path, /oauth/authorize, /, an https refusal and the metadata send X-Frame-Options DENY and frame-ancestors 'none', once each", shH.every(unframed), shH.map(framing).join(" | "));
+  check("SH2 hosted: every one of them sends Strict-Transport-Security max-age=31536000", shH.every((r) => header(r, "strict-transport-security") === "max-age=31536000"), shH.map(framing).join(" | "));
   const devHosted = await tool(D1.access, "align_list_goals");
   check("hosted: a device token (alnd_) with no Origin is accepted and acts as the device's person", devHosted.status === 200 && devHosted.sc?.workspace.id === A && !devHosted.sc.goals.some((g) => g.id === S.GPriv.id), `${devHosted.status} ${devHosted.text.slice(0, 120)}`);
   const agt = await mcp("agt.e30.AAAA", "tools/list");
