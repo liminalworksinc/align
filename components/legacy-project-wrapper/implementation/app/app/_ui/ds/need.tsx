@@ -79,14 +79,19 @@ export function NeedAction({ children, href, onClick, disabled }: { children: Re
   );
 }
 
-/** The ranked list. `rankNote` states the ranking in one line; it shows once there is something to rank. With no rows
- *  the list collapses to one line (`empty`, default "Nothing needs you."). */
-export function NeedList({ rankNote, children, empty }: { rankNote: string; children: ReactNode; empty?: ReactNode }) {
+/** The ranked list. `rankNote` states the ranking, as text or the caller's own disclosure; it shows once there is
+ *  something to rank, and nothing renders when it is empty or omitted, so a caller can place it elsewhere. With no rows
+ *  the list collapses to one line: `empty`, default "Nothing needs you."; `empty={null}` renders nothing at all, for a
+ *  heading that already says so. */
+export function NeedList({ rankNote, children, empty }: { rankNote?: ReactNode; children: ReactNode; empty?: ReactNode }) {
   const rows = Children.toArray(children);
-  if (!rows.length) return <p className="rounded-(--radius-m) border border-(--line) bg-(--bg-panel) px-3 py-2.5 text-[14px] text-(--text-2)">{empty ?? "Nothing needs you."}</p>;
+  if (!rows.length) {
+    if (empty === null) return null;
+    return <p className="rounded-(--radius-m) border border-(--line) bg-(--bg-panel) px-3 py-2.5 text-[14px] text-(--text-2)">{empty ?? "Nothing needs you."}</p>;
+  }
   return (
     <div className="@container min-w-0">
-      {rows.length > 1 && <p className="mb-1.5 px-1 text-[12px] text-(--text-3)">{rankNote}</p>}
+      {rows.length > 1 && rankNote ? <div className="mb-1.5 px-1 text-[12px] text-(--text-3)">{rankNote}</div> : null}
       <ol className="grid rounded-(--radius-m) border border-(--line) bg-(--bg-panel) @3xl:grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] @3xl:gap-x-4">{rows}</ol>
     </div>
   );
