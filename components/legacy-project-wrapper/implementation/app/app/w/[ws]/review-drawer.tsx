@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useGoalTitles } from "../../_ui/changes";
 import { useCallback, useEffect, useState } from "react";
@@ -13,6 +14,8 @@ import type { ChangeRequest } from "../../_ui/types";
 // "Not yours" with who can. Every action is the real POST. Quiet links lead to the full record and the goal's work.
 
 export { crStatus };
+
+const quiet = "inline-flex min-h-[44px] items-center text-[13px] text-(--accent-text) hover:underline";
 
 function Loaded({ ws, cr, me, choice, onClose, done }: { ws: string; cr: ChangeRequest; me: string; choice?: ReviewChoice; onClose: () => void; done: () => void }) {
   const titles = useGoalTitles(ws);
