@@ -268,7 +268,8 @@ function crNeed(cr: ChangeRequest, me: string, returning?: Set<string>): Need | 
     // (c) Your request that came back: a suggested change to accept, a condition to acknowledge, an update to the
     // goal's current version.
     if (cr.requester.id === me && (c.accept_counter || (c.acknowledge && cr.condition && !cr.condition.acknowledged_by) || (c.rebase && cr.behind))) {
-      const label = c.accept_counter ? "Accept the change" : c.acknowledge && cr.condition && !cr.condition.acknowledged_by ? "Confirm the condition" : `Update to v${cr.goal.version}`;
+      // The row names what to look at, never the decision before the review ("See the change", not "Accept the change").
+      const label = c.accept_counter ? "See the change" : c.acknowledge && cr.condition && !cr.condition.acknowledged_by ? "See the condition" : `Update to v${cr.goal.version}`;
       const why = c.accept_counter ? "An approver suggested a change" : label === "Confirm the condition" ? "Approved on a condition" : `The goal moved on to v${cr.goal.version}`;
       return { ...base, kind: "returned", phase: "needs_you", tone: c.accept_counter ? "countered" : "pending", cause: why, since, action: { label, opens: "review" }, who: null };
     }

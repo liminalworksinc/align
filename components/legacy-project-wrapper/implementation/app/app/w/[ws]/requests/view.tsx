@@ -20,7 +20,7 @@ export default function Requests({ me, ws }: { me: Me; ws: string }) {
       <Desk ws={ws} me={me.id} selectedId={review?.id ?? null} reloadToken={reloadToken} />
       {/* The drawers break words only where needed, so a short label ("Close", "Esc") never splits at 320. */}
       <div className="[overflow-wrap:break-word]">
-        {review && <ReviewDrawer key={`${review.id}:${review.choice ?? ""}`} ws={ws} goal={review.goal} id={review.id} me={me.id} choice={review.choice} onClose={closeReview} onChanged={changed} />}
+        {review && <ReviewDrawer key={`${review.id}:${review.choice ?? ""}`} ws={ws} goal={review.goal} id={review.id} me={me.id} choice={review.choice} onPick={(c) => setReview({ goal: review.goal, id: review.id, choice: c })} onClose={closeReview} onChanged={changed} />}
       </div>
     </Shell>
   );

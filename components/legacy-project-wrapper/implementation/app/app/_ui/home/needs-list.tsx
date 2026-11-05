@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EvidenceLabel, EvidenceSummary, hasEvidence, NeedAction, NeedList, NeedRow, Segmented, type Delivery } from "../ds";
 import { api, useApi } from "../kit";
+import { readValue } from "./value-cache";
 import type { Alignment, ChangeRequest, Goal } from "../types";
 import { buildNeeds, inPhase, type Unknown, KIND_WORDS, latestLaunches, ORDER_LINE, ORDER_WHY, rankNote, REQ_GOALS_MAX, SENT_GOALS_MAX, type AppLite, type AskLite, type EvidenceCounts, type Need, type NeedPhase, type NeedsInput, type RequestLite } from "./needs";
 
@@ -104,7 +105,7 @@ type ValueLite = Delivery;
  *  that version. `values` keeps each read for the rows' evidence summaries, so a row and the review never disagree.
  *  Launches past the cap are `unchecked` (deliberate); a value read that fails is `failed`, which makes "what Align
  *  sent apps" unknown like any unread source. */
-function useSends(W: string, crs: ChangeRequest[] | null, failed: boolean) {
+function useSends(ws: string, crs: ChangeRequest[] | null, failed: boolean) {
   const launches = useMemo(() => (crs ? latestLaunches(crs) : null), [crs]);
   const key = launches ? launches.map((c) => `${c.id}:${c.version}`).join(",") : null;
   const [state, setState] = useState<{ key: string; sends: NonNullable<NeedsInput["sends"]>; values: Map<string, ValueLite>; unchecked: number; failed: number } | null>(null);
@@ -112,7 +113,9 @@ function useSends(W: string, crs: ChangeRequest[] | null, failed: boolean) {
     if (!launches || key === null) return;
     let live = true;
     const pick = launches.slice(0, SENT_GOALS_MAX);
-    void Promise.all(pick.map((c) => api<ValueLite>(`${W}/goals/${c.goal.id}/change-requests/${c.id}/value`).then((v) => ({ c, v }), () => null))).then((res) => {
+    // Through Home's shared cache (value-cache.ts): one read per launch per page, shared with the goal lines. A read that
+    // failed comes back null and counts as failed (unknown), never as "nothing sent".
+    void Promise.all(pick.map((c) => readValue(ws, c.goal.id, c.id).then((v) => (v ? { c, v } : null)))).then((res) => {
       if (!live) return;
       const ok = res.filter((x): x is NonNullable<typeof x> => !!x);
       setState({
@@ -126,7 +129,7 @@ function useSends(W: string, crs: ChangeRequest[] | null, failed: boolean) {
     return () => {
       live = false;
     };
-  }, [W, launches, key]);
+  }, [ws, launches, key]);
   if (failed) return { sends: null, values: new Map<string, ValueLite>(), unchecked: 0, failed: 0, loading: false };
   const ready = state && state.key === key;
   return { sends: ready ? state.sends : undefined, values: ready ? state.values : new Map<string, ValueLite>(), unchecked: ready ? state.unchecked : 0, failed: ready ? state.failed : 0, loading: !ready };
@@ -200,7 +203,7 @@ export function NeedsList({
   const wsList = useApi<{ workspaces: { id: string; role: "owner" | "member" | "viewer"; teams: { id: string; role: "lead" | "member" }[] }[] }>("/api/v2/workspaces");
   const reqs = useRequestsToAgents(W, me, goals.data?.goals ?? null, !!goals.error);
   const crList = useMemo(() => (cr.data ? [...cr.data.waiting_on_me, ...cr.data.mine, ...cr.data.others] : null), [cr.data]);
-  const sent = useSends(W, crList, !!cr.error);
+  const sent = useSends(ws, crList, !!cr.error);
   const [phase, setPhase] = useState<NeedPhase>("needs_you");
   const narrow = useNarrow();
   const [q, setQ] = useState("");
@@ -364,6 +367,8 @@ export function NeedsList({
               action={
                 n.action?.opens === "goal" && n.goal ? (
                   // Propose again: on the goal page, where a change is proposed; opening it marks the decline as seen.
+                  // TODO(LIM-2472 r2): once r2-shell's "Propose a change" drawer is on this branch, open it with this
+                  // goal pre-filled instead of navigating to the goal page.
                   <NeedAction
                     onClick={() => {
                       declined.mark(n.cr!.id);

@@ -107,7 +107,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
 
         {/* The drawers break words only where needed, so a short label ("Close", "Esc") never splits at 320. */}
         <div className="[overflow-wrap:break-word]">
-          {review && <ReviewDrawer key={`${review.id}:${review.choice ?? ""}`} ws={ws} goal={review.goal} id={review.id} me={me.id} choice={review.choice} onClose={closeReview} onChanged={reloadAll} />}
+          {review && <ReviewDrawer key={`${review.id}:${review.choice ?? ""}`} ws={ws} goal={review.goal} id={review.id} me={me.id} choice={review.choice} onPick={(c) => setReview({ goal: review.goal, id: review.id, choice: c })} onClose={closeReview} onChanged={reloadAll} />}
         </div>
       </div>
     </Shell>
