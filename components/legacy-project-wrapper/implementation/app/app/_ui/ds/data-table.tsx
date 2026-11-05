@@ -99,7 +99,7 @@ export function DataTable<T>({
             <tr
               key={k}
               aria-selected={selectedKey !== undefined ? on : undefined}
-              className={`border-b border-(--line) align-middle max-sm:mb-3 max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:rounded-(--radius-m) max-sm:border max-sm:bg-(--bg-panel) max-sm:p-3 ${on ? "bg-(--accent-soft) shadow-[inset_2px_0_0_var(--accent)]" : "hover:bg-(--bg-raised)"}`}
+              className={`border-b border-(--line) align-middle max-sm:mb-3 max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:rounded-(--radius-m) max-sm:border max-sm:bg-(--bg-panel) max-sm:p-3 ${on ? "bg-(--accent-soft) shadow-[inset_2px_0_0_var(--accent-text)]" : "hover:bg-(--bg-raised)"}`}
             >
               {columns.map((c, i) => (
                 <td key={c.key} className={`px-3 py-2 max-sm:p-0 ${c.align === "end" ? "sm:text-right" : ""}`}>
