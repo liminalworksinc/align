@@ -23,6 +23,12 @@ Branch `agent/LIM-2472-foundation` from `origin/main` b16f8d1. Front end only. S
 
 Hues (canon): accent wholeness `#BF0078` (hover `#94005C`) in both themes, ruled 2026-11-05; between orchid; approved connection green; **launched cerulean `#197EEB` (proposed)**, lifted to `#5aa7ff` on dark and `#0f62c0` on light, with its own arrow icon; declined stability red (`--alarm`); retry watch amber; urgent Surge coral; receipt expression teal; reported clarity violet; not observed neutral grey with a dashed shape.
 
+## Focus
+
+- Every Tab stop gets the 2px `--focus` ring (`:focus-visible:not([tabindex="-1"])`, unlayered).
+- An element that only code focuses (`tabindex="-1"`: a heading after navigation, an error or confirm message, a dialog panel) gets no ring and not the browser's default one (`[tabindex="-1"]:focus { outline: none }` in `@layer base`, so a utility can still add a ring). No builder needs `outline-none` for these.
+- Checked in Chrome by keyboard: Tab stops, the roving Segmented choice after an arrow key, a code-focused heading, the Drawer panel and a control inside it; the real goal page passes test-v2:3880's check (29 stops, all with a 2px ring).
+
 ## Measured contrast (WCAG ratio, lowest across all five surface tiers)
 
 | | text-1 | text-2 | text-3 | edge | focus | status and evidence inks |
