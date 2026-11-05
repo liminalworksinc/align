@@ -125,8 +125,6 @@ for (const [screen, path, runs, fixed] of SCREENS) {
     await page.setViewport({ width, height: 900 });
     await page.goto(`${BASE}${path}`, { waitUntil: "networkidle0" });
     await new Promise((r) => setTimeout(r, 400));
-    // A single change request's record opens its disclosures, so the shot shows the compare.
-    if (screen === "record-cr") await page.evaluate(() => document.querySelectorAll("[data-surface=decision-record] details").forEach((d) => (d.open = true)));
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     const nn = fixed === 0 ? "00" : String(++n).padStart(2, "0");
     const file = join(OUT, `${CLEAN ? "clean-" : ""}${nn}-${screen}-${theme}-${width}.png`);
