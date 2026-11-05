@@ -53,12 +53,17 @@ export interface RecordEvent {
   /** Evidence: a link and how it is classed (never verified by Align). */
   link?: { url: string; label: string; reported: "self-reported" | "agent-reported" };
   tone?: "pending" | "approved" | "launched" | "declined" | "retry" | "neutral" | "accent";
+  /** Where the time comes from when it isn't the event's own recorded time (said on the card). */
+  timeNote?: string;
+  /** The reads carry no time for it: `at` only orders it (right after what it answers); the card shows no time. */
+  noTime?: boolean;
 }
 
 const crHref = (ws: string, cr: ChangeRequest) => `/app/w/${ws}/record?cr=${cr.id}`;
 
-/** Every event one change request recorded, oldest first. */
-export function changeRequestEvents(ws: string, cr: ChangeRequest): RecordEvent[] {
+/** Every event one change request recorded, oldest first. `audit`: the workspace audit rows when the reader may read
+ *  them (owners), used only for times the request read doesn't carry (accepting a suggested change). */
+export function changeRequestEvents(ws: string, cr: ChangeRequest, audit: AuditRow[] = []): RecordEvent[] {
   const obj = { label: `Change to ${cr.goal.title}`, href: crHref(ws, cr), id: cr.id };
   const out: RecordEvent[] = [];
   const revs = [...cr.revisions].sort((a, b) => a.revision - b.revision);
@@ -122,6 +127,39 @@ export function changeRequestEvents(ws: string, cr: ChangeRequest): RecordEvent[
       });
     }
   });
+  // Accepting a suggested change writes no revision and no time on the request: the latest revision being someone
+  // else's counter while the request has left "countered" (pending again, then approved or declined) says it was
+  // accepted. Its time is the audit row's for owners; anyone else's read has none (a server ask).
+  const last = revs[revs.length - 1];
+  if (last && revs.length > 1 && last.author.id !== cr.requester.id && ["pending", "approved", "rejected"].includes(cr.state)) {
+    const row = audit.filter((a) => a.action === "change_request.counter_accepted" && a.object_id === cr.id).sort((a, b) => b.at.localeCompare(a.at))[0];
+    out.push({
+      id: `${cr.id}:accepted:${last.revision}`,
+      at: row?.at ?? last.created_at,
+      noTime: !row,
+      kind: "counter",
+      actor: cr.requester,
+      source: "person",
+      object: obj,
+      what: `accepted the suggested change (revision ${last.revision})`,
+      tone: "neutral",
+    });
+  }
+  // Withdrawn and superseded record no decided_at; withdrawing or superseding closes the request, so its last update
+  // (updated_at) is when that happened. Said as such on the card.
+  if (!cr.decided_at && (cr.state === "withdrawn" || cr.state === "superseded")) {
+    out.push({
+      id: `${cr.id}:closed`,
+      at: cr.updated_at,
+      timeNote: `Time of the request's last change: ${cr.state === "withdrawn" ? "withdrawing" : "superseding"} closed it, so nothing changed after.`,
+      kind: "decision",
+      actor: cr.state === "withdrawn" ? cr.requester : null,
+      source: cr.state === "withdrawn" ? "person" : "align",
+      object: obj,
+      what: cr.state === "withdrawn" ? "withdrew the request" : "closed the request: the goal changed another way first",
+      tone: "neutral",
+    });
+  }
   if (cr.decided_at) {
     const decided = {
       approved: { actor: cr.approved_by, what: `approved revision ${cr.revision}${cr.version ? `: ${cr.goal.title} version ${cr.version}` : ""}`, tone: "approved" as const },

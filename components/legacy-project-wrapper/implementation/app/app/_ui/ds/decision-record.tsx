@@ -7,6 +7,7 @@ import { Compare } from "./compare";
 import { EmptyState } from "./empty-state";
 import { EvidenceLabel } from "./evidence-label";
 import { Panel } from "./panel";
+import { ReviewActions, ReviewBody } from "./review";
 import { useRead } from "./read";
 import { auditEvents, changeRequestEvents, KIND_WORDS, type AuditRow, type Kind, type RecordEvent } from "./record-events";
 import { Segmented } from "./segmented";
@@ -41,8 +42,22 @@ function source(e: RecordEvent): TimelineSource {
 }
 
 /** The card's detail, or null when there is none (the Timeline draws a box for any detail it gets). */
-function detail(e: RecordEvent, titleOf: (id: string) => string): ReactNode {
+/** `openCompare`: the before/after tables start open (the workspace-wide record); closed when a ReviewBody for the same
+ *  request is on the page, so its table isn't shown three times (open on click). */
+function detail(e: RecordEvent, titleOf: (id: string) => string, openCompare: boolean): ReactNode {
   const parts: ReactNode[] = [];
+  if (e.noTime)
+    parts.push(
+      <p key="t" className="text-[13px] text-(--text-3)">
+        Time not recorded in what you can read: the request doesn&apos;t carry it, and the audit log that does is for workspace owners.
+      </p>,
+    );
+  if (e.timeNote)
+    parts.push(
+      <p key="tn" className="text-[13px] text-(--text-3)">
+        {e.timeNote}
+      </p>,
+    );
   if (e.source === "unrecorded")
     parts.push(
       <p key="src" className="text-[13px] text-(--text-3)">
@@ -59,7 +74,7 @@ function detail(e: RecordEvent, titleOf: (id: string) => string): ReactNode {
     parts.push(
       <p key="l" className="flex flex-wrap items-center gap-2 text-[14px]">
         {e.link.reported === "agent-reported" ? <EvidenceLabel kind="reported" size="s" /> : <span className="rounded-(--radius-s) border border-(--edge) px-1.5 text-[12px] leading-5 text-(--text-2)">Self-reported</span>}
-        <a href={e.link.url} target="_blank" rel="noreferrer noopener" className="text-(--accent-text) underline underline-offset-2 [overflow-wrap:anywhere]">
+        <a href={e.link.url} target="_blank" rel="noopener noreferrer" className="max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center text-(--accent-text) underline underline-offset-2 [overflow-wrap:anywhere]">
           {e.link.label || e.link.url}
         </a>
         <span className="text-[13px] text-(--text-3)">Align doesn&apos;t verify links.</span>
@@ -67,7 +82,7 @@ function detail(e: RecordEvent, titleOf: (id: string) => string): ReactNode {
     );
   if (e.compare)
     parts.push(
-      <details key="c" className="group">
+      <details key="c" className="group" open={openCompare || undefined}>
         <summary className={SUMMARY}>
           {e.kind === "counter" ? "What this revision changed" : "What the plan was and what it would become"}
         </summary>
@@ -79,7 +94,7 @@ function detail(e: RecordEvent, titleOf: (id: string) => string): ReactNode {
   if (e.kind === "decision" && e.cr?.state === "approved") {
     const cr = e.cr;
     parts.push(
-      <details key="d" className="group">
+      <details key="d" className="group" open={openCompare || undefined}>
         <summary className={SUMMARY}>What the plan was and what it became</summary>
         <div className="mt-2">
           <Compare before={cr.diff.before} after={cr.diff.after} hidden={cr.diff.hidden_depends_on ?? null} beforeLabel={`Version ${cr.base_version}`} afterLabel={cr.version ? `Version ${cr.version}` : "Approved"} titleOf={titleOf} />
@@ -102,7 +117,9 @@ type Order = "newest" | "oldest";
 export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: string; goalId?: string; crId?: string }) {
   const crs = useRead<{ waiting_on_me: ChangeRequest[]; mine: ChangeRequest[]; others: ChangeRequest[] }>(`/api/v2/workspaces/${ws}/change-requests`);
   // Workspace owners only; anyone else gets a 403, which is shown as what it means, not as an error.
-  const audit = useRead<{ audit: AuditRow[] }>(goalId || crId ? null : `/api/v2/workspaces/${ws}/audit`);
+  // On ?cr= and ?goal= it is read only for times the request read doesn't carry; its rows are listed only workspace-wide.
+  const audit = useRead<{ audit: AuditRow[] }>(`/api/v2/workspaces/${ws}/audit`);
+  const scoped = !!(goalId || crId);
   const titles = useGoalTitles(ws);
   const titleOf = (id: string) => titles.get(id) ?? "A goal";
   const [actor, setActor] = useState("all");
@@ -111,11 +128,11 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
 
   const all = useMemo(() => {
     const list = crs.data ? [...crs.data.waiting_on_me, ...crs.data.mine, ...crs.data.others] : [];
-    const scoped = list.filter((c) => (!crId || c.id === crId) && (!goalId || c.goal.id === goalId));
-    const events = scoped.flatMap((c) => changeRequestEvents(ws, c));
-    if (audit.data) events.push(...auditEvents(audit.data.audit, new Set(list.map((c) => c.id))));
+    const inScope = list.filter((c) => (!crId || c.id === crId) && (!goalId || c.goal.id === goalId));
+    const events = inScope.flatMap((c) => changeRequestEvents(ws, c, audit.data?.audit ?? []));
+    if (audit.data && !scoped) events.push(...auditEvents(audit.data.audit, new Set(list.map((c) => c.id))));
     return events;
-  }, [crs.data, audit.data, ws, crId, goalId]);
+  }, [crs.data, audit.data, ws, crId, goalId, scoped]);
 
   const actors = useMemo(() => {
     const m = new Map<string, string>();
@@ -139,9 +156,9 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
           {status && <StatusPill kind={status} size="s" />}
         </span>
       ),
-      when: e.at,
+      when: e.noTime ? "" : e.at,
       object: e.object.href ? (
-        <Link href={e.object.href} className="text-(--accent-text) underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-(--focus)">
+        <Link href={e.object.href} className="max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center text-(--accent-text) underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-(--focus)">
           {e.object.label}
         </Link>
       ) : (
@@ -151,12 +168,16 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
         </span>
       ),
       source: source(e),
-      detail: detail(e, titleOf),
+      detail: detail(e, titleOf, !crId),
     };
   });
 
   const scope = crId ? "this change request" : goalId ? "this goal" : "this workspace";
-  const loading = crs.loading || (!goalId && !crId && audit.loading);
+  // ?goal=: the goals the reader can read, to tell an unknown goal from one with nothing recorded yet.
+  const feed = useRead<{ goals: { id: string }[] }>(goalId ? `/api/v2/workspaces/${ws}/goals` : null);
+  const unknownGoal = !!goalId && !!feed.data && !feed.data.goals.some((g) => g.id === goalId);
+  const reviewing = crId && crs.data ? [...crs.data.waiting_on_me, ...crs.data.mine, ...crs.data.others].find((c) => c.id === crId) : undefined;
+  const loading = crs.loading || audit.loading;
 
   return (
     <div data-surface="decision-record" className="flex min-w-0 flex-col gap-4">
@@ -212,12 +233,22 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
         </div>
       </Panel>
 
-      {audit.status === 403 && (
+      {reviewing && (
+        <Panel eyebrow="Review" title={`Change to ${reviewing.goal.title}`}>
+          <div className="flex flex-col gap-4">
+            <ReviewBody ws={ws} cr={reviewing} me={me} titleOf={titleOf} onDone={crs.reload} />
+            <div className="border-t border-(--line) pt-3">
+              <ReviewActions key={reviewing.id} ws={ws} cr={reviewing} me={me} onDone={crs.reload} compact />
+            </div>
+          </div>
+        </Panel>
+      )}
+      {audit.status === 403 && !scoped && (
         <p role="status" className="rounded-(--radius-m) border border-(--line) bg-(--bg-inset) px-4 py-2.5 text-[14px] text-(--text-2)">
           You see the change requests on goals you can read. The workspace&apos;s full audit log (invites, roles, devices, apps) is for workspace owners.
         </p>
       )}
-      {audit.status !== 0 && audit.status !== 403 && audit.message && (
+      {!scoped && audit.status !== 0 && audit.status !== 403 && audit.message && (
         <p role="alert" className="text-[14px] text-(--st-declined)">
           The audit log didn&apos;t load: {audit.message}
         </p>
@@ -226,7 +257,13 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
       <Panel title={`${shown.length} ${shown.length === 1 ? "event" : "events"}`} eyebrow={scope}>
         {loading && <p className="text-[14px] text-(--text-2)">Loading the record…</p>}
         {crs.status !== 0 && <EmptyState title={crs.status === 404 ? "Not found" : "The record didn't load"} body={crs.message} />}
-        {!loading && crs.status === 0 && (
+        {!loading && crs.status === 0 && crId && !reviewing && (
+          <EmptyState title="No such request in this workspace" body="Align has no change request with this address here that you can read. It may be in another workspace, or on a goal you can't see." action={<Link href={`/app/w/${ws}/record`} className="text-(--accent-text) underline">Whole workspace record</Link>} />
+        )}
+        {!loading && crs.status === 0 && unknownGoal && (
+          <EmptyState title="No such goal in this workspace" body="Align has no goal with this address here that you can read. It may be in another workspace, or a goal you can't see." action={<Link href={`/app/w/${ws}/record`} className="text-(--accent-text) underline">Whole workspace record</Link>} />
+        )}
+        {!loading && crs.status === 0 && !(crId && !reviewing) && !unknownGoal && (
           <Timeline
             events={events}
             empty={

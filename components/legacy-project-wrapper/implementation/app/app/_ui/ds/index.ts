@@ -13,3 +13,6 @@ export { Timeline, type TimelineEvent, type TimelineSource } from "./timeline";
 // LIM-2472 workstream S: shared surfaces both concepts mount.
 export { Compare, VersionsCompare, type CompareProps, type VersionRow } from "./compare";
 export { DecisionRecord } from "./decision-record";
+export { WorkPanels } from "./work";
+export { GoalDependencies } from "./dependencies";
+export { ReviewActions, ReviewBody, type ReviewChoice } from "./review";
