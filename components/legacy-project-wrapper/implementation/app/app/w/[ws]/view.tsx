@@ -229,7 +229,7 @@ function GoalGroup({ ws, g, me, latest, sessions, alloc, onReview }: { ws: strin
           {alloc?.held && <StatusPill kind="held" size="s" label="Held" />}
           {/* Agent time on this goal over 7 days, from usage the CLI reports: agent reported, never a measure of progress. */}
           {alloc && (
-            <EvidenceLabel kind={alloc.share_7d > 0 ? "reported" : "unobserved"} size="s" detail={`${alloc.share_7d}% of agent time, 7 days${alloc.target_share !== null ? ` · target ${alloc.target_share}%` : ""}`} />
+            <EvidenceLabel kind="reported" size="s" detail={`${alloc.share_7d > 0 ? `${alloc.share_7d}% of agent time, 7 days` : "No agent time reported, 7 days"}${alloc.target_share !== null ? ` · target ${alloc.target_share}%` : ""}`} />
           )}
         </div>
       </div>
@@ -280,7 +280,11 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const onMe = h && h.change_requests && h.asks && h.alignments ? h.change_requests.waiting_on_me.length + h.asks.waiting_on_me.length + h.alignments.waiting_on_me.length : null;
   const apps = h?.apps ?? null;
   const readers = apps?.items.filter((a) => a.last_read_at).length ?? 0;
-  const noAgents = !!apps && !apps.items.some(seenApp) && s.data !== null && mine.length === 0 && !teammates?.length;
+  /** The person has connected nothing here. Only an owner sees everyone's apps and sessions, so only for an owner does
+   *  "no agent is sharing work here" hold for the whole workspace; anyone else is told what their role can't see. */
+  const nothingOfMine = !!apps && !apps.items.some(seenApp) && s.data !== null && mine.length === 0 && !teammates?.length;
+  const ownerView = !!apps?.everyone;
+  const noAgents = nothingOfMine && ownerView;
   const open = (goal: string, id: string, choice?: ReviewChoice) => setReview({ goal, id, choice });
 
   const changeCard = (q: QueueChange, onMine: boolean, first = false) => {
@@ -343,8 +347,8 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
               </p>
             )}
           </div>
-          {/* With no agent yet, the empty state below carries this action, so it appears once. */}
-          {!noAgents && (
+          {/* With nothing of theirs connected yet, the note below carries this action, so it appears once. */}
+          {!nothingOfMine && (
             <button
               type="button"
               onClick={() => setConnect(true)}
@@ -468,6 +472,16 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
                   }
                 />
               )}
+              {nothingOfMine && !ownerView && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3" data-home-role-note>
+                  <p className="min-w-0 flex-1 basis-64 text-[14px] text-(--text-2)">
+                    You haven&apos;t connected an agent here. Other people&apos;s sessions and apps are shown to workspace owners only, so this Home shows the plan and what Align released, not their agents.
+                  </p>
+                  <button type="button" className={outlineBtn} onClick={() => setConnect(true)} data-connect-empty>
+                    Connect your agent
+                  </button>
+                </div>
+              )}
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <h2 className="text-[16px] font-semibold text-(--text-1)">Work by goal</h2>
                 <Link href={`${base}/sessions`} className="text-[13px] text-(--accent-text) hover:underline">
@@ -568,7 +582,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
         <div className="[overflow-wrap:break-word]">
           {review && <ReviewDrawer key={`${review.id}:${review.choice ?? ""}`} ws={ws} goal={review.goal} id={review.id} me={me.id} choice={review.choice} onClose={() => setReview(null)} onChanged={reloadAll} />}
           <Drawer open={connect} onClose={() => setConnect(false)} title="Connect an agent" eyebrow="Get started">
-            <FirstRun ws={ws} onSeen={reloadAll} />
+            <FirstRun ws={ws} onSeen={reloadAll} always />
           </Drawer>
         </div>
       </div>
