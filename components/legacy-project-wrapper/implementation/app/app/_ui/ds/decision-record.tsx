@@ -22,6 +22,9 @@ import { Timeline, type TimelineEvent, type TimelineSource } from "./timeline";
 
 const FIELD = "min-h-[36px] max-sm:min-h-[44px] rounded-(--radius-s) border border-(--edge) bg-(--bg-raised) px-2.5 text-[14px] text-(--text-1) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)";
 
+const SUMMARY =
+  "inline-flex min-h-[36px] cursor-pointer items-center gap-1.5 text-[14px] font-medium text-(--accent-text) underline-offset-2 hover:underline max-sm:min-h-[44px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) [&::-webkit-details-marker]:hidden before:content-['+'] before:inline-block before:w-3 before:font-mono group-open:before:content-['-']";
+
 const TONE_STATUS: Partial<Record<NonNullable<RecordEvent["tone"]>, StatusKind>> = {
   pending: "pending",
   approved: "approved",
@@ -33,10 +36,12 @@ function source(e: RecordEvent): TimelineSource {
   if (e.source === "align") return { kind: "system" };
   if (e.source === "app") return { kind: "reported", detail: "connected app via MCP" };
   if (e.source === "device") return { kind: "reported", detail: "align CLI" };
+  if (e.source === "unrecorded") return { kind: "person", detail: "source not recorded" };
   return { kind: "person" };
 }
 
-function Detail({ e, titleOf }: { e: RecordEvent; titleOf: (id: string) => string }) {
+/** The card's detail, or null when there is none (the Timeline draws a box for any detail it gets). */
+function detail(e: RecordEvent, titleOf: (id: string) => string): ReactNode {
   const parts: ReactNode[] = [];
   if (e.source === "unrecorded")
     parts.push(
@@ -63,7 +68,7 @@ function Detail({ e, titleOf }: { e: RecordEvent; titleOf: (id: string) => strin
   if (e.compare)
     parts.push(
       <details key="c" className="group">
-        <summary className="inline-flex min-h-[36px] cursor-pointer items-center text-[14px] font-medium text-(--text-1) max-sm:min-h-[44px]">
+        <summary className={SUMMARY}>
           {e.kind === "counter" ? "What this revision changed" : "What the plan was and what it would become"}
         </summary>
         <div className="mt-2">
@@ -75,7 +80,7 @@ function Detail({ e, titleOf }: { e: RecordEvent; titleOf: (id: string) => strin
     const cr = e.cr;
     parts.push(
       <details key="d" className="group">
-        <summary className="inline-flex min-h-[36px] cursor-pointer items-center text-[14px] font-medium text-(--text-1) max-sm:min-h-[44px]">What the plan was and what it became</summary>
+        <summary className={SUMMARY}>What the plan was and what it became</summary>
         <div className="mt-2">
           <Compare before={cr.diff.before} after={cr.diff.after} hidden={cr.diff.hidden_depends_on ?? null} beforeLabel={`Version ${cr.base_version}`} afterLabel={cr.version ? `Version ${cr.version}` : "Approved"} titleOf={titleOf} />
         </div>
@@ -142,11 +147,11 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
       ) : (
         <span>
           {e.object.label}
-          {e.object.id && <span className="font-mono text-[12px] text-(--text-3)"> {e.object.id}</span>}
+          {e.object.id && (titles.get(e.object.id) ? <span className="text-(--text-1)"> {titles.get(e.object.id)}</span> : <span className="font-mono text-[12px] text-(--text-3)"> {e.object.id}</span>)}
         </span>
       ),
       source: source(e),
-      detail: <Detail e={e} titleOf={titleOf} />,
+      detail: detail(e, titleOf),
     };
   });
 

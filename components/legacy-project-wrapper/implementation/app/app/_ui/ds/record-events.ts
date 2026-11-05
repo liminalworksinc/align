@@ -77,7 +77,7 @@ export function changeRequestEvents(ws: string, cr: ChangeRequest): RecordEvent[
         what: `proposed a change to ${cr.goal.title} (version ${r.base_version})`,
         compare: { before: base, after: { ...base, ...r.changes }, beforeLabel: `Version ${r.base_version}`, afterLabel: "Proposed" },
         quote: cr.reason || undefined,
-        tone: "pending",
+        tone: "neutral",
       });
     } else {
       const prev = revs[i - 1];
@@ -202,10 +202,48 @@ function auditKind(action: string): Kind {
   return "other";
 }
 
-/** "change_request.approved_without_evidence" → "approved without evidence"; the family names the object. */
+/** "goal.created" → "created a goal"; "change_request.approved_without_evidence" → "approved a change request
+ *  without evidence". The object (its title when the reader can read it, else its id) follows on the card. */
+const SAID: Record<string, string> = {
+  "team.member_set": "set a team member",
+  "team.member_removed": "removed a team member",
+  "member.role_changed": "changed a member's role",
+  "member.account_deleted": "deleted their account",
+  "member.sessions_deleted": "deleted a member's sessions",
+  "goal.parent_reviewed": "reviewed a goal it contributes to",
+  "workspace.steering_on": "turned steering on",
+  "workspace.steering_off": "turned steering off",
+  "session.agent_stopped": "stopped a session's agent",
+  "session.agent_resumed": "resumed a session's agent",
+  "session.sharing_stopped": "stopped sharing a session",
+  "session.shared_again": "shared a session again",
+  "session.history_deleted": "deleted a session's history",
+  "change_request.approved_without_evidence": "approved a change request without evidence",
+  "change_request.condition_acknowledged": "acknowledged a condition",
+  "change_request.counter_accepted": "accepted a counter",
+  "change_request.evidence_added": "added evidence to a change request",
+  "change_request.evidence_removed": "removed evidence from a change request",
+  "change_request.not_yet": "decided not to launch a change yet",
+  "reallocation.not_yet": "decided not to launch a target change yet",
+  "reallocation.approval": "gave one approval on a target change",
+  "reallocation.counter_accepted": "accepted a counter on a target change",
+  "alignment.goal_closed": "closed an alignment when its goal closed",
+  "request.not_declined": "took back a decline",
+  "oauth.app_approved": "approved a connected app",
+  "oauth.app_revoked": "disconnected a connected app",
+  "device.workspace_added": "added a device to this workspace",
+  "account.signed_out_everywhere": "signed out everywhere",
+};
+
 function auditWhat(action: string): string {
-  const [, verb = action] = action.split(/\.(.+)/);
-  return verb.replace(/_/g, " ");
+  if (SAID[action]) return SAID[action];
+  const [family, verb = action] = action.split(/\.(.+)/);
+  const noun = (FAMILY[family] ?? family).toLowerCase();
+  const article = /^[aeiou]/.test(noun) ? "an" : "a";
+  const words = verb.replace(/_/g, " ");
+  const m = /^(approved|countered|rejected|withdrawn|superseded|launched|revoked|created|accepted|declined|cancelled|expired|renamed|restored|held|released|versioned|requested|paired|imported|added|deleted|removed|left|sent) ?(.*)$/.exec(words);
+  if (!m) return `${words} (${noun})`;
+  return `${m[1]} ${article} ${noun}${m[2] ? ` ${m[2]}` : ""}`;
 }
 
 const FAMILY: Record<string, string> = {
