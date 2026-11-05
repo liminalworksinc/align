@@ -1,6 +1,7 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { EvidenceLabel, EvidenceSummary, NeedAction, NeedList, NeedRow, Segmented, type Delivery } from "../ds";
+import { EvidenceLabel, EvidenceSummary, hasEvidence, NeedAction, NeedList, NeedRow, Segmented, type Delivery } from "../ds";
 import { api, useApi } from "../kit";
 import type { Alignment, ChangeRequest, Goal } from "../types";
 import { buildNeeds, inPhase, KIND_WORDS, latestLaunches, rankNote, REQ_GOALS_MAX, SENT_GOALS_MAX, type AppLite, type AskLite, type EvidenceCounts, type Need, type NeedPhase, type NeedsInput, type RequestLite } from "./needs";
@@ -129,7 +130,7 @@ export function NeedsList({ ws, me, selected, reviewBase = "", heading = true }:
   const [q, setQ] = useState("");
 
   const loading = [cr, asks, al, home].some((r) => r.loading && !r.data && !r.error) || reqs.loading || sent.loading;
-  const { rows, unknown } = useMemo(
+  const { rows, unknown, notices } = useMemo(
     () =>
       buildNeeds({
         ws,
@@ -186,7 +187,7 @@ export function NeedsList({ ws, me, selected, reviewBase = "", heading = true }:
               type="search"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search goal, person, words"
+              placeholder="Search"
               className="min-h-[36px] w-full rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) px-3 text-[14px] text-(--text-1) placeholder:text-(--text-3) max-sm:min-h-[44px]"
             />
           </label>
@@ -222,7 +223,7 @@ export function NeedsList({ ws, me, selected, reviewBase = "", heading = true }:
               sub={n.goal ? (n.who ? `${n.cause} · ${n.who}` : n.cause) : (n.who ?? undefined)}
               waited={n.since ? waited(n.since.at) : "time not recorded"}
               evidence={
-                n.kind === "decide" && n.phase === "needs_you" && !n.evidence.agent_reported && !n.evidence.self_reported ? (
+                n.kind === "decide" && n.phase === "needs_you" && n.cr && !hasEvidence(n.cr) ? (
                   <span className="text-[12px] text-(--text-3)">No evidence attached</span>
                 ) : n.cr ? (
                   // The shared summary, from the same value read the review uses; none for a request not launched.
@@ -238,6 +239,16 @@ export function NeedsList({ ws, me, selected, reviewBase = "", heading = true }:
           ))}
         </NeedList>
         </div>
+      )}
+      {!loading && notices.length > 0 && (
+        <p data-needs-notice className="px-1 text-[12px] text-(--text-3)">
+          Align has recorded no goal read from {notices[0]!.app.name}
+          {notices[0]!.connected_by.id === me ? "" : ` (connected by ${notices[0]!.connected_by.name})`}
+          {notices.length > 1 ? ` or ${notices.length - 1} other app${notices.length === 2 ? "" : "s"}` : ""}.{" "}
+          <Link href={`/app/w/${ws}/apps`} className="text-(--text-2) underline underline-offset-4 hover:text-(--text-1)">
+            See apps
+          </Link>
+        </p>
       )}
     </section>
   );

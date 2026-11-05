@@ -71,7 +71,7 @@ for (const [role, acct] of people) {
   const launches = latestLaunches(crs).slice(0, SENT_GOALS_MAX);
   const sends = await Promise.all(launches.map(async (c) => ({ goal: { id: c.goal.id, title: c.goal.title }, cr: c.id, version: c.version!, launched_at: c.launch_decided_at!, current_version: c.goal.version, apps: (await get(cookie, `${W}/goals/${c.goal.id}/change-requests/${c.id}/value`))?.apps?.items ?? [] })));
   const reqs = (await Promise.all(pick.map(async (g: { id: string; title: string }) => ({ goal: { id: g.id, title: g.title }, requests: (await get(cookie, `${W}/goals/${g.id}/requests`))?.requests ?? [] }))));
-  const { rows, unknown } = buildNeeds({
+  const { rows, unknown, notices } = buildNeeds({
     ws: s.ws,
     me,
     crs: cr ? [...cr.waiting_on_me, ...cr.mine, ...cr.others] : null,
@@ -82,7 +82,8 @@ for (const [role, acct] of people) {
     sends,
   });
   console.log(`rank note: ${rankNote(goals.length - pick.length)}`);
-  console.log(`== ${role} (${acct.name}): ${rows.length} rows${unknown.length ? `, unknown: ${unknown.join(", ")}` : ""}`);
+  console.log(`== ${role} (${acct.name}): ${rows.length} rows, ${notices.length} notice(s)${unknown.length ? `, unknown: ${unknown.join(", ")}` : ""}`);
+  for (const n of notices) console.log(`  notice            ${n.kind} ${n.app.name} | connected by ${n.connected_by.name} | ${n.action.label}`);
   for (const r of rows) {
     const ev = Object.entries(r.evidence).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(", ") || "none";
     console.log(`  ${r.phase.padEnd(17)} ${r.kind.padEnd(10)} ${r.goal?.title ?? "(no goal)"} | ${r.cause} | since ${r.since ? `${r.since.at} (${r.since.field})` : "none"} | evidence: ${ev} | ${r.action ? `action: ${r.action.label} -> ${r.action.opens}` : r.who ?? "no action"}${r.review ? ` | ${r.review}` : ""}`);
@@ -92,6 +93,7 @@ for (const [role, acct] of people) {
   rule(`${role}: no row outside Needs you has an action`, rows.filter((r) => r.phase !== "needs_you").every((r) => !r.action));
   const order = ["launch", "decide", "returned", "agent_declined", "team_ask", "alignment", "app_behind"];
   rule(`${role}: Needs you is in kind order, oldest first within a kind`, needs.every((r, i) => i === 0 || order.indexOf(needs[i - 1].kind) < order.indexOf(r.kind) || (needs[i - 1].kind === r.kind && (needs[i - 1].since?.at ?? "") <= (r.since?.at ?? ""))));
+  if (role === "member") rule("member (seeded): the never-read app Theo connected is a notice, not a Needs-you row", needs.length === 0 && notices.length === 1 && notices[0]!.kind === "app_never_read");
   if (role === "viewer") rule("viewer: nothing needs a viewer (viewers can't act)", needs.length === 0);
   if (role === "owner") {
     rule("owner: at least one launch, one decision and one app row", ["launch", "decide", "app_behind"].every((k) => needs.some((r) => r.kind === k)));
@@ -114,8 +116,9 @@ const two = buildNeeds({ ws: "w", me: "me", crs: [A, B], asks: [], alignments: [
   { goal: { id: "gB", title: "B" }, cr: "crB", version: 2, launched_at: "2026-01-03T00:00:00Z", apps: [] },
 ] }).rows.filter((r) => r.kind === "app_behind");
 rule("model: an app that read only goal A after goal B launched keeps B's row and has none for A", two.some((r) => r.goal?.id === "gB") && !two.some((r) => r.goal?.id === "gA"));
-const fresh = buildNeeds({ ws: "w", me: "me", crs: [], asks: [], alignments: [], apps: [{ ...app, last_read_at: null }], sends: [] }).rows.filter((r) => r.kind === "app_behind");
-rule("model: an app Align has recorded no goal read from has a row even with no launch, naming no goal or version", fresh.length === 1 && fresh[0]!.goal === null && !/v\d/.test(fresh[0]!.cause));
+rule("model: a not-sent row is one short sentence with one Not observed chip", two.every((r) => /^Align has not sent v\d+ to [^.;]+\.$/.test(r.cause) && r.evidence.not_observed === 1 && r.evidence.receipt === 0));
+const fresh = buildNeeds({ ws: "w", me: "me", crs: [], asks: [], alignments: [], apps: [{ ...app, last_read_at: null }], sends: [] });
+rule("model: an app Align has recorded no goal read from is a notice (See apps), never a row or a count", fresh.rows.length === 0 && fresh.notices.length === 1 && fresh.notices[0]!.action.label === "See apps");
 const pend = crOf({ id: "crP", state: "pending", launch: null, version: null, launch_decided_at: null, decided_at: null, approved_by: null, updated_at: "2026-02-01T00:00:00Z", can: { approve: true }, waiting_on_me: true, revisions: [{ revision: 1, created_at: "2026-01-10T00:00:00Z", evidence: [] }] });
 const p = buildNeeds({ ws: "w", me: "me", crs: [pend], asks: [], alignments: [], apps: [] }).rows[0]!;
 rule("model: a decision waits from its latest revision, not from updated_at (adding evidence doesn't restart it)", p.since?.at === "2026-01-10T00:00:00Z");

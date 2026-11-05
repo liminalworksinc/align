@@ -197,8 +197,8 @@ try {
   await shoot(page, "04", "not-yours", "dark", ALL, "Mina Torres can");
 
   // 05: the shared decision record, in the desk shell; 06: Work and evidence for the launched goal.
-  await go(page, `/app/w/${s.ws}/record?cr=${rafis.id}`, "Decision record");
-  await shoot(page, "05", "record", "dark", ALL, "Decision record");
+  await go(page, `/app/w/${s.ws}/record?cr=${rafis.id}`, "Review");
+  await shoot(page, "05", "record", "dark", ALL, "Review");
   await go(page, `/app/w/${s.ws}/work?goal=${launched.goal.id}`);
   await shoot(page, "06", "work-evidence", "dark", ALL);
 
