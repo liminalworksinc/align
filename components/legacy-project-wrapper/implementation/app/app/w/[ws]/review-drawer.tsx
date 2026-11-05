@@ -59,7 +59,7 @@ export function ReviewDrawer({ ws, goal, id, me, onClose, onChanged }: { ws: str
       footer={
         <>
           <Link
-            href={`${base}/goals/${goal}#change-requests`}
+            href={`${base}/record?cr=${id}`}
             className="inline-flex min-h-[44px] items-center rounded-(--radius-s) px-3 text-[14px] text-(--accent-text) hover:underline"
             data-review-record
           >
