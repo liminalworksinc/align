@@ -1,0 +1,11 @@
+LITAI_LANGUAGE_TOOL ?= node
+OUT ?= _build
+.PHONY: all test check
+all:
+	"$(LITAI_LANGUAGE_TOOL)" tools/assemble.js "$(OUT)"
+test:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-smoke

@@ -8,6 +8,56 @@
   another is requested, and says when the confirmation replaces that rule.
 - The live-agent test client uses fresh HTTP connections after synchronous CLI calls so the offline-revocation
   scenario can finish without a stale keep-alive socket reset.
+- Value-card wording, note cleaning, follow-up links and measured spans now come
+  from their qualified library. The typed consumer preserves all 1,168,597
+  observations, including shared estimate data and environment defaults. The
+  complete application passes 1,821 checks and all 24 image checks.
+
+- Agent envelope and ended-session wording now come from their qualified
+  library. Both typed consumers preserve all 563,717 observations, and the
+  complete application passes 1,821 checks with all 24 image checks passing.
+  The web test harness prepares agent bindings before importing those consumers
+  in a fresh retained workspace.
+
+- Shared text cleaning, counts, currency and change wording now come from their
+  qualified library. All 4,598,945 observations match through the five typed
+  consumers, and the full application passes 1,821 checks with all 24 image
+  checks passing.
+
+- Shared keyed callback queues now come from their independently qualified
+  library. The original generic API preserves all 5,290 observations, and the
+  complete application workflow passes 1,821 checks with all 24 hosted image
+  checks passing.
+
+- Shared HTTP error constructors and factories now come from their independently
+  qualified library. Both typed consumers preserve all 22,618 observations, and
+  the complete application workflow passes 1,821 checks with all 24 hosted image
+  checks passing.
+
+- Trust-document parsing now comes from its independently qualified Markdown
+  library. The typed consumer preserves all 1,153,547 observations in 21 batches,
+  and the complete application workflow passes 1,821 checks with all 24 hosted
+  image checks passing.
+
+- Home evidence and attention rules now come from their independently qualified
+  library. The typed consumer preserves all 82,905 observations, including shared
+  metadata and original person references. The complete application workflow
+  passes 1,821 checks, and all 24 hosted image checks pass.
+- Trust-document lists with indented root markers now terminate and preserve
+  their root and nested items. The seven existing trust documents render the
+  same parsed structure.
+- Share-again wording now comes from its independently qualified library. The
+  typed consumer preserves all 1,163 observations, and the complete application
+  workflow passes 1,820 checks with 24 hosted image checks passing.
+- Native libraries retain their package namespaces when exports share a name.
+  Flat aliases are available only for unambiguous names; existing integrity,
+  acceptance and installation rollback checks remain enforced.
+- Clipped session context keeps the goal's own measures before its parent's
+  measures. Single-ask notices retain who asked, who accepted and earlier closing
+  counts within the existing character budgets.
+- The local agent consumes qualified shell-reading and session-notice libraries
+  through typed public names. Their original algorithms are retired after direct
+  consumer parity and the complete application workflow pass.
 - Authorization policy now has an independently qualified specification. Two clean
   builds and the typed application binding match all 331,937 observations from the
   corrected baseline. The retained file preserves the public types and names while

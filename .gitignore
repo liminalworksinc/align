@@ -28,3 +28,8 @@ dist/
 
 # literate-ai run locks (transient)
 /.litai-locks/
+
+# Local recovery records and workstation metadata.
+/.literate/native-additions/
+/.literate/native-child-additions/
+.DS_Store

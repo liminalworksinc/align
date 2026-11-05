@@ -1,0 +1,69 @@
+'use strict';
+const {state_situation,told_situation,latch_notice_tail,never_sent_words,ended_data}=require('./core.js');
+const prefix=k=>k.slice(0,k.indexOf(':'));
+function words(key,f,why){
+ const unsent=Boolean(f.unsent),ws=f.ws;
+ const again=f.goal?` (it counts toward "${f.goal}"${unsent?'':' again'})`:'';
+ const before=f.before??'this machine signed out of Align';
+ const endWhen=f.e==='access_lost'||why==='access_lost'?`you lost access to ${ws} in Align (you were removed from it or left it)`:f.via==='login'&&!f.out_since?'a new sign-in on this machine (`align login`) replaced the earlier one':'this machine signed out of Align';
+ const never=never_sent_words(endWhen),neverOut=never_sent_words('this machine signed out of Align'),neverRelogin=never_sent_words('a new sign-in on this machine (`align login`) replaced the earlier one');
+ const noShare=unsent?`can't be shared there from here (${never})`:"can't be shared there again from here";
+ switch(key){
+ case 'out:signed_out':return `Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on. To share it again, run \`align login\` in a terminal, then type \`::align share\` here${again}.`;
+ case 'out:signed_out_unsent':return `Align: ${neverOut}; its usage stays on this machine. To share it, run \`align login\` in a terminal, then type \`::align share\` here${again}.`;
+ case 'out:signed_out_ended':return unsent?`Align: this machine signed out of Align, so this session can't be shared from here for now (${never}); its usage stays on this machine. To share it, run \`align login\` in a terminal, then type \`::align share\` here${again}.`:`Align: this machine signed out of Align, so this session can't be shared again from here for now; its usage stays on this machine. To share it again, run \`align login\` in a terminal, then type \`::align share\` here${again}.`;
+ case 'reshare:signed_in':return unsent?`Align: this machine is signed in to Align again. Earlier, ${never}; to share it, type \`::align share\` here${again}.`:`Align: this machine is signed in to Align again. To share this session again, type \`::align share\` here${again}.`;
+ case 'reshare:relogin':return unsent?`Align: ${neverRelogin}; its usage stays on this machine until it is shared. To share it, type \`::align share\` here${again}.`:`Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in; its usage stays on this machine until it is shared again. To share it again, type \`::align share\` here${again}.`;
+ case 'reshare:workspace_back':return unsent?`Align: this machine can reach ${ws} in Align again. Earlier, ${never}; to share it there, type \`::align share\` here${again}.`:`Align: this machine can reach ${ws} in Align again. To share this session there again, type \`::align share\` here${again}.`;
+ case 'reshare:removed':return `Align: this session stopped sharing because you were removed from ${ws} in Align (or left it) while this machine was not in touch; its usage from then on stays on this machine. You are a member again, so to share it there again, type \`::align share\` here${again}.`;
+ case 'reshare:server_signed_out':return `Align: this session stopped sharing because the Align server ended its share when this machine signed out of Align (an earlier sign-in); its usage stays on this machine from now on. This machine is signed in now, so to share it again, type \`::align share\` here${again}.`;
+ case 'noreach:signed_in_noreach':return `Align: this machine is signed in to Align again, but this sign-in does not reach ${ws}, so this session ${noShare}; its usage stays on this machine.`;
+ case 'noreach:relogin_noreach':return unsent?`Align: ${neverRelogin}, and this sign-in does not reach ${ws}, so it can't be shared there from here; its usage stays on this machine.`:`Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in, and this sign-in does not reach ${ws}, so this session can't be shared there again from here; its usage stays on this machine.`;
+ case 'noreach:signed_in_removed':return `Align: this machine is signed in to Align again, but you are no longer a member of ${ws} in Align (you were removed from it or left it), so this session ${noShare}; its usage stays on this machine.`;
+ case 'noreach:relogin_removed':return unsent?`Align: ${neverRelogin}, and you are no longer a member of ${ws} in Align (you were removed from it or left it), so it can't be shared there from here; its usage stays on this machine.`:`Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in, and you are no longer a member of ${ws} in Align (you were removed from it or left it), so this session can't be shared there again from here; its usage stays on this machine.`;
+ case 'noreach:removed_again':return `Align: you are no longer a member of ${ws} in Align (you were removed from it or left it), so this session ${noShare}; its usage stays on this machine.`;
+ case 'noreach:reach_lost':return `Align: this sign-in no longer reaches ${ws} in Align, so this session ${noShare}; its usage stays on this machine.`;
+ case 'noreach:access_lost':return unsent?`Align: ${never}; its usage stays on this machine.`:`Align: this session stopped sharing because you no longer have access to ${ws} in Align (you were removed from it or left it); its usage stays on this machine from now on.`;
+ case 'noreach:access_lost_again':return `Align: this machine can no longer reach ${ws} in Align (you were removed from it or left it again), so this session ${noShare}; its usage stays on this machine.`;
+ case 'stopped:web':return "Align: this session's sharing was stopped (Stop sharing on the web), so it stopped sharing here; its usage stays on this machine from now on.";
+ case 'changed:live':case 'changed:other':return ended_data().SHARE_CHANGED;
+ case 'stopped:before_end':return `Align: this session's sharing was stopped (Stop sharing on the web), so it stays stopped and is not shared again from here (its share here had ended when ${before}); its usage stays on this machine.`;
+ case 'stopped:share_refused':return "Align: this session's sharing was stopped (Stop sharing on the web), so it stays stopped and is not shared again from here; its usage stays on this machine.";
+ default:return f.text??'';
+ }
+}
+function share_notice(lid,id,f,now,told,toldFacts=null){
+ const changed=f.e==='changed',sitNow=state_situation(now);
+ if(changed&&sitNow==='hold')return 'hold';
+ const tail=now.latched&&now.ended?latch_notice_tail(lid,now.reshare,now.reshare?null:now.release,{unread:now.unread,login:now.login}):'';
+ const out=key=>({key,tail,text:words(key,f,now.ended)+tail});
+ if(changed&&told&&told.id!==id&&told_situation(told.key)===sitNow){
+  if(toldFacts&&toldFacts.e!=='changed'){const earlier=share_notice(lid,told.id,toldFacts,now,told);if(earlier&&typeof earlier==='object'&&told_situation(earlier.key)===sitNow)return earlier;}
+  return {key:told.key,tail,text:((prefix(told.key)==='started'||prefix(told.key)==='none')?ended_data().SHARE_CHANGED:words(told.key,f,now.ended))+tail};
+ }
+ const prev=told&&(told.id===id||changed&&['out','reshare','noreach'].includes(prefix(told.key)))?told:null;
+ if(f.e==='started')return now.live?{key:'started:text',tail:'',text:f.text??''}:null;
+ if(f.e==='share_err')return now.live?null:{key:'share_err:text',tail:'',text:f.text??''};
+ const eventKeys={stopped_on_web:'stopped:web',stopped_before_end:'stopped:before_end',share_stopped:'stopped:share_refused',upload_refused:'stopped:refused'};
+ if(Object.hasOwn(eventKeys,f.e))return now.live?null:out(eventKeys[f.e]);
+ if(changed){if(now.live)return out('changed:live');if(now.ended!=='device_signed_out'&&now.ended!=='access_lost')return out('changed:other');}
+ if(now.live||now.ended!=='device_signed_out'&&now.ended!=='access_lost')return null;
+ if(sitNow==='hold')return 'hold';
+ if(prev&&prefix(prev.key)===sitNow)return out(prev.key);
+ const was=prev?prefix(prev.key):null,relogin=f.via==='login'&&!f.out_since&&now.ended==='device_signed_out'&&was!=='out';
+ if(sitNow==='out')return out(now.ended==='device_signed_out'?(f.unsent?'out:signed_out_unsent':'out:signed_out'):'out:signed_out_ended');
+ if(sitNow==='reshare'){
+  if(!prev&&f.e==='removed')return out('reshare:removed');
+  if(!prev&&f.e==='server_signed_out')return out('reshare:server_signed_out');
+  if(was==='noreach')return out('reshare:workspace_back');
+  if(relogin)return out('reshare:relogin');
+  return out(now.ended==='device_signed_out'||was==='out'?'reshare:signed_in':'reshare:workspace_back');
+ }
+ const removed=now.member===false;
+ if(relogin&&was!=='reshare')return out(removed?'noreach:relogin_removed':'noreach:relogin_noreach');
+ if(removed&&now.ended==='device_signed_out')return out(was==='reshare'?'noreach:removed_again':'noreach:signed_in_removed');
+ if(relogin)return out('noreach:reach_lost');
+ if(now.ended==='device_signed_out'||was==='out'&&now.signed_in)return out(removed?'noreach:signed_in_removed':'noreach:signed_in_noreach');
+ return out(was==='reshare'?'noreach:access_lost_again':'noreach:access_lost');
+}
+module.exports={share_notice};

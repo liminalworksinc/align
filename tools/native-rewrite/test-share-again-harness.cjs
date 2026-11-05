@@ -30,3 +30,18 @@ test("share-again batches reject empty, unknown and out-of-range requests", () =
     assert.throws(() => h.runBatch(() => "", op, start, limit));
   }
 });
+test("share-again fingerprints preserve nested identity and output prototypes", () => {
+  const shared = {device: "same"};
+  assert.notDeepEqual(h.encode([shared, shared]), h.encode([shared, {...shared}]));
+  assert.notDeepEqual(h.encode({}), h.encode(Object.create(null)));
+  const clean = () => "same";
+  // This deliberately wrong fixture replaces an input record with an equal copy.
+  const replace = parts => {
+    for (let i = 0; i < parts.length; i++) if (typeof parts[i] === "object") parts[i] = {...parts[i]};
+    return "same";
+  };
+  assert.notDeepEqual(h.runBatch(clean, "text", 2, 1), h.runBatch(replace, "text", 2, 1));
+  assert.throws(() => h.runBatch(replace, "text", 2, 1, true), /mutates/);
+  const data = {nested: {}}, anchors = h.referenceAnchors(data), before = h.encode({data, anchors});
+  data.nested = {}; assert.notDeepEqual(h.encode({data, anchors}), before);
+});

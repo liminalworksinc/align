@@ -1,0 +1,3 @@
+#!/usr/bin/env node
+'use strict';
+try{require('./main.js').main();}catch(error){process.stderr.write(String(error.message)+'\n');process.exitCode=1;}

@@ -1,0 +1,17 @@
+'use strict';
+const tests = require('./tests/litai_test.js');
+function main(args = process.argv.slice(2)) {
+  if (args.length !== 1) throw new Error('Expected one framework mode');
+  let result;
+  if (args[0] === '--litai-test') result = tests.run();
+  else if (args[0] === '--litai-smoke') result = tests.smoke();
+  else throw new Error('This library has no product command-line entrypoint');
+  process.stdout.write(JSON.stringify(result) + '\n');
+}
+module.exports = { main };
+if (require.main === module) {
+  try { main(); } catch (error) {
+    process.stderr.write(String(error) + '\n');
+    process.exitCode = 1;
+  }
+}

@@ -1,42 +1,34 @@
 # Active work
 
-This file is the durable resumption queue for user-directed and discovered work. Before
-implementation, follow `skills/agent/record-user-directed-work/SKILL.md`.
-Keep detailed designs in focused roadmap documents and link them here.
-Record release scope in the [release-goal manifest](release-goals.json); the release
-gate cross-checks it against this queue.
-
-## Detailed-roadmap lifecycle
-
-This file is the sole resumable queue. Create a supporting file beneath `docs/roadmap/`
-only when one item cannot keep a program's rationale, ordering, and acceptance contract
-readable. Put this visible header immediately after the detailed document's title:
-
-```markdown
-- **Status:** active
-- **Owning queue item:** [AREA-NNN](active-work.md#area-nnn-heading)
-- **Completion / archival evidence:** pending while AREA-NNN remains open
-```
-
-Status is exactly `active`, `partial`, `deferred`, `completed`, or `historical`. The
-owner must resolve to a checkbox or named program heading in this file. A terminal state
-requires linked evidence. Keep a completed plan here only when doing so preserves useful
-inbound links; move substantial closed programs beneath `docs/history/roadmap/`, retain
-their owner, and mark them `historical`. Do not create a separate file for an ordinary
-queue item or let `docs/roadmap/` become a plan archive.
+Release scope is recorded in the [release-goal manifest](release-goals.json).
 
 ## P0
 
-### [ ] ONBOARD-001 — Replace this starter item with the first project outcome
+### [x] DOCS-001 - Reflect the qualified library in its contributor queue
 
-- **Owner:** project core
-- **Direction:** Record the user's desired outcome without copying conversation noise.
-- **Conclusion:** State the evidence-backed implementation boundary.
+- **Priority:** P1
+- **Owner:** components/spend-rounding
+- **Direction:** Remove the onboarding placeholder and keep the actual component status and contributor commands accurate.
+- **Conclusion:** The library is already qualified and integrated. Preserve its exact lock, protected profile, qualified projection and committed package bytes while repairing owned documentation.
 - **Depends on:** none
+- **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Name the next concrete change.
+  - [x] Replace the starter queue with the actual component status, guide links and contributor commands.
 - **Evidence:**
-  - [ ] Name the build, test, execution, or review proof required for completion.
+  - [x] The normal cached rebuild, verification, project validation and entrypoint audit pass with every protected input and committed cache byte unchanged.
 
-Check the parent only after every required subtask and evidence item passes. Add the
-release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
+## Qualified component
+
+`local/spend-rounding` is already regeneratively qualified and consumed by the parent.
+Its independent profile has 31 batches or direct cases.
+Qualified projection: `sha256:87803acf18fc3958f568ae2286ec87ffac8d47021d4661b3c8734963ed4db807`.
+
+See the [API guide](../user/getting-started.md). Contributor checks use the actual component:
+
+```console
+litai project validate
+litai lock --check
+CODING_CLI=codex litai rebuild components/spend-rounding --target host --allow-host-execution --update-receipt
+```
+
+The parent owns application integration, source retirement and complete application parity.

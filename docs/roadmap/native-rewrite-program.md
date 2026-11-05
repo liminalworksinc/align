@@ -17,9 +17,13 @@ until each boundary earns transfer under ADR 0002.
    immutable asset, repository-only harness, or intentionally retained source.
    Proposed classes are in the inventory's Class column; they need owner review.
 3. [ ] Select the smallest independently buildable/testable boundary and author its
-   native authority; leave later boundaries retained. B09, B01 and B05 are integrated.
-   B04's parity verifier and contracts are prepared; its source-extension framework
-   correction awaits a clean committed runtime.
+   native authority; leave later boundaries retained. B01, B03, B04, B05, B08,
+   B09, B11, B10's notice subset and B06's error subset pass complete integration.
+   B12's shared queue passes the complete twelve-library application workflow.
+   B02 wording and the remaining B10 envelope pass complete consumer integration
+   and the fourteen-library application workflow. B07 value rules passes qualification,
+   actual consumer integration and the full fifteen-library application workflow.
+   B06 field validation is the next independent boundary.
 4. [ ] Generate, build, test, execute, and package the candidate through the ordinary
    lifecycle; compare observable results with the Phase 1.2 parity record.
 5. [ ] Independently accept and regeneratively qualify the candidate before authority
@@ -493,7 +497,8 @@ The next pure boundary is the three share-again wording functions. Its unchanged
 `3830cc5edc94b7715badb514ad03dce2629ef7246bf8bad6d9132db3fad4419c`.
 The verifier captures 1,163 observations across 13 batches, including device states,
 opaque names, exact structured parts, deleted accounts, omitted options and explicit
-undefined defaults. Three observation controls pass.
+undefined defaults. Four observation controls pass, including nested reference
+preservation and output prototype checks.
 
 Static derivation stops with `workflow.inventory_excluded`: the framework's source
 suffix map lacks `.mts`, `.cts`, `.mjs`, `.cjs`, `.tsx` and `.jsx`. The file remains
@@ -531,9 +536,45 @@ does not own this extension defect.
 The corrected development CLI derives the unchanged `.mts` source without
 execution or model egress. Its inventory identity is
 `sha256:cf400830059e0a13328875543008048d3d9e091a5e611294019159bfd3f728a8`.
-The source-bound Component graph and signed delegated review are prepared. The
-installed runtime confirms this same inventory identity; native acceptance and
-qualification remain open.
+The installed runtime confirms that the entire reviewed bundle is identical to
+its earlier development derivation. The three source-bound contracts are now
+accepted as specification set
+`sha256:090846d77b52bbe15a5ba2cc5415c772e6b02bd46590215bdaa3d74fa04e18fd`.
+The independent verifier retains all 1,163 inputs and their ranges, while adding
+reference anchors and ordinary-object prototype checks. All 13 embedded source
+commands match the stronger capture; all four verifier controls pass.
+
+The new `local-share-again` project has lock
+`sha256:7951fae384f5784e8e4b8b326fa1a0f9f39374910ad8f643c18432e0c7b6f4dc`
+and import surface
+`sha256:7b60b39002fbaf0373bfe7d8ac2a984a8540d16756d9a134e31d82aa21be67bb`.
+Its natural API, actual qualification queue, guide and parent links replace the
+starter text. Documentation review, project validation and owned entrypoints pass.
+Both clean Codex builds and the separately admitted build match all 1,163
+observations. Their generated suites pass 9, 13 and 13 tests. Qualified projection
+`sha256:c1b51ae8d2b59ec2946702a6962d5069728c95dc5426be67a247bb1e67a5f010`
+is admitted by decision
+`sha256:caeb477bd2d78f0dcf22282c2c8845862f403bca4d3594cbe4ec79a74015eba4`.
+The final cached build replays all 13 acceptance batches with receipt
+`sha256:f479fb359a2643de4068ce386ca58e2020e337b6db2e669c0aa9b29363102cbf`.
+Verification, project validation and owned entrypoints pass. The guarded
+registration extends parent authority to eight qualified children; all seven
+prior consumer pins are unchanged.
+
+The retained share-again file now holds only the original public types and three
+typed aliases to its package-specific binding. Every observation passes through
+that actual consumer. The web and container selections replay 105 batches across
+three libraries. The hosted image passes all 24 checks; the complete sealed
+application workflow passes all 1,820 checks with zero failures or skips. Its
+receipt is `sha256:f716f51985f1a697847f34e690d4b4cf031226ade75000c087944e8cb1585ba0`.
+Root and CI-pinned verification, project validation and owned entrypoints pass.
+This milestone's retained membership is 379 files, adding only
+the independent oracle and verifier, with no unmapped paths. Class review remains
+open.
+
+The first accept invocation passed negative Flavor selectors as separate argv
+values; argparse refused them before mutation. The corrected invocation uses
+`--flavor=VALUE`. Both the failed preflight and successful acceptance are retained.
 
 ### B11 independent preflight
 
@@ -834,8 +875,49 @@ with one existing macOS persistent-service skip. Lint and formatting pass. Frame
 commit `05d07fe6` is built from a clean checkout and installed separately as a
 non-editable wheel. That installation projects the exact accepted 51-capability
 surface into 1,396 characters with every mapping and the original surface identity
-preserved. The unqualified child still needs a reviewed execution rebind before
-retrying qualification; the seven existing consumer pins remain unchanged.
+preserved. Both execution-rebind CLI forms refuse this unregistered child at its
+reserved native-project path. A normal fresh acceptance on the installed runtime
+therefore replaces the owned unqualified predecessor after preserving all 193
+files outside the repository with an exact hash/mode manifest. The transaction
+verifies that the archived tree, public specifications, protected profile, source
+snapshot, lock and parent registry remain unchanged. It copies only six authored
+documentation files into the fresh accepted child. The old lifecycle metadata is
+preserved in recovery, without copying it into the new project. The first clean
+qualification build reaches real import verification, then fails with
+`library exports map has undeclared entries`. A direct comparison proves that all
+51 export keys and targets match exactly, with no missing or extra entry; only
+JSON insertion order differs. The verifier's final `JSON.stringify` comparison
+incorrectly treats ordering as membership. No generated implementation is edited.
+
+Parent work `LIBRARY-EXPORT-ORDER-001` owns the portable correction. Refreshed
+tracker searches found no matching issue. The operator authorized filing upstream
+issue [#314](https://github.com/jordanhubbard/literate-ai/issues/314) before the
+source change and updating draft PR #313. The tested
+[source and regression patch](../../tools/native-rewrite/library-export-order.patch)
+compares sorted exact own-key sets independently of insertion order. It preserves
+required targets, symbols, paths and dependency checks. An inherited-key fixture
+also rejects replacing a missing key with an undeclared key of the same count.
+Both the original order-sensitive comparison and a cardinality-only proposal fail
+the regression controls. Four managed import-command and four existing Standard
+projection tests pass, as do lint and formatting. A non-editable wheel from
+commit `d4bd72bfdb39ec203dddcf903a1d5c07dba327fb`, SHA-256
+`0a803747dd0cd81d00a413d3df9a57a44aa42e3192c8a94300736790c03845de`,
+passes all four installed import-command tests. Commit `d4bd72bf` is pushed to
+draft PR #313 under its explicitly approved one-command hook opt-out after the
+normal review provider failed at its API usage limit. The PR description includes
+issue #314, installed-wheel and normal qualification proof, and its open review
+notes. The remote head and updated description are verified.
+
+Normal acceptance under this wheel preserves the unchanged public specifications,
+profiles and locks of both unregistered libraries. Their prior projects remain in
+external recovery with exact hash manifests: 160 wording files and 194 envelope
+files. No registered child pin changes. Wording now passes normal fresh qualification through both clean builds and its
+unchanged 4,598,945-observation profile. Its admitted build passes 30 tests. The
+envelope passes all import checks and 58 of 59 semantic batches; 246 clipping
+inputs incorrectly keep a Measures heading when no own measure is displayed.
+The existing zero-kept rule is made explicit in one contract, with the other
+fifty interfaces, all source bytes and 563,717 observations preserved. Signed
+review and normal fresh acceptance precede another clean qualification attempt.
 
 ### B02 wording helper preflight
 
@@ -843,9 +925,9 @@ All five source files retain their original names and bytes. The development
 source inventory classifies the four `.mts` files and `launch-words.ts` as
 TypeScript source, with snapshot
 `sha256:7bca67baa82f36c8968e5621dedc9a34c7d7a20242b7ff29cdadb1fba7880e66`.
-This is an editable development proof of the source-extension correction;
-refresh derivation with the independently installed `05d07fe6` runtime before acceptance.
-Static derivation leaves five behavioral uncertainties for source-bound review.
+The independently installed `05d07fe6` runtime confirms the same inventory without
+source execution or model egress. Source-bound review resolves all five behavioral
+uncertainties against the complete public contracts and independent observations.
 
 The independent matrix covers all 16 functions and the three scalar data exports
 through 17 capabilities. It has 4,598,945 observations in 49 gap-free batches. Each
@@ -865,8 +947,47 @@ source batches match the capture, including all four 131,072-observation text
 batches, callback batches and metadata. Each finishes in under one second on this
 host, within the existing 30-second budget. Inert TypeScript AST checks verify all
 runtime exports, three public values and three limit labels without executing
-source. The 17 authored contracts remain a review draft. No wording child exists,
-no consumer has changed and no source has been retired.
+source. The first acceptance creates `local/wording` with specification set
+`sha256:dbe29cf9ec642552bfcf60bfe1783944ab0e634538489ce0ef3469cba1590a7d`
+and lock `sha256:e2e3bb8d30c36696d6e6a8b511877e30dcfc7683132c5f3228c68573535de3c1`.
+The exact 49-batch profile is bound to the independent library oracle. Actual API
+documentation, qualification queue, parent links, project validation and owned
+entrypoints pass. The first generated candidate fails independent change and diff
+wording batches, with 138 differing inputs each. It merges null and empty measure
+targets during comparison, while the source merges only null and undefined.
+The two contracts explicitly separate comparison from rendering both as "none".
+
+All 160 predecessor files are preserved with a hash/mode manifest. Fresh normal
+acceptance creates specification set
+`sha256:8a965dd03622fa1cb1b9511a6c9f0f715950488f6835d31c7cdb5dead75cd586`
+and lock `sha256:4fa2091d8e25739749b904c7c54c6cf20f668b38d1296fadc5dbc736c6273fa4`.
+The protected profile bytes, source snapshot, all inputs, ranges and expected
+fingerprints remain identical. The new candidate matches all 49 batches and
+4,598,945 observations in a separate diagnostic. Its ordinary qualification still
+fails the framework export-order gate: all 17 keys and targets match, with no
+missing or extra entry. `LIBRARY-EXPORT-ORDER-001` owns this same refusal. The
+diagnostic is not qualification. The child stays unregistered, no consumer has
+changed and no source has been retired.
+
+Wording now qualifies under the published installed export-map correction.
+Both clean builds match all 4,598,945 observations in 49 batches. Qualified
+projection `sha256:ab1d16b729691c61c2ecbd803aff8636be0801be6747c07275a7de3d75232560`
+is admitted by decision
+`sha256:3bab81f421e1d8ff2c3ca44280490e837b6d97dfc04ae46c7b61dd8fb8d1ca8e`.
+The separately admitted build passes 30 tests. Final child receipt
+`sha256:260eaa2de2f7e289cc66897d7eb0489b38ccd9a82e2622ae1a44d27d4ee4a6fb`
+passes verification, validation and owned entrypoints. The original five modules
+now expose typed native names: sixteen functions, three public types and three
+scalar data names. Every observation matches these actual consumers. Module
+exports and public types are assignable in both directions. All twelve earlier
+manifest entries stay identical. Web admission passes 215 batches across eight
+libraries, and lint passes. The scope adds only the wording oracle and verifier,
+reaching 389 members. The complete thirteen-library application workflow passes
+all 1,821 checks with zero failures or skips, and all 24 image checks pass. Receipt
+`sha256:b8257683ce83654386f26b7ff611acfbad34a109c1e8cf80fc373f2be948da53`
+binds candidate `sha256:a1cac35aafc4fb54630b6761d5a8c3b5ceec4d31ee7787738cf28bb0510c5858`
+and evidence `sha256:5b80a0d5ff16c6531e19c60f56b2c3f495be410cfdf2fb6bd8c313b88aa15b96`.
+The five original wording algorithms are retired; public types and names remain.
 
 ### B03 Home attention preflight
 
@@ -875,9 +996,9 @@ The unchanged 8,337-byte `home-core.mts` snapshot has SHA-256
 Its development inventory identity is
 `sha256:bb8956f01bf19b934f7c3b2c8bb1cc52ee9fefab2b786031dd508fee6f7128c8`.
 The extension correction recognizes it as TypeScript source without a
-filename or content change. This remains an editable development proof, with one
-behavioral uncertainty left for source-bound review after refreshing derivation
-with the independently installed `05d07fe6` runtime.
+filename or content change. Independent installed derivation at `05d07fe6`
+confirms this inventory. Source-bound review resolves the one behavioral
+uncertainty against all nine contracts and independent observations.
 
 The full runtime surface is eight functions and three public data exports, beyond
 the earlier inventory's abbreviated list. Nine authored contracts and nine
@@ -890,8 +1011,364 @@ the launch check's response to external array edits. All probes restore their ed
 
 Four verifier controls pass, and inert AST checks verify every runtime export and
 all three public data values. SDK profile validation and all nine embedded source
-batches pass. No Home child exists, no consumer has changed and no source has been
-retired. The contracts remain review drafts.
+batches pass. Ordinary acceptance creates `local/home-attention` with specification
+set `sha256:e8e0f073d06021fb5982c2bcbda24cdbf7356ea7c7ab39c3c7a60d92add9f739`
+and lock `sha256:f0a3e33ea3d97d2e943592fb4d731ffff4f6ade51ee1f23ef250ececb2207d02`.
+The exact nine-batch profile is bound to the independent library oracle. Actual
+API documentation, qualification queue, parent links, project validation and
+owned entrypoints pass. Both clean builds and the separately admitted build match
+all 82,905 observations. Their generated suites pass 27, 6 and 16 tests.
+Qualified projection
+`sha256:23a85f32f791a895d0b55eb26f5a2041137dac0518f225e6d1ea48c7691b15ce`
+is admitted by decision
+`sha256:6742e6cd342689658d12eef7363baf3f4b613d93f4dd4de42a00315f759fa5f5`.
+The final cached build and all nine independent batches pass with receipt
+`sha256:b335a7ce49f226fc333736b0b7f0d3ec62e6c956994ced410609d60fca63552a`.
+
+Guarded registration adds the ninth qualified child. The retained file now holds
+only eight typed public names, three metadata aliases and four original public
+types. Every independent observation passes through that actual consumer, with
+shared mutable state preserved. All eight prior consumer pins are unchanged.
+The web and container selections verify four libraries in 114 batches. The
+hosted image passes all 24 checks. The complete sealed workflow, including the
+bounded trust-parser repair, passes all 1,821 checks with zero failures or skips.
+Root receipt `sha256:aa0bd02ee32698a06e175de77f79ebd1369072fb471e70f26872417bbc95f033`
+binds candidate `sha256:b6e49748676af6c141caa1e4c43b725c09fb68812d28bc46fda96cac8783cdd3`
+and execution evidence `sha256:7ad1c363e55ef3fb87f6725c7ba72725ae906b70f21da36e8857110f26394c91`.
+Root and CI-pinned verification, project validation and owned entrypoints pass.
+The reviewed scope has
+381 members, including only the two additional oracle/verifier inputs, with no
+unmapped paths. Class review stays open.
+
+### B08 trust Markdown qualification and consumer integration
+
+The source reader's two-space unordered and four-space ordered root lists
+reproduce infinite loops in bounded two-second child processes. Zero- and
+one-space controls return. `TRUST-PARSER-001` records the terminating indentation
+rule before source changes. The smallest repair sets the root indentation limit
+from the first marker, with the existing zero-/one-space behavior preserved.
+The permanent bounded regression detects the old hang and passes for unordered,
+ordered, zero-space and one-space roots with nested items. All seven existing
+trust documents have identical parsed trees before and after the repair.
+
+The original 10,954-byte source is preserved with SHA-256
+`0ee8a1965533bd3e1a5eb7053f0d0c543cb42368c34cd7c4b15b1447495c638b`.
+The corrected 11,018-byte source has SHA-256
+`a519d1ee722fb57e7b1db0c6971a6b2027224b501609a046c0eacb2c1338836e`.
+It exposes five pure functions and six public type declarations. A self-contained
+verifier covers Unicode slugs, URL handling, exact parsed structure, placeholder
+keys and values, callback order and original errors, fresh result graphs,
+prototypes and input references. Its seven cached real document fixtures preserve
+their original content identities. Four verifier controls pass. The final capture
+has 1,153,547 observations in 21 batches. Supplemental literal-placeholder,
+inherited-property and sparse-array inputs preserve every earlier input's index
+and fingerprint; all 1,153,265 earlier observations still match. Every embedded
+source command matches its expected fingerprint in at most 0.741 seconds on this
+host. SDK profile validation accepts all five capabilities and 21 batches.
+
+The independently installed runtime derives source snapshot
+`sha256:85c453b6d3d1694823d88f88d32229633d900f2f8d3f70db04fc27d97cf78891`
+without source execution or model egress. Static derivation leaves one behavior
+uncertainty for source-bound review. Five drafted contracts pass inert checks for
+all runtime exports, six public type shapes, seven exact grammar literals and
+eleven node kinds. The repaired baseline now passes the complete 1,821-check
+workflow and 24 hosted image checks.
+
+The source-bound review accepts specification set
+`sha256:22966432bdda3cf213373a65a790ea140bccbabdfe01fbff5a2118f5e4ed9072`
+and lock `sha256:0c91b85db4d463579d6cbc0199f1df0c12370bfc878a6b9878493fa3a15f6f83`.
+Two clean qualification builds pass 9 and 12 tests and match every independent
+batch. Qualified projection
+`sha256:8e169fd629cb9604bfa829b14da35eec0432a24984d4adf0d1d8508aca6fc354`
+is admitted by decision
+`sha256:184ec395a69d75391bfb765585b8850dd4d6d94dd15b093bdf60056e25a507df`.
+A separate admitted build passes 8 tests. The final child receipt is
+`sha256:64428fa1825bb5e23094fbdf05e9ae824eed82e957b46f9bc29525c502c239b1`;
+verification, validation and owned entrypoints pass.
+
+The guarded registration adds the tenth qualified child before consumer changes.
+All nine earlier manifest entries remain identical. The actual application file
+now contains six public types and five typed native names, with no parser
+algorithm. All 1,153,547 observations in 21 batches match through this consumer.
+Web and container admission now select five libraries and replay 135 batches;
+the agent's five-library, 98-batch selection remains unchanged. The ordinary
+scope refresh adds only the Markdown oracle and verifier, reaching 383 members
+with no unmapped paths. The complete ten-library application workflow and hosted
+image checks are pending. The first full run passes 1,820 checks and fails only
+application lint on two verifier-local import variables named `module`.
+VERIFIER-LINT-001 renames those bindings in the authored acceptance verifier,
+leaving the protected qualification profile, lock, qualified head, source cache
+entry and all case values unchanged. The normal cached rebuild passes 8 tests;
+all 21 original-source and consumer batches match again. Application lint passes
+with its existing rules. The corrected complete workflow passes all 1,821 checks and all 24 hosted image
+checks. Root receipt `sha256:7f3b84e7019246bdb8bb2edfc9dd043135ce572822a25197073fabfe210db12e` binds candidate
+`sha256:f60a79459605d7fe66973e53d28dd3d95f13274cd86d9edec56eab7772d378dd`
+and execution evidence
+`sha256:75da816618eca2788f197889662a449b2bfb6a92a6bddf03388299a0f750ff93`.
+Root and CI-pinned verification, project validation and owned entrypoints pass.
+
+### B06 independent error constructors
+
+The two error modules are independent of validation and B02. They expose the
+`HttpError` and `V2Error` classes plus four v2 factories. Their constructor
+identity, ordinary Error inheritance, optional own properties, extra-data alias
+and JavaScript default/coercion behavior are part of the existing public API.
+Assess them as `local/http-errors`, with a metadata capability returning the two
+shared constructors and four natural factory capabilities. Keep validation's
+dependency on B02 explicit. Do not reshape the source classes to fit a harness.
+
+Node's current type stripper refuses their parameter properties. The original
+files compile with the retained application's TypeScript 5.9.3 compiler using
+its ES2017 target. Source observations must invoke `tsc` through PATH, compile
+only the two immutable snapshot files into a disposable directory and remove it
+after import. Keep that source-tool prerequisite explicit. Generated JavaScript
+observations do not need the TypeScript compiler. Direct probes already confirm
+constructor arities 4 and 3, inherited Error names, preserved extra-data alias
+and the optional code property's presence even when undefined. Complete the
+source observation matrix, control tests and source-bound contracts before
+acceptance or source retirement.
+
+The resulting `local/http-errors` child is now accepted and qualified. Source
+snapshot `sha256:9ae456ee1b0feeec17cca4fbad18a9c32e5abb2378c20f4710317d0423f8ec81`
+accepts specification set
+`sha256:41262af15e4e468aaa252e47612bcbe2559e823c4ceaa826e3e21b37d6206658`
+and lock `sha256:bf5d133418a81b6768c92336725a5af1ea961436738ce74dd51e295f0214820d`.
+The final profile has 22,618 observations in nine batches, preserving all earlier
+input ranges. It records intrinsic Error identity without fingerprinting its
+host-owned static property order; the complete matrix matches host Node 26 and
+container Node 24. Every embedded source command matches in at most 0.427 seconds.
+Five controls and the inert constructor/factory audit pass. Both clean builds
+pass 4 tests. Qualified projection
+`sha256:d6e18ee61d9b2a34bd1034ad0a7f6d18092b84b6fb2633f3eeae671e3b275ecc`
+is admitted by decision
+`sha256:8f65243ab72adcad334f80f065f5fa68368d12648737bdabb01568a72e656f3f`.
+A separate admitted build passes 7 tests. Final child receipt
+`sha256:f2b695b7e3ca4c8273554ac9932d087eef3e4d7aa8af85306fecf1502b761518`
+passes verification, validation and owned entrypoints. Its authored acceptance
+verifier also uses a lint-safe local import name; protected inputs remain exact.
+
+The prepared consumer declarations preserve both constructor types and all four
+factory types in both directions, plus instance types and subclassing. They use
+ambient class shapes and native value aliases without runtime algorithms. Drafts
+pass application lint and Node syntax checks. The guarded registration adds this eleventh qualified child after B08's complete
+application receipt passes. All ten earlier manifest entries remain identical.
+The original two error classes and four factories are replaced by ambient public
+class declarations and native value aliases. All 22,618 observations in nine
+batches match through those actual consumers. Web admission now passes 144
+batches across six libraries; the agent retains five libraries and 98 batches.
+The scope refresh adds only the two error oracle/verifier files, reaching 385
+members with no unmapped paths. The complete eleven-library application workflow
+passes all 1,821 checks, with zero failures or skips, and all 24 hosted image
+checks pass. Receipt
+`sha256:08c3bc93bf5afe449207d1d1adab34610345487fc16083e118cf3e1f791e633e`
+binds candidate `sha256:763a64903fbf121d7bc8c05fa7297702fd0312186578f056c7b172170edd4c3a`
+and evidence `sha256:e283611f769d1ee9a6d7fda0c6eb7178a1ecc98a8e24f1e7dae94b8e430334cf`.
+
+### B12 shared promise queue assessment
+
+`lib/locks.ts` is independent of configuration, database and wording. Its one
+generic `withLock(key, fn)` function serializes callbacks by key through a shared
+process-wide Map. Different keys may progress independently. The callback runs
+once with no arguments; its original result or thrown value reaches the caller.
+Completion releases the successor even on failure, and removes a key only when
+no later request owns its current tail. Existing route bundles share the global
+queue Map, so that identity and queued predecessors are part of the contract.
+
+Assess it as `local/promise-queues` with one natural asynchronous capability.
+Use controlled promises and bounded microtask drains to observe ordering,
+independent-key progress, callback identity, queue cleanup and cross-module
+sharing. Keep all work within disposable verifier processes. Source capture,
+verifier controls and complete source-bound contracts precede acceptance. The
+remaining B12 database and configuration boundaries retain their own authority.
+
+The source-bound queue specification is accepted as set
+`sha256:f73e31b2ce833eb2cd57a00be5be44caa099ce153c3ccb94d50ea887c59a702d`
+with lock `sha256:b0266651ecfc6c0b7adc330c7334706d047ccb10aca55fa7349a9e55a6971f99`.
+Both clean qualification builds pass the frozen 5,290-observation profile in 22
+batches. The first attempt exposed a verifier launcher-context mismatch. Only the
+authored standalone worker was corrected to use the frozen encoded-eval invocation;
+source, generated code, cases, protected profile and lock remain exact. Five
+controls include a packaged-launcher regression. Qualified projection
+`sha256:8f54bce6767e112d43dcc6b34954322a236da2891f0551abb98f958c0b01ec1c`
+is admitted by decision
+`sha256:d0c6e89e66367e41b72cb09805fdf43694b5f301f98c3db1101d97340760cdd6`.
+The separately admitted build passes three tests. Final child receipt
+`sha256:32f42ca1ea5c46db3e47c7c8cb9063cd1a3cefd7c4e95f09fc3cb13237c8eeec`
+passes verification, validation and owned entrypoints.
+
+The guarded registry addition installs the twelfth qualified child. All eleven
+prior manifest entries stay identical. The original `lib/locks.ts` algorithm is
+replaced by its generic public signature and native value alias. Bidirectional
+TypeScript assignment, inferred return values and invalid-call refusals pass.
+All 5,290 observations match the actual consumer in a fresh process per frozen
+case. Web admission passes 166 batches across seven libraries, and application
+lint passes. The scope adds only the queue oracle and verifier, reaching 387
+members with no unmapped paths. The complete twelve-library application workflow
+passes all 1,821 checks with zero failures or skips, and all 24 hosted image
+checks pass. Receipt
+`sha256:7673dcd26a4bf3bf208d31050215031650be8b1c11bf26bfe7d632685b682816`
+binds candidate `sha256:f3a5ecbd2c36cd3f0435975226b42020e86f84c7b852ab921b12d9c5d785c87e`
+and evidence `sha256:0499c93c9e808dcae14c03769799d56ecd5a676d712f989f88cbf5e4e5838273`.
+
+### B10 envelope consumer integration
+
+The zero-kept heading clarification changes only the render-envelope interface.
+The source snapshot and all 563,717 observations remain unchanged. Accepted set
+`sha256:16826eefb2b6204829318b293391609ceddb7b4183131867f9613952e8493fc1`
+locks as `sha256:6003d08eb6f192919be5a373282d663f9e490992af2ea5cfbb841f39d5b9a97c`.
+Both clean builds pass. Qualified projection
+`sha256:10909306b0e78dee59a60a2cc7914c89be3c569eb11a0e18441ddb053fd62819`
+is admitted by decision
+`sha256:2fb0e0bdd7d7ae13fef4fd2dd4d9ac8aac584269d39ad19e59ab839e0e8fac8c`.
+The admitted build passes 43 tests, and final child receipt
+`sha256:7e82828a1d16080a8a8c917e6cd199728856f9bd5936fa002a8de7c6b781796f`
+passes every child gate.
+
+The fourteenth qualified child is registered after the complete thirteen-library
+receipt and root/CI gates pass. All thirteen previous manifest entries remain
+identical. The two original agent modules now preserve their public types and
+names through native aliases; shared types.ts stays byte-identical. Their complete
+namespaces are assignable in both directions. The first external type comparison
+incorrectly inferred CommonJS for the snapshot; an identical copy in the agent's
+ESM package context fixes that verifier setup without source or profile edits.
+All 563,717 observations match the actual consumers. Agent admission passes 157
+batches across six libraries; web admission retains 215 across eight. Lint passes.
+Only the envelope oracle and verifier join the scope, reaching 391 members with
+no gaps. The first complete run fails when test-v2 imports the new agent consumer
+before its later package build materializes bindings. The authored test harness
+now materializes the exact admitted agent libraries first, preserving every test.
+The complete rerun passes all 1,821 checks with zero failures or skips, including
+941 web checks, 183 OAuth checks, 62 live-agent checks and 609 package checks.
+All 24 image checks pass. Receipt
+`sha256:e62fbfd78d2ddff7d3485ebbd1fea6b402284df07285ed25d7016e879512b469`
+binds candidate
+`sha256:88b2f5a37942ab25c6b11e920054c3828de6d03bfaa7bb4a668aa6c28323a510`
+and evidence
+`sha256:12080825aeb3d3fbdbf79e24c442853d41e27db80147cdbca3e79a4589d09668`.
+Root and CI-pinned verification each pass three gates with two declared skips.
+Root validation and owned entrypoint readiness pass.
+
+### B06 field-validation assessment
+
+The remaining module exposes 15 functions, six data names and the Body type.
+Keep the generic oneOf/optOneOf signatures and revisionRead overloads exact.
+Failure behavior must use the application's existing qualified badRequest factory
+and shared V2Error identity. The three public RegExp objects remain shared and
+mutable; b64url must observe the same B64URL object that callers receive. Unicode
+grapheme segmentation uses the target's Intl runtime, and timestamp parsing retains
+ordinary Date semantics. The native interface will expose one
+`create_validators(context)` factory. The context supplies the existing qualified
+`badRequest`, `cleanProse`, `dropInvisible`, `isBlankText` and `BLANK_FILLERS`.
+One factory instance supplies all 15 functions and six data names to a typed
+binding created once at module load. This preserves the actual shared error
+constructor and regular-expression objects while keeping wording and HTTP errors
+with their existing providers. Generic signatures and overloads stay in the
+binding, and the native instance owns every validation algorithm.
+
+The immutable original source and exact qualified wording/error dependencies are
+frozen. The baseline erases TypeScript types and binds only the two original
+imports in memory. Its 4,549,018 observations cover fifty complete batches; eight
+controls reject observer defects. Every baseline result also matches Linux Node
+24.22.2. Both targets use Unicode 17 and ICU 78.3. No validation implementation
+is supplied as generation input.
+
+The first accepted interface named its capability `validation.factory`, while
+its contract and observer required `create_validators`. The public projection
+correctly exposed the suffix `factory`, so independent acceptance refused the
+mismatch. Preserve that failed project and profile. A fresh signed graph review
+and acceptance now use `validation.create-validators` and the ordinary module
+`field_validation/create_validators`. All fifty batch expectations are unchanged.
+The second attempt reaches the independent oracle but exceeds its sixty-second
+aggregate limit. A fresh observer uses at most eight isolated worker threads and
+replays every unchanged baseline fingerprint in 46.27 seconds. The four-worker
+control takes 73.57 seconds and remains failed deadline evidence. A fresh profile
+and signed review retain all fifty cases and the same 4,549,018 observations; no
+protected prior profile is edited. Fresh acceptance and qualification remain
+required. The revised signed review
+also explicitly resolves the original behavior uncertainty; its omitted-resolution
+refusal is retained as failed evidence.
+
+An unapplied typed binding draft captures the existing qualified dependencies
+once and aliases all 21 public runtime names. TypeScript 5.9.3 checks the complete
+original and drafted namespaces in both directions, retains both revision
+overloads and generic choice inference, and rejects four invalid type controls.
+The native factory owns every runtime algorithm. Next action: complete ordinary
+qualification and admission, register the qualified child through the public
+transaction, then prove the actual typed consumer against all observations and
+rerun full application and image gates. No validation consumer has changed.
+
+### B07 value-card rule assessment
+
+Assess `value-core.mts` as `local/value-rules` after the wording consumer transfer.
+Its public API is seven functions plus a metadata wrapper: estimate wording,
+value-note cleaning, safe follow-up links, the two environment-default follow-up
+functions, and measured-span wording. Four data names include the shared mutable
+five-entry estimate array. Preserve that array's identity and its influence on
+estimate lookup, as well as all existing TypeScript declarations.
+
+Observe explicit environment records and omitted defaults using only synthetic
+values for the three named environment fields; never capture the operator's
+ambient values. URL parsing must preserve ordinary URL normalization and rejection,
+including default ports, credentials and mailto query names. Keep the original
+Unicode cleaning dependency as a read-only baseline input. Its exports are
+internal to this boundary's source observation; the qualified wording library
+continues to own the actual application's text-core consumer. No value-card source
+is retired until normal qualification, actual consumer parity and full application
+and image gates pass. The database-backed `value.ts` remains in B15.
+
+The independent harness captures 1,168,597 original observations across all eight
+capabilities in 16 complete ranges. It includes every Unicode code point, numeric
+rounding boundaries, URL parsing and mailto keys, explicit environment records and
+omitted/undefined defaults, plus shared-array mutation and lookup behavior. Five
+observer controls pass. Baseline source hashes remain identical. Contracts are
+authored separately from the observations. Linux Node 24.22.2 matches every
+original observation. Normal trusted source attestation and signed graph review
+accept the standalone child with lock
+`sha256:f39cbe1c77236a231db677d3abdfb653bbe56415f5d9ac6f9c6805f7d3090154`
+and import surface
+`sha256:bfa41643567f70f396dc91daa1195187a556db4ddde5de2fb6cb2bb85617c86f`.
+The initial unattested inventory attempt correctly refuses promotion and remains
+preserved. The accepted child's protected lock and profile stay unchanged while
+normal qualification runs. Its authored front doors, validation and entrypoints
+pass. An external naming draft preserves seven functions, four data exports and
+the readonly estimate tuple and union type, with no runtime algorithms. Consumer
+integration still requires the current parent gates and the verified public
+registration API from accepted parent ADR 0060.
+
+Both clean qualification builds pass the frozen profile. Projection
+`sha256:e1e25797b2c7ae2b9d9d2825f51edefe9c02478832d5fdbbb07c3936f85fb0d6`
+is admitted by decision
+`sha256:71afa5169e4661eb777cee79502ff08fcd1969c36b2c40cbf13da80ecf46d3ac`.
+The separately admitted build passes 15 tests; final child receipt
+`sha256:d8b3a8c64c3bb97822096c704e5891f7a63b4f985c207049f6ad621c5850959b`
+passes verification, validation and entrypoints, with protected inputs unchanged.
+
+The installed public API from accepted ADR 0064, originally local ADR 0060,
+registers this fifteenth child. It retains all
+14 prior registrations and 421 protected files. Planning and completed recovery
+preserve bytes, modes and modification times. Ordinary parent verification passes.
+The former private transaction and its five tests are retired after all 25
+framework controls pass from source and from the installed wheel; exact copies
+remain in external recovery. Historical local journals remain unchanged.
+
+All 14 previous consumer manifest entries remain identical. The original
+value-core module now contains public types, exact readonly tuple/literal types
+and native value aliases. Its complete namespace and EstimateId are compatible
+in both directions. All 1,168,597 observations match the actual consumer in 16
+fresh-process batches. Web admission passes 231 batches across nine libraries;
+agent admission remains 157 across six. Lint passes. Only the value oracle and
+verifier join the source scope, reaching 393 members with no gaps. Complete
+fifteen-library application passes all 1,821 checks with zero failures or skips.
+All 24 image checks pass using the SSD-backed default Colima profile. Both the
+system and Docker data disk are open by the VM process on `/Volumes/Liminal SSD`.
+Current receipt
+`sha256:4b755cd7b824a6b1622662923c0ea6c0b42e47deffa13a695145606409491997`
+binds candidate
+`sha256:73b4a26df8c9432b756269b2400674f267abaec27e1b8777f3fe6fbaf3f5a8bd`
+and evidence
+`sha256:446bcf9b8503fe0d68cbe34d6c5f249b1bf6e7f51d751f5e8d4e3c30875bfcba`.
+Current root and CI-pinned verification each pass three gates with two declared
+skips. Project validation and owned-entrypoint checks pass.
 
 ## Boundary inventory
 
@@ -908,13 +1385,13 @@ types, and does not touch the database, files, network, clock or environment.
 | ID | Boundary | Files | Public interface | Evidence | Owner | Class |
 |---|---|---|---|---|---|---|
 | B01 | MCP paste lines | `lib/paste-lines.ts` is now a typed naming binding | `shq`, `safeMcpUrl`, `claudeCodeLine`, `codexLine` | All 49 native cases, 23 shell checks, complete sealed application workflow and hosted image checks | `mcp.md` | intent: integrated qualified Component `local/paste-lines`. The original algorithm is retired; web and container builds consume exact verified package files. |
-| B02 | Wording helpers | `lib/v2/text-core.mts`, `plural.mts`, `money.mts`, `launch-words.ts`, `change-words.mts` | `cleanProse`, `isBlankText`, `dropInvisible`, `plural`, `count`, `usd`, `launchWords`, `changeWords`, `diffWords`, `counterSameAsBase` | direct imports in `scripts/test-v2.mjs:2271` (money), `:7337` and `:8203` (change-words), `:8225` (plural); text-core and launch-words only through the HTTP routes | `interface.md`, `goals-and-proposals.md` | intent: Component `local/wording` |
-| B03 | Home attention and evidence classes | `lib/v2/home-core.mts` | `appEvidence`, `activityEvidence`, `answerEvidence`, `receiptEvidence`, `appStatusWords`, `changeWaits`, `alignmentWaits`, `launchWaits`; `EVIDENCE_CLASSES`, `EVIDENCE_WORDS`, `UNLAUNCHED_STATES` | 82,905 preflight observations in nine batches, plus original `scripts/test-v2.mjs:6456`, `:8118` cases | `workspaces.md`, `interface.md` | intent: Component `local/home-attention`; source-bound contract review, wheel proof and qualification remain open |
-| B04 | Share-again wording | `lib/v2/share-again.mts` | `shareAgainText`, `shareAgainWords`, `sharingStoppedText` | `scripts/test-v2.mjs:3417` | `local-agent.md` | intent: Component `local/share-again` |
+| B02 | Wording helpers | `lib/v2/text-core.mts`, `plural.mts`, `money.mts`, `launch-words.ts`, `change-words.mts` are typed naming bindings | `cleanProse`, `isBlankText`, `dropInvisible`, `plural`, `count`, `usd`, `launchWords`, `changeWords`, `diffWords`, `counterSameAsBase` | direct imports in `scripts/test-v2.mjs:2271` (money), `:7337` and `:8203` (change-words), `:8225` (plural); text-core and launch-words only through the HTTP routes | `interface.md`, `goals-and-proposals.md` | intent: qualified and consumed `local/wording`; 4,598,945 actual consumer observations pass; complete application and image gates pass; original algorithms retired |
+| B03 | Home attention and evidence classes | `lib/v2/home-core.mts` is now a typed naming binding | `appEvidence`, `activityEvidence`, `answerEvidence`, `receiptEvidence`, `appStatusWords`, `changeWaits`, `alignmentWaits`, `launchWaits`; `EVIDENCE_CLASSES`, `EVIDENCE_WORDS`, `UNLAUNCHED_STATES` | 82,905 observations through both clean builds and the actual consumer; complete sealed workflow and hosted image checks | `workspaces.md`, `interface.md` | intent: integrated qualified Component `local/home-attention`; original algorithm retired |
+| B04 | Share-again wording | `lib/v2/share-again.mts` is now a typed naming binding | `shareAgainText`, `shareAgainWords`, `sharingStoppedText` | 1,163 observations through both clean builds and the actual consumer; complete sealed workflow and hosted image checks | `local-agent.md` | intent: integrated qualified Component `local/share-again`; original algorithm retired |
 | B05 | Authorization policy | `lib/v2/policy.ts` is now a typed binding | Authorization, goal readability, goal binding, all six data values and the existing ten public types | 331,937 observations through two clean builds and the consumer; complete sealed workflow and hosted image checks | `workspaces.md`, `goals-and-proposals.md` | intent: integrated qualified Component `local/policy`; original algorithm retired |
-| B06 | Input validation and error type | `lib/v2/validate.ts`, `lib/v2/errors.ts`, `lib/errors.ts` | `str`, `cleanName`, `oneLine`, `optStr`, `oneOf`, `nonNegInt`, `revisionRead`, `badRequest` | only through the HTTP routes in `test-v2.mjs` (no direct import) | `interface.md` | intent: Component `local/validate`, together with the error type it throws; needs direct probes first |
+| B06 | Input validation and error type | `lib/v2/validate.ts` remains source; `lib/v2/errors.ts` and `lib/errors.ts` are typed constructor/factory bindings | `str`, `cleanName`, `oneLine`, `optStr`, `oneOf`, `nonNegInt`, `revisionRead`, `badRequest` | Error subset: 22,618 observations through two clean builds and the actual consumer; validation remains covered through HTTP routes | `interface.md` | intent: integrated qualified `local/http-errors`, complete application and image gates pass; remaining validation still depends on B02 |
 | B07 | Value card rules | `lib/v2/value-core.mts` (imports B02) | `estimateSaid`, `cleanValueText`, `safeFollowUpUrl`, `loiUrlOk`, `followUpUrl`, `spanWords` | `scripts/test-v2.mjs:5149` | `goals-and-proposals.md`, `metrics.md` | intent: Component `local/value-rules`. It reads `process.env` only as a default argument, which the spec can make an input. |
-| B08 | Trust page Markdown renderer | `lib/trust/markdown.mts` | `parseMarkdown`, `parseInline`, `plain`, `slug`, `safeHref` | `scripts/test-v2.mjs:438` | `workspaces.md` (public trust pages) | intent: Component `local/trust-markdown` |
+| B08 | Trust page Markdown renderer | `lib/trust/markdown.mts` is now a typed naming binding | `parseMarkdown`, `parseInline`, `plain`, `slug`, `safeHref` | 1,153,547 observations through both clean builds and the actual consumer; complete 1,821-check application receipt and 24 hosted image checks | `workspaces.md` (public trust pages) | intent: qualified and registered Component `local/trust-markdown`; original parser retired after complete application and hosted image gates pass |
 | B09 | Agent spend parsers and price table | Original `packages/align-agent/src/spend/*.ts` (4 files, retired); `packages/align-agent/src/spend.ts` and `packages/align-agent/src/spend-types.ts` hold the typed consumer names | Batch and line parsers, counts, pricing, version and rounding; event and state types preserved at the consumer | Existing metering and agent tests; complete sealed consumer receipt recorded above | `local-agent.md` | intent: integrated qualified Components `local/spend-meter`, `local/spend-stream` and `local/spend-rounding`. Only the type and naming bindings remain retained. |
 | B10 | Agent envelope and share-state wording | `packages/align-agent/src/shared/envelope.ts`, `ended.ts`, `types.ts`; `notices.ts` is now a typed naming binding | `renderEnvelope`, `asksBlock`, `boundLimits`, `ENVELOPE_MAX`, `stateSituation`, `neverSentWords`, `SHARE_STATE_NOTICES`, the shared agent types | Notice helper matches 1,099 observations through two clean builds and its consumer, plus complete sealed workflow and hosted image checks | `local-agent.md`, `directives.md` | intent: integrated qualified `local/share-notices`; remaining envelope, ended wording and types stay open for `local/agent-envelope`, after CONTEXT-001 baseline verification |
 | B11 | Shell command parser | `packages/align-agent/src/hooks/shell.ts` is now a typed naming binding | `ShellCmd`, `parseShell`, `commandWords` | Two clean builds and actual consumer match 11,108 observations; complete sealed workflow and hosted image checks | `local-agent.md` | intent: integrated qualified Component `local/shell-words`; original algorithm retired |
@@ -923,7 +1400,7 @@ types, and does not touch the database, files, network, clock or environment.
 
 | ID | Boundary | Files | Evidence | Owner | Class |
 |---|---|---|---|---|---|
-| B12 | Storage, configuration and request plumbing | `lib/v2/core.mts`, `db.ts`, `node-sqlite.d.ts`, `ids.ts`, `events.ts`, `init.ts`, `config.ts`, `limits.ts`, `http.ts`; `lib/config.ts`, `secret.ts`, `startup.ts`, `locks.ts`, `http.ts`, `ratelimit.ts` | `test-v2.mjs` (opens the database directly with `node:sqlite`) | `workspaces.md` (rate limits, local and hosted edges) | retained: `node:sqlite` schema and migrations (`db.ts`, 1139 lines), secrets and environment. Every server module depends on it; the schema has to become its own data contract before anything that touches the database can transfer. |
+| B12 | Storage, configuration and request plumbing | `lib/v2/core.mts`, `db.ts`, `node-sqlite.d.ts`, `ids.ts`, `events.ts`, `init.ts`, `config.ts`, `limits.ts`, `http.ts`; `lib/config.ts`, `secret.ts`, `startup.ts`, `locks.ts`, `http.ts`, `ratelimit.ts` | `test-v2.mjs` (opens the database directly with `node:sqlite`) | `workspaces.md` (rate limits, local and hosted edges) | intent: the shared queue is integrated as qualified `local/promise-queues`, with its original algorithm retired. The remaining storage and configuration code stays retained: `node:sqlite` schema and migrations (`db.ts`, 1139 lines), secrets and environment. Every server module depends on it; the schema has to become its own data contract before anything that touches the database can transfer. |
 | B13 | Identity and sign-in | `lib/v2/auth.ts`, `captcha.ts`, `mail.ts`, `local-owner.ts`, `access.ts`, `creation.ts`, `disposable.ts`, `account.ts`, `lifecycle.ts` | `test-v2.mjs` | `workspaces.md` | retained: Better Auth, passkeys, email delivery and the bot check |
 | B14 | Workspaces and the sample | `lib/v2/workspaces.ts`, `sample.ts` | `test-v2.mjs` | `workspaces.md`, `goals-and-proposals.md` (Northstar sample) | retained: database |
 | B15 | Goals, change requests, alignments, reallocations, requests, asks | `lib/v2/goals.ts`, `goal-limits.ts`, `changes.ts`, `changes-read.ts`, `approval.ts`, `evidence.ts`, `value.ts`, `limit-suggest.ts`, `alignments.ts`, `reallocations.ts`, `requests.ts`, `asks.ts` | `test-v2.mjs` | `goals-and-proposals.md`, `directives.md` | retained: database transactions; the main product logic, a candidate after B12's data contract |
@@ -944,10 +1421,10 @@ types, and does not touch the database, files, network, clock or environment.
 | B24 | Static files | `public/*.svg` (5), `app/favicon.ico` | Only `file.svg` is referenced, by a route check in `test-v2.mjs:11787`; `globe`, `next`, `vercel` and `window.svg` look like unused Next.js template files | asset |
 | B25 | Node and Next.js packaging | `package.json`, `package-lock.json`, `tsconfig.json`, `next.config.ts`, `eslint.config.mjs`; `packages/align-agent/package.json`, `package-lock.json`, `tsconfig.json`, `scripts/postbuild.mjs` | `/litai.harness.mk` (`npm ci`, `npm run build`, `npm test`, `npm pack`) | flavor: `lang-typescript`, `ui-react`, `package-npm`, `build-make` (the project's current toolchain sources are `lang-javascript`, `package-npm`, `build-make`) |
 | B26 | Container and hosting target | `Dockerfile`, `.dockerignore`, `fly.toml`, `docs/HOSTING.md` | `scripts/test-image.sh` | flavor: `deploy-docker`, `os-linux`. Target variance: Mode L serves `127.0.0.1:3100` for one person on macOS; hosted mode (`HOSTED=1`) runs the image on Fly with data in `/data` and secrets set by `fly secrets`. |
-| B27 | Tests and test scripts | `scripts/test-*.mjs`, `test-all.sh`, `test-image.sh`, `oauth-test-net.mjs`, `packages/align-agent/test/**`; `native/*` except `libraries.json` holds the seven pinned oracles and verifiers | `/litai.harness.mk test`; latest completed parent receipt passes 1,818 checks | harness |
+| B27 | Tests and test scripts | `scripts/test-*.mjs`, `test-all.sh`, `test-image.sh`, `oauth-test-net.mjs`, `packages/align-agent/test/**`; `native/*` except `libraries.json` holds the ten pinned oracles and verifiers | `/litai.harness.mk test`; latest completed parent receipt passes 1,821 checks | harness |
 | B29 | Documents | `README.md`, `AGENTS.md`, `SECURITY.md`, `docs/*.md`, `docs/archive/**`, `docs/v2/WIRE.md`, `packages/align-agent/README.md`, `HARNESS_FACTS.md`, `packages/align-connect/README.md` | | harness (documentation for the retained code; `docs/archive` is v1 history) |
 | B30 | Repository metadata | `.gitignore`, `.claude/settings.json`, `packages/align-agent/.gitignore` | | harness |
-| B31 | Native package admission and build bindings | `scripts/native-libraries.mjs`, `native/libraries.json` | Eleven integrity/rollback controls, exact package membership, independent oracle replay and sealed consumer runs | harness |
+| B31 | Native package admission and build bindings | `scripts/native-libraries.mjs`, `native/libraries.json` | Thirteen integrity/rollback controls, exact package membership, independent oracle replay and sealed consumer runs | harness |
 
 ### Runtime state, data schemas, CI and release
 
@@ -968,11 +1445,11 @@ A pattern check on 2026-11-04 mapped all 362 tracked files under the implementat
 row above (first matching row wins), with none left over. Rows B01 to B11 hold 23 files; B12 to
 B22 and B28 hold 249; B23 to B30, excluding B28, hold 90.
 
-The current 377-file scope is reconciled on 2026-11-05 by
+The current 391-file scope is reconciled on 2026-11-05 by
 `tools/native-rewrite/map-retained-boundaries.py`: every file maps to one boundary,
 with no unmapped paths. Pure boundaries and their typed bindings hold 21 files;
 server, agent, UI and operator boundaries hold 249; assets, targets, packaging,
-harness and metadata hold 107. The new source-cache oracles and build admission
+harness and metadata hold 121. The new source-cache oracles and build admission
 files are explicit harness rows. This membership check does not ratify the pending
 authority-class review or close the remaining runtime boundaries.
 
@@ -982,13 +1459,32 @@ is a command-target distinction, with no outstanding root-plan defect.
 
 ### Proposed next boundary
 
-The two framework corrections pass their installed-wheel proof at `05d07fe6`.
-Rebind only the unqualified envelope child's
-Standard execution authority through the reviewed lifecycle plan, then retry its
-qualification and integrate its admitted package. The corrected CONTEXT-001
-baseline already passes the full retained workflow. Accept and qualify B04's
-share-again wording with its prepared 1,163 observations and contracts, then B02's
-wording library with its reviewed source-bound contracts and 49-batch profile.
-Retain the complete original application parity
-gates as each boundary transfers. B10's remaining envelope, ended-state wording
-and type boundaries, and the full program, stay open.
+Integrate the qualified wording library after the twelve-library receipt and
+current verification gates pass, then repeat complete application and image
+checks. Its two clean builds match all 4,598,945 frozen observations; its admitted
+build passes 30 tests and its final child gates pass. Preserve all twelve existing
+manifest entries and the original five public TypeScript interfaces. The remaining
+agent envelope is undergoing normal qualification of its clarified zero-kept
+heading rule. All other contracts and the complete profile remain unchanged.
+B06 validation and B07 value rules follow the wording consumer transfer. Complete
+[SDK-FOLLOWUPS-001](active-work.md#sdk-followups-001) before declaring framework
+integration finished. Runtime replacement, authority-class review and the full
+rewrite remain open.
+
+### Overlapping native export names
+
+The unaccepted B02 and B03 import surfaces expose a concrete adapter constraint:
+wording's `count` overlaps spend-stream's `count`, and Home's `data` overlaps
+policy's `data`. The package-specific bindings already preserve the module
+namespaces, but the flat compatibility index rejects duplicates globally.
+NATIVE-BINDINGS-001 owns the correction. Keep the natural public APIs and source
+contracts; do not rename functions to fit this harness restriction. Current spend
+consumers use the flat agent index, so its unambiguous aliases must keep working.
+
+The adapter now exports every provider as an explicit package namespace and keeps
+flat aliases only when one selected provider owns the name and it does not shadow
+a package namespace. Package-local duplicate names still refuse before output
+replacement. The two new controls call both distinct providers of `count`, prove
+the ambiguous flat name is absent, and prove a single-provider selection restores
+the alias. All eleven prior integrity, acceptance, isolation and rollback controls
+also pass. Complete application parity remains the closing gate.

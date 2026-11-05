@@ -5,7 +5,7 @@ helpers do not change that environment or publish anything.
 
 `map-retained-boundaries.py SCOPE_PLAN_JSON OUTPUT_JSON` checks that every retained
 source member has a boundary owner. It preserves the distinction between file
-membership and pending authority-class review. The current 377-file scope maps
+membership and pending authority-class review. The current 393-file scope maps
 without gaps; new unmatched paths fail explicitly.
 
 `litai-local.py` forwards the ordinary CLI arguments and adds conservative diagnostic
@@ -65,7 +65,8 @@ fidelity, mutation detection, matrix coverage and empty-range refusal.
 1,163 observations across 13 batches for the three share-again wording functions.
 It covers device states, null and opaque names, structured sentence parts, deleted
 accounts, omitted options and explicit undefined defaults. The standalone verifier
-preserves return/throw distinctions and argument mutations. Its three controls run
+preserves return/throw distinctions, argument mutations, nested references and
+output prototypes. Its four controls run
 with `node --test tools/native-rewrite/test-share-again-harness.cjs`.
 
 `make-shell-profile.mjs SOURCE_SNAPSHOT PROFILE_JSON CONTRACTS_JSON` captures
@@ -106,6 +107,9 @@ For B02, run `capture-wording-baseline.mjs SOURCE_SNAPSHOT CAPTURE`, then
 text cleaners, currency boundaries, launch and change wording, optional defaults,
 callback traces and preserved input references. Four verifier controls run with
 `node --test tools/native-rewrite/test-wording-harness.cjs`.
+`make-wording-bindings.mjs` prepares all five typed public facades outside retained
+source. It preserves sixteen function signatures, three public type declarations
+and three scalar data names; it emits no runtime algorithms.
 `make-wording-contracts.mjs OUTPUT` authors all 17 contracts and refuses omissions.
 `check-wording-contracts.mjs SOURCE_SNAPSHOT CONTRACTS` checks exports, public data
 and private limit labels with the TypeScript parser without executing source.
@@ -119,7 +123,53 @@ identity and mutations. Four controls run with
 `node --test tools/native-rewrite/test-home-harness.cjs`.
 `make-home-contracts.mjs OUTPUT` authors the nine contracts;
 `check-home-contracts.mjs SOURCE_SNAPSHOT CONTRACTS` checks all exports and public
-data through inert TypeScript AST inspection. These are preflight inputs too.
+data through inert TypeScript AST inspection. B03 is qualified and consumed by the parent.
+
+For B08, `make-markdown-profile.mjs SOURCE_SNAPSHOT PROFILE CAPTURE` preserves
+1,153,547 observations in 21 batches, including all Unicode code points, exact
+Markdown structures, callback and error identity, placeholders, sparse arrays
+and seven cached real document fixtures. Four controls run with
+`node --test tools/native-rewrite/test-markdown-harness.cjs`.
+`make-markdown-contracts.mjs OUTPUT` authors all five contracts;
+`check-markdown-contracts.mjs SOURCE_SNAPSHOT CONTRACTS` checks exports, six public
+types and grammar literals with inert AST inspection. The qualified child and its
+actual typed consumer match the complete profile.
+`make-markdown-bindings.mjs SOURCE_FILE OUTPUT_FILE` prepares six public types and
+five function aliases outside retained source for review before registration and
+integration. `make-home-bindings.mjs` follows the same rule for Home's types,
+function names and shared metadata.
+
+For B06's error subset, `make-http-errors-profile.mjs SOURCE_SNAPSHOT PROFILE
+CAPTURE` covers 22,618 observations in nine batches. Source qualification requires
+TypeScript 5.9.3's `tsc` on PATH and uses the existing ES2017 target in a disposable
+directory. The generated API needs no TypeScript compiler. Five controls run with
+`node --test tools/native-rewrite/test-http-errors-harness.cjs`.
+`make-http-errors-contracts.mjs` authors the five contracts;
+`check-http-errors-contracts.mjs` checks both constructors and all four factories
+without executing source. `make-http-errors-bindings.mjs SOURCE_SNAPSHOT OUTPUT`
+prepares two ambient class declarations and the original constructor/factory
+names outside retained source. They preserve public types and subclassing without
+runtime algorithms. The qualified child and actual consumers match all nine
+batches, including class identity, descriptors, aliases and original errors.
+
+For B12's promise queue, `make-queues-profile.mjs SOURCE_SNAPSHOT PROFILE CAPTURE`
+records 5,290 asynchronous observations in 22 batches. The standalone
+`queues-harness.cjs` isolates import modes, observes the shared global Map and
+uses controlled promises and bounded microtask drains. Five controls run with
+`node --test tools/native-rewrite/test-queues-harness.cjs`.
+`make-queues-contracts.mjs` and `check-queues-contracts.mjs` keep authored meaning
+separate from observations and check the one generic public API inertly.
+Both clean qualification builds and the separately admitted build pass all queue inputs.
+Consumer and complete application evidence belong to the parent program.
+
+For the remaining B06 validation functions,
+`make-field-validation-bindings.mjs SOURCE_SNAPSHOT OUTPUT_DIRECTORY` prepares
+one context-bound native factory call, fifteen public function aliases, six data
+aliases and the original Body type. It preserves generic choice inference and
+both revision overloads. The draft must remain outside retained source until
+normal qualification, admission and public child registration pass. The original
+and drafted public namespaces pass TypeScript compatibility in both directions;
+no validation consumer is transferred by this helper alone.
 
 After each library has a current qualified projection and receipt, use the local
 `litai cache publish --target project-committed` operation in its project to copy
@@ -129,24 +179,26 @@ consumer pins with:
 ```sh
 python tools/native-rewrite/make-consumer-manifest.py . \
   components/legacy-project-wrapper/implementation/native \
-  spend-meter spend-stream spend-rounding paste-lines policy shell-words share-notices
+  spend-meter spend-stream spend-rounding paste-lines policy shell-words share-notices share-again home-attention trust-markdown http-errors promise-queues wording agent-envelope value-rules
 ```
 
 The retained agent build runs `scripts/native-libraries.mjs` from the retained
-implementation. It verifies the pinned package bytes and replays all 98 independent
+implementation. It verifies the pinned package bytes and replays all 157 independent
 acceptance cases before writing the source and distribution copies. Development
 builds check live provider locks and authority heads; sealed builds receive the
 reviewed manifest and the same immutable cache bytes. The full sealed harness
 receipt remains necessary before claiming application integration. Keep all consumed
-libraries in the manifest. The web build selects paste-lines and policy, replaying
-their 92 independent batches; the agent selects the three spend libraries and
-shell-words and share-notices, replaying 98 batches. `npm run prepare:container` exports the exact
+libraries in the manifest. The web build selects paste-lines, policy, share-again,
+home-attention, trust-markdown, http-errors, promise-queues, wording and value-rules, replaying their 231 independent batches; the agent selects the three spend libraries and
+shell-words, share-notices and agent-envelope, replaying 157 batches. `npm run prepare:container` exports the exact
 verified web inputs locally.
 The Docker build checks them and reruns web acceptance before compiling, while
 the runtime image contains only the application build and operator files.
 Mechanical package-specific bindings live under `.bindings/`. Browser consumers
 import only their own package binding; adding a server library never adds it to
-the paste helper's import graph.
+the paste helper's import graph. The root index exports each package namespace
+and only unambiguous flat aliases. Overlapping names never silently select a
+provider, while duplicate names within one package still refuse.
 
 Register new children before editing retained consumer source. The addition helper
 requires the parent's current retained receipt and correctly refuses a stale one.
@@ -161,43 +213,61 @@ litai spec qualify .literate/native-projects/local-spend-meter/components/spend-
   --allow-host-execution
 ```
 
-`register-qualified-child.py` is a local extension for adding an already-qualified
-child to a qualified parent. It uses the pinned framework's current-evidence,
-safe-path, registration and storage routines. It never changes the stage order or
-permits an unqualified child. Generate a plan with `--project` and `--child`, inspect
-it, then apply that exact file with `--apply`. The child must be a direct directory
-under `.literate/native-projects` and have no coordinate or project-ID collision.
-This registers component authority; wiring the application to consume its package
-and retiring retained source are later, separately reviewed work.
-
-The extension holds both framework metadata locks, checks that the reviewed plan
-is current, registers the child, and revalidates every qualified component before
-renewing the parent's exact evidence. It retains the previous registry and authority
-under `.literate/native-additions`. Exceptions restore both metadata files. An abrupt
-process or machine interruption between file writes leaves a stale parent claim,
-which the ordinary framework gate rejects. Preserve that journal and recover its
-prior metadata before retrying; do not treat an interrupted application as success.
-
-Run the transaction failure tests with:
+Use the public framework commands to add an already-qualified child to a qualified
+parent. Accepted parent ADR 0064, originally reviewed locally as ADR 0060, and
+issue #315 own this operation. Approved local
+framework commit `4d672137` supplies it; that commit is not yet published or released.
+Select its separately verified non-editable installation when running these commands:
 
 ```sh
-python -m unittest discover -s tools/native-rewrite -p 'test_*.py'
+litai project native-child plan-add .literate/native-projects/CHILD --project . > PLAN.json
+# Inspect the exact plan before applying it.
+litai project native-child apply-add PLAN.json --project . --acknowledge
+litai project native-child recover-add JOURNAL --project .
 ```
 
-The portable upstream defect draft is part of the native rewrite program. Filing
-it requires the operator's explicit go.
+The canonical plan binds the current receipt, parent authority, exact registry,
+child definition, authority heads and qualified evidence union. Apply rechecks
+these under the registry and authority locks. Ordinary failures roll back; process
+interruption leaves a guarded journal beneath `.literate/native-child-additions`.
+Recovery refuses unrelated input changes and restores only the known transaction.
+Source retirement, consumer wiring and execution remain separate operations.
+
+The former local transaction and its five tests are retired after 25 framework
+transaction controls pass from source and from the installed wheel. All 93 focused
+installed regressions pass at `4d672137`. The real public operation
+adds the fifteenth child, preserves all 14 prior registrations and 421 protected
+files, and passes ordinary parent verification. Its planning and completed recovery
+preserve protected bytes, modes and modification times. Exact copies of both old
+helper files remain in the external recovery directory. Earlier
+`.literate/native-additions` journals remain unchanged; the new command does not
+reinterpret that historical format. A separate public-CLI fixture qualifies two
+fresh libraries, interrupts the process after registry publication, observes ordinary
+verification refusing the stale qualification and recovers exact prior metadata.
+Reapplication retains the first child and all 525 protected files. The complete
+fifteen-library application then passes all 1,821 checks through that installed SDK.
 
 `source-module-extensions.patch` contains the staged source inventory correction
 against parent commit `4548261e3c2293c75b22dcfafd831821c80179a6`: JavaScript/TypeScript
 module and JSX extensions, preserved exclusion classifications, focused controls
 and user documentation. Check and apply its zero-context diff with
 `git apply --check --unidiff-zero` and `git apply --unidiff-zero` against that exact
-base. Fourteen conversion regression tests, lint and formatting
-pass. A new non-editable runtime remains pending an explicitly approved source
-commit because the wheel backend requires a clean exact checkout.
+base. Fourteen conversion regression tests, lint and formatting pass. Commit
+`05d07fe6` includes this correction and the bounded import command. Its separate
+non-editable wheel proves unchanged module derivation and all 51 import mappings.
+The later export-map correction is published in draft framework PR #313 at
+`d4bd72bf`; its clean wheel passes the import regression and normal qualification
+of the unchanged wording profile. Existing registered children retain their pins.
 
 `retained-scope-qualified-children.patch` is a portable diff against parent revision
 `d935813eba84b391cacd842be848b31dae17a582`. It uses zero-context hunks, so review
 and check it with `git apply --check --unidiff-zero` before applying it to that
 exact base. The isolated parent checkout also retains the source commit and its
 later verification record.
+
+
+`library-export-order.patch` compares exact own export keys independently of
+insertion order. Its tests retain wrong-target, symbol, dependency and path
+refusals, including an inherited missing key replaced by a same-count extra key.
+Upstream issue #314 and draft PR #313 own this correction. The rewrite program
+records its source commit, wheel identity and real qualification evidence.
