@@ -28,7 +28,7 @@ export function EvidenceLabel({ kind, detail, size = "m" }: { kind: EvidenceKind
         <I />
         {WORD[kind]}
       </span>
-      {detail && <span className="min-w-0 break-words font-mono text-[12px] opacity-90">{detail}</span>}
+      {detail && <span className="min-w-0 break-words font-mono text-[12px]">{detail}</span>}
     </span>
   );
 }
