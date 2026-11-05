@@ -2,7 +2,9 @@
 
 Branch `agent/LIM-2472-integration`. App at `components/legacy-project-wrapper/implementation` (paths below are relative to it unless they start with `design/`). Base of the whole set: `main` at `b16f8d1`.
 
-What the base holds: foundation (`e6ea124`), Stream R (rest of app, `3cc0f71`), shared surfaces (`340ead6`, which contains `db544d3`, `d1d0ca1`, `a6ff222` and foundation `e6ea124`), and the Requests tab moved onto the shared review, with Add evidence wired (`onDone` passed to ReviewBody). No concept is merged. Home and the workspace shell (header, tab nav, workspace select) are left to the concept the founder picks: their screens and findings are marked "pending the concept".
+What the base holds at `a5fbe8e`: foundation (through `d0f6dbe`), Stream R (`3cc0f71`), shared surfaces (through `f98dd2a`), concept A's rail shell, review drawer and Home parts (through `b2c02dc`), and Mini S1's list and desk taken by path (`f4a7609`). Home follows the founder's direction of 2026-11-05 (`~/liminal/.private/align-lim2472/brief/DIRECTION.md`): one ranked "needs a human" list with evidence, then Since you last looked, then Goals. Requests is the decision desk, and both open the same review drawer.
+
+Read the sections in order of date. "Direction: Home and Requests" below is the current state. The D2 walk sections, including the coverage table, were run on earlier bases: Home and the shell were out of scope there, and Requests was still the review list, so they do not describe Home or the Desk. The final walk and the 64-page audit are held until the list and Home are stable.
 
 ## Merges and resolutions
 
@@ -23,12 +25,31 @@ What the base holds: foundation (`e6ea124`), Stream R (rest of app, `3cc0f71`), 
 | `eb1b357221b6be23b68325f152eaa1b2727bad14` (contains `4c7cd15` and foundation `1a4e6d7`: no outline-colour transition on Segmented and kit `Btn`) | `4ba62b0ad85f87e1599911f9d0ae1cda63f5ef7a` | clean: `ds/segmented.tsx`, `kit.tsx` |
 | concept A `3f90b9cad56136c17a11b27b060788c2396242f7` (rail shell, review drawer, first run, A's Home as the starting file) | `1ce4a1a1e8dd3adb62355af7151867775dae78ff` | clean: `kit.tsx`, `w/[ws]/view.tsx`, `w/[ws]/first-run.tsx`, `w/[ws]/review-drawer.tsx`, `design/prototypes/lim-2472/a/*` |
 | foundation `27a686b5c541db46d457f121acc0dd0d62336d04` (`NeedRow`, `NeedList`, `NeedAction`) | `9645fcd3364f7c2c4fcf737101a378e1996e187c` | clean: `_ui/ds/need.tsx`, `_ui/ds/index.ts` |
+| foundation `b69d7e1dfac3778b3c76261d2a8dd03fcc729085` (finished NeedRow, `EvidenceLabel kind="self"`, `need-list.html` specimen) | `01c06a33ab6e58da7ff691b91f1902273f685932` | clean; the merge followed the foundation note's rename |
+| concept A `7b77ae26ea918db53abc2e4291850f1b8e89ad9d` (`_ui/home/since.tsx`, `goal-lines.tsx`, `cr-status.ts`; drawer's Not found and Try again states) | `2605b8161ebf56138b80592a74b19e11222bb767` | clean, one auto-merged hunk in `review-drawer.tsx` |
+| foundation `13fcfe802e982db218404d3f4520e9484c75789e` (foundation report at the design/ path at the source) | `8e0d5dde4537c68715d860a806a2111a39368856` | clean; the root file did not come back |
+| shared surfaces `7413f0b20df22e8cca32b4c4531cc5f0ef00110d` (`EvidenceSummary`, `changeFacts`, `goalFacts`) | `4b9fd0e657c98d5f34ef5a9ab74eaa820a381c17` | clean |
+| foundation `66795179b83f560edf17d1b533286767e80612e6` (specimen only) | `cbb085f88f8d4dbfbdacd252b446ec96c02311cf` | clean |
+| shared surfaces `b2de51e0f693d3a11d495f9ae0c423c73bd7fd33` (`DecisionLinks`; the review as a cold arrival at `/record?cr=`; two audit Lows) | `bb8a9c981730b8f548c4f630147f7e7d4fb5f60c` | clean |
+| shared surfaces `968bbac2e7dbc882a7ec60af3a7a3028060f0403` (absence chips removed at the source; `hasEvidence`) | `9e6af787e9a72a73c698667d3aefd08a848c228f` | clean |
+| foundation `d0f6dbee2af5f6d3157fea1c9cc3f72f18d36896` (`rankNote` optional, `empty={null}` renders nothing, row fixes at 320) | `c474a734b077cf1724631c52808801ec4d677765` | clean |
+| shared surfaces `f98dd2aa68659846fe193bf184da2698ab8d7a58` (review columns named by state; the two post-decision notes; plain seed names) | `d9a06d90c8822cbc38645af8b4e67f08a737f86d` | clean |
+| concept A `b2c02dc7393b401bf702fc150636ddf13b9fc7f9` (quiet goal lines; Since leaves out the person's own events; Menu sheet focus) | `9d43944983c9b1d3d2abfb67d8fb40239dc46782` | clean; the drawer's duplicate-link removal survived |
+
+Taken by path from concept B, never merged (its DeskShell, its Home and its DecisionDrawer are not in this base):
+
+| From | Files | In commit |
+|---|---|---|
+| `5bfa593ad357c5c79b7bfa0c1bd857435db4c637` | `_ui/home/needs.ts`, `design/prototypes/lim-2472/b/needs-check.mts`, `b/seed.mjs` (the check imports it) | `9029dc6b3c5e3d7ceeb269326798b6eb42578e46` |
+| `56cfe50c70a5a4804c9fca4019a601b67b1e23a9` | `_ui/home/needs.ts`, `needs-list.tsx`, `_ui/b/{desk.tsx,act.tsx,model.ts,parts.tsx}`, then `needs-check.mts` | `df54c65d7d24aeb5814604188342b16a951766b2`, `bb4ff18c73ce84c9b48a2c56bb1971699e26febd` |
+| `d539b486b3caa2501033c6bb3ca263dff09b1309` | `_ui/home/needs.ts`, `needs-list.tsx` | `e55c668a913deda6d5d47d37776bad18b819806c` |
+| `f4a7609c39a333459bf13467485ebf275646d90e` | `_ui/home/needs.ts`, `needs-list.tsx`, then `needs-check.mts` | `5888636816de2b57315f38fd390a4dc57b8b4a45`, this report's commit |
 
 No conflicts, so no file needed a side chosen. No rebase, no force push, no stash.
 
 ## ADDED / REPLACED / DELETED (whole base against main `b16f8d1`)
 
-86 files: 39 added, 47 modified, 0 deleted. No file under `app/api/**`, `lib/**`, `proxy.ts`, migrations or tests is touched.
+102 files: 55 added, 47 modified, 0 deleted. No file under `app/api/**`, `lib/**`, `proxy.ts`, migrations or tests is touched.
 
 ### Foundation
 - ADDED: `app/app/_ui/ds/{data-table,drawer,empty-state,evidence-label,icons,kbd,panel,segmented,status-pill,theme,theme-script,timeline}.tsx|ts`, `app/app/_ui/ds/index.ts` (one import path, `@/app/app/_ui/ds`), `design/prototypes/lim-2472/LIM-2472-FOUNDATION.md`, `design/prototypes/lim-2472/foundation.html` (specimen).
@@ -42,13 +63,13 @@ REPLACED (restyle; requests and logic unchanged, see `design/prototypes/lim-2472
 - REPLACED: `w/[ws]/apps/view.tsx` (set-up panels, `#connect` anchor), `w/[ws]/sessions/view.tsx` (panel system), `_ui/evidence.tsx`, `_ui/activity.tsx` ("Reported activity", not "Active").
 
 ### Concept A and the Needs parts
-- ADDED: `w/[ws]/review-drawer.tsx`, `_ui/ds/need.tsx`, `design/prototypes/lim-2472/a/{LIM-2472-REPORT-A.md,seed.mjs,shots.mjs}`.
-- REPLACED: `_ui/kit.tsx` (Shell: the rail, and a top bar with Menu on phones), `w/[ws]/view.tsx` (A's Home as the starting file for the direction's Home), `w/[ws]/first-run.tsx`.
+- ADDED: `w/[ws]/review-drawer.tsx`; `_ui/ds/need.tsx`, `evidence-summary.tsx`, `evidence-facts.mts`, `decision-links.tsx`; `_ui/home/{needs.ts,needs-list.tsx,since.tsx,goal-lines.tsx,cr-status.ts}`; `_ui/b/{desk.tsx,act.tsx,model.ts,parts.tsx}`; `design/prototypes/lim-2472/need-list.html`; `design/prototypes/lim-2472/a/{LIM-2472-REPORT-A.md,seed.mjs,shots.mjs}`; `design/prototypes/lim-2472/b/{needs-check.mts,seed.mjs}`; `design/prototypes/lim-2472/s/evidence-facts.check.mjs`.
+- REPLACED: `_ui/kit.tsx` (Shell: the rail, and a top bar with Menu on phones), `w/[ws]/view.tsx` (see "Direction" below), `w/[ws]/first-run.tsx`.
 
 ### This step (integration)
 - MOVED: `LIM-2472-FOUNDATION.md`, repo root → `design/prototypes/lim-2472/LIM-2472-FOUNDATION.md`. Every branch adds it at the root, which is outside the allowed paths. A later merge of a foundation branch that edits it should follow the rename; check that it does.
-- REPLACED: the review drawer's "Work and evidence for this goal" link now goes to `/app/w/<ws>/work?goal=<goal>`, not the goal page (`w/[ws]/review-drawer.tsx`). Shared surfaces doesn't carry this file, so nothing upstream was changing it.
-- REPLACED: `app/app/w/[ws]/requests/view.tsx`. Each change request is now the shared review from `@/app/app/_ui/ds` in a ds `Panel`: `ReviewBody {ws, cr, me, titleOf}` over `ReviewActions {ws, cr, me, onDone: reload, compact}`, with "Goal" and "Record" links (44px on phones). The tab no longer imports `_ui/decide.tsx`, `_ui/crparts.tsx` or `_ui/changes.tsx` (those files are unchanged; the goal page still uses them).
+- The review drawer's "Work and evidence for this goal" link went to `/app/w/<ws>/work?goal=<goal>` at `768bda9`, and was later dropped with the drawer's other link: `DecisionLinks` in ReviewBody carries both now.
+- REPLACED (first step, since superseded by the Desk; see "Direction" below): `app/app/w/[ws]/requests/view.tsx`. Each change request was the shared review from `@/app/app/_ui/ds` in a ds `Panel`: `ReviewBody {ws, cr, me, titleOf}` over `ReviewActions {ws, cr, me, onDone: reload, compact}`, with "Goal" and "Record" links (44px on phones). The tab no longer imports `_ui/decide.tsx`, `_ui/crparts.tsx` or `_ui/changes.tsx` (those files are unchanged; the goal page still uses them).
   - Same two reads as before: `GET /api/v2/workspaces/<ws>/change-requests` and `GET /api/v2/workspaces/<ws>/goals` (the goal titles that `useGoalTitles` read, now read in the tab itself for `titleOf`). No new API call. Every decision is the shared review's own POST to `…/change-requests/<id>/<action>`.
   - The three sections are headings in ONE flat keyed list, so a request that moves section after a decision keeps its `ReviewActions` mounted and its "Recorded: …" or "Not recorded. …" notice stays on screen (main's card kept notices in a module map, `crparts.tsx:496`; the shared review keeps them in component state). Cost: the sections are no longer `<section aria-label>` landmarks; each is an `h2` with an id.
   - Fields: the shared review needs nothing the tab doesn't fetch (`ChangeRequest` from the list carries `can`, `revisions`, `diff`, `condition`, `launch`, `behind`).
@@ -66,10 +87,51 @@ REPLACED (restyle; requests and logic unchanged, see `design/prototypes/lim-2472
 | 7618-7624 | B12: sample Requests tab | expects "You proposed a change"; the review says "You asked to change". "No other requests of yours. Yours that need you are under Waiting on you." is kept verbatim |
 | 5415, 5430, 5437, 5446 | value card on the goal page at 1000px (R) | after R's defect-4 gate only the approver (V3) sees `[data-value-card]`; the browser is V1, so `waitForSelector` at 5415 times out |
 | 5088 | goal activity card (S) | matches `/Active now\s+1/`; the label is now "Reported activity, last 90 min" |
+| 4135-4175, 7537, 7618 (again) | the same Requests checks | since the Desk replaced the review list, these read a table: "Waiting on you", section `h2`s and the review cards are gone from the tab until a row opens the drawer |
+| 4184-4187, 6621-6623 | new workspace opens on Home, "Know what needs you", tiles | Home no longer has that heading or the tiles |
+| 5876, 6611-6617, 6658-6659, 6682, 6714, 6749-6751 | `[data-home-summary]`, `[data-home-app]`, `[data-home-item]`, `#waiting` | those hooks left with A's Home and the panels removed for the direction |
+| 5905-5906 | first run "Two ways to start" on the owner's Home | not read against the new Home; first run is Mini S0's lane |
 | 3783-3797 | 44px buttons at 390 incl. Requests | expected to pass: review buttons are `max-sm:min-h-[44px]`; hidden secondaries have height 0 |
 | 4204 | empty Requests says "You have not proposed a change" | kept verbatim, should pass |
 
 The goal page's own request cards (`5506-5543` and the U/B checks that call `cardText` on a goal page) still render main's `ChangeRequestCard`: unchanged here.
+
+## Direction: Home and Requests (current state, `a5fbe8e`)
+
+### What changed
+- **Home (`w/[ws]/view.tsx`).** In this order: the H1 count ("5 things need you", "1 thing needs you", "Nothing needs you"; "Needs you" while reads are in flight or when a failed read leaves zero unknown), `NeedsList` with `heading={false}`, `Since`, `GoalLines`. The connect note appears only when nothing is connected. The header has "Connect an agent" only when no app is connected and that note isn't carrying it.
+- **Removed from Home (code deleted):** A's Needs-you cards and rail, `NextCard`, `changeCard`, "Work by goal", `GoalGroup`, `SessionRow`, `Delivered`, teammates' sessions, the connected-apps panel, the "Command center" kicker, the subline with its apps clause, the "Read it as" legend, and my interim `NeedRow` rendering and `app_behind` filter.
+- **404 on Home's read.** The page checks membership on the server before Home mounts. If Home's own read returns 404 (removed while Home is open), Home now renders `NotInWorkspace`.
+- **Requests (`w/[ws]/requests/view.tsx`).** The tab is `Desk`, with the same `ReviewDrawer` Home uses. `RequestReview`, its Panel list and the goal-titles read are deleted. The flat keyed list from `19b27b9` went with them; the drawer stays mounted through a decision, so the notice still survives.
+- **Review drawer (`w/[ws]/review-drawer.tsx`).** `useReview` moved here and now reads `useSearchParams`, so a plain link from a row opens the drawer on any page. It honours `&choice=`, passed to `ReviewActions` as `initialChoice`. The drawer's own record and work links are gone: `DecisionLinks` in ReviewBody is the one set. One drawer in the app; B's DecisionDrawer is not in the base.
+- **Stable `onClose` on Home and Requests.** `ds/drawer.tsx` re-takes focus whenever `onClose` changes, which pulled focus off a notice that had just taken it. The hosts pass a stable callback; the Drawer itself is unchanged.
+
+### Local delta on Mini S1's file
+`_ui/home/needs-list.tsx` carries one addition on top of `f4a7609`: an `onCount?: (n: number | null) => void` prop and one `useEffect`, marked "Local delta (integration)". It reports Needs-you rows only, and null while reading or when a read failed and the rest found nothing. Home's H1 reads it. A by-path re-take drops it, and the H1 then stays on "Needs you". It has been asked for upstream.
+
+### Checks on this head
+- **`needs-check` on `f4a7609`'s `needs.ts`** (fresh server, real API, its `needs-check.mts` from `f4a7609`): exit 0, 22 PASS, 0 FAIL. Owner 13 rows and 1 notice; member 9 rows and 1 notice; viewer 9 rows and 0 notices. Owner by phase: Needs you 5 (2 launch, 2 decide, 1 app_behind), Waiting on others 3, Done 5. Home's filters show the same 5, 3, 5. The earlier 14 / 10 / 9 counted the never-read app as a row; it is a notice now.
+- **Reads on Home's first paint** (dev server, 1440, owner; waited for the H1 count, then 1.5s):
+
+| Read | Dev count | Production estimate |
+|---|---|---|
+| `…/value` | 4 (2 unique URLs) | 4 |
+| `…/goals/<g>/change-requests?state=approved` | 18 | 9 |
+| `…/goals/<g>/requests` | 9 | 9 |
+| `/change-requests`, `/home`, `/goals` | 4 each | 2 each |
+| `/asks`, `/alignments`, `/sessions`, `/workspaces` | 2 each | 1 each |
+| All API reads | 51 | about 32 |
+
+  Member and viewer: `…/value` 4, all reads 48. The estimate rests on dev mode doubling effects that fire on mount only: reads that start on mount double, and reads that start after another read resolves don't. No production build was run, so these are estimates. An earlier note of about 3 `…/value` reads was wrong: by the code, the 4 are the same 2 URLs read twice, once by NeedsList's send check and once by the goal lines (the count itself was measured; which component made each read was not). That is not per row: `…/value` stays 4 with 13 rows. The `?state=approved` read is one per goal, from the goal lines' EvidenceSummary. Passing `launched` from Home's change-request read would remove both repeats (Mini S0's file).
+- **Quick pass on `a5fbe8e`** (fresh `.next`, re-seeded, dark): owner, member and viewer Home at 1440, owner at 390 and 320, a real non-member at 1440, and one decision through the drawer. No console errors, no sideways scroll. Non-member: "This workspace doesn't exist or you're not in it", never "Nothing needs you". The decision showed exactly "Recorded: you approved revision 1." (focused) and "Approval is not launch: version 2 is released only when you launch it.", with one set of links. Both notes come from `ds/review.tsx`. Screenshots: `~/liminal/.private/align-lim2472/I-compose/`.
+
+### Open, with Mini S1 (`needs-list.tsx`)
+1. The full rank note always shows under its disclosure: line 219 still passes `rankNote`, and the wrapper's CSS no longer hides it after `d0f6dbe`. First row's title: y=204 at 1440, 365 at 390, 429 at 320 (target about 160). Home is 2,097px tall at 390 (target about 1,400).
+2. With zero rows, a "Nothing needs you." box still shows under the H1.
+3. The same box shows when a source couldn't be read and nothing else was found; the H1 stays neutral there.
+4. `onCount` upstream, as above.
+
+Unwalked: `data-needs="unreadable"` never rendered in the pass, because Home's own 404 handling shows first. Supersede on the record is read only.
 
 ## After-set (both themes)
 
@@ -359,6 +421,9 @@ That is `--focus` (#6f4dda) every time, never white. Raw: `I-base/walk/ring-ligh
 
 
 ## Needed outside my files (listed, not changed)
+
+Current list: "Open, with Mini S1" under "Direction" above, plus the items here. The Add evidence and record items below were written on earlier bases.
+
 
 - `_ui/ds/review.tsx` (S): the no-evidence line in the phone confirmation (L5). H1, H2, M3, M4 and M9 are fixed.
 - Server: record the time of accepting a suggested change on the request, so non-owners see it, and detect every accepted counter, not only the latest (M7's remaining limit). M1 and M7 are fixed in the front end.
