@@ -2,7 +2,7 @@
 
 Branch `agent/LIM-2472-integration`. App at `components/legacy-project-wrapper/implementation` (paths below are relative to it unless they start with `design/`). Base of the whole set: `main` at `b16f8d1`.
 
-What the base holds: foundation (`e6ea124`), Stream R (rest of app, `3cc0f71`), shared surfaces (`db544d3`, which contains `d1d0ca1`, `a6ff222` and foundation `e6ea124`), and the Requests tab moved onto the shared review. No concept is merged. Home and the workspace shell (header, tab nav, workspace select) are left to the concept the founder picks: their screens and findings are marked "pending the concept".
+What the base holds: foundation (`e6ea124`), Stream R (rest of app, `3cc0f71`), shared surfaces (`340ead6`, which contains `db544d3`, `d1d0ca1`, `a6ff222` and foundation `e6ea124`), and the Requests tab moved onto the shared review, with Add evidence wired (`onDone` passed to ReviewBody). No concept is merged. Home and the workspace shell (header, tab nav, workspace select) are left to the concept the founder picks: their screens and findings are marked "pending the concept".
 
 ## Merges and resolutions
 
@@ -12,6 +12,7 @@ What the base holds: foundation (`e6ea124`), Stream R (rest of app, `3cc0f71`), 
 | `origin/agent/LIM-2472-shared-surfaces` `a6ff222774145a9173744c73eacd93a48e8d3f24` | `b866da046c2abbf961b1f3b953221f24f5ee9d88` | clean. R changed 39 files, S 22, none in common (merge base `6b76a16`) |
 | `origin/agent/LIM-2472-foundation` `e6ea12458ce318b6661c5573fdf6be37438f66ef` (kit `Btn`/`Input`/`Select`/`TextArea`) | `519ad538c5b447feda1f9e664ee87bb75b905e1a` | clean, `app/app/_ui/kit.tsx` only |
 | `origin/agent/LIM-2472-shared-surfaces` `db544d3e17dea486e5d1e64946eb068d12e95817` (contains `d1d0ca1`: ReviewActions returns to the choices after Cancel or a decision; compact phone confirmation on one row; one consequence line) | `010789001fecb7878e482e059d6de531067f0b10` | clean, `_ui/ds/review.tsx` and `_ui/ds/decision-record.tsx` only |
+| `340ead6cc6b4a1c5d7ef9e39073dce35af64d657` (notices: retry amber, refused red, done neutral; unknown `cr` on the record says so; 44px evidence and object links on phones, rel `noopener noreferrer`; Add evidence back in ReviewBody behind `onDone`) | `eeed05cf3c9cde9a75419901466e303452f8e37c` | clean, `_ui/ds/review.tsx`, `_ui/ds/decision-record.tsx`, `_ui/ds/work.tsx` |
 
 No conflicts, so no file needed a side chosen. No rebase, no force push, no stash.
 
@@ -35,6 +36,7 @@ REPLACED (restyle; requests and logic unchanged, see `design/prototypes/lim-2472
   - Same two reads as before: `GET /api/v2/workspaces/<ws>/change-requests` and `GET /api/v2/workspaces/<ws>/goals` (the goal titles that `useGoalTitles` read, now read in the tab itself for `titleOf`). No new API call. Every decision is the shared review's own POST to `…/change-requests/<id>/<action>`.
   - The three sections are headings in ONE flat keyed list, so a request that moves section after a decision keeps its `ReviewActions` mounted and its "Recorded: …" or "Not recorded. …" notice stays on screen (main's card kept notices in a module map, `crparts.tsx:496`; the shared review keeps them in component state). Cost: the sections are no longer `<section aria-label>` landmarks; each is an `h2` with an id.
   - Fields: the shared review needs nothing the tab doesn't fetch (`ChangeRequest` from the list carries `can`, `revisions`, `diff`, `condition`, `launch`, `behind`).
+- `f0d3def30adabc91bcd340c32af226c92f1763d9`: the tab passes `onDone` to `ReviewBody`, so people that `cr.can.add_evidence` allows get Add evidence on the Requests tab again (main's POST, https only, label up to 120).
 - ADDED: this report.
 
 ## test-v2 checks likely broken (read, not run)
@@ -43,7 +45,7 @@ REPLACED (restyle; requests and logic unchanged, see `design/prototypes/lim-2472
 
 | Line | Check | Why |
 |---|---|---|
-| 4140-4175 | first run: sample request approved and launched from the Requests tab | clicks `[data-decision="Approve"]` (now "Approve only" for an owner who may launch), waits for "Approve without evidence?", "Add evidence"/"Add link" (the shared review has no add-evidence control), "Recorded by Align at revision 1", "Approved, agents still on v1 until launch", "Launch version 2 to agents", "Launched, agents on v2" |
+| 4140-4175 | first run: sample request approved and launched from the Requests tab | clicks `[data-decision="Approve"]` (now "Approve only" for an owner who may launch), waits for "Approve without evidence?" (the "Add evidence" / "Add link" buttons, url input and 120-character label input are back since `340ead6`, so that part should pass), "Recorded by Align at revision 1", "Approved, agents still on v1 until launch", "Launch version 2 to agents", "Launched, agents on v2" |
 | 7538-7542 | B9: approve then not yet, owner sees it under Waiting on you | reads `main section` whose `h2` is "Waiting on you" (sections are now headings in one list) and expects "Not launched yet: Fran Lead decided not yet" (the review says "Approved, not yet launched" and "Approval is not launch: …") |
 | 7618-7624 | B12: sample Requests tab | expects "You proposed a change"; the review says "You asked to change". "No other requests of yours. Yours that need you are under Waiting on you." is kept verbatim |
 | 5415, 5430, 5437, 5446 | value card on the goal page at 1000px (R) | after R's defect-4 gate only the approver (V3) sees `[data-value-card]`; the browser is V1, so `waitForSelector` at 5415 times out |
@@ -75,37 +77,165 @@ Routes: `/app`, account, devices, device, people, alignments, asks, spend, reque
 - Refusals are red (`--st-declined`) and take focus:
   - a stale second tab: "Not recorded. You declined this request, so nothing changes. Nothing was sent. …" (the client re-read caught it, no POST);
   - a 404 when the workspace was deleted under a staged decision: "Not recorded. Not found. Nothing changed.";
-  - a 403 when the member was made a viewer under a staged Withdraw: "Not recorded. Viewers can look but not change anything. Nothing changed." (dark; see I2 for light).
+  - a 403 when the member was made a viewer under a staged Withdraw: "Not recorded. Viewers can look but not change anything. Nothing changed." (both themes; see "403" under "Write path").
 - No sideways scroll at 320 on any read. No positive `tabindex`. Every Tab stop shows a 2px focus ring, except the one in L4. The page's `data-theme` matched the theme on every read.
 
 ### Findings
 
 | # | Sev | Tag | Flow | Width | Theme | Role | Issue | File:line | Screenshot |
 |---|---|---|---|---|---|---|---|---|---|
-| H1 | High | Verified | Shared review, retryable failure (network drop; a 503) | 1440 | both | owner | The retry notice is orchid/purple, not amber. Its border is `--st-pending` (dark 217,117,255; light 147,18,184). The foundation has `--st-retry` (amber) for this, and the brief says retryable errors are amber. The copy is right ("Not recorded yet. … Nothing changed; try again."). | `app/app/_ui/ds/review.tsx:492` (`NoticeLine`) | `dark-flow-48-retry-amber-1440.png`, `light-flow-48-retry-amber-1440.png` |
-| M1 | Medium | Verified | Record with another workspace's request id (`/record?cr=<ws2 id>`) | 1440 | both | owner | There is no not-found message. The page shows an empty single-request record, "Everyone (0)", and "Nothing has happened on this change request yet". That is false: this is not this workspace's request. Nothing from the other workspace leaks. | `app/app/_ui/ds/decision-record.tsx:249` (and how the record treats an unknown `cr`) | `dark-flow-54-record-other-ws-cr-1440.png`, `light-flow-54-record-other-ws-cr-1440.png` |
+| H1 | Fixed in `340ead6`, re-walked | Verified | Shared review, retryable failure (network drop; a 503) | 1440 | both | owner | The retry notice is orchid/purple, not amber. Its border is `--st-pending` (dark 217,117,255; light 147,18,184). The foundation has `--st-retry` (amber) for this, and the brief says retryable errors are amber. The copy is right ("Not recorded yet. … Nothing changed; try again."). | `app/app/_ui/ds/review.tsx:492` (`NoticeLine`) | `dark-flow-48-retry-amber-1440.png`, `light-flow-48-retry-amber-1440.png` |
+| M1 | Fixed in `340ead6`, re-walked | Verified | Record with another workspace's request id (`/record?cr=<ws2 id>`) | 1440 | both | owner | There is no not-found message. The page shows an empty single-request record, "Everyone (0)", and "Nothing has happened on this change request yet". That is false: this is not this workspace's request. Nothing from the other workspace leaks. | `app/app/_ui/ds/decision-record.tsx:249` (and how the record treats an unknown `cr`) | `dark-flow-54-record-other-ws-cr-1440.png`, `light-flow-54-record-other-ws-cr-1440.png` |
 | M2 | Medium | Verified | Primary and selected controls in dark: Approve and launch, Launch v2, Withdraw, Sign in, Create invite link, Newest first, Appearance "Dark" | all | dark | all | White on `--accent` #e90095 is 4.29:1 for 13-15px labels (4.5 needed). Light (#bf0078) passes. | `app/globals.css:35,42` | `dark-owner-requests-1440.png`, `dark-owner-account-1440.png` |
-| M3 | Medium | Verified | Evidence links in the review and the record; the record's "Change to …" links | 390 | both | all | 18-20px tall at 390, under the 44px rule. They are list-row links, not words inside a sentence, so the inline-text exception does not apply. | `app/app/_ui/ds/review.tsx:91`, `app/app/_ui/ds/decision-record.tsx:65,147` | `dark-owner-requests-390.png`, `dark-owner-record-390.png` |
-| M4 | Medium | Verified | Requests tab, adding evidence | all | both | owner, member | The shared review has no Add evidence control (`cr.can.add_evidence` is never used). The Requests tab lost main's "Add evidence / Add link", so evidence can only be added from the goal page. | `app/app/_ui/ds/review.tsx` (ReviewBody evidence section) | `I-base/dark/19-requests-no-add-evidence-control-1440.png` |
+| M3 | Fixed in `340ead6`, re-walked | Verified | Evidence links in the review and the record; the record's "Change to …" links | 390 | both | all | 18-20px tall at 390, under the 44px rule. They are list-row links, not words inside a sentence, so the inline-text exception does not apply. | `app/app/_ui/ds/review.tsx:91`, `app/app/_ui/ds/decision-record.tsx:65,147` | `dark-owner-requests-390.png`, `dark-owner-record-390.png` |
+| M4 | Fixed (`340ead6` + `f0d3def`), re-walked | Verified | Requests tab, adding evidence | all | both | owner, member | The shared review has no Add evidence control (`cr.can.add_evidence` is never used). The Requests tab lost main's "Add evidence / Add link", so evidence can only be added from the goal page. | `app/app/_ui/ds/review.tsx` (ReviewBody evidence section) | `I-base/dark/19-requests-no-add-evidence-control-1440.png` |
 | M5 | Medium | Verified | Sample request text on Requests and the record | all | both | all | "…approve it (then launch it, which is when agents get the new version)…". Align releases a version; it does not see agents get it. Server copy. | `lib/v2/sample.ts:26` (server) | `dark-owner-requests-390.png` |
 | M6 | Medium | Verified, pending the concept | Workspace shell on every signed-in page | 390 | both | all | Header links Align, Devices and Account are 22-26px tall; tab links are 37-38px. The workspace select's border is 1.64:1 (dark) and 1.34:1 (light), under 3:1. | `app/app/_ui/kit.tsx:156-157,171,188` | `dark-owner-people-390.png`, `light-owner-people-390.png` |
+| H2 | High | Verified | Add evidence refused with 409 (the request was declined in another session while the form was open) | 1440, 390 | both | owner | The POST gets 409 ("You declined this request, so nothing changes.") but no notice is ever shown: `AddEvidence` sets its red notice and calls `onDone`, the re-read request no longer allows `add_evidence`, and ReviewBody unmounts `AddEvidence` along with its notice. The person sees the form vanish and nothing else. | `app/app/_ui/ds/review.tsx:103` (and 196-199) | `w-dark-1440-409-Add-evidence.png` (and light, 390) |
+| M7 | Medium | Verified | Record timeline after Withdraw and after Accept the change | 1440, 390 | both | member (and anyone reading `?cr=`) | Withdraw and Accept the change both POST 200, but the single-request record gains no event. A withdrawn request has `decided_at: null`, so `changeRequestEvents` adds no "withdrew the request". Accepting a counter keeps the revision, and no event kind covers it. With `?cr=` the audit log isn't read, so owners don't see these either. | `app/app/_ui/ds/record-events.ts:125`; server `decided_at` on withdraw | `w-dark-1440-write-Withdraw.png`, `w-dark-1440-write-Accept-the-change.png` |
+| M8 | Medium | Verified | 409 on Not yet (server copy) | 1440, 390 | both | owner | The refusal reads "…so nothing changes: agents stay on version 4 until someone launches version 5." Align releases versions; it doesn't know which version agents are on. | `lib/v2/changes.ts:540` (server) | `w-dark-1440-409-Not-yet-after-another-session-decided-not-yet.png` |
 | L1 | Low | Verified | Compare on the record and on Requests (light) | all | light | all | "Added"/"Changed" marks are 4.45:1 at 12px. A changed row's " · target …" (`--text-3` on `--accent-soft`) is 4.18:1 at 14px. | `app/app/_ui/ds/compare.tsx:26,62` | `light-owner-record-goal-security-1440.png` |
 | L2 | Low | Verified | Evidence label detail on Work (light) | all | light | owner, member | The `opacity-90` detail text ("read the goals …", "no goal read yet") is 4.27-4.47:1 at 12px. | `app/app/_ui/ds/evidence-label.tsx:25` | `light-owner-work-1440.png` |
 | L3 | Low | Verified | Work "Apps", dependencies "Work", trust/privacy "Trust" | 390 | both | all, signed out | 44px tall but only 34-35px wide. | `app/app/_ui/ds/work.tsx:234`, `app/app/_ui/ds/dependencies.tsx:73`, `app/_trust/doc.tsx:138` | `dark-owner-work-390.png`, `dark-owner-dependencies-390.png`, `dark-signed-out-trust-390.png` |
 | L4 | Low | Suspected | Asks, date input | 1440, 390 | both | owner, member | Tabbing to the date input reports `outline: none` on it. Chrome highlights the date segment instead; not checked by eye. | `app/app/w/[ws]/asks/view.tsx:57,217` (kit `Input`) | `dark-owner-asks-1440.png` |
 | L5 | Low | Verified | Phone one-row confirmation | 390 | both | owner | On a request with no evidence, Approve only and Approve and launch no longer say "No evidence: the record will say it was approved without evidence." It is shown at 1440 only. | `app/app/_ui/ds/review.tsx:467` | `dark-flow-45-phone-consequence-requests-Approve-only-390.png` |
 | L6 | Low | Suspected | Tab order at 1440: Work, Work?goal, dependencies; Sessions (owner) | 1440 | both | all | Focus moves up 166-275px because the right column follows the left (reading order of a two-column layout, probably fine). On Sessions, "Delete shared history" is followed by a "Stop agent" 200px higher. | `app/app/_ui/ds/work.tsx`, `app/app/w/[ws]/sessions/view.tsx:209,247` | `dark-owner-work-1440.png`, `dark-owner-sessions-1440.png` |
-| I1 | Info | Verified | Real server 409 | 1440 | both | owner | Not reached through the UI. A stale tab's Decline after the goal moved to a new version was accepted (200): the server allows declining a request that is behind. While a request is open, the owner's new version of that goal is itself refused (409), so the goal can't be moved under a staged approve. The 409 branch (red, "Here it is as it stands now.") is the same `catch` as 403/404 in `send`; read, not run. The files named `*-409-*` show these 200s. | `app/app/_ui/ds/review.tsx` (`send`) | `dark-409-Decline-1440.png`, `dark-flow-49-stale-409-1440.png` |
-| I2 | Info | Verified | 403 in light | 1440 | light | member | Not set up: the dark run's refused Withdraw left Theo's request open, so the second request on that goal was refused. The 403 tone and copy come from the same tokens in both themes; dark is Verified above. | – | `dark-403-1440.png` |
+| I1 | Info | Verified | Server-side: a request that fell behind can still be declined | 1440 | both | owner | After the owner saved a new version of the goal, a stale tab's Decline on a request asked against the old version was accepted (200), not refused. That may be intended (declining changes nothing). The real 409 is walked in "Write path" below. | server (decline route) | `dark-flow-49-stale-409-1440.png` |
 
-Counts: High 1, Medium 6 (one pending the concept), Low 6 (two Suspected), Info 2.
+Counts after the `340ead6` re-walk: open High 1 (H2), Medium 5 (M2, M5, M6 pending the concept, M7, M8), Low 6 (two Suspected), Info 1. Fixed and re-walked: H1, M1, M3, M4.
+
+## Write path: every write as a real POST (`f0d3def`, after `340ead6`)
+
+One `next dev` with a fresh data dir and the same seed. Four passes: dark 1440, light 1440, light 390, dark 390. In each pass the member (Theo) proposes on the seeded goals, the owner (Mara) decides in the browser, and a second owner session moves requests on through the real API when a step needs it. For every write the walk records the POST status, the request's state afterwards (read from the API), the notice text, and the event count on `/record?cr=<id>` before and after. Raw rows: `I-base/walk/writes-<theme>-<width>.json`. Screenshots: `I-base/walk/w-<theme>-<width>-*.png`.
+
+"First walk" says whether the first walk (`f9189b8`) had already posted this write for real.
+
+| Write | Who, where | POST | State after | Notice (exact, all four passes) | Record timeline | First walk |
+|---|---|---|---|---|---|---|
+| Approve only | owner, Requests | 200 `approve` | approved, launch pending | "Recorded: you approved revision 1. It is not launched yet." | 1 → 2 | yes (flows, 1440) |
+| Approve and launch | owner, record | 200 `approve_and_launch` | approved, launched | "Recorded: you approved revision 1 and launched version <n>." | 1 → 3 (approved, launched) | yes (record, 1440) |
+| Decline | owner, Requests | 200 `reject` | rejected | "Recorded: you declined this request." | 1 → 2 | yes (stale-tab setup) |
+| Suggest a change | owner, Requests | 200 `counter` | countered, revision 2 | "Recorded: you suggested a change to Theo Vance." | 1 → 2 | yes (after-set 58-60) |
+| Accept the change | member, Requests | 200 `accept_counter` | pending, revision 2 | "Recorded: you accepted the suggested change. It waits for approval again." | 2 → 2: **no event** (M7) | yes (after-set 65-66) |
+| Accept if… | owner, Requests | 200 `counter` with condition | countered, revision 3, condition open | "Recorded: you accepted it if Theo Vance acknowledges your condition." | 2 → 3 | no |
+| Accept the change (with a condition) | member, Requests | 200 `accept_counter` | pending, revision 3, condition open | as Accept the change | 3 → 3: **no event** (M7) | no |
+| Confirm the condition is met (Acknowledge) | member, Requests | 200 `acknowledge` | pending, condition acknowledged | "Recorded: you acknowledged the condition." | 3 → 4 | no |
+| Add evidence | owner, Requests tab | 201 `evidence` | evidence 0 → 1 | "Recorded: your link was added, shown as self-reported." With an http:// link the form shows "Use an https:// link…" and Add link is disabled. The new link has `target="_blank"` and rel "noopener noreferrer" | 4 → 5 | no (the tab had no control) |
+| Update to version n (rebase) | member, Requests, after the owner saved a new goal version | 200 `rebase` | pending, revision 2 | "Recorded: you updated your request to version <n>. It waits for approval again." | 1 → 2 | no |
+| Withdraw | member, Requests | 200 `withdraw` | withdrawn | "Recorded: you withdrew your request." | 2 → 2: **no event** (M7) | yes (403 setup) |
+| Launch | owner, Requests | 200 `launch` | launched | "Recorded: you launched version 2." | – | yes (flows, 1440, both themes) |
+| Not yet | owner, Requests | 200 `not_yet` | approved, not yet | "Recorded: you decided not yet." | – | yes (after-set 23, both themes) |
+
+Every successful notice is neutral (`--line-strong` border), focused, and kept after the reload. All 11 new rows passed in all four passes (dark/light x 1440/390).
+
+### Real 409 (browser-only interception)
+
+The page's re-read is `GET …/goals/<goal>/change-requests/<id>`. The walk:
+1. reads that URL as the page shows it;
+2. stages the choice up to its confirmation;
+3. moves the request on through the real API in another session;
+4. routes that one GET (GET only) to the copy the page shows;
+5. presses Confirm.
+
+The POST reaches the server. Every run expects:
+- 409;
+- `data-notice="refused"` with the red `--st-declined` border;
+- focus on the notice;
+- notice text exactly "Not recorded. <server message> Here it is as it stands now.";
+- the choice cleared;
+- `onDone` called (the list re-fetched once);
+- the choices equal to `choicesFor(cr.can)` afterwards.
+
+| Choice pressed | Moved on by the other session | Server message (verbatim) | Result (d1440, d390, l1440, l390) |
+|---|---|---|---|
+| Approve only | declined | "You declined this request, so nothing changes." | pass x4 |
+| Suggest a change | approved | "You already approved this request." | pass x4 (choices became Launch v<n>, Not yet) |
+| Not yet | decided not yet | "You already decided not yet, so nothing changes: agents stay on version 4 until someone launches version 5." (`lib/v2/changes.ts:540`, see M8) | pass x4 (choices became Launch v<n>) |
+| Launch v<n> | launched | "This change is already launched as version 5." | pass x4 |
+| Withdraw (member) | the owner declined | "This request was declined by Mara Quill, so nothing changes." | pass x4 |
+| Decline (first gap walk, `f9189b8`) | approved | "You already approved this request." | pass x8 (Requests and record) |
+| Add evidence (no interception: the form is open, the other session declines, Add link) | declined | POST 409 "You declined this request, so nothing changes." | **fail x4: no notice is shown (H2)** |
+
+Example notice: "Not recorded. You already decided not yet, so nothing changes: agents stay on version 4 until someone launches version 5. Here it is as it stands now."
+
+### Retry branch (amber)
+
+`page.route` on the POST was used three ways: abort it (network failure), answer 503 "Align is restarting.", and answer 429 "Too many requests. Wait a minute.". This ran on Approve only and on Add evidence, in all four passes, 24 runs, all passed:
+- the notice is `data-notice="retry"` with the amber `--st-retry` border, focused, and reads "Not recorded yet. <message> Nothing changed; try again.";
+- the confirmation (or the evidence form) stays open, so pressing Confirm (or Add link) again is the retry;
+- after the 429 the route was removed and the same button pressed again: "Recorded: you approved revision 1. It is not launched yet." / "Recorded: your link was added, shown as self-reported.", and the server state matched.
+
+### Re-walk of the four fixed findings
+- **H1 (retry colour):** amber `--st-retry` now; see above.
+- **M1 (unknown id):** `/record?cr=<made-up id>` and `/record?cr=<another workspace's request>` both say "No such request in this workspace" and link to `/app/w/<ws>/record`. Both themes, 1440 and 390.
+- **M3 (link targets):** at 390, every evidence link and "Change to …" link on Requests, the workspace record and `?goal=` is at least 44px tall (0 under 44), and every `target="_blank"` link has rel "noopener noreferrer". Both themes.
+- **M4 (Add evidence):** it is back on the Requests tab for people `cr.can.add_evidence` allows; see the write table.
+
+### 403 (light and dark)
+The member stages Withdraw, a second owner session makes him a viewer, and he confirms. The POST gets 403. The notice is red, focused, and reads "Not recorded. Viewers can look but not change anything. Nothing changed.". Withdraw is gone, and the choices equal `cr.can` (none; "Not yours: Mara Quill can decide on it."). This passed at 1440 and 390 in both themes on the `f9189b8` gap walk (Requests and record, 8 runs; `403-<theme>-…png`) and again on `f0d3def` (4 runs; `w-<theme>-<width>-403.png`).
+
+### Walk coverage
+
+Columns are theme x width. Each cell says:
+- **walked**: in a real browser, with clicks or key presses (for writes, a real POST), plus the page audit of targets, sideways scroll, contrast and copy;
+- **read only**: rendered and screenshotted, or code read, with no interaction or checks;
+- **not reached**: with the reason.
+
+The keyboard (Tab) pass ran at 1440 and 390 only; 320 got the page audit without it. Roles: O owner, M member, V viewer, S signed out.
+
+| Flow | Roles | Dark 1440 | Dark 390 | Dark 320 | Light 1440 | Light 390 | Light 320 |
+|---|---|---|---|---|---|---|---|
+| Shared review choices from `cr.can` (Requests + record) | O, M, V | walked | walked | read only: page audit, no clicks | walked | walked | read only: page audit, no clicks |
+| Cancel path (choose, Cancel, choices return, choose another) | O | walked | walked | not reached: flows at 1440/390 only | walked | walked | not reached: flows at 1440/390 only |
+| Consequence line (Approve only vs Approve and launch) | O | walked | walked | not reached: flows at 1440/390 only | walked | walked | not reached: flows at 1440/390 only |
+| Write: Approve only | O | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
+| Write: Approve and launch | O | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
+| Write: Accept if… | O | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
+| Write: Suggest a change | O | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
+| Write: Decline | O | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
+| Write: Acknowledge | M | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
+| Write: Accept the change | M | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
+| Write: Update to version n | M | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
+| Write: Withdraw | M | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
+| Write: Add evidence (Requests tab) | O | walked | walked | not reached: write passes at 1440/390 | walked | walked | not reached: write passes at 1440/390 |
+| Write: Launch | O | walked | not reached: the successful POST ran at 1440; at 390 only its 409 | not reached | walked | not reached: as dark 390 | not reached |
+| Write: Not yet | O | walked | not reached: the successful POST ran at 1440; at 390 only its 409 | not reached | walked | not reached: as dark 390 | not reached |
+| 409, real (Approve only, Suggest a change, Not yet, Launch, Withdraw, Decline) | O, M | walked | walked | not reached: 1440/390 only | walked | walked | not reached: 1440/390 only |
+| 409 on Add evidence | O | walked (fails, H2) | walked (fails) | not reached: 1440/390 only | walked (fails) | walked (fails) | not reached: 1440/390 only |
+| Retry: abort, 503, 429 (Approve only, Add evidence) | O | walked | walked | not reached: 1440/390 only | walked | walked | not reached: 1440/390 only |
+| 403 (member made a viewer mid-decision) | M | walked | walked | not reached: 1440/390 only | walked | walked | not reached: 1440/390 only |
+| 404 (workspace deleted under a staged decision) | O | walked | not reached: run at 1440 only | not reached: run at 1440 only | walked | not reached: run at 1440 only | not reached: run at 1440 only |
+| Unknown `cr` on the record (made-up id; another workspace's) | O | walked | walked | not reached: 1440/390 only | walked | walked | not reached: 1440/390 only |
+| Stale second tab, client re-read refusal | O | walked | not reached: run at 1440 only | not reached: run at 1440 only | walked | not reached: run at 1440 only | not reached: run at 1440 only |
+| Decision record (workspace, `?cr=`, `?goal=`) | O, M, V | walked | walked | walked | walked | walked | walked |
+| Compare (on the record and Requests; disclosure not toggled) | O, M, V | walked | walked | walked | walked | walked | walked |
+| Work (all goals, `?goal=`) | O, M, V | walked | walked | walked | walked | walked | walked |
+| Apps (connect flow not clicked) | O, M, V | walked | walked | walked | walked | walked | walked |
+| Sessions (Stop agent and Delete shared history not clicked: destructive) | O, M, V | walked | walked | walked | walked | walked | walked |
+| Dependencies | O, M, V | walked | walked | walked | walked | walked | walked |
+| R: sign-in (incl. test account create) | S | walked | walked | walked | walked | walked | walked |
+| R: request access | S | walked | walked | walked | walked | walked | walked |
+| R: trust, privacy | S | walked | walked | walked | walked | walked | walked |
+| R: /app list, create workspace | O, M, V | walked | walked | walked | walked | walked | walked |
+| R: invite (create link, accept) | O creates; M, V accept | walked (after-set capture clicks) | walked | walked | walked | walked | walked |
+| R: account | O, M, V | walked | walked | walked | walked | walked | walked |
+| R: device, devices | O, M, V | walked | walked | walked | walked | walked | walked |
+| R: people | O, M, V | walked | walked | walked | walked | walked | walked |
+| R: alignments | O, M, V | walked | walked | walked | walked | walked | walked |
+| R: asks | O, M, V | walked | walked | walked | walked | walked | walked |
+| R: spend | O, M, V | walked | walked | walked | walked | walked | walked |
+| R: error pages (missing workspace, missing route, bad invite) | O, M, V | walked | walked | walked | walked | walked | walked |
+| R: OAuth authorize (no params) | S | read only: after-set screenshot | read only | read only | read only | read only | read only |
+| Home and workspace shell | all | not reached: pending the concept | not reached: pending the concept | not reached: pending the concept | not reached: pending the concept | not reached: pending the concept | not reached: pending the concept |
+
+Totals over 42 flows x 6 columns = 252 cells: **walked 188, read only 8, not reached 56**. Of the 56, 6 are Home and the shell (pending the concept) and most of the rest are 320 cells for flows that only ran at 1440 and 390. The shell's targets and contrast were still measured; see M6. The page audit of the routes above was run on `0107890`; the four shared-surface files that changed after it (`review.tsx`, `decision-record.tsx`, `work.tsx`) were re-walked on `f0d3def` through the write, 409, retry, unknown-id and link rows.
 
 ## Needed outside my files (listed, not changed)
 
-- `_ui/ds/review.tsx` (S): retry notice on `--st-retry` (H1); an Add evidence control driven by `cr.can.add_evidence` (M4); 44px evidence links on phones (M3); the no-evidence line in the phone confirmation (L5).
-- `_ui/ds/decision-record.tsx` (S): a real not-found for an unknown `cr` (M1); 44px object and evidence links on phones (M3).
+- `_ui/ds/review.tsx` (S): keep Add evidence's refusal on screen after the request stops allowing evidence (H2); the no-evidence line in the phone confirmation (L5). H1, M3 and M4 are fixed in `340ead6`.
+- `_ui/ds/record-events.ts` (S) and the server: events for Withdraw and Accept the change (M7). M1 is fixed in `340ead6`.
 - `_ui/ds/compare.tsx`, `_ui/ds/evidence-label.tsx` (S/foundation): light-theme contrast (L1, L2). `_ui/ds/work.tsx:234`, `_ui/ds/dependencies.tsx:73`, `app/_trust/doc.tsx:138`: 44px width (L3).
 - `app/globals.css` (foundation): dark `--accent` vs `--text-on-accent` at 4.29:1 (M2).
 - `_ui/kit.tsx` shell: header links, tab links, workspace select (M6), pending the concept.
-- Server: `lib/v2/sample.ts:26` sample copy (M5); `lib/v2/launch-words.ts:12` "Launched, agents on v…" is still the MCP record's wording (SERVER_ASKS 6; not shown on the screens walked here).
+- Server: `lib/v2/sample.ts:26` sample copy (M5); `lib/v2/changes.ts:540` "agents stay on version N" (M8); `lib/v2/launch-words.ts:12` "Launched, agents on v…" is still the MCP record's wording (SERVER_ASKS 6; not shown on the screens walked here).
 - Fields: none. The shared review needed nothing the Requests tab doesn't already fetch.
