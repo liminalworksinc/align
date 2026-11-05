@@ -5,8 +5,9 @@ import { DataTable, EmptyState, NeedAction, Segmented, StatusPill, type Column }
 import { useApi } from "../kit";
 import type { ChangeRequest } from "../types";
 import { needForChangeRequest } from "../home/needs";
+import { waited } from "../home/needs-list";
 import { actsFor, QuietBtn } from "./act";
-import { ago, crStatus, nameList, oneLine, PHASE_WORDS, phaseOf, versions, waitsOn, type Phase } from "./model";
+import { crStatus, nameList, oneLine, PHASE_WORDS, phaseOf, versions, waitsOn, type Phase } from "./model";
 
 // LIM-2472: the decision desk as one piece, mountable in any shell (the integrated candidate's Requests tab). One read,
 // GET …/change-requests: every change request this person can read, filtered client-side into Waiting on me / Waiting on
@@ -109,14 +110,14 @@ export function Desk({
         const v = versions(r);
         return (
           <span className="flex flex-col font-mono text-[12px] text-(--text-2) sm:whitespace-nowrap">
-            <span>Launched {v.launched}</span>
+            <span>{v.launched}</span>
             <span className="text-(--text-3)">{v.approvedLine}</span>
           </span>
         );
       },
     },
     { key: "evidence", header: "Links", align: "end", width: "96px", sortValue: (r) => r.evidence_count, render: (r) => <span className="font-mono text-[12px] text-(--text-2)">{r.evidence_count}</span> },
-    { key: "age", header: "Updated", align: "end", width: "116px", sortValue: (r) => r.updated_at, render: (r) => <span className="font-mono text-[12px] text-(--text-3) sm:whitespace-nowrap">{ago(r.updated_at)} ago</span> },
+    { key: "age", header: "Updated", align: "end", width: "116px", sortValue: (r) => r.updated_at, render: (r) => <span className="font-mono text-[12px] text-(--text-3) sm:whitespace-nowrap">{waited(r.updated_at)}</span> },
   ];
 
   const rowActions = (r: ChangeRequest) => {

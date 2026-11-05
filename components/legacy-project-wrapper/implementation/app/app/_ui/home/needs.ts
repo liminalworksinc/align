@@ -245,8 +245,10 @@ function askNeed(a: AskLite, me: string): Need {
 function alignmentNeed(a: Alignment, me: string): Need | null {
   const target = a.target_goal?.visible && a.target_goal.id && a.target_goal.title ? { id: a.target_goal.id, title: a.target_goal.title } : null;
   const base = { key: `al:${a.id}`, kind: "alignment" as const, goal: target, quote: a.note, evidence: none(), review: null, word: "" };
-  const from = a.source_goal ? ` from ${a.source_goal.visible && a.source_goal.title ? a.source_goal.title : "a goal you can't see"}` : "";
-  const cause = `${a.requester.id === me ? "You ask" : `${a.requester.name} asks`} to align with ${target ? target.title : "a goal you can't see"}${from}`;
+  // What tells two alignments on one goal apart (the source goal) leads, so a one-line row never truncates it away.
+  const src = a.source_goal ? (a.source_goal.visible && a.source_goal.title ? a.source_goal.title : "a goal you can't see") : null;
+  const asker = a.requester.id === me ? "You ask" : `${a.requester.name} asks`;
+  const cause = src ? `From ${src}: ${asker.toLowerCase().startsWith("you") ? "you ask" : asker} to align with ${target ? "this goal" : "a goal you can't see"}` : `${asker} to align with ${target ? target.title : "a goal you can't see"}`;
   if (a.state === "approved" || a.state === "rejected" || a.state === "withdrawn" || a.state === "revoked")
     return { ...base, phase: "done", tone: a.state === "approved" ? "approved" : a.state === "rejected" ? "declined" : "draft", word: a.state === "approved" ? "Alignment approved" : a.state === "rejected" ? "Alignment declined" : a.state === "revoked" ? "Alignment revoked" : "Alignment withdrawn", cause, since: { at: a.closed_at ?? a.updated_at, field: a.closed_at ? "closed_at" : "updated_at" }, action: null, who: null };
   const lastH = a.history.reduce<Alignment["history"][number] | null>((m, h) => (!m || h.revision > m.revision ? h : m), null);
