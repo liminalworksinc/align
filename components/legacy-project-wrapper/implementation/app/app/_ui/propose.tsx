@@ -78,7 +78,15 @@ function Form({ ws, me, goals, start, onClose }: { ws: string; me?: string; goal
       <p className="text-[15px] text-(--text-2)" data-propose="none">
         {goals.some((x) => x.status === "active")
           ? "You own every active goal you can see here. To change one, save a new version on its page."
-          : "There is no active goal here to propose a change to."}
+          : (
+            <>
+              {/* Owners and members can set a goal (the Goals page's own rule); viewers never reach this drawer. */}
+              There is no active goal here to propose a change to.{" "}
+              <Link href={`/app/w/${ws}/goals`} className="font-medium text-(--text-1) underline underline-offset-2" onClick={onClose}>
+                {goals.length ? "Set a new goal" : "Set the first goal"}
+              </Link>
+            </>
+          )}
       </p>
     );
 
