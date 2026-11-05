@@ -69,7 +69,8 @@ function check(name, ok, detail = "") {
 
 // ---- HTTP (as in test-v2) ----
 async function call(method, p, { body, cookie, bearer, headers = {} } = {}) {
-  const h = { ...headers };
+  // Keep test requests separate across the deliberately unreachable proxy step.
+  const h = { connection: "close", ...headers };
   if (body !== undefined && !h["content-type"]) h["content-type"] = "application/json";
   if (cookie) h.cookie = cookie;
   if (bearer) h.authorization = `Bearer ${bearer}`;

@@ -30,6 +30,7 @@ forbidden $'package.json\n.env.production' ""; ok $? "matcher: a top-level .env.
 ! forbidden $'package.json\nnode_modules\npublic' $'/app/lib/env.ts\n/app/.envrc-not'; ok $? "matcher: a clean listing passes (env.ts and .envrc-not are not .env files)"
 
 docker info >/dev/null 2>&1 || { echo "test-image: no Docker daemon"; [ $fails = 0 ] && echo "test-image: matcher checks passed"; exit 2; }
+npm run prepare:container || { echo "FAIL  native container inputs"; exit 1; }
 docker build -q -t "$TAG" . >/dev/null || { echo "FAIL  docker build"; exit 1; }
 echo "PASS  docker build"
 
@@ -41,6 +42,8 @@ printf '%s\n' "$listing" | grep -qx 'package.json' && [ "$nobad" -ne 0 ]; ok $? 
 
 extra="$(docker run --rm --entrypoint sh "$TAG" -c 'find /app/scripts /app/lib -type f 2>/dev/null | sort')"
 [ "$extra" = "$OPERATOR_FILES" ]; ok $? "scripts/ and lib/ hold only the operator script, lib/v2/core.mts, lib/v2/metrics-core.mts and lib/v2/retention-core.mts" "$(echo "$extra" | tr '\n' ' ')"
+docker run --rm --entrypoint sh "$TAG" -c 'test ! -e /.literate && test ! -e /app/native && test ! -e /app/.native-inputs'
+ok $? "native source caches and acceptance inputs stay out of the runtime image"
 
 docker run --name "$NAME-bad" "$TAG" >/dev/null 2>&1
 code="$(docker inspect -f '{{.State.ExitCode}}' "$NAME-bad")"

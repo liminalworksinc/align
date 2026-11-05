@@ -1,0 +1,21 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { parse } = require('../shell_words/parse.js');
+const { command_words } = require('../shell_words/command_words.js');
+const cases = [["empty","boundary",[""],[]],["pieces","example",["say a\" b\"'c' \"\""],[{"words":["say","a bc",""],"redirs":[]}]],["nested","invariant",["show $(one $(two))"],[{"words":["show","$(...)"],"redirs":[]},{"words":["one","$(...)"],"redirs":[]},{"words":["two"],"redirs":[]}]],["heredoc-pending","boundary",["emit > <<END target\nignored $(bad)\nEND\nnext"],[{"words":["emit"],"redirs":[{"op":"<<","target":null},{"op":">","target":"target"}]},{"words":["next"],"redirs":[]}]],["operators","example",["2>>log; \"3\">out |& read <&0"],[{"words":[],"redirs":[{"op":">>","target":"log"}]},{"words":["3"],"redirs":[{"op":">","target":"out"}]},{"words":["read"],"redirs":[{"op":"<&","target":"0"}]}]],["opaque","example",["say `hidden` ${x{y}} $((1+(2)))"],[{"words":["say","`...`","${...}","$((...))"],"redirs":[]}]],["comment","boundary",["echo x#y # ignored\nlast\r"],[{"words":["echo","x#y"],"redirs":[]},{"words":["last\r"],"redirs":[]}]],["tabs","example",["cat <<-E\n\tbody\n\tE\nok"],[{"words":["cat"],"redirs":[{"op":"<<","target":null}]},{"words":["ok"],"redirs":[]}]],["wrappers","example",[["A=","sudo","env","echo","x"]],["echo","x"]],["options","boundary",[["sudo","-n","echo"]],["-n","echo"]],["opaque-names","invariant",[["__proto__","env","😀"]],["__proto__","env","😀"]],["all-skipped","boundary",[["time","xargs","X=a"]],[]],["unmatched","boundary",["call 'rest\nraw"],[{"words":["call","rest\nraw"],"redirs":[]}]],["empty-heredoc","boundary",["<<< <<;"],[{"words":[],"redirs":[{"op":"<<","target":null},{"op":"<<<","target":null}]}]]];
+function invoke(args) { return typeof args[0] === 'string' ? parse(...args) : command_words(...args); }
+function run() {
+  const results = [];
+  for (const [id, , args, expected] of cases) {
+    const before = JSON.stringify(args);
+    assert.deepStrictEqual(invoke(args), expected);
+    assert.equal(JSON.stringify(args), before);
+    results.push({case_id: 'generated-' + id, outcome: 'passed'});
+  }
+  const words = ['env', 'tool']; words.extra = 'kept'; Object.freeze(words);
+  const suffix = command_words(words);
+  assert.deepStrictEqual(suffix, ['tool']); assert.notStrictEqual(suffix, words); assert.equal(words.extra, 'kept');
+  return {schema: 'literate-ai/generated-test-results@1', cases: results};
+}
+function smoke() { return parse('say a" b"\'c\' ""'); }
+module.exports = {run, smoke};

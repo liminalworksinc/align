@@ -25,6 +25,27 @@ inbound links; move substantial closed programs beneath `docs/history/roadmap/`,
 their owner, and mark them `historical`. Do not create a separate file for an ordinary
 queue item or let `docs/roadmap/` become a plan archive.
 
+## Open pull-request landing queue
+
+Tracker reconciliation on 2026-11-04 found three open reviews. None has been merged
+or updated by this continuation.
+
+- [#58](https://github.com/liminalworksinc/align/pull/58), native boundary inventory:
+  its head is already an ancestor of this worktree. Keep its review separate from
+  the unpublished native implementation changes.
+- [#59](https://github.com/liminalworksinc/align/pull/59), demo friction: draft peer
+  work, outside this native rewrite step.
+- [#62](https://github.com/liminalworksinc/align/pull/62), serial hook latency:
+  draft peer work. Keep the 150 ms threshold; this native integration must pass the
+  existing test conditions before claiming verification.
+
+PR #60 is merged by its owner. PR #61 is closed; its folder-rule fix and stale-socket
+repair are on the newer main, while its latency work continues in #62. ADOPT-002
+reproduces the folder-rule failure on this older base and tracks the matching repair.
+
+Open issue [#30](https://github.com/liminalworksinc/align/issues/30) remains covered
+by the existing preseed, deployment and handoff items in this queue.
+
 ## P0
 
 Check the parent only after every required subtask and evidence item passes. Add the
@@ -33,19 +54,67 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 <a id="adopt-002"></a>
 ### [ ] ADOPT-002 — Native Literate AI rewrite
 
-- **Completion prerequisites:** none
+- **Completion prerequisites:** SEC-001, CONTEXT-001
 - **Owner:** project architecture / Components / Flavors / skills / assets
 - **Direction:** Execute
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Next action:** Specify B09's incremental parser state API and map its remaining
-  exports before package integration and full parity. The spend-meter child is qualified and
-  registered: two clean host builds match all 110 original inputs; root and child
-  verification, validation and agent-entrypoint audits pass. See
-  [B09 recovery](native-rewrite-program.md#b09-recovery) for the exact evidence and
-  local runtime needed to reproduce qualification.
+- **Next action:** Rebind the unqualified B10 envelope child through the reviewed
+  lifecycle plan to the independently installed framework fix `05d07fe6`, then retry
+  its two clean Codex qualification builds. Its first attempt stopped before
+  generation because the complete 51-capability import surface exceeded the
+  bounded verifier argument; the installed correction now passes that projection.
+  CONTEXT-001's repaired
+  baseline passes all 1,818 checks
+  and 24 hosted image checks. Its three new direct/hook regressions fail against
+  the old implementation and pass against the repair. The B10 notice
+  helper is integrated: both clean builds, the admitted build and its actual typed
+  consumer pass all 1,099 observations; its original algorithm is retired. All
+  seven registered native children are qualified. The remaining B10 envelope,
+  ended-state wording and shared types have source snapshots and 563,717 observations.
+  B11 is integrated: its two clean builds and typed consumer match all 11,108
+  observations, and its complete sealed workflow passes.
+  B04's source-extension correction and the envelope's bounded import-command
+  correction are committed as framework `05d07fe6`. Its clean non-editable wheel
+  proves unchanged `.mts` derivation and the full 51-capability projection.
+  B02's 17-capability
+  preflight covers 4,598,945 observations in 49 batches; B03's nine-capability
+  preflight covers 82,905 observations in nine batches. Both pass their verifier
+  controls and SDK profile checks, with contracts still pending source-bound review.
+  B01, B09, B05, B11 and B10's notice subset are integrated.
+  Their latest completed parent receipt is
+  `sha256:08cf7b053511bde9938ffcc6ab12ef329fcd35b264688eb55de264c1d5ca9367`,
+  with all 1,818 checks and 24 hosted image checks passing. That milestone also
+  passes root and seven-child verification, root validation and the owned entrypoint
+  audit. The remaining inventory boundaries and class review stay open. See the
+  [integration evidence](native-rewrite-program.md#integration-execution) and
+  [next boundary](native-rewrite-program.md#proposed-next-boundary).
 - **Evidence:** Phase 1.2 lift-and-shift identity `sha256:316a4e6b641a46788febb1c21b004ad3c00b6d812c10006deb1d05a48207aa49`.
+- **Continuation direction (2026-11-04):** Finish the complete native rewrite program
+  and resolve its litai follow-ups. Qualification of an isolated library is an
+  intermediate result. Completion requires actual consumer integration, verified
+  source retirement, every inventory classification, and full application parity.
+
+<a id="context-001"></a>
+### [ ] CONTEXT-001 - Preserve context priorities and ask attribution under clipping
+
+- **Priority:** P1
+- **Owner:** Agent envelope, B10
+- **Direction:** Enforce the existing goal-envelope and accepted-ask delta requirements before native envelope qualification.
+- **Conclusion:** The current budget loop keeps parent measures while dropping the bound goal's measures. The single-ask fallback drops both attribution and earlier closing counts. Preserve all limits, quote boundaries, attribution, closing counts and existing character budgets.
+- **Depends on:** none
+- **Implementation:**
+  - [x] Drop parent measures before reducing the goal's own measures under budget pressure.
+  - [x] Keep who asked, the date, who accepted and earlier closing counts in the clipped single-ask note.
+  - [x] Add direct and hook regression cases, and recapture the corrected envelope baseline before qualification.
+- **Evidence:**
+  - [x] Canonical clipping priorities, attribution and closing counts pass with long legal field values, without enlarging any budget or removing limits.
+  - [x] Complete retained application workflow and current receipt against the corrected source.
+  - [ ] Native envelope qualification against the corrected source.
+- **Verification follow-up:** The first corrected full run passes 1,816 checks and fails the share-state property at seed `1630038945`, after `align stop-sharing` then an older build writes. The same seed reproduces locally. Diagnose its state preconditions and preserve stop/hold and private-session invariants before rerunning the full gate; do not skip the seed or relax the assertion.
+- **Failure diagnosis:** The chosen fake-server session belongs to an earlier device pairing. The current pairing cannot receive its directive, and its local share has ended. Correct the property action's ownership precondition, keep the denial assertion for every deliverable stop/hold, retain the reported seed permanently and add a deterministic old-pairing isolation regression.
+- **Reproduction:** Direct probes of the unchanged source show a limit-bearing envelope retaining parent measures while showing only six of eight own measures, and a long one-ask delta of 187 characters with no attribution or closing count. The implementation and canonical requirements are recorded in the [rewrite program](native-rewrite-program.md#b10-notice-helper-preflight). Tracker search finds no matching issue. No external issue is posted.
 
 ### [x] PRESEED-001 — Retire the hosted closing date
 
@@ -437,3 +506,18 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [ ] An E2E cycle whose spend report finds no bugs, with the reconciliation totals matching to the micro-USD
   - [ ] test-v2 and align-agent tests for each fix; litai spec validate ok
   - [ ] Retained test receipt recorded on the commit that closes it
+
+<a id="sec-001"></a>
+### [x] SEC-001 - Keep viewer team leads read-only
+
+- **Priority:** P0
+- **Owner:** Authorization policy and team membership routes, B05
+- **Direction:** Enforce the existing viewer restriction even when a workspace viewer retains a team lead role.
+- **Conclusion:** The policy allows pod.manage_members through the team lead branch before checking the viewer restriction. Workspace role changes preserve team roles, and the HTTP team and pod routes use this decision directly. Deny viewers before granting team lead writes, preserve hidden-object behavior and normal owner/member permissions, and correct the baseline before native qualification.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Reject viewer team membership writes before granting team lead permissions; extend the existing policy matrix and add HTTP add/remove regressions that prove membership and audit state stay unchanged.
+- **Evidence:**
+  - [x] Direct policy reproduction, meaningful role matrix, HTTP write refusal on team and pod routes, unchanged membership and audit records, and the complete retained workflow before native policy qualification.
+- **Evidence:** The original policy returns allow for a viewer team lead. The repair passes 24 focused role/object cases and a production-server HTTP probe: both aliases reject POST and DELETE with `read_only`, membership and audit rows stay unchanged, and owner/member team lead writes still succeed. The application suite includes four denied requests in three new assertions. Specification validation passes. The complete sealed build, tests and package pass all 1,813 checks, including 940 application, 183 OAuth, 62 live agent and 602 agent tests. Current receipt `sha256:5d3c5781b0b4cf01813855e45ef47e5dd92d42046f082db094520c44a54da9af` binds execution evidence `sha256:fb2dd937b466d2a5d8b6b7c2dea3a48510e7ba01523ae8f2e2ad195ff92bed6a`. Both the current and CI-pinned runtimes verify the parent; validation and owned agent-entrypoint audit pass.

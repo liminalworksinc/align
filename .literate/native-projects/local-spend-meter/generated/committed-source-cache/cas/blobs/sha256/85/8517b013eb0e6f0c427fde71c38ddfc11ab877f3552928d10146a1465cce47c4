@@ -1,0 +1,29 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {claude_counts} = require('../spend_meter/claude_counts.js');
+const {parse_claude_lines} = require('../spend_meter/parse_claude_lines.js');
+const {parse_codex_lines} = require('../spend_meter/parse_codex_lines.js');
+const {price_request} = require('../spend_meter/price_request.js');
+const {price_row} = require('../spend_meter/price_row.js');
+const {price_table_version} = require('../spend_meter/price_table_version.js');
+const {valid_counts} = require('../spend_meter/valid_counts.js');
+const cases = [
+  {id:"generated-version",run:()=>price_table_version(...[]),expected:"align-prices-2026-10-22.2"},
+  {id:"generated-empty-counts",run:()=>valid_counts(...[{}]),expected:true},
+  {id:"generated-invalid-count",run:()=>valid_counts(...[{"input":-1}]),expected:false},
+  {id:"generated-claude-split",run:()=>claude_counts(...[{"input_tokens":"12","output_tokens":3,"cache_creation_input_tokens":9,"cache_creation":{"ephemeral_5m_input_tokens":4,"ephemeral_1h_input_tokens":2}}]),expected:{"input":12,"output":3,"cache_read":0,"cache_write_5m":4,"cache_write_1h":2,"cache_write_unsplit":3}},
+  {id:"generated-claude-invalid",run:()=>claude_counts(...[{"input_tokens":1}]),expected:null},
+  {id:"generated-price-round",run:()=>price_request(...["gpt-6-luna",{"input":0,"output":1,"cache_read":0,"cache_write_5m":0,"cache_write_1h":0,"cache_write_unsplit":0}]),expected:{"est_list_usd_micros":1,"unpriced":null}},
+  {id:"generated-price-long",run:()=>price_request(...["gpt-5",{"input":0,"output":0,"cache_read":0,"cache_write_5m":0,"cache_write_1h":0,"cache_write_unsplit":0},272001]),expected:{"est_list_usd_micros":null,"unpriced":"long_context_unmodeled"}},
+  {id:"generated-price-tier",run:()=>price_request(...["claude-haiku-5-5",{"input":100001,"output":0,"cache_read":0,"cache_write_5m":0,"cache_write_1h":0,"cache_write_unsplit":0}]),expected:{"est_list_usd_micros":50001,"unpriced":null}},
+  {id:"generated-unknown-row",run:()=>price_row(...["gpt-5-unknown"]),expected:null},
+  {id:"generated-claude-gap",run:()=>parse_claude_lines(...["test.jsonl",["not json"]]),expected:[{"kind":"gap","reason":"malformed_line"}]},
+  {id:"generated-codex-gap",run:()=>parse_codex_lines(...["group",["{\"type\":\"token_usage_record\",\"payload\":{}}"]]),expected:[{"kind":"gap","reason":"no_session_meta"}]}
+];
+function run_tests() {
+  const results=[];
+  for (const c of cases) { assert.deepStrictEqual(c.run(),c.expected,c.id); results.push({case_id:c.id,outcome:'passed'}); }
+  return {schema:'literate-ai/generated-test-results@1',cases:results};
+}
+function smoke() { return price_table_version(); }
+module.exports={run_tests,smoke};

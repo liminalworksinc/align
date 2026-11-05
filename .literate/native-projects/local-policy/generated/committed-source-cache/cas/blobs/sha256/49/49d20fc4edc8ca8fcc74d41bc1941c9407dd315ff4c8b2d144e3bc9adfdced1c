@@ -1,0 +1,15 @@
+LITAI_LANGUAGE_TOOL ?= node
+.PHONY: all check test smoke
+all: check
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" --check policy/authorize.js
+	"$(LITAI_LANGUAGE_TOOL)" --check policy/can_bind.js
+	"$(LITAI_LANGUAGE_TOOL)" --check policy/can_read_goal.js
+	"$(LITAI_LANGUAGE_TOOL)" --check policy/data.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tests/litai_test.js
+	"$(LITAI_LANGUAGE_TOOL)" --check run
+test:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+smoke:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-smoke

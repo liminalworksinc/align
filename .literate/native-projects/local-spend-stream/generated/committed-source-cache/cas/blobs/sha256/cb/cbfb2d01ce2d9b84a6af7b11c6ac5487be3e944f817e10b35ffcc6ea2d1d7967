@@ -1,0 +1,11 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const source = path.resolve(__dirname, '..');
+const destination = path.resolve(process.argv[2] || path.join(source, '_build', 'artifact'));
+if (destination === source || source.startsWith(destination + path.sep)) throw new Error('Artifact must not replace source');
+fs.mkdirSync(destination, {recursive: true});
+for (const name of ['main.js', 'run', 'spend_stream', 'tests']) {
+  fs.cpSync(path.join(source, name), path.join(destination, name), {recursive: true});
+}
+fs.chmodSync(path.join(destination, 'run'), 0o755);

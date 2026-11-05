@@ -4,6 +4,8 @@
 # lib/v2/metrics-core.mts, under lib).
 # The trust documents (docs/trust, docs/RETENTION.md) enter the build stage only: /privacy and /trust are built from
 # them, and the runtime image gets the build output, never the files.
+# The generated native inputs, acceptance files and native build adapter enter
+# only the build stage. No source cache or verifier is copied to the runtime.
 *
 !package.json
 !package-lock.json
@@ -17,6 +19,10 @@
 !scripts/align-admin.mjs
 !docs/trust
 !docs/RETENTION.md
+!.native-inputs
+!native
+!scripts/native-libraries.mjs
+lib/native
 # Belt and braces inside the allowed folders.
 **/.env
 **/.env.*

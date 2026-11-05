@@ -2,10 +2,29 @@
 
 ## Unreleased
 
+- Authorization policy now has an independently qualified specification. Two clean
+  builds and the typed application binding match all 331,937 observations from the
+  corrected baseline. The retained file preserves the public types and names while
+  the native package owns the implementation. The complete sealed workflow passes
+  all 1,814 checks, and all 24 hosted image checks pass.
+- A viewer's team lead role no longer allows them to change team membership.
+  Both the team route and its pod alias return `read_only` and leave membership
+  and its audit records unchanged.
+- The Apps tab now consumes the qualified paste-line library. Its original
+  implementation is replaced by typed consumer names. Browser builds and clean
+  container builds verify package files and rerun all 49 independent cases; the
+  complete application workflow and hosted image checks pass.
+- Incremental spend parsing has its own reviewed specification in
+  `.literate/native-projects/local-spend-stream`. Two clean builds match the
+  original on 132 inputs, including 135 observations of parser state after a line.
+  The agent now consumes its qualified package through verified immutable files.
 - Spend parsing and pricing have their own reviewed specification in
   `.literate/native-projects/local-spend-meter`. Two clean builds pass their tests
-  and match the original on all 110 inputs. The agent continues to use its retained
-  implementation while package integration and full parity are reviewed.
+  and match the original on all 110 inputs. The agent now uses this package and the
+  separately qualified rounding helper. The four replaced implementation files
+  are retired after the complete sealed application workflow passes, including
+  all 600 agent tests. Builds verify every package file and rerun independent
+  acceptance before installing the native libraries.
 - The MCP paste lines (`lib/paste-lines.ts`: `shq`, `safeMcpUrl`, `claudeCodeLine`, `codexLine`) are specified as
   their own component in `.literate/native-projects/local-paste-lines`. Two clean builds generated from that
   specification alone pass their tests and match the original on 49 cases (hostile URLs, quoting edges), so the

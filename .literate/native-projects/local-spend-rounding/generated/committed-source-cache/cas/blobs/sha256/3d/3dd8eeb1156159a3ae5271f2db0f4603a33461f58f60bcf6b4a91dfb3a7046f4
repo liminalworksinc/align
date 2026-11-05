@@ -1,0 +1,15 @@
+LITAI_LANGUAGE_TOOL ?= node
+BUILD_DIR ?= _build
+
+.PHONY: all test check
+all:
+	"$(LITAI_LANGUAGE_TOOL)" tools/package.js "$(BUILD_DIR)"
+
+test:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" --check spend_rounding/pico_to_micros.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tests/litai_test.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tools/package.js

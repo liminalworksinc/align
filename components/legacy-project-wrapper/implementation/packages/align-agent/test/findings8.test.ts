@@ -365,8 +365,10 @@ describe("cycle 7, section 5: works, but would confuse a developer", () => {
 
   test("`::align share --dir confirm` that replaces the folder's rule says so, as `align share --dir` does", async () => {
     const { t } = await world();
+    const target = path.join(t.root, "rule-target");
+    fs.mkdirSync(target, { recursive: true });
     const dir = path.join(t.root, "rule-replace");
-    fs.mkdirSync(dir, { recursive: true });
+    fs.symlinkSync(target, dir, "dir");
     assert.equal((await runCli(t, ["share", "--dir", dir, "--workspace", "Acme", "--goal", "Ship the v2", "--yes"])).code, 0);
     const sid = newSid();
     start(t, sid, "startup", dir);

@@ -1,0 +1,13 @@
+{
+  "name": "spend_stream",
+  "type": "commonjs",
+  "exports": {
+    "./codex_counts": "./codex_counts.js",
+    "./count": "./count.js",
+    "./init_claude_state": "./init_claude_state.js",
+    "./init_codex_state": "./init_codex_state.js",
+    "./iso_or_null": "./iso_or_null.js",
+    "./parse_claude_line": "./parse_claude_line.js",
+    "./parse_codex_line": "./parse_codex_line.js"
+  }
+}

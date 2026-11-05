@@ -4,7 +4,8 @@
 # local agent packages and any .env file never reach the image, except the operator script (scripts/align-admin.mjs)
 # and the three modules it imports (lib/v2/core.mts, lib/v2/retention-core.mts, lib/v2/metrics-core.mts), which the
 # runtime gets so `fly ssh console` can run it. The trust documents (docs/trust, docs/RETENTION.md) enter the build
-# stage only.
+# stage only. The native cache, independent verifiers and build adapter also enter
+# the build stage only, so the image can check the exact paste-line package itself.
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -16,7 +17,12 @@ COPY proxy.ts instrumentation.ts next.config.ts tsconfig.json ./
 # The public /privacy and /trust pages are built from these (lib/trust/docs.ts); the runtime stage doesn't copy them.
 COPY docs/trust ./docs/trust
 COPY docs/RETENTION.md ./docs/RETENTION.md
-RUN npx next build
+# Prepared from the exact admitted paste-line cache by npm run prepare:container.
+# Verification and independent acceptance run again inside this clean build stage.
+COPY .native-inputs /
+COPY native ./native
+COPY scripts/native-libraries.mjs ./scripts/native-libraries.mjs
+RUN node scripts/native-libraries.mjs web && npx next build
 
 # Runtime: production dependencies and the build output only, run as the unprivileged node user.
 FROM node:24-bookworm-slim

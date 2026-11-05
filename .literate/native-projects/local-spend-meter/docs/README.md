@@ -1,11 +1,7 @@
-# Project guide
+# Spend parsing and pricing project guide
 
-<!-- DOC-IDENTITY: Replace the quoted placeholder below with a short description
-     of what this project is and does. This is the front door for anyone reading
-     the documentation. -->
-
-> **Replace this paragraph** with a one-to-three sentence description of your
-> project: what it is, what it does, and who it is for.
+Parses complete usage transcripts and calculates estimated list cost for Align session usage.
+Its capabilities parse supported transcript formats, validate token counts, apply the versioned price table and price usage rows.
 
 Start with [getting started](user/getting-started.md) for installation and usage.
 See [active work](roadmap/active-work.md) for current development status.
