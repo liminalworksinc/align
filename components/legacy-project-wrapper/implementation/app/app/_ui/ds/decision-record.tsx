@@ -9,8 +9,9 @@ import { EmptyState } from "./empty-state";
 import { EvidenceLabel } from "./evidence-label";
 import { Panel } from "./panel";
 import { ReviewActions, ReviewBody } from "./review";
+import { useDelivery } from "./evidence-summary";
 import { useRead } from "./read";
-import { auditEvents, changeRequestEvents, KIND_WORDS, type AuditRow, type Kind, type RecordEvent } from "./record-events";
+import { auditEvents, changeRequestEvents, deliveryEvent, KIND_WORDS, type AuditRow, type Kind, type RecordEvent } from "./record-events";
 import { Segmented } from "./segmented";
 import { StatusPill, type StatusKind } from "./status-pill";
 import { Timeline, type TimelineEvent, type TimelineSource } from "./timeline";
@@ -35,6 +36,7 @@ const TONE_STATUS: Partial<Record<NonNullable<RecordEvent["tone"]>, StatusKind>>
 };
 
 function source(e: RecordEvent): TimelineSource {
+  if (e.evidence) return { kind: e.evidence, detail: e.evidence === "receipt" ? "Align recorded it" : "nothing recorded yet" };
   if (e.source === "align") return { kind: "system" };
   if (e.source === "app") return { kind: "reported", detail: "connected app via MCP" };
   // A person's evidence link is Self-reported (reported_as on the request read), the fourth evidence class.
@@ -54,6 +56,13 @@ function detail(e: RecordEvent, titleOf: (id: string) => string, openCompare: bo
     parts.push(
       <p key="t" className="text-[13px] text-(--text-3)">
         Time not recorded in what you can read: the request doesn&apos;t carry it, and the audit log that does is for workspace owners.
+      </p>,
+    );
+  // Only when there are counts to qualify; a failed read says so in the event itself.
+  if (e.asOfNow && e.evidence)
+    parts.push(
+      <p key="now" className="text-[13px] text-(--text-3)">
+        As Align has it now: counts, with no time for each receipt.
       </p>,
     );
   if (e.timeNote)
@@ -132,13 +141,17 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
   const [kind, setKind] = useState<"all" | Kind>("all");
   const [order, setOrder] = useState<Order>("newest");
 
+  const reviewing = useMemo(() => (crId && crs.data ? [...crs.data.waiting_on_me, ...crs.data.mine, ...crs.data.others].find((c) => c.id === crId) : undefined), [crId, crs.data]);
+  // ?cr= on a launched request: its delivery is the record's last event (read once; ReviewBody reads its own).
+  const delivery = useDelivery(ws, reviewing);
   const all = useMemo(() => {
     const list = crs.data ? [...crs.data.waiting_on_me, ...crs.data.mine, ...crs.data.others] : [];
     const inScope = list.filter((c) => (!crId || c.id === crId) && (!goalId || c.goal.id === goalId));
     const events = inScope.flatMap((c) => changeRequestEvents(ws, c, audit.data?.audit ?? []));
     if (audit.data && !scoped) events.push(...auditEvents(audit.data.audit, new Set(list.map((c) => c.id))));
+    if (reviewing && delivery.launched && delivery.value !== undefined) events.push(deliveryEvent(ws, reviewing, delivery.value));
     return events;
-  }, [crs.data, audit.data, ws, crId, goalId, scoped]);
+  }, [crs.data, audit.data, ws, crId, goalId, scoped, reviewing, delivery.launched, delivery.value]);
 
   const actors = useMemo(() => {
     const m = new Map<string, string>();
@@ -162,7 +175,7 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
           {status && <StatusPill kind={status} size="s" />}
         </span>
       ),
-      when: e.noTime ? "" : e.at,
+      when: e.noTime || e.asOfNow ? "" : e.at,
       object: e.object.href ? (
         <Link href={e.object.href} className="max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center text-(--accent-text) underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-(--focus)">
           {e.object.label}
@@ -182,7 +195,6 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
   // ?goal=: the goals the reader can read, to tell an unknown goal from one with nothing recorded yet.
   const feed = useRead<{ goals: { id: string }[] }>(goalId ? `/api/v2/workspaces/${ws}/goals` : null);
   const unknownGoal = !!goalId && !!feed.data && !feed.data.goals.some((g) => g.id === goalId);
-  const reviewing = crId && crs.data ? [...crs.data.waiting_on_me, ...crs.data.mine, ...crs.data.others].find((c) => c.id === crId) : undefined;
   const loading = crs.loading || audit.loading;
 
   const filters = (

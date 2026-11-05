@@ -4,14 +4,14 @@ import { Shell } from "../../../_ui/kit";
 import { WorkPanels } from "../../../_ui/ds";
 import type { Me } from "../../../_ui/server";
 
-// The Work page: the shared goal-by-goal drill-down (app/app/_ui/ds/work.tsx) inside today's shell, which either
-// concept's shell replaces.
-export default function Work({ me, ws, goal }: { me: Me; ws: string; goal?: string }) {
+// The Work page: the shared body (app/app/_ui/ds/work.tsx) inside the shell. ?goal=<g>&cr=<id> leads with that
+// decision; ?goal=<g> with the goal's open or latest one; bare /work is a plain index of goals.
+export default function Work({ me, ws, goal, cr }: { me: Me; ws: string; goal?: string; cr?: string }) {
   return (
     <Shell me={me} ws={ws}>
       <h1 className={`${PAGE_H1} mb-1`}>Work</h1>
-      <p className="mb-5 max-w-prose text-[15px] text-(--text-2)">What Align knows about the work on each goal: sessions people shared toward it, evidence on its changes and connected apps&apos; goal reads. Each item says where it came from.</p>
-      <WorkPanels ws={ws} goalId={goal} />
+      <p className="mb-5 max-w-prose text-[15px] text-(--text-2)">What Align knows about the work behind a decision: its evidence, what Align sent, the sessions on the goal and connected apps&apos; goal reads. Each item says where it came from.</p>
+      <WorkPanels ws={ws} goalId={goal} crId={cr} me={me.id} />
     </Shell>
   );
 }

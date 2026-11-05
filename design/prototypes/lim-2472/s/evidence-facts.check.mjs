@@ -8,7 +8,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const lib = resolve("components/legacy-project-wrapper/implementation/app/app/_ui/ds/evidence-facts.mts");
-const { changeFacts, goalFacts, hasEvidence, FACT_WORD } = await import(pathToFileURL(lib).href);
+const { changeFacts, deliveryStatement, goalFacts, hasEvidence, FACT_WORD } = await import(pathToFileURL(lib).href);
 
 // Claims about what an agent did or is, and "verified": Align never knows either from what it records.
 const BANNED = /\b(followed|live|running|compliant|agents? (?:are |is )?on|applied|verified|released|is on v|has v\d)\b/i;
@@ -88,6 +88,20 @@ expect("launch that targeted no session, one app sent it", changeFacts({ revisio
 }
 expect("goal with 35% agent time and nothing launched", goalFacts({ allocation: { target_share: 40, share_7d: 35, gap_7d: -5, held: false } }, null), "reported", "35% of reported agent time, 7 days");
 none("goal with no agent time, not quiet: no fact", goalFacts({ allocation: { target_share: null, share_7d: 0, gap_7d: null, held: false } }, null));
+
+// "I launched it. Did it reach them?": one sentence, counts only, never past "received", and a failed read said as one.
+function says(name, text, want) {
+  const ok = text === want && !BANNED.test(text);
+  if (!ok) failed++;
+  console.log(`${ok ? "ok  " : "FAIL"} statement, ${name}: ${text}`);
+  if (!ok) console.log(`     expected: ${want}`);
+}
+const app = (id, name) => ({ id, name });
+says("1 of 2 received, one named app (owner)", deliveryStatement(3, { delivery: { sessions: 2, received: 1, applied: 1 }, apps: { everyone: true, items: [app("a", "Claude Code")] } }), "Align sent v3 to 2 sessions; 1 has sent a receipt. Claude Code was sent it when it read the goals.");
+says("all received, no app (member)", deliveryStatement(3, { delivery: { sessions: 1, received: 1, applied: 0 }, apps: { everyone: false, items: [] } }), "Align sent v3 to 1 session; it has sent a receipt. None of your connected apps has been sent it in a goal read yet.");
+says("none received, two apps (member)", deliveryStatement(2, { delivery: { sessions: 3, received: 0, applied: 0 }, apps: { everyone: false, items: [app("a", "Claude Code"), app("b", "Codex")] } }), "Align sent v2 to 3 sessions; none has sent a receipt yet. Your Claude Code and Codex were sent it when they read the goals.");
+says("no session, no app", deliveryStatement(2, { delivery: null, apps: { everyone: true, items: [] } }), "No session was on this goal when v2 was launched. No connected app has been sent it in a goal read yet.");
+says("the read failed", deliveryStatement(2, null), "Align couldn't read where v2 was sent. Reload to try again.");
 
 const at = process.argv.indexOf("--seed");
 if (at > 0) {

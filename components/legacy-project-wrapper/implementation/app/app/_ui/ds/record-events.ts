@@ -1,4 +1,5 @@
 import type { ChangeFields, ChangeRequest } from "../types";
+import { deliveryStatement, type Delivery } from "./evidence-facts.mts";
 
 // The decision record's events (LIM-2472 workstream S, item 1): who did what, when, to which object, from which
 // source, built only from what Align recorded and the reader may read:
@@ -57,6 +58,10 @@ export interface RecordEvent {
   timeNote?: string;
   /** The reads carry no time for it: `at` only orders it (right after what it answers); the card shows no time. */
   noTime?: boolean;
+  /** Counts as Align has them now, not an event with its own time (a launch's delivery): the card says so. */
+  asOfNow?: boolean;
+  /** The event's evidence class, when it is evidence rather than an action: the timeline shows it as its source. */
+  evidence?: "receipt" | "unobserved";
 }
 
 const crHref = (ws: string, cr: ChangeRequest) => `/app/w/${ws}/record?cr=${cr.id}`;
@@ -196,6 +201,29 @@ export function changeRequestEvents(ws: string, cr: ChangeRequest, audit: AuditR
     });
   }
   return out;
+}
+
+/**
+ * A launched request's delivery as the last event of its record (LIM-2472 round 2): the same sentence as the review's
+ * and Work's delivery statement, from …/value. The read carries counts, not a time per receipt, so the event is placed
+ * right after the launch (its `at` only orders it) and says it is as of now. A Receipt when a session sent one or an app
+ * was sent the version; Not observed when neither; null `d` (the read failed) is said as such.
+ */
+export function deliveryEvent(ws: string, cr: ChangeRequest, d: Delivery | null): RecordEvent {
+  const s = d?.delivery;
+  const got = !!d && ((s?.received ?? 0) > 0 || (d.apps?.items.length ?? 0) > 0);
+  return {
+    id: `${cr.id}:delivery`,
+    at: new Date(new Date(cr.launch_decided_at ?? cr.updated_at).getTime() + 1).toISOString(),
+    kind: "launch",
+    actor: null,
+    source: "align",
+    object: { label: `Change to ${cr.goal.title}`, href: crHref(ws, cr), id: cr.id },
+    // The timeline names Align as the actor, so the statement's own "Align …" starts lower case after it.
+    what: deliveryStatement(cr.version!, d).replace(/^Align /, ""),
+    asOfNow: true,
+    evidence: d ? (got ? "receipt" : "unobserved") : undefined,
+  };
 }
 
 export interface AuditRow {

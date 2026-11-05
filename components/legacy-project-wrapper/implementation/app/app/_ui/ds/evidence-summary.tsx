@@ -1,7 +1,7 @@
 "use client";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ChangeRequest, Goal } from "../types";
-import { changeFacts, FACT_WORD, goalFacts, type Delivery, type Fact } from "./evidence-facts.mts";
+import { changeFacts, deliveryStatement, FACT_WORD, goalFacts, type Delivery, type Fact } from "./evidence-facts.mts";
 import { EvidenceLabel } from "./evidence-label";
 import { useRead } from "./read";
 
@@ -24,6 +24,9 @@ export type EvidenceSummaryProps = {
   variant?: "inline" | "full";
   /** inline: the most chips shown before "+N more" (fewer when they don't fit). Default: as many as fit. */
   max?: number;
+  /** false where the page already says a failed delivery read in its own words (the review's state line, Work's
+   *  delivery statement), so it isn't said twice. */
+  sayUnread?: boolean;
 } & (
   | { cr: ChangeRequest; goal?: never; value?: Delivery | null; launched?: never }
   | {
@@ -80,7 +83,7 @@ function useFit(count: number, max: number) {
   return { box, probe, shown };
 }
 
-function Inline({ facts, max }: { facts: Fact[]; max: number }) {
+function Inline({ facts, max, unread }: { facts: Fact[]; max: number; unread: number | null }) {
   const { box, probe, shown } = useFit(facts.length, max);
   const hidden = facts.slice(shown);
   return (
@@ -98,6 +101,11 @@ function Inline({ facts, max }: { facts: Fact[]; max: number }) {
           <span className="sr-only">Also: {hidden.map((f) => `${FACT_WORD[f.kind]}, ${f.short}`).join("; ")}.</span>
         </>
       )}
+      {unread !== null && (
+        <span data-delivery-unread className="shrink-0 text-[12px] whitespace-nowrap text-(--text-3)">
+          Delivery not read
+        </span>
+      )}
       {/* The measuring copy: every chip at its natural width and the widest "+N more", never seen or read out. */}
       <span ref={probe} aria-hidden="true" className="invisible absolute top-0 left-0 flex flex-nowrap gap-1.5 whitespace-nowrap">
         {facts.map((f, i) => (
@@ -111,7 +119,7 @@ function Inline({ facts, max }: { facts: Fact[]; max: number }) {
   );
 }
 
-function Full({ facts }: { facts: Fact[] }) {
+function Full({ facts, unread }: { facts: Fact[]; unread: number | null }) {
   return (
     <ul data-evidence-summary="full" className="flex flex-col gap-2">
       {facts.map((f, i) => (
@@ -122,12 +130,28 @@ function Full({ facts }: { facts: Fact[] }) {
           <span className="min-w-0 text-(--text-2) [overflow-wrap:anywhere]">{f.long}</span>
         </li>
       ))}
+      {unread !== null && (
+        <li data-delivery-unread className="text-[14px] text-(--text-2)">
+          {deliveryStatement(unread, null)}
+        </li>
+      )}
     </ul>
   );
 }
 
+/**
+ * A launched request's delivery (GET …/change-requests/<id>/value), read once for a page that shows it twice (the
+ * statement and the summary): `undefined` while reading or when the request isn't launched, `null` when the read
+ * failed. Pass the result to EvidenceSummary's `value` once it isn't undefined, so the summary doesn't read it again.
+ */
+export function useDelivery(ws: string, cr: ChangeRequest | null | undefined): { launched: boolean; value: Delivery | null | undefined } {
+  const launched = !!cr && cr.launch === "launched" && !!cr.version;
+  const r = useRead<ValueRead>(launched ? `/api/v2/workspaces/${ws}/goals/${cr!.goal.id}/change-requests/${cr!.id}/value` : null);
+  return { launched, value: !launched || r.loading ? undefined : r.status === 0 ? (r.data ?? null) : null };
+}
+
 export function EvidenceSummary(props: EvidenceSummaryProps) {
-  const { ws, variant = "inline", max = Infinity } = props;
+  const { ws, variant = "inline", max = Infinity, sayUnread = true } = props;
   const cr = props.cr;
   const needValue = !!cr && cr.launch === "launched" && !!cr.version && props.value === undefined;
   const value = useRead<ValueRead>(needValue ? `/api/v2/workspaces/${ws}/goals/${cr!.goal.id}/change-requests/${cr!.id}/value` : null);
@@ -135,11 +159,13 @@ export function EvidenceSummary(props: EvidenceSummaryProps) {
 
   const loading = (needValue && value.loading) || g.loading;
   if (loading) return <span className="text-[12px] leading-5 text-(--text-3)">Reading evidence…</span>;
-  const facts = cr
-    ? changeFacts(cr, props.value !== undefined ? props.value : needValue ? (value.status === 0 ? (value.data ?? null) : null) : undefined)
-    : props.goal
-      ? goalFacts(props.goal, props.launched !== undefined ? props.launched : g.launched, { quiet: props.quiet })
-      : [];
-  if (!facts.length) return null;
-  return variant === "full" ? <Full facts={facts} /> : <Inline facts={facts} max={max} />;
+  const crValue = cr ? (props.value !== undefined ? props.value : needValue ? (value.status === 0 ? (value.data ?? null) : null) : undefined) : undefined;
+  const launched = props.goal ? (props.launched !== undefined ? props.launched : g.launched) : undefined;
+  const facts = cr ? changeFacts(cr, crValue) : props.goal ? goalFacts(props.goal, launched, { quiet: props.quiet }) : [];
+  // A launched version whose delivery couldn't be read: said in words, never dropped (its facts would otherwise vanish
+  // and read as nothing to say). Not an evidence class: Align has the facts, this page couldn't get them.
+  const failed = cr ? (cr.launch === "launched" && cr.version && crValue === null ? cr.version : null) : launched && launched.value === null ? launched.version : null;
+  const unread = sayUnread ? failed : null;
+  if (!facts.length && unread === null) return null;
+  return variant === "full" ? <Full facts={facts} unread={unread} /> : <Inline facts={facts} max={max} unread={unread} />;
 }

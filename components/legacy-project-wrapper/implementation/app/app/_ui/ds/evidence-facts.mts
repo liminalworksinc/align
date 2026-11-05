@@ -28,7 +28,7 @@ const RANK: Record<FactKind, number> = { receipt: 0, reported: 1, self: 2, unobs
 /** What GET …/change-requests/<id>/value says about a launch (lib/v2/value.ts ValueView: delivery, apps). */
 export interface Delivery {
   delivery: { sessions: number; received: number; applied: number } | null;
-  apps: { everyone: boolean; items: { id: string }[] } | null;
+  apps: { everyone: boolean; items: { id: string; name?: string }[] } | null;
 }
 
 export type ChangeInput = Pick<ChangeRequest, "revision" | "revisions" | "launch" | "version">;
@@ -42,7 +42,7 @@ function deliveryFacts(version: number, d: Delivery): Fact[] {
   const s = d.delivery;
   const apps = d.apps?.items.length ?? 0;
   if (s && s.received > 0)
-    out.push({ kind: "receipt", short: `v${version} · ${s.received} of ${s.sessions} received`, long: `${s.received} of ${n(s.sessions, "session")} that Align sent v${version} to sent a receipt for it.` });
+    out.push({ kind: "receipt", short: `v${version} · ${s.received} of ${s.sessions} received`, long: `Align sent v${version} to ${n(s.sessions, "session")}; ${s.received} sent a receipt for it.` });
   if (s && s.sessions > 0 && s.received === 0)
     out.push({ kind: "unobserved", short: `v${version} · 0 of ${s.sessions} received`, long: `Align sent v${version} to ${n(s.sessions, "session")}; none has sent a receipt yet.` });
   if (apps > 0)
@@ -61,6 +61,29 @@ function deliveryFacts(version: number, d: Delivery): Fact[] {
     });
   if (noSession && apps > 0) out.push({ kind: "unobserved", short: `v${version} · no session on this goal`, long: `No session was on this goal when v${version} was launched.` });
   return out;
+}
+
+/**
+ * "I launched it. Did it reach them?" (LIM-2472 round 2): one plain statement of a launched version's delivery, from the
+ * same …/value read as the facts. Counts only; "received" is the furthest it goes (the CLI's own "applied" would be
+ * Agent reported, and isn't said). `d` null: the read failed, and the sentence says so instead of guessing.
+ */
+export function deliveryStatement(version: number, d: Delivery | null): string {
+  if (!d) return `Align couldn't read where v${version} was sent. Reload to try again.`;
+  const s = d.delivery;
+  const apps = d.apps?.items ?? [];
+  const sessions =
+    !s || s.sessions === 0
+      ? `No session was on this goal when v${version} was launched.`
+      : `Align sent v${version} to ${n(s.sessions, "session")}; ${s.received === 0 ? "none has" : s.received === s.sessions ? (s.sessions === 1 ? "it has" : "all have") : `${s.received} ${s.received === 1 ? "has" : "have"}`} sent a receipt${s.received === 0 ? " yet" : ""}.`;
+  const named = apps.map((a) => a.name).filter(Boolean) as string[];
+  // Anyone but a workspace owner sees only their own apps, so the sentence says whose it is talking about.
+  const mine = !d.apps?.everyone;
+  const appWords =
+    apps.length === 0
+      ? `${mine ? "None of your connected apps has" : "No connected app has"} been sent it in a goal read yet.`
+      : `${mine ? "Your " : ""}${named.length === apps.length && apps.length <= 2 ? named.join(" and ") : n(apps.length, "connected app")} ${apps.length === 1 ? "was" : "were"} sent it when ${apps.length === 1 ? "it" : "they"} read the goals.`;
+  return `${sessions} ${appWords}`;
 }
 
 /** Whether the request's current revision has any evidence link: a consumer says "No evidence attached" in words when

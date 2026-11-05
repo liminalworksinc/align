@@ -1,13 +1,14 @@
 "use client";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ApiError, api, sentence } from "../kit";
 import type { ChangeFields, ChangeRequest, Goal } from "../types";
 import { changeWaits, launchWaits } from "@/lib/v2/home-core.mts";
 import { Compare } from "./compare";
-import { DecisionLinks } from "./decision-links";
+import { DECISION_LINK, DecisionLinks } from "./decision-links";
 import { EvidenceLabel } from "./evidence-label";
-import { hasEvidence } from "./evidence-facts.mts";
-import { EvidenceSummary } from "./evidence-summary";
+import { deliveryStatement, hasEvidence } from "./evidence-facts.mts";
+import { EvidenceSummary, useDelivery } from "./evidence-summary";
 import { StatusPill, type StatusKind } from "./status-pill";
 
 // A compact review of one change request (LIM-2472 workstream S), for both concepts in place of main's long decision
@@ -46,6 +47,62 @@ function statusOf(cr: ChangeRequest): { kind: StatusKind; label?: string } {
 
 // ---------------------------------------------------------------------------------------------------------------------
 
+/**
+ * "My request came back" (LIM-2472 round 2): for the person who asked, when someone else's move has sent it back to them,
+ * the decider's words first, then what they can do, in what Align records. Shown only to the requester:
+ *  - a suggested change (countered): accept it, or withdraw. Align records no "keep mine", so the page says the way to
+ *    keep their own version is to withdraw and propose it again;
+ *  - accepted on a condition not yet confirmed: the condition, then "Confirm the condition is met";
+ *  - the goal moved on (pending, behind): update it to the goal's version;
+ *  - declined: the reason; a declined request is closed (it can't be withdrawn or revised), so a revised change is a new
+ *    proposal on the goal.
+ * The actions themselves are ReviewActions' (the server's `can` flags), right under the request.
+ */
+function Returned({ ws, cr, me }: { ws: string; cr: ChangeRequest; me: string }) {
+  if (cr.requester.id !== me) return null;
+  const rev = cr.revisions.find((r) => r.revision === cr.revision);
+  const author = rev?.author && rev.author.id !== me ? rev.author : null;
+  const cond = cr.condition && !cr.condition.acknowledged_by && (cr.state === "pending" || cr.state === "approved") ? cr.condition : null;
+  let kind: "counter" | "condition" | "behind" | "declined" | null = null;
+  if (cr.state === "countered") kind = "counter";
+  else if (cond) kind = "condition";
+  else if (cr.state === "pending" && cr.behind) kind = "behind";
+  else if (cr.state === "rejected") kind = "declined";
+  if (!kind) return null;
+  const decider = kind === "declined" ? cr.rejected_by : author;
+  const words = kind === "declined" ? cr.rejection_reason : kind === "condition" ? cond!.text : kind === "counter" ? rev?.note : null;
+  const head =
+    kind === "counter"
+      ? `${decider?.name ?? "An approver"} suggested a change to your request`
+      : kind === "condition"
+        ? `${decider?.name ?? "An approver"} accepts it if you confirm a condition`
+        : kind === "behind"
+          ? `The goal moved on to version ${cr.goal.version}`
+          : `${decider?.name ?? "An approver"} declined your request`;
+  const next =
+    kind === "counter"
+      ? "You can accept their change, or withdraw your request. Align doesn't record keeping your own version: to keep it, withdraw this and propose it again."
+      : kind === "condition"
+        ? "Confirm the condition is met when it is. It isn't a gate on approval or launch, and Align doesn't check it."
+        : kind === "behind"
+          ? `You asked against version ${cr.base_version}. Update it to version ${cr.goal.version} so it can be decided, or withdraw it.`
+          : "A declined request is closed. To try again, propose a revised change on the goal.";
+  return (
+    <section data-returned={kind} aria-label="Your request came back" className="flex flex-col gap-2 rounded-(--radius-m) border border-(--line-strong) bg-(--bg-inset) px-3 py-3">
+      <h3 className="text-[15px] font-semibold text-(--text-1)">{head}</h3>
+      {words && <blockquote className="border-l-2 border-(--line-strong) pl-3 text-[15px] text-(--text-1) [overflow-wrap:anywhere]">{kind === "condition" ? `Accept if: ${words}` : words}</blockquote>}
+      <p className="text-[14px] text-(--text-2)">{next}</p>
+      {/* At integration with r2-shell (align session, round 2): open its Propose drawer pre-filled from this declined
+          request (goal, the change, the reason) instead of the goal page, as Mini S1 did for "Propose again". */}
+      {kind === "declined" && (
+        <Link href={`/app/w/${ws}/goals/${cr.goal.id}#change-requests`} className={`${DECISION_LINK} self-start`}>
+          Open the goal to propose again
+        </Link>
+      )}
+    </section>
+  );
+}
+
 /** The request itself: everything a reviewer needs before choosing, nothing they don't. */
 /** `onDone`: called after an evidence link is added (or refused), to re-read the request; without it the Add evidence
  *  control isn't offered. */
@@ -63,6 +120,8 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
   const waits = changeWaits(cr);
   const launch = launchWaits(cr);
   const n = cr.base_version;
+  // Read once: the state line's delivery statement and the evidence summary both use it.
+  const delivery = useDelivery(ws, cr);
   // The columns are named by the request's state: what it asks while undecided, what was decided once it is.
   const undecided = cr.state === "pending" || cr.state === "countered";
   const currentLabel = undecided ? `Current (v${n})` : `Version ${n}`;
@@ -82,6 +141,7 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
               : "Proposed";
   return (
     <div className="flex min-w-0 flex-col gap-4" data-cr={cr.id} data-cr-view="review">
+      <Returned ws={ws} cr={cr} me={me} />
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <StatusPill kind={s.kind} label={s.label} size="s" />
         <p className="text-[14px] text-(--text-2)">
@@ -109,7 +169,11 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
 
       <section aria-label="Evidence" className="flex flex-col gap-2">
         <p className="text-[13px] font-medium text-(--text-2)">Evidence</p>
-        <EvidenceSummary ws={ws} cr={cr} variant="full" />
+        {delivery.launched && delivery.value === undefined ? (
+          <p className="text-[13px] text-(--text-3)">Reading evidence…</p>
+        ) : (
+          <EvidenceSummary ws={ws} cr={cr} variant="full" value={delivery.launched ? delivery.value : null} sayUnread={false} />
+        )}
         {!hasEvidence(cr) && (
           <p className="text-[14px] text-(--text-2)">
             {cr.state === "approved"
@@ -152,7 +216,7 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
         {waits?.next === "decide" && `Waits on ${people(waits.waiting_on, me)} to decide.`}
         {waits?.next === "accept_counter" && `Waits on ${people(waits.waiting_on, me)} to accept the suggested change.`}
         {!waits && launch && `Approval is not launch: version ${cr.version ?? cr.goal.version + 1} becomes the launched version only when ${people(launch.launchers, me)} launch${launch.launchers.length === 1 && launch.launchers[0].id !== me ? "es" : ""} it.`}
-        {!waits && !launch && cr.state === "approved" && cr.launch === "launched" && `Launched by ${who(cr.launch_decided_by, me)}, ${at(cr.launch_decided_at)}: version ${cr.version} is now the launched version.`}
+        {!waits && !launch && cr.state === "approved" && cr.launch === "launched" && `Launched by ${who(cr.launch_decided_by, me)}, ${at(cr.launch_decided_at)}: version ${cr.version} is now the launched version.${delivery.value !== undefined ? ` ${deliveryStatement(cr.version!, delivery.value)}` : ""}`}
         {!waits && !launch && cr.state !== "approved" && cr.state_note}
       </p>
     </div>
@@ -438,6 +502,7 @@ export function ReviewActions({
   compact = false,
   initialChoice,
   onChoice,
+  after,
 }: {
   ws: string;
   cr: ChangeRequest;
@@ -446,6 +511,8 @@ export function ReviewActions({
   compact?: boolean;
   initialChoice?: ReviewChoice;
   onChoice?: (c: ReviewChoice | null) => void;
+  /** Shown under a recorded decision's notice only (never under a refusal or a retry): the host's "Next" (NextAfterDecision). */
+  after?: ReactNode;
 }) {
   const next = cr.version ?? cr.goal.version + 1;
   const n = cr.goal.version;
@@ -582,6 +649,7 @@ export function ReviewActions({
     return (
       <div className="flex flex-col gap-2">
         {notice && <NoticeLine n={notice} r={noticeRef} />}
+        {notice?.kind === "done" && after}
         {line && (
           <p data-not-yours className="text-[14px] text-(--text-2)">
             {line}
@@ -596,6 +664,7 @@ export function ReviewActions({
   return (
     <div className="flex min-w-0 flex-col gap-3" data-review-actions={cr.id}>
       {notice && <NoticeLine n={notice} r={noticeRef} />}
+        {notice?.kind === "done" && after}
       {shown !== "confirm" && (
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" data-decision={TITLE[dominant]} aria-pressed={choice === dominant} className={PRIMARY} onClick={() => pick(dominant)}>
