@@ -55,6 +55,15 @@ Predicted to stay green: the 390px 44px check counts only bordered buttons in `<
 - "Receipt · applied v3" in the Timeline sample is a real receipt state on main: `RECEIPT_STATES = ["received", "applied", "enforced", "accepted", "declined"]` (`lib/v2/directives.ts:186` at b16f8d1).
 - Main's own record copy still says "Launched, agents on v…" (`lib/v2/launch-words.ts:12` at b16f8d1). That over-claims the same way, but `lib/` is out of scope for the front end: a server copy ask.
 
+## The Needs-you row (direction 2026-11-05)
+
+`NeedRow`, `NeedList` and `NeedAction` in `app/app/_ui/ds/need.tsx`; specimen `design/prototypes/lim-2472/need-list.html`.
+
+- **One target plus one action.** The title is the row's link (its `::after` covers the row); the action sits above it. `NeedAction` is always outlined; the one filled action in a view is the review's.
+- **No table header.** Columns align through CSS subgrid, so one row is a row, not a hollow table; the list stacks on its own width (container query at `@3xl`), so it works beside any shell. On phones the action sits beside the evidence, 44px tall.
+- **Rank note** above the list, shown with two or more rows. No rows: one line (`empty`, default "Nothing needs you.").
+- **Checked in Chrome, both themes, at 1440, 390 and 320:** twelve rows fit at 1440x900 even under a 200px header (50-52px each; the goal was eight); no sideways scroll; the action and the row are separate hit targets; Tab goes title, action, next title with the 2px ring. At wide widths title and sub truncate to one line, so keep them short; evidence never truncates. Phone rows are 140-180px, so 3 to 4 show at once.
+
 ## Known rough edges
 
 - `/app/account` at 320: "Ways you can sign in" wraps one letter per line. That layout predates this branch (only the Appearance card was added); not fixed here.

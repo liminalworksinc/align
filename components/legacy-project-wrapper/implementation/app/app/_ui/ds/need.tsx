@@ -50,17 +50,24 @@ export function NeedRow({
         )}
         {sub && <p className="text-[13px] leading-[18px] text-(--text-2) @3xl:truncate">{sub}</p>}
       </div>
-      <div className="col-span-2 flex min-w-0 flex-wrap items-center gap-1 empty:hidden @3xl:col-span-1 @3xl:empty:block">{evidence}</div>
-      <div className="col-start-2 row-start-1 whitespace-nowrap pt-0.5 text-right font-mono text-[12px] tabular-nums text-(--text-3) @3xl:col-start-auto @3xl:row-start-auto @3xl:pt-0">{waited}</div>
-      <div className="relative z-10 col-span-2 empty:hidden @3xl:col-span-1 @3xl:empty:block @3xl:text-right">{action}</div>
+      <div className="col-start-1 flex min-h-[44px] min-w-0 flex-wrap items-center gap-1 empty:hidden @3xl:col-start-auto @3xl:min-h-0 @3xl:empty:block">{evidence}</div>
+      <div className="col-start-2 row-start-1 whitespace-nowrap pt-0.5 text-right font-mono text-[12px] tabular-nums text-(--text-3) @3xl:col-start-auto @3xl:row-start-auto @3xl:pt-0">
+        {waited && (
+          <>
+            <span className="sr-only">Waiting </span>
+            {waited}
+          </>
+        )}
+      </div>
+      <div className="relative z-10 col-start-2 self-end text-right empty:hidden @3xl:col-start-auto @3xl:self-center @3xl:empty:block">{action}</div>
     </li>
   );
 }
 
-/** A row's one action: always outlined, a link or a button. 44px and full width when the row stacks. */
+/** A row's one action: always outlined, a link or a button. 44px when the row stacks, beside the evidence. */
 export function NeedAction({ children, href, onClick, disabled }: { children: ReactNode; href?: string; onClick?: () => void; disabled?: boolean }) {
   const cls =
-    "inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) border border-(--edge) px-3 text-[13px] font-medium text-(--text-1) transition-[color,background-color,border-color] hover:bg-(--bg-overlay) disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px] @max-3xl:w-full";
+    "inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) border border-(--edge) px-3 text-[13px] font-medium text-(--text-1) transition-[color,background-color,border-color] hover:bg-(--bg-overlay) disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px]";
   return href ? (
     <Link href={href} className={cls}>
       {children}
@@ -79,8 +86,8 @@ export function NeedList({ rankNote, children, empty }: { rankNote: string; chil
   if (!rows.length) return <p className="rounded-(--radius-m) border border-(--line) bg-(--bg-panel) px-3 py-2.5 text-[14px] text-(--text-2)">{empty ?? "Nothing needs you."}</p>;
   return (
     <div className="@container min-w-0">
+      {rows.length > 1 && <p className="mb-1.5 px-1 text-[12px] text-(--text-3)">{rankNote}</p>}
       <ol className="grid rounded-(--radius-m) border border-(--line) bg-(--bg-panel) @3xl:grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] @3xl:gap-x-4">{rows}</ol>
-      {rows.length > 1 && <p className="mt-1.5 px-1 text-[12px] text-(--text-3)">{rankNote}</p>}
     </div>
   );
 }
