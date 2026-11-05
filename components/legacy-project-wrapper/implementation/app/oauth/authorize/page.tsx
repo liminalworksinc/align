@@ -19,7 +19,7 @@ import AuthorizeForm, { type Person } from "./AuthorizeForm";
 // checks everything again.
 export default function AuthorizePage({ searchParams }: PageProps<"/oauth/authorize">) {
   return (
-    <Suspense fallback={<main className="p-10 text-[16px] text-(--text-3)">Loading Align…</main>}>
+    <Suspense fallback={<main className="p-10 text-[16px] text-zinc-500">Loading Align…</main>}>
       <Authorize searchParams={searchParams} />
     </Suspense>
   );
@@ -50,12 +50,9 @@ async function personFrom(h: Headers): Promise<Person | null> {
 
 function Refused({ children }: { children: React.ReactNode }) {
   return (
-    <main className="grid min-h-screen place-items-center bg-(--bg-page) p-6 text-[16px] text-(--text-1) max-sm:p-3">
-      <div className="w-full max-w-[560px] rounded-(--radius-l) border border-(--line) bg-(--bg-panel) p-8 max-sm:p-5">
-        <p className="mb-4 font-display text-[26px] leading-none">Align</p>
-        <h1 className={`${PAGE_H1} mb-3`}>Can’t connect this app</h1>
-        {children}
-      </div>
+    <main className="mx-auto min-h-screen max-w-[560px] bg-[var(--al-bg)] p-6 text-[16px] text-zinc-900">
+      <h1 className={`${PAGE_H1} mb-3`}>Can’t connect this app</h1>
+      {children}
     </main>
   );
 }
@@ -87,7 +84,7 @@ async function Authorize({ searchParams }: { searchParams: PageProps<"/oauth/aut
     return (
       <Refused>
         <p className="mb-4">The app sent a request Align can’t accept. Go back to the app and try again.</p>
-        <a className="inline-flex min-h-[44px] items-center font-medium text-(--accent-text) underline underline-offset-2" href={check.redirect}>
+        <a className="text-violet-700 underline" href={check.redirect}>
           Return to the app
         </a>
       </Refused>

@@ -56,7 +56,7 @@ No conflicts, so no file needed a side chosen. No rebase, no force push, no stas
 - REPLACED: `app/globals.css` (semantic tokens for both themes: surfaces, text, lines, `--accent`, `--st-*` states, `--focus`, radii), `app/layout.tsx` (theme script before first paint, fonts), `app/app/_ui/kit.tsx` (kit on tokens; `Btn` primary on `--accent`; secondary and `Input`/`Select`/`TextArea` on `--edge` with a 44px phone minimum), `app/app/account/view.tsx` (Appearance setting: System, Light, Dark).
 
 ### Stream R (rest of app)
-REPLACED (restyle; requests and logic unchanged, see `design/prototypes/lim-2472/r/LIM-2472-REPORT-R.md`): `app/app/view.tsx`, `sign-in/view.tsx`, `request-access/view.tsx`, `account/view.tsx`, `device/view.tsx`, `devices/view.tsx`, `invite/[token]/view.tsx`, `w/[ws]/people/view.tsx`, `w/[ws]/alignments/view.tsx`, `w/[ws]/asks/view.tsx`, `w/[ws]/spend/{view,allocation}.tsx`, `_ui/{reallocations,limits,requests,goalform,missing,error-notice,turnstile}.tsx`, `_ui/value.tsx` (only the value-card approver gate), `app/global-error.tsx`, `app/oauth/authorize/{AuthorizeForm,page}.tsx` (class names only), `app/trust/page.tsx`, `app/_trust/doc.tsx`, and every owned `page.tsx` (loading fallback colour). ADDED: `design/prototypes/lim-2472/r/LIM-2472-REPORT-R.md`.
+REPLACED (restyle; requests and logic unchanged, see `design/prototypes/lim-2472/r/LIM-2472-REPORT-R.md`): `app/app/view.tsx`, `sign-in/view.tsx`, `request-access/view.tsx`, `account/view.tsx`, `device/view.tsx`, `devices/view.tsx`, `invite/[token]/view.tsx`, `w/[ws]/people/view.tsx`, `w/[ws]/alignments/view.tsx`, `w/[ws]/asks/view.tsx`, `w/[ws]/spend/{view,allocation}.tsx`, `_ui/{reallocations,limits,requests,goalform,missing,error-notice,turnstile}.tsx`, `_ui/value.tsx` (only the value-card approver gate), `app/global-error.tsx`, `app/trust/page.tsx`, `app/_trust/doc.tsx`, and every owned `page.tsx` (loading fallback colour). ADDED: `design/prototypes/lim-2472/r/LIM-2472-REPORT-R.md`.
 
 ### Shared surfaces (S)
 - ADDED: `_ui/ds/compare.tsx` (Compare, VersionsCompare), `_ui/ds/decision-record.tsx`, `_ui/ds/record-events.ts`, `_ui/ds/read.ts`, `_ui/ds/review.tsx` (ReviewBody, ReviewActions), `_ui/ds/work.tsx` (WorkPanels), `_ui/ds/dependencies.tsx`; routes `w/[ws]/record/{page,view}.tsx`, `w/[ws]/work/{page,view}.tsx`, `w/[ws]/dependencies/{page,view}.tsx`; `w/[ws]/sessions/parts.tsx`; `design/prototypes/lim-2472/s/{LIM-2472-REPORT-S.md,seed-agent.mjs,shots.mjs}`.
@@ -119,7 +119,16 @@ The goal page's own request cards (`5506-5543` and the U/B checks that call `car
 **Viewer connect.** Home no longer offers a viewer "Connect your agent" or the header "Connect an agent" (`AuthorizeForm.tsx:15,119`: viewers can't connect apps). Nothing is offered until the role is known, from `GET /api/v2/workspaces`, the read the shell already makes, so Home adds one read. A viewer keeps the note's second sentence. A freshly invited member still gets the offer. `NeedsList`'s notice says "See apps", which is not a connect offer.
 
 ### Notes for the PR body
-**Files outside `app/app/**` touched by the H1 change:** `app/oauth/authorize/AuthorizeForm.tsx`, `app/oauth/authorize/page.tsx` and `app/trust/page.tsx`. Class-only, no logic: each `h1` takes `PAGE_H1` and the file gains that one import. The consent page's form, handlers and headers are unchanged.
+**OAuth consent page (read this one on its own).** `app/oauth/authorize/page.tsx` and `AuthorizeForm.tsx` are main's files plus one change each: the `h1` takes `PAGE_H1` and the file gains that import. No wrapper, no wordmark, no token swaps, no logic, form, handler or header change. The fuller restyle is saved on `agent/LIM-2472-consent-restyle` (`a356ca9`). It depends on the theme tokens, so it can only merge after this candidate, as its own PR.
+
+Rendered on the new tokens, dark and light, 1440 and 390: consent, signed out and the unknown-client error. Readable, no text under 4.5:1, no sideways scroll. Main's `--al-bg` and zinc classes resolve through the theme. One visible difference: the signed-out "Sign in" link stays `bg-violet-700`, which renders orchid (dark `#d975ff`, light `#9312b8`), not the pink primary. "Allow access" is pink. Screenshots: `I-compose/consent/`.
+
+**Other files outside `app/app/**`:**
+- `app/globals.css`: the semantic theme tokens for dark and light, `--focus` and the focus ring rule, `--al-display` without Anton, `@font-face` for the display face.
+- `app/layout.tsx`: drops the Anton `next/font` import; adds `THEME_SCRIPT` before first paint, `data-theme` and `suppressHydrationWarning` on `<html>`.
+- `app/global-error.tsx`: the `<body>` takes `bg-(--bg-page)` and `text-(--text-1)`.
+- `app/_trust/doc.tsx`: theme tokens, 44px nav and contents links on phones, long URLs break instead of scrolling sideways.
+- `app/trust/page.tsx`: theme tokens, and the `h1` takes `PAGE_H1`.
 
 **The display face.** Screenshots from this iMac show the real Nineties Headliner because it is installed here. A tester's machine won't show it until the private host lands (LIM-2454 1cb2b974); until then it falls through to Iowan Old Style or Georgia. The current CSP is only `frame-ancestors` (`proxy.ts:37`, `next.config.ts:16`), so `font-src` blocks nothing today.
 
@@ -394,7 +403,7 @@ For comparison, `--accent` as a mark measured 3.08 on the panel, 2.89 on raised 
 **Marks switched to `--accent-text` in R's files (this commit):**
 - Native radio and checkbox fills (`accent-(--accent)` → `accent-(--accent-text)`):
   - `app/app/request-access/view.tsx` (2 radios)
-  - `app/oauth/authorize/AuthorizeForm.tsx` (workspace radio)
+  - `app/oauth/authorize/AuthorizeForm.tsx` (workspace radio): since moved to `agent/LIM-2472-consent-restyle`; the candidate keeps main's file plus `PAGE_H1`
   - `app/app/device/view.tsx` (workspace checkbox)
   - `app/app/_ui/requests.tsx` (request-type radio, session checkbox)
   - `app/app/_ui/limits.tsx` (limit checkbox)

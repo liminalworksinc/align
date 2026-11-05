@@ -69,14 +69,14 @@ export default function AuthorizeForm(props: {
   );
 
   return (
-    <main className="mx-auto min-h-screen max-w-[600px] bg-(--bg-page) p-6 text-[16px] text-(--text-1) max-sm:p-4">
-      <p className="font-display mb-4 text-[26px] leading-none text-(--text-1)">Align</p>
+    <main className="mx-auto min-h-screen max-w-[600px] bg-[var(--al-bg)] p-6 text-[16px] text-zinc-800">
+      <p className="font-display mb-4 text-[26px] leading-none text-zinc-900">Align</p>
       <h1 className={`${PAGE_H1} mb-1`}>Connect {clientName} to Align</h1>
-      <p className="mb-5 text-(--text-2)">
+      <p className="mb-5 text-zinc-600">
         {selfNamed ? "This app named itself. " : ""}After you allow it, Align sends you back to <span className="font-mono">{redirectHost}</span>.
       </p>
       {loopback && (
-        <p role="alert" className="mb-5 rounded-(--radius-s) border border-(--st-retry)/50 bg-(--st-retry-soft) p-3 text-(--text-1)">
+        <p role="alert" className="mb-5 rounded-[10px] border border-amber-300 bg-amber-50 p-3 text-amber-900">
           This app sends you back to a program on this computer ({redirectHost}). Allow it only if you started it yourself just now.
         </p>
       )}
@@ -85,7 +85,7 @@ export default function AuthorizeForm(props: {
         <Card>
           <p className="mb-4">Sign in to Align to connect {clientName}.</p>
           <div className="flex flex-wrap gap-2">
-            <a href={signIn} className="inline-flex min-h-[40px] items-center rounded-(--radius-s) border border-(--accent) bg-(--accent) px-3.5 py-2 text-[15px] font-medium text-(--text-on-accent) hover:bg-(--accent-hover) max-sm:min-h-[44px]">
+            <a href={signIn} className="rounded-[10px] border border-violet-700 bg-violet-700 px-3.5 py-2 text-[15px] font-medium text-[var(--al-bg)] hover:opacity-90">
               Sign in
             </a>
             {cancel}
@@ -102,7 +102,7 @@ export default function AuthorizeForm(props: {
         </>
       ) : (
         <>
-          <p className="mb-5 text-(--text-2)">
+          <p className="mb-5 text-zinc-600">
             Signed in as {person.name} ({person.email}).
           </p>
           <Card title="What it can do">
@@ -121,8 +121,8 @@ export default function AuthorizeForm(props: {
             ) : (
               <div className="space-y-2">
                 {person.workspaces.map((w) => (
-                  <label key={w.id} className="flex min-h-[44px] items-start gap-2 rounded-(--radius-s) py-2 text-[15px]">
-                    <input type="radio" name="workspace" className="mt-1 size-4 shrink-0 accent-(--accent-text)" checked={ws === w.id} onChange={() => setWs(w.id)} />
+                  <label key={w.id} className="flex items-start gap-2 text-[15px]">
+                    <input type="radio" name="workspace" className="mt-1 size-4 accent-violet-700" checked={ws === w.id} onChange={() => setWs(w.id)} />
                     <span>
                       {w.name} <span className="al-lbl ml-1">{w.role}</span>
                     </span>
