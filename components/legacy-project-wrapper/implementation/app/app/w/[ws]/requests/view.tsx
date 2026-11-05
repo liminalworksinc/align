@@ -1,6 +1,5 @@
 "use client";
 import Link from "next/link";
-import { Fragment } from "react";
 import { Err, Loading, Shell, useApi } from "../../../_ui/kit";
 import { Panel, ReviewActions, ReviewBody } from "@/app/app/_ui/ds";
 import type { Me } from "../../../_ui/server";
@@ -40,21 +39,22 @@ export default function Requests({ me, ws }: { me: Me; ws: string }) {
       {d.loading && <Loading />}
       <Err>{d.error}</Err>
       {d.data && (
-        // One keyed list, headings included, so a request that moves section after a decision (say, from Waiting on
+        // One flat keyed list (headings are siblings, not wrappers), so a request that moves section after a decision (say, from Waiting on
         // you to Others) keeps its review mounted and its "Recorded: …" or "Not recorded. …" notice stays on screen.
         <div className="flex flex-col">
-          {sections.map((s) => (
-            <Fragment key={`section:${s.id}`}>
-              <h2 id={`requests-${s.id}`} className="mb-3 mt-7 flex items-baseline gap-2 border-b border-(--line) pb-2 text-[17px] font-semibold text-(--text-1) first:mt-0">
-                {s.title}
-                {s.list.length > 0 && <span className="font-mono text-[12px] font-normal text-(--text-3)">{s.list.length}</span>}
-              </h2>
-              {s.list.length === 0 && <p className="text-[15px] text-(--text-2)">{s.empty}</p>}
-              {s.list.map((cr) => (
-                <RequestReview key={cr.id} ws={ws} cr={cr} me={me.id} titleOf={titleOf} onDone={d.reload} />
-              ))}
-            </Fragment>
-          ))}
+          {sections.flatMap((s) => [
+            <h2 key={`h:${s.id}`} id={`requests-${s.id}`} className="mb-3 mt-7 flex items-baseline gap-2 border-b border-(--line) pb-2 text-[17px] font-semibold text-(--text-1) first:mt-0">
+              {s.title}
+              {s.list.length > 0 && <span className="font-mono text-[12px] font-normal text-(--text-3)">{s.list.length}</span>}
+            </h2>,
+            ...(s.list.length === 0
+              ? [
+                  <p key={`e:${s.id}`} className="text-[15px] text-(--text-2)">
+                    {s.empty}
+                  </p>,
+                ]
+              : s.list.map((cr) => <RequestReview key={cr.id} ws={ws} cr={cr} me={me.id} titleOf={titleOf} onDone={d.reload} />)),
+          ])}
         </div>
       )}
     </Shell>
