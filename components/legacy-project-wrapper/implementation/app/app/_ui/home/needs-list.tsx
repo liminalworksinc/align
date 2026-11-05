@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EvidenceLabel, EvidenceSummary, hasEvidence, NeedAction, NeedList, NeedRow, Segmented, type Delivery } from "../ds";
 import { api, useApi } from "../kit";
 import type { Alignment, ChangeRequest, Goal } from "../types";
@@ -137,6 +138,40 @@ const listWords = (xs: string[]) => (xs.length < 2 ? (xs[0] ?? "") : `${xs.slice
 /** Search shows only when a phase has more rows than this. */
 const SEARCH_FROM = 8;
 
+/** Declined requests this person has opened, per workspace and person, in this browser's local storage only: a
+ *  declined request comes back to its requester's Home until they open it (founder ruling, LIM-2472 eaa5cf92). Across
+ *  devices it needs a server field (on Sean's list). Storage blocked: nothing is remembered, so it keeps coming back. */
+function useDeclinedSeen(ws: string, me: string) {
+  const key = `align.declinedSeen:${ws}:${me}`;
+  const [seen, setSeen] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    let ids: string[] = [];
+    try {
+      ids = JSON.parse(localStorage.getItem(key) ?? "[]") as string[];
+    } catch {
+      /* storage blocked or unreadable */
+    }
+    const t = setTimeout(() => setSeen(new Set(Array.isArray(ids) ? ids : [])), 0);
+    return () => clearTimeout(t);
+  }, [key]);
+  const mark = useCallback(
+    (id: string) =>
+      setSeen((prev) => {
+        if (prev?.has(id)) return prev;
+        const next = new Set(prev ?? []);
+        next.add(id);
+        try {
+          localStorage.setItem(key, JSON.stringify([...next].slice(-200)));
+        } catch {
+          /* storage blocked */
+        }
+        return next;
+      }),
+    [key],
+  );
+  return { seen, mark };
+}
+
 export function NeedsList({
   ws,
   me,
@@ -170,7 +205,10 @@ export function NeedsList({
   const narrow = useNarrow();
   const [q, setQ] = useState("");
 
-  const loading = [cr, asks, al, home, goals, wsList].some((r) => r.loading && !r.data && !r.error) || reqs.loading || sent.loading;
+  const declined = useDeclinedSeen(ws, me);
+  const router = useRouter();
+  const activeGoals = useMemo(() => (goals.data ? new Set(goals.data.goals.filter((g) => g.status === "active").map((g) => g.id)) : null), [goals.data]);
+  const loading = [cr, asks, al, home, goals, wsList].some((r) => r.loading && !r.data && !r.error) || reqs.loading || sent.loading || declined.seen === null;
   const wsRow = wsList.data?.workspaces.find((w) => w.id === ws) ?? null;
   const approver = useMemo(
     () => ({
@@ -192,9 +230,17 @@ export function NeedsList({
         requests: reqs.groups,
         sends: sent.sends,
         approver,
+        declinedSeen: declined.seen ?? undefined,
+        activeGoals,
       }),
-    [ws, me, crList, asks.data, al.data, home.data, reqs.groups, sent.sends, approver],
+    [ws, me, crList, asks.data, al.data, home.data, reqs.groups, sent.sends, approver, declined.seen, activeGoals],
   );
+  // Opening a returned declined request's review marks it seen, so it leaves Needs you (into Done) on the next read.
+  const markSeen = declined.mark;
+  useEffect(() => {
+    const row = selected ? rows.find((r) => r.key === selected && r.word === "Declined" && r.phase === "needs_you") : null;
+    if (row?.cr) markSeen(row.cr.id);
+  }, [selected, rows, markSeen]);
   // A failed per-goal read is an unread source like any other (amber line, lower-bound counts, partial); only the
   // deliberate cap stays in the rank note, with one short visible line.
   const unknown: Unknown[] = [...unreadSources, ...(sent.failed ? (["deliveries to apps"] as const) : []), ...(reqs.failed ? (["requests to agents"] as const) : [])].filter((x, i, a) => a.indexOf(x) === i);
@@ -315,7 +361,21 @@ export function NeedsList({
                   <EvidenceChips e={n.evidence} />
                 )
               }
-              action={n.action ? <NeedAction href={needHref(ws, n, reviewBase)}>{n.action.label}</NeedAction> : undefined}
+              action={
+                n.action?.opens === "goal" && n.goal ? (
+                  // Propose again: on the goal page, where a change is proposed; opening it marks the decline as seen.
+                  <NeedAction
+                    onClick={() => {
+                      declined.mark(n.cr!.id);
+                      router.push(`/app/w/${ws}/goals/${n.goal!.id}#change-requests`);
+                    }}
+                  >
+                    {n.action.label}
+                  </NeedAction>
+                ) : n.action ? (
+                  <NeedAction href={needHref(ws, n, reviewBase)}>{n.action.label}</NeedAction>
+                ) : undefined
+              }
               href={needHref(ws, n, reviewBase)}
               selected={!!selected && n.key === selected}
             />

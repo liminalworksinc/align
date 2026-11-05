@@ -365,6 +365,26 @@ try {
     await vp2.close();
   }
 
+  // A declined request comes back to its requester (Jun, whose request on the onboarding goal was declined) until opened.
+  {
+    const jun = await login(s.people.theo);
+    const jp = await newPage(browser, jun, "dark");
+    await go(jp, desk, "Decision desk");
+    const row = await jp.evaluate(() => {
+      const li = [...document.querySelectorAll('[data-needs="list"] ol > li')].find((x) => /Declined/.test(x.textContent ?? ""));
+      return li ? { text: li.textContent ?? "", href: li.querySelector('a[href*="review="]')?.getAttribute("href") ?? "", propose: [...li.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Propose again") } : null;
+    });
+    check("requester: a declined request is back on Home as 'Declined', with the reason and 'Propose again'", !!row && /One hour isn.t something we can measure yet/.test(row.text) && row.propose);
+    await jp.screenshot({ path: path.join(OUT, "17-declined-returns-dark-1440.png"), fullPage: false });
+    if (row?.href) {
+      await go(jp, `${desk}${row.href.startsWith("?") ? row.href : row.href.slice(row.href.indexOf("?"))}`, "change request");
+      await go(jp, desk, "Decision desk");
+      const still = await jp.evaluate(() => [...document.querySelectorAll('[data-needs="list"] ol > li')].some((x) => /Declined/.test(x.textContent ?? "") && /Propose again/.test(x.textContent ?? "")));
+      check("requester: once its review is opened, the declined request leaves Needs you", !still);
+    }
+    await jp.close();
+  }
+
   // The deliberate cap, shown: more active goals than the requests-to-agents read covers.
   {
     for (let i = 0; i < 14; i++) await apiAs(owner, "POST", `/api/v2/workspaces/${s.ws}/goals`, { title: `Cap specimen goal ${i + 1} (fictional)`, visibility: "workspace" });

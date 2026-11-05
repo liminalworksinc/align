@@ -11,7 +11,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildNeeds, latestLaunches, ORDERS, rankNeeds, rankNote, rankOrder, REQ_GOALS_MAX, SENT_GOALS_MAX, type Need } from "../../../../components/legacy-project-wrapper/implementation/app/app/_ui/home/needs.ts";
+import { buildNeeds, declinedReturns, latestLaunches, ORDERS, rankNeeds, rankNote, rankOrder, REQ_GOALS_MAX, SENT_GOALS_MAX, type Need } from "../../../../components/legacy-project-wrapper/implementation/app/app/_ui/home/needs.ts";
 // @ts-expect-error plain .mjs seed
 import { seed } from "./seed.mjs";
 
@@ -169,5 +169,15 @@ const asA = { order: "approver", rows: rankNeeds(base, "approver") };
 const asR = { order: "requester", rows: rankNeeds(base, "requester") };
 rule("orders: approver ranks the decision first, requester ranks the returned request first", asA.rows[0]!.kind === "decide" && asR.rows[0]!.kind === "returned");
 rule("orders: the same rows and actions in both orders", JSON.stringify(asA.rows.map((r) => [r.key, r.action?.label]).sort()) === JSON.stringify(asR.rows.map((r) => [r.key, r.action?.label]).sort()));
+// ---- a declined request comes back to its requester's Home until they open it ----
+const dec1 = crOf({ id: "crDec", state: "rejected", launch: null, version: null, requester: person("me"), rejected_by: person("x"), rejection_reason: "Not this quarter.", decided_at: "2026-01-05T00:00:00Z", created_at: "2026-01-04T00:00:00Z" });
+const back = buildNeeds({ ws: "w", me: "me", crs: [dec1], asks: [], alignments: [], apps: [], declinedSeen: new Set(), activeGoals: new Set(["gA"]) }).rows[0]!;
+rule("declined: my newest request on an active goal, declined, is a Needs-you row 'Declined' with the reason and 'Propose again'", back.phase === "needs_you" && back.word === "Declined" && /Not this quarter/.test(back.cause) && back.action?.label === "Propose again");
+const seenRow = buildNeeds({ ws: "w", me: "me", crs: [dec1], asks: [], alignments: [], apps: [], declinedSeen: new Set(["crDec"]), activeGoals: new Set(["gA"]) }).rows[0]!;
+rule("declined: once opened (seen), it is in Done", seenRow.phase === "done");
+const newerMine = crOf({ id: "crNew", state: "pending", launch: null, version: null, requester: person("me"), approvers: [person("x")], launchers: [person("x")], created_at: "2026-01-06T00:00:00Z" });
+rule("declined: a newer request of mine on that goal ends it", declinedReturns([dec1, newerMine], "me", new Set(), new Set(["gA"])).size === 0);
+rule("declined: not on a goal that is no longer active", declinedReturns([dec1], "me", new Set(), new Set()).size === 0);
+rule("declined: someone else's declined request never comes back to me", declinedReturns([crOf({ ...dec1, requester: person("other") })], "me", new Set(), new Set(["gA"])).size === 0);
 
 process.exitCode = failed ? 1 : 0;

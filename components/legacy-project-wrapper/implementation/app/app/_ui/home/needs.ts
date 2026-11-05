@@ -173,6 +173,10 @@ export interface NeedsInput {
   /** SENT: per goal, the latest launch and the apps the value read says Align sent that version
    *  (GET …/change-requests/<id>/value apps.items); null when it couldn't be read. */
   sends?: { goal: { id: string; title: string }; cr: string; version: number; launched_at: string; apps: { id: string }[]; current_version?: number }[] | null;
+  /** Declined requests this person has opened since (local storage); absent: declined requests stay in Done. */
+  declinedSeen?: Set<string>;
+  /** Active goals, by id (goals read); null when it failed. */
+  activeGoals?: Set<string> | null;
   /** The approver rule's reads (rankOrder); absent: approver order. */
   approver?: ApproverFacts;
   /** REQ, per goal read; null when none could be read. */
@@ -231,7 +235,7 @@ const reviewOf = (cr: ChangeRequest) => `?review=${cr.goal.id}.${cr.id}`;
 const goalOf = (cr: ChangeRequest) => ({ id: cr.goal.id, title: cr.goal.title });
 
 /** One change request as at most one row (CR read). */
-function crNeed(cr: ChangeRequest, me: string): Need | null {
+function crNeed(cr: ChangeRequest, me: string, returning?: Set<string>): Need | null {
   const base = { key: `cr:${cr.id}`, goal: goalOf(cr), quote: cr.reason, evidence: crEvidence(cr), review: reviewOf(cr), cr, word: "" };
   const asker = cr.requester.id === me ? "Your request" : `${cr.requester.name}'s request`;
   const c = cr.can;
@@ -271,6 +275,24 @@ function crNeed(cr: ChangeRequest, me: string): Need | null {
     // "Your request came back" only for the requester; anyone else sees what the request waits for.
     const other = cr.requester.id !== me && (w.next === "accept_counter" || w.next === "rebase");
     return { ...base, word: other ? (w.next === "accept_counter" ? "Change suggested" : "Needs an update") : "", kind: w.next === "accept_counter" || w.next === "rebase" ? "returned" : "decide", phase: "waiting_on_others", tone: cr.state === "countered" ? "countered" : "pending", cause: asker, since, action: null, who: `Waiting on ${names(w.waiting_on, me)}` };
+  }
+
+  // (c) Your declined request, back on your Home until you open it (founder ruling, LIM-2472 eaa5cf92): the newest of your
+  // requests on an active goal, declined, with the decider's reason; "Propose again" (decidedReturns says which).
+  if (returning?.has(cr.id)) {
+    const by = cr.rejected_by ? (cr.rejected_by.id === me ? "you" : cr.rejected_by.name) : "an approver";
+    return {
+      ...base,
+      kind: "returned",
+      phase: "needs_you",
+      tone: "declined",
+      word: "Declined",
+      cause: `Declined by ${by}${cr.rejection_reason ? `: “${cr.rejection_reason}”` : ""}`,
+      quote: cr.rejection_reason,
+      since: cr.decided_at ? { at: cr.decided_at, field: "decided_at" } : null,
+      action: { label: "Propose again", opens: "goal" },
+      who: null,
+    };
   }
 
   // Done: decided, withdrawn, superseded, or launched.
@@ -393,6 +415,20 @@ function declinedNeeds(groups: NonNullable<NeedsInput["requests"]>, me: string):
   return out;
 }
 
+/** Which of this person's declined requests come back to their Home: per active goal, the newest of their requests
+ *  (by created_at, then id), when it was declined and they haven't opened it since. "Opened" is a seen-marker kept in
+ *  this browser's local storage only (needs-list.tsx); across devices it needs a server field, which is on Sean's list.
+ *  With the goals read failed (activeGoals null) every goal counts as active, so nothing is hidden for a read failure. */
+export function declinedReturns(crs: ChangeRequest[], me: string, seen: Set<string>, activeGoals: Set<string> | null): Set<string> {
+  const newest = new Map<string, ChangeRequest>();
+  for (const c of crs) {
+    if (c.requester.id !== me) continue;
+    const p = newest.get(c.goal.id);
+    if (!p || c.created_at > p.created_at || (c.created_at === p.created_at && c.id > p.id)) newest.set(c.goal.id, c);
+  }
+  return new Set([...newest.values()].filter((c) => c.state === "rejected" && !seen.has(c.id) && (!activeGoals || activeGoals.has(c.goal.id))).map((c) => c.id));
+}
+
 /** A row's label: its own once done, else its kind's word. */
 const withWord = (n: Need): Need => ({ ...n, word: n.word || KIND_WORDS[n.kind] });
 
@@ -413,8 +449,9 @@ export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[
   const { me } = input;
   const rows: Need[] = [];
   const unknown: Unknown[] = [];
+  const returning = input.crs && input.declinedSeen ? declinedReturns(input.crs, me, input.declinedSeen, input.activeGoals ?? null) : undefined;
   if (input.crs) for (const cr of input.crs) {
-    const n = crNeed(cr, me);
+    const n = crNeed(cr, me, returning);
     if (n) rows.push(n);
   }
   else unknown.push("change requests");
