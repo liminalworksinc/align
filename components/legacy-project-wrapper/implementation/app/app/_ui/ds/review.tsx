@@ -1,10 +1,11 @@
 "use client";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ApiError, api, sentence } from "../kit";
 import type { ChangeFields, ChangeRequest, Goal } from "../types";
 import { changeWaits, launchWaits } from "@/lib/v2/home-core.mts";
 import { Compare } from "./compare";
-import { DecisionLinks } from "./decision-links";
+import { DECISION_LINK, DecisionLinks } from "./decision-links";
 import { EvidenceLabel } from "./evidence-label";
 import { deliveryStatement, hasEvidence } from "./evidence-facts.mts";
 import { EvidenceSummary, useDelivery } from "./evidence-summary";
@@ -46,6 +47,60 @@ function statusOf(cr: ChangeRequest): { kind: StatusKind; label?: string } {
 
 // ---------------------------------------------------------------------------------------------------------------------
 
+/**
+ * "My request came back" (LIM-2472 round 2): for the person who asked, when someone else's move has sent it back to them,
+ * the decider's words first, then what they can do, in what Align records. Shown only to the requester:
+ *  - a suggested change (countered): accept it, or withdraw. Align records no "keep mine", so the page says the way to
+ *    keep their own version is to withdraw and propose it again;
+ *  - accepted on a condition not yet confirmed: the condition, then "Confirm the condition is met";
+ *  - the goal moved on (pending, behind): update it to the goal's version;
+ *  - declined: the reason; a declined request is closed (it can't be withdrawn or revised), so a revised change is a new
+ *    proposal on the goal.
+ * The actions themselves are ReviewActions' (the server's `can` flags), right under the request.
+ */
+function Returned({ ws, cr, me }: { ws: string; cr: ChangeRequest; me: string }) {
+  if (cr.requester.id !== me) return null;
+  const rev = cr.revisions.find((r) => r.revision === cr.revision);
+  const author = rev?.author && rev.author.id !== me ? rev.author : null;
+  const cond = cr.condition && !cr.condition.acknowledged_by && (cr.state === "pending" || cr.state === "approved") ? cr.condition : null;
+  let kind: "counter" | "condition" | "behind" | "declined" | null = null;
+  if (cr.state === "countered") kind = "counter";
+  else if (cond) kind = "condition";
+  else if (cr.state === "pending" && cr.behind) kind = "behind";
+  else if (cr.state === "rejected") kind = "declined";
+  if (!kind) return null;
+  const decider = kind === "declined" ? cr.rejected_by : author;
+  const words = kind === "declined" ? cr.rejection_reason : kind === "condition" ? cond!.text : kind === "counter" ? rev?.note : null;
+  const head =
+    kind === "counter"
+      ? `${decider?.name ?? "An approver"} suggested a change to your request`
+      : kind === "condition"
+        ? `${decider?.name ?? "An approver"} accepts it if you confirm a condition`
+        : kind === "behind"
+          ? `The goal moved on to version ${cr.goal.version}`
+          : `${decider?.name ?? "An approver"} declined your request`;
+  const next =
+    kind === "counter"
+      ? "You can accept their change, or withdraw your request. Align doesn't record keeping your own version: to keep it, withdraw this and propose it again."
+      : kind === "condition"
+        ? "Confirm the condition is met when it is. It isn't a gate on approval or launch, and Align doesn't check it."
+        : kind === "behind"
+          ? `You asked against version ${cr.base_version}. Update it to version ${cr.goal.version} so it can be decided, or withdraw it.`
+          : "A declined request is closed. To try again, propose a revised change on the goal.";
+  return (
+    <section data-returned={kind} aria-label="Your request came back" className="flex flex-col gap-2 rounded-(--radius-m) border border-(--line-strong) bg-(--bg-inset) px-3 py-3">
+      <h3 className="text-[15px] font-semibold text-(--text-1)">{head}</h3>
+      {words && <blockquote className="border-l-2 border-(--line-strong) pl-3 text-[15px] text-(--text-1) [overflow-wrap:anywhere]">{kind === "condition" ? `Accept if: ${words}` : words}</blockquote>}
+      <p className="text-[14px] text-(--text-2)">{next}</p>
+      {kind === "declined" && (
+        <Link href={`/app/w/${ws}/goals/${cr.goal.id}#change-requests`} className={`${DECISION_LINK} self-start`}>
+          Open the goal to propose again
+        </Link>
+      )}
+    </section>
+  );
+}
+
 /** The request itself: everything a reviewer needs before choosing, nothing they don't. */
 /** `onDone`: called after an evidence link is added (or refused), to re-read the request; without it the Add evidence
  *  control isn't offered. */
@@ -84,6 +139,7 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
               : "Proposed";
   return (
     <div className="flex min-w-0 flex-col gap-4" data-cr={cr.id} data-cr-view="review">
+      <Returned ws={ws} cr={cr} me={me} />
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <StatusPill kind={s.kind} label={s.label} size="s" />
         <p className="text-[14px] text-(--text-2)">
