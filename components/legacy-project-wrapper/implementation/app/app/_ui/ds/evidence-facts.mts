@@ -42,7 +42,7 @@ function deliveryFacts(version: number, d: Delivery): Fact[] {
   const s = d.delivery;
   const apps = d.apps?.items.length ?? 0;
   if (s && s.received > 0)
-    out.push({ kind: "receipt", short: `v${version} · ${s.received} of ${s.sessions} received`, long: `${s.received} of ${n(s.sessions, "session")} that Align sent v${version} to sent a receipt for it.` });
+    out.push({ kind: "receipt", short: `v${version} · ${s.received} of ${s.sessions} received`, long: `Align sent v${version} to ${n(s.sessions, "session")}; ${s.received} sent a receipt for it.` });
   if (s && s.sessions > 0 && s.received === 0)
     out.push({ kind: "unobserved", short: `v${version} · 0 of ${s.sessions} received`, long: `Align sent v${version} to ${n(s.sessions, "session")}; none has sent a receipt yet.` });
   if (apps > 0)

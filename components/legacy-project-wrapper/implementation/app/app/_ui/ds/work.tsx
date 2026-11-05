@@ -124,7 +124,7 @@ function SessionsPanel({ ws, goal }: { ws: string; goal: Goal }) {
                 <span className="text-(--text-3)">· {x.state === "shared" ? "shared" : x.state}</span>
                 {x.agent_stopped && <span className="text-(--st-declined)">· stop requested</span>}
                 {(x.current_epoch as { goal_version_at_start?: number | null } | null)?.goal_version_at_start ? (
-                  <span className="text-[13px] text-(--text-2)">bound at v{(x.current_epoch as { goal_version_at_start?: number }).goal_version_at_start}</span>
+                  <span className="text-[13px] text-(--text-2)">bound when the goal was at v{(x.current_epoch as { goal_version_at_start?: number }).goal_version_at_start}</span>
                 ) : null}
                 <span className="text-[13px] text-(--text-3)">since {at(x.started_at)}</span>
               </li>
