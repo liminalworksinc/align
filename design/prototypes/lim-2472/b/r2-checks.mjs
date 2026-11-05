@@ -30,8 +30,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let pass = 0;
 let fail = 0;
+const failed = [];
+// The last line always names what failed (or that the run stopped before the end), so a log cut off above still says it.
+let finished = false;
+process.on("exit", () => {
+  if (!finished) console.log(`STOPPED before the end: ${pass} pass, ${fail} fail so far${failed.length ? `; failed: ${failed.join(" | ")}` : ""}`);
+  else if (failed.length) console.log(`FAILED: ${failed.join(" | ")}`);
+});
 function check(name, ok, detail = "") {
   ok ? pass++ : fail++;
+  if (!ok) failed.push(name);
   console.log(`${ok ? "ok  " : "FAIL"} ${name}${ok || !detail ? "" : `  (${detail})`}`);
 }
 
@@ -274,4 +282,5 @@ try {
   await browser.close();
 }
 console.log(`\n${pass} pass, ${fail} fail`);
+finished = true;
 process.exitCode = fail ? 1 : 0;
