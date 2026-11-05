@@ -7,6 +7,7 @@ import { Compare } from "./compare";
 import { EmptyState } from "./empty-state";
 import { EvidenceLabel } from "./evidence-label";
 import { Panel } from "./panel";
+import { ReviewActions, ReviewBody } from "./review";
 import { useRead } from "./read";
 import { auditEvents, changeRequestEvents, KIND_WORDS, type AuditRow, type Kind, type RecordEvent } from "./record-events";
 import { Segmented } from "./segmented";
@@ -156,6 +157,7 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
   });
 
   const scope = crId ? "this change request" : goalId ? "this goal" : "this workspace";
+  const reviewing = crId && crs.data ? [...crs.data.waiting_on_me, ...crs.data.mine, ...crs.data.others].find((c) => c.id === crId) : undefined;
   const loading = crs.loading || (!goalId && !crId && audit.loading);
 
   return (
@@ -212,6 +214,16 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
         </div>
       </Panel>
 
+      {reviewing && (
+        <Panel eyebrow="Review" title={`Change to ${reviewing.goal.title}`}>
+          <div className="flex flex-col gap-4">
+            <ReviewBody ws={ws} cr={reviewing} me={me} titleOf={titleOf} />
+            <div className="border-t border-(--line) pt-3">
+              <ReviewActions key={reviewing.id} ws={ws} cr={reviewing} me={me} onDone={crs.reload} />
+            </div>
+          </div>
+        </Panel>
+      )}
       {audit.status === 403 && (
         <p role="status" className="rounded-(--radius-m) border border-(--line) bg-(--bg-inset) px-4 py-2.5 text-[14px] text-(--text-2)">
           You see the change requests on goals you can read. The workspace&apos;s full audit log (invites, roles, devices, apps) is for workspace owners.
