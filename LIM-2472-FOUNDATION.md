@@ -29,6 +29,10 @@ Hues (canon): accent wholeness `#BF0078` (hover `#94005C`) in both themes, ruled
 - An element that only code focuses (`tabindex="-1"`: a heading after navigation, an error or confirm message, a dialog panel) gets no ring and not the browser's default one (`[tabindex="-1"]:focus { outline: none }` in `@layer base`, so a utility can still add a ring). No builder needs `outline-none` for these.
 - Checked in Chrome by keyboard: Tab stops, the roving Segmented choice after an arrow key, a code-focused heading, the Drawer panel and a control inside it; the real goal page passes test-v2:3880's check (29 stops, all with a 2px ring).
 
+## Evidence classes
+
+Four, in `EvidenceLabel`: Receipt, Agent reported, Self-reported (`kind: "self"`) and Not observed. Self-reported means a person added the link in a web session and Align did not check it (`reported_as`, `lib/v2/evidence.ts:75`). It has no colour token on purpose: `--text-2` on `--line-strong` with a person icon, ranked below Agent reported, and it never reads as verified.
+
 ## Measured contrast (WCAG ratio, lowest across all five surface tiers)
 
 | | text-1 | text-2 | text-3 | edge | focus | status and evidence inks |
@@ -54,6 +58,15 @@ Predicted to stay green: the 390px 44px check counts only bordered buttons in `<
 - Pills say what Align released or sent ("Launched v4"), never what agents are on or doing.
 - "Receipt · applied v3" in the Timeline sample is a real receipt state on main: `RECEIPT_STATES = ["received", "applied", "enforced", "accepted", "declined"]` (`lib/v2/directives.ts:186` at b16f8d1).
 - Main's own record copy still says "Launched, agents on v…" (`lib/v2/launch-words.ts:12` at b16f8d1). That over-claims the same way, but `lib/` is out of scope for the front end: a server copy ask.
+
+## The Needs-you row (direction 2026-11-05)
+
+`NeedRow`, `NeedList` and `NeedAction` in `app/app/_ui/ds/need.tsx`; specimen `design/prototypes/lim-2472/need-list.html`.
+
+- **One target plus one action.** The title is the row's link (its `::after` covers the row); the action sits above it. `NeedAction` is always outlined; the one filled action in a view is the review's.
+- **No table header.** Columns align through CSS subgrid, so one row is a row, not a hollow table; the list stacks on its own width (container query at `@3xl`), so it works beside any shell. On phones the action sits beside the evidence, 44px tall.
+- **Rank note** above the list, shown with two or more rows. No rows: one line (`empty`, default "Nothing needs you.").
+- **Checked in Chrome, both themes, at 1440, 390 and 320:** twelve rows fit at 1440x900 even under a 200px header (50-52px each; the goal was eight); no sideways scroll; the action and the row are separate hit targets; Tab goes title, action, next title with the 2px ring. At wide widths title and sub truncate to one line, so keep them short; evidence never truncates. Phone rows are 140-180px, so 3 to 4 show at once.
 
 ## Known rough edges
 
