@@ -553,7 +553,7 @@ export function ReviewActions({
       )}
 
       {choice && shown === "confirm" && (
-        <div role="region" aria-labelledby={`confirm-${cr.id}`} data-confirm={choice} className="flex flex-col gap-2 rounded-(--radius-m) border border-(--accent) bg-(--bg-raised) p-3">
+        <div role="region" aria-labelledby={`confirm-${cr.id}`} data-confirm={choice} className="flex flex-col gap-2 rounded-(--radius-m) border border-(--accent-text) bg-(--bg-raised) p-3">
           <h4 id={`confirm-${cr.id}`} ref={confirmRef} tabIndex={-1} className="text-[15px] font-semibold text-(--text-1) outline-none">
             {TITLE[choice]}: {cr.goal.title}
           </h4>
