@@ -148,6 +148,8 @@ function useReview(): [{ goal: string; id: string } | null, (r: { goal: string; 
 
 const primaryBtn =
   "inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) bg-(--accent) px-3.5 text-[14px] font-medium text-(--text-on-accent) hover:bg-(--accent-hover) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) max-sm:min-h-[44px]";
+const outlineBtn =
+  "inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) border border-(--line-strong) px-3.5 text-[14px] font-medium text-(--text-1) hover:bg-(--bg-raised) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) max-sm:min-h-[44px]";
 const quietLink = "inline-flex min-h-[40px] items-center text-[14px] font-medium text-(--accent-text) hover:underline max-sm:min-h-[44px]";
 
 /** A next-step card: what it is, its state, the one thing to read, what it needs, and one action. */
@@ -209,7 +211,7 @@ function GoalGroup({ ws, g, me, latest, sessions, alloc, onReview }: { ws: strin
             {g.title}
           </Link>
           <p className="font-mono text-[12px] text-(--text-3)">
-            {g.level === "company" ? "Company" : (g.team?.name ?? "Team")} · {g.owner.id === me.id ? "yours" : g.owner.name} · v{g.version} in force
+            {g.level === "company" ? "Company" : (g.team?.name ?? "Team")} · {g.owner.id === me.id ? "yours" : g.owner.name} · v{g.version} approved
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -281,7 +283,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const noAgents = !!apps && !apps.items.some(seenApp) && s.data !== null && mine.length === 0 && !teammates?.length;
   const open = (goal: string, id: string) => setReview({ goal, id });
 
-  const changeCard = (q: QueueChange, onMine: boolean) => {
+  const changeCard = (q: QueueChange, onMine: boolean, first = false) => {
     const full = crById.get(q.id);
     const st = full
       ? crStatus(full)
@@ -315,7 +317,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
             : `Waiting on ${names(q.waiting_on, me.id) || "nobody yet"}.`
         }
         action={
-          <button type="button" className={onMine ? primaryBtn : quietLink} onClick={() => open(q.goal.id, q.id)} data-review-open={q.id}>
+          <button type="button" className={onMine ? (first ? primaryBtn : outlineBtn) : quietLink} onClick={() => open(q.goal.id, q.id)} data-review-open={q.id}>
             {onMine ? (launch ? "Review and launch" : "Review") : "View"}
           </button>
         }
@@ -377,7 +379,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
                   {!h.change_requests && <Note>Align couldn&apos;t read change requests just now.</Note>}
                   {onMe === 0 && <p className="px-1 py-2 text-[14px] text-(--text-2)">Nothing needs your judgment right now.</p>}
                   <ul className="flex flex-col gap-2" id="waiting">
-                    {h.change_requests?.waiting_on_me.map((q) => changeCard(q, true))}
+                    {h.change_requests?.waiting_on_me.map((q, i) => changeCard(q, true, i === 0))}
                     {h.asks?.waiting_on_me.map((a) => (
                       <NextCard
                         key={a.id}
@@ -392,7 +394,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
                         quote={a.text}
                         need={a.next === "accept" ? "Accept it or decline it for your team." : "Mark it done once it is."}
                         action={
-                          <Link href={`${base}/asks`} className={primaryBtn}>
+                          <Link href={`${base}/asks`} className={outlineBtn}>
                             Open in Asks
                           </Link>
                         }
@@ -412,7 +414,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
                         }
                         need="Approve it, suggest a change or decline it."
                         action={
-                          <Link href={`${base}/alignments`} className={primaryBtn}>
+                          <Link href={`${base}/alignments`} className={outlineBtn}>
                             Open in Alignments
                           </Link>
                         }
