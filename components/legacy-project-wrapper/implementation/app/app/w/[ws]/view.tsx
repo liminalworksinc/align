@@ -335,7 +335,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div className="min-w-0">
             <p className="font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">Command center</p>
-            <h1 tabIndex={-1} className="text-[24px] font-semibold leading-tight text-(--text-1) focus:outline-none">
+            <h1 tabIndex={-1} className="text-[24px] font-semibold leading-tight text-(--text-1)">
               The work, and what needs you
             </h1>
             {h && (

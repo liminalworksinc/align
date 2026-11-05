@@ -1,6 +1,6 @@
 # LIM-2472 Concept A: agent-work-first command center
 
-Branch `agent/LIM-2472-concept-a-agent-work`, from main b16f8d1, with foundation (e6ea124) and shared surfaces (a6ff222) merged.
+Branch `agent/LIM-2472-concept-a-agent-work`, from main b16f8d1, with shared surfaces (45bfc92, which contains foundation da51b0c) merged.
 Front end only. No PR, nothing deployed.
 
 ## The concept in 10 lines
@@ -79,7 +79,7 @@ node ../../../design/prototypes/lim-2472/a/shots.mjs http://127.0.0.1:3801 <out 
 
 Sign in at /app/sign-in with an account from seed.json. Home is `/app/w/<ws>`.
 
-The script writes 33 PNGs:
+The script writes 33 PNGs. Its asserted decision steps run after every screenshot, on a throwaway goal it drops at the end, so a rerun on the same seed shows nothing from them:
 
 | Screen | Dark | Light |
 |---|---|---|

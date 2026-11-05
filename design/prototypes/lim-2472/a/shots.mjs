@@ -4,9 +4,9 @@
 //   node design/prototypes/lim-2472/a/shots.mjs <BASE> <OUT_DIR> [seed.json]
 //
 // BASE is the server (e.g. http://127.0.0.1:3801, started with ALIGN_TEST_IDP=1 and a fresh ALIGN_DATA_DIR). Without
-// seed.json the script runs seed.mjs first and keeps its output at <OUT_DIR>/seed.json (mode 600, local throwaway
-// test-IdP passwords). Writes <nn>-<screen>-<theme>-<width>.png into OUT_DIR. Nothing it clicks sends a decision, so
-// it can run again against the same data. Run from the implementation folder or anywhere: puppeteer-core is resolved
+// seed.json the script runs ../s/seed-agent.mjs first and keeps its output at <OUT_DIR>/seed.json (mode 600, local throwaway
+// test-IdP passwords). Writes <nn>-<screen>-<theme>-<width>.png into OUT_DIR. The screens send no decision; the
+// asserted decision steps run last, on a throwaway goal dropped at the end, so it can run again against the same data. Run from the implementation folder or anywhere: puppeteer-core is resolved
 // from the app's node_modules. CHROME_PATH overrides the Chrome binary.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -259,9 +259,11 @@ for (const width of W) {
     }
   }
 }
-// Asserted at 1440, no screenshot: the drawer stays open with its outcome notice after a decision lands, and after a
-// refusal. Each step makes its own pending request (Theo proposes, as a member would), so the seeded ones are untouched
-// and the script can run again on the same seed.
+// Asserted at 1440, no screenshot, after every screenshot: the drawer stays open with its outcome notice after a decision
+// lands, and after a refusal. Both run on a throwaway goal Mara creates here, each on its own pending request (Theo
+// proposes, as a member would), so the seeded goals and requests are untouched. An approved request can't be withdrawn,
+// so the goal is dropped at the end (a new version, status dropped), which supersedes what it left: nothing from these
+// steps shows on a later run's screens.
 {
   const signIn = async (person) => {
     const r = await fetch(`${BASE}/api/v2/auth/sign-in/email`, { method: "POST", headers: { origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ email: who(person).email, password: who(person).password }) });
@@ -276,14 +278,17 @@ for (const width of W) {
   };
   const theo = await signIn("member");
   const mara = await signIn("owner");
-  const goal = seed.goals?.security;
-  if (!goal) throw new Error("seed.json has no goals.security (use ../s/seed-agent.mjs)");
+  const made = await call(mara, "POST", `/api/v2/workspaces/${WS}/goals`, { title: "Drawer check (shots.mjs, fictional)" });
+  const goal = made.id ?? made.goal?.id;
+  if (!goal) throw new Error(`create goal: no id (${JSON.stringify(made).slice(0, 200)})`);
+  const version = async () => {
+    const g = await call(mara, "GET", `/api/v2/workspaces/${WS}/goals/${goal}`);
+    return g.version ?? g.goal?.version;
+  };
   const propose = async (tag) => {
-    const g = await call(theo, "GET", `/api/v2/workspaces/${WS}/goals/${goal}`);
-    const v = g.version ?? g.goal?.version;
     const cr = await call(theo, "POST", `/api/v2/workspaces/${WS}/goals/${goal}/change-requests`, {
-      base_version: v,
-      changes: { title: `Pass the security review (${tag}, fictional)` },
+      base_version: await version(),
+      changes: { title: `Drawer check (${tag}, fictional)` },
       reason: `A drawer check from shots.mjs (${tag}). Fictional.`,
     });
     return cr.id ? cr : cr.change_request;
@@ -295,28 +300,31 @@ for (const width of W) {
     await p.evaluate(() => [...document.querySelectorAll("[role=dialog] button")].find((b) => b.offsetParent !== null && b.textContent?.trim().startsWith("Confirm:"))?.click());
   };
   const { p, ctx } = await page("owner", "dark", 1440);
+  try {
+    // Success: Approve only -> the drawer stays, with the done notice and the request as approved, not launched.
+    const ok = await propose("approve only");
+    await goto(p, `/app/w/${WS}?review=${goal}.${ok.id}`);
+    await ready(p, "Open the full record", "[role=dialog]");
+    await approveOnly(p);
+    await p.waitForSelector('[role=dialog] [data-notice="done"]', { timeout: 20_000 }).catch(() => {
+      throw new Error("Approve only: the drawer shows no done notice (or closed)");
+    });
+    await ready(p, "Approved, not launched", "[role=dialog]");
 
-  // Success: Approve only -> the drawer stays, with the done notice and the request as approved, not launched.
-  const ok = await propose("approve only");
-  await goto(p, `/app/w/${WS}?review=${goal}.${ok.id}`);
-  await ready(p, "Open the full record", "[role=dialog]");
-  await approveOnly(p);
-  await p.waitForSelector('[role=dialog] [data-notice="done"]', { timeout: 20_000 }).catch(() => {
-    throw new Error("Approve only: the drawer shows no done notice (or closed)");
-  });
-  await ready(p, "Approved, not launched", "[role=dialog]");
-
-  // Refusal: the request is declined from Node while the drawer is open -> Approve only -> the drawer stays, red.
-  const no = await propose("refused");
-  await goto(p, `/app/w/${WS}?review=${goal}.${no.id}`);
-  await ready(p, "Open the full record", "[role=dialog]");
-  await call(mara, "POST", `/api/v2/workspaces/${WS}/goals/${goal}/change-requests/${no.id}/reject`, { revision: no.revision, reason: "Declined from Node by shots.mjs (fictional)." });
-  await approveOnly(p);
-  await p.waitForSelector('[role=dialog] [data-notice="refused"]', { timeout: 20_000 }).catch(() => {
-    throw new Error("refusal: the drawer shows no refused notice (or closed)");
-  });
-  if (!(await p.$("[role=dialog]"))) throw new Error("refusal: the drawer closed");
-  await ctx.close();
+    // Refusal: the request is declined from Node while the drawer is open -> Approve only -> the drawer stays, red.
+    const no = await propose("refused");
+    await goto(p, `/app/w/${WS}?review=${goal}.${no.id}`);
+    await ready(p, "Open the full record", "[role=dialog]");
+    await call(mara, "POST", `/api/v2/workspaces/${WS}/goals/${goal}/change-requests/${no.id}/reject`, { revision: no.revision, reason: "Declined from Node by shots.mjs (fictional)." });
+    await approveOnly(p);
+    await p.waitForSelector('[role=dialog] [data-notice="refused"]', { timeout: 20_000 }).catch(() => {
+      throw new Error("refusal: the drawer shows no refused notice (or closed)");
+    });
+    if (!(await p.$("[role=dialog]"))) throw new Error("refusal: the drawer closed");
+  } finally {
+    await ctx.close();
+    await call(mara, "POST", `/api/v2/workspaces/${WS}/goals/${goal}/versions`, { version: await version(), status: "dropped" });
+  }
 }
 
 await browser.close();
