@@ -38,6 +38,8 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
     <Shell me={me} ws={ws} tab="Goals">
       <h1 className={`${PAGE_H1} mb-5`}>Goals</h1>
       <Err>{detail.error ?? feed.error}</Err>
+      {/* Arriving from "Set the first goal" with no goals: no empty list card above the form. */}
+      {!(first && feed.data?.goals.length === 0) && (
       <Card>
         {feed.loading && <Loading />}
         {feed.data?.goals.length === 0 && !first && <Note>No goals you can see yet.</Note>}
@@ -72,6 +74,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
           ))}
         </ul>
       </Card>
+      )}
       {canCreate && <NotesSuggest ws={ws} onDone={feed.reload} />}
       {canCreate && (
         <Card title="New goal">
