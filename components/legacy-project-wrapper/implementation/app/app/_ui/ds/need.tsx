@@ -1,0 +1,86 @@
+import Link from "next/link";
+import { Children, type ReactNode } from "react";
+import { StatusPill, type StatusKind } from "./status-pill";
+
+// The rows of Home's "needs a human" list (LIM-2472 direction, 2026-11-05): judgment is the unit, agent work is its
+// evidence. One anatomy for every kind: the kind, the goal, who asked or what caused it, how long it has waited, its
+// evidence and one outlined action. The list has no table header, so one row reads as a row, not a hollow table; the
+// columns line up through subgrid and stack by the list's own width (a container query), not the window's.
+
+/** One row. The title is the row's link: its ::after stretches over the row, so the whole row is one target while
+ *  `action` stays a separate control above it. Never a filled button: the one filled action in a view is the review's
+ *  (use NeedAction). `tone` colours the kind with an existing pill; the kind's word is the caller's. */
+export function NeedRow({
+  kind,
+  tone = "draft",
+  title,
+  sub,
+  waited,
+  evidence,
+  action,
+  href,
+  selected = false,
+}: {
+  kind: string;
+  tone?: StatusKind;
+  title: ReactNode;
+  sub?: ReactNode;
+  waited?: string;
+  evidence?: ReactNode;
+  action?: ReactNode;
+  href?: string;
+  selected?: boolean;
+}) {
+  const heading = "text-[14px] font-medium text-(--text-1) group-first/need:font-semibold @3xl:group-first/need:text-[15px]";
+  return (
+    <li
+      aria-current={selected ? "true" : undefined}
+      className={`group/need relative grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1.5 border-b border-(--line) px-3 py-3 last:border-b-0 @3xl:col-span-full @3xl:grid-cols-subgrid @3xl:items-center @3xl:gap-y-0 @3xl:py-1.5 ${selected ? "bg-(--accent-soft) shadow-[inset_2px_0_0_var(--accent-text)]" : href ? "hover:bg-(--bg-raised)" : ""}`}
+    >
+      <div className="col-start-1 row-start-1 min-w-0 @3xl:col-start-auto @3xl:row-start-auto">
+        <StatusPill kind={tone} label={kind} size="s" />
+      </div>
+      <div className="col-span-2 min-w-0 @3xl:col-span-1">
+        {href ? (
+          <Link href={href} className={`${heading} block underline-offset-4 after:absolute after:inset-0 after:content-[''] hover:underline @3xl:truncate`}>
+            {title}
+          </Link>
+        ) : (
+          <p className={`${heading} @3xl:truncate`}>{title}</p>
+        )}
+        {sub && <p className="text-[13px] leading-[18px] text-(--text-2) @3xl:truncate">{sub}</p>}
+      </div>
+      <div className="col-span-2 flex min-w-0 flex-wrap items-center gap-1 empty:hidden @3xl:col-span-1 @3xl:empty:block">{evidence}</div>
+      <div className="col-start-2 row-start-1 whitespace-nowrap pt-0.5 text-right font-mono text-[12px] tabular-nums text-(--text-3) @3xl:col-start-auto @3xl:row-start-auto @3xl:pt-0">{waited}</div>
+      <div className="relative z-10 col-span-2 empty:hidden @3xl:col-span-1 @3xl:empty:block @3xl:text-right">{action}</div>
+    </li>
+  );
+}
+
+/** A row's one action: always outlined, a link or a button. 44px and full width when the row stacks. */
+export function NeedAction({ children, href, onClick, disabled }: { children: ReactNode; href?: string; onClick?: () => void; disabled?: boolean }) {
+  const cls =
+    "inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) border border-(--edge) px-3 text-[13px] font-medium text-(--text-1) transition-[color,background-color,border-color] hover:bg-(--bg-overlay) disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px] @max-3xl:w-full";
+  return href ? (
+    <Link href={href} className={cls}>
+      {children}
+    </Link>
+  ) : (
+    <button type="button" onClick={onClick} disabled={disabled} className={cls}>
+      {children}
+    </button>
+  );
+}
+
+/** The ranked list. `rankNote` states the ranking in one line; it shows once there is something to rank. With no rows
+ *  the list collapses to one line (`empty`, default "Nothing needs you."). */
+export function NeedList({ rankNote, children, empty }: { rankNote: string; children: ReactNode; empty?: ReactNode }) {
+  const rows = Children.toArray(children);
+  if (!rows.length) return <p className="rounded-(--radius-m) border border-(--line) bg-(--bg-panel) px-3 py-2.5 text-[14px] text-(--text-2)">{empty ?? "Nothing needs you."}</p>;
+  return (
+    <div className="@container min-w-0">
+      <ol className="grid rounded-(--radius-m) border border-(--line) bg-(--bg-panel) @3xl:grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] @3xl:gap-x-4">{rows}</ol>
+      {rows.length > 1 && <p className="mt-1.5 px-1 text-[12px] text-(--text-3)">{rankNote}</p>}
+    </div>
+  );
+}
