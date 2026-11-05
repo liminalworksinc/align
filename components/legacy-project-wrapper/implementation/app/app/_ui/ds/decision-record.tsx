@@ -159,6 +159,9 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
   });
 
   const scope = crId ? "this change request" : goalId ? "this goal" : "this workspace";
+  // ?goal=: the goals the reader can read, to tell an unknown goal from one with nothing recorded yet.
+  const feed = useRead<{ goals: { id: string }[] }>(goalId ? `/api/v2/workspaces/${ws}/goals` : null);
+  const unknownGoal = !!goalId && !!feed.data && !feed.data.goals.some((g) => g.id === goalId);
   const reviewing = crId && crs.data ? [...crs.data.waiting_on_me, ...crs.data.mine, ...crs.data.others].find((c) => c.id === crId) : undefined;
   const loading = crs.loading || (!goalId && !crId && audit.loading);
 
@@ -243,7 +246,10 @@ export function DecisionRecord({ ws, me, goalId, crId }: { ws: string; me: strin
         {!loading && crs.status === 0 && crId && !reviewing && (
           <EmptyState title="No such request in this workspace" body="Align has no change request with this address here that you can read. It may be in another workspace, or on a goal you can't see." action={<Link href={`/app/w/${ws}/record`} className="text-(--accent-text) underline">Whole workspace record</Link>} />
         )}
-        {!loading && crs.status === 0 && !(crId && !reviewing) && (
+        {!loading && crs.status === 0 && unknownGoal && (
+          <EmptyState title="No such goal in this workspace" body="Align has no goal with this address here that you can read. It may be in another workspace, or a goal you can't see." action={<Link href={`/app/w/${ws}/record`} className="text-(--accent-text) underline">Whole workspace record</Link>} />
+        )}
+        {!loading && crs.status === 0 && !(crId && !reviewing) && !unknownGoal && (
           <Timeline
             events={events}
             empty={
