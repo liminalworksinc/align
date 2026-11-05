@@ -70,6 +70,9 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const [count, setCount] = useState<{ n: number | null; partial: boolean }>({ n: null, partial: false });
   const onCount = useCallback((n: number | null, partial: boolean) => setCount({ n, partial }), []);
   const h = d.data ?? (d.status ? UNREAD : null);
+  // Read only for the empty state, the one place Home needs the role.
+  const list = useRead<{ workspaces: { id: string; role: "owner" | "member" | "viewer" }[] }>(h?.goals?.length === 0 ? "/api/v2/workspaces" : null);
+  const role = list.data?.workspaces.find((w) => w.id === ws)?.role ?? null;
   // Stable (the reloads are): FirstRun's polling restarts whenever onSeen changes.
   const { reload: reloadHome } = d;
   const { reload: reloadChanges } = c;
@@ -101,7 +104,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
         ) : (
           <>
             <Since ws={ws} me={me.id} changes={c.data ? allCrs : null} goals={h.goals} apps={h.apps?.items ?? null} onReview={(goal, id) => setReview({ goal, id })} />
-            <GoalLines ws={ws} goals={h.goals} changes={c.data ? allCrs : null} feed={feed.data?.goals ?? null} onReview={(goal, id) => setReview({ goal, id })} />
+            <GoalLines ws={ws} goals={h.goals} changes={c.data ? allCrs : null} feed={feed.data?.goals ?? null} role={role} onReview={(goal, id) => setReview({ goal, id })} />
           </>
         )}
 
