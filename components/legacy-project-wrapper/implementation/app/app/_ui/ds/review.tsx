@@ -26,7 +26,7 @@ type Choice = "approve_and_launch" | "approve" | "launch" | "not_yet" | "accept_
 const BTN = "inline-flex min-h-[36px] max-sm:min-h-[44px] items-center justify-center whitespace-nowrap rounded-(--radius-s) border px-3 text-[14px] font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) disabled:cursor-not-allowed disabled:opacity-50";
 const PRIMARY = `${BTN} border-(--accent) bg-(--accent) text-(--text-on-accent) hover:bg-(--accent-hover)`;
 const SECONDARY = `${BTN} border-(--edge) bg-(--bg-raised) text-(--text-1) hover:bg-(--bg-overlay)`;
-const FIELD = "w-full rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) px-2.5 py-2 text-[14px] text-(--text-1) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)";
+const FIELD = "min-h-[36px] max-sm:min-h-[44px] w-full rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) px-2.5 py-2 text-[14px] text-(--text-1) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)";
 const at = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
 const blank = (s: string) => s.trim() === "";
 const crPath = (ws: string, cr: ChangeRequest) => `/api/v2/workspaces/${ws}/goals/${cr.goal.id}/change-requests/${cr.id}`;
