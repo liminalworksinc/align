@@ -6,6 +6,7 @@ import { changeWaits, launchWaits } from "@/lib/v2/home-core.mts";
 import { Compare } from "./compare";
 import { DecisionLinks } from "./decision-links";
 import { EvidenceLabel } from "./evidence-label";
+import { hasEvidence } from "./evidence-facts.mts";
 import { EvidenceSummary } from "./evidence-summary";
 import { StatusPill, type StatusKind } from "./status-pill";
 
@@ -93,9 +94,12 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
       <section aria-label="Evidence" className="flex flex-col gap-2">
         <p className="text-[13px] font-medium text-(--text-2)">Evidence</p>
         <EvidenceSummary ws={ws} cr={cr} variant="full" />
-        {evidence.length === 0 ? (
-          <p className="text-[13px] text-(--text-3)">Approving without evidence is recorded as such.</p>
-        ) : (
+        {!hasEvidence(cr) && (
+          <p className="text-[14px] text-(--text-2)">
+            No evidence attached{cr.revision > 1 ? ` to revision ${cr.revision}` : ""}. Approving without evidence is recorded as such.
+          </p>
+        )}
+        {evidence.length > 0 && (
           <ul className="flex flex-col gap-1.5">
             {evidence.map((e) => (
               <li key={e.id} className="flex flex-wrap items-center gap-2 text-[14px]">
