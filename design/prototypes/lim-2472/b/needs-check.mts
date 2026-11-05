@@ -126,5 +126,12 @@ const t1 = crOf({ id: "crT1", launch: "pending", version: null, launch_decided_a
 const t2 = crOf({ id: "crT2", goal: { id: "gB", title: "B", version: 1 }, launch: "pending", version: null, launch_decided_at: null, decided_at: "2026-01-04T00:00:00Z", can: { launch: true } });
 const ord = buildNeeds({ ws: "w", me: "me", crs: [t1, t2], asks: [], alignments: [], apps: [] }).rows.filter((r) => r.kind === "launch").map((r) => r.key);
 rule("model: a row with no recorded time sorts last within its kind", ord[0] === "cr:crT2" && ord[1] === "cr:crT1");
+const dec = buildNeeds({ ws: "w", me: "me", crs: [], asks: [], alignments: [], apps: [], requests: [
+  { goal: { id: "gA", title: "A" }, requests: [
+    { id: "r1", type: "switch_goal", sender: person("me"), state: "answered", sessions: [{ session_key: "k1", owner: person("dev"), repo_alias: "web", harness: "claude-code", state: "declined", updated_at: "2026-01-06T00:00:00Z" }] },
+    { id: "r2", type: "checkpoint", sender: person("other"), state: "answered", sessions: [{ session_key: "k2", owner: person("dev"), repo_alias: null, harness: "codex", state: "declined", updated_at: "2026-01-06T00:00:00Z" }] },
+  ] },
+] }).rows;
+rule("model: my request a session declined is one Agent-reported row; someone else's request isn't mine to act on", dec.length === 1 && dec[0]!.kind === "agent_declined" && dec[0]!.evidence.agent_reported === 1 && /claude-code in web declined your switch goal request/.test(dec[0]!.cause) && !/blocked|stuck/i.test(dec[0]!.cause));
 
 process.exitCode = failed ? 1 : 0;
