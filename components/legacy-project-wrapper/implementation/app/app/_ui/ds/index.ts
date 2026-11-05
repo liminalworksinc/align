@@ -16,7 +16,7 @@ export { Compare, VersionsCompare, type CompareProps, type VersionRow } from "./
 export { DecisionRecord } from "./decision-record";
 export { WorkPanels } from "./work";
 export { GoalDependencies } from "./dependencies";
-export { ReviewActions, ReviewBody, type ReviewChoice } from "./review";
+export { defaultBody, ReviewActions, ReviewBody, sendChoice, type ReviewChoice, type SendResult } from "./review";
 export { EvidenceSummary, type EvidenceSummaryProps } from "./evidence-summary";
 export { changeFacts, goalFacts, hasEvidence, FACT_WORD, type Fact, type FactKind, type Delivery } from "./evidence-facts.mts";
 export { DecisionLinks, DECISION_LINK, type DecisionPlace } from "./decision-links";

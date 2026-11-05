@@ -314,6 +314,118 @@ function choicesFor(cr: ChangeRequest): Choice[] {
 
 export type ReviewChoice = Choice;
 
+/** The POST each choice makes (…/change-requests/<id>/<action>): Accept if is a counter with a condition. */
+const ACTION: Record<Choice, string> = {
+  approve_and_launch: "approve_and_launch",
+  approve: "approve",
+  launch: "launch",
+  not_yet: "not_yet",
+  accept_if: "counter",
+  counter: "counter",
+  reject: "reject",
+  accept_counter: "accept_counter",
+  acknowledge: "acknowledge",
+  rebase: "rebase",
+  withdraw: "withdraw",
+};
+
+/** The body for a choice that needs no words from the person; null for one that does (Accept if, counter, decline). */
+export function defaultBody(cr: ChangeRequest, choice: Choice): Record<string, unknown> | null {
+  switch (choice) {
+    case "approve":
+    case "approve_and_launch":
+      return { revision: cr.revision, note: null };
+    case "launch":
+    case "not_yet":
+    case "accept_counter":
+    case "withdraw":
+      return { revision: cr.revision };
+    case "acknowledge":
+      return { revision: cr.condition?.revision };
+    case "rebase":
+      return { revision: cr.revision, base_version: cr.goal.version };
+    default:
+      return null;
+  }
+}
+
+/** What a recorded choice says, after "Recorded: " (empty: just "Recorded."). */
+function doneWords(cr: ChangeRequest, choice: Choice): string {
+  switch (choice) {
+    // A launch's own line ("Launched by you, <time>: version N is now the launched version.") says the launch with who
+    // and when, so the notice doesn't restate it.
+    case "approve_and_launch":
+    // One job each: this says what was recorded; the waits line under the request says approval is not launch, and who
+    // launches, once (it is there on a cold open too).
+    case "approve":
+      return `you approved revision ${cr.revision}`;
+    case "launch":
+      return "";
+    case "not_yet":
+      return "you decided not yet";
+    case "accept_if":
+      return `you accepted it if ${cr.requester.name} acknowledges your condition`;
+    case "counter":
+      return `you suggested a change to ${cr.requester.name}`;
+    case "reject":
+      return "you declined this request";
+    case "accept_counter":
+      return "you accepted the suggested change. It waits for approval again";
+    case "acknowledge":
+      return "you acknowledged the condition";
+    case "rebase":
+      return `you updated your request to version ${cr.goal.version}. It waits for approval again`;
+    case "withdraw":
+      return "you withdrew your request";
+  }
+}
+
+/** The outcome of sending a choice: the notice to show, and whether the request should be read again (anything but a
+ *  retry: a decision, or a refusal that says how it stands now). */
+export interface SendResult {
+  kind: "done" | "refused" | "retry";
+  text: string;
+  reread: boolean;
+}
+
+/**
+ * The one way a decision is sent, for the review and for any shortcut to it (the Desk's one-click Approve only):
+ *  1. Read the request again. If its revision, state, launch decision or its goal's version changed since `cr` was read,
+ *     nothing is sent (a confirmation can name a version a moved goal makes stale): refused, saying what changed.
+ *  2. `requireEvidence`: the caller offered this only because the request had evidence; if the re-read has none on its
+ *     current revision (a link removed in another session meanwhile), nothing is sent.
+ *  3. POST …/<action> with `body` (default: defaultBody, for the choices that need no words; throws for one that does).
+ *  4. 403/404/409: refused, in the server's words (409 adds "Here it is as it stands now."). Anything else (network, 429,
+ *     5xx): retry, nothing changed. The server checks every rule again on the write; this never decides for it.
+ */
+export async function sendChoice(ws: string, cr: ChangeRequest, choice: Choice, body?: Record<string, unknown> | null, opts: { requireEvidence?: boolean } = {}): Promise<SendResult> {
+  const b = body ?? defaultBody(cr, choice);
+  if (!b) throw new Error(`sendChoice: "${choice}" needs a body (a note, a condition, changes or a reason)`);
+  const path = crPath(ws, cr);
+  try {
+    const now = await api<ChangeRequest>(path);
+    if (now.revision !== cr.revision || now.state !== cr.state || now.launch !== cr.launch || now.goal.version !== cr.goal.version) {
+      const what =
+        now.state !== cr.state || now.launch !== cr.launch
+          ? now.state_note
+          : now.revision !== cr.revision
+            ? `It changed after you opened it: it is now at revision ${now.revision}.`
+            : `The goal moved to version ${now.goal.version} after you opened it.`;
+      return { kind: "refused", text: `Not recorded. ${what} Nothing was sent. Read it again and decide again.`, reread: true };
+    }
+    if (opts.requireEvidence && !hasEvidence(now))
+      return { kind: "refused", text: "Not recorded. Its evidence was removed after you opened it. Nothing was sent. Open it to decide.", reread: true };
+    await api(`${path}/${ACTION[choice]}`, { body: b });
+    const words = doneWords(cr, choice);
+    return { kind: "done", text: words ? `Recorded: ${words}.` : "Recorded.", reread: true };
+  } catch (e) {
+    const status = e instanceof ApiError ? e.status : 0;
+    if (status === 403 || status === 404 || status === 409)
+      return { kind: "refused", text: `Not recorded. ${sentence((e as Error).message)}${status === 409 ? " Here it is as it stands now." : " Nothing changed."}`, reread: true };
+    return { kind: "retry", text: `Not recorded yet. ${sentence((e as Error).message)} Nothing changed; try again.`, reread: false };
+  }
+}
+
 /** `compact`: below 640px the secondary actions fold into a "More actions" menu (the dominant one stays a button).
  *  `initialChoice`: open with this choice already picked (its input, or its confirmation for a choice that needs no
  *  text), e.g. from a concept's own "Decline" or "Launch" button; ignored when this person can't make it. Remount (a new
@@ -335,7 +447,6 @@ export function ReviewActions({
   initialChoice?: ReviewChoice;
   onChoice?: (c: ReviewChoice | null) => void;
 }) {
-  const path = crPath(ws, cr);
   const next = cr.version ?? cr.goal.version + 1;
   const n = cr.goal.version;
   const TITLE: Record<Choice, string> = {
@@ -424,82 +535,35 @@ export function ReviewActions({
     return null;
   }
 
-  function request(): { action: string; body: Record<string, unknown> } | null {
+  function request(): Record<string, unknown> | null {
     switch (choice) {
       case "approve":
       case "approve_and_launch":
-        return { action: choice, body: { revision: cr.revision, note: note.trim() || null } };
-      case "launch":
-      case "not_yet":
-      case "accept_counter":
-      case "withdraw":
-        return { action: choice, body: { revision: cr.revision } };
+        return { revision: cr.revision, note: note.trim() || null };
       case "accept_if":
-        return { action: "counter", body: { revision: cr.revision, changes: cr.changes, note: note.trim(), condition: condition.trim() } };
+        return { revision: cr.revision, changes: cr.changes, note: note.trim(), condition: condition.trim() };
       case "counter":
-        return { action: "counter", body: { revision: cr.revision, changes: counter, note: note.trim() } };
+        return { revision: cr.revision, changes: counter, note: note.trim() };
       case "reject":
-        return { action: "reject", body: { revision: cr.revision, reason: reason.trim() } };
-      case "acknowledge":
-        return { action: "acknowledge", body: { revision: cr.condition?.revision } };
-      case "rebase":
-        return { action: "rebase", body: { revision: cr.revision, base_version: n } };
-      default:
+        return { revision: cr.revision, reason: reason.trim() };
+      case null:
         return null;
+      default:
+        return defaultBody(cr, choice);
     }
   }
 
-  const DONE: Record<Choice, string> = {
-    // A launch's own line ("Launched by you, <time>: version N is now the launched version.") says the launch with who
-    // and when, so the notice doesn't restate it.
-    approve_and_launch: `you approved revision ${cr.revision}`,
-    // One job each: this says what was recorded; the waits line under the request says approval is not launch, and who
-    // launches, once (it is there on a cold open too).
-    approve: `you approved revision ${cr.revision}`,
-    launch: "",
-    not_yet: "you decided not yet",
-    accept_if: `you accepted it if ${cr.requester.name} acknowledges your condition`,
-    counter: `you suggested a change to ${cr.requester.name}`,
-    reject: "you declined this request",
-    accept_counter: "you accepted the suggested change. It waits for approval again",
-    acknowledge: "you acknowledged the condition",
-    rebase: `you updated your request to version ${n}. It waits for approval again`,
-    withdraw: "you withdrew your request",
-  };
 
   const send = async () => {
-    const req = request();
-    if (!req || sending || !choice) return;
+    const body = request();
+    if (!body || sending || !choice) return;
     setSending(true);
     try {
-      // Read it again first: if it changed since it was shown, nothing is sent (the server checks again on the write).
-      const now = await api<ChangeRequest>(path);
-      // The goal's version too: the confirmation names the version a launch releases (goal version + 1), so a goal that
-      // moved meanwhile would make it name a stale one. Re-read and show the choice again with the right number.
-      if (now.revision !== cr.revision || now.state !== cr.state || now.launch !== cr.launch || now.goal.version !== cr.goal.version) {
-        const what =
-          now.state !== cr.state || now.launch !== cr.launch
-            ? now.state_note
-            : now.revision !== cr.revision
-              ? `It changed after you opened it: it is now at revision ${now.revision}.`
-              : `The goal moved to version ${now.goal.version} after you opened it.`;
-        setNotice({ kind: "refused", text: `Not recorded. ${what} Nothing was sent. Read it again and decide again.` });
+      const r = await sendChoice(ws, cr, choice, body);
+      setNotice({ kind: r.kind, text: r.text });
+      if (r.reread) {
         setChoice(null);
         onDone();
-        return;
-      }
-      await api(`${path}/${req.action}`, { body: req.body });
-      setNotice({ kind: "done", text: DONE[choice] ? `Recorded: ${DONE[choice]}.` : "Recorded." });
-      setChoice(null);
-      onDone();
-    } catch (e) {
-      const status = e instanceof ApiError ? e.status : 0;
-      if (status === 403 || status === 404 || status === 409) {
-        setNotice({ kind: "refused", text: `Not recorded. ${sentence((e as Error).message)}${status === 409 ? " Here it is as it stands now." : " Nothing changed."}` });
-        setChoice(null);
-        onDone();
-      } else {
-        setNotice({ kind: "retry", text: `Not recorded yet. ${sentence((e as Error).message)} Nothing changed; try again.` });
       }
     } finally {
       setSending(false);
