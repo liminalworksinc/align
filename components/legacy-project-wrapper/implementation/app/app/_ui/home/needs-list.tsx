@@ -115,7 +115,7 @@ function useSends(W: string, crs: ChangeRequest[] | null, failed: boolean) {
 /** Search shows only when a phase has more rows than this. */
 const SEARCH_FROM = 8;
 
-export function NeedsList({ ws, me, selected, reviewBase = "", heading = true }: { ws: string; me: string; selected?: string | null; reviewBase?: string; heading?: boolean }) {
+export function NeedsList({ ws, me, selected, reviewBase = "", heading = true, onCount }: { ws: string; me: string; selected?: string | null; reviewBase?: string; heading?: boolean; onCount?: (n: number | null) => void }) {
   const W = `/api/v2/workspaces/${ws}`;
   const cr = useApi<Groups<ChangeRequest>>(`${W}/change-requests`);
   const asks = useApi<{ asks: AskLite[] }>(`${W}/asks?state=open,accepted,done,declined`);
@@ -144,6 +144,10 @@ export function NeedsList({ ws, me, selected, reviewBase = "", heading = true }:
     [ws, me, crList, asks.data, al.data, home.data, reqs.groups, sent.sends],
   );
   const counts = Object.fromEntries(PHASES.map((p) => [p.value, inPhase(rows, p.value).length])) as Record<NeedPhase, number>;
+  // For the page's heading: null while reading, and when a read failed and the rest found nothing (zero isn't known then).
+  useEffect(() => {
+    onCount?.(loading || (unknown.length > 0 && counts.needs_you === 0) ? null : counts.needs_you);
+  }, [onCount, loading, unknown.length, counts.needs_you]);
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return inPhase(rows, phase).filter((n) => !needle || [n.goal?.title, n.cause, n.quote, n.who, KIND_WORDS[n.kind]].join(" ").toLowerCase().includes(needle));

@@ -4,7 +4,9 @@ import { Drawer, EmptyState } from "../../_ui/ds";
 import GoalLines from "../../_ui/home/goal-lines";
 import { NeedsList } from "../../_ui/home/needs-list";
 import Since from "../../_ui/home/since";
+import { useRead } from "../../_ui/ds/read";
 import { Loading, Shell, useApi } from "../../_ui/kit";
+import { NotInWorkspace } from "../../_ui/missing";
 import type { Me } from "../../_ui/server";
 import type { AnySession, ChangeRequest, MySession } from "../../_ui/types";
 import FirstRun, { seenApp } from "./first-run";
@@ -53,7 +55,7 @@ const outlineBtn =
   "inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) border border-(--line-strong) px-3.5 text-[14px] font-medium text-(--text-1) hover:bg-(--bg-raised) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) max-sm:min-h-[44px]";
 
 export default function Home({ me, ws }: { me: Me; ws: string }) {
-  const d = useApi<HomeData>(`/api/v2/workspaces/${ws}/home`);
+  const d = useRead<HomeData>(`/api/v2/workspaces/${ws}/home`);
   const s = useApi<{ mine: MySession[]; all: AnySession[] | null }>(`/api/v2/workspaces/${ws}/sessions`);
   const c = useApi<Groups>(`/api/v2/workspaces/${ws}/change-requests`);
   const [review, setReview] = useReview();
@@ -64,7 +66,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const [needsKey, setNeedsKey] = useState(0);
   // The Needs-you count, from NeedsList's own rows; null until its reads finish, or when one failed and it found nothing.
   const [needCount, setNeedCount] = useState<number | null>(null);
-  const h = d.data ?? (d.error ? UNREAD : null);
+  const h = d.data ?? (d.status ? UNREAD : null);
   const reloadAll = useCallback(() => {
     d.reload();
     s.reload();
@@ -83,6 +85,9 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const nothingOfMine = !!apps && !apps.items.some(seenApp) && s.data !== null && mine.length === 0 && !teammates?.length;
   const ownerView = !!apps?.everyone;
   const noAgents = nothingOfMine && ownerView;
+  // The page checks membership before Home mounts; this is the person removed while Home is open (every read is a 404).
+  if (d.status === 404) return <NotInWorkspace me={me} />;
+
   return (
     <Shell me={me} ws={ws} tab="Home">
       <div className="flex flex-col gap-5">
@@ -104,7 +109,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
           )}
         </header>
 
-        <NeedsList key={needsKey} ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} onCount={setNeedCount} />
+        <NeedsList key={needsKey} ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={setNeedCount} />
 
         {noAgents && (
           <EmptyState
