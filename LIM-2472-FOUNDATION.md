@@ -29,6 +29,10 @@ Hues (canon): accent wholeness `#BF0078` (hover `#94005C`) in both themes, ruled
 - An element that only code focuses (`tabindex="-1"`: a heading after navigation, an error or confirm message, a dialog panel) gets no ring and not the browser's default one (`[tabindex="-1"]:focus { outline: none }` in `@layer base`, so a utility can still add a ring). No builder needs `outline-none` for these.
 - Checked in Chrome by keyboard: Tab stops, the roving Segmented choice after an arrow key, a code-focused heading, the Drawer panel and a control inside it; the real goal page passes test-v2:3880's check (29 stops, all with a 2px ring).
 
+## Evidence classes
+
+Four, in `EvidenceLabel`: Receipt, Agent reported, Self-reported (`kind: "self"`) and Not observed. Self-reported means a person added the link in a web session and Align did not check it (`reported_as`, `lib/v2/evidence.ts:75`). It has no colour token on purpose: `--text-2` on `--line-strong` with a person icon, ranked below Agent reported, and it never reads as verified.
+
 ## Measured contrast (WCAG ratio, lowest across all five surface tiers)
 
 | | text-1 | text-2 | text-3 | edge | focus | status and evidence inks |
