@@ -49,9 +49,17 @@ async function page(who, theme, width) {
       localStorage.setItem("align-theme", t);
     } catch {}
   }, theme);
-  await p.goto(`${BASE}/app/sign-in`, { waitUntil: "domcontentloaded" });
-  const ok = await p.evaluate(async (cred) => (await fetch("/api/v2/auth/sign-in/email", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(cred), credentials: "same-origin" })).status, seed[who]);
+  // Sign in from Node and hand the browser the session cookie: a dev server can reload a page mid-call.
+  const r = await fetch(`${BASE}/api/v2/auth/sign-in/email`, { method: "POST", headers: { origin: BASE, "content-type": "application/json" }, body: JSON.stringify(seed[who]) });
+  const ok = r.status;
+  const host = new URL(BASE).hostname;
+  for (const c of r.headers.getSetCookie()) {
+    const [pair] = c.split(";");
+    const at = pair.indexOf("=");
+    await ctx.setCookie({ name: pair.slice(0, at), value: pair.slice(at + 1), domain: host, path: "/", httpOnly: true, secure: BASE.startsWith("https:") });
+  }
   if (ok !== 200) throw new Error(`sign-in ${who}: ${ok}`);
+  await p.goto(`${BASE}/app`, { waitUntil: "domcontentloaded" });
   return { p, ctx };
 }
 async function settle(p) {
@@ -61,7 +69,16 @@ async function settle(p) {
 async function shot(p, name, theme, width, full = true) {
   const file = path.join(OUT, `${name}-${theme}-${width}.png`);
   // No horizontal page scroll is a requirement: say so whenever a screen breaks it.
-  const wide = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  // A link click may still be navigating: wait for the new document before measuring it.
+  let wide = 0;
+  for (let i = 0; i < 20; i++) {
+    try {
+      wide = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      break;
+    } catch {
+      await sleep(250);
+    }
+  }
   if (wide > 0) console.warn(`WARN ${name} ${theme} ${width}: page scrolls sideways by ${wide}px`);
   await p.screenshot({ path: file, fullPage: full });
   written.push(file);
@@ -80,6 +97,7 @@ const clickText = async (p, sel, text) => {
     text,
   );
   if (!ok) throw new Error(`no ${sel} starting "${text}"`);
+  if (sel.endsWith(" a")) await p.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => undefined);
   await settle(p);
 };
 /** Open the review drawer on the onboarding request (the one waiting on the owner), by its card's button. */
