@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
-import { api, Btn, Pill, when, type WsSummary } from "../../_ui/kit";
+import { api, Btn, when, type WsSummary } from "../../_ui/kit";
 import { READ_TOOLS } from "@/lib/mcp/read-tools";
 import { claudeCodeLine } from "@/lib/paste-lines";
 
@@ -13,6 +13,9 @@ import { claudeCodeLine } from "@/lib/paste-lines";
 // code, so this card links to a sample the person already has (or says they are in it) and otherwise shows only the
 // connect path. Hidden per workspace in localStorage. While shown it checks the Apps endpoint every few seconds (only
 // while the tab is visible); once an app has made any request it yields to the Home's "Connected AI apps" section.
+//
+// LIM-2472 (ruling 9b5b870f): first run is the Home in its empty state, not a separate screen. The Home renders this
+// card where "Needs you" would lead, with the same two paths only, on the theme tokens so it reads in dark and light.
 
 /** The name lib/v2/sample.ts gives the sample workspace. */
 const SAMPLE_NAME = "Northstar (sample)";
@@ -32,10 +35,10 @@ export const seenApp = (a: { last_used_at: string | null; last_read_at: string |
 
 function Path({ title, tag, children, testId }: { title: string; tag: string; children: ReactNode; testId: string }) {
   return (
-    <div className="flex min-w-0 flex-col gap-2 rounded-[12px] border border-zinc-200 p-4" data-first-run-path={testId}>
+    <div className="flex min-w-0 flex-col gap-2 rounded-(--radius-m) border border-(--line) bg-(--bg-raised) p-4" data-first-run-path={testId}>
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-[17px] font-semibold text-zinc-900">{title}</h3>
-        <Pill>{tag}</Pill>
+        <h3 className="text-[17px] font-semibold text-(--text-1)">{title}</h3>
+        <span className="inline-flex items-center rounded-full border border-(--line-strong) px-2 py-0.5 font-mono text-[12px] tracking-[0.04em] text-(--text-2)">{tag}</span>
       </div>
       {children}
     </div>
@@ -57,7 +60,7 @@ function CopyLine({ line }: { line: string }) {
           {copied ? "Copied" : "Copy"}
         </Btn>
       </div>
-      <code className="block max-h-36 overflow-y-auto break-all rounded-[8px] bg-zinc-100 px-3 py-2 font-mono text-[14px] text-zinc-900" data-first-run-line>
+      <code className="block max-h-36 overflow-y-auto break-all rounded-[8px] bg-(--bg-inset) px-3 py-2 font-mono text-[14px] text-(--text-1)" data-first-run-line>
         {line}
       </code>
     </div>
@@ -159,18 +162,18 @@ export default function FirstRun({ ws, onSeen, always = false }: { ws: string; o
   const connect = (
     <>
       {viewer ? (
-        <p className="text-zinc-700">Viewers can&apos;t connect AI apps to this workspace. Ask a workspace owner to make you a member.</p>
+        <p className="text-(--text-2)">Viewers can&apos;t connect AI apps to this workspace. Ask a workspace owner to make you a member.</p>
       ) : (
         <>
-          <p className="text-zinc-700">Paste this into a terminal (sh, bash or zsh), then choose this workspace and Allow on the Align page that opens:</p>
-          {apps && line === null && <p className="text-zinc-600">This server&apos;s address can&apos;t be turned into a command. Copy the URL from the Apps tab instead.</p>}
+          <p className="text-(--text-2)">Paste this into a terminal (sh, bash or zsh), then choose this workspace and Allow on the Align page that opens:</p>
+          {apps && line === null && <p className="text-(--text-2)">This server&apos;s address can&apos;t be turned into a command. Copy the URL from the Apps tab instead.</p>}
           {line && <CopyLine line={line} />}
-          <p className="text-[14px] text-zinc-600">It adds Align to Claude Code for your user account (every folder) and starts the sign-in. It writes no hooks and no settings in your folder.</p>
+          <p className="text-[14px] text-(--text-2)">It adds Align to Claude Code for your user account (every folder) and starts the sign-in. It writes no hooks and no settings in your folder.</p>
         </>
       )}
       <div>
-        <p className="font-semibold text-zinc-900">It can read, as you</p>
-        <ul aria-label="What a connected agent can read" className="ml-5 list-disc text-zinc-700">
+        <p className="font-semibold text-(--text-1)">It can read, as you</p>
+        <ul aria-label="What a connected agent can read" className="ml-5 list-disc text-(--text-2)">
           {READ_TOOLS.map((t) => (
             <li key={t.name} data-tool={t.name}>
               {t.reads}
@@ -179,28 +182,28 @@ export default function FirstRun({ ws, onSeen, always = false }: { ws: string; o
           ))}
         </ul>
       </div>
-      <p className="text-zinc-700">
-        <span className="font-semibold text-zinc-900">It can&apos;t</span> propose, approve, launch or change anything here. If you allow it when you connect, it can add evidence links to change requests, labelled
+      <p className="text-(--text-2)">
+        <span className="font-semibold text-(--text-1)">It can&apos;t</span> propose, approve, launch or change anything here. If you allow it when you connect, it can add evidence links to change requests, labelled
         agent-reported.
       </p>
-      <p role="status" aria-live="polite" className={failed ? "text-amber-800" : "text-zinc-700"} data-first-run-status={failed ? "error" : !apps ? "checking" : approvedOnly.length ? "approved" : "none"}>
+      <p role="status" aria-live="polite" className={failed ? "text-(--st-retry)" : "text-(--text-2)"} data-first-run-status={failed ? "error" : !apps ? "checking" : approvedOnly.length ? "approved" : "none"}>
         {status}
       </p>
-      <p className="text-[14px] text-zinc-600">
+      <p className="text-[14px] text-(--text-2)">
         Once it connects, the Home and the Apps tab show when it last connected (any request to Align) and, separately, when it last read the goals. Connecting is not a read.
       </p>
-      <Link href={`/app/w/${ws}/apps`} className="w-fit text-[14px] font-medium text-violet-700 underline">
+      <Link href={`/app/w/${ws}/apps`} className="w-fit text-[14px] font-medium text-(--accent-text) underline">
         Using Codex or another app? See the Apps tab.
       </Link>
     </>
   );
 
   return (
-    <section aria-label="Get started" className="mb-5 min-w-0 rounded-[14px] border border-violet-700 bg-white p-5 text-[15px] text-zinc-900" data-first-run={sample ? "two" : "connect"}>
+    <section aria-label="Get started" className="min-w-0 rounded-(--radius-l) border border-(--line-strong) bg-(--bg-panel) p-5 text-[15px] text-(--text-1)" data-first-run={sample ? "two" : "connect"}>
       <div className="mb-3 flex flex-wrap items-start gap-2">
         <div className="min-w-0 flex-1 basis-60">
           <h2 className="text-[20px] font-semibold">{sample ? "Two ways to start" : "Connect one agent"}</h2>
-          <p className="text-zinc-600">
+          <p className="text-(--text-2)">
             {sample
               ? inSample
                 ? "Look around this made-up company, or connect one AI agent to it."
@@ -217,18 +220,18 @@ export default function FirstRun({ ws, onSeen, always = false }: { ws: string; o
           <Path title="Explore a sample" tag="Fictional" testId="sample">
             {inSample ? (
               <>
-                <p className="text-zinc-700">
+                <p className="text-(--text-2)">
                   You are in the Northstar sample. Its company, teams, goals and change request are fictional: Align made them up so you can try each step. Its change request is
                   waiting on you.
                 </p>
-                <Link href={`/app/w/${ws}/requests`} className="w-fit text-[15px] font-medium text-violet-700 underline">
+                <Link href={`/app/w/${ws}/requests`} className="w-fit text-[15px] font-medium text-(--accent-text) underline">
                   Open the sample&apos;s change request
                 </Link>
               </>
             ) : (
               <>
-                <p className="text-zinc-700">Northstar is a made-up company in its own workspace, with two teams, their goals and one change request to try. Nothing in it is real.</p>
-                <Link href={`/app/w/${sample.id}`} aria-label="Open the Northstar sample (fictional)" className="w-fit text-[15px] font-medium text-violet-700 underline" data-sample-link>
+                <p className="text-(--text-2)">Northstar is a made-up company in its own workspace, with two teams, their goals and one change request to try. Nothing in it is real.</p>
+                <Link href={`/app/w/${sample.id}`} aria-label="Open the Northstar sample (fictional)" className="w-fit text-[15px] font-medium text-(--accent-text) underline" data-sample-link>
                   Open the Northstar sample
                 </Link>
               </>
