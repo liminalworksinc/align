@@ -7,7 +7,7 @@ import type { ChangeRequest, Goal } from "../types";
 //   Receipt         Align recorded it: a launch directive's received receipts, or a goal read that served the version;
 //   Agent reported  an agent's own account: evidence links added through a connected app, align CLI usage times;
 //   Self-reported   a person's own evidence links;
-//   Not observed    only for a launched version's delivery: Align sent it nowhere yet, or nothing sent a receipt.
+//   Not observed    only for a launched version's delivery: no session on the goal and no app sent it, or no receipt.
 // An absence is never a fact of its own otherwise: no agent time and no links give no chip (no report is not an agent's
 // report; no links is a fact about the request, not an observation of work); `hasEvidence` lets a consumer say "No
 // evidence attached" in words. Never what an agent did with something, and never "verified": Align doesn't check links.
@@ -43,8 +43,6 @@ function deliveryFacts(version: number, d: Delivery): Fact[] {
   const apps = d.apps?.items.length ?? 0;
   if (s && s.received > 0)
     out.push({ kind: "receipt", short: `v${version} · ${s.received} of ${s.sessions} received`, long: `${s.received} of ${n(s.sessions, "session")} that Align sent v${version} to sent a receipt for it.` });
-  if (s && s.sessions === 0)
-    out.push({ kind: "unobserved", short: `v${version} · no session on this goal`, long: `v${version} reached no session: none was on this goal when it was launched.` });
   if (s && s.sessions > 0 && s.received === 0)
     out.push({ kind: "unobserved", short: `v${version} · 0 of ${s.sessions} received`, long: `Align sent v${version} to ${n(s.sessions, "session")}; none has sent a receipt yet.` });
   if (apps > 0)
@@ -53,7 +51,15 @@ function deliveryFacts(version: number, d: Delivery): Fact[] {
       short: `v${version} · ${n(apps, "app")}`,
       long: `Align sent v${version} to ${n(apps, "connected app")} when ${apps === 1 ? "it" : "they"} read the goals${d.apps?.everyone ? "" : " (yours; owners see everyone's)"}.`,
     });
-  if (!s && apps === 0) out.push({ kind: "unobserved", short: `v${version} · not sent yet`, long: `Align hasn't sent v${version} to a session or a connected app yet.` });
+  // No directive target (…/value delivery null after a launch, or 0 sessions): no session was on the goal at launch.
+  const noSession = !s || s.sessions === 0;
+  if (noSession && apps === 0)
+    out.push({
+      kind: "unobserved",
+      short: `v${version} · no session or app yet`,
+      long: `No session was on this goal when v${version} was launched, and no connected app has been sent it in a goal read since.`,
+    });
+  if (noSession && apps > 0) out.push({ kind: "unobserved", short: `v${version} · no session on this goal`, long: `No session was on this goal when v${version} was launched.` });
   return out;
 }
 

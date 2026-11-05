@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ApiError, api, sentence } from "../kit";
 import type { ChangeFields, ChangeRequest, Goal } from "../types";
 import { changeWaits, launchWaits } from "@/lib/v2/home-core.mts";
@@ -21,7 +21,7 @@ import { StatusPill, type StatusKind } from "./status-pill";
 //    confirmation itself. Before sending, the request is read again: if it changed, nothing is sent. 403/404/409 re-read
 //    and say what changed (red); a network failure, 429 or 5xx says to try again (amber).
 // Kept from main for its tests: data-decision="<choice title>", data-confirm="<choice>", "Confirm: <title>" buttons,
-// data-cr / data-cr-view. Wording: Align releases a version at launch; it never says what agents "are on".
+// data-cr / data-cr-view. Wording: a launch makes a version the launched one; never what agents "are on" or "released".
 
 type Person = { id: string; name: string };
 type Choice = "approve_and_launch" | "approve" | "launch" | "not_yet" | "accept_if" | "counter" | "reject" | "accept_counter" | "acknowledge" | "rebase" | "withdraw";
@@ -52,7 +52,7 @@ function statusOf(cr: ChangeRequest): { kind: StatusKind; label?: string } {
 export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: string; cr: ChangeRequest; me: string; titleOf?: (id: string) => string; onDone?: () => void }) {
   // Add evidence's result lives here, outside the can.add_evidence gate: a refusal re-reads the request, and the new
   // read may no longer allow adding (declined meanwhile), which unmounts the form but must not take its statement along.
-  const [evNotice, setEvNotice] = useState<Notice | null>(null);
+  const [evNotice, setEvNotice] = useOneNotice(cr.id, "body");
   const evRef = useRef<HTMLParagraphElement | null>(null);
   useEffect(() => {
     if (evNotice) evRef.current?.focus();
@@ -112,7 +112,13 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
         <EvidenceSummary ws={ws} cr={cr} variant="full" />
         {!hasEvidence(cr) && (
           <p className="text-[14px] text-(--text-2)">
-            No evidence attached{cr.revision > 1 ? ` to revision ${cr.revision}` : ""}. Approving without evidence is recorded as such.
+            {cr.state === "approved"
+              ? cr.approved_without_evidence
+                ? "Approved without evidence."
+                : `No evidence attached${cr.revision > 1 ? ` to revision ${cr.revision}` : ""}.`
+              : cr.state === "pending" || cr.state === "countered"
+                ? `No evidence attached${cr.revision > 1 ? ` to revision ${cr.revision}` : ""}. Approving without evidence is recorded as such.`
+                : `No evidence attached${cr.revision > 1 ? ` to revision ${cr.revision}` : ""}.`}
           </p>
         )}
         {evidence.length > 0 && (
@@ -120,7 +126,7 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
             {evidence.map((e) => (
               <li key={e.id} className="flex flex-wrap items-center gap-2 text-[14px]">
                 {e.reported_as === "agent-reported" ? <EvidenceLabel kind="reported" size="s" detail="connected app" /> : <EvidenceLabel kind="self" size="s" />}
-                <a href={e.url} target="_blank" rel="noopener noreferrer" className="max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center text-(--accent-text) underline underline-offset-2 [overflow-wrap:anywhere]">
+                <a href={e.url} target="_blank" rel="noopener noreferrer" className="max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center text-(--text-1) underline decoration-(--line-strong) underline-offset-2 hover:decoration-(--text-1) [overflow-wrap:anywhere]">
                   {e.label || e.url}
                 </a>
                 <span className="text-[13px] text-(--text-3)">
@@ -145,8 +151,8 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
         {waits?.next === "resolve_loop" && `Waits on ${people(waits.waiting_on, me)}: nobody can approve it as it stands. ${cr.dependency_loop ?? ""}`}
         {waits?.next === "decide" && `Waits on ${people(waits.waiting_on, me)} to decide.`}
         {waits?.next === "accept_counter" && `Waits on ${people(waits.waiting_on, me)} to accept the suggested change.`}
-        {!waits && launch && `Approval is not launch: version ${cr.version ?? cr.goal.version + 1} is released only when ${people(launch.launchers, me)} launch${launch.launchers.length === 1 && launch.launchers[0].id !== me ? "es" : ""} it.`}
-        {!waits && !launch && cr.state === "approved" && cr.launch === "launched" && `Launched by ${who(cr.launch_decided_by, me)}, ${at(cr.launch_decided_at)}: Align released version ${cr.version}.`}
+        {!waits && launch && `Approval is not launch: version ${cr.version ?? cr.goal.version + 1} becomes the launched version only when ${people(launch.launchers, me)} launch${launch.launchers.length === 1 && launch.launchers[0].id !== me ? "es" : ""} it.`}
+        {!waits && !launch && cr.state === "approved" && cr.launch === "launched" && `Launched by ${who(cr.launch_decided_by, me)}, ${at(cr.launch_decided_at)}: version ${cr.version} is now the launched version.`}
         {!waits && !launch && cr.state !== "approved" && cr.state_note}
       </p>
     </div>
@@ -265,6 +271,29 @@ function AddEvidence({ ws, cr, onDone, setNotice }: { ws: string; cr: ChangeRequ
 
 type Notice = { kind: "done" | "refused" | "retry"; text: string };
 
+// One result notice at a time per request: the body's (Add evidence) and the actions' (a decision) live in two
+// components a consumer mounts separately, so a new notice in one clears the other's through a window event.
+const NOTICE_EVENT = "align-review-notice";
+function useOneNotice(crId: string, from: "body" | "actions") {
+  const [notice, set] = useState<Notice | null>(null);
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ cr: string; from: string }>).detail;
+      if (d.cr === crId && d.from !== from) set(null);
+    };
+    window.addEventListener(NOTICE_EVENT, on);
+    return () => window.removeEventListener(NOTICE_EVENT, on);
+  }, [crId, from]);
+  const show = useCallback(
+    (n: Notice | null) => {
+      set(n);
+      if (n) window.dispatchEvent(new CustomEvent(NOTICE_EVENT, { detail: { cr: crId, from } }));
+    },
+    [crId, from],
+  );
+  return [notice, show] as const;
+}
+
 /** The choices this person has, from the request's `can` flags (the server's answer), dominant first. */
 function choicesFor(cr: ChangeRequest): Choice[] {
   const c = cr.can;
@@ -323,9 +352,9 @@ export function ReviewActions({
     withdraw: "Withdraw",
   };
   const SAYS: Record<Choice, string> = {
-    approve_and_launch: `Approves revision ${cr.revision}, then launches it: Align releases version ${next} of the goal.`,
-    approve: `Records the approval. Approval is not launch: version ${next} is released only when someone launches it.`,
-    launch: `Align releases version ${next} of the goal. Connected apps and bound sessions can get it the next time they read the goal.`,
+    approve_and_launch: `Approves revision ${cr.revision}, then launches it: version ${next} becomes the goal's launched version.`,
+    approve: `Records the approval. Approval is not launch: version ${next} becomes the launched version only when someone launches it.`,
+    launch: `Version ${next} becomes the goal's launched version. Connected apps and bound sessions can get it the next time they read the goal.`,
     not_yet: `Records that it isn't launched yet. The goal stays at version ${n}.`,
     accept_if: `Keeps this change and adds a condition ${cr.requester.name} acknowledges.`,
     counter: `Sends different values back to ${cr.requester.name}, who accepts them before it can be approved.`,
@@ -339,9 +368,9 @@ export function ReviewActions({
   /** The phone confirmation's one line: what the action does, nothing more. */
   const SHORT: Record<Choice, string> = {
     ...SAYS,
-    approve_and_launch: `Approves revision ${cr.revision} and releases version ${next}.`,
-    approve: `Approves revision ${cr.revision}. Nothing is released until someone launches it.`,
-    launch: `Releases version ${next}.`,
+    approve_and_launch: `Approves revision ${cr.revision} and launches version ${next}.`,
+    approve: `Approves revision ${cr.revision}. Launching it is a separate step.`,
+    launch: `Launches version ${next}.`,
   };
   const choices = choicesFor(cr);
   const phone = usePhone();
@@ -363,7 +392,7 @@ export function ReviewActions({
   const [reason, setReason] = useState("");
   const [counter, setCounter] = useState<ChangeFields>(() => structuredClone(cr.changes));
   const [err, setErr] = useState<string | null>(null);
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const [notice, setNotice] = useOneNotice(cr.id, "actions");
   const [sending, setSending] = useState(false);
   const confirmRef = useRef<HTMLHeadingElement | null>(null);
   const noticeRef = useRef<HTMLParagraphElement | null>(null);
@@ -421,11 +450,13 @@ export function ReviewActions({
   }
 
   const DONE: Record<Choice, string> = {
-    approve_and_launch: `you approved revision ${cr.revision} and launched version ${next}`,
+    // A launch's own line ("Launched by you, <time>: version N is now the launched version.") says the launch with who
+    // and when, so the notice doesn't restate it.
+    approve_and_launch: `you approved revision ${cr.revision}`,
     // One job each: this says what was recorded; the waits line under the request says approval is not launch, and who
     // launches, once (it is there on a cold open too).
     approve: `you approved revision ${cr.revision}`,
-    launch: `you launched version ${next}`,
+    launch: "",
     not_yet: "you decided not yet",
     accept_if: `you accepted it if ${cr.requester.name} acknowledges your condition`,
     counter: `you suggested a change to ${cr.requester.name}`,
@@ -458,7 +489,7 @@ export function ReviewActions({
         return;
       }
       await api(`${path}/${req.action}`, { body: req.body });
-      setNotice({ kind: "done", text: `Recorded: ${DONE[choice]}.` });
+      setNotice({ kind: "done", text: DONE[choice] ? `Recorded: ${DONE[choice]}.` : "Recorded." });
       setChoice(null);
       onDone();
     } catch (e) {
@@ -586,7 +617,7 @@ export function ReviewActions({
       )}
 
       {choice && shown === "confirm" && (
-        <div role="region" aria-labelledby={`confirm-${cr.id}`} data-confirm={choice} className="flex flex-col gap-2 rounded-(--radius-m) border border-(--accent-text) bg-(--bg-raised) p-3">
+        <div role="region" aria-labelledby={`confirm-${cr.id}`} data-confirm={choice} className="flex flex-col gap-2 rounded-(--radius-m) border border-(--line-strong) bg-(--bg-raised) p-3">
           <h4 id={`confirm-${cr.id}`} ref={confirmRef} tabIndex={-1} className="text-[15px] font-semibold text-(--text-1) outline-none">
             {TITLE[choice]}: {cr.goal.title}
           </h4>
@@ -599,7 +630,7 @@ export function ReviewActions({
           {!oneRow && (choice === "approve" || choice === "approve_and_launch") && cr.evidence_count === 0 && <p className="text-[14px] text-(--text-2)">No evidence: the record will say it was approved without evidence.</p>}
           {oneRow && NOTE_ONLY.includes(choice) && (
             <details data-add-note className="text-[14px]" open={note.trim() !== "" || undefined}>
-              <summary className="inline-flex min-h-[44px] cursor-pointer items-center text-(--accent-text) [&::-webkit-details-marker]:hidden">Add a note</summary>
+              <summary className="inline-flex min-h-[44px] cursor-pointer items-center text-(--text-1) underline decoration-(--line-strong) underline-offset-2 [&::-webkit-details-marker]:hidden">Add a note</summary>
               <textarea aria-label="Note (optional)" className={FIELD} rows={2} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
             </details>
           )}

@@ -8,8 +8,11 @@ import { useRead } from "./read";
 // EvidenceSummary (LIM-2472 direction 9b5b870f): the one renderer for "the evidence behind this item", so Home's rows,
 // the goal lines and the review never say it differently. The facts come from evidence-facts.mts; this file only reads
 // what they need and draws them.
-//   inline: one line for a list row, strongest fact first, as chips that never split icon from word; whatever doesn't
-//           fit becomes "+N more" (measured, so it holds at 320).
+//   inline: a list row's evidence, strongest fact first: every chip that fits on the row's first line (measured, so all
+//           of them at 1440, one or two at 320), then "+N more" as plain text. A chip is never cut: its icon and word
+//           stay together and its detail wraps inside the chip when even one chip is wider than the row. The facts
+//           behind "+N more" are in the row's text for screen readers (visually hidden); sighted readers get them on
+//           the review and on Work, which say every fact.
 //   full:   every fact, each chip with its sentence.
 // Reads, only when the caller hasn't passed them: a launched request's GET …/value; a goal's approved requests
 // (GET …/goals/<goal>/change-requests?state=approved) for its newest launch, then that launch's …/value.
@@ -19,7 +22,7 @@ type ValueRead = Delivery & { goal?: unknown };
 export type EvidenceSummaryProps = {
   ws: string;
   variant?: "inline" | "full";
-  /** inline: the most chips shown before "+N more" (fewer when they don't fit). Default 2, for NeedRow's evidence slot. */
+  /** inline: the most chips shown before "+N more" (fewer when they don't fit). Default: as many as fit. */
   max?: number;
 } & (
   | { cr: ChangeRequest; goal?: never; value?: Delivery | null; launched?: never }
@@ -65,6 +68,7 @@ function useFit(count: number, max: number) {
       const room = el.clientWidth;
       let k = Math.min(count, max);
       const width = (m: number) => chips.slice(0, m).reduce((s, w) => s + w, 0) + Math.max(0, m - 1) * gap + (m < count ? gap + more : 0);
+      // At least the strongest chip, whole: when it and "+N more" don't fit on one line, the count wraps under it.
       while (k > 1 && width(k) > room) k--;
       setShown(k);
     };
@@ -78,23 +82,24 @@ function useFit(count: number, max: number) {
 
 function Inline({ facts, max }: { facts: Fact[]; max: number }) {
   const { box, probe, shown } = useFit(facts.length, max);
-  const hidden = facts.length - shown;
+  const hidden = facts.slice(shown);
   return (
-    <span ref={box} data-evidence-summary="inline" className="relative flex w-full min-w-0 flex-nowrap items-center gap-1.5 overflow-hidden whitespace-nowrap">
+    <span ref={box} data-evidence-summary="inline" className="relative flex w-full min-w-0 flex-wrap items-center gap-1.5 overflow-hidden">
       {facts.slice(0, shown).map((f, i) => (
-        // The strongest chip may shrink when even it and "+N more" don't fit: its detail ends in an ellipsis (the full
-        // words stay in the text and the title); the icon and the word never shrink or split.
-        <span key={i} title={`${FACT_WORD[f.kind]}: ${f.short}`} className={`flex ${i === 0 ? "min-w-0 shrink" : "shrink-0"} [&>[data-evidence]]:flex-nowrap [&>[data-evidence]>span:nth-child(2)]:truncate`}>
+        <span key={i} className="flex min-w-0 max-w-full">
           <Chip f={f} detail={f.short} />
         </span>
       ))}
-      {hidden > 0 && (
-        <span className="shrink-0 text-[12px] text-(--text-3)" title={facts.slice(shown).map((f) => `${FACT_WORD[f.kind]}: ${f.short}`).join("; ")}>
-          +{hidden} more
-        </span>
+      {hidden.length > 0 && (
+        <>
+          <span aria-hidden="true" data-more={hidden.length} className="shrink-0 text-[12px] whitespace-nowrap text-(--text-3)">
+            +{hidden.length} more
+          </span>
+          <span className="sr-only">Also: {hidden.map((f) => `${FACT_WORD[f.kind]}, ${f.short}`).join("; ")}.</span>
+        </>
       )}
       {/* The measuring copy: every chip at its natural width and the widest "+N more", never seen or read out. */}
-      <span ref={probe} aria-hidden="true" className="invisible absolute top-0 left-0 flex flex-nowrap gap-1.5">
+      <span ref={probe} aria-hidden="true" className="invisible absolute top-0 left-0 flex flex-nowrap gap-1.5 whitespace-nowrap">
         {facts.map((f, i) => (
           <span key={i} className="shrink-0">
             <Chip f={f} detail={f.short} />
@@ -122,7 +127,7 @@ function Full({ facts }: { facts: Fact[] }) {
 }
 
 export function EvidenceSummary(props: EvidenceSummaryProps) {
-  const { ws, variant = "inline", max = 2 } = props;
+  const { ws, variant = "inline", max = Infinity } = props;
   const cr = props.cr;
   const needValue = !!cr && cr.launch === "launched" && !!cr.version && props.value === undefined;
   const value = useRead<ValueRead>(needValue ? `/api/v2/workspaces/${ws}/goals/${cr!.goal.id}/change-requests/${cr!.id}/value` : null);
