@@ -35,7 +35,7 @@ export function StatusPill({ kind, label, size = "m" }: { kind: StatusKind; labe
       <span className="shrink-0">
         <I />
       </span>
-      <span className="min-w-0">{label ?? WORD[kind]}</span>
+      <span className="[overflow-wrap:normal]">{label ?? WORD[kind]}</span>
     </span>
   );
 }
