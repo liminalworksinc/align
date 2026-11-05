@@ -147,6 +147,34 @@ for (const [role, a] of Object.entries(people)) {
   }
   await ctx.close();
 }
+// "Since you last looked": no "Nothing changed" for a source it didn't read. Each new tab compares with the last visit.
+{
+  const ctx = await signedIn(seed.accounts.owner);
+  const visit = async (route) => {
+    const page = await ctx.newPage();
+    if (route) await route(page);
+    await page.goto(`${BASE}/app/w/${WS}`, { waitUntil: "networkidle", timeout: 60000 });
+    await page.waitForTimeout(1200);
+    const text = (await page.locator("[data-since]").first().innerText()).replace(/\s+/g, " ");
+    await page.close();
+    return text;
+  };
+  await visit();
+  const CHANGED = "Nothing changed since your last visit.";
+  for (const [name, pattern, source] of [
+    ["change requests", new RegExp(`/workspaces/${WS}/change-requests$`), "change requests"],
+    ["home", new RegExp(`/workspaces/${WS}/home$`), "goals or connected apps"],
+    ["a goal's versions", new RegExp(`/workspaces/${WS}/goals/[^/]+$`), "goal versions"],
+  ]) {
+    const t = await visit((p) => p.route(pattern, (r) => r.fulfill(BOOM)));
+    rule(`Since, ${name} read fails: says it couldn't read it`, t.includes(`Align couldn't read the ${source} just now`), t);
+    rule(`Since, ${name} read fails: no "Nothing changed"`, !t.includes(CHANGED), t);
+    rule(`Since, ${name} read fails: no empty-timeline fallback`, !t.includes("Nothing recorded yet"), t);
+  }
+  const all = await visit();
+  rule('Since, every read answers and no events: "Nothing changed"', all.includes(CHANGED) && !all.includes("couldn't read"), all);
+  await ctx.close();
+}
 await browser.close();
 process.exitCode = failed ? 1 : 0;
 console.log(failed ? `${failed} failed` : "all passed");
