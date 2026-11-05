@@ -62,6 +62,7 @@ const cr = await page.evaluate(async (w) => {
 const SCREENS = [
   ["record", `/app/w/${ws}/record`],
   ...(cr ? [["record-cr", `/app/w/${ws}/record?cr=${cr}`]] : []),
+  ["work", `/app/w/${ws}/work`],
   ["apps", `/app/w/${ws}/apps`],
   ["sessions", `/app/w/${ws}/sessions`],
 ];
