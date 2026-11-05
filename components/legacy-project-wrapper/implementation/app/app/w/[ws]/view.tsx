@@ -1,25 +1,27 @@
 "use client";
 import Link from "next/link";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Drawer, EmptyState, EvidenceLabel, Panel, StatusPill, type EvidenceKind, type ReviewChoice } from "../../_ui/ds";
+import { useCallback, useEffect, useState } from "react";
+import { Drawer, EmptyState, EvidenceLabel, NeedAction, NeedList, NeedRow, Panel, StatusPill, type EvidenceKind, type ReviewChoice } from "../../_ui/ds";
+import { buildNeeds, inPhase, KIND_WORDS, RANK_NOTE, type AskLite, type EvidenceCounts, type Need } from "../../_ui/home/needs";
 import { Loading, Note, Shell, useApi, when } from "../../_ui/kit";
 import type { Me } from "../../_ui/server";
-import type { AnySession, ChangeRequest, Goal, MySession } from "../../_ui/types";
+import type { Alignment, AnySession, ChangeRequest, Goal, MySession } from "../../_ui/types";
 import FirstRun, { seenApp } from "./first-run";
 import { crStatus, ReviewDrawer } from "./review-drawer";
 import { appStatusWords, type EvidenceClass, type HomeNext, type HomePerson } from "@/lib/v2/home-core.mts";
 
-// Concept A Home (LIM-2472): the command center for parallel AI work. It leads with the work: every goal the person can
-// read, with the plan in force (the version, and whether its latest change is launched or only approved), what Align
-// delivered for that version (the launch's receipts), and the shared sessions bound to it. A rail of next-step cards
-// holds what needs this person's judgment; a change request opens in the review drawer over the Home, and closing it
-// returns to the same picture. Only what Align knows is shown, each with its evidence class: a delivery receipt (Align
+// Home (LIM-2472 direction, 2026-11-05): first the one ranked list of what needs a human (_ui/home/needs.ts, rendered
+// with NeedRow), then the work: every goal the person can read, with the plan in force (the version, and whether its
+// latest change is launched or only approved), what Align delivered for that version (the launch's receipts), and the
+// shared sessions bound to it. A change request opens in the review drawer over the Home, and closing it returns to the
+// same picture. Only what Align knows is shown, each with its evidence class: a delivery receipt (Align
 // delivered something and recorded it), agent reported (a session's own binding or answer), not observed (nothing).
 // Nothing says what an agent is doing, whether it follows the plan, or how far along it is. A connected app's last
 // connection is never a read: apps are judged by last_read_at only (LIM-2454 cc0df90c).
 //
-// Reads: GET …/home (queues, goals, apps), GET …/sessions (mine, and for owners everyone's), GET …/change-requests
-// (each goal's latest decided change), and per launched change GET …/value (that launch's delivery counts).
+// Reads: GET …/home (goals, apps), GET …/sessions (mine, and for owners everyone's), GET …/change-requests (the list, and
+// each goal's latest decided change), GET …/asks and GET …/alignments (the list), and per launched change GET …/value
+// (that launch's delivery counts).
 
 interface QueueChange {
   id: string;
@@ -121,7 +123,6 @@ const ago = (iso: string) => {
   const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
   return m < 60 ? `${m}m ago` : m < 48 * 60 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
 };
-const names = (ps: HomePerson[], me: string) => ps.map((p) => (p.id === me ? "you" : p.name)).join(", ");
 
 /** The review drawer's place in the URL (?review=<goal>.<id>), so Back, a reload and a shared link reopen it. */
 function useReview(): [{ goal: string; id: string; choice?: ReviewChoice } | null, (r: { goal: string; id: string; choice?: ReviewChoice } | null) => void] {
@@ -152,19 +153,36 @@ const outlineBtn =
   "inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) border border-(--line-strong) px-3.5 text-[14px] font-medium text-(--text-1) hover:bg-(--bg-raised) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) max-sm:min-h-[44px]";
 const quietLink = "inline-flex min-h-[40px] items-center text-[14px] font-medium text-(--accent-text) hover:underline max-sm:min-h-[44px]";
 
-/** A next-step card: what it is, its state, the one thing to read, what it needs, and one action. */
-function NextCard({ status, kicker, title, quote, need, action, testId }: { status: ReactNode; kicker: string; title: ReactNode; quote?: string; need: string; action: ReactNode; testId: string }) {
+const EV_KINDS: [keyof EvidenceCounts, EvidenceKind][] = [
+  ["receipt", "receipt"],
+  ["agent_reported", "reported"],
+  ["self_reported", "self"],
+  ["not_observed", "unobserved"],
+];
+/** A row's evidence as labels with counts. A change request with no links says so; other kinds carry no evidence. */
+function NeedEvidence({ r }: { r: Need }) {
+  const shown = EV_KINDS.filter(([k]) => r.evidence[k] > 0);
+  if (!shown.length) return r.review ? <span className="text-[12px] text-(--text-3)">No evidence</span> : null;
+  return shown.map(([k, kind]) => <EvidenceLabel key={k} kind={kind} size="s" detail={String(r.evidence[k])} />);
+}
+const waited = (iso: string) => {
+  const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+  return m < 60 ? `${m}m` : m < 48 * 60 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`;
+};
+/** One row of the list: its action opens the review drawer for a change request, or the tab that holds the rest. */
+function NeedItem({ r, base, onReview }: { r: Need; base: string; onReview: (r: Need) => void }) {
+  const label = r.action?.label ?? "View";
+  const tab = r.action?.opens ?? (r.kind === "team_ask" ? "asks" : r.kind === "alignment" ? "alignments" : "apps");
   return (
-    <li className="flex flex-col gap-2 rounded-(--radius-m) border border-(--line-strong) bg-(--bg-raised) p-3.5" data-home-item={testId}>
-      <div className="flex flex-wrap items-center gap-2">
-        {status}
-        <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">{kicker}</span>
-      </div>
-      <p className="text-[15px] leading-snug text-(--text-1)">{title}</p>
-      {quote && <p className="line-clamp-2 text-[13px] text-(--text-2)">&ldquo;{quote}&rdquo;</p>}
-      <p className="text-[13px] text-(--text-2)">{need}</p>
-      <div className="flex flex-wrap items-center gap-3">{action}</div>
-    </li>
+    <NeedRow
+      kind={KIND_WORDS[r.kind]}
+      tone={r.tone}
+      title={r.goal?.title ?? r.quote ?? r.cause}
+      sub={[r.cause, r.who].filter(Boolean).join(" · ")}
+      waited={r.since ? (r.phase === "done" ? ago(r.since.at) : waited(r.since.at)) : undefined}
+      evidence={<NeedEvidence r={r} />}
+      action={r.review ? <NeedAction onClick={() => onReview(r)}>{label}</NeedAction> : <NeedAction href={`${base}/${tab}`}>{label}</NeedAction>}
+    />
   );
 }
 
@@ -253,6 +271,8 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const s = useApi<{ mine: MySession[]; all: AnySession[] | null }>(`/api/v2/workspaces/${ws}/sessions`);
   const c = useApi<Groups>(`/api/v2/workspaces/${ws}/change-requests`);
   const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
+  const asks = useApi<{ asks: AskLite[] }>(`/api/v2/workspaces/${ws}/asks?state=open,accepted,done,declined`);
+  const al = useApi<{ waiting_on_me: Alignment[]; mine: Alignment[]; others: Alignment[] }>(`/api/v2/workspaces/${ws}/alignments`);
   const [review, setReview] = useReview();
   const [connect, setConnect] = useState(false);
   const h = d.data ?? (d.error ? UNREAD : null);
@@ -261,7 +281,9 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
     d.reload();
     s.reload();
     c.reload();
-  }, [d, s, c]);
+    asks.reload();
+    al.reload();
+  }, [d, s, c, asks, al]);
 
   const allCrs = c.data ? [...c.data.waiting_on_me, ...c.data.mine, ...c.data.others] : [];
   /** Each goal's latest decided change, or an open one when nothing has been decided: what its plan pill says. */
@@ -269,7 +291,6 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
     const on = allCrs.filter((x) => x.goal.id === goal && x.state === "approved").sort((a, b) => (b.decided_at ?? "").localeCompare(a.decided_at ?? ""));
     return on[0] ?? null;
   };
-  const crById = new Map(allCrs.map((x) => [x.id, x]));
   const mine = s.data?.mine.filter((x) => x.state !== "stopped") ?? [];
   const byGoal = (goal: string) => mine.filter((x) => (x.current_epoch?.goal?.id ?? x.governing_goal?.id) === goal);
   const goalIds = new Set(h?.goals?.map((g) => g.id) ?? []);
@@ -277,7 +298,14 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const mineKeys = new Set(mine.map((x) => x.session_key));
   const teammates = s.data?.all?.filter((x) => !mineKeys.has(x.session_key)) ?? null;
 
-  const onMe = h && h.change_requests && h.asks && h.alignments ? h.change_requests.waiting_on_me.length + h.asks.waiting_on_me.length + h.alignments.waiting_on_me.length : null;
+  // The list waits for its four reads; one that failed is null, which buildNeeds reports as unknown.
+  const needsRead = !!h && !c.loading && !asks.loading && !al.loading;
+  const needs = needsRead
+    ? buildNeeds({ ws, me: me.id, crs: c.data ? allCrs : null, asks: asks.data?.asks ?? null, alignments: al.data ? [...al.data.waiting_on_me, ...al.data.mine, ...al.data.others] : null, apps: h?.apps?.items ?? null })
+    : null;
+  const needsYou = needs ? inPhase(needs.rows, "needs_you") : [];
+  const waitingOthers = needs ? inPhase(needs.rows, "waiting_on_others") : [];
+  const done = needs ? inPhase(needs.rows, "done") : [];
   const apps = h?.apps ?? null;
   const readers = apps?.items.filter((a) => a.last_read_at).length ?? 0;
   /** The person has connected nothing here. Only an owner sees everyone's apps and sessions, so only for an owner does
@@ -287,46 +315,9 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const noAgents = nothingOfMine && ownerView;
   const open = (goal: string, id: string, choice?: ReviewChoice) => setReview({ goal, id, choice });
 
-  const changeCard = (q: QueueChange, onMine: boolean, first = false) => {
-    const full = crById.get(q.id);
-    const st = full
-      ? crStatus(full)
-      : {
-          kind: q.next === "launch" ? ("approved" as const) : ("pending" as const),
-        };
-    const launch = q.next === "launch";
-    return (
-      <NextCard
-        key={q.id}
-        testId={`change_request:${q.id}`}
-        status={<StatusPill kind={st.kind} size="s" label={launch ? "Approved, not launched" : st.label} />}
-        kicker={launch ? "Launch" : "Change request"}
-        title={
-          <>
-            {q.requester.id === me.id ? "Your request" : `${q.requester.name}'s request`} on <b className="font-semibold">{q.goal.title}</b>
-          </>
-        }
-        quote={q.reason}
-        need={
-          onMine
-            ? launch
-              ? `Approved, not released: Align has released v${q.goal.version} only. Launch it to send the change.`
-              : q.next === "decide"
-                ? "Approve and launch, approve only, suggest a change or decline."
-                : q.next === "rebase"
-                  ? `Update your request to v${q.goal.version} before anyone can approve it.`
-                  : q.next === "accept_counter"
-                    ? "An approver suggested a change: accept it or withdraw."
-                    : "Approving it now would make a dependency loop: suggest a change or decline."
-            : `Waiting on ${names(q.waiting_on, me.id) || "nobody yet"}.`
-        }
-        action={
-          <button type="button" className={onMine ? (first ? primaryBtn : outlineBtn) : quietLink} onClick={() => open(q.goal.id, q.id, onMine && launch ? "launch" : undefined)} data-review-open={q.id}>
-            {onMine ? (launch ? "Review and launch" : "Review") : "View"}
-          </button>
-        }
-      />
-    );
+  const openNeed = (r: Need) => {
+    const [goal, id] = (r.review ?? "").replace("?review=", "").split(".");
+    open(goal, id, r.phase === "needs_you" && r.kind === "launch" ? "launch" : undefined);
   };
 
   return (
@@ -340,7 +331,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
             </h1>
             {h && (
               <p className="mt-1 text-[14px] text-(--text-2)" data-home-summary>
-                {onMe === null ? "What waits on you is unknown: Align couldn't read all of it." : onMe ? `${onMe} need${onMe === 1 ? "s" : ""} your judgment.` : "Nothing needs your judgment."}{" "}
+                {needs ? (needs.unknown.length ? "What waits on you is partly unknown." : needsYou.length ? `${needsYou.length} need${needsYou.length === 1 ? "s" : ""} your judgment.` : "Nothing needs your judgment.") : ""}{" "}
                 {s.data ? `You share ${mine.length} session${mine.length === 1 ? "" : "s"}` : "Your sessions are unknown"}
                 {h.goals ? ` · ${h.goals.length} active goal${h.goals.length === 1 ? "" : "s"}` : ""}
                 {apps ? (apps.items.length ? ` · ${readers} of ${apps.items.length} connected app${apps.items.length === 1 ? "" : "s"} read the goals.` : " · no connected apps.") : "."}
@@ -360,6 +351,41 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
           )}
         </header>
 
+        <section id="waiting" aria-label="Needs you" data-needs="needs_you" className="flex min-w-0 flex-col gap-2">
+          <h2 className="text-[16px] font-semibold text-(--text-1)">Needs you{needs ? ` · ${needsYou.length}` : ""}</h2>
+          {!needs ? (
+            <Loading />
+          ) : (
+            <>
+              {needs.unknown.length > 0 && <Note>Align couldn&apos;t read {needs.unknown.join(", ")} just now, so this list may be missing what they hold.</Note>}
+              <NeedList rankNote={RANK_NOTE} empty={needs.unknown.length ? "Nothing else Align could read needs you." : undefined}>
+                {needsYou.map((r) => (
+                  <NeedItem key={r.key} r={r} base={base} onReview={openNeed} />
+                ))}
+              </NeedList>
+              {/* Until the list's filters land, the other two phases stay reachable here. */}
+              {[
+                ["Waiting on others", waitingOthers, "others"] as const,
+                ["Done", done, "done"] as const,
+              ].map(
+                ([title, rows, id]) =>
+                  rows.length > 0 && (
+                    <details key={id} id={id} data-needs={id}>
+                      <summary className="inline-flex min-h-[36px] cursor-pointer items-center text-[14px] text-(--text-2) max-sm:min-h-[44px]">
+                        {title} · {rows.length}
+                      </summary>
+                      <NeedList rankNote="">
+                        {rows.map((r) => (
+                          <NeedItem key={r.key} r={r} base={base} onReview={openNeed} />
+                        ))}
+                      </NeedList>
+                    </details>
+                  ),
+              )}
+            </>
+          )}
+        </section>
+
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-(--radius-m) border border-(--line) bg-(--bg-inset) px-4 py-2.5 text-[13px] text-(--text-2) [overflow-wrap:break-word]" data-three-states>
           <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">Read it as</span>
           <span className="flex items-center gap-2">
@@ -376,91 +402,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
         {!h ? (
           <Loading />
         ) : (
-          <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-            <aside className="flex flex-col gap-4 lg:sticky lg:top-5 lg:order-2" aria-label="Needs your judgment">
-              <Panel eyebrow="Next steps" title={onMe === null ? "Needs you: unknown" : `Needs you · ${onMe}`} padded={false}>
-                <div className="flex flex-col gap-2 p-3">
-                  {!h.change_requests && <Note>Align couldn&apos;t read change requests just now.</Note>}
-                  {onMe === 0 && <p className="px-1 py-2 text-[14px] text-(--text-2)">Nothing needs your judgment right now.</p>}
-                  <ul className="flex flex-col gap-2" id="waiting">
-                    {h.change_requests?.waiting_on_me.map((q, i) => changeCard(q, true, i === 0))}
-                    {h.asks?.waiting_on_me.map((a) => (
-                      <NextCard
-                        key={a.id}
-                        testId={`ask:${a.id}`}
-                        status={<StatusPill kind="pending" size="s" />}
-                        kicker="Ask"
-                        title={
-                          <>
-                            {a.from_label ?? a.requester.name} asked <b className="font-semibold">{a.team.name}</b>
-                          </>
-                        }
-                        quote={a.text}
-                        need={a.next === "accept" ? "Accept it or decline it for your team." : "Mark it done once it is."}
-                        action={
-                          <Link href={`${base}/asks`} className={outlineBtn}>
-                            Open in Asks
-                          </Link>
-                        }
-                      />
-                    ))}
-                    {h.alignments?.waiting_on_me.map((a) => (
-                      <NextCard
-                        key={a.id}
-                        testId={`alignment:${a.id}`}
-                        status={<StatusPill kind={a.next === "accept_counter" ? "countered" : "pending"} size="s" />}
-                        kicker="Alignment"
-                        title={
-                          <>
-                            {a.requester.id === me.id ? "You ask" : `${a.requester.name} asks`} to work toward{" "}
-                            <b className="font-semibold">{a.target_goal?.visible && a.target_goal.title ? a.target_goal.title : "a goal you can't see"}</b>
-                          </>
-                        }
-                        need="Approve it, suggest a change or decline it."
-                        action={
-                          <Link href={`${base}/alignments`} className={outlineBtn}>
-                            Open in Alignments
-                          </Link>
-                        }
-                      />
-                    ))}
-                  </ul>
-                </div>
-              </Panel>
-              {!!(h.change_requests?.waiting_on_others.length || h.alignments?.waiting_on_others.length) && (
-                <Panel eyebrow="Waiting on others" title="You are part of these" padded={false}>
-                  <ul className="flex flex-col gap-2 p-3" id="others">
-                    {h.change_requests?.waiting_on_others.map((q) => changeCard(q, false))}
-                    {h.alignments?.waiting_on_others.map((a) => (
-                      <li key={a.id} className="px-1 text-[13px] text-(--text-2)" data-home-item={`alignment:${a.id}`}>
-                        Alignment with {a.target_goal?.visible && a.target_goal.title ? a.target_goal.title : "a goal you can't see"}: waiting on {names(a.waiting_on, me.id) || "nobody yet"}.
-                      </li>
-                    ))}
-                  </ul>
-                </Panel>
-              )}
-              {!!h.change_requests?.declined?.length && (
-                <Panel eyebrow="Declined" title="Your declined requests" padded={false}>
-                  <ul className="flex flex-col gap-2 p-3">
-                    {h.change_requests.declined.map((x) => (
-                      <li key={x.id} className="flex flex-col gap-1 px-1 text-[13px] text-(--text-2)" data-home-item={`declined:${x.id}`}>
-                        <StatusPill kind="declined" size="s" />
-                        <span>
-                          {x.rejected_by ? (x.rejected_by.id === me.id ? "You" : x.rejected_by.name) : "An approver"} declined your request on{" "}
-                          <b className="font-semibold text-(--text-1)">{x.goal.title}</b>
-                          {x.rejection_reason ? `: “${x.rejection_reason}”` : "."} The goal stays at v{x.goal.version}.
-                        </span>
-                        <button type="button" className={quietLink} onClick={() => open(x.goal.id, x.id)}>
-                          View the decision
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </Panel>
-              )}
-            </aside>
-
-            <section className="flex min-w-0 flex-col gap-4 lg:order-1" aria-label="The work">
+            <section className="flex min-w-0 flex-col gap-4" aria-label="The work">
               {noAgents && (
                 <EmptyState
                   title="No agent is sharing work here yet"
@@ -575,7 +517,6 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
                 goal.
               </p>
             </section>
-          </div>
         )}
 
         {/* The drawers break words only where needed, so a short label ("Close", "Esc") never splits at 320. */}
