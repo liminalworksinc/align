@@ -79,7 +79,7 @@ function RequestReview({ ws, cr, me, titleOf, onDone }: { ws: string; cr: Change
       }
     >
       <div className="flex flex-col gap-4">
-        <ReviewBody ws={ws} cr={cr} me={me} titleOf={titleOf} />
+        <ReviewBody ws={ws} cr={cr} me={me} titleOf={titleOf} onDone={onDone} />
         <div className="border-t border-(--line) pt-3">
           <ReviewActions ws={ws} cr={cr} me={me} onDone={onDone} compact />
         </div>
