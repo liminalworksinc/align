@@ -1,7 +1,9 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api, ApiError, Btn, Card, Err, Loading, Note, Pill, Shell, num, useAction, useApi, when } from "../../../_ui/kit";
+import { api, ApiError, Shell, num, useAction, useApi, when } from "../../../_ui/kit";
+import { Panel } from "../../../_ui/ds";
+import { Btn, Err, Loading, Note, Pill } from "./parts";
 import type { Me } from "../../../_ui/server";
 import { EvidencePill } from "../../../_ui/evidence";
 import { HoldBanner } from "../../../_ui/requests";
@@ -47,7 +49,7 @@ function shareAgain(s: MySession): ReactNode {
         {p.device}
       </span>
     ) : (
-      <Link key={i} href="/app/devices" className="underline">
+      <Link key={i} href="/app/devices" className="text-(--accent-text) underline">
         {p.devices_page}
       </Link>
     ),
@@ -71,7 +73,7 @@ function RowRefusal({ text }: { text: string }) {
       tabIndex={-1}
       role="alert"
       data-row-refusal
-      className="my-2 w-full rounded-[10px] border border-red-700 bg-red-50 px-3 py-2 text-[15px] text-zinc-900 [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
+      className="my-2 w-full rounded-(--radius-s) border border-(--st-declined) bg-(--st-declined-soft) px-3 py-2 text-[15px] text-(--text-1) [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)"
     >
       {text}
     </p>
@@ -138,28 +140,33 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
 
   return (
     <Shell me={me} ws={ws} tab="Sessions">
-      <h1 className="mb-2 text-[26px] font-semibold text-zinc-900">Shared sessions</h1>
-      <p className="mb-5 text-[15px] text-zinc-600">Sessions you shared from your machine with align share. Nothing else from your machine reaches this workspace.</p>
+      <h1 className="mb-2 text-[26px] font-semibold text-(--text-1)">Shared sessions</h1>
+      <p className="mb-5 max-w-prose text-[15px] text-(--text-2)">Sessions you shared from your machine with align share. Nothing else from your machine reaches this workspace.</p>
       {holds.data?.holds.map((h) => (
         <HoldBanner key={h.goal.id} hold={h} goalTitle={h.goal.title} me={me.id} />
       ))}
       {d.loading && <Loading />}
       <Err>{d.error ?? act.error}</Err>
       {alreadyDeleted && <Note>That session&apos;s shared history was already deleted, in another tab or window or from its machine, so it is no longer listed.</Note>}
-      <Card title="Yours">
-        {d.data?.mine.length === 0 && <Note>You have not shared a session in this workspace.</Note>}
-        <ul className="divide-y divide-zinc-200">
+      <div data-surface="sessions" className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      <Panel eyebrow="Your machine" title="Yours">
+        {d.data?.mine.length === 0 && (
+          <Note>
+            You have not shared a session in this workspace. To share one, pair your machine with the align CLI (<Link href="/app/devices" className="text-(--accent-text) underline">Devices</Link>), then run ::align share in a Claude Code or Codex session.
+          </Note>
+        )}
+        <ul className="divide-y divide-(--line)">
           {d.data?.mine.map((s) => (
             <li key={s.session_key} className="py-3">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[16px] text-zinc-900">{s.title || s.repo_alias || `${s.harness} session`}</span>
+                <span className="text-[16px] font-medium text-(--text-1) [overflow-wrap:anywhere]">{s.title || s.repo_alias || `${s.harness} session`}</span>
                 <Pill>{s.harness}</Pill>
                 <Pill tone={s.state === "shared" ? "green" : s.state === "suspended" ? "amber" : s.ended_reason ? "red" : "neutral"}>
                   {s.ended_reason === "device_signed_out" ? "ended: device signed out" : s.ended_reason === "member_removed" ? "ended: left the workspace" : s.state === "stopped" ? "not shared" : s.state}
                 </Pill>
                 <StopStatusPills s={s.stop_status} stopped={s.agent_stopped} ended={!!s.ended_reason} />
               </div>
-              <p className="text-[14px] text-zinc-500">
+              <p className="mt-1 text-[14px] text-(--text-2)">
                 Started {when(s.started_at)}.{" "}
                 {/* A session no longer shared counts under nothing from then on: say so, never "Counting under: no goal". */}
                 {s.state === "stopped" ? (
@@ -243,17 +250,18 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
             </li>
           ))}
         </ul>
-      </Card>
+      </Panel>
       {everyone && (
-        <Card title="Everyone's shared sessions (workspace owners)">
+        <Panel eyebrow="Workspace owners" title="Everyone's shared sessions (workspace owners)">
           <Note>As an owner you can stop or resume any shared session&apos;s agent. Titles and usage stay with each person.</Note>
-          <ul className="divide-y divide-zinc-200">
+          {everyone.length === 0 && <p className="text-[14px] text-(--text-2)">Nobody has shared a session in this workspace yet.</p>}
+          <ul className="divide-y divide-(--line)">
             {everyone.map((s, i) => (
               <li key={s.session_key} data-session-row={s.session_key} className="flex flex-wrap items-center gap-2 py-2 text-[15px]">
-                <span className="text-zinc-900">{s.owner.name}</span>
-                <span className="text-zinc-500">{s.repo_alias ? `${s.repo_alias} (${s.harness})` : `a ${s.harness} session`}</span>
+                <span className="font-medium text-(--text-1)">{s.owner.name}</span>
+                <span className="text-(--text-2)">{s.repo_alias ? `${s.repo_alias} (${s.harness})` : `a ${s.harness} session`}</span>
                 {/* Titles stay private; the start time and the key's end tell one person's sessions apart (W3). */}
-                <span className="text-[14px] text-zinc-500" data-session-detail>
+                <span className="font-mono text-[12.5px] text-(--text-3)" data-session-detail>
                   started {when(s.started_at)} · …{s.session_key.slice(-6)}
                 </span>
                 {refused?.key === s.session_key ? (
@@ -278,8 +286,9 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
               </li>
             ))}
           </ul>
-        </Card>
+        </Panel>
       )}
+      </div>
     </Shell>
   );
 }
