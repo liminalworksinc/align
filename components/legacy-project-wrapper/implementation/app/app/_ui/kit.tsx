@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { cloneElement, isValidElement, useCallback, useEffect, useId, useState, type ReactNode, type Ref } from "react";
+import { cloneElement, isValidElement, useCallback, useEffect, useId, useRef, useState, type ReactNode, type Ref } from "react";
 import { ThemeSettingCompact } from "./ds";
 
 // Shared client pieces for the goal sessions web app: the API helper, a data hook, layout and form controls.
@@ -224,6 +224,20 @@ export function Shell({ me, ws, tab, children }: { me: { name: string; email: st
   const list = useApi<{ workspaces: WsSummary[] }>("/api/v2/workspaces");
   const current = list.data?.workspaces.find((w) => w.id === ws);
   const [menu, setMenu] = useState(false);
+  const menuBtn = useRef<HTMLButtonElement>(null);
+  const sheet = useRef<HTMLDivElement>(null);
+  // The sheet takes focus when it opens (its first control) and gives it back to Menu when it closes; Escape closes it.
+  useEffect(() => {
+    if (!menu) return;
+    sheet.current?.querySelector<HTMLElement>("a[href], button, select")?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setMenu(false);
+      menuBtn.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [menu]);
   return (
     <div className="min-h-screen bg-(--bg-page) text-(--text-1) lg:flex">
       <aside className="sticky top-0 hidden h-screen w-[232px] shrink-0 flex-col gap-5 overflow-y-auto border-r border-(--line) bg-(--bg-inset) px-3 py-4 lg:flex">
@@ -239,6 +253,7 @@ export function Shell({ me, ws, tab, children }: { me: { name: string; email: st
           </Link>
           <span className="min-w-0 flex-1 truncate text-[14px] text-(--text-2)">{current?.name ?? ""}</span>
           <button
+            ref={menuBtn}
             type="button"
             aria-expanded={menu}
             aria-controls="ca-menu"
@@ -249,7 +264,8 @@ export function Shell({ me, ws, tab, children }: { me: { name: string; email: st
           </button>
         </header>
         {menu && (
-          <div id="ca-menu" className="flex flex-col border-b border-(--line) bg-(--bg-inset) px-3 py-3 lg:hidden">
+          // A link in the sheet closes it, so the page it opens starts with the navigation folded away.
+          <div id="ca-menu" ref={sheet} onClick={(e) => (e.target as HTMLElement).closest("a") && setMenu(false)} className="flex flex-col border-b border-(--line) bg-(--bg-inset) px-3 py-3 lg:hidden" data-menu-sheet>
             <NavBody ws={ws} tab={tab} list={list.data?.workspaces ?? null} me={me} current={current} />
           </div>
         )}

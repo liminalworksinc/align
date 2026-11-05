@@ -83,10 +83,10 @@ export function ReviewDrawer({ ws, goal, id, me, choice, onClose, onChanged }: {
 
   if (!r.cr && (r.status === 404 || r.status === 400))
     return (
-      <Drawer open onClose={onClose} width="l" eyebrow="Review" title="Not found">
+      <Drawer open onClose={onClose} width="l" eyebrow="Review" title="No such request in this workspace">
         <div className="flex flex-col gap-3 text-[15px] text-(--text-2)" data-review-missing>
-          <p>This link doesn&apos;t open a change request you can read. The request may not exist, or it may be on a goal you can&apos;t see.</p>
-          <p>If someone sent you this link, ask them to check it, or to add you to the goal.</p>
+          {/* The same words as the record page's missing state (decision-record.tsx), so both say one thing. */}
+          <p>Align has no change request with this address here that you can read. It may be in another workspace, or on a goal you can&apos;t see.</p>
           <Link href={`/app/w/${ws}/requests`} className={quiet}>
             Open Requests
           </Link>

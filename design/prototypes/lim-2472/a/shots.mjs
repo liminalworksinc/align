@@ -120,7 +120,7 @@ async function openCard(p, match = "Ship self-serve onboarding") {
     return !!b;
   }, match);
   if (!ok) throw new Error(`no Home card for "${match}"`);
-  await ready(p, "Open the full record", "[role=dialog]");
+  await ready(p, "Work on this goal", "[role=dialog]");
 }
 /** Click the visible decision `title` in the drawer; on a phone a secondary one sits in "More actions". */
 async function pick(p, title) {
@@ -150,6 +150,27 @@ async function cancelToChoices(p, dominant, where) {
   await p.waitForFunction((t) => [...document.querySelectorAll(`[role=dialog] [data-decision="${t}"]`)].some((e) => e.offsetParent !== null), { timeout: 10_000 }, dominant).catch(() => undefined);
   if (!(await choicesShown(p, dominant))) throw new Error(`after Cancel (${where}) the drawer shows no choices`);
 }
+/** Press Tab (Shift+Tab with `back`) until the focused element matches `sel` (and starts with `text`, when given) and
+ *  is visible; throw after `max` presses. Keyboard only: nothing here clicks. */
+async function tabTo(p, { sel, text }, what, { back = false, max = 80 } = {}) {
+  const at = () =>
+    p.evaluate(
+      (s, t) => {
+        const a = document.activeElement;
+        return !!a && a.matches(s) && a.offsetParent !== null && (!t || (a.textContent ?? "").trim().startsWith(t));
+      },
+      sel,
+      text ?? "",
+    );
+  for (let i = 0; i < max; i++) {
+    if (await at()) return;
+    if (back) await p.keyboard.down("Shift");
+    await p.keyboard.press("Tab");
+    if (back) await p.keyboard.up("Shift");
+  }
+  throw new Error(`keyboard at ${p.viewport()?.width}: Tab never reached ${what}`);
+}
+const focusIn = (p, sel) => p.evaluate((s) => !!document.activeElement?.closest(s), sel);
 const dialogHref = (p, attr) => p.$eval(`[role=dialog] [${attr}]`, (a) => a.getAttribute("href"));
 const goalTitle = "Ship self-serve onboarding";
 
@@ -214,8 +235,8 @@ for (const width of W) {
       await ready(p, "Confirm", "[role=dialog]");
       await shot(p, "03-approve-and-launch-confirm", theme, width, false);
       // 05 The full record and 06 the goal's work and evidence: the drawer's own links.
-      const record = await dialogHref(p, "data-review-record");
-      const work = await dialogHref(p, "data-review-work");
+      const record = await dialogHref(p, 'data-to="record"');
+      const work = await dialogHref(p, 'data-to="work"');
       await goto(p, record);
       await ready(p, goalTitle);
       await shot(p, "05-record", theme, width);
@@ -259,6 +280,47 @@ for (const width of W) {
     }
   }
 }
+// Asserted at 390 and 320, keyboard only, no screenshot: the top bar's Menu opens the navigation sheet and moves focus
+// into it; Escape closes it and gives focus back to Menu; Close does the same; a link in the sheet navigates, and the
+// next page starts with the sheet closed.
+for (const width of [390, 320]) {
+  const { p, ctx } = await page("owner", "dark", width);
+  await home(p);
+  const menuBtn = 'button[aria-controls="ca-menu"]';
+  const sheetOpen = () => p.waitForSelector("[data-menu-sheet]", { timeout: 5000 }).catch(() => {
+    throw new Error(`Menu at ${width}: Enter opened no sheet`);
+  });
+  const sheetClosed = (how) => p.waitForFunction(() => !document.querySelector("[data-menu-sheet]"), { timeout: 5000 }).catch(() => {
+    throw new Error(`Menu at ${width}: ${how} left the sheet open`);
+  });
+  const onMenu = async (how) => {
+    if (!(await p.evaluate((s) => document.activeElement === document.querySelector(s), menuBtn))) throw new Error(`Menu at ${width}: after ${how} focus is not back on Menu`);
+  };
+  await tabTo(p, { sel: menuBtn, text: "Menu" }, "Menu");
+  await p.keyboard.press("Enter");
+  await sheetOpen();
+  if (!(await focusIn(p, "[data-menu-sheet]"))) throw new Error(`Menu at ${width}: focus did not move into the sheet`);
+  await p.keyboard.press("Escape");
+  await sheetClosed("Escape");
+  await onMenu("Escape");
+  await p.keyboard.press("Enter");
+  await sheetOpen();
+  await tabTo(p, { sel: menuBtn, text: "Close" }, "Close", { back: true });
+  await p.keyboard.press("Enter");
+  await sheetClosed("Close");
+  await onMenu("Close");
+  await p.keyboard.press("Enter");
+  await sheetOpen();
+  await tabTo(p, { sel: "[data-menu-sheet] a", text: "Requests" }, "Requests in the sheet");
+  await p.keyboard.press("Enter");
+  await p.waitForFunction(() => location.pathname.endsWith("/requests"), { timeout: 30_000 }).catch(() => {
+    throw new Error(`Menu at ${width}: Requests did not navigate`);
+  });
+  await ready(p, "Change requests");
+  if ((await p.$eval(menuBtn, (b) => b.getAttribute("aria-expanded"))) !== "false" || (await p.$("[data-menu-sheet]"))) throw new Error(`Menu at ${width}: the next page opened with the sheet open`);
+  await ctx.close();
+}
+
 // Asserted at 1440, no screenshot, after every screenshot: the drawer stays open with its outcome notice after a decision
 // lands, and after a refusal. Both run on a throwaway goal Mara creates here, each on its own pending request (Theo
 // proposes, as a member would), so the seeded goals and requests are untouched. An approved request can't be withdrawn,
@@ -300,11 +362,12 @@ for (const width of W) {
     await p.evaluate(() => [...document.querySelectorAll("[role=dialog] button")].find((b) => b.offsetParent !== null && b.textContent?.trim().startsWith("Confirm:"))?.click());
   };
   const { p, ctx } = await page("owner", "dark", 1440);
+  let privGoal = null;
   try {
     // Success: Approve only -> the drawer stays, with the done notice and the request as approved, not launched.
     const ok = await propose("approve only");
     await goto(p, `/app/w/${WS}?review=${goal}.${ok.id}`);
-    await ready(p, "Open the full record", "[role=dialog]");
+    await ready(p, "Work on this goal", "[role=dialog]");
     await approveOnly(p);
     await p.waitForSelector('[role=dialog] [data-notice="done"]', { timeout: 20_000 }).catch(() => {
       throw new Error("Approve only: the drawer shows no done notice (or closed)");
@@ -314,16 +377,85 @@ for (const width of W) {
     // Refusal: the request is declined from Node while the drawer is open -> Approve only -> the drawer stays, red.
     const no = await propose("refused");
     await goto(p, `/app/w/${WS}?review=${goal}.${no.id}`);
-    await ready(p, "Open the full record", "[role=dialog]");
+    await ready(p, "Work on this goal", "[role=dialog]");
     await call(mara, "POST", `/api/v2/workspaces/${WS}/goals/${goal}/change-requests/${no.id}/reject`, { revision: no.revision, reason: "Declined from Node by shots.mjs (fictional)." });
     await approveOnly(p);
     await p.waitForSelector('[role=dialog] [data-notice="refused"]', { timeout: 20_000 }).catch(() => {
       throw new Error("refusal: the drawer shows no refused notice (or closed)");
     });
     if (!(await p.$("[role=dialog]"))) throw new Error("refusal: the drawer closed");
+
+    // A review link opens complete on a cold load (a fresh browser context each time) for every role at every width, and
+    // a link to a request the person can't read opens the not-found state, which is the same whether the request doesn't
+    // exist or sits on a goal they can't see, and shows nothing of it. The private goal is Mara's, dropped at the end.
+    const made2 = await call(mara, "POST", `/api/v2/workspaces/${WS}/goals`, { title: "Private check (shots.mjs, fictional)", visibility: "private" });
+    privGoal = made2.id ?? made2.goal?.id;
+    let privCr = "cr_shotsdoesnotexist";
+    try {
+      const c = await call(mara, "POST", `/api/v2/workspaces/${WS}/goals/${privGoal}/change-requests`, { base_version: 1, changes: { title: "Private check (renamed, fictional)" }, reason: "Private check from shots.mjs. Fictional." });
+      privCr = (c.id ? c : c.change_request).id;
+    } catch {
+      /* an owner may not propose on their own goal: the made-up id on the hidden goal is the same 404 */
+    }
+    const pendingCr = seed.change_requests?.pending;
+    const pendingGoal = seed.goals?.onboarding;
+    for (const person of ["owner", "member", "viewer"]) {
+      for (const width of W) {
+        const c = await page(person, "dark", width);
+        await goto(c.p, `/app/w/${WS}?review=${pendingGoal}.${pendingCr}`);
+        await ready(c.p, "Work on this goal", "[role=dialog]");
+        if (!(await c.p.$eval("[role=dialog]", (d, t) => d.innerText.includes(t), goalTitle))) throw new Error(`review link, ${person} at ${width}: the drawer doesn't show the goal`);
+        await goto(c.p, `/app/w/${WS}?review=${pendingGoal}.cr_shotsdoesnotexist`);
+        await ready(c.p, "No such request", "[role=dialog]");
+        if (!(await c.p.$("[role=dialog] [data-review-missing]"))) throw new Error(`review link, ${person} at ${width}: a made-up id shows no not-found state`);
+        if (person !== "owner") {
+          await goto(c.p, `/app/w/${WS}?review=${privGoal}.${privCr}`);
+          await ready(c.p, "No such request", "[role=dialog]");
+          const leaks = await c.p.$eval("[role=dialog]", (d) => /Private check/.test(d.innerText));
+          if (leaks || !(await c.p.$("[role=dialog] [data-review-missing]"))) throw new Error(`review link, ${person} at ${width}: a hidden goal's request is not a plain not-found`);
+        }
+        await c.ctx.close();
+      }
+    }
+
+    // Keyboard only at 320: from a cold review link, Tab to Approve and launch, Enter, Tab to its confirmation, Enter;
+    // the drawer shows the done notice, and Escape closes it.
+    const kb = await propose("keyboard at 320");
+    const k = await page("owner", "dark", 320);
+    await goto(k.p, `/app/w/${WS}?review=${goal}.${kb.id}`);
+    await ready(k.p, "Work on this goal", "[role=dialog]");
+    await tabTo(k.p, { sel: '[role=dialog] [data-decision="Approve and launch"]' }, "Approve and launch");
+    await k.p.keyboard.press("Enter");
+    const step = await k.p
+      .waitForFunction(
+        () => {
+          const b = [...document.querySelectorAll("[role=dialog] button")].find((e) => e.offsetParent !== null && /^(Confirm:|Review this decision)/.test(e.textContent?.trim() ?? ""));
+          return b ? (b.textContent ?? "").trim() : false;
+        },
+        { timeout: 10_000 },
+      )
+      .then((h) => h.jsonValue());
+    if (String(step).startsWith("Review this decision")) {
+      await tabTo(k.p, { sel: "[role=dialog] button", text: "Review this decision" }, "Review this decision");
+      await k.p.keyboard.press("Enter");
+    }
+    await tabTo(k.p, { sel: "[role=dialog] button", text: "Confirm:" }, "the confirmation");
+    await k.p.keyboard.press("Enter");
+    await k.p.waitForSelector('[role=dialog] [data-notice="done"]', { timeout: 20_000 }).catch(() => {
+      throw new Error("keyboard at 320: Approve and launch shows no done notice");
+    });
+    await k.p.keyboard.press("Escape");
+    await k.p.waitForFunction(() => !document.querySelector("[role=dialog]"), { timeout: 5000 }).catch(() => {
+      throw new Error("keyboard at 320: Escape did not close the drawer");
+    });
+    await k.ctx.close();
   } finally {
     await ctx.close();
     await call(mara, "POST", `/api/v2/workspaces/${WS}/goals/${goal}/versions`, { version: await version(), status: "dropped" });
+    if (privGoal) {
+      const g = await call(mara, "GET", `/api/v2/workspaces/${WS}/goals/${privGoal}`);
+      await call(mara, "POST", `/api/v2/workspaces/${WS}/goals/${privGoal}/versions`, { version: g.version ?? g.goal?.version, status: "dropped" });
+    }
   }
 }
 
