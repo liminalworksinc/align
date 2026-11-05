@@ -214,13 +214,22 @@ function LaunchRows({ ws, goal }: { ws: string; goal: Goal }) {
 function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
   const apps = useRead<{ apps: App[] }>(`/api/v2/workspaces/${ws}/apps`);
   const list = apps.data?.apps ?? [];
+  // The apps read is everyone's for a workspace owner and the reader's own for anyone else, without saying which: the
+  // role decides how an empty list is worded. Unknown role reads as "yours", which is never false.
+  const role = useRead<{ role: "owner" | "member" | "viewer" }>(`/api/v2/workspaces/${ws}`);
+  const everyone = role.data?.role === "owner";
   const { cr, sent, loading, launchUnread, sentUnread } = useLaunched(ws, goal);
   const sentTo = new Map((sent?.items ?? []).map((i) => [i.id, i]));
   return (
     <Panel eyebrow="Connected apps" title="Goal reads Align recorded" actions={<Link href={`/app/w/${ws}/apps`} className={`${LINK} text-[14px]`}>Apps</Link>}>
       {apps.loading && <p className="text-[14px] text-(--text-2)">Loading…</p>}
       {apps.status !== 0 && <p className="text-[14px] text-(--text-2)">{apps.message}</p>}
-      {apps.data && list.length === 0 && <EmptyState title="No AI apps connected" body="Nothing has read this workspace's goals through an app." action={<Link href={`/app/w/${ws}/apps`} className={LINK}>Connect one</Link>} />}
+      {apps.data && list.length === 0 &&
+        (everyone ? (
+          <EmptyState title="No AI apps connected" body="Nothing has read this workspace's goals through an app." action={<Link href={`/app/w/${ws}/apps`} className={LINK}>Connect one</Link>} />
+        ) : (
+          <EmptyState title="None of your AI apps is connected" body="You see your own apps here; workspace owners see everyone's." action={<Link href={`/app/w/${ws}/apps`} className={LINK}>Apps</Link>} />
+        ))}
       {list.length > 0 && (
         <ul className="flex flex-col gap-2">
           {list.map((a) => (
@@ -241,7 +250,7 @@ function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
           {launchUnread || sentUnread
             ? NOT_LOADED
             : cr && apps.data && !list.length
-            ? `Launched v${cr.version} reaches an app when it reads the goals; none is connected.`
+            ? `Launched v${cr.version} reaches an app when it reads the goals; ${everyone ? "none is connected" : "none of yours is connected"}.`
             : cr
             ? `"Align sent it v${cr.version}" is a delivery receipt: a goal read served this goal's launched version to that app. Align can't see what the app does with it.`
             : "Nothing is launched on this goal yet, so Align has sent no version of it to an app. Goal reads are recorded for the workspace, not per goal."}
