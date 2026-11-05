@@ -1,6 +1,6 @@
 # LIM-2472 workstream F: foundation report
 
-Branch `agent/LIM-2472-foundation` from `origin/main` b16f8d1. Front end only. Specimen: `design/prototypes/lim-2472/foundation.html` (generated from the real components; open it in a browser, Light / Dark / System at the top right).
+Branch `agent/LIM-2472-foundation` from `origin/main` b16f8d1. Front end only. Specimen: `foundation.html` in this folder (generated from the real components; open it in a browser, Light / Dark / System at the top right).
 
 ## What it gives the concepts
 
@@ -61,7 +61,7 @@ Predicted to stay green: the 390px 44px check counts only bordered buttons in `<
 
 ## The Needs-you row (direction 2026-11-05)
 
-`NeedRow`, `NeedList` and `NeedAction` in `app/app/_ui/ds/need.tsx`; specimen `design/prototypes/lim-2472/need-list.html`.
+`NeedRow`, `NeedList` and `NeedAction` in `app/app/_ui/ds/need.tsx`; specimen `need-list.html` in this folder.
 
 - **One target plus one action.** The title is the row's link (its `::after` covers the row); the action sits above it. `NeedAction` is always outlined; the one filled action in a view is the review's.
 - **No table header.** Columns align through CSS subgrid, so one row is a row, not a hollow table; the list stacks on its own width (container query at `@3xl`), so it works beside any shell. On phones the action sits beside the evidence, 44px tall.
