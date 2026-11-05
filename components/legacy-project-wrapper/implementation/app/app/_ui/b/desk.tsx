@@ -1,18 +1,20 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { DataTable, EmptyState, Segmented, StatusPill, type Column } from "../ds";
+import { DataTable, EmptyState, NeedAction, Segmented, StatusPill, type Column } from "../ds";
 import { useApi } from "../kit";
 import type { ChangeRequest } from "../types";
-import { ActBtn, actsFor, DOMINANT, QuietBtn, type Act } from "./act";
+import { needForChangeRequest } from "../home/needs";
+import { actsFor, QuietBtn } from "./act";
 import { ago, crStatus, nameList, oneLine, PHASE_WORDS, phaseOf, versions, waitsOn, type Phase } from "./model";
 
 // LIM-2472: the decision desk as one piece, mountable in any shell (the integrated candidate's Requests tab). One read,
 // GET …/change-requests: every change request this person can read, filtered client-side into Waiting on me / Waiting on
-// others / Decided / All with counts, searchable, sortable. A row's actions come only from its `can` flags; one filled
-// pink in the table (the first row whose first choice moves a request forward), the rest outlined or quiet. Opening a
-// row goes to `?review=<goal>.<id>` (with `&choice=<choice>` from a row's action button) unless the page passes
-// `onOpen`. No shell, no first run: the page around it owns those.
+// others / Decided / All with counts, searchable, sortable. Each row carries Home's label for it (KIND_WORDS, through
+// needForChangeRequest) and one outlined action in Home's words ("Review", "Launch v<n>", a returned request's verb),
+// shown only when its `can` flags give this person something to do. A row never decides: every action opens the
+// review (`?review=<goal>.<id>`, no choice), where the evidence is and the one filled action lives, unless the page
+// passes `onOpen`. No shell, no first run: the page around it owns those.
 
 type Groups = { waiting_on_me: ChangeRequest[]; mine: ChangeRequest[]; others: ChangeRequest[] };
 type Filter = Phase | "all";
@@ -27,8 +29,8 @@ export function Desk({
 }: {
   ws: string;
   me: string;
-  /** Open a request (and, from a row's action, the choice to open it on). Default: navigate to `?review=<goal>.<id>`. */
-  onOpen?: (cr: ChangeRequest, choice?: Act) => void;
+  /** Open a request's review. Default: navigate to `?review=<goal>.<id>`. */
+  onOpen?: (cr: ChangeRequest) => void;
   selectedId?: string | null;
   /** Change it to read the requests again (after a decision made elsewhere on the page). */
   reloadToken?: number;
@@ -44,8 +46,7 @@ export function Desk({
   const [filter, setFilter] = useState<Filter | null>(null);
   const [q, setQ] = useState("");
 
-  const open = (r: ChangeRequest, choice?: Act) =>
-    onOpen ? onOpen(r, choice) : router.push(`?review=${r.goal.id}.${r.id}${choice ? `&choice=${choice}` : ""}`, { scroll: false });
+  const open = (r: ChangeRequest) => (onOpen ? onOpen(r) : router.push(`?review=${r.goal.id}.${r.id}`, { scroll: false }));
 
   const rows = useMemo(() => (feed.data ? [...feed.data.waiting_on_me, ...feed.data.mine, ...feed.data.others] : []), [feed.data]);
   const counts = useMemo(() => {
@@ -82,13 +83,16 @@ export function Desk({
     {
       key: "state",
       header: "State",
-      sortValue: (r) => crStatus(r).label,
+      sortValue: (r) => needForChangeRequest(r, me)?.word ?? crStatus(r).label,
       width: "210px",
-      render: (r) => (
-        <span className="sm:whitespace-nowrap">
-          <StatusPill kind={crStatus(r).kind} label={crStatus(r).label} size="s" />
-        </span>
-      ),
+      render: (r) => {
+        const n = needForChangeRequest(r, me);
+        return (
+          <span className="sm:whitespace-nowrap">
+            <StatusPill kind={n?.tone ?? crStatus(r).kind} label={n?.word ?? crStatus(r).label} size="s" />
+          </span>
+        );
+      },
     },
     {
       key: "waiting",
@@ -106,7 +110,7 @@ export function Desk({
         return (
           <span className="flex flex-col font-mono text-[12px] text-(--text-2) sm:whitespace-nowrap">
             <span>Launched {v.launched}</span>
-            <span className="text-(--text-3)">Approved {v.approved}</span>
+            <span className="text-(--text-3)">{v.approvedLine}</span>
           </span>
         );
       },
@@ -115,16 +119,11 @@ export function Desk({
     { key: "age", header: "Updated", align: "end", width: "116px", sortValue: (r) => r.updated_at, render: (r) => <span className="font-mono text-[12px] text-(--text-3) sm:whitespace-nowrap">{ago(r.updated_at)} ago</span> },
   ];
 
-  const filledId = shown.find((r) => actsFor(r).length && DOMINANT.includes(actsFor(r)[0]!))?.id ?? null;
   const rowActions = (r: ChangeRequest) => {
-    const acts = actsFor(r);
-    if (!acts.length) return <span className="text-[12px] text-(--text-3)">{phaseOf(r) === "decided" ? "No action" : "Not yours"}</span>;
-    return (
-      <span className="inline-flex flex-wrap justify-end gap-1.5 whitespace-nowrap max-sm:justify-start sm:min-w-[220px] sm:flex-nowrap">
-        <ActBtn a={acts[0]!} cr={r} filled={r.id === filledId} onClick={() => open(r, acts[0]!)} />
-        {acts.length > 1 && <QuietBtn onClick={() => open(r)}>More</QuietBtn>}
-      </span>
-    );
+    const n = needForChangeRequest(r, me);
+    const label = n?.action?.label ?? (actsFor(r).length ? "Review" : null);
+    if (!label) return <span className="text-[12px] text-(--text-3)">{phaseOf(r) === "decided" ? "No action" : "Not yours"}</span>;
+    return onOpen ? <NeedAction onClick={() => onOpen(r)}>{label}</NeedAction> : <NeedAction href={`?review=${r.goal.id}.${r.id}`}>{label}</NeedAction>;
   };
 
   const filters: { value: Filter; label: string }[] = [

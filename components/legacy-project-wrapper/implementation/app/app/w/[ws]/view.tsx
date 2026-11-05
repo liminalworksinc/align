@@ -55,9 +55,11 @@ const primaryBtn =
 const outlineBtn =
   "inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) border border-(--line-strong) px-3.5 text-[14px] font-medium text-(--text-1) hover:bg-(--bg-raised) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) max-sm:min-h-[44px]";
 
-/** The page's heading: the Needs-you count; neutral while reading, or when a failed read leaves zero unknown. */
-function needsHeading(n: number | null) {
+/** The page's heading, from NeedsList: its Needs-you count (null while reading, or when nothing is readable); `partial`
+ *  when some source couldn't be read, so the count is a lower bound and zero is never claimed. */
+function needsHeading(n: number | null, partial: boolean) {
   if (n === null) return "Needs you";
+  if (partial) return n === 0 ? "Some of this could not be read" : `At least ${n} ${n === 1 ? "thing needs" : "things need"} you`;
   if (n === 0) return "Nothing needs you";
   return `${n} ${n === 1 ? "thing needs" : "things need"} you`;
 }
@@ -77,8 +79,8 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const closeConnect = useCallback(() => setConnect(false), []);
   // NeedsList holds its own reads: a new key reads them again after a decision in the drawer.
   const [needsKey, setNeedsKey] = useState(0);
-  // The Needs-you count, from NeedsList's own rows; null until its reads finish, or when one failed and it found nothing.
-  const [needCount, setNeedCount] = useState<number | null>(null);
+  const [count, setCount] = useState<{ n: number | null; partial: boolean }>({ n: null, partial: false });
+  const onCount = useCallback((n: number | null, partial: boolean) => setCount({ n, partial }), []);
   const h = d.data ?? (d.status ? UNREAD : null);
   const reloadAll = useCallback(() => {
     d.reload();
@@ -105,8 +107,8 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
     <Shell me={me} ws={ws} tab="Home">
       <div className="flex flex-col gap-5">
         <header className="flex flex-wrap items-center justify-between gap-3">
-          <h1 tabIndex={-1} className={`${PAGE_H1} min-w-0`} data-home-count={needCount ?? "reading"}>
-            {needsHeading(needCount)}
+          <h1 tabIndex={-1} className={`${PAGE_H1} min-w-0`} data-home-count={count.n ?? "reading"}>
+            {needsHeading(count.n, count.partial)}
           </h1>
           {/* First run's action: with an app connected the header has none. With nothing connected at all, the note below
               carries it, so it appears once. */}
@@ -122,7 +124,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
           )}
         </header>
 
-        <NeedsList key={needsKey} ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={setNeedCount} />
+        <NeedsList key={needsKey} ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} />
 
         {noAgents && (
           <EmptyState

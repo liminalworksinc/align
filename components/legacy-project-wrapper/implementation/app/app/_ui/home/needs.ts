@@ -93,6 +93,8 @@ export interface Need {
   /** The review link target, "?review=<goal>.<id>", for a change request. */
   review: string | null;
   tone: StatusKind;
+  /** The row's label: the kind's word (KIND_WORDS) while open; once done, what happened ("Launched as v2", "Declined"). */
+  word: string;
   /** The change request a row is about, for the renderer's evidence summary. */
   cr?: ChangeRequest;
 }
@@ -177,7 +179,7 @@ const goalOf = (cr: ChangeRequest) => ({ id: cr.goal.id, title: cr.goal.title })
 
 /** One change request as at most one row (CR read). */
 function crNeed(cr: ChangeRequest, me: string): Need | null {
-  const base = { key: `cr:${cr.id}`, goal: goalOf(cr), quote: cr.reason, evidence: crEvidence(cr), review: reviewOf(cr), cr };
+  const base = { key: `cr:${cr.id}`, goal: goalOf(cr), quote: cr.reason, evidence: crEvidence(cr), review: reviewOf(cr), cr, word: "" };
   const asker = cr.requester.id === me ? "Your request" : `${cr.requester.name}'s request`;
   const c = cr.can;
   const next = cr.version ?? cr.base_version + 1;
@@ -213,23 +215,26 @@ function crNeed(cr: ChangeRequest, me: string): Need | null {
       const why = c.accept_counter ? "An approver suggested a change" : label === "Confirm the condition" ? "Approved on a condition" : `The goal moved on to v${cr.goal.version}`;
       return { ...base, kind: "returned", phase: "needs_you", tone: c.accept_counter ? "countered" : "pending", cause: why, since, action: { label, opens: "review" }, who: null };
     }
-    return { ...base, kind: w.next === "accept_counter" || w.next === "rebase" ? "returned" : "decide", phase: "waiting_on_others", tone: cr.state === "countered" ? "countered" : "pending", cause: asker, since, action: null, who: `Waiting on ${names(w.waiting_on, me)}` };
+    // "Your request came back" only for the requester; anyone else sees what the request waits for.
+    const other = cr.requester.id !== me && (w.next === "accept_counter" || w.next === "rebase");
+    return { ...base, word: other ? (w.next === "accept_counter" ? "Change suggested" : "Needs an update") : "", kind: w.next === "accept_counter" || w.next === "rebase" ? "returned" : "decide", phase: "waiting_on_others", tone: cr.state === "countered" ? "countered" : "pending", cause: asker, since, action: null, who: `Waiting on ${names(w.waiting_on, me)}` };
   }
 
   // Done: decided, withdrawn, superseded, or launched.
   const at = cr.launch_decided_at ?? cr.decided_at ?? cr.updated_at;
   const field = cr.launch_decided_at ? "launch_decided_at" : cr.decided_at ? "decided_at" : "updated_at";
   const tone: StatusKind = cr.launch === "launched" ? "launched" : cr.state === "rejected" ? "declined" : cr.state === "approved" ? "approved" : "draft";
-  return { ...base, kind: cr.launch === "launched" ? "launch" : "decide", phase: "done", tone, cause: asker, since: { at, field }, action: null, who: null };
+  const word = cr.launch === "launched" ? `Launched as v${cr.version}` : cr.state === "rejected" ? "Declined" : cr.state === "withdrawn" ? "Withdrawn" : cr.launch === "superseded" || cr.state === "superseded" ? "Superseded" : "Approved";
+  return { ...base, kind: cr.launch === "launched" ? "launch" : "decide", phase: "done", tone, word, cause: asker, since: { at, field }, action: null, who: null };
 }
 
 /** One team ask as a row (ASKS read). Waiting on you: open and you lead the team, or accepted and your team finishes it
  *  (AskView.waiting_on_me, lib/v2/asks.ts:220). */
 function askNeed(a: AskLite, me: string): Need {
-  const base = { key: `ask:${a.id}`, kind: "team_ask" as const, goal: a.goal, quote: a.text, evidence: none(), review: null };
+  const base = { key: `ask:${a.id}`, kind: "team_ask" as const, goal: a.goal, quote: a.text, evidence: none(), review: null, word: "" };
   const cause = `${a.from_label ?? (a.requester.id === me ? "You" : a.requester.name)} asked ${a.team.name}`;
   if (a.state === "done" || a.state === "declined" || a.state === "withdrawn")
-    return { ...base, phase: "done", tone: a.state === "done" ? "approved" : a.state === "declined" ? "declined" : "draft", cause, since: { at: a.decided_at ?? a.updated_at, field: a.decided_at ? "decided_at" : "updated_at" }, action: null, who: null };
+    return { ...base, phase: "done", tone: a.state === "done" ? "approved" : a.state === "declined" ? "declined" : "draft", word: a.state === "done" ? "Ask done" : a.state === "declined" ? "Ask declined" : "Ask withdrawn", cause, since: { at: a.decided_at ?? a.updated_at, field: a.decided_at ? "decided_at" : "updated_at" }, action: null, who: null };
   const since = { at: a.state === "accepted" && a.decided_at ? a.decided_at : a.created_at, field: a.state === "accepted" && a.decided_at ? "decided_at" : "created_at" };
   if (a.waiting_on_me)
     return { ...base, phase: "needs_you", tone: "pending", cause, since, action: a.state === "open" ? { label: "Accept or decline", opens: "asks" } : { label: "Mark done", opens: "asks" }, who: null };
@@ -239,11 +244,11 @@ function askNeed(a: AskLite, me: string): Need {
 /** One alignment as a row (AL read; alignmentWaits would give the same people). */
 function alignmentNeed(a: Alignment, me: string): Need | null {
   const target = a.target_goal?.visible && a.target_goal.id && a.target_goal.title ? { id: a.target_goal.id, title: a.target_goal.title } : null;
-  const base = { key: `al:${a.id}`, kind: "alignment" as const, goal: target, quote: a.note, evidence: none(), review: null };
+  const base = { key: `al:${a.id}`, kind: "alignment" as const, goal: target, quote: a.note, evidence: none(), review: null, word: "" };
   const from = a.source_goal ? ` from ${a.source_goal.visible && a.source_goal.title ? a.source_goal.title : "a goal you can't see"}` : "";
   const cause = `${a.requester.id === me ? "You ask" : `${a.requester.name} asks`} to align with ${target ? target.title : "a goal you can't see"}${from}`;
   if (a.state === "approved" || a.state === "rejected" || a.state === "withdrawn" || a.state === "revoked")
-    return { ...base, phase: "done", tone: a.state === "approved" ? "approved" : a.state === "rejected" ? "declined" : "draft", cause, since: { at: a.closed_at ?? a.updated_at, field: a.closed_at ? "closed_at" : "updated_at" }, action: null, who: null };
+    return { ...base, phase: "done", tone: a.state === "approved" ? "approved" : a.state === "rejected" ? "declined" : "draft", word: a.state === "approved" ? "Alignment approved" : a.state === "rejected" ? "Alignment declined" : a.state === "revoked" ? "Alignment revoked" : "Alignment withdrawn", cause, since: { at: a.closed_at ?? a.updated_at, field: a.closed_at ? "closed_at" : "updated_at" }, action: null, who: null };
   const lastH = a.history.reduce<Alignment["history"][number] | null>((m, h) => (!m || h.revision > m.revision ? h : m), null);
   const since = lastH ? { at: lastH.created_at, field: "history[latest].created_at" } : { at: a.created_at, field: "created_at" };
   if (a.waiting_on_me) {
@@ -276,6 +281,7 @@ function appNeeds(apps: AppLite[], sends: NonNullable<NeedsInput["sends"]> | und
     who: mine(a) ? null : `Connected by ${a.connected_by.name}`,
     review: null,
     tone: "draft",
+    word: "",
   });
   for (const s of sends ?? []) {
     const sent = new Set(s.apps.map((x) => x.id));
@@ -326,9 +332,20 @@ function declinedNeeds(groups: NonNullable<NeedsInput["requests"]>, me: string):
         who: null,
         review: null,
         tone: "draft",
+        word: "",
       });
     }
   return out;
+}
+
+/** A row's label: its own once done, else its kind's word. */
+const withWord = (n: Need): Need => ({ ...n, word: n.word || KIND_WORDS[n.kind] });
+
+/** One change request as the row Home would show for it (kind, word, tone, action), for the desk's rows, so a request
+ *  has the same label in both places. Null when Home shows no row (an approved change that can't launch is shown). */
+export function needForChangeRequest(cr: ChangeRequest, me: string): Need | null {
+  const n = crNeed(cr, me);
+  return n && withWord(n);
 }
 
 /** Every row this person's reads support, ranked, in its phase. A read that failed (null) contributes no rows; the
@@ -356,7 +373,7 @@ export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[
   if (input.apps) rows.push(...appNeeds(input.apps, input.sends ?? undefined, me));
   else unknown.push("apps");
   if (input.sends === null) unknown.push("what Align sent apps");
-  return { rows: rankNeeds(rows), unknown, notices: input.apps ? neverRead(input.apps) : [] };
+  return { rows: rankNeeds(rows.map(withWord)), unknown, notices: input.apps ? neverRead(input.apps) : [] };
 }
 
 const PHASE_ORDER: NeedPhase[] = ["needs_you", "waiting_on_others", "done"];
