@@ -12,6 +12,7 @@ const change="d has before, after, and optional hidden:{before:number,after:numb
 "For field 'limits', elements have id,type,text. w(l) is (labels[l.type] ?? l.type)+': '+q(l.text), where labels is the ordinary JavaScript object {must:'Must',must_not:'Must not',out_of_scope:'Out of scope'} and property lookup retains its normal Object prototype behavior for names such as '__proto__' and 'constructor'. Iterate after in order, using the first before element with strictly equal id. A new element emits 'Added limit '+w(new); a matched element whose text or type changed emits 'Limit '+w(old)+' became '+w(new). Then each before element whose id occurs nowhere in after emits 'Removed limit '+w(old), in before order. With no lines return ['Limits reordered']. "+
 "For field 'depends_on', lists contain ids. Added ids are after elements absent from before using includes; removed ids are before elements absent from after, retaining order and duplicates. more=max(0,(d.hidden?.after ?? 0)-(d.hidden?.before ?? 0)); fewer=max(0,(d.hidden?.before ?? 0)-(d.hidden?.after ?? 0)). When added is nonempty or more is truthy, emit 'Now depends on '+with_hidden(added.map(id=>q(title(id))),more). When removed is nonempty or fewer is truthy, then emit 'No longer depends on '+with_hidden(removed.map(id=>q(title(id))),fewer). With no emitted lines return ['Dependencies you can\'t see changed']. "+
 "For field 'title', return exactly one line 'Title '+q(String(d.before ?? ''))+' '+arrow+' '+q(String(d.after ?? '')). For 'status', return exactly one line 'Status '+String(d.before ?? U+2014)+' '+arrow+' '+String(d.after ?? U+2014). For every other field, return one line field+': '+String(d.before ?? U+2014)+' '+arrow+' '+String(d.after ?? U+2014). U+2014 denotes the single em dash character as data. Do not quote status or unknown fields. Return a new array of exact raw strings. ";
+const targetComparison=" Target comparison and rendering have different rules: compare (old.target ?? null) !== (new.target ?? null), merging only null and undefined. An empty string remains distinct from null even though t renders both as 'none'. Do not compare rendered target text or use truthiness to compare targets. With unchanged measure text 'A', a null old target and an empty-string new target produce ['A target none → none'] with default options. A custom q is called once for 'A' in that example and never for either missing target. ";
 const signatures={
   dropControls:"drop_controls(v:string):string. "+dropControls,
   dropInvisible:"drop_invisible(v:string):string. "+dropInvisible,
@@ -34,7 +35,8 @@ const signatures={
 const capabilities={};
 for(const op of Object.keys(h.CAPABILITY)) {
   if(!signatures[op])throw new Error("missing wording contract "+op);
-  capabilities[h.CAPABILITY[op]]="JavaScript module wording/"+h.SYMBOL[op]+" exports "+signatures[op]+" "+common;
+  capabilities[h.CAPABILITY[op]]="JavaScript module wording/"+h.SYMBOL[op]+" exports "+signatures[op]+" "+common+
+    (["changeWords","diffWords"].includes(op)?targetComparison:"");
 }
 if(Object.keys(signatures).length!==Object.keys(capabilities).length)throw new Error("unexpected wording contract");
 fs.writeFileSync(process.argv[2],JSON.stringify({kind:"library",capabilities},null,2)+"\n");

@@ -1,0 +1,20 @@
+LITAI_LANGUAGE_TOOL ?= node
+OUT ?= _build
+
+.PHONY: all test check clean
+all: check
+	"$(LITAI_LANGUAGE_TOOL)" tools/export.js "$(OUT)"
+
+test:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" --check share_again/text.js
+	"$(LITAI_LANGUAGE_TOOL)" --check share_again/stopped.js
+	"$(LITAI_LANGUAGE_TOOL)" --check share_again/words.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tests/litai_test.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tools/export.js
+
+clean:
+	"$(LITAI_LANGUAGE_TOOL)" tools/export.js "$(OUT)" --clean

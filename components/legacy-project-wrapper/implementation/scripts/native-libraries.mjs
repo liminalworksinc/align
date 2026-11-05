@@ -90,11 +90,11 @@ export function prepareNative(implementation, destinations, {components, inputDe
   const inputs = path.join(temporary, "inputs");
   fs.mkdirSync(staging);
   fs.mkdirSync(inputs);
-  const exports = [], symbols = new Set(), packages = new Set();
+  const exports = [], symbolOwners = new Map(), packages = new Set();
   let caseTotal = 0;
   try {
     for (const lib of libraries) {
-      const bindings = [], packageSymbols = [];
+      const bindings = [], packageSymbols = new Set();
       if (!hex(lib.entry) || !hex(lib.source_tree) || !/^[a-z][a-z0-9_]*$/.test(lib.package) || packages.has(lib.package)) throw new Error("invalid native package pin");
       packages.add(lib.package);
       if ("sha256:" + digest(Buffer.from(canonical(lib.lock))) !== lib.lock_identity) throw new Error("native lock pin mismatch");
@@ -145,22 +145,24 @@ export function prepareNative(implementation, destinations, {components, inputDe
           oracle.cases.some(c => !capabilities.has(c.capability)) ||
           new Set(oracle.cases.map(c => c.capability)).size !== capabilities.size) throw new Error("native acceptance coverage mismatch");
       for (const item of lib.surface.capabilities) for (const symbol of item.symbols) {
-        if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(symbol) || symbols.has(symbol)) throw new Error("duplicate native symbol");
-        symbols.add(symbol);
+        if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(symbol) || packageSymbols.has(symbol)) throw new Error("duplicate native symbol");
+        packageSymbols.add(symbol);
+        const owners = symbolOwners.get(symbol) || [];
+        owners.push(lib.package);
+        symbolOwners.set(symbol, owners);
         const relative = item.module.slice((lib.package + "/").length);
         const modules = lib.files.filter(f => [relative + ".js", relative + ".mjs", relative + ".cjs"].includes(f.path));
         if (modules.length !== 1 || !item.module.startsWith(lib.package + "/")) throw new Error("native module missing");
         const binding = "m" + bindings.length;
-        packageSymbols.push(symbol);
         bindings.push("import * as " + binding + " from " + JSON.stringify("../" + lib.package + "/" + modules[0].path) + ";\n" +
           "export const " + symbol + " = " + binding + "." + symbol + " ?? " + binding + ".default?." + symbol + " ?? " + binding + ".default;\n" +
           "if (typeof " + symbol + " !== 'function') throw new Error('native callable missing');\n");
       }
       fs.mkdirSync(path.join(staging, ".bindings"), {recursive: true});
       fs.writeFileSync(path.join(staging, ".bindings", lib.package + ".js"), bindings.join("\n"));
-      fs.writeFileSync(path.join(staging, ".bindings", lib.package + ".d.ts"), packageSymbols.sort().map(s =>
+      fs.writeFileSync(path.join(staging, ".bindings", lib.package + ".d.ts"), [...packageSymbols].sort().map(s =>
         "export declare const " + s + ": (...args: unknown[]) => unknown;\n").join(""));
-      exports.push("export {" + packageSymbols.join(", ") + "} from " + JSON.stringify("./.bindings/" + lib.package + ".js") + ";\n");
+      exports.push("export * as " + lib.package + " from " + JSON.stringify("./.bindings/" + lib.package + ".js") + ";\n");
       for (const test of oracle.cases) {
         const result = spawnSync(process.execPath, [path.join(implementation, "native", lib.verifier), staging, JSON.stringify(lib.surface), JSON.stringify([test])],
           {encoding: "utf8", timeout: 30000, maxBuffer: 2 * 1024 * 1024});
@@ -176,9 +178,14 @@ export function prepareNative(implementation, destinations, {components, inputDe
         fs.writeFileSync(file, observation.bytes);
       }
     }
+    // Keep a namespace for every provider. Existing consumers may also use flat
+    // aliases, but an overlapping name must never silently select a provider.
+    for (const [symbol, owners] of [...symbolOwners].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+      if (owners.length === 1 && !packages.has(symbol)) exports.push("export {" + symbol + "} from " +
+        JSON.stringify("./.bindings/" + owners[0] + ".js") + ";\n");
+    }
     fs.writeFileSync(path.join(staging, "index.js"), exports.join("\n"));
-    fs.writeFileSync(path.join(staging, "index.d.ts"), [...symbols].sort().map(s =>
-      "export declare const " + s + ": (...args: unknown[]) => unknown;\n").join(""));
+    fs.writeFileSync(path.join(staging, "index.d.ts"), exports.join("\n"));
     fs.writeFileSync(path.join(staging, "package.json"), '{"type":"module"}\n');
     fs.writeFileSync(path.join(staging, ".literate-native.json"), JSON.stringify({schema: "align/materialized-native@1", manifest: digest(manifestBytes), entries: libraries.map(l => l.entry)}) + "\n");
     for (const old of observations) if (!read(old.root, old.relative, []).equals(old.bytes)) throw new Error("native inputs changed during acceptance");
@@ -196,6 +203,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const web = consumer !== "agent";
   console.log(JSON.stringify(prepareNative(implementation,
     web ? [path.join(implementation, "lib/native")] : [path.join(agent, "src/native"), path.join(agent, "dist/native")],
-    {components: web ? ["paste-lines", "policy"] : ["spend-meter", "spend-stream", "spend-rounding", "shell-words", "share-notices"],
+    {components: web ? ["paste-lines", "policy", "share-again", "home-attention", "trust-markdown", "http-errors", "promise-queues", "wording", "value-rules"] : ["spend-meter", "spend-stream", "spend-rounding", "shell-words", "share-notices", "agent-envelope"],
       inputDestination: consumer === "container" ? path.join(implementation, ".native-inputs") : undefined})));
 }

@@ -1,0 +1,2 @@
+'use strict';
+require('node:fs').rmSync(require('node:path').join(__dirname,'..','_build'),{recursive:true,force:true});

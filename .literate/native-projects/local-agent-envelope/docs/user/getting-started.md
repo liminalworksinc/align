@@ -22,6 +22,7 @@ keeps references to the original added and removed entries.
 
 ## Consumption
 
+Both clean builds and the admitted build pass the complete independent profile.
 Consumer integration is tracked by ADOPT-002 in the parent project. The build
 obtains an admitted package from the verified local source cache and replays its
 independent acceptance before installation. This internal child has no standalone

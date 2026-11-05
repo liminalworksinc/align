@@ -359,6 +359,12 @@ function invariantHolds(s) {
 }
 
 const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "align-v2-"));
+// Later phases import the agent's TypeScript consumers directly, before its build.
+const nativeAgent = spawnSync(process.execPath, ["scripts/native-libraries.mjs", "agent"], { cwd: ROOT, encoding: "utf8" });
+if (nativeAgent.status !== 0) {
+  console.log(`FAIL  agent native libraries\n${(nativeAgent.stdout + nativeAgent.stderr).slice(-1500)}`);
+  process.exit(1);
+}
 const build = spawnSync("npx", ["next", "build"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, HOSTED: "", ALIGN_DATA_DIR: "" } });
 if (build.status !== 0) {
   console.log(`FAIL  next build\n${(build.stdout + build.stderr).slice(-1500)}`);
@@ -447,6 +453,28 @@ if (build.status !== 0) {
     blocks[0].t === "heading" && blocks[0].id === "t-hi-bxb" && flat.includes("<script>alert(1)</script>") && !flat.includes("secret note") && !flat.includes("PRESEED") &&
       JSON.stringify(links) === JSON.stringify(["/trust#retention-the-schedule", "https://example.com", "mailto:privacy@example.com"]),
     `${flat.slice(0, 300)} links=${JSON.stringify(links)}`,
+  );
+  const listInputs = [
+    "  - first\n    - nested\n  - second",
+    "    1. first\n      1. nested\n    2. second",
+    "- first\n  - nested\n- second",
+    " - first\n   - nested\n - second",
+  ];
+  const listRun = spawnSync(process.execPath, [
+    "--input-type=module", "--eval",
+    "const {parseMarkdown}=await import(process.argv[1]);process.stdout.write(JSON.stringify(JSON.parse(process.argv[2]).map(value=>parseMarkdown(value,{prefix:'fixture'}))));",
+    pathToFileURL(path.join(ROOT, "lib/trust/markdown.mts")).href, JSON.stringify(listInputs),
+  ], { encoding: "utf8", timeout: 2000, maxBuffer: 64 * 1024 });
+  let listOutput = null;
+  try { listOutput = JSON.parse(listRun.stdout); } catch { listOutput = null; }
+  const listTree = (ordered) => [{ t: "list", ordered, items: [
+    { c: [{ t: "text", v: "first" }], sub: { t: "list", ordered, items: [{ c: [{ t: "text", v: "nested" }], sub: null }] } },
+    { c: [{ t: "text", v: "second" }], sub: null },
+  ] }];
+  check(
+    "trust: indented root lists terminate with every root and nested item once; existing zero- and one-space roots keep their structure",
+    listRun.status === 0 && !listRun.error && JSON.stringify(listOutput) === JSON.stringify([false, true, false, false].map(listTree)),
+    listRun.error?.code || listRun.stderr || listRun.stdout.slice(0, 300),
   );
 }
 

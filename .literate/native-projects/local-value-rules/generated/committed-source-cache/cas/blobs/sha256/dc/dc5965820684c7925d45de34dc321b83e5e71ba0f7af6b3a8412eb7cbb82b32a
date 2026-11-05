@@ -1,0 +1,1 @@
+{"name":"value_rules","type":"commonjs","exports":{"./clean_value_text":"./clean_value_text.js","./estimate_said":"./estimate_said.js","./follow_up_problem":"./follow_up_problem.js","./follow_up_url":"./follow_up_url.js","./loi_url_ok":"./loi_url_ok.js","./safe_follow_up_url":"./safe_follow_up_url.js","./span_words":"./span_words.js","./value_data":"./value_data.js"}}

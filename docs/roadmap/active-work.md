@@ -54,42 +54,36 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 <a id="adopt-002"></a>
 ### [ ] ADOPT-002 — Native Literate AI rewrite
 
-- **Completion prerequisites:** SEC-001, CONTEXT-001
+- **Completion prerequisites:** SEC-001, CONTEXT-001, NATIVE-BINDINGS-001, TRUST-PARSER-001, VERIFIER-LINT-001
 - **Owner:** project architecture / Components / Flavors / skills / assets
 - **Direction:** Execute
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Next action:** Rebind the unqualified B10 envelope child through the reviewed
-  lifecycle plan to the independently installed framework fix `05d07fe6`, then retry
-  its two clean Codex qualification builds. Its first attempt stopped before
-  generation because the complete 51-capability import surface exceeded the
-  bounded verifier argument; the installed correction now passes that projection.
-  CONTEXT-001's repaired
-  baseline passes all 1,818 checks
-  and 24 hosted image checks. Its three new direct/hook regressions fail against
-  the old implementation and pass against the repair. The B10 notice
-  helper is integrated: both clean builds, the admitted build and its actual typed
-  consumer pass all 1,099 observations; its original algorithm is retired. All
-  seven registered native children are qualified. The remaining B10 envelope,
-  ended-state wording and shared types have source snapshots and 563,717 observations.
-  B11 is integrated: its two clean builds and typed consumer match all 11,108
-  observations, and its complete sealed workflow passes.
-  B04's source-extension correction and the envelope's bounded import-command
-  correction are committed as framework `05d07fe6`. Its clean non-editable wheel
-  proves unchanged `.mts` derivation and the full 51-capability projection.
-  B02's 17-capability
-  preflight covers 4,598,945 observations in 49 batches; B03's nine-capability
-  preflight covers 82,905 observations in nine batches. Both pass their verifier
-  controls and SDK profile checks, with contracts still pending source-bound review.
-  B01, B09, B05, B11 and B10's notice subset are integrated.
-  Their latest completed parent receipt is
-  `sha256:08cf7b053511bde9938ffcc6ab12ef329fcd35b264688eb55de264c1d5ca9367`,
-  with all 1,818 checks and 24 hosted image checks passing. That milestone also
-  passes root and seven-child verification, root validation and the owned entrypoint
-  audit. The remaining inventory boundaries and class review stay open. See the
-  [integration evidence](native-rewrite-program.md#integration-execution) and
-  [next boundary](native-rewrite-program.md#proposed-next-boundary).
+- **Next action:** Qualify B06 field validation through its corrected public factory
+  surface, then integrate its actual consumers and continue the remaining authority
+  classes. The complete fifteen-library application passes all 1,821 checks with
+  zero failures or skips through the reconciled installed framework at `4d672137`.
+  All 24 image checks pass on the SSD-backed Colima engine with the same application
+  inputs. Current receipt:
+  `sha256:8c7f0f604ba43f9185814c94b090480716700daed9fbe1c10e11c37d4c104f73`.
+  Root and CI-pinned verification each pass three gates with two declared skips;
+  project validation and owned-entrypoint checks pass. B07 value rules passes both
+  clean qualification builds, its separate 15-test admitted build and all 1,168,597
+  observations against the actual typed consumer. Namespace and EstimateId types
+  remain compatible in both directions. Web admission passes 231 batches across
+  nine libraries; agent admission passes 157 batches across six. All fourteen prior
+  manifest entries remain identical. The scope has 393 members and no gaps.
+  The accepted registration design, originally local ADR 0060 and now ADR 0064,
+  is implemented in approved local merge commit `4d672137`. Its clean non-editable
+  wheel passes 93 managed installed regressions. The real two-library public-CLI
+  fixture proves read-only planning, stale-plan refusal, actual process interruption,
+  ordinary verification refusal of mixed metadata, exact recovery and successful
+  addition while preserving 525 child files. The former private helper is retired.
+  The Go runtime-test contract issue is filed as upstream #324 and its approved
+  local repair is being verified. Further commits and publication require specific
+  operator approval. [SDK-FOLLOWUPS-001](#sdk-followups-001), remaining runtime
+  boundaries and authority-class review stay open.
 - **Evidence:** Phase 1.2 lift-and-shift identity `sha256:316a4e6b641a46788febb1c21b004ad3c00b6d812c10006deb1d05a48207aa49`.
 - **Continuation direction (2026-11-04):** Finish the complete native rewrite program
   and resolve its litai follow-ups. Qualification of an isolated library is an
@@ -97,7 +91,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   source retirement, every inventory classification, and full application parity.
 
 <a id="context-001"></a>
-### [ ] CONTEXT-001 - Preserve context priorities and ask attribution under clipping
+### [x] CONTEXT-001 - Preserve context priorities and ask attribution under clipping
 
 - **Priority:** P1
 - **Owner:** Agent envelope, B10
@@ -111,7 +105,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Evidence:**
   - [x] Canonical clipping priorities, attribution and closing counts pass with long legal field values, without enlarging any budget or removing limits.
   - [x] Complete retained application workflow and current receipt against the corrected source.
-  - [ ] Native envelope qualification against the corrected source.
+  - [x] Native envelope qualification against the corrected source.
 - **Verification follow-up:** The first corrected full run passes 1,816 checks and fails the share-state property at seed `1630038945`, after `align stop-sharing` then an older build writes. The same seed reproduces locally. Diagnose its state preconditions and preserve stop/hold and private-session invariants before rerunning the full gate; do not skip the seed or relax the assertion.
 - **Failure diagnosis:** The chosen fake-server session belongs to an earlier device pairing. The current pairing cannot receive its directive, and its local share has ended. Correct the property action's ownership precondition, keep the denial assertion for every deliverable stop/hold, retain the reported seed permanently and add a deterministic old-pairing isolation regression.
 - **Reproduction:** Direct probes of the unchanged source show a limit-bearing envelope retaining parent measures while showing only six of eight own measures, and a long one-ask delta of 187 characters with no attribution or closing count. The implementation and canonical requirements are recorded in the [rewrite program](native-rewrite-program.md#b10-notice-helper-preflight). Tracker search finds no matching issue. No external issue is posted.
@@ -521,3 +515,88 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Evidence:**
   - [x] Direct policy reproduction, meaningful role matrix, HTTP write refusal on team and pod routes, unchanged membership and audit records, and the complete retained workflow before native policy qualification.
 - **Evidence:** The original policy returns allow for a viewer team lead. The repair passes 24 focused role/object cases and a production-server HTTP probe: both aliases reject POST and DELETE with `read_only`, membership and audit rows stay unchanged, and owner/member team lead writes still succeed. The application suite includes four denied requests in three new assertions. Specification validation passes. The complete sealed build, tests and package pass all 1,813 checks, including 940 application, 183 OAuth, 62 live agent and 602 agent tests. Current receipt `sha256:5d3c5781b0b4cf01813855e45ef47e5dd92d42046f082db094520c44a54da9af` binds execution evidence `sha256:fb2dd937b466d2a5d8b6b7c2dea3a48510e7ba01523ae8f2e2ad195ff92bed6a`. Both the current and CI-pinned runtimes verify the parent; validation and owned agent-entrypoint audit pass.
+
+### [x] NATIVE-BINDINGS-001 - Preserve package namespaces for overlapping native export names
+
+- **Priority:** P1
+- **Owner:** B31 native package admission and generated bindings
+- **Direction:** Continue the full native rewrite without changing natural library APIs to satisfy a global flat export restriction.
+- **Conclusion:** The proposed wording count overlaps spend-stream count, and Home data overlaps policy data. Existing package-specific bindings already distinguish them, but the compatibility index currently refuses all duplicate names across providers. Keep package namespaces, expose only unambiguous flat aliases, preserve current selected-agent aliases and retain within-package ambiguity and integrity refusals.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Generate explicit package namespace exports and unambiguous compatibility aliases.
+  - [x] Retain package-local duplicate checks, exact package membership, independent acceptance and atomic installation.
+- **Evidence:**
+  - [x] Two verified cache fixture packages export the same name with distinct behavior; namespace calls resolve correctly and no flat alias silently chooses one. Selecting only one provider restores its flat alias.
+  - [x] Existing eleven admission controls pass alongside the two new controls. The integrated web selection passes 105 batches across paste, policy and share-again.
+  - [x] The complete retained workflow and hosted image checks pass after consumer integration. The sealed build, test and package workflow passes all 1,820 checks with zero failures or skips; the hosted image passes 24 checks.
+
+### [x] TRUST-PARSER-001 - Terminate trust Markdown lists with indented root markers
+
+- **Priority:** P1
+- **Owner:** B08 trust Markdown reader
+- **Direction:** Preserve public trust-document rendering while preparing the remaining native boundary.
+- **Conclusion:** A root list marker indented by two or more spaces enters list parsing with no current item, then repeats the same line indefinitely. Two-space unordered and four-space ordered fixtures time out in isolated two-second probes, while zero- and one-space controls return. Record the termination rule and fix the source before capturing a qualified native baseline.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Specify a terminating root-list indentation rule and preserve existing unindented and nested-list output.
+  - [x] Apply the smallest source correction before native qualification baseline capture.
+- **Evidence:**
+  - [x] A bounded child-process regression detects both current hangs; the repair returns expected trees and all seven existing trust documents retain identical parsed output.
+  - [x] Direct Markdown tests, the complete retained application workflow and hosted image checks pass before native source promotion. The complete sealed workflow passes 1,821 checks with zero failures or skips, including 941 application checks, 183 OAuth checks, 62 live-agent checks, 609 agent tests, 23 shell checks and three static gates. The hosted image passes 24 checks.
+
+### [x] VERIFIER-LINT-001 - Keep copied native verifiers valid under application lint
+
+- **Priority:** P0
+- **Owner:** native acceptance harness
+- **Direction:** Resolve the new verifier lint failure without disabling the existing rule or changing qualified behavior.
+- **Conclusion:** Rename only local import variables in the authored Markdown acceptance verifier, preserve the protected qualification profile and exact cases, rebuild through the normal lifecycle, and refresh consumer custody before full application verification.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Rename the two local module bindings and rebind the authored acceptance harness with every observation unchanged.
+- **Evidence:**
+  - [x] Controls, all 21 source and consumer batches, admitted rebuild, application lint, complete sealed workflow and hosted image gates pass with protected profiles, locks and qualified heads preserved.
+
+The first ten-library workflow passes all functional suites and fails only the
+Next-specific lint rule on two local import variables in the copied Markdown
+verifier. Those two authored verifier bindings are renamed without changing any
+case or protected profile. Its normal cached rebuild passes 8 tests, current
+verification and validation pass, and all 21 original and consumer batches match.
+The source cache entry, source bytes, component lock and qualified head remain
+identical; only authored verification file hashes change in the consumer manifest.
+The corrected complete workflow passes all 1,821 checks and 24 hosted image
+checks. Its current receipt is `sha256:7f3b84e7019246bdb8bb2edfc9dd043135ce572822a25197073fabfe210db12e`.
+
+<a id="sdk-followups-001"></a>
+### [ ] SDK-FOLLOWUPS-001 - Resolve remaining framework integration followups
+
+- **Priority:** P1
+- **Owner:** parent framework application and adapter APIs
+- **Direction:** Finish the native rewrite without private registry writes or unresolved verifier and cache-transport review findings.
+- **Conclusion:** Keep the published export-map fix separate. The remaining parent-owned work needs issue-first authority: a supported qualified-child registration transaction, isolation of generic Python library imports, and accurate local-only native-cache scope. Prepare portable proposals and preserve every existing qualification gate and registered child pin. Obtain specific authorization for missing issue filings and later publication. Link matching existing issues before local parent changes.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Search upstream and prepare sanitized contracts and issue drafts for each remaining defect class.
+  - [x] With explicit authorization, file or link upstream issues before implementation in the isolated parent checkout.
+  - [x] Replace the private registry helper with the supported public operation; preserve stale-plan, qualification, collision and rollback refusals.
+  - [x] Preserve main's generic Python import isolation and the separate verified-wheel dependency closure; document and test native-cache transport scope.
+  - [ ] Repair and qualify the Go runtime-test contract reported in upstream #324.
+- **Evidence:**
+  - [x] Registration, Python isolation and cache-scope fixtures pass 93 focused installed regressions and the real two-library recovery journey without editing protected pins or generated implementations.
+  - [ ] The Go contract repair passes actual compiler controls and clean installed qualification.
+  - [x] Current fifteen-library consumer integrity, all 1,821 application checks and owned project verification pass with the approved reconciled framework.
+
+See the [framework integration followups](framework-integration-followups.md) for
+portable contracts, tracker findings and the next issue-first action.
+
+Upstream issues [#315](https://github.com/jordanhubbard/literate-ai/issues/315) and
+[#316](https://github.com/jordanhubbard/literate-ai/issues/316) are filed before
+implementation. The operator accepted parent ADR 0060 before implementation; it is
+now ADR 0064 after upstream reconciliation. Approved commit `4d672137` passes the
+installed acceptance described in the linked followups. Issue [#324](https://github.com/jordanhubbard/literate-ai/issues/324)
+was filed with explicit approval before its local Go contract repair. Publication
+and broader upstream release qualification remain separate.

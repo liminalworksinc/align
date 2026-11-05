@@ -1,0 +1,24 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const clean = process.argv[2] === '--clean';
+const destination = path.resolve(process.argv[clean ? 3 : 2] || '_build');
+if (destination === root || root.startsWith(destination + path.sep)) throw new Error('Output must not contain the source root');
+if (clean) {
+  fs.rmSync(destination, {recursive:true, force:true});
+} else {
+  fs.mkdirSync(destination, {recursive:true});
+  const files = ['main.js', 'tests/litai_test.js', 'value_rules/package.json',
+    'value_rules/clean_value_text.js', 'value_rules/estimate_said.js',
+    'value_rules/follow_up_problem.js', 'value_rules/follow_up_url.js',
+    'value_rules/loi_url_ok.js', 'value_rules/safe_follow_up_url.js',
+    'value_rules/span_words.js', 'value_rules/value_data.js'];
+  for (const file of files) {
+    const target = path.join(destination, file);
+    fs.mkdirSync(path.dirname(target), {recursive:true});
+    fs.copyFileSync(path.join(root, file), target);
+  }
+  fs.writeFileSync(path.join(destination, 'run'), '#!/usr/bin/env node\n' + fs.readFileSync(path.join(root, 'main.js'), 'utf8'), {mode:0o755});
+  fs.chmodSync(path.join(destination, 'run'), 0o755);
+}

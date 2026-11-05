@@ -9,8 +9,9 @@ including the shared mutable limit-label record and safe-request Set.
 See [the project guide](docs/README.md) and
 [getting started](docs/user/getting-started.md). The specification and 51 direct
 public contracts live under `components/agent-envelope`. The independent profile
-captures 563,717 source observations in 59 batches. Qualification and application
-integration are tracked by the parent native rewrite program.
+captures 563,717 source observations in 59 batches. Both clean qualification
+builds, the admitted 43-test build and all child verification gates pass. Application
+integration and source retirement remain with the parent native rewrite program.
 
 <!-- literate-ai:parent-repositories -->
 - Parent repository: [github.com/jordanhubbard/literate-ai](<https://github.com/jordanhubbard/literate-ai>)

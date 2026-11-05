@@ -30,17 +30,22 @@ function* vectors(operation) {
   }
 }
 const countVectors = operation => [...vectors(operation)].length;
-function encode(value, ancestors = new Set()) {
+function encode(value, seen = new Map()) {
   if (value === null) return ["null"];
   const type = typeof value;
   if (type === "undefined") return ["undefined"];
   if (type === "string" || type === "boolean") return [type, value];
-  if (type !== "object") return [type, String(value)];
-  if (ancestors.has(value)) throw new Error("cyclic share-again observation");
-  ancestors.add(value);
-  const result = Array.isArray(value) ? ["array", value.length, Object.keys(value).sort().map(k => [k, encode(value[k], ancestors)])]
-    : ["object", Object.keys(value).sort().map(k => [k, encode(value[k], ancestors)])];
-  ancestors.delete(value);
+  if (type !== "object") return [type, Object.is(value, -0) ? "-0" : String(value)];
+  if (seen.has(value)) return ["ref", seen.get(value)];
+  const id = seen.size; seen.set(value, id);
+  const keys = Object.keys(value).sort().map(k => [k, encode(value[k], seen)]);
+  return Array.isArray(value) ? ["array", id, value.length, keys]
+    : ["object", id, Object.getPrototypeOf(value) === Object.prototype ? "plain" : Object.getPrototypeOf(value) === null ? "null" : "other", keys];
+}
+function referenceAnchors(value, seen = new Set(), result = []) {
+  if (value === null || typeof value !== "object" || seen.has(value)) return result;
+  seen.add(value); result.push(value);
+  for (const key of Object.keys(value)) referenceAnchors(value[key], seen, result);
   return result;
 }
 function runBatch(fn, operation, start, limit, pureBaseline = false) {
@@ -50,16 +55,16 @@ function runBatch(fn, operation, start, limit, pureBaseline = false) {
   for (const args of vectors(operation)) {
     if (index++ < start) continue;
     if (count === limit) break;
-    const before = encode(args);
+    const anchors = referenceAnchors(args), before = encode({arguments: args, anchors});
     let outcome;
-    try { outcome = ["return", encode(fn(...args))]; }
+    try { outcome = ["return", fn(...args)]; }
     catch (error) { outcome = ["throw", error?.name, error?.message]; }
-    const after = encode(args);
+    const after = encode({arguments: args, anchors});
     if (pureBaseline) {
       assert.equal(outcome[0], "return", "baseline throws for a supported share-again input");
       assert.deepEqual(after, before, "baseline mutates share-again input state");
     }
-    hash.update(JSON.stringify({outcome, arguments: after}) + "\n");
+    hash.update(JSON.stringify(encode({outcome, arguments: args, anchors})) + "\n");
     count++;
   }
   assert.equal(count, limit, "share-again range exceeds the matrix");
@@ -109,7 +114,7 @@ async function main() {
     process.stdout.write(JSON.stringify({schema: "literate-ai/library-acceptance-results@1", cases}) + "\n");
   }
 }
-module.exports = {CAPABILITY, NAMES, vectors, countVectors, runBatch, loadBaseline, encode};
+module.exports = {CAPABILITY, NAMES, vectors, countVectors, runBatch, loadBaseline, encode, referenceAnchors};
 if (require.main === module || ["--baseline", "--generated"].includes(process.argv[1])) {
   main().catch(error => {console.error(error.stack || error); process.exit(1);});
 }
