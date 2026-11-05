@@ -35,7 +35,7 @@ export const RANK_NOTE =
   "Ranked: approved changes waiting to launch, then decisions waiting on you, then your requests that came back, then requests an agent declined, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.";
 /** The rank note, plus what wasn't checked: requests to agents are read per goal, at most REQ_GOALS_MAX goals. */
 export const rankNote = (unchecked: number, unsent = 0) =>
-  [RANK_NOTE, unchecked ? `Requests to agents not checked on ${unchecked} goal${unchecked === 1 ? "" : "s"}.` : "", unsent ? `What Align sent apps not checked on ${unsent} launch${unsent === 1 ? "" : "es"}.` : ""].filter(Boolean).join(" ");
+  [RANK_NOTE, unchecked ? `Requests to agents not checked on ${unchecked} goal${unchecked === 1 ? "" : "s"}.` : "", unsent ? `Deliveries to apps not checked on ${unsent} launch${unsent === 1 ? "" : "es"}.` : ""].filter(Boolean).join(" ");
 
 /** The latest launch on each goal, newest first: the change requests whose value read SENT checks. */
 export function latestLaunches(crs: ChangeRequest[]): ChangeRequest[] {
@@ -352,7 +352,9 @@ export function needForChangeRequest(cr: ChangeRequest, me: string): Need | null
 
 /** Every row this person's reads support, ranked, in its phase. A read that failed (null) contributes no rows; the
  *  renderer says that kind is unknown rather than showing nothing. */
-export type Unknown = "change requests" | "asks" | "alignments" | "apps" | "requests to agents" | "what Align sent apps";
+/** A source Align couldn't read, as a noun phrase that reads after "the" ("Align couldn't read the asks and the
+ *  deliveries to apps"). */
+export type Unknown = "change requests" | "asks" | "alignments" | "workspace summary" | "requests to agents" | "deliveries to apps";
 
 export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[]; notices: Notice[] } {
   const { me } = input;
@@ -373,8 +375,8 @@ export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[
   if (input.requests) rows.push(...declinedNeeds(input.requests, me));
   else if (input.requests === null) unknown.push("requests to agents");
   if (input.apps) rows.push(...appNeeds(input.apps, input.sends ?? undefined, me));
-  else unknown.push("apps");
-  if (input.sends === null) unknown.push("what Align sent apps");
+  else unknown.push("workspace summary");
+  if (input.sends === null) unknown.push("deliveries to apps");
   return { rows: rankNeeds(rows.map(withWord)), unknown, notices: input.apps ? neverRead(input.apps) : [] };
 }
 

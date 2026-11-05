@@ -262,22 +262,36 @@ try {
 
   // A source that fails (forced 500 on one read at a time): the list never says "Nothing needs you", never shows a bare 0
   // in its filter, and reports partial to the page.
-  const SOURCES = [
-    ["change-requests", `/api/v2/workspaces/${s.ws}/change-requests(\\?|$)`, ["owner", "viewer"]],
-    ["asks", `/api/v2/workspaces/${s.ws}/asks(\\?|$)`, ["owner", "viewer"]],
-    ["alignments", `/api/v2/workspaces/${s.ws}/alignments(\\?|$)`, ["owner", "viewer"]],
-    ["home", `/api/v2/workspaces/${s.ws}/home(\\?|$)`, ["owner", "viewer"]],
+  // Each source: the request pattern that reads it, and the noun phrase the amber line names it by ("the …").
+  const SRC = {
+    "change-requests": [`/api/v2/workspaces/${s.ws}/change-requests(\\?|$)`, "the change requests"],
+    asks: [`/api/v2/workspaces/${s.ws}/asks(\\?|$)`, "the asks"],
+    alignments: [`/api/v2/workspaces/${s.ws}/alignments(\\?|$)`, "the alignments"],
+    home: [`/api/v2/workspaces/${s.ws}/home(\\?|$)`, "the workspace summary"],
     // Per-goal reads: a failed one is unknown too, never only a note behind "How it's ranked".
-    ["value (what Align sent)", `/api/v2/workspaces/${s.ws}/goals/[^/]+/change-requests/[^/]+/value$`, ["owner", "member"]],
-    ["requests to agents", `/api/v2/workspaces/${s.ws}/goals/[^/]+/requests$`, ["owner", "member"]],
+    value: [`/api/v2/workspaces/${s.ws}/goals/[^/]+/change-requests/[^/]+/value$`, "the deliveries to apps"],
+    requests: [`/api/v2/workspaces/${s.ws}/goals/[^/]+/requests$`, "the requests to agents"],
+  };
+  const SOURCES = [
+    [["change-requests"], ["owner", "viewer"]],
+    [["asks"], ["owner", "viewer"]],
+    [["alignments"], ["owner", "viewer"]],
+    [["home"], ["owner", "viewer"]],
+    [["value"], ["owner", "member"]],
+    [["requests"], ["owner", "member"]],
+    // Pairs: the sentence joins them as "the … and the …".
+    [["asks", "alignments"], ["owner"]],
+    [["home", "requests"], ["owner"]],
+    [["asks", "value"], ["owner"]],
   ];
   const cookieOf = { owner, member, viewer };
-  for (const [src, pattern, roles] of SOURCES)
+  for (const [srcs, roles] of SOURCES)
     for (const who of roles) {
+      const src = srcs.join(" + ");
       const cookies = cookieOf[who];
       const fp = await newPage(browser, cookies, "dark");
       await fp.setRequestInterception(true);
-      const re = new RegExp(pattern);
+      const re = new RegExp(srcs.map((x) => `(?:${SRC[x][0]})`).join("|"));
       fp.on("request", (req) => (req.method() === "GET" && re.test(new URL(req.url()).pathname + (new URL(req.url()).search ? "?" : "")) ? req.respond({ status: 500, contentType: "application/json", body: '{"error":"forced"}' }) : req.continue()));
       await fp.goto(BASE + desk, { waitUntil: "networkidle0" });
       await fp.waitForFunction(() => document.querySelector("h1[data-need-partial]")?.getAttribute("data-need-partial") === "1", { timeout: 20000 }).catch(() => undefined);
@@ -286,8 +300,12 @@ try {
         nothing: /Nothing needs you/.test(document.body.innerText),
         zeros: [...document.querySelectorAll('[data-needs="list"] [role="radio"]')].map((b) => b.textContent ?? "").filter((t) => / 0$/.test(t.trim())),
         amber: !!document.querySelector("[data-needs-partial]"),
+        sentence: document.querySelector("[data-needs-partial]")?.textContent ?? "",
       }));
-      check(`${who}, ${src} read failing: partial reported, amber line shown, no "Nothing needs you", no bare 0 in the filter`, r.partial === "1" && r.amber && !r.nothing && r.zeros.length === 0);
+      const want = srcs.map((x) => SRC[x][1]);
+      const reads = want.every((w) => r.sentence.includes(w)) && (want.length < 2 || r.sentence.includes(`${want[0]} and ${want[1]}`)) && !/the what|the the /.test(r.sentence);
+      check(`${who}, ${src} read failing: partial, amber line names ${want.join(" and ")}, no "Nothing needs you", no bare 0`, r.partial === "1" && r.amber && reads && !r.nothing && r.zeros.length === 0);
+      if (!reads) console.log(`   sentence: ${r.sentence}`);
       await fp.close();
     }
 
