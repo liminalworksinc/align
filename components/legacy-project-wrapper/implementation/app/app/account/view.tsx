@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Shell, SignInAgain, go, useAction, useApi, when } from "../_ui/kit";
+import { ThemeSetting } from "../_ui/ds/theme";
 import { addPasskey, usePasskeyPlace } from "../_ui/passkey";
 import type { Me, SignInOptions } from "../_ui/server";
 import { isBlankText } from "@/lib/v2/text-core.mts";
@@ -222,6 +223,9 @@ export default function Account({ me, options, linkError }: { me: Me; options: S
       <Card>
         <p className="text-[18px] text-zinc-900">{me.name || me.email}</p>
         <p className="text-[15px] text-zinc-500">{me.email}</p>
+      </Card>
+      <Card title="Appearance">
+        <ThemeSetting />
       </Card>
       <Card title="Ways you can sign in">
         {list.loading && <Loading />}
