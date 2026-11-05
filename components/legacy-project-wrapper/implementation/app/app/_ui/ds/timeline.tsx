@@ -1,9 +1,16 @@
 import type { ReactNode } from "react";
 import { EvidenceLabel, type EvidenceKind } from "./evidence-label";
+import { Icon } from "./icons";
 
-/** Where an event came from. Person and system events are what Align recorded itself; the three evidence classes are
- *  for what agents and their devices sent. */
-export type TimelineSource = { kind: "person" | "system" } | { kind: EvidenceKind; detail?: string };
+/** Where an event came from. person: recorded in Align against a person; system: Align itself. Align's audit log
+ *  records no channel (browser, CLI or app), so person and system never claim one; `detail` can say so ("source not
+ *  recorded"). What an agent's side sent uses the three evidence classes: Receipt, Agent reported, Not observed. */
+export type TimelineSource = { kind: "person" | "system"; detail?: string } | { kind: EvidenceKind; detail?: string };
+
+const ORIGIN = {
+  person: { icon: Icon.person, word: "Recorded in Align" },
+  system: { icon: Icon.system, word: "Align" },
+} as const;
 
 export type TimelineEvent = {
   id: string;
@@ -25,9 +32,17 @@ const fmt = (iso: string) => {
 };
 
 function SourceLabel({ source }: { source: TimelineSource }) {
-  if (source.kind === "person" || source.kind === "system")
-    return <span className="font-mono text-[12px] text-(--text-3)">{source.kind === "person" ? "Recorded in Align" : "Align"}</span>;
-  return <EvidenceLabel kind={source.kind} detail={"detail" in source ? source.detail : undefined} size="s" />;
+  if (source.kind === "receipt" || source.kind === "reported" || source.kind === "unobserved")
+    return <EvidenceLabel kind={source.kind} detail={"detail" in source ? source.detail : undefined} size="s" />;
+  const o = ORIGIN[source.kind];
+  const I = o.icon;
+  return (
+    <span data-source={source.kind} className="inline-flex items-center gap-1.5 rounded-(--radius-s) border border-(--line-strong) px-1.5 py-0.5 text-[12px] text-(--text-2)">
+      <I />
+      <span className="font-medium">{o.word}</span>
+      {"detail" in source && source.detail && <span className="font-mono text-(--text-3)">{source.detail}</span>}
+    </span>
+  );
 }
 
 /** A chronological record: who did what, when, to which object, and from which source. Oldest first unless the

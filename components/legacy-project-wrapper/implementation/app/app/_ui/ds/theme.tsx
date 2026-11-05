@@ -56,12 +56,13 @@ export function useTheme() {
   return { pref, setPref };
 }
 
-/** The account page's Appearance control. */
-export function ThemeSetting() {
+/** The account page's Appearance control. `hideLabel` when a heading already says "Appearance" (it stays the
+ *  control's accessible name). */
+export function ThemeSetting({ hideLabel = false }: { hideLabel?: boolean }) {
   const { pref, setPref } = useTheme();
   return (
     <div className="flex flex-col gap-2">
-      <Segmented label="Appearance" options={OPTIONS} value={pref} onChange={setPref} />
+      <Segmented label="Appearance" hideLabel={hideLabel} options={OPTIONS} value={pref} onChange={setPref} />
       <p className="text-[13px] text-(--text-2)">System follows your device. Your choice is saved in this browser only.</p>
     </div>
   );
