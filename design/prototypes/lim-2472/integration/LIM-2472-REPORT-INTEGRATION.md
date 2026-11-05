@@ -18,6 +18,7 @@ What the base holds: foundation (`e6ea124`), Stream R (rest of app, `3cc0f71`), 
 | `327ec1c0ae7a704d7912f6d33f155aacc35f6e67` (44px phone minimum on every input, select and textarea in the review) | `246df2fdbf2a175e05cbfdb3eba1b348a69345f0` | clean: `review.tsx` |
 | foundation `6a97ca9144bb31531239da65fe56eb6b5f9f3830` (dark `--accent` #BF0078, `--accent-hover` #94005C) | `b797d8286d7422e2d23dc058a9642f1ce30f8627` | clean: `globals.css`, `LIM-2472-FOUNDATION.md`, `foundation.html` |
 | `46cd27f58bca85b6d4a14fc474bce336d4f42e2e` (contains `6a97ca9`; thin marks to `--accent-text`: Work and Dependencies selected goal, Confirm panel border) | `7f74d799219016ea932fdcca8fa5fed945d3a926` | clean: `work.tsx`, `dependencies.tsx`, `review.tsx` |
+| `45bfc92b8a736e19967616b5a39e64336b28b389` (contains foundation `da51b0c`: the ring is `:focus-visible:not([tabindex="-1"])`, plus a base-layer `[tabindex="-1"]:focus { outline: none }`) | `50a8dc7fb41d6db202352960cd6c5f8ec61cf72c` | clean: `globals.css`, `ds/data-table.tsx`, `LIM-2472-FOUNDATION.md`, `foundation.html` |
 
 No conflicts, so no file needed a side chosen. No rebase, no force push, no stash.
 
@@ -83,7 +84,7 @@ Routes: `/app`, account, devices, device, people, alignments, asks, spend, reque
   - a stale second tab: "Not recorded. You declined this request, so nothing changes. Nothing was sent. …" (the client re-read caught it, no POST);
   - a 404 when the workspace was deleted under a staged decision: "Not recorded. Not found. Nothing changed.";
   - a 403 when the member was made a viewer under a staged Withdraw: "Not recorded. Viewers can look but not change anything. Nothing changed." (both themes; see "403" under "Write path").
-- No sideways scroll at 320 on any read. No positive `tabindex`. Every Tab stop shows a 2px focus ring, except the one in L4. The page's `data-theme` matched the theme on every read.
+- No sideways scroll at 320 on any read. No positive `tabindex`. Every Tab stop shows a 2px focus ring, except the one in L4. Re-checked after `45bfc92`: see "Focus ring after `45bfc92`" below. The page's `data-theme` matched the theme on every read.
 
 ### Findings
 
@@ -315,6 +316,30 @@ For comparison, `--accent` as a mark measured 3.08 on the panel, 2.89 on raised 
 - In light, `--accent-text` is #BF0078, the same as light `--accent`, so light is unchanged.
 
 Outside R's set I found three thin marks (Work selected marker, Dependencies selected marker, Confirm border). They were already switched in `46cd27f`. `kit.tsx` `Btn` primary and `segmented.tsx` selected use `--accent` as a fill behind white text, which is the ruled 6.02:1 case, so they need no switch.
+
+
+### Focus ring after `45bfc92`, keyboard only
+
+Fresh `next dev` and seed; owner; dark and light at 1440 and 390, Tab, Shift+Tab, Enter and Escape only. The outline was read from computed style on every stop inside `<main>`. Raw: `I-base/walk/focus.json`; screenshots: `I-base/walk/focus-<theme>-<width>-{confirm,notice}.png`.
+
+**Code-focused targets draw no ring** (4 of 4 runs):
+- The confirmation heading (`h4`, `tabindex="-1"`) takes focus after Review this decision with `outline-style: none`.
+- The notice (`tabindex="-1"`) takes focus after Confirm ("Recorded: you declined this request.") with `outline-style: none`.
+
+**Every real Tab stop draws the 2px ring** (4 of 4 runs, 0 stops without it). The ring is 2px solid `--focus`: rgb(180,140,255) in dark, rgb(111,77,218) in light.
+
+| Where | Dark 1440 | Dark 390 | Light 1440 | Light 390 |
+|---|---|---|---|---|
+| Requests, whole page | 22 stops | 23 | 36 | 31 |
+| Add evidence form (select, link, label, Add link, Cancel, then the next stop) | 6 | 6 | 6 | 6 |
+| More actions (summary and menu items, phones) | – | 5 | – | 5 |
+| Decline input (reason, Review this decision, Cancel) | 3 | 3 | 3 | 3 |
+| Confirm and Cancel | 2 | 2 | 2 | 2 |
+| Record (`?cr=`), whole page | 12 | 9 | 12 | 9 |
+
+The light Requests page has more stops than dark because each pass's data set differs (light runs after dark on the same server), not because the theme changes the controls.
+
+**One transient, noted (not counted as a finding):** the selected Segmented option on the record ("Newest first") reads `outline-color` white right after Tab and the focus colour 500ms later. Its `transition-colors` animates the outline colour from `currentColor` (white on pink) to `--focus` (`ds/segmented.tsx`). In light the ring flashes white against the page for a moment before it settles.
 
 
 ## Needed outside my files (listed, not changed)
