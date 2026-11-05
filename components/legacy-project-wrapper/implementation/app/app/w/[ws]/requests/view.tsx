@@ -18,7 +18,7 @@ export default function Requests({ me, ws }: { me: Me; ws: string }) {
   );
   return (
     <Shell me={me} ws={ws} tab="Requests">
-      <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">Change requests</h1>
+      <h1 className="mb-5 text-[26px] font-semibold text-(--text-1)">Change requests</h1>
       {d.loading && <Loading />}
       <Err>{d.error}</Err>
       {d.data && (

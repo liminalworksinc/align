@@ -14,13 +14,13 @@ function Inlines({ c }: { c: Inline[] }) {
             return x.v;
           case "code":
             return (
-              <code key={i} className="rounded bg-zinc-100 px-1 font-mono text-[0.9em]">
+              <code key={i} className="rounded bg-(--bg-raised) px-1 font-mono text-[0.9em]">
                 {x.v}
               </code>
             );
           case "strong":
             return (
-              <strong key={i} className="font-semibold text-zinc-900">
+              <strong key={i} className="font-semibold text-(--text-1)">
                 <Inlines c={x.c} />
               </strong>
             );
@@ -33,7 +33,7 @@ function Inlines({ c }: { c: Inline[] }) {
           case "link": {
             const external = /^https?:/i.test(x.href);
             return (
-              <a key={i} href={x.href} className="underline decoration-zinc-400 underline-offset-2 hover:text-zinc-900" {...(external ? { rel: "noopener noreferrer" } : {})}>
+              <a key={i} href={x.href} className="underline decoration-(--text-3) underline-offset-2 hover:text-(--text-1)" {...(external ? { rel: "noopener noreferrer" } : {})}>
                 <Inlines c={x.c} />
               </a>
             );
@@ -66,7 +66,7 @@ export function DocBlocks({ blocks, shift = 0 }: { blocks: Block[]; shift?: numb
             const level = Math.min(6, b.level + shift);
             const Tag = `h${level}` as "h1";
             return (
-              <Tag key={i} id={b.id} className={`${HEADING_CLASS[level]} mb-3 scroll-mt-6 text-zinc-900`}>
+              <Tag key={i} id={b.id} className={`${HEADING_CLASS[level]} mb-3 scroll-mt-6 text-(--text-1)`}>
                 <Inlines c={b.c} />
               </Tag>
             );
@@ -86,7 +86,7 @@ export function DocBlocks({ blocks, shift = 0 }: { blocks: Block[]; shift?: numb
                   <thead>
                     <tr>
                       {b.head.map((c, j) => (
-                        <th key={j} className="border-b border-zinc-300 px-2 py-2 align-bottom font-semibold text-zinc-900">
+                        <th key={j} className="border-b border-(--edge) px-2 py-2 align-bottom font-semibold text-(--text-1)">
                           <Inlines c={c} />
                         </th>
                       ))}
@@ -96,7 +96,7 @@ export function DocBlocks({ blocks, shift = 0 }: { blocks: Block[]; shift?: numb
                     {b.rows.map((r, j) => (
                       <tr key={j}>
                         {r.map((c, k) => (
-                          <td key={k} className="border-b border-zinc-200 px-2 py-2 align-top">
+                          <td key={k} className="border-b border-(--line) px-2 py-2 align-top">
                             <Inlines c={c} />
                           </td>
                         ))}
@@ -108,18 +108,18 @@ export function DocBlocks({ blocks, shift = 0 }: { blocks: Block[]; shift?: numb
             );
           case "code":
             return (
-              <pre key={i} className="mb-4 overflow-x-auto rounded bg-zinc-100 p-3 font-mono text-[13px]">
+              <pre key={i} className="mb-4 overflow-x-auto rounded bg-(--bg-raised) p-3 font-mono text-[13px]">
                 {b.v}
               </pre>
             );
           case "quote":
             return (
-              <blockquote key={i} className="mb-5 border-l-2 border-zinc-300 pl-4 text-zinc-600">
+              <blockquote key={i} className="mb-5 border-l-2 border-(--edge) pl-4 text-(--text-2)">
                 <DocBlocks blocks={b.c} shift={shift} />
               </blockquote>
             );
           case "rule":
-            return <hr key={i} className="my-6 border-zinc-200" />;
+            return <hr key={i} className="my-6 border-(--line)" />;
         }
       })}
     </>
@@ -129,10 +129,10 @@ export function DocBlocks({ blocks, shift = 0 }: { blocks: Block[]; shift?: numb
 /** The frame of a public trust page: the Align mark, the page, and links between the two pages and to sign-in. */
 export function TrustFrame({ children }: { children: ReactNode }) {
   return (
-    <main className="min-h-screen bg-[var(--al-bg)] px-4 py-8 text-[15px] leading-relaxed text-zinc-700 sm:px-6">
+    <main className="min-h-screen bg-(--bg-page) px-4 py-8 text-[15px] leading-relaxed text-(--text-2) sm:px-6">
       <div className="mx-auto w-full max-w-[860px]">
         <nav className="mb-8 flex flex-wrap items-baseline gap-x-5 gap-y-2 text-[14px]">
-          <Link href="/app" className="font-display text-[24px] leading-none text-zinc-900">
+          <Link href="/app" className="font-display text-[24px] leading-none text-(--text-1)">
             Align
           </Link>
           <Link href="/trust" className="underline-offset-2 hover:underline">
@@ -145,7 +145,7 @@ export function TrustFrame({ children }: { children: ReactNode }) {
             Sign in
           </Link>
         </nav>
-        <article className="al-in rounded-[14px] border border-zinc-200 bg-white p-5 sm:p-8">{children}</article>
+        <article className="al-in rounded-[14px] border border-(--line) bg-(--bg-panel) p-5 sm:p-8">{children}</article>
       </div>
     </main>
   );

@@ -80,19 +80,19 @@ function Counter({ a, busy, onSend }: { a: Alignment; busy: boolean; onSend: (bo
   const [note, setNote] = useState("");
   // Approvers see the requester's sessions without their keys, so a counter names the ones to keep by ref.
   return (
-    <div className="mt-3 rounded-[12px] border border-zinc-300 p-3">
-      <p className="mb-2 text-[15px] text-zinc-700">Suggest a change. It replaces the request and needs everyone&apos;s approval again.</p>
+    <div className="mt-3 rounded-[12px] border border-(--edge) p-3">
+      <p className="mb-2 text-[15px] text-(--text-2)">Suggest a change. It replaces the request and needs everyone&apos;s approval again.</p>
       <label className="mb-1 flex items-center gap-2 text-[15px]">
         <input type="radio" checked={choice === "contribution"} onChange={() => setChoice("contribution")} /> Recognize contribution only
       </label>
       <label className="mb-2 flex items-center gap-2 text-[15px]">
         <input type="radio" checked={choice === "work_toward"} onChange={() => setChoice("work_toward")} /> Work toward the goal and count future usage there
       </label>
-      {keep.length > 0 && <p className="mb-1 text-[14px] text-zinc-600">Sessions to keep</p>}
+      {keep.length > 0 && <p className="mb-1 text-[14px] text-(--text-2)">Sessions to keep</p>}
       {keep.map((s) => (
         <label key={s.ref} className="mb-1 flex items-center gap-2 text-[15px]">
           <input type="checkbox" checked={!drop.includes(s.ref)} onChange={(e) => setDrop((d) => (e.target.checked ? d.filter((x) => x !== s.ref) : [...d, s.ref]))} />
-          {s.label} <span className="text-zinc-500">({s.owner.name}{sessionId(s)})</span>
+          {s.label} <span className="text-(--text-3)">({s.owner.name}{sessionId(s)})</span>
         </label>
       ))}
       <Field label="Note (never sent to agents)">
@@ -131,34 +131,34 @@ function AlignmentCard({ ws, a, me, onDone }: { ws: string; a: Alignment; me: st
       }
     });
   return (
-    <div className="mb-4 rounded-[12px] border border-zinc-200 p-4" data-alignment={a.id}>
+    <div className="mb-4 rounded-[12px] border border-(--line) p-4" data-alignment={a.id}>
       {notice && <NoticeBox notice={notice} />}
       <div className="mb-1 flex flex-wrap items-center gap-2">
-        <span className="text-[16px] text-zinc-900">
+        <span className="text-[16px] text-(--text-1)">
           {a.requester.id === me ? "You ask" : `${a.requester.name} asks`} to align with {named(a.target_goal)}
         </span>
         <Pill tone={a.state === "approved" ? "green" : a.state === "pending" || a.state === "countered" ? "amber" : "neutral"}>{STATE_WORDS[a.state]}</Pill>
         <Pill>{a.choice === "contribution" ? "contribution only" : "work toward, usage moves"}</Pill>
         <Pill>revision {a.revision}</Pill>
       </div>
-      <ul className="mb-2 list-disc pl-5 text-[15px] text-zinc-700">
+      <ul className="mb-2 list-disc pl-5 text-[15px] text-(--text-2)">
         {a.effects.map((e) => (
           <li key={e.kind}>{e.text}</li>
         ))}
       </ul>
       {a.sessions.length > 0 && (
-        <p className="text-[14px] text-zinc-500" data-alignment-sessions>
+        <p className="text-[14px] text-(--text-3)" data-alignment-sessions>
           Sessions: {a.sessions.map((s) => `${s.label}${sessionId(s)}${s.current_goal ? `, now on ${s.current_goal.visible ? s.current_goal.title : "a goal you can't see"}` : ""}`).join("; ")}
         </p>
       )}
       {closed ? (
-        <p className="text-[14px] text-zinc-700" data-alignment-decision>
+        <p className="text-[14px] text-(--text-2)" data-alignment-decision>
           {closed}
         </p>
       ) : (
         <>
-          <p className="text-[14px] text-zinc-500">Approvals needed (one from each):</p>
-          <ul className="mb-1 list-disc pl-5 text-[14px] text-zinc-500">
+          <p className="text-[14px] text-(--text-3)">Approvals needed (one from each):</p>
+          <ul className="mb-1 list-disc pl-5 text-[14px] text-(--text-3)">
             {a.requirements.map((r, i) => (
               <li key={`${r.for}-${i}`}>
                 {requirementLabel(a, r.for, me)}: {r.approvers.map((p) => said(p, me)).join(" or ") || "nobody yet"}{" "}
@@ -168,9 +168,9 @@ function AlignmentCard({ ws, a, me, onDone }: { ws: string; a: Alignment; me: st
           </ul>
         </>
       )}
-      {a.note && <p className="mt-1 text-[14px] text-zinc-600">Note: {a.note}</p>}
+      {a.note && <p className="mt-1 text-[14px] text-(--text-2)">Note: {a.note}</p>}
       {a.history.length > 1 && (
-        <details className="mt-1 text-[14px] text-zinc-500">
+        <details className="mt-1 text-[14px] text-(--text-3)">
           <summary className="cursor-pointer">History</summary>
           {a.history.map((h) => (
             <p key={h.revision}>
@@ -237,7 +237,7 @@ export default function Alignments({ me, ws }: { me: Me; ws: string }) {
   );
   return (
     <Shell me={me} ws={ws} tab="Alignments">
-      <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">Alignments</h1>
+      <h1 className="mb-5 text-[26px] font-semibold text-(--text-1)">Alignments</h1>
       {d.loading && <Loading />}
       <Err>{d.error}</Err>
       {d.data && (

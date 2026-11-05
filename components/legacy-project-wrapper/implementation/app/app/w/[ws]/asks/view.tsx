@@ -48,8 +48,8 @@ function MentionForm({ ws, a, onDone }: { ws: string; a: Ask; onDone: () => void
   const [where, setWhere] = useState("");
   const act = useAction();
   return (
-    <div className="mt-3 rounded-[12px] border border-zinc-300 p-3">
-      <p className="mb-2 text-[15px] text-zinc-700">Record that this came up again.</p>
+    <div className="mt-3 rounded-[12px] border border-(--edge) p-3">
+      <p className="mb-2 text-[15px] text-(--text-2)">Record that this came up again.</p>
       <Field label="When">
         <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
       </Field>
@@ -89,28 +89,28 @@ function AskCard({ ws, a, me, onDone }: { ws: string; a: Ask; me: string; onDone
       onDone();
     });
   return (
-    <div className="ask-card mb-4 rounded-[12px] border border-zinc-200 p-4" data-ask={a.id}>
+    <div className="ask-card mb-4 rounded-[12px] border border-(--line) p-4" data-ask={a.id}>
       {notice && <NoticeBox notice={notice} />}
       <div className="mb-1 flex flex-wrap items-center gap-2">
-        <span className="text-[16px] text-zinc-900">
+        <span className="text-[16px] text-(--text-1)">
           {a.from_label ?? (a.requester.id === me ? "You" : a.requester.name)} asked {a.team.name}
         </span>
         <Pill tone={TONE[a.state]}>{a.state}</Pill>
         {a.goal && (
-          <Link href={`/app/w/${ws}/goals/${a.goal.id}`} className="text-[14px] text-violet-700 hover:underline">
+          <Link href={`/app/w/${ws}/goals/${a.goal.id}`} className="text-[14px] text-(--accent-text) hover:underline">
             {a.goal.title}
           </Link>
         )}
       </div>
-      <blockquote className="my-2 border-l-2 border-zinc-300 pl-3 text-[15px] text-zinc-800">“{a.text}”</blockquote>
-      <p className="text-[14px] text-zinc-500">{askSubline(a)}</p>
+      <blockquote className="my-2 border-l-2 border-(--edge) pl-3 text-[15px] text-(--text-1)">“{a.text}”</blockquote>
+      <p className="text-[14px] text-(--text-3)">{askSubline(a)}</p>
       {/* Who last decided it, in the refusal's words: "marked done by <name>", never the bare "done by" (c10 W3). */}
-      <p className="text-[13px] text-zinc-500">
+      <p className="text-[13px] text-(--text-3)">
         Recorded by {said(a.requester, me)}
         {a.decided_by && a.state !== "open" ? ` · ${a.state === "done" ? "marked done" : a.state} by ${said(a.decided_by, me)}` : ""}
       </p>
       {a.mentions.length > 0 && (
-        <details className="mt-1 text-[14px] text-zinc-500">
+        <details className="mt-1 text-[14px] text-(--text-3)">
           <summary className="cursor-pointer">When it came up again</summary>
           {a.mentions.map((m) => (
             <p key={m.n}>
@@ -252,12 +252,12 @@ function ImportAsks({ ws, teams, onDone }: { ws: string; teams: { id: string; na
     }, onDone);
   return (
     <details id="import-asks">
-      <summary className="cursor-pointer text-[15px] text-zinc-700">Import asks (JSON, at most 60)</summary>
-      <p className="my-2 text-[14px] text-zinc-500">
+      <summary className="cursor-pointer text-[15px] text-(--text-2)">Import asks (JSON, at most 60)</summary>
+      <p className="my-2 text-[14px] text-(--text-3)">
         Each ask: {"{"}team (the team&apos;s name) or team_id, text, from_label, goal_id, source: {"{"}kind: &quot;meeting&quot; or &quot;manual&quot;, title, date{"}"}, state, mentions{"}"}. An import adds to the asks here and never replaces them: an ask already recorded for that team with the same text and date is skipped, and one with a new date is recorded as having come up again.
       </p>
       {teams.length > 0 && (
-        <p className="my-2 text-[14px] text-zinc-500" data-import-teams>
+        <p className="my-2 text-[14px] text-(--text-3)" data-import-teams>
           Teams here: {teams.map((t) => `${t.name} (team_id ${t.id})`).join(", ")}.
         </p>
       )}
@@ -294,8 +294,8 @@ export default function Asks({ me, ws }: { me: Me; ws: string }) {
   );
   return (
     <Shell me={me} ws={ws} tab="Asks">
-      <h1 className="mb-2 text-[26px] font-semibold text-zinc-900">Asks</h1>
-      <p className="mb-5 text-[15px] text-zinc-600">What people asked of a team, from meetings or recorded by hand. An open ask is not an agreed goal until a lead of the team accepts it.</p>
+      <h1 className="mb-2 text-[26px] font-semibold text-(--text-1)">Asks</h1>
+      <p className="mb-5 text-[15px] text-(--text-2)">What people asked of a team, from meetings or recorded by hand. An open ask is not an agreed goal until a lead of the team accepts it.</p>
       {d.loading && <Loading />}
       <Err>{d.error}</Err>
       {d.data && (

@@ -9,11 +9,11 @@ export function NotInWorkspace({ me }: { me: Me }) {
   return (
     <Shell me={me}>
       <Card>
-        <h1 className="mb-2 text-[22px] font-semibold text-zinc-900" data-not-in-workspace>
+        <h1 className="mb-2 text-[22px] font-semibold text-(--text-1)" data-not-in-workspace>
           This workspace doesn&apos;t exist or you&apos;re not in it
         </h1>
-        <p className="mb-3 text-[15px] text-zinc-700">It may have been deleted, or you may have been removed from it. Ask a workspace owner for an invite if you should be in it.</p>
-        <Link href="/app" className="font-medium text-violet-700 underline">
+        <p className="mb-3 text-[15px] text-(--text-2)">It may have been deleted, or you may have been removed from it. Ask a workspace owner for an invite if you should be in it.</p>
+        <Link href="/app" className="font-medium text-(--accent-text) underline">
           Go to your workspaces
         </Link>
       </Card>

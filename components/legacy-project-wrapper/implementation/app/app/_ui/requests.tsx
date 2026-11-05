@@ -96,7 +96,7 @@ const sessionName = (s: { owner: Person; mine: boolean; repo_alias: string | nul
 export function HoldBanner({ hold, goalTitle, me }: { hold: HoldState["held"]; goalTitle?: string; me?: string }) {
   if (!hold) return null;
   return (
-    <div data-hold-banner className="mb-5 rounded-[14px] border border-red-700 bg-red-50 px-4 py-3 text-[15px] text-red-800">
+    <div data-hold-banner className="mb-5 rounded-[14px] border border-(--st-declined) bg-(--st-declined-soft) px-4 py-3 text-[15px] text-(--st-declined)">
       <strong>All agents on {goalTitle ? `"${goalTitle}"` : "this goal"} are on hold.</strong> {hold.held_by.id === me ? "You" : hold.held_by.name} paused them {when(hold.held_at)}
       {hold.reason ? `: ${hold.reason}` : ""}. Their tools are blocked until someone who can approve for the goal releases it.
     </div>
@@ -121,7 +121,7 @@ function HoldControls({ ws, goal, me, hold, onDone }: { ws: string; goal: Goal; 
       </SignInAgain>
     );
   return (
-    <div className="mb-4 border-b border-zinc-200 pb-4">
+    <div className="mb-4 border-b border-(--line) pb-4">
       {hold.held ? (
         <>
           <Btn kind="secondary" disabled={act.busy} onClick={() => void act.run(() => api(path, { method: "DELETE" }), onDone)}>
@@ -129,7 +129,7 @@ function HoldControls({ ws, goal, me, hold, onDone }: { ws: string; goal: Goal; 
           </Btn>
           {/* Said before the press, as for holding: a developer told to lift a hold "from the web" otherwise meets the
               recent sign-in only as a refusal (E2E-AGENT cycle 13, section 5). */}
-          <p className="mt-1 text-[13px] text-zinc-500" data-hold-hint>
+          <p className="mt-1 text-[13px] text-(--text-3)" data-hold-hint>
             {RELEASE_HINT}
           </p>
         </>
@@ -142,7 +142,7 @@ function HoldControls({ ws, goal, me, hold, onDone }: { ws: string; goal: Goal; 
             <Btn kind="danger" disabled={act.busy} onClick={() => void act.run(() => api(path, { method: "PUT", body: { reason: reason || null } }), onDone)}>
               Hold all agents on this goal
             </Btn>
-            <p className="mt-1 text-[13px] text-zinc-500" data-hold-hint>
+            <p className="mt-1 text-[13px] text-(--text-3)" data-hold-hint>
               {HOLD_HINT}
             </p>
           </>
@@ -164,26 +164,26 @@ function SendRequest({ ws, goal, data, onDone }: { ws: string; goal: Goal; data:
   const others = feed.data?.goals.filter((g) => g.id !== goal.id && g.status === "active") ?? [];
   if (!sessions.length) return <Note>No shared session is working on this goal, so there is no one to send a request to.</Note>;
   return (
-    <div className="mb-4 border-b border-zinc-200 pb-4" id="send-request">
-      <p className="mb-2 text-[15px] font-medium text-zinc-900">Send a request</p>
+    <div className="mb-4 border-b border-(--line) pb-4" id="send-request">
+      <p className="mb-2 text-[15px] font-medium text-(--text-1)">Send a request</p>
       {(Object.keys(TYPE_LABEL) as RequestType[]).map((t) => (
         <label key={t} className="mb-2 flex items-start gap-2 text-[15px]">
           <input type="radio" name="request-type" value={t} checked={type === t} onChange={() => setType(t)} className="mt-1" />
           <span>
-            <strong className="text-zinc-900">{TYPE_LABEL[t]}.</strong> {TYPE_HELP[t]}
+            <strong className="text-(--text-1)">{TYPE_LABEL[t]}.</strong> {TYPE_HELP[t]}
           </span>
         </label>
       ))}
       {type === "switch_goal" && (
         <>
-          <p className="mb-1 text-[14px] text-zinc-600">Sessions to move (pick at least one)</p>
+          <p className="mb-1 text-[14px] text-(--text-2)">Sessions to move (pick at least one)</p>
           {sessions.map((s) => (
             <label key={s.session_key} className="mb-1 flex items-center gap-2 text-[15px]">
               <input type="checkbox" checked={keys.includes(s.session_key)} onChange={(e) => setKeys((k) => (e.target.checked ? [...k, s.session_key] : k.filter((x) => x !== s.session_key)))} />
               <span>
                 {sessionName(s)}
                 {/* Two sessions can share a name (one person, one repository): the start time and the key's end tell them apart. */}
-                <span className="text-zinc-500">
+                <span className="text-(--text-3)">
                   {" "}
                   · started {when(s.started_at)} · …{s.session_key.slice(-6)}
                 </span>
@@ -231,9 +231,9 @@ function RequestRow({ ws, r, me, onDone }: { ws: string; r: RequestView; me: str
   return (
     <li className="py-3" data-request={r.id}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[16px] text-zinc-900">{TYPE_LABEL[r.type]}</span>
+        <span className="text-[16px] text-(--text-1)">{TYPE_LABEL[r.type]}</span>
         {r.state === "cancelled" ? <Pill>cancelled</Pill> : r.state === "expired" ? <Pill>{r.expired_reason === "sessions_ended" ? "expired: its sessions ended" : "expired: the goal closed"}</Pill> : r.state === "open" ? <Pill tone="amber">waiting</Pill> : <Pill tone="green">answered</Pill>}
-        <span className="text-[14px] text-zinc-500">
+        <span className="text-[14px] text-(--text-3)">
           from {r.sender.id === me ? "you" : r.sender.name} ({r.sender.role === "approver" ? "approver" : "workspace owner"}), {when(r.created_at)}, goal version {r.goal.version}
         </span>
         {r.can_cancel && (
@@ -244,18 +244,18 @@ function RequestRow({ ws, r, me, onDone }: { ws: string; r: RequestView; me: str
           </span>
         )}
       </div>
-      {r.target_goal && <p className="text-[14px] text-zinc-600">Move to: {r.target_goal.private ? "a goal you can't see" : r.target_goal.title}</p>}
-      {r.note && <p className="text-[14px] text-zinc-600">Note: &ldquo;{r.note}&rdquo;</p>}
-      {r.cancelled_by && <p className="text-[14px] text-zinc-500">Cancelled by {r.cancelled_by.id === me ? "you" : r.cancelled_by.name}, {when(r.cancelled_at)}</p>}
-      <p className="text-[14px] text-zinc-500">
+      {r.target_goal && <p className="text-[14px] text-(--text-2)">Move to: {r.target_goal.private ? "a goal you can't see" : r.target_goal.title}</p>}
+      {r.note && <p className="text-[14px] text-(--text-2)">Note: &ldquo;{r.note}&rdquo;</p>}
+      {r.cancelled_by && <p className="text-[14px] text-(--text-3)">Cancelled by {r.cancelled_by.id === me ? "you" : r.cancelled_by.name}, {when(r.cancelled_at)}</p>}
+      <p className="text-[14px] text-(--text-3)">
         {c.pending} pending, {c.accepted} accepted by the developer{c.not_declined ? `, ${c.not_declined} delivered and not declined` : ""}, {c.declined} declined
         {c.expired ? `, ${c.expired} expired` : ""}
       </p>
       {r.sessions.map((s) => (
-        <p key={s.session_key} className="flex flex-wrap items-center gap-2 text-[14px] text-zinc-700">
+        <p key={s.session_key} className="flex flex-wrap items-center gap-2 text-[14px] text-(--text-2)">
           {sessionName(s)}
           {/* Two sessions can share a name (one person, one repository): the start time and the key's end tell them apart (X4). */}
-          <span className="text-zinc-500">
+          <span className="text-(--text-3)">
             {" "}
             · started {when(s.started_at)} · …{s.session_key.slice(-6)}
           </span>{" "}
@@ -296,7 +296,7 @@ export function AgentsOnGoalCard({ ws, goal, me, onHoldChanged }: { ws: string; 
         {data.requests.length === 0 ? (
           <Note>No requests sent to agents on this goal yet.</Note>
         ) : (
-          <ul className="divide-y divide-zinc-200">
+          <ul className="divide-y divide-(--line)">
             {data.requests.map((r) => (
               <RequestRow key={`${r.id}:${r.state}`} ws={ws} r={r} me={me.id} onDone={d.reload} />
             ))}

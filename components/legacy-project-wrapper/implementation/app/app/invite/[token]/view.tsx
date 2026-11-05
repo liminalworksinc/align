@@ -69,19 +69,19 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
     });
   return (
     <Shell me={me}>
-      <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">Workspace invite</h1>
+      <h1 className="mb-5 text-[26px] font-semibold text-(--text-1)">Workspace invite</h1>
       <Card>
         {p.loading && <Loading />}
         {gone && <Err>{GONE}</Err>}
         {p.error && !gone && <Err>This invite link is not valid. It may have been used, withdrawn or expired.</Err>}
         {p.data && !gone && (
           <>
-            <p className="mb-3 text-[16px] text-zinc-700">
-              {p.data.email_matches ? "You are" : `${p.data.invited_email} is`} invited to <strong className="text-zinc-900">{p.data.workspace.name}</strong> as {p.data.role}
+            <p className="mb-3 text-[16px] text-(--text-2)">
+              {p.data.email_matches ? "You are" : `${p.data.invited_email} is`} invited to <strong className="text-(--text-1)">{p.data.workspace.name}</strong> as {p.data.role}
               {p.data.team ? (
                 <>
                   {" "}
-                  and to the team <strong className="text-zinc-900">{p.data.team.name}</strong> as {p.data.team_role ?? "member"}.
+                  and to the team <strong className="text-(--text-1)">{p.data.team.name}</strong> as {p.data.team_role ?? "member"}.
                 </>
               ) : (
                 "."
@@ -93,9 +93,9 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
                   // A fieldset is at least as wide as its widest content by default (min-inline-size: min-content), so it
                   // would grow past the card for a name it can't wrap: min-w-0 lets it shrink, and the name clips inside
                   // it, as on the Devices page (E2E-WEB cycle 11 C11-2).
-                  <fieldset className="mb-4 min-w-0 overflow-hidden rounded-[12px] border border-zinc-300 p-4">
-                    <legend className="px-1 text-[15px] text-zinc-700">Your paired devices</legend>
-                    <p className="mb-2 text-[15px] text-zinc-600">
+                  <fieldset className="mb-4 min-w-0 overflow-hidden rounded-[12px] border border-(--edge) p-4">
+                    <legend className="px-1 text-[15px] text-(--text-2)">Your paired devices</legend>
+                    <p className="mb-2 text-[15px] text-(--text-2)">
                       Tick the devices that should reach {p.data.workspace.name} too. Each one picks it up the next time it syncs, without signing in again; its other workspaces stay as they are.
                     </p>
                     {!fresh && (
@@ -116,7 +116,7 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
                           onChange={(e) => setChosen((c) => (e.target.checked ? [...c, d.id] : c.filter((x) => x !== d.id)))}
                         />
                         <span className="min-w-0 overflow-hidden [overflow-wrap:anywhere]">
-                          {d.name} <span className="text-zinc-500">(last seen {when(d.last_seen_at)})</span>
+                          {d.name} <span className="text-(--text-3)">(last seen {when(d.last_seen_at)})</span>
                         </span>
                       </label>
                     ))}

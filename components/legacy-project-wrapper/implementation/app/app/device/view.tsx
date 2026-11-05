@@ -132,7 +132,7 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
 
   return (
     <Shell me={me}>
-      <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">Connect a device</h1>
+      <h1 className="mb-5 text-[26px] font-semibold text-(--text-1)">Connect a device</h1>
       {stale ? (
         <SignInAgain me={me} next={code.trim() ? `/app/device?code=${encodeURIComponent(code.trim())}` : "/app/device"}>
           Sign in again to approve a device. Approving needs a sign-in from the last 15 minutes.
@@ -154,10 +154,10 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
             </Btn>
           </form>
           {pending && (
-            <div className="mt-5 rounded-[12px] border border-zinc-300 p-4">
-              <p className="overflow-hidden text-[17px] text-zinc-900 [overflow-wrap:anywhere]">{pending.device_name}</p>
-              <p className="mb-3 text-[14px] text-zinc-500">Asked {ago(pending.age_seconds)}</p>
-              <p className="mb-2 text-[15px] text-zinc-600">Workspaces this device may use:</p>
+            <div className="mt-5 rounded-[12px] border border-(--edge) p-4">
+              <p className="overflow-hidden text-[17px] text-(--text-1) [overflow-wrap:anywhere]">{pending.device_name}</p>
+              <p className="mb-3 text-[14px] text-(--text-3)">Asked {ago(pending.age_seconds)}</p>
+              <p className="mb-2 text-[15px] text-(--text-2)">Workspaces this device may use:</p>
               {list.data?.workspaces.map((w) => (
                 <label key={w.id} className="mb-1 flex items-center gap-2 text-[15px]">
                   <input type="checkbox" checked={chosen.includes(w.id)} onChange={(e) => setChosen((c) => (e.target.checked ? [...c, w.id] : c.filter((x) => x !== w.id)))} />

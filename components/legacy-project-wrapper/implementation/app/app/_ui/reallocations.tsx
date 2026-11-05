@@ -100,10 +100,10 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
     <li className="py-3" data-reallocation={r.id}>
       {notice && <NoticeBox notice={notice} />}
       <div className="mb-1 flex flex-wrap items-center gap-2">
-        <span className="text-[15px] text-zinc-900">{r.requester.id === me.id ? "You" : r.requester.name} proposed new targets</span>
+        <span className="text-[15px] text-(--text-1)">{r.requester.id === me.id ? "You" : r.requester.name} proposed new targets</span>
         <Pill tone={r.state === "approved" ? "green" : r.state === "pending" || r.state === "countered" ? "amber" : "neutral"}>{STATE_WORDS[r.state]}</Pill>
         {r.launch === "launched" && <Pill tone="violet">launched</Pill>}
-        <span className="text-[13px] text-zinc-500">
+        <span className="text-[13px] text-(--text-3)">
           revision {r.revision} · {when(r.updated_at)}
         </span>
       </div>
@@ -113,9 +113,9 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
             {t.goal ? t.goal.title : "A goal you can't see"}: {t.goal ? `${pctOr(t.from_share)} → ${pctOr(t.target_share)}` : "changes"}
             {t.goal &&
               (t.approved ? (
-                <span className="text-zinc-500"> (approved by {said(t.approved_by, me.id)})</span>
+                <span className="text-(--text-3)"> (approved by {said(t.approved_by, me.id)})</span>
               ) : (
-                !closed(r) && <span className="text-zinc-500"> (needs one of: {names(t.approvers, me.id) || "nobody yet"})</span>
+                !closed(r) && <span className="text-(--text-3)"> (needs one of: {names(t.approvers, me.id) || "nobody yet"})</span>
               ))}
           </li>
         ))}
@@ -123,22 +123,22 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
       {/* The requester's reason (their first revision's note) stays on the card whatever a counter says or leaves out, as a
           change request keeps "<requester>'s reason, as written" next to a counter's note (X3). */}
       {reason && (
-        <p className="text-[14px] text-zinc-600" data-reallocation-reason>
+        <p className="text-[14px] text-(--text-2)" data-reallocation-reason>
           {r.requester.id === me.id ? "Your" : `${r.requester.name}'s`} reason: “{reason}”
         </p>
       )}
       {counterNote && (
-        <p className="text-[14px] text-zinc-600" data-reallocation-counter-note>
+        <p className="text-[14px] text-(--text-2)" data-reallocation-counter-note>
           {counterNote.author.id === me.id ? "Your" : `${counterNote.author.name}'s`} note on revision {counterNote.revision}: “{counterNote.note}”
         </p>
       )}
       {r.state === "rejected" && (
-        <p className="text-[14px] text-zinc-600" data-reallocation-declined>
+        <p className="text-[14px] text-(--text-2)" data-reallocation-declined>
           Declined by {said(r.rejected_by, me.id)}
           {r.rejection_reason ? <>: “{r.rejection_reason}”</> : "."}
         </p>
       )}
-      {line && <p className="text-[14px] text-zinc-600">{line}</p>}
+      {line && <p className="text-[14px] text-(--text-2)">{line}</p>}
       <div className="mt-2 flex flex-wrap gap-2">
         {r.can.approve && (
           <Btn disabled={act.busy} onClick={() => doIt("approve")}>
@@ -183,7 +183,7 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
       </div>
       {countering && (
         <form
-          className="mt-3 rounded-[10px] border border-zinc-200 p-3"
+          className="mt-3 rounded-[10px] border border-(--line) p-3"
           onSubmit={(e) => {
             e.preventDefault();
             decide("counter", { targets: r.targets.map((t, i) => ({ goal_id: t.goal!.id, target_share: values[i].trim() === "" ? null : Number(values[i]) })), note: note || null }, () => setCountering(false));
@@ -198,7 +198,7 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
             <TextArea rows={2} maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
           {sameAsProposal && (
-            <p className="mb-2 text-[14px] text-zinc-600" data-counter-same>
+            <p className="mb-2 text-[14px] text-(--text-2)" data-counter-same>
               {COUNTER_SAME_AS_PROPOSAL}
             </p>
           )}
@@ -236,15 +236,15 @@ export function ProposalsCard({ ws, me, detail }: { ws: string; me: Me; detail: 
         </Note>
         {list.loading && <Loading />}
         <Err>{list.error}</Err>
-        {all.length === 0 && !list.loading && <p className="text-[15px] text-zinc-500">No proposals yet.</p>}
-        <ul className="divide-y divide-zinc-200">
+        {all.length === 0 && !list.loading && <p className="text-[15px] text-(--text-3)">No proposals yet.</p>}
+        <ul className="divide-y divide-(--line)">
           {all.map((r) => (
             <ProposalItem key={`${r.id}:${r.revision}:${r.state}:${r.launch}`} ws={ws} r={r} me={me} onDone={reload} />
           ))}
         </ul>
         {canPropose && active.length > 0 && (
           <form
-            className="mt-4 border-t border-zinc-200 pt-4"
+            className="mt-4 border-t border-(--line) pt-4"
             onSubmit={(e) => {
               e.preventDefault();
               const n = changes.length;
@@ -260,7 +260,7 @@ export function ProposalsCard({ ws, me, detail }: { ws: string; me: Me; detail: 
               );
             }}
           >
-            <p className="mb-2 text-[15px] font-medium text-zinc-900">Propose new targets</p>
+            <p className="mb-2 text-[15px] font-medium text-(--text-1)">Propose new targets</p>
             {proposed && <NoticeBox notice={proposed} />}
             <div className="grid gap-2 sm:grid-cols-2">
               {active.map((g) => (

@@ -7,9 +7,9 @@ import { ERROR_PAGE, ERROR_RETRY } from "./words";
 export function ErrorNotice({ digest, reset }: { digest?: string; reset: () => void }) {
   return (
     <main role="alert" className="flex min-h-full flex-col items-start gap-4 p-10">
-      <p className="text-[18px] font-semibold text-zinc-900">{ERROR_PAGE}</p>
+      <p className="text-[18px] font-semibold text-(--text-1)">{ERROR_PAGE}</p>
       <Btn onClick={reset}>{ERROR_RETRY}</Btn>
-      {digest && <p className="font-mono text-[12.5px] text-zinc-500">Reference: {digest}</p>}
+      {digest && <p className="font-mono text-[12.5px] text-(--text-3)">Reference: {digest}</p>}
     </main>
   );
 }

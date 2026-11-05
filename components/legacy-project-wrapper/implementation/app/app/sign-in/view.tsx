@@ -54,6 +54,11 @@ function captchaMessage(e: AuthError): string | null {
   return null;
 }
 
+// LIM-2472 (stream R): token-only styling in both themes; the test sign-in's two modes read as one segmented choice.
+const TAB = "rounded-[7px] px-3 py-1.5 font-medium";
+const TAB_ON = "bg-(--bg-overlay) text-(--text-1) shadow-[inset_0_0_0_1px_var(--line-strong)]";
+const TAB_OFF = "text-(--text-2) hover:text-(--text-1)";
+
 export default function SignIn({ next, options, email: email0, code: code0 }: { next: string; options: SignInOptions; email: string; code: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -140,10 +145,10 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
   };
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[var(--al-bg)] p-6 text-zinc-800">
-      <div className="al-in w-full max-w-[460px] rounded-[14px] border border-zinc-200 bg-white p-8">
-        <h1 className="mb-1 font-display text-[34px] leading-none">Align</h1>
-        <p className="mb-6 text-[16px] text-zinc-600">Sign in as yourself to see your workspaces, goals and shared sessions.</p>
+    <main className="grid min-h-screen place-items-center bg-(--bg-page) p-6 text-(--text-1) max-sm:p-3">
+      <div className="al-in w-full max-w-[460px] rounded-(--radius-l) border border-(--line) bg-(--bg-panel) p-8 max-sm:p-5">
+        <h1 className="mb-1 font-display text-[38px] leading-none">Align</h1>
+        <p className="mb-6 text-[16px] text-(--text-2)">Sign in as yourself to see your workspaces, goals and shared sessions.</p>
         {(options.google || options.github) && (
           <div className="mb-5 flex flex-col gap-2">
             {options.google && (
@@ -167,7 +172,7 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
         )}
         {place === "elsewhere" && (
           <Note>
-            Passkeys work only at <a className="text-violet-700 underline" href={`${options.passkeyOrigin}/app/sign-in`}>{options.passkeyOrigin}</a>
+            Passkeys work only at <a className="font-medium text-(--accent-text) underline underline-offset-2" href={`${options.passkeyOrigin}/app/sign-in`}>{options.passkeyOrigin}</a>
             {options.local ? " (a passkey needs a domain name, and this address is a number)." : "."}
           </Note>
         )}
@@ -242,13 +247,13 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
         {/* One widget for both steps: it stays mounted while the person moves from Send code to Sign in. */}
         {bot.widget && <div className="mt-4">{bot.widget}</div>}
         {options.testIdp && (
-          <form id="test-idp" onSubmit={local} className="mt-6 border-t border-zinc-200 pt-5">
+          <form id="test-idp" onSubmit={local} className="mt-6 border-t border-(--line) pt-5">
             <p className="al-lbl mb-2">Test sign-in (this machine only)</p>
-            <div className="mb-3 flex gap-2 text-[14px]">
-              <button type="button" className={mode === "in" ? "text-zinc-900 underline" : "text-zinc-500"} onClick={() => setMode("in")}>
+            <div className="mb-3 inline-flex max-w-full flex-wrap gap-0.5 rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) p-0.5 text-[14px]">
+              <button type="button" aria-pressed={mode === "in"} className={`${TAB} ${mode === "in" ? TAB_ON : TAB_OFF}`} onClick={() => setMode("in")}>
                 Sign in
               </button>
-              <button type="button" className={mode === "up" ? "text-zinc-900 underline" : "text-zinc-500"} onClick={() => setMode("up")}>
+              <button type="button" aria-pressed={mode === "up"} className={`${TAB} ${mode === "up" ? TAB_ON : TAB_OFF}`} onClick={() => setMode("up")}>
                 Create a test account
               </button>
             </div>
@@ -270,9 +275,9 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
         )}
         <Err>{error}</Err>
         {options.requestAccess && (
-          <p className="mt-5 border-t border-zinc-200 pt-4 text-[15px] text-zinc-600">
+          <p className="mt-5 border-t border-(--line) pt-4 text-[15px] text-(--text-2)">
             New to Align? Creating a workspace here needs a creation code.{" "}
-            <Link href="/app/request-access" className="underline">
+            <Link href="/app/request-access" className="font-medium text-(--accent-text) underline underline-offset-2">
               Request access
             </Link>
           </p>

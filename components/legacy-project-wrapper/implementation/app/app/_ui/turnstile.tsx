@@ -63,7 +63,7 @@ export function useTurnstile(siteKey: string | null) {
   const widget = siteKey ? (
     <div className="mb-3">
       <div ref={el} data-turnstile-sitekey={siteKey} />
-      {failed && <p className="text-[14px] text-red-700">The check that you are a person didn&apos;t load. Reload the page to try again.</p>}
+      {failed && <p className="text-[14px] text-(--st-declined)">The check that you are a person didn&apos;t load. Reload the page to try again.</p>}
     </div>
   ) : null;
   return {

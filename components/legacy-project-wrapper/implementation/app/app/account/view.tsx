@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Shell, SignInAgain, go, useAction, useApi, when } from "../_ui/kit";
+import { api, Btn, Err, Field, Input, Loading, Note, Pill, Shell, SignInAgain, go, useAction, useApi, when } from "../_ui/kit";
+import { Panel } from "../_ui/ds";
 import { ThemeSetting } from "../_ui/ds/theme";
 import { addPasskey, usePasskeyPlace } from "../_ui/passkey";
 import type { Me, SignInOptions } from "../_ui/server";
@@ -24,6 +25,13 @@ const PROVIDERS = { google: "Google", github: "GitHub" } as const;
 type Provider = keyof typeof PROVIDERS;
 const LABELS: Record<string, string> = { ...PROVIDERS, credential: "Test password (this machine only)" };
 
+// LIM-2472 (stream R): token-only styling in both themes. Each row is a name over its detail, and the rows wrap, so a
+// long email never squeezes a label to one letter per line at 320 (defect 5).
+const H1 = "mb-5 font-display text-[32px] leading-[1.1] text-(--text-1) max-sm:text-[28px]";
+const ROW = "flex flex-wrap items-center gap-x-3 gap-y-1 py-3 first:pt-0 last:pb-0";
+const ROW_NAME = "min-w-0 flex-1 basis-[12rem] text-[15px] font-medium text-(--text-1)";
+const TEXT_BTN = "rounded-(--radius-s) px-2 text-[14px] font-medium";
+
 /** Better Auth's link-failure codes, in words. */
 function linkMessage(code: string): string {
   const c = code.toLowerCase();
@@ -37,16 +45,16 @@ function PasskeyItem({ p, busy, onRename, onDelete }: { p: Passkey; busy: boolea
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(p.name ?? "");
   return (
-    <li className="flex flex-wrap items-center gap-3 py-3">
+    <li className={ROW}>
       {editing ? (
         <form
-          className="flex flex-1 items-center gap-2"
+          className="flex min-w-0 flex-1 basis-full flex-wrap items-center gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             void onRename(name).then((ok) => ok && setEditing(false));
           }}
         >
-          <span className="flex-1">
+          <span className="min-w-[160px] flex-1">
             <Input aria-label="Passkey name" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} required />
           </span>
           <Btn type="submit" kind="secondary" disabled={busy || isBlankText(name)}>
@@ -54,17 +62,17 @@ function PasskeyItem({ p, busy, onRename, onDelete }: { p: Passkey; busy: boolea
           </Btn>
         </form>
       ) : (
-        <span className="flex-1 text-[16px] text-zinc-900">{p.name || "Unnamed passkey"}</span>
+        <span className={ROW_NAME}>{p.name || "Unnamed passkey"}</span>
       )}
-      <span className="text-[14px] text-zinc-500">
+      <span className="text-[14px] text-(--text-3)">
         added {when(p.created_at)} · {p.last_used_at ? `last used ${when(p.last_used_at)}` : "not used yet"}
       </span>
       {!editing && (
-        <button type="button" className="text-[14px] text-zinc-600 hover:text-zinc-900" onClick={() => setEditing(true)}>
+        <button type="button" className={`${TEXT_BTN} text-(--text-2) hover:bg-(--bg-raised) hover:text-(--text-1)`} onClick={() => setEditing(true)}>
           Rename
         </button>
       )}
-      <button type="button" className="text-[14px] text-red-700" disabled={busy} onClick={onDelete}>
+      <button type="button" className={`${TEXT_BTN} text-(--st-declined) hover:bg-(--st-declined-soft)`} disabled={busy} onClick={onDelete}>
         Delete
       </button>
     </li>
@@ -91,12 +99,12 @@ function Passkeys({ options, onReauth }: { options: SignInOptions; onReauth: (me
       setName("");
     }, list.reload);
   return (
-    <Card title="Passkeys">
-      <span id="passkeys" />
+    <Panel title="Passkeys">
+      <span id="passkeys" className="block scroll-mt-4" />
       {list.loading && <Loading />}
       <Err>{list.error}</Err>
-      {list.data && list.data.passkeys.length === 0 && <p className="text-[15px] text-zinc-500">No passkeys yet.</p>}
-      <ul className="divide-y divide-zinc-200">
+      {list.data && list.data.passkeys.length === 0 && <p className="text-[15px] text-(--text-2)">No passkeys yet.</p>}
+      <ul className="divide-y divide-(--line)">
         {(list.data?.passkeys ?? []).map((p) => (
           <PasskeyItem
             key={p.id}
@@ -119,7 +127,7 @@ function Passkeys({ options, onReauth }: { options: SignInOptions; onReauth: (me
             void add();
           }}
         >
-          <div className="min-w-[220px] flex-1">
+          <div className="min-w-[200px] flex-1">
             <Field label="Name (optional)" hint="For example, the device or password manager that keeps it">
               <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={100} />
             </Field>
@@ -134,13 +142,13 @@ function Passkeys({ options, onReauth }: { options: SignInOptions; onReauth: (me
         <Note>This browser can&apos;t use passkeys.</Note>
       ) : place === "elsewhere" ? (
         <Note>
-          Passkeys work only at <a className="text-violet-700 underline" href={`${options.passkeyOrigin}/app/account`}>{options.passkeyOrigin}</a>
+          Passkeys work only at <a className="text-(--accent-text) underline" href={`${options.passkeyOrigin}/app/account`}>{options.passkeyOrigin}</a>
           {options.local ? ", because a passkey needs a domain name and this address is a number. Open Align there and sign in to add or use one." : "."}
         </Note>
       ) : null}
       <Note>A passkey signs you in with your fingerprint, face or device PIN. Adding or deleting one needs a sign-in from the last 15 minutes.</Note>
       <Err>{act.error}</Err>
-    </Card>
+    </Panel>
   );
 }
 
@@ -158,14 +166,14 @@ function SignOutEverywhere({ onReauth }: { onReauth: (message: string) => void }
     void act.run(() => api("/api/v2/account/sign-out-everywhere", { body: { devices, apps } }), () => go("/app/sign-in"));
   };
   return (
-    <Card title="Sign out everywhere">
-      <p className="mb-3 text-[15px] text-zinc-600">Ends your Align sign-in on every browser, this one included. Use it if you lost a device or signed in somewhere you shouldn&apos;t have.</p>
-      <label className="mb-1 flex items-center gap-2 text-[15px]">
-        <input type="checkbox" name="devices" checked={devices} onChange={(e) => setDevices(e.target.checked)} />
+    <Panel title="Sign out everywhere">
+      <p className="mb-3 text-[15px] text-(--text-2)">Ends your Align sign-in on every browser, this one included. Use it if you lost a device or signed in somewhere you shouldn&apos;t have.</p>
+      <label className="mb-1 flex min-h-[44px] items-center gap-2 text-[15px] text-(--text-1)">
+        <input type="checkbox" className="size-4 shrink-0 accent-(--accent)" name="devices" checked={devices} onChange={(e) => setDevices(e.target.checked)} />
         Also unpair all my devices (each <code>align</code> CLI has to run <code>align login</code> again)
       </label>
-      <label className="mb-3 flex items-center gap-2 text-[15px]">
-        <input type="checkbox" name="apps" checked={apps} onChange={(e) => setApps(e.target.checked)} />
+      <label className="mb-3 flex min-h-[44px] items-center gap-2 text-[15px] text-(--text-1)">
+        <input type="checkbox" className="size-4 shrink-0 accent-(--accent)" name="apps" checked={apps} onChange={(e) => setApps(e.target.checked)} />
         Also disconnect all my AI apps, in every workspace
       </label>
       <Btn kind="danger" disabled={act.busy} onClick={signOutAll}>
@@ -173,7 +181,7 @@ function SignOutEverywhere({ onReauth }: { onReauth: (message: string) => void }
       </Btn>
       <Note>This needs a sign-in from the last 15 minutes.</Note>
       <Err>{act.error}</Err>
-    </Card>
+    </Panel>
   );
 }
 
@@ -214,36 +222,37 @@ export default function Account({ me, options, linkError }: { me: Me; options: S
 
   return (
     <Shell me={{ ...me, passkeyPrompt: false }}>
-      <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">Your account</h1>
+      <h1 className={H1}>Your account</h1>
       {reauth && (
         <SignInAgain me={me} next="/app/account">
           {reauth}
         </SignInAgain>
       )}
-      <Card>
-        <p className="text-[18px] text-zinc-900">{me.name || me.email}</p>
-        <p className="text-[15px] text-zinc-500">{me.email}</p>
-      </Card>
-      <Card title="Appearance">
+      <div className="flex flex-col gap-4">
+      <Panel>
+        <p className="text-[18px] font-semibold text-(--text-1)">{me.name || me.email}</p>
+        <p className="text-[15px] text-(--text-2)">{me.email}</p>
+      </Panel>
+      <Panel title="Appearance">
         <ThemeSetting hideLabel />
-      </Card>
-      <Card title="Ways you can sign in">
+      </Panel>
+      <Panel title="Ways you can sign in">
         {list.loading && <Loading />}
         <Err>{list.error}</Err>
-        <ul className="divide-y divide-zinc-200">
+        <ul className="divide-y divide-(--line)">
           {options.email && (
-            <li className="flex items-center gap-3 py-3">
-              <span className="flex-1 text-[16px] text-zinc-900">Email code</span>
-              <span className="text-[14px] text-zinc-500">A 6-digit code sent to {me.email}</span>
+            <li className={ROW}>
+              <span className={ROW_NAME}>Email code</span>
+              <span className="min-w-0 text-[14px] text-(--text-2)">A 6-digit code sent to {me.email}</span>
             </li>
           )}
           {(list.data ?? [])
             .filter((a) => a.providerId in LABELS)
             .map((a) => (
-              <li key={a.id} className="flex items-center gap-3 py-3">
-                <span className="flex-1 text-[16px] text-zinc-900">{LABELS[a.providerId]}</span>
+              <li key={a.id} className={ROW}>
+                <span className={ROW_NAME}>{LABELS[a.providerId]}</span>
                 <Pill tone="green">linked</Pill>
-                <span className="text-[14px] text-zinc-500">since {when(a.createdAt)}</span>
+                <span className="text-[14px] text-(--text-2)">since {when(a.createdAt)}</span>
               </li>
             ))}
         </ul>
@@ -260,10 +269,11 @@ export default function Account({ me, options, linkError }: { me: Me; options: S
         )}
         <Note>Linking lets that Google or GitHub account sign you in to this Align account. Align never links accounts on its own because their emails match.</Note>
         <Err>{error}</Err>
-      </Card>
+      </Panel>
       <Passkeys options={options} onReauth={setReauth} />
       <SignOutEverywhere onReauth={setReauth} />
       <DeleteAccount me={me} />
+      </div>
     </Shell>
   );
 }
@@ -285,8 +295,8 @@ function DeleteAccount({ me }: { me: Me }) {
     );
   }
   return (
-    <Card title="Delete your account">
-      <p className="mb-3 text-[15px] text-zinc-600">
+    <Panel title="Delete your account">
+      <p className="mb-3 text-[15px] text-(--text-2)">
         This signs you out everywhere, unpairs your devices, disconnects your apps and removes you from every workspace. A workspace where you are the only member is deleted too. Goals, change requests and session spend that others rely on stay, shown as
         &quot;Former member&quot; with no name or email. If you are the only owner of a workspace with other members, make someone else an owner or delete it first.
       </p>
@@ -307,6 +317,6 @@ function DeleteAccount({ me }: { me: Me }) {
         </Btn>
         <Err>{act.error}</Err>
       </form>
-    </Card>
+    </Panel>
   );
 }
