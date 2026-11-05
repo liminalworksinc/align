@@ -8,8 +8,9 @@ import Link from "next/link";
 //   Record         /app/w/<ws>/record?cr=<id>#record (the request's timeline), else /record?goal=<goal>
 // 44px tall on phones.
 
+// Neutral underlined text, not pink: in the review the only pink is the Changed marker and the one filled action.
 export const DECISION_LINK =
-  "inline-flex min-h-[32px] max-sm:min-h-[44px] items-center text-[14px] text-(--accent-text) underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)";
+  "inline-flex min-h-[32px] max-sm:min-h-[44px] items-center text-[14px] text-(--text-1) underline decoration-(--line-strong) underline-offset-2 hover:decoration-(--text-1) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)";
 
 export type DecisionPlace = "review" | "work" | "record";
 
@@ -17,7 +18,7 @@ export function DecisionLinks({ ws, goalId, crId, here, className = "" }: { ws: 
   const links: { place: DecisionPlace; href: string; label: string }[] = [
     ...(crId ? [{ place: "review" as const, href: `/app/w/${ws}/record?cr=${crId}`, label: "Review" }] : []),
     { place: "work", href: `/app/w/${ws}/work?goal=${goalId}`, label: "Work on this goal" },
-    { place: "record", href: crId ? `/app/w/${ws}/record?cr=${crId}#record` : `/app/w/${ws}/record?goal=${goalId}`, label: crId ? "Its record" : "Goal record" },
+    { place: "record", href: crId ? `/app/w/${ws}/record?cr=${crId}#record` : `/app/w/${ws}/record?goal=${goalId}`, label: "Record" },
   ];
   return (
     <nav aria-label="Decision, work and record" data-decision-links className={`flex flex-wrap items-center gap-x-4 ${className}`}>

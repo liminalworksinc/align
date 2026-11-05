@@ -112,7 +112,13 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
         <EvidenceSummary ws={ws} cr={cr} variant="full" />
         {!hasEvidence(cr) && (
           <p className="text-[14px] text-(--text-2)">
-            No evidence attached{cr.revision > 1 ? ` to revision ${cr.revision}` : ""}. Approving without evidence is recorded as such.
+            {cr.state === "approved"
+              ? cr.approved_without_evidence
+                ? "Approved without evidence."
+                : `No evidence attached${cr.revision > 1 ? ` to revision ${cr.revision}` : ""}.`
+              : cr.state === "pending" || cr.state === "countered"
+                ? `No evidence attached${cr.revision > 1 ? ` to revision ${cr.revision}` : ""}. Approving without evidence is recorded as such.`
+                : `No evidence attached${cr.revision > 1 ? ` to revision ${cr.revision}` : ""}.`}
           </p>
         )}
         {evidence.length > 0 && (
@@ -120,7 +126,7 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
             {evidence.map((e) => (
               <li key={e.id} className="flex flex-wrap items-center gap-2 text-[14px]">
                 {e.reported_as === "agent-reported" ? <EvidenceLabel kind="reported" size="s" detail="connected app" /> : <EvidenceLabel kind="self" size="s" />}
-                <a href={e.url} target="_blank" rel="noopener noreferrer" className="max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center text-(--accent-text) underline underline-offset-2 [overflow-wrap:anywhere]">
+                <a href={e.url} target="_blank" rel="noopener noreferrer" className="max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center text-(--text-1) underline decoration-(--line-strong) underline-offset-2 hover:decoration-(--text-1) [overflow-wrap:anywhere]">
                   {e.label || e.url}
                 </a>
                 <span className="text-[13px] text-(--text-3)">
@@ -586,7 +592,7 @@ export function ReviewActions({
       )}
 
       {choice && shown === "confirm" && (
-        <div role="region" aria-labelledby={`confirm-${cr.id}`} data-confirm={choice} className="flex flex-col gap-2 rounded-(--radius-m) border border-(--accent-text) bg-(--bg-raised) p-3">
+        <div role="region" aria-labelledby={`confirm-${cr.id}`} data-confirm={choice} className="flex flex-col gap-2 rounded-(--radius-m) border border-(--line-strong) bg-(--bg-raised) p-3">
           <h4 id={`confirm-${cr.id}`} ref={confirmRef} tabIndex={-1} className="text-[15px] font-semibold text-(--text-1) outline-none">
             {TITLE[choice]}: {cr.goal.title}
           </h4>
@@ -599,7 +605,7 @@ export function ReviewActions({
           {!oneRow && (choice === "approve" || choice === "approve_and_launch") && cr.evidence_count === 0 && <p className="text-[14px] text-(--text-2)">No evidence: the record will say it was approved without evidence.</p>}
           {oneRow && NOTE_ONLY.includes(choice) && (
             <details data-add-note className="text-[14px]" open={note.trim() !== "" || undefined}>
-              <summary className="inline-flex min-h-[44px] cursor-pointer items-center text-(--accent-text) [&::-webkit-details-marker]:hidden">Add a note</summary>
+              <summary className="inline-flex min-h-[44px] cursor-pointer items-center text-(--text-1) underline decoration-(--line-strong) underline-offset-2 [&::-webkit-details-marker]:hidden">Add a note</summary>
               <textarea aria-label="Note (optional)" className={FIELD} rows={2} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
             </details>
           )}
