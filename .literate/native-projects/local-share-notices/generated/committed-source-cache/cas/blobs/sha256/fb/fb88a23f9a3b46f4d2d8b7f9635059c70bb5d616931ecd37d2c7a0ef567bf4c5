@@ -1,0 +1,15 @@
+LITAI_LANGUAGE_TOOL ?= node
+OUT ?= _build
+.PHONY: all build test check
+all: build
+build:
+	"$(LITAI_LANGUAGE_TOOL)" tools/build.js "$(OUT)"
+test:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tests/litai_test.js
+	"$(LITAI_LANGUAGE_TOOL)" --check share_notices/constants.js
+	"$(LITAI_LANGUAGE_TOOL)" --check share_notices/is_share_state.js
+	"$(LITAI_LANGUAGE_TOOL)" --check share_notices/kind.js
+	"$(LITAI_LANGUAGE_TOOL)" --check share_notices/resumed_held.js

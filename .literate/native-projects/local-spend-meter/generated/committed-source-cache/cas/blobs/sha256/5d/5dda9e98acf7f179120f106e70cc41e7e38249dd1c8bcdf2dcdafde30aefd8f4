@@ -1,0 +1,10 @@
+'use strict';
+const {run_tests,smoke} = require('./tests/litai_test.js');
+function main() {
+  if (process.argv.length !== 3) throw new Error('Expected one framework mode');
+  if (process.argv[2] === '--litai-test') return run_tests();
+  if (process.argv[2] === '--litai-smoke') return smoke();
+  throw new Error('Library artifact has no product entrypoint');
+}
+try { process.stdout.write(JSON.stringify(main())+'\n'); }
+catch (error) { process.stderr.write(String(error.message)+'\n'); process.exitCode=1; }

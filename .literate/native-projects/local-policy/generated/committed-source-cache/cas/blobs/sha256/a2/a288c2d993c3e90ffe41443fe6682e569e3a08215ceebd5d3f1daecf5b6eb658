@@ -1,0 +1,102 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {authorize} = require('../policy/authorize.js');
+const {can_bind} = require('../policy/can_bind.js');
+const {can_read_goal} = require('../policy/can_read_goal.js');
+const {data} = require('../policy/data.js');
+
+function principal(wsRole, userId = 'reader', entries = []) {
+  return {userId, wsId: '', wsRole, pods: new Map(entries)};
+}
+const hidden = {ok: false, status: 404, code: 'not_found', message: 'Not found'};
+const viewerDenied = {ok: false, status: 403, code: 'read_only', message: 'Viewers can look but not change anything.'};
+const cases = [
+  ['generated-workspace-read', () => assert.deepStrictEqual(
+    authorize(principal('member'), 'workspace.read', {kind: 'pod', podId: ''}), {ok: true})],
+  ['generated-null-owner', () => assert.deepStrictEqual(
+    authorize(principal(null), 'goal.read', {kind: 'goal', ownerId: 'reader', visibility: 'private', podId: null}), hidden)],
+  ['generated-create-precedence', () => assert.deepStrictEqual(
+    authorize(principal('viewer'), 'goal.create', {kind: 'session', ownerId: 'reader'}), viewerDenied)],
+  ['generated-owner-team-required', () => assert.deepStrictEqual(
+    authorize(principal('owner'), 'goal.create', {kind: 'goal_draft', podId: 'team'}),
+    {ok: false, status: 403, code: 'not_in_team', message: 'Only members of that team can add its goals.'})],
+  ['generated-bind-approval', () => assert.deepStrictEqual(
+    authorize(principal('member'), 'goal.bind', {kind: 'bind', goal: {kind: 'goal', ownerId: 'writer', visibility: 'workspace', podId: null}, hasTransfer: false}),
+    {ok: false, status: 403, code: 'alignment_required', message: "Ask the goal's owner to approve working toward it first."})],
+  ['generated-viewer-own-session', () => assert.deepStrictEqual(
+    authorize(principal('viewer'), 'session.stop', {kind: 'session', ownerId: 'reader'}), {ok: true})],
+  ['generated-alignment-opaque', () => assert.deepStrictEqual(
+    authorize(principal('member', '__proto__'), 'alignment.read', {kind: 'alignment', involved: ['雪', '__proto__', '__proto__']}), {ok: true})],
+  ['generated-empty-pod', () => assert.deepStrictEqual(
+    authorize(principal('member', 'reader', [['', 'lead']]), 'goal.read', {kind: 'goal', ownerId: 'writer', visibility: 'pod', podId: ''}), hidden)]
+];
+
+function invariants() {
+  assert.deepStrictEqual(data(), {
+    WS_ROLES: ['owner', 'member', 'viewer'], POD_ROLES: ['lead', 'member'], VISIBILITIES: ['private', 'pod', 'workspace'],
+    WORKSPACE_ROLE_ACTIONS: {
+      owner: ['workspace.read', 'workspace.manage', 'goal.create', 'session.share', 'session.stop_any', 'alignment.create', 'spend.read'],
+      member: ['workspace.read', 'goal.create', 'session.share', 'alignment.create', 'spend.read'], viewer: ['workspace.read', 'spend.read']
+    },
+    POD_ROLE_ACTIONS: {lead: ['pod.manage_members', 'goal.create_in_pod', 'goal.bind_pod_goal'], member: ['goal.create_in_pod', 'goal.bind_pod_goal']},
+    GOAL_READERS: {private: {wsRoles: [], podRoles: []}, pod: {wsRoles: ['owner'], podRoles: ['lead', 'member']}, workspace: {wsRoles: ['owner', 'member', 'viewer'], podRoles: []}}
+  });
+  for (const wsRole of [null, 'owner', 'member', 'viewer']) {
+    for (const podRole of [undefined, 'lead', 'member']) {
+      for (const podId of [null, '', '__proto__', '雪']) {
+        for (const visibility of ['private', 'pod', 'workspace']) {
+          for (const owns of [false, true]) {
+            const p = principal(wsRole, '', podRole ? [[podId, podRole]] : []);
+            const goal = Object.freeze({kind: 'goal', ownerId: owns ? '' : 'other', visibility, podId});
+            const before = Array.from(p.pods);
+            Object.freeze(p);
+            const member = Boolean(podId) && podRole !== undefined;
+            const readable = wsRole !== null && (owns || visibility === 'workspace' || (visibility === 'pod' && (wsRole === 'owner' || member)));
+            assert.equal(can_read_goal(p, goal), readable);
+            assert.deepStrictEqual(authorize(p, 'goal.read', goal), readable ? {ok: true} : hidden);
+            for (const hasTransfer of [false, true]) {
+              const expected = readable && wsRole !== 'viewer' && (owns || member || hasTransfer);
+              assert.equal(can_bind(p, goal, hasTransfer), expected);
+              assert.equal(can_bind(p, goal, hasTransfer), authorize(p, 'goal.bind', {kind: 'bind', goal, hasTransfer}).ok);
+            }
+            assert.deepStrictEqual(Array.from(p.pods), before);
+          }
+        }
+      }
+    }
+  }
+  for (const role of ['owner', 'member', 'viewer']) {
+    const p = principal(role, '雪', [['__proto__', 'lead']]);
+    assert.deepStrictEqual(authorize(p, 'session.manage', {kind: 'session', ownerId: 'other'}), hidden);
+    assert.deepStrictEqual(authorize(p, 'session.manage', {kind: 'session', ownerId: '雪'}), {ok: true});
+    assert.deepStrictEqual(authorize(p, 'session.stop', {kind: 'session', ownerId: 'other'}), role === 'owner' ? {ok: true} : hidden);
+    assert.deepStrictEqual(authorize(p, 'pod.manage_members', {kind: 'pod', podId: '__proto__'}), role === 'viewer' ? viewerDenied : {ok: true});
+    assert.deepStrictEqual(authorize(p, 'pod.manage_members', {kind: 'goal_draft', podId: '__proto__'}), hidden);
+    assert.deepStrictEqual(authorize(p, 'goal.edit', {kind: 'goal', ownerId: 'other', visibility: 'private', podId: null}), hidden);
+    assert.deepStrictEqual(authorize(p, 'goal.bind', {kind: 'bind', goal: {kind: 'goal', ownerId: 'other', visibility: 'private', podId: null}, hasTransfer: true}), hidden);
+    for (const action of ['workspace.read', 'workspace.manage', 'session.share', 'session.stop_any', 'alignment.create', 'spend.read']) {
+      const allowed = action === 'workspace.read' || action === 'spend.read' || role === 'owner'
+        || (role === 'member' && ['session.share', 'alignment.create'].includes(action));
+      assert.deepStrictEqual(authorize(p, action, {kind: 'alignment', involved: []}), allowed ? {ok: true}
+        : role === 'viewer' ? viewerDenied : {ok: false, status: 403, code: 'owner_only', message: 'Only a workspace owner can do this.'});
+    }
+  }
+  assert.deepStrictEqual(authorize(principal('member'), 'goal.edit', {kind: 'goal', ownerId: 'other', visibility: 'workspace', podId: null}),
+    {ok: false, status: 403, code: 'not_goal_owner', message: "Only the goal's owner can change it."});
+  assert.deepStrictEqual(authorize(principal('member'), 'pod.manage_members', {kind: 'pod', podId: ''}),
+    {ok: false, status: 403, code: 'not_team_lead', message: "Only a workspace owner or the team's lead can change its members."});
+  assert.deepStrictEqual(authorize(principal('owner'), 'goal.create', {kind: 'goal_draft', podId: ''}), {ok: true});
+}
+function runTests() {
+  const results = [];
+  for (const [case_id, test] of cases) {
+    test();
+    results.push({case_id, outcome: 'passed'});
+  }
+  invariants();
+  return {schema: 'literate-ai/generated-test-results@1', cases: results};
+}
+function smoke() {
+  return authorize(principal('member'), 'workspace.read', {kind: 'pod', podId: ''});
+}
+module.exports = {runTests, smoke};

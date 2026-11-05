@@ -1,0 +1,67 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { constants } = require('../share_notices/constants.js');
+const { kind } = require('../share_notices/kind.js');
+const { is_share_state } = require('../share_notices/is_share_state.js');
+const { resumed_held } = require('../share_notices/resumed_held.js');
+const api = { constants, kind, is_share_state, resumed_held };
+const behaviors = [
+  ["generated-kind-nested", "kind", ["session/a/b"], "a/b"],
+  ["generated-kind-empty", "kind", [""], ""],
+  ["generated-kind-trailing", "kind", ["x/"], ""],
+  ["generated-kind-opaque", "kind", [" __proto__\n雪 "], " __proto__\n雪 "],
+  ["generated-prefix-old", "is_share_state", ["signed_in_again"], true],
+  ["generated-prefix-case", "is_share_state", ["Share_started_x"], false],
+  ["generated-prefix-substring", "is_share_state", ["xshare_err_"], false],
+  ["generated-held-empty", "resumed_held", [[],"user"], "Align: this session was resumed from its Align workspace, so its stop is lifted, but a goal hold still blocks its tools until it is released."],
+  ["generated-held-many", "resumed_held", [["A","B","A"],"model"], "[Align] This session was resumed from its Align workspace, so the stop no longer blocks its tools, but the hold on goal \"A\", \"B\" and \"A\" still block them until it is released. Tell the user and wait for instructions."],
+  ["generated-held-quotes", "resumed_held", [["a\"b\n雪"],"user"], "Align: this session was resumed from its Align workspace, so its stop is lifted, but the hold on \"a\"b\n雪\" still blocks its tools until it is released."],
+  ["generated-constants-shared", "constants", [], {"SHARE_STATE_NOTICES":["share_started_","share_err_","share_stopped_","upload_refused_","server_stopped_","signed_out_","signed_in_","access_lost_","workspace_back_"],"RESUMED_NOTICE":"Align: this session was resumed from its Align workspace, so its tools work again."}]
+];
+function sharedStateChecks() {
+  const a = constants();
+  const b = constants();
+  assert.notStrictEqual(a, b);
+  assert.strictEqual(Object.getPrototypeOf(a), Object.prototype);
+  assert.deepStrictEqual(Object.keys(a).sort(), ['RESUMED_NOTICE', 'SHARE_STATE_NOTICES']);
+  assert.strictEqual(a.SHARE_STATE_NOTICES, b.SHARE_STATE_NOTICES);
+  const prefixes = a.SHARE_STATE_NOTICES;
+  const saved = prefixes.slice();
+  try {
+    for (const prefix of saved) assert.strictEqual(is_share_state(prefix + 'x'), true);
+    prefixes.splice(0);
+    assert.strictEqual(is_share_state('share_started_x'), false);
+    assert.strictEqual(constants().SHARE_STATE_NOTICES, prefixes);
+    prefixes.push('雪/', '__proto__');
+    assert.strictEqual(is_share_state('雪/a'), true);
+    assert.strictEqual(is_share_state('__proto__x'), true);
+    assert.strictEqual(is_share_state('x雪/'), false);
+    prefixes.push('');
+    assert.strictEqual(is_share_state(''), true);
+    assert.strictEqual(is_share_state('anything'), true);
+  } finally {
+    prefixes.splice(0, prefixes.length, ...saved);
+  }
+  assert.strictEqual(is_share_state('workspace_back_x'), true);
+  const held = ['x', 'x'];
+  held.extra = { untouched: true };
+  const before = Object.getOwnPropertyDescriptors(held);
+  resumed_held(held, 'model');
+  assert.deepStrictEqual(Object.getOwnPropertyDescriptors(held), before);
+  assert.deepStrictEqual(prefixes, saved);
+}
+function runTests() {
+  const results = [];
+  for (const [id, name, args, expected] of behaviors) {
+    const before = JSON.stringify(args);
+    assert.deepStrictEqual(api[name](...args), expected, id);
+    assert.strictEqual(JSON.stringify(args), before, id + ': argument preservation');
+    if (name === 'constants') sharedStateChecks();
+    results.push({ case_id: id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+function smoke() {
+  return kind('session/a/b');
+}
+module.exports = { runTests, smoke };

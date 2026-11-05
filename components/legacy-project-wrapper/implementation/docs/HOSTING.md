@@ -139,6 +139,7 @@ counts, durations and workspace ids only. LOIs count only when the operator reco
 fly apps create align-pg-draft
 fly volumes create align_data --size 1 --region sjc
 fly secrets set ALIGN_SECRET=$(openssl rand -hex 32) BETTER_AUTH_SECRET=$(openssl rand -hex 32) ALIGN_EMAIL_API_KEY=...
+npm run prepare:container # verify and stage the exact native library inputs locally
 fly deploy --ha=false     # one machine: in-memory limits, and the volume attaches to one machine
 fly scale count 1
 ```

@@ -1,11 +1,10 @@
-# Project guide
+# Align project guide
 
-<!-- DOC-IDENTITY: Replace the quoted placeholder below with a short description
-     of what this project is and does. This is the front door for anyone reading
-     the documentation. -->
-
-> **Replace this paragraph** with a one-to-three sentence description of your
-> project: what it is, what it does, and who it is for.
+Align lets people propose, approve and launch changes to shared goals, then keeps
+connected coding sessions current with the launched version. It records session
+usage and estimated spend against those goals. The web app, local agent and MCP
+connections are described in the README in the
+[application directory](../components/legacy-project-wrapper/implementation).
 
 Start with [getting started](user/getting-started.md) for installation and usage.
 See [active work](roadmap/active-work.md) for current development status.

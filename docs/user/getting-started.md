@@ -2,37 +2,31 @@
 
 [Project guide](../README.md) → getting started
 
-<!-- DOC-IDENTITY: Replace this section with your project's own description.
-     A downstream project's getting-started document must describe the project
-     itself — what it is, what it does, how to install and use it — not the
-     framework that built it. Delete this comment block and the placeholder
-     sections below, replacing them with your actual product documentation.
-     The "Development workflow" section at the bottom may be kept as-is for
-     contributors. -->
-
 ## What is this project?
 
-> **Replace this section.** Describe what this project is, what problem it solves,
-> and who it is for. A reader should understand the project's purpose without
-> knowing anything about Literate AI.
+Align manages shared goals and the coding sessions working toward them. People
+approve and launch goal changes; connected sessions receive the launched version.
+The app also shows session usage and estimated spend for each goal.
 
 ## Installation
 
-> **Replace this section.** Document the exact artifact or package to obtain,
-> installation destination, supported host prerequisites, complete non-secret
-> configuration, environment-backed credentials, persistence and network
-> assumptions, startup order, health/readiness checks, one verified request with
-> its expected result, upgrade or rollback, and uninstall or cleanup.
->
-> Contributor-only `litai rebuild` commands and internal smoke harnesses do not
-> count as installation. If packaging or service registration is not implemented,
-> say so prominently and link the active work that owns that gap rather than
-> inventing commands.
+The public tester deployment remains open under DEPLOY-001 in the
+[active work queue](../roadmap/active-work.md).
+For a local installation with Node 24 or later, follow
+the README in the [application directory](../../components/legacy-project-wrapper/implementation).
+The application guide covers the loopback server, sign-in codes, persistent data,
+optional settings and local agent pairing. Its Hosted section links the separate
+configuration and persistence requirements.
 
 ## Usage
 
-> **Replace this section.** Show how a user interacts with the installed project:
-> representative commands, API calls, configuration, or UI workflows.
+After signing in, create a workspace and goal in the web app. The Apps tab gives
+the connection commands for an MCP client. Pair the local agent and choose which
+coding sessions share usage with a goal using the
+README in the [agent directory](../../components/legacy-project-wrapper/implementation/packages/align-agent).
+Goal changes take effect for connected sessions after an authorized person launches
+them. The [active work queue](../roadmap/active-work.md) records remaining release
+and deployment work.
 
 ---
 

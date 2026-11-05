@@ -11,7 +11,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && node scripts/postbuild.mjs",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && node ../../scripts/native-libraries.mjs && tsc -p tsconfig.json && node scripts/postbuild.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && { npm run test:concurrent; s=$?; npm run test:serial && exit $s; }",
     "test:concurrent": "node --test --test-concurrency=4 test/*.test.ts",

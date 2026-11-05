@@ -11,6 +11,7 @@
 The original project now lives at `components/legacy-project-wrapper/implementation` and passes the same
 build, test, package, and CI workflow through first-class Literate AI shims. That move
 proved project reorganization only. The retained implementation remains release
+authority until each boundary satisfies the transfer and parity requirements below.
 
 ## Decision
 

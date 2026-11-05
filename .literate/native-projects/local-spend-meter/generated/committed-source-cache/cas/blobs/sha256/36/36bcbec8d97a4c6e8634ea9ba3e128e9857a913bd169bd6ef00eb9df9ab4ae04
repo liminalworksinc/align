@@ -1,0 +1,18 @@
+LITAI_LANGUAGE_TOOL ?= node
+.PHONY: all test check smoke
+all: check
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" --check spend_meter/helpers.js
+	"$(LITAI_LANGUAGE_TOOL)" --check spend_meter/claude_counts.js
+	"$(LITAI_LANGUAGE_TOOL)" --check spend_meter/parse_claude_lines.js
+	"$(LITAI_LANGUAGE_TOOL)" --check spend_meter/parse_codex_lines.js
+	"$(LITAI_LANGUAGE_TOOL)" --check spend_meter/price_request.js
+	"$(LITAI_LANGUAGE_TOOL)" --check spend_meter/price_row.js
+	"$(LITAI_LANGUAGE_TOOL)" --check spend_meter/price_table_version.js
+	"$(LITAI_LANGUAGE_TOOL)" --check spend_meter/valid_counts.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tests/litai_test.js
+test:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+smoke:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-smoke

@@ -1029,6 +1029,11 @@ allow a person in any number of teams, with no team inside another.
 The server SHALL let only a workspace owner make someone a team lead, change a lead's team role, or remove another
 person who is a lead, while a lead may add and remove the team's members and remove themselves.
 
+#### Scenario: Viewer with a team lead role
+
+- **WHEN** a workspace viewer who is also a team lead adds or removes a team member through a team route or its pod alias
+- **THEN** the server responds 403 `read_only`, preserves team membership and records no team membership write
+
 #### Scenario: Lead promoting someone
 
 - **WHEN** a team lead who is not a workspace owner POSTs `{user_id, role:"lead"}`, or changes another lead to `member`, or removes another lead

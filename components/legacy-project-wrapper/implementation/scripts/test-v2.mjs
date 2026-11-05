@@ -1067,6 +1067,17 @@ try {
       cases++;
       if ((d.ok ? 200 : d.status) !== want) wrong.push(`${a} as ${wsRole}`);
     }
+  for (const wsRole of [null, "owner", "member", "viewer"])
+    for (const podRole of [null, "lead", "member"]) {
+      const pp = { userId: "u_me", wsId: "ws_x", wsRole, pods: new Map(podRole ? [["pod_1", podRole]] : []) };
+      const d = policy.authorize(pp, "pod.manage_members", { kind: "pod", podId: "pod_1" });
+      const want = !wsRole ? 404 : wsRole === "viewer" ? 403 : wsRole === "owner" || podRole === "lead" ? 200 : 403;
+      const code = !wsRole ? "not_found" : wsRole === "viewer" ? "read_only" : "not_team_lead";
+      const mismatched = policy.authorize(pp, "pod.manage_members", { kind: "workspace" });
+      cases += 2;
+      if ((d.ok ? 200 : d.status) !== want || (!d.ok && d.code !== code)) wrong.push(`team membership ${wsRole}/${podRole}`);
+      if (mismatched.ok || mismatched.status !== 404 || mismatched.code !== "not_found") wrong.push(`team object ${wsRole}/${podRole}`);
+    }
   check(`policy: ${cases} role x pod role x visibility x ownership x transfer cases match the spec (private never readable by a workspace owner)`, wrong.length === 0 && cases > 400, wrong.slice(0, 5).join("; "));
 
   // -- device pairing --
@@ -2612,6 +2623,16 @@ try {
   const e5 = await epoch(D5, S5, { epoch_id: epochId(), goal_id: G5.id, starts_at: T0 });
   await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P2}/members`, { cookie: U1.cookie, body: { user_id: U2.id, role: "lead" } });
   await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P2}/members`, { cookie: U1.cookie, body: { user_id: U6.id, role: "lead" } });
+  const teamWriteState = () => withDb((d) => ({
+    members: d.prepare("SELECT user_id, role FROM v2_pod_members WHERE ws_id = ? AND pod_id = ? ORDER BY user_id").all(A, P2),
+    audit: d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE ws_id = ? AND object_id = ? AND action IN ('team.member_set', 'team.member_removed')").get(A, P2).n,
+  }));
+  const beforeViewerWrites = teamWriteState();
+  const viewerAdds = await Promise.all(["teams", "pods"].map((path) => call("U6", "POST", `/api/v2/workspaces/${A}/${path}/${P2}/members`, { cookie: U6.cookie, body: { user_id: U3.id, role: "member" } })));
+  const viewerRemoves = await Promise.all(["teams", "pods"].map((path) => call("U6", "DELETE", `/api/v2/workspaces/${A}/${path}/${P2}/members/${U5.id}`, { cookie: U6.cookie })));
+  check("viewer team lead: adding a member through team and pod routes -> 403 read_only", viewerAdds.every((r) => r.status === 403 && r.json?.error === "read_only"), viewerAdds.map((r) => `${r.status}:${r.json?.error}`).join(" "));
+  check("viewer team lead: removing a member through team and pod routes -> 403 read_only", viewerRemoves.every((r) => r.status === 403 && r.json?.error === "read_only"), viewerRemoves.map((r) => `${r.status}:${r.json?.error}`).join(" "));
+  check("viewer team lead: refused writes leave membership and team write audit records unchanged", JSON.stringify(teamWriteState()) === JSON.stringify(beforeViewerWrites));
   const setBefore = await al(U3, { target_goal_id: G5.id, source_goal_id: G3.id, choice: "contribution", session_keys: [] });
   check(
     "approval: a team goal's set is its owner and the team's leads; a viewer who leads the team is never in it",
