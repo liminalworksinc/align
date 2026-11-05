@@ -147,6 +147,45 @@ for (const [role, a] of Object.entries(people)) {
   }
   await ctx.close();
 }
+// First run on an unread /home: goals unknown, so no card and none of its sentences, in a workspace that has goals.
+{
+  // The seeded workspace is a sample, where the card's heading differs ("Look around first", "Two ways to start").
+  const FIRST_RUN = ["Look around first", "Look around a made-up company", "Explore a sample", "Two ways to start", "Nothing here yet", "A workspace owner or member adds the goals", "Connect one agent", "Connect your agent", "Viewers can't connect", "Viewers can’t connect", "No AI app is connected"];
+  const signIn = await fetch(`${BASE}/api/v2/auth/sign-in/email`, { method: "POST", headers: H, body: JSON.stringify({ email: seed.accounts.owner.email, password: seed.accounts.owner.password }) });
+  const cookie = signIn.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+  const member = await acct("Pat Member");
+  const inv = await call(cookie, "POST", `/api/v2/workspaces/${WS}/invites`, { email: member.email, role: "member" });
+  await call(member.cookie, "POST", `/api/v2/invites/${inv.token}/accept`, {});
+  const viewer = await acct("Kai Viewer");
+  const inv2 = await call(cookie, "POST", `/api/v2/workspaces/${WS}/invites`, { email: viewer.email, role: "viewer" });
+  await call(viewer.cookie, "POST", `/api/v2/invites/${inv2.token}/accept`, {});
+  const path = `/app/w/${WS}`;
+  const broke = (p) => p.route(new RegExp(`/workspaces/${WS}/home$`), (r) => r.fulfill(BOOM));
+  for (const [role, a] of [["viewer", viewer], ["member with no app", member]]) {
+    const t = await read(a, path, broke);
+    rule(`first run, /home fails, ${role}: no card, none of its sentences`, !FIRST_RUN.some((x) => t.includes(x)), FIRST_RUN.filter((x) => t.includes(x)));
+  }
+  // An owner in a workspace that isn't a sample and has a goal
+  const lead = await acct("Dee Owner");
+  const ws3 = (await call(lead.cookie, "POST", "/api/v2/workspaces", { name: "Real" })).id;
+  const made = await call(lead.cookie, "POST", `/api/v2/workspaces/${ws3}/goals`, { title: "A real goal", level: "company" });
+  rule("first run: the owner's workspace has a goal", !!made.id || !!made.goal?.id, made);
+  const leadPath = `/app/w/${ws3}`;
+  const down = await read(lead, leadPath, (p) => p.route(new RegExp(`/workspaces/${ws3}/home$`), (r) => r.fulfill(BOOM)));
+  rule("first run, /home fails, owner outside a sample: no card, none of its sentences", !FIRST_RUN.some((x) => down.includes(x)), FIRST_RUN.filter((x) => down.includes(x)));
+  const up = await read(lead, leadPath);
+  rule("first run, real reads, owner with a goal: keeps the compact card", up.includes("Connect your agent"), up.slice(0, 200));
+
+  const real = await read(member, path);
+  rule("first run, real reads, member with no app: keeps the compact card", real.includes("Connect your agent"), real.slice(0, 200));
+  const none = await read(viewer, path);
+  rule("first run, real reads, viewer with goals: no card", !FIRST_RUN.some((x) => none.includes(x)), FIRST_RUN.filter((x) => none.includes(x)));
+  const full = await read(people.owner, `/app/w/${ws2}`);
+  rule("first run, real reads, owner with no goals: keeps the full card", full.includes("Connect one agent"), full.slice(0, 200));
+  const empty = await read(people.viewer, `/app/w/${ws2}`);
+  rule("first run, real reads, viewer with no goals: keeps Nothing here yet", empty.includes("Nothing here yet"), empty.slice(0, 200));
+}
+
 // "Since you last looked": no "Nothing changed" for a source it didn't read. Each new tab compares with the last visit.
 {
   const ctx = await signedIn(seed.accounts.owner);
