@@ -53,6 +53,9 @@ function Loaded({ ws, cr, me, choice, onClose, done }: { ws: string; cr: ChangeR
   );
 }
 
+/** Read by id and kept mounted until the person closes it: a decision or a refusal re-reads the request in place, so
+ *  the drawer shows it as it now stands with the outcome notice, even when the Home's reload drops it from "Needs you".
+ *  Not re-keyed on state: a remount would lose ReviewActions' notice. */
 export function ReviewDrawer({ ws, goal, id, me, choice, onClose, onChanged }: { ws: string; goal: string; id: string; me: string; choice?: ReviewChoice; onClose: () => void; onChanged: () => void }) {
   const r = useApi<ChangeRequest>(`/api/v2/workspaces/${ws}/goals/${goal}/change-requests/${id}`);
   if (!r.data)
@@ -63,7 +66,6 @@ export function ReviewDrawer({ ws, goal, id, me, choice, onClose, onChanged }: {
     );
   return (
     <Loaded
-      key={`${r.data.id}:${r.data.revision}:${r.data.state}:${r.data.launch}`}
       ws={ws}
       cr={r.data}
       me={me}
