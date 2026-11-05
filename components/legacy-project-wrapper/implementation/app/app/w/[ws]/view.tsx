@@ -99,7 +99,8 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
           </h1>
         </header>
 
-        {h && <FirstRun ws={ws} onSeen={reloadAll} me={me.id} hasGoals={(h.goals?.length ?? 0) > 0} creation={creation} />}
+        {/* Goals unread is not goals absent: with the goals read failed, first run (and its empty-workspace state) waits. */}
+        {h && h.goals !== null && <FirstRun ws={ws} onSeen={reloadAll} me={me.id} hasGoals={h.goals.length > 0} creation={creation} />}
 
         <div className={quietList ? "hidden" : "contents"}>
         <NeedsList key={needsKey} ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} />

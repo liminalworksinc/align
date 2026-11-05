@@ -369,6 +369,12 @@ for (const width of [390, 320]) {
       const t = await f.$eval("[data-since]", (e) => e.innerText);
       if (!t.includes(`couldn't read the`) || !t.includes(source)) throw new Error(`Since with ${source} unread: wanted the couldn't-read line naming it, got: ${t.slice(0, 240)}`);
       if (t.includes("Nothing changed since your last visit.")) throw new Error(`Since with ${source} unread: still says nothing changed: ${t.slice(0, 240)}`);
+      // Goals unread is not goals absent: no empty-workspace state and no "No goals here yet" over a failed read.
+      if (source === "goals") {
+        const h1 = await f.$eval("main h1", (e) => e.textContent.trim());
+        const fr = await f.$eval("[data-first-run]", (e) => e.getAttribute("data-first-run")).catch(() => null);
+        if (h1 === "No goals here yet" || fr === "empty" || fr === "viewer-empty") throw new Error(`goals unread read as goals absent: H1 "${h1}", first run ${fr}`);
+      }
       await f.close();
     }
   }
