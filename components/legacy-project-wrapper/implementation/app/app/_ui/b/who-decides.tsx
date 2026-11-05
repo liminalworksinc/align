@@ -10,8 +10,9 @@ import { nameList } from "./model";
 // cards are the states lib/v2/changes.ts has; the request's own is "Now", the way it came is "Done", and the states one
 // step away are "next". Lines carry no words; each card says in its action slot which steps lead out of it and whose
 // they are. A step is this person's exactly when its `cr.can` flag says so, and pressing it hands the choice to the
-// review's own ReviewActions (`onAct`), which confirms and sends. Desktop only: below md the disclosure is not rendered at
-// all, and the review's one-sentence "who decides" answer stands alone.
+// review's own ReviewActions (`onAct`), which confirms and sends. Desktop only: below md the disclosure is in the DOM but
+// hidden (`hidden md:block`, display none), so it is neither seen nor reached by keyboard or screen reader there, and the
+// review's one-sentence "who decides" answer stands alone.
 
 // Rows chosen so most steps are straight lines between neighbours: from "Waiting for a decision" (row 1) the suggested
 // change sits beside it on the left, "Approved, not launched" beside it on the right, "Declined" right under it, and
@@ -43,6 +44,8 @@ export function WhoDecides({ cr, me, onAct }: { cr: ChangeRequest; me: string; o
           ) : (
             <span className={e.can ? "font-medium text-(--text-1)" : "text-(--text-2)"}>{e.label}</span>
           )}
+          {/* A separator a screen reader speaks, so the step and who can take it aren't read as one word. */}
+          <span className="sr-only">, </span>
           <span className="text-(--text-3)">{e.can ? "(you)" : `${nameList(e.who, me)} can`}</span>
         </li>
       ))}

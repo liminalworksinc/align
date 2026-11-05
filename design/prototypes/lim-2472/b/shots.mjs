@@ -49,7 +49,7 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), "lim2472-b-"));
 const agentOut = path.join(tmp, "agent.json");
 const sa = spawnSync(process.execPath, [path.join(here, "../s/seed-agent.mjs"), BASE, agentOut], { encoding: "utf8" });
 if (sa.status !== 0) {
-  console.error(`seed-agent.mjs failed: ${sa.stderr || sa.stdout}`);
+  console.error(`seed-agent.mjs failed; this needs a server on a fresh ALIGN_DATA_DIR (the shared seed can run once per data folder).\n${sa.stderr || sa.stdout}`);
   process.exit(1);
 }
 const agent = JSON.parse(readFileSync(agentOut, "utf8"));

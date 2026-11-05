@@ -38,7 +38,9 @@ function check(name, ok, detail = "") {
 const tmp = mkdtempSync(path.join(os.tmpdir(), "lim2472-r2-"));
 const sa = spawnSync(process.execPath, [path.join(here, "../s/seed-agent.mjs"), BASE, path.join(tmp, "agent.json")], { encoding: "utf8" });
 if (sa.status !== 0) {
-  console.error(sa.stderr || sa.stdout);
+  // seed-agent.mjs signs up fixed emails, so it can seed a data folder once: run each check against a server started on a
+  // fresh, empty ALIGN_DATA_DIR. A failure here is the seed, not the product.
+  console.error(`seed-agent.mjs failed; this check needs a server on a fresh ALIGN_DATA_DIR (the shared seed can run once per data folder).\n${sa.stderr || sa.stdout}`);
   process.exit(1);
 }
 const agent = JSON.parse(readFileSync(path.join(tmp, "agent.json"), "utf8"));
