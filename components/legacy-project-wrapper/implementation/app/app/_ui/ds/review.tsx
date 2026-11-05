@@ -47,6 +47,13 @@ function statusOf(cr: ChangeRequest): { kind: StatusKind; label?: string } {
 /** `onDone`: called after an evidence link is added (or refused), to re-read the request; without it the Add evidence
  *  control isn't offered. */
 export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: string; cr: ChangeRequest; me: string; titleOf?: (id: string) => string; onDone?: () => void }) {
+  // Add evidence's result lives here, outside the can.add_evidence gate: a refusal re-reads the request, and the new
+  // read may no longer allow adding (declined meanwhile), which unmounts the form but must not take its statement along.
+  const [evNotice, setEvNotice] = useState<Notice | null>(null);
+  const evRef = useRef<HTMLParagraphElement | null>(null);
+  useEffect(() => {
+    if (evNotice) evRef.current?.focus();
+  }, [evNotice]);
   const s = statusOf(cr);
   const current = cr.revisions.find((r) => r.revision === cr.revision) ?? cr.revisions[cr.revisions.length - 1];
   const evidence = cr.revisions.flatMap((r) => r.evidence);
@@ -100,7 +107,8 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
             <li className="text-[13px] text-(--text-3)">Align doesn&apos;t verify links.</li>
           </ul>
         )}
-        {cr.can.add_evidence && onDone && <AddEvidence ws={ws} cr={cr} onDone={onDone} />}
+        {evNotice && <NoticeLine n={evNotice} r={evRef} />}
+        {cr.can.add_evidence && onDone && <AddEvidence ws={ws} cr={cr} onDone={onDone} setNotice={setEvNotice} />}
       </section>
 
       {current?.snapshot && (
@@ -149,28 +157,27 @@ const EVIDENCE_KINDS = { pr: "Pull request", ci_run: "CI run", incident: "Incide
  *  self-reported, never verified. Kept from main for its tests: the "Add evidence" and "Add link" buttons, the
  *  url input, the 120-character label input and the "Link (https)" / "What it shows" labels. Refusals as ReviewActions:
  *  403/404/409 red, then the request is read again; anything else amber, try again. */
-function AddEvidence({ ws, cr, onDone }: { ws: string; cr: ChangeRequest; onDone: () => void }) {
+function AddEvidence({ ws, cr, onDone, setNotice }: { ws: string; cr: ChangeRequest; onDone: () => void; setNotice: (n: Notice | null) => void }) {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<keyof typeof EVIDENCE_KINDS>("pr");
   const [url, setUrl] = useState("");
   const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
-  const ref = useRef<HTMLParagraphElement | null>(null);
-  useEffect(() => {
-    if (notice) ref.current?.focus();
-  }, [notice]);
   const https = /^https:\/\//i.test(url.trim());
   const typing = url.trim() !== "" && !https && !"https://".startsWith(url.trim().toLowerCase());
   if (!open)
     return (
-      <div className="flex flex-col gap-2">
-        {notice && <NoticeLine n={notice} r={ref} />}
-        <div>
-          <button type="button" className={SECONDARY} onClick={() => setOpen(true)}>
-            Add evidence
-          </button>
-        </div>
+      <div>
+        <button
+          type="button"
+          className={SECONDARY}
+          onClick={() => {
+            setNotice(null);
+            setOpen(true);
+          }}
+        >
+          Add evidence
+        </button>
       </div>
     );
   return (
@@ -203,7 +210,6 @@ function AddEvidence({ ws, cr, onDone }: { ws: string; cr: ChangeRequest; onDone
           .finally(() => setBusy(false));
       }}
     >
-      {notice && <NoticeLine n={notice} r={ref} />}
       <p className="text-[14px] text-(--text-2)">A link that supports this change. It is shown as self-reported: Align doesn&apos;t check it.</p>
       <Labelled label="Kind">
         <select className={FIELD} value={kind} onChange={(e) => setKind(e.target.value as keyof typeof EVIDENCE_KINDS)}>
