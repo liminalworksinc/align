@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { EvidenceLabel, EvidenceSummary, hasEvidence, NeedAction, NeedList, NeedRow, Segmented, type Delivery } from "../ds";
 import { api, useApi } from "../kit";
 import type { Alignment, ChangeRequest, Goal } from "../types";
@@ -116,7 +116,23 @@ function useSends(W: string, crs: ChangeRequest[] | null, failed: boolean) {
 /** Search shows only when a phase has more rows than this. */
 const SEARCH_FROM = 8;
 
-export function NeedsList({ ws, me, selected, reviewBase = "", heading = true }: { ws: string; me: string; selected?: string | null; reviewBase?: string; heading?: boolean }) {
+export function NeedsList({
+  ws,
+  me,
+  selected,
+  reviewBase = "",
+  heading = true,
+  onCount,
+}: {
+  ws: string;
+  me: string;
+  selected?: string | null;
+  reviewBase?: string;
+  heading?: boolean;
+  /** The number of Needs-you rows (never notices, other phases or the search's filter); null while any read is in
+   *  flight and when nothing is readable, so a page never prints "Nothing needs you" for a non-member. */
+  onCount?: (n: number | null) => void;
+}) {
   const W = `/api/v2/workspaces/${ws}`;
   const cr = useApi<Groups<ChangeRequest>>(`${W}/change-requests`);
   const asks = useApi<{ asks: AskLite[] }>(`${W}/asks?state=open,accepted,done,declined`);
@@ -152,6 +168,15 @@ export function NeedsList({ ws, me, selected, reviewBase = "", heading = true }:
 
   // Every read refused or failed (a signed-in non-member gets 404 on all of them): say so, never "Nothing needs you".
   const unreadable = !loading && cr.error !== null && asks.error !== null && al.error !== null && home.error !== null;
+  const needCount = loading || unreadable ? null : counts.needs_you;
+  // Called only when the number changes; the latest callback is kept in a ref so a new function identity doesn't re-fire.
+  const countCb = useRef(onCount);
+  useEffect(() => {
+    countCb.current = onCount;
+  }, [onCount]);
+  useEffect(() => {
+    countCb.current?.(needCount);
+  }, [needCount]);
   if (unreadable)
     return (
       <section aria-label="Needs you" data-needs="unreadable" className="flex min-w-0 flex-col gap-2">
@@ -203,21 +228,25 @@ export function NeedsList({ ws, me, selected, reviewBase = "", heading = true }:
           {sent.loading && !reqs.loading ? "Checking what Align sent…" : "Reading what needs you…"}
         </p>
       ) : (
-        <div className="min-w-0 [&>div>p:first-child]:hidden">
-        {shown.length > 1 && (
-          <details className="mb-1.5 px-1 text-[12px] text-(--text-3)" data-rank-note>
-            <summary className="inline-flex min-h-[44px] cursor-pointer items-center">Ranked by kind, oldest first. How it&apos;s ranked</summary>
-            <p className="pb-1">{rankNote(reqs.unchecked, sent.unchecked)}</p>
-          </details>
-        )}
         <NeedList
-          rankNote={rankNote(reqs.unchecked, sent.unchecked)}
-          empty={q ? `Nothing here mentions "${q}".` : phase === "needs_you" ? "Nothing needs you." : phase === "waiting_on_others" ? "Nothing you're part of is waiting on someone else." : "Nothing decided yet."}
+          rankNote={
+            <details data-rank-note>
+              <summary className="inline-flex min-h-[44px] cursor-pointer items-center gap-1">
+                Ranked by kind, oldest first.{" "}
+                <span className="text-(--text-2) underline underline-offset-4 hover:text-(--text-1)">How it&apos;s ranked</span>
+                <span aria-hidden="true">▾</span>
+              </summary>
+              <p className="pb-1">{rankNote(reqs.unchecked, sent.unchecked)}</p>
+            </details>
+          }
+          // No empty line when a read failed (the amber line says what is unknown) or in Needs you (the page's heading
+          // says the count once).
+          empty={unknown.length ? null : q ? `Nothing here mentions "${q}".` : phase === "needs_you" ? null : phase === "waiting_on_others" ? "Nothing you're part of is waiting on someone else." : "Nothing decided yet."}
         >
           {shown.map((n) => (
             <NeedRow
               key={n.key}
-              kind={KIND_WORDS[n.kind]}
+              kind={n.word}
               tone={n.tone}
               title={n.goal?.title ?? n.cause}
               sub={n.goal ? (n.who ? `${n.cause} · ${n.who}` : n.cause) : (n.who ?? undefined)}
@@ -238,14 +267,13 @@ export function NeedsList({ ws, me, selected, reviewBase = "", heading = true }:
             />
           ))}
         </NeedList>
-        </div>
       )}
       {!loading && notices.length > 0 && (
         <p data-needs-notice className="px-1 text-[12px] text-(--text-3)">
           Align has recorded no goal read from {notices[0]!.app.name}
           {notices[0]!.connected_by.id === me ? "" : ` (connected by ${notices[0]!.connected_by.name})`}
           {notices.length > 1 ? ` or ${notices.length - 1} other app${notices.length === 2 ? "" : "s"}` : ""}.{" "}
-          <Link href={`/app/w/${ws}/apps`} className="text-(--text-2) underline underline-offset-4 hover:text-(--text-1)">
+          <Link href={`/app/w/${ws}/apps`} className="inline-flex items-center whitespace-nowrap text-(--text-2) underline underline-offset-4 hover:text-(--text-1) max-sm:min-h-[44px]">
             See apps
           </Link>
         </p>

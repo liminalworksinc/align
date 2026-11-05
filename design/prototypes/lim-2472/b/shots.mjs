@@ -139,6 +139,13 @@ async function clickText(page, sel, text) {
 }
 const has = (page, sel) => page.evaluate((x) => !!document.querySelector(x), sel);
 
+/** The page's count (H1 data-need-count, from NeedsList's onCount) against the Needs-you rows rendered. */
+async function countMatches(page, who) {
+  await page.waitForFunction(() => document.querySelector("h1[data-need-count]")?.getAttribute("data-need-count") !== "", { timeout: 20000 });
+  const r = await page.evaluate(() => ({ n: Number(document.querySelector("h1[data-need-count]").getAttribute("data-need-count")), rows: document.querySelectorAll('[data-needs="list"] ol > li').length, h1: document.querySelector("h1").textContent }));
+  check(`${who}: the page's count (${r.n}) equals the Needs-you rows rendered (${r.rows}), and 0 says "Nothing needs you"`, r.n === r.rows && (r.n !== 0 || /Nothing needs you/.test(r.h1)));
+}
+
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
 try {
   const owner = await login(s.people.dana);
@@ -173,6 +180,8 @@ try {
   }
 
   const page = await newPage(browser, owner, "dark");
+  await go(page, desk, "Decision desk");
+  await countMatches(page, "owner");
   // 03: a live connector opens the shared ReviewActions on that choice.
   await go(page, dec(rafis), "Where this request is");
   await clickText(page, "button[data-edge-from]", "Approve and launch");
@@ -239,10 +248,12 @@ try {
   // 11, 12, 13: what each role sees.
   const mp = await newPage(browser, member, "dark");
   await go(mp, desk, "Decision desk");
+  await countMatches(mp, "member");
   await shoot(mp, "11", "home-member", "dark", [1440, 390], "Decision desk");
   await mp.close();
   const vp = await newPage(browser, viewer, "dark");
   await go(vp, desk, "Decision desk");
+  await countMatches(vp, "viewer");
   await shoot(vp, "12", "home-viewer", "dark", [1440, 390], "Decision desk");
   await go(vp, dec(rafis), "Where this request is");
   check("viewer: no live connector on the decision page", !(await has(vp, 'button[data-edge-from][data-live="1"]')));

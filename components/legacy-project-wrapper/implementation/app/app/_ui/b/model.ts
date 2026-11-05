@@ -48,12 +48,13 @@ export const nameList = (ps: HomePerson[], me: string) => (ps.length ? ps.map((p
 export const proposedVersion = (cr: ChangeRequest) => cr.base_version + 1;
 
 /** What is launched (the goal's current version, the one Align serves) and what is approved but not launched. */
-export function versions(cr: ChangeRequest): { launched: string; approved: string } {
+export function versions(cr: ChangeRequest): { launched: string; approved: string; approvedLine: string } {
   const launched = `v${cr.goal.version}`;
-  if (cr.state === "approved" && cr.launch === "launched") return { launched, approved: `v${cr.version}` };
-  if (cr.state === "approved" && (cr.launch === "pending" || cr.launch === "not_yet")) return { launched, approved: `v${proposedVersion(cr)}, not launched` };
-  if (cr.state === "pending" || cr.state === "countered") return { launched, approved: `none yet, asks for v${proposedVersion(cr)}` };
-  return { launched, approved: "none" };
+  if (cr.state === "approved" && cr.launch === "launched") return { launched, approved: `v${cr.version}`, approvedLine: `Approved v${cr.version}` };
+  if (cr.state === "approved" && (cr.launch === "pending" || cr.launch === "not_yet"))
+    return { launched, approved: `v${proposedVersion(cr)}, not launched`, approvedLine: `Approved v${proposedVersion(cr)}, not launched` };
+  if (cr.state === "pending" || cr.state === "countered") return { launched, approved: `not yet, asks for v${proposedVersion(cr)}`, approvedLine: `Not approved yet, asks for v${proposedVersion(cr)}` };
+  return { launched, approved: "none", approvedLine: "Not approved" };
 }
 
 /** A one-line meaning of the request: what it changes, from the request's own fields. */

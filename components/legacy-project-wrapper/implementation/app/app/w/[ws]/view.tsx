@@ -37,6 +37,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const pathname = usePathname();
   const params = useSearchParams();
   const [token, setToken] = useState(0);
+  const [needCount, setNeedCount] = useState<number | null>(null);
   const base = `/app/w/${ws}`;
   // ?review=<goal>.<id>: the request to show; &choice= opens ReviewActions on that choice.
   const review = /^([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/.exec(params.get("review") ?? "");
@@ -51,10 +52,13 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
     <DeskShell me={me} ws={ws} active="desk" crumbs={[{ label: "Home" }]}>
       <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_300px]">
         <div className="flex min-w-0 flex-col gap-8">
-          <h1 tabIndex={-1} className="sr-only">
-            Home
-          </h1>
-          <NeedsList key={token} ws={ws} me={me.id} selected={review ? `cr:${review[2]}` : null} />
+          <div className="flex flex-col gap-3">
+            {/* The count is the Needs-you rows only, from the list itself; unknown while it reads. */}
+            <h1 tabIndex={-1} data-need-count={needCount ?? ""} className="text-[24px] font-semibold tracking-[-0.01em] text-(--text-1) focus:outline-none">
+              {needCount === null ? "Home" : needCount === 0 ? "Nothing needs you" : `${needCount} thing${needCount === 1 ? "" : "s"} need${needCount === 1 ? "s" : ""} you`}
+            </h1>
+            <NeedsList key={token} ws={ws} me={me.id} heading={false} onCount={setNeedCount} selected={review ? `cr:${review[2]}` : null} />
+          </div>
           <section aria-labelledby="desk-h" className="flex min-w-0 flex-col gap-2">
             <h2 id="desk-h" className="text-[18px] font-semibold text-(--text-1)">
               Decision desk
