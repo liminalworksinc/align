@@ -330,6 +330,30 @@ for (const width of [390, 320]) {
   await ctx.close();
 }
 
+// Asserted at 1440, no screenshot, where the Home mounts "Since you last looked" (data-since): a fresh browser has no
+// last visit, so the section shows only the first-visit line and never the words "last visit"; a second visit in the
+// same browser (a new tab, so a new baseline) with nothing changed by anyone else shows "Nothing changed since your
+// last visit." A Home without the section (concept A's own) skips this, and says so.
+{
+  const { p, ctx } = await page("owner", "dark", 1440);
+  await home(p);
+  const sinceState = (pg) =>
+    pg.waitForFunction(() => { const e = document.querySelector("[data-since]"); return !e ? "absent" : e.getAttribute("data-since") === "reading" ? false : e.getAttribute("data-since"); }, { timeout: 30_000 }).then((h) => h.jsonValue());
+  if ((await p.$("[data-since]")) === null) console.log("Since: not on this Home, first-visit asserts skipped");
+  else {
+    const first = await sinceState(p);
+    const text = await p.$eval("[data-since]", (e) => e.innerText);
+    if (first !== "first" || !text.includes("First visit on this device") || /last visit/i.test(text)) throw new Error(`Since, first visit: wanted only the first-visit line, got data-since=${first}: ${text.slice(0, 200)}`);
+    const again = await ctx.newPage();
+    await again.setViewport({ width: 1440, height: 900 });
+    await home(again);
+    const second = await sinceState(again);
+    const text2 = await again.$eval("[data-since]", (e) => e.innerText);
+    if (second !== "0" || !text2.includes("Nothing changed since your last visit.")) throw new Error(`Since, second visit: wanted "Nothing changed since your last visit.", got data-since=${second}: ${text2.slice(0, 200)}`);
+  }
+  await ctx.close();
+}
+
 // Asserted at 1440, no screenshot, after every screenshot: the drawer stays open with its outcome notice after a decision
 // lands, and after a refusal. Both run on a throwaway goal Mara creates here, each on its own pending request (Theo
 // proposes, as a member would), so the seeded goals and requests are untouched. An approved request can't be withdrawn,

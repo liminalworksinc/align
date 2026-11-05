@@ -120,7 +120,8 @@ export default function GoalLines({
         <h2 id="goal-lines-title" className="text-[16px] font-semibold text-(--text-1)">
           Goals
         </h2>
-        <Link href={`/app/w/${ws}/goals`} className="text-[13px] text-(--text-2) hover:text-(--text-1) hover:underline">
+        {/* A 44px tap area on phones from the pseudo-element, so the heading row doesn't grow. */}
+        <Link href={`/app/w/${ws}/goals`} className="relative text-[13px] text-(--text-2) hover:text-(--text-1) hover:underline max-sm:before:absolute max-sm:before:-inset-x-2 max-sm:before:top-1/2 max-sm:before:h-[44px] max-sm:before:-translate-y-1/2 max-sm:before:z-10 max-sm:before:content-['']">
           All goals
         </Link>
       </div>
