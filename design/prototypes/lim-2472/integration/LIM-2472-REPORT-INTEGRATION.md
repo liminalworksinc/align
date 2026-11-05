@@ -4,7 +4,54 @@ Branch `agent/LIM-2472-integration`. App at `components/legacy-project-wrapper/i
 
 What the base holds at `a5fbe8e`: foundation (through `d0f6dbe`), Stream R (`3cc0f71`), shared surfaces (through `f98dd2a`), concept A's rail shell, review drawer and Home parts (through `b2c02dc`), and Mini S1's list and desk taken by path (`f4a7609`). Home follows the founder's direction of 2026-11-05 (`~/liminal/.private/align-lim2472/brief/DIRECTION.md`): one ranked "needs a human" list with evidence, then Since you last looked, then Goals. Requests is the decision desk, and both open the same review drawer.
 
-Read the sections in order of date. "Direction: Home and Requests" below is the current state. The D2 walk sections, including the coverage table, were run on earlier bases: Home and the shell were out of scope there, and Requests was still the review list, so they do not describe Home or the Desk. The final walk and the 64-page audit are held until the list and Home are stable.
+Read the sections in order of date. "Direction: Home and Requests" below is the current state. The D2 walk sections, including the coverage table, were run on earlier bases: Home and the shell were out of scope there, and Requests was still the review list, so they do not describe Home or the Desk. The final state is in "Final head" just below; read that first.
+
+## Final head (on top of `67db56b`)
+
+### What this last push changed
+- **Work, failed reads (`_ui/ds/work.tsx`).** A failed read no longer reads as an absence. `useLaunched` now says when the launched-request read or the `…/value` read failed.
+  - `…/value` fails: "Align sent it to" says "Not read just now. Reload to try again." It used to say "No app yet…", which was false. The per-app rows already stayed silent on a failed read: they show a receipt only for a listed app and never a negative. The panel's note now says the same "not read" line.
+  - A real empty list still says "No app yet…". A non-empty list is unchanged.
+  - Same trap, also fixed: when the approved change-request read fails, the Launched row said "Nothing launched…" and the Connected apps note said "Nothing is launched on this goal yet…". Both now say "not read".
+  - Same trap, also fixed: the note "…none is connected" showed while `/apps` was loading or had failed. It now needs an answered `/apps` read, and the note waits for the launch reads.
+- **Home, viewer link.** "Create a goal" is hidden for viewers on the empty goals state. `view.tsx` passes `role` to `GoalLines`. It reads `/api/v2/workspaces` only when the goals list is empty, so a normal Home makes no extra read. Unknown role: no link. Owners and members keep it, and it reaches the New goal form on `/goals`.
+- **Checks added:** `design/prototypes/lim-2472/integration/work-delivery.check.mjs` and `goal-line-delivery.check.mjs`. `b/needs-check.mts` updated to the `b0d47c8` version.
+
+### Results
+- `work-delivery.check`: 9 failed on `67db56b`, all 19 rules pass on this tree.
+  - Failed read: owner and member, no "No app yet", no "not sent", no receipt, and it says not read.
+  - Real empty list: viewer still sees "No app yet".
+  - No goals: viewer has no "Create a goal"; owner and member keep it.
+- `goal-line-delivery.check`: pass. With `…/value` held for 2 s a cold load shows no delivery fact; a soft return keeps the earlier true Receipt and never shows Not observed; a 500 shows no delivery fact. So the suspected truth flash does not exist: `goalFacts` adds delivery facts only for a truthy value, and no fix was made.
+- `first-run-load.check`: pass. `needs-check`: exit 0, 25 PASS. tsc and eslint clean.
+- On `5fa3297`: `chips-320` 298 chips; partial heading 10 of 10; five real-POST writes (Accept if…, Suggest a change, Decline, Withdraw, Not yet), each with its notice and timeline event; light focus return from Home and the Desk. No console errors. These were not re-run after the two later commits, which touch only the first-run sentence, Work's delivery rows and the viewer link.
+
+### Audit on production `67db56b` (replaces the "ran on `0107890`" limit)
+`next build`, then `next start`. 22 signed-in routes x 3 roles + 4 signed-out = 70 pages, both themes, 1440, 390, 320: 420 rows. Taken one commit before this head.
+- Original 64 pages: 384 rows, 366 at 200 and 18 at 404 (all the deliberate `err-route-404` page). Sideways scroll 0, page errors 0.
+- Home and the review link (6 pages): 36 rows, all 200. Sideways scroll 0, page errors 0.
+- Under 44px on phones, original 64: the logo (45x24), the "Apps" and "Work" header links (34x44) and "Trust" (35x44). None new against the earlier audit.
+
+### Tap areas on Home, 390 and 320 (`elementFromPoint` at 21px from centre)
+- Pass all four ways: "All goals" (tap area 68x44) and the goal-line pill.
+- Short by one dimension, left for round 2: the goal line's "Work" link (39x44) and the logo (45x24).
+
+### Reads on Home's first paint, production `67db56b`, owner, agent-only seed (3 goals, 1 launch)
+16 API reads, `…/value` 2 for 1 unique URL. `/home`, `/change-requests`, `/goals` and `/workspaces` 2 each; `/goals/<g>/requests` 3; `/asks`, `/alignments`, `/apps` 1 each. Measured, and it replaces the estimates under "Checks on this head". `NeedsList` still reads `…/value` itself rather than through the shared cache, which accounts for the repeat.
+
+### Fonts, production `67db56b`
+- Space Grotesk and Space Mono are self-hosted: files come from `/_next/static/media/`, and the only host contacted across sign-in and Home was the app's own. No request to `fonts.googleapis.com` or `fonts.gstatic.com`.
+- A build that can't reach Google fails (tried with a dead proxy: exit 1, "Failed to fetch Space Grotesk from Google Fonts"). `next dev` instead logs the error and renders the fallback (read from Next's loader, not tried). The deploy's build needs Google once; the running site never does. Whether the Fly build has that network access is not checked.
+
+### Corrections to earlier sections
+- Merged since this report's last update: `6b88db7`, `b0d47c8`, `3ba2276`, `2c5dee1`, `b0fb5a6`, `14ec06c`, `08e39c9`.
+- The `onCount` local delta on `needs-list.tsx` is gone: it is upstream in Mini S1's file.
+- Removed from Home since: the Connect drawer and the role note. First run stays: a compact panel above the list when goals exist, the full panel when none do, and "Hide the steps" is a local toggle, not a dismiss. Home's only `data-home-*` hook left is `data-home-count`.
+- First run calls `onSeen` only when this mount first saw no app, which ended the double load (`/home` reads 7 to 4 in dev).
+- Consent page: main's files plus `PAGE_H1` and its import only. Files outside `app/app/**` are seven: `app/globals.css`, `app/layout.tsx`, `app/global-error.tsx`, `app/_trust/doc.tsx`, `app/trust/page.tsx`, `app/oauth/authorize/page.tsx`, `app/oauth/authorize/AuthorizeForm.tsx`.
+- Restoring the consent restyle: `a356ca9` on `agent/LIM-2472-consent-restyle` is an ancestor of this branch, so a PR from it shows no diff. After this merges, branch from main and run `git checkout a356ca9 -- ` on those two files.
+- `test-v2`: "You have not proposed a change" is gone (4201 breaks). 5660, 8939 and 8952 don't break. 3774, 3843 and 4194 do. Full list: `~/liminal/.private/align-lim2472/pr/TEST-DELTAS.md` (33 checks).
+- The CSP note on the display face stands.
 
 ## Merges and resolutions
 
@@ -49,7 +96,7 @@ No conflicts, so no file needed a side chosen. No rebase, no force push, no stas
 
 ## ADDED / REPLACED / DELETED (whole base against main `b16f8d1`)
 
-102 files: 55 added, 47 modified, 0 deleted. No file under `app/api/**`, `lib/**`, `proxy.ts`, migrations or tests is touched.
+110 files on the final head: 61 added, 49 modified, 0 deleted (`git diff --name-status origin/main...HEAD`; main unmoved at `b16f8d1`). No file under `app/api/**`, `lib/**`, `proxy.ts`, migrations or tests is touched.
 
 ### Foundation
 - ADDED: `app/app/_ui/ds/{data-table,drawer,empty-state,evidence-label,icons,kbd,panel,segmented,status-pill,theme,theme-script,timeline}.tsx|ts`, `app/app/_ui/ds/index.ts` (one import path, `@/app/app/_ui/ds`), `design/prototypes/lim-2472/LIM-2472-FOUNDATION.md`, `design/prototypes/lim-2472/foundation.html` (specimen).
@@ -78,6 +125,8 @@ REPLACED (restyle; requests and logic unchanged, see `design/prototypes/lim-2472
 
 ## test-v2 checks likely broken (read, not run)
 
+Superseded: the current list is `~/liminal/.private/align-lim2472/pr/TEST-DELTAS.md` (33 checks). See "Final head" for what changed from the table below.
+
 `scripts/test-v2.mjs`, by reading only:
 
 | Line | Check | Why |
@@ -92,7 +141,7 @@ REPLACED (restyle; requests and logic unchanged, see `design/prototypes/lim-2472
 | 5876, 6611-6617, 6658-6659, 6682, 6714, 6749-6751 | `[data-home-summary]`, `[data-home-app]`, `[data-home-item]`, `#waiting` | those hooks left with A's Home and the panels removed for the direction |
 | 5905-5906 | first run "Two ways to start" on the owner's Home | not read against the new Home; first run is Mini S0's lane |
 | 3783-3797 | 44px buttons at 390 incl. Requests | expected to pass: review buttons are `max-sm:min-h-[44px]`; hidden secondaries have height 0 |
-| 4204 | empty Requests says "You have not proposed a change" | kept verbatim, should pass |
+| 4201 | empty Requests says "You have not proposed a change" | breaks: the Desk says "No change requests yet" |
 
 The goal page's own request cards (`5506-5543` and the U/B checks that call `cardText` on a goal page) still render main's `ChangeRequestCard`: unchanged here.
 

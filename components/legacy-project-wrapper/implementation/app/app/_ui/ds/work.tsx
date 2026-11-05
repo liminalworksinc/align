@@ -194,12 +194,21 @@ function useLaunched(ws: string, goal: Goal) {
   const value = useRead<{ apps: { everyone: boolean; items: { id: string; name: string; connected_by: { id: string; name: string }; sent_at: string }[] } | null }>(
     cr ? `/api/v2/workspaces/${ws}/goals/${goal.id}/change-requests/${cr.id}/value` : null,
   );
-  return { cr, sent: value.data?.apps ?? null, loading: crs.loading || (!!cr && value.loading) };
+  // A failed read says nothing about what was launched or sent: neither is the same as a read that found none.
+  return { cr, sent: value.data?.apps ?? null, loading: crs.loading || (!!cr && value.loading), launchUnread: crs.status !== 0 && !cr, sentUnread: !!cr && value.status !== 0 };
 }
 
+const NOT_READ = "Not read just now. Reload to try again.";
+
 function LaunchRows({ ws, goal }: { ws: string; goal: Goal }) {
-  const { cr, sent, loading } = useLaunched(ws, goal);
+  const { cr, sent, loading, launchUnread, sentUnread } = useLaunched(ws, goal);
   if (loading) return null;
+  if (launchUnread)
+    return (
+      <Row label="Launched">
+        <span className="text-(--text-2)">{NOT_READ}</span>
+      </Row>
+    );
   if (!cr)
     return (
       <Row label="Launched">
@@ -215,7 +224,9 @@ function LaunchRows({ ws, goal }: { ws: string; goal: Goal }) {
         </span>
       </Row>
       <Row label="Align sent it to">
-        {sent && sent.items.length > 0 ? (
+        {sentUnread ? (
+          <span className="text-(--text-2)">{NOT_READ}</span>
+        ) : sent && sent.items.length > 0 ? (
           <span>
             {sent.items.length} connected {sent.items.length === 1 ? "app" : "apps"}
             {!sent.everyone && <span className="text-(--text-3)"> (yours; owners see everyone&apos;s)</span>}
@@ -231,7 +242,7 @@ function LaunchRows({ ws, goal }: { ws: string; goal: Goal }) {
 function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
   const apps = useRead<{ apps: App[] }>(`/api/v2/workspaces/${ws}/apps`);
   const list = apps.data?.apps ?? [];
-  const { cr, sent } = useLaunched(ws, goal);
+  const { cr, sent, loading, launchUnread, sentUnread } = useLaunched(ws, goal);
   const sentTo = new Map((sent?.items ?? []).map((i) => [i.id, i]));
   return (
     <Panel eyebrow="Connected apps" title="Goal reads Align recorded" actions={<Link href={`/app/w/${ws}/apps`} className={`${LINK} text-[14px]`}>Apps</Link>}>
@@ -253,13 +264,17 @@ function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
           ))}
         </ul>
       )}
-      <p className="mt-3 text-[13px] text-(--text-3)">
-        {cr && !list.length
-          ? `Launched v${cr.version} reaches an app when it reads the goals; none is connected.`
-          : cr
-          ? `"Align sent it v${cr.version}" is a delivery receipt: a goal read served this goal's launched version to that app. Align can't see what the app does with it.`
-          : "Nothing is launched on this goal yet, so Align has sent no version of it to an app. Goal reads are recorded for the workspace, not per goal."}
-      </p>
+      {!loading && (
+        <p className="mt-3 text-[13px] text-(--text-3)">
+          {launchUnread || sentUnread
+            ? NOT_READ
+            : cr && apps.data && !list.length
+            ? `Launched v${cr.version} reaches an app when it reads the goals; none is connected.`
+            : cr
+            ? `"Align sent it v${cr.version}" is a delivery receipt: a goal read served this goal's launched version to that app. Align can't see what the app does with it.`
+            : "Nothing is launched on this goal yet, so Align has sent no version of it to an app. Goal reads are recorded for the workspace, not per goal."}
+        </p>
+      )}
     </Panel>
   );
 }
