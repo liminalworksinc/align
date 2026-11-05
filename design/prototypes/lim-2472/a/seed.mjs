@@ -52,14 +52,32 @@ async function pair(user, ws, name) {
 }
 
 const hoursAgo = (h) => new Date(Date.now() - h * 3600_000).toISOString();
-async function share(dev, ws, native, { repo, title, harness = "claude-code", startedH, goal }) {
+async function share(dev, ws, native, { repo, title, harness = "claude-code", startedH, goal, usage = 0 }) {
   const key = createHmac("sha256", dev.secret).update(`${ws}\0${harness}\0${native}`).digest("base64url");
   const repoKey = createHmac("sha256", dev.secret).update(`${ws}\0repo\0${repo}`).digest("base64url");
   await must(`share ${title}`, call("PUT", `/api/v2/workspaces/${ws}/sessions/${key}`, { bearer: dev.access, body: { harness, repo_key: repoKey, repo_alias: repo, started_at: hoursAgo(startedH), title } }));
-  if (goal) {
-    const epoch = `ep_${randomBytes(18).toString("base64url")}`;
-    await must(`bind ${title}`, call("POST", `/api/v2/workspaces/${ws}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: epoch, goal_id: goal, starts_at: hoursAgo(startedH), root_turn: null, cause: "manual" } }));
-  }
+  // A binding epoch (to the goal, or to none): usage is reported against an epoch, as the align CLI does.
+  const epoch = `ep_${randomBytes(18).toString("base64url")}`;
+  await must(`bind ${title}`, call("POST", `/api/v2/workspaces/${ws}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: epoch, goal_id: goal ?? null, starts_at: hoursAgo(startedH), root_turn: null, cause: "manual" } }));
+  // Fictional usage rows, as the CLI reports them (agent reported): this is what each goal's 7-day share counts.
+  const rows = Array.from({ length: usage }, (_, i) => ({
+    request_key: createHmac("sha256", dev.secret).update(`req\0${native}-${i}`).digest("base64url"),
+    epoch_id: epoch,
+    ts: hoursAgo(Math.max(0.2, startedH - 0.1 - i * 0.05)),
+    model: "claude-sonnet-4-5",
+    query_source: "main",
+    input: 1000,
+    output: 200,
+    cache_read: 5000,
+    cache_write_5m: 300,
+    cache_write_1h: 0,
+    cache_write_unsplit: 0,
+    basis: "subscription_included",
+    est_list_usd_micros: 12_345,
+    price_table_version: "2026-10-01",
+    source: "otel",
+  }));
+  if (rows.length) await must(`usage ${title}`, call("POST", `/api/v2/workspaces/${ws}/sessions/${key}/usage`, { bearer: dev.access, body: { rows } }));
   return key;
 }
 
@@ -79,11 +97,11 @@ const security = byTitle("Pass the security review");
 
 // Devices and sessions first, so the launch below has bound sessions to deliver its version to.
 const ownerDev = await pair(owner, ws, "Mara's laptop (sample)");
-const s1 = await share(ownerDev, ws, "n1", { repo: "web-onboarding", title: "Signup flow, step 2 copy", startedH: 5, goal: onboarding.id });
-const s2 = await share(ownerDev, ws, "n2", { repo: "security-review", title: "Pen-test scope checklist", harness: "codex", startedH: 3, goal: security.id });
-await share(ownerDev, ws, "n3", { repo: "infra", title: "Audit log retention script", startedH: 26 });
+const s1 = await share(ownerDev, ws, "n1", { repo: "web-onboarding", title: "Signup flow, step 2 copy", startedH: 5, goal: onboarding.id, usage: 30 });
+const s2 = await share(ownerDev, ws, "n2", { repo: "security-review", title: "Pen-test scope checklist", harness: "codex", startedH: 3, goal: security.id, usage: 12 });
+await share(ownerDev, ws, "n3", { repo: "infra", title: "Audit log retention script", startedH: 26, usage: 8 });
 const memberDev = await pair(member, ws, "Theo's desktop (sample)");
-await share(memberDev, ws, "m1", { repo: "web-onboarding", title: "Pricing page for regulated tier", startedH: 2 }); // unbound: binding to a goal Theo does not own needs an approved alignment first
+await share(memberDev, ws, "m1", { repo: "web-onboarding", title: "Pricing page for regulated tier", startedH: 2, usage: 10 }); // unbound: binding to a goal Theo does not own needs an approved alignment first
 
 // The sample's own pending request on the security goal: approve and launch it, so its new version is sent to the
 // session bound to that goal; that session's device then answers with a received receipt (a delivery receipt).

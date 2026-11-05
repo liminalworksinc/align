@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Drawer, EmptyState, EvidenceLabel, Panel, StatusPill, type EvidenceKind } from "../../_ui/ds";
 import { Loading, Note, Shell, useApi, when } from "../../_ui/kit";
 import type { Me } from "../../_ui/server";
-import type { AnySession, ChangeRequest, MySession } from "../../_ui/types";
+import type { AnySession, ChangeRequest, Goal, MySession } from "../../_ui/types";
 import FirstRun, { seenApp } from "./first-run";
 import { crStatus, ReviewDrawer } from "./review-drawer";
 import { appStatusWords, type EvidenceClass, type HomeNext, type HomePerson } from "@/lib/v2/home-core.mts";
@@ -199,7 +199,7 @@ function SessionRow({ s, me, bound = true }: { s: MySession; me: Me; bound?: boo
   );
 }
 
-function GoalGroup({ ws, g, me, latest, sessions, onReview }: { ws: string; g: HomeGoal; me: Me; latest: ChangeRequest | null; sessions: MySession[]; onReview: (cr: ChangeRequest) => void }) {
+function GoalGroup({ ws, g, me, latest, sessions, alloc, onReview }: { ws: string; g: HomeGoal; me: Me; latest: ChangeRequest | null; sessions: MySession[]; alloc: Goal["allocation"] | undefined; onReview: (cr: ChangeRequest) => void }) {
   const st = latest ? crStatus(latest) : null;
   return (
     <li className="overflow-hidden rounded-(--radius-m) border border-(--line) bg-(--bg-panel)" data-home-goal={g.id}>
@@ -224,6 +224,11 @@ function GoalGroup({ ws, g, me, latest, sessions, onReview }: { ws: string; g: H
             </button>
           )}
           {latest?.launch === "launched" && <Delivered ws={ws} cr={latest} />}
+          {alloc?.held && <StatusPill kind="held" size="s" label="Held" />}
+          {/* Agent time on this goal over 7 days, from usage the CLI reports: agent reported, never a measure of progress. */}
+          {alloc && (
+            <EvidenceLabel kind={alloc.share_7d > 0 ? "reported" : "unobserved"} size="s" detail={`${alloc.share_7d}% of agent time, 7 days${alloc.target_share !== null ? ` · target ${alloc.target_share}%` : ""}`} />
+          )}
         </div>
       </div>
       {sessions.length ? (
@@ -245,6 +250,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const d = useApi<HomeData>(`/api/v2/workspaces/${ws}/home`);
   const s = useApi<{ mine: MySession[]; all: AnySession[] | null }>(`/api/v2/workspaces/${ws}/sessions`);
   const c = useApi<Groups>(`/api/v2/workspaces/${ws}/change-requests`);
+  const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
   const [review, setReview] = useReview();
   const [connect, setConnect] = useState(false);
   const h = d.data ?? (d.error ? UNREAD : null);
@@ -481,7 +487,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
               ) : (
                 <ul className="flex flex-col gap-3">
                   {h.goals.map((g) => (
-                    <GoalGroup key={g.id} ws={ws} g={g} me={me} latest={latestFor(g.id)} sessions={byGoal(g.id)} onReview={(cr) => open(cr.goal.id, cr.id)} />
+                    <GoalGroup key={g.id} ws={ws} g={g} me={me} latest={latestFor(g.id)} sessions={byGoal(g.id)} alloc={feed.data?.goals.find((x) => x.id === g.id)?.allocation} onReview={(cr) => open(cr.goal.id, cr.id)} />
                   ))}
                 </ul>
               )}
