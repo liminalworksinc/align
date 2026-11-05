@@ -17,7 +17,7 @@
  * 0e0f6774): pink = the one primary action and the active selection; orchid (--between) = in-between states
  * (pending, countered, held); green = a recorded human authorization; cerulean = launched to agents; red = decline,
  * refusal and failed writes; amber = transient or retryable; Surge coral = urgent reprioritization only.
- * Elevation is surface lightness plus hairlines, never glow. Measured contrast is in LIM-2472-FOUNDATION.md.
+ * Elevation is surface lightness plus hairlines, never glow. Measured contrast is in design/prototypes/lim-2472/LIM-2472-FOUNDATION.md.
  */
 :root,
 :root[data-theme="dark"] {
