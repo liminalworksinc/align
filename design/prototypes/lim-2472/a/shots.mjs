@@ -28,29 +28,43 @@ let seedFile = process.argv[4];
 if (!seedFile) {
   seedFile = path.join(OUT, "seed.json");
   if (!existsSync(seedFile)) {
-    const r = spawnSync(process.execPath, [path.join(HERE, "seed.mjs"), BASE, seedFile], { stdio: "inherit" });
+    const r = spawnSync(process.execPath, [path.join(HERE, "../s/seed-agent.mjs"), BASE, seedFile], { stdio: "inherit" });
     if (r.status !== 0) process.exit(r.status ?? 1);
   }
 }
 const seed = JSON.parse(readFileSync(seedFile, "utf8"));
+// The shared agent seed (../s/seed-agent.mjs) keeps the people under `accounts`; this folder's older seed.mjs kept them at the top.
+const who = (k) => seed.accounts?.[k] ?? seed[k];
 const WS = seed.ws;
 const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, protocolTimeout: 180_000, args: ["--no-first-run", "--no-default-browser-check"] });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const written = [];
 
 /** A fresh signed-in page for one person, in one theme and width. */
-async function page(who, theme, width) {
+async function page(person, theme, width) {
   const ctx = await browser.createBrowserContext();
   const p = await ctx.newPage();
   await p.setViewport({ width, height: width >= 1024 ? 900 : 844, deviceScaleFactor: 1 });
+  // A dev server's live-reload socket can reload the page in a loop while Turbopack rebuilds (seen on the mini with
+  // several dev servers running): the screenshots don't need it, so the page never opens it.
+  await p.evaluateOnNewDocument(() => {
+    const Real = window.WebSocket;
+    const Stub = function (url, protocols) {
+      if (String(url).includes("/_next/hmr")) return { readyState: 0, send() {}, close() {}, addEventListener() {}, removeEventListener() {} };
+      return new Real(url, protocols);
+    };
+    Stub.prototype = Real.prototype;
+    Object.assign(Stub, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
+    window.WebSocket = Stub;
+  });
   await p.evaluateOnNewDocument((t) => {
     try {
       localStorage.setItem("align-theme", t);
     } catch {}
   }, theme);
   // Sign in from Node and hand the browser the session cookie: a dev server can reload a page mid-call.
-  const r = await fetch(`${BASE}/api/v2/auth/sign-in/email`, { method: "POST", headers: { origin: BASE, "content-type": "application/json" }, body: JSON.stringify(seed[who]) });
+  const r = await fetch(`${BASE}/api/v2/auth/sign-in/email`, { method: "POST", headers: { origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ email: who(person).email, password: who(person).password }) });
   const ok = r.status;
   const host = new URL(BASE).hostname;
   for (const c of r.headers.getSetCookie()) {
@@ -58,7 +72,7 @@ async function page(who, theme, width) {
     const at = pair.indexOf("=");
     await ctx.setCookie({ name: pair.slice(0, at), value: pair.slice(at + 1), domain: host, path: "/", httpOnly: true, secure: BASE.startsWith("https:") });
   }
-  if (ok !== 200) throw new Error(`sign-in ${who}: ${ok}`);
+  if (ok !== 200) throw new Error(`sign-in ${person}: ${ok}`);
   await p.goto(`${BASE}/app`, { waitUntil: "domcontentloaded" });
   return { p, ctx };
 }
@@ -116,6 +130,17 @@ for (const theme of ["dark", "light"]) {
   await home(p);
   await shot(p, "00-three-states", theme, 1440, false);
   await ctx.close();
+}
+
+// 09 Home as each role sees it: a member (Theo) and a viewer (Ines), dark, desktop and phone.
+for (const [person, n] of [["member", "09-home-member"], ["viewer", "10-home-viewer"]]) {
+  if (!who(person)) continue;
+  for (const width of [1440, 390]) {
+    const { p, ctx } = await page(person, "dark", width);
+    await home(p);
+    await shot(p, n, "dark", width);
+    await ctx.close();
+  }
 }
 
 for (const width of W) {
