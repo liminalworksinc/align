@@ -64,18 +64,6 @@ issue [#307](https://github.com/jordanhubbard/literate-ai/issues/307) covers the
 missing retained Python package-delivery bridge. Issue #235's per-unit native tree
 packages do not establish this feature's remote cache custody.
 
-## Go runtime-test contract
-
-With explicit operator approval, issue
-[#324](https://github.com/jordanhubbard/literate-ai/issues/324) records a native
-compiler failure and a buildable control before parent source changes. The old
-contract imports runtime assertions from an `_test.go` file, which ordinary Go
-package compilation excludes. The existing builder consumes only `source/main.go`.
-The approved local repair keeps native assertion helpers in that file and aligns
-the skill, copied template, prompt and command profile with the closed compiler
-input. Six actual builder/runtime controls and 24 generation controls pass.
-Clean installed qualification and publication remain pending.
-
 ## Current consumer checkpoint and next action
 
 All 93 focused managed installed regressions pass with zero failures or skips at
@@ -87,10 +75,13 @@ Root and CI-pinned verification each pass three gates with two declared skips;
 validation and owned-entrypoint checks pass. The same application inputs pass all
 24 image checks on the SSD-backed engine.
 
-Finish the Go contract's remaining checks and prepare an exact staged publication
-packet. Any further local commit, push or tracker update requires specific operator
-approval. Broader upstream release requirements remain open after these local
-proofs, and the complete native rewrite continues under ADOPT-002.
+Prepare the Align-related framework contribution's exact publication packet for
+qualified-child registration, generic import isolation and local cache transport.
+Any further local commit, push or tracker update requires specific operator
+approval. Align checkpoint `a598a6e` is published to draft PR #58 with its
+specifically approved hook opt-out. Broader upstream review and qualification
+requirements remain open after these local proofs. The complete native rewrite
+continues under ADOPT-002. The operator's scope is Align only.
 
 ## Additional forwarded design input
 

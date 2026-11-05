@@ -1,0 +1,12 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const modules = ['field_validation/create_validators.js', 'tests/litai_test.js', 'main.js'];
+const bodies = modules.map(id => JSON.stringify(id) + ':function(module,exports,require){\n' + fs.readFileSync(path.join(root, id), 'utf8').replace(/^#![^\n]*\n/, '') + '\n}');
+const output = process.argv[2];
+if (!output) throw new Error('Output directory required');
+fs.mkdirSync(output, {recursive:true});
+const bundle = '#!/usr/bin/env node\n\'use strict\';\nconst registry={' + bodies.join(',\n') + '};\nconst cache={};\nfunction load(id){if(cache[id])return cache[id].exports;if(!registry[id])return require(id);const m={exports:{}};cache[id]=m;registry[id](m,m.exports,function(s){if(!s.startsWith("."))return require(s);const p=id.split("/");p.pop();for(const x of s.split("/")){if(x==="..")p.pop();else if(x!==".")p.push(x);}return load(p.join("/"));});return m.exports;}\ntry{process.stdout.write(JSON.stringify(load("main.js").main())+"\\n");}catch(e){process.stderr.write(String(e.stack||e)+"\\n");process.exitCode=1;}\n';
+fs.writeFileSync(path.join(output, 'run'), bundle, {mode:0o755});
+fs.cpSync(path.join(root, 'field_validation'), path.join(output, 'field_validation'), {recursive:true});

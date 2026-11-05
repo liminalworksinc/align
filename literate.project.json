@@ -69,7 +69,7 @@
     "runner_identity": {
       "schema": "urn:literate-ai:schema:v1:content-identity",
       "algorithm": "sha256",
-      "digest": "21798338bc12adfcd382b8923344567294617caef9e285d50a9d02d43d7d027e"
+      "digest": "934a687fb2670451fbd68c3864983d0a94aa5301ce2138c69917226e902bb62c"
     },
     "required_evidence_kinds": [
       "build-result",
