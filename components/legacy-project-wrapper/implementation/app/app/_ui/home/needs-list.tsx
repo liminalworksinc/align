@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { EvidenceLabel, EvidenceSummary, hasEvidence, NeedAction, NeedList, NeedRow, Segmented, type Delivery } from "../ds";
+import { EvidenceLabel, EvidenceSummary, hasEvidence, NeedAction, NeedList, NeedRow, Segmented, type Delivery, type NextItem } from "../ds";
 import { api, useApi } from "../kit";
 import { readValue } from "./value-cache";
 import type { Alignment, ChangeRequest, Goal } from "../types";
@@ -182,6 +182,9 @@ export function NeedsList({
   reviewBase = "",
   heading = true,
   onCount,
+  reloadToken = 0,
+  onItems,
+  decided,
 }: {
   ws: string;
   me: string;
@@ -192,6 +195,14 @@ export function NeedsList({
    *  flight and when nothing is readable, so a page never prints "Nothing needs you" for a non-member. `partial` is
    *  true when a source couldn't be read: then `n` is only a lower bound, and 0 must not read as "nothing". */
   onCount?: (n: number | null, partial: boolean) => void;
+  /** Change it to read everything again in place (after a decision): the list keeps its filter, search and any decided
+   *  rows, which a remount would lose. */
+  reloadToken?: number;
+  /** The Needs-you rows as "Next" items (ds/next-core.mts), in this list's own order: undefined while a read after
+   *  `reloadToken` is still in flight, null when a source couldn't be read (no Next is guessed from a partial list). */
+  onItems?: (items: NextItem[] | null | undefined) => void;
+  /** Rows decided on this page (keys): when one leaves Needs you it stays in place, greyed, until the filter changes. */
+  decided?: ReadonlySet<string>;
 }) {
   const W = `/api/v2/workspaces/${ws}`;
   const cr = useApi<Groups<ChangeRequest>>(`${W}/change-requests`);
@@ -206,6 +217,23 @@ export function NeedsList({
   const sent = useSends(ws, crList, !!cr.error);
   const [phase, setPhase] = useState<NeedPhase>("needs_you");
   const narrow = useNarrow();
+  // Read everything again in place when the page says so; until the change requests come back, Next waits.
+  const [awaiting, setAwaiting] = useState<{ token: number; data: unknown; err: string | null } | null>(null);
+  const reloaders = useRef([cr.reload, asks.reload, al.reload, home.reload, goals.reload]);
+  useEffect(() => {
+    reloaders.current = [cr.reload, asks.reload, al.reload, home.reload, goals.reload];
+  });
+  const crRef = useRef({ data: cr.data as unknown, err: cr.error });
+  useEffect(() => {
+    crRef.current = { data: cr.data, err: cr.error };
+  });
+  useEffect(() => {
+    if (!reloadToken) return;
+    const t = setTimeout(() => setAwaiting({ token: reloadToken, data: crRef.current.data, err: crRef.current.err }), 0);
+    for (const r of reloaders.current) r();
+    return () => clearTimeout(t);
+  }, [reloadToken]);
+  const reread = !awaiting || cr.data !== awaiting.data || (cr.error !== null && cr.error !== awaiting.err);
   const [q, setQ] = useState("");
 
   const declined = useDeclinedSeen(ws, me);
@@ -249,16 +277,46 @@ export function NeedsList({
   const unknown: Unknown[] = [...unreadSources, ...(sent.failed ? (["deliveries to apps"] as const) : []), ...(reqs.failed ? (["requests to agents"] as const) : [])].filter((x, i, a) => a.indexOf(x) === i);
   const capped = reqs.unchecked + sent.unchecked;
   const counts = Object.fromEntries(PHASES.map((p) => [p.value, inPhase(rows, p.value).length])) as Record<NeedPhase, number>;
+  // A row decided here stays in place, greyed, until the filter changes (founder ruling): captured when the page marks it
+  // decided, from the rows as they were, and dropped when the phase changes.
+  const [stuck, setStuck] = useState<Map<string, { row: Need; index: number }>>(new Map());
+  const needsNow = useMemo(() => inPhase(rows, "needs_you"), [rows]);
+  const lastNeeds = useRef(needsNow);
+  useEffect(() => {
+    if (!decided?.size) return;
+    const add = [...decided].filter((k) => !stuck.has(k)).map((k) => [k, lastNeeds.current.findIndex((r) => r.key === k)] as const).filter(([, i]) => i >= 0);
+    if (!add.length) return;
+    const t = setTimeout(() => setStuck((m) => new Map([...m, ...add.map(([k, i]) => [k, { row: lastNeeds.current[i]!, index: i }] as const)])), 0);
+    return () => clearTimeout(t);
+  }, [decided, stuck]);
+  useEffect(() => {
+    if (!awaiting || reread) lastNeeds.current = needsNow;
+  });
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return inPhase(rows, phase).filter((n) => !needle || [n.goal?.title, n.cause, n.quote, n.who, KIND_WORDS[n.kind]].join(" ").toLowerCase().includes(needle));
-  }, [rows, phase, q]);
+    const list: (Need & { stuck?: boolean })[] = inPhase(rows, phase).filter((n) => !needle || [n.goal?.title, n.cause, n.quote, n.who, KIND_WORDS[n.kind]].join(" ").toLowerCase().includes(needle));
+    if (phase === "needs_you" && !needle)
+      for (const [k, { row, index }] of [...stuck].sort((a, b) => a[1].index - b[1].index)) if (!list.some((r) => r.key === k)) list.splice(Math.min(index, list.length), 0, { ...row, stuck: true });
+    return list;
+  }, [rows, phase, q, stuck]);
 
   // Every read refused or failed (a signed-in non-member gets 404 on all of them): say so, never "Nothing needs you".
   const unreadable = !loading && cr.error !== null && asks.error !== null && al.error !== null && home.error !== null;
   const needCount = loading || unreadable ? null : counts.needs_you;
   const partial = !loading && unknown.length > 0;
   // Called only when the number changes; the latest callback is kept in a ref so a new function identity doesn't re-fire.
+  const items = useMemo<NextItem[] | null | undefined>(() => {
+    if (loading || !reread || reqs.loading || sent.loading) return undefined;
+    if (unknown.length || cr.error) return null;
+    return needsNow.map((n) => ({ key: n.key, kind: n.word, title: n.goal?.title ?? n.cause, waited: n.since ? waited(n.since.at) : undefined, href: needHref(ws, n, reviewBase), review: !!n.review, actionable: !!n.action }));
+  }, [loading, reread, reqs.loading, sent.loading, unknown.length, cr.error, needsNow, ws, reviewBase]);
+  const itemsCb = useRef(onItems);
+  useEffect(() => {
+    itemsCb.current = onItems;
+  }, [onItems]);
+  useEffect(() => {
+    itemsCb.current?.(items);
+  }, [items]);
   const countCb = useRef(onCount);
   useEffect(() => {
     countCb.current = onCount;
@@ -293,6 +351,7 @@ export function NeedsList({
           onChange={(v) => {
             setPhase(v);
             setQ("");
+            setStuck(new Map());
           }}
         />
         {!loading && counts[phase] > SEARCH_FROM && (
@@ -343,7 +402,17 @@ export function NeedsList({
           // says the count once).
           empty={unknown.length ? null : q ? `Nothing here mentions "${q}".` : phase === "needs_you" ? null : phase === "waiting_on_others" ? "Nothing you're part of is waiting on someone else." : "Nothing decided yet."}
         >
-          {shown.map((n) => (
+          {shown.map((n) =>
+            n.stuck ? (
+              <NeedRow
+                key={n.key}
+                kind="Decided"
+                tone="draft"
+                title={<span className="text-(--text-3)">{n.goal?.title ?? n.cause}</span>}
+                sub="You decided this just now. It leaves Needs you when you change the filter."
+                href={needHref(ws, n, reviewBase)}
+              />
+            ) : (
             <NeedRow
               key={n.key}
               kind={n.word}
@@ -384,7 +453,8 @@ export function NeedsList({
               href={needHref(ws, n, reviewBase)}
               selected={!!selected && n.key === selected}
             />
-          ))}
+            ),
+          )}
         </NeedList>
       )}
       {!loading && notices.length > 0 && (

@@ -1,6 +1,7 @@
 "use client";
 import { PAGE_H1 } from "@/app/app/_ui/page-title";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { NextAfterDecision, type NextItem } from "../../_ui/ds";
 import GoalLines from "../../_ui/home/goal-lines";
 import { NeedsList } from "../../_ui/home/needs-list";
 import Since from "../../_ui/home/since";
@@ -79,6 +80,35 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
     setNeedsKey((k) => k + 1);
   }, [reloadHome, reloadChanges]);
 
+  // "Next" after a decision (round 2): NeedsList hands over its Needs-you rows in its own order; the keys when this
+  // review opened are the snapshot; the rows after the decision are `fresh` (undefined while NeedsList reads again).
+  const [items, setItems] = useState<NextItem[] | null | undefined>(undefined);
+  const [snap, setSnap] = useState<{ id: string; keys: string[] | null } | null>(null);
+  const reviewId = review?.id ?? null;
+  useEffect(() => {
+    // Taken once the list has read (a cold link opens the review before the list lands), so "the list changed" compares
+    // with what the person could see.
+    if (!reviewId || snap?.id === reviewId || items === undefined) return;
+    const keys = Array.isArray(items) ? items.map((i) => i.key) : null;
+    const t = setTimeout(() => setSnap({ id: reviewId, keys }), 0);
+    return () => clearTimeout(t);
+  }, [reviewId, items, snap]);
+  const [decided, setDecided] = useState<Set<string>>(new Set());
+  const onDecided = useCallback(() => {
+    if (reviewId) setDecided((d) => new Set(d).add(`cr:${reviewId}`));
+    reloadAll();
+  }, [reviewId, reloadAll]);
+  /** Back to the list: close the review and put focus on its row, or on the row now in its place. */
+  const backToList = useCallback(() => {
+    const at = snap?.keys?.indexOf(`cr:${reviewId}`) ?? -1;
+    closeReview();
+    requestAnimationFrame(() => {
+      const links = [...document.querySelectorAll<HTMLAnchorElement>('[data-needs] ol > li a[href*="review="]')];
+      const own = links.find((a) => a.getAttribute("href")?.includes(`.${reviewId}`));
+      (own ?? links[Math.max(0, Math.min(at, links.length - 1))])?.focus();
+    });
+  }, [snap, reviewId, closeReview]);
+
   const allCrs = c.data ? [...c.data.waiting_on_me, ...c.data.mine, ...c.data.others] : [];
   // The page checks membership before Home mounts; this is the person removed while Home is open (every read is a 404).
   if (d.status === 404) return <NotInWorkspace me={me} />;
@@ -94,7 +124,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
 
         {h && <FirstRun ws={ws} onSeen={reloadAll} me={me.id} hasGoals={(h.goals?.length ?? 0) > 0} />}
 
-        <NeedsList key={needsKey} ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} />
+        <NeedsList ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} reloadToken={needsKey} onItems={setItems} decided={decided} />
 
         {!h ? (
           <Loading />
@@ -107,7 +137,31 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
 
         {/* The drawers break words only where needed, so a short label ("Close", "Esc") never splits at 320. */}
         <div className="[overflow-wrap:break-word]">
-          {review && <ReviewDrawer key={`${review.id}:${review.choice ?? ""}`} ws={ws} goal={review.goal} id={review.id} me={me.id} choice={review.choice} onPick={(c) => setReview({ goal: review.goal, id: review.id, choice: c })} onClose={closeReview} onChanged={reloadAll} />}
+          {review && (
+            <ReviewDrawer
+              key={`${review.id}:${review.choice ?? ""}`}
+              ws={ws}
+              goal={review.goal}
+              id={review.id}
+              me={me.id}
+              choice={review.choice}
+              onPick={(c) => setReview({ goal: review.goal, id: review.id, choice: c })}
+              onClose={closeReview}
+              onChanged={onDecided}
+              after={
+                <NextAfterDecision
+                  current={`cr:${review.id}`}
+                  snapshot={snap?.id === review.id ? snap.keys : null}
+                  fresh={items}
+                  onBack={backToList}
+                  onGo={(item) => {
+                    // A review opens in this drawer's place; anything else is another page, so the drawer closes first.
+                    if (!item.review) closeReview();
+                  }}
+                />
+              }
+            />
+          )}
         </div>
       </div>
     </Shell>

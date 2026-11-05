@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useGoalTitles } from "../../_ui/changes";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Drawer, ReviewActions, ReviewBody, type ReviewChoice } from "../../_ui/ds";
 import { crStatus } from "../../_ui/home/cr-status";
 import { api, ApiError, Loading, Note } from "../../_ui/kit";
@@ -18,7 +18,7 @@ export { crStatus };
 
 const quiet = "inline-flex min-h-[44px] items-center text-[13px] text-(--accent-text) hover:underline";
 
-function Loaded({ ws, cr, me, choice, onClose, done, onPick }: { ws: string; cr: ChangeRequest; me: string; choice?: ReviewChoice; onClose: () => void; done: () => void; onPick?: (c: ReviewChoice) => void }) {
+function Loaded({ ws, cr, me, choice, onClose, done, onPick, after }: { ws: string; cr: ChangeRequest; me: string; choice?: ReviewChoice; onClose: () => void; done: () => void; onPick?: (c: ReviewChoice) => void; after?: ReactNode }) {
   const titles = useGoalTitles(ws);
   return (
     <Drawer
@@ -27,7 +27,7 @@ function Loaded({ ws, cr, me, choice, onClose, done, onPick }: { ws: string; cr:
       width="l"
       eyebrow="Review"
       title={cr.goal.title}
-      footer={<ReviewActions ws={ws} cr={cr} me={me} onDone={done} compact initialChoice={choice} />}
+      footer={<ReviewActions ws={ws} cr={cr} me={me} onDone={done} compact initialChoice={choice} after={after} />}
     >
       <div data-review={cr.id}>
         <ReviewBody ws={ws} cr={cr} me={me} titleOf={(id) => titles.get(id) ?? "a goal you can't see"} onDone={done} />
@@ -72,7 +72,7 @@ export function useReview(): [ReviewTarget | null, (r: ReviewTarget | null) => v
  *  It is also how a shared link arrives (`?review=<goal>.<id>`, cold load included). The server answers 404 alike for a
  *  request that doesn't exist and one on a goal the reader can't see, so the not-found state says the same for both and
  *  names nothing from the link. Any other failure says Align couldn't read it and offers to try again. */
-export function ReviewDrawer({ ws, goal, id, me, choice, onClose, onChanged, onPick }: { ws: string; goal: string; id: string; me: string; choice?: ReviewChoice; onClose: () => void; onChanged: () => void; onPick?: (c: ReviewChoice) => void }) {
+export function ReviewDrawer({ ws, goal, id, me, choice, onClose, onChanged, onPick, after }: { ws: string; goal: string; id: string; me: string; choice?: ReviewChoice; onClose: () => void; onChanged: () => void; onPick?: (c: ReviewChoice) => void; after?: ReactNode }) {
   const [r, setR] = useState<{ cr: ChangeRequest | null; status: number | null; error: string | null }>({ cr: null, status: null, error: null });
   const [tick, setTick] = useState(0);
   const reload = useCallback(() => setTick((t) => t + 1), []);
@@ -122,6 +122,7 @@ export function ReviewDrawer({ ws, goal, id, me, choice, onClose, onChanged, onP
       choice={choice}
       onClose={onClose}
       onPick={onPick}
+      after={after}
       done={() => {
         reload();
         onChanged();
