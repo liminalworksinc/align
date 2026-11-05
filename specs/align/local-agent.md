@@ -1543,7 +1543,8 @@ before `align stop-sharing` freed its tools, which the server shares again): the
 a session whose sharing was stopped is not shared again, so it stays stopped. To share it again, counting from now,
 first delete its shared history (it leaves every total): run \`align delete-history <lid8>\` in a terminal, or use
 Delete shared history on the web's Sessions page; then type \`::align share\` here.` and spool nothing. `::align share
---dir` that replaces the rule of the same folder SHALL say `This replaces the current rule (<workspace>, "<goal>").`
+--dir` that replaces the rule of the same folder (including filesystem aliases resolved by realpath) SHALL say
+`This replaces the current rule (<workspace>, "<goal>").`
 (`no goal` without one) in its preview and its confirmation, as `align share --dir` does; with no goal named it SHALL
 keep the goal that rule has (its preview says `for "<goal>" (the goal its rule has now; \`::align share --dir none\` for
 no goal)`), and `::align share --dir none` asks for no goal: its confirmation SHALL say `This session too, with no goal

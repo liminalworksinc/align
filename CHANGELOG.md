@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- The retained runner reports the complete test aggregate to the receipt
+  collector. A portable nine-case regression fixture preserves that count and
+  failure handling in every stage.
+
+- Field validation now comes from its qualified library. The typed public API
+  preserves all 4,549,018 compatibility observations, both revision overloads,
+  shared error constructors and data references. The combined application with
+  the latest security fixes passes 1,825 checks with no failures or skips. The
+  hosted image passes 24 checks plus ten response-header checks.
+
 - Value-card wording, note cleaning, follow-up links and measured spans now come
   from their qualified library. The typed consumer preserves all 1,168,597
   observations, including shared estimate data and environment defaults. The
@@ -75,6 +85,11 @@
   are retired after the complete sealed application workflow passes, including
   all 600 agent tests. Builds verify every package file and rerun independent
   acceptance before installing the native libraries.
+
+- The agent's folder-rule preview recognizes a folder through a filesystem alias, keeps its current goal unless
+  another is requested, and says when the confirmation replaces that rule.
+- The live-agent test client uses fresh HTTP connections after synchronous CLI calls so the offline-revocation
+  scenario can finish without a stale keep-alive socket reset.
 - The MCP paste lines (`lib/paste-lines.ts`: `shq`, `safeMcpUrl`, `claudeCodeLine`, `codexLine`) are specified as
   their own component in `.literate/native-projects/local-paste-lines`. Two clean builds generated from that
   specification alone pass their tests and match the original on 49 cases (hostile URLs, quoting edges), so the

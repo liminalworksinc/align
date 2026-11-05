@@ -26,8 +26,26 @@ function toApp(request: NextRequest): URL {
 
 const text = (status: number, body: string) => new NextResponse(body, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
 
+// Every page and route this proxy sees, refusals and redirects included: never framed (clickjacking). The consent page
+// sets the same two values itself in next.config.ts, so it is left to that set here. HSTS only when hosted: in Mode L it
+// would pin 127.0.0.1 to https in the browser.
+const HSTS = "max-age=31536000";
+const CONSENT_PAGE = "/oauth/authorize";
+function secured(res: NextResponse, pathname: string, hosted: boolean): NextResponse {
+  if (pathname !== CONSENT_PAGE) {
+    res.headers.set("X-Frame-Options", "DENY");
+    res.headers.set("Content-Security-Policy", "frame-ancestors 'none'");
+  }
+  if (hosted) res.headers.set("Strict-Transport-Security", HSTS);
+  return res;
+}
+
 export function proxy(request: NextRequest) {
   const cfg = alignConfig();
+  return secured(route(request, cfg), request.nextUrl.pathname, cfg.hosted);
+}
+
+function route(request: NextRequest, cfg: ReturnType<typeof alignConfig>): NextResponse {
   const name = hostName(request.headers.get("host"));
   const p = request.nextUrl.pathname;
   if (!cfg.hosted) {

@@ -271,3 +271,11 @@ insertion order. Its tests retain wrong-target, symbol, dependency and path
 refusals, including an inherited missing key replaced by a same-count extra key.
 Upstream issue #314 and draft PR #313 own this correction. The rewrite program
 records its source commit, wheel identity and real qualification evidence.
+
+## Aggregate count regression
+
+Run `python3 tools/native-rewrite/test-aggregate-count.py` to exercise the actual
+retained gate runner with synthetic command results. The fixture uses only the
+Python standard library. Its nine cases check the complete numeric aggregate and
+a nonzero exit for a failure in each of the eight stages. The synthetic results
+are isolated from application acceptance and create no receipt.

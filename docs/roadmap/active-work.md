@@ -60,12 +60,21 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Next action:** Qualify B06 field validation through its corrected public factory
-  surface, then integrate its actual consumers and continue the remaining authority
-  classes. The complete fifteen-library application passes all 1,821 checks with
+- **Next action:** Obtain specific approval to commit and publish the tested
+  sixteen-library checkpoint. B12 data-contract work follows that checkpoint.
+  The combined build, test and package workflow includes main at `b16f8d1` and
+  passes all 1,825 checks with zero failures or skips.
+  B06 field validation is qualified, separately admitted, publicly registered and
+  consumed through typed aliases. All 4,549,018 observations match the actual
+  consumer; web admission passes 281 batches across ten libraries. The scope has
+  395 members and no gaps. The hosted image passes all 24 checks, and ten additional
+  HTTP cases verify exact framing headers and hosted HSTS on that same image.
+  All fifteen prior registrations, manifest records and
+  2,797 native child files remain unchanged. Continue the remaining authority
+  classes after complete consumer-transfer acceptance. The complete fifteen-library application passes all 1,821 checks with
   zero failures or skips through the reconciled installed framework at `4d672137`.
-  All 24 image checks pass on the SSD-backed Colima engine with the same application
-  inputs. Current receipt:
+  All 24 image checks pass on the SSD-backed Colima engine for that fifteen-library
+  checkpoint. Last complete fifteen-library receipt:
   `sha256:8c7f0f604ba43f9185814c94b090480716700daed9fbe1c10e11c37d4c104f73`.
   Root and CI-pinned verification each pass three gates with two declared skips;
   project validation and owned-entrypoint checks pass. B07 value rules passes both
@@ -80,8 +89,9 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   fixture proves read-only planning, stale-plan refusal, actual process interruption,
   ordinary verification refusal of mixed metadata, exact recovery and successful
   addition while preserving 525 child files. The former private helper is retired.
-  The Go runtime-test contract issue is filed as upstream #324 and its approved
-  local repair is being verified. Further commits and publication require specific
+  The operator approved publishing the fifteen-library tree as `a598a6e` to
+  draft PR #58. Only framework changes needed by Align remain in scope.
+  Further commits and publication require specific
   operator approval. [SDK-FOLLOWUPS-001](#sdk-followups-001), remaining runtime
   boundaries and authority-class review stay open.
 - **Evidence:** Phase 1.2 lift-and-shift identity `sha256:316a4e6b641a46788febb1c21b004ad3c00b6d812c10006deb1d05a48207aa49`.
@@ -584,10 +594,10 @@ checks. Its current receipt is `sha256:7f3b84e7019246bdb8bb2edfc9dd043135ce57282
   - [x] With explicit authorization, file or link upstream issues before implementation in the isolated parent checkout.
   - [x] Replace the private registry helper with the supported public operation; preserve stale-plan, qualification, collision and rollback refusals.
   - [x] Preserve main's generic Python import isolation and the separate verified-wheel dependency closure; document and test native-cache transport scope.
-  - [ ] Repair and qualify the Go runtime-test contract reported in upstream #324.
+  - [ ] Publish the tested framework contribution with specific approval and reconcile its canonical design and required review outcomes.
 - **Evidence:**
   - [x] Registration, Python isolation and cache-scope fixtures pass 93 focused installed regressions and the real two-library recovery journey without editing protected pins or generated implementations.
-  - [ ] The Go contract repair passes actual compiler controls and clean installed qualification.
+  - [ ] The framework PR completes its required independent review and exact-head platform/CI qualification before landing.
   - [x] Current fifteen-library consumer integrity, all 1,821 application checks and owned project verification pass with the approved reconciled framework.
 
 See the [framework integration followups](framework-integration-followups.md) for
@@ -597,6 +607,48 @@ Upstream issues [#315](https://github.com/jordanhubbard/literate-ai/issues/315) 
 [#316](https://github.com/jordanhubbard/literate-ai/issues/316) are filed before
 implementation. The operator accepted parent ADR 0060 before implementation; it is
 now ADR 0064 after upstream reconciliation. Approved commit `4d672137` passes the
-installed acceptance described in the linked followups. Issue [#324](https://github.com/jordanhubbard/literate-ai/issues/324)
-was filed with explicit approval before its local Go contract repair. Publication
-and broader upstream release qualification remain separate.
+installed acceptance described in the linked followups. The operator has limited continuation to Align and the framework work it needs.
+Publication and broader upstream qualification remain separate.
+
+### Current-main integration
+
+Main's security-header and folder-rule fixes from `b16f8d1` are reconciled with
+the sixteen-library working tree. The interrupted earlier run does not count as
+complete acceptance. A fresh sealed build, test and package workflow passes all
+1,825 checks with zero failures or skips. Its current retained receipt is
+`sha256:485aa67eedf4eacd3379ba5703d8265e2ffcf5fc0c2282df931aac5ab4eee871`.
+The hosted image passes all 24 checks plus ten response-header checks on the
+SSD-backed engine. Commit, push and PR update await specific approval.
+
+### [x] VERIFY-001 - Repair the retained-test blockers for PR 60
+
+- **Priority:** P1
+- **Owner:** components/legacy-project-wrapper/implementation (agent hooks and retained test harness)
+- **Direction:** Run PR 60 on this machine, investigate failures on main, repair demonstrated defects and refresh the branch receipt without merging or deploying.
+- **Conclusion:** The initial PR run passed 1787 checks and failed two. Clean main reproduces the dead-proxy fetch reset and folder-rule goal loss through a filesystem alias. Normalize folder identity and avoid stale HTTP connections in the live-test client; preserve all assertions and the latency budget.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Reproduce the two failures on clean main and retain diagnostic logs (main `cff1d34`: live 46/1, focused folder rule 0/1; network cause `ECONNRESET`)
+  - [x] Repair canonical folder-rule comparisons with a symlink regression (focused alias and unchanged latency tests 2/0 on macOS arm64 / Node 26.3.0)
+  - [x] Use fresh connections in the live-agent test client
+- **Evidence:**
+  - [x] Focused folder-rule and unchanged latency tests 2/0; repaired live client against unchanged main 62/0, including offline revoke and re-pairing
+  - [x] Full retained suite passes: lint/typecheck/syntax, paste-lines 23/0, v2 937/0, OAuth 187/0, live agent 62/0, CLI 592/0; supported receipt committed in `75420dd` and candidate check matches (the collector's 937 count is tracked in VERIFY-002)
+  - [x] Historical checkpoint at `75420dd`: `litai verify`, spec validation, `litai-verify` and `rebased-on-main` pass ([verification run](https://github.com/liminalworksinc/align/actions/runs/41958037099)). The PR was draft at that checkpoint; its changes are now on main at `b16f8d1`.
+
+### [x] VERIFY-002 - Preserve complete aggregate test-count reporting
+
+- **Priority:** P2
+- **Owner:** Align retained gate runner and its receipt-count interface
+- **Direction:** Resolve the aggregate-count discrepancy carried by main while preserving failure handling in every stage.
+- **Conclusion:** The pinned collector recognizes numeric passed/failed summaries and selects the largest count. Without the branch's existing final numeric footer, a nine-case diagnostic selects the 941-check sub-suite instead of the 1,825-check aggregate. The owning fix is the Align runner's machine-readable footer. Both the current installed and CI-pinned collectors accept its full total and reject all eight failing-stage controls. Preserve that interface with a portable local regression fixture.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Compare collector summary precedence with the Node 26 aggregate footer.
+  - [x] Resolve ownership to the Align gate runner and preserve its existing aggregate footer.
+  - [x] Add a portable standard-library fixture for the unchanged runner and all eight stage failures.
+- **Evidence:**
+  - [x] The portable fixture passes all nine cases with a 54-check synthetic aggregate and rejects a failure in each stage. Run `python3 tools/native-rewrite/test-aggregate-count.py`; the script uses only the standard library and exercises the actual runner unchanged.
+  - [x] Both installed collector runtimes pass all nine diagnostic cases. The real sealed build, test and package workflow reports all 1,825 checks with zero failures or skips.
