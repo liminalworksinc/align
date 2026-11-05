@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { EvidenceLabel, EvidenceSummary, hasEvidence, NeedAction, NeedList, NeedRow, Segmented, type Delivery } from "../ds";
 import { api, useApi } from "../kit";
 import type { Alignment, ChangeRequest, Goal } from "../types";
-import { buildNeeds, inPhase, KIND_WORDS, latestLaunches, rankNote, REQ_GOALS_MAX, SENT_GOALS_MAX, type AppLite, type AskLite, type EvidenceCounts, type Need, type NeedPhase, type NeedsInput, type RequestLite } from "./needs";
+import { buildNeeds, inPhase, type Unknown, KIND_WORDS, latestLaunches, rankNote, REQ_GOALS_MAX, SENT_GOALS_MAX, type AppLite, type AskLite, type EvidenceCounts, type Need, type NeedPhase, type NeedsInput, type RequestLite } from "./needs";
 
 // LIM-2472 Home, section 1: the "Needs you" list (direction LIM-2472 9b5b870f). Four cookie reads, the model in needs.ts,
 // and the foundation's NeedList / NeedRow / NeedAction. Filters: Needs you (default), Waiting on others, Done; search over
@@ -185,7 +185,7 @@ export function NeedsList({
   );
   // A failed per-goal read is an unread source like any other (amber line, lower-bound counts, partial); only the
   // deliberate cap stays in the rank note, with one short visible line.
-  const unknown: string[] = [...unreadSources, ...(sent.failed ? ["what Align sent apps"] : []), ...(reqs.failed ? ["requests to agents"] : [])].filter((x, i, a) => a.indexOf(x) === i);
+  const unknown: Unknown[] = [...unreadSources, ...(sent.failed ? (["deliveries to apps"] as const) : []), ...(reqs.failed ? (["requests to agents"] as const) : [])].filter((x, i, a) => a.indexOf(x) === i);
   const capped = reqs.unchecked + sent.unchecked;
   const counts = Object.fromEntries(PHASES.map((p) => [p.value, inPhase(rows, p.value).length])) as Record<NeedPhase, number>;
   const shown = useMemo(() => {
@@ -250,12 +250,12 @@ export function NeedsList({
       {capped > 0 && !loading && (
         <p data-needs-capped className="px-1 text-[12px] text-(--text-3)">
           {reqs.unchecked ? `Requests to agents not checked on ${reqs.unchecked} goal${reqs.unchecked === 1 ? "" : "s"}. ` : ""}
-          {sent.unchecked ? `What Align sent apps not checked on ${sent.unchecked} launch${sent.unchecked === 1 ? "" : "es"}.` : ""}
+          {sent.unchecked ? `Deliveries to apps not checked on ${sent.unchecked} launch${sent.unchecked === 1 ? "" : "es"}.` : ""}
         </p>
       )}
       {unknown.length > 0 && !loading && (
         <p role="status" data-needs-partial className="rounded-(--radius-s) border border-(--st-retry)/50 bg-(--st-retry-soft) px-3 py-2 text-[13px] text-(--text-1)">
-          Align couldn&apos;t read the {listWords(unknown)} just now, so this list may be missing items and its counts are at least what you see. Reload to try again.
+          Align couldn&apos;t read {listWords(unknown.map((u) => `the ${u}`))} just now, so this list may be missing items and its counts are at least what you see. Reload to try again.
         </p>
       )}
       {loading ? (
