@@ -4,7 +4,7 @@ import { Icon } from "./icons";
 
 /** Where an event came from. person: recorded in Align against a person; system: Align itself. Align's audit log
  *  records no channel (browser, CLI or app), so person and system never claim one; `detail` can say so ("source not
- *  recorded"). What an agent's side sent uses the three evidence classes: Receipt, Agent reported, Not observed. */
+ *  recorded"). Evidence uses the evidence classes: Receipt, Agent reported, Self-reported, Not observed. */
 export type TimelineSource = { kind: "person" | "system"; detail?: string } | { kind: EvidenceKind; detail?: string };
 
 const ORIGIN = {
@@ -32,7 +32,7 @@ const fmt = (iso: string) => {
 };
 
 function SourceLabel({ source }: { source: TimelineSource }) {
-  if (source.kind === "receipt" || source.kind === "reported" || source.kind === "unobserved")
+  if (source.kind !== "person" && source.kind !== "system")
     return <EvidenceLabel kind={source.kind} detail={"detail" in source ? source.detail : undefined} size="s" />;
   const o = ORIGIN[source.kind];
   const I = o.icon;
