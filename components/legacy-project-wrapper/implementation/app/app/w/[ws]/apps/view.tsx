@@ -13,7 +13,7 @@ import { claudeCodeLine, codexLine } from "@/lib/paste-lines";
 // (test-v2 reads them): Last connected is not a read; only Last read the goals is a receipt.
 
 const BTN =
-  "inline-flex min-h-[36px] max-sm:min-h-[44px] items-center justify-center rounded-(--radius-s) border px-3 text-[14px] font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) disabled:opacity-60";
+  "inline-flex min-h-[36px] max-sm:min-h-[44px] items-center justify-center whitespace-nowrap rounded-(--radius-s) border px-3 text-[14px] font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus) disabled:opacity-60";
 const CODE = "min-w-0 flex-1 rounded-(--radius-s) border border-(--line) bg-(--bg-inset) px-2.5 py-1.5 font-mono text-[13px] text-(--text-1) [overflow-wrap:anywhere]";
 
 function CopyRow({ text, label }: { text: string; label: string }) {
