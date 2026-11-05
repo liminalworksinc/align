@@ -457,6 +457,17 @@ for (const width of [390, 320]) {
     const k = await page("owner", "dark", 320);
     await goto(k.p, `/app/w/${WS}?review=${goal}.${kb.id}`);
     await ready(k.p, "Work on this goal", "[role=dialog]");
+    // The drawer keeps focus: 30 Tabs at 320 never leave the dialog, and they pass "More actions" (a summary) on the way
+    // round, so a disclosure is a stop of the trap, not a way out of it.
+    {
+      const seen = [];
+      for (let i = 0; i < 30; i++) {
+        await k.p.keyboard.press("Tab");
+        seen.push(await k.p.evaluate(() => { const a = document.activeElement; return `${a?.closest("[role=dialog]") ? "in" : "OUT"}:${a?.tagName}:${(a?.textContent ?? "").trim().slice(0, 20)}`; }));
+      }
+      if (seen.some((x) => x.startsWith("OUT"))) throw new Error(`keyboard at 320: Tab left the drawer: ${seen.join(" | ")}`);
+      if (!seen.some((x) => x.startsWith("in:SUMMARY:More actions"))) throw new Error(`keyboard at 320: Tab never reached More actions: ${seen.join(" | ")}`);
+    }
     await tabTo(k.p, { sel: '[role=dialog] [data-decision="Approve and launch"]' }, "Approve and launch");
     await k.p.keyboard.press("Enter");
     const step = await k.p
