@@ -47,7 +47,7 @@ export function LimitChips({ goal }: { goal: Goal }) {
     <ul aria-label={`Limits of ${goal.title}`} className="mt-1 flex flex-wrap gap-2">
       {ls.slice(0, LIMITS_MAX).map((l) => (
         <li key={l.id} className="text-[14px] text-(--text-2)">
-          <Pill tone={l.type === "must_not" ? "red" : l.type === "must" ? "violet" : "neutral"}>{LIMIT_WORDS[l.type]}</Pill> {l.text}
+          <Pill>{LIMIT_WORDS[l.type]}</Pill> {l.text}
         </li>
       ))}
     </ul>
@@ -106,7 +106,7 @@ export function GoalLimits({ ws, goal, canEdit, onDone }: { ws: string; goal: Go
         <ul className="mb-2 text-[15px]">
           {ls.map((l) => (
             <li key={l.id} className="py-1">
-              <Pill tone={l.type === "must_not" ? "red" : l.type === "must" ? "violet" : "neutral"}>{LIMIT_WORDS[l.type]}</Pill> {l.text}
+              <Pill>{LIMIT_WORDS[l.type]}</Pill> {l.text}
               {l.source && <span className="text-[13px] text-(--text-3)"> ({sourceWords(l)})</span>}
             </li>
           ))}
@@ -254,7 +254,7 @@ function GoalGroup({ ws, group, title, date, onDone }: { ws: string; group: Goal
             <label className="flex items-start gap-2">
               <input type="checkbox" className="mt-1 size-4 shrink-0 accent-(--accent)" checked={chosen[i]} onChange={(e) => setChosen((c) => c.map((x, j) => (j === i ? e.target.checked : x)))} />
               <span>
-                <Pill tone={l.type === "must_not" ? "red" : l.type === "must" ? "violet" : "neutral"}>{LIMIT_WORDS[l.type]}</Pill> {l.text}
+                <Pill>{LIMIT_WORDS[l.type]}</Pill> {l.text}
                 {l.already && <span className="text-[13px] text-(--text-3)"> (the goal already has a limit like this)</span>}
                 <span className="block text-[13px] text-(--text-3)">Said: “{l.quote}”</span>
               </span>

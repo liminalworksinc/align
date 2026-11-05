@@ -39,7 +39,7 @@ export function AllocationCard({ ws, detail }: { ws: string; detail: WsDetail | 
   const isOwner = detail?.role === "owner";
   const weekGoals = d.data ? [...new Map(d.data.weekly.flatMap((w) => w.rows.filter((r) => r.kind === "goal").map((r) => [r.goal!.id, r.goal!.title] as const))).entries()] : [];
   return (
-    <Panel className="mb-4" title="Agent time against targets" actions={<Pill tone={steering === "on" ? "green" : "neutral"}>steering {steering}</Pill>}>
+    <Panel className="mb-4" title="Agent time against targets" actions={<Pill>steering {steering}</Pill>}>
       {d.loading && <Loading />}
       <Err>{d.error}</Err>
       {d.data && (

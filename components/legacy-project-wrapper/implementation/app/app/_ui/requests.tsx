@@ -87,7 +87,7 @@ function answerPill(s: { state: TargetState; ended_reason: EndedReason | null; a
   if (s.state === "expired" && s.ended_reason === "device_signed_out") return <Pill>ended: device signed out</Pill>;
   if (s.state === "expired" && s.ended_reason === "member_removed") return <Pill>ended: left the workspace</Pill>;
   if (s.state === "expired") return <Pill>expired</Pill>;
-  return <Pill tone="amber">pending</Pill>;
+  return <Pill tone="violet">pending</Pill>;
 }
 
 const sessionName = (s: { owner: Person; mine: boolean; repo_alias: string | null; harness: string; title?: string | null }) =>
@@ -232,8 +232,8 @@ function RequestRow({ ws, r, me, onDone }: { ws: string; r: RequestView; me: str
   return (
     <li className="py-3" data-request={r.id}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[16px] text-(--text-1)">{TYPE_LABEL[r.type]}</span>
-        {r.state === "cancelled" ? <Pill>cancelled</Pill> : r.state === "expired" ? <Pill>{r.expired_reason === "sessions_ended" ? "expired: its sessions ended" : "expired: the goal closed"}</Pill> : r.state === "open" ? <Pill tone="amber">waiting</Pill> : <Pill tone="green">answered</Pill>}
+        <span className="text-[15px] font-semibold text-(--text-1)">{TYPE_LABEL[r.type]}</span>
+        {r.state === "cancelled" ? <Pill>cancelled</Pill> : r.state === "expired" ? <Pill>{r.expired_reason === "sessions_ended" ? "expired: its sessions ended" : "expired: the goal closed"}</Pill> : r.state === "open" ? <Pill tone="violet">waiting</Pill> : <Pill>answered</Pill>}
         <span className="text-[14px] text-(--text-3)">
           from {r.sender.id === me ? "you" : r.sender.name} ({r.sender.role === "approver" ? "approver" : "workspace owner"}), {when(r.created_at)}, goal version {r.goal.version}
         </span>
