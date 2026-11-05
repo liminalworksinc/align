@@ -92,6 +92,8 @@ function Returned({ ws, cr, me }: { ws: string; cr: ChangeRequest; me: string })
       <h3 className="text-[15px] font-semibold text-(--text-1)">{head}</h3>
       {words && <blockquote className="border-l-2 border-(--line-strong) pl-3 text-[15px] text-(--text-1) [overflow-wrap:anywhere]">{kind === "condition" ? `Accept if: ${words}` : words}</blockquote>}
       <p className="text-[14px] text-(--text-2)">{next}</p>
+      {/* At integration with r2-shell (align session, round 2): open its Propose drawer pre-filled from this declined
+          request (goal, the change, the reason) instead of the goal page, as Mini S1 did for "Propose again". */}
       {kind === "declined" && (
         <Link href={`/app/w/${ws}/goals/${cr.goal.id}#change-requests`} className={`${DECISION_LINK} self-start`}>
           Open the goal to propose again
