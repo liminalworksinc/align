@@ -219,8 +219,9 @@ export function deliveryEvent(ws: string, cr: ChangeRequest, d: Delivery | null)
     actor: null,
     source: "align",
     object: { label: `Change to ${cr.goal.title}`, href: crHref(ws, cr), id: cr.id },
-    what: deliveryStatement(cr.version!, d),
-    asOfNow: true,
+    // The timeline names Align as the actor, so the statement's own "Align …" starts lower case after it.
+    what: deliveryStatement(cr.version!, d).replace(/^Align /, ""),
+    asOfNow: !!d,
     evidence: d ? (got ? "receipt" : "unobserved") : undefined,
   };
 }
