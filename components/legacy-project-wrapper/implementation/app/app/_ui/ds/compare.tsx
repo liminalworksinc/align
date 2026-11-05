@@ -138,9 +138,7 @@ export function Compare({ before, after, beforeLabel = "Before", afterLabel = "A
           <span className="hidden px-3 py-2 sm:block">Field</span>
           <span className="hidden px-3 py-2 sm:block">{beforeLabel}</span>
           <span className="hidden px-3 py-2 sm:block">{afterLabel}</span>
-          <span className="px-3 py-2 sm:hidden">
-            {beforeLabel} and {afterLabel}
-          </span>
+          <span className="px-3 py-2 sm:hidden">Change</span>
         </div>
         {fields.map((f) => {
           const words = changeWords(f, { before: b[f], after: a[f], hidden: f === "depends_on" ? hidden : null }, { title: titleOf });
@@ -157,7 +155,9 @@ export function Compare({ before, after, beforeLabel = "Before", afterLabel = "A
                 <p className="px-2 text-[12.5px] text-(--text-3) sm:hidden">{afterLabel}</p>
                 <Side field={f} v={a[f]} other={b[f]} side="after" titleOf={titleOf} hidden={hidden?.after ?? 0} />
               </div>
-              <ul className="col-span-full flex flex-col gap-0.5 border-t border-dashed border-(--line) px-5 py-1.5 text-[13px] text-(--text-2) sm:col-start-2" aria-label={`${FIELD_LABEL[f]} change in words`}>
+              {/* In words on phones, where the columns stack; at two columns the table says it, so the words are for screen
+                  readers only. */}
+              <ul className="col-span-full flex flex-col gap-0.5 border-t border-dashed border-(--line) px-5 py-1.5 text-[13px] text-(--text-2) sm:sr-only" aria-label={`${FIELD_LABEL[f]} change in words`}>
                 {words.map((w) => (
                   <li key={w}>{w}</li>
                 ))}
