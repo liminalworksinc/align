@@ -1,6 +1,6 @@
 # LIM-2472 Concept A: agent-work-first command center
 
-Branch `agent/LIM-2472-concept-a-agent-work`, from main b16f8d1, with shared surfaces (45bfc92, which contains foundation da51b0c) merged.
+Branch `agent/LIM-2472-concept-a-agent-work`, from main b16f8d1, with shared surfaces (eb1b357, which contains foundation 1a4e6d7) merged.
 Front end only. No PR, nothing deployed.
 
 ## The concept in 10 lines
