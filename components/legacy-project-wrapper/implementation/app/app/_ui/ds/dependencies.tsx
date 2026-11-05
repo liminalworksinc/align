@@ -88,7 +88,7 @@ function Details({ ws, goal, byId }: { ws: string; goal: Goal; byId: Map<string,
           <dd className="text-(--text-1)">{goal.owner.name}</dd>
           <dt className="text-(--text-2)">Contributes to</dt>
           <dd className="flex min-w-0 flex-col gap-1 text-(--text-1)">
-            {goal.contributes_to.length === 0 && <span className="text-(--text-2)">Nothing</span>}
+            {goal.contributes_to.length === 0 && <span className="text-(--text-2)">No goal you can see</span>}
             {goal.contributes_to.map((p) => (
               <span key={p.id} className="[overflow-wrap:anywhere]">
                 {p.title} (v{p.version})
