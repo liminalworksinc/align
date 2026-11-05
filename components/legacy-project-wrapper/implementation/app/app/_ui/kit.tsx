@@ -99,7 +99,8 @@ export interface WsSummary {
 /** Concept A navigation (LIM-2472): grouped by what a person is doing, the command center first. Labels keep the
  *  existing tab names so every page's `tab` prop still marks its place. */
 const NAV: { group: string; items: { href: string; label: string }[] }[] = [
-  { group: "Command", items: [{ href: "", label: "Home" }] },
+  // Home sits at the top with no group label: the label named the product ("command center"), which it no longer is.
+  { group: "", items: [{ href: "", label: "Home" }] },
   {
     group: "Plan",
     items: [
@@ -197,7 +198,7 @@ function NavBody({ ws, tab, list, me, current }: { ws?: string; tab?: string; li
         <nav aria-label="Workspace" className="flex flex-col gap-3">
           {NAV.map((g) => (
             <div key={g.group} className="flex flex-col gap-0.5">
-              <p className="px-2.5 font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">{g.group}</p>
+              {g.group && <p className="px-2.5 font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">{g.group}</p>}
               {/* The workspace-wide record is an owner's audit page (ruling eaa5cf92 item 1); the server decides what it shows. */}
               {[...g.items, ...(g.group === "Team" && current?.role === "owner" ? [{ href: "/record", label: "Record" }] : [])].map((t) => (
                 <Link key={t.href} href={`/app/w/${ws}${t.href}`} aria-current={tab === t.label ? "page" : undefined} className={navLink(tab === t.label)}>
