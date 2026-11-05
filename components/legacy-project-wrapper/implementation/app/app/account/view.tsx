@@ -225,7 +225,7 @@ export default function Account({ me, options, linkError }: { me: Me; options: S
         <p className="text-[15px] text-zinc-500">{me.email}</p>
       </Card>
       <Card title="Appearance">
-        <ThemeSetting />
+        <ThemeSetting hideLabel />
       </Card>
       <Card title="Ways you can sign in">
         {list.loading && <Loading />}
