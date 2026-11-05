@@ -58,7 +58,8 @@ function detail(e: RecordEvent, titleOf: (id: string) => string, openCompare: bo
         Time not recorded in what you can read: the request doesn&apos;t carry it, and the audit log that does is for workspace owners.
       </p>,
     );
-  if (e.asOfNow)
+  // Only when there are counts to qualify; a failed read says so in the event itself.
+  if (e.asOfNow && e.evidence)
     parts.push(
       <p key="now" className="text-[13px] text-(--text-3)">
         As Align has it now: counts, with no time for each receipt.
