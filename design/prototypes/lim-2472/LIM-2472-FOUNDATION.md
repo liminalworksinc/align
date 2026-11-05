@@ -27,7 +27,17 @@ Hues (canon): accent wholeness `#BF0078` (hover `#94005C`) in both themes, ruled
 
 - Every Tab stop gets the 2px `--focus` ring (`:focus-visible:not([tabindex="-1"])`, unlayered).
 - An element that only code focuses (`tabindex="-1"`: a heading after navigation, an error or confirm message, a dialog panel) gets no ring and not the browser's default one (`[tabindex="-1"]:focus { outline: none }` in `@layer base`, so a utility can still add a ring). No builder needs `outline-none` for these.
+- The Drawer's Tab trap counts `summary`, and only controls that can take focus now, read on every Tab: hidden controls are skipped, and so is anything inside a closed `<details>` (it keeps its box, so that is checked by walking its closed ancestors) except that details' own summary. Checked in Chrome at 1440, 390 and 320, Tab forward and back through a drawer with closed, open, nested and `hidden md:block` disclosures, including one whose very last control is a closed summary with no footer after it: focus never left the dialog, summaries were reached, closed content was skipped, and opening a disclosure added its controls to the loop. The static specimens have no drawer, so re-run this on a real one after changing the trap.
 - Checked in Chrome by keyboard: Tab stops, the roving Segmented choice after an arrow key, a code-focused heading, the Drawer panel and a control inside it; the real goal page passes test-v2:3880's check (29 stops, all with a 2px ring).
+
+## Round 2 primitives
+
+Specimen: `round-2.html` in this folder.
+
+- `Disclosure`: closed by default, a native `<details>`, with a chevron and underline so it reads as a control.
+- `LaneMap`: lanes as columns, so it fits the review drawer. The caller declares `lanes`, `cards` and `links` (`live`, `done`, `muted`); the map routes the lines. Hidden below 42rem of its own width. Wrap its `Disclosure` in `className="hidden md:block"` so nothing opens onto nothing.
+- `FormField`, `TextInput`, `TextArea`, `SelectInput`, `FormSummary`: a short form with errors beside their fields, "Optional" in words, and a summary of what happens before it is sent.
+- `NeedAction quiet`: a shortcut beside the outlined action. On the Desk: "Approve only" (quiet) beside "Review" (outlined), only with evidence.
 
 ## The hosted display face
 

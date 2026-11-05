@@ -28,14 +28,65 @@ import { changeWaits, launchWaits, type HomePerson } from "../../../../lib/v2/ho
 export type NeedKind = "launch" | "decide" | "returned" | "agent_declined" | "team_ask" | "alignment" | "app_behind";
 export type NeedPhase = "needs_you" | "waiting_on_others" | "done";
 
-/** The ranking, said once on the page. Launches first: approved work Align hasn't released yet; then what is yours to
- *  decide; then your own requests that came back; then requests an agent declined; then team asks; then alignments;
- *  then launched versions Align has not sent to an app. Oldest first inside a kind. */
-export const RANK_NOTE =
-  "Ranked: approved changes waiting to launch, then decisions waiting on you, then your requests that came back, then requests an agent declined, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.";
+/** Two orders, by person (founder ruling, LIM-2472 eaa5cf92). The order only ORDERS rows: what a person may do or see
+ *  stays the server's (`cr.can`), whichever order they get.
+ *    approver   launches and decisions first: approved work Align hasn't released, then what is yours to decide, then
+ *               your own requests that came back, requests an agent declined, team asks, alignments, launched versions
+ *               Align has not sent to an app;
+ *    requester  your own requests first: those that came back, requests an agent declined, then any decision or launch
+ *               that is yours, then the rest as above. */
+export type RankOrder = "approver" | "requester";
+export const ORDERS: Record<RankOrder, NeedKind[]> = {
+  approver: ["launch", "decide", "returned", "agent_declined", "team_ask", "alignment", "app_behind"],
+  requester: ["returned", "agent_declined", "decide", "launch", "team_ask", "alignment", "app_behind"],
+};
+/** The one visible line: which order this is, never the rule behind it. */
+export const ORDER_LINE: Record<RankOrder, string> = { approver: "Ranked for someone who approves: launches and decisions first.", requester: "Ranked for your own requests first." };
+/** The full sentence, behind "How it's ranked". */
+export const ORDER_SENTENCE: Record<RankOrder, string> = {
+  approver:
+    "Ranked for someone who approves on a goal here: approved changes waiting to launch, then decisions waiting on you, then your requests that came back, then requests an agent declined, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.",
+  requester:
+    "Ranked for your own requests first: your requests that came back, then requests an agent declined, then any decision or launch that is yours, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.",
+};
+/** Why this order: the rule, in words, behind "How it's ranked". */
+export const ORDER_WHY: Record<RankOrder, string> = {
+  approver: "You get this order because you can approve on at least one goal here: you own one, lead its team, own the workspace with a company goal, or are named on a request's approvers or launchers.",
+  requester: "You get this order because nothing your reads show lets you approve on a goal here. What you may do on any request is still decided on that request.",
+};
+/** The approver order's sentence, kept for callers of the round-1 API. */
+export const RANK_NOTE = ORDER_SENTENCE.approver;
 /** The rank note, plus what wasn't checked: requests to agents are read per goal, at most REQ_GOALS_MAX goals. */
-export const rankNote = (unchecked: number, unsent = 0) =>
-  [RANK_NOTE, unchecked ? `Requests to agents not checked on ${unchecked} goal${unchecked === 1 ? "" : "s"}.` : "", unsent ? `Deliveries to apps not checked on ${unsent} launch${unsent === 1 ? "" : "es"}.` : ""].filter(Boolean).join(" ");
+export const rankNote = (unchecked: number, unsent = 0, order: RankOrder = "approver") =>
+  [ORDER_SENTENCE[order], unchecked ? `Requests to agents not checked on ${unchecked} goal${unchecked === 1 ? "" : "s"}.` : "", unsent ? `Deliveries to apps not checked on ${unsent} launch${unsent === 1 ? "" : "es"}.` : ""].filter(Boolean).join(" ");
+
+/** What the approver rule reads. `role` and `leads` come from GET /api/v2/workspaces (this workspace's role and the teams
+ *  this person leads); `goals` from GET …/goals. null: that read failed. */
+export interface ApproverFacts {
+  role: "owner" | "member" | "viewer" | null;
+  leads: string[] | null;
+  goals: { owner: { id: string }; team: { id: string } | null; level: "company" | "team"; status: string }[] | null;
+}
+
+/** Which order this person gets. Approver when their workspace role is owner or member AND any of: (a) they own an
+ *  active goal; (b) they lead a team that owns an active team goal; (c) they are a workspace owner and an active company
+ *  goal exists; (d) a change request lists them among its approvers or launchers, or lets them approve or launch. The
+ *  server's own approval set (lib/v2/approval.ts approvalSet) is the same people; (d) also covers its fallback, where
+ *  workspace owners decide for a goal whose set is empty. When a read a clause needs failed, (d) decides; when the
+ *  requests failed too, approver order, which hides nothing a decider needs (`fallback` says so). */
+export function rankOrder(me: string, facts: ApproverFacts | undefined, crs: ChangeRequest[] | null): { order: RankOrder; fallback: boolean } {
+  if (!facts) return { order: "approver", fallback: false };
+  if (facts.role === "viewer") return { order: "requester", fallback: false };
+  const d = crs?.some((c) => c.approvers.some((p) => p.id === me) || c.launchers.some((p) => p.id === me) || c.can.approve || c.can.approve_and_launch || c.can.launch) ?? null;
+  if (d) return { order: "approver", fallback: false };
+  if (facts.role === null || facts.goals === null || facts.leads === null) return d === false ? { order: "requester", fallback: false } : { order: "approver", fallback: true };
+  const active = facts.goals.filter((g) => g.status === "active");
+  const a = active.some((g) => g.owner.id === me);
+  const b = active.some((g) => g.team && facts.leads!.includes(g.team.id));
+  const c = facts.role === "owner" && active.some((g) => g.level === "company");
+  if (a || b || c) return { order: "approver", fallback: false };
+  return crs === null ? { order: "approver", fallback: true } : { order: "requester", fallback: false };
+}
 
 /** The latest launch on each goal, newest first: the change requests whose value read SENT checks. */
 export function latestLaunches(crs: ChangeRequest[]): ChangeRequest[] {
@@ -53,7 +104,7 @@ export const REQ_GOALS_MAX = 12;
 export const SENT_GOALS_MAX = 12;
 // Rows rank by what the person can do about them. An app that hasn't read the launched plan comes last: the person's
 // action there is the weakest (Align notifies nobody), and its real home as evidence is the launched goal's line.
-export const KIND_ORDER: NeedKind[] = ["launch", "decide", "returned", "agent_declined", "team_ask", "alignment", "app_behind"];
+export const KIND_ORDER: NeedKind[] = ORDERS.approver;
 
 export const KIND_WORDS: Record<NeedKind, string> = {
   launch: "Approved, not launched",
@@ -122,6 +173,12 @@ export interface NeedsInput {
   /** SENT: per goal, the latest launch and the apps the value read says Align sent that version
    *  (GET …/change-requests/<id>/value apps.items); null when it couldn't be read. */
   sends?: { goal: { id: string; title: string }; cr: string; version: number; launched_at: string; apps: { id: string }[]; current_version?: number }[] | null;
+  /** Declined requests this person has opened since (local storage); absent: declined requests stay in Done. */
+  declinedSeen?: Set<string>;
+  /** Active goals, by id (goals read); null when it failed. */
+  activeGoals?: Set<string> | null;
+  /** The approver rule's reads (rankOrder); absent: approver order. */
+  approver?: ApproverFacts;
   /** REQ, per goal read; null when none could be read. */
   requests?: { goal: { id: string; title: string }; requests: RequestLite[] }[] | null;
 }
@@ -178,7 +235,7 @@ const reviewOf = (cr: ChangeRequest) => `?review=${cr.goal.id}.${cr.id}`;
 const goalOf = (cr: ChangeRequest) => ({ id: cr.goal.id, title: cr.goal.title });
 
 /** One change request as at most one row (CR read). */
-function crNeed(cr: ChangeRequest, me: string): Need | null {
+function crNeed(cr: ChangeRequest, me: string, returning?: Set<string>): Need | null {
   const base = { key: `cr:${cr.id}`, goal: goalOf(cr), quote: cr.reason, evidence: crEvidence(cr), review: reviewOf(cr), cr, word: "" };
   const asker = cr.requester.id === me ? "Your request" : `${cr.requester.name}'s request`;
   const c = cr.can;
@@ -211,13 +268,32 @@ function crNeed(cr: ChangeRequest, me: string): Need | null {
     // (c) Your request that came back: a suggested change to accept, a condition to acknowledge, an update to the
     // goal's current version.
     if (cr.requester.id === me && (c.accept_counter || (c.acknowledge && cr.condition && !cr.condition.acknowledged_by) || (c.rebase && cr.behind))) {
-      const label = c.accept_counter ? "Accept the change" : c.acknowledge && cr.condition && !cr.condition.acknowledged_by ? "Confirm the condition" : `Update to v${cr.goal.version}`;
+      // The row names what to look at, never the decision before the review ("See the change", not "Accept the change").
+      const label = c.accept_counter ? "See the change" : c.acknowledge && cr.condition && !cr.condition.acknowledged_by ? "See the condition" : `Update to v${cr.goal.version}`;
       const why = c.accept_counter ? "An approver suggested a change" : label === "Confirm the condition" ? "Approved on a condition" : `The goal moved on to v${cr.goal.version}`;
       return { ...base, kind: "returned", phase: "needs_you", tone: c.accept_counter ? "countered" : "pending", cause: why, since, action: { label, opens: "review" }, who: null };
     }
     // "Your request came back" only for the requester; anyone else sees what the request waits for.
     const other = cr.requester.id !== me && (w.next === "accept_counter" || w.next === "rebase");
     return { ...base, word: other ? (w.next === "accept_counter" ? "Change suggested" : "Needs an update") : "", kind: w.next === "accept_counter" || w.next === "rebase" ? "returned" : "decide", phase: "waiting_on_others", tone: cr.state === "countered" ? "countered" : "pending", cause: asker, since, action: null, who: `Waiting on ${names(w.waiting_on, me)}` };
+  }
+
+  // (c) Your declined request, back on your Home until you open it (founder ruling, LIM-2472 eaa5cf92): the newest of your
+  // requests on an active goal, declined, with the decider's reason; "Propose again" (decidedReturns says which).
+  if (returning?.has(cr.id)) {
+    const by = cr.rejected_by ? (cr.rejected_by.id === me ? "you" : cr.rejected_by.name) : "an approver";
+    return {
+      ...base,
+      kind: "returned",
+      phase: "needs_you",
+      tone: "declined",
+      word: "Declined",
+      cause: `Declined by ${by}${cr.rejection_reason ? `: “${cr.rejection_reason}”` : ""}`,
+      quote: cr.rejection_reason,
+      since: cr.decided_at ? { at: cr.decided_at, field: "decided_at" } : null,
+      action: { label: "Propose again", opens: "goal" },
+      who: null,
+    };
   }
 
   // Done: decided, withdrawn, superseded, or launched.
@@ -294,7 +370,7 @@ function appNeeds(apps: AppLite[], sends: NonNullable<NeedsInput["sends"]> | und
       // A newer version saved directly (no change request) may have been sent; these reads can't tell, so the row
       // names the goal's current version rather than reading as "behind".
       const now = s.current_version && s.current_version > s.version ? ` The goal is now at v${s.current_version}.` : "";
-      out.push(row(a, `app:${a.id}:${s.goal.id}:${s.version}`, s.goal, `Align has not sent v${s.version} to ${a.name}.${now}`, { at: s.launched_at, field: "launch_decided_at" }, e));
+      out.push(row(a, `app:${a.id}:${s.goal.id}:${s.version}`, s.goal, `Align has not sent v${s.version} to the app ${a.name}.${now}`, { at: s.launched_at, field: "launch_decided_at" }, e));
     }
   }
   return out;
@@ -340,6 +416,20 @@ function declinedNeeds(groups: NonNullable<NeedsInput["requests"]>, me: string):
   return out;
 }
 
+/** Which of this person's declined requests come back to their Home: per active goal, the newest of their requests
+ *  (by created_at, then id), when it was declined and they haven't opened it since. "Opened" is a seen-marker kept in
+ *  this browser's local storage only (needs-list.tsx); across devices it needs a server field, which is on Sean's list.
+ *  With the goals read failed (activeGoals null) every goal counts as active, so nothing is hidden for a read failure. */
+export function declinedReturns(crs: ChangeRequest[], me: string, seen: Set<string>, activeGoals: Set<string> | null): Set<string> {
+  const newest = new Map<string, ChangeRequest>();
+  for (const c of crs) {
+    if (c.requester.id !== me) continue;
+    const p = newest.get(c.goal.id);
+    if (!p || c.created_at > p.created_at || (c.created_at === p.created_at && c.id > p.id)) newest.set(c.goal.id, c);
+  }
+  return new Set([...newest.values()].filter((c) => c.state === "rejected" && !seen.has(c.id) && (!activeGoals || activeGoals.has(c.goal.id))).map((c) => c.id));
+}
+
 /** A row's label: its own once done, else its kind's word. */
 const withWord = (n: Need): Need => ({ ...n, word: n.word || KIND_WORDS[n.kind] });
 
@@ -356,12 +446,13 @@ export function needForChangeRequest(cr: ChangeRequest, me: string): Need | null
  *  deliveries to apps"). */
 export type Unknown = "change requests" | "asks" | "alignments" | "workspace summary" | "requests to agents" | "deliveries to apps";
 
-export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[]; notices: Notice[] } {
+export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[]; notices: Notice[]; order: RankOrder; orderFallback: boolean } {
   const { me } = input;
   const rows: Need[] = [];
   const unknown: Unknown[] = [];
+  const returning = input.crs && input.declinedSeen ? declinedReturns(input.crs, me, input.declinedSeen, input.activeGoals ?? null) : undefined;
   if (input.crs) for (const cr of input.crs) {
-    const n = crNeed(cr, me);
+    const n = crNeed(cr, me, returning);
     if (n) rows.push(n);
   }
   else unknown.push("change requests");
@@ -377,14 +468,16 @@ export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[
   if (input.apps) rows.push(...appNeeds(input.apps, input.sends ?? undefined, me));
   else unknown.push("workspace summary");
   if (input.sends === null) unknown.push("deliveries to apps");
-  return { rows: rankNeeds(rows.map(withWord)), unknown, notices: input.apps ? neverRead(input.apps) : [] };
+  const { order, fallback } = rankOrder(me, input.approver, input.crs);
+  return { rows: rankNeeds(rows.map(withWord), order), unknown, notices: input.apps ? neverRead(input.apps) : [], order, orderFallback: fallback };
 }
 
 const PHASE_ORDER: NeedPhase[] = ["needs_you", "waiting_on_others", "done"];
 
 /** Phase, then kind order, then oldest first (done: newest first, by time alone), then key, so the order never depends
  *  on the order a read returned. */
-export function rankNeeds(rows: Need[]): Need[] {
+export function rankNeeds(rows: Need[], order: RankOrder = "approver"): Need[] {
+  const KIND_ORDER = ORDERS[order];
   return [...rows].sort((x, y) => {
     const ph = PHASE_ORDER.indexOf(x.phase) - PHASE_ORDER.indexOf(y.phase);
     if (ph) return ph;

@@ -68,16 +68,19 @@ export function NeedRow({
   );
 }
 
-/** A row's one action: always outlined, a link or a button. 44px when the row stacks, beside the evidence. */
-export function NeedAction({ children, href, onClick, disabled }: { children: ReactNode; href?: string; onClick?: () => void; disabled?: boolean }) {
-  const cls =
-    "inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) border border-(--edge) px-3 text-[13px] font-medium text-(--text-1) transition-[color,background-color,border-color] hover:bg-(--bg-overlay) disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px]";
+/** A row's action: a link or a button. Outlined by default. `quiet` is a shortcut beside it: underlined text with no
+ *  outline, so it is plainly a control and the outlined action stays the row's main one. Its word must say what it does and doesn't do ("Approve only"), and
+ *  `name` can say the rest to a screen reader. 44px when the row stacks. `dense` is for desktop-only places such as a
+ *  LaneMap card, which is never shown on a phone; never use it where a phone can reach it. */
+export function NeedAction({ children, href, onClick, disabled, quiet = false, dense = false, name }: { children: ReactNode; href?: string; onClick?: () => void; disabled?: boolean; quiet?: boolean; dense?: boolean; name?: string }) {
+  const look = quiet ? "px-2 font-normal text-(--text-2) underline underline-offset-4 hover:text-(--text-1)" : "border border-(--edge) px-3 font-medium text-(--text-1) hover:bg-(--bg-overlay)";
+  const cls = `inline-flex items-center justify-center whitespace-nowrap rounded-(--radius-s) text-[13px] transition-[color,background-color,border-color] disabled:cursor-not-allowed disabled:opacity-50 ${dense ? "min-h-[24px]" : "min-h-[36px] max-sm:min-h-[44px] @max-3xl:min-h-[44px]"} ${look}`;
   return href ? (
-    <Link href={href} className={cls}>
+    <Link href={href} aria-label={name} className={cls}>
       {children}
     </Link>
   ) : (
-    <button type="button" onClick={onClick} disabled={disabled} className={cls}>
+    <button type="button" onClick={onClick} disabled={disabled} aria-label={name} className={cls}>
       {children}
     </button>
   );

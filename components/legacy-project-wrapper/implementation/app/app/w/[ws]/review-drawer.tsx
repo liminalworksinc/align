@@ -2,11 +2,12 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useGoalTitles } from "../../_ui/changes";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Drawer, ReviewActions, ReviewBody, type ReviewChoice } from "../../_ui/ds";
 import { crStatus } from "../../_ui/home/cr-status";
 import { api, ApiError, Loading, Note } from "../../_ui/kit";
 import type { ChangeRequest } from "../../_ui/types";
+import { WhoDecides } from "../../_ui/b/who-decides";
 
 // Concept A's review drawer (LIM-2472): a change request opens beside the Home's work, never instead of it. The body is
 // the shared ReviewBody (who asked, the reason once, Compare, evidence, what it waits on); the footer is the shared
@@ -17,7 +18,7 @@ export { crStatus };
 
 const quiet = "inline-flex min-h-[44px] items-center text-[13px] text-(--accent-text) hover:underline";
 
-function Loaded({ ws, cr, me, choice, onClose, done }: { ws: string; cr: ChangeRequest; me: string; choice?: ReviewChoice; onClose: () => void; done: () => void }) {
+function Loaded({ ws, cr, me, choice, onClose, done, onPick, after }: { ws: string; cr: ChangeRequest; me: string; choice?: ReviewChoice; onClose: () => void; done: () => void; onPick?: (c: ReviewChoice) => void; after?: ReactNode }) {
   const titles = useGoalTitles(ws);
   return (
     <Drawer
@@ -26,10 +27,15 @@ function Loaded({ ws, cr, me, choice, onClose, done }: { ws: string; cr: ChangeR
       width="l"
       eyebrow="Review"
       title={cr.goal.title}
-      footer={<ReviewActions ws={ws} cr={cr} me={me} onDone={done} compact initialChoice={choice} />}
+      footer={<ReviewActions ws={ws} cr={cr} me={me} onDone={done} compact initialChoice={choice} after={after} />}
     >
       <div data-review={cr.id}>
         <ReviewBody ws={ws} cr={cr} me={me} titleOf={(id) => titles.get(id) ?? "a goal you can't see"} onDone={done} />
+        {/* Round 2 (founder ruling eaa5cf92): "See who decides", desktop only, closed by default. A step of this
+            person's opens that choice in the footer's ReviewActions (&choice=), the one send path. */}
+        <div className="mt-4">
+          <WhoDecides cr={cr} me={me} onAct={onPick} />
+        </div>
       </div>
     </Drawer>
   );
@@ -66,7 +72,7 @@ export function useReview(): [ReviewTarget | null, (r: ReviewTarget | null) => v
  *  It is also how a shared link arrives (`?review=<goal>.<id>`, cold load included). The server answers 404 alike for a
  *  request that doesn't exist and one on a goal the reader can't see, so the not-found state says the same for both and
  *  names nothing from the link. Any other failure says Align couldn't read it and offers to try again. */
-export function ReviewDrawer({ ws, goal, id, me, choice, onClose, onChanged }: { ws: string; goal: string; id: string; me: string; choice?: ReviewChoice; onClose: () => void; onChanged: () => void }) {
+export function ReviewDrawer({ ws, goal, id, me, choice, onClose, onChanged, onPick, after }: { ws: string; goal: string; id: string; me: string; choice?: ReviewChoice; onClose: () => void; onChanged: () => void; onPick?: (c: ReviewChoice) => void; after?: ReactNode }) {
   const [r, setR] = useState<{ cr: ChangeRequest | null; status: number | null; error: string | null }>({ cr: null, status: null, error: null });
   const [tick, setTick] = useState(0);
   const reload = useCallback(() => setTick((t) => t + 1), []);
@@ -115,6 +121,8 @@ export function ReviewDrawer({ ws, goal, id, me, choice, onClose, onChanged }: {
       me={me}
       choice={choice}
       onClose={onClose}
+      onPick={onPick}
+      after={after}
       done={() => {
         reload();
         onChanged();

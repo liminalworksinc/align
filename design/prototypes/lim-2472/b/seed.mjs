@@ -105,6 +105,11 @@ export async function seed(base, on = null) {
   const c5 = await cr(rafi, gAudit, { measures: [...gAudit.measures, { text: "Approvals recorded with a reviewer note", target: "100%" }] }, "Reviewers asked to see why each approval was given.");
   await evidence(rafi, gAudit, c5, { kind: "doc", url: "https://example.test/kestrel/docs/review-notes", label: "Reviewer notes proposal (fictional)" });
   await act(dana, gAudit, c5, "approve_and_launch", { revision: 1, note: null });
+  // 5b. A second request with evidence waiting on Dana (the audit goal, now at v2), so the Desk's one-click "Approve only"
+  // has two eligible rows (two clicks in one tick can be tried on different rows).
+  const audit2 = (await as(mina)("GET", `${W}/goals/${gAudit.id}`)).goal;
+  const c5b = await cr(mina, audit2, { title: "Every release carries its audit evidence and a named reviewer" }, "Auditors want a name on each release review.");
+  await evidence(mina, audit2, c5b, { kind: "doc", url: "https://example.test/kestrel/docs/named-reviewer", label: "Named reviewer note (fictional)" });
 
   // 6. Declined: Theo's request on the onboarding goal.
   const c6 = await cr(theo, gOnboard, { title: "New customers reach a first approved plan in one hour" }, "One hour would make a stronger launch story.");

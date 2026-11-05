@@ -2,7 +2,17 @@
 import { useEffect, useId, useRef, type ReactNode, type RefObject } from "react";
 import { Kbd } from "./kbd";
 
-const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
+
+/** Has a box, is visible, and no closed <details> hides it. Closed content keeps its box (content-visibility), so that
+ *  takes a walk up: at each closed <details>, only that details' own summary is reachable. */
+function canTakeFocus(e: HTMLElement) {
+  if (!e.getClientRects().length || getComputedStyle(e).visibility === "hidden") return false;
+  for (let d = e.closest("details:not([open])"); d; d = d.parentElement?.closest("details:not([open])") ?? null) {
+    if (!d.querySelector(":scope > summary")?.contains(e)) return false;
+  }
+  return true;
+}
 
 /** A right-side detail drawer (full width on phones). While open it traps focus, closes on Esc or the backdrop, and
  *  returns focus to whatever opened it. */
@@ -39,7 +49,9 @@ export function Drawer({
         return;
       }
       if (e.key !== "Tab" || !panel.current) return;
-      const items = [...panel.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      // Read on every Tab, so a disclosure opening or closing counts. Only what can take focus now, or the first or last
+      // here would be a control the browser skips, and focus would leave.
+      const items = [...panel.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(canTakeFocus);
       if (!items.length) return;
       const first = items[0];
       const last = items[items.length - 1];
