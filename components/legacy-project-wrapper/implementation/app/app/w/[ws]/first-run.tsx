@@ -64,7 +64,9 @@ function CopyLine({ line }: { line: string }) {
   );
 }
 
-export default function FirstRun({ ws, onSeen }: { ws: string; onSeen: () => void }) {
+/** `always`: the Connect drawer (LIM-2472 concept A) shows the connect paths even after an app has connected or the
+ *  person hid the card, and never hands off to the Home. */
+export default function FirstRun({ ws, onSeen, always = false }: { ws: string; onSeen: () => void; always?: boolean }) {
   // Read after mount, so the server render and the first client render agree; blocked storage keeps the card shown.
   const [hidden, setHidden] = useState<boolean | null>(null);
   const [apps, setApps] = useState<{ url: string; apps: FirstRunApp[]; at: number } | null>(null);
@@ -78,9 +80,9 @@ export default function FirstRun({ ws, onSeen }: { ws: string; onSeen: () => voi
     } catch {
       /* storage blocked: show the card */
     }
-    const t = setTimeout(() => setHidden(v), 0);
+    const t = setTimeout(() => setHidden(always ? false : v), 0);
     return () => clearTimeout(t);
-  }, [ws]);
+  }, [ws, always]);
 
   useEffect(() => {
     let live = true;
@@ -105,7 +107,7 @@ export default function FirstRun({ ws, onSeen }: { ws: string; onSeen: () => voi
           if (!live) return;
           setApps({ ...d, at: Date.now() });
           setFailed(false);
-          if (d.apps.some(seenApp)) {
+          if (!always && d.apps.some(seenApp)) {
             onSeen(); // the Home reads again and shows the app in its own section; this card is done
             return;
           }
@@ -121,7 +123,7 @@ export default function FirstRun({ ws, onSeen }: { ws: string; onSeen: () => voi
       live = false;
       clearTimeout(timer);
     };
-  }, [hidden, ws, onSeen]);
+  }, [hidden, ws, onSeen, always]);
 
   function hide() {
     setHidden(true);
@@ -135,7 +137,7 @@ export default function FirstRun({ ws, onSeen }: { ws: string; onSeen: () => voi
   }
 
   if (hidden !== false || !list) return null;
-  if (apps?.apps.some(seenApp)) return null;
+  if (!always && apps?.apps.some(seenApp)) return null;
 
   const self = list.find((w) => w.id === ws);
   const viewer = self?.role === "viewer";
