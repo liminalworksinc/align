@@ -94,6 +94,7 @@ for (const [role, acct] of people) {
   const order = ["launch", "decide", "returned", "agent_declined", "team_ask", "alignment", "app_behind"];
   rule(`${role}: Needs you is in kind order, oldest first within a kind`, needs.every((r, i) => i === 0 || order.indexOf(needs[i - 1].kind) < order.indexOf(r.kind) || (needs[i - 1].kind === r.kind && (needs[i - 1].since?.at ?? "") <= (r.since?.at ?? ""))));
   if (role === "member") rule("member (seeded): the never-read app Theo connected is a notice, not a Needs-you row", needs.length === 0 && notices.length === 1 && notices[0]!.kind === "app_never_read");
+  rule(`${role}: "Your request came back" only on this person's own requests`, rows.filter((r) => r.word === "Your request came back").every((r) => r.cr?.requester.id === me));
   if (role === "viewer") rule("viewer: nothing needs a viewer (viewers can't act)", needs.length === 0);
   if (role === "owner") {
     rule("owner: at least one launch, one decision and one app row", ["launch", "decide", "app_behind"].every((k) => needs.some((r) => r.kind === k)));
