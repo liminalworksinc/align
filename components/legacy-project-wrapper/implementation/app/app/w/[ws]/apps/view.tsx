@@ -166,7 +166,7 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
             )}
             {apps.data && list.length === 0 && (
               <EmptyState
-                title="No AI apps are connected to this workspace"
+                title="No AI apps are connected to this workspace."
                 body={
                   role === "viewer"
                     ? "Nothing is reading this workspace's goals through an app."
@@ -177,7 +177,7 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
             {list.length > 0 && (
               <div>
                 <table className="w-full border-collapse text-[14px] max-md:block">
-                  <thead className="max-md:hidden">
+                  <thead className="max-md:sr-only">
                     <tr className="border-b border-(--line) text-left text-[12.5px] text-(--text-3)">
                       <th className="py-2 pr-3 font-medium">App</th>
                       <th className="py-2 pr-3 font-medium">Sends you back to</th>
