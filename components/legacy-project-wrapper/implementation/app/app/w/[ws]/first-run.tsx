@@ -128,12 +128,13 @@ export default function FirstRun({ ws, onSeen, always = false, me, hasGoals = fa
   }, [ws, onSeen, always, me]);
 
   if (!list) return null;
-  if (!always && apps?.apps.some((a) => seenApp(a) && (!me || a.user?.id === me))) return null;
-
+  const connected = !!apps?.apps.some((a) => seenApp(a) && (!me || a.user?.id === me));
   const self = list.find((w) => w.id === ws);
   const viewer = self?.role === "viewer";
+  // An empty workspace is its own state (below), shown whether or not this person has connected an agent: the first
+  // goal is the step that matters, and it must not vanish with the connect panel.
+  if (!always && hasGoals && connected) return null;
   if (!always && viewer && hasGoals) return null;
-  const compact = !always && hasGoals;
   const sample = self?.name === SAMPLE_NAME ? self : list.find((w) => w.name === SAMPLE_NAME && w.id !== ws);
   const inSample = sample?.id === ws;
   const approvedOnly = apps?.apps.filter((a) => !seenApp(a) && (!me || a.user?.id === me)) ?? [];
@@ -187,14 +188,58 @@ export default function FirstRun({ ws, onSeen, always = false, me, hasGoals = fa
       <p className="text-[14px] text-(--text-2)">
         Once it connects, the Home and the Apps tab show when it last connected (any request to Align) and, separately, when it last read the goals. Connecting is not a read.
       </p>
-      <Link href={`/app/w/${ws}/apps`} className="w-fit text-[14px] font-medium text-(--accent-text) underline">
+      <Link href={`/app/w/${ws}/apps`} className="w-fit text-[14px] font-medium text-(--text-1) underline underline-offset-2">
         Using Codex or another app? See the Apps tab.
       </Link>
     </>
   );
 
+  // A workspace with no goals (LIM-2472 round 2): what this person can do first. An owner or member: "Set the first goal"
+  // is the one filled action, then the two paths (the sample, one agent) outlined, the connect steps folded behind
+  // their action. A viewer, who can do neither, gets one line.
+  if (!always && !hasGoals) {
+    if (viewer)
+      return (
+        <p className="rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3 text-[14px] text-(--text-2)" data-first-run="viewer-empty">
+          This workspace has no goals yet. A workspace owner or member sets them.
+        </p>
+      );
+    const pathBtn =
+      "inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) border border-(--line-strong) px-3.5 text-[14px] font-medium text-(--text-1) hover:bg-(--bg-raised) max-sm:min-h-[44px]";
+    return (
+      <section aria-label="Get started" className="min-w-0 rounded-(--radius-m) border border-(--line-strong) bg-(--bg-panel) px-4 py-4 text-[14px] text-(--text-1)" data-first-run="empty">
+        <p className="text-[16px] font-semibold">Start with a goal</p>
+        <p className="mt-1 max-w-prose text-(--text-2)">Agents read the goals you can read, as you. Set the first one{sample || !connected ? ", or look around first" : ""}.</p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <Link
+            href={`/app/w/${ws}/goals`}
+            className="inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) bg-(--accent) px-3.5 text-[14px] font-medium text-(--text-on-accent) hover:bg-(--accent-hover) max-sm:min-h-[44px]"
+            data-first-goal
+          >
+            Set the first goal
+          </Link>
+          {sample && !inSample && (
+            <Link href={`/app/w/${sample.id}`} className={pathBtn} aria-label="Explore the Northstar sample (fictional)" data-sample-link>
+              Explore the sample
+            </Link>
+          )}
+          {!connected && (
+            <button type="button" className={pathBtn} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+              {open ? "Hide the steps" : "Connect one agent"}
+            </button>
+          )}
+        </div>
+        {open && !connected && (
+          <div className="mt-3 flex min-w-0 flex-col gap-2 border-t border-(--line) pt-3 text-[15px]" data-first-run-path="connect">
+            {connect}
+          </div>
+        )}
+      </section>
+    );
+  }
+
   // Above a list that has something in it: two lines and the two actions; the connect steps open in place.
-  if (compact)
+  if (!always)
     return (
       <section aria-label="Get started" className="min-w-0 rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3 text-[14px] text-(--text-1)" data-first-run="compact">
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -255,14 +300,14 @@ export default function FirstRun({ ws, onSeen, always = false, me, hasGoals = fa
                 <p className="text-(--text-2)">
                   You are in the Northstar sample. Its company, teams, goals and change request are fictional: Align made them up so you can try each step. Its change request is waiting on you.
                 </p>
-                <Link href={`/app/w/${ws}/requests`} className="w-fit text-[15px] font-medium text-(--accent-text) underline">
+                <Link href={`/app/w/${ws}/requests`} className="w-fit text-[15px] font-medium text-(--text-1) underline underline-offset-2">
                   Open the sample&apos;s change request
                 </Link>
               </>
             ) : (
               <>
                 <p className="text-(--text-2)">Northstar is a made-up company in its own workspace, with two teams, their goals and one change request to try. Nothing in it is real.</p>
-                <Link href={`/app/w/${sample.id}`} aria-label="Open the Northstar sample (fictional)" className="w-fit text-[15px] font-medium text-(--accent-text) underline" data-sample-link>
+                <Link href={`/app/w/${sample.id}`} aria-label="Open the Northstar sample (fictional)" className="w-fit text-[15px] font-medium text-(--text-1) underline underline-offset-2" data-sample-link>
                   Open the Northstar sample
                 </Link>
               </>

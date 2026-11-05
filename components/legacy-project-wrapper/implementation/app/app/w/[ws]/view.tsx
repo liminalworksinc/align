@@ -80,6 +80,10 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   }, [reloadHome, reloadChanges]);
 
   const allCrs = c.data ? [...c.data.waiting_on_me, ...c.data.mine, ...c.data.others] : [];
+  // A workspace with no goals: the page says so, and the empty state (FirstRun) leads. The list stays mounted for its
+  // count but is hidden while nothing needs the person; Since and Goals have nothing to compare or list.
+  const noGoals = !!h && h.goals !== null && h.goals.length === 0;
+  const quietList = noGoals && count.n === 0 && !count.partial;
   // The page checks membership before Home mounts; this is the person removed while Home is open (every read is a 404).
   if (d.status === 404) return <NotInWorkspace me={me} />;
 
@@ -88,17 +92,19 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
       <div className="flex flex-col gap-5">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <h1 tabIndex={-1} className={`${PAGE_H1} min-w-0`} data-home-count={count.n ?? "reading"}>
-            {needsHeading(count.n, count.partial)}
+            {noGoals && (count.n === 0 || count.n === null) && !count.partial ? "No goals here yet" : needsHeading(count.n, count.partial)}
           </h1>
         </header>
 
         {h && <FirstRun ws={ws} onSeen={reloadAll} me={me.id} hasGoals={(h.goals?.length ?? 0) > 0} />}
 
+        <div className={quietList ? "hidden" : "contents"}>
         <NeedsList key={needsKey} ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} />
+        </div>
 
         {!h ? (
           <Loading />
-        ) : (
+        ) : noGoals ? null : (
           <>
             <Since ws={ws} me={me.id} changes={c.data ? allCrs : null} goals={h.goals} apps={h.apps?.items ?? null} onReview={(goal, id) => setReview({ goal, id })} />
             <GoalLines ws={ws} goals={h.goals} changes={c.data ? allCrs : null} feed={feed.data?.goals ?? null} onReview={(goal, id) => setReview({ goal, id })} />
