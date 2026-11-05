@@ -455,7 +455,7 @@ export function ReviewActions({
 
       {choice && shown === "confirm" && (
         <div role="region" aria-labelledby={`confirm-${cr.id}`} data-confirm={choice} className="flex flex-col gap-2 rounded-(--radius-m) border border-(--accent) bg-(--bg-raised) p-3">
-          <h4 id={`confirm-${cr.id}`} ref={confirmRef} tabIndex={-1} className="text-[15px] font-semibold text-(--text-1) focus-visible:outline-2 focus-visible:outline-(--focus)">
+          <h4 id={`confirm-${cr.id}`} ref={confirmRef} tabIndex={-1} className="text-[15px] font-semibold text-(--text-1) outline-none">
             {TITLE[choice]}: {cr.goal.title}
           </h4>
           {oneRow ? (
@@ -491,7 +491,7 @@ export function ReviewActions({
 function NoticeLine({ n, r }: { n: Notice; r: React.RefObject<HTMLParagraphElement | null> }) {
   const tone = n.kind === "done" ? "border-(--st-approved) text-(--text-1)" : n.kind === "retry" ? "border-(--st-pending) bg-(--st-pending-soft) text-(--text-1)" : "border-(--st-declined) bg-(--st-declined-soft) text-(--text-1)";
   return (
-    <p ref={r} tabIndex={-1} role={n.kind === "done" ? "status" : "alert"} data-notice={n.kind} className={`rounded-(--radius-s) border px-3 py-2 text-[14px] [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-(--focus) ${tone}`}>
+    <p ref={r} tabIndex={-1} role={n.kind === "done" ? "status" : "alert"} data-notice={n.kind} className={`rounded-(--radius-s) border px-3 py-2 text-[14px] [overflow-wrap:anywhere] outline-none ${tone}`}>
       {n.text}
     </p>
   );
