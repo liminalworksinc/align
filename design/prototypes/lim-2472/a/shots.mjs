@@ -350,6 +350,27 @@ for (const width of [390, 320]) {
     const second = await sinceState(again);
     const text2 = await again.$eval("[data-since]", (e) => e.innerText);
     if (second !== "0" || !text2.includes("Nothing changed since your last visit.")) throw new Error(`Since, second visit: wanted "Nothing changed since your last visit.", got data-since=${second}: ${text2.slice(0, 200)}`);
+    // A source Align couldn't read is no evidence that nothing changed: with one read forced to fail, the section names
+    // what it couldn't read and never says "Nothing changed since your last visit."
+    const failures = [
+      ["change requests", (u) => u.pathname === `/api/v2/workspaces/${WS}/change-requests` && !u.search],
+      ["goals", (u) => u.pathname === `/api/v2/workspaces/${WS}/home`],
+      ["goal versions", (u) => /^\/api\/v2\/workspaces\/[^/]+\/goals\/[^/]+$/.test(u.pathname)],
+    ];
+    for (const [source, match] of failures) {
+      const f = await ctx.newPage();
+      await f.setViewport({ width: 1440, height: 900 });
+      await f.setRequestInterception(true);
+      f.on("request", (q) => (q.method() === "GET" && match(new URL(q.url())) ? q.respond({ status: 500, contentType: "application/json", body: '{"error":"forced","message":"Forced failure (shots.mjs)."}' }) : q.continue()));
+      await goto(f, `/app/w/${WS}`);
+      await f.waitForSelector("[data-since]", { timeout: 60_000 });
+      await f.waitForFunction(() => document.querySelector("[data-since]")?.getAttribute("data-since") !== "reading", { timeout: 60_000 }).catch(() => undefined);
+      await f.waitForNetworkIdle({ idleTime: 500, timeout: 20_000 }).catch(() => undefined);
+      const t = await f.$eval("[data-since]", (e) => e.innerText);
+      if (!t.includes(`couldn't read the`) || !t.includes(source)) throw new Error(`Since with ${source} unread: wanted the couldn't-read line naming it, got: ${t.slice(0, 240)}`);
+      if (t.includes("Nothing changed since your last visit.")) throw new Error(`Since with ${source} unread: still says nothing changed: ${t.slice(0, 240)}`);
+      await f.close();
+    }
   }
   await ctx.close();
 }
