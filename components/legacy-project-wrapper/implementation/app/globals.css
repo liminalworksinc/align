@@ -1,13 +1,19 @@
 @import "tailwindcss";
 
 /*
- * Display face. Founder ruling: Nineties Headliner loads at runtime from the viewer's machine
- * via local() and is NEVER committed to this public repo. When it is not installed, the display
- * chain falls through to the canon serifs (no Anton fallback, ruling LIM-2454 0e0f6774).
+ * Display face. Founder ruling (LIM-2454 1cb2b974, 2026-11-05): Nineties Headliner loads as a webfont from a PRIVATE
+ * host, so testers see the real face. The font file is never committed to this public repo.
+ * Today: local() only, so a machine without the face falls through the display chain to the canon serifs (no Anton,
+ * ruling 0e0f6774); the host does not exist yet. local() stays first.
+ *
+ * NINETIES_HEADLINER_URL: the one place the hosted URL goes. Replace the src below with the commented one only when
+ * all three are true: the founder has confirmed the licence allows web embedding; the private host is chosen; and the
+ * security headers allow it (font-src in next.config.ts and proxy.ts, Sean's). Never invent a URL here.
  */
 @font-face {
   font-family: "Nineties Headliner";
   src: local("Nineties Headliner"), local("NinetiesHeadliner-Regular");
+  /* src: local("Nineties Headliner"), local("NinetiesHeadliner-Regular"), url("NINETIES_HEADLINER_URL") format("woff2"); */
   font-display: swap;
 }
 
