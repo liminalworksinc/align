@@ -1,15 +1,15 @@
 "use client";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { DataTable, Drawer, EmptyState, Panel, Segmented, StatusPill, type Column } from "../../_ui/ds";
+import { DataTable, Drawer, EmptyState, Panel, ReviewActions, ReviewBody, Segmented, StatusPill, type Column } from "../../_ui/ds";
 import { useGoalTitles } from "../../_ui/changes";
 import { useApi } from "../../_ui/kit";
 import type { Me } from "../../_ui/server";
 import type { ChangeRequest } from "../../_ui/types";
-import { ACT_WORDS, actsFor, Confirm, DOMINANT, formLinks, notYours, OutcomeLine, PrimaryBtn, QuietBtn, QuietLink, type Act, type Outcome } from "../../_ui/b/act";
+import { ActBtn, actsFor, notYours, QuietBtn, QuietLink, type Act } from "../../_ui/b/act";
 import { AgentsLine, type HomeApp } from "../../_ui/b/agents";
 import { ago, crStatus, decisionHref, nameList, oneLine, PHASE_WORDS, phaseOf, recordHref, versions, waitsOn, type Phase } from "../../_ui/b/model";
-import { currentEvidence, EvidenceList, Facts, Reason, WouldChange } from "../../_ui/b/parts";
+import { Facts } from "../../_ui/b/parts";
 import { DeskShell } from "../../_ui/b/shell";
 import FirstRun, { seenApp } from "./first-run";
 
@@ -37,12 +37,11 @@ type Filter = Phase | "all";
 export default function Home({ me, ws }: { me: Me; ws: string }) {
   const feed = useApi<Groups>(`/api/v2/workspaces/${ws}/change-requests`);
   const home = useApi<HomeData>(`/api/v2/workspaces/${ws}/home`);
-  const titles = useGoalTitles(ws);
   const [filter, setFilter] = useState<Filter | null>(null);
   const [q, setQ] = useState("");
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [act, setAct] = useState<Act | null>(null);
-  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  // The open request is held by id (and goal), never by its filtered row: a decision that moves it out of the current
+  // view must leave the drawer open with the request as it now stands and its notice.
+  const [opened, setOpened] = useState<{ id: string; goal: string; act: Act | undefined; n: number } | null>(null);
   const base = `/app/w/${ws}`;
 
   const rows = useMemo(() => (feed.data ? [...feed.data.waiting_on_me, ...feed.data.mine, ...feed.data.others] : []), [feed.data]);
@@ -61,20 +60,15 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
       return [r.goal.title, r.requester.name, r.reason, ...r.approvers.map((p) => p.name), crStatus(r).label].join(" ").toLowerCase().includes(needle);
     });
   }, [rows, f, q]);
-  const open = rows.find((r) => r.id === openId) ?? null;
 
   const apps = home.data?.apps ?? (home.error ? null : undefined);
   const noAppSeen = !!home.data?.apps && !home.data.apps.items.some(seenApp);
 
-  const openRow = (r: ChangeRequest, a: Act | null = null) => {
-    setOpenId(r.id);
-    setAct(a);
-    setOutcome(null);
-  };
-  const close = () => {
-    setOpenId(null);
-    setAct(null);
-    setOutcome(null);
+  const openRow = (r: ChangeRequest, a?: Act) => setOpened((o) => ({ id: r.id, goal: r.goal.id, act: a, n: (o?.n ?? 0) + 1 }));
+  const close = () => setOpened(null);
+  const reloadAll = () => {
+    feed.reload();
+    home.reload();
   };
 
   const columns: Column<ChangeRequest>[] = [
@@ -121,19 +115,11 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const rowActions = (r: ChangeRequest) => {
     const acts = actsFor(r);
     if (!acts.length) {
-      const links = formLinks(ws, r);
-      if (links.length) return <QuietLink href={links[0]!.href}>{links[0]!.label}</QuietLink>;
       return <span className="text-[12px] text-(--text-3)">{phaseOf(r) === "decided" ? "No action" : "Not yours"}</span>;
     }
     return (
       <span className="inline-flex flex-wrap justify-end gap-1.5 max-sm:justify-start sm:flex-nowrap">
-        {DOMINANT.includes(acts[0]!) ? (
-          <PrimaryBtn onClick={() => openRow(r, acts[0]!)}>{ACT_WORDS[acts[0]!]}</PrimaryBtn>
-        ) : (
-          <QuietBtn danger={acts[0] === "reject"} onClick={() => openRow(r, acts[0]!)}>
-            {ACT_WORDS[acts[0]!]}
-          </QuietBtn>
-        )}
+        <ActBtn a={acts[0]!} cr={r} onClick={() => openRow(r, acts[0]!)} />
         {acts.length > 1 && <QuietBtn onClick={() => openRow(r)}>More</QuietBtn>}
       </span>
     );
@@ -225,7 +211,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
                   rows={shown}
                   rowKey={(r) => r.id}
                   onRowOpen={(r) => openRow(r)}
-                  selectedKey={openId}
+                  selectedKey={opened?.id ?? null}
                   rowActions={rowActions}
                   initialSort={{ key: "age", dir: "desc" }}
                   empty={
@@ -276,85 +262,66 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
         </aside>
       </div>
 
-      <Drawer
-        open={!!open}
-        onClose={close}
-        width="l"
-        eyebrow={open ? `${open.requester.id === me.id ? "Your" : `${open.requester.name}'s`} change request` : ""}
-        title={open?.goal.title ?? ""}
-        footer={
-          open && (
-            <>
-              <QuietLink href={recordHref(ws, open)}>Decision record</QuietLink>
-              <QuietLink href={`${base}/sessions`}>Work</QuietLink>
-              <Link href={decisionHref(ws, open)} className="inline-flex min-h-[36px] items-center rounded-(--radius-s) border border-(--accent) px-3 text-[13px] font-medium text-(--accent-text) hover:bg-(--accent-soft) max-sm:min-h-[44px]">
-                Open the lane map
-              </Link>
-            </>
-          )
-        }
-      >
-        {open && (
-          <div className="flex flex-col gap-5" data-drawer={open.id}>
-            {outcome && <OutcomeLine o={outcome} />}
-            <Facts cr={open} me={me.id} />
-            {act ? (
-              <Confirm
-                ws={ws}
-                cr={open}
-                act={act}
-                meName={me.name}
-                onCancel={() => setAct(null)}
-                onDone={(o) => {
-                  setOutcome(o);
-                  setAct(null);
-                  feed.reload();
-                  home.reload();
-                }}
-              />
-            ) : (
-              <DrawerActions ws={ws} cr={open} me={me.id} onAct={setAct} />
-            )}
-            <Reason cr={open} />
-            <WouldChange cr={open} titles={titles} />
-            <div className="flex flex-col gap-1">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--text-3)">Evidence on revision {open.revision}</p>
-              <EvidenceList items={currentEvidence(open)} me={me.id} />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--text-3)">What Align observed of agents</p>
-              <AgentsLine ws={ws} apps={apps} />
-            </div>
-          </div>
-        )}
-      </Drawer>
+      {opened && <DecisionDrawer key={opened.id} ws={ws} me={me} id={opened.id} goal={opened.goal} act={opened.act} n={opened.n} apps={apps} onClose={close} onDone={reloadAll} />}
     </DeskShell>
   );
 }
 
-function DrawerActions({ ws, cr, me, onAct }: { ws: string; cr: ChangeRequest; me: string; onAct: (a: Act) => void }) {
-  const acts = actsFor(cr);
-  const links = formLinks(ws, cr);
-  if (!acts.length && !links.length) return <p className="rounded-(--radius-s) border border-dashed border-(--line-strong) px-3 py-2 text-[13px] text-(--text-2)" data-not-yours>{notYours(cr, me)}</p>;
+/** One request in the drawer, read by id so it stays as the person left it while the table behind it moves. The shared
+ *  ReviewActions does the deciding; it is re-keyed only when the desk opens it on a choice (a row's button), never on a
+ *  reload, so its done or refused notice stays. */
+function DecisionDrawer({ ws, me, id, goal, act, n, apps, onClose, onDone }: { ws: string; me: Me; id: string; goal: string; act: Act | undefined; n: number; apps: { everyone: boolean; items: HomeApp[] } | null | undefined; onClose: () => void; onDone: () => void }) {
+  const d = useApi<ChangeRequest>(`/api/v2/workspaces/${ws}/goals/${goal}/change-requests/${id}`);
+  const titles = useGoalTitles(ws);
+  const cr = d.data;
+  const base = `/app/w/${ws}`;
   return (
-    <div className="flex flex-wrap gap-2" data-actions>
-      {acts.map((a, i) =>
-        i === 0 && DOMINANT.includes(a) ? (
-          <PrimaryBtn key={a} onClick={() => onAct(a)}>
-            {ACT_WORDS[a]}
-          </PrimaryBtn>
-        ) : (
-          <QuietBtn key={a} danger={a === "reject"} onClick={() => onAct(a)}>
-            {ACT_WORDS[a]}
-          </QuietBtn>
-        ),
+    <Drawer
+      open
+      onClose={onClose}
+      width="l"
+      eyebrow={cr ? `${cr.requester.id === me.id ? "Your" : `${cr.requester.name}'s`} change request` : "Change request"}
+      title={cr?.goal.title ?? "Reading…"}
+      footer={
+        <>
+          <QuietLink href={recordHref(ws, { id })}>Decision record</QuietLink>
+          <QuietLink href={`${base}/work?goal=${goal}`}>Work and evidence</QuietLink>
+          <Link href={decisionHref(ws, { id, goal: { id: goal } })} className="inline-flex min-h-[36px] items-center rounded-(--radius-s) border border-(--accent) px-3 text-[13px] font-medium text-(--accent-text) hover:bg-(--accent-soft) max-sm:min-h-[44px]">
+            Open the lane map
+          </Link>
+        </>
+      }
+    >
+      {!cr && d.error && <p className="text-[14px] text-(--text-2)">This change request doesn&apos;t exist or you can&apos;t see it.</p>}
+      {cr && (
+        <div className="flex flex-col gap-5" data-drawer={cr.id}>
+          <Facts cr={cr} me={me.id} />
+          <div className="rounded-(--radius-m) border border-(--line-strong) bg-(--bg-panel) p-3" data-action-bar>
+            {!actsFor(cr).length && (
+              <p className="mb-2 text-[13px] text-(--text-2)" data-not-yours>
+                {notYours(cr, me.id)}
+              </p>
+            )}
+            <ReviewActions
+              key={`${cr.id}:${n}`}
+              ws={ws}
+              cr={cr}
+              me={me.id}
+              compact
+              initialChoice={act}
+              onDone={() => {
+                d.reload();
+                onDone();
+              }}
+            />
+          </div>
+          <ReviewBody ws={ws} cr={cr} me={me.id} titleOf={(gid) => titles.get(gid) ?? "a goal"} onDone={() => { d.reload(); onDone(); }} />
+          <div className="flex flex-col gap-1.5">
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--text-3)">What Align observed of agents</p>
+            <AgentsLine ws={ws} apps={apps} />
+          </div>
+        </div>
       )}
-      {links.map((l) => (
-        <QuietLink key={l.label} href={l.href}>
-          {l.label}
-        </QuietLink>
-      ))}
-    </div>
+    </Drawer>
   );
 }
-

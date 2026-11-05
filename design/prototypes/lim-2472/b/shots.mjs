@@ -1,17 +1,24 @@
 #!/usr/bin/env node
-// LIM-2472 concept B screenshots: seeds a fresh fictional workspace through the real API (seed.mjs), then drives the
+// LIM-2472 concept B screenshots and click checks. Seeds a fictional workspace through the real API only (the shared
+// agent seed design/prototypes/lim-2472/s/seed-agent.mjs first, then seed.mjs on top of it), then drives the
 // decision-desk journey with real clicks and writes PNGs named <nn>-<screen>-<theme>-<width>.png.
 //
 //   node design/prototypes/lim-2472/b/shots.mjs <BASE> <OUT>
 //   e.g. node design/prototypes/lim-2472/b/shots.mjs http://127.0.0.1:3802 /tmp/b-shots
 //
-// BASE must be a Mode L server started with ALIGN_TEST_IDP=1 (see LIM-2472-REPORT-B.md, "Boot it"). Uses
-// puppeteer-core from the implementation's node_modules and Chrome at CHROME_PATH (default: the macOS Google Chrome).
-// Dark: every journey screen at 1440, 390 and 320. Light: Home and the decision at 1440, Home at 390. Plus
-// 00-three-states-<theme>-1440.png. Each shot also reports any horizontal page scroll.
+// BASE must be a Mode L server started with ALIGN_TEST_IDP=1 and its own ALIGN_DATA_DIR (see LIM-2472-REPORT-B.md,
+// "Boot it"). Uses puppeteer-core from the implementation's node_modules and Chrome at CHROME_PATH (default: the macOS
+// Google Chrome). The journey screens use the side-by-side page's numbers: 00-three-states, 01-home, 02-decision,
+// 03-approve-and-launch-confirm, 04-not-yours, 05-record, 06-work-evidence, 07-first-run, 08-connect-agent; dark at
+// 1440, 390 and 320, light for 00/01/02 at 1440 and 01 at 390. Extras: 09-drawer (after Approve only), 10-launched,
+// 11-home-member, 12-home-viewer, 13-decision-viewer. Each screen waits for its own text and throws when it is missing;
+// the click checks (Cancel, the drawer staying open on a done notice, a refused notice after a decline made elsewhere)
+// throw on failure. Exit 1 on any sideways page scroll.
 
-import { mkdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { seed } from "./seed.mjs";
@@ -30,16 +37,42 @@ const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Conte
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const problems = [];
+let checks = 0;
+function check(name, ok) {
+  if (!ok) throw new Error(`check failed: ${name}`);
+  checks++;
+  console.log(`ok   ${name}`);
+}
 
-async function signIn(person) {
-  const r = await fetch(`${BASE}/api/v2/auth/sign-in/email`, { method: "POST", headers: { origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ email: person.email, password: person.password }) });
-  if (!r.ok) throw new Error(`sign-in ${person.email}: ${r.status}`);
+// The shared agent seed writes its accounts (throwaway test-IdP passwords) to a private temp file, removed at the end.
+const tmp = mkdtempSync(path.join(os.tmpdir(), "lim2472-b-"));
+const agentOut = path.join(tmp, "agent.json");
+const sa = spawnSync(process.execPath, [path.join(here, "../s/seed-agent.mjs"), BASE, agentOut], { encoding: "utf8" });
+if (sa.status !== 0) {
+  console.error(`seed-agent.mjs failed: ${sa.stderr || sa.stdout}`);
+  process.exit(1);
+}
+const agent = JSON.parse(readFileSync(agentOut, "utf8"));
+rmSync(tmp, { recursive: true, force: true });
+const s = await seed(BASE, agent);
+console.log(`seeded ${s.ws}: the shared agent seed, then concept B's requests on top`);
+
+async function login(acct) {
+  const r = await fetch(`${BASE}/api/v2/auth/sign-in/email`, { method: "POST", headers: { origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ email: acct.email, password: acct.password }) });
+  if (!r.ok) throw new Error(`sign-in ${acct.email}: ${r.status}`);
   const host = new URL(BASE).hostname;
   return r.headers.getSetCookie().map((c) => {
     const [nv] = c.split(";");
     const i = nv.indexOf("=");
     return { name: nv.slice(0, i), value: nv.slice(i + 1), domain: host, path: "/", httpOnly: true };
   });
+}
+const header = (cookies) => cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+async function apiAs(cookies, method, p, body) {
+  const r = await fetch(BASE + p, { method, headers: { origin: BASE, cookie: header(cookies), ...(body ? { "content-type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(`${method} ${p} -> ${r.status} ${JSON.stringify(j)}`);
+  return j;
 }
 
 async function newPage(browser, cookies, theme) {
@@ -50,6 +83,7 @@ async function newPage(browser, cookies, theme) {
     } catch {}
   }, theme);
   await page.setCookie(...cookies);
+  await page.setViewport({ width: 1440, height: 900 });
   return page;
 }
 
@@ -58,28 +92,41 @@ async function settle(page) {
   await sleep(250);
 }
 
-async function shoot(page, nn, screen, theme, widths) {
+/** Wait for this screen's own text; throw when it never shows. */
+async function expectText(page, text, timeout = 15000) {
+  try {
+    await page.waitForFunction((t) => document.body?.innerText.includes(t), { timeout }, text);
+  } catch {
+    throw new Error(`"${text}" never showed on ${page.url()}`);
+  }
+}
+
+async function shoot(page, nn, screen, theme, widths, text) {
   for (const w of widths) {
     await page.setViewport({ width: w, height: w >= 1000 ? 900 : 844 });
     await settle(page);
+    if (text) await expectText(page, text);
     const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     if (over > 0) problems.push(`${nn}-${screen}-${theme}-${w}: page scrolls sideways by ${over}px`);
     const file = path.join(OUT, `${nn}-${screen}-${theme}-${w}.png`);
     await page.screenshot({ path: file, fullPage: true });
     console.log(`wrote ${file}${over > 0 ? `  (sideways scroll ${over}px)` : ""}`);
   }
+  await page.setViewport({ width: 1440, height: 900 });
+  await settle(page);
 }
 
-async function go(page, url) {
+async function go(page, url, text) {
   await page.goto(BASE + url, { waitUntil: "networkidle0" });
   await settle(page);
+  if (text) await expectText(page, text);
 }
 
 /** Click the first element matching `sel` whose text includes `text`. */
 async function clickText(page, sel, text) {
   const ok = await page.evaluate(
     (s, t) => {
-      const el = [...document.querySelectorAll(s)].find((e) => e.textContent?.includes(t));
+      const el = [...document.querySelectorAll(s)].find((e) => e.textContent?.includes(t) && e.offsetParent !== null);
       if (!el) return false;
       el.click();
       return true;
@@ -87,85 +134,128 @@ async function clickText(page, sel, text) {
     sel,
     text,
   );
-  if (!ok) throw new Error(`no ${sel} with "${text}" on ${page.url()}`);
+  if (!ok) throw new Error(`no visible ${sel} with "${text}" on ${page.url()}`);
   await settle(page);
 }
+const has = (page, sel) => page.evaluate((x) => !!document.querySelector(x), sel);
 
-const s = await seed(BASE);
-console.log(`seeded ${s.ws} (dana ${s.people.dana.email})`);
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
 try {
-  const dana = await signIn(s.people.dana);
-  const eli = await signIn(s.people.eli);
+  const owner = await login(s.people.dana);
+  const member = await login(agent.accounts.member);
+  const viewer = await login(agent.accounts.viewer);
+  const eli = await login(s.people.eli);
   const ALL = [1440, 390, 320];
   const desk = `/app/w/${s.ws}`;
-
-  // Request ids, read as Dana, to open the decision pages directly.
-  const feed = await (await fetch(`${BASE}/api/v2/workspaces/${s.ws}/change-requests`, { headers: { cookie: dana.map((c) => `${c.name}=${c.value}`).join("; ") } })).json();
-  const rows = [...feed.waiting_on_me, ...feed.mine, ...feed.others];
-  const rafis = rows.find((r) => r.state === "pending" && r.requester.name === "Rafi Haddad");
-  const notMine = rows.find((r) => r.state === "pending" && r.requester.name === "Theo Lindqvist");
   const dec = (r) => `/app/w/${s.ws}/decisions/${r.goal.id}/${r.id}`;
 
+  const feedOf = async (c) => {
+    const f = await apiAs(c, "GET", `/api/v2/workspaces/${s.ws}/change-requests`);
+    return [...f.waiting_on_me, ...f.mine, ...f.others];
+  };
+  let rows = await feedOf(owner);
+  const rafis = rows.find((r) => r.state === "pending" && r.requester.name === "Rafi Haddad");
+  const notMine = rows.find((r) => r.state === "pending" && r.requester.name === "Jun Okada");
+  const launched = rows.find((r) => r.launch === "launched" && r.id === agent.change_requests.launched);
+  if (!rafis || !notMine || !launched) throw new Error("the seeded requests are not all there");
+
   for (const theme of ["dark", "light"]) {
-    const page = await newPage(browser, dana, theme);
+    const page = await newPage(browser, owner, theme);
     // 00: a pending approval, a launched plan and an unobserved agent outcome on one screen (All view).
-    await page.setViewport({ width: 1440, height: 900 });
-    await go(page, desk);
+    await go(page, desk, "Decision desk");
     await clickText(page, '[role="radio"]', "All");
-    await shoot(page, "00", "three-states", theme, [1440]);
-
-    await go(page, desk);
-    await shoot(page, "01", "desk", theme, theme === "dark" ? ALL : [1440, 390]);
-
-    await go(page, dec(rafis));
-    await shoot(page, "03", "decision", theme, theme === "dark" ? ALL : [1440]);
+    await shoot(page, "00", "three-states", theme, [1440], "Launched as v");
+    await go(page, desk, "Decision desk");
+    await shoot(page, "01", "home", theme, theme === "dark" ? ALL : [1440, 390], "Waiting on me");
+    await go(page, dec(rafis), "Where this request is");
+    await shoot(page, "02", "decision", theme, theme === "dark" ? ALL : [1440], "Where this request is");
     await page.close();
   }
 
-  const page = await newPage(browser, dana, "dark");
-  await page.setViewport({ width: 1440, height: 900 });
-  // 02: inspect a row without leaving the desk.
-  await go(page, desk);
-  await page.evaluate((id) => document.querySelector(`[data-row="${id}"]`)?.closest("button")?.click(), rafis.id);
-  await settle(page);
-  await shoot(page, "02", "drawer", "dark", ALL);
+  const page = await newPage(browser, owner, "dark");
+  // 03: a live connector opens the shared ReviewActions on that choice.
+  await go(page, dec(rafis), "Where this request is");
+  await clickText(page, "button[data-edge-from]", "Approve and launch");
+  check("connector Approve and launch opens its confirmation", await has(page, '[data-confirm="approve_and_launch"]'));
+  await shoot(page, "03", "approve-and-launch-confirm", "dark", ALL, "Confirm: Approve and launch");
+  await clickText(page, "[data-confirm] button", "Back");
+  check("Back from the confirmation returns to the choices", !(await has(page, "[data-confirm]")) && (await has(page, "[data-decision]")));
+  await clickText(page, "button[data-edge-from]", "Decline");
+  check("a different connector (Decline) opens its own input", await page.evaluate(() => !!document.querySelector("textarea, input[type=text]") && document.body.innerText.includes("Decline")));
+  await clickText(page, "button[data-edge-from]", "Approve and launch");
+  await clickText(page, "[data-confirm] button", "Confirm: Approve and launch");
+  await expectText(page, "Launched as v");
+  check("Approve and launch: a done notice and the map lit on Launched", (await has(page, '[data-notice="done"]')) && (await has(page, '[data-node="launched"][data-current="1"]')));
+  await shoot(page, "10", "launched", "dark", [1440, 390], "Launched as v");
 
-  // 04: the live connector opens the confirmation; 05: it is sent, and the map lights Launched.
-  await page.setViewport({ width: 1440, height: 900 });
-  await go(page, dec(rafis));
-  await clickText(page, "[data-edge-from] , button[data-edge-from]", "Approve and launch");
-  await shoot(page, "04", "confirm", "dark", ALL);
-  await page.setViewport({ width: 1440, height: 900 });
-  await settle(page);
-  await clickText(page, "[data-confirm] button[type=submit]", "Approve and launch");
-  await sleep(600);
-  await settle(page);
-  await shoot(page, "05", "launched", "dark", ALL);
+  // 04: a request that isn't the owner's to decide: inert connectors say who can.
+  await go(page, dec(notMine), "Where this request is");
+  check("not yours: no live connector, a line naming who decides", !(await has(page, 'button[data-edge-from][data-live="1"]')) && (await has(page, "[data-not-yours]")));
+  await shoot(page, "04", "not-yours", "dark", ALL, "Mina Torres can");
 
-  // 06: a request that isn't Dana's to decide: inert connectors say who can.
-  await go(page, dec(notMine));
-  await shoot(page, "06", "not-yours", "dark", ALL);
+  // 05: the shared decision record, in the desk shell; 06: Work and evidence for the launched goal.
+  await go(page, `/app/w/${s.ws}/record?cr=${rafis.id}`, "Decision record");
+  await shoot(page, "05", "record", "dark", ALL, "Decision record");
+  await go(page, `/app/w/${s.ws}/work?goal=${launched.goal.id}`);
+  await shoot(page, "06", "work-evidence", "dark", ALL);
 
-  // 07: the decision record (shared record page, in the desk shell); 08: Work.
-  await go(page, `/app/w/${s.ws}/record?cr=${rafis.id}`);
-  await shoot(page, "07", "record", "dark", ALL);
-  await go(page, `/app/w/${s.ws}/sessions`);
-  await shoot(page, "08", "work", "dark", ALL);
+  // 09: open a pending request in the drawer, Approve only: the drawer stays open on the done notice while the row leaves
+  // "Waiting on me" for "Waiting on others" behind it.
+  rows = await feedOf(owner);
+  const toApprove = rows.find((r) => r.state === "pending" && r.can.approve && r.waiting_on_me);
+  if (!toApprove) throw new Error("no pending request left for the owner to approve");
+  await go(page, desk, "Decision desk");
+  await page.evaluate((id) => document.querySelector(`[data-row="${id}"]`)?.closest("button")?.click(), toApprove.id);
+  await settle(page);
+  await expectText(page, "Approve only");
+  await clickText(page, "[data-drawer] [data-decision]", "Approve only");
+  await clickText(page, "[data-confirm] button", "Confirm: Approve only");
+  await expectText(page, "Approved, not launched");
+  check("drawer: still open after Approve only, with the done notice", (await has(page, `[data-drawer="${toApprove.id}"]`)) && (await has(page, '[data-drawer] [data-notice="done"]')));
+  await shoot(page, "09", "drawer", "dark", ALL, "Approved, not launched");
+  await page.keyboard.press("Escape");
+
+  // A refused decision: a request is declined elsewhere (the API, as its approver) while the drawer is open on it.
+  const audit = rows.find((r) => r.goal.title === "Every release carries its audit evidence");
+  const g = await apiAs(owner, "GET", `/api/v2/workspaces/${s.ws}/goals/${audit.goal.id}`);
+  const mina = await login(s.people.mina);
+  const fresh = await apiAs(mina, "POST", `/api/v2/workspaces/${s.ws}/goals/${audit.goal.id}/change-requests`, { base_version: g.goal?.version ?? g.version, changes: { title: "Every release carries its audit evidence and a reviewer (fictional)" }, reason: "Reviewers asked to be named on each release." });
+  await go(page, desk, "Decision desk");
+  await page.evaluate((id) => document.querySelector(`[data-row="${id}"]`)?.closest("button")?.click(), fresh.id);
+  await settle(page);
+  await expectText(page, "Approve only");
+  await apiAs(owner, "POST", `/api/v2/workspaces/${s.ws}/goals/${audit.goal.id}/change-requests/${fresh.id}/reject`, { revision: fresh.revision, reason: "Declined elsewhere for the click check (fictional)." });
+  await clickText(page, "[data-drawer] [data-decision]", "Approve only");
+  await clickText(page, "[data-confirm] button", "Confirm: Approve only");
+  await sleep(500);
+  check("drawer: a decision refused after a decline elsewhere shows the refused notice and stays open", (await has(page, `[data-drawer="${fresh.id}"]`)) && (await page.evaluate(() => !!document.querySelector('[data-drawer] [data-notice="refused"], [data-drawer] [data-notice="retry"]'))));
   await page.close();
 
-  // 09: first run for a clean person (empty workspace); 10: connect an agent.
-  const fresh = await newPage(browser, eli, "dark");
-  await fresh.setViewport({ width: 1440, height: 900 });
-  await go(fresh, `/app/w/${s.empty}`);
-  await shoot(fresh, "09", "first-run", "dark", ALL);
-  await go(fresh, `/app/w/${s.empty}/apps`);
-  await shoot(fresh, "10", "connect", "dark", ALL);
-  await fresh.close();
+  // 11, 12, 13: what each role sees.
+  const mp = await newPage(browser, member, "dark");
+  await go(mp, desk, "Decision desk");
+  await shoot(mp, "11", "home-member", "dark", [1440, 390], "Decision desk");
+  await mp.close();
+  const vp = await newPage(browser, viewer, "dark");
+  await go(vp, desk, "Decision desk");
+  await shoot(vp, "12", "home-viewer", "dark", [1440, 390], "Decision desk");
+  await go(vp, dec(rafis), "Where this request is");
+  check("viewer: no live connector on the decision page", !(await has(vp, 'button[data-edge-from][data-live="1"]')));
+  await shoot(vp, "13", "decision-viewer", "dark", [1440], "Where this request is");
+  await vp.close();
+
+  // 07: first run for a clean person (an empty workspace); 08: connect an agent.
+  const ep = await newPage(browser, eli, "dark");
+  await go(ep, `/app/w/${s.empty}`, "No decisions yet");
+  await shoot(ep, "07", "first-run", "dark", ALL, "No decisions yet");
+  await go(ep, `/app/w/${s.empty}/apps`);
+  await shoot(ep, "08", "connect-agent", "dark", ALL);
+  await ep.close();
 } finally {
   await browser.close();
 }
+console.log(`\n${checks} click checks passed`);
 if (problems.length) {
-  console.log(`\n${problems.length} problem(s):\n${problems.join("\n")}`);
+  console.log(`${problems.length} problem(s):\n${problems.join("\n")}`);
   process.exitCode = 1;
-} else console.log("\nno sideways page scroll in any shot");
+} else console.log("no sideways page scroll in any shot");

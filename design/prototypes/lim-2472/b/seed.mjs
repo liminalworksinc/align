@@ -3,8 +3,11 @@
 // Needs a Mode L server started with ALIGN_TEST_IDP=1 (test accounts by email + password). Every write is an ordinary
 // API call made as the person it names; nothing touches the database directly.
 //
-//   node design/prototypes/lim-2472/b/seed.mjs http://127.0.0.1:3802
+//   node design/prototypes/lim-2472/b/seed.mjs http://127.0.0.1:3802 [--on <seed-agent out.json>]
 //
+// With --on, it layers onto the workspace design/prototypes/lim-2472/s/seed-agent.mjs made (devices, bound sessions, a
+// launched request with received and applied receipts, apps that connect and read): that workspace's owner plays Dana
+// (the owner who decides), and the other people are invited into it. Without it, Dana and the workspace are new.
 // Prints one JSON line: the workspace ids and each person's email and password, for shots.mjs and for signing in by hand.
 // Each run makes new accounts (a run suffix in every email), so it can run again against the same server.
 
@@ -28,9 +31,14 @@ async function call(base, method, path, { cookie, body } = {}) {
   return { json, setCookies: res.headers.getSetCookie?.() ?? [] };
 }
 
-export async function seed(base) {
+export async function seed(base, on = null) {
   const run = Date.now().toString(36);
   const people = {};
+  const signIn = async (key, acct) => {
+    const r = await call(base, "POST", "/api/v2/auth/sign-in/email", { body: { email: acct.email, password: acct.password } });
+    people[key] = { id: r.json.user.id, name: acct.name, email: acct.email, password: acct.password, cookie: cookieOf(r.setCookies) };
+    return people[key];
+  };
   const signUp = async (key, name) => {
     const email = `${key}-${run}@fictional.test`;
     const password = `pw-${key}-${run}-fictional`;
@@ -39,17 +47,17 @@ export async function seed(base) {
     return people[key];
   };
   // Fictional people. Dana owns the workspace and is the person the screenshots sign in as.
-  const dana = await signUp("dana", "Dana Okafor");
+  const dana = on ? await signIn("dana", on.accounts.owner) : await signUp("dana", "Dana Okafor");
   const rafi = await signUp("rafi", "Rafi Haddad");
   const mina = await signUp("mina", "Mina Torres");
-  const theo = await signUp("theo", "Theo Lindqvist");
+  const theo = await signUp("theo", "Jun Okada");
   const vic = await signUp("vic", "Vic Moreau");
   const eli = await signUp("eli", "Eli Brandt");
 
   const as = (p) => (method, path, body) => call(base, method, path, { cookie: p.cookie, body }).then((r) => r.json);
   const D = as(dana);
 
-  const ws = (await D("POST", "/api/v2/workspaces", { name: "Kestrel Works (fictional)" })).id;
+  const ws = on ? on.ws : (await D("POST", "/api/v2/workspaces", { name: "Kestrel Works (fictional)" })).id;
   const W = `/api/v2/workspaces/${ws}`;
   for (const [p, role] of [
     [rafi, "member"],
@@ -60,7 +68,7 @@ export async function seed(base) {
     const inv = await D("POST", `${W}/invites`, { email: p.email, role });
     await as(p)("POST", `/api/v2/invites/${inv.token}/accept`, {});
   }
-  const product = (await D("POST", `${W}/teams`, { name: "Product" })).id;
+  const product = (await D("POST", `${W}/teams`, { name: "Reviews" })).id;
   const platform = (await D("POST", `${W}/teams`, { name: "Platform" })).id;
   await D("POST", `${W}/teams/${product}/members`, { user_id: mina.id, role: "lead" });
   await D("POST", `${W}/teams/${product}/members`, { user_id: theo.id, role: "member" });
@@ -111,16 +119,18 @@ export async function seed(base) {
   // The fictional sample workspace, for the first-run "explore a sample" path.
   const sample = (await as(eli)("POST", "/api/v2/workspaces/sample", {})).id;
 
-  const out = { base, ws, empty, sample, people: Object.fromEntries(Object.entries(people).map(([k, p]) => [k, { id: p.id, name: p.name, email: p.email, password: p.password }])) };
+  const out = { base, ws, empty, sample, layered: !!on, agent_accounts: on?.accounts ?? null, people: Object.fromEntries(Object.entries(people).map(([k, p]) => [k, { id: p.id, name: p.name, email: p.email, password: p.password }])) };
   return out;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  if (!BASE) {
+  const i = process.argv.indexOf("--on");
+  const on = i > 0 ? JSON.parse((await import("node:fs")).readFileSync(process.argv[i + 1], "utf8")) : null;
+  if (!BASE || BASE === "--on") {
     console.error("usage: node seed.mjs <base url, e.g. http://127.0.0.1:3802>");
     process.exit(2);
   }
-  seed(BASE).then(
+  seed(BASE, on).then(
     (o) => console.log(JSON.stringify(o)),
     (e) => {
       console.error(e.message);

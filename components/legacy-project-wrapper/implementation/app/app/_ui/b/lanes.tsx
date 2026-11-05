@@ -1,5 +1,4 @@
 "use client";
-import Link from "next/link";
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { when } from "../kit";
 import type { ChangeRequest } from "../types";
@@ -21,9 +20,8 @@ interface Edge {
   from: Node;
   to: Node;
   label: string;
-  /** The action the page confirms and sends, or a link to the goal page's form. */
+  /** The ReviewActions choice a live connector opens; none for the historical "Ask". */
   act?: Act;
-  form?: boolean;
   can: boolean;
   who: { id: string; name: string }[];
 }
@@ -70,17 +68,17 @@ function edges(cr: ChangeRequest): Edge[] {
   const req = [cr.requester];
   return [
     { from: "asked", to: "deciding", label: "Ask", can: false, who: req },
-    { from: "update", to: "deciding", label: `Update to v${cr.goal.version}`, form: true, can: c.rebase && cr.behind, who: req },
+    { from: "update", to: "deciding", label: `Update to v${cr.goal.version}`, act: "rebase", can: c.rebase && cr.behind, who: req },
     { from: "deciding", to: "launched", label: "Approve and launch", act: "approve_and_launch", can: c.approve_and_launch, who: cr.approvers },
     { from: "deciding", to: "approved", label: "Approve only", act: "approve", can: c.approve, who: cr.approvers },
-    { from: "deciding", to: "suggested", label: "Suggest a change", form: true, can: c.counter, who: cr.approvers },
+    { from: "deciding", to: "suggested", label: "Suggest a change", act: "counter", can: c.counter, who: cr.approvers },
     { from: "deciding", to: "declined", label: "Decline", act: "reject", can: c.reject && cr.state === "pending", who: cr.approvers },
     { from: "deciding", to: "withdrawn", label: "Withdraw", act: "withdraw", can: c.withdraw && cr.state === "pending", who: req },
     { from: "suggested", to: "deciding", label: "Accept the change", act: "accept_counter", can: c.accept_counter, who: req },
     { from: "suggested", to: "declined", label: "Decline", act: "reject", can: c.reject && cr.state === "countered", who: cr.approvers },
     { from: "suggested", to: "withdrawn", label: "Withdraw", act: "withdraw", can: c.withdraw && cr.state === "countered", who: req },
     { from: "approved", to: "launched", label: "Launch", act: "launch", can: c.launch, who: cr.launchers },
-    { from: "approved", to: "approved", label: "Not yet", act: "not_yet", can: c.not_yet, who: cr.launchers },
+    { from: "approved", to: "approved", label: "Not yet", act: "not_yet", can: c.not_yet && cr.launch !== "not_yet", who: cr.launchers },
   ];
 }
 
@@ -96,7 +94,7 @@ function passed(cur: Node | null, cr: ChangeRequest): Set<Node> {
 
 type Line = { d: string; live: boolean; key: string };
 
-export function LaneMap({ cr, me, ws, onAct }: { cr: ChangeRequest; me: string; ws: string; onAct: (a: Act) => void }) {
+export function LaneMap({ cr, me, onAct, picked = null }: { cr: ChangeRequest; me: string; onAct: (a: Act) => void; picked?: Act | null }) {
   const cur = currentNode(cr);
   const done = passed(cur, cr);
   const words = cards(cr, me);
@@ -173,24 +171,16 @@ export function LaneMap({ cr, me, ws, onAct }: { cr: ChangeRequest; me: string; 
       // Lines only for the way this request came and the ways out of where it is now; the rest stay as dashed chips.
       "data-drawn": fromCur || (done.has(e.from) && (done.has(e.to) || e.to === cur)) ? "1" : "0",
     };
-    if (live && e.form) {
-      return (
-        <Link key={e.label} {...common} href={`/app/w/${ws}/goals/${cr.goal.id}#change-requests`} className="flex min-h-[36px] w-full items-center justify-between gap-2 rounded-(--radius-s) border border-(--accent) px-2.5 py-1 text-left text-[13px] font-medium text-(--accent-text) hover:bg-(--accent-soft) max-sm:min-h-[44px]">
-          <span>{e.label}</span>
-          <span aria-hidden="true">→</span>
-          <span className="sr-only">, to {target}, on the goal page</span>
-        </Link>
-      );
-    }
     if (live) {
-      const dominant = e.act === "approve_and_launch" || e.act === "launch" || e.act === "accept_counter";
+      const dominant = e.act === "approve_and_launch" || e.act === "launch" || e.act === "accept_counter" || e.act === "rebase";
       return (
         <button
           key={e.label}
           type="button"
           {...common}
+          aria-pressed={picked === e.act}
           onClick={() => onAct(e.act!)}
-          className={`flex min-h-[36px] w-full items-center justify-between gap-2 rounded-(--radius-s) px-2.5 py-1 text-left text-[13px] font-medium max-sm:min-h-[44px] ${dominant ? "bg-(--accent) text-(--text-on-accent) hover:bg-(--accent-hover)" : "border border-(--accent) text-(--accent-text) hover:bg-(--accent-soft)"}`}
+          className={`flex min-h-[36px] w-full items-center justify-between gap-2 rounded-(--radius-s) px-2.5 py-1 text-left text-[13px] font-medium max-sm:min-h-[44px] ${dominant ? "bg-(--accent) text-(--text-on-accent) hover:bg-(--accent-hover)" : "border border-(--accent) text-(--accent-text) hover:bg-(--accent-soft)"} ${picked === e.act ? "outline-2 outline-offset-2 outline-(--focus)" : ""}`}
         >
           <span>{e.label}</span>
           <span aria-hidden="true">→</span>
