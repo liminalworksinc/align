@@ -246,7 +246,9 @@ export function Card({ title, children, actions }: { title?: ReactNode; children
 
 /** An action button. A long label wraps between words instead of running past its container (max-w-full), at any
  *  width. Below 640px every button is at least 44px tall, a phone's tap target: the root font is 15px, so rem-based
- *  heights (min-h-11 is 41.25px here) fall short, and the height is in px (main #44). */
+ *  heights (min-h-11 is 41.25px here) fall short, and the height is in px (main #44). The transition names its
+ *  properties: `transition` and `transition-colors` also animate outline-color, so the focus ring would fade in from
+ *  white. */
 export function Btn({
   children,
   onClick,
@@ -270,7 +272,7 @@ export function Btn({
     danger: "border-red-700 bg-transparent text-red-700 hover:bg-red-50",
   }[kind];
   return (
-    <button ref={ref} type={type} onClick={onClick} disabled={disabled} className={`max-w-full rounded-[10px] border px-3.5 py-2 text-[15px] font-medium transition [overflow-wrap:normal] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] ${k}`}>
+    <button ref={ref} type={type} onClick={onClick} disabled={disabled} className={`max-w-full rounded-[10px] border px-3.5 py-2 text-[15px] font-medium transition-[color,background-color,border-color,opacity] [overflow-wrap:normal] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] ${k}`}>
       {children}
     </button>
   );
