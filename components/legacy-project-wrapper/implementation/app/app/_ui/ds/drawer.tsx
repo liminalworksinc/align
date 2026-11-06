@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useId, useRef, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useRef, useSyncExternalStore, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { Kbd } from "./kbd";
 
 const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
@@ -14,8 +15,12 @@ function canTakeFocus(e: HTMLElement) {
   return true;
 }
 
+/** No document on the server: a drawer open at first paint (?review=) renders after hydration. */
+const noSubscription = () => () => {};
+
 /** A right-side detail drawer (full width on phones). While open it traps focus, closes on Esc or the backdrop, and
- *  returns focus to whatever opened it. */
+ *  returns focus to whatever opened it. It renders on document.body: mounted inside the sticky rail, z-50 would count
+ *  only within the rail and the page would take its clicks. */
 export function Drawer({
   open,
   onClose,
@@ -37,9 +42,14 @@ export function Drawer({
 }) {
   const id = useId();
   const panel = useRef<HTMLDivElement>(null);
+  const client = useSyncExternalStore(
+    noSubscription,
+    () => true,
+    () => false,
+  );
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !client) return;
     const opener = document.activeElement as HTMLElement | null;
     (initialFocusRef?.current ?? panel.current)?.focus();
     const onKey = (e: KeyboardEvent) => {
@@ -71,11 +81,11 @@ export function Drawer({
       document.body.style.overflow = overflow;
       opener?.focus?.();
     };
-  }, [open, onClose, initialFocusRef]);
+  }, [open, client, onClose, initialFocusRef]);
 
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+  if (!open || !client) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex justify-end text-(--text-1) [overflow-wrap:anywhere]">
       <div className="absolute inset-0 bg-black/45" onClick={onClose} aria-hidden="true" />
       <div
         ref={panel}
@@ -103,6 +113,7 @@ export function Drawer({
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
         {footer && <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-(--line) px-5 py-3">{footer}</footer>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
