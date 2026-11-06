@@ -316,6 +316,43 @@ try {
     const okC = cPosts === 1 && (await approvals(C)) === "approved" && /Recorded: you approved revision 1\. Not launched yet\./.test(await noteOf(C.cr.id));
     check("Requests: three clicks before a re-render send one approval and the row says Recorded", okC, JSON.stringify({ cPosts, c: await noteOf(C.cr.id) }));
     await q.close();
+    // The owner's desk at laptop widths: no sideways scroll, no title word broken mid-word, every row names who it waits
+    // on or its action, and a request with no link says so.
+    for (const w of [1440, 1366, 1280, 1100, 1024]) {
+      const d = await open(owner, REQS, { width: w });
+      await d.evaluate(() => [...document.querySelectorAll('[role="radio"]')].find((b) => /All/.test(b.textContent ?? ""))?.click());
+      await sleep(500);
+      const r = await d.evaluate(() => {
+        const broken = [];
+        for (const row of document.querySelectorAll("[data-row]")) {
+          const title = row.firstElementChild;
+          const text = title?.firstChild;
+          if (!text || text.nodeType !== 3) continue;
+          const s = text.textContent ?? "";
+          const re = /[^\s-]+/g; // a break at a hyphen is a normal line break
+          let m;
+          while ((m = re.exec(s))) {
+            const range = document.createRange();
+            range.setStart(text, m.index);
+            range.setEnd(text, m.index + m[0].length);
+            const tops = new Set([...range.getClientRects()].map((x) => Math.round(x.top)));
+            if (tops.size > 1) broken.push(m[0]);
+          }
+        }
+        const rows = [...document.querySelectorAll("[data-row]")].map((x) => x.closest("tr") ?? x.closest("[role=row]") ?? x.parentElement);
+        const unnamed = rows.filter((tr) => tr && ![...tr.querySelectorAll("button, a")].length && !/ can |No action/.test(tr.innerText)).length;
+        return { over: document.documentElement.scrollWidth - document.documentElement.clientWidth, broken, unnamed, noEv: document.querySelectorAll("[data-no-evidence]").length, waitsOn: [...document.querySelectorAll("th")].some((th) => /Waits on/i.test(th.textContent ?? "")) };
+      });
+      check(`Requests, owner at ${w}: no sideways scroll, no title word broken, every row names its action or who can act, no "Waits on" column`, r.over <= 0 && !r.broken.length && r.unnamed === 0 && !r.waitsOn, JSON.stringify(r));
+      if (w === 1440) {
+        check('Requests: a request with no link says "No evidence attached"', r.noEv > 0, JSON.stringify(r));
+        const lines = await d.evaluate(() => [...document.querySelectorAll("[data-row]")].map((x) => x.closest("tr")?.querySelectorAll("td")[2]?.innerText ?? ""));
+        check("Requests: Versions on one line of wording", lines.length > 0 && lines.every((t) => /^v\d+( launched)?( · (v\d+ (launched|approved)|asks for v\d+|not approved))?$/.test(t.replace(/\s+/g, " ").trim())), JSON.stringify(lines.slice(0, 6)));
+        await shot(d, "r2-requests-owner-1440");
+      }
+      if (w === 1280) await shot(d, "r2-requests-owner-1280");
+      await d.close();
+    }
     const vp = await open(viewer, REQS);
     check("Requests: a viewer never sees 'Approve only'", !(await vp.evaluate(() => [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Approve only"))));
     await vp.close();

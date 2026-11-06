@@ -113,25 +113,19 @@ export function Desk({
       },
     },
     {
-      key: "waiting",
-      header: "Waits on",
-      render: (r) => {
-        const w = waitsOn(r);
-        return <span className="text-[13px] text-(--text-2) sm:whitespace-nowrap">{w ? nameList(w.people, me) : "Decided"}</span>;
-      },
-    },
-    {
       key: "versions",
       header: "Versions",
-      render: (r) => {
-        const v = versions(r);
-        return (
-          <span className="flex flex-col font-mono text-[12px] text-(--text-2) sm:whitespace-nowrap">
-            <span>{v.launched}</span>
-            <span className="text-(--text-3)">{v.approvedLine}</span>
-          </span>
-        );
-      },
+      // One line: the goal now, then what this request did or asks. State says the rest.
+      render: (r) => (
+        <span className="font-mono text-[12px] text-(--text-2)">
+          {versions(r).line.map((part, i) => (
+            <span key={i}>
+              {i > 0 && " "}
+              <span className="whitespace-nowrap">{i > 0 ? `· ${part}` : part}</span>
+            </span>
+          ))}
+        </span>
+      ),
     },
     {
       key: "evidence",
@@ -140,8 +134,10 @@ export function Desk({
       sortValue: (r) => r.evidence_count,
       // The same chips the review shows, beside the click they back; none for a request not launched reads no delivery.
       // One chip ("+N more" says the rest). Whether its words wrap inside the chip is EvidenceLabel's (foundation).
+      // No link is said in words, as Home says it: an absence reads as a stated fact, never a blank cell.
       render: (r) => (
         <span className="block">
+          {!hasEvidence(r) && <span className="block text-[12px] text-(--text-3)" data-no-evidence>No evidence attached</span>}
           <EvidenceSummary ws={ws} cr={r} variant="inline" max={1} value={r.launch === "launched" ? undefined : null} />
         </span>
       ),
