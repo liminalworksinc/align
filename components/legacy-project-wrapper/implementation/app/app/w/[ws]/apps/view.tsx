@@ -100,7 +100,7 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
           <div id="connect" className="min-w-0 scroll-mt-4 lg:col-span-2 xl:col-span-1">
             <Panel eyebrow="Set up" title="Connect an AI app" className="h-full">
             {!apps.data || !role ? (
-              <p className="text-[14px] text-(--text-2)">{apps.error ?? "Loading…"}</p>
+              <p className="text-[14px] text-(--text-2)">{apps.error ?? (detail.error ? "Couldn't read your role in this workspace just now. Reload to try again." : "Loading…")}</p>
             ) : role === "viewer" ? (
               <p className="text-[15px] text-(--text-1)">Viewers can&apos;t connect apps to this workspace. A member or an owner can.</p>
             ) : (
@@ -175,9 +175,9 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
                 body={
                   role === "owner"
                     ? "Nothing is reading this workspace's goals through an app yet. Connect one above; it is listed here once you approve it, and its first goal read is recorded under Last read the goals."
-                    : role === "viewer"
-                      ? "You see your own apps here; workspace owners see everyone's."
-                      : "You see your own apps here; workspace owners see everyone's. Connect one above; it is listed here once you approve it, and its first goal read is recorded under Last read the goals."
+                    : role === "member"
+                      ? "You see your own apps here; workspace owners see everyone's. Connect one above; it is listed here once you approve it, and its first goal read is recorded under Last read the goals."
+                      : "You see your own apps here; workspace owners see everyone's."
                 }
               />
             )}

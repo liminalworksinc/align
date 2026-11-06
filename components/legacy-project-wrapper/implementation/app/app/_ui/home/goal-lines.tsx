@@ -51,7 +51,7 @@ function Line({ ws, g, latest, launch, fed, onReview }: { ws: string; g: GoalLin
     // Desktop: title | chips | Work on one row. Phone: title and Work on the first row, chips (if any) on a second, so
     // a quiet line is one row and never three. On a phone the chips cell is hidden when none of its children has content;
     // on a desktop it stays, empty, so Work keeps its column.
-    <li className="grid min-h-[44px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-1.5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto] max-md:py-2" data-goal-line={g.id}>
+    <li className="grid min-h-[44px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 px-4 py-1.5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto] max-md:items-start max-md:py-2.5" data-goal-line={g.id}>
       {/* The title wins: it wraps to two lines before it is cut, and the metadata goes first (team, then version). */}
       <div className="flex min-w-0 items-baseline gap-2">
         <span className="line-clamp-2 min-w-0 text-[14px] font-medium text-(--text-1)" title={g.title}>
@@ -81,13 +81,18 @@ function Line({ ws, g, latest, launch, fed, onReview }: { ws: string; g: GoalLin
           ))}
         {a?.held && <StatusPill kind="held" size="s" label="Held" />}
         {/* The shared summary: the newest launch's delivery from its own …/value read, then agent time as reported. */}
-        {fed && (
+        {/* Held back while the shared delivery read is in flight: a null value means a FAILED read ("Delivery not read"),
+            so passing it while loading would flash that on every load, and passing undefined would make the summary read
+            for itself (one read per goal, which the shared cache is here to avoid). */}
+        {fed && !v.loading && (
           <span className="flex min-w-0 flex-1 md:order-first md:[&_[data-evidence-summary=inline]]:justify-end">
             <EvidenceSummary ws={ws} goal={fed} variant="inline" launched={launched} />
           </span>
         )}
       </div>
-      <Link href={`/app/w/${ws}/work?goal=${g.id}`} className="inline-flex min-h-[32px] items-center px-1 text-[13px] text-(--text-2) hover:text-(--text-1) hover:underline max-sm:min-h-[44px]" aria-label={`Work on ${g.title}`} data-goal-work>
+      {/* On a phone the row aligns to the top and Work takes a 20px line with a 44px tap area from the pseudo-element, so
+          a two-line title sits as far from its chips as a one-line title does. */}
+      <Link href={`/app/w/${ws}/work?goal=${g.id}`} className="relative inline-flex min-h-[32px] items-center px-1 text-[13px] text-(--text-2) hover:text-(--text-1) hover:underline max-md:min-h-0 max-md:leading-5 max-md:before:absolute max-md:before:inset-x-0 max-md:before:top-1/2 max-md:before:h-[44px] max-md:before:-translate-y-1/2 max-md:before:content-['']" aria-label={`Work on ${g.title}`} data-goal-work>
         Work
       </Link>
     </li>
@@ -100,7 +105,7 @@ export default function GoalLines({
   changes,
   onReview,
   feed,
-  role,
+  canCreate = false,
 }: {
   ws: string;
   /** Unused since lines stopped saying "yours" (an owner's every line said it); kept so callers need no change. */
@@ -113,8 +118,8 @@ export default function GoalLines({
   onReview?: (goal: string, id: string) => void;
   /** The goals feed (GET …/goals, for allocation) when the Home already read it; without it the lines read it once. */
   feed?: Goal[] | null;
-  /** The person's role here: "Create a goal" is offered only when it is known and they can. */
-  role?: "owner" | "member" | "viewer" | null;
+  /** Whether the person may create a goal (anyone but a viewer); the empty list offers "Create a goal" only then. */
+  canCreate?: boolean;
 }) {
   const own = useApi<{ goals: Goal[] }>(feed === undefined ? `/api/v2/workspaces/${ws}/goals` : null);
   const fedGoals = feed === undefined ? own.data?.goals : feed;
@@ -134,8 +139,8 @@ export default function GoalLines({
       ) : goals.length === 0 ? (
         <p className="rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3 text-[14px] text-(--text-2)">
           No active goals you can see.{" "}
-          {(role === "owner" || role === "member") && (
-            <Link href={`/app/w/${ws}/goals`} className="font-medium text-(--accent-text) hover:underline">
+          {canCreate && (
+            <Link href={`/app/w/${ws}/goals`} className="font-medium text-(--text-1) underline underline-offset-2">
               Create a goal
             </Link>
           )}

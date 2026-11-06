@@ -370,6 +370,15 @@ export function NotesSuggest({ ws, preferGoalId, onDone }: { ws: string; preferG
       );
     return <div className="mt-2 rounded-(--radius-m) border border-(--edge) p-3">{body}</div>;
   }
+  // Folded, it is the button alone: a card titled with the button's own words said nothing more.
+  if (!open)
+    return (
+      <div className="mb-4">
+        <Btn kind="secondary" onClick={() => setOpen(true)}>
+          Paste meeting notes
+        </Btn>
+      </div>
+    );
   return (
     <Panel className="mb-4" title="Paste meeting notes">
       {open ? (

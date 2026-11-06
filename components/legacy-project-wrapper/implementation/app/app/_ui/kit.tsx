@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { cloneElement, isValidElement, useCallback, useEffect, useId, useRef, useState, type ReactNode, type Ref } from "react";
 import { ThemeSettingCompact } from "./ds";
+import { ProposeControl } from "./propose";
 
 // Shared client pieces for the goal sessions web app: the API helper, a data hook, layout and form controls.
 
@@ -98,7 +99,8 @@ export interface WsSummary {
 /** Concept A navigation (LIM-2472): grouped by what a person is doing, the command center first. Labels keep the
  *  existing tab names so every page's `tab` prop still marks its place. */
 const NAV: { group: string; items: { href: string; label: string }[] }[] = [
-  { group: "Command", items: [{ href: "", label: "Home" }] },
+  // Home sits at the top with no group label: the label named the product ("command center"), which it no longer is.
+  { group: "", items: [{ href: "", label: "Home" }] },
   {
     group: "Plan",
     items: [
@@ -108,8 +110,10 @@ const NAV: { group: string; items: { href: string; label: string }[] }[] = [
       { href: "/asks", label: "Asks" },
     ],
   },
+  // "Agents", not "Work": the Work page is the evidence for one goal, opened from a decision (ruling eaa5cf92 item 1),
+  // and is not in this menu. Whether Sessions stays here is the founder's open question.
   {
-    group: "Work",
+    group: "Agents",
     items: [
       { href: "/sessions", label: "Sessions" },
       { href: "/apps", label: "Apps" },
@@ -173,9 +177,17 @@ function WsSwitch({ ws, list }: { ws?: string; list: WsSummary[] }) {
   );
 }
 
-function NavBody({ ws, tab, list, me, current }: { ws?: string; tab?: string; list: WsSummary[] | null; me: { name: string; email: string }; current?: WsSummary }) {
+function NavBody({ ws, tab, list, me, current }: { ws?: string; tab?: string; list: WsSummary[] | null; me: { id?: string; name: string; email: string }; current?: WsSummary }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
+      {/* One way to change the plan from anywhere (ruling eaa5cf92 item 10). People propose; viewers can't. */}
+      {ws && current && current.role !== "viewer" && (
+        <ProposeControl
+          ws={ws}
+          me={me.id}
+          className="inline-flex min-h-[36px] w-full items-center justify-center rounded-(--radius-s) border border-(--line-strong) px-3 text-[14px] font-medium text-(--text-1) hover:bg-(--bg-raised) max-lg:min-h-[44px]"
+        />
+      )}
       {list && list.length > 0 && (
         <div className="flex flex-col gap-1">
           <WsSwitch ws={ws} list={list} />
@@ -186,8 +198,9 @@ function NavBody({ ws, tab, list, me, current }: { ws?: string; tab?: string; li
         <nav aria-label="Workspace" className="flex flex-col gap-3">
           {NAV.map((g) => (
             <div key={g.group} className="flex flex-col gap-0.5">
-              <p className="px-2.5 font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">{g.group}</p>
-              {g.items.map((t) => (
+              {g.group && <p className="px-2.5 font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">{g.group}</p>}
+              {/* The workspace-wide record is an owner's audit page (ruling eaa5cf92 item 1); the server decides what it shows. */}
+              {[...g.items, ...(g.group === "Team" && current?.role === "owner" ? [{ href: "/record", label: "Record" }] : [])].map((t) => (
                 <Link key={t.href} href={`/app/w/${ws}${t.href}`} aria-current={tab === t.label ? "page" : undefined} className={navLink(tab === t.label)}>
                   {t.label}
                 </Link>
@@ -220,7 +233,7 @@ function NavBody({ ws, tab, list, me, current }: { ws?: string; tab?: string; li
 /** Page frame (LIM-2472 concept A): a dense left rail at 1024px and up (workspace switcher, grouped navigation,
  *  devices, account, appearance); below that a top bar with a Menu button that opens the same navigation as a sheet.
  *  Every bar wraps and a word longer than its line breaks, so no /app page scrolls sideways at 390 or 320. */
-export function Shell({ me, ws, tab, children }: { me: { name: string; email: string; passkeyPrompt?: boolean }; ws?: string; tab?: string; children: ReactNode }) {
+export function Shell({ me, ws, tab, children }: { me: { id?: string; name: string; email: string; passkeyPrompt?: boolean }; ws?: string; tab?: string; children: ReactNode }) {
   const list = useApi<{ workspaces: WsSummary[] }>("/api/v2/workspaces");
   const current = list.data?.workspaces.find((w) => w.id === ws);
   const [menu, setMenu] = useState(false);
@@ -252,6 +265,10 @@ export function Shell({ me, ws, tab, children }: { me: { name: string; email: st
             Align
           </Link>
           <span className="min-w-0 flex-1 truncate text-[14px] text-(--text-2)">{current?.name ?? ""}</span>
+          {/* Between phone and rail widths there is room to say who is signed in without opening Menu. */}
+          <span className="hidden max-w-[12rem] truncate text-[13px] text-(--text-3) md:inline" title={me.email}>
+            {me.name}
+          </span>
           <button
             ref={menuBtn}
             type="button"
@@ -265,7 +282,13 @@ export function Shell({ me, ws, tab, children }: { me: { name: string; email: st
         </header>
         {menu && (
           // A link in the sheet closes it, so the page it opens starts with the navigation folded away.
-          <div id="ca-menu" ref={sheet} onClick={(e) => (e.target as HTMLElement).closest("a") && setMenu(false)} className="flex flex-col border-b border-(--line) bg-(--bg-inset) px-3 py-3 lg:hidden" data-menu-sheet>
+          <div
+            id="ca-menu"
+            ref={sheet}
+            onClick={(e) => (e.target as HTMLElement).closest("a") && setMenu(false)}
+            className="flex flex-col border-b border-(--line) bg-(--bg-inset) px-3 py-3 lg:hidden"
+            data-menu-sheet
+          >
             <NavBody ws={ws} tab={tab} list={list.data?.workspaces ?? null} me={me} current={current} />
           </div>
         )}
@@ -342,7 +365,13 @@ export function Btn({
     danger: "border-red-700 bg-transparent text-red-700 hover:bg-red-50",
   }[kind];
   return (
-    <button ref={ref} type={type} onClick={onClick} disabled={disabled} className={`max-w-full rounded-[10px] border px-3.5 py-2 text-[15px] font-medium transition-[color,background-color,border-color,opacity] [overflow-wrap:normal] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] ${k}`}>
+    <button
+      ref={ref}
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className={`max-w-full rounded-[10px] border px-3.5 py-2 text-[15px] font-medium transition-[color,background-color,border-color,opacity] [overflow-wrap:normal] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] ${k}`}
+    >
       {children}
     </button>
   );
@@ -401,7 +430,13 @@ export function Note({ children }: { children: ReactNode }) {
 }
 
 export function Pill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "violet" | "amber" | "red" | "green" }) {
-  const t = { neutral: "text-zinc-600 border-zinc-300", violet: "text-violet-700 border-violet-700", amber: "text-amber-700 border-amber-700", red: "text-red-700 border-red-700", green: "text-emerald-700 border-emerald-700" }[tone];
+  const t = {
+    neutral: "text-zinc-600 border-zinc-300",
+    violet: "text-violet-700 border-violet-700",
+    amber: "text-amber-700 border-amber-700",
+    red: "text-red-700 border-red-700",
+    green: "text-emerald-700 border-emerald-700",
+  }[tone];
   return <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 font-mono text-[12px] tracking-[0.04em] [overflow-wrap:anywhere] ${t}`}>{children}</span>;
 }
 

@@ -215,9 +215,11 @@ function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
   const apps = useRead<{ apps: App[] }>(`/api/v2/workspaces/${ws}/apps`);
   const list = apps.data?.apps ?? [];
   // The apps read is everyone's for a workspace owner and the reader's own for anyone else, without saying which: the
-  // role decides how an empty list is worded. Unknown role reads as "yours", which is never false.
+  // role decides how an empty list is worded. Until the role is known (read failed or still out), the sentence names no
+  // role and offers nothing: an offer needs a role the server would allow.
   const role = useRead<{ role: "owner" | "member" | "viewer" }>(`/api/v2/workspaces/${ws}`);
-  const everyone = role.data?.role === "owner";
+  const known = role.status === 0 ? role.data?.role : undefined;
+  const everyone = known === "owner";
   const { cr, sent, loading, launchUnread, sentUnread } = useLaunched(ws, goal);
   const sentTo = new Map((sent?.items ?? []).map((i) => [i.id, i]));
   return (
@@ -227,13 +229,15 @@ function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
       {apps.data && list.length === 0 &&
         (everyone ? (
           <EmptyState title="No AI apps connected" body="Nothing has read this workspace's goals through an app." action={<Link href={`/app/w/${ws}/apps`} className={LINK}>Connect one</Link>} />
-        ) : (
+        ) : known ? (
           // A viewer can't connect an app, so nothing is offered; a member can, on the Apps tab.
           <EmptyState
             title="None of your AI apps is connected"
             body="You see your own apps here; workspace owners see everyone's."
-            action={role.data?.role === "member" ? <Link href={`/app/w/${ws}/apps`} className={LINK}>Connect one</Link> : undefined}
+            action={known === "member" ? <Link href={`/app/w/${ws}/apps`} className={LINK}>Connect one</Link> : undefined}
           />
+        ) : (
+          <EmptyState title="No AI app you can see is connected." body="Workspace owners see everyone's apps; others see their own." />
         ))}
       {list.length > 0 && (
         <ul className="flex flex-col gap-2">
@@ -255,7 +259,7 @@ function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
           {launchUnread || sentUnread
             ? NOT_LOADED
             : cr && apps.data && !list.length
-            ? `Launched v${cr.version} reaches an app when it reads the goals; ${everyone ? "none is connected" : "none of yours is connected"}.`
+            ? `Launched v${cr.version} reaches an app when it reads the goals; ${everyone ? "none is connected" : known ? "none of yours is connected" : "none you can see is connected"}.`
             : cr
             ? `"Align sent it v${cr.version}" is a delivery receipt: a goal read served this goal's launched version to that app. Align can't see what the app does with it.`
             : "Nothing is launched on this goal yet, so Align has sent no version of it to an app. Goal reads are recorded for the workspace, not per goal."}

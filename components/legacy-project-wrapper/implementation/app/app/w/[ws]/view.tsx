@@ -8,7 +8,7 @@ import Since from "../../_ui/home/since";
 import { useRead } from "../../_ui/ds/read";
 import { Loading, Shell, useApi } from "../../_ui/kit";
 import { NotInWorkspace } from "../../_ui/missing";
-import type { Me } from "../../_ui/server";
+import type { CreationOptions, Me } from "../../_ui/server";
 import type { ChangeRequest, Goal } from "../../_ui/types";
 import FirstRun from "./first-run";
 import { ReviewDrawer, useReview } from "./review-drawer";
@@ -59,15 +59,15 @@ function needsHeading(n: number | null, partial: boolean) {
   return `${n} ${n === 1 ? "thing needs" : "things need"} you`;
 }
 
-export default function Home({ me, ws }: { me: Me; ws: string }) {
+export default function Home({ me, ws, creation }: { me: Me; ws: string; creation?: CreationOptions }) {
   const d = useRead<HomeData>(`/api/v2/workspaces/${ws}/home`);
   const c = useApi<Groups>(`/api/v2/workspaces/${ws}/change-requests`);
   const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
   const [review, setReview] = useReview();
   // Stable: the Drawer re-takes focus whenever onClose changes, which would pull it off a notice that just took it.
   const closeReview = useCallback(() => setReview(null), [setReview]);
-  // NeedsList holds its own reads: a new key reads them again after a decision in the drawer.
-  const [needsKey, setNeedsKey] = useState(0);
+  // NeedsList holds its own reads: a new token reads them again after a decision in the drawer.
+  const [reloadToken, setReloadToken] = useState(0);
   const [count, setCount] = useState<{ n: number | null; partial: boolean }>({ n: null, partial: false });
   const onCount = useCallback((n: number | null, partial: boolean) => setCount({ n, partial }), []);
   const h = d.data ?? (d.status ? UNREAD : null);
@@ -80,7 +80,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const reloadAll = useCallback(() => {
     reloadHome();
     reloadChanges();
-    setNeedsKey((k) => k + 1);
+    setReloadToken((t) => t + 1);
   }, [reloadHome, reloadChanges]);
 
   // "Next" after a decision (round 2): NeedsList hands over its Needs-you rows in its own order; the keys when this
@@ -113,6 +113,13 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   }, [snap, reviewId, closeReview]);
 
   const allCrs = c.data ? [...c.data.waiting_on_me, ...c.data.mine, ...c.data.others] : [];
+  // A workspace with no goals: the page says so, and the empty state (FirstRun) leads. The list stays mounted for its
+  // count but is hidden while nothing needs the person; Since and Goals have nothing to compare or list.
+  const noGoals = !!h && h.goals !== null && h.goals.length === 0;
+  // Until /home lands, nothing says whether the workspace has goals: no list and no count unless there are rows to show.
+  // A failed /home makes h UNREAD, so this ends either way.
+  const homePending = !h && !count.partial && (count.n === null || count.n === 0);
+  const quietList = homePending || (noGoals && count.n === 0 && !count.partial);
   // The page checks membership before Home mounts; this is the person removed while Home is open (every read is a 404).
   if (d.status === 404) return <NotInWorkspace me={me} />;
 
@@ -121,20 +128,23 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
       <div className="flex flex-col gap-5">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <h1 tabIndex={-1} className={`${PAGE_H1} min-w-0`} data-home-count={count.n ?? "reading"}>
-            {needsHeading(count.n, count.partial)}
+            {homePending ? "Home" : noGoals && (count.n === 0 || count.n === null) && !count.partial ? "No goals here yet" : needsHeading(count.n, count.partial)}
           </h1>
         </header>
 
-        {h && <FirstRun ws={ws} onSeen={reloadAll} me={me.id} hasGoals={(h.goals?.length ?? 0) > 0} />}
+        {/* Only on what was read: an unread Home says nothing about goals or apps, so it can't choose a first-run card. */}
+        {h?.goals && h.apps && <FirstRun ws={ws} onSeen={reloadAll} me={me.id} hasGoals={h.goals.length > 0} creation={creation} />}
 
-        <NeedsList ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} reloadToken={needsKey} onItems={setItems} decided={decided} />
+        <div className={quietList ? "hidden" : "contents"}>
+          <NeedsList ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} reloadToken={reloadToken} onItems={setItems} decided={decided} />
+        </div>
 
         {!h ? (
           <Loading />
-        ) : (
+        ) : noGoals ? null : (
           <>
             <Since ws={ws} me={me.id} changes={c.data ? allCrs : null} goals={h.goals} apps={h.apps?.items ?? null} onReview={(goal, id) => setReview({ goal, id })} />
-            <GoalLines ws={ws} goals={h.goals} changes={c.data ? allCrs : null} feed={feed.data?.goals ?? null} role={role} onReview={(goal, id) => setReview({ goal, id })} />
+            <GoalLines ws={ws} goals={h.goals} changes={c.data ? allCrs : null} feed={feed.data?.goals ?? null} canCreate={role === "owner" || role === "member"} onReview={(goal, id) => setReview({ goal, id })} />
           </>
         )}
 
