@@ -12354,6 +12354,7 @@ try {
       for (const width of [1440, 390, 320]) for (const theme of ["light", "dark"]) {
         const context = await browser.createBrowserContext();
         const page = await context.newPage();
+        const clientIp = nextIp();
         const address = [`browser-${width}-${theme}`, "example.test"].join("@");
         const invite = v1Hex();
         writeFileSync(boundFile, `${invite},${address}\n`, { mode: 0o600 });
@@ -12377,7 +12378,7 @@ try {
           try {
             const url = new URL(request.url());
             if (url.origin !== `https://${HOSTED_HOST}`) return void await request.abort();
-            const headers = { ...request.headers(), host: HOSTED_HOST, "x-forwarded-proto": "https", "fly-client-ip": nextIp() };
+            const headers = { ...request.headers(), host: HOSTED_HOST, "x-forwarded-proto": "https", "fly-client-ip": clientIp };
             delete headers["accept-encoding"];
             const result = await new Promise((resolve, reject) => {
               const outgoing = http.request({ hostname: "127.0.0.1", port: PORT, path: url.pathname + url.search, method: request.method(), headers }, (res) => {
