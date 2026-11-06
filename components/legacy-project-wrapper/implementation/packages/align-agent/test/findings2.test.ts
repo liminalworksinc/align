@@ -620,7 +620,7 @@ describe("E2E cycle 2: sign-out, sharing and workspaces", () => {
     assert.ok(calls.includes("POST /api/v2/device/refresh"), "the old key signed a refresh for a fresh access token");
   });
 
-  test("removed from the workspace: the next contact ends the share here with a notice, the stop latch stays until `align stop-sharing`, cached goals go", async () => {
+  test("removed from the workspace: the next contact ends the share here with a notice, the stop latch stays (also after `align stop-sharing`, LIM-2441), cached goals go", async () => {
     const { fake, t, SID, cwd, skey, lid } = await sharedWorld();
     fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [skey], goal: null, binding: null });
     assert.equal((await runCli(t, ["sync"])).code, 0);
@@ -633,14 +633,15 @@ describe("E2E cycle 2: sign-out, sharing and workspaces", () => {
     assert.equal(r.code, 0, r.stderr);
     assert.match((await runCli(t, ["sessions"])).stdout, /stopped \(Acme; no access to the workspace\)/);
     const told = prompt(t, SID, "hello", cwd);
-    assert.match(told.systemMessage, /this session stopped sharing because you no longer have access to Acme in Align \(you were removed from it or left it\).*tools stay blocked until you run `align stop-sharing [\w-]{8}`/);
+    assert.match(told.systemMessage, /this session stopped sharing because you no longer have access to Acme in Align \(you were removed from it or left it\).*It was stopped or held from the web, so this session stays stopped: a stop set from its Align workspace holds after its sharing ends/);
     const deny = json(runHook(t, "claude", "PreToolUse", { session_id: SID, tool_name: "Bash", cwd }).stdout);
-    assert.match(deny.hookSpecificOutput.permissionDecisionReason, /this machine no longer has access to its Align workspace.*`align stop-sharing [\w-]{8}`/);
+    assert.match(deny.hookSpecificOutput.permissionDecisionReason, /this machine no longer has access to its Align workspace\), so this session stays stopped/);
+    assert.doesNotMatch(deny.hookSpecificOutput.permissionDecisionReason, /align stop-sharing/);
     assert.ok(!fs.existsSync(layout.feed(t.home, "ws_acme")), "no cached goals of a workspace out of reach");
     const resumed = json(runHook(t, "claude", "SessionStart", { session_id: SID, source: "resume", cwd }).stdout);
     assert.ok(!resumed?.hookSpecificOutput?.additionalContext, "no goal envelope for a session that no longer counts toward it");
     assert.equal((await runCli(t, ["stop-sharing", lid.slice(0, 8)])).code, 0);
-    assert.equal(runHook(t, "claude", "PreToolUse", { session_id: SID, tool_name: "Bash", cwd }).stdout, "");
+    assert.equal(json(runHook(t, "claude", "PreToolUse", { session_id: SID, tool_name: "Bash", cwd }).stdout).hookSpecificOutput.permissionDecision, "deny", "the stop holds after sharing stops");
   });
 
   test("confusing: `align sync` against an unreachable server prints no \"0 sent\" line above the error", async () => {

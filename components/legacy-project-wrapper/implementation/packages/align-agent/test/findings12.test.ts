@@ -170,7 +170,8 @@ describe("C11-2: a workspace given back on the Devices page", () => {
     assert.doesNotMatch(e2, /can now reach|To share this session there/, e2);
     for (const s of [W, H]) assert.doesNotMatch(said(t, s), /can now reach|To share this session there|align share [A-Za-z0-9_-]{8} --workspace/);
     const why = deny(t, H) ?? "";
-    assert.ok(why.includes(latchWayOut(H.lid, false, "model")), why);
+    // H was stopped from the web: the stop holds after its sharing ends (LIM-2441).
+    assert.ok(why.includes(latchWayOut(H.lid, false, "model", null, {}, true)), why);
     assert.match(said(t, P), new RegExp(`^Align: this machine can now reach Acme in Align\\. To share this session there, run \`align share ${P.lid.slice(0, 8)} --workspace "Acme" --goal <goal>\` in a terminal\\.$`));
     assert.match(said(t, E1), /^Align: this machine can reach Acme in Align again\. To share this session there again, type `::align share` here|^Align: this machine is signed in to Align again\. To share this session again, type `::align share` here/);
   });
@@ -188,7 +189,7 @@ describe("C11-3: a share ended by a lost workspace, back through a new `align lo
     await sync(t);
     const lost = said(t, Z1);
     assert.match(lost, /you no longer have access to Acme in Align/);
-    assert.ok(lost.endsWith(latchNoticeTail(Z1.lid, false)), lost);
+    assert.ok(lost.endsWith(latchNoticeTail(Z1.lid, false, null, { lost: true }, true)), lost);
     assert.equal((await runCli(t, ["logout"])).code, 0);
     fake.workspaces = [ACME];
     await login(t);
