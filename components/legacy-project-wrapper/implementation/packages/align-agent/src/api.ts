@@ -177,8 +177,11 @@ export function withLock<T>(home: string, fn: () => Promise<T>, waitMs = 15_000)
   const deadline = Date.now() + waitMs;
   const attempt = async (): Promise<T> => {
     let fd: number | null = null;
+    // Each holder writes its own id into the lock, and releases it only while the id there is still its own.
+    const id = `${process.pid}.${crypto.randomUUID()}`;
     try {
       fd = fs.openSync(file, "wx", 0o600);
+      fs.writeSync(fd, id);
     } catch {
       try {
         if (Date.now() - fs.statSync(file).mtimeMs > 20_000) fs.unlinkSync(file);
@@ -203,10 +206,12 @@ export function withLock<T>(home: string, fn: () => Promise<T>, waitMs = 15_000)
     } finally {
       clearInterval(beat);
       fs.closeSync(fd);
+      // A holder paused past the stale mark (a laptop asleep) may find its lock taken over: that lock is the new
+      // holder's, and deleting it would let a third process refresh alongside the second.
       try {
-        fs.unlinkSync(file);
+        if (fs.readFileSync(file, "utf8") === id) fs.unlinkSync(file);
       } catch {
-        /* ignore */
+        /* gone */
       }
     }
   };

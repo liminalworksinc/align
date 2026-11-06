@@ -13,7 +13,9 @@
   "scripts": {
     "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && node scripts/postbuild.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test --test-concurrency=4 test/*.test.ts"
+    "test": "npm run build && { npm run test:concurrent; s=$?; npm run test:serial && exit $s; }",
+    "test:concurrent": "node --test --test-concurrency=4 test/*.test.ts",
+    "test:serial": "node --test --test-concurrency=1 test/serial/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "26.6.4",

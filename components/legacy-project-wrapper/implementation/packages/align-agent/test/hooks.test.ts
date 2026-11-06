@@ -1,5 +1,5 @@
 // Hook behavior: budgets, zero bytes when unchanged, private sessions silent, local commands, fail-closed latch,
-// offline operation and latency. Runs the built dist/hook.js as Claude Code and Codex would.
+// offline operation (latency: serial/latency.test.ts). Runs the built dist/hook.js as Claude Code and Codex would.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -7,43 +7,21 @@ import path from "node:path";
 import { after, describe, test } from "node:test";
 import type { Ctx } from "../src/context.ts";
 import { nowIso } from "../src/db.ts";
-import { ensureSession } from "../src/ledger.ts";
 import { renderHot } from "../src/hot.ts";
 import { DELTA_MAX, ENVELOPE_MAX, ENVELOPE_MAX_WITH_LIMITS, renderDelta, renderEnvelope } from "../src/shared/envelope.ts";
 import { crossing } from "../src/shared/drift.ts";
 import { layout, listSpool, localId } from "../src/shared/layout.ts";
 import { writeJsonAtomic } from "../src/shared/fsx.ts";
-import type { Ask, GoalSnapshot, Harness, Limit } from "../src/shared/types.ts";
+import type { Ask, GoalSnapshot, Limit } from "../src/shared/types.ts";
 import { ingestSpool } from "../src/sync.ts";
 import { latchedOnFailure } from "../src/hooks/handlers.ts";
-import { ctxFor, HOOK, makeEnv, PKG, runHook, touch, type TestEnv } from "./helpers.ts";
+import { ctxFor, HOOK, makeEnv, PKG, runHook, SHARE_GOAL as GOAL, shareSession, touch, type TestEnv } from "./helpers.ts";
 
 const BLOCK_NET = ["--import", path.join(PKG, "test", "fixtures", "block-net.mjs")];
 const envs: TestEnv[] = [];
 after(() => envs.forEach((e) => e.cleanup()));
 
-const GOAL: GoalSnapshot = {
-  id: "g_ship",
-  version: 3,
-  title: "Ship the v2 onboarding flow",
-  status: "active",
-  measures: [
-    { id: "m1", text: "New workspace reaches first shared session in under 10 minutes", target: "10 min" },
-    { id: "m2", text: "Zero duplicate usage rows in a week of real use", target: "0" },
-  ],
-};
 
-function shareSession(ctx: Ctx, harness: Harness, sid: string, goal: GoalSnapshot | null = GOAL, state = "shared"): string {
-  const lid = ensureSession(ctx.db, harness, sid, { cwd: "/tmp/synthetic-repo", ts: nowIso() });
-  ctx.db
-    .prepare(
-      `INSERT INTO shares(local_id, workspace_id, workspace_name, session_key, goal_id, state, from_mode, created_at, goal_json, binding_epoch, binding_goal)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-    )
-    .run(lid, "ws_1", "Acme", `key-${sid}`, goal?.id ?? null, state, "start", nowIso(), goal ? JSON.stringify(goal) : null, "ep_1", goal?.id ?? null);
-  renderHot(ctx, lid);
-  return lid;
-}
 
 function setup() {
   const t = makeEnv();
@@ -337,27 +315,6 @@ describe("claude hooks", () => {
     assert.match(out.systemMessage, /matches goal "Ship the v2 onboarding flow"/);
     assert.equal(out.hookSpecificOutput, undefined, "never additionalContext");
     assert.equal(runHook(t, "claude", "SessionStart", { session_id: "sess-anchor", source: "startup", cwd: repo }).stdout, "", "suggested once");
-  });
-
-  test("p95 latency under 150 ms with networking blocked", () => {
-    const { t, ctx } = setup();
-    const sid = "sess-latency";
-    shareSession(ctx, "claude-code", sid);
-    const times: number[] = [];
-    const events: [string, object][] = [
-      ["SessionStart", { session_id: sid, source: "startup" }],
-      ["UserPromptSubmit", { session_id: sid, prompt_id: "p", prompt: "x" }],
-      ["PreToolUse", { session_id: sid, tool_name: "Bash" }],
-    ];
-    for (let i = 0; i < 30; i++) {
-      const [ev, input] = events[i % 3];
-      const r = runHook(t, "claude", ev, input, {}, BLOCK_NET);
-      assert.equal(r.code, 0, r.stderr);
-      times.push(r.ms);
-    }
-    times.sort((a, b) => a - b);
-    const p95 = times[Math.ceil(times.length * 0.95) - 1];
-    assert.ok(p95 < 150, `p95 ${p95.toFixed(1)} ms`);
   });
 });
 
