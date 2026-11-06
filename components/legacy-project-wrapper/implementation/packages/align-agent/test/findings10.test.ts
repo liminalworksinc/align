@@ -141,6 +141,7 @@ describe("C9-2: every notice about a share that ended gives the deny's advice", 
     text.includes(latchWayOut(lid, true, reader))
       ? "share again"
       : text.includes(latchWayOut(lid, false, reader, null, {}, true)) ||
+          text.includes(latchWayOut(lid, false, reader, null, { lost: true }, true)) ||
           text.includes(latchWayOut(lid, false, reader, null, { login: true }, true)) ||
           text.includes(latchNoticeTail(lid, false, null, { login: true }, true))
         ? "stays stopped"
@@ -151,7 +152,12 @@ describe("C9-2: every notice about a share that ended gives the deny's advice", 
     const why = deny(t, s) ?? "";
     assert.equal(advice(notice, s.lid, "user"), want, `${label}: notice ${notice}`);
     assert.equal(advice(why, s.lid, "model"), want, `${label}: deny ${why}`);
-    assert.ok(notice.endsWith(latchNoticeTail(s.lid, want === "share again", null, {}, true)) || notice.endsWith(latchNoticeTail(s.lid, false, null, { login: true }, true)), `${label}: the notice ends with the latch sentence: ${notice}`);
+    assert.ok(
+      notice.endsWith(latchNoticeTail(s.lid, want === "share again", null, {}, true)) ||
+        notice.endsWith(latchNoticeTail(s.lid, false, null, { lost: true }, true)) ||
+        notice.endsWith(latchNoticeTail(s.lid, false, null, { login: true }, true)),
+      `${label}: the notice ends with the latch sentence: ${notice}`,
+    );
   };
   const stopped = async (fake: FakeServer, t: TestEnv) => {
     const A = await shared(t);

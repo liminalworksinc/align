@@ -40,7 +40,7 @@ import { fetchAsks } from "./asks.ts";
 import { computeUnsharedDigest, uploadSteering } from "./allocation.ts";
 import { layout, listSpool, localId } from "./shared/layout.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
-import type { ShareFacts } from "./shared/ended.ts";
+import { STOP_HOLDS_NO_SHARE, type ShareFacts } from "./shared/ended.ts";
 import type { GoalSnapshot, SpoolRecord } from "./shared/types.ts";
 
 // ---------- spool ----------
@@ -262,6 +262,9 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
         ctx.log(`folder rule: session ${lid.slice(0, 8)} was stopped by its person (or its history deleted), so it stays private`);
         return lid;
       }
+      // Its shared history deleted while it was stopped from its workspace: the stop holds and it is not shared again
+      // (LIM-2441).
+      if (!getShare(ctx, lid) && stoppedByPerson(ctx, lid) && ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid)) throw new Error(STOP_HOLDS_NO_SHARE);
       // Shared before (its history deleted since, too): this share counts from now (C6-1).
       const before = sharedBefore(ctx, lid);
       applyShare(ctx, planShare(ctx, lid, ws, goal, null, before ? "now" : "start", r.epoch_id));

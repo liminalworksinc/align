@@ -43,7 +43,7 @@ import {
 import { readAsks, teamAsks } from "../shared/asks.ts";
 import { crossingDigest, crossings, lastReply } from "../shared/drift.ts";
 import { feedHold, feedHoldReason } from "../shared/feedhold.ts";
-import { endedWhyWords, latchWayOut, noneTold, SHARE_CHANGED, shareAgainWords, shareNotice, shareRetell, toldSituation, type ReleaseReaches, type ShareAgain, type ShareFacts, type ShareTold } from "../shared/ended.ts";
+import { endedWhyWords, latchWayOut, noneTold, SHARE_CHANGED, STOP_HOLDS_NO_SHARE, shareAgainWords, shareNotice, shareRetell, toldSituation, type ReleaseReaches, type ShareAgain, type ShareFacts, type ShareTold } from "../shared/ended.ts";
 import { contextGoals, snapshot } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
@@ -1052,10 +1052,10 @@ function endedNote(ended: EndedWhy, lid: string, reshare = false, release: Relea
   if (reshare && ended !== "sharing_ended") return `Its sharing ended (${endedWhyWords(ended, true, relogin)}), so ${latchWayOut(lid, true, "model", null, more)}`;
   const why = endedWhyWords(ended, false, relogin);
   // A hold whose release still reaches it can still be lifted from the web; its stop, if any, can't (C10-4).
-  if (release?.goals.length) return `Its sharing has since ended (${why}), so ${latchWayOut(lid, false, "model", release, {}, stop)}`;
+  if (release?.goals.length) return `Its sharing has since ended (${why}), so ${latchWayOut(lid, false, "model", release, { lost: ended === "access_lost" }, stop)}`;
   if (more.login) return `Its sharing has since ended (${why}), so ${latchWayOut(lid, false, "model", null, more, stop)}`;
   // A stop holds after its sharing ends (LIM-2441): nothing lifts it from here, and `align stop-sharing` frees only a hold.
-  if (stop) return `Its sharing has since ended (${why}), so ${latchWayOut(lid, false, "model", null, {}, true)}`;
+  if (stop) return `Its sharing has since ended (${why}), so ${latchWayOut(lid, false, "model", null, { lost: ended === "access_lost" }, true)}`;
   return `Its sharing has since ended (${why}), so this can no longer be lifted from the web: ${latchWayOut(lid, false, "model")}`;
 }
 
@@ -1591,7 +1591,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
                 : latch.value.ended && latch.value.login
                   ? `on (tools blocked; sharing ended, this machine signed out: ${latchWayOut(lid, false, "user", null, { login: true }, true)})`
                   : latch.value.ended
-                    ? `on (tools blocked; sharing ended, so ${latchWayOut(lid, false, "user", latch.value.release?.goals.length ? latch.value.release : null, {}, true)})`
+                    ? `on (tools blocked; sharing ended, so ${latchWayOut(lid, false, "user", latch.value.release?.goals.length ? latch.value.release : null, { lost: latch.value.ended === "access_lost" }, true)})`
                     : "on (tools blocked)"
               : "unreadable (tools blocked)"
         }`,
@@ -1691,6 +1691,9 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       if (!me || me.signed_out) return "Align: not signed in on this machine. Run `align login` in a terminal first.";
       // Stopped by its person while it was shared there; not one whose share a sign-out or a lost workspace had ended
       // before `align stop-sharing` freed its tools, which the server shares again.
+      // Its shared history deleted while it was stopped from its workspace: the stop holds and it is not shared again
+      // (LIM-2441).
+      if (!hot?.share && hot?.prior_share?.stopped && hot.share_now?.stopped) return `Align: ${STOP_HOLDS_NO_SHARE}`;
       if (!dirMode && hot?.share?.state === "stopped" && hot.prior_share?.stopped && (hot.share.ended ?? "sharing_ended") === "sharing_ended") return `Align: ${stoppedForGoodWords(lid, "type `::align share` here")}`;
       // A share a sign-out or a lost workspace ended, while this sign-in has not read which shares their person stopped
       // on the web: one stopped there is never shared again, so nothing is asked for until that is known (C11-1).

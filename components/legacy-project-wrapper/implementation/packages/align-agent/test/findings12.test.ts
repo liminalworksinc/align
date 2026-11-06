@@ -189,7 +189,7 @@ describe("C11-3: a share ended by a lost workspace, back through a new `align lo
     await sync(t);
     const lost = said(t, Z1);
     assert.match(lost, /you no longer have access to Acme in Align/);
-    assert.ok(lost.endsWith(latchNoticeTail(Z1.lid, false, null, {}, true)), lost);
+    assert.ok(lost.endsWith(latchNoticeTail(Z1.lid, false, null, { lost: true }, true)), lost);
     assert.equal((await runCli(t, ["logout"])).code, 0);
     fake.workspaces = [ACME];
     await login(t);

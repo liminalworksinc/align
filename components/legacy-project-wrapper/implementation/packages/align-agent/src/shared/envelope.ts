@@ -628,7 +628,7 @@ export const HELD_MARK = "h = on hold: all agents on it were paused from its Ali
  *  again only there (its work is that workspace's), never into another one; `latched`: its tools stay blocked (a hold
  *  until `align stop-sharing`; a stop, `stopped`, holds after its sharing ends, LIM-2441). */
 export function outOfReachWords(ws: string, lid: string, latched: boolean, stopped = false): string {
-  return `this session was shared with ${clean(ws, 80)}, and this machine can't reach ${clean(ws, 80)} in Align now, so this session can't be shared there again from here, and it is never shared into another workspace instead; its usage stays on this machine.${latched ? latchNoticeTail(lid, false, null, {}, stopped) : ""}`;
+  return `this session was shared with ${clean(ws, 80)}, and this machine can't reach ${clean(ws, 80)} in Align now, so this session can't be shared there again from here, and it is never shared into another workspace instead; its usage stays on this machine.${latched ? latchNoticeTail(lid, false, null, { lost: true }, stopped) : ""}`;
 }
 
 /** Why a session shared before in workspace `ws` is not shared into `other` (cycle 8). */

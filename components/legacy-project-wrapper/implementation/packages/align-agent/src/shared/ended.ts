@@ -28,6 +28,9 @@ function quoted(titles: string[]): string {
 export interface ShareAgain {
   unread?: boolean;
   login?: boolean;
+  /** its share ended because this machine can't reach its workspace now: if it can again, the session can be shared
+   *  there again and the stop lifted from the web */
+  lost?: boolean;
 }
 
 /**
@@ -49,9 +52,20 @@ export function shareAgainWords(unread: boolean, where: string, there = false, u
  * session stays stopped. A new session is not stopped. A goal hold is a latch of its own, which `align stop-sharing`
  * still frees.
  */
-function stopStays(user: boolean): string {
-  return `this session stays stopped: a stop set from its Align workspace holds after its sharing ends, and nothing lifts it from here now. A new session is not stopped${user ? "" : ", so the user can start one to keep working"}.`;
+function stopStays(user: boolean, lost = false): string {
+  const after = lost
+    ? `, and nothing lifts it from here unless this machine can reach that workspace again, when sharing it there again lets the stop be lifted from the web`
+    : ", and nothing lifts it from here now";
+  return `this session stays stopped: a stop set from its Align workspace holds after its sharing ends${after}. A new session is not stopped${user ? "" : ", so the user can start one to keep working"}.`;
 }
+
+/**
+ * Why a session stopped from its workspace is not shared again once its person stopped sharing it or deleted its shared
+ * history (LIM-2441): the stop holds after both, and a new share would start a server record with no stop on it, which
+ * the web could not resume while this machine kept the session blocked. So it is not shared, and it stays stopped.
+ */
+export const STOP_HOLDS_NO_SHARE =
+  "this session was stopped from its Align workspace, and that stop holds after its shared history is deleted, so it is not shared again and it stays stopped. A new session is not stopped.";
 
 /**
  * For a session stopped or held from the web whose share ended (B6, C6-2): when it can be shared there again now
@@ -81,10 +95,10 @@ export function latchWayOut(lid: string, reshare: boolean, reader: "model" | "us
   if (release?.goals.length) {
     const hold = `the hold on ${quoted(release.goals)}`;
     return release.stopped || stop
-      ? `${stopStays(user)} A release of ${hold} (which still reaches this session) lifts only the hold.`
+      ? `${stopStays(user, !!again.lost)} A release of ${hold} (which still reaches this session) lifts only the hold.`
       : `tools stay blocked until ${hold} is released from the web (a release still reaches this session though its sharing ended), or until ${run}.`;
   }
-  return stop ? stopStays(user) : `tools stay blocked until ${run}.`;
+  return stop ? stopStays(user, !!again.lost) : `tools stay blocked until ${run}.`;
 }
 
 /** What a notice about a share that ended adds for a session stopped or held from the web (leading space included):
@@ -284,7 +298,7 @@ export function storedText(f: ShareFacts): string {
 
 /** The latch sentence of a notice about a share that ended, from the values its latch files carry. */
 function stateTail(lid: string, now: ShareNow): string {
-  return now.latched && now.ended ? latchNoticeTail(lid, now.reshare, now.reshare ? null : now.release, { unread: now.unread, login: now.login }, !!now.stopped) : "";
+  return now.latched && now.ended ? latchNoticeTail(lid, now.reshare, now.reshare ? null : now.release, { unread: now.unread, login: now.login, lost: now.ended === "access_lost" }, !!now.stopped) : "";
 }
 
 /** The situations a session can be told its share is in: live, stopped for good, signed out, shareable again, out of

@@ -32,7 +32,7 @@ import { openCtx, saveConfig, type Ctx } from "./context.ts";
 import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
 import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedByLogin, endedReason, endedState, endedUnsent, getShare, notMember, releaseOf, renderEndedShares } from "./hot.ts";
-import { endedWhyWords, latchWayOut, shareAgainWords } from "./shared/ended.ts";
+import { endedWhyWords, latchWayOut, shareAgainWords, STOP_HOLDS_NO_SHARE } from "./shared/ended.ts";
 import { buildOf, hooksBuildDiffers, hooksBuildWords, selfBuild, supersededWords } from "./build.ts";
 import { resolvePaths, type Paths } from "./paths.ts";
 import { fetchAsks } from "./asks.ts";
@@ -976,6 +976,13 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
   // Its person stopped it while it was shared, and its history is kept: the server would refuse it, so nothing is sent
   // and the answer is the one `::align share` gives. A share a sign-out or a lost workspace had ended is shared again
   // (cycle 7).
+  // Its shared history deleted while it was stopped from its workspace: the stop holds, and sharing it again would start
+  // a server record with no stop on it, which the web can't resume (LIM-2441).
+  if (!share && stoppedByPerson(ctx, session.local_id) && ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(session.local_id)) {
+    err(`align: session ${session.local_id.slice(0, 8)} was not shared: ${STOP_HOLDS_NO_SHARE}`);
+    process.exitCode = 1;
+    return;
+  }
   if (share?.state === "stopped" && stoppedByPerson(ctx, session.local_id) && (endedReason(share) ?? "sharing_ended") === "sharing_ended" && ws.id === share.workspace_id) {
     err(`align: session ${session.local_id.slice(0, 8)} was not shared: ${stoppedForGoodWords(session.local_id, "run `align share` again")}`);
     process.exitCode = 1;
@@ -1273,7 +1280,7 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
     if (ended.login) return `; sharing ended (${why}): ${latchWayOut(lid, false, "user", null, { login: true }, !hold)}`;
     const release = releaseOf(ctx, lid, share);
     if (release && hold) return `; sharing ended (${why}), but a release still reaches it: ${latchWayOut(lid, false, "user", release)}`;
-    if (!hold) return `; sharing ended (${why}), so ${latchWayOut(lid, false, "user", release, {}, true)}`;
+    if (!hold) return `; sharing ended (${why}), so ${latchWayOut(lid, false, "user", release, { lost: ended.why === "access_lost" }, true)}`;
     return `; sharing ended (${why}), so only \`align stop-sharing ${lid.slice(0, 8)}\` unblocks it`;
   };
   for (const r of rows) {

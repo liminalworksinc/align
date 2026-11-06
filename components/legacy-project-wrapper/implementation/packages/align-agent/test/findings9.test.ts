@@ -81,6 +81,9 @@ const LATCHED_AGAIN = " It was stopped or held from the web, so tools stay block
 const SIGNED_OUT = `Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on. To share it again, run \`align login\` in a terminal, then type \`::align share\` here (it counts toward "${GOAL}" again).`;
 // A stop holds after its sharing ends (LIM-2441): where nothing can lift it, the session stays stopped.
 const stopSharingTail = (_lid: string) => " It was stopped or held from the web, so this session stays stopped: a stop set from its Align workspace holds after its sharing ends, and nothing lifts it from here now. A new session is not stopped.";
+/** Its workspace lost: the stop holds unless this machine can reach that workspace again (LIM-2441). */
+const lostTail = (_lid: string) =>
+  " It was stopped or held from the web, so this session stays stopped: a stop set from its Align workspace holds after its sharing ends, and nothing lifts it from here unless this machine can reach that workspace again, when sharing it there again lets the stop be lifted from the web. A new session is not stopped.";
 /** Signed out: sharing it again after `align login`, which the notice has just said; until then the stop holds (cycle 12;
  *  LIM-2441). */
 const signedOutTail = (_lid: string) => " It was stopped or held from the web, so tools stay blocked until it is shared again that way, after which the stop or hold, if still in place, can be lifted from the web; until then this session stays stopped: a stop set from its Align workspace holds after its sharing ends, and nothing lifts it from here now. A new session is not stopped.";
@@ -127,7 +130,7 @@ describe("C8-1: every change of whether a session can be shared again tells it t
     await sync(t);
     assert.equal(
       prompt(t, A.sid, "go on", A.cwd)?.systemMessage,
-      `Align: this machine can no longer reach Acme in Align (you were removed from it or left it again), so this session can't be shared there again from here; its usage stays on this machine.${stopSharingTail(A.lid)}`,
+      `Align: this machine can no longer reach Acme in Align (you were removed from it or left it again), so this session can't be shared there again from here; its usage stays on this machine.${lostTail(A.lid)}`,
     );
     assert.match(deny(t, A) ?? "", /no longer has access to its Align workspace\), so this session stays stopped/);
 
