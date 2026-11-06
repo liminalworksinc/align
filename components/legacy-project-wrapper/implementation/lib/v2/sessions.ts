@@ -66,7 +66,8 @@ export type EndedReason = "device_signed_out" | "member_removed";
  * shared (or suspended) is stopped as stop-sharing would stop it (open epoch closed, no governing goal), marked with
  * why, and the requests still waiting on it expire, each target marked with the same reason (a request no device can
  * answer never stays open, and it says its sessions ended rather than that its goal closed). Its history
- * stays. A stop latch or goal hold already set on the machine stays until the developer runs `align stop-sharing`.
+ * stays. A goal hold already set on the machine stays until the developer runs `align stop-sharing`; a stop stays
+ * until a resume from here reaches it, once the session is shared again (`align stop-sharing` never lifts it: LIM-2441).
  * Used when a device is revoked (lib/v2/devices.ts) and when a member leaves or is removed (lib/v2/lifecycle.ts).
  * Returns how many ended.
  */
@@ -437,7 +438,7 @@ export async function setAgentStop(pp: PolicyPrincipal, key: string, stop: boole
       "device_signed_out",
       // The machine offers `::align share` once it is signed in again, as the member_removed refusal says (E2E-AGENT
       // cycle 14, section 5).
-      "The machine that shared this session signed out of Align, so its sharing ended and a stop or resume can't reach it. Once that machine is signed in again (align login), ::align share in the session shares it again, and then Stop and Resume here reach it; until then, a stopped session stays stopped unless its developer runs align stop-sharing there.",
+      "The machine that shared this session signed out of Align, so its sharing ended and a stop or resume can't reach it. Once that machine is signed in again (align login), ::align share in the session shares it again, and then Stop and Resume here reach it; until then, a stopped session stays stopped.",
     );
   }
   if (s.ended_reason === "member_removed") throw conflict("member_removed", memberRemovedRefusal(pp, s));
