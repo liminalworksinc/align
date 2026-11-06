@@ -13,8 +13,10 @@ export type Column<T> = {
   width?: string;
 };
 
-/** A dense table with client-side sort and a row-actions slot. Below 640px each row becomes a stacked card with the
- *  header as its label, so the page never scrolls sideways. */
+/** A dense table with client-side sort and a row-actions slot. Below `stackBelow` each row becomes a stacked card with
+ *  the header as its label, so the page never scrolls sideways; from 640px up, a card lays its fields out in a row
+ *  under the first. A table too wide for 640px raises it. Inside the table,
+ *  `stacked:` and `unstacked:` (app/globals.css) follow the same width. */
 export function DataTable<T>({
   caption,
   columns,
@@ -25,6 +27,7 @@ export function DataTable<T>({
   selectedKey,
   empty,
   initialSort,
+  stackBelow = 640,
 }: {
   caption: string;
   columns: Column<T>[];
@@ -36,6 +39,8 @@ export function DataTable<T>({
   selectedKey?: string | null;
   empty?: ReactNode;
   initialSort?: { key: string; dir: "asc" | "desc" };
+  /** The viewport width in px below which rows stack. A new width needs a line in each variant in app/globals.css. */
+  stackBelow?: 640 | 1200;
 }) {
   const [sort, setSort] = useState(initialSort ?? null);
   const sorted = useMemo(() => {
@@ -56,9 +61,9 @@ export function DataTable<T>({
   if (!rows.length) return <>{empty ?? <p className="text-[14px] text-(--text-2)">Nothing here.</p>}</>;
 
   return (
-    <table className="w-full border-collapse text-[14px]">
+    <table data-stack={stackBelow} className="w-full border-collapse text-[14px]">
       <caption className="sr-only">{caption}</caption>
-      <thead className="max-sm:hidden">
+      <thead className="stacked:hidden">
         <tr className="border-b border-(--line-strong)">
           {columns.map((c) => {
             const dir = sort?.key === c.key ? sort.dir : null;
@@ -100,13 +105,13 @@ export function DataTable<T>({
             <tr
               key={k}
               aria-selected={selectedKey !== undefined ? on : undefined}
-              className={`border-b border-(--line) align-middle max-sm:mb-3 max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:rounded-(--radius-m) max-sm:border max-sm:bg-(--bg-panel) max-sm:p-3 ${on ? "bg-(--accent-soft) shadow-[inset_2px_0_0_var(--accent-text)]" : "hover:bg-(--bg-raised)"}`}
+              className={`border-b border-(--line) align-middle stacked:mb-3 stacked:flex stacked:flex-col stacked:gap-2 stacked:sm:flex-row stacked:sm:flex-wrap stacked:sm:items-end stacked:sm:gap-x-8 stacked:rounded-(--radius-m) stacked:border stacked:bg-(--bg-panel) stacked:p-3 ${on ? "bg-(--accent-soft) shadow-[inset_2px_0_0_var(--accent-text)]" : "hover:bg-(--bg-raised)"}`}
             >
               {columns.map((c, i) => (
-                <td key={c.key} className={`px-3 py-2 max-sm:p-0 ${c.align === "end" ? "sm:text-right" : ""}`}>
-                  <span className="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">{c.header}</span>
+                <td key={c.key} className={`px-3 py-2 stacked:p-0 ${i === 0 ? "stacked:sm:basis-full" : ""} ${c.align === "end" ? "unstacked:text-right" : ""}`}>
+                  <span className="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) stacked:block">{c.header}</span>
                   {i === 0 && onRowOpen ? (
-                    <button type="button" onClick={() => onRowOpen(row)} className="min-h-[36px] text-left font-medium text-(--text-1) underline-offset-4 hover:underline max-sm:min-h-[44px]">
+                    <button type="button" onClick={() => onRowOpen(row)} className="min-h-[36px] text-left font-medium text-(--text-1) underline-offset-4 hover:underline stacked:min-h-[44px]">
                       {c.render(row)}
                     </button>
                   ) : (
@@ -114,7 +119,7 @@ export function DataTable<T>({
                   )}
                 </td>
               ))}
-              {rowActions && <td className="px-3 py-2 text-right max-sm:p-0 max-sm:text-left">{rowActions(row)}</td>}
+              {rowActions && <td className="px-3 py-2 text-right stacked:p-0 stacked:text-left stacked:sm:ml-auto">{rowActions(row)}</td>}
             </tr>
           );
         })}
