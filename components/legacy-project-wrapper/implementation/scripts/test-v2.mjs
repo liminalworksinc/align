@@ -12300,6 +12300,45 @@ try {
     v1SignIn.text.includes("Have an invite code? Sign in first, then enter it.") && v1Field.text.includes('name="creation_code"') && v1Field.text.includes("Use the code you were given.") && !v1Field.text.includes('placeholder="alc_'),
     `${v1SignIn.status} ${v1Field.status}`,
   );
+  // LIM-2480: no prior invite/account; import is the only way this tester qualifies for email sign-in.
+  const boundAddress = ["imported-tester", "example.test"].join("@");
+  const boundCode = v1Hex();
+  const boundFile = path.join(tmpRoot, "v1-bound.txt");
+  const boundArgs = ["codes", "import", "--file", boundFile, "--used", v1Used, "--days", "60"];
+  const boundBefore = v1Rows().length;
+  writeFileSync(boundFile, `${boundCode}, ${boundAddress.toUpperCase()} \n`, { mode: 0o600 });
+  const boundImport = admin(boundArgs, opGate);
+  const boundRow = v1Rows().find((r) => r.email === boundAddress);
+  const boundList = admin(["codes", "list"], opGate);
+  check("LIM-2480: bound import normalizes the address and prints neither address nor code (including codes list)",
+    boundImport.status === 0 && v1Rows().length === boundBefore + 1 && !!boundRow &&
+    [boundImport, boundList].every((r) => ![boundCode, boundAddress].some((v) => (r.out + r.err).toLowerCase().includes(v))),
+    `import status ${boundImport.status}; row present ${!!boundRow}`);
+  const boundWrong = await gCreate(BOB, "Wrong recipient", boundCode);
+  const boundTester = await gSignIn(boundAddress);
+  const boundHome = await hosted("GET", "/app", { cookie: boundTester.cookie });
+  const boundCreate = await gCreate(boundTester, "Imported tester", boundCode);
+  check("LIM-2480: a new email tester reaches the creation field and creates once; another account is refused",
+    boundWrong.status === 403 && boundWrong.json?.error === "creation_code_invalid" && boundTester.status === 200 &&
+    boundHome.status === 200 && boundHome.text.includes('name="creation_code"') && boundCreate.status === 201,
+    `wrong ${boundWrong.status}; sign-in ${boundTester.status}; home ${boundHome.status}; create ${boundCreate.status}`);
+  const reboundAddress = ["different-tester", "example.test"].join("@");
+  writeFileSync(boundFile, `${boundCode},${reboundAddress}\n`, { mode: 0o600 });
+  const boundAgain = admin(boundArgs, opGate);
+  const boundAfter = v1Rows().find((r) => r.id === boundRow?.id);
+  const boundReplay = await gCreate(boundTester, "Imported again", boundCode);
+  check("LIM-2480: re-import cannot rebind or revive a used code",
+    boundAgain.status === 0 && boundAfter?.email === boundAddress && !!boundAfter?.redeemed_at && boundReplay.status === 403,
+    `import ${boundAgain.status}; replay ${boundReplay.status}`);
+  const boundPurge = admin(["workspaces", "delete", boundCreate.json?.id ?? "", "--purge", "--yes"], opGate);
+  check("LIM-2480: imported tester fixture is purged before cap checks", boundPurge.status === 0);
+  // Validate all rows before writing, including a good first row followed by malformed private input.
+  const invalidBefore = v1Rows().length;
+  writeFileSync(boundFile, `${v1Hex()},${boundAddress}\n${v1Hex()},\n${v1Hex()},invalid\n${v1Hex()},${boundAddress},extra\n`, { mode: 0o600 });
+  const boundInvalid = admin(boundArgs, opGate);
+  check("LIM-2480: malformed bound rows abort the complete import with line numbers only",
+    boundInvalid.status === 2 && /lines 2, 3, 4\./.test(boundInvalid.err) && v1Rows().length === invalidBefore &&
+    !boundInvalid.err.includes(boundAddress) && !boundInvalid.err.includes("invalid\n"), `status ${boundInvalid.status}`);
   // -- workspaces per account (2 by default) and on the server (4 here) --
   const W3 = await gCreate(OPSG, "Ops Two", U1c);
   const opsThird = await gCreate(OPSG, "Ops Three", U2c);

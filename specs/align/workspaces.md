@@ -654,8 +654,8 @@ The server SHALL accept a creation code (`alc_` and 32 base32 characters, or a v
 characters) only once, only before it expires (14 days after it was made unless the operator chose otherwise), only if
 it was not revoked and, for a code bound to an email address, only from a signed-in person whose verified email is
 that address; it SHALL store only an HMAC of the code under `ALIGN_SECRET` and record which workspace the code created.
-A v1 invite code exists only if the operator imported it (`align-admin codes import`): the import makes unbound codes,
-skips every code v1 recorded as spent, prints counts and never a code, and leaves a code already present exactly as it
+A v1 invite code exists only if the operator imported it (`align-admin codes import`): the import accepts one `code` or `code,email` per line, normalizes a supplied address by trimming and lowercasing it, and binds that code to that address. Code-only lines remain unbound for provider sign-up. It validates every line before writing, rejects empty addresses and extra fields,
+skips every code v1 recorded as spent, prints counts and line numbers but never a code or address, and leaves a code already present exactly as it
 is. The server never reads v1's files.
 
 #### Scenario: Code spent
@@ -672,6 +672,11 @@ is. The server never reads v1's files.
 
 - **WHEN** the operator imports a file of v1 invite codes, and a person signs in and creates a workspace with one of them
 - **THEN** the create is 201 and the code is spent; the same code again is 403 `creation_code_invalid`, also after the workspace is purged and after the file is imported again; a code v1 recorded as spent, a code of 19 or 21 hex characters, an uppercase one, or one that was never imported is 403 `creation_code_invalid`
+
+#### Scenario: An imported bound code admits a new tester
+
+- **WHEN** the operator imports a code bound to a new tester's address and the tester verifies that address by email code
+- **THEN** sign-in succeeds without a prior invite; that tester can create one workspace with the imported code, another address cannot spend it, and re-importing never changes an existing binding or revives a spent code
 
 #### Scenario: A create that fails keeps the code
 

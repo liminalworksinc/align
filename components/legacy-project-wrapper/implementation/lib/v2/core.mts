@@ -226,22 +226,22 @@ export function insertCreationCode(db: Sql, secret: string, o: { email?: string 
   return { id, code, email, expires_at: expires };
 }
 
-/** v1 invite codes as unbound creation codes, in one transaction of the caller's. `spentOnV1` is v1's record of spent
+/** v1 invite codes as optionally email-bound creation codes, in one transaction of the caller's. `spentOnV1` is v1's record of spent
  *  codes, _used_invites.json: sha256 hex of the raw code. A code in it is skipped, so it can't be spent twice. Throws on a
  *  code of any other shape, before writing. A code already here (code_hash is unique) stays exactly as it is, spent,
  *  revoked or live, so a second run changes nothing and can't bring a spent code back. Counts only: no code comes back. */
-export function importCreationCodes(db: Sql, secret: string, codes: string[], spentOnV1: Set<string>, days: number, now = Date.now()) {
-  if (!codes.every((c) => V1_CODE_RE.test(c))) throw new Error("Not a v1 invite code");
+export function importCreationCodes(db: Sql, secret: string, codes: { code: string; email: string | null }[], spentOnV1: Set<string>, days: number, now = Date.now()) {
+  if (!codes.every((c) => V1_CODE_RE.test(c.code) && (c.email === null || /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(c.email)))) throw new Error("Invalid import row");
   const at = new Date(now).toISOString();
   const expires = new Date(now + days * DAY_MS).toISOString();
   const r = { imported: 0, present: 0, used: 0, spentOnV1: 0 };
-  for (const code of codes) {
+  for (const { code, email } of codes) {
     if (spentOnV1.has(createHash("sha256").update(code).digest("hex"))) {
       r.spentOnV1++;
       continue;
     }
     const hash = codeHash(secret, code);
-    if (db.run("INSERT OR IGNORE INTO v2_creation_codes (id, code_hash, created_at, expires_at) VALUES (?, ?, ?, ?)", `cc_${rand32(15)}`, hash, at, expires) === 1) {
+    if (db.run("INSERT OR IGNORE INTO v2_creation_codes (id, code_hash, email, created_at, expires_at) VALUES (?, ?, ?, ?, ?)", `cc_${rand32(15)}`, hash, email?.trim().toLowerCase() ?? null, at, expires) === 1) {
       r.imported++;
       recordEvent(db, "code_created", { props: { source: "operator" }, at });
     } else {
