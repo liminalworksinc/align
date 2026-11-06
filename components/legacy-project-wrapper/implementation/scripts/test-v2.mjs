@@ -939,6 +939,36 @@ try {
   await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${aliasPod.json?.id}/members`, { cookie: U1.cookie, body: { user_id: U2.id, role: "lead" } });
   const leadSelf = await call("U2", "DELETE", `/api/v2/workspaces/${A}/teams/${aliasPod.json?.id}/members/${U2.id}`, { cookie: U2.cookie });
   check("teams: a lead removes themselves from the team -> 204", leadSelf.status === 204, `${leadSelf.status} ${leadSelf.text}`);
+  // A viewer never changes a team's members (LIM-2441): an owner can't make one a lead, an invite can't, and a viewer
+  // already stored as a lead (an older row) is refused by the policy itself, whatever the stored team role says.
+  const viewerLead = await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U1.cookie, body: { user_id: U4.id, role: "lead" } });
+  const viewerLeadInvite = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: "viewer-lead@example.test", role: "viewer", team_id: P1, team_role: "lead" } });
+  withDb((d) =>
+    d.prepare("INSERT INTO v2_pod_members (ws_id, pod_id, user_id, role, created_at) VALUES (?, ?, ?, 'lead', ?) ON CONFLICT (pod_id, user_id) DO UPDATE SET role = 'lead'").run(A, P1, U4.id, new Date().toISOString()),
+  );
+  const storedViewerAdds = await call("U4", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U4.cookie, body: { user_id: U3.id, role: "member" } });
+  const storedViewerRemoves = await call("U4", "DELETE", `/api/v2/workspaces/${A}/teams/${P1}/members/${U3.id}`, { cookie: U4.cookie });
+  withDb((d) => d.prepare("DELETE FROM v2_pod_members WHERE pod_id = ? AND user_id = ?").run(P1, U4.id));
+  // Where the server let any of it through, put the team and the invites back as they were, so later checks are unaffected.
+  const p1Now = (await call("U1", "GET", `/api/v2/workspaces/${A}`, { cookie: U1.cookie })).json?.teams?.find((t) => t.id === P1);
+  const p1Members = p1Now?.members?.map((m) => m.id) ?? [];
+  if (storedViewerRemoves.status === 204 || !p1Members.includes(U3.id)) await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U1.cookie, body: { user_id: U3.id, role: "member" } });
+  if (viewerLeadInvite.status === 201 && viewerLeadInvite.json?.id) await call("U1", "DELETE", `/api/v2/workspaces/${A}/invites/${viewerLeadInvite.json.id}`, { cookie: U1.cookie });
+  const p1After = (await call("U1", "GET", `/api/v2/workspaces/${A}`, { cookie: U1.cookie })).json?.teams?.find((t) => t.id === P1);
+  check(
+    "teams: a viewer can't lead a team or change its members: made a lead -> 403 viewer_lead, invited as lead -> 403 viewer_lead, and a viewer stored as a lead adding or removing a member -> 403 read_only, membership unchanged",
+    viewerLead.status === 403 &&
+      viewerLead.json?.error === "viewer_lead" &&
+      viewerLeadInvite.status === 403 &&
+      viewerLeadInvite.json?.error === "viewer_lead" &&
+      storedViewerAdds.status === 403 &&
+      storedViewerAdds.json?.error === "read_only" &&
+      storedViewerRemoves.status === 403 &&
+      storedViewerRemoves.json?.error === "read_only" &&
+      p1Members.includes(U3.id) &&
+      !!p1After?.members.some((m) => m.id === U3.id),
+    `${viewerLead.status} ${viewerLead.text} ${viewerLeadInvite.status} ${viewerLeadInvite.text} ${storedViewerAdds.status} ${storedViewerAdds.text} ${storedViewerRemoves.status} ${JSON.stringify(p1After?.members)}`,
+  );
 
   // -- goals --
   const CANARY = `CANARY-PRIV-${randomBytes(6).toString("hex")}`;
