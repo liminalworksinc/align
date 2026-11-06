@@ -2,6 +2,102 @@
 
 ## Unreleased
 
+- Server and operator settings now share one qualified library while preserving
+  their public interfaces and observed behavior. Cold operator commands run with
+  Node alone from a read-only checkout; the hosted operator uses the same pinned
+  code as its application. The complete workflow passes 1,829 checks, and all
+  36 image, header and startup checks pass.
+- Contributor guides name the actual library Components, targets and pinned
+  runtimes. All 72 validation, lock, plan and verification checks pass across the
+  eighteen registered children.
+
+- Hosted startup rejects data directories inside the application even when a
+  directory name starts with two dots. Valid outside directories remain allowed.
+
+- The retained runner reports the complete test aggregate to the receipt
+  collector. A portable nine-case regression fixture preserves that count and
+  failure handling in every stage.
+
+- Field validation now comes from its qualified library. The typed public API
+  preserves all 4,549,018 compatibility observations, both revision overloads,
+  shared error constructors and data references. The combined application with
+  the latest security fixes passes 1,825 checks with no failures or skips. The
+  hosted image passes 24 checks plus ten response-header checks.
+
+- Value-card wording, note cleaning, follow-up links and measured spans now come
+  from their qualified library. The typed consumer preserves all 1,168,597
+  observations, including shared estimate data and environment defaults. The
+  complete application passes 1,821 checks and all 24 image checks.
+
+- Agent envelope and ended-session wording now come from their qualified
+  library. Both typed consumers preserve all 563,717 observations, and the
+  complete application passes 1,821 checks with all 24 image checks passing.
+  The web test harness prepares agent bindings before importing those consumers
+  in a fresh retained workspace.
+
+- Shared text cleaning, counts, currency and change wording now come from their
+  qualified library. All 4,598,945 observations match through the five typed
+  consumers, and the full application passes 1,821 checks with all 24 image
+  checks passing.
+
+- Shared keyed callback queues now come from their independently qualified
+  library. The original generic API preserves all 5,290 observations, and the
+  complete application workflow passes 1,821 checks with all 24 hosted image
+  checks passing.
+
+- Shared HTTP error constructors and factories now come from their independently
+  qualified library. Both typed consumers preserve all 22,618 observations, and
+  the complete application workflow passes 1,821 checks with all 24 hosted image
+  checks passing.
+
+- Trust-document parsing now comes from its independently qualified Markdown
+  library. The typed consumer preserves all 1,153,547 observations in 21 batches,
+  and the complete application workflow passes 1,821 checks with all 24 hosted
+  image checks passing.
+
+- Home evidence and attention rules now come from their independently qualified
+  library. The typed consumer preserves all 82,905 observations, including shared
+  metadata and original person references. The complete application workflow
+  passes 1,821 checks, and all 24 hosted image checks pass.
+- Trust-document lists with indented root markers now terminate and preserve
+  their root and nested items. The seven existing trust documents render the
+  same parsed structure.
+- Share-again wording now comes from its independently qualified library. The
+  typed consumer preserves all 1,163 observations, and the complete application
+  workflow passes 1,820 checks with 24 hosted image checks passing.
+- Native libraries retain their package namespaces when exports share a name.
+  Flat aliases are available only for unambiguous names; existing integrity,
+  acceptance and installation rollback checks remain enforced.
+- Clipped session context keeps the goal's own measures before its parent's
+  measures. Single-ask notices retain who asked, who accepted and earlier closing
+  counts within the existing character budgets.
+- The local agent consumes qualified shell-reading and session-notice libraries
+  through typed public names. Their original algorithms are retired after direct
+  consumer parity and the complete application workflow pass.
+- Authorization policy now has an independently qualified specification. Two clean
+  builds and the typed application binding match all 331,937 observations from the
+  corrected baseline. The retained file preserves the public types and names while
+  the native package owns the implementation. The complete sealed workflow passes
+  all 1,814 checks, and all 24 hosted image checks pass.
+- A viewer's team lead role no longer allows them to change team membership.
+  Both the team route and its pod alias return `read_only` and leave membership
+  and its audit records unchanged.
+- The Apps tab now consumes the qualified paste-line library. Its original
+  implementation is replaced by typed consumer names. Browser builds and clean
+  container builds verify package files and rerun all 49 independent cases; the
+  complete application workflow and hosted image checks pass.
+- Incremental spend parsing has its own reviewed specification in
+  `.literate/native-projects/local-spend-stream`. Two clean builds match the
+  original on 132 inputs, including 135 observations of parser state after a line.
+  The agent now consumes its qualified package through verified immutable files.
+- Spend parsing and pricing have their own reviewed specification in
+  `.literate/native-projects/local-spend-meter`. Two clean builds pass their tests
+  and match the original on all 110 inputs. The agent now uses this package and the
+  separately qualified rounding helper. The four replaced implementation files
+  are retired after the complete sealed application workflow passes, including
+  all 600 agent tests. Builds verify every package file and rerun independent
+  acceptance before installing the native libraries.
+
 - The agent's folder-rule preview recognizes a folder through a filesystem alias, keeps its current goal unless
   another is requested, and says when the confirmation replaces that rule.
 - The live-agent test client uses fresh HTTP connections after synchronous CLI calls so the offline-revocation

@@ -1,0 +1,3 @@
+'use strict';
+const {goal_mark}=require('./core.js');
+module.exports={goal_mark};

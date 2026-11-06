@@ -1,0 +1,1 @@
+{"name":"paste_lines","type":"commonjs","exports":{"./claude_code_line":"./claude_code_line.js","./codex_line":"./codex_line.js","./safe_mcp_url":"./safe_mcp_url.js","./shq":"./shq.js"}}

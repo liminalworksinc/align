@@ -1,0 +1,1 @@
+{"name":"share_notices","type":"commonjs","exports":{"./constants":"./constants.js","./is_share_state":"./is_share_state.js","./kind":"./kind.js","./resumed_held":"./resumed_held.js"}}

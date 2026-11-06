@@ -1,0 +1,121 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {activity_evidence} = require('../home_attention/activity_evidence.js');
+const {alignment_waits} = require('../home_attention/alignment_waits.js');
+const {answer_evidence} = require('../home_attention/answer_evidence.js');
+const {app_evidence} = require('../home_attention/app_evidence.js');
+const {app_status_words} = require('../home_attention/app_status_words.js');
+const {change_waits} = require('../home_attention/change_waits.js');
+const {data} = require('../home_attention/data.js');
+const {launch_waits} = require('../home_attention/launch_waits.js');
+const {receipt_evidence} = require('../home_attention/receipt_evidence.js');
+function runTests() {
+  const results = [];
+  function check(id, actual, expected) {
+    assert.deepStrictEqual(actual, expected);
+    results.push({case_id: id, outcome: 'passed'});
+  }
+  check("generated-receipt-positive", receipt_evidence(...[7]), "delivery_receipt");
+  check("generated-receipt-zero", receipt_evidence(...[0]), "not_observed");
+  check("generated-receipt-negative", receipt_evidence(...[-4]), "not_observed");
+  check("generated-activity-idle", activity_evidence(...[{"sessions":0,"last_activity_at":null}]), "not_observed");
+  check("generated-activity-report", activity_evidence(...[{"sessions":0,"last_activity_at":"opaque"}]), "agent_reported");
+  check("generated-answer-auto", answer_evidence(...["accepted",true]), "delivery_receipt");
+  check("generated-answer-manual", answer_evidence(...["accepted",false]), "agent_reported");
+  check("generated-answer-case", answer_evidence(...["Received"]), "not_observed");
+  check("generated-app-empty", app_evidence(...[""]), "not_observed");
+  check("generated-app-space", app_evidence(...[" "]), "delivery_receipt");
+  check("generated-change-loop", change_waits(...[{"state":"pending","behind":false,"requester":{"id":"r","name":"R"},"approvers":[{"id":"a","name":"A"}],"dependency_loop":"loop"}]), {"next":"resolve_loop","waiting_on":[{"id":"a","name":"A"}]});
+  check("generated-change-behind", change_waits(...[{"state":"pending","behind":true,"requester":{"id":"r","name":"R"},"approvers":[],"dependency_loop":"loop"}]), {"next":"rebase","waiting_on":[{"id":"r","name":"R"}]});
+  check("generated-alignment-empty", alignment_waits(...[{"state":"pending","requester":{"id":"r","name":"R"},"requirements":[]}]), {"next":"decide","waiting_on":[]});
+  check("generated-launch-filter", launch_waits(...[{"state":"approved","launch":"pending","can":{"launch":1},"launchers":[null,{"id":"a","name":"A","extra":5},{"id":5,"name":"B"}]}]), {"state":"pending","can_launch":false,"launchers":[{"id":"a","name":"A"}]});
+  check("generated-launch-reject", launch_waits(...[null]), null);
+  check("generated-data-initial", data(...[]), {"EVIDENCE_CLASSES":["delivery_receipt","agent_reported","not_observed"],"EVIDENCE_WORDS":{"delivery_receipt":"Delivery receipt","agent_reported":"Agent reported","not_observed":"Not observed"},"UNLAUNCHED_STATES":["pending","not_yet"]});
+  verifyIdentitiesAndEdges();
+  return {schema: 'literate-ai/generated-test-results@1', cases: results};
+}
+function verifyIdentitiesAndEdges() {
+  const person = {id: '__proto__', name: 'Z', nested: {}};
+  const replacement = {id: '__proto__', name: 'A', nested: {}};
+  const other = {id: 'b', name: 'A'};
+  const approvers = [person, other];
+  const change = {state: 'pending', behind: false, approvers, requester: person};
+  assert.strictEqual(change_waits(change).waiting_on, approvers);
+  change.dependency_loop = 'x';
+  assert.strictEqual(change_waits(change).waiting_on, approvers);
+  change.state = 'countered';
+  change.behind = true;
+  const counter = change_waits(change);
+  assert.strictEqual(counter.waiting_on[0], person);
+  assert.notStrictEqual(counter, change_waits(change));
+  assert.notStrictEqual(counter.waiting_on, change_waits(change).waiting_on);
+  change.state = 'closed';
+  assert.strictEqual(change_waits(change), null);
+  const a = {state: 'pending', requester: person, requirements: [
+    {approved_by: null, approvers},
+    {approved_by: person, approvers: [{id: 'ignored', name: 'Ignored'}]},
+    {approved_by: null, approvers: [replacement]}
+  ]};
+  const waiting = alignment_waits(a).waiting_on;
+  assert.deepStrictEqual(waiting, [replacement, other].sort((x,y) => x.name.localeCompare(y.name) || x.id.localeCompare(y.id)));
+  assert.strictEqual(waiting.find(p => p.id === '__proto__'), replacement);
+  assert.deepStrictEqual(approvers, [person, other]);
+  a.state = 'countered';
+  assert.strictEqual(alignment_waits(a).waiting_on[0], person);
+  a.state = 'approved';
+  assert.strictEqual(alignment_waits(a), null);
+  const first = data(), second = data();
+  assert.notStrictEqual(first, second);
+  for (const key of Object.keys(first)) assert.strictEqual(first[key], second[key]);
+  const states = first.UNLAUNCHED_STATES;
+  const oldLength = states.length;
+  try {
+    states.push('external');
+    first.UNLAUNCHED_STATES = [];
+    const input = {state: 'approved', launch: 'external', can: {launch: true}, launchers: [person, person]};
+    const output = launch_waits(input);
+    assert.deepStrictEqual(output, {state: 'external', can_launch: true, launchers: [{id: '__proto__', name: 'Z'}, {id: '__proto__', name: 'Z'}]});
+    assert.notStrictEqual(output.launchers[0], person);
+    assert.notStrictEqual(output.launchers[0], output.launchers[1]);
+    assert.strictEqual(data().UNLAUNCHED_STATES, states);
+  } finally { states.length = oldLength; }
+  const oldWord = first.EVIDENCE_WORDS.not_observed;
+  try {
+    first.EVIDENCE_WORDS.not_observed = 'Changed';
+    assert.strictEqual(data().EVIDENCE_WORDS.not_observed, 'Changed');
+  } finally { first.EVIDENCE_WORDS.not_observed = oldWord; }
+  const asArray = [];
+  asArray.state = 'approved'; asArray.launch = 'not_yet';
+  asArray.can = []; asArray.can.launch = true;
+  const pArray = []; pArray.id = ''; pArray.name = '';
+  asArray.launchers = [pArray, false, {id: 'x', name: 1}];
+  assert.deepStrictEqual(launch_waits(asArray), {state: 'not_yet', can_launch: true, launchers: [{id: '', name: ''}]});
+  assert.deepStrictEqual(launch_waits({state: 'approved', launch: 'pending', can: 'true'}), {state: 'pending', can_launch: false, launchers: []});
+  for (const value of [undefined, false, 1, 'pending', {}, {state:'approved', launch:'Pending'}]) assert.strictEqual(launch_waits(value), null);
+  assert.strictEqual(receipt_evidence(NaN), 'not_observed');
+  assert.strictEqual(receipt_evidence(Infinity), 'delivery_receipt');
+  assert.strictEqual(receipt_evidence(-0), 'not_observed');
+  assert.strictEqual(activity_evidence({sessions: NaN, last_activity_at: ''}), 'not_observed');
+  assert.strictEqual(activity_evidence({sessions: Infinity, last_activity_at: null}), 'agent_reported');
+  assert.strictEqual(answer_evidence('received'), 'delivery_receipt');
+  assert.strictEqual(answer_evidence('accepted', undefined), 'agent_reported');
+  assert.strictEqual(answer_evidence('accepted', 'yes'), 'delivery_receipt');
+  assert.strictEqual(answer_evidence('declined', true), 'agent_reported');
+  for (const value of [undefined, null, false, 1, new String('x')]) assert.strictEqual(app_evidence(value), 'not_observed');
+  const timestamps = {approved_at: 'approval', last_used_at: 'connection', last_read_at: 'read'};
+  const calls = [];
+  const at = value => { calls.push(value); return {toString: () => '[' + value + ']'}; };
+  assert.strictEqual(app_status_words(timestamps, at), 'Read the goals [read]');
+  assert.deepStrictEqual(calls.splice(0), ['read']);
+  timestamps.last_read_at = '';
+  assert.strictEqual(app_status_words(timestamps, at), 'Connected [connection], no goal read seen yet');
+  assert.deepStrictEqual(calls.splice(0), ['connection']);
+  timestamps.last_used_at = null;
+  assert.strictEqual(app_status_words(timestamps, at), 'Approved [approval], no goal read seen yet');
+  assert.deepStrictEqual(calls, ['approval']);
+  const sentinel = {};
+  assert.throws(() => app_status_words(timestamps, () => {throw sentinel;}), e => e === sentinel);
+}
+exports.runTests = runTests;
+exports.smoke = () => receipt_evidence(7);
+

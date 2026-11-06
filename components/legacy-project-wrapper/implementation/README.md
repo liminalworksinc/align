@@ -220,7 +220,7 @@ in use.
 | `app/oauth/`, `app/api/oauth/`, `app/.well-known/`, `lib/oauth/` | The OAuth authorization server for AI apps |
 | `lib/v2/` | Identity, workspaces, goals, change requests, sessions, directives, spend, the database |
 | `proxy.ts`, `lib/config.ts`, `lib/startup.ts` | The request edge, settings and startup checks |
-| `scripts/align-admin.mjs`, `lib/v2/core.mts`, `lib/v2/retention-core.mts`, `lib/v2/metrics-core.mts` | The operator script and the code it shares with the app (the retention schedule, the metrics report) |
+| `scripts/align-admin.mjs`, `scripts/align-admin-main.mjs`, `scripts/prepare-operator.mjs`, `lib/runtime-settings.mts`, `lib/v2/core.mts`, `lib/v2/retention-core.mts`, `lib/v2/metrics-core.mts` | The Node-only operator command, its qualified settings binding and the code it shares with the app (the retention schedule, the metrics report) |
 | `packages/align-agent/` | The `align` CLI and hooks |
 | `packages/align-connect/` | A stdio MCP bridge for clients without OAuth |
 | `docs/trust/`, `SECURITY.md`, `lib/trust/`, `app/privacy`, `app/trust` | The security pack and the public trust pages built from it |

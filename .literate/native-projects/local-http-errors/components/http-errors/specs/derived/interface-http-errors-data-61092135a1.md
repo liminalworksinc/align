@@ -1,0 +1,14 @@
+# Public interface: http-errors.data
+
+## ADDED Requirements
+
+### Requirement: http-errors.data
+
+JavaScript module http_errors/data exports data():object. Return a new ordinary object with exactly HttpError followed by V2Error as own enumerable properties. Every wrapper contains the same two shared class objects; do not clone constructors, prototypes or instances, reset mutations, freeze them, or cache the wrapper. HttpError is a native class named HttpError with constructor arity 3: constructor(status:number,message:string,code?:string). Call super(message), then assign this.status=status and this.code=code in that order, including an own code when omitted or undefined. V2Error is a native class named V2Error with constructor arity 4: constructor(status:number,code:string,message?:string,extra?:Record<string,unknown>). Call super(message ?? code), then assign this.status=status, this.code=code and this.extra=extra in that order, including all three properties when undefined. Keep the exact extra object reference and its nested references. Empty message strings do not fall back; null and undefined messages do. Never force a message for super(undefined). Preserve normal JavaScript class invocation, subclassing and prototype behavior, including a TypeError when called without new. In-place changes to either shared constructor or prototype remain observable through every later wrapper and factory instance. Synchronous JavaScript API with no I/O, clock or environment reads. Preserve input values and references without mutation. Use ordinary native Error inheritance and coercion, including propagation of the original thrown coercion value. Do not trim, normalize, validate or JSON-serialize arguments. Error instances have inherited name 'Error', ordinary native stack behavior and an own message only when native Error creates one. Physical stack frames depend on invocation paths and are outside the comparison contract. Optional status, code and extra values are retained even if they are undefined, null, non-string or opaque objects at JavaScript call sites. The constructors are shared mutable class objects. Factory-created v2 errors use exactly the same V2Error and prototype returned by data(). With unmodified field prototypes, the instance fields assigned below are ordinary enumerable writable configurable own properties. Assignments use ordinary property assignment: inherited setters run, nonwritable inherited fields cause the normal strict-mode TypeError, and an error thrown by a setter propagates unchanged. Preserve assignment order after super returns. Every construction or factory call creates a new instance.
+
+#### Scenario: Preserve the reviewed public contract
+
+- **WHEN** a consumer uses this capability
+- **THEN** the implementation satisfies the reviewed contract
+
+Evidence: `evidence:6f2f84ca62de0a15c4ab`, `evidence:bb4dd3222332d6c502c6`

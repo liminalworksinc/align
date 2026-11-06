@@ -6,8 +6,8 @@ import { bumpGap, kvGet, kvSet, nowIso, type Db } from "./db.ts";
 import { requestKey } from "./keys.ts";
 import { localId } from "./shared/layout.ts";
 import type { Harness } from "./shared/types.ts";
-import type { ParsedEvent, UsageEvent } from "./spend/events.ts";
-import { PRICE_TABLE_VERSION, priceRequest } from "./spend/prices.ts";
+import type { ParsedEvent, UsageEvent } from "./spend.ts";
+import { PRICE_TABLE_VERSION, priceRequest } from "./spend.ts";
 
 export type Basis = "api_usd" | "subscription_included" | "workspace_credits" | "estimated_list_usd" | "unknown";
 

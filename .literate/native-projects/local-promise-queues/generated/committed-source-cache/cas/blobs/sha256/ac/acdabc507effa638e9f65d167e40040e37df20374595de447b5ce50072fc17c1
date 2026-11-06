@@ -1,0 +1,14 @@
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const output = path.resolve(process.argv[2]);
+fs.mkdirSync(output, { recursive: true });
+for (const file of ['main.js', 'tests/litai_test.js', 'promise_queues/package.json', 'promise_queues/with_lock.js']) {
+  const destination = path.join(output, file);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.copyFileSync(path.join(root, file), destination);
+}
+fs.copyFileSync(path.join(root, 'main.js'), path.join(output, 'run'));
+fs.chmodSync(path.join(output, 'run'), 0o755);

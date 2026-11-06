@@ -1,0 +1,14 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const output = path.resolve(process.argv[2] || path.join(root, '_build'));
+if (output === root || root.startsWith(output + path.sep)) throw new Error('Output must not contain the source root.');
+fs.mkdirSync(output, { recursive: true });
+for (const relative of ['main.js', 'tests/litai_test.js', 'share_notices/package.json', 'share_notices/constants.js', 'share_notices/is_share_state.js', 'share_notices/kind.js', 'share_notices/resumed_held.js']) {
+  const target = path.join(output, relative);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.copyFileSync(path.join(root, relative), target);
+}
+fs.copyFileSync(path.join(root, 'main.js'), path.join(output, 'run'));
+fs.chmodSync(path.join(output, 'run'), 0o755);

@@ -1,0 +1,96 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { with_lock } = require('../promise_queues/with_lock.js');
+
+function deferred() {
+  let resolve;
+  const promise = new Promise(r => { resolve = r; });
+  return { promise, resolve };
+}
+
+async function valueCase(key, value, expected) {
+  let calls = 0;
+  const resultPromise = with_lock(key, function () {
+    assert.equal(this, undefined);
+    assert.equal(arguments.length, 0);
+    calls++;
+    return value;
+  });
+  assert.ok(resultPromise instanceof Promise);
+  assert.equal(calls, 0);
+  assert.ok(globalThis.__alignLocks.has(key));
+  const result = await resultPromise;
+  assert.deepEqual(result, expected);
+  assert.equal(result, value);
+  assert.equal(calls, 1);
+  assert.equal(globalThis.__alignLocks.has(key), false);
+  return result;
+}
+
+async function ordering() {
+  const key = {};
+  const gate = deferred();
+  const started = deferred();
+  const events = [];
+  const failure = {};
+  const first = with_lock(key, async () => {
+    events.push('first');
+    started.resolve();
+    await gate.promise;
+    throw failure;
+  });
+  const caught = first.catch(error => { assert.equal(error, failure); });
+  const second = with_lock(key, () => { events.push('second'); return 2; });
+  const lastTail = globalThis.__alignLocks.get(key);
+  await started.promise;
+  assert.deepEqual(events, ['first']);
+  assert.equal(await with_lock({}, () => 3), 3);
+  assert.equal(globalThis.__alignLocks.get(key), lastTail);
+  gate.resolve();
+  await caught;
+  assert.equal(await second, 2);
+  assert.deepEqual(events, ['first', 'second']);
+  assert.equal(globalThis.__alignLocks.has(key), false);
+}
+
+async function cleanupAndNesting() {
+  const key = Symbol('key');
+  const later = Promise.resolve();
+  await with_lock(key, () => { globalThis.__alignLocks.set(key, later); });
+  assert.equal(globalThis.__alignLocks.get(key), later);
+  globalThis.__alignLocks.delete(key);
+  await assert.rejects(with_lock(key, null), TypeError);
+  assert.equal(globalThis.__alignLocks.has(key), false);
+  let inner;
+  const events = [];
+  await with_lock(key, () => {
+    events.push(1);
+    inner = with_lock(key, () => { events.push(3); });
+    events.push(2);
+  });
+  await inner;
+  assert.deepEqual(events, [1, 2, 3]);
+  const value = {};
+  assert.equal(await with_lock(key, () => ({ then(resolve) { resolve(value); } })), value);
+  assert.equal(await with_lock(key, () => undefined), undefined);
+}
+
+async function run() {
+  const cases = [];
+  await valueCase('sample-key', 37, 37);
+  await ordering();
+  cases.push({ case_id: 'generated-value', outcome: 'passed' });
+  await valueCase('', null, null);
+  await cleanupAndNesting();
+  cases.push({ case_id: 'generated-empty-key', outcome: 'passed' });
+  await valueCase(' spaced ', { items: [4, 9] }, { items: [4, 9] });
+  cases.push({ case_id: 'generated-reference', outcome: 'passed' });
+  return { schema: 'literate-ai/generated-test-results@1', cases };
+}
+
+async function smoke() {
+  return valueCase('sample-key', 37, 37);
+}
+
+module.exports = { run, smoke };

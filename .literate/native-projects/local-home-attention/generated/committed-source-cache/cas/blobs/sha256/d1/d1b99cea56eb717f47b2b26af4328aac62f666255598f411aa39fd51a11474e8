@@ -1,0 +1,15 @@
+{
+  "name": "home_attention",
+  "type": "commonjs",
+  "exports": {
+    "./activity_evidence": "./activity_evidence.js",
+    "./alignment_waits": "./alignment_waits.js",
+    "./answer_evidence": "./answer_evidence.js",
+    "./app_evidence": "./app_evidence.js",
+    "./app_status_words": "./app_status_words.js",
+    "./change_waits": "./change_waits.js",
+    "./data": "./data.js",
+    "./launch_waits": "./launch_waits.js",
+    "./receipt_evidence": "./receipt_evidence.js"
+  }
+}

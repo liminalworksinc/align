@@ -70,6 +70,7 @@ echo
 echo "ℹ tests $((TOTAL_PASS + TOTAL_FAIL))"
 echo "ℹ pass $TOTAL_PASS"
 echo "ℹ fail $TOTAL_FAIL"
+echo "$TOTAL_PASS passed, $TOTAL_FAIL failed"
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "test-all: all steps passed (logs in $LOGDIR)"; else echo "test-all: $FAILS step(s) failed (logs in $LOGDIR)"; fi

@@ -1,0 +1,119 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { data } = require('../http_errors/data.js');
+const { bad_request } = require('../http_errors/bad_request.js');
+const { conflict } = require('../http_errors/conflict.js');
+const { forbidden } = require('../http_errors/forbidden.js');
+const { not_found } = require('../http_errors/not_found.js');
+
+function serialized(error) { return JSON.parse(JSON.stringify(error)); }
+function check(error, expected, message) {
+  assert.deepStrictEqual(serialized(error), expected);
+  assert.equal(error.message, message);
+  assert.equal(error.name, 'Error');
+  assert.equal(Object.hasOwn(error, 'name'), false);
+  assert.ok(error instanceof Error);
+  assert.ok(error instanceof data().V2Error);
+  assert.equal(Object.hasOwn(error, 'extra'), true);
+  for (const key of ['status', 'code', 'extra']) {
+    const descriptor = Object.getOwnPropertyDescriptor(error, key);
+    assert.equal(descriptor.enumerable, true);
+    assert.equal(descriptor.writable, true);
+    assert.equal(descriptor.configurable, true);
+  }
+}
+
+const cases = [
+  ['generated-not-found', () => {
+    check(not_found(...[]), { status: 404, code: 'not_found' }, 'Not found');
+    assert.notEqual(not_found(), not_found());
+  }],
+  ['generated-bad-request', () => {
+    check(bad_request(...['Invalid field']), { status: 400, code: 'bad_request' }, 'Invalid field');
+  }],
+  ['generated-empty-message', () => {
+    check(bad_request(...['', null]), { status: 400, code: null }, '');
+  }],
+  ['generated-conflict-fallback', () => {
+    check(conflict(...['duplicate', null]), { status: 409, code: 'duplicate' }, 'duplicate');
+  }],
+  ['generated-forbidden', () => {
+    check(forbidden(...['restricted', 'Access denied']), { status: 403, code: 'restricted' }, 'Access denied');
+  }],
+  ['generated-extra-reference', () => {
+    const args = [422, 'invalid', null, { field: 'email' }];
+    const error = new (data().V2Error)(...args);
+    check(error, { status: 422, code: 'invalid', extra: { field: 'email' } }, 'invalid');
+    assert.equal(error.extra, args[3]);
+  }],
+  ['generated-http-error', () => {
+    const error = new (data().HttpError)(...[503, 'Unavailable', 'retry']);
+    assert.deepStrictEqual(serialized(error), { status: 503, code: 'retry' });
+    assert.equal(error.message, 'Unavailable');
+    assert.ok(error instanceof Error);
+    assert.equal(Object.hasOwn(error, 'extra'), false);
+  }]
+];
+
+function nativeInvariants() {
+  const first = data();
+  const second = data();
+  assert.notEqual(first, second);
+  assert.equal(Object.getPrototypeOf(first), Object.prototype);
+  assert.deepStrictEqual(Object.keys(first), ['HttpError', 'V2Error']);
+  assert.equal(first.HttpError, second.HttpError);
+  assert.equal(first.V2Error, second.V2Error);
+  assert.equal(first.HttpError.name, 'HttpError');
+  assert.equal(first.V2Error.name, 'V2Error');
+  assert.equal(first.HttpError.length, 3);
+  assert.equal(first.V2Error.length, 4);
+  assert.throws(() => first.HttpError(), TypeError);
+  assert.throws(() => first.V2Error(), TypeError);
+  const blank = new first.HttpError();
+  assert.equal(Object.hasOwn(blank, 'message'), false);
+  assert.deepStrictEqual(Object.keys(blank), ['status', 'code']);
+  const v2Blank = new first.V2Error();
+  assert.equal(Object.hasOwn(v2Blank, 'message'), false);
+  assert.deepStrictEqual(Object.keys(v2Blank), ['status', 'code', 'extra']);
+  check(bad_request(null, undefined), { status: 400, code: 'bad_request' }, 'bad_request');
+  check(not_found('ignored', { extra: true }), { status: 404, code: 'not_found' }, 'Not found');
+  const token = {};
+  const message = { toString() { throw token; } };
+  assert.throws(() => bad_request(message), value => value === token);
+  assert.throws(() => new first.HttpError(400, message), value => value === token);
+  class Child extends first.V2Error {}
+  assert.ok(new Child(401, 'denied') instanceof Child);
+  const proto = first.V2Error.prototype;
+  const log = [];
+  try {
+    for (const key of ['status', 'code', 'extra']) {
+      Object.defineProperty(proto, key, { configurable: true, set(value) { log.push([key, value]); } });
+    }
+    const error = forbidden('locked', 'Locked');
+    assert.deepStrictEqual(log, [['status', 403], ['code', 'locked'], ['extra', undefined]]);
+    assert.equal(Object.hasOwn(error, 'status'), false);
+    Object.defineProperty(proto, 'status', { configurable: true, set() { throw token; } });
+    assert.throws(() => not_found(), value => value === token);
+    Object.defineProperty(proto, 'status', { configurable: true, value: 0, writable: false });
+    assert.throws(() => conflict('x', 'y'), TypeError);
+  } finally {
+    for (const key of ['status', 'code', 'extra']) delete proto[key];
+  }
+  try {
+    proto.marker = token;
+    assert.equal(data().V2Error.prototype.marker, token);
+    assert.equal(not_found().marker, token);
+  } finally { delete proto.marker; }
+}
+
+function run() {
+  nativeInvariants();
+  const results = [];
+  for (const [case_id, execute] of cases) {
+    execute();
+    results.push({ case_id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+function smoke() { return not_found(); }
+module.exports = { run, smoke };

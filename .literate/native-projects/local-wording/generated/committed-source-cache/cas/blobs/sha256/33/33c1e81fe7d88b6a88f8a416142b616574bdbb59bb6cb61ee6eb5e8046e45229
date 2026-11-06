@@ -1,0 +1,19 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path');
+const root=path.resolve(__dirname,'..'),out=path.resolve(process.argv[2]||path.join(root,'_build','run'));
+const modules=new Map();
+function collect(file){
+ const id=path.relative(root,file).split(path.sep).join('/');
+ if(modules.has(id))return id;
+ modules.set(id,'');
+ let body=fs.readFileSync(file,'utf8').replace(/^#![^\n]*\n/,'');
+ const matches=Array.from(body.matchAll(/require\((['"])(\.[^'"]+)\1\)/g));
+ for(const match of matches){const child=collect(path.resolve(path.dirname(file),match[2]));body=body.split(match[0]).join('__litaiRequire('+JSON.stringify(child)+')');}
+ modules.set(id,body);return id;
+}
+collect(path.join(root,'main.js'));
+const registry=Array.from(modules,([id,body])=>JSON.stringify(id)+':function(module,exports,__litaiRequire){\n'+body+'\n}').join(',\n');
+const bundle='#!/usr/bin/env node\n'+"'use strict';\nconst __registry={\n"+registry+"\n};\nconst __cache={};\nfunction __litaiRequire(id){if(__cache[id])return __cache[id].exports;const module={exports:{}};__cache[id]=module;__registry[id](module,module.exports,__litaiRequire);return module.exports;}\n__litaiRequire('main.js').cli();\n";
+fs.mkdirSync(path.dirname(out),{recursive:true});
+fs.writeFileSync(out,bundle,{mode:0o755});fs.chmodSync(out,0o755);
+fs.cpSync(path.join(root,'wording'),path.join(path.dirname(out),'wording'),{recursive:true});

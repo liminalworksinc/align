@@ -1,0 +1,9 @@
+LITAI_LANGUAGE_TOOL ?= node
+OUT ?= _build/artifact
+.PHONY: all test check
+all: check
+	"$(LITAI_LANGUAGE_TOOL)" tools/build.js "$(OUT)"
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+test:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test

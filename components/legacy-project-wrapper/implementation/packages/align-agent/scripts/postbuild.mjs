@@ -5,14 +5,16 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-const dist = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "dist");
+import { fileURLToPath } from "node:url";
+const dist = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "dist");
 for (const f of ["cli.js", "hook.js"]) fs.chmodSync(path.join(dist, f), 0o755);
 const files = [];
 const walk = (dir) => {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) walk(p);
-    else if (e.isFile() && e.name.endsWith(".js")) files.push(p);
+    else if (e.isFile() && p !== path.join(dist, "build.json")) files.push(p);
+    else if (!e.isFile()) throw new Error("Build identity requires regular files: " + p);
   }
 };
 walk(dist);

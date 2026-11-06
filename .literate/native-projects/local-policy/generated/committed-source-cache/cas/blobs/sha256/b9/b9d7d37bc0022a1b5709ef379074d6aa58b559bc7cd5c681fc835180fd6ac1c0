@@ -1,0 +1,14 @@
+#!/usr/bin/env node
+'use strict';
+const {runTests, smoke} = require('./tests/litai_test.js');
+function main(args = process.argv.slice(2)) {
+  if (args.length !== 1) throw new Error('Expected one framework mode argument');
+  if (args[0] === '--litai-test') return runTests();
+  if (args[0] === '--litai-smoke') return smoke();
+  throw new Error('This library exposes no product command');
+}
+if (require.main === module) {
+  try { process.stdout.write(JSON.stringify(main()) + '\n'); }
+  catch (error) { process.stderr.write(error.message + '\n'); process.exitCode = 1; }
+}
+module.exports = {main};

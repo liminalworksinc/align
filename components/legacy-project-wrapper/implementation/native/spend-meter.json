@@ -1,0 +1,1996 @@
+{
+  "cases": [
+    {
+      "arguments": [
+        "[\"claude_counts\",[]]",
+        "[\"claude_counts\",{\"input_tokens\":10,\"output_tokens\":20}]",
+        "[\"claude_counts\",{\"input_tokens\":1,\"output_tokens\":2,\"cache_read_input_tokens\":-4}]",
+        "[\"claude_counts\",{\"input_tokens\":10}]",
+        "[\"claude_counts\",{\"input_tokens\":-1,\"output_tokens\":20}]",
+        "[\"claude_counts\",null]",
+        "[\"claude_counts\",{\"input_tokens\":1000000000001,\"output_tokens\":2}]",
+        "[\"claude_counts\",{\"input_tokens\":1,\"output_tokens\":2,\"cache_creation_input_tokens\":10,\"cache_creation\":{\"ephemeral_5m_input_tokens\":1.5}}]",
+        "[\"claude_counts\",{\"input_tokens\":1,\"output_tokens\":2,\"cache_creation_input_tokens\":300,\"cache_creation\":{\"ephemeral_5m_input_tokens\":100,\"ephemeral_1h_input_tokens\":200}}]",
+        "[\"claude_counts\",{\"input_tokens\":1,\"output_tokens\":2,\"cache_creation\":{\"ephemeral_5m_input_tokens\":7,\"ephemeral_1h_input_tokens\":8}}]",
+        "[\"claude_counts\",{\"input_tokens\":1,\"output_tokens\":2,\"cache_creation_input_tokens\":50,\"cache_creation\":{\"ephemeral_5m_input_tokens\":100}}]",
+        "[\"claude_counts\",{\"input_tokens\":1,\"output_tokens\":2,\"cache_creation_input_tokens\":300,\"cache_creation\":{\"ephemeral_5m_input_tokens\":100}}]",
+        "[\"claude_counts\",{\"input_tokens\":1,\"output_tokens\":2,\"cache_creation_input_tokens\":\"x\",\"cache_creation\":{}}]",
+        "[\"claude_counts\",\"x\"]",
+        "[\"claude_counts\",{\"input_tokens\":\"1e3\",\"output_tokens\":20}]",
+        "[\"claude_counts\",{\"input_tokens\":\"10\",\"output_tokens\":\"20\",\"cache_read_input_tokens\":\"5\"}]"
+      ],
+      "capability": "spend-meter.claude-counts",
+      "case_id": "claude_counts-000",
+      "expected_result": [
+        {
+          "value": null
+        },
+        {
+          "value": {
+            "cache_read": 0,
+            "cache_write_1h": 0,
+            "cache_write_5m": 0,
+            "cache_write_unsplit": 0,
+            "input": 10,
+            "output": 20
+          }
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": {
+            "cache_read": 0,
+            "cache_write_1h": 200,
+            "cache_write_5m": 100,
+            "cache_write_unsplit": 0,
+            "input": 1,
+            "output": 2
+          }
+        },
+        {
+          "value": {
+            "cache_read": 0,
+            "cache_write_1h": 8,
+            "cache_write_5m": 7,
+            "cache_write_unsplit": 0,
+            "input": 1,
+            "output": 2
+          }
+        },
+        {
+          "value": null
+        },
+        {
+          "value": {
+            "cache_read": 0,
+            "cache_write_1h": 0,
+            "cache_write_5m": 100,
+            "cache_write_unsplit": 200,
+            "input": 1,
+            "output": 2
+          }
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": {
+            "cache_read": 5,
+            "cache_write_1h": 0,
+            "cache_write_5m": 0,
+            "cache_write_unsplit": 0,
+            "input": 10,
+            "output": 20
+          }
+        }
+      ]
+    },
+    {
+      "arguments": [
+        "[\"claude_counts\",{\"input_tokens\":1,\"output_tokens\":2,\"cache_creation_input_tokens\":true}]",
+        "[\"claude_counts\",{\"input_tokens\":1,\"output_tokens\":2,\"cache_creation_input_tokens\":300}]"
+      ],
+      "capability": "spend-meter.claude-counts",
+      "case_id": "claude_counts-016",
+      "expected_result": [
+        {
+          "value": null
+        },
+        {
+          "value": {
+            "cache_read": 0,
+            "cache_write_1h": 0,
+            "cache_write_5m": 0,
+            "cache_write_unsplit": 300,
+            "input": 1,
+            "output": 2
+          }
+        }
+      ]
+    },
+    {
+      "arguments": [
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc.jsonl\",[\"{\\\"type\\\":\\\"user\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/a\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"requestId\\\":\\\"req_1\\\",\\\"message\\\":{\\\"id\\\":\\\"m\\\",\\\"model\\\":\\\"claude-opus-5-5\\\",\\\"stop_reason\\\":\\\"tool_use\\\",\\\"usage\\\":{\\\"input_tokens\\\":-1,\\\"output_tokens\\\":1}}}\"]]",
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc.jsonl\",[\"\",\"   \"]]",
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc.jsonl\",[\"{\\\"type\\\":\\\"user\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/0\\\",\\\"promptId\\\":\\\"p0\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"user\\\",\\\"cwd\\\":\\\"/1\\\",\\\"promptId\\\":\\\"p0\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"user\\\",\\\"cwd\\\":\\\"/2\\\",\\\"promptId\\\":\\\"p0\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"user\\\",\\\"cwd\\\":\\\"/3\\\",\\\"promptId\\\":\\\"p0\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"user\\\",\\\"cwd\\\":\\\"/4\\\",\\\"promptId\\\":\\\"p0\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"user\\\",\\\"cwd\\\":\\\"/5\\\",\\\"promptId\\\":\\\"p0\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"user\\\",\\\"cwd\\\":\\\"/6\\\",\\\"promptId\\\":\\\"p0\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"user\\\",\\\"cwd\\\":\\\"/7\\\",\\\"promptId\\\":\\\"p0\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"user\\\",\\\"cwd\\\":\\\"/8\\\",\\\"promptId\\\":\\\"p0\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"user\\\",\\\"cwd\\\":\\\"/9\\\",\\\"promptId\\\":\\\"p0\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"user\\\",\\\"cwd\\\":\\\"/10\\\",\\\"promptId\\\":\\\"p0\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\"]]",
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc.jsonl\",[\"{\\\"type\\\":\\\"user\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/a\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"promptId\\\":\\\"p1\\\"}\",\"{\\\"type\\\":\\\"user\\\",\\\"cwd\\\":\\\"/b\\\",\\\"promptId\\\":\\\"p1\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"user\\\",\\\"cwd\\\":\\\"/c\\\",\\\"promptId\\\":\\\"p1\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"user\\\",\\\"cwd\\\":\\\"/b\\\",\\\"promptId\\\":\\\"p1\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"user\\\",\\\"cwd\\\":\\\"/a\\\",\\\"promptId\\\":\\\"p1\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\"]]",
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc.jsonl\",[]]",
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc.jsonl\",[\"{\\\"type\\\":\\\"user\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"promptId\\\":\\\"p1\\\"}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"requestId\\\":\\\"req_1\\\",\\\"message\\\":{\\\"id\\\":\\\"m1\\\",\\\"model\\\":\\\"claude-opus-5-5\\\",\\\"stop_reason\\\":\\\"end_turn\\\",\\\"usage\\\":{\\\"input_tokens\\\":5,\\\"output_tokens\\\":6}}}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"requestId\\\":\\\"req_2\\\",\\\"message\\\":{\\\"id\\\":\\\"m2\\\",\\\"model\\\":\\\"claude-opus-5-5\\\",\\\"stop_reason\\\":null,\\\"usage\\\":{\\\"input_tokens\\\":1,\\\"output_tokens\\\":1}}}\"]]",
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc.jsonl\",[\"{\\\"type\\\":\\\"user\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/a\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"message\\\":{\\\"id\\\":\\\"m1\\\",\\\"model\\\":\\\"claude-opus-5-5\\\",\\\"stop_reason\\\":\\\"end_turn\\\",\\\"usage\\\":{\\\"input_tokens\\\":5,\\\"output_tokens\\\":6}},\\\"request_id\\\":\\\"rq_alt\\\"}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"message\\\":{\\\"id\\\":\\\"mm\\\",\\\"model\\\":\\\"claude-opus-5-5\\\",\\\"usage\\\":{\\\"input_tokens\\\":1,\\\"output_tokens\\\":1}}}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"message\\\":{\\\"model\\\":\\\"claude-opus-5-5\\\",\\\"usage\\\":{\\\"input_tokens\\\":1,\\\"output_tokens\\\":1}},\\\"uuid\\\":\\\"uu\\\"}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"message\\\":{\\\"model\\\":\\\"claude-opus-5-5\\\",\\\"usage\\\":{\\\"input_tokens\\\":1,\\\"output_tokens\\\":1}}}\"]]",
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc.jsonl\",[\"{not json\",\"null\",\"42\",\"[1,2]\"]]",
+        "[\"parse_claude_lines\",\"/x/y/abc\",[\"{\\\"type\\\":\\\"user\\\",\\\"cwd\\\":\\\"/a\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"promptId\\\":\\\"p1\\\"}\"]]",
+        "[\"parse_claude_lines\",\"/x/.jsonl\",[\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"requestId\\\":\\\"req_1\\\",\\\"message\\\":{\\\"id\\\":\\\"m1\\\",\\\"model\\\":\\\"claude-opus-5-5\\\",\\\"stop_reason\\\":\\\"end_turn\\\",\\\"usage\\\":{\\\"input_tokens\\\":5,\\\"output_tokens\\\":6}}}\"]]",
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc.jsonl\",[\"{\\\"type\\\":\\\"user\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"promptId\\\":\\\"p1\\\"}\",\"{\\\"type\\\":\\\"user\\\",\\\"promptId\\\":\\\"p1\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"user\\\",\\\"promptId\\\":\\\"p2\\\",\\\"timestamp\\\":\\\"bad date\\\"}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"requestId\\\":\\\"req_1\\\",\\\"message\\\":{\\\"id\\\":\\\"m1\\\",\\\"model\\\":\\\"claude-opus-5-5\\\",\\\"stop_reason\\\":\\\"end_turn\\\",\\\"usage\\\":{\\\"input_tokens\\\":5,\\\"output_tokens\\\":6}}}\"]]",
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc.jsonl\",[\"{\\\"type\\\":\\\"user\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"promptId\\\":\\\"p1\\\"}\"]]",
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc.jsonl\",[\"{\\\"type\\\":\\\"user\\\",\\\"sessionId\\\":\\\"S9\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"promptId\\\":\\\"p1\\\"}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"requestId\\\":\\\"req_1\\\",\\\"message\\\":{\\\"id\\\":\\\"m1\\\",\\\"model\\\":\\\"claude-opus-5-5\\\",\\\"stop_reason\\\":\\\"end_turn\\\",\\\"usage\\\":{\\\"input_tokens\\\":5,\\\"output_tokens\\\":6}}}\"]]",
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc.jsonl\",[\"{\\\"type\\\":\\\"user\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/a\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"promptId\\\":\\\"p1\\\"}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"requestId\\\":\\\"req_1\\\",\\\"message\\\":{\\\"id\\\":\\\"m1\\\",\\\"model\\\":\\\"claude-opus-5-5\\\",\\\"stop_reason\\\":\\\"end_turn\\\",\\\"usage\\\":{\\\"input_tokens\\\":5,\\\"output_tokens\\\":6}},\\\"isSidechain\\\":true,\\\"promptId\\\":\\\"px\\\"}\"]]",
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc.jsonl\",[\"{\\\"type\\\":\\\"user\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"promptId\\\":\\\"p1\\\",\\\"isSidechain\\\":true}\"]]",
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc.jsonl\",[\"{\\\"type\\\":\\\"user\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/a\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"promptId\\\":\\\"p1\\\"}\",\"{\\\"type\\\":\\\"system\\\",\\\"cwd\\\":\\\"/zzz\\\",\\\"sessionId\\\":\\\"S2\\\"}\",\"{not json but no keys\"]]"
+      ],
+      "capability": "spend-meter.parse-claude-lines",
+      "case_id": "parse_claude_lines-000",
+      "expected_result": [
+        {
+          "value": [
+            {
+              "cwd": "/a",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/u/proj",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": null,
+              "finalized": true,
+              "harness": "claude-code",
+              "kind": "request",
+              "model": "claude-opus-5-5",
+              "native_session_id": "S1",
+              "provider": "anthropic",
+              "provider_id": "req_1",
+              "query_source": "main",
+              "root_turn": null,
+              "source": "transcript",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": []
+        },
+        {
+          "value": [
+            {
+              "cwd": "/0",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "harness": "claude-code",
+              "kind": "root_turn",
+              "native_session_id": "S1",
+              "root_turn": "p0",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/1",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/2",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/3",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/4",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/5",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/6",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/7",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/8",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/a",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "harness": "claude-code",
+              "kind": "root_turn",
+              "native_session_id": "S1",
+              "root_turn": "p1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/b",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/c",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": []
+        },
+        {
+          "value": [
+            {
+              "cwd": "/u/proj",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "harness": "claude-code",
+              "kind": "root_turn",
+              "native_session_id": "S1",
+              "root_turn": "p1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 5,
+                "output": 6
+              },
+              "finalized": true,
+              "harness": "claude-code",
+              "kind": "request",
+              "model": "claude-opus-5-5",
+              "native_session_id": "S1",
+              "provider": "anthropic",
+              "provider_id": "req_1",
+              "query_source": "main",
+              "root_turn": "p1",
+              "source": "transcript",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 1,
+                "output": 1
+              },
+              "finalized": false,
+              "harness": "claude-code",
+              "kind": "request",
+              "model": "claude-opus-5-5",
+              "native_session_id": "S1",
+              "provider": "anthropic",
+              "provider_id": "req_2",
+              "query_source": "main",
+              "root_turn": "p1",
+              "source": "transcript",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/a",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/u/proj",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 5,
+                "output": 6
+              },
+              "finalized": true,
+              "harness": "claude-code",
+              "kind": "request",
+              "model": "claude-opus-5-5",
+              "native_session_id": "S1",
+              "provider": "anthropic",
+              "provider_id": "rq_alt",
+              "query_source": "main",
+              "root_turn": null,
+              "source": "transcript",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 1,
+                "output": 1
+              },
+              "finalized": false,
+              "harness": "claude-code",
+              "kind": "request",
+              "model": "claude-opus-5-5",
+              "native_session_id": "S1",
+              "provider": "anthropic",
+              "provider_id": "msg:mm",
+              "query_source": "main",
+              "root_turn": null,
+              "source": "transcript",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 1,
+                "output": 1
+              },
+              "finalized": false,
+              "harness": "claude-code",
+              "kind": "request",
+              "model": "claude-opus-5-5",
+              "native_session_id": "S1",
+              "provider": "anthropic",
+              "provider_id": "uuid:uu",
+              "query_source": "main",
+              "root_turn": null,
+              "source": "transcript",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "kind": "gap",
+              "reason": "unkeyed_request"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "kind": "gap",
+              "reason": "malformed_line"
+            },
+            {
+              "kind": "gap",
+              "reason": "malformed_line"
+            },
+            {
+              "kind": "gap",
+              "reason": "malformed_line"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/a",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "abc",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "harness": "claude-code",
+              "kind": "root_turn",
+              "native_session_id": "abc",
+              "root_turn": "p1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/u/proj",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 5,
+                "output": 6
+              },
+              "finalized": true,
+              "harness": "claude-code",
+              "kind": "request",
+              "model": "claude-opus-5-5",
+              "native_session_id": "S1",
+              "provider": "anthropic",
+              "provider_id": "req_1",
+              "query_source": "main",
+              "root_turn": null,
+              "source": "transcript",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/u/proj",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "harness": "claude-code",
+              "kind": "root_turn",
+              "native_session_id": "S1",
+              "root_turn": "p1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 5,
+                "output": 6
+              },
+              "finalized": true,
+              "harness": "claude-code",
+              "kind": "request",
+              "model": "claude-opus-5-5",
+              "native_session_id": "S1",
+              "provider": "anthropic",
+              "provider_id": "req_1",
+              "query_source": "main",
+              "root_turn": "p2",
+              "source": "transcript",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/u/proj",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "sess-abc",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "harness": "claude-code",
+              "kind": "root_turn",
+              "native_session_id": "sess-abc",
+              "root_turn": "p1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/u/proj",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S9",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "harness": "claude-code",
+              "kind": "root_turn",
+              "native_session_id": "S9",
+              "root_turn": "p1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 5,
+                "output": 6
+              },
+              "finalized": true,
+              "harness": "claude-code",
+              "kind": "request",
+              "model": "claude-opus-5-5",
+              "native_session_id": "S1",
+              "provider": "anthropic",
+              "provider_id": "req_1",
+              "query_source": "main",
+              "root_turn": "p1",
+              "source": "transcript",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/a",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "harness": "claude-code",
+              "kind": "root_turn",
+              "native_session_id": "S1",
+              "root_turn": "p1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/u/proj",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 5,
+                "output": 6
+              },
+              "finalized": true,
+              "harness": "claude-code",
+              "kind": "request",
+              "model": "claude-opus-5-5",
+              "native_session_id": "S1",
+              "provider": "anthropic",
+              "provider_id": "req_1",
+              "query_source": "subagent",
+              "root_turn": "px",
+              "source": "transcript",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/u/proj",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/a",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "harness": "claude-code",
+              "kind": "root_turn",
+              "native_session_id": "S1",
+              "root_turn": "p1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "arguments": [
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc/subagents/agent-1.jsonl\",[\"{\\\"type\\\":\\\"user\\\",\\\"sessionId\\\":\\\"IGNORED\\\",\\\"cwd\\\":\\\"/a\\\",\\\"promptId\\\":\\\"p1\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"requestId\\\":\\\"req_1\\\",\\\"message\\\":{\\\"id\\\":\\\"m1\\\",\\\"model\\\":\\\"claude-opus-5-5\\\",\\\"stop_reason\\\":\\\"end_turn\\\",\\\"usage\\\":{\\\"input_tokens\\\":5,\\\"output_tokens\\\":6}},\\\"promptId\\\":\\\"p1\\\"}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"note\\\":\\\"no usage key\\\"}\"]]",
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc/subagents/agent-1.jsonl\",[\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"requestId\\\":\\\"req_1\\\",\\\"message\\\":{\\\"id\\\":\\\"m1\\\",\\\"model\\\":\\\"claude-opus-5-5\\\",\\\"stop_reason\\\":\\\"end_turn\\\",\\\"usage\\\":{\\\"input_tokens\\\":5,\\\"output_tokens\\\":6}}}\"]]",
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc.jsonl\",[\"{\\\"type\\\":\\\"user\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/a\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\"}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"requestId\\\":\\\"req_1\\\",\\\"message\\\":{\\\"model\\\":\\\"<synthetic>\\\",\\\"usage\\\":{\\\"input_tokens\\\":1,\\\"output_tokens\\\":1}}}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"requestId\\\":\\\"req_1\\\",\\\"message\\\":{\\\"usage\\\":{\\\"input_tokens\\\":1,\\\"output_tokens\\\":1}}}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"requestId\\\":\\\"req_1\\\",\\\"message\\\":{\\\"model\\\":\\\"claude-opus-5-5\\\"}}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"requestId\\\":\\\"req_1\\\",\\\"message\\\":\\\"x\\\"}\"]]",
+        "[\"parse_claude_lines\",\"/u/.claude/projects/-u-proj/sess-abc.jsonl\",[\"{\\\"type\\\":\\\"user\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/a\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00+02:00\\\",\\\"promptId\\\":\\\"p1\\\"}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":12345,\\\"requestId\\\":\\\"req_1\\\",\\\"message\\\":{\\\"id\\\":\\\"m1\\\",\\\"model\\\":\\\"claude-opus-5-5\\\",\\\"stop_reason\\\":\\\"end_turn\\\",\\\"usage\\\":{\\\"input_tokens\\\":5,\\\"output_tokens\\\":6}}}\",\"{\\\"type\\\":\\\"assistant\\\",\\\"sessionId\\\":\\\"S1\\\",\\\"cwd\\\":\\\"/u/proj\\\",\\\"timestamp\\\":\\\"\\\",\\\"requestId\\\":\\\"r3\\\",\\\"message\\\":{\\\"id\\\":\\\"m1\\\",\\\"model\\\":\\\"claude-opus-5-5\\\",\\\"stop_reason\\\":\\\"end_turn\\\",\\\"usage\\\":{\\\"input_tokens\\\":5,\\\"output_tokens\\\":6}}}\"]]"
+      ],
+      "capability": "spend-meter.parse-claude-lines",
+      "case_id": "parse_claude_lines-016",
+      "expected_result": [
+        {
+          "value": [
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 5,
+                "output": 6
+              },
+              "finalized": true,
+              "harness": "claude-code",
+              "kind": "request",
+              "model": "claude-opus-5-5",
+              "native_session_id": "sess-abc",
+              "provider": "anthropic",
+              "provider_id": "req_1",
+              "query_source": "subagent",
+              "root_turn": "p1",
+              "source": "transcript",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 5,
+                "output": 6
+              },
+              "finalized": true,
+              "harness": "claude-code",
+              "kind": "request",
+              "model": "claude-opus-5-5",
+              "native_session_id": "sess-abc",
+              "provider": "anthropic",
+              "provider_id": "req_1",
+              "query_source": "subagent",
+              "root_turn": null,
+              "source": "transcript",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/a",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/u/proj",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/a",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": "2026-11-04T08:00:00.000Z"
+            },
+            {
+              "harness": "claude-code",
+              "kind": "root_turn",
+              "native_session_id": "S1",
+              "root_turn": "p1",
+              "ts": "2026-11-04T08:00:00.000Z"
+            },
+            {
+              "cwd": "/u/proj",
+              "harness": "claude-code",
+              "kind": "session",
+              "native_session_id": "S1",
+              "ts": null
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 5,
+                "output": 6
+              },
+              "finalized": true,
+              "harness": "claude-code",
+              "kind": "request",
+              "model": "claude-opus-5-5",
+              "native_session_id": "S1",
+              "provider": "anthropic",
+              "provider_id": "req_1",
+              "query_source": "main",
+              "root_turn": "p1",
+              "source": "transcript",
+              "ts": null
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 5,
+                "output": 6
+              },
+              "finalized": true,
+              "harness": "claude-code",
+              "kind": "request",
+              "model": "claude-opus-5-5",
+              "native_session_id": "S1",
+              "provider": "anthropic",
+              "provider_id": "r3",
+              "query_source": "main",
+              "root_turn": "p1",
+              "source": "transcript",
+              "ts": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "arguments": [
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th1\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\"}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":{\\\"input_tokens\\\":-1,\\\"output_tokens\\\":1,\\\"cached_input_tokens\\\":0},\\\"last_token_usage\\\":{\\\"input_tokens\\\":5,\\\"output_tokens\\\":\\\"x\\\",\\\"cached_input_tokens\\\":0}}}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th1\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\"}}\",\"{\\\"type\\\":\\\"token_usage_record\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"response_id\\\":\\\"r1\\\",\\\"usage\\\":{\\\"input_tokens\\\":10,\\\"output_tokens\\\":1,\\\"cached_input_tokens\\\":20}}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th1\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\"}}\",\"{\\\"type\\\":\\\"turn_context\\\",\\\"payload\\\":{\\\"model\\\":\\\"gpt-6.1-sol\\\",\\\"turn_id\\\":\\\"t1\\\",\\\"cwd\\\":\\\"/w\\\"}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":{\\\"input_tokens\\\":100,\\\"output_tokens\\\":10,\\\"cached_input_tokens\\\":20},\\\"last_token_usage\\\":{\\\"input_tokens\\\":100,\\\"output_tokens\\\":10,\\\"cached_input_tokens\\\":20}}}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":{\\\"input_tokens\\\":100,\\\"output_tokens\\\":10,\\\"cached_input_tokens\\\":20},\\\"last_token_usage\\\":{\\\"input_tokens\\\":100,\\\"output_tokens\\\":10,\\\"cached_input_tokens\\\":20}}}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":{\\\"input_tokens\\\":250,\\\"output_tokens\\\":30,\\\"cached_input_tokens\\\":50},\\\"last_token_usage\\\":null}}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":{\\\"input_tokens\\\":260,\\\"output_tokens\\\":30,\\\"cached_input_tokens\\\":50},\\\"last_token_usage\\\":{\\\"input_tokens\\\":10,\\\"output_tokens\\\":0,\\\"cached_input_tokens\\\":0}}}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{session_meta\",\"null\",\"\\\"token_count\\\"\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th2\\\",\\\"session_id\\\":\\\"th2\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\",\\\"parent_thread_id\\\":\\\"th1\\\"}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"g\\\",\\\"session_id\\\":\\\"root\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\",\\\"thread_source\\\":\\\"guardian_review\\\"}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":{\\\"input_tokens\\\":100,\\\"output_tokens\\\":10,\\\"cached_input_tokens\\\":0},\\\"last_token_usage\\\":{\\\"input_tokens\\\":100,\\\"output_tokens\\\":10,\\\"cached_input_tokens\\\":0}}}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"g\\\",\\\"session_id\\\":\\\"root\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\",\\\"source\\\":{\\\"subagent\\\":{\\\"other\\\":\\\"guardian\\\"}}}}\",\"{\\\"type\\\":\\\"token_usage_record\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"response_id\\\":\\\"r1\\\",\\\"usage\\\":{\\\"input_tokens\\\":10,\\\"output_tokens\\\":1,\\\"cached_input_tokens\\\":0}}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th1\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\"}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\"}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th1\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\",\\\"source\\\":{\\\"subagent\\\":{\\\"kind\\\":\\\"x\\\"}}}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":{\\\"input_tokens\\\":10,\\\"output_tokens\\\":1,\\\"cached_input_tokens\\\":0},\\\"last_token_usage\\\":{\\\"input_tokens\\\":10,\\\"output_tokens\\\":1,\\\"cached_input_tokens\\\":0}}}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th2\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\",\\\"parent_thread_id\\\":\\\"th1\\\",\\\"thread_source\\\":\\\"subagent\\\"}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th1\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\"}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":{\\\"input_tokens\\\":10,\\\"output_tokens\\\":1,\\\"cached_input_tokens\\\":0},\\\"last_token_usage\\\":{\\\"input_tokens\\\":10,\\\"output_tokens\\\":1,\\\"cached_input_tokens\\\":0}}}}\"]]",
+        "[\"parse_codex_lines\",\"grp-x\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"session_id\\\":\\\"root\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\"}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":{\\\"input_tokens\\\":10,\\\"output_tokens\\\":1,\\\"cached_input_tokens\\\":0},\\\"last_token_usage\\\":{\\\"input_tokens\\\":10,\\\"output_tokens\\\":1,\\\"cached_input_tokens\\\":0}}}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th1\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\"}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"payload\\\":{\\\"type\\\":\\\"agent_message\\\",\\\"note\\\":\\\"token_count\\\"}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"response_item\\\",\\\"payload\\\":{\\\"x\\\":1}}\",\"   \"]]"
+      ],
+      "capability": "spend-meter.parse-codex-lines",
+      "case_id": "parse_codex_lines-000",
+      "expected_result": [
+        {
+          "value": [
+            {
+              "cwd": "/w",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/w",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": null,
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6-sol",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "resp:r1",
+              "query_source": "main",
+              "retract_group": null,
+              "root_turn": null,
+              "source": "rollout",
+              "total_input": 10,
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": []
+        },
+        {
+          "value": [
+            {
+              "cwd": "/w",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 20,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 80,
+                "output": 10
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6.1-sol",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "tc:th1:100:20:10",
+              "query_source": "main",
+              "retract_group": "g1",
+              "root_turn": "t1",
+              "source": "rollout",
+              "total_input": 100,
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 30,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 120,
+                "output": 20
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6.1-sol",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "tc:th1:250:50:30",
+              "query_source": "main",
+              "retract_group": "g1",
+              "root_turn": "t1",
+              "source": "rollout",
+              "total_input": 150,
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 10,
+                "output": 0
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6.1-sol",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "tc:th1:260:50:30",
+              "query_source": "main",
+              "retract_group": "g1",
+              "root_turn": "t1",
+              "source": "rollout",
+              "total_input": 10,
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "kind": "gap",
+              "reason": "malformed_line"
+            },
+            {
+              "kind": "gap",
+              "reason": "malformed_line"
+            }
+          ]
+        },
+        {
+          "value": []
+        },
+        {
+          "value": [
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 100,
+                "output": 10
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "codex-auto-review",
+              "native_session_id": "root",
+              "provider": "openai",
+              "provider_id": "tc:g:100:0:10",
+              "query_source": "auxiliary",
+              "retract_group": "g1",
+              "root_turn": null,
+              "source": "rollout",
+              "total_input": 100,
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 10,
+                "output": 1
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "codex-auto-review",
+              "native_session_id": "root",
+              "provider": "openai",
+              "provider_id": "resp:r1",
+              "query_source": "auxiliary",
+              "retract_group": null,
+              "root_turn": null,
+              "source": "rollout",
+              "total_input": 10,
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/w",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": []
+        },
+        {
+          "value": [
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 10,
+                "output": 1
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6-sol",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "tc:th1:10:0:1",
+              "query_source": "subagent",
+              "retract_group": "g1",
+              "root_turn": null,
+              "source": "rollout",
+              "total_input": 10,
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": []
+        },
+        {
+          "value": [
+            {
+              "cwd": "/w",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 10,
+                "output": 1
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "unknown",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "tc:th1:10:0:1",
+              "query_source": "main",
+              "retract_group": "g1",
+              "root_turn": null,
+              "source": "rollout",
+              "total_input": 10,
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/w",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "root",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 10,
+                "output": 1
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6-sol",
+              "native_session_id": "root",
+              "provider": "openai",
+              "provider_id": "tc:null:10:0:1",
+              "query_source": "main",
+              "retract_group": "grp-x",
+              "root_turn": null,
+              "source": "rollout",
+              "total_input": 10,
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/w",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": []
+        }
+      ]
+    },
+    {
+      "arguments": [
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th1\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\"}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"task_started\\\",\\\"turn_id\\\":\\\"t1\\\"}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"task_started\\\",\\\"turn_id\\\":\\\"t2\\\",\\\"root_turn_id\\\":\\\"t1\\\"}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"payload\\\":{\\\"type\\\":\\\"task_started\\\",\\\"turn_id\\\":\\\"t3\\\"}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":{\\\"input_tokens\\\":10,\\\"output_tokens\\\":1,\\\"cached_input_tokens\\\":0},\\\"last_token_usage\\\":{\\\"input_tokens\\\":10,\\\"output_tokens\\\":1,\\\"cached_input_tokens\\\":0}}}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"c\\\",\\\"session_id\\\":\\\"c\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\",\\\"parent_thread_id\\\":\\\"p\\\"}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"task_started\\\",\\\"turn_id\\\":\\\"t1\\\"}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":{\\\"input_tokens\\\":100,\\\"output_tokens\\\":10,\\\"cached_input_tokens\\\":0},\\\"last_token_usage\\\":{\\\"input_tokens\\\":100,\\\"output_tokens\\\":10,\\\"cached_input_tokens\\\":0}}}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th1\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\"}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\"}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th1\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\"}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":null,\\\"last_token_usage\\\":{\\\"input_tokens\\\":40,\\\"output_tokens\\\":4,\\\"cached_input_tokens\\\":10}}}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"last_token_usage\\\":{\\\"input_tokens\\\":0,\\\"output_tokens\\\":0,\\\"cached_input_tokens\\\":0}}}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th1\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\"}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":{\\\"input_tokens\\\":100,\\\"output_tokens\\\":10,\\\"cached_input_tokens\\\":0},\\\"last_token_usage\\\":{\\\"input_tokens\\\":100,\\\"output_tokens\\\":10,\\\"cached_input_tokens\\\":0}}}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":{\\\"input_tokens\\\":90,\\\"output_tokens\\\":10,\\\"cached_input_tokens\\\":0},\\\"last_token_usage\\\":{\\\"input_tokens\\\":5,\\\"output_tokens\\\":5,\\\"cached_input_tokens\\\":0}}}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":{\\\"input_tokens\\\":95,\\\"output_tokens\\\":12,\\\"cached_input_tokens\\\":0},\\\"last_token_usage\\\":{\\\"input_tokens\\\":5,\\\"output_tokens\\\":2,\\\"cached_input_tokens\\\":0}}}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th1\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\"}}\",\"{\\\"type\\\":\\\"token_usage_record\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"response_id\\\":\\\"r1\\\",\\\"usage\\\":{\\\"prompt_tokens\\\":30,\\\"completion_tokens\\\":3,\\\"cache_read_input_tokens\\\":10}}}\",\"{\\\"type\\\":\\\"token_usage_record\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"response_id\\\":\\\"r2\\\",\\\"usage\\\":{\\\"input_tokens\\\":30,\\\"output_tokens\\\":3,\\\"cached_tokens\\\":40}}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"token_usage_record\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"response_id\\\":\\\"r1\\\",\\\"usage\\\":{\\\"input_tokens\\\":1,\\\"output_tokens\\\":1,\\\"cached_input_tokens\\\":0}}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th1\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\"}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":{\\\"input_tokens\\\":100,\\\"output_tokens\\\":10,\\\"cached_input_tokens\\\":0},\\\"last_token_usage\\\":{\\\"input_tokens\\\":100,\\\"output_tokens\\\":10,\\\"cached_input_tokens\\\":0}}}}\",\"{\\\"type\\\":\\\"token_usage_record\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"response_id\\\":\\\"r1\\\",\\\"usage\\\":{\\\"input_tokens\\\":100,\\\"output_tokens\\\":10,\\\"cached_input_tokens\\\":30},\\\"root_turn_id\\\":\\\"rt\\\",\\\"model\\\":\\\"gpt-6-luna\\\"}}\",\"{\\\"type\\\":\\\"event_msg\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"type\\\":\\\"token_count\\\",\\\"info\\\":{\\\"total_token_usage\\\":{\\\"input_tokens\\\":200,\\\"output_tokens\\\":20,\\\"cached_input_tokens\\\":0},\\\"last_token_usage\\\":{\\\"input_tokens\\\":100,\\\"output_tokens\\\":10,\\\"cached_input_tokens\\\":0}}}}\",\"{\\\"type\\\":\\\"token_usage_record\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"response_id\\\":\\\"r2\\\",\\\"usage\\\":{\\\"input_tokens\\\":5,\\\"output_tokens\\\":5,\\\"cached_input_tokens\\\":0}}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th1\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\"}}\",\"{\\\"type\\\":\\\"token_usage_record\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"response_id\\\":\\\"r1\\\",\\\"usage\\\":{\\\"input_tokens\\\":50,\\\"output_tokens\\\":5,\\\"cached_input_tokens\\\":10,\\\"cache_write_input_tokens\\\":4}}}\",\"{\\\"type\\\":\\\"token_usage_record\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"usage\\\":{\\\"input_tokens\\\":1,\\\"output_tokens\\\":1,\\\"cached_input_tokens\\\":0}}}\",\"{\\\"type\\\":\\\"token_usage_record\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"response_id\\\":\\\"r3\\\",\\\"usage\\\":null}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th1\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\"}}\",\"{\\\"type\\\":\\\"turn_context\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"cwd\\\":\\\"/c1\\\"}}\",\"{\\\"type\\\":\\\"turn_context\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"cwd\\\":\\\"/c2\\\"}}\",\"{\\\"type\\\":\\\"turn_context\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"cwd\\\":\\\"/c3\\\"}}\",\"{\\\"type\\\":\\\"turn_context\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"cwd\\\":\\\"/c4\\\"}}\",\"{\\\"type\\\":\\\"turn_context\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"cwd\\\":\\\"/c5\\\"}}\",\"{\\\"type\\\":\\\"turn_context\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"cwd\\\":\\\"/c6\\\"}}\",\"{\\\"type\\\":\\\"turn_context\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"cwd\\\":\\\"/c7\\\"}}\",\"{\\\"type\\\":\\\"turn_context\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"cwd\\\":\\\"/c8\\\"}}\",\"{\\\"type\\\":\\\"turn_context\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"cwd\\\":\\\"/c9\\\"}}\"]]",
+        "[\"parse_codex_lines\",\"g1\",[\"{\\\"type\\\":\\\"session_meta\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"id\\\":\\\"th1\\\",\\\"session_id\\\":\\\"th1\\\",\\\"cwd\\\":\\\"/w\\\",\\\"model\\\":\\\"gpt-6-sol\\\"}}\",\"{\\\"type\\\":\\\"turn_context\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"cwd\\\":\\\"/x\\\",\\\"root_turn_id\\\":\\\"r\\\",\\\"turn_id\\\":\\\"t\\\"}}\",\"{\\\"type\\\":\\\"turn_context\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"cwd\\\":\\\"/y\\\",\\\"root_turn_id\\\":\\\"r\\\",\\\"turn_id\\\":\\\"t\\\"}}\",\"{\\\"type\\\":\\\"turn_context\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"cwd\\\":\\\"/x\\\",\\\"root_turn_id\\\":\\\"r\\\",\\\"turn_id\\\":\\\"t\\\"}}\",\"{\\\"type\\\":\\\"turn_context\\\",\\\"timestamp\\\":\\\"2026-11-04T10:00:00.000Z\\\",\\\"payload\\\":{\\\"cwd\\\":\\\"/w\\\",\\\"root_turn_id\\\":\\\"r\\\",\\\"turn_id\\\":\\\"t\\\"}}\"]]"
+      ],
+      "capability": "spend-meter.parse-codex-lines",
+      "case_id": "parse_codex_lines-016",
+      "expected_result": [
+        {
+          "value": [
+            {
+              "cwd": "/w",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "harness": "codex",
+              "kind": "root_turn",
+              "native_session_id": "th1",
+              "root_turn": "t1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 10,
+                "output": 1
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6-sol",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "tc:th1:10:0:1",
+              "query_source": "main",
+              "retract_group": "g1",
+              "root_turn": "t3",
+              "source": "rollout",
+              "total_input": 10,
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": []
+        },
+        {
+          "value": []
+        },
+        {
+          "value": [
+            {
+              "cwd": "/w",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/w",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 10,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 30,
+                "output": 4
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6-sol",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "tc:th1:2026-11-04T10:00:00.000Z:40:10:4",
+              "query_source": "main",
+              "retract_group": "g1",
+              "root_turn": null,
+              "source": "rollout",
+              "total_input": 40,
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/w",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 100,
+                "output": 10
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6-sol",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "tc:th1:100:0:10",
+              "query_source": "main",
+              "retract_group": "g1",
+              "root_turn": null,
+              "source": "rollout",
+              "total_input": 100,
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "kind": "gap",
+              "reason": "cumulative_regression"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 5,
+                "output": 2
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6-sol",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "tc:th1:95:0:12",
+              "query_source": "main",
+              "retract_group": "g1",
+              "root_turn": null,
+              "source": "rollout",
+              "total_input": 5,
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/w",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 10,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 20,
+                "output": 3
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6-sol",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "resp:r1",
+              "query_source": "main",
+              "retract_group": null,
+              "root_turn": null,
+              "source": "rollout",
+              "total_input": 30,
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": null,
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6-sol",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "resp:r2",
+              "query_source": "main",
+              "retract_group": null,
+              "root_turn": null,
+              "source": "rollout",
+              "total_input": 30,
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "kind": "gap",
+              "reason": "no_session_meta"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/w",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 100,
+                "output": 10
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6-sol",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "tc:th1:100:0:10",
+              "query_source": "main",
+              "retract_group": "g1",
+              "root_turn": null,
+              "source": "rollout",
+              "total_input": 100,
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "group": "g1",
+              "kind": "retract"
+            },
+            {
+              "counts": {
+                "cache_read": 30,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 70,
+                "output": 10
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6-luna",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "resp:r1",
+              "query_source": "main",
+              "retract_group": null,
+              "root_turn": "rt",
+              "source": "rollout",
+              "total_input": 100,
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 0,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 0,
+                "input": 5,
+                "output": 5
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6-sol",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "resp:r2",
+              "query_source": "main",
+              "retract_group": null,
+              "root_turn": null,
+              "source": "rollout",
+              "total_input": 5,
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/w",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "counts": {
+                "cache_read": 10,
+                "cache_write_1h": 0,
+                "cache_write_5m": 0,
+                "cache_write_unsplit": 4,
+                "input": 36,
+                "output": 5
+              },
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6-sol",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "resp:r1",
+              "query_source": "main",
+              "retract_group": null,
+              "root_turn": null,
+              "source": "rollout",
+              "total_input": 50,
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "kind": "gap",
+              "reason": "unkeyed_request"
+            },
+            {
+              "counts": null,
+              "finalized": true,
+              "harness": "codex",
+              "kind": "request",
+              "model": "gpt-6-sol",
+              "native_session_id": "th1",
+              "provider": "openai",
+              "provider_id": "resp:r3",
+              "query_source": "main",
+              "retract_group": null,
+              "root_turn": null,
+              "source": "rollout",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/w",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/c1",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/c2",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/c3",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/c4",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/c5",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/c6",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/c7",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/c8",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "cwd": "/w",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/x",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            },
+            {
+              "cwd": "/y",
+              "harness": "codex",
+              "kind": "session",
+              "native_session_id": "th1",
+              "ts": "2026-11-04T10:00:00.000Z"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "arguments": [
+        "[\"price_request\",\"codex-auto-review\",{\"input\":10,\"output\":10,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0},null]",
+        "[\"price_request\",\"codex-auto-review\",{\"input\":-1,\"output\":10,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0},null]",
+        "[\"price_request\",\"claude-fable-5-1\",{\"input\":1000000000000,\"output\":1000000000000,\"cache_read\":1000000000000,\"cache_write_5m\":1000000000000,\"cache_write_1h\":1000000000000,\"cache_write_unsplit\":0},null]",
+        "[\"price_request\",\"gpt-6-sol\",{\"input\":200000,\"output\":1,\"cache_read\":72000,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0},null]",
+        "[\"price_request\",\"gpt-6-sol\",{\"input\":200000,\"output\":1,\"cache_read\":72001,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0},null]",
+        "[\"price_request\",\"gpt-6-sol\",{\"input\":10,\"output\":1,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0},272001]",
+        "[\"price_request\",\"gpt-6-sol\",{\"input\":300000,\"output\":1,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0},1000]",
+        "[\"price_request\",\"gpt-6-sol\",{\"input\":10,\"output\":10,\"cache_read\":0,\"cache_write_5m\":7,\"cache_write_1h\":9,\"cache_write_unsplit\":0},null]",
+        "[\"price_request\",\"gpt-6-sol\",{\"input\":5000,\"output\":700,\"cache_read\":2000,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0},null]",
+        "[\"price_request\",\"gpt-6-sol\",{\"input\":5000,\"output\":700,\"cache_read\":2000,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":300},null]",
+        "[\"price_request\",\"claude-haiku-5-5\",{\"input\":100000,\"output\":10,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0},null]",
+        "[\"price_request\",\"claude-haiku-5-5\",{\"input\":100001,\"output\":10,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0},null]",
+        "[\"price_request\",\"claude-haiku-5-5\",{\"input\":1,\"output\":10,\"cache_read\":60000,\"cache_write_5m\":30000,\"cache_write_1h\":10000,\"cache_write_unsplit\":0},null]",
+        "[\"price_request\",\"claude-opus-5-5\",{\"input\":1.25,\"output\":10,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0},null]",
+        "[\"price_request\",\"o4\",{\"input\":123456,\"output\":78901,\"cache_read\":2345,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":678},null]",
+        "[\"price_request\",\"claude-opus-5-5\",{\"input\":1234,\"output\":567,\"cache_read\":8900,\"cache_write_5m\":100,\"cache_write_1h\":200,\"cache_write_unsplit\":0},null]"
+      ],
+      "capability": "spend-meter.price-request",
+      "case_id": "price_request-000",
+      "expected_result": [
+        {
+          "value": {
+            "est_list_usd_micros": null,
+            "unpriced": "auto_review_unpriced"
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": null,
+            "unpriced": "invalid_counters"
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": 92750000000000,
+            "unpriced": null
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": 414410,
+            "unpriced": null
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": null,
+            "unpriced": "long_context_unmodeled"
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": null,
+            "unpriced": "long_context_unmodeled"
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": 600010,
+            "unpriced": null
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": 160,
+            "unpriced": null
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": 17400,
+            "unpriced": null
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": 18150,
+            "unpriced": null
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": 10005,
+            "unpriced": null
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": 50026,
+            "unpriced": null
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": 31776,
+            "unpriced": null
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": null,
+            "unpriced": "invalid_counters"
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": 6602130,
+            "unpriced": null
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": 20156,
+            "unpriced": null
+          }
+        }
+      ]
+    },
+    {
+      "arguments": [
+        "[\"price_request\",\"claude-opus-5-5\",{\"input\":1000,\"output\":500,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0},null]",
+        "[\"price_request\",\"claude-opus-5-5\",{\"input\":10,\"output\":10,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":5},null]",
+        "[\"price_request\",\"o4-mini\",{\"input\":0,\"output\":0,\"cache_read\":1,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0},null]",
+        "[\"price_request\",\"claude-sonnet-5-5\",{\"input\":1,\"output\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0},null]",
+        "[\"price_request\",\"claude-sonnet-5-5\",{\"input\":3,\"output\":1000,\"cache_read\":250000,\"cache_write_5m\":40000,\"cache_write_1h\":2000,\"cache_write_unsplit\":0},null]",
+        "[\"price_request\",\"nope\",{\"input\":10,\"output\":10,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0},null]",
+        "[\"price_request\",\"gpt-5\",{\"input\":0,\"output\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0},null]"
+      ],
+      "capability": "spend-meter.price-request",
+      "case_id": "price_request-016",
+      "expected_result": [
+        {
+          "value": {
+            "est_list_usd_micros": 14000,
+            "unpriced": null
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": null,
+            "unpriced": "untyped_cache_write"
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": 0,
+            "unpriced": null
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": 2,
+            "unpriced": null
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": 168006,
+            "unpriced": null
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": null,
+            "unpriced": "unknown_model"
+          }
+        },
+        {
+          "value": {
+            "est_list_usd_micros": 0,
+            "unpriced": null
+          }
+        }
+      ]
+    },
+    {
+      "arguments": [
+        "[\"price_row\",\"Claude-Opus-5-5\"]",
+        "[\"price_row\",\"claude-haiku-4-5-20251001\"]",
+        "[\"price_row\",\"claude-haiku-5-5\"]",
+        "[\"price_row\",\"claude-opus-5-5\"]",
+        "[\"price_row\",\"claude-opus-5-5-20261101\"]",
+        "[\"price_row\",\"codex-auto-review\"]",
+        "[\"price_row\",\"\"]",
+        "[\"price_row\",\"gpt-5.5-pro\"]",
+        "[\"price_row\",\"gpt-6-sol\"]",
+        "[\"price_row\",\"o4-mini\"]",
+        "[\"price_row\",\"unknown-model\"]"
+      ],
+      "capability": "spend-meter.price-row",
+      "case_id": "price_row-000",
+      "expected_result": [
+        {
+          "value": null
+        },
+        {
+          "value": {
+            "cache_read": 100000,
+            "cache_write_1h": 2000000,
+            "cache_write_5m": 1250000,
+            "input": 1000000,
+            "output": 5000000,
+            "provider": "anthropic",
+            "read": "not re-verified for this table",
+            "source": "liminal ai-spend pricing.js (operator-maintained table)"
+          }
+        },
+        {
+          "value": {
+            "cache_read": 10000,
+            "cache_write_1h": 200000,
+            "cache_write_5m": 125000,
+            "input": 100000,
+            "output": 500000,
+            "over": {
+              "input_tokens": 100000,
+              "rates": {
+                "cache_read": 50000,
+                "cache_write_1h": 1000000,
+                "cache_write_5m": 625000,
+                "input": 500000,
+                "output": 2500000,
+                "provider": "anthropic",
+                "read": "2026-10-22",
+                "source": "Claude API reference (claude-api skill, cached 2026-10-06): models table and Haiku 5.5 migration notes"
+              }
+            },
+            "provider": "anthropic",
+            "read": "2026-10-22",
+            "source": "Claude API reference (claude-api skill, cached 2026-10-06): models table and Haiku 5.5 migration notes"
+          }
+        },
+        {
+          "value": {
+            "cache_read": 200000,
+            "cache_write_1h": 8000000,
+            "cache_write_5m": 5000000,
+            "input": 4000000,
+            "output": 20000000,
+            "provider": "anthropic",
+            "read": "not re-verified for this table",
+            "source": "liminal ai-spend pricing.js (operator-maintained table)"
+          }
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": {
+            "cache_read": 3000000,
+            "cache_write": 30000000,
+            "input": 30000000,
+            "output": 180000000,
+            "provider": "openai",
+            "read": "not re-verified for this table",
+            "source": "liminal ai-spend pricing.js (operator-maintained table)"
+          }
+        },
+        {
+          "value": {
+            "cache_read": 200000,
+            "cache_write": 2500000,
+            "input": 2000000,
+            "output": 10000000,
+            "provider": "openai",
+            "read": "2026-10-09",
+            "source": "developers.openai.com/api/docs/pricing (per pricing.js)"
+          }
+        },
+        {
+          "value": {
+            "cache_read": 275000,
+            "cache_write": 1100000,
+            "input": 1100000,
+            "output": 4400000,
+            "provider": "openai",
+            "read": "not re-verified for this table",
+            "source": "liminal ai-spend pricing.js (operator-maintained table)"
+          }
+        },
+        {
+          "value": null
+        }
+      ]
+    },
+    {
+      "arguments": [
+        "[\"price_table_version\"]"
+      ],
+      "capability": "spend-meter.price-table-version",
+      "case_id": "price_table_version-000",
+      "expected_result": [
+        {
+          "value": "align-prices-2026-10-22.2"
+        }
+      ]
+    },
+    {
+      "arguments": [
+        "[\"valid_counts\",{}]",
+        "[\"valid_counts\",{\"input\":1,\"output\":1,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"extra\":-3}]",
+        "[\"valid_counts\",{\"input\":1.5,\"output\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0}]",
+        "[\"valid_counts\",{\"input\":1000000000000,\"output\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0}]",
+        "[\"valid_counts\",{\"input\":-1,\"output\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0}]",
+        "[\"valid_counts\",{\"input\":10,\"output\":20,\"cache_read\":30,\"cache_write_5m\":1,\"cache_write_1h\":2,\"cache_write_unsplit\":3}]",
+        "[\"valid_counts\",{\"input\":1000000000001,\"output\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0}]",
+        "[\"valid_counts\",{\"input\":\"5\",\"output\":1,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0}]",
+        "[\"valid_counts\",{\"input\":0,\"output\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0}]"
+      ],
+      "capability": "spend-meter.valid-counts",
+      "case_id": "valid_counts-000",
+      "expected_result": [
+        {
+          "value": true
+        },
+        {
+          "value": false
+        },
+        {
+          "value": false
+        },
+        {
+          "value": true
+        },
+        {
+          "value": false
+        },
+        {
+          "value": true
+        },
+        {
+          "value": false
+        },
+        {
+          "value": false
+        },
+        {
+          "value": true
+        }
+      ]
+    }
+  ],
+  "component": "spend-meter",
+  "harness": "spend-library-harness.cjs",
+  "harness_identity": "sha256:32b8314796ecbef053d170dc13425a24c77a868473ed4ca5bce92f2c5cfe0ce9",
+  "import_surface_identity": "sha256:4ab7b400bb006ec55da9287de41f55b60d934dc7b61bf23dd1242e0108cb4141",
+  "language": "javascript",
+  "public_interface_identities": [
+    "sha256:2c297645179776a345cd60bf9b0d51f7c1be04c3af79ea66d2d6198d0f980f46",
+    "sha256:38a67f47b2a6d8047dd17efc2a5858184a0704721f052f5480364dceacc2039b",
+    "sha256:5a5f7947bef931a6e2983a61ba8629b3439ed9d10ddd33c8dd2a6a07dc2bacc6",
+    "sha256:756f8383a05e83235eaec478aed6955b3495ed4a883ebecedea01544c9b7174c",
+    "sha256:82049ecf5e52d2cd35f8bfda792f4f317e0d770b2334e96e3d79e7db8bd8c311",
+    "sha256:84b9432d528e26f426be7b45acb0af89874f78c7e17a0c647412c07997395292",
+    "sha256:aaf48a5c8ea64b46b1e437bfd05d8192c3d19c37f60b3366e1e78590b9a51ac9"
+  ],
+  "schema": "literate-ai/library-acceptance-oracle@1",
+  "specification_set_identity": "sha256:bbab1cfca56afa6b115a1d4e6839b8cf54572dae0a1470d8020389477ce15b57"
+}

@@ -1,0 +1,1 @@
+{"name":"migration_coordinator","type":"commonjs","exports":{"./apply_migrations":"./apply_migrations.js"}}

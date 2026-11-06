@@ -1,0 +1,14 @@
+'use strict';
+const fs=require('node:fs');
+const path=require('node:path');
+const root=path.resolve(__dirname,'..');
+const requested=process.argv[2];
+if(!requested)throw new Error('An output path is required');
+const output=path.resolve(requested),destination=path.dirname(output);
+fs.mkdirSync(destination,{recursive:true});
+fs.cpSync(path.join(root,'agent_envelope'),path.join(destination,'agent_envelope'),{recursive:true});
+fs.mkdirSync(path.join(destination,'tests'),{recursive:true});
+fs.copyFileSync(path.join(root,'tests','litai_test.js'),path.join(destination,'tests','litai_test.js'));
+fs.copyFileSync(path.join(root,'main.js'),path.join(destination,'main.js'));
+fs.writeFileSync(output,'#!/usr/bin/env node\n'+"'use strict';\ntry{require('./main.js').main();}catch(error){process.stderr.write(String(error.message)+'\\n');process.exitCode=1;}\n");
+fs.chmodSync(output,0o755);

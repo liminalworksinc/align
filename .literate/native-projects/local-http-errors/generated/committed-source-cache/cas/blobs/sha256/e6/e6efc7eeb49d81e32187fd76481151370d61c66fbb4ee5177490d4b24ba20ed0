@@ -1,0 +1,15 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const output = path.resolve(process.argv[2] || '_build');
+if (output === root || root.startsWith(output + path.sep)) {
+  throw new Error('Output must not contain the source root');
+}
+fs.mkdirSync(output, { recursive: true });
+for (const name of ['main.js', 'run', 'http_errors', 'tests/litai_test.js']) {
+  const target = path.join(output, name);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.cpSync(path.join(root, name), target, { recursive: true });
+}
+fs.chmodSync(path.join(output, 'run'), 0o755);

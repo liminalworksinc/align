@@ -1,0 +1,9 @@
+#!/usr/bin/env node
+'use strict';
+try {
+  const {cli} = require('./main.js');
+  process.stdout.write(JSON.stringify(cli()) + '\n');
+} catch (error) {
+  process.stderr.write(String(error.stack || error) + '\n');
+  process.exitCode = 1;
+}

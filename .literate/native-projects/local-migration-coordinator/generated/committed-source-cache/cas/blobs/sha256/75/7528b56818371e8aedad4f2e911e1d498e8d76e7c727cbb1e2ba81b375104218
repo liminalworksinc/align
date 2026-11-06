@@ -1,0 +1,24 @@
+'use strict';
+
+const tests = require('./tests/litai_test.js');
+
+function main() {
+  if (process.argv.length !== 3) throw new Error('Expected one framework mode');
+  if (process.argv[2] === '--litai-test') {
+    return tests.run();
+  }
+  if (process.argv[2] === '--litai-smoke') {
+    return tests.smoke();
+  }
+  throw new Error('Library artifact supports framework test modes only');
+}
+
+if (require.main === module) {
+  try {
+    process.stdout.write(JSON.stringify(main()) + '\n');
+  } catch (error) {
+    process.stderr.write(String(error) + '\n');
+    process.exitCode = 1;
+  }
+}
+module.exports = { main };

@@ -1,0 +1,33 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { pico_to_micros } = require('../spend_rounding/pico_to_micros.js');
+
+// JSON metadata integers are converted losslessly to the API's bigint domain.
+const cases = [
+  { id: 'generated-positive-example', args: [2500000], expected: 3 },
+  { id: 'generated-below-half', args: [499999], expected: 0 },
+  { id: 'generated-at-half', args: [500000], expected: 1 },
+  { id: 'generated-negative-integer', args: [-1500000], expected: -1 },
+  { id: 'generated-negative-truncation', args: [-1499999], expected: 0 },
+  { id: 'generated-zero', args: [0], expected: 0 }
+];
+
+function runTests() {
+  const results = [];
+  for (const entry of cases) {
+    assert.strictEqual(pico_to_micros(...entry.args.map(BigInt)), entry.expected);
+    results.push({ case_id: entry.id, outcome: 'passed' });
+  }
+  // Independently exact vectors beyond the JSON metadata domain.
+  assert.strictEqual(pico_to_micros(9007199254740994000000n), 9007199254740994);
+  assert.strictEqual(pico_to_micros(10n ** 400n), Infinity);
+  assert.strictEqual(pico_to_micros(-(10n ** 400n)), -Infinity);
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+
+function smoke() {
+  return pico_to_micros(2500000n);
+}
+
+module.exports = { runTests, smoke };
