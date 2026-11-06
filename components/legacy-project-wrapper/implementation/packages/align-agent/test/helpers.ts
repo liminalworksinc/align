@@ -4,6 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { openCtx, type Ctx } from "../src/context.ts";
+import { nowIso } from "../src/db.ts";
+import { renderHot } from "../src/hot.ts";
+import { ensureSession } from "../src/ledger.ts";
+import type { GoalSnapshot, Harness } from "../src/shared/types.ts";
 
 export const PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const DIST = path.join(PKG, "dist");
@@ -179,4 +183,29 @@ export function codexTokenCount(total: ReturnType<typeof tok> | null, last: Retu
 
 export function rows(ctx: Ctx, sql = "SELECT * FROM requests ORDER BY ts, request_key", ...params: (string | number | null)[]): any[] {
   return ctx.db.prepare(sql).all(...params) as any[];
+}
+
+/** The goal the hook tests share sessions toward. */
+export const SHARE_GOAL: GoalSnapshot = {
+  id: "g_ship",
+  version: 3,
+  title: "Ship the v2 onboarding flow",
+  status: "active",
+  measures: [
+    { id: "m1", text: "New workspace reaches first shared session in under 10 minutes", target: "10 min" },
+    { id: "m2", text: "Zero duplicate usage rows in a week of real use", target: "0" },
+  ],
+};
+
+/** A session shared (by default toward SHARE_GOAL), with its hot file rendered, as a sync would leave it. */
+export function shareSession(ctx: Ctx, harness: Harness, sid: string, goal: GoalSnapshot | null = SHARE_GOAL, state = "shared"): string {
+  const lid = ensureSession(ctx.db, harness, sid, { cwd: "/tmp/synthetic-repo", ts: nowIso() });
+  ctx.db
+    .prepare(
+      `INSERT INTO shares(local_id, workspace_id, workspace_name, session_key, goal_id, state, from_mode, created_at, goal_json, binding_epoch, binding_goal)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+    )
+    .run(lid, "ws_1", "Acme", `key-${sid}`, goal?.id ?? null, state, "start", nowIso(), goal ? JSON.stringify(goal) : null, "ep_1", goal?.id ?? null);
+  renderHot(ctx, lid);
+  return lid;
 }
