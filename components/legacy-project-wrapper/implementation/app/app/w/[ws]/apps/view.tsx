@@ -175,9 +175,9 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
                 body={
                   role === "owner"
                     ? "Nothing is reading this workspace's goals through an app yet. Connect one above; it is listed here once you approve it, and its first goal read is recorded under Last read the goals."
-                    : role === "viewer"
-                      ? "You see your own apps here; workspace owners see everyone's."
-                      : "You see your own apps here; workspace owners see everyone's. Connect one above; it is listed here once you approve it, and its first goal read is recorded under Last read the goals."
+                    : role === "member"
+                      ? "You see your own apps here; workspace owners see everyone's. Connect one above; it is listed here once you approve it, and its first goal read is recorded under Last read the goals."
+                      : "You see your own apps here; workspace owners see everyone's."
                 }
               />
             )}

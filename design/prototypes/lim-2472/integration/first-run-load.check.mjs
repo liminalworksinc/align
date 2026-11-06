@@ -6,7 +6,9 @@
 //     mounts once, and /home is read only by Home and NeedsList (4 on a dev server, where StrictMode doubles mount effects;
 //     a second cycle from first run's onSeen makes it more).
 //  2. A new member with no app connects one while Home is open (real OAuth grant, one tool call):
-//     first run's next check refreshes Home exactly once, and the panel goes.
+//     first run's next check refreshes Home exactly once, and the panel goes. One refresh is Home's own /home read plus
+//     NeedsList's, on one reloadToken bump: /home reads rise by exactly 2 and NeedsList does not remount. A second refresh
+//     reads /home again, so it fails.
 // Exits 1 on any failure. Playwright from PLAYWRIGHT_MODULE (default /tmp/pw/node_modules/playwright/index.mjs).
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -91,7 +93,8 @@ const panel = (page) => page.locator('section[aria-label="Get started"], [data-f
   await page.waitForTimeout(8000); // first run checks every 5s
   const after = { ...(await needs(page)), homeReads: reads.length, panel: await panel(page) };
   rule("first connect: the panel was there, then goes", before.panel === 1 && after.panel === 0, { before: before.panel, after: after.panel, mcp: mcp.status });
-  rule("first connect: Home refreshes exactly once", after.mounts === before.mounts + 1, { before: before.mounts, after: after.mounts, homeReads: [before.homeReads, after.homeReads] });
+  rule("first connect: one refresh, /home read twice more", after.homeReads - before.homeReads === 2, { homeReads: [before.homeReads, after.homeReads] });
+  rule("first connect: NeedsList reloads in place, no remount", after.mounts === before.mounts, { before: before.mounts, after: after.mounts });
   await ctx.close();
 }
 await browser.close();

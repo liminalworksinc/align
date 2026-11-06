@@ -60,6 +60,7 @@ for (const role of ["owner", "member"]) {
   rule("owner, reads answer: names the connected app", /Align sent it to \d+ connected app/.test(t) && !t.includes(NOT_READ), clip(t, "Align sent it to"));
   // A viewer's list is their own apps: truly empty in the seed, though the owner's app was sent the version.
   const v = await work(seed.accounts.viewer);
+  rule("viewer, role known: Work offers no connection", !v.includes("Connect one"), clip(v, "Connected apps"));
   rule("viewer, their own list empty: says so, not the workspace's", !v.includes("No app yet") && v.includes(OWN_ONLY) && !v.includes(NOT_READ), clip(v, "Align sent it to"));
 }
 
@@ -86,15 +87,22 @@ const call = async (cookie, method, path, body) => (await fetch(BASE + path, { m
   rule('member with no app: no "No AI apps connected"', !t.includes("No AI apps connected"), d);
   rule('member with no app: no "Nothing has read this workspace\'s goals"', !t.includes("Nothing has read this workspace's goals"), d);
   rule('member with no app: no "none is connected"', !t.includes("none is connected"), d);
-  rule("member with no app: says what they can see", t.includes("No AI app you can see is connected") && t.includes("none you can see is connected"), d);
+  rule("member with no app: says what they can see", t.includes("None of your AI apps is connected") && t.includes("none of yours is connected"), d);
   rule('member with no app: no "No app yet"', !t.includes("No app yet"), clip(t, "Align sent it to"));
   rule("member with no app: the delivery row is about their own apps", t.includes(OWN_ONLY), clip(t, "Align sent it to"));
 
   const appsPath = `/app/w/${WS}/apps`;
   const a = await read(m, appsPath);
   rule("Apps, member with no app: no workspace-wide sentence", !a.includes("No AI apps are connected to this workspace") && !a.includes("Nothing is reading"), clip(a, "Your apps"));
-  rule("Apps, member with no app: says what they can see", a.includes("None of your AI apps is connected here.") && a.includes("You see your own apps; workspace owners see everyone's."), clip(a, "Your apps"));
+  rule("Apps, member with no app: may connect one", a.includes("Connect one above"), clip(a, "Your apps"));
+  rule("Apps, member with no app: says what they can see", a.includes("None of your AI apps is connected.") && a.includes("You see your own apps here; workspace owners see everyone's."), clip(a, "Your apps"));
   const r = await read(seed.accounts.viewer, appsPath, (p) => p.route(new RegExp(`/api/v2/workspaces/${WS}$`), (x) => x.fulfill(BOOM)));
+  const roleDown = (p) => p.route(new RegExp(`/api/v2/workspaces/${WS}$`), (x) => x.fulfill(BOOM));
+  const wm = await read(m, `/app/w/${WS}/work?goal=${GOAL}`, roleDown);
+  rule("Work, member, role unread: no offer", !wm.includes("Connect one") && wm.includes("No AI app you can see is connected."), clip(wm, "Connected apps"));
+  rule("Work, member, role known: may connect one", t.includes("Connect one"), clip(t, "Connected apps"));
+  const am = await read(m, appsPath, roleDown);
+  rule("Apps, member, role unread: no offer", !am.includes("Connect one above") && !am.includes("Add Align's MCP server"), clip(am, "Your apps"));
   rule("Apps, role unread: offers nothing", !r.includes("Connect one above") && !r.includes("No AI apps are connected to this workspace"), clip(r, "Your apps"));
 
   // The goal page's sessions, on a goal the person doesn't own
@@ -117,6 +125,13 @@ const call = async (cookie, method, path, body) => (await fetch(BASE + path, { m
   const t = await read(o, `/app/w/${ws}/work?goal=${cr.goal.id}`);
   rule('owner, a real empty list: Work keeps "No app yet"', t.includes("No app yet") && !t.includes(OWN_ONLY), clip(t, "Align sent it to"));
   const a = await read(o, `/app/w/${ws}/apps`);
+  rule('owner, a real empty list: Work keeps "No AI apps connected"', t.includes("No AI apps connected") && t.includes("none is connected"), clip(t, "Connected apps"));
+  const roleDown = (p) => p.route(new RegExp(`/api/v2/workspaces/${ws}$`), (r) => r.fulfill(BOOM));
+  const wu = await read(o, `/app/w/${ws}/work?goal=${cr.goal.id}`, roleDown);
+  rule("Work, role unread: never the owner's sentences", !wu.includes("No AI apps connected") && !wu.includes("Nothing has read this workspace's goals") && !wu.includes("none is connected") && !wu.includes("Connect one"), clip(wu, "Connected apps"));
+  rule("Work, role unread: the role-free sentence", wu.includes("No AI app you can see is connected.") && wu.includes("none you can see is connected") && !wu.includes("None of your AI apps"), clip(wu, "Connected apps"));
+  const au = await read(o, `/app/w/${ws}/apps`, roleDown);
+  rule("Apps, role unread: never the owner's sentences", !au.includes("No AI apps are connected to this workspace") && !au.includes("Nothing is reading") && !au.includes("Connect one above") && !au.includes("Add Align's MCP server") && au.includes("None of your AI apps is connected."), clip(au, "Your apps"));
   rule("owner, a real empty list: Apps keeps the workspace-wide wording", a.includes("No AI apps are connected to this workspace.") && a.includes("Nothing is reading this workspace's goals through an app yet.") && !a.includes("None of your AI apps"), clip(a, "Everyone's apps"));
 }
 
@@ -134,15 +149,17 @@ for (const [role, a] of Object.entries(people)) {
   const page = await ctx.newPage();
   await page.goto(`${BASE}/app/w/${ws2}`, { waitUntil: "networkidle", timeout: 60000 });
   await page.waitForTimeout(1200);
-  const link = page.locator("main a", { hasText: "Create a goal" });
-  const n = await link.count();
-  if (role === "viewer") rule('viewer, no goals: no "Create a goal"', n === 0, { n });
+  const offers = (await page.locator("main").first().innerText()).includes("Create a goal");
+  const first = page.locator("main a, main button").filter({ hasText: /^Set the first goal$/ });
+  const n = await first.count();
+  if (role === "viewer") rule('viewer, no goals: no "Create a goal" or "Set the first goal"', n === 0 && !offers, { n, offers });
   else {
-    rule(`${role}, no goals: keeps "Create a goal"`, n === 1, { n });
+    rule(`${role}, no goals: offers "Set the first goal"`, n === 1, { n });
     if (n) {
-      await link.first().click();
+      await first.first().click();
       await page.getByText("New goal", { exact: true }).first().waitFor({ timeout: 15000 }).catch(() => {});
-      rule(`${role}: the link reaches a way to create one`, (await page.getByRole("button", { name: "Create goal" }).count()) === 1, page.url().replace(BASE, ""));
+      const form = { newGoal: await page.getByText("New goal", { exact: true }).count(), create: await page.getByRole("button", { name: "Create goal" }).count(), url: page.url().replace(BASE, "").replace(ws2, "<ws>") };
+      rule(`${role}: a real click reaches the New goal form`, form.newGoal >= 1 && form.create === 1 && form.url.includes("/goals"), form);
     }
   }
   await ctx.close();
@@ -183,7 +200,7 @@ for (const [role, a] of Object.entries(people)) {
   const full = await read(people.owner, `/app/w/${ws2}`);
   rule("first run, real reads, owner with no goals: keeps the full card", full.includes("Connect one agent"), full.slice(0, 200));
   const empty = await read(people.viewer, `/app/w/${ws2}`);
-  rule("first run, real reads, viewer with no goals: keeps Nothing here yet", empty.includes("Nothing here yet"), empty.slice(0, 200));
+  rule("first run, real reads, viewer with no goals: the one line", empty.includes("This workspace has no goals yet. A workspace owner or member sets them.") && !empty.includes("Set the first goal"), empty.slice(0, 200));
 }
 
 // "Since you last looked": no "Nothing changed" for a source it didn't read. Each new tab compares with the last visit.
