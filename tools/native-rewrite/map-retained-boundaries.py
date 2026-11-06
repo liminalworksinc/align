@@ -59,6 +59,7 @@ assign(
             "secret.ts",
             "startup.ts",
             "locks.ts",
+            "migration-coordinator.mts",
             "http.ts",
             "ratelimit.ts",
         ]

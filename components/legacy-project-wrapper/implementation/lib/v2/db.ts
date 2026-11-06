@@ -4,6 +4,7 @@ import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlit
 import { config } from "../config";
 import { SCHEMA_VERSION, type Sql } from "./core.mts";
 import { count } from "./plural.mts";
+import { applyMigrations } from "../migration-coordinator.mts";
 
 // Goal sessions storage: one SQLite file (WAL) at <ALIGN_DATA_DIR or ./data>/v2/align.sqlite, directory 0700, file 0600.
 // Two connections to the same file:
@@ -1113,28 +1114,19 @@ if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`lib/v2/core.mts SCHEM
 
 export function migrate() {
   const d = openDb().domain;
-  const current = Number((d.prepare("PRAGMA user_version").get() as { user_version: number }).user_version);
-  if (current >= MIGRATIONS.length) return lockDown(openDb().file);
-  // Rebuilding a table (drop, then rename the copy) needs foreign keys off; it can't change inside a transaction.
-  d.exec("PRAGMA foreign_keys = OFF");
-  try {
-    for (let v = current; v < MIGRATIONS.length; v++) {
-      d.exec("BEGIN IMMEDIATE");
-      try {
-        d.exec(MIGRATIONS[v]);
-        const broken = d.prepare("PRAGMA foreign_key_check").all();
-        if (broken.length) throw new Error(`migration ${v + 1} left ${count(broken.length, "broken reference")}`);
-        d.exec(`PRAGMA user_version = ${v + 1}`);
-        d.exec("COMMIT");
-      } catch (e) {
-        d.exec("ROLLBACK");
-        throw e;
-      }
-    }
-  } finally {
-    d.exec("PRAGMA foreign_keys = ON");
-  }
-  lockDown(openDb().file);
+  applyMigrations({
+    changeCount: MIGRATIONS.length,
+    readVersion: () => Number((d.prepare("PRAGMA user_version").get() as { user_version: number }).user_version),
+    setReferences: (enabled) => d.exec(`PRAGMA foreign_keys = ${enabled ? "ON" : "OFF"}`),
+    begin: () => d.exec("BEGIN IMMEDIATE"),
+    apply: (version) => d.exec(MIGRATIONS[version - 1]),
+    brokenReferences: () => d.prepare("PRAGMA foreign_key_check").all().length,
+    referenceError: (version, broken) => new Error(`migration ${version} left ${count(broken, "broken reference")}`),
+    writeVersion: (version) => d.exec(`PRAGMA user_version = ${version}`),
+    commit: () => d.exec("COMMIT"),
+    rollback: () => d.exec("ROLLBACK"),
+    complete: () => lockDown(openDb().file),
+  });
 }
 
 /** SQL: the workspace that `ws` (a column or a placeholder) names is not deleted. A deleted workspace, waiting out its

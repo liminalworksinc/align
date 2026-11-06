@@ -1428,6 +1428,31 @@ remains draft with the updated fifteen-library description. The documented
 one-command pre-push opt-out was specifically approved because the configured
 reviewer is under an API usage limit. Automatic review remains incomplete.
 
+## B12 storage schema baseline
+
+The [storage contract work](storage-data-contract.md) follows the published
+sixteen-library checkpoint. Static TypeScript extraction and isolated SQLite
+observations inventory all 22 migration steps and 23 schema versions. The final
+shape has 48 tables, 420 columns, 71 foreign-key constraints, 96 indexes including
+automatic indexes, and one trigger. Every empty starting schema converges to the
+same final shape. A separate 27-case probe executes the unchanged original module:
+23 empty historical upgrades match, connection and mode checks pass, a future
+version is a no-op, a failed migration rolls back, and a dropped-index control is
+detected. Further probes pass all 22 populated upgrade paths, 13 transaction and
+helper cases, 144 constraint cases and seven recovery/control cases. A complete
+application receipt records 1,825 passing checks, with no failures or skips, for
+the diagnostic-document checkpoint. Both installed verification runtimes pass.
+The migration coordinator qualifies on two clean builds against 645 observations
+in 21 batches. Its separate admitted build and public registration pass, preserving
+all sixteen previous records and 2,956 tracked child files. The target adapter
+passes 213 storage checks on both macOS and Linux. The full seventeen-library
+workflow passes 1,825 checks with no failures or skips; all 24 image checks and
+ten additional header checks pass. Current receipt:
+`sha256:5e61ae0fe5bebdf1b28e1ff2112135628f34d8d601ef99dcbd46444507da5547`.
+The historical SQL bodies and schema remain retained source. Publication, B13's
+full authentication schema, the remaining storage boundary and authority-class
+review remain open in the linked work.
+
 ## Boundary inventory
 
 Paths are relative to `components/legacy-project-wrapper/implementation/` unless they
@@ -1458,7 +1483,7 @@ types, and does not touch the database, files, network, clock or environment.
 
 | ID | Boundary | Files | Evidence | Owner | Class |
 |---|---|---|---|---|---|
-| B12 | Storage, configuration and request plumbing | `lib/v2/core.mts`, `db.ts`, `node-sqlite.d.ts`, `ids.ts`, `events.ts`, `init.ts`, `config.ts`, `limits.ts`, `http.ts`; `lib/config.ts`, `secret.ts`, `startup.ts`, `locks.ts`, `http.ts`, `ratelimit.ts` | `test-v2.mjs` (opens the database directly with `node:sqlite`) | `workspaces.md` (rate limits, local and hosted edges) | intent: the shared queue is integrated as qualified `local/promise-queues`, with its original algorithm retired. The remaining storage and configuration code stays retained: `node:sqlite` schema and migrations (`db.ts`, 1139 lines), secrets and environment. Every server module depends on it; the schema has to become its own data contract before anything that touches the database can transfer. |
+| B12 | Storage, configuration and request plumbing | `lib/v2/core.mts`, `db.ts`, `node-sqlite.d.ts`, `ids.ts`, `events.ts`, `init.ts`, `config.ts`, `limits.ts`, `http.ts`; `lib/config.ts`, `secret.ts`, `startup.ts`, `locks.ts`, `http.ts`, `ratelimit.ts`, `lib/migration-coordinator.mts` | `test-v2.mjs` (opens the database directly with `node:sqlite`) | `workspaces.md` (rate limits, local and hosted edges) | intent: the shared queue is integrated as qualified `local/promise-queues`, with its original algorithm retired. The remaining storage and configuration code stays retained: `node:sqlite` schema and migrations (`db.ts`), secrets and environment. The numbered migration coordinator is qualified, registered and consumed in the working tree, with all 213 storage checks passing on macOS and Linux, the full 1,825-check application workflow and all 34 image/header checks passing. Every server module depends on it; the schema has to become its own data contract before anything that touches the database can transfer. |
 | B13 | Identity and sign-in | `lib/v2/auth.ts`, `captcha.ts`, `mail.ts`, `local-owner.ts`, `access.ts`, `creation.ts`, `disposable.ts`, `account.ts`, `lifecycle.ts` | `test-v2.mjs` | `workspaces.md` | retained: Better Auth, passkeys, email delivery and the bot check |
 | B14 | Workspaces and the sample | `lib/v2/workspaces.ts`, `sample.ts` | `test-v2.mjs` | `workspaces.md`, `goals-and-proposals.md` (Northstar sample) | retained: database |
 | B15 | Goals, change requests, alignments, reallocations, requests, asks | `lib/v2/goals.ts`, `goal-limits.ts`, `changes.ts`, `changes-read.ts`, `approval.ts`, `evidence.ts`, `value.ts`, `limit-suggest.ts`, `alignments.ts`, `reallocations.ts`, `requests.ts`, `asks.ts` | `test-v2.mjs` | `goals-and-proposals.md`, `directives.md` | retained: database transactions; the main product logic, a candidate after B12's data contract |
@@ -1503,11 +1528,11 @@ A pattern check on 2026-11-04 mapped all 362 tracked files under the implementat
 row above (first matching row wins), with none left over. Rows B01 to B11 hold 23 files; B12 to
 B22 and B28 hold 249; B23 to B30, excluding B28, hold 90.
 
-The current 395-file scope is reconciled on 2026-11-05 by
+The current 398-file scope is reconciled on 2026-11-05 by
 `tools/native-rewrite/map-retained-boundaries.py`: every file maps to one boundary,
 with no unmapped paths. Pure boundaries and their typed bindings hold 21 files;
-server, agent, UI and operator boundaries hold 249; assets, targets, packaging,
-harness and metadata hold 125. The new source-cache oracles and build admission
+server, agent, UI and operator boundaries hold 250; assets, targets, packaging,
+harness and metadata hold 127. The new source-cache oracles and build admission
 files are explicit harness rows. This membership check does not ratify the pending
 authority-class review or close the remaining runtime boundaries.
 
@@ -1522,7 +1547,8 @@ pass with main's security-header and folder-rule fixes from `b16f8d1`. The earli
 run on the previous base was interrupted before completion; its partial logs are
 preserved and do not establish the current receipt. All sixteen child
 registrations and qualified packages remain unchanged during reconciliation.
-Checkpoint commit and publication still need specific approval.
+The operator approved checkpoint commit `bb2605c`; it is published to draft PR #58
+with both exact-head CI workflows passing.
 
 Prepare B12's database schema and migration contract before replacing stateful
 server behavior. Keep storage, credentials, transaction semantics and target
