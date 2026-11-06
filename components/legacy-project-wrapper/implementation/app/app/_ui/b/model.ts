@@ -48,14 +48,18 @@ export const nameList = (ps: HomePerson[], me: string) => (ps.length ? ps.map((p
 export const proposedVersion = (cr: ChangeRequest) => cr.base_version + 1;
 
 /** What is launched (the goal's current version, the one Align serves) and what is approved but not launched. */
-export function versions(cr: ChangeRequest): { launched: string; approved: string; approvedLine: string } {
+export function versions(cr: ChangeRequest): { launched: string; approved: string; approvedLine: string; line: string } {
   // A goal's first version was saved by its owner, not launched by a request: call it what it is.
   const launched = cr.goal.version === 1 ? "Version 1" : `Launched v${cr.goal.version}`;
-  if (cr.state === "approved" && cr.launch === "launched") return { launched, approved: `v${cr.version}`, approvedLine: `Approved v${cr.version}` };
+  // What this request did or asks, in a few words true in every state ("Asks for v3"); the State beside it says the
+  // rest, and the review names the goal's current version.
+  if (cr.state === "approved" && cr.launch === "launched")
+    return { launched, approved: `v${cr.version}`, approvedLine: `Approved v${cr.version}`, line: `Launched v${cr.version}` };
   if (cr.state === "approved" && (cr.launch === "pending" || cr.launch === "not_yet"))
-    return { launched, approved: `v${proposedVersion(cr)}, not launched`, approvedLine: `Approved v${proposedVersion(cr)}, not launched` };
-  if (cr.state === "pending" || cr.state === "countered") return { launched, approved: `not yet, asks for v${proposedVersion(cr)}`, approvedLine: `Not approved yet, asks for v${proposedVersion(cr)}` };
-  return { launched, approved: "none", approvedLine: "Not approved" };
+    return { launched, approved: `v${proposedVersion(cr)}, not launched`, approvedLine: `Approved v${proposedVersion(cr)}, not launched`, line: `Approved v${proposedVersion(cr)}` };
+  if (cr.state === "pending" || cr.state === "countered")
+    return { launched, approved: `not yet, asks for v${proposedVersion(cr)}`, approvedLine: `Not approved yet, asks for v${proposedVersion(cr)}`, line: `Asks for v${proposedVersion(cr)}` };
+  return { launched, approved: "none", approvedLine: "Not approved", line: "Not approved" };
 }
 
 /** A one-line meaning of the request: what it changes, from the request's own fields. */

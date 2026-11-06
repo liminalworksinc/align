@@ -277,45 +277,85 @@ try {
       }
       throw new Error("no goal left for a click check");
     };
-    const A = await fresh();
-    const B = await fresh();
-    const C = await fresh();
-    const q = await open(owner, REQS);
-    await q.evaluate(() => [...document.querySelectorAll('[role="radio"]')].find((b) => /All/.test(b.textContent ?? ""))?.click());
-    await sleep(500);
-    // Every decision POST held 1.5 s, so the clicks land while the first is in flight.
-    const posts = [];
-    await q.setRequestInterception(true);
-    q.on("request", (req) => {
-      if (req.method() === "POST" && /\/change-requests\/[^/]+\/(approve|decide|decision|actions?)/.test(req.url())) {
-        posts.push(req.url());
-        setTimeout(() => req.continue(), 1500);
-      } else req.continue();
-    });
-    const clickIn = (id) => q.evaluate((x) => [...(document.querySelector(`[data-row="${x}"]`)?.closest("tr")?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.trim() === "Approve only")?.click(), id);
-    const noteOf = (id) => q.evaluate((x) => document.querySelector(`[data-row="${x}"]`)?.closest("tr")?.querySelector("[data-row-notice]")?.textContent ?? "", id);
-    const approvals = async (x) => (await apiAs(owner, "GET", `${W}/goals/${x.g.id}/change-requests/${x.cr.id}`)).state;
-    await clickIn(A.cr.id);
-    await sleep(150);
-    await clickIn(B.cr.id);
-    await sleep(150);
-    await clickIn(A.cr.id);
-    await sleep(4000);
-    const aPosts = posts.filter((u) => u.includes(A.cr.id)).length;
-    const okAB = aPosts === 1 && (await approvals(A)) === "approved" && (await approvals(B)) === "approved" && /Recorded: you approved revision 1\. Not launched yet\./.test(await noteOf(A.cr.id)) && /Recorded: you approved revision 1\. Not launched yet\./.test(await noteOf(B.cr.id));
-    check("Requests: A, then B, then A again while A is in flight: one approval each, and A still says Recorded", okAB, JSON.stringify({ aPosts, a: await noteOf(A.cr.id), b: await noteOf(B.cr.id) }));
-    // Three clicks in one tick, before any re-render.
-    await q.evaluate((x) => {
-      const b = [...(document.querySelector(`[data-row="${x}"]`)?.closest("tr")?.querySelectorAll("button") ?? [])].find((e) => e.textContent?.trim() === "Approve only");
-      b?.click();
-      b?.click();
-      b?.click();
-    }, C.cr.id);
-    await sleep(4000);
-    const cPosts = posts.filter((u) => u.includes(C.cr.id)).length;
-    const okC = cPosts === 1 && (await approvals(C)) === "approved" && /Recorded: you approved revision 1\. Not launched yet\./.test(await noteOf(C.cr.id));
-    check("Requests: three clicks before a re-render send one approval and the row says Recorded", okC, JSON.stringify({ cPosts, c: await noteOf(C.cr.id) }));
-    await q.close();
+    // In the table (1440) and as stacked cards (1024).
+    for (const cw of [1440, 1024]) {
+      const A = await fresh();
+      const B = await fresh();
+      const C = await fresh();
+      const q = await open(owner, REQS, { width: cw });
+      await q.evaluate(() => [...document.querySelectorAll('[role="radio"]')].find((b) => /All/.test(b.textContent ?? ""))?.click());
+      await sleep(500);
+      // Every decision POST held 1.5 s, so the clicks land while the first is in flight.
+      const posts = [];
+      await q.setRequestInterception(true);
+      q.on("request", (req) => {
+        if (req.method() === "POST" && /\/change-requests\/[^/]+\/(approve|decide|decision|actions?)/.test(req.url())) {
+          posts.push(req.url());
+          setTimeout(() => req.continue(), 1500);
+        } else req.continue();
+      });
+      const clickIn = (id) => q.evaluate((x) => [...(document.querySelector(`[data-row="${x}"]`)?.closest("tr")?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.trim() === "Approve only")?.click(), id);
+      const noteOf = (id) => q.evaluate((x) => document.querySelector(`[data-row="${x}"]`)?.closest("tr")?.querySelector("[data-row-notice]")?.textContent ?? "", id);
+      const approvals = async (x) => (await apiAs(owner, "GET", `${W}/goals/${x.g.id}/change-requests/${x.cr.id}`)).state;
+      await clickIn(A.cr.id);
+      await sleep(150);
+      await clickIn(B.cr.id);
+      await sleep(150);
+      await clickIn(A.cr.id);
+      await sleep(4000);
+      const aPosts = posts.filter((u) => u.includes(A.cr.id)).length;
+      const okAB = aPosts === 1 && (await approvals(A)) === "approved" && (await approvals(B)) === "approved" && /Recorded: you approved revision 1\. Not launched yet\./.test(await noteOf(A.cr.id)) && /Recorded: you approved revision 1\. Not launched yet\./.test(await noteOf(B.cr.id));
+      check(`Requests at ${cw}: A, then B, then A again while A is in flight: one approval each, and A still says Recorded`, okAB, JSON.stringify({ aPosts, a: await noteOf(A.cr.id), b: await noteOf(B.cr.id) }));
+      // Three clicks in one tick, before any re-render.
+      await q.evaluate((x) => {
+        const b = [...(document.querySelector(`[data-row="${x}"]`)?.closest("tr")?.querySelectorAll("button") ?? [])].find((e) => e.textContent?.trim() === "Approve only");
+        b?.click();
+        b?.click();
+        b?.click();
+      }, C.cr.id);
+      await sleep(4000);
+      const cPosts = posts.filter((u) => u.includes(C.cr.id)).length;
+      const okC = cPosts === 1 && (await approvals(C)) === "approved" && /Recorded: you approved revision 1\. Not launched yet\./.test(await noteOf(C.cr.id));
+      check(`Requests at ${cw}: three clicks before a re-render send one approval and the row says Recorded`, okC, JSON.stringify({ cPosts, c: await noteOf(C.cr.id) }));
+      await q.close();
+    }
+    // The owner's desk at laptop widths: no sideways scroll, no title word broken mid-word, every row names who it waits
+    // on or its action, and a request with no link says so.
+    for (const w of [1440, 1366, 1280, 1220, 1200, 1199, 1024, 768, 390, 320]) {
+      const d = await open(owner, REQS, { width: w });
+      await d.evaluate(() => [...document.querySelectorAll('[role="radio"]')].find((b) => /All/.test(b.textContent ?? ""))?.click());
+      await sleep(500);
+      const r = await d.evaluate(() => {
+        const broken = [];
+        for (const row of document.querySelectorAll("[data-row]")) {
+          const title = row.firstElementChild;
+          const text = title?.firstChild;
+          if (!text || text.nodeType !== 3) continue;
+          const s = text.textContent ?? "";
+          const re = /[^\s-]+/g; // a break at a hyphen is a normal line break
+          let m;
+          while ((m = re.exec(s))) {
+            const range = document.createRange();
+            range.setStart(text, m.index);
+            range.setEnd(text, m.index + m[0].length);
+            const tops = new Set([...range.getClientRects()].map((x) => Math.round(x.top)));
+            if (tops.size > 1) broken.push(m[0]);
+          }
+        }
+        const rows = [...document.querySelectorAll("[data-row]")].map((x) => x.closest("tr") ?? x.closest("[role=row]") ?? x.parentElement);
+        const unnamed = rows.filter((tr) => tr && ![...tr.querySelectorAll("button, a")].length && !/ can |No action/.test(tr.innerText)).length;
+        return { over: document.documentElement.scrollWidth - document.documentElement.clientWidth, broken, unnamed, noEv: document.querySelectorAll("[data-no-evidence]").length, waitsOn: [...document.querySelectorAll("th")].some((th) => /Waits on/i.test(th.textContent ?? "")) };
+      });
+      check(`Requests, owner at ${w}: no sideways scroll, no title word broken, every row names its action or who can act, no "Waits on" column`, r.over <= 0 && !r.broken.length && r.unnamed === 0 && !r.waitsOn, JSON.stringify(r));
+      if (w === 1440 || w === 1024 || w === 390) check(`Requests at ${w}: a request with no link says "No evidence attached"`, r.noEv > 0, JSON.stringify(r));
+      if (w === 1440) {
+        const lines = await d.evaluate(() => [...document.querySelectorAll("[data-row]")].map((x) => x.closest("tr")?.querySelectorAll("td")[2]?.innerText ?? ""));
+        check("Requests: Versions on one line of wording", lines.length > 0 && lines.every((t) => /^(Asks for v\d+|Approved v\d+|Launched v\d+|Not approved)$/.test(t.trim())), JSON.stringify(lines.slice(0, 6)));
+        await shot(d, "r2-requests-owner-1440");
+      }
+      if (w === 1280 || w === 1199 || w === 390) await shot(d, `r2-requests-owner-${w}`);
+      await d.close();
+    }
     const vp = await open(viewer, REQS);
     check("Requests: a viewer never sees 'Approve only'", !(await vp.evaluate(() => [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Approve only"))));
     await vp.close();
