@@ -862,6 +862,8 @@ visible action the role does not allow.
 
 - **WHEN** a viewer attempts any change other than leaving, a member attempts an owner-only action (invites, creating teams, member roles and removal, renaming or deleting the workspace, reading the audit trail), or a member who is neither owner nor that team's lead changes a team's membership
 - **THEN** the server responds 403 `read_only`, `owner_only` or `not_team_lead` respectively
+- **WHEN** an owner attempts to assign a workspace viewer as a team lead, directly or through an invite
+- **THEN** the server refuses with 403 `viewer_lead`; an existing lead row never overrides a viewer's workspace-level `read_only` restriction
 
 ### Requirement: Workspace and account read views
 
