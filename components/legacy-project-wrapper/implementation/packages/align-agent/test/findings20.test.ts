@@ -13,6 +13,8 @@ import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
+import os from "node:os";
+import { withLock } from "../src/api.ts";
 import { sessionKey } from "../src/keys.ts";
 import { commitSubject, pathHash, repoIdentity, shellWrites, type Act } from "../src/hooks/siblings.ts";
 import * as envelope from "../src/shared/envelope.ts";
@@ -264,6 +266,56 @@ const ROWS: Row[] = [
     },
   },
 ];
+
+// LIM-2441 H7c: the refresh lock's holder released it by unlinking the file whoever held it. A holder paused past the
+// 20-second stale mark (a laptop asleep) had its lock taken over, then on waking deleted the new holder's lock, letting a
+// third process refresh at the same time as the second.
+describe("LIM-2441 H7c: a holder releases only its own refresh lock", () => {
+  test("a paused holder whose lock was taken over leaves the new holder's lock in place, so a third waits", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "align-h7c-"));
+    cleanups.push(() => fs.rmSync(home, { recursive: true, force: true }));
+    const file = layout.refreshLock(home);
+    const gate = () => {
+      let open!: () => void;
+      const p = new Promise<void>((r) => (open = r));
+      return { p, open };
+    };
+    const ga = gate();
+    const gb = gate();
+    let bIn = false;
+    const a = withLock(home, () => ga.p);
+    for (let i = 0; i < 50 && !fs.existsSync(file); i++) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(fs.existsSync(file), "A holds the lock");
+    // A sleeps past the stale mark: its heartbeat never ran, so its lock looks 25 s old.
+    const old = new Date(Date.now() - 25_000);
+    fs.utimesSync(file, old, old);
+    const b = withLock(home, async () => {
+      bIn = true;
+      await gb.p;
+    });
+    for (let i = 0; i < 100 && !bIn; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(bIn, "B took the stale lock over");
+    // A wakes and finishes.
+    ga.open();
+    await a;
+    assert.ok(fs.existsSync(file), "A's release left B's lock in place");
+    let cIn = false;
+    await assert.rejects(
+      withLock(
+        home,
+        async () => {
+          cIn = true;
+        },
+        400,
+      ),
+      /refresh lock busy/,
+    );
+    assert.equal(cIn, false, "a third never ran while B held the lock");
+    gb.open();
+    await b;
+    assert.ok(!fs.existsSync(file), "B released its own lock");
+  });
+});
 
 describe("A3-local-1, A3-local-6, A3-local-11: a shell command's effects are decided from their artifacts, whatever its exit status", () => {
   test("table: each command's writes and commit × exit status × whether it changed anything", async () => {
