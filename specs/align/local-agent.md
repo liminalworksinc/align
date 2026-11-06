@@ -677,12 +677,12 @@ whose share ends at a sign-out SHALL expire here ("The developer answers request
 #### Scenario: The pass that hears the device was revoked
 
 - **WHEN** two shared sessions, one stopped from the web, are on a machine whose device is revoked on the web, and `align sync` runs, then each is prompted or its tool denied with no other command in between (test `findings13` "C12-2: ...")
-- **THEN** the sync says the device was revoked, no share is live here after it, the next prompt says `Align: this session stopped sharing because this machine signed out of Align; ...`, and the stopped one's deny says `Its sharing has since ended (this machine signed out of Align), so tools stay blocked until the user runs \`align stop-sharing <lid8>\` in a terminal, or until it is shared again once this machine is signed in ...`, never `until it is resumed there`
+- **THEN** the sync says the device was revoked, no share is live here after it, the next prompt says `Align: this session stopped sharing because this machine signed out of Align; ...`, and the stopped one's deny says `Its sharing has since ended (this machine signed out of Align), so tools stay blocked until it is shared again once this machine is signed in ...; until then this session stays stopped: ...`, never `until it is resumed there` and never `align stop-sharing` (LIM-2441)
 
 #### Scenario: Signed out with a session stopped from the web
 
-- **WHEN** a session stopped from the web is on a machine that runs `align logout`, and it is prompted and a tool is denied (test `findings13` "signed out, a stopped session's notice and deny name both ways out in one sentence ...")
-- **THEN** the notice ends `It was stopped or held from the web, so tools stay blocked until it is shared again that way, after which the stop or hold, if still in place, can be lifted from the web, or until you run \`align stop-sharing <lid8>\` in a terminal.` and the deny names the same two ways
+- **WHEN** a session stopped from the web is on a machine that runs `align logout`, and it is prompted and a tool is denied (test `findings13` "signed out, a stopped session's notice and deny name the way back in one sentence ...")
+- **THEN** the notice ends `It was stopped or held from the web, so tools stay blocked until it is shared again that way, after which the stop or hold, if still in place, can be lifted from the web; until then this session stays stopped: a stop set from its Align workspace holds after its sharing ends, and nothing lifts it from here now. A new session is not stopped.` and the deny gives the same way back, neither naming `align stop-sharing` (a stop holds after sharing ends, LIM-2441)
 
 #### Scenario: A re-pairing, and a workspace given back
 
