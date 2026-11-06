@@ -290,18 +290,18 @@ export function ProposeControl({ ws, me, className }: { ws: string; me?: string;
       <button type="button" className={className ?? outline} onClick={() => setOpen({ start: goalHere() })} data-propose-open>
         Propose a change
       </button>
+      {/* The Drawer renders on document.body and sets its own wrapping, so nothing wraps it here: a wrapper would be a
+          flex child of the rail and move the workspace switcher while the drawer is open. */}
       {open && (
-        <div className="[overflow-wrap:break-word]">
-          <Drawer open onClose={() => setOpen(null)} eyebrow="Change the plan" title="Propose a change">
-            {feed.data ? (
-              <Form ws={ws} me={me} goals={feed.data.goals} start={open.start} onClose={() => setOpen(null)} />
-            ) : feed.error ? (
-              <p className="text-[15px] text-(--text-2)">Align couldn&apos;t read the goals just now: {feed.error}</p>
-            ) : (
-              <p className="text-[15px] text-(--text-3)">Reading the goals…</p>
-            )}
-          </Drawer>
-        </div>
+        <Drawer open onClose={() => setOpen(null)} eyebrow="Change the plan" title="Propose a change">
+          {feed.data ? (
+            <Form ws={ws} me={me} goals={feed.data.goals} start={open.start} onClose={() => setOpen(null)} />
+          ) : feed.error ? (
+            <p className="text-[15px] text-(--text-2)">Align couldn&apos;t read the goals just now: {feed.error}</p>
+          ) : (
+            <p className="text-[15px] text-(--text-3)">Reading the goals…</p>
+          )}
+        </Drawer>
       )}
     </>
   );
