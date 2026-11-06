@@ -31,8 +31,8 @@ import {
 import { openCtx, saveConfig, type Ctx } from "./context.ts";
 import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
-import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedByLogin, endedReason, endedState, endedUnsent, getShare, notMember, releaseOf, renderEndedShares } from "./hot.ts";
-import { endedWhyWords, latchWayOut, shareAgainWords } from "./shared/ended.ts";
+import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedByLogin, endedReason, endedState, endedUnsent, getShare, notMember, releaseOf, renderEndedShares, stopOutlivesShare } from "./hot.ts";
+import { endedWhyWords, latchWayOut, shareAgainWords, STOP_HOLDS_NO_SHARE } from "./shared/ended.ts";
 import { buildOf, hooksBuildDiffers, hooksBuildWords, selfBuild, supersededWords } from "./build.ts";
 import { resolvePaths, type Paths } from "./paths.ts";
 import { fetchAsks } from "./asks.ts";
@@ -716,23 +716,29 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
   out(`  Unpriced:   ${unpriced.length ? unpriced.map((u) => `${u.n} ${u.unpriced}`).join(", ") : "0"}`);
   const latched = (ctx.db.prepare("SELECT COUNT(*) AS n FROM latches WHERE stopped=1").get() as { n: number }).n;
   // Of those whose share ended: the ones that can be shared there again now (`::align share`, then the web lifts it), the
-  // held ones a release still reaches (C10-4), and the ones only `align stop-sharing` unblocks (C6-2).
+  // held ones a release still reaches (C10-4), and the ones only `align stop-sharing` unblocks (C6-2; a hold: a stop holds
+  // after its sharing ends, LIM-2441).
   // While the ended shares are unread since this sign-in, `align sync` comes first (cycle 12, section 6); signed out, a
   // new `align login` is the other way out of those a sign-out ended.
   const unread = signedIn(ctx.home) && !!kvGet(ctx.db, ENDED_UNREAD);
-  const stuck = (e: { stuck: number; again: number; release: number; login: number }) =>
+  // A stop holds after its sharing ends (LIM-2441): for stop latches (`stop`), `align stop-sharing` is never the way out.
+  const stuck = (e: { stuck: number; again: number; release: number; login: number; stop: boolean }) =>
     (e.again ? `; ${e.again} can be shared again (${unread ? "run `align sync` first, then " : ""}\`::align share\` in the session), after which the web can lift it` : "") +
     (e.login
-      ? `; ${e.login} can be shared again once this machine is signed in (\`align login\`, then \`::align share\` in the session), after which the web can lift it, or freed now with \`align stop-sharing <session>\``
+      ? `; ${e.login} can be shared again once this machine is signed in (\`align login\`, then \`::align share\` in the session), after which the web can lift it${e.stop ? "" : ", or freed now with \`align stop-sharing <session>\`"}`
       : "") +
     (e.release ? `; ${e.release} can still be released from the web (sharing ended, but the release reaches it) or freed with \`align stop-sharing <session>\`` : "") +
-    (e.stuck ? `; ${e.stuck} can't be lifted from the web any more (sharing ended): \`align stop-sharing <session>\` unblocks each` : "");
+    (e.stuck
+      ? e.stop
+        ? `; ${e.stuck} can't be lifted any more (sharing ended): ${e.stuck > 1 ? "those sessions stay" : "that session stays"} stopped, and a new session is not`
+        : `; ${e.stuck} can't be lifted from the web any more (sharing ended): \`align stop-sharing <session>\` unblocks each`
+      : "");
   const endedOf = (table: "latches" | "holds", flag: "stopped" | "held") => {
     const lids = (ctx.db.prepare(`SELECT DISTINCT x.local_id AS lid FROM ${table} x JOIN shares s ON s.local_id=x.local_id WHERE x.${flag}=1 AND s.state IN ('stopped','error')`).all() as { lid: string }[]).map((r) => r.lid);
     const again = lids.filter((lid) => endedState(ctx, getShare(ctx, lid))?.reshare).length;
     const login = lids.filter((lid) => endedState(ctx, getShare(ctx, lid))?.login).length;
     const release = table === "holds" ? lids.filter((lid) => !endedState(ctx, getShare(ctx, lid))?.reshare && releaseOf(ctx, lid, getShare(ctx, lid))).length : 0;
-    return { stuck: lids.length - again - release - login, again, release, login };
+    return { stuck: lids.length - again - release - login, again, release, login, stop: table === "latches" };
   };
   if (latched) out(`  Stop latch: ${latched} session(s) stopped${stuck(endedOf("latches", "stopped"))}; see \`align latch status\``);
   const holds = ctx.db.prepare("SELECT local_id, goal_id, json FROM holds WHERE held=1").all() as { local_id: string; goal_id: string; json: string }[];
@@ -959,8 +965,9 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
   const own = share?.state === "stopped" ? share : null;
   if (own && !values.workspace) ws = resolveWorkspace(ctx.home, own.workspace_id);
   if (own && ws?.id !== own.workspace_id) {
-    const latched = !!(ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(own.local_id) || ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(own.local_id));
-    const why = ws && resolveWorkspace(ctx.home, own.workspace_id) ? otherWorkspaceWords(own.workspace_name, ws.name) : outOfReachWords(own.workspace_name, own.local_id, latched);
+    const stopped = !!ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(own.local_id);
+    const latched = stopped || !!ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(own.local_id);
+    const why = ws && resolveWorkspace(ctx.home, own.workspace_id) ? otherWorkspaceWords(own.workspace_name, ws.name) : outOfReachWords(own.workspace_name, own.local_id, latched, stopped);
     err(`align: session ${session.local_id.slice(0, 8)} was not shared: ${why}`);
     process.exitCode = 1;
     return;
@@ -969,6 +976,13 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
   // Its person stopped it while it was shared, and its history is kept: the server would refuse it, so nothing is sent
   // and the answer is the one `::align share` gives. A share a sign-out or a lost workspace had ended is shared again
   // (cycle 7).
+  // Stopped from its workspace, and its sharing stopped or its history deleted since: the stop holds, and sharing it again
+  // would be refused or start a server record with no stop on it, which the web can't resume (LIM-2441).
+  if (stopOutlivesShare(ctx, session.local_id)) {
+    err(`align: session ${session.local_id.slice(0, 8)} was not shared: ${STOP_HOLDS_NO_SHARE}`);
+    process.exitCode = 1;
+    return;
+  }
   if (share?.state === "stopped" && stoppedByPerson(ctx, session.local_id) && (endedReason(share) ?? "sharing_ended") === "sharing_ended" && ws.id === share.workspace_id) {
     err(`align: session ${session.local_id.slice(0, 8)} was not shared: ${stoppedForGoodWords(session.local_id, "run `align share` again")}`);
     process.exitCode = 1;
@@ -1172,15 +1186,19 @@ async function cmdStopSharing(ctx: Ctx, argv: string[], cmdName = "stop-sharing"
   const { positionals } = parseSessionArgs(ctx, cmdName, argv, {});
   prepare(ctx);
   const s = resolveSession(ctx, positionals[0]);
-  // A stop latch or goal hold this lifts (both go with the share): said, so the developer knows its tools work again
-  // (E2E-AGENT cycle 12, section 6).
+  // A goal hold this lifts (it goes with the share): said, so the developer knows its tools work again (E2E-AGENT cycle
+  // 12, section 6). A stop set from the workspace stays (LIM-2441): said too, so nobody expects this to lift it.
   const stop = !!ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(s.local_id);
   const held = (ctx.db.prepare("SELECT json FROM holds WHERE local_id=? AND held=1 ORDER BY seq").all(s.local_id) as { json: string }[]).map((h) => `"${clean((JSON.parse(h.json) as { goal_title: string }).goal_title, 80)}"`);
   stopSharing(ctx, s.local_id);
   await tryFlush(ctx);
   out("Stopped sharing. Future usage stays on this machine. Already shared history stays until you run `align delete-history`.");
-  const lifted = [stop ? "its stop from the web" : "", held.length ? `the hold on ${held.length > 1 ? `${held.slice(0, -1).join(", ")} and ${held[held.length - 1]}` : held[0]}` : ""].filter(Boolean);
-  if (lifted.length) out(`Its tools are unblocked now: ${lifted.join(" and ")} no longer ${lifted.length > 1 || held.length > 1 ? "apply" : "applies"} to session ${s.local_id.slice(0, 8)}.`);
+  const lifted = held.length ? `the hold on ${held.length > 1 ? `${held.slice(0, -1).join(", ")} and ${held[held.length - 1]}` : held[0]}` : "";
+  if (stop) {
+    out(
+      `Session ${s.local_id.slice(0, 8)} stays stopped: it was stopped from its Align workspace, and that stop holds after sharing stops. Its tools stay blocked; a new session is not stopped.${lifted ? ` ${lifted.charAt(0).toUpperCase()}${lifted.slice(1)} no longer ${held.length > 1 ? "apply" : "applies"}.` : ""}`,
+    );
+  } else if (lifted) out(`Its tools are unblocked now: ${lifted} no longer ${held.length > 1 ? "apply" : "applies"} to session ${s.local_id.slice(0, 8)}.`);
 }
 
 async function cmdDeleteHistory(ctx: Ctx, argv: string[]): Promise<void> {
@@ -1257,11 +1275,12 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
       return `; sharing ended (${endedWhyWords(ended.why, true, relogin, true)}): ${shareAgainWords(!!kvGet(ctx.db, ENDED_UNREAD), "in the session", true)}, after which it can be resumed or released from the web`;
     }
     const why = endedWhyWords(ended.why, false, relogin, true);
-    // Signed out: `align stop-sharing`, or a new sign-in and `::align share`, in the deny's words (cycle 12, section 6).
-    if (ended.login) return `; sharing ended (${why}): ${latchWayOut(lid, false, "user", null, { login: true })}`;
+    // Signed out: a new sign-in and `::align share` (or, for a hold, `align stop-sharing`), in the deny's words (cycle 12,
+    // section 6). A stop holds after its sharing ends (LIM-2441): `align stop-sharing` frees only a hold.
+    if (ended.login) return `; sharing ended (${why}): ${latchWayOut(lid, false, "user", null, { login: true }, !hold)}`;
     const release = releaseOf(ctx, lid, share);
     if (release && hold) return `; sharing ended (${why}), but a release still reaches it: ${latchWayOut(lid, false, "user", release)}`;
-    if (release) return `; sharing ended (${why}), so only \`align stop-sharing ${lid.slice(0, 8)}\` unblocks it (a release of its hold lifts only the hold)`;
+    if (!hold) return `; sharing ended (${why}), so ${latchWayOut(lid, false, "user", release, { lost: ended.why === "access_lost" }, true)}`;
     return `; sharing ended (${why}), so only \`align stop-sharing ${lid.slice(0, 8)}\` unblocks it`;
   };
   for (const r of rows) {

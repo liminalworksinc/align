@@ -166,7 +166,9 @@ describe("E2E cycle 3 leftovers", () => {
     fake.workspaces = [];
     assert.equal((await runCli(t, ["sync"])).code, 0);
     const out = (await runCli(t, ["latch", "status"])).stdout;
-    assert.match(out, new RegExp(`STOPPED \\(tools blocked\\).*; sharing ended \\(this machine no longer has access to its Align workspace\\), so only \`align stop-sharing ${A.lid.slice(0, 8)}\` unblocks it`));
+    // A stop holds after its sharing ends (LIM-2441): no `align stop-sharing` as a way out.
+    assert.match(out, new RegExp(`STOPPED \\(tools blocked\\).*; sharing ended \\(this machine no longer has access to its Align workspace\\), so this session stays stopped: a stop set from its Align workspace holds after its sharing ends`));
+    assert.doesNotMatch(out, /align stop-sharing/);
     assert.doesNotMatch(out, /no longer has the share/);
   });
 
