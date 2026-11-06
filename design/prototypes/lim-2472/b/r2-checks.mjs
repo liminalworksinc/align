@@ -256,6 +256,66 @@ try {
     await p.evaluate(() => document.querySelector('[data-row-notice="done"]')?.scrollIntoView({ block: "center" }));
     await shot(p, "r2-requests-shortcut-dark-1440");
     await p.close();
+
+    // Several clicks on "Approve only": each row sends one approval and says so, whatever else is in flight.
+    const askers = [];
+    for (const who of ["rafi", "mina", "theo", "vic", "eli"]) if (s.people[who]) askers.push(await login(s.people[who]));
+    const fresh = async () => {
+      const goals = (await apiAs(owner, "GET", `${W}/goals`)).goals;
+      for (const asker of askers) {
+        for (const g of goals) {
+          try {
+            const cr = await apiAs(asker, "POST", `${W}/goals/${g.id}/change-requests`, { base_version: g.version, changes: { title: `${g.title} (clicks)` }, reason: "Click check (fictional)." });
+            await apiAs(asker, "POST", `${W}/goals/${g.id}/change-requests/${cr.id}/evidence`, { revision: 1, kind: "doc", url: "https://example.test/kestrel/docs/clicks", label: "Click note (fictional)" });
+            const now = await apiAs(owner, "GET", `${W}/goals/${g.id}/change-requests/${cr.id}`);
+            if (now.can?.approve && !now.can?.approve_and_launch) return { cr, g };
+            if (now.can?.approve) return { cr, g };
+          } catch {
+            /* a request is open there already, or this person can't ask there: try the next */
+          }
+        }
+      }
+      throw new Error("no goal left for a click check");
+    };
+    const A = await fresh();
+    const B = await fresh();
+    const C = await fresh();
+    const q = await open(owner, REQS);
+    await q.evaluate(() => [...document.querySelectorAll('[role="radio"]')].find((b) => /All/.test(b.textContent ?? ""))?.click());
+    await sleep(500);
+    // Every decision POST held 1.5 s, so the clicks land while the first is in flight.
+    const posts = [];
+    await q.setRequestInterception(true);
+    q.on("request", (req) => {
+      if (req.method() === "POST" && /\/change-requests\/[^/]+\/(approve|decide|decision|actions?)/.test(req.url())) {
+        posts.push(req.url());
+        setTimeout(() => req.continue(), 1500);
+      } else req.continue();
+    });
+    const clickIn = (id) => q.evaluate((x) => [...(document.querySelector(`[data-row="${x}"]`)?.closest("tr")?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.trim() === "Approve only")?.click(), id);
+    const noteOf = (id) => q.evaluate((x) => document.querySelector(`[data-row="${x}"]`)?.closest("tr")?.querySelector("[data-row-notice]")?.textContent ?? "", id);
+    const approvals = async (x) => (await apiAs(owner, "GET", `${W}/goals/${x.g.id}/change-requests/${x.cr.id}`)).state;
+    await clickIn(A.cr.id);
+    await sleep(150);
+    await clickIn(B.cr.id);
+    await sleep(150);
+    await clickIn(A.cr.id);
+    await sleep(4000);
+    const aPosts = posts.filter((u) => u.includes(A.cr.id)).length;
+    const okAB = aPosts === 1 && (await approvals(A)) === "approved" && (await approvals(B)) === "approved" && /Recorded: you approved revision 1\. Not launched yet\./.test(await noteOf(A.cr.id)) && /Recorded: you approved revision 1\. Not launched yet\./.test(await noteOf(B.cr.id));
+    check("Requests: A, then B, then A again while A is in flight: one approval each, and A still says Recorded", okAB, JSON.stringify({ aPosts, a: await noteOf(A.cr.id), b: await noteOf(B.cr.id) }));
+    // Three clicks in one tick, before any re-render.
+    await q.evaluate((x) => {
+      const b = [...(document.querySelector(`[data-row="${x}"]`)?.closest("tr")?.querySelectorAll("button") ?? [])].find((e) => e.textContent?.trim() === "Approve only");
+      b?.click();
+      b?.click();
+      b?.click();
+    }, C.cr.id);
+    await sleep(4000);
+    const cPosts = posts.filter((u) => u.includes(C.cr.id)).length;
+    const okC = cPosts === 1 && (await approvals(C)) === "approved" && /Recorded: you approved revision 1\. Not launched yet\./.test(await noteOf(C.cr.id));
+    check("Requests: three clicks before a re-render send one approval and the row says Recorded", okC, JSON.stringify({ cPosts, c: await noteOf(C.cr.id) }));
+    await q.close();
     const vp = await open(viewer, REQS);
     check("Requests: a viewer never sees 'Approve only'", !(await vp.evaluate(() => [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Approve only"))));
     await vp.close();

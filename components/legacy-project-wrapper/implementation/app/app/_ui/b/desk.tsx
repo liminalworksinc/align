@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DataTable, EmptyState, EvidenceSummary, hasEvidence, NeedAction, Segmented, sendChoice, StatusPill, type Column, type SendResult } from "../ds";
 import { useApi } from "../kit";
 import type { ChangeRequest } from "../types";
@@ -56,7 +56,10 @@ export function Desk({
   const [q, setQ] = useState("");
   const narrow = useNarrow();
   const [notes, setNotes] = useState<Map<string, SendResult>>(new Map());
-  const [busy, setBusy] = useState<string | null>(null);
+  // Every row with an "Approve only" in flight: a ref, so clicks that land before a re-render send nothing more, and a
+  // set, so a click on another row never re-enables this one.
+  const inflight = useRef(new Set<string>());
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
 
   const open = (r: ChangeRequest) => (onOpen ? onOpen(r) : router.push(`?review=${r.goal.id}.${r.id}`, { scroll: false }));
 
@@ -152,10 +155,15 @@ export function Desk({
    *  with requireEvidence, sends nothing if the evidence was removed meanwhile. Never a launch from a row. */
   const shortcut = (r: ChangeRequest, label: string) => r.can.approve && hasEvidence(r) && label === "Review";
   const approveRow = async (r: ChangeRequest) => {
-    setBusy(r.id);
+    if (inflight.current.has(r.id)) return;
+    inflight.current.add(r.id);
+    setBusy(new Set(inflight.current));
     const res = await sendChoice(ws, r, "approve", null, { requireEvidence: true, launchNote: true });
-    setBusy(null);
-    setNotes((m) => new Map(m).set(r.id, res));
+    inflight.current.delete(r.id);
+    setBusy(new Set(inflight.current));
+    // This person's own approval stays said: a later answer for the same row (a 409 for a click after it) never
+    // replaces "Recorded".
+    setNotes((m) => (m.get(r.id)?.kind === "done" && res.kind !== "done" ? m : new Map(m).set(r.id, res)));
     if (res.reread) feed.reload();
   };
   const rowNote = (r: ChangeRequest) => {
@@ -185,8 +193,8 @@ export function Desk({
       <span className="flex flex-col items-end max-sm:items-start">
         <span className="inline-flex items-center gap-1">
           {shortcut(r, label) && (
-            <NeedAction quiet name={`Approve only: ${r.goal.title}. This does not launch it.`} disabled={busy === r.id} onClick={() => void approveRow(r)}>
-              {busy === r.id ? "Approving…" : "Approve only"}
+            <NeedAction quiet name={`Approve only: ${r.goal.title}. This does not launch it.`} disabled={busy.has(r.id)} onClick={() => void approveRow(r)}>
+              {busy.has(r.id) ? "Approving…" : "Approve only"}
             </NeedAction>
           )}
           {review}
