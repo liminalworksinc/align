@@ -275,6 +275,7 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
           </form>
         )}
         <Err>{error}</Err>
+        <p className="mt-5 text-[15px] text-(--text-2)">Have an invite code? Sign in first, then enter it.</p>
         {options.requestAccess && (
           <p className="mt-5 border-t border-(--line) pt-4 text-[15px] text-(--text-2)">
             New to Align? Creating a workspace here needs a creation code.{" "}

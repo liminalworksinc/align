@@ -282,6 +282,16 @@ for (const [role, a] of Object.entries(people)) {
   rule('Since, every read answers and no events: "Nothing changed"', all.includes(CHANGED) && !all.includes("couldn't read"), all);
   await ctx.close();
 }
+// Founder-ruled strings (LIM-2473). The code field only renders on a hosted server, so its hint is read from the source.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  await page.goto(`${BASE}/app/sign-in`, { waitUntil: "networkidle", timeout: 60000 });
+  rule("sign-in, signed out: the invite-code line", (await page.locator("main").first().innerText()).includes("Have an invite code? Sign in first, then enter it."));
+  await ctx.close();
+  const source = readFileSync("components/legacy-project-wrapper/implementation/app/app/view.tsx", "utf8");
+  rule("code field: the ruled hint, no alc_ placeholder, maxLength kept", source.includes('hint="Each code creates one workspace. Use the code you were given."') && !source.includes('placeholder="alc_') && source.split("\n").some((l) => l.includes('name="creation_code"') && l.includes("maxLength={100}")));
+}
 await browser.close();
 process.exitCode = failed ? 1 : 0;
 console.log(failed ? `${failed} failed` : "all passed");
