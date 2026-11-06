@@ -12287,6 +12287,10 @@ try {
     v1Create.status === 201 && v1Row?.redeemed_at && v1Replay.status === 403 && v1Replay.json?.error === "creation_code_invalid" && /Imported 0, for 60 days\. 3 already here, left as they were \(1 of those used\)\. 1 spent on v1, skipped\./.test(v1Reimport.out) && v1Purge.status === 0 && v1AfterPurge.status === 403 && v1AfterPurge.json?.error === "creation_code_invalid",
     `${v1Create.status} ${v1Create.text} ${v1Replay.status} ${v1Reimport.out} ${v1Purge.status} ${v1Purge.err} ${v1AfterPurge.status}`,
   );
+  // Testers paste codes from a text message. The route trims (optStr); the shape match stays exact, so case is untouched.
+  const v1Pasted = await gCreate(BOB, "Bob V1 pasted", `  ${v1Kept}\n`);
+  const v1PastedPurge = admin(["workspaces", "delete", v1Pasted.json?.id ?? "", "--purge", "--yes"], opGate);
+  check("gate (LIM-2473): a code pasted with spaces and a newline around it is accepted (201)", v1Pasted.status === 201 && v1PastedPurge.status === 0, `${v1Pasted.status} ${v1Pasted.text} ${v1PastedPurge.status}`);
   const v1Clear = readdirSync(gateDir, { recursive: true }).filter((f) => statSync(path.join(gateDir, f)).isFile()).some((f) => readFileSync(path.join(gateDir, f)).includes(v1Unused));
   check("gate (LIM-2473): an imported code is in no file of the data directory in clear; only its HMAC is stored", !v1Clear);
   const v1SignIn = await hosted("GET", "/app/sign-in");
