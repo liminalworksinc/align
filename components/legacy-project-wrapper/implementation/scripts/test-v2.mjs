@@ -12311,9 +12311,15 @@ try {
   const boundRow = v1Rows().find((r) => r.email === boundAddress);
   const boundList = admin(["codes", "list"], opGate);
   check("LIM-2480: bound import normalizes the address and prints neither address nor code (including codes list)",
-    boundImport.status === 0 && v1Rows().length === boundBefore + 1 && !!boundRow &&
+    boundImport.status === 0 && boundList.status === 0 && v1Rows().length === boundBefore + 1 && !!boundRow &&
     [boundImport, boundList].every((r) => ![boundCode, boundAddress].some((v) => (r.out + r.err).toLowerCase().includes(v))),
     `import status ${boundImport.status}; row present ${!!boundRow}`);
+  const preservedBefore = v1Rows().find((r) => r.id === v1Added.find((x) => !v1Rows().find((y) => y.id === x.id)?.redeemed_at)?.id);
+  writeFileSync(boundFile, `${v1Unused},${boundAddress}\n`, { mode: 0o600 });
+  const liveAgain = admin(boundArgs, opGate);
+  const preservedAfter = v1Rows().find((r) => r.id === preservedBefore?.id);
+  check("LIM-2480: re-import leaves a live unbound row entirely unchanged",
+    liveAgain.status === 0 && !!preservedBefore && JSON.stringify(preservedBefore) === JSON.stringify(preservedAfter));
   const boundWrong = await gCreate(BOB, "Wrong recipient", boundCode);
   const boundTester = await gSignIn(boundAddress);
   const boundHome = await hosted("GET", "/app", { cookie: boundTester.cookie });
@@ -12339,6 +12345,86 @@ try {
   check("LIM-2480: malformed bound rows abort the complete import with line numbers only",
     boundInvalid.status === 2 && /lines 2, 3, 4\./.test(boundInvalid.err) && v1Rows().length === invalidBefore &&
     !boundInvalid.err.includes(boundAddress) && !boundInvalid.err.includes("invalid\n"), `status ${boundInvalid.status}`);
+  // LIM-2480: exercise the real hosted pages and handlers. Only delivery and the external bot widget are fakes.
+  // Interception preserves the public HTTPS origin (and Secure cookies) while forwarding to the isolated server.
+  if (existsSync(CHROME)) {
+    const { default: puppeteer } = await import("puppeteer-core");
+    const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
+    try {
+      for (const width of [1440, 390, 320]) for (const theme of ["light", "dark"]) {
+        const context = await browser.createBrowserContext();
+        const page = await context.newPage();
+        const address = [`browser-${width}-${theme}`, "example.test"].join("@");
+        const invite = v1Hex();
+        writeFileSync(boundFile, `${invite},${address}\n`, { mode: 0o600 });
+        const imported = admin(boundArgs, opGate);
+        let errors = 0;
+        let created = null;
+        let overflow = false;
+        page.on("pageerror", () => errors++);
+        await page.setViewport({ width, height: 900 });
+        await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: theme }]);
+        await page.evaluateOnNewDocument(() => {
+          const callbacks = new Map();
+          window.turnstile = {
+            render(_el, options) { const id = String(callbacks.size); callbacks.set(id, options.callback); setTimeout(() => options.callback("ok"), 0); return id; },
+            reset(id) { setTimeout(() => callbacks.get(id)?.("ok"), 0); },
+            remove(id) { callbacks.delete(id); },
+          };
+        });
+        await page.setRequestInterception(true);
+        page.on("request", async (request) => {
+          try {
+            const url = new URL(request.url());
+            if (url.origin !== `https://${HOSTED_HOST}`) return void await request.abort();
+            const headers = { ...request.headers(), host: HOSTED_HOST, "x-forwarded-proto": "https", "fly-client-ip": nextIp() };
+            delete headers["accept-encoding"];
+            const result = await new Promise((resolve, reject) => {
+              const outgoing = http.request({ hostname: "127.0.0.1", port: PORT, path: url.pathname + url.search, method: request.method(), headers }, (res) => {
+                const chunks = [];
+                res.on("data", (chunk) => chunks.push(chunk));
+                res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
+              });
+              outgoing.on("error", reject);
+              outgoing.end(request.postData());
+            });
+            if (url.pathname === "/api/v2/workspaces" && request.method() === "POST" && result.status === 201) created = JSON.parse(result.body.toString()).id;
+            delete result.headers["transfer-encoding"];
+            await request.respond(result);
+          } catch { errors++; await request.abort().catch(() => {}); }
+        });
+        const fit = async () => { overflow ||= await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1); };
+        const submit = async (selector) => {
+          await page.waitForFunction((s) => { const button = document.querySelector(s); return button && !button.disabled; }, {}, selector);
+          await page.click(selector);
+        };
+        try {
+          await page.goto(`https://${HOSTED_HOST}/new`, { waitUntil: "networkidle0" });
+          await page.waitForSelector('input[name="email"]');
+          await fit();
+          await page.type('input[name="email"]', address);
+          await submit('#email-code button[type="submit"]');
+          await page.waitForSelector('input[name="code"]');
+          await fit();
+          await page.type('input[name="code"]', mailCode(address));
+          await submit('#email-code button[type="submit"]');
+          await page.waitForSelector('input[name="creation_code"]');
+          await fit();
+          await page.type('form input:not([name])', "Browser tester");
+          await page.type('input[name="creation_code"]', invite);
+          await submit('form button[type="submit"]');
+          await page.waitForFunction(() => /^\/app\/w\//.test(location.pathname));
+          await fit();
+          check(`LIM-2480: hosted new tester browser path ${width} ${theme}`, imported.status === 0 && !!created && errors === 0 && !overflow,
+            `import ${imported.status}; created ${!!created}; errors ${errors}; overflow ${overflow}`);
+        } catch { check(`LIM-2480: hosted new tester browser path ${width} ${theme}`, false, "browser step did not complete"); }
+        finally {
+          if (created) check(`LIM-2480: browser fixture cleanup ${width} ${theme}`, admin(["workspaces", "delete", created, "--purge", "--yes"], opGate).status === 0);
+          await context.close();
+        }
+      }
+    } finally { await browser.close(); }
+  } else check("LIM-2480: Chrome available for hosted browser coverage", false);
   // -- workspaces per account (2 by default) and on the server (4 here) --
   const W3 = await gCreate(OPSG, "Ops Two", U1c);
   const opsThird = await gCreate(OPSG, "Ops Three", U2c);
