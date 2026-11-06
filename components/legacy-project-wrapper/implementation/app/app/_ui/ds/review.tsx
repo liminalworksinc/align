@@ -671,7 +671,7 @@ export function ReviewActions({
         {notice?.kind === "done" && after}
       {shown !== "confirm" && (
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" data-decision={TITLE[dominant]} aria-pressed={choice === dominant} className={PRIMARY} onClick={() => pick(dominant)}>
+          <button type="button" data-decision={TITLE[dominant]} aria-pressed={choice === dominant} className={dominant === "withdraw" || choice ? SECONDARY : PRIMARY} onClick={() => pick(dominant)}>
             {TITLE[dominant]}
           </button>
           {rest.map((c) => (
