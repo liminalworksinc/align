@@ -142,6 +142,9 @@ export class FakeServer {
 
   /** Called as each request arrives, before it is answered (a web action that lands between two calls of one pass). */
   beforeRequest: ((method: string, path: string) => void) | null = null;
+  /** When set, a usage upload whose rows it returns a status for is answered that status and stores nothing (a server
+   *  that refuses one bad row, or is down). */
+  usageRefuse: ((rows: any[]) => number | null) | null = null;
 
   /** The person stops sharing the session on the web. */
   stopOnWeb(key: string): void {
@@ -600,6 +603,8 @@ export class FakeServer {
           return send(200, wire);
         }
         if (sub === "usage") {
+          const refuse = this.usageRefuse?.(Array.isArray(body?.rows) ? body.rows : []);
+          if (refuse) return send(refuse, { error: refuse >= 500 ? "unavailable" : "invalid_row" });
           if (sess.state !== "shared") return send(409, sess.state === "stopped" ? { error: "sharing_stopped", ended_reason: sess.ended ?? null } : { error: "suspended" });
           const rows = Array.isArray(body?.rows) ? body.rows : [];
           if (rows.length > 500) return send(413, { error: "too_many_rows" });
