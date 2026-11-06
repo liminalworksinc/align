@@ -116,7 +116,10 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
   // A workspace with no goals: the page says so, and the empty state (FirstRun) leads. The list stays mounted for its
   // count but is hidden while nothing needs the person; Since and Goals have nothing to compare or list.
   const noGoals = !!h && h.goals !== null && h.goals.length === 0;
-  const quietList = noGoals && count.n === 0 && !count.partial;
+  // Until /home lands, nothing says whether the workspace has goals: no list and no count unless there are rows to show.
+  // A failed /home makes h UNREAD, so this ends either way.
+  const homePending = !h && !count.partial && (count.n === null || count.n === 0);
+  const quietList = homePending || (noGoals && count.n === 0 && !count.partial);
   // The page checks membership before Home mounts; this is the person removed while Home is open (every read is a 404).
   if (d.status === 404) return <NotInWorkspace me={me} />;
 
@@ -125,7 +128,7 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
       <div className="flex flex-col gap-5">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <h1 tabIndex={-1} className={`${PAGE_H1} min-w-0`} data-home-count={count.n ?? "reading"}>
-            {noGoals && (count.n === 0 || count.n === null) && !count.partial ? "No goals here yet" : needsHeading(count.n, count.partial)}
+            {homePending ? "Home" : noGoals && (count.n === 0 || count.n === null) && !count.partial ? "No goals here yet" : needsHeading(count.n, count.partial)}
           </h1>
         </header>
 

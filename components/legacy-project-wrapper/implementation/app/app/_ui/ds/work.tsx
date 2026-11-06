@@ -237,7 +237,7 @@ function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
             action={known === "member" ? <Link href={`/app/w/${ws}/apps`} className={LINK}>Connect one</Link> : undefined}
           />
         ) : (
-          <EmptyState title="No AI app you can see is connected." body="You see your own apps here; workspace owners see everyone's." />
+          <EmptyState title="No AI app you can see is connected." body="Workspace owners see everyone's apps; others see their own." />
         ))}
       {list.length > 0 && (
         <ul className="flex flex-col gap-2">

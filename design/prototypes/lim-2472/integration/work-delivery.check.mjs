@@ -103,6 +103,18 @@ const call = async (cookie, method, path, body) => (await fetch(BASE + path, { m
   rule("Work, member, role known: may connect one", t.includes("Connect one"), clip(t, "Connected apps"));
   const am = await read(m, appsPath, roleDown);
   rule("Apps, member, role unread: no offer", !am.includes("Connect one above") && !am.includes("Add Align's MCP server"), clip(am, "Your apps"));
+  rule("Apps, member, role unread: says so, not Loading", am.includes("Couldn't read your role in this workspace just now. Reload to try again.") && !am.includes("Loading…"), clip(am, "Connect an AI app"));
+  {
+    const ctx = await signedIn(m);
+    const page = await ctx.newPage();
+    await page.route(new RegExp(`/api/v2/workspaces/${WS}$`), async (x) => { await new Promise((r) => setTimeout(r, 2500)); await x.continue().catch(() => {}); });
+    await page.goto(BASE + appsPath, { waitUntil: "commit" });
+    await page.getByText("Connect an AI app").first().waitFor({ timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(600);
+    const pending = (await page.locator("main").first().innerText()).replace(/\s+/g, " ");
+    await ctx.close();
+    rule("Apps, role read pending: keeps Loading", pending.includes("Loading…") && !pending.includes("Couldn't read your role"), clip(pending, "Connect an AI app"));
+  }
   rule("Apps, role unread: offers nothing", !r.includes("Connect one above") && !r.includes("No AI apps are connected to this workspace"), clip(r, "Your apps"));
 
   // The goal page's sessions, on a goal the person doesn't own
@@ -129,7 +141,7 @@ const call = async (cookie, method, path, body) => (await fetch(BASE + path, { m
   const roleDown = (p) => p.route(new RegExp(`/api/v2/workspaces/${ws}$`), (r) => r.fulfill(BOOM));
   const wu = await read(o, `/app/w/${ws}/work?goal=${cr.goal.id}`, roleDown);
   rule("Work, role unread: never the owner's sentences", !wu.includes("No AI apps connected") && !wu.includes("Nothing has read this workspace's goals") && !wu.includes("none is connected") && !wu.includes("Connect one"), clip(wu, "Connected apps"));
-  rule("Work, role unread: the role-free sentence", wu.includes("No AI app you can see is connected.") && wu.includes("none you can see is connected") && !wu.includes("None of your AI apps"), clip(wu, "Connected apps"));
+  rule("Work, role unread: the role-free sentence", wu.includes("No AI app you can see is connected.") && wu.includes("none you can see is connected") && !wu.includes("None of your AI apps") && wu.includes("Workspace owners see everyone's apps; others see their own.") && !wu.includes("You see your own apps"), clip(wu, "Connected apps"));
   const au = await read(o, `/app/w/${ws}/apps`, roleDown);
   rule("Apps, role unread: never the owner's sentences", !au.includes("No AI apps are connected to this workspace") && !au.includes("Nothing is reading") && !au.includes("Connect one above") && !au.includes("Add Align's MCP server") && au.includes("None of your AI apps is connected."), clip(au, "Your apps"));
   rule("owner, a real empty list: Apps keeps the workspace-wide wording", a.includes("No AI apps are connected to this workspace.") && a.includes("Nothing is reading this workspace's goals through an app yet.") && !a.includes("None of your AI apps"), clip(a, "Everyone's apps"));
@@ -201,6 +213,45 @@ for (const [role, a] of Object.entries(people)) {
   rule("first run, real reads, owner with no goals: keeps the full card", full.includes("Connect one agent"), full.slice(0, 200));
   const empty = await read(people.viewer, `/app/w/${ws2}`);
   rule("first run, real reads, viewer with no goals: the one line", empty.includes("This workspace has no goals yet. A workspace owner or member sets them.") && !empty.includes("Set the first goal"), empty.slice(0, 200));
+}
+
+// Home's first second: an empty workspace never flashes the list or a count; a list with rows isn't held back.
+{
+  const watch = async (account, path, route) => {
+    const ctx = await signedIn(account);
+    await ctx.addInitScript(() => {
+      window.__seen = { h1: [], listShown: false, rowsWithoutList: false };
+      const tick = () => {
+        const h = document.querySelector("main h1")?.innerText?.trim();
+        if (h && window.__seen.h1.at(-1) !== h) window.__seen.h1.push(h);
+        const shown = [...document.querySelectorAll("[data-needs], [data-needs-loading]")].some((e) => e.getClientRects().length > 0);
+        if (shown) window.__seen.listShown = true;
+        if (h && /^\d+ things? need/.test(h) && !shown) window.__seen.rowsWithoutList = true;
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    const page = await ctx.newPage();
+    if (route) await route(page);
+    await page.goto(BASE + path, { waitUntil: "commit" });
+    await page.waitForTimeout(1200);
+    await page.waitForLoadState("networkidle").catch(() => {});
+    await page.waitForTimeout(600);
+    const seen = await page.evaluate(() => window.__seen);
+    const text = (await page.locator("main").first().innerText()).replace(/\s+/g, " ");
+    await ctx.close();
+    return { ...seen, text };
+  };
+  const empty = await watch(people.owner, `/app/w/${ws2}`);
+  rule("Home, empty workspace: the list never shows", !empty.listShown, empty.h1);
+  rule('Home, empty workspace: H1 never "Needs you" or "Nothing needs you"', !empty.h1.includes("Needs you") && !empty.h1.includes("Nothing needs you") && empty.h1.at(-1) === "No goals here yet", empty.h1);
+  const rows = await watch(seed.accounts.owner, `/app/w/${WS}`);
+  rule("Home, with rows: the list shows with its count", rows.listShown && !rows.rowsWithoutList && /^\d+ things? need/.test(rows.h1.at(-1) ?? ""), rows.h1);
+  const down = await watch(seed.accounts.owner, `/app/w/${WS}`, (p) => p.route(new RegExp(`/workspaces/${WS}/home$`), (r) => r.fulfill(BOOM)));
+  rule("Home, /home fails: the list or its couldn't-read line shows", down.listShown || /couldn't read/i.test(down.text), { h1: down.h1, text: down.text.slice(0, 160) });
+  rule("Home, /home fails: the H1 settles", down.h1.at(-1) !== "Home", down.h1);
+  const emptyDown = await watch(people.owner, `/app/w/${ws2}`, (p) => p.route(new RegExp(`/workspaces/${ws2}/home$`), (r) => r.fulfill(BOOM)));
+  rule("Home, empty workspace, /home fails: not hidden for good", emptyDown.listShown || /couldn't read/i.test(emptyDown.text), { h1: emptyDown.h1, text: emptyDown.text.slice(0, 160) });
 }
 
 // "Since you last looked": no "Nothing changed" for a source it didn't read. Each new tab compares with the last visit.

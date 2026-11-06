@@ -100,7 +100,7 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
           <div id="connect" className="min-w-0 scroll-mt-4 lg:col-span-2 xl:col-span-1">
             <Panel eyebrow="Set up" title="Connect an AI app" className="h-full">
             {!apps.data || !role ? (
-              <p className="text-[14px] text-(--text-2)">{apps.error ?? "Loading…"}</p>
+              <p className="text-[14px] text-(--text-2)">{apps.error ?? (detail.error ? "Couldn't read your role in this workspace just now. Reload to try again." : "Loading…")}</p>
             ) : role === "viewer" ? (
               <p className="text-[15px] text-(--text-1)">Viewers can&apos;t connect apps to this workspace. A member or an owner can.</p>
             ) : (
