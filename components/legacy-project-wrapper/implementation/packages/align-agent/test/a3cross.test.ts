@@ -316,3 +316,60 @@ describe("A3-cross-2 (agent side): a binding ended because the followed goal clo
     assert.match(out.hookSpecificOutput.additionalContext, /no longer bound to an Align goal/);
   });
 });
+
+describe("LIM-2441 H8 (agent side): an alignment revoked before its session switched goals cancels only the pending switch", () => {
+  const setup = async () => {
+    const fake = new FakeServer();
+    await fake.start();
+    cleanups.push(() => fake.stop());
+    const t = env({ ALIGN_SERVER: fake.url, ALIGN_DEVICE_POLL_SCALE_MS: "10", ALIGN_OUTBOX_MAX_BACKOFF_MS: "200" });
+    assert.equal((await runCli(t, ["login", "--name", "Lena Mac"])).code, 0);
+    const sid = `aaaaaaaa-8888-2222-3333-${Math.random().toString(16).slice(2, 14).padEnd(12, "0")}`;
+    const cwd = path.join(t.root, `ledger-${sid.slice(-4)}`);
+    fs.mkdirSync(cwd, { recursive: true });
+    runHook(t, "claude", "SessionStart", { session_id: sid, source: "startup", cwd });
+    runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "p0", prompt: "start", cwd });
+    const lid = localId("claude-code", sid);
+    assert.equal((await runCli(t, ["share", lid.slice(0, 8), "--workspace", "Acme", "--goal", "Ship the v2", "--yes"])).code, 0);
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    const prompt = () => JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: `p${Math.random()}`, prompt: "go on", cwd }).stdout || "{}");
+    prompt();
+    const row = () => {
+      const c = ctxFor(t);
+      const r = c.db.prepare("SELECT session_key, state, binding_goal, (SELECT goal_id FROM pending_bindings p WHERE p.local_id=shares.local_id) AS pending FROM shares WHERE local_id=?").get(lid) as { session_key: string; state: string; binding_goal: string | null; pending: string | null };
+      c.db.close();
+      return r;
+    };
+    const perf = fake.goals.get("ws_acme")!.find((g) => g.id === "g_perf")!;
+    fake.pushDirective({ ws: "ws_acme", kind: "binding_changed", session_keys: [row().session_key], goal: perf, binding: { goal_id: "g_perf", effective: "next_root_turn", cause: "alignment:al_9" } });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.equal(row().pending, "g_perf");
+    return { fake, t, prompt, row };
+  };
+  const cancel = { ws: "ws_acme", kind: "binding_suspended" as const, goal: null, binding: { goal_id: "g_perf", effective: "cancel_pending", cause: "alignment:al_9" } };
+
+  test("binding_suspended with effective cancel_pending: the pending switch is dropped, the share stays shared under its goal, and the user hears why", async () => {
+    const { fake, t, prompt, row } = await setup();
+    const before = row();
+    fake.pushDirective({ ...cancel, session_keys: [before.session_key] });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    const after = row();
+    assert.equal(after.pending, null);
+    assert.equal(after.state, "shared");
+    assert.equal(after.binding_goal, before.binding_goal);
+    const out = prompt();
+    assert.match(out.systemMessage ?? "", /the alignment this session was about to switch goals for was revoked before the switch, so it keeps its current goal/);
+    assert.doesNotMatch(out.systemMessage ?? "", /usage is paused/);
+  });
+
+  test("the same directive once the session already switched to that goal: suspended, as for any revocation", async () => {
+    const { fake, t, prompt, row } = await setup();
+    prompt();
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.equal(row().binding_goal, "g_perf", "switched to g_perf at the root turn");
+    fake.pushDirective({ ...cancel, session_keys: [row().session_key] });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.equal(row().state, "suspended");
+    assert.match(prompt().systemMessage ?? "", /this session's goal binding was revoked, so its usage is paused/);
+  });
+});

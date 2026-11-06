@@ -2036,7 +2036,12 @@ session keys this device shares in the directive's workspace, and post receipts:
 \`::align bind <goal>\` or run \`align bind\` to pick a goal.` (when its `binding.cause` is `goal_closed:<alignment
 id>`, `Align: the goal this session followed through an alignment was achieved or dropped, so its usage is paused ...`
 instead, never "revoked": test `a3cross` "binding_suspended with cause `goal_closed:<alignment>` ..."; E2E acycle3
-A3-cross-2) and give the model the unbound delta at the next prompt.
+A3-cross-2) and give the model the unbound delta at the next prompt. A `binding_suspended` whose `binding.effective` is
+`cancel_pending` (the alignment was revoked before the session switched to its goal: LIM-2441) SHALL instead delete the
+session's pending binding to that goal and leave the share as it is, telling the user, when it deleted one, `Align: the
+alignment this session was about to switch goals for was revoked before the switch, so it keeps its current goal.`;
+when the session's current binding is already that goal, it SHALL be handled as any `binding_suspended` (test `a3cross`
+"LIM-2441 H8 (agent side) ...").
 A share ends with no directive (Stop sharing on the web, say), so the pass SHALL also read the first page's
 `ended_sessions` (this device's sessions whose share the server ended, `directives` "Device fetch of v2 directives by
 cursor") and end each share that is still `shared` or `suspended` here as the usage upload's `sharing_stopped` refusal

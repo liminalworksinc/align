@@ -16,7 +16,9 @@ import { expireStoppedSessionTargets, holdWire, requestReceipt, requestWire, typ
 export type DirectiveKind = "goal_version" | "binding_changed" | "binding_suspended" | "stop" | "resume" | "request" | "hold" | "release";
 export interface Binding {
   goal_id: string | null;
-  effective: "next_root_turn";
+  // binding_suspended: "cancel_pending" when the session never opened the binding it is losing (LIM-2441): its machine
+  // drops the pending binding_changed and keeps its own binding.
+  effective: "next_root_turn" | "cancel_pending";
   cause: string; // "alignment:<al_id>" | "goal_closed:<al_id>" (binding_suspended: the target was achieved or dropped) | "manual"
 }
 
