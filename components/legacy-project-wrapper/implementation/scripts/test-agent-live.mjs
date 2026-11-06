@@ -1015,10 +1015,10 @@ try {
   const q1Deny = denied(tool(Q1, "Bash")) ?? "";
   const q1Told = prompt(Q1, "still there?");
   check(
-    "logout (E2E-AGENT B4/G2/B6): `align logout` revokes the device, and the server ends its sessions (stopped, ended_reason device_signed_out); a stop from the web is then refused 409 device_signed_out instead of reported sent; the CLI lists the session as stopped, not shared; the stopped session stays blocked and its deny names `align stop-sharing <id>`; the next prompt tells the developer that sharing ended and how to share again",
+    "logout (E2E-AGENT B4/G2/B6): `align logout` revokes the device, and the server ends its sessions (stopped, ended_reason device_signed_out); a stop from the web is then refused 409 device_signed_out instead of reported sent; the CLI lists the session as stopped, not shared; the stopped session stays blocked and its deny says it stays stopped until it is shared again once this machine is signed in, never naming `align stop-sharing` (a stop holds after sharing ends, LIM-2441); the next prompt tells the developer that sharing ended and how to share again",
     stopQ1.status === 200 && denied(q1Stopped) !== null && logout.code === 0 && q1Row?.state === "stopped" && q1Row.ended_reason === "device_signed_out" && q1Row.agent_stopped === 1 &&
       webStop.status === 409 && webStop.json?.error === "device_signed_out" && webList?.ended_reason === "device_signed_out" &&
-      localQ1?.shared === "stopped (Ledger Co; this machine signed out)" && q1Deny.includes(`\`align stop-sharing ${localQ1.local_id.slice(0, 8)}\``) && !q1Deny.includes("until it is resumed there") &&
+      localQ1?.shared === "stopped (Ledger Co; this machine signed out)" && q1Deny.includes("until then this session stays stopped") && !q1Deny.includes("align stop-sharing") && !q1Deny.includes("until it is resumed there") &&
       (q1Told.system ?? "").includes("this session stopped sharing because this machine signed out of Align") && (q1Told.system ?? "").includes("`::align share`"),
     `${stopQ1.status} ${logout.stdout} ${logout.stderr} ${JSON.stringify(q1Row)} ${webStop.text} ${JSON.stringify(localQ1)} deny=${q1Deny} told=${q1Told.stdout}`,
   );
@@ -1323,10 +1323,10 @@ try {
   const rmOut = cli(["stop-sharing", rmLocal?.local_id?.slice(0, 8) ?? "none"]);
   const rmFree = tool(Q1, "Bash");
   check(
-    "member removed (E2E-AGENT cycle 2): the device's next sync ends the share here (sessions: stopped, no access to the workspace) and the next prompt says why; Bash stays denied naming `align stop-sharing <id>` until it runs; `align goals` lists only the workspace still in reach (Side Co)",
+    "member removed (E2E-AGENT cycle 2): the device's next sync ends the share here (sessions: stopped, no access to the workspace) and the next prompt says why; Bash stays denied, saying the stop holds unless this machine can reach the workspace again, never naming `align stop-sharing`, and still after `align stop-sharing` runs (LIM-2441); `align goals` lists only the workspace still in reach (Side Co)",
     rmSync.code === 0 && rmLocal?.shared === "stopped (Ledger Co; no access to the workspace)" && (rmTold.system ?? "").includes("this session stopped sharing because you no longer have access to Ledger Co in Align") &&
-      rmDeny.includes("no longer has access to its Align workspace") && rmDeny.includes(`\`align stop-sharing ${rmLocal.local_id.slice(0, 8)}\``) &&
-      rmGoals.code === 0 && rmGoals.stdout.includes("Side Co") && !rmGoals.stdout.includes("Ledger Co") && rmOut.code === 0 && denied(rmFree) === null,
+      rmDeny.includes("no longer has access to its Align workspace") && rmDeny.includes("unless this machine can reach that workspace again") && !rmDeny.includes("align stop-sharing") &&
+      rmGoals.code === 0 && rmGoals.stdout.includes("Side Co") && !rmGoals.stdout.includes("Ledger Co") && rmOut.code === 0 && denied(rmFree) !== null,
     `${rmSync.stderr} ${JSON.stringify(rmLocal)} told=${rmTold.stdout} deny=${rmDeny} goals=${rmGoals.code} ${rmGoals.stdout} ${rmGoals.stderr} ${rmOut.stderr} free=${rmFree.stdout}`,
   );
   // E2E-AGENT cycle 13, section 5: the agent names a removal (not this sign-in's reach) when `/me` lists the workspace
@@ -1370,11 +1370,20 @@ try {
     "re-invite (owner decision 2026-11-01): removed, re-invited and accepted with this device ticked (audited device.workspace_added); the next hook pass sees Ledger Co again (/me lists both), the session that lost it hears once how to share it again toward its goal, `::align share confirm` shares it again on the same device (shared, no ended_reason), and the Side Co share is untouched; still one paired device, no new `align login`",
     reInv.status === 201 && rePreview.json?.devices?.map((d) => d.id).join() === deviceBefore && reAccept.status === 200 && reAudit.join() === M.id &&
       reHook.code === 0 && reMe === [W, SIDE_W].sort().join() &&
-      (reTold.system ?? "") === `Align: this machine can reach Ledger Co in Align again. To share this session there again, type \`::align share\` here (it counts toward "${GOAL_TITLE}" again).` && reTold2.system === null &&
+      (reTold.system ?? "") ===
+        `Align: this machine can reach Ledger Co in Align again. To share this session there again, type \`::align share\` here (it counts toward "${GOAL_TITLE}" again). It was stopped or held from the web, so tools stay blocked until it is shared again (you can type \`::align share\` in this session), after which the stop or hold, if still in place, can be lifted from the web.` && reTold2.system === null &&
       (reShare.json?.reason ?? "") === `Align: sharing requested toward "${GOAL_TITLE}". The next sync asks the Align server for it (within a few seconds); once it is shared, your next prompt carries the goal.` &&
       q1Back?.state === "shared" && q1Back.ended_reason === null && q1Back.device_id === deviceBefore && q1Local === "shared (Ledger Co)" &&
       scRow()?.state === "shared" && scRow()?.device_id === deviceBefore && scLocal() === "shared (Side Co)" && liveDevice() === deviceBefore && miloDevices === 1,
     `${reInv.status} ${rePreview.text} ${reAccept.text} ${JSON.stringify(reAudit)} ${reHook.stderr} ${reMe} told=${reTold.stdout} told2=${reTold2.stdout} share=${reShare.stdout} ${JSON.stringify(q1Back)} ${q1Local} ${JSON.stringify(scRow())} ${scLocal()} ${miloDevices}`,
+  );
+  // Its stop held through \`align stop-sharing\` (LIM-2441); shared again, the web's resume lifts it, as for Q3 below.
+  const q1Resume = await ws(M, "POST", `/sessions/${Q1.key}/resume`, {});
+  sync();
+  check(
+    "re-invite (LIM-2441): the session stopped from the web, whose stop held after its sharing ended and after \`align stop-sharing\`, is freed by a web resume once it is shared again",
+    q1Resume.status === 200 && denied(tool(Q1, "Bash")) === null,
+    `${q1Resume.status} ${q1Resume.text}`,
   );
   // C6-2: the session stopped from the web whose workspace came back: its deny gives the advice its notice gives
   // (`::align share`), never "only `align stop-sharing`"; shared again, the plain stop, which a web resume lifts.
@@ -1388,8 +1397,8 @@ try {
   sync();
   const q3Free = denied(tool(Q3, "Bash"));
   check(
-    "stopped, removed and re-invited (E2E-AGENT cycle 6 C6-2): while the workspace is out of reach the deny names `align stop-sharing`; once it is back the deny and `align latch status` offer `::align share` instead, as the session's notice does; `::align share confirm` shares it again, the deny becomes the plain stop, and a web resume frees its tools",
-    q3Shared0.code === 0 && q3Stop.status === 200 && q3Lost.includes("no longer has access to its Align workspace") && q3Lost.includes("`align stop-sharing ") &&
+    "stopped, removed and re-invited (E2E-AGENT cycle 6 C6-2): while the workspace is out of reach the deny says the stop holds unless this machine can reach it again, never `align stop-sharing` (LIM-2441); once it is back the deny and `align latch status` offer `::align share` instead, as the session's notice does; `::align share confirm` shares it again, the deny becomes the plain stop, and a web resume frees its tools",
+    q3Shared0.code === 0 && q3Stop.status === 200 && q3Lost.includes("no longer has access to its Align workspace") && q3Lost.includes("unless this machine can reach that workspace again") && !q3Lost.includes("align stop-sharing") &&
       q3Back.includes("can reach it again now), so tools stay blocked until it is shared again (the user can type `::align share` in this session)") && !q3Back.includes("align stop-sharing") &&
       q3Latch.includes(`${q3Lid.slice(0, 8)} claude-code STOPPED`) && !new RegExp(`${q3Lid.slice(0, 8)}[^\n]*only \`align stop-sharing`).test(q3Latch) &&
       /sharing requested/.test(q3Share.json?.reason ?? "") && q3Shared === "Align: this session was stopped from its Align workspace. Tools are blocked until it is resumed there. Tell the user and wait for instructions." &&

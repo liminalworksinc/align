@@ -80,7 +80,9 @@ const GOAL = "Ship the v2 onboarding flow";
 const AGAIN = `Align: this machine is signed in to Align again. To share this session again, type \`::align share\` here (it counts toward "${GOAL}" again).`;
 const LATCHED_AGAIN = " It was stopped or held from the web, so tools stay blocked until it is shared again (you can type `::align share` in this session), after which the stop or hold, if still in place, can be lifted from the web.";
 const SIGNED_OUT = `Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on. To share it again, run \`align login\` in a terminal, then type \`::align share\` here (it counts toward "${GOAL}" again).`;
-const stopSharingTail = (lid: string) => ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
+// A stop holds after its sharing ends (LIM-2441): the notice's latch sentence for a stopped session that can't be shared
+// there again says it stays stopped, never `align stop-sharing`.
+const staysStoppedTail = (lid: string) => latchNoticeTail(lid, false, null, {}, true);
 
 describe("C9-1: a web Stop sharing before a re-pairing is heard by the new pairing", () => {
   for (const how of ["logout, then login", "a login that replaces the live pairing"]) {
@@ -115,7 +117,7 @@ describe("C9-1: a web Stop sharing before a re-pairing is heard by the new pairi
     });
   }
 
-  test("stopped from the web (latch), then stopped sharing on the web, then a re-pairing: the notice names `align stop-sharing`, as the deny does", async () => {
+  test("stopped from the web (latch), then stopped sharing on the web, then a re-pairing: the notice says it stays stopped, as the deny does", async () => {
     const { fake, t } = await world();
     const A = await shared(t);
     await sync(t);
@@ -125,27 +127,37 @@ describe("C9-1: a web Stop sharing before a re-pairing is heard by the new pairi
     await logout(t);
     await login(t);
     const told = prompt(t, A.sid, "go on", A.cwd)?.systemMessage ?? "";
-    assert.ok(told.endsWith(stopSharingTail(A.lid)), told);
-    assert.match(deny(t, A) ?? "", new RegExp(`until the user runs \`align stop-sharing ${A.lid.slice(0, 8)}\``));
+    assert.ok(told.endsWith(staysStoppedTail(A.lid)), told);
+    assert.match(deny(t, A) ?? "", /this session stays stopped/);
+    assert.doesNotMatch(deny(t, A) ?? "", /align stop-sharing/);
   });
 });
 
 describe("C9-2: every notice about a share that ended gives the deny's advice", () => {
-  /** Which way out a text gives, as `latchWayOut` words it for its reader: sharing again, `align stop-sharing`, or none.
-   *  Signed out, `align stop-sharing` comes with a new sign-in and `::align share` as the other way (cycle 12). */
+  /** Which way out a text gives, as `latchWayOut` words it for its reader: sharing again, or, for a stop nothing can
+   *  lift from here, that the session stays stopped (LIM-2441), or none. Signed out, a new sign-in and `::align share`
+   *  come first, with the stop holding until then (cycle 12). */
   const advice = (text: string, lid: string, reader: "model" | "user") =>
     text.includes(latchWayOut(lid, true, reader))
       ? "share again"
-      : text.includes(latchWayOut(lid, false, reader)) || text.includes(latchWayOut(lid, false, reader, null, { login: true })) || text.includes(latchNoticeTail(lid, false, null, { login: true }))
-        ? "stop-sharing"
+      : text.includes(latchWayOut(lid, false, reader, null, {}, true)) ||
+          text.includes(latchWayOut(lid, false, reader, null, { lost: true }, true)) ||
+          text.includes(latchWayOut(lid, false, reader, null, { login: true }, true)) ||
+          text.includes(latchNoticeTail(lid, false, null, { login: true }, true))
+        ? "stays stopped"
         : "none";
   /** The session's newest notice and its deny give the same way out, and the expected one. */
-  const same = (t: TestEnv, s: { sid: string; cwd: string; lid: string }, want: "share again" | "stop-sharing", label: string) => {
+  const same = (t: TestEnv, s: { sid: string; cwd: string; lid: string }, want: "share again" | "stays stopped", label: string) => {
     const notice = prompt(t, s.sid, "go on", s.cwd)?.systemMessage ?? "";
     const why = deny(t, s) ?? "";
     assert.equal(advice(notice, s.lid, "user"), want, `${label}: notice ${notice}`);
     assert.equal(advice(why, s.lid, "model"), want, `${label}: deny ${why}`);
-    assert.ok(notice.endsWith(latchNoticeTail(s.lid, want === "share again")) || notice.endsWith(latchNoticeTail(s.lid, false, null, { login: true })), `${label}: the notice ends with the latch sentence: ${notice}`);
+    assert.ok(
+      notice.endsWith(latchNoticeTail(s.lid, want === "share again", null, {}, true)) ||
+        notice.endsWith(latchNoticeTail(s.lid, false, null, { lost: true }, true)) ||
+        notice.endsWith(latchNoticeTail(s.lid, false, null, { login: true }, true)),
+      `${label}: the notice ends with the latch sentence: ${notice}`,
+    );
   };
   const stopped = async (fake: FakeServer, t: TestEnv) => {
     const A = await shared(t);
@@ -155,13 +167,13 @@ describe("C9-2: every notice about a share that ended gives the deny's advice", 
     return A;
   };
 
-  test("stopped from the web, then Stop sharing on the web (heard at the next pass): the notice says tools stay blocked until `align stop-sharing`, as the deny does", async () => {
+  test("stopped from the web, then Stop sharing on the web (heard at the next pass): the notice says it stays stopped, as the deny does", async () => {
     const { fake, t } = await world();
     const A = await stopped(fake, t);
     fake.stopOnWeb(A.key);
     await sync(t);
-    same(t, A, "stop-sharing", "stopped by its person");
-    assert.match(prompt(t, A.sid, "::align status", A.cwd).reason, new RegExp(`run \`align stop-sharing ${A.lid.slice(0, 8)}\``));
+    same(t, A, "stays stopped", "stopped by its person");
+    assert.match(prompt(t, A.sid, "::align status", A.cwd).reason, /Stop latch: on \(tools blocked; sharing ended, so this session stays stopped/);
   });
 
   test("ended while its person was out of the workspace, or at a sign-out the server reports: notice and deny both offer `::align share`", async () => {
@@ -181,14 +193,14 @@ describe("C9-2: every notice about a share that ended gives the deny's advice", 
     const { fake, t } = await world();
     const A = await stopped(fake, t);
     await logout(t);
-    same(t, A, "stop-sharing", "signed out");
+    same(t, A, "stays stopped", "signed out");
     await login(t);
     same(t, A, "share again", "signed in again");
     const B = await stopped(fake, t);
     const acme = fake.workspaces[0];
     fake.workspaces = [];
     await sync(t);
-    same(t, B, "stop-sharing", "workspace lost");
+    same(t, B, "stays stopped", "workspace lost");
     fake.workspaces = [acme];
     await sync(t);
     same(t, B, "share again", "workspace back");

@@ -158,9 +158,12 @@ describe("C7-2: signed out and in again, the session's notice says what holds no
     const lid8 = A.lid.slice(0, 8);
     assert.equal(
       prompt(t, A.sid, "go on", A.cwd)?.systemMessage,
-      `Align: this machine is signed in to Align again, but this sign-in does not reach Acme, so this session can't be shared there again from here; its usage stays on this machine. It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid8}\` in a terminal.`,
+      // A stop holds after its sharing ends (LIM-2441): it stays stopped, and `align stop-sharing` is not a way out.
+      `Align: this machine is signed in to Align again, but this sign-in does not reach Acme, so this session can't be shared there again from here; its usage stays on this machine. It was stopped or held from the web, so this session stays stopped: a stop set from its Align workspace holds after its sharing ends, and nothing lifts it from here now. A new session is not stopped.`,
     );
-    assert.match(deny(t, A) ?? "", /tools stay blocked until the user runs `align stop-sharing /);
+    void lid8;
+    assert.match(deny(t, A) ?? "", /so this session stays stopped/);
+    assert.doesNotMatch(deny(t, A) ?? "", /align stop-sharing/);
     fake.workspaces = [acme];
     fake.otherWorkspaces = [];
     await sync(t);
