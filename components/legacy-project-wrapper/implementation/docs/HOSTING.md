@@ -110,6 +110,7 @@ fly ssh console -C "node scripts/align-admin.mjs requests approve ar_…"     # 
 fly ssh console -C "node scripts/align-admin.mjs requests decline ar_…"
 fly ssh console -C "node scripts/align-admin.mjs codes create --email someone@example.com"   # printed once
 fly ssh console -C "node scripts/align-admin.mjs codes list"                # ids and states, never a code
+fly ssh console -C "node scripts/align-admin.mjs codes import --file /tmp/v1-codes.txt --used /data/workspaces/_used_invites.json --days 60"   # v1 invite codes, counts only
 fly ssh console -C "node scripts/align-admin.mjs codes revoke cc_…"
 fly ssh console -C "node scripts/align-admin.mjs workspaces list"           # counts only, no people; deleted_at
 fly ssh console -C "node scripts/align-admin.mjs workspaces delete ws_… --yes"          # soft: restorable 30 days

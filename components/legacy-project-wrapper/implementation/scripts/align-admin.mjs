@@ -9,6 +9,9 @@
 // retention job reads ALIGN_SESSION_MAX_DAYS as the server does, and hosted the codes need ALIGN_SECRET.
 //
 //   codes create [--email <address>] [--days <n>] [--count <n>]   new creation codes, each printed once
+//   codes import --file <path> --used <path> --days <n>           v1 invite codes from a private file, one per line
+//                                                                 (# comments allowed), minus those in v1's
+//                                                                 _used_invites.json: counts only, never a code
 //   codes list                                                    every code: id, state, binding, dates (no secrets)
 //   codes revoke <id>                                             revoke an unused code
 //   requests list [--status pending|approved|declined]
@@ -29,17 +32,19 @@
 //                                                                 a signed LOI, only with the countersigned original in
 //                                                                 hand; never inferred from a form or a claim
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
   CODE_DAYS,
   REQUEST_STATUSES,
+  V1_CODE_RE,
   RESTORE_DAYS,
   SCHEMA_VERSION,
   accessRequest,
   approveAccessRequest,
   codeEmail,
   declineAccessRequest,
+  importCreationCodes,
   insertCreationCode,
   listAccessRequests,
   listCreationCodes,
@@ -56,6 +61,7 @@ import { buildReport, formatReport, LOI_EVENTS, recordLoi } from "../lib/v2/metr
 
 const USAGE = `Usage: node scripts/align-admin.mjs <command>   (or npm run admin -- <command>)
   codes create [--email <address>] [--days <n>] [--count <n>]
+  codes import --file <path> --used <path> --days <n>
   codes list
   codes revoke <id>
   requests list [--status pending|approved|declined]
@@ -195,6 +201,34 @@ async function main() {
     const made = tx(() => Array.from({ length: count }, () => insertCreationCode(db, s, { email, days })));
     console.log(`Created ${count} creation code${count === 1 ? "" : "s"}. Each is shown only now and creates one workspace:`);
     for (const c of made) console.log(`${c.code}  (${c.id}, ${c.email ? `only for ${c.email}` : "anyone"}, until ${day(c.expires_at)})`);
+    return;
+  }
+  if (key === "codes import") {
+    if (typeof opt.file !== "string" || typeof opt.used !== "string" || opt.days === undefined) fail(USAGE, 2);
+    const days = intOpt("days", CODE_DAYS, 365);
+    const read = (f) => {
+      try {
+        return readFileSync(f, "utf8");
+      } catch {
+        fail(`Nothing imported. Can't read ${f}.`);
+      }
+    };
+    const text = read(opt.file);
+    let used;
+    try {
+      used = JSON.parse(read(opt.used));
+    } catch {
+      fail(`Nothing imported. ${opt.used} isn't JSON.`);
+    }
+    if (!Array.isArray(used) || !used.every((h) => typeof h === "string" && /^[0-9a-f]{64}$/.test(h))) fail(`Nothing imported. ${opt.used} isn't v1's list of spent codes.`);
+    const lines = text.split(/\r?\n/).map((l, i) => ({ n: i + 1, code: l.trim() })).filter((l) => l.code && !l.code.startsWith("#"));
+    // Line numbers only: a line that isn't a code might still be one with a typo, so it is never printed.
+    const bad = lines.filter((l) => !V1_CODE_RE.test(l.code)).map((l) => l.n);
+    if (bad.length) fail(`Nothing imported. Not a v1 invite code (20 lowercase hex characters) on line${bad.length === 1 ? "" : "s"} ${bad.join(", ")}.`, 2);
+    if (!lines.length) fail("Nothing imported. The file holds no codes.", 2);
+    const s = secret();
+    const r = tx(() => importCreationCodes(db, s, lines.map((l) => l.code), new Set(used), days));
+    console.log(`Imported ${r.imported}, for ${days} days. ${r.present} already here, left as they were (${r.used} of those used). ${r.spentOnV1} spent on v1, skipped.`);
     return;
   }
   if (key === "codes list") {

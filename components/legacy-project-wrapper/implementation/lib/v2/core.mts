@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { SQLInputValue } from "node:sqlite";
@@ -191,6 +191,10 @@ export function recordEvent(db: Sql, name: EventName, o: { ws?: string | null; a
 
 export const CODE_PREFIX = "alc_";
 export const CODE_RE = /^alc_[a-z2-7]{32}$/;
+// A v1 invite code, loaded by importCreationCodes so a tester keeps the code they were given (LIM-2473). Exactly this
+// shape: v1 made them with `openssl rand -hex 10`. Spent, stored and refused like any other code.
+export const V1_CODE_RE = /^[0-9a-f]{20}$/;
+export const isCreationCode = (code: string) => CODE_RE.test(code) || V1_CODE_RE.test(code);
 export const CODE_DAYS = 14;
 const DAY_MS = 24 * 3600 * 1000;
 
@@ -222,6 +226,32 @@ export function insertCreationCode(db: Sql, secret: string, o: { email?: string 
   return { id, code, email, expires_at: expires };
 }
 
+/** v1 invite codes as unbound creation codes, in one transaction of the caller's. `spentOnV1` is v1's record of spent
+ *  codes, _used_invites.json: sha256 hex of the raw code. A code in it is skipped, so it can't be spent twice. Throws on a
+ *  code of any other shape, before writing. A code already here (code_hash is unique) stays exactly as it is, spent,
+ *  revoked or live, so a second run changes nothing and can't bring a spent code back. Counts only: no code comes back. */
+export function importCreationCodes(db: Sql, secret: string, codes: string[], spentOnV1: Set<string>, days: number, now = Date.now()) {
+  if (!codes.every((c) => V1_CODE_RE.test(c))) throw new Error("Not a v1 invite code");
+  const at = new Date(now).toISOString();
+  const expires = new Date(now + days * DAY_MS).toISOString();
+  const r = { imported: 0, present: 0, used: 0, spentOnV1: 0 };
+  for (const code of codes) {
+    if (spentOnV1.has(createHash("sha256").update(code).digest("hex"))) {
+      r.spentOnV1++;
+      continue;
+    }
+    const hash = codeHash(secret, code);
+    if (db.run("INSERT OR IGNORE INTO v2_creation_codes (id, code_hash, created_at, expires_at) VALUES (?, ?, ?, ?)", `cc_${rand32(15)}`, hash, at, expires) === 1) {
+      r.imported++;
+      recordEvent(db, "code_created", { props: { source: "operator" }, at });
+    } else {
+      r.present++;
+      if (db.get("SELECT 1 AS x FROM v2_creation_codes WHERE code_hash = ? AND redeemed_at IS NOT NULL", hash)) r.used++;
+    }
+  }
+  return r;
+}
+
 export interface CodeRow {
   id: string;
   email: string | null;
@@ -249,7 +279,7 @@ export function revokeCreationCode(db: Sql, id: string, now = Date.now()): boole
 /** Spend a code for workspace `wsId`, in one statement: it must exist, be unused, unrevoked and unexpired, and be
  *  unbound or bound to `email`. True when it was spent. */
 export function redeemCreationCode(db: Sql, secret: string, code: string, email: string, userId: string, wsId: string, now = Date.now()): boolean {
-  if (!CODE_RE.test(code)) return false;
+  if (!isCreationCode(code)) return false;
   const at = new Date(now).toISOString();
   return (
     db.run(

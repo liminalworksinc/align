@@ -36,7 +36,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, createHmac, generateKeyPairSync, randomBytes, sign } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import os from "node:os";
@@ -11772,11 +11772,18 @@ try {
   // -- the hosted route allowlist: / -> /app; /app*, /api/v2/*, /api/mcp, /oauth/*, /.well-known/*, /api/oauth/* and static assets; else 404 --
   const hRoot = await hosted("GET", "/");
   check("hosted: / redirects to https://<host>/app (307)", hRoot.status === 307 && hRoot.headers.location === `https://${HOSTED_HOST}/app`, `${hRoot.status} ${hRoot.headers.location}`);
+  const hNew = await Promise.all([hosted("GET", "/new"), hosted("GET", "/new?code=abc")]);
+  check(
+    "hosted (LIM-2473): a v1 invite link, /new, redirects to https://<host>/app (307), and a query goes no further",
+    hNew.every((r) => r.status === 307 && r.headers.location === `https://${HOSTED_HOST}/app`),
+    hNew.map((r) => `${r.status} ${r.headers.location}`).join(" | "),
+  );
   const outside = [
     ["GET", "/api/state"],
     ["POST", "/api/sessions/events"],
     ["GET", "/setup"],
-    ["GET", "/new"],
+    ["GET", "/new/x"],
+    ["GET", "/newx"],
     ["GET", "/w/x"],
     ["POST", "/api/session"],
     ["GET", "/api/workspaces/config"],
@@ -12202,6 +12209,93 @@ try {
   const BOB = await gSignIn("bob@example.test");
   const bobAccept = await gPost(`/api/v2/invites/${bobInv.json?.token}/accept`, {}, BOB);
   check("caps: accepting an open invite within the cap works (it was already counted)", BOB.status === 200 && bobAccept.status === 200, `${BOB.status} ${bobAccept.status} ${bobAccept.text}`);
+  // -- v1 invite codes (LIM-2473): imported as unbound single-use codes; exactly one extra shape; alc_ unchanged --
+  const v1Hex = () => randomBytes(10).toString("hex");
+  const [v1Code, v1Unused, v1Spent, v1Kept] = [v1Hex(), v1Hex(), v1Hex(), v1Hex()];
+  const v1File = path.join(tmpRoot, "v1-codes.txt");
+  const v1Used = path.join(tmpRoot, "v1-used.json");
+  writeFileSync(v1File, `# unspent\n\n${v1Code}\n${v1Unused}\r\n${v1Kept}\n${v1Spent}\n`, { mode: 0o600 });
+  writeFileSync(v1Used, JSON.stringify([createHash("sha256").update(v1Spent).digest("hex")]), { mode: 0o600 });
+  const v1Args = ["codes", "import", "--file", v1File, "--used", v1Used, "--days", "60"];
+  const v1Noisy = (r) => [v1Code, v1Unused, v1Kept, v1Spent].some((c) => r.out.includes(c) || r.err.includes(c));
+  const v1Rows = () => withDb((d) => d.prepare("SELECT * FROM v2_creation_codes").all());
+  const v1Before = v1Rows().length;
+  const v1Imported = admin(v1Args, opGate);
+  const v1Added = v1Rows().filter((r) => !r.request_id && r.email === null).sort((x, y) => y.expires_at.localeCompare(x.expires_at)).slice(0, 3);
+  const v1Days = (Date.parse(v1Added[0]?.expires_at) - Date.now()) / 86400000;
+  const v1ListOut = admin(["codes", "list"], opGate).out;
+  check(
+    "align-admin: codes import --file --used --days 60 loads 3 unbound codes valid for 60 days, skips the 1 spent on v1, says so in counts, and neither the output nor codes list holds a code",
+    v1Imported.status === 0 && /Imported 3, for 60 days\. 0 already here, left as they were \(0 of those used\)\. 1 spent on v1, skipped\./.test(v1Imported.out) && v1Rows().length === v1Before + 3 && v1Added.length === 3 && v1Days > 59.9 && v1Days <= 60 && !v1Noisy(v1Imported) && ![v1Code, v1Unused, v1Kept, v1Spent].some((c) => v1ListOut.includes(c)),
+    `${v1Imported.status} ${v1Imported.out} ${v1Imported.err} ${v1Rows().length - v1Before} ${v1Days}`,
+  );
+  const v1BadFile = path.join(tmpRoot, "v1-bad.txt");
+  const v1BadUsed = path.join(tmpRoot, "v1-bad-used.json");
+  writeFileSync(v1BadFile, `${v1Hex()}\n${v1Code.toUpperCase()}\nalc_${"a".repeat(32)}\n${v1Code.slice(0, 19)}\n${v1Code}0\n`, { mode: 0o600 });
+  writeFileSync(v1BadUsed, JSON.stringify({ spent: [] }), { mode: 0o600 });
+  const v1Bad = admin(["codes", "import", "--file", v1BadFile, "--used", v1Used, "--days", "60"], opGate);
+  const v1NoDays = admin(["codes", "import", "--file", v1File, "--used", v1Used], opGate);
+  const v1NoUsed = admin(["codes", "import", "--file", v1File, "--days", "60"], opGate);
+  const v1WrongUsed = admin(["codes", "import", "--file", v1File, "--used", v1BadUsed, "--days", "60"], opGate);
+  const v1MissingUsed = admin(["codes", "import", "--file", v1File, "--used", path.join(tmpRoot, "v1-none.json"), "--days", "60"], opGate);
+  check(
+    "align-admin: one line of another shape (alc_, uppercase, 19 or 21 hex) imports nothing, names the lines and never their text; --days and --used are required; a --used file that isn't v1's list or can't be read imports nothing",
+    v1Bad.status === 2 && /lines 2, 3, 4, 5\./.test(v1Bad.err) && !v1Bad.err.includes(v1Code.toUpperCase()) && !v1Bad.err.includes("alc_a") && !v1Bad.err.includes(v1Code.slice(0, 19)) && v1NoDays.status === 2 && v1NoUsed.status === 2 && v1WrongUsed.status === 1 && /Nothing imported/.test(v1WrongUsed.err) && v1MissingUsed.status === 1 && /Nothing imported/.test(v1MissingUsed.err) && v1Rows().length === v1Before + 3,
+    `${v1Bad.status} ${v1NoDays.status} ${v1NoUsed.status} ${v1WrongUsed.status} ${v1MissingUsed.status} ${v1Rows().length - v1Before}`,
+  );
+  const v1OldDir = path.join(tmpRoot, "v1-old-schema");
+  mkdirSync(path.join(v1OldDir, "v2"), { recursive: true });
+  const v1OldDb = new DatabaseSync(path.join(v1OldDir, "v2", "align.sqlite"));
+  v1OldDb.exec("PRAGMA user_version = 1");
+  v1OldDb.close();
+  const v1OldRun = admin(v1Args, { ...opGate, ALIGN_DATA_DIR: v1OldDir });
+  const v1NoDbRun = admin(v1Args, { ...opGate, ALIGN_DATA_DIR: path.join(tmpRoot, "v1-no-db") });
+  check(
+    "align-admin: codes import refuses a database this version hasn't migrated, and a server that has no database yet, so the import can only follow the deploy",
+    v1OldRun.status !== 0 && /not been migrated/.test(v1OldRun.err) && v1NoDbRun.status === 1 && /No Align database/.test(v1NoDbRun.err),
+    `${v1OldRun.status} ${v1OldRun.err} ${v1NoDbRun.status} ${v1NoDbRun.err}`,
+  );
+  const v1Shapes = [v1Code.slice(0, 19), `${v1Code}0`, v1Code.toUpperCase(), v1Hex()];
+  const v1Refused = [];
+  for (const c of v1Shapes) v1Refused.push(await gCreate(ALICE, "Alice V1", c));
+  const v1OnSpent = await gCreate(BOB, "Bob V1 spent", v1Spent);
+  check(
+    "gate (LIM-2473): 19 hex, 21 hex, uppercase, a 20-hex code never imported, and a code spent on v1 -> 403 creation_code_invalid, and no code is spent",
+    [...v1Refused, v1OnSpent].every((r) => r.status === 403 && r.json?.error === "creation_code_invalid") && v1Rows().filter((r) => r.redeemed_at && v1Added.some((x) => x.id === r.id)).length === 0,
+    [...v1Refused, v1OnSpent].map((r) => `${r.status} ${r.json?.error}`).join(" "),
+  );
+  // A create that fails after the code was redeemed: the transaction rolls back, so a failed create burns nothing.
+  withDb((d) => d.exec("CREATE TRIGGER v1_fail BEFORE INSERT ON v2_members BEGIN SELECT RAISE(ABORT, 'forced'); END"));
+  const v1Failed = await gCreate(BOB, "Bob V1 failed", v1Code);
+  withDb((d) => d.exec("DROP TRIGGER v1_fail"));
+  const v1AfterFail = withDb((d) => ({ spent: d.prepare("SELECT COUNT(*) AS n FROM v2_creation_codes WHERE redeemed_at IS NOT NULL").get().n, ws: d.prepare("SELECT COUNT(*) AS n FROM v2_workspaces WHERE name = 'Bob V1 failed'").get().n }));
+  const v1SpentBefore = v1Rows().filter((r) => r.redeemed_at).length;
+  const v1Create = await gCreate(BOB, "Bob V1", v1Code);
+  check(
+    "gate (LIM-2473): a create that fails after the code was redeemed leaves no workspace and the code unspent, and the same code then creates the workspace",
+    v1Failed.status >= 500 && v1AfterFail.ws === 0 && v1AfterFail.spent === v1SpentBefore && v1Create.status === 201,
+    `${v1Failed.status} ${JSON.stringify(v1AfterFail)} ${v1SpentBefore} ${v1Create.status} ${v1Create.text}`,
+  );
+  const v1Replay = await gCreate(BOB, "Bob V1 again", v1Code);
+  const v1Row = v1Rows().find((r) => r.ws_id === v1Create.json?.id);
+  const v1Reimport = admin(v1Args, opGate);
+  const v1Purge = admin(["workspaces", "delete", v1Create.json?.id ?? "", "--purge", "--yes"], opGate);
+  admin(v1Args, opGate);
+  const v1AfterPurge = await gCreate(BOB, "Bob V1 after", v1Code);
+  check(
+    "gate (LIM-2473): an imported v1 code creates one workspace (201) and is spent with it; used again -> 403 creation_code_invalid, also after a re-import (0 new, 3 left as they were, 1 of those used, 1 spent on v1) and after that workspace is purged",
+    v1Create.status === 201 && v1Row?.redeemed_at && v1Replay.status === 403 && v1Replay.json?.error === "creation_code_invalid" && /Imported 0, for 60 days\. 3 already here, left as they were \(1 of those used\)\. 1 spent on v1, skipped\./.test(v1Reimport.out) && v1Purge.status === 0 && v1AfterPurge.status === 403 && v1AfterPurge.json?.error === "creation_code_invalid",
+    `${v1Create.status} ${v1Create.text} ${v1Replay.status} ${v1Reimport.out} ${v1Purge.status} ${v1Purge.err} ${v1AfterPurge.status}`,
+  );
+  const v1Clear = readdirSync(gateDir, { recursive: true }).filter((f) => statSync(path.join(gateDir, f)).isFile()).some((f) => readFileSync(path.join(gateDir, f)).includes(v1Unused));
+  check("gate (LIM-2473): an imported code is in no file of the data directory in clear; only its HMAC is stored", !v1Clear);
+  const v1SignIn = await hosted("GET", "/app/sign-in");
+  const v1Field = await hosted("GET", "/app", { cookie: BOB.cookie });
+  check(
+    "gate (LIM-2473, founder's wording): the sign-in page says \"Have an invite code? Sign in first, then enter it.\"; the code field says \"Use the code you were given.\" and has no alc_ placeholder",
+    v1SignIn.text.includes("Have an invite code? Sign in first, then enter it.") && v1Field.text.includes('name="creation_code"') && v1Field.text.includes("Use the code you were given.") && !v1Field.text.includes('placeholder="alc_'),
+    `${v1SignIn.status} ${v1Field.status}`,
+  );
   // -- workspaces per account (2 by default) and on the server (4 here) --
   const W3 = await gCreate(OPSG, "Ops Two", U1c);
   const opsThird = await gCreate(OPSG, "Ops Three", U2c);

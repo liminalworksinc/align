@@ -2,7 +2,7 @@ import { config } from "../config";
 import { secret } from "../secret";
 import { requireCaptcha } from "./captcha";
 import { caps, creationMode } from "./config";
-import { CODE_RE, redeemCreationCode } from "./core.mts";
+import { isCreationCode, redeemCreationCode } from "./core.mts";
 import { get, sql } from "./db";
 import { refuseDisposable } from "./disposable";
 import { V2Error, conflict, forbidden } from "./errors";
@@ -61,7 +61,7 @@ const invalid = () => forbidden("creation_code_invalid", "That creation code isn
 export async function precheckCreation(req: Request, user: Creator, code: string | null) {
   check(user, code);
   if (!config().hosted) return;
-  if (code !== null && !CODE_RE.test(code)) throw invalid();
+  if (code !== null && !isCreationCode(code)) throw invalid();
   await requireCaptcha(req);
 }
 

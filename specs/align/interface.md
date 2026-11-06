@@ -50,8 +50,9 @@ People, Sessions, Alignments, Requests, Asks, Spend and Apps, with the current t
 
 ### Requirement: Root path redirects to the web app
 
-The server SHALL answer `/` with a redirect to `/app`, and SHALL serve no other page outside `/app`,
-`/oauth/authorize` and the public trust pages `/privacy` and `/trust`.
+The server SHALL answer `/` with a redirect to `/app`, and, when hosted, `/new` too, so a v1 invite link leads to sign-in
+and the creation-code field. It SHALL serve no other page outside `/app`, `/oauth/authorize` and the public trust pages
+`/privacy` and `/trust`.
 
 #### Scenario: Opening the root
 
@@ -60,8 +61,18 @@ The server SHALL answer `/` with a redirect to `/app`, and SHALL serve no other 
 
 #### Scenario: Retired pages
 
-- **WHEN** someone opens `/new`, `/setup` or `/w/<id>`
+- **WHEN** someone opens `/setup` or `/w/<id>`, or `/new` in Mode L
 - **THEN** the server answers 404; no page offers passcodes, role cards or **Switch team**
+
+#### Scenario: A v1 invite link
+
+- **WHEN** anyone opens exactly `/new` on a hosted server, with or without a query
+- **THEN** the response redirects to `/app` with no query; `/new/x` and `/newx` stay 404
+
+#### Scenario: Sign-in names the invite code
+
+- **WHEN** anyone opens the sign-in page
+- **THEN** it says "Have an invite code? Sign in first, then enter it."
 
 ### Requirement: Signed-out visitors are sent to sign-in
 
