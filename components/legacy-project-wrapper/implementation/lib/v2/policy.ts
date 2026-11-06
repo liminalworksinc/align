@@ -146,8 +146,10 @@ export function authorize(p: PolicyPrincipal, action: Action, obj: PolicyObject)
 
     case "pod.manage_members": {
       if (obj.kind !== "pod") return hidden();
+      // A viewer changes nothing, whatever team role is stored for them: the workspace role is checked first.
+      if (p.wsRole === "viewer") return roleDenied(p);
       if (wsCan(p, "workspace.manage") || podCan(p, obj.podId, "pod.manage_members")) return ALLOW;
-      return p.wsRole === "viewer" ? roleDenied(p) : deny("not_team_lead", "Only a workspace owner or the team's lead can change its members.");
+      return deny("not_team_lead", "Only a workspace owner or the team's lead can change its members.");
     }
 
     case "session.manage":
