@@ -672,7 +672,7 @@ describe("LIM-2441 H4: a refused usage row never blocks the others", () => {
     fake.usageRefuse = () => 400;
     for (let pass = 0; pass < 3; pass++) assert.equal((await runCli(t, ["sync"])).code, 0);
     assert.deepEqual(local(t, A.lid).filter((r) => r.uploaded !== 0), [], "no row set aside while the server accepted none");
-    assert.match(logText(t), /the server refused 5 row\(s\) and accepted none this pass, so none is set aside; they wait for the next pass/);
+    assert.match(logText(t), new RegExp(`the server refused 5 row\\(s\\) of ${A.lid.slice(0, 8)} \\(400\\) and accepted none of its rows this pass, so none is set aside; they wait for the next pass`));
     fake.usageRefuse = null;
     assert.equal((await runCli(t, ["sync"])).code, 0);
     assert.equal(rowsOf(fake, A.key).length, 12, "every row went up once the server recovered");
@@ -690,6 +690,21 @@ describe("LIM-2441 H4: a refused usage row never blocks the others", () => {
     assert.deepEqual(local(t, A.lid), [{ input: 12, uploaded: 1 }, { input: 77, uploaded: 2 }]);
   });
 
+  test("one session's rows all refused while another session's are accepted in the same pass: the first session's rows are not set aside", async () => {
+    const { fake, t } = await world();
+    const A = await sharedSession(t);
+    const B = await sharedSession(t);
+    for (let i = 0; i < 6; i++) turnOf(t, A, `req_h4_a_all${i}`, 70 + i);
+    turnOf(t, B, "req_h4_b_ok", 16);
+    fake.usageRefuse = (rows) => (rows.some((r) => r.input >= 70) ? 400 : null);
+    for (let pass = 0; pass < 3; pass++) assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.deepEqual(rowsOf(fake, B.key).map((r) => r.input), [16], "the other session's row went up");
+    assert.deepEqual(local(t, A.lid).filter((r) => r.uploaded !== 0), [], "no row of the refused session set aside");
+    fake.usageRefuse = null;
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.equal(rowsOf(fake, A.key).length, 6, "all of its rows went up once the server accepted them");
+  });
+
   test("a lone bad row with nothing else to upload waits, unmarked, pass after pass", async () => {
     const { fake, t } = await world();
     const A = await sharedSession(t);
@@ -698,7 +713,7 @@ describe("LIM-2441 H4: a refused usage row never blocks the others", () => {
     assert.equal((await runCli(t, ["sync"])).code, 0);
     assert.equal((await runCli(t, ["sync"])).code, 0);
     assert.deepEqual(local(t, A.lid), [{ input: 77, uploaded: 0 }], "not set aside: no other row was accepted");
-    assert.match(logText(t), /the server refused 1 row\(s\) and accepted none this pass, so none is set aside/);
+    assert.match(logText(t), new RegExp(`the server refused 1 row\\(s\\) of ${A.lid.slice(0, 8)} \\(422\\) and accepted none of its rows this pass, so none is set aside`));
     // Once another row goes up in the same pass, the lone one is set aside.
     turnOf(t, A, "req_h4_good_later", 15);
     assert.equal((await runCli(t, ["sync"])).code, 0);

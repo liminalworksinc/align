@@ -636,9 +636,10 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
   // Epochs sent before that offset was kept use the one known now.
   const offset = clockOffset(ctx.home);
   // Rows refused alone this pass. They are set aside (`uploaded` 2, staying on this machine) only once the same pass has
-  // seen the server accept another row: a server that refuses everything (a bad deploy) is not evidence about any row.
+  // seen the server accept another row of the same session: a server that refuses everything, or everything of one
+  // session (a bad deploy), is not evidence about any row.
   const refusedAlone: { lid: string; key: string; status: number }[] = [];
-  let acceptedAny = false;
+  const accepted = new Set<string>();
   for (const s of shares) {
     assignEpochs(ctx, s.local_id);
     const pendingOutbox = ctx.db.prepare("SELECT 1 FROM outbox WHERE local_id=? AND kind IN ('put_session','post_epoch') LIMIT 1").get(s.local_id);
@@ -679,7 +680,7 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
         r = await api(ctx, "POST", `/api/v2/workspaces/${enc(s.workspace_id)}/sessions/${enc(s.session_key)}/usage`, { body: { rows: wire } });
       } catch (e) {
         if (e instanceof NetworkError) {
-          settleRefused(ctx, refusedAlone, acceptedAny);
+          settleRefused(ctx, refusedAlone, accepted);
           return res;
         }
         throw e;
@@ -720,7 +721,7 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
         // Logged by status and count only, as every refusal here: never a prompt, reply, file or path.
         if (r.status >= 500 || r.status === 401 || r.status === 408 || r.status === 429) {
           ctx.log(`usage upload for ${s.local_id.slice(0, 8)} answered ${r.status}: ${wire.length} row(s) wait for the next pass`);
-          settleRefused(ctx, refusedAlone, acceptedAny);
+          settleRefused(ctx, refusedAlone, accepted);
           return res;
         }
         if (wire.length > 1) {
@@ -741,7 +742,7 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
       // Rows the server did not store (made while the session was not shared, by its clock: the C5-1 backstop) stay on
       // this machine and count as not shared, as rows withheld here do (cycle 6).
       const refused = new Set(Array.isArray(r.json?.refused) ? (r.json.refused as unknown[]).filter((k): k is string => typeof k === "string") : []);
-      if (keys.some((k) => !refused.has(k))) acceptedAny = true;
+      if (keys.some((k) => !refused.has(k))) accepted.add(s.local_id);
       tx(ctx.db, () => {
         const mark = ctx.db.prepare("UPDATE requests SET uploaded=? WHERE request_key=?");
         for (const k of keys) mark.run(refused.has(k) ? 2 : 1, k);
@@ -755,25 +756,32 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
       if (rows.length < limit && keys.length === rows.length) break;
     }
   }
-  settleRefused(ctx, refusedAlone, acceptedAny);
+  settleRefused(ctx, refusedAlone, accepted);
   return res;
 }
 
-/** Rows refused alone this pass: set aside when the server accepted another row in it, otherwise left to wait. Logged by
- *  session, status and count only, never a prompt, reply, file or path. */
-function settleRefused(ctx: Ctx, rows: { lid: string; key: string; status: number }[], acceptedAny: boolean): void {
-  if (!rows.length) return;
-  const groups = new Map<string, number>();
-  for (const r of rows) groups.set(`${r.lid.slice(0, 8)} (${r.status})`, (groups.get(`${r.lid.slice(0, 8)} (${r.status})`) ?? 0) + 1);
-  if (!acceptedAny) {
-    ctx.log(`usage: the server refused ${rows.length} row(s) and accepted none this pass, so none is set aside; they wait for the next pass`);
-    return;
+/** Rows refused alone this pass: set aside when the server accepted another row of the same session in it, otherwise
+ *  left to wait. Logged by session, status and count only, never a prompt, reply, file or path. */
+function settleRefused(ctx: Ctx, rows: { lid: string; key: string; status: number }[], accepted: ReadonlySet<string>): void {
+  const groups = new Map<string, { n: number; aside: boolean }>();
+  for (const r of rows) {
+    const g = `${r.lid.slice(0, 8)} (${r.status})`;
+    groups.set(g, { n: (groups.get(g)?.n ?? 0) + 1, aside: accepted.has(r.lid) });
   }
-  tx(ctx.db, () => {
-    const mark = ctx.db.prepare("UPDATE requests SET uploaded=2 WHERE request_key=? AND uploaded=0");
-    for (const r of rows) mark.run(r.key);
-  });
-  for (const [g, n] of groups) ctx.log(n === 1 ? `usage: the server refused 1 row of ${g}; it stays on this machine` : `usage: the server refused ${n} rows of ${g}; they stay on this machine`);
+  const aside = rows.filter((r) => accepted.has(r.lid));
+  if (aside.length)
+    tx(ctx.db, () => {
+      const mark = ctx.db.prepare("UPDATE requests SET uploaded=2 WHERE request_key=? AND uploaded=0");
+      for (const r of aside) mark.run(r.key);
+    });
+  for (const [g, { n, aside: set }] of groups)
+    ctx.log(
+      !set
+        ? `usage: the server refused ${n} row(s) of ${g} and accepted none of its rows this pass, so none is set aside; they wait for the next pass`
+        : n === 1
+          ? `usage: the server refused 1 row of ${g}; it stays on this machine`
+          : `usage: the server refused ${n} rows of ${g}; they stay on this machine`,
+    );
 }
 
 export function outboxDepth(ctx: Ctx): number {
