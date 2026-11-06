@@ -1453,6 +1453,110 @@ The historical SQL bodies and schema remain retained source. Publication, B13's
 full authentication schema, the remaining storage boundary and authority-class
 review remain open in the linked work.
 
+## B12 runtime settings
+
+[CONFIG-001](active-work.md#config-001) corrects hosted data-path admission before
+freezing settings behavior. The complete sealed workflow passes all 1,827 checks,
+with no failures or skips. The normal updated receipt is
+`sha256:16acdfd7a2fde0d5d3561470e6143bd8c99b31b4e50e607df9e73b7575be155c`.
+Both installed verification runtimes pass three gates with two declared skips;
+project validation and owned entrypoints pass. The same immutable hosted image
+passes 24 canonical checks, ten response-header checks and two inside-path
+startup refusals. This local correction is not published.
+
+The [settings contract](../architecture/runtime-settings-contract.md)
+separates portable operating policy from the Node binding. Its service
+factory binds current-environment, working-directory and existing qualified
+follow-up callbacks, preserving all 22 public methods, two data values, shared
+loopback state and the instance's cached startup array. The contract includes
+the exact ordered startup diagnostic catalog. Native qualification and complete
+consumer-transfer acceptance pass locally. The broader storage boundary remains
+open.
+
+`capture-runtime-settings.mjs` captures both complete configuration modules and
+only the five contiguous settings declarations from `core.mts`, totaling three
+files and 15,214 bytes. Signed snapshot:
+`sha256:b472e3d20bfbe52388ad09558aad8acb8d8f230e9d79e9efec8d73daef3765ee`.
+The installed CLI's static derivation succeeds and retains three explicit
+runtime-behavior uncertainties for signed review against the independent
+observations. An isolated replay preserves
+all 18,156 frozen observations, seven state/identity traces and public metadata.
+The full retained baseline also matches on macOS and Linux. Four capture controls
+refuse source drift, symlinked inputs, existing output and evidence/snapshot
+collision before creating new output. The qualified follow-up implementation
+is used only by the independent observer fixture; its algorithm is not copied
+into the settings source snapshot.
+
+The verifier-owned binding of the exact retained modules passes eight context
+controls and rejects eight deliberately broken bindings. All 52 observation
+batches retain their original digests through that binding, including 720
+follow-up dependency calls with unchanged input identity. The observer revision
+also preserves all seven original state traces. These are source-preparation
+results, with no generated settings candidate involved.
+
+The independent verifier passes all 62 cases on macOS and Linux, detects 19
+semantic mutants and 11 forbidden-effect variants, and preserves the original
+18,156 observations and seven state traces. After one generated candidate failed
+the existing relative-directory control, the Node Flavor was clarified with a
+separate source-reproduced public example. Every original case and expected
+result is unchanged. Two distinct clean generation runs then pass qualification.
+A separate admitted build passes, with receipt
+`sha256:606bdedd144612a0e888a793e1f092bf7eee291ed2e7d1c1c71572c0cf8beddd`.
+Public child registration preserves all 17 prior records and 3,113 tracked files.
+
+The application now uses one shared factory instance through direct typed
+aliases. All 18,156 actual consumer observations, seven state traces and public
+metadata match the retained baseline. Public namespaces are assignable in both
+directions, and the 51 unselected core statements plus the operator's executable
+command body remain unchanged. Eight cold operator checks pass from a read-only
+source tree without node_modules or materialized native files. Workspace listing,
+reports and retention dry runs preserve output, leave the synthetic database
+unchanged and clean up their temporary runtimes.
+
+The copied independent verifier's local import-variable names now satisfy the
+existing lint rule. Normal re-admission passes, and the protected qualification
+profile, component lock, qualified head and consumed package files remain
+unchanged. The packaged operator's code closure is checked against exact retained
+and qualified package bytes as the unprivileged runtime user. An initial image
+failure reproduced private native-directory permissions; explicit modes on the
+assembled code correct it, and all 24 canonical image checks now pass. The source
+launcher preserves the retained SIGTERM result while SQLite is locked and stops
+owned preparation groups on SIGTERM, SIGINT and SIGHUP, with no live descendants
+or temporary files left behind. All 36 canonical image, header and inside-path
+startup-refusal checks pass against the same immutable image. The only subsequent
+retained-source edit is its excluded test driver; the other 403 image input files
+remain unchanged.
+
+The operator and retention test helpers now await their subprocesses, keeping the
+HTTP client event loop active. The following complete run passes 1,826 of 1,827
+checks. Its sole failure is a reproduced privacy-observer false positive: joining
+an actor hash ending in Doc to a timestamp starting with 2 manufactures the
+fixture label Doc 2. The observer now checks individual fields. Eighteen injected
+URL/label leaks and two field/row boundary controls pass. One new observer check
+is added; the other 965 existing check calls remain unchanged.
+
+The asynchronous command capture now decodes stdout and stderr incrementally as
+UTF-8. A real child process splits a euro sign and an emoji across byte chunks:
+retained synchronous capture and the corrected asynchronous helper return the
+same text, while the first asynchronous helper corrupts both streams. The new
+in-suite control passes and all 967 preceding check calls remain unchanged.
+The superseded run is deliberately interrupted before admission. The corrected
+complete build, test and package workflow passes all 1,829 checks, with no failures
+or skips. All three phases bind one 404-member source identity, and all 4,198
+committable files remain unchanged during execution. The normal updated receipt is
+`sha256:cb5556032abc5d569b3b8bb4a31809da4325c3f43078c09157dae7b7f7212a21`. Both installed verification
+runtimes pass three gates with two declared optional skips. Project validation
+and owned entrypoints pass. This is complete local settings consumer acceptance;
+publication and the remaining rewrite are open.
+
+The contributor-command audit covers all 18 native children and passes 72 actual
+validate, lock, plan and verify commands. Three affected guides use their actual
+Components, target names and pinned runtimes. Their ordinary rebuilds reuse
+accepted source and refresh current receipts, with qualification profiles,
+Component locks, qualified heads and consumed package bytes unchanged. Schema
+qualification separately awaits the pending specific local SDK commit approval.
+The historical SQL, wider runtime and authority-class review remain open.
+
 ## Boundary inventory
 
 Paths are relative to `components/legacy-project-wrapper/implementation/` unless they
@@ -1483,7 +1587,7 @@ types, and does not touch the database, files, network, clock or environment.
 
 | ID | Boundary | Files | Evidence | Owner | Class |
 |---|---|---|---|---|---|
-| B12 | Storage, configuration and request plumbing | `lib/v2/core.mts`, `db.ts`, `node-sqlite.d.ts`, `ids.ts`, `events.ts`, `init.ts`, `config.ts`, `limits.ts`, `http.ts`; `lib/config.ts`, `secret.ts`, `startup.ts`, `locks.ts`, `http.ts`, `ratelimit.ts`, `lib/migration-coordinator.mts` | `test-v2.mjs` (opens the database directly with `node:sqlite`) | `workspaces.md` (rate limits, local and hosted edges) | intent: the shared queue is integrated as qualified `local/promise-queues`, with its original algorithm retired. The remaining storage and configuration code stays retained: `node:sqlite` schema and migrations (`db.ts`), secrets and environment. The numbered migration coordinator is qualified, registered and consumed in the working tree, with all 213 storage checks passing on macOS and Linux, the full 1,825-check application workflow and all 34 image/header checks passing. Every server module depends on it; the schema has to become its own data contract before anything that touches the database can transfer. |
+| B12 | Storage, configuration and request plumbing | `lib/v2/core.mts`, `db.ts`, `node-sqlite.d.ts`, `ids.ts`, `events.ts`, `init.ts`, `config.ts`, `limits.ts`, `http.ts`; `lib/config.ts`, `secret.ts`, `startup.ts`, `locks.ts`, `http.ts`, `ratelimit.ts`, `lib/migration-coordinator.mts` | `test-v2.mjs` (opens the database directly with `node:sqlite`) | `workspaces.md` (rate limits, local and hosted edges) | intent: qualified `local/promise-queues`, `local/migration-coordinator` and `local/runtime-settings` replace their original algorithms. The coordinator preserves 213 storage checks on macOS and Linux; settings preserves 18,156 observations and seven state traces through typed aliases. The complete eighteen-library workflow passes 1,829 checks, with all 36 image/header/startup checks passing. Connections, historical schema SQL, secret files and request effects retain source authority. The schema needs its own qualified data contract before database-dependent behavior transfers. |
 | B13 | Identity and sign-in | `lib/v2/auth.ts`, `captcha.ts`, `mail.ts`, `local-owner.ts`, `access.ts`, `creation.ts`, `disposable.ts`, `account.ts`, `lifecycle.ts` | `test-v2.mjs` | `workspaces.md` | retained: Better Auth, passkeys, email delivery and the bot check |
 | B14 | Workspaces and the sample | `lib/v2/workspaces.ts`, `sample.ts` | `test-v2.mjs` | `workspaces.md`, `goals-and-proposals.md` (Northstar sample) | retained: database |
 | B15 | Goals, change requests, alignments, reallocations, requests, asks | `lib/v2/goals.ts`, `goal-limits.ts`, `changes.ts`, `changes-read.ts`, `approval.ts`, `evidence.ts`, `value.ts`, `limit-suggest.ts`, `alignments.ts`, `reallocations.ts`, `requests.ts`, `asks.ts` | `test-v2.mjs` | `goals-and-proposals.md`, `directives.md` | retained: database transactions; the main product logic, a candidate after B12's data contract |
@@ -1528,11 +1632,11 @@ A pattern check on 2026-11-04 mapped all 362 tracked files under the implementat
 row above (first matching row wins), with none left over. Rows B01 to B11 hold 23 files; B12 to
 B22 and B28 hold 249; B23 to B30, excluding B28, hold 90.
 
-The current 398-file scope is reconciled on 2026-11-05 by
+The current 404-file scope is reconciled on 2026-11-05 by
 `tools/native-rewrite/map-retained-boundaries.py`: every file maps to one boundary,
 with no unmapped paths. Pure boundaries and their typed bindings hold 21 files;
-server, agent, UI and operator boundaries hold 250; assets, targets, packaging,
-harness and metadata hold 127. The new source-cache oracles and build admission
+server, agent, UI and operator boundaries hold 252; assets, targets, packaging,
+harness and metadata hold 131. The new source-cache oracles and build admission
 files are explicit harness rows. This membership check does not ratify the pending
 authority-class review or close the remaining runtime boundaries.
 

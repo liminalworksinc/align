@@ -43,6 +43,33 @@ The final shape has 48 tables, 420 columns, 71 foreign-key constraints represent
 by 117 field-pair rows, 96 indexes including SQLite's automatic indexes, and one
 trigger. The observed runtime is Node 26.3.0, SQLite 3.53.2 and TypeScript 5.9.3.
 
+## Entity and upgrade contract proposal
+
+The [entity and upgrade contract](../architecture/storage-entity-contract.md)
+now names all 48 record families, their responsibilities and the required effects
+of all 22 historical steps. A separate
+[target-model proposal](../architecture/storage-target-model-proposal.json)
+describes all 23 shapes without retained DDL programs. It covers 420 columns,
+71 foreign-key groups, 96 indexes, 49 check predicates and the event update guard.
+A diagnostic reconstruction matches every frozen schema shape on both macOS
+Node 26.3.0 / SQLite 3.53.2 and Linux Node 24.22.2 / SQLite 3.53.4. All 16 model
+mutation/refusal controls pass. Nineteen additional compatibility cases pass on
+each target. The capture helper reproduces the original inventory byte for byte
+and passes four refusal controls. The
+[contract observations](../architecture/storage-contract-observation.json) bind
+these results to the exact helpers and target description. The 22 original SQL
+bodies in the current consumer still match the frozen baseline exactly.
+
+The schema-only Component intent and SQLite Flavor pass source-bound review.
+Their frozen verifier covers 212 observations in 51 cases on macOS and Linux and
+detects all 15 broken variants. The natural zero-argument `change_programs()` API
+is blocked by the framework's omission of reviewed callable metadata during
+promotion. The tested parent correction awaits specific local commit approval
+before a clean wheel, fresh ordinary promotion and two clean qualifications.
+The full storage contract and authority classes, native-schema qualification and
+actual source retirement remain open. The diagnostic reconstructor does not
+implement the application and remains excluded from candidate generation.
+
 ## Authority and proposed transfer
 
 - Component intent owns entities, identities, relationships, validity, lifecycle
@@ -181,7 +208,11 @@ The current receipt is
 The same 398 source members feed an isolated image snapshot. All 24 image checks
 and ten additional header checks pass on image
 `sha256:92cdc39975b11d2783f14ed96c92ffc7e7ac39ec96c60422fd86d097500a9c51`.
-This checkpoint is local and awaits specific commit/publication approval.
+The operator approved publication of this exact staged tree. Commit `56848383`
+is published to draft [PR #58](https://github.com/liminalworksinc/align/pull/58).
+Its exact-head [receipt/spec check](https://github.com/liminalworksinc/align/actions/runs/42141663499)
+and [current-main check](https://github.com/liminalworksinc/align/actions/runs/42141700921)
+pass. The normal pre-push review completed without an opt-out.
 
 The same 213 consumer cases also pass on Linux arm64 with Node 24.22.2 and SQLite
 3.53.4. That run uses a read-only copy of the actual source and native packages,
@@ -307,5 +338,4 @@ contains data transformations; an empty schema cannot establish their parity.
 
 Only the named migration coordinator has qualified. The full schema, historical
 SQL and remaining storage behavior retain source authority; the current consumer
-transfer passes its complete parity checks. Checkpoint publication and the
-remaining storage work stay open.
+transfer passes its complete parity checks. The remaining storage work stays open.

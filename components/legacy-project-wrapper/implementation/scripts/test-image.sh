@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The hosted image, checked the way Fly would run it. Needs a running Docker daemon. Builds the image, then checks:
-# no tests, docs, packages or .env inside, and no scripts but the operator script; a misconfigured container exits 1
+# no tests, docs, packages or .env inside, and only the exact pinned operator closure; a misconfigured container exits 1
 # with its problems; a configured one serves the allowlisted routes only, as the node user, with the server itself as
 # PID 1, and owner-only files on the volume; the operator script runs in it.
 # Usage: scripts/test-image.sh [host-port]   (default 18080; nothing is pushed or deployed)
@@ -20,9 +20,7 @@ trap cleanup EXIT
 forbidden() { # forbidden <ls -A /app listing> <find output>: exit 0 if anything forbidden is present
   printf '%s\n' "$1" | grep -qxE 'data|packages|test|docs|\.env(\..*)?' || printf '%s\n' "$2" | grep -qE '(^|/)\.env(\.[^/]*)?$'
 }
-# scripts/ and lib/ hold only the operator script and its three imports (lib/v2/core.mts, lib/v2/metrics-core.mts,
-# lib/v2/retention-core.mts).
-OPERATOR_FILES=$'/app/lib/v2/core.mts\n/app/lib/v2/metrics-core.mts\n/app/lib/v2/retention-core.mts\n/app/scripts/align-admin.mjs'
+# scripts/ and lib/ must match the reviewed command, core modules, shared settings binding and two qualified packages.
 # The matcher itself, without Docker: a nested .env must be caught, a clean image must not be.
 forbidden "package.json" "/app/lib/.env.local"; ok $? "matcher: a nested /app/lib/.env.local is caught"
 forbidden "package.json" "/srv/x/.env"; ok $? "matcher: a nested /srv/x/.env is caught"
@@ -40,8 +38,8 @@ forbidden "$listing" "$envs"; nobad=$?
 # The listing must be real (it names package.json), or "none of these names" would pass on an empty listing.
 printf '%s\n' "$listing" | grep -qx 'package.json' && [ "$nobad" -ne 0 ]; ok $? "the image has no data/, packages/, test/, docs/ or .env at any depth" "$(echo "$listing $envs" | tr '\n' ' ')"
 
-extra="$(docker run --rm --entrypoint sh "$TAG" -c 'find /app/scripts /app/lib -type f 2>/dev/null | sort')"
-[ "$extra" = "$OPERATOR_FILES" ]; ok $? "scripts/ and lib/ hold only the operator script, lib/v2/core.mts, lib/v2/metrics-core.mts and lib/v2/retention-core.mts" "$(echo "$extra" | tr '\n' ' ')"
+operator="$(node scripts/test-operator-image.mjs "$TAG" 2>&1)"
+ok $? "scripts/ and lib/ match the exact pinned operator closure" "$operator"
 docker run --rm --entrypoint sh "$TAG" -c 'test ! -e /.literate && test ! -e /app/native && test ! -e /app/.native-inputs'
 ok $? "native source caches and acceptance inputs stay out of the runtime image"
 

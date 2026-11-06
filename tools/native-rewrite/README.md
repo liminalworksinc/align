@@ -162,6 +162,18 @@ separate from observations and check the one generic public API inertly.
 Both clean qualification builds and the separately admitted build pass all queue inputs.
 Consumer and complete application evidence belong to the parent program.
 
+For B12's runtime settings,
+`capture-runtime-settings.mjs IMPLEMENTATION SNAPSHOT RECORD_JSON` preserves both
+configuration modules and extracts the five exact shared settings declarations
+from `core.mts`. It checks the reviewed source hashes and public exports before
+writing. Keep the record outside the source snapshot. The captured source leaves
+the existing qualified follow-up dependency external and excludes unrelated core
+cryptography, secrets, schema and storage code. Its isolated replay preserves all
+18,156 retained observations and seven state traces. The
+[proposed settings contract](../../docs/architecture/runtime-settings-contract.md)
+records the complete stateful service and Node mapping. Qualification and consumer
+transfer remain open.
+
 For B12's migration coordinator,
 `capture-migration-coordinator-source.mjs SOURCE_DB OUTPUT_DIRECTORY RECORD_JSON`
 checks the complete reviewed `db.ts` baseline and extracts only its exact migration
@@ -298,3 +310,32 @@ retained gate runner with synthetic command results. The fixture uses only the
 Python standard library. Its nine cases check the complete numeric aggregate and
 a nonzero exit for a failure in each of the eight stages. The synthetic results
 are isolated from application acceptance and create no receipt.
+
+## Storage contract preparation
+
+The proposed [entity and upgrade contract](../../docs/architecture/storage-entity-contract.md)
+separates portable obligations from the SQLite target description. The
+[contract observations](../../docs/architecture/storage-contract-observation.json)
+record exact helper identities and the current diagnostic results. These tools
+do not generate or qualify the application's replacement storage implementation.
+
+Use Node with its SQLite module and Python 3.11 or newer. Set
+`ALIGN_SCHEMA_BASELINE_DIR` to a new directory outside this project. Capture reads
+the exact historical source from Git, checks its identities before executing SQL,
+and uses isolated in-memory databases. It refuses an existing output directory.
+
+```sh
+node --no-warnings tools/native-rewrite/capture-storage-schema.cjs . bb2605c80db29e03862ac2a2a9affe134184a7da "$ALIGN_SCHEMA_BASELINE_DIR"
+python -B tools/native-rewrite/schema-target-model.py "$ALIGN_SCHEMA_BASELINE_DIR/inventory.json" "$ALIGN_SCHEMA_BASELINE_DIR/target-proposal.json"
+python -B tools/native-rewrite/test-schema-target-model.py "$ALIGN_SCHEMA_BASELINE_DIR/inventory.json" "$ALIGN_SCHEMA_BASELINE_DIR/model-check.json"
+node --no-warnings tools/native-rewrite/probe-schema-compatibility.cjs "$ALIGN_SCHEMA_BASELINE_DIR/inventory.json" "$ALIGN_SCHEMA_BASELINE_DIR/source/migrations" "$ALIGN_SCHEMA_BASELINE_DIR/compatibility.json"
+```
+
+Capture reproduces all 23 historical shapes and 22 frozen SQL bodies. The model
+checker describes constraints as structured data, reconstructs each shape through
+the real SQLite engine and compares its observations. Sixteen mutation/refusal
+controls check the description boundary. The additional 19 compatibility cases
+cover nulls, affinity, Unicode length, reference scope, partial uniqueness,
+statement rollback and sequence allocation. The seed factory contains only
+explicit synthetic fixtures. The reconstructor remains an observer control;
+candidate generation must use separately reviewed Component and Flavor authority.

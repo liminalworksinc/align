@@ -60,6 +60,7 @@ assign(
             "startup.ts",
             "locks.ts",
             "migration-coordinator.mts",
+            "runtime-settings.mts",
             "http.ts",
             "ratelimit.ts",
         ]
@@ -119,11 +120,11 @@ assign(
 assign("B26", ["Dockerfile", ".dockerignore", "fly.toml", "docs/HOSTING.md"])
 assign(
     "B27",
-    ["scripts/test-all.sh", "scripts/test-image.sh", "scripts/oauth-test-net.mjs"],
+    ["scripts/test-all.sh", "scripts/test-image.sh", "scripts/test-operator-image.mjs", "scripts/oauth-test-net.mjs"],
 )
 assign(
     "B28",
-    ["scripts/align-admin.mjs", "scripts/retention.mjs", "scripts/sign-in-link.mjs"],
+    ["scripts/align-admin.mjs", "scripts/align-admin-main.mjs", "scripts/retention.mjs", "scripts/sign-in-link.mjs"],
 )
 assign(
     "B29",
@@ -140,7 +141,7 @@ assign(
 assign(
     "B30", [".gitignore", ".claude/settings.json", "packages/align-agent/.gitignore"]
 )
-assign("B31", ["scripts/native-libraries.mjs", "native/libraries.json"])
+assign("B31", ["scripts/native-libraries.mjs", "scripts/prepare-operator.mjs", "native/libraries.json"])
 
 PREFIXES = [
     (

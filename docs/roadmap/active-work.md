@@ -27,12 +27,22 @@ queue item or let `docs/roadmap/` become a plan archive.
 
 ## Open pull-request landing queue
 
-Tracker reconciliation on 2026-11-04 found three open reviews. None has been merged
-or updated by this continuation.
+Tracker reconciliation on 2026-11-05 found seven open reviews. The native rewrite
+checkpoint in #58 is published as `56848383` and remains draft. Its exact-head
+receipt/spec and current-main checks pass. Peer work remains independently owned.
 
-- [#58](https://github.com/liminalworksinc/align/pull/58), native boundary inventory:
-  its head is already an ancestor of this worktree. Keep its review separate from
-  the unpublished native implementation changes.
+- [#58](https://github.com/liminalworksinc/align/pull/58), native rewrite:
+  seventeen qualified libraries, including numbered storage upgrades. Current head
+  `56848383` matches this worktree and passes hosted CI. The review remains draft.
+- [#63](https://github.com/liminalworksinc/align/pull/63), integrated v2 frontend:
+  peer work, with its receipt/spec check failing at the surveyed head. It changes
+  interface consumers and remains separate from the storage contract work.
+- [#64](https://github.com/liminalworksinc/align/pull/64), refused usage uploads:
+  draft peer work in the local agent.
+- [#65](https://github.com/liminalworksinc/align/pull/65), refresh-lock ownership:
+  draft peer work in the local agent.
+- [#66](https://github.com/liminalworksinc/align/pull/66), team membership role checks:
+  draft peer work in workspace authorization.
 - [#59](https://github.com/liminalworksinc/align/pull/59), demo friction: draft peer
   work, outside this native rewrite step.
 - [#62](https://github.com/liminalworksinc/align/pull/62), serial hook latency:
@@ -54,29 +64,76 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 <a id="adopt-002"></a>
 ### [ ] ADOPT-002 — Native Literate AI rewrite
 
-- **Completion prerequisites:** SEC-001, CONTEXT-001, NATIVE-BINDINGS-001, TRUST-PARSER-001, VERIFIER-LINT-001
+- **Completion prerequisites:** SEC-001, CONFIG-001, CONTEXT-001, NATIVE-BINDINGS-001, TRUST-PARSER-001, VERIFIER-LINT-001
 - **Owner:** project architecture / Components / Flavors / skills / assets
 - **Direction:** Execute
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Next action:** Review the seventeen-library checkpoint for commit and draft
-  PR #58 publication, as described in the
-  [storage contract work](storage-data-contract.md). The retained-runtime baseline
-  now covers all 22 populated starting versions, 13 transaction/helper cases,
-  144 constraint cases and seven recovery/control cases. The full application
-  workflow passes 1,825 checks with the diagnostic documents present, and both
-  installed verification runtimes pass. The coordinator now qualifies on two clean
-  builds, passes its separately admitted build and is publicly registered. All 213
-  actual-consumer storage checks pass, including populated upgrades and recovery.
-  Web admission passes 302 batches across eleven libraries. All sixteen prior
-  consumer pins remain unchanged. The complete seventeen-library build, test and
-  package workflow passes 1,825 checks with zero failures or skips. All 24 image
-  checks and ten additional header checks pass on the same image. Current receipt:
-  `sha256:5e61ae0fe5bebdf1b28e1ff2112135628f34d8d601ef99dcbd46444507da5547`.
-  Historical SQL remains retained source. Full storage/schema transfer, remaining
-  runtime boundaries and authority-class review stay open. New publication needs
-  specific operator approval.
+- **Next action:** After the pending specific local SDK commit approval, build
+  and verify its clean non-editable wheel, then recreate the schema project
+  through ordinary signed promotion and run two clean qualifications. Preserve
+  its natural zero-argument API and all frozen acceptance cases before consumer
+  transfer or SQL retirement. The remaining storage, runtime and authority-class
+  review stay open under the [native rewrite program](native-rewrite-program.md).
+  Runtime settings completes local consumer acceptance across all 22 functions
+  and both data values. Two distinct clean qualification runs and a separate
+  admitted build pass all 62 cases, covering 18,156 observations and seven state
+  traces. Actual macOS and Linux consumers match those results; typed namespaces
+  remain assignable in both directions. Eight cold Node-only operator commands
+  match the retained baseline from a read-only checkout. Explicit packaged code
+  modes support the unprivileged operator, and owned process groups preserve
+  SIGTERM, SIGINT and SIGHUP with cleanup. All 36 image/header/startup checks pass.
+  The complete 404-member build, test and package workflow passes all 1,829 checks
+  with zero failures or skips. Every phase binds the same source identity, and
+  all 4,198 committable files remain unchanged through that run. Both installed
+  verification runtimes pass three gates with two declared optional skips;
+  project validation and owned entrypoints pass. Current receipt:
+  `sha256:cb5556032abc5d569b3b8bb4a31809da4325c3f43078c09157dae7b7f7212a21`.
+  All 18 native children pass 72 actual validate, lock, plan and verify commands.
+  Three corrected contributor guides have fresh ordinary receipts, with accepted
+  source reused and qualification profiles, locks, qualified heads and consumed
+  packages unchanged. The test driver awaits subprocesses, decodes UTF-8 streams
+  incrementally and checks event fields independently. Eighteen injected leak
+  controls, two field/row boundary controls and a real split-byte child process
+  preserve the intended assertions. No interrupted run supplies the current
+  receipt. The registered settings child initially preserves all 17 prior
+  registrations and 3,113 tracked files; later guide repairs change only their
+  owned documentation, review markers and receipts. This local checkpoint remains
+  uncommitted and unpublished. The separate SDK tree is excluded. No schema SQL
+  is retired.
+  The portable contract and SQLite Flavor pass source-bound review. Their verifier
+  passes 212 observations in 51 cases with identical macOS/Linux results and
+  detects all 15 broken variants. Source snapshot:
+  `sha256:77c6c76403ced6b996f9236d3b304b692d86a1ae52b7e1ef93a5fd8e00e86bf5`.
+  All 23 shape descriptions match the historical schemas on both targets,
+  19 additional compatibility cases pass on each, and 16 model controls plus
+  four capture refusals pass. The architecture documents and CONFIG-001 correction
+  pass the full 1,827-check build/test/package workflow, with zero failures or
+  skips. Its source remains a 398-member tree. All 36 hosted image,
+  response-header and startup refusal checks pass against the same immutable
+  image. Both installed and CI-pinned verification runtimes accept the refreshed
+  local receipt:
+  `sha256:16acdfd7a2fde0d5d3561470e6143bd8c99b31b4e50e607df9e73b7575be155c`.
+  These local changes are uncommitted and unpublished. The schema itself is not
+  natively qualified or transferred yet.
+  The seventeen-library checkpoint is published as `56848383` in draft
+  [PR #58](https://github.com/liminalworksinc/align/pull/58). Its exact-head
+  [receipt and spec check](https://github.com/liminalworksinc/align/actions/runs/42141663499)
+  and [current-main check](https://github.com/liminalworksinc/align/actions/runs/42141700921)
+  pass. The complete build, test and package workflow passes all 1,825 application
+  checks, with zero failures or skips. All 24 image checks and ten additional
+  header checks pass. The coordinator passes two clean qualification builds,
+  its separately admitted build, public registration, 213 actual storage checks
+  on macOS and Linux, and 302 web-admission batches across eleven libraries.
+  Sixteen prior registrations and 2,956 tracked child files are preserved.
+  Current receipt: `sha256:5e61ae0fe5bebdf1b28e1ff2112135628f34d8d601ef99dcbd46444507da5547`.
+  The normal pre-push review completed without an opt-out. Its old-Git admission
+  concern is refuted by installed composition checks: effective constraints remain
+  Git >=2.47 and Git LFS >=3.2. Inherited realization labels are unchanged.
+  All 48 tables have observed consumers outside the schema module. The remaining
+  schema, historical SQL, authentication, runtime boundaries and authority-class
+  review remain open. The separate framework tree is excluded from publication.
   The sixteen-library checkpoint is published as `bb2605c` in draft
   [PR #58](https://github.com/liminalworksinc/align/pull/58). Its exact-head
   [receipt and spec check](https://github.com/liminalworksinc/align/actions/runs/42123356635)
@@ -531,36 +588,6 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [ ] test-v2 and align-agent tests for each fix; litai spec validate ok
   - [ ] Retained test receipt recorded on the commit that closes it
 
-### [x] VERIFY-001 — Repair the retained-test blockers for PR 60
-
-- **Priority:** P1
-- **Owner:** components/legacy-project-wrapper/implementation (agent hooks and retained test harness)
-- **Direction:** Run PR 60 on this machine, investigate failures on main, repair demonstrated defects and refresh the branch receipt without merging or deploying.
-- **Conclusion:** The initial PR run passed 1787 checks and failed two. Clean main reproduces the dead-proxy fetch reset and folder-rule goal loss through a filesystem alias. Normalize folder identity and avoid stale HTTP connections in the live-test client; preserve all assertions and the latency budget.
-- **Depends on:** none
-- **Completion prerequisites:** none
-- **Implementation:**
-  - [x] Reproduce the two failures on clean main and retain diagnostic logs (main `cff1d34`: live 46/1, focused folder rule 0/1; network cause `ECONNRESET`)
-  - [x] Repair canonical folder-rule comparisons with a symlink regression (focused alias and unchanged latency tests 2/0 on macOS arm64 / Node 26.3.0)
-  - [x] Use fresh connections in the live-agent test client
-- **Evidence:**
-  - [x] Focused folder-rule and unchanged latency tests 2/0; repaired live client against unchanged main 62/0, including offline revoke and re-pairing
-  - [x] Full retained suite passes: lint/typecheck/syntax, paste-lines 23/0, v2 937/0, OAuth 187/0, live agent 62/0, CLI 592/0; supported receipt committed in `75420dd` and candidate check matches (the collector's 937 count is tracked in VERIFY-002)
-  - [x] `litai verify` and spec validation pass; `litai-verify` and `rebased-on-main` both pass at `75420dd` ([verification run](https://github.com/liminalworksinc/align/actions/runs/41958037099)); PR remains draft and nothing is deployed
-
-### [ ] VERIFY-002 — Investigate retained aggregate test-count reporting
-
-- **Priority:** P2
-- **Owner:** retained harness reporting (local test-all adapter / upstream Literate AI collector)
-- **Direction:** Investigate why the pinned collector records the v2 summary count rather than the complete test-all aggregate.
-- **Conclusion:** The full run passed all eight steps: 1804 checks by the per-step totals, while the supported candidate records 937 tests. Keep the generated receipt unchanged. Determine the narrow owner and search upstream before any parent implementation; this count discrepancy does not bypass any failing gate.
-- **Depends on:** none
-- **Completion prerequisites:** none
-- **Implementation:**
-  - [ ] Compare collector summary precedence with the Node 26 aggregate footer
-  - [ ] Resolve ownership and record an upstream issue before changing parent authority if applicable
-- **Evidence:**
-  - [ ] A fixture reports the complete aggregate and still rejects a failure in any stage
 <a id="sec-001"></a>
 ### [x] SEC-001 - Keep viewer team leads read-only
 
@@ -644,6 +671,7 @@ checks. Its current receipt is `sha256:7f3b84e7019246bdb8bb2edfc9dd043135ce57282
   - [x] With explicit authorization, file or link upstream issues before implementation in the isolated parent checkout.
   - [x] Replace the private registry helper with the supported public operation; preserve stale-plan, qualification, collision and rollback refusals.
   - [x] Preserve main's generic Python import isolation and the separate verified-wheel dependency closure; document and test native-cache transport scope.
+  - [ ] Preserve reviewed zero-argument callable metadata through ordinary single-Component promotion under existing upstream issue #132, then qualify the schema without changing its public API or independent cases.
   - [ ] Publish the tested framework contribution with specific approval and reconcile its canonical design and required review outcomes.
 - **Evidence:**
   - [x] Registration, Python isolation and cache-scope fixtures pass 93 focused installed regressions and the real two-library recovery journey without editing protected pins or generated implementations.
@@ -705,3 +733,41 @@ under its API usage limit; the approved one-command opt-out was used.
 - **Evidence:**
   - [x] The portable fixture passes all nine cases with a 54-check synthetic aggregate and rejects a failure in each stage. Run `python3 tools/native-rewrite/test-aggregate-count.py`; the script uses only the standard library and exercises the actual runner unchanged.
   - [x] Both installed collector runtimes pass all nine diagnostic cases. The real sealed build, test and package workflow reports all 1,825 checks with zero failures or skips.
+
+<a id="config-001"></a>
+### [x] CONFIG-001 - Reject hosted data paths inside the application directory
+
+- **Priority:** P1
+- **Owner:** B12 configuration target binding in lib/config.ts
+- **Direction:** Preserve the existing requirement that hosted data lives outside the application directory before freezing runtime configuration for native conversion.
+- **Conclusion:** The actual retained hostedProblems function admits four synthetic inside paths whose first relative component begins with two dots. A name prefix does not establish a parent path segment. Compare normalized path relationships at segment boundaries, retain existing diagnostic order and outside-directory behavior, and use fixture settings only. This is independent of the pending schema SDK commit.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Record the exact retained-function reproduction, source hashes and existing outside-directory contract; prepare a local issue draft if no matching issue exists.
+  - [x] Repair the path relationship check and add hosted startup regressions for direct and nested two-dot directory names without changing modes, secrets, database behavior or native children.
+- **Evidence:**
+  - [x] Pass all fifteen synthetic retained-function cases with legitimate outside controls and zero filesystem effects, retaining the failing predecessor record.
+  - [x] Pass the complete build, test and package workflow, refresh the current receipt normally, and verify the hosted image and current project gates before publication.
+
+- **Development evidence:** The unchanged function admits four forbidden paths in
+  a 15-case fixture probe. The corrected function passes all 15 cases, loads the
+  same 13 modules and attempts no filesystem effects. Existing issue search finds
+  no matching report; a sanitized issue draft is retained locally and is not
+  posted. Source before:
+  `sha256:cf0e9177ffd7bc28aad8cd14f9728045a882ec53a89605b5a79ade3a386b913b`;
+  source after:
+  `sha256:77f863f64159431a36fc40a617e7befcacf2720e6da42b1df48c0391ec7f1184`.
+  The complete sealed build, test and package workflow passes all 1,827 checks
+  with zero failures or skips, including both new hosted-startup regressions.
+  The normal receipt update records
+  `sha256:16acdfd7a2fde0d5d3561470e6143bd8c99b31b4e50e607df9e73b7575be155c`.
+  The installed and CI-pinned verification runtimes each pass three gates with
+  two declared skips; project validation and owned agent-entrypoint checks pass.
+  The same immutable image
+  `sha256:99a3e9cddc958879213b798dd8b5dd10474e57fa4328f63ee7b2801076bf3062`
+  passes 24 canonical image checks, ten response-header checks and both direct
+  and nested inside-path startup refusals. The 15-case path matrix also matches
+  on macOS and Linux. All 3,113 tracked native child files and the pending SDK
+  staged tree remain unchanged. This is local acceptance; publication still
+  requires specific operator approval.

@@ -1,11 +1,11 @@
 # Align hosted mode (HOSTED=1) on one machine with a persistent volume. See docs/HOSTING.md.
 # Secrets come from the platform (fly secrets), never from this file or a file in the image.
 # The build context is an allowlist (.dockerignore): only the app's own source goes in. Scripts, tests, docs, the
-# local agent packages and any .env file never reach the image, except the operator script (scripts/align-admin.mjs)
-# and the three modules it imports (lib/v2/core.mts, lib/v2/retention-core.mts, lib/v2/metrics-core.mts), which the
-# runtime gets so `fly ssh console` can run it. The trust documents (docs/trust, docs/RETENTION.md) enter the build
+# local agent packages and any .env file never reach the runtime, except the assembled operator command,
+# three core modules and qualified settings closure needed by `fly ssh console`. The trust documents
+# (docs/trust, docs/RETENTION.md) enter the build
 # stage only. The native cache, independent verifiers and build adapter also enter
-# the build stage only, so the image can check the exact paste-line package itself.
+# the build stage only, so the image checks the exact qualified packages itself.
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -17,12 +17,13 @@ COPY proxy.ts instrumentation.ts next.config.ts tsconfig.json ./
 # The public /privacy and /trust pages are built from these (lib/trust/docs.ts); the runtime stage doesn't copy them.
 COPY docs/trust ./docs/trust
 COPY docs/RETENTION.md ./docs/RETENTION.md
-# Prepared from the exact admitted paste-line cache by npm run prepare:container.
+# Prepared from the exact admitted native caches by npm run prepare:container.
 # Verification and independent acceptance run again inside this clean build stage.
 COPY .native-inputs /
 COPY native ./native
 COPY scripts/native-libraries.mjs ./scripts/native-libraries.mjs
-RUN node scripts/native-libraries.mjs web && npx next build
+COPY scripts/align-admin-main.mjs scripts/prepare-operator.mjs ./scripts/
+RUN node scripts/native-libraries.mjs web && node scripts/prepare-operator.mjs /app/.operator-runtime && npx next build
 
 # Runtime: production dependencies and the build output only, run as the unprivileged node user.
 FROM node:24-bookworm-slim
@@ -33,9 +34,8 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/.next ./.next
 COPY --from=build /app/public ./public
 COPY next.config.ts ./
-# The operator script and its three imports (Node runs the .mts directly): fly ssh console -C "node scripts/align-admin.mjs …"
-COPY scripts/align-admin.mjs ./scripts/align-admin.mjs
-COPY lib/v2/core.mts lib/v2/retention-core.mts lib/v2/metrics-core.mts ./lib/v2/
+# The exact assembled Node-only operator closure, with no cache, verifier or build adapter.
+COPY --from=build /app/.operator-runtime ./
 RUN mkdir -p /data && chown -R node:node /data /app/.next
 EXPOSE 8080
 # Fly mounts the volume over /data owned by root, so the container starts as root only to hand /data to the node

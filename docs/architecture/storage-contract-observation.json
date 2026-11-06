@@ -1,0 +1,595 @@
+{
+  "schema": "align/storage-contract-observation@1",
+  "status": "diagnostic proposal validation only",
+  "source_commit": "bb2605c80db29e03862ac2a2a9affe134184a7da",
+  "current_consumer_commit": "56848383e18ac344ed9e908796ffae8861088741",
+  "current_consumer_db_sha256": "75610c44789c686e34db744d50fa081d33fc7a4e172cfa99562d18cb9e524a58",
+  "current_sql_bodies_match_frozen": 22,
+  "inventory_sha256": "499e43291f4f54f8a7b7710810ae9b14f885b33e1daaf71dd7428a2f3bda26f8",
+  "target_model_sha256": "00c8025cdeb9e559c5e246816283f75fa16584e277d40c35ffeefcbf7c6d5ea9",
+  "target_counts": {
+    "tables": 48,
+    "columns": 420,
+    "foreign_key_constraints": 71,
+    "indexes": 96,
+    "triggers": 1,
+    "checks": 49
+  },
+  "reconstructed_shapes": [
+    {
+      "runtime": {
+        "node": "v26.3.0",
+        "sqlite": "3.53.2"
+      },
+      "versions": [
+        {
+          "version": 0,
+          "tables": 0,
+          "passed": true
+        },
+        {
+          "version": 1,
+          "tables": 22,
+          "passed": true
+        },
+        {
+          "version": 2,
+          "tables": 24,
+          "passed": true
+        },
+        {
+          "version": 3,
+          "tables": 24,
+          "passed": true
+        },
+        {
+          "version": 4,
+          "tables": 25,
+          "passed": true
+        },
+        {
+          "version": 5,
+          "tables": 27,
+          "passed": true
+        },
+        {
+          "version": 6,
+          "tables": 29,
+          "passed": true
+        },
+        {
+          "version": 7,
+          "tables": 31,
+          "passed": true
+        },
+        {
+          "version": 8,
+          "tables": 34,
+          "passed": true
+        },
+        {
+          "version": 9,
+          "tables": 35,
+          "passed": true
+        },
+        {
+          "version": 10,
+          "tables": 36,
+          "passed": true
+        },
+        {
+          "version": 11,
+          "tables": 39,
+          "passed": true
+        },
+        {
+          "version": 12,
+          "tables": 42,
+          "passed": true
+        },
+        {
+          "version": 13,
+          "tables": 42,
+          "passed": true
+        },
+        {
+          "version": 14,
+          "tables": 42,
+          "passed": true
+        },
+        {
+          "version": 15,
+          "tables": 46,
+          "passed": true
+        },
+        {
+          "version": 16,
+          "tables": 46,
+          "passed": true
+        },
+        {
+          "version": 17,
+          "tables": 46,
+          "passed": true
+        },
+        {
+          "version": 18,
+          "tables": 46,
+          "passed": true
+        },
+        {
+          "version": 19,
+          "tables": 47,
+          "passed": true
+        },
+        {
+          "version": 20,
+          "tables": 47,
+          "passed": true
+        },
+        {
+          "version": 21,
+          "tables": 47,
+          "passed": true
+        },
+        {
+          "version": 22,
+          "tables": 48,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "runtime": {
+        "node": "v24.22.2",
+        "sqlite": "3.53.4"
+      },
+      "versions": [
+        {
+          "version": 0,
+          "tables": 0,
+          "passed": true
+        },
+        {
+          "version": 1,
+          "tables": 22,
+          "passed": true
+        },
+        {
+          "version": 2,
+          "tables": 24,
+          "passed": true
+        },
+        {
+          "version": 3,
+          "tables": 24,
+          "passed": true
+        },
+        {
+          "version": 4,
+          "tables": 25,
+          "passed": true
+        },
+        {
+          "version": 5,
+          "tables": 27,
+          "passed": true
+        },
+        {
+          "version": 6,
+          "tables": 29,
+          "passed": true
+        },
+        {
+          "version": 7,
+          "tables": 31,
+          "passed": true
+        },
+        {
+          "version": 8,
+          "tables": 34,
+          "passed": true
+        },
+        {
+          "version": 9,
+          "tables": 35,
+          "passed": true
+        },
+        {
+          "version": 10,
+          "tables": 36,
+          "passed": true
+        },
+        {
+          "version": 11,
+          "tables": 39,
+          "passed": true
+        },
+        {
+          "version": 12,
+          "tables": 42,
+          "passed": true
+        },
+        {
+          "version": 13,
+          "tables": 42,
+          "passed": true
+        },
+        {
+          "version": 14,
+          "tables": 42,
+          "passed": true
+        },
+        {
+          "version": 15,
+          "tables": 46,
+          "passed": true
+        },
+        {
+          "version": 16,
+          "tables": 46,
+          "passed": true
+        },
+        {
+          "version": 17,
+          "tables": 46,
+          "passed": true
+        },
+        {
+          "version": 18,
+          "tables": 46,
+          "passed": true
+        },
+        {
+          "version": 19,
+          "tables": 47,
+          "passed": true
+        },
+        {
+          "version": 20,
+          "tables": 47,
+          "passed": true
+        },
+        {
+          "version": 21,
+          "tables": 47,
+          "passed": true
+        },
+        {
+          "version": 22,
+          "tables": 48,
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "model_mutation_controls": [
+    {
+      "name": "reject-unmodeled/ON CONFLICT IGNORE",
+      "passed": true
+    },
+    {
+      "name": "reject-unmodeled/DEFERRABLE INITIALLY DEFERRED",
+      "passed": true
+    },
+    {
+      "name": "reject-unmodeled/COLLATE NOCASE",
+      "passed": true
+    },
+    {
+      "name": "reject-unmodeled/GENERATED ALWAYS",
+      "passed": true
+    },
+    {
+      "name": "reject-unmodeled/STRICT",
+      "passed": true
+    },
+    {
+      "name": "reject-unmodeled/WITHOUT ROWID",
+      "passed": true
+    },
+    {
+      "name": "detect/changed-enum",
+      "passed": true
+    },
+    {
+      "name": "detect/missing-reference",
+      "passed": true
+    },
+    {
+      "name": "detect/missing-unique-index",
+      "passed": true
+    },
+    {
+      "name": "detect/weaker-nullability",
+      "passed": true
+    },
+    {
+      "name": "reject-expression/length(note,1) < 5",
+      "passed": true
+    },
+    {
+      "name": "reject-expression/random() > 0",
+      "passed": true
+    },
+    {
+      "name": "reject-expression/note LIKE '%'",
+      "passed": true
+    },
+    {
+      "name": "reject-expression/x IN ()",
+      "passed": true
+    },
+    {
+      "name": "reject-expression/x BETWEEN 0",
+      "passed": true
+    },
+    {
+      "name": "reject-expression/x; SELECT 1",
+      "passed": true
+    }
+  ],
+  "capture": {
+    "schema": "align/storage-schema-recapture-check@1",
+    "passed": true,
+    "byte_identical_inventory": true,
+    "inventory_sha256": "499e43291f4f54f8a7b7710810ae9b14f885b33e1daaf71dd7428a2f3bda26f8",
+    "schema_versions": 23,
+    "sql_files": 22,
+    "refusal_controls": [
+      {
+        "name": "unexpected-source",
+        "rejected": true,
+        "output_created": false
+      },
+      {
+        "name": "existing-output",
+        "rejected": true,
+        "output_created": false
+      },
+      {
+        "name": "project-output",
+        "rejected": true,
+        "output_created": false
+      },
+      {
+        "name": "unbounded-revision-name",
+        "rejected": true,
+        "output_created": false
+      }
+    ]
+  },
+  "physical_compatibility": [
+    {
+      "runtime": {
+        "node": "v26.3.0",
+        "sqlite": "3.53.2"
+      },
+      "cases": [
+        {
+          "name": "nullable-text-primary-key-is-not-strengthened",
+          "value": 2,
+          "passed": true
+        },
+        {
+          "name": "explicit-non-null-primary-key-field",
+          "value": 1299,
+          "passed": true
+        },
+        {
+          "name": "integer-affinity-is-not-strict-typing",
+          "value": [
+            "integer",
+            "real",
+            "text"
+          ],
+          "passed": true
+        },
+        {
+          "name": "repeated-rate-hits-remain-separate",
+          "value": 2,
+          "passed": true
+        },
+        {
+          "name": "nullable-enum-check-retains-null",
+          "value": true,
+          "passed": true
+        },
+        {
+          "name": "optional-composite-reference-retains-null",
+          "value": true,
+          "passed": true
+        },
+        {
+          "name": "historical-actors-do-not-require-current-membership",
+          "value": 3,
+          "passed": true
+        },
+        {
+          "name": "historical-labels-are-not-new-foreign-keys",
+          "value": true,
+          "passed": true
+        },
+        {
+          "name": "reallocation-approval-retains-declared-reference-scope",
+          "value": true,
+          "passed": true
+        },
+        {
+          "name": "unicode-length-uses-code-points",
+          "value": 275,
+          "passed": true
+        },
+        {
+          "name": "null-workspace-exempts-workspace-once-index",
+          "value": 2,
+          "passed": true
+        },
+        {
+          "name": "null-actor-exempts-person-once-index",
+          "value": 2,
+          "passed": true
+        },
+        {
+          "name": "event-no-op-update-still-aborts",
+          "value": 1811,
+          "passed": true
+        },
+        {
+          "name": "constraint-failure-aborts-statement-not-outer-transaction",
+          "value": 2,
+          "passed": true
+        },
+        {
+          "name": "binary-unique-key-collation",
+          "value": 1,
+          "passed": true
+        },
+        {
+          "name": "deleted-high-sequence/v2_audit",
+          "value": 9000001,
+          "passed": true
+        },
+        {
+          "name": "deleted-high-sequence/v2_activity",
+          "value": 9000001,
+          "passed": true
+        },
+        {
+          "name": "deleted-high-sequence/v2_directives",
+          "value": 9000001,
+          "passed": true
+        },
+        {
+          "name": "event-rowid-has-no-nonreuse-promise",
+          "value": 22,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "runtime": {
+        "node": "v24.22.2",
+        "sqlite": "3.53.4"
+      },
+      "cases": [
+        {
+          "name": "nullable-text-primary-key-is-not-strengthened",
+          "value": 2,
+          "passed": true
+        },
+        {
+          "name": "explicit-non-null-primary-key-field",
+          "value": 1299,
+          "passed": true
+        },
+        {
+          "name": "integer-affinity-is-not-strict-typing",
+          "value": [
+            "integer",
+            "real",
+            "text"
+          ],
+          "passed": true
+        },
+        {
+          "name": "repeated-rate-hits-remain-separate",
+          "value": 2,
+          "passed": true
+        },
+        {
+          "name": "nullable-enum-check-retains-null",
+          "value": true,
+          "passed": true
+        },
+        {
+          "name": "optional-composite-reference-retains-null",
+          "value": true,
+          "passed": true
+        },
+        {
+          "name": "historical-actors-do-not-require-current-membership",
+          "value": 3,
+          "passed": true
+        },
+        {
+          "name": "historical-labels-are-not-new-foreign-keys",
+          "value": true,
+          "passed": true
+        },
+        {
+          "name": "reallocation-approval-retains-declared-reference-scope",
+          "value": true,
+          "passed": true
+        },
+        {
+          "name": "unicode-length-uses-code-points",
+          "value": 275,
+          "passed": true
+        },
+        {
+          "name": "null-workspace-exempts-workspace-once-index",
+          "value": 2,
+          "passed": true
+        },
+        {
+          "name": "null-actor-exempts-person-once-index",
+          "value": 2,
+          "passed": true
+        },
+        {
+          "name": "event-no-op-update-still-aborts",
+          "value": 1811,
+          "passed": true
+        },
+        {
+          "name": "constraint-failure-aborts-statement-not-outer-transaction",
+          "value": 2,
+          "passed": true
+        },
+        {
+          "name": "binary-unique-key-collation",
+          "value": 1,
+          "passed": true
+        },
+        {
+          "name": "deleted-high-sequence/v2_audit",
+          "value": 9000001,
+          "passed": true
+        },
+        {
+          "name": "deleted-high-sequence/v2_activity",
+          "value": 9000001,
+          "passed": true
+        },
+        {
+          "name": "deleted-high-sequence/v2_directives",
+          "value": 9000001,
+          "passed": true
+        },
+        {
+          "name": "event-rowid-has-no-nonreuse-promise",
+          "value": 22,
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "helper_sha256": {
+    "capture-storage-schema.cjs": "bd0b1e97610de401af668cf0dba5ba10eb306c47fdbc254698509da126129f4d",
+    "schema-target-model.py": "42393dbf626e24402d3a5a8edc143f94cceeb0c747a9cdebae240df499794aaf",
+    "test-schema-target-model.py": "32d44dd522119aa3624a5887910c887d2ed5af4240f3449c67a9ae331b36f8cb",
+    "storage-seed-fixture.cjs": "4706e4aae1658e63abecc854b804fb8e0375d0226fa9ec9ddd210e595c65f0a1",
+    "probe-schema-compatibility.cjs": "bafac282bfdb12e64178d1a0b153072e833b47c511e7766e68a65f9d19d05959"
+  },
+  "synthetic_fixtures_only": true,
+  "generation_input": false,
+  "native_qualification_claimed": false,
+  "release_authority_transferred": false,
+  "limits": [
+    "Shape reconstruction does not execute populated upgrades. Earlier populated-upgrade evidence remains separate.",
+    "Physical acceptance of a record is not business authorization.",
+    "External account/passkey fixtures do not qualify the complete authentication schema.",
+    "The new entity contract and SQLite mapping still need ordinary source-bound review and independent native-schema acceptance."
+  ]
+}

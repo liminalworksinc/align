@@ -573,6 +573,11 @@ URL; and SHALL log one warning when it starts hosted without the Turnstile keys.
 - **WHEN** a hosted server starts with none of the email settings and neither provider's id and secret
 - **THEN** it refuses to start and names that it needs the email settings or a Google or GitHub client
 
+#### Scenario: Data directory remains inside the application
+
+- **WHEN** a hosted server's absolute data directory resolves to the application directory or one of its descendants, including an ordinary child named `..private`
+- **THEN** it refuses to start and names that the data directory must be outside the application directory
+
 #### Scenario: Partial or unsafe settings
 
 - **WHEN** a hosted server starts with only some of the three email settings, an `http:` `ALIGN_EMAIL_API_URL`, a Google or GitHub client id without its secret (or the reverse), an `ALIGN_SESSION_MAX_DAYS` that is not a whole number from 1 to 365, `ALIGN_TEST_IDP`, `ALIGN_TEST_NOW`, `ALIGN_TEST_OAUTH_URL` or `ALIGN_LOCAL_OWNER_EMAIL` set, or `ALIGN_PUBLIC=1`

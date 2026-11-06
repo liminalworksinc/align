@@ -27,7 +27,7 @@ See the [API guide](../user/getting-started.md). Contributor checks use the actu
 
 ```console
 litai project validate
-litai lock --check
+litai lock components/paste-lines --target host --check
 CODING_CLI=codex litai rebuild components/paste-lines --target host --allow-host-execution --update-receipt
 ```
 

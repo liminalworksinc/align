@@ -99,8 +99,10 @@ volume (`fly volumes destroy`).
 
 ## Operator script
 
-`scripts/align-admin.mjs` (the v2 replacement for v1's `ws-admin`) is in the image with its three imports,
-`lib/v2/core.mts`, `lib/v2/retention-core.mts` and `lib/v2/metrics-core.mts`. It works on the volume beside the running server and reads the
+`scripts/align-admin.mjs` (the v2 replacement for v1's `ws-admin`) is in the image with its three core modules,
+the shared settings binding and its two pinned native packages. The image checks their exact bytes during
+the build. In a source checkout the same command prepares a temporary runtime using Node alone, without
+writing to the checkout or requiring an npm install. It works on the volume beside the running server and reads the
 server's settings (`ALIGN_SECRET` for codes, `ALIGN_SESSION_MAX_DAYS` for the retention job) from its environment, so
 run it on the machine, where `fly ssh console` has that environment:
 

@@ -35,7 +35,7 @@ component:
 
 ```sh
 litai project validate
-litai lock --check
+litai lock components/paste-lines --target host --check
 litai plan components/paste-lines
 ```
 
