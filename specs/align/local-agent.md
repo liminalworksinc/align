@@ -1939,15 +1939,10 @@ after which the stop or hold, if still in place, can be lifted from the web.`, t
 not yet heard whether its sharing was stopped on the web meanwhile), then \`::align share\` <here|in the session>
 shares it again`, and `align status` `<n> can be shared again (run \`align sync\` first, then \`::align share\` in the
 session), after which the web can lift it`. While this machine is signed out, a latch whose share ended at a sign-out
-(or at a lost workspace the cached `/me` still reaches) SHALL carry `login`, and every view SHALL name both ways out in
-one sentence: the deny `Its sharing has since ended (this machine signed out of Align), so tools stay blocked until the
-user runs \`align stop-sharing <lid8>\` in a terminal, or until it is shared again once this machine is signed in (the
-user runs \`align login\` in a terminal, then types \`::align share\` in this session), after which the stop or hold, if still in place,
-can be lifted from the web.`; `::align status` `on (tools blocked; sharing ended, this machine signed out: tools stay
-blocked until you run ...)` (a hold: `Sharing ended (this machine signed out): ...`); `align latch status` `; sharing
-ended (this machine signed out): tools stay blocked until you run ...`; `align status` `<n> can be shared again once this
-machine is signed in (\`align login\`, then \`::align share\` in the session), after which the web can lift it, or
-freed now with \`align stop-sharing <session>\``. A hold deny of a share that ended SHALL leave out `Work resumes when
+(or at a lost workspace the cached `/me` still reaches) SHALL carry `login`. Every view SHALL explain the same
+recovery path: sign in with `align login`, restore sharing with `::align share` when permitted, then wait for an
+authorized web resume or release. Tools remain blocked until that instruction reaches the session. No view SHALL
+offer stopping sharing or deleting history as a way to lift the restriction. A hold deny of a share that ended SHALL leave out `Work resumes when
 they release it.` unless a release still reaches the session, also when it can be shared again (sharing it again comes
 first) and after the hold was released on the web, a release that could not reach it (cycle 12, section 6).
 
@@ -2273,8 +2268,8 @@ no longer blocks tools.`; a hold whose `release` reached the session is told by 
 told to wait for instructions never finds its tools working again without a word. A hold SHALL stay on a session that moves to another goal until that goal's `release`
 reaches it (the server sends the release to every session its hold reached). The hold and the stop latch SHALL be independent: a tool runs only when neither blocks
 it, `resume` SHALL NOT lift a hold and `release` SHALL NOT lift a stop. At the end of a turn a held session behaves
-like a stopped one (the `Stop` hook prints nothing). Stopping sharing or deleting history SHALL lift a session's holds
-as it lifts its stop latch. `::align status` SHALL show `Goal hold: on goal "<title>" by <name> (all tools blocked)`.
+like a stopped one (the `Stop` hook prints nothing). Stopping sharing or deleting history SHALL preserve a session's owner-issued holds
+and stop latch until an authorized resume or release reaches it. `::align status` SHALL show `Goal hold: on goal "<title>" by <name> (all tools blocked)`.
 A hold SHALL also fail closed before its directive arrives: while a session's goal (its live share's, or, for a session
 a folder rule is sharing that has no share yet, the rule's goal it was given at its start) is held in the cached goals
 feed (`allocation.held`) and no hold or release of that goal has reached the session, the hook SHALL deny every
@@ -2309,7 +2304,7 @@ line (`... (<n> from the cached goals, before the hold reaches them)`).
 #### Scenario: A hold deny asks the model to tell the user
 
 - **WHEN** a shared session's goal is held with reason `Security review` and a tool is called, then the machine signs out and a tool is called again (test `findings8` "hold denies end with ...")
-- **THEN** the first reason is `Align: Dana Lee paused all agents on goal "Ship the v2 onboarding flow": "Security review". Work resumes when they release it. Your work so far is saved. Tell the user and wait for instructions.`, and the second names `align stop-sharing <lid8>` and ends with `Tell the user and wait for instructions.`
+- **THEN** the first reason is `Align: Dana Lee paused all agents on goal "Ship the v2 onboarding flow": "Security review". Work resumes when they release it. Your work so far is saved. Tell the user and wait for instructions.`, and the second explains how to restore access so an authorized web release can reach the session and ends with `Tell the user and wait for instructions.`
 
 #### Scenario: Hold, stop and release with no sync running
 
@@ -2456,12 +2451,11 @@ once when a session, epoch or usage call of that workspace is refused 403 or 404
 workspace no longer listed: `stopped` with the reason `workspace_access_lost`, its pending binding and queued session
 and epoch calls dropped, and the notice `Align: this session stopped sharing because you no longer have access to
 <workspace> in Align (you were removed from it or left it); its usage stays on this machine from now on.` (plus the
-`align stop-sharing <lid8>` sentence for a stopped or held session). Its stop latch and goal holds SHALL stay until
-`align stop-sharing`, their denies naming that command. A session whose share there had ended already and whose newest
+sentence explaining that tools remain blocked until an authorized web resume or release reaches a stopped or held session). Its stop latch and goal holds SHALL stay until
+an authorized web resume or release reaches the session; their denies SHALL explain that access must first be restored. A session whose share there had ended already and whose newest
 notice said it can be shared there again (its workspace reached again, or a member again) SHALL be told, whatever it
 has seen, `Align: this machine can no longer reach <workspace> in Align (you were removed from it or left it again), so
-this session can't be shared there again from here; its usage stays on this machine.` (plus the `align stop-sharing
-<lid8>` sentence for a stopped or held session), so its newest notice agrees with its deny. The cached goal, asks and team activity feeds of every
+this session can't be shared there again from here; its usage stays on this machine.` (plus the same restriction sentence for a stopped or held session), so its newest notice agrees with its deny. The cached goal, asks and team activity feeds of every
 workspace out of reach SHALL be deleted, so no envelope or `::align goals` shows them, and a default workspace out of
 reach is no default any more. The device's default workspace (in `me.json`) SHALL be worked out afresh from each `/me`,
 never carried over from the previous one: the server's, else `default_workspace` in `config.json` (which `align config`
@@ -2480,12 +2474,12 @@ continue, and shares in the person's other workspaces SHALL be unaffected.
 #### Scenario: A stopped session in a workspace out of reach
 
 - **WHEN** a shared session is stopped from the web, then the person is removed from the workspace and `align sync` runs (test `findings2` "removed from the workspace: the next contact ends the share here ..."; against the real server in `scripts/test-agent-live.mjs` "member removed (E2E-AGENT cycle 2) ...")
-- **THEN** `align sessions` shows it `stopped (Acme; no access to the workspace)`, the next prompt shows the notice naming `align stop-sharing <lid8>`, `Bash` stays denied naming the lost access and that command, the cached feed is gone, a resume gets no goal envelope, and after `align stop-sharing <lid8>` tools run
+- **THEN** `align sessions` shows it `stopped (Acme; no access to the workspace)`, the next prompt explains that access must be restored before an authorized instruction can reach it, and `Bash` stays denied naming the lost access, the cached feed is gone, a resume gets no goal envelope, and after `align stop-sharing <lid8>` tools remain blocked
 
 #### Scenario: Back, then out of reach again
 
 - **WHEN** a session stopped from the web loses its workspace, is told it is back, loses it again, gets it back, and then the machine signs out and in (test `findings9` "told its lost workspace is back, then the workspace is lost again ...")
-- **THEN** after the second loss its next prompt says `this machine can no longer reach Acme in Align ... can't be shared there again from here` with `align stop-sharing <lid8>`, as its deny does; back again it is told so again; at the sign-out it is told `this machine signed out of Align, so this session can't be shared again from here for now ...`; and after the sign-in that it can be shared again
+- **THEN** after the second loss its next prompt says `this machine can no longer reach Acme in Align ... can't be shared there again from here` with the restriction and access-restoration explanation, as its deny does; back again it is told so again; at the sign-out it is told `this machine signed out of Align, so this session can't be shared again from here for now ...`; and after the sign-in that it can be shared again
 
 #### Scenario: No workspace left
 
@@ -2549,7 +2543,7 @@ workspaces SHALL be untouched.
 #### Scenario: Given back with sessions stopped for good
 
 - **WHEN** a device's sessions in Acme are: one shared, one Stop-shared on the web just before a new pairing that reaches only Side Co, one Stop-shared on the web earlier, one stopped from the web and Stop-shared, and one never shared; then Acme is given to the device on the Devices page and a sync runs (test `findings12` "C11-2: ...")
-- **THEN** the sync says it can now reach Acme, the sessions whose sharing was stopped are never told to run `align share ... --workspace "Acme" ...` (the one Stop-shared before the pairing is told only that it stays stopped), the blocked one's deny names `align stop-sharing <lid8>`, the never-shared one gets `Align: this machine can now reach Acme in Align. To share this session there, run \`align share <lid8> --workspace "Acme" --goal <goal>\` in a terminal.`, and the shared one is told `::align share` shares it again
+- **THEN** the sync says it can now reach Acme, the sessions whose sharing was stopped are never told to run `align share ... --workspace "Acme" ...` (the one Stop-shared before the pairing is told only that it stays stopped), the blocked one's deny requires an authorized web resume or release to reach it, the never-shared one gets `Align: this machine can now reach Acme in Align. To share this session there, run \`align share <lid8> --workspace "Acme" --goal <goal>\` in a terminal.`, and the shared one is told `::align share` shares it again
 
 #### Scenario: Given the workspace later on the Devices page
 
