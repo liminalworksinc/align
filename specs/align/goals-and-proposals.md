@@ -418,12 +418,12 @@ The server SHALL let only a goal's owner confirm the goal still fits a parent's 
 
 ### Requirement: Bindable goals
 
-The server SHALL mark a goal `bindable` for the caller only when it is `active`, the caller is not a viewer, and the goal is the caller's own, belongs to a team the caller is in, or is the target of an approved `work_toward` alignment whose current revision lists one of the caller's sessions. Binding a session to a goal its owner may read but that is not their own, not their team's and not covered by such an alignment SHALL be refused with 403 `alignment_required`, and binding it to a goal that is not `active` with 409 `goal_not_active` (the epoch route is specified in `workspaces`).
+The server SHALL mark a goal `bindable` for the caller only when it is `active`, the caller is not a viewer, and the goal is the caller's own or belongs to a team the caller is in. This person-level flag SHALL remain false for another goal even when an approved `work_toward` alignment covers one of the caller's sessions. That alignment authorizes only its listed sessions, whose binding is delivered by the server; it does not add a general CLI or folder-rule binding choice. After a covered session moves off that goal, the CLI SHALL not offer manual rebinding through this flag. Binding a session to a goal its owner may read but that is not their own, not their team's and not covered by such an alignment SHALL be refused with 403 `alignment_required`, and binding it to a goal that is not `active` with 409 `goal_not_active` (the epoch route is specified in `workspaces`).
 
 #### Scenario: Teammate's goal
 
 - **WHEN** a member of team Product reads an active goal owned by another member of team Product
-- **THEN** the goal has `bindable: true`; a company goal owned by someone else has `bindable: false` until an approved `work_toward` alignment covers one of the caller's sessions
+- **THEN** the goal has `bindable: true`; a company goal owned by someone else has `bindable: false` even when an approved `work_toward` alignment covers one of the caller's sessions
 
 ### Requirement: Approval set of a goal
 

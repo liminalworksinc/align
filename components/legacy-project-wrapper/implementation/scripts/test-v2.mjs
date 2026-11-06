@@ -1640,7 +1640,7 @@ try {
   );
   check("alignment: notes and counters never reach agents", !JSON.stringify(after).includes("Moving to onboarding") && !JSON.stringify(after).includes("only this one"), "a note reached a directive");
   const feedAfter = await call("U3", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D3.access });
-  check("alignment: G1 is now bindable for U3", feedAfter.json.goals.find((g) => g.id === G1.id).bindable === true, "");
+  check("LIM-2485: session-specific approval never makes G1 generally bindable for U3, including its directive snapshot", feedAfter.json.goals.find((g) => g.id === G1.id).bindable === false && bc.goal.bindable === false, "");
   const againSame = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S3a] });
   const againOther = await al(U3, { target_goal_id: G3.id, choice: "work_toward", session_keys: [S3a] });
   check(
