@@ -12214,8 +12214,8 @@ try {
   const useExpired = await gCreate(ALICE, "Alice Two", expC);
   const useBobs = await gCreate(ALICE, "Alice Two", bobC);
   check(
-    "gate: a revoked code, an expired code, and a code bound to another address -> 403 creation_code_invalid, and none of them is spent",
-    gMade.status === 0 && bobMade.status === 0 && [useRevoked, useExpired, useBobs].every((r) => r.status === 403 && r.json?.error === "creation_code_invalid") && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_creation_codes WHERE redeemed_at IS NOT NULL").get().n) === 1,
+    "gate: a revoked code, an expired code, and a code bound to another address -> 403 creation_code_invalid with the founder's wording, and none of them is spent",
+    gMade.status === 0 && bobMade.status === 0 && [useRevoked, useExpired, useBobs].every((r) => r.status === 403 && r.json?.error === "creation_code_invalid" && r.json?.message === "That creation code isn't valid. It may be mistyped, used, expired, revoked or for another email address. Reply to the message with your code for a new one.") && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_creation_codes WHERE redeemed_at IS NOT NULL").get().n) === 1,
     `${useRevoked.status} ${useExpired.status} ${useBobs.status} ${gMade.err}`,
   );
   const tmpInv = await gPost(`/api/v2/workspaces/${W2.json?.id}/invites`, { email: "temp@mailinator.com", role: "member" }, ALICE);
@@ -12391,6 +12391,7 @@ try {
         const imported = admin(boundArgs, opGate);
         let errors = 0;
         let created = null;
+        let createRefused = "";
         let overflow = false;
         page.on("pageerror", () => errors++);
         await page.setViewport({ width, height: 900 });
@@ -12419,7 +12420,10 @@ try {
               outgoing.on("error", reject);
               outgoing.end(request.postData());
             });
-            if (url.pathname === "/api/v2/workspaces" && request.method() === "POST" && result.status === 201) created = JSON.parse(result.body.toString()).id;
+            if (url.pathname === "/api/v2/workspaces" && request.method() === "POST") {
+              if (result.status === 201) created = JSON.parse(result.body.toString()).id;
+              else { try { createRefused = `${result.status} ${JSON.parse(result.body.toString()).error}`; } catch { createRefused = String(result.status); } }
+            }
             delete result.headers["transfer-encoding"];
             await request.respond(result);
           } catch { errors++; await request.abort().catch(() => {}); }
@@ -12429,26 +12433,34 @@ try {
           await page.waitForFunction((s) => { const button = document.querySelector(s); return button && !button.disabled; }, {}, selector);
           await page.click(selector);
         };
+        let step = "";
         try {
+          step = "open /new";
           await page.goto(`https://${HOSTED_HOST}/new`, { waitUntil: "networkidle0" });
           await page.waitForSelector('input[name="email"]');
           await fit();
+          step = "send email";
           await page.type('input[name="email"]', address);
           await submit('#email-code button[type="submit"]');
+          step = "code field";
           await page.waitForSelector('input[name="code"]');
           await fit();
+          step = "verify code";
           await page.type('input[name="code"]', mailCode(address));
           await submit('#email-code button[type="submit"]');
+          step = "creation field";
           await page.waitForSelector('input[name="creation_code"]');
           await fit();
+          step = "create";
           await page.type('form input:not([name])', "Browser tester");
           await page.type('input[name="creation_code"]', invite);
           await submit('form button[type="submit"]');
+          step = "workspace page";
           await page.waitForFunction(() => /^\/app\/w\//.test(location.pathname));
           await fit();
           check(`LIM-2480: hosted new tester browser path ${width} ${theme}`, imported.status === 0 && !!created && errors === 0 && !overflow,
             `import ${imported.status}; created ${!!created}; errors ${errors}; overflow ${overflow}`);
-        } catch { check(`LIM-2480: hosted new tester browser path ${width} ${theme}`, false, "browser step did not complete"); }
+        } catch (e) { check(`LIM-2480: hosted new tester browser path ${width} ${theme}`, false, `stopped at ${step}: ${String(e?.message ?? e).split("\n")[0].slice(0, 160)}; create ${createRefused || (created ? "201" : "not sent")}; errors ${errors}; overflow ${overflow}`); }
         finally {
           if (created) check(`LIM-2480: browser fixture cleanup ${width} ${theme}`, admin(["workspaces", "delete", created, "--purge", "--yes"], opGate).status === 0);
           await context.close();

@@ -55,7 +55,7 @@ function check(user: Creator, code: string | null) {
   if (needsCode(user.email) && !code) throw forbidden("creation_code_required", "Creating a workspace here needs a creation code. Request access to get one.");
 }
 
-const invalid = () => forbidden("creation_code_invalid", "That creation code isn't valid. It may be mistyped, used, expired, revoked or for another email address.");
+const invalid = () => forbidden("creation_code_invalid", "That creation code isn't valid. It may be mistyped, used, expired, revoked or for another email address. Reply to the message with your code for a new one.");
 
 /** Before creating: everything but the code's redemption, including the captcha. Throws the refusal. */
 export async function precheckCreation(req: Request, user: Creator, code: string | null) {

@@ -666,7 +666,7 @@ is. The server never reads v1's files.
 #### Scenario: Unusable codes
 
 - **WHEN** a create names a malformed code, a revoked code, an expired code, or a code bound to another address
-- **THEN** the server responds 403 `creation_code_invalid` and spends no code
+- **THEN** the server responds 403 `creation_code_invalid` with the message "That creation code isn't valid. It may be mistyped, used, expired, revoked or for another email address. Reply to the message with your code for a new one." and spends no code
 
 #### Scenario: A tester keeps their v1 invite code
 
