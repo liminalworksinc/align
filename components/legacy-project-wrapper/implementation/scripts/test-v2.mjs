@@ -1289,20 +1289,68 @@ try {
       d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), x.id);
   });
   const ts3 = new Date().toISOString();
-  const rr1 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });
-  const rrReuse = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });
-  const afterReuse = await call("U1", "GET", "/api/v2/me", { bearer: rr1.json?.access_token });
-  const newRefreshDead = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: rr1.json?.refresh_token, ts: ts3, sig: refreshSig(DR, DR.id, rr1.json?.refresh_token ?? "", ts3) } });
-  const drRow = withDb((d) => d.prepare("SELECT revoked_at, revoked_reason FROM v2_devices WHERE id = ?").get(DR.id));
+  const refreshOf = (dev, id, token, ts = new Date().toISOString()) => call("D", "POST", "/api/v2/device/refresh", { body: { device_id: id, refresh_token: token, ts, sig: refreshSig(dev, id, token, ts) } });
+  const revokedOf = (id) => withDb((d) => d.prepare("SELECT revoked_at, revoked_reason FROM v2_devices WHERE id = ?").get(id));
+  const rr1 = await refreshOf(DR, DR.id, DR.refresh, ts3);
+  // A retry of the latest rotation within 10 s, while its new pair is unused (the answer was lost): a fresh pair, the
+  // unused one is gone, the device stays paired and the retry is audited. A second retry of the same token revokes.
+  const rrRetry = await refreshOf(DR, DR.id, DR.refresh, ts3);
+  const lostAccess = await call("U1", "GET", "/api/v2/me", { bearer: rr1.json?.access_token });
+  const lostRefresh = await refreshOf(DR, DR.id, rr1.json?.refresh_token ?? "");
+  const retriedRow = revokedOf(DR.id);
+  const retryAudit = withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE action = 'device.refresh_retried' AND object_id = ?").all(DR.id));
+  const retryWorks = await call("U1", "GET", "/api/v2/me", { bearer: rrRetry.json?.access_token });
+  check(
+    "refresh (LIM-2441 H7a): retrying the latest rotation within 10 s while its new pair is unused gets a fresh pair (the unused access and refresh tokens are dead, the refresh one without revoking), the device stays paired and one device.refresh_retried audit row is written",
+    rr1.status === 200 && rrRetry.status === 200 && rrRetry.json?.refresh_token !== rr1.json?.refresh_token && retryWorks.status === 200 &&
+      lostAccess.status === 401 && lostRefresh.status === 401 && lostRefresh.json?.reason === undefined && !retriedRow.revoked_at && retryAudit.length === 1 && retryAudit[0].actor_id === null,
+    `${rr1.status} ${rrRetry.status} ${retryWorks.status} ${lostAccess.status} ${lostRefresh.text} ${JSON.stringify(retriedRow)} ${JSON.stringify(retryAudit)}`,
+  );
+  // Outside the grace, reuse still revokes: a retry 11 s after the rotation, and the replay of a token whose new pair
+  // was already used. Each on its own device written straight into the database (the pairing limit is spent here).
+  const keyedDevice = (name) => {
+    const keys = newDeviceKeys();
+    const id = `dv_${randomBytes(15).toString("hex").slice(0, 24).replace(/[01089]/g, "a")}`;
+    const refresh = `alnr_${randomBytes(32).toString("base64url")}`;
+    const at = new Date().toISOString();
+    withDb((d) => {
+      d.prepare("INSERT INTO v2_devices (id, user_id, name, public_key, created_at) VALUES (?, ?, ?, ?, ?)").run(id, U1.id, name, keys.pub, at);
+      d.prepare("INSERT INTO v2_device_tokens (token_hash, device_id, kind, created_at, expires_at) VALUES (?, ?, 'refresh', ?, ?)").run(sha256hex(refresh), id, at, new Date(Date.now() + 3_600_000).toISOString());
+    });
+    return { ...keys, id, refresh };
+  };
+  const DL1 = keyedDevice("late retry");
+  const late1 = await refreshOf(DL1, DL1.id, DL1.refresh);
+  withDb((d) => {
+    const row = d.prepare("SELECT rotated_at FROM v2_device_tokens WHERE token_hash = ?").get(sha256hex(DL1.refresh));
+    const back = new Date(Date.parse(row.rotated_at) - 11_000).toISOString();
+    d.prepare("UPDATE v2_device_tokens SET created_at = ? WHERE device_id = ? AND created_at = ?").run(back, DL1.id, row.rotated_at);
+    d.prepare("UPDATE v2_device_tokens SET rotated_at = ? WHERE token_hash = ?").run(back, sha256hex(DL1.refresh));
+  });
+  const lateRetry = await refreshOf(DL1, DL1.id, DL1.refresh);
+  const DU = keyedDevice("used pair");
+  const used1 = await refreshOf(DU, DU.id, DU.refresh);
+  const used2 = await refreshOf(DU, DU.id, used1.json?.refresh_token ?? "");
+  const usedReplay = await refreshOf(DU, DU.id, DU.refresh);
+  check(
+    "refresh (LIM-2441 H7a): outside the grace, reuse still revokes the device with reason refresh_reuse: a retry 11 s after the rotation, and a replay of a token whose new pair was already used",
+    late1.status === 200 && lateRetry.status === 401 && lateRetry.json?.reason === "refresh_reuse" && revokedOf(DL1.id)?.revoked_reason === "refresh_reuse" &&
+      used1.status === 200 && used2.status === 200 && usedReplay.status === 401 && usedReplay.json?.reason === "refresh_reuse" && revokedOf(DU.id)?.revoked_reason === "refresh_reuse",
+    `${late1.status} ${lateRetry.text} ${JSON.stringify(revokedOf(DL1.id))} ${used1.status} ${used2.status} ${usedReplay.text} ${JSON.stringify(revokedOf(DU.id))}`,
+  );
+  const rrReuse = await refreshOf(DR, DR.id, DR.refresh, ts3);
+  const afterReuse = await call("U1", "GET", "/api/v2/me", { bearer: rrRetry.json?.access_token });
+  const newRefreshDead = await refreshOf(DR, DR.id, rrRetry.json?.refresh_token ?? "", ts3);
+  const drRow = revokedOf(DR.id);
   const ts4 = new Date().toISOString();
-  const badSigRevoked = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: rr1.json?.refresh_token, ts: ts4, sig: refreshSig(D1, DR.id, rr1.json?.refresh_token ?? "", ts4) } });
+  const badSigRevoked = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: rrRetry.json?.refresh_token, ts: ts4, sig: refreshSig(D1, DR.id, rrRetry.json?.refresh_token ?? "", ts4) } });
   const unknownDevice = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: "dv_aaaaaaaaaaaaaaaaaaaaaaaa", refresh_token: DR.refresh, ts: ts4, sig: refreshSig(DR, "dv_aaaaaaaaaaaaaaaaaaaaaaaa", DR.refresh, ts4) } });
   check(
-    "refresh: reusing an old refresh token revokes the device (new access 401, new refresh 401, revoked_reason refresh_reuse); a correctly signed refresh of the revoked device says why (reason refresh_reuse), a badly signed one says nothing more, and an unknown device (only deleting an account deletes devices) gets reason unknown_device",
-    rr1.status === 200 && rrReuse.status === 401 && afterReuse.status === 401 && newRefreshDead.status === 401 && drRow.revoked_at && drRow.revoked_reason === "refresh_reuse" &&
+    "refresh: reusing an old refresh token revokes the device (its second retry within the grace; new access 401, new refresh 401, revoked_reason refresh_reuse); a correctly signed refresh of the revoked device says why (reason refresh_reuse), a badly signed one says nothing more, and an unknown device (only deleting an account deletes devices) gets reason unknown_device",
+    rrRetry.status === 200 && rrReuse.status === 401 && afterReuse.status === 401 && newRefreshDead.status === 401 && drRow.revoked_at && drRow.revoked_reason === "refresh_reuse" &&
       newRefreshDead.json?.error === "invalid_grant" && newRefreshDead.json?.reason === "refresh_reuse" &&
       badSigRevoked.status === 401 && badSigRevoked.json?.reason === undefined && unknownDevice.status === 401 && unknownDevice.json?.error === "invalid_grant" && unknownDevice.json?.reason === "unknown_device",
-    `${rr1.status} ${rrReuse.status} ${afterReuse.status} ${newRefreshDead.text} ${JSON.stringify(drRow)} ${badSigRevoked.text} ${unknownDevice.text}`,
+    `${rrRetry.status} ${rrReuse.status} ${afterReuse.status} ${newRefreshDead.text} ${JSON.stringify(drRow)} ${badSigRevoked.text} ${unknownDevice.text}`,
   );
   D1.access = r2.json.access_token;
   D1.refresh = r2.json.refresh_token;

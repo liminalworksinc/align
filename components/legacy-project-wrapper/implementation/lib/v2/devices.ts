@@ -10,7 +10,8 @@ import { endSessions } from "./sessions";
 
 // Device pairing (RFC 8628 style, key-bound) and device credentials. docs/v2/WIRE.md "Device pairing".
 // Access tokens (alnd_) last 1 h; refresh tokens (alnr_) rotate on every use and last 30 days. Only SHA-256 hashes
-// are stored. Presenting a refresh token that was already rotated revokes the whole device.
+// are stored. Presenting a refresh token that was already rotated revokes the whole device, except a retry of the latest
+// rotation within REFRESH_GRACE_MS whose new pair is still unused (see `refresh`).
 
 export const ACCESS_TTL_S = 3600;
 export const REFRESH_TTL_S = 30 * 24 * 3600;
@@ -18,6 +19,7 @@ export const CODE_TTL_S = 600;
 export const POLL_INTERVAL_S = 5;
 const USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ"; // no vowels (no words), no lookalikes
 const REFRESH_SKEW_MS = 5 * 60 * 1000;
+const REFRESH_GRACE_MS = 10 * 1000;
 
 export interface UserRef {
   id: string;
@@ -270,8 +272,28 @@ export async function refresh(input: { device_id: string; refresh_token: string;
     );
     if (!t) return null;
     if (t.rotated_at) {
-      revokeInTx(input.device_id, "refresh_reuse", null);
-      return null;
+      // A device whose answer was lost in transit retries with the token it still holds. That retry is let through once:
+      // only for this device's latest rotation, within REFRESH_GRACE_MS of it, while the pair that rotation issued is
+      // still unused. That pair is deleted and a new one issued, so the device keeps exactly one live chain, and the
+      // retry is audited. Any other reuse revokes the whole device.
+      const rotatedMs = Date.parse(t.rotated_at);
+      const next = all<{ token_hash: string; kind: string; rotated_at: string | null }>(
+        "SELECT token_hash, kind, rotated_at FROM v2_device_tokens WHERE device_id = ? AND created_at = ?",
+        input.device_id,
+        t.rotated_at,
+      );
+      const nextRefresh = next.filter((r) => r.kind === "refresh");
+      // Strictly after the rotation, so the new pair's created_at never matches it and a second retry revokes.
+      const graced = nowMs > rotatedMs && nowMs - rotatedMs <= REFRESH_GRACE_MS && nextRefresh.length === 1 && !nextRefresh[0].rotated_at;
+      if (!graced) {
+        revokeInTx(input.device_id, "refresh_reuse", null);
+        return null;
+      }
+      for (const r of next) run("DELETE FROM v2_device_tokens WHERE token_hash = ?", r.token_hash);
+      audit(null, null, "device.refresh_retried", input.device_id, new Date(nowMs).toISOString());
+      run("UPDATE v2_devices SET last_seen_at = ? WHERE id = ?", new Date(nowMs).toISOString(), input.device_id);
+      const n = issueTokens(input.device_id, nowMs);
+      return { access_token: n.access, expires_in: ACCESS_TTL_S, refresh_token: n.refresh };
     }
     if (Date.parse(t.expires_at) <= nowMs) return null;
     run("UPDATE v2_device_tokens SET rotated_at = ? WHERE token_hash = ?", new Date(nowMs).toISOString(), sha256hex(input.refresh_token));
