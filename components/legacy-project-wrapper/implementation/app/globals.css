@@ -1,5 +1,31 @@
 @import "tailwindcss";
 
+/* Inside a DataTable: whether its rows are stacked, at its own stackBelow. */
+@custom-variant stacked {
+  @media (width < 640px) {
+    &:where([data-stack="640"] *) {
+      @slot;
+    }
+  }
+  @media (width < 1200px) {
+    &:where([data-stack="1200"] *) {
+      @slot;
+    }
+  }
+}
+@custom-variant unstacked {
+  @media (width >= 640px) {
+    &:where([data-stack="640"] *) {
+      @slot;
+    }
+  }
+  @media (width >= 1200px) {
+    &:where([data-stack="1200"] *) {
+      @slot;
+    }
+  }
+}
+
 /*
  * Display face. Founder ruling (LIM-2454 1cb2b974, 2026-11-05): Nineties Headliner loads as a webfont from a PRIVATE
  * host, so testers see the real face. The font file is never committed to this public repo.
