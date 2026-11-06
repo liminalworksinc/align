@@ -248,6 +248,7 @@ export async function createInvite(pp: PolicyPrincipal, email: string, role: WsR
   if (team.id && !get("SELECT 1 AS x FROM v2_pods WHERE ws_id = ? AND id = ?", pp.wsId, team.id)) throw notFound();
   const teamId = team.id;
   const teamRole = teamId ? (team.role ?? "member") : null;
+  if (role === "viewer" && teamRole === "lead") throw forbidden("viewer_lead", "A viewer can't lead a team. Invite them as a member of it, or with another workspace role.");
   take(`invite-create:${pp.wsId}`, 50, 60 * 60 * 1000);
   const e = email.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw badRequest("Enter an email address");
@@ -403,7 +404,10 @@ export async function setTeamMember(pp: PolicyPrincipal, podId: string, userId: 
   // A lead adds and removes members; only a workspace owner makes someone a lead (or changes a lead's role).
   const current = get<{ role: PodRole }>("SELECT role FROM v2_pod_members WHERE pod_id = ? AND user_id = ?", podId, userId);
   if ((role === "lead" || current?.role === "lead") && pp.wsRole !== "owner") throw forbidden("owner_only", "Only a workspace owner can make someone a team lead.");
-  if (!get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", pp.wsId, userId)) throw notFound();
+  const member = get<{ role: WsRole }>("SELECT role FROM v2_members WHERE ws_id = ? AND user_id = ?", pp.wsId, userId);
+  if (!member) throw notFound();
+  // A viewer can't change anything, so leading a team would give them nothing; the policy refuses them regardless.
+  if (role === "lead" && member.role === "viewer") throw forbidden("viewer_lead", "A viewer can't lead a team. Change their workspace role first, or add them as a member.");
   const at = nowIso();
   await tx(() => {
     run(
