@@ -214,7 +214,7 @@ describe("C10-4: a held session whose share was ended by Stop sharing on the web
     assert.equal(deny(t, A), undefined, "the release lifted it");
   });
 
-  test("stopped and held, then Stop sharing on the web: the stop is said to need `align stop-sharing`, the release to lift only the hold", async () => {
+  test("stopped and held, then Stop sharing on the web: the stop is said to hold (the session stays stopped, LIM-2441), the release to lift only the hold", async () => {
     const { fake, t } = await world();
     const A = await shared(t);
     await sync(t);
@@ -224,10 +224,11 @@ describe("C10-4: a held session whose share was ended by Stop sharing on the web
     fake.stopOnWeb(A.key);
     await sync(t);
     const way = latchWayOut(A.lid, false, "model", { goals: [GOAL], stopped: true });
-    assert.match(way, /until the user runs `align stop-sharing [^`]+` in a terminal: the stop can no longer be lifted from the web, and a release of the hold on "Ship the v2 onboarding flow" \(which still reaches this session\) lifts only the hold\./);
+    assert.match(way, /^this session stays stopped: a stop set from its Align workspace holds after its sharing ends, and nothing lifts it from here now\. A new session is not stopped, so the user can start one to keep working\. A release of the hold on "Ship the v2 onboarding flow" \(which still reaches this session\) lifts only the hold\.$/);
     assert.ok((deny(t, A) ?? "").includes(way), deny(t, A));
     assert.ok((deny(t, A, "Read") ?? "").includes(way), "the hold's deny gives the same advice");
-    assert.match(prompt(t, A.sid, "go on", A.cwd)?.systemMessage ?? "", / It was stopped and held from the web, so tools stay blocked until you run `align stop-sharing/);
+    assert.match(prompt(t, A.sid, "go on", A.cwd)?.systemMessage ?? "", / It was stopped and held from the web, so this session stays stopped: /);
+    assert.doesNotMatch(prompt(t, A.sid, "::align status", A.cwd).reason ?? "", /align stop-sharing [^`]+` in a terminal to unblock it\)/);
     fake.releaseGoal("ws_acme", "g_ship", [A.key]);
     await sync(t);
     assert.match(deny(t, A) ?? "", /was stopped from its Align workspace/, "the stop still blocks");

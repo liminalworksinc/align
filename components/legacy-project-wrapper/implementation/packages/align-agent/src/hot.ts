@@ -84,6 +84,18 @@ export function sharedBefore(ctx: Ctx, lid: string): boolean {
   );
 }
 
+/**
+ * A stop latch blocks `lid` and its share can't be shared again where the stop would still reach it (LIM-2441): its
+ * history was deleted (here or on the web), or its sharing stopped (by its person, or the server refused its usage).
+ * A share a sign-out or a lost workspace ended is shared again: the server keeps that record, stop included.
+ */
+export function stopOutlivesShare(ctx: Ctx, lid: string): boolean {
+  if (!ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid)) return false;
+  const share = getShare(ctx, lid);
+  if (!share) return sharedBefore(ctx, lid);
+  return share.state === "stopped" && endedReason(share) === "sharing_ended";
+}
+
 /** Did its person stop sharing `lid`, or delete its shared history, with no explicit share since? */
 export function stoppedByPerson(ctx: Ctx, lid: string): boolean {
   if (priorShare(ctx, lid)?.stopped_at) return true;
@@ -158,7 +170,9 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   const shareSince = kvGet(ctx.db, `share_since:${lid}`);
   // Why the share ended so nothing from the web can lift its latches, whether `::align share` shares it again now, and
   // whether a release still reaches its holds: one reading, for its latch files and its notices alike (C6-2, C10-4).
-  const end = endedState(ctx, share);
+  // A session whose shared history was deleted has no share left, but a stop on it still holds (LIM-2441): its latch says
+  // its sharing ended, so the deny says it stays stopped, never that it waits for a resume nothing can send.
+  const end = endedState(ctx, share) ?? (!share && kvGet(ctx.db, `history_deleted:${lid}`) ? { why: "sharing_ended" as const, reshare: false, login: false } : null);
   const release = end && !end.reshare ? releaseOf(ctx, lid, share) : null;
   const hot: HotState = {
     v: 1,
@@ -200,7 +214,8 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   if (ctx.superseded) kvSet(ctx.db, `${OLDER_RENDER}${lid}`, nowIso());
   else writeJsonAtomic(layout.hot(ctx.home, lid), hot);
   // A latch whose share has ended (this machine signed out, or the server no longer has the share) can't be lifted from
-  // the web any more: the latch says so, so the deny tells the user how to get out (`align stop-sharing`). When the
+  // the web any more: the latch says so, so the deny says what happens now (a hold: `align stop-sharing` frees it; a stop
+  // holds and the session stays stopped, LIM-2441). When the
   // session can be shared there again now (signed in again, its workspace in reach again), the latch says that instead,
   // so the deny gives the same advice as the session's notice: `::align share` (C6-2).
   const latch = ctx.db.prepare("SELECT * FROM latches WHERE local_id=?").get(lid) as { stopped: number; directive_id: string; seq: number; at: string } | undefined;
@@ -329,6 +344,7 @@ export function shareNow(
     unread: signed && !!kvGet(ctx.db, ENDED_UNREAD),
     login: !!end?.login,
     latched: latchedFromWeb(ctx, lid),
+    stopped: !!ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid),
     release,
     ...(member ? {} : { member: false as const }),
   };
