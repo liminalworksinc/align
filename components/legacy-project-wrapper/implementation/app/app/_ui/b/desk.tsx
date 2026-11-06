@@ -106,7 +106,7 @@ export function Desk({
       render: (r) => {
         const n = needForChangeRequest(r, me);
         return (
-          <span className="sm:whitespace-nowrap">
+          <span className="unstacked:whitespace-nowrap">
             <StatusPill kind={n?.tone ?? crStatus(r).kind} label={n?.word ?? crStatus(r).label} size="s" />
           </span>
         );
@@ -115,17 +115,8 @@ export function Desk({
     {
       key: "versions",
       header: "Versions",
-      // One line: the goal now, then what this request did or asks. State says the rest.
-      render: (r) => (
-        <span className="font-mono text-[12px] text-(--text-2)">
-          {versions(r).line.map((part, i) => (
-            <span key={i}>
-              {i > 0 && " "}
-              <span className="whitespace-nowrap">{i > 0 ? `· ${part}` : part}</span>
-            </span>
-          ))}
-        </span>
-      ),
+      // A few words on one line: what this request did or asks. State says the rest.
+      render: (r) => <span className="font-mono text-[12px] text-(--text-2) unstacked:whitespace-nowrap">{versions(r).line}</span>,
     },
     {
       key: "evidence",
@@ -142,7 +133,7 @@ export function Desk({
         </span>
       ),
     },
-    { key: "age", header: "Updated", align: "end", width: "116px", sortValue: (r) => r.updated_at, render: (r) => <span className="font-mono text-[12px] text-(--text-3) sm:whitespace-nowrap">{waited(r.updated_at)}</span> },
+    { key: "age", header: "Updated", align: "end", width: "116px", sortValue: (r) => r.updated_at, render: (r) => <span className="font-mono text-[12px] text-(--text-3) unstacked:whitespace-nowrap">{waited(r.updated_at)}</span> },
   ];
 
   /** The row shortcut (founder ruling, LIM-2472 eaa5cf92): a quiet "Approve only" beside Review, only when the request has
@@ -180,13 +171,13 @@ export function Desk({
     const label = n?.action?.label ?? (actsFor(r).length ? "Review" : null);
     if (!label)
       return (
-        <span className="flex flex-col items-end max-sm:items-start">
+        <span className="flex flex-col items-end stacked:items-start">
           <span className="text-[12px] text-(--text-3)">{phaseOf(r) === "decided" ? "No action" : whoCan(r, me)}</span>
         </span>
       );
     const review = onOpen ? <NeedAction onClick={() => onOpen(r)}>{label}</NeedAction> : <NeedAction href={`?review=${r.goal.id}.${r.id}`}>{label}</NeedAction>;
     return (
-      <span className="flex flex-col items-end max-sm:items-start">
+      <span className="flex flex-col items-end stacked:items-start">
         <span className="inline-flex items-center gap-1">
           {shortcut(r, label) && (
             <NeedAction quiet name={`Approve only: ${r.goal.title}. This does not launch it.`} disabled={busy.has(r.id)} onClick={() => void approveRow(r)}>
@@ -242,8 +233,9 @@ export function Desk({
               />
             </label>
           </div>
-          <div className="rounded-(--radius-m) border border-(--line) bg-(--bg-panel) max-sm:border-0 max-sm:bg-transparent">
+          <div className="rounded-(--radius-m) border border-(--line) bg-(--bg-panel) max-[1199px]:border-0 max-[1199px]:bg-transparent">
             <DataTable
+              stackBelow={1200}
               caption={`Change requests: ${filters.find((x) => x.value === f)?.label ?? ""}`}
               columns={columns}
               rows={shown}
