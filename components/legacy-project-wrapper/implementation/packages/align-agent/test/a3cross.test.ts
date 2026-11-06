@@ -362,6 +362,16 @@ describe("LIM-2441 H8 (agent side): an alignment revoked before its session swit
     assert.doesNotMatch(out.systemMessage ?? "", /usage is paused/);
   });
 
+  test("the same directive after a hook opened the switch but before the pass that sends it: suspended, never switched", async () => {
+    const { fake, t, prompt, row } = await setup();
+    prompt();
+    fake.pushDirective({ ...cancel, session_keys: [row().session_key] });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.equal(row().state, "suspended");
+    assert.equal(row().pending, null);
+    assert.match(prompt().systemMessage ?? "", /goal binding was revoked, so its usage is paused/);
+  });
+
   test("the same directive once the session already switched to that goal: suspended, as for any revocation", async () => {
     const { fake, t, prompt, row } = await setup();
     prompt();

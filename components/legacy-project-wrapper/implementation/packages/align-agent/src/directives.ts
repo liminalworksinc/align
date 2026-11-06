@@ -139,8 +139,14 @@ function applyOne(ctx: Ctx, d: Directive, lid: string, seq: number, at: string):
       // server left the session shared under its own binding. Only that pending change is dropped. A session that already
       // switched to the revoked goal here is suspended as for any revocation, so it never keeps counting toward it.
       if (d.binding?.effective === "cancel_pending" && share.binding_goal !== d.binding.goal_id) {
-        const gone = ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=? AND goal_id IS ?").run(lid, d.binding.goal_id).changes > 0;
-        if (gone) addNotice(ctx, lid, `susp_${d.id}`, "Align: the alignment this session was about to switch goals for was revoked before the switch, so it keeps its current goal.");
+        const pending = ctx.db.prepare("SELECT id FROM pending_bindings WHERE local_id=? AND goal_id IS ?").get(lid, d.binding.goal_id) as { id: string } | undefined;
+        if (pending) {
+          ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=? AND id=?").run(lid, pending.id);
+          // A hook may already have opened an epoch with it, spooled for this pass: that epoch suspends the session
+          // instead of switching it (sync.ts "epoch_open").
+          kvSet(ctx.db, `binding_cancelled:${lid}`, pending.id);
+          addNotice(ctx, lid, `susp_${d.id}`, "Align: the alignment this session was about to switch goals for was revoked before the switch, so it keeps its current goal.");
+        }
         return "received";
       }
       ctx.db.prepare("UPDATE shares SET state='suspended', suspended_at=? WHERE local_id=? AND state IN ('shared','pending','suspended')").run(at, lid);
