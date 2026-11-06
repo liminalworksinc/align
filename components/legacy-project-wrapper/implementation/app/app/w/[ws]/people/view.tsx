@@ -139,6 +139,9 @@ export default function People({ me, ws }: { me: Me; ws: string }) {
   const [role, setRole] = useState<WsRole>("member");
   const [inviteTeam, setInviteTeam] = useState("");
   const [inviteTeamRole, setInviteTeamRole] = useState<TeamRole>("member");
+  // A viewer can't lead a team (they can change nothing), so Lead isn't offered for one; choosing Viewer with Lead picked
+  // sets the team role back to Member and says so once.
+  const [leadCleared, setLeadCleared] = useState(false);
   const [link, setLink] = useState<string | null>(null);
   const [teamName, setTeamName] = useState("");
   const [removing, setRemoving] = useState<string | null>(null);
@@ -271,7 +274,17 @@ export default function People({ me, ws }: { me: Me; ws: string }) {
                     <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
                   </Field>
                   <Field label="Role">
-                    <Select value={role} onChange={(e) => setRole(e.target.value as WsRole)}>
+                    <Select
+                      value={role}
+                      onChange={(e) => {
+                        const next = e.target.value as WsRole;
+                        setRole(next);
+                        // Cleared even with no team picked yet, so Lead can't come back hidden once a team is chosen.
+                        const clear = next === "viewer" && inviteTeamRole === "lead";
+                        if (clear) setInviteTeamRole("member");
+                        setLeadCleared(clear);
+                      }}
+                    >
                       <option value="member">Member</option>
                       <option value="viewer">Viewer (read only)</option>
                       <option value="owner">Owner</option>
@@ -293,11 +306,22 @@ export default function People({ me, ws }: { me: Me; ws: string }) {
                     {/* A team role only means something with a team (U12). */}
                     {inviteTeam && (
                       <Field label="Team role">
-                        <Select value={inviteTeamRole} onChange={(e) => setInviteTeamRole(e.target.value as TeamRole)}>
+                        <Select
+                          value={inviteTeamRole}
+                          onChange={(e) => {
+                            setInviteTeamRole(e.target.value as TeamRole);
+                            setLeadCleared(false);
+                          }}
+                        >
                           <option value="member">Member</option>
-                          <option value="lead">Lead</option>
+                          {role !== "viewer" && <option value="lead">Lead</option>}
                         </Select>
                       </Field>
+                    )}
+                    {inviteTeam && leadCleared && (
+                      <p className="text-[13px] text-(--text-2) sm:col-span-2" data-lead-cleared>
+                        A viewer can&apos;t lead a team, so the team role is now Member.
+                      </p>
                     )}
                   </div>
                 )}
