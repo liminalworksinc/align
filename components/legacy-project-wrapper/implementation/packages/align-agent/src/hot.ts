@@ -84,6 +84,18 @@ export function sharedBefore(ctx: Ctx, lid: string): boolean {
   );
 }
 
+/**
+ * A stop latch blocks `lid` and its share can't be shared again where the stop would still reach it (LIM-2441): its
+ * history was deleted (here or on the web), or its sharing stopped (by its person, or the server refused its usage).
+ * A share a sign-out or a lost workspace ended is shared again: the server keeps that record, stop included.
+ */
+export function stopOutlivesShare(ctx: Ctx, lid: string): boolean {
+  if (!ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid)) return false;
+  const share = getShare(ctx, lid);
+  if (!share) return sharedBefore(ctx, lid);
+  return share.state === "stopped" && endedReason(share) === "sharing_ended";
+}
+
 /** Did its person stop sharing `lid`, or delete its shared history, with no explicit share since? */
 export function stoppedByPerson(ctx: Ctx, lid: string): boolean {
   if (priorShare(ctx, lid)?.stopped_at) return true;
@@ -158,7 +170,9 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   const shareSince = kvGet(ctx.db, `share_since:${lid}`);
   // Why the share ended so nothing from the web can lift its latches, whether `::align share` shares it again now, and
   // whether a release still reaches its holds: one reading, for its latch files and its notices alike (C6-2, C10-4).
-  const end = endedState(ctx, share);
+  // A session whose shared history was deleted has no share left, but a stop on it still holds (LIM-2441): its latch says
+  // its sharing ended, so the deny says it stays stopped, never that it waits for a resume nothing can send.
+  const end = endedState(ctx, share) ?? (!share && kvGet(ctx.db, `history_deleted:${lid}`) ? { why: "sharing_ended" as const, reshare: false, login: false } : null);
   const release = end && !end.reshare ? releaseOf(ctx, lid, share) : null;
   const hot: HotState = {
     v: 1,

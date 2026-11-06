@@ -1013,11 +1013,14 @@ stays on this machine. Already shared history stays until you run \`align delete
 session has a stop latch, by `Session <lid8> stays stopped: it was stopped from its Align workspace, and that stop holds
 after sharing stops. Its tools stay blocked; a new session is not stopped.` (and `The hold on "<goal>" no longer
 applies.` when it freed a hold), or, when it freed only a hold, `Its tools are unblocked now: the hold on "<goal>" no
-longer applies to session <lid8>.` A session with a stop latch whose shared history was deleted (on the web or with `align
-delete-history`) SHALL NOT be shared again (`align share`, `::align share`, a folder rule): it is refused with `this
-session was stopped from its Align workspace, and that stop holds after its shared history is deleted, so it is not
-shared again and it stays stopped. A new session is not stopped.`, because a new share would start a server record with no stop on
-it, which the web could not resume. Wherever this spec names `align stop-sharing` as the way out of a stop (a deny, a
+longer applies to session <lid8>.` A session with a stop latch whose sharing stopped (by its person here or on the web, or the
+server refused its usage) or whose shared history was deleted (here or on the web) SHALL NOT be shared again (`align
+share`, `::align share`, a folder rule): it is refused with `this session was stopped from its Align workspace, and that
+stop holds after its sharing stopped or its shared history was deleted, so it is not shared again and it stays stopped.
+A new session is not stopped.`, never with advice to delete its history first, because the server would refuse the
+share or, with the history gone, start a record with no stop on it, which the web could not resume; its deny says it
+stays stopped. Only a share a sign-out or a lost workspace ended is shared again: the server keeps that record and its
+stop, which a resume from the web then lifts. Wherever this spec names `align stop-sharing` as the way out of a stop (a deny, a
 notice, `::align status`, `align latch status`, `align status`), that way out is for a goal hold only: for a stop, the
 words SHALL say instead that the session stays stopped, nothing lifts the stop from this machine, and a new session is
 not stopped, or, where the session can still be shared again (a sign-out or a lost workspace ended its share), how to

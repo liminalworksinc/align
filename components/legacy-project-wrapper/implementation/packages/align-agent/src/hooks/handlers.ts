@@ -1691,9 +1691,13 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       if (!me || me.signed_out) return "Align: not signed in on this machine. Run `align login` in a terminal first.";
       // Stopped by its person while it was shared there; not one whose share a sign-out or a lost workspace had ended
       // before `align stop-sharing` freed its tools, which the server shares again.
-      // Its shared history deleted while it was stopped from its workspace: the stop holds and it is not shared again
-      // (LIM-2441).
-      if (!hot?.share && hot?.prior_share?.stopped && hot.share_now?.stopped) return `Align: ${STOP_HOLDS_NO_SHARE}`;
+      // Stopped from its workspace, and its sharing stopped or its history deleted since: the stop holds and it is not
+      // shared again (LIM-2441; `stopOutlivesShare`, from the hot file).
+      if (
+        hot?.share_now?.stopped &&
+        (hot.share ? hot.share.state === "stopped" && (hot.share.ended ?? "sharing_ended") === "sharing_ended" : !!hot.prior_share)
+      )
+        return `Align: ${STOP_HOLDS_NO_SHARE}`;
       if (!dirMode && hot?.share?.state === "stopped" && hot.prior_share?.stopped && (hot.share.ended ?? "sharing_ended") === "sharing_ended") return `Align: ${stoppedForGoodWords(lid, "type `::align share` here")}`;
       // A share a sign-out or a lost workspace ended, while this sign-in has not read which shares their person stopped
       // on the web: one stopped there is never shared again, so nothing is asked for until that is known (C11-1).

@@ -27,7 +27,7 @@ import {
 } from "./api.ts";
 import { bumpGap, nowIso, tx } from "./db.ts";
 import { endEpochs, ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
-import { addNotice, addShareNotice, catchUpOtherBuilds, getShare, renderHot, snapshot } from "./hot.ts";
+import { addNotice, addShareNotice, catchUpOtherBuilds, getShare, renderHot, snapshot, stopOutlivesShare } from "./hot.ts";
 import { clean, otherWorkspaceWords, outOfReachWords, requestShortId } from "./shared/envelope.ts";
 import { applyShare, bind, endedUnread, endShareRemoved, endShareSignedOutByServer, endShareStoppedByPerson, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, SHARE_UNREAD_WORDS, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
@@ -262,9 +262,9 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
         ctx.log(`folder rule: session ${lid.slice(0, 8)} was stopped by its person (or its history deleted), so it stays private`);
         return lid;
       }
-      // Its shared history deleted while it was stopped from its workspace: the stop holds and it is not shared again
-      // (LIM-2441).
-      if (!getShare(ctx, lid) && stoppedByPerson(ctx, lid) && ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid)) throw new Error(STOP_HOLDS_NO_SHARE);
+      // Stopped from its workspace, and its sharing stopped or its history deleted since: the stop holds and it is not
+      // shared again (LIM-2441).
+      if (stopOutlivesShare(ctx, lid)) throw new Error(STOP_HOLDS_NO_SHARE);
       // Shared before (its history deleted since, too): this share counts from now (C6-1).
       const before = sharedBefore(ctx, lid);
       applyShare(ctx, planShare(ctx, lid, ws, goal, null, before ? "now" : "start", r.epoch_id));

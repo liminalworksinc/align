@@ -31,7 +31,7 @@ import {
 import { openCtx, saveConfig, type Ctx } from "./context.ts";
 import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
-import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedByLogin, endedReason, endedState, endedUnsent, getShare, notMember, releaseOf, renderEndedShares } from "./hot.ts";
+import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedByLogin, endedReason, endedState, endedUnsent, getShare, notMember, releaseOf, renderEndedShares, stopOutlivesShare } from "./hot.ts";
 import { endedWhyWords, latchWayOut, shareAgainWords, STOP_HOLDS_NO_SHARE } from "./shared/ended.ts";
 import { buildOf, hooksBuildDiffers, hooksBuildWords, selfBuild, supersededWords } from "./build.ts";
 import { resolvePaths, type Paths } from "./paths.ts";
@@ -976,9 +976,9 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
   // Its person stopped it while it was shared, and its history is kept: the server would refuse it, so nothing is sent
   // and the answer is the one `::align share` gives. A share a sign-out or a lost workspace had ended is shared again
   // (cycle 7).
-  // Its shared history deleted while it was stopped from its workspace: the stop holds, and sharing it again would start
-  // a server record with no stop on it, which the web can't resume (LIM-2441).
-  if (!share && stoppedByPerson(ctx, session.local_id) && ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(session.local_id)) {
+  // Stopped from its workspace, and its sharing stopped or its history deleted since: the stop holds, and sharing it again
+  // would be refused or start a server record with no stop on it, which the web can't resume (LIM-2441).
+  if (stopOutlivesShare(ctx, session.local_id)) {
     err(`align: session ${session.local_id.slice(0, 8)} was not shared: ${STOP_HOLDS_NO_SHARE}`);
     process.exitCode = 1;
     return;

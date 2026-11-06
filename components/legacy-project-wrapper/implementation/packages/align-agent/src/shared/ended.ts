@@ -60,12 +60,14 @@ function stopStays(user: boolean, lost = false): string {
 }
 
 /**
- * Why a session stopped from its workspace is not shared again once its person stopped sharing it or deleted its shared
- * history (LIM-2441): the stop holds after both, and a new share would start a server record with no stop on it, which
- * the web could not resume while this machine kept the session blocked. So it is not shared, and it stays stopped.
+ * Why a session stopped from its workspace is not shared again once its sharing stopped (by its person, on the web, or
+ * the server refused its usage) or its shared history was deleted (LIM-2441): the stop holds after each, and the server
+ * either refuses a new share or, when the history is gone, starts a record with no stop on it, which the web could not
+ * resume while this machine kept the session blocked. So it is not shared, and it stays stopped. Only a share a sign-out
+ * or a lost workspace ended is shared again, since the server keeps that record and its stop.
  */
 export const STOP_HOLDS_NO_SHARE =
-  "this session was stopped from its Align workspace, and that stop holds after its shared history is deleted, so it is not shared again and it stays stopped. A new session is not stopped.";
+  "this session was stopped from its Align workspace, and that stop holds after its sharing stopped or its shared history was deleted, so it is not shared again and it stays stopped. A new session is not stopped.";
 
 /**
  * For a session stopped or held from the web whose share ended (B6, C6-2): when it can be shared there again now

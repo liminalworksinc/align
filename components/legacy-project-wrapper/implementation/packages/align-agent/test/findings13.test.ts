@@ -20,7 +20,7 @@ import { localId, layout, spoolWrite } from "../src/shared/layout.ts";
 import { requestShortId } from "../src/shared/envelope.ts";
 import type { InjectedState } from "../src/shared/types.ts";
 import { FakeServer } from "./fake-server.ts";
-import { ctxFor, makeEnv, runCli, runHook, type TestEnv } from "./helpers.ts";
+import { appendLines, claudeAssistant, claudeUser, ctxFor, makeEnv, runCli, runHook, usage, writeLines, type TestEnv } from "./helpers.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 after(async () => {
@@ -443,11 +443,52 @@ describe("cycle 12, section 6: works, but would confuse a developer", () => {
     const before = puts();
     const r = await runCli(t, ["share", A.lid.slice(0, 8), "--workspace", "Acme", "--goal", "Ship the v2", "--yes"]);
     assert.equal(r.code, 1, r.stdout);
-    assert.match(r.stderr, /was not shared: this session was stopped from its Align workspace, and that stop holds after its shared history is deleted, so it is not shared again and it stays stopped\. A new session is not stopped\./);
-    assert.match(prompt(t, A, "::align share confirm").reason, /^Align: this session was stopped from its Align workspace, and that stop holds after its shared history is deleted/);
+    assert.match(r.stderr, /was not shared: this session was stopped from its Align workspace, and that stop holds after its sharing stopped or its shared history was deleted, so it is not shared again and it stays stopped\. A new session is not stopped\./);
+    assert.match(prompt(t, A, "::align share confirm").reason, /^Align: this session was stopped from its Align workspace, and that stop holds after its sharing stopped or its shared history was deleted/);
     await sync(t);
     assert.equal(puts(), before, "nothing is shared again");
-    assert.notEqual(deny(t, A), "", "the stop still blocks");
+    const d = deny(t, A);
+    assert.match(d, /this session stays stopped: a stop set from its Align workspace holds after its sharing ends, and nothing lifts it from here now/);
+    assert.doesNotMatch(d, /until it is resumed there/);
+  });
+
+  test("a session stopped from its workspace whose shared history was deleted on the web, heard as a refused upload: not shared again", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    await sync(t);
+    stop(fake, A);
+    await sync(t);
+    fake.deleteOnWeb(A.key);
+    const at = Date.now();
+    const file = path.join(t.claudeDir, "projects", `-${path.basename(A.cwd)}`, `${A.sid}.jsonl`);
+    (fs.existsSync(file) ? appendLines : writeLines)(file, [claudeUser(A.sid, "gone-p", new Date(at).toISOString(), { cwd: A.cwd }), { ...claudeAssistant(A.sid, "req_gone", new Date(at + 50).toISOString(), usage(10, 5)), cwd: A.cwd }]);
+    await sync(t);
+    const puts = () => fake.log.filter((l) => l.method === "PUT").length;
+    const before = puts();
+    const r = await runCli(t, ["share", A.lid.slice(0, 8), "--workspace", "Acme", "--goal", "Ship the v2", "--yes"]);
+    assert.equal(r.code, 1, `${r.stdout} ${r.stderr}`);
+    assert.match(r.stderr, /was not shared: this session was stopped from its Align workspace, and that stop holds after its sharing stopped/);
+    assert.match(prompt(t, A, "::align share confirm").reason, /^Align: this session was stopped from its Align workspace, and that stop holds after its sharing stopped/);
+    await sync(t);
+    assert.equal(puts(), before, "nothing is shared again");
+    assert.ok(!fake.sessions.has(A.key), "no new server record without its stop");
+  });
+
+  test("a session stopped from its workspace, then unshared: sharing it again is refused without advice to delete its history first", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    await sync(t);
+    stop(fake, A);
+    await sync(t);
+    assert.equal((await runCli(t, ["stop-sharing", A.lid.slice(0, 8)])).code, 0);
+    await sync(t);
+    const r = await runCli(t, ["share", A.lid.slice(0, 8), "--workspace", "Acme", "--goal", "Ship the v2", "--yes"]);
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /that stop holds after its sharing stopped/);
+    assert.doesNotMatch(r.stderr, /delete-history/);
+    const p = prompt(t, A, "::align share").reason;
+    assert.match(p, /that stop holds after its sharing stopped/);
+    assert.doesNotMatch(p, /delete-history|Delete shared history/);
   });
 
   test("plain `::align share` in a session that started before its folder's rule shares toward the rule's goal", async () => {
