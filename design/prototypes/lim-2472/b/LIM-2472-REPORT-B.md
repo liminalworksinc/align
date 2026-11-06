@@ -111,6 +111,8 @@ From the repo root:
 node design/prototypes/lim-2472/b/shots.mjs http://127.0.0.1:3802 /tmp/b-shots
 ```
 
+Round 2 removed `shots.mjs` from this folder. It walked concept B's own shell (the "Decision desk" Home), which was not integrated, so on the integrated pages it stopped at its first screen. The round-1 commits keep it in git history. What it checked on the integrated pages is now in `r2-checks.mjs` (Home's ranked list, the Requests desk and "Approve only", "See who decides") and `next-checks.mjs` ("Next" after a decision), and the screens are in `../s/shots.mjs`.
+
 This runs `design/prototypes/lim-2472/s/seed-agent.mjs` first, then `seed.mjs` on top of it in the same workspace. Every write is a real API call made as the person it names.
 
 To sign in by hand:
