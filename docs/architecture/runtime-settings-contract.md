@@ -1,0 +1,238 @@
+# Runtime settings contract
+
+- **Status:** qualified and registered; consumer acceptance is tracked under ADOPT-002
+- **Owning work:** [ADOPT-002](../roadmap/active-work.md#adopt-002)
+- **Source prerequisite:** [CONFIG-001](../roadmap/active-work.md#config-001) passes complete local acceptance
+- **Authority:** retained baseline until complete consumer acceptance; thereafter the registered Component intent, Node Flavor and typed consumer bindings
+
+This contract covers `lib/config.ts`, `lib/v2/config.ts` and the five contiguous
+settings declarations in `lib/v2/core.mts`. Cryptography, secret files, schema
+versions, database operations, email delivery and identity-provider protocols
+remain with their existing owners. Configuration functions do not open storage
+or contact a service. The existing qualified `value.follow-up-problem` contract
+owns follow-up URL warnings.
+
+## Component intent
+
+One settings instance reads an explicitly bound runtime environment. Local mode
+is the default; hosted mode requires an explicit setting. Read current settings
+when a method is called. A caller may supply an environment to methods that
+support one. Those methods use that environment without merging it with the
+runtime environment or modifying it.
+
+Return the operating mode, data location, allowed hosts, sign-in readiness,
+creation mode, operational caps, session lifetime and local send ceiling through
+the existing public meanings. Operational caps constrain server use; they do not
+represent financial budgets. Local mode allows creation and ignores hosted caps.
+An unknown hosted creation mode closes creation. Invalid optional positive
+integer limits use their existing defaults, while startup validation reports
+invalid configured limits.
+
+Hosted startup problems have a stable order and preserve every existing
+diagnostic. Report host, secret, data-location and unsupported-mode problems
+before identity, public-origin, sign-in, session, test-only and creation/abuse
+problems. Warnings remain separate from startup refusal. The bot-check warning
+precedes a follow-up warning. Delegate the latter to the bound qualified
+dependency exactly once, with the original environment object.
+
+The startup-problem method computes once per settings instance. Its first call
+fixes the result even if the runtime environment later changes. Return that same
+mutable array on every call, including mutations a caller makes to it. Startup
+assertion performs a fresh validation independently of that cache. It refuses
+unsupported public mode first, then refuses hosted startup when problems exist.
+
+Configuration calls return fresh records and fresh allowed-host collections.
+The instance's public loopback collection is shared and mutable at runtime;
+future local configurations copy its current members. Earlier returned
+collections remain independent. Cap, email and bot-check settings return fresh
+records when present. Separate settings instances have independent caches and
+loopback collections. Replacing a returned method property must not replace the
+lexical method used by another method.
+
+Returned records are ordinary objects with writable, enumerable, configurable
+own data properties in the stated order: `config` returns `hosted`, `dataDir`,
+`allowedHosts`; `emailApi` returns `url`, `key`, `from`; `caps` returns
+`workspaces`, `owned`, `members`, `sessionsPerDeviceDay`; `turnstile` returns
+`siteKey`, `secretKey`, `verifyUrl`. Diagnostic arrays stay mutable, and startup
+refusals use the ordinary Error prototype. Preserve caller input identity,
+descriptors, extensibility, prototype and hidden or symbol properties.
+
+## JavaScript binding and target requirements
+
+The qualified module `runtime_settings/create_settings` exports
+`create_settings(context)`. It returns the complete settings service. One
+application binding creates one instance and re-exports its methods and data
+through the existing modules. The factory binds three supplied callbacks:
+
+- `environment()` returns the current environment record.
+- `cwd()` returns the current working directory.
+- `followUpProblem(env)` implements the existing qualified public dependency.
+
+Capture the three callback references at factory creation; later replacement of
+context properties does not reconfigure an existing instance. Invoke captured
+callbacks as bare functions. Do not call them during creation. Use them only when
+the corresponding settings operation needs them, and propagate callback failures
+without replacing the thrown value. Do not read ambient process settings or application files independently of
+this context. The application binding supplies its actual process environment
+and working directory. Tests supply isolated fixture values.
+
+The returned service exposes these 22 functions with their existing names:
+
+| Function | Inputs and result |
+| --- | --- |
+| `config` | No arguments; fresh `{hosted, dataDir, allowedHosts}` record |
+| `hostName` | Host string or null; extracted lower-case hostname |
+| `hostAllowed` | Host string or null; current allowlist decision |
+| `hostedProblems` | Optional environment and working directory; ordered problem array |
+| `startupProblems` | No arguments; instance-cached mutable problem array |
+| `assertStartupConfig` | No arguments; undefined on success or an ordinary Error |
+| `testIdpEnabled` | Optional environment; local test-provider switch |
+| `validMaxDays` | String; whether it denotes an allowed session duration |
+| `sessionMaxDays` | Optional environment; configured duration or default |
+| `testOAuthUrl` | Optional environment; local test-provider origin or null |
+| `googleConfigured` | Optional environment; both provider settings present |
+| `githubConfigured` | Optional environment; both provider settings present |
+| `emailApi` | Optional environment; fresh API settings record or null |
+| `emailSignInEnabled` | Optional environment; local mode or configured API |
+| `localOwnerEmail` | Optional environment; trimmed lower-case owner email |
+| `localCodesPerHour` | Optional environment; send ceiling or default |
+| `creationMode` | Optional environment; codes, open or closed |
+| `caps` | Optional environment; fresh hosted cap record or null |
+| `turnstile` | Optional environment; fresh bot-check record or null |
+| `v2Warnings` | Optional environment; ordered warning array |
+| `v2Problems` | Optional environment; ordered identity and admission problems |
+| `publicOrigin` | Optional environment; hosted parsed origin or null |
+
+The service also exposes `LOOPBACK` and `RECENT_SIGN_IN_MS`. Consumer bindings
+retain the existing `Config`, `Caps` and `CreationMode` types. Re-exported core
+settings functions and their v2 aliases refer to the same service functions.
+
+The Node target mapping preserves these existing behaviors:
+
+1. Hosted mode means exactly `HOSTED === "1"`. Unsupported public mode means
+   exactly `ALIGN_PUBLIC === "1"`. Optional argument defaults apply to omitted
+   or undefined values, using ordinary JavaScript default-parameter semantics.
+2. Split `ALIGN_HOSTS` on commas, trim, lower-case and remove empty entries.
+   Preserve first insertion order when constructing a Set. The initial loopback
+   Set contains `localhost`, `127.0.0.1`, then `[::1]`.
+3. Resolve `ALIGN_DATA_DIR`, or `data` beneath the current working directory,
+   with Node path semantics. Relative data paths and an explicitly supplied
+   relative application directory resolve against the current bound working
+   directory, including when only the explicit application directory is relative.
+   Hosted validation requires a nonempty absolute data path outside
+   the normalized application directory. Equal paths and descendants, including
+   names beginning with two dots, fail. Parent and sibling paths remain valid.
+   This rule does not inspect symlinks or perform filesystem operations.
+4. Lower-case the whole Host input. A leading `[` ends the hostname at the first
+   `]`; a missing closing bracket yields an empty hostname. Other inputs end at
+   their first colon. Host admission requires a nonempty allowed hostname and a
+   remaining suffix matching `^(?::\d{1,5})?$`. It does not trim input, reject
+   a numeric port for exceeding 65,535, or normalize a trailing dot.
+5. Test identity is enabled only for `ALIGN_TEST_IDP === "1"` in local mode.
+   Its OAuth URL additionally needs a configured URL whose parsed hostname is
+   `localhost`, `127.0.0.1` or `[::1]` and whose protocol is HTTP or HTTPS.
+   Return its WHATWG URL origin, discarding path, query and fragment.
+6. Google and GitHub readiness require truthy ID and secret values. Email API
+   readiness requires truthy `ALIGN_EMAIL_API_URL`, `ALIGN_EMAIL_API_KEY` and
+   `ALIGN_EMAIL_FROM`, with a parseable HTTPS URL. Return the original strings
+   as `url`, `key` and `from`. Local email sign-in is always enabled.
+7. The local owner email defaults to `owner@align.localhost` when its setting
+   is falsy, then trims and lower-cases. Recent sign-in means 900,000 ms.
+   The local send ceiling defaults to 60. A configured positive integer must
+   match `^\s*[1-9]\d{0,8}\s*$`; leading zeroes are invalid for this ceiling
+   and for hosted caps.
+8. Session days default to 30. Trim `ALIGN_SESSION_MAX_DAYS`; a valid value
+   matches `^\d{1,3}$` and numerically lies from 1 through 365. Leading zeroes
+   are valid. The public `validMaxDays` method itself does not trim its argument.
+9. Local creation is always open. Hosted `ALIGN_CREATION` defaults to codes
+   when falsy, then trims and lower-cases. Unknown values resolve to closed.
+10. Hosted caps are `workspaces` from `ALIGN_MAX_WORKSPACES`, default 100;
+    `owned` from `ALIGN_MAX_OWNED_WORKSPACES`, default 2; `members` from
+    `ALIGN_MAX_MEMBERS`, default 25; and `sessionsPerDeviceDay` from
+    `ALIGN_MAX_SESSIONS_PER_DEVICE_DAY`, default 500. Use the positive-integer
+    rule above. Local mode returns null.
+11. Bot-check configuration requires hosted mode and both truthy Turnstile
+    keys. Return their original strings and the configured verification URL,
+    or `https://challenges.cloudflare.com/turnstile/v0/siteverify` when falsy.
+    Readiness itself does not validate that URL; startup validation does.
+12. Use WHATWG URL parsing for identity, email, bot-check and origin settings.
+    Public-origin validation requires HTTPS, pathname `/`, no search, hash,
+    username or password, and a parsed hostname in the configured host list.
+    Its read accessor returns null outside hosted mode, for a falsy setting or
+    on parse failure; otherwise it returns the parsed origin without repeating
+    startup validation.
+13. `v2Problems` validates whenever called, including with a local environment.
+    Its caller decides when those problems prevent startup. Empty optional
+    settings retain their existing truthiness and nullish distinctions.
+
+## Ordered Node diagnostic catalog
+
+Append each applicable problem in the order below. Conditions do not short
+circuit later checks except for the alternatives explicitly grouped in one row.
+Do not trim secrets or provider values before testing their truthiness or length.
+
+| Order | Condition | Exact diagnostic |
+| --- | --- | --- |
+| Outer 1 | Parsed host list is empty | `ALIGN_HOSTS must list the public hostname(s)` |
+| Outer 2 | A listed host is in the current LOOPBACK Set or equals `::1` | `ALIGN_HOSTS must not include loopback names` |
+| Outer 3 | Server secret is falsy or shorter than 32 characters | `ALIGN_SECRET must be set (32+ characters)` |
+| Outer 4a | Data directory is falsy or not absolute | `ALIGN_DATA_DIR must be an absolute path on the persistent volume` |
+| Outer 4b | Otherwise, data directory is equal to or inside the application directory | `ALIGN_DATA_DIR must be outside the app directory` |
+| Outer 5 | Unsupported public mode is on | `Public mode is not supported in this build` |
+| V2 1 | Identity secret is falsy or shorter than 32 characters | `BETTER_AUTH_SECRET must be set (32+ characters)` |
+| V2 2a | Public origin fails the URL restrictions above | `ALIGN_PUBLIC_ORIGIN must be an https origin (https://host)` |
+| V2 2b | Otherwise, its hostname is absent from the parsed host list | `ALIGN_PUBLIC_ORIGIN's host must be listed in ALIGN_HOSTS` |
+| V2 3 | Some, but not all, email API values are truthy | `Set all of ALIGN_EMAIL_API_URL, ALIGN_EMAIL_API_KEY, ALIGN_EMAIL_FROM or none (missing <keys>)` |
+| V2 4 | A truthy email API URL cannot parse as HTTPS | `ALIGN_EMAIL_API_URL must be an https URL` |
+| V2 5 | Exactly one Google provider value is truthy | `GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together` |
+| V2 6 | Exactly one GitHub provider value is truthy | `GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET must be set together` |
+| V2 7 | No email API value is truthy and neither provider is ready | `Sign-in needs the email settings (ALIGN_EMAIL_API_URL, ALIGN_EMAIL_API_KEY, ALIGN_EMAIL_FROM) or a Google or GitHub client (id and secret)` |
+| V2 8 | Trimmed session-days setting is nonempty and invalid | `ALIGN_SESSION_MAX_DAYS must be a whole number of days from 1 to 365` |
+| V2 9 | Test identity setting is truthy | `ALIGN_TEST_IDP is not allowed when hosted` |
+| V2 10 | Test clock setting is truthy | `ALIGN_TEST_NOW is not allowed when hosted (tests only)` |
+| V2 11 | Test OAuth URL setting is truthy | `ALIGN_TEST_OAUTH_URL is not allowed when hosted (tests only)` |
+| V2 12 | Local owner setting is truthy | `ALIGN_LOCAL_OWNER_EMAIL is not allowed when hosted (Mode L only)` |
+| Gate 1 | A truthy creation setting normalizes to an unknown mode | `ALIGN_CREATION must be codes, open or closed` |
+| Gate 2 | A cap setting is neither undefined nor empty and fails the positive-integer rule | `<key> must be a positive whole number` |
+| Gate 3 | Exactly one bot-check key is truthy | `ALIGN_TURNSTILE_SITE_KEY and ALIGN_TURNSTILE_SECRET_KEY must be set together` |
+| Gate 4 | A truthy bot-check verification URL cannot parse as HTTPS | `ALIGN_TURNSTILE_VERIFY_URL must be an https URL` |
+
+For V2 3, list only missing email keys, joined by comma and space, in this order:
+URL, API key, from. Any truthy partial email configuration suppresses V2 7 while
+still producing V2 3. Gate 2 may append four messages, using cap keys in the
+workspaces, owned workspaces, members, sessions-per-device order above.
+`hostedProblems` appends all V2 and gate messages after the outer messages.
+
+The first warning, when hosted and bot-check configuration is absent, is exactly:
+
+```text
+Warning: ALIGN_TURNSTILE_SITE_KEY and ALIGN_TURNSTILE_SECRET_KEY are not set, so sign-in, access requests and workspace creation have no bot check.
+```
+
+Append a truthy result of `followUpProblem(env)` after that warning, in either
+operating mode. Preserve its exact returned text. Startup assertion first throws
+an Error with the outer unsupported-public-mode message when that switch is on.
+Otherwise, in hosted mode only, obtain a fresh `hostedProblems` array. If it is
+nonempty, throw an Error whose message is `HOSTED=1 refused to start:\n- `
+followed by the problems joined with `\n- `. Return undefined in every other
+case. This assertion neither reads nor initializes the startup-problem cache.
+
+## Acceptance and remaining work
+
+The corrected retained baseline has 18,156 observations, seven identity/state
+traces, 360 synthetic environment cases and 1,044 host-header inputs. macOS
+Node 26.3.0 and Linux Node 24.22.2 results match. All seven diagnostic mutants
+are detected. Extracting the source boundary preserves every observation, trace
+and public metadata value. Four capture controls refuse source drift, symlinked
+inputs, an existing output and an evidence path equal to the snapshot directory
+before writing a new snapshot.
+
+Before generation, review all 22 methods, both data exports and the exact
+diagnostic catalog against the captured source, and bind the independent
+profile and verifier. The profile must retain every frozen baseline observation
+and state trace. Add factory-context isolation and dependency-call controls
+without deleting or weakening any original observation. Qualification requires
+two clean ordinary runs, a separate admitted build, normal child registration,
+actual consumer transfer and a complete current application receipt. Native
+settings authority transfers only after those gates pass; this contract alone
+does not authorize transfer.

@@ -49,4 +49,7 @@ explicit parent change.
 
 The [storage data contract](roadmap/storage-data-contract.md) records the B12
 assessment, schema observations and acceptance work remaining before native
-storage can replace retained behavior.
+storage can replace retained behavior. Its proposed
+[entity and upgrade contract](architecture/storage-entity-contract.md) and
+[contract observations](architecture/storage-contract-observation.json) keep
+logical obligations separate from the SQLite mapping and native qualification.

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Server and operator settings now share one qualified library while preserving
+  their public interfaces and observed behavior. Cold operator commands run with
+  Node alone from a read-only checkout; the hosted operator uses the same pinned
+  code as its application. The complete workflow passes 1,829 checks, and all
+  36 image, header and startup checks pass.
+- Contributor guides name the actual library Components, targets and pinned
+  runtimes. All 72 validation, lock, plan and verification checks pass across the
+  eighteen registered children.
+
+- Hosted startup rejects data directories inside the application even when a
+  directory name starts with two dots. Valid outside directories remain allowed.
+
 - The retained runner reports the complete test aggregate to the receipt
   collector. A portable nine-case regression fixture preserves that count and
   failure handling in every stage.

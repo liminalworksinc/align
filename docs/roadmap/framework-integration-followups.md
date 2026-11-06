@@ -83,6 +83,41 @@ specifically approved hook opt-out. Broader upstream review and qualification
 requirements remain open after these local proofs. The complete native rewrite
 continues under ADOPT-002. The operator's scope is Align only.
 
+The local publication draft separates the committed runtime's 93 installed
+regressions from the staged metadata correction's 42 source tests. Upstream main
+has advanced to `dbe7eeb4`; its synthesis implementation still matches the unfixed
+local baseline. Before publication, reconcile the nine newer upstream commits,
+including overlaps in the two planning documents and `standard_project.py`, then
+verify the final committed wheel and exact-head CI. The six-file staged tree
+`be178dbbcf6346f0c6c61375ea6d21f4af32654b` remains unchanged and still awaits its
+specific local commit go. The draft is not posted.
+
+## Zero-argument schema qualification
+
+The prepared schema library's public `change_programs()` callable takes no arguments.
+Two ordinary qualification attempts stop at `coding_cli.empty_generation`; the
+retained provider transcript identifies contradictory generated-test requirements.
+The same clean provider configuration passes a separate workspace-write control.
+Existing upstream issue [#132](https://github.com/jordanhubbard/literate-ai/issues/132)
+and accepted parent ADR 0051 own exhaustive coverage of this singleton input domain.
+
+A signed metadata control accepts `interfaces/callable.json` into the reviewed
+specification set, but ordinary project promotion omits that file and produces the
+same lock as the declaration-free child. The supported coverage mode therefore
+cannot reach this source-to-spec child. Preserve the no-argument public API and all
+51 independent acceptance cases, covering 212 observations. Do not add dummy
+arguments, duplicate manifest cases or lower coverage gates.
+
+The portable parent patch preserves the reviewed declaration for a single
+OpenSpec Component and refuses ambiguous ownership and unsupported nested Markdown
+projection. Five focused controls, 16 coverage controls, 13 promotion regressions,
+one actual signed CLI fixture and seven project-verification controls pass without
+failures or skips. Lint and formatting pass. The existing staged verification fix
+is preserved alongside this narrow patch. A clean committed wheel, ordinary fresh
+promotion, two clean qualifications, consumer integration and complete application
+parity remain required. Further commit, push and upstream tracker updates need
+specific operator approval. The production schema remains source-authority.
+
 ## Additional forwarded design input
 
 At the operator's request, [#321](https://github.com/jordanhubbard/literate-ai/issues/321)

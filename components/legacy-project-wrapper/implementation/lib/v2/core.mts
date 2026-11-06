@@ -2,11 +2,13 @@ import { createHmac, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { SQLInputValue } from "node:sqlite";
+import { runtimeSettings } from "../runtime-settings.mts";
 
 // The parts of lib/v2 that the operator script (scripts/align-admin.mjs) runs outside the app, against the same
 // database: the schema version it expects, the settings both read (the session cap, the test switches), the server
 // secret, creation codes, access-request decisions, workspace deletion (soft) and purging, and the email API call.
-// The retention schedule, which also runs from the script, is lib/v2/retention-core.mts. Node runs this file directly (type stripping), so it imports only Node's built-ins, uses no TypeScript
+// The retention schedule, which also runs from the script, is lib/v2/retention-core.mts. Node runs this file directly
+// (type stripping), with built-ins and the shared qualified settings binding. It uses no TypeScript
 // that needs compiling (no enums or parameter properties), and takes its database as an argument: the app passes
 // lib/v2/db.ts's helpers, the script its own connection. Every write here runs inside the caller's transaction.
 
@@ -23,22 +25,9 @@ export const SCHEMA_VERSION = 22;
 
 // ---- settings shared with the operator script (lib/v2/config.ts re-exports these) ----
 
-const hostedEnv = (env: NodeJS.ProcessEnv) => env.HOSTED === "1";
-
-/** The local test identity provider (email + password sign-up). ALIGN_TEST_IDP=1, never when hosted. */
-export const testIdpEnabled = (env: NodeJS.ProcessEnv = process.env) => env.ALIGN_TEST_IDP === "1" && !hostedEnv(env);
-
-const SESSION_MAX_DAYS = 30;
-export const validMaxDays = (v: string) => /^\d{1,3}$/.test(v) && Number(v) >= 1 && Number(v) <= 365;
-
-/** The absolute session cap in days: ALIGN_SESSION_MAX_DAYS, a whole number from 1 to 365, default 30. A web session
- *  older than this is invalid however recently it was used. Hosted refuses a bad value at startup; Mode L ignores it.
- *  The retention job (server or script) deletes sessions older than this, so run the script with the server's
- *  environment. */
-export function sessionMaxDays(env: NodeJS.ProcessEnv = process.env): number {
-  const v = (env.ALIGN_SESSION_MAX_DAYS ?? "").trim();
-  return v && validMaxDays(v) ? Number(v) : SESSION_MAX_DAYS;
-}
+export const testIdpEnabled = runtimeSettings.testIdpEnabled;
+export const validMaxDays = runtimeSettings.validMaxDays;
+export const sessionMaxDays = runtimeSettings.sessionMaxDays;
 
 const B32 = "abcdefghijklmnopqrstuvwxyz234567";
 
