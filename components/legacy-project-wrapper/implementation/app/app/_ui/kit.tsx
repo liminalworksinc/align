@@ -265,10 +265,6 @@ export function Shell({ me, ws, tab, children }: { me: { id?: string; name: stri
             Align
           </Link>
           <span className="min-w-0 flex-1 truncate text-[14px] text-(--text-2)">{current?.name ?? ""}</span>
-          {/* Between phone and rail widths there is room to say who is signed in without opening Menu. */}
-          <span className="hidden max-w-[12rem] truncate text-[13px] text-(--text-3) md:inline" title={me.email}>
-            {me.name}
-          </span>
           <button
             ref={menuBtn}
             type="button"

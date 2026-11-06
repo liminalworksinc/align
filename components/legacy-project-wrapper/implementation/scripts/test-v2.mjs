@@ -6035,8 +6035,8 @@ try {
         const v = await cardOf(pv);
         await pv.close();
         check(
-          "ui (Chrome, first run): a member with no sample sees only \"Connect one agent\" and \"You haven't connected an AI app to this workspace yet.\"; a viewer on a workspace with no goals sees no command, only that viewers can't connect AI apps here",
-          m?.kind === "empty" && /Set the first goal/.test(m.text) && /Connect an agent/.test(m.text) && m.line === null &&
+          "ui (Chrome, first run): a member with no goals sees the first-goal and optional connect actions; a viewer sees who can set the goals and no command",
+          m?.kind === "empty" && /Set the first goal/.test(m.text) && /Connect one agent/.test(m.text) && m.line === null &&
             v?.kind === "viewer-empty" && v?.line === null && /A workspace owner or member sets them/.test(v?.text ?? "") && errors.length === 0,
           `${JSON.stringify(m)?.slice(0, 300)} ${JSON.stringify(v)?.slice(0, 300)}`,
         );
@@ -6819,7 +6819,6 @@ try {
         await page.waitForSelector('h1[data-home-count]:not([data-home-count="reading"])', { timeout: 15000 });
         const declinedLink = `[data-needs="list"] a[href*="review=${GX.id}.${crD.json?.id}"]`;
         const inNeeds = !!(await page.$(declinedLink));
-        await page.evaluate(() => [...document.querySelectorAll('[data-needs="list"] [role="radio"]')].find((b) => b.textContent.startsWith("Done"))?.click());
         await page.waitForSelector(declinedLink, { timeout: 15000 });
         const dv = await page.evaluate((sel) => {
           const row = document.querySelector(sel)?.closest("li");
@@ -6828,13 +6827,13 @@ try {
         await page.evaluate((sel) => document.querySelector(sel)?.click(), declinedLink);
         await page.waitForSelector(`[data-review="${crD.json?.id}"]`, { timeout: 15000 });
         const dvReview = await page.$eval(`[data-review="${crD.json?.id}"]`, (e) => e.innerText);
-        // The review doesn't carry the decline reason; the goal page does.
+        // Opening a returned decline shows its reason and marks it seen; it then moves to Done.
         await page.goto(`${BASE}/app/w/${HW}/goals/${GX.id}`, { waitUntil: "networkidle0" });
         await page.waitForFunction((id) => (document.querySelector(`[data-cr="${id}"]`)?.innerText ?? "").includes("Reason:"), { timeout: 15000 }, crD.json?.id).catch(() => undefined);
         const dvGoal = await page.evaluate((id) => document.querySelector(`[data-cr="${id}"]`)?.innerText ?? "", crD.json?.id);
         check(
-          "ui (Chrome, main #53, LIM-2472): the requester's declined request is not under Needs you; under the Done filter it is a Declined row opening the review, which says who declined it and that nothing changes; the goal page has the reason; it fits 390 px",
-          !inNeeds && dv.status === "declined" && /Declined/.test(dv.text) && /Your request/.test(dv.text) && /This request was declined by Hank Other, so nothing changes\./.test(dvReview) && /Reason: Home: not this quarter/.test(dvGoal) && dv.sw <= dv.W && errors.length === 0,
+          "ui (Chrome, main #53, LIM-2472): the requester's unseen decline returns under Needs you; its review names the decider, reason and next step, and its goal page retains the reason; it fits 390 px",
+          inNeeds && dv.status === "declined" && /Declined/.test(dv.text) && /Your request/.test(dv.text) && /Hank Other declined your request/.test(dvReview) && /Home: not this quarter/.test(dvReview) && /A declined request is closed/.test(dvReview) && /Open the goal to propose again/.test(dvReview) && /Reason: Home: not this quarter/.test(dvGoal) && dv.sw <= dv.W && errors.length === 0,
           `${inNeeds} ${JSON.stringify(dv)} | ${dvReview.slice(0, 300)} | ${dvGoal.slice(0, 300)} ${errors.join(" | ")}`,
         );
       } catch (e) {
@@ -7874,14 +7873,27 @@ try {
           const hs = await phone.evaluate(() =>
             [...document.querySelectorAll("header button, header select, #passkey-prompt button, #passkey-prompt a, main button, main select")]
               .filter((b) => b.getBoundingClientRect().height > 0 && getComputedStyle(b).visibility !== "hidden")
-              .map((b) => [b.textContent.trim().slice(0, 30) || b.getAttribute("aria-label") || b.tagName, Math.round(b.getBoundingClientRect().height * 100) / 100]),
+              .map((b) => {
+                b.scrollIntoView({ block: "center" });
+                const r = b.getBoundingClientRect();
+                let height = r.height;
+                // A compact chip may extend its target with a pseudo-element. Prove the full 44px area
+                // actually hits this control, including its edges; CSS dimensions alone can hide overlap.
+                if (height < 44) {
+                  const cy = r.top + r.height / 2;
+                  const hits = [r.left + 1, r.left + r.width / 2, r.right - 1].every((x) =>
+                    [cy - 21.5, cy, cy + 21.5].every((y) => b.contains(document.elementFromPoint(x, y))));
+                  if (hits) height = 44;
+                }
+                return [b.textContent.trim().slice(0, 30) || b.getAttribute("aria-label") || b.tagName, Math.round(height * 100) / 100];
+              }),
           );
           counted += hs.length;
           for (const [t, h] of hs) if (h < 44) short.push(`${p} "${t}" ${h}px`);
         }
         const prompt = await phone.evaluate(() => !!document.querySelector("#passkey-prompt"));
         check(
-          "B6: at 390 px every button and select on the top bar, the page and the passkey prompt (Sign out, Not now, Paste meeting notes, Remove included) is at least 44 px tall",
+          "B6: at 390 px every button and select on the top bar, the page and the passkey prompt (Sign out, Not now, Paste meeting notes, Remove included) has a hit-tested tap target at least 44 px tall",
           counted >= 40 && short.length === 0,
           `${counted} controls; prompt ${prompt}; ${short.slice(0, 8).join(" | ")}`,
         );
