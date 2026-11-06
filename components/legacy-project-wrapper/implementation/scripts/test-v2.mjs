@@ -1333,9 +1333,9 @@ try {
   const used2 = await refreshOf(DU, DU.id, used1.json?.refresh_token ?? "");
   const usedReplay = await refreshOf(DU, DU.id, DU.refresh);
   check(
-    "refresh (LIM-2441 H7a): outside the grace, reuse still revokes the device with reason refresh_reuse: a retry 11 s after the rotation, and a replay of a token whose new pair was already used",
-    late1.status === 200 && lateRetry.status === 401 && lateRetry.json?.reason === "refresh_reuse" && revokedOf(DL1.id)?.revoked_reason === "refresh_reuse" &&
-      used1.status === 200 && used2.status === 200 && usedReplay.status === 401 && usedReplay.json?.reason === "refresh_reuse" && revokedOf(DU.id)?.revoked_reason === "refresh_reuse",
+    "refresh (LIM-2441 H7a): outside the grace, reuse still revokes the device (401 invalid_grant, revoked_reason refresh_reuse): a retry 11 s after the rotation, and a replay of a token whose new pair was already used",
+    late1.status === 200 && lateRetry.status === 401 && lateRetry.json?.error === "invalid_grant" && revokedOf(DL1.id)?.revoked_reason === "refresh_reuse" &&
+      used1.status === 200 && used2.status === 200 && usedReplay.status === 401 && usedReplay.json?.error === "invalid_grant" && revokedOf(DU.id)?.revoked_reason === "refresh_reuse",
     `${late1.status} ${lateRetry.text} ${JSON.stringify(revokedOf(DL1.id))} ${used1.status} ${used2.status} ${usedReplay.text} ${JSON.stringify(revokedOf(DU.id))}`,
   );
   const rrReuse = await refreshOf(DR, DR.id, DR.refresh, ts3);
@@ -3117,8 +3117,8 @@ try {
   );
   const allAudit = withDb((d) => d.prepare("SELECT ws_id, actor_id, action FROM v2_audit WHERE ws_id = ? OR action LIKE 'device.%' OR action LIKE 'team.%'").all(A));
   check(
-    "audit: team actions are written as team.*; a person revoking a device is its actor; only refresh-token reuse has no actor",
-    allAudit.some((r) => r.action === "team.member_set" && r.actor_id === U2.id) && allAudit.some((r) => r.action === "team.member_removed") && allAudit.some((r) => r.action === "device.revoked" && r.actor_id === U3.id) && allAudit.filter((r) => r.actor_id === null).length >= 1 && allAudit.filter((r) => r.actor_id === null).every((r) => r.action === "device.revoked"),
+    "audit: team actions are written as team.*; a person revoking a device is its actor; only refresh-token reuse and a refresh retry have no actor",
+    allAudit.some((r) => r.action === "team.member_set" && r.actor_id === U2.id) && allAudit.some((r) => r.action === "team.member_removed") && allAudit.some((r) => r.action === "device.revoked" && r.actor_id === U3.id) && allAudit.filter((r) => r.actor_id === null).length >= 1 && allAudit.filter((r) => r.actor_id === null).every((r) => r.action === "device.revoked" || r.action === "device.refresh_retried"),
     JSON.stringify(allAudit.filter((r) => r.actor_id === null)),
   );
 
