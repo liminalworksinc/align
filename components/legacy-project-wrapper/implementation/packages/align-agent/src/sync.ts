@@ -27,7 +27,7 @@ import {
 } from "./api.ts";
 import { bumpGap, nowIso, tx } from "./db.ts";
 import { endEpochs, ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
-import { addNotice, addShareNotice, catchUpOtherBuilds, getShare, renderHot, snapshot } from "./hot.ts";
+import { addNotice, addShareNotice, catchUpOtherBuilds, getShare, renderHot, snapshot, stopOutlivesShare } from "./hot.ts";
 import { clean, otherWorkspaceWords, outOfReachWords, requestShortId } from "./shared/envelope.ts";
 import { applyShare, bind, endedUnread, endShareRemoved, endShareSignedOutByServer, endShareStoppedByPerson, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, SHARE_UNREAD_WORDS, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
@@ -40,7 +40,7 @@ import { fetchAsks } from "./asks.ts";
 import { computeUnsharedDigest, uploadSteering } from "./allocation.ts";
 import { layout, listSpool, localId } from "./shared/layout.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
-import type { ShareFacts } from "./shared/ended.ts";
+import { STOP_HOLDS_NO_SHARE, type ShareFacts } from "./shared/ended.ts";
 import type { GoalSnapshot, SpoolRecord } from "./shared/types.ts";
 
 // ---------- spool ----------
@@ -250,7 +250,8 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
       const ws = resolveWorkspace(ctx.home, own?.id || r.workspace || ctx.config.default_workspace);
       if (!ws && own) {
         if (r.rule_dir) return lid;
-        throw new Error(outOfReachWords(own.name, lid, !!(ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid) || ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(lid))));
+        const stopped = !!ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid);
+        throw new Error(outOfReachWords(own.name, lid, stopped || !!ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(lid), stopped));
       }
       if (!ws) throw new Error(r.workspace ? `${r.rule_dir ? "the folder rule's" : "that"} workspace is no longer available on this device` : "no default workspace; run `align share --latest --workspace <name>` in a terminal");
       const goal = r.arg ? resolveGoal(loadFeed(ctx.home, ws.id), r.arg) : null;
@@ -261,6 +262,9 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
         ctx.log(`folder rule: session ${lid.slice(0, 8)} was stopped by its person (or its history deleted), so it stays private`);
         return lid;
       }
+      // Stopped from its workspace, and its sharing stopped or its history deleted since: the stop holds and it is not
+      // shared again (LIM-2441).
+      if (stopOutlivesShare(ctx, lid)) throw new Error(STOP_HOLDS_NO_SHARE);
       // Shared before (its history deleted since, too): this share counts from now (C6-1).
       const before = sharedBefore(ctx, lid);
       applyShare(ctx, planShare(ctx, lid, ws, goal, null, before ? "now" : "start", r.epoch_id));
