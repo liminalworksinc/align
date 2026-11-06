@@ -49,7 +49,7 @@ export default function Page() {
       <section id="contact" className="scroll-mt-6 border-t border-zinc-200 pt-2">
         <h2 className="mt-10 mb-3 text-[24px] font-semibold text-zinc-900">Contact</h2>
         {contact("Security reports: [SECURITY CONTACT EMAIL]. Privacy questions, data requests and the DPA: [PRIVACY CONTACT EMAIL].")}
-        {contact("[LEGAL ENTITY], [ADDRESS].")}
+        {contact("[LEGAL ENTITY].")}
       </section>
     </TrustFrame>
   );
