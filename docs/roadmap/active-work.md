@@ -60,8 +60,28 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Next action:** Obtain specific approval to commit and publish the tested
-  sixteen-library checkpoint. B12 data-contract work follows that checkpoint.
+- **Next action:** Review the seventeen-library checkpoint for commit and draft
+  PR #58 publication, as described in the
+  [storage contract work](storage-data-contract.md). The retained-runtime baseline
+  now covers all 22 populated starting versions, 13 transaction/helper cases,
+  144 constraint cases and seven recovery/control cases. The full application
+  workflow passes 1,825 checks with the diagnostic documents present, and both
+  installed verification runtimes pass. The coordinator now qualifies on two clean
+  builds, passes its separately admitted build and is publicly registered. All 213
+  actual-consumer storage checks pass, including populated upgrades and recovery.
+  Web admission passes 302 batches across eleven libraries. All sixteen prior
+  consumer pins remain unchanged. The complete seventeen-library build, test and
+  package workflow passes 1,825 checks with zero failures or skips. All 24 image
+  checks and ten additional header checks pass on the same image. Current receipt:
+  `sha256:5e61ae0fe5bebdf1b28e1ff2112135628f34d8d601ef99dcbd46444507da5547`.
+  Historical SQL remains retained source. Full storage/schema transfer, remaining
+  runtime boundaries and authority-class review stay open. New publication needs
+  specific operator approval.
+  The sixteen-library checkpoint is published as `bb2605c` in draft
+  [PR #58](https://github.com/liminalworksinc/align/pull/58). Its exact-head
+  [receipt and spec check](https://github.com/liminalworksinc/align/actions/runs/42123356635)
+  and [current-main check](https://github.com/liminalworksinc/align/actions/runs/42123419433)
+  pass. B12 starts from that verified checkpoint.
   The combined build, test and package workflow includes main at `b16f8d1` and
   passes all 1,825 checks with zero failures or skips.
   B06 field validation is qualified, separately admitted, publicly registered and
@@ -618,7 +638,10 @@ complete acceptance. A fresh sealed build, test and package workflow passes all
 1,825 checks with zero failures or skips. Its current retained receipt is
 `sha256:485aa67eedf4eacd3379ba5703d8265e2ffcf5fc0c2282df931aac5ab4eee871`.
 The hosted image passes all 24 checks plus ten response-header checks on the
-SSD-backed engine. Commit, push and PR update await specific approval.
+SSD-backed engine. The operator approved this checkpoint; commit `bb2605c` is
+pushed to draft PR #58, its prepared title and body are verified, and both
+exact-head CI workflows pass. The configured pre-push reviewer remains unavailable
+under its API usage limit; the approved one-command opt-out was used.
 
 ### [x] VERIFY-001 - Repair the retained-test blockers for PR 60
 

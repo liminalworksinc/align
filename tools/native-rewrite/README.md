@@ -5,7 +5,7 @@ helpers do not change that environment or publish anything.
 
 `map-retained-boundaries.py SCOPE_PLAN_JSON OUTPUT_JSON` checks that every retained
 source member has a boundary owner. It preserves the distinction between file
-membership and pending authority-class review. The current 393-file scope maps
+membership and pending authority-class review. The current 398-file scope maps
 without gaps; new unmatched paths fail explicitly.
 
 `litai-local.py` forwards the ordinary CLI arguments and adds conservative diagnostic
@@ -162,6 +162,25 @@ separate from observations and check the one generic public API inertly.
 Both clean qualification builds and the separately admitted build pass all queue inputs.
 Consumer and complete application evidence belong to the parent program.
 
+For B12's migration coordinator,
+`capture-migration-coordinator-source.mjs SOURCE_DB OUTPUT_DIRECTORY RECORD_JSON`
+checks the complete reviewed `db.ts` baseline and extracts only its exact migration
+function. Keep the extraction record outside the source snapshot. Retrieve that
+baseline from checkpoint `bb2605c` after the retained runner has been replaced.
+`make-migration-coordinator-profile.mjs SOURCE_SNAPSHOT PROFILE CAPTURE` executes
+the exact frozen `migrate.ts` function with authored minimal schemas and the real
+SQLite driver. It records 645 observations in 21 capability batches, including
+original error identity, broken-reference errors, per-change commits and cleanup
+precedence. The profile selects two clean runs. The same batch digests match on
+macOS and Linux Node 24.22.2. Run
+`node tools/native-rewrite/test-migration-coordinator-harness.cjs SOURCE_SNAPSHOT`
+for all 13 observer controls. `make-library-oracle.py` binds these exact batches
+and `migration-coordinator-harness.cjs` before generation. Both clean qualification
+builds pass all 21 batches. The target adapter passes all 213 actual-consumer
+storage checks. Complete application and image checks pass for this checkpoint;
+their current receipts belong to the native rewrite program. Historical SQL, the schema,
+connection management and auth retain their existing authority.
+
 For the remaining B06 validation functions,
 `make-field-validation-bindings.mjs SOURCE_SNAPSHOT OUTPUT_DIRECTORY` prepares
 one context-bound native factory call, fifteen public function aliases, six data
@@ -179,7 +198,7 @@ consumer pins with:
 ```sh
 python tools/native-rewrite/make-consumer-manifest.py . \
   components/legacy-project-wrapper/implementation/native \
-  spend-meter spend-stream spend-rounding paste-lines policy shell-words share-notices share-again home-attention trust-markdown http-errors promise-queues wording agent-envelope value-rules
+  spend-meter spend-stream spend-rounding paste-lines policy shell-words share-notices share-again home-attention trust-markdown http-errors promise-queues wording agent-envelope value-rules field-validation migration-coordinator
 ```
 
 The retained agent build runs `scripts/native-libraries.mjs` from the retained
@@ -189,7 +208,7 @@ builds check live provider locks and authority heads; sealed builds receive the
 reviewed manifest and the same immutable cache bytes. The full sealed harness
 receipt remains necessary before claiming application integration. Keep all consumed
 libraries in the manifest. The web build selects paste-lines, policy, share-again,
-home-attention, trust-markdown, http-errors, promise-queues, wording and value-rules, replaying their 231 independent batches; the agent selects the three spend libraries and
+home-attention, trust-markdown, http-errors, promise-queues, wording, value-rules, field-validation and migration-coordinator, replaying their 302 independent batches; the agent selects the three spend libraries and
 shell-words, share-notices and agent-envelope, replaying 157 batches. `npm run prepare:container` exports the exact
 verified web inputs locally.
 The Docker build checks them and reruns web acceptance before compiling, while

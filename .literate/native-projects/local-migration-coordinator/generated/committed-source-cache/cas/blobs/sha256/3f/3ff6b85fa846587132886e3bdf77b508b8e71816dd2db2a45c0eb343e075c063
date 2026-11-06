@@ -1,0 +1,129 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { apply_migrations } = require('../migration_coordinator/apply_migrations.js');
+
+function fixture(changeCount, storedVersion, faults = {}) {
+  const events = [];
+  const context = { changeCount };
+  for (const name of ['readVersion', 'setReferences', 'begin', 'apply',
+    'brokenReferences', 'referenceError', 'writeVersion', 'commit', 'rollback', 'complete']) {
+    context[name] = function (...args) {
+      assert.equal(this, context);
+      events.push([name, ...args]);
+      if (Object.prototype.hasOwnProperty.call(faults, name)) {
+        return faults[name](...args);
+      }
+      if (name === 'readVersion') return storedVersion;
+      if (name === 'brokenReferences') return 0;
+      if (name === 'referenceError') return referenceFailure;
+      return { ignored: name };
+    };
+  }
+  const referenceFailure = {};
+  return { context, events, referenceFailure };
+}
+
+function success(changeCount, storedVersion, expectedEvents) {
+  const f = fixture(changeCount, storedVersion);
+  const result = apply_migrations(f.context);
+  assert.equal(result, undefined);
+  assert.deepEqual(f.events, expectedEvents);
+  // A void library result has no JSON value. The test protocol uses null.
+  return result === undefined ? null : result;
+}
+
+function example() {
+  return success(2, 0, [
+    ['readVersion'], ['setReferences', false],
+    ['begin'], ['apply', 1], ['brokenReferences'], ['writeVersion', 1], ['commit'],
+    ['begin'], ['apply', 2], ['brokenReferences'], ['writeVersion', 2], ['commit'],
+    ['setReferences', true], ['complete']
+  ]);
+}
+
+function boundary() {
+  return success(0, 0, [['readVersion'], ['complete']]);
+}
+
+function invariant() {
+  return success(2, 5, [['readVersion'], ['complete']]);
+}
+
+function caughtValue(fn) {
+  let threw = false;
+  let value;
+  try { fn(); } catch (error) { threw = true; value = error; }
+  assert.equal(threw, true);
+  return value;
+}
+
+function cleanupTests() {
+  for (const failure of [undefined, null, false, 0, 'failure', {}]) {
+    for (const stage of ['readVersion', 'begin', 'apply', 'brokenReferences',
+      'referenceError', 'writeVersion', 'commit', 'complete']) {
+      const faults = { [stage]: () => { throw failure; } };
+      if (stage === 'referenceError') faults.brokenReferences = () => 3;
+      const f = fixture(1, 0, faults);
+      assert.equal(caughtValue(() => apply_migrations(f.context)), failure);
+      const names = f.events.map(event => event[0]);
+      const transactional = ['apply', 'brokenReferences', 'referenceError', 'writeVersion', 'commit'].includes(stage);
+      assert.equal(names.filter(name => name === 'rollback').length, transactional ? 1 : 0);
+      assert.equal(names.filter(name => name === 'complete').length, stage === 'complete' ? 1 : 0);
+      if (stage !== 'readVersion') {
+        assert.deepEqual(f.events[stage === 'complete' ? f.events.length - 2 : f.events.length - 1], ['setReferences', true]);
+      }
+    }
+    const disabled = fixture(1, 0, { setReferences() { throw failure; } });
+    assert.equal(caughtValue(() => apply_migrations(disabled.context)), failure);
+    assert.deepEqual(disabled.events, [['readVersion'], ['setReferences', false]]);
+  }
+
+  const first = {}, rollback = {}, enable = {};
+  for (const stage of ['apply', 'brokenReferences', 'referenceError', 'writeVersion', 'commit']) {
+    for (const enableFails of [false, true]) {
+      const f = fixture(1, 0, {
+        [stage]() { throw first; },
+        ...(stage === 'referenceError' ? { brokenReferences() { return 2; } } : {}),
+        rollback() { throw rollback; },
+        setReferences(enabled) { if (enabled && enableFails) throw enable; }
+      });
+      assert.equal(caughtValue(() => apply_migrations(f.context)), enableFails ? enable : rollback);
+      assert.deepEqual(f.events.slice(-2), [['rollback'], ['setReferences', true]]);
+    }
+  }
+  const broken = fixture(1, 0, { brokenReferences() { return 4; } });
+  assert.equal(caughtValue(() => apply_migrations(broken.context)), broken.referenceFailure);
+  assert.deepEqual(broken.events, [['readVersion'], ['setReferences', false], ['begin'],
+    ['apply', 1], ['brokenReferences'], ['referenceError', 1, 4], ['rollback'], ['setReferences', true]]);
+
+  const later = fixture(3, 0, { apply(version) { if (version === 2) throw first; } });
+  assert.equal(caughtValue(() => apply_migrations(later.context)), first);
+  assert.deepEqual(later.events, [['readVersion'], ['setReferences', false],
+    ['begin'], ['apply', 1], ['brokenReferences'], ['writeVersion', 1], ['commit'],
+    ['begin'], ['apply', 2], ['rollback'], ['setReferences', true]]);
+
+  const enableOnly = fixture(1, 0, { setReferences(enabled) { if (enabled) throw enable; } });
+  assert.equal(caughtValue(() => apply_migrations(enableOnly.context)), enable);
+  assert.equal(enableOnly.events.some(event => event[0] === 'rollback' || event[0] === 'complete'), false);
+
+  success(3, 2, [['readVersion'], ['setReferences', false], ['begin'], ['apply', 3],
+    ['brokenReferences'], ['writeVersion', 3], ['commit'], ['setReferences', true], ['complete']]);
+}
+
+function run() {
+  const cases = [
+    ['generated-two-changes', example],
+    ['generated-empty-store', boundary],
+    ['generated-ahead-version', invariant]
+  ];
+  const results = [];
+  for (const [case_id, execute] of cases) {
+    assert.deepEqual(execute(), null);
+    results.push({ case_id, outcome: 'passed' });
+  }
+  cleanupTests();
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+
+module.exports = { run, smoke: example };

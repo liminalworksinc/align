@@ -9649,6 +9649,297 @@
         "field-validation.json": "74b859dd962163a5af05c70d6c022ab1a14fd1224a91efd8fe7bc4dce52c5588",
         "field-validation-harness.cjs": "05ba968d693365a329a3b25d9154a1d936896b3a0019448150b215d297f7abfd"
       }
+    },
+    {
+      "component": "migration-coordinator",
+      "provider": ".literate/native-projects/local-migration-coordinator",
+      "package": "migration_coordinator",
+      "lock_identity": "sha256:a7a93cc9284c6707b14bca363e91606a25d25a8835b2d4b735670d348baf9021",
+      "lock": {
+        "edges": [],
+        "nodes": [
+          {
+            "interface_bindings": [
+              {
+                "capability": "storage-upgrade.apply-migrations",
+                "component_revision": {
+                  "algorithm": "sha256",
+                  "digest": "3ecaf000591a958713c94e67ae052043ea202a136fc8e0ebd97ce8c951b2cd12",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "interface_identity": {
+                  "algorithm": "sha256",
+                  "digest": "34af7db3c4f07a4de24595e5acb983ac2d39dda484b464d95216f9a0498363b6",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "schema": "urn:literate-ai:schema:v2:component-interface-binding"
+              }
+            ],
+            "requirement_constraint_satisfactions": [],
+            "revision": {
+              "acceptance_contracts": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "375fcd81b6b812543d890513ec3b9f19d9d06060ceffac88bae01079c84172a6",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "acceptance-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "qualification/profile.json"
+                }
+              ],
+              "authoring_identity": {
+                "algorithm": "sha256",
+                "digest": "54f3cf62005f0d82e047d971d3d9466c346353f311a498cd0d16f6ae8025df7a",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "authoring_inputs": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "0df5d4b45e8ff6a1e3b670add69e4897fd29bfdcd2e521275d602809e4704f5f",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application-implementation/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "79519b3fde095c4189cd95c0e6ff3049a31557c34938ca5df4d0481b64f6e606",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "7bfdd0ddf52d2ddf5d6ac5ed6536b999da474323978937e72f4e4d3b1dface38",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-specification-planning/SKILL.md"
+                }
+              ],
+              "coordinate": {
+                "name": "migration-coordinator",
+                "namespace": "local"
+              },
+              "public_interfaces": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "34af7db3c4f07a4de24595e5acb983ac2d39dda484b464d95216f9a0498363b6",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "public-interface-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/interface-storage-upgrade-apply-migrations-6c5e6ee9bb.md"
+                }
+              ],
+              "repository_sources": [],
+              "routing_policy": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "99bc0eb9ee3039ccb3836060c199bc94cf1e5aa6c6a92d64235dc6e7065bdb79",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "routing-policy",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "routing/production/staging/dev/routing.json"
+              },
+              "schema": "urn:literate-ai:schema:v2:locked-component-revision",
+              "selected_flavor_revisions": [
+                {
+                  "algorithm": "sha256",
+                  "digest": "1096aa8defc4dd66b6701f26a77d056bb98abf85af734b23e76498196ecf5f84",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "3cf30d7e28f86932b81bbad4156dbd98ab7c4fa05553b2553d65687a81aabca4",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                }
+              ],
+              "specification_set_identity": {
+                "algorithm": "sha256",
+                "digest": "46c200bf86acaa988226f41e387c2f17a63aa605308c9b97db4972e56fed859e",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "specifications": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "20961ca19ed95fc159aa9513e576114b9d63611032843ced928ed57277e1ac4c",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/spec.md"
+                }
+              ],
+              "version": "1.0.0",
+              "workflow_definition": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "c5c8c2881fd7d5b1504847e93aee5a91015438bbaf867bfb50d5d215e0b0309d",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "workflow",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "workflows/production/staging/dev/workflow.md"
+              }
+            },
+            "schema": "urn:literate-ai:schema:v2:component-lock-node",
+            "target_flavor_selection": {
+              "component_revision": {
+                "algorithm": "sha256",
+                "digest": "3ecaf000591a958713c94e67ae052043ea202a136fc8e0ebd97ce8c951b2cd12",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "schema": "urn:literate-ai:schema:v2:node-target-flavor-selection",
+              "selection_policy_identity": {
+                "algorithm": "sha256",
+                "digest": "e07f834a4a139ad0273ebcbb824883a18fe1702adc3e63125046c8e274b5b907",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "slots": [
+                {
+                  "selected": [],
+                  "slot": {
+                    "axis": "build.system",
+                    "capability_contract": "storage-upgrade.apply-migrations",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "build-system"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "3cf30d7e28f86932b81bbad4156dbd98ab7c4fa05553b2553d65687a81aabca4",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "javascript"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "implementation.language-ecosystem",
+                    "capability_contract": "storage-upgrade.apply-migrations",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "implementation-language-ecosystem"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "1096aa8defc4dd66b6701f26a77d056bb98abf85af734b23e76498196ecf5f84",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "macos"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "platform.os",
+                    "capability_contract": "storage-upgrade.apply-migrations",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "platform-os"
+                  }
+                }
+              ],
+              "target_name": "migration-coordinator-host-v1",
+              "target_profile_identity": {
+                "algorithm": "sha256",
+                "digest": "cec51743c28b1d6de2a6b96d9836877cff8d7aaa64d001072dad7be739330cd5",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              }
+            }
+          }
+        ],
+        "provider_resolutions": [],
+        "resolver_identity": {
+          "algorithm": "sha256",
+          "digest": "5085d8dcc1825af6e6c4340ff39ac0e130986c12fc447f82fb700dd27dbe8a95",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "root_revision": {
+          "algorithm": "sha256",
+          "digest": "3ecaf000591a958713c94e67ae052043ea202a136fc8e0ebd97ce8c951b2cd12",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "schema": "urn:literate-ai:schema:v2:component-lock",
+        "selection_policy_identity": {
+          "algorithm": "sha256",
+          "digest": "e07f834a4a139ad0273ebcbb824883a18fe1702adc3e63125046c8e274b5b907",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "target_name": "migration-coordinator-host-v1",
+        "target_profile_identity": {
+          "algorithm": "sha256",
+          "digest": "cec51743c28b1d6de2a6b96d9836877cff8d7aaa64d001072dad7be739330cd5",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        }
+      },
+      "qualified_projection": "sha256:aa4019970b62fc7b81b7934b9c06c4de558a387c84cb50cf4848d69c22e26b45",
+      "authority_head": "provenance/component-authority/26cd9d35b9a0bf5b4bb3c8ced0449d2d8ab8ea0a18979f1234932962ccf86c8f/current.json",
+      "entry": "2d10890f84384493eb0eda470814257b39b94663ebbf09d4138c8814389d0c4b",
+      "source_tree": "2b1596690c65e4c640bb2aa5df7b9d0b1b4e16cc22f8e962de10d834a1be527a",
+      "files": [
+        {
+          "path": "apply_migrations.js",
+          "algorithm": "sha256",
+          "digest": "a9da1b2aefc8cf6b7071326f77d41afad6072ef01de83f5f235131e6a7620862",
+          "media_type": "application/octet-stream",
+          "size": 734
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "d65bd2ba24307cd25d1c50738214b274131bf65f2dd0cabae515d0298c5de3f1",
+          "media_type": "application/octet-stream",
+          "size": 108
+        }
+      ],
+      "surface": {
+        "schema": "urn:literate-ai:schema:v2:library-import-surface@1",
+        "language": "javascript",
+        "package": "migration_coordinator",
+        "capabilities": [
+          {
+            "schema": "urn:literate-ai:schema:v2:library-capability-import@1",
+            "capability": "storage-upgrade.apply-migrations",
+            "interface_identity": {
+              "schema": "urn:literate-ai:schema:v1:content-identity",
+              "algorithm": "sha256",
+              "digest": "34af7db3c4f07a4de24595e5acb983ac2d39dda484b464d95216f9a0498363b6"
+            },
+            "module": "migration_coordinator/apply_migrations",
+            "symbols": [
+              "apply_migrations"
+            ]
+          }
+        ]
+      },
+      "oracle": "migration-coordinator.json",
+      "verifier": "migration-coordinator-harness.cjs",
+      "verification_files": {
+        "migration-coordinator.json": "ae55673b9a3a6a7c22f8b2de532497b2f717cf67348414426ac85b5e4b5a65af",
+        "migration-coordinator-harness.cjs": "a0f3bb77bf73c4092fe5e161688b21625c263d456e899a3f1cc5244895d19ec1"
+      }
     }
   ]
 }
