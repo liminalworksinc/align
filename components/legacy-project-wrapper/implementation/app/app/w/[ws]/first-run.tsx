@@ -154,10 +154,16 @@ export default function FirstRun({
   const viewer = self?.role === "viewer";
   // An empty workspace is its own state (below), shown whether or not this person has connected an agent: the first
   // goal is the step that matters, and it must not vanish with the connect panel.
-  if (!always && hasGoals && connected) return null;
-  if (!always && viewer && hasGoals) return null;
   const sample = self?.name === SAMPLE_NAME ? self : list.find((w) => w.name === SAMPLE_NAME && w.id !== ws);
   const inSample = sample?.id === ws;
+  // The sample label describes the workspace, so it survives connecting an app and read-only access.
+  const sampleNotice = inSample ? (
+    <p data-sample-fictional className="text-[14px] text-(--text-2)">
+      Northstar is fictional. Its company, teams, goals and change request are made up so you can try each step.
+    </p>
+  ) : null;
+  if (!always && hasGoals && (connected || viewer)) return sampleNotice;
+
   const approvedOnly = apps?.apps.filter((a) => !seenApp(a) && (!me || a.user?.id === me)) ?? [];
   const line = apps ? claudeCodeLine(apps.url) : null;
 
@@ -301,6 +307,7 @@ export default function FirstRun({
   if (!always)
     return (
       <section aria-label="Get started" className="min-w-0 rounded-(--radius-m) border border-dashed border-(--line-strong) px-4 py-3 text-[14px] text-(--text-1)" data-first-run="compact">
+        {sampleNotice}
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="min-w-0 flex-1 basis-64">
             <p className="font-semibold">Connect your agent</p>
