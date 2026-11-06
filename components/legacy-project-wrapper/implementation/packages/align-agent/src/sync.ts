@@ -250,7 +250,8 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
       const ws = resolveWorkspace(ctx.home, own?.id || r.workspace || ctx.config.default_workspace);
       if (!ws && own) {
         if (r.rule_dir) return lid;
-        throw new Error(outOfReachWords(own.name, lid, !!(ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid) || ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(lid))));
+        const stopped = !!ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid);
+        throw new Error(outOfReachWords(own.name, lid, stopped || !!ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(lid), stopped));
       }
       if (!ws) throw new Error(r.workspace ? `${r.rule_dir ? "the folder rule's" : "that"} workspace is no longer available on this device` : "no default workspace; run `align share --latest --workspace <name>` in a terminal");
       const goal = r.arg ? resolveGoal(loadFeed(ctx.home, ws.id), r.arg) : null;

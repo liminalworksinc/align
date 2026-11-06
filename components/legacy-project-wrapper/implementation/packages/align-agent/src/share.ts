@@ -184,7 +184,7 @@ export function stopSharing(ctx: Ctx, lid: string): void {
     endEpochs(ctx.db, lid, at);
     notePriorShare(ctx, lid, true, at);
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
-    ctx.db.prepare("DELETE FROM latches WHERE local_id=?").run(lid);
+    // A stop set from the workspace holds after sharing stops (LIM-2441): its latch stays. Goal holds are freed.
     ctx.db.prepare("DELETE FROM holds WHERE local_id=?").run(lid);
     // The server expires the requests still waiting on it at this stop (E2E-AGENT cycle 13).
     expireRequests(ctx, lid, "sharing_stopped", at);
@@ -214,7 +214,7 @@ export function deleteHistory(ctx: Ctx, lid: string): void {
     markStopped(ctx, lid);
     notePriorShare(ctx, lid, true);
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
-    ctx.db.prepare("DELETE FROM latches WHERE local_id=?").run(lid);
+    // As at a stop of sharing: a stop set from the workspace stays (LIM-2441); goal holds are freed.
     ctx.db.prepare("DELETE FROM holds WHERE local_id=?").run(lid);
     // Asked again: one deletion, tried now (a refused one waits an hour on its own).
     ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind='delete_session'").run(lid);
@@ -265,7 +265,8 @@ function factsOf(row: { workspace_name: string; goal_json: string | null }, e: S
  * This machine signed out (logout, a revoked device, or a new pairing that replaced the old device): the server can no
  * longer reach its shares, so each live one ends here too and its session is told how to share it again. Queued share
  * and epoch calls are dropped (they belonged to the old device). Stop latches and goal holds stay: a stopped session
- * stays blocked until the developer runs `align stop-sharing`. Every session whose share had ended already is worded
+ * stays blocked until it is shared again and resumed from the web (a stop holds after sharing ends, LIM-2441; a goal
+ * hold is freed by `align stop-sharing`). Every session whose share had ended already is worded
  * afresh from the state now (its hot and latch files), so a notice that said `::align share` shares it again now gives
  * the sign-out's words at its next prompt, as its deny does (C8-1, cycle 11). Returns how many shares the server had
  * ended (`pending` ones never reached it).
@@ -526,7 +527,8 @@ export function endSharesEndedOnServer(ctx: Ctx, ended: EndedOnServer[]): number
  * This device can no longer reach a workspace (`/me` no longer lists it: its person was removed from it or left, or a
  * new pairing did not include it). The server ended those sessions (`member_removed`), so each live share in it ends
  * here too, with one notice; its cached goals and asks go, so no envelope or `::align goals` shows them. Stop latches
- * and goal holds stay until `align stop-sharing`. Returns how many shares ended.
+ * stay (a stop holds after sharing ends, LIM-2441); goal holds stay until `align stop-sharing`. Returns how many shares
+ * ended.
  */
 export function endSharesWithoutAccess(ctx: Ctx, me: MeFile): number {
   const reach = new Set(me.workspaces.map((w) => w.id));

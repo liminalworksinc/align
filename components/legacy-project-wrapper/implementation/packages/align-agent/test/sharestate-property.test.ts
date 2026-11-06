@@ -81,6 +81,8 @@ function wayOf(text: string): Way | null {
   if (/lifts only the hold/.test(text)) return "stop+release";
   if (/a release still reaches (this session though its sharing ended|it:)|is released from the web \(a release still reaches/.test(text)) return "release";
   if (/align stop-sharing [A-Za-z0-9_-]{8}`/.test(text)) return "stop";
+  // A stop holds after its sharing ends (LIM-2441): where nothing can lift it, the text says the session stays stopped.
+  if (/this session stays stopped: a stop set from its Align workspace holds after its sharing ends/.test(text)) return "stop";
   return null;
 }
 

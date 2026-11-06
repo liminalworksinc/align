@@ -200,7 +200,8 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   if (ctx.superseded) kvSet(ctx.db, `${OLDER_RENDER}${lid}`, nowIso());
   else writeJsonAtomic(layout.hot(ctx.home, lid), hot);
   // A latch whose share has ended (this machine signed out, or the server no longer has the share) can't be lifted from
-  // the web any more: the latch says so, so the deny tells the user how to get out (`align stop-sharing`). When the
+  // the web any more: the latch says so, so the deny says what happens now (a hold: `align stop-sharing` frees it; a stop
+  // holds and the session stays stopped, LIM-2441). When the
   // session can be shared there again now (signed in again, its workspace in reach again), the latch says that instead,
   // so the deny gives the same advice as the session's notice: `::align share` (C6-2).
   const latch = ctx.db.prepare("SELECT * FROM latches WHERE local_id=?").get(lid) as { stopped: number; directive_id: string; seq: number; at: string } | undefined;
@@ -329,6 +330,7 @@ export function shareNow(
     unread: signed && !!kvGet(ctx.db, ENDED_UNREAD),
     login: !!end?.login,
     latched: latchedFromWeb(ctx, lid),
+    stopped: !!ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid),
     release,
     ...(member ? {} : { member: false as const }),
   };

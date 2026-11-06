@@ -1048,12 +1048,14 @@ type EndedWhy = NonNullable<Latch["ended"]>;
  * uses too, so the deny and the notices never give different advice (C9-2). Why it ended is `endedWhyWords`, as
  * `align latch status` says it (a share a replacing `align login` ended never reads as signed out, cycle 13).
  */
-function endedNote(ended: EndedWhy, lid: string, reshare = false, release: ReleaseReaches | null = null, more: ShareAgain = {}, relogin = false): string {
+function endedNote(ended: EndedWhy, lid: string, reshare = false, release: ReleaseReaches | null = null, more: ShareAgain = {}, relogin = false, stop = false): string {
   if (reshare && ended !== "sharing_ended") return `Its sharing ended (${endedWhyWords(ended, true, relogin)}), so ${latchWayOut(lid, true, "model", null, more)}`;
   const why = endedWhyWords(ended, false, relogin);
   // A hold whose release still reaches it can still be lifted from the web; its stop, if any, can't (C10-4).
-  if (release?.goals.length) return `Its sharing has since ended (${why}), so ${latchWayOut(lid, false, "model", release)}`;
-  if (more.login) return `Its sharing has since ended (${why}), so ${latchWayOut(lid, false, "model", null, more)}`;
+  if (release?.goals.length) return `Its sharing has since ended (${why}), so ${latchWayOut(lid, false, "model", release, {}, stop)}`;
+  if (more.login) return `Its sharing has since ended (${why}), so ${latchWayOut(lid, false, "model", null, more, stop)}`;
+  // A stop holds after its sharing ends (LIM-2441): nothing lifts it from here, and `align stop-sharing` frees only a hold.
+  if (stop) return `Its sharing has since ended (${why}), so ${latchWayOut(lid, false, "model", null, {}, true)}`;
   return `Its sharing has since ended (${why}), so this can no longer be lifted from the web: ${latchWayOut(lid, false, "model")}`;
 }
 
@@ -1066,7 +1068,7 @@ const TELL_USER = "Tell the user and wait for instructions.";
 /** The stop deny: the plain wording, or, when the session's sharing ended, how the user gets out. */
 export function stopReason(latch: Latch | null, lid: string): string {
   if (!latch?.ended) return DENY_REASON;
-  return `Align: this session was stopped from its Align workspace. ${endedNote(latch.ended, lid, !!latch.reshare, latch.release ?? null, againOf(latch), !!latch.relogin)} ${TELL_USER}`;
+  return `Align: this session was stopped from its Align workspace. ${endedNote(latch.ended, lid, !!latch.reshare, latch.release ?? null, againOf(latch), !!latch.relogin, true)} ${TELL_USER}`;
 }
 
 function holdDenyReason(h: HoldLatch | null, lid: string): string {
@@ -1587,9 +1589,9 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
               ? latch.value.ended && latch.value.reshare
                 ? `on (tools blocked; sharing ended (${endedWhyWords(latch.value.ended, true, !!latch.value.relogin, true)}): ${shareAgainWords(!!latch.value.unread, "here")}, after which it can be resumed from the web)`
                 : latch.value.ended && latch.value.login
-                  ? `on (tools blocked; sharing ended, this machine signed out: ${latchWayOut(lid, false, "user", null, { login: true })})`
+                  ? `on (tools blocked; sharing ended, this machine signed out: ${latchWayOut(lid, false, "user", null, { login: true }, true)})`
                   : latch.value.ended
-                    ? `on (tools blocked; sharing ended, so run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal to unblock it${latch.value.release?.goals.length ? "; a release of the hold lifts only the hold" : ""})`
+                    ? `on (tools blocked; sharing ended, so ${latchWayOut(lid, false, "user", latch.value.release?.goals.length ? latch.value.release : null, {}, true)})`
                     : "on (tools blocked)"
               : "unreadable (tools blocked)"
         }`,
@@ -1697,7 +1699,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       // only there, never into the default workspace, which would file that workspace's work under another (cycle 8).
       const own = hot?.share;
       if (!dirMode && own && !(me.workspaces || []).some((w) => w.id === own.workspace_id)) {
-        return `Align: ${outOfReachWords(own.workspace_name, lid, fs.existsSync(layout.latch(home, lid)) || fs.existsSync(layout.hold(home, lid)))}`;
+        return `Align: ${outOfReachWords(own.workspace_name, lid, fs.existsSync(layout.latch(home, lid)) || fs.existsSync(layout.hold(home, lid)), fs.existsSync(layout.latch(home, lid)))}`;
       }
       const feed = feedFor(home, hot, cwd);
       // With no workspace of its own, no default and more than one in reach, no goal can be looked up either: say why

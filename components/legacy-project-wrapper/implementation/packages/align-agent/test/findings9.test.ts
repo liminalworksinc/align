@@ -79,9 +79,11 @@ const GOAL = "Ship the v2 onboarding flow";
 const AGAIN = `Align: this machine is signed in to Align again. To share this session again, type \`::align share\` here (it counts toward "${GOAL}" again).`;
 const LATCHED_AGAIN = " It was stopped or held from the web, so tools stay blocked until it is shared again (you can type `::align share` in this session), after which the stop or hold, if still in place, can be lifted from the web.";
 const SIGNED_OUT = `Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on. To share it again, run \`align login\` in a terminal, then type \`::align share\` here (it counts toward "${GOAL}" again).`;
-const stopSharingTail = (lid: string) => ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
-/** Signed out: sharing it again after `align login`, which the notice has just said, or `align stop-sharing` (cycle 12). */
-const signedOutTail = (lid: string) => ` It was stopped or held from the web, so tools stay blocked until it is shared again that way, after which the stop or hold, if still in place, can be lifted from the web, or until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
+// A stop holds after its sharing ends (LIM-2441): where nothing can lift it, the session stays stopped.
+const stopSharingTail = (_lid: string) => " It was stopped or held from the web, so this session stays stopped: a stop set from its Align workspace holds after its sharing ends, and nothing lifts it from here now. A new session is not stopped.";
+/** Signed out: sharing it again after `align login`, which the notice has just said; until then the stop holds (cycle 12;
+ *  LIM-2441). */
+const signedOutTail = (_lid: string) => " It was stopped or held from the web, so tools stay blocked until it is shared again that way, after which the stop or hold, if still in place, can be lifted from the web; until then this session stays stopped: a stop set from its Align workspace holds after its sharing ends, and nothing lifts it from here now. A new session is not stopped.";
 
 describe("C8-1: every change of whether a session can be shared again tells it the notice for the new state, whatever it has seen", () => {
   test("told \"signed in to Align again\", then signed out again: the next prompt tells the sign-out notice again, as the deny says; signed in once more, the signed-in-again notice again", async () => {
@@ -97,7 +99,7 @@ describe("C8-1: every change of whether a session can be shared again tells it t
 
     await logout(t);
     assert.equal(prompt(t, A.sid, "go on", A.cwd)?.systemMessage, SIGNED_OUT + signedOutTail(A.lid));
-    assert.match(deny(t, A) ?? "", new RegExp(`tools stay blocked until the user runs \`align stop-sharing ${A.lid.slice(0, 8)}\` in a terminal, or until it is shared again once this machine is signed in`));
+    assert.match(deny(t, A) ?? "", /tools stay blocked until it is shared again once this machine is signed in \(the user runs `align login` in a terminal, then types `::align share` in this session\), after which the stop or hold, if still in place, can be lifted from the web; until then this session stays stopped/);
     assert.equal(prompt(t, B.sid, "go on", B.cwd)?.systemMessage, SIGNED_OUT, "not stopped: the sign-out notice too");
     assert.equal(prompt(t, A.sid, "go on", A.cwd)?.systemMessage, undefined, "once");
     // Every sync pass while signed out ends the shares again (nothing is live): no new notice.
@@ -127,7 +129,7 @@ describe("C8-1: every change of whether a session can be shared again tells it t
       prompt(t, A.sid, "go on", A.cwd)?.systemMessage,
       `Align: this machine can no longer reach Acme in Align (you were removed from it or left it again), so this session can't be shared there again from here; its usage stays on this machine.${stopSharingTail(A.lid)}`,
     );
-    assert.match(deny(t, A) ?? "", /no longer has access to its Align workspace\), so this can no longer be lifted from the web/);
+    assert.match(deny(t, A) ?? "", /no longer has access to its Align workspace\), so this session stays stopped/);
 
     fake.workspaces = [acme];
     await sync(t);

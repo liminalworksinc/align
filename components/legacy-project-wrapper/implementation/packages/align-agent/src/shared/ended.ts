@@ -43,6 +43,17 @@ export function shareAgainWords(unread: boolean, where: string, there = false, u
 }
 
 /**
+ * A stop set from the session's Align workspace holds after its sharing ends (LIM-2441): stopping sharing on this machine
+ * (`align stop-sharing`, `::align unshare`) or deleting the shared history keeps it, and a session whose sharing was
+ * stopped is not shared again, so once nothing can reach the session from the web the stop can't be lifted and the
+ * session stays stopped. A new session is not stopped. A goal hold is a latch of its own, which `align stop-sharing`
+ * still frees.
+ */
+function stopStays(user: boolean): string {
+  return `this session stays stopped: a stop set from its Align workspace holds after its sharing ends, and nothing lifts it from here now. A new session is not stopped${user ? "" : ", so the user can start one to keep working"}.`;
+}
+
+/**
  * For a session stopped or held from the web whose share ended (B6, C6-2): when it can be shared there again now
  * (`reshare`: signed in again and reaching its workspace), sharing it again with `::align share` in the session, after
  * which the web can lift the stop or hold, with `align sync` first while the ended shares are unread (`again.unread`);
@@ -50,9 +61,10 @@ export function shareAgainWords(unread: boolean, where: string, there = false, u
  * `align login` and then `::align share`, in one sentence (cycle 12, section 6); otherwise `align stop-sharing <id>`.
  * A hold whose release still reaches the session (`release`) says that the release lifts it too, and, when a stop
  * blocks it as well, that the release lifts only the hold (C10-4). `reader`: the model (a deny, which names "the user")
- * or the user (a notice, which says "you").
+ * or the user (a notice, which says "you"). `stop`: a stop latch blocks it, which `align stop-sharing` never lifts: where
+ * nothing else can, the session stays stopped (LIM-2441).
  */
-export function latchWayOut(lid: string, reshare: boolean, reader: "model" | "user", release: ReleaseReaches | null = null, again: ShareAgain = {}): string {
+export function latchWayOut(lid: string, reshare: boolean, reader: "model" | "user", release: ReleaseReaches | null = null, again: ShareAgain = {}, stop = false): string {
   const user = reader === "user";
   const run = `${user ? "you run" : "the user runs"} \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal`;
   const lifted = "after which the stop or hold, if still in place, can be lifted from the web";
@@ -61,27 +73,33 @@ export function latchWayOut(lid: string, reshare: boolean, reader: "model" | "us
   }
   if (reshare) return `tools stay blocked until it is shared again (${user ? "you can type" : "the user can type"} \`::align share\` in this session), ${lifted}.`;
   if (again.login) {
+    if (stop) {
+      return `tools stay blocked until it is shared again once this machine is signed in (${user ? "run" : "the user runs"} \`align login\` in a terminal, then ${user ? "type" : "types"} \`::align share\` in this session), ${lifted}; until then ${stopStays(user)}`;
+    }
     return `tools stay blocked until ${run}, or until it is shared again once this machine is signed in (${user ? "run" : "the user runs"} \`align login\` in a terminal, then ${user ? "type" : "types"} \`::align share\` in this session), ${lifted}.`;
   }
   if (release?.goals.length) {
     const hold = `the hold on ${quoted(release.goals)}`;
-    return release.stopped
-      ? `tools stay blocked until ${run}: the stop can no longer be lifted from the web, and a release of ${hold} (which still reaches this session) lifts only the hold.`
+    return release.stopped || stop
+      ? `${stopStays(user)} A release of ${hold} (which still reaches this session) lifts only the hold.`
       : `tools stay blocked until ${hold} is released from the web (a release still reaches this session though its sharing ended), or until ${run}.`;
   }
-  return `tools stay blocked until ${run}.`;
+  return stop ? stopStays(user) : `tools stay blocked until ${run}.`;
 }
 
 /** What a notice about a share that ended adds for a session stopped or held from the web (leading space included):
  *  which of the two blocks it, when a release still reaches it, and the way out. Signed out (`again.login`), the
  *  notice has just said to run `align login` and then type `::align share`, so the sentence names that way by
  *  reference, and `align stop-sharing` as the other, the two ways the deny names (cycle 12, section 6). */
-export function latchNoticeTail(lid: string, reshare: boolean, release: ReleaseReaches | null = null, again: ShareAgain = {}): string {
+export function latchNoticeTail(lid: string, reshare: boolean, release: ReleaseReaches | null = null, again: ShareAgain = {}, stop = false): string {
   const what = !reshare && release?.goals.length ? (release.stopped ? "stopped and held" : "held") : "stopped or held";
+  if (!reshare && again.login && stop) {
+    return ` It was ${what} from the web, so tools stay blocked until it is shared again that way, after which the stop or hold, if still in place, can be lifted from the web; until then ${stopStays(true)}`;
+  }
   if (!reshare && again.login) {
     return ` It was ${what} from the web, so tools stay blocked until it is shared again that way, after which the stop or hold, if still in place, can be lifted from the web, or until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
   }
-  return ` It was ${what} from the web, so ${latchWayOut(lid, reshare, "user", release, again)}`;
+  return ` It was ${what} from the web, so ${latchWayOut(lid, reshare, "user", release, again, stop)}`;
 }
 
 // ---------- notices about a session's share, worded when they are shown ----------
@@ -139,6 +157,8 @@ export interface ShareNow {
   login?: boolean;
   /** a stop latch or a goal hold blocks its tools */
   latched: boolean;
+  /** a stop latch blocks its tools (a stop holds after its sharing ends; LIM-2441) */
+  stopped?: boolean;
   /** false when the cached `/me` says its person is no longer a member of its workspace (neither this device's
    *  workspaces nor `other_workspaces` list it: removed, or they left); absent when that is not known (an older server
    *  sends no `other_workspaces`) or it is listed (E2E-AGENT cycle 13, section 5). */
@@ -264,7 +284,7 @@ export function storedText(f: ShareFacts): string {
 
 /** The latch sentence of a notice about a share that ended, from the values its latch files carry. */
 function stateTail(lid: string, now: ShareNow): string {
-  return now.latched && now.ended ? latchNoticeTail(lid, now.reshare, now.reshare ? null : now.release, { unread: now.unread, login: now.login }) : "";
+  return now.latched && now.ended ? latchNoticeTail(lid, now.reshare, now.reshare ? null : now.release, { unread: now.unread, login: now.login }, !!now.stopped) : "";
 }
 
 /** The situations a session can be told its share is in: live, stopped for good, signed out, shareable again, out of
