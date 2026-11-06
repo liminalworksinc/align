@@ -624,6 +624,7 @@ interface UploadRow {
 
 const MAX_ROWS = 500;
 const MAX_BYTES = 256 * 1024;
+const MAX_BAD_ROWS = 5;
 
 export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches: number }> {
   const res = { uploaded: 0, batches: 0 };
@@ -638,6 +639,10 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
     assignEpochs(ctx, s.local_id);
     const pendingOutbox = ctx.db.prepare("SELECT 1 FROM outbox WHERE local_id=? AND kind IN ('put_session','post_epoch') LIMIT 1").get(s.local_id);
     if (pendingOutbox) continue;
+    // A refusal that names no share-level cause (400, 413, 422...) is about the rows: the batch is halved until the one
+    // row the server refuses goes alone, and that row stays on this machine (`uploaded` 2), so it never blocks the rest.
+    let limit = MAX_ROWS;
+    let badRows = 0;
     for (;;) {
       const rows = ctx.db
         .prepare(
@@ -645,7 +650,7 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
            WHERE r.local_id=? AND r.uploaded=0 AND r.finalized=1 AND e.synced=1
            ORDER BY COALESCE(r.ts, r.created_at) LIMIT ?`,
         )
-        .all(s.local_id, MAX_ROWS) as unknown as UploadRow[];
+        .all(s.local_id, limit) as unknown as UploadRow[];
       if (!rows.length) break;
       const wire = rows.map((r) => ({
         request_key: r.request_key,
@@ -702,8 +707,27 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
             addShareNotice(ctx, s.local_id, `upload_refused_${r.status}`, { e: "upload_refused", ws: s.workspace_name, goal: null, text });
             renderHot(ctx, s.local_id);
           }
+          break;
         }
-        break;
+        // The server (or the way to it) is down or busy, not the rows: nothing is marked, and the next pass tries again.
+        // Logged by status and count only, as every refusal here: never a prompt, reply, file or path.
+        if (r.status >= 500 || r.status === 401 || r.status === 408 || r.status === 429) {
+          ctx.log(`usage upload for ${s.local_id.slice(0, 8)} answered ${r.status}: ${wire.length} row(s) wait for the next pass`);
+          return res;
+        }
+        if (wire.length > 1) {
+          limit = Math.ceil(wire.length / 2);
+          continue;
+        }
+        ctx.db.prepare("UPDATE requests SET uploaded=2 WHERE request_key=?").run(wire[0].request_key);
+        ctx.log(`usage: the server refused 1 row of ${s.local_id.slice(0, 8)} (${r.status}); it stays on this machine`);
+        limit = MAX_ROWS;
+        // A server that refuses every row alike is not refusing rows: stop marking them after a few and try next pass.
+        if (++badRows >= MAX_BAD_ROWS) {
+          ctx.log(`usage upload for ${s.local_id.slice(0, 8)}: ${badRows} rows refused this pass; the rest wait for the next pass`);
+          break;
+        }
+        continue;
       }
       const keys = wire.map((w) => w.request_key);
       // Rows the server did not store (made while the session was not shared, by its clock: the C5-1 backstop) stay on
@@ -719,7 +743,7 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
       });
       res.uploaded += keys.length;
       res.batches++;
-      if (rows.length < MAX_ROWS && keys.length === rows.length) break;
+      if (rows.length < limit && keys.length === rows.length) break;
     }
   }
   return res;

@@ -18,7 +18,7 @@ import { commitSubject, pathHash, repoIdentity, shellWrites, type Act } from "..
 import * as envelope from "../src/shared/envelope.ts";
 import { layout, localId } from "../src/shared/layout.ts";
 import { FakeServer } from "./fake-server.ts";
-import { ctxFor, HOOK, makeEnv, runCli, type TestEnv } from "./helpers.ts";
+import { claudeAssistant, claudeUser, ctxFor, HOOK, makeEnv, runCli, runHook, usage, writeLines, type TestEnv } from "./helpers.ts";
 
 // Read loosely, so this file runs (and fails test by test) against the agent before these fixes.
 const { renderCard } = envelope;
@@ -583,5 +583,97 @@ describe("A3-local-11: heredocs are data", () => {
     assert.deepEqual(w("python3 - <<'PY'\nopen('x','w').write('>y')\nPY"), []);
     assert.deepEqual(w("echo \"a > b\" && echo 'c > d' # e > f"), []);
     assert.equal(commitSubject("Bash", { command: "cat > notes.md <<'EOF'\ngit commit -m 'not a commit'\nEOF" }), null);
+  });
+});
+
+// LIM-2441 H4: a usage upload refused for a reason other than the share's (400, 413, 422) ended the pass with no log and
+// no row marked, so one bad row blocked every later pass; a 5xx was handled the same way.
+describe("LIM-2441 H4: a refused usage row never blocks the others", () => {
+  let k = 0;
+  async function sharedSession(t: TestEnv) {
+    const sid = `${String(++k).padStart(8, "d")}-4444-2222-3333-${Math.random().toString(16).slice(2, 14).padEnd(12, "0")}`;
+    const cwd = path.join(t.root, `h4-${k}`);
+    fs.mkdirSync(cwd, { recursive: true });
+    runHook(t, "claude", "SessionStart", { session_id: sid, source: "startup", cwd });
+    runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: `${sid}-p0`, prompt: "start", cwd });
+    const r = await runCli(t, ["share", localId("claude-code", sid).slice(0, 8), "--workspace", "Acme", "--goal", "Ship the v2", "--yes"]);
+    assert.equal(r.code, 0, r.stderr);
+    const ctx = ctxFor(t);
+    const key = sessionKey(ctx.secret, "ws_acme", "claude-code", sid);
+    ctx.db.close();
+    return { sid, cwd, key, lid: localId("claude-code", sid) };
+  }
+  /** One finished turn whose request used `input` input tokens. */
+  function turnOf(t: TestEnv, s: { sid: string; cwd: string }, req: string, input: number) {
+    const file = path.join(t.claudeDir, "projects", `-${path.basename(s.cwd)}`, `${s.sid}.jsonl`);
+    const at = Date.now();
+    const lines = [claudeUser(s.sid, `${req}-p`, new Date(at).toISOString(), { cwd: s.cwd }), { ...claudeAssistant(s.sid, req, new Date(at + 50).toISOString(), usage(input, 5)), cwd: s.cwd }];
+    if (fs.existsSync(file)) fs.appendFileSync(file, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+    else writeLines(file, lines);
+  }
+  const rowsOf = (fake: FakeServer, key: string) => [...fake.usage.values()].filter((u) => u.session_key === key);
+  const local = (t: TestEnv, lid: string) => {
+    const ctx = ctxFor(t);
+    const r = ctx.db.prepare("SELECT input, uploaded FROM requests WHERE local_id=? ORDER BY input").all(lid) as { input: number; uploaded: number }[];
+    ctx.db.close();
+    return r.map((x) => ({ input: x.input, uploaded: x.uploaded }));
+  };
+  const logText = (t: TestEnv) => {
+    try {
+      return fs.readFileSync(path.join(layout.logs(t.home), "align.log"), "utf8");
+    } catch {
+      return "";
+    }
+  };
+
+  for (const status of [400, 413, 422]) {
+    test(`one row refused ${status}: the others go up, that row stays on this machine, the refusal is logged with no content, and the next pass does not send it again`, async () => {
+      const { fake, t } = await world();
+      const A = await sharedSession(t);
+      turnOf(t, A, "req_h4_a", 11);
+      turnOf(t, A, "req_h4_bad", 77);
+      turnOf(t, A, "req_h4_c", 13);
+      fake.usageRefuse = (rows) => (rows.some((r) => r.input === 77) ? status : null);
+      assert.equal((await runCli(t, ["sync"])).code, 0);
+      assert.deepEqual(rowsOf(fake, A.key).map((r) => r.input).sort(), [11, 13], "the rows around the bad one went up");
+      assert.deepEqual(local(t, A.lid), [{ input: 11, uploaded: 1 }, { input: 13, uploaded: 1 }, { input: 77, uploaded: 2 }]);
+      const log = logText(t);
+      assert.match(log, new RegExp(`refused 1 row of ${A.lid.slice(0, 8)} \\(${status}\\); it stays on this machine`));
+      assert.doesNotMatch(log, /req_h4|start|h4-\d/, "no request id, prompt or path in the log");
+      const sent = fake.log.filter((l) => l.path.endsWith("/usage")).length;
+      turnOf(t, A, "req_h4_d", 14);
+      assert.equal((await runCli(t, ["sync"])).code, 0);
+      assert.equal(fake.log.filter((l) => l.path.endsWith("/usage")).length, sent + 1, "the next pass sends the new row once, never the bad one");
+      assert.deepEqual(rowsOf(fake, A.key).map((r) => r.input).sort(), [11, 13, 14]);
+    });
+  }
+
+  test("guard (already true on main except the per-session log line): a 503 marks nothing, is logged by status and count, and the rows go up when the server is back", async () => {
+    const { fake, t } = await world();
+    const A = await sharedSession(t);
+    turnOf(t, A, "req_h4_e", 21);
+    turnOf(t, A, "req_h4_f", 22);
+    fake.usageRefuse = () => 503;
+    const down = await runCli(t, ["sync"]);
+    assert.equal(down.code, 1, "the pass says the server is down");
+    assert.match(down.stderr, /answered HTTP 503\. 2 usage rows, .* stay on this machine; the next sync retries\./);
+    assert.deepEqual(local(t, A.lid).map((r) => r.uploaded), [0, 0], "nothing marked while the server is down");
+    assert.match(logText(t), new RegExp(`usage upload for ${A.lid.slice(0, 8)} answered 503: 2 row\\(s\\) wait for the next pass`));
+    fake.usageRefuse = null;
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.deepEqual(rowsOf(fake, A.key).map((r) => r.input).sort(), [21, 22]);
+    assert.deepEqual(local(t, A.lid).map((r) => r.uploaded), [1, 1]);
+  });
+
+  test("a server that refuses every row alike stops being believed after 5 rows a pass: the rest wait", async () => {
+    const { fake, t } = await world();
+    const A = await sharedSession(t);
+    for (let i = 0; i < 8; i++) turnOf(t, A, `req_h4_all${i}`, 30 + i);
+    fake.usageRefuse = () => 400;
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    const st = local(t, A.lid).map((r) => r.uploaded);
+    assert.equal(st.filter((u) => u === 2).length, 5);
+    assert.equal(st.filter((u) => u === 0).length, 3);
+    assert.match(logText(t), /5 rows refused this pass; the rest wait for the next pass/);
   });
 });
