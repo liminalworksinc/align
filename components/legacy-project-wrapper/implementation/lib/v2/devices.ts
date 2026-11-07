@@ -19,7 +19,8 @@ export const CODE_TTL_S = 600;
 export const POLL_INTERVAL_S = 5;
 const USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ"; // no vowels (no words), no lookalikes
 const REFRESH_SKEW_MS = 5 * 60 * 1000;
-const REFRESH_GRACE_MS = 10 * 1000;
+// Covers a refresh whose answer was lost: the agent's 15 s timeout and its one retry at once, with room for a slow link.
+const REFRESH_GRACE_MS = 30 * 1000;
 
 export interface UserRef {
   id: string;

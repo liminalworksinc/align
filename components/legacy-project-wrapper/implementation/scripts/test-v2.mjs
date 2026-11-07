@@ -1322,7 +1322,7 @@ try {
   const refreshOf = (dev, id, token, ts = new Date().toISOString()) => call("D", "POST", "/api/v2/device/refresh", { body: { device_id: id, refresh_token: token, ts, sig: refreshSig(dev, id, token, ts) } });
   const revokedOf = (id) => withDb((d) => d.prepare("SELECT revoked_at, revoked_reason FROM v2_devices WHERE id = ?").get(id));
   const rr1 = await refreshOf(DR, DR.id, DR.refresh, ts3);
-  // A retry of the latest rotation within 10 s, signed anew (a later ts), while its new pair is unused (the answer was
+  // A retry of the latest rotation within 30 s, signed anew (a later ts), while its new pair is unused (the answer was
   // lost): a fresh pair, the unused one is gone, the device stays paired and the retry is audited. A second retry of
   // the same token revokes.
   const rrRetry = await refreshOf(DR, DR.id, DR.refresh, new Date(Date.parse(ts3) + 1000).toISOString());
@@ -1332,12 +1332,12 @@ try {
   const retryAudit = withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE action = 'device.refresh_retried' AND object_id = ?").all(DR.id));
   const retryWorks = await call("U1", "GET", "/api/v2/me", { bearer: rrRetry.json?.access_token });
   check(
-    "refresh (LIM-2441 H7a): retrying the latest rotation within 10 s while its new pair is unused gets a fresh pair (the unused access and refresh tokens are dead, the refresh one without revoking), the device stays paired and one device.refresh_retried audit row is written",
+    "refresh (LIM-2441 H7a): retrying the latest rotation within 30 s while its new pair is unused gets a fresh pair (the unused access and refresh tokens are dead, the refresh one without revoking), the device stays paired and one device.refresh_retried audit row is written",
     rr1.status === 200 && rrRetry.status === 200 && rrRetry.json?.refresh_token !== rr1.json?.refresh_token && retryWorks.status === 200 &&
       lostAccess.status === 401 && lostRefresh.status === 401 && lostRefresh.json?.reason === undefined && !retriedRow.revoked_at && retryAudit.length === 1 && retryAudit[0].actor_id === null,
     `${rr1.status} ${rrRetry.status} ${retryWorks.status} ${lostAccess.status} ${lostRefresh.text} ${JSON.stringify(retriedRow)} ${JSON.stringify(retryAudit)}`,
   );
-  // Outside the grace, reuse still revokes: a retry 11 s after the rotation, and the replay of a token whose new pair
+  // Outside the grace, reuse still revokes: a retry 31 s after the rotation, and the replay of a token whose new pair
   // was already used. Each on its own device written straight into the database (the pairing limit is spent here).
   const keyedDevice = (name) => {
     const keys = newDeviceKeys();
@@ -1354,7 +1354,7 @@ try {
   const late1 = await refreshOf(DL1, DL1.id, DL1.refresh);
   withDb((d) => {
     const row = d.prepare("SELECT rotated_at FROM v2_device_tokens WHERE token_hash = ?").get(sha256hex(DL1.refresh));
-    const back = new Date(Date.parse(row.rotated_at) - 11_000).toISOString();
+    const back = new Date(Date.parse(row.rotated_at) - 31_000).toISOString();
     d.prepare("UPDATE v2_device_tokens SET created_at = ? WHERE device_id = ? AND created_at = ?").run(back, DL1.id, row.rotated_at);
     d.prepare("UPDATE v2_device_tokens SET rotated_at = ? WHERE token_hash = ?").run(back, sha256hex(DL1.refresh));
   });
@@ -1387,7 +1387,7 @@ try {
     `${byte1.status} ${byte2.text} ${byteAccess.status} ${old1.status} ${oldRetry.text} ${acc1.status} ${accUse.status} ${accRetry.text} ${JSON.stringify([revokedOf(DB.id), revokedOf(DO.id), revokedOf(DA.id)])}`,
   );
   check(
-    "refresh (LIM-2441 H7a): outside the grace, reuse still revokes the device (401 invalid_grant, revoked_reason refresh_reuse): a retry 11 s after the rotation, and a replay of a token whose new pair was already used",
+    "refresh (LIM-2441 H7a): outside the grace, reuse still revokes the device (401 invalid_grant, revoked_reason refresh_reuse): a retry 31 s after the rotation, and a replay of a token whose new pair was already used",
     late1.status === 200 && lateRetry.status === 401 && lateRetry.json?.error === "invalid_grant" && revokedOf(DL1.id)?.revoked_reason === "refresh_reuse" &&
       used1.status === 200 && used2.status === 200 && usedReplay.status === 401 && usedReplay.json?.error === "invalid_grant" && revokedOf(DU.id)?.revoked_reason === "refresh_reuse",
     `${late1.status} ${lateRetry.text} ${JSON.stringify(revokedOf(DL1.id))} ${used1.status} ${used2.status} ${usedReplay.text} ${JSON.stringify(revokedOf(DU.id))}`,
