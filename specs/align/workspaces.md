@@ -1288,10 +1288,13 @@ workspaces they belong to on `POST /api/v2/device/approve {user_code, workspace_
 `POST /api/v2/device/deny {user_code}`, rotate refresh tokens on `POST /api/v2/device/refresh` only with an Ed25519
 signature from the paired key, and revoke a device on `DELETE /api/v2/devices/self` (its own token) or
 `DELETE /api/v2/devices/{id}` (its owner's browser session). Presenting a refresh token that was already rotated SHALL
-revoke the whole device, with one exception for a device whose answer was lost: a correctly signed retry of the
-device's latest rotation, more than 0 and at most 10 seconds after it, while the pair that rotation issued is still
-unused, SHALL delete that pair, issue a new one and write a `device.refresh_retried` audit row, leaving the device
-paired; a second retry of the same token revokes the device. A refresh whose signature is valid but whose `ts` is more
+revoke the whole device, with one exception for a device whose answer was lost: a retry of the device's latest
+rotation, more than 0 and at most 10 seconds after it, signed anew with a `ts` later than the rotating request's (the
+server keeps that `ts` with the rotated token), while the pair that rotation issued is still unused (its refresh token
+not rotated, its access token never presented: the server records an access token's first use), SHALL delete that
+pair, issue a new one and write a `device.refresh_retried` audit row, leaving the device paired. A byte-identical
+replay of the rotating request, a retry signed no later than it, and a second retry of the same token revoke the
+device. A refresh whose signature is valid but whose `ts` is more
 than 5 minutes off the server's clock SHALL be answered 400 `clock_skew` with the message `This device's clock is <n>
 minutes ahead of|behind the server's` and `server_time`, rotating nothing and leaving the device paired (the window
 is unchanged, so a captured signed message still expires within 5 minutes). A refused refresh SHALL say why when
@@ -1311,12 +1314,12 @@ its sessions that is not stopped: close its open epoch, clear its governing goal
 
 #### Scenario: Refresh token reuse
 
-- **WHEN** a device presents, with a valid signature, a refresh token that was already rotated, outside the retry grace (a second retry of its latest rotation, a retry more than 10 seconds after it, or a token whose new pair was already used)
+- **WHEN** a device presents, with a valid signature, a refresh token that was already rotated, outside the retry grace (a second retry of its latest rotation, a retry more than 10 seconds after it, a byte-identical replay of the rotating request or a retry signed no later than it, or a token whose new refresh or access token was already used: `scripts/test-v2.mjs` "refresh (LIM-2441 H7a): a byte-identical replay ...")
 - **THEN** the server responds 401 `invalid_grant` and revokes the whole device; a bad signature, an expired token or a revoked device also get 401 `invalid_grant`, a correctly signed refresh of the revoked device with `reason` `refresh_reuse`, a badly signed one with no `reason`, and an unknown device id with `reason` `unknown_device` (`scripts/test-v2.mjs` "refresh: reusing an old refresh token revokes the device ...")
 
 #### Scenario: Retrying a refresh whose answer was lost
 
-- **WHEN** a device, with a valid signature, presents again within 10 seconds the refresh token it just rotated, and the pair that rotation issued has not been used
+- **WHEN** a device presents again within 10 seconds the refresh token it just rotated, signed anew with a later `ts`, and neither token of the pair that rotation issued has been used
 - **THEN** the server responds 200 with a new pair, the unused pair's access and refresh tokens are dead (the refresh one gets 401 `invalid_grant` without revoking), the device stays paired and one `device.refresh_retried` audit row is written (`scripts/test-v2.mjs` "refresh (LIM-2441 H7a): retrying the latest rotation within 10 s ...", "refresh (LIM-2441 H7a): outside the grace, reuse still revokes ...")
 
 #### Scenario: A device clock that is off

@@ -31,7 +31,8 @@ The user signs in at `/app/device`, types the code, sees device name + request a
 → 200 (once) `{ "device_id": "dv_...", "access_token": "alnd_...", "expires_in": 3600, "refresh_token": "alnr_...", "user": { "id", "name", "email" } }`
 
 `POST /api/v2/device/refresh` (proof of possession; rotating; reuse of an old refresh token revokes the device, except
-one retry of the latest rotation within 10 s while its new pair is unused, which replaces that pair)
+one retry of the latest rotation within 10 s, signed with a later `ts` than the rotating request, while neither token
+of its new pair has been used, which replaces that pair)
 → req `{ "device_id", "refresh_token", "ts": "<ISO>", "sig": "<b64url Ed25519 signature>" }`
    signed message (UTF-8): `align-refresh\n<device_id>\n<sha256hex(refresh_token)>\n<ts>`; ts within ±5 min.
 → 200 `{ "access_token", "expires_in": 3600, "refresh_token" }` · 401 `{ "error": "invalid_grant", "reason"? }` (`reason`:

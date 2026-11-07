@@ -785,7 +785,7 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 22, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds, deleted-session markers and the goal versions sent to connected apps included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 22 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 23, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds, deleted-session markers and the goal versions sent to connected apps included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 23 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
@@ -1322,9 +1322,10 @@ try {
   const refreshOf = (dev, id, token, ts = new Date().toISOString()) => call("D", "POST", "/api/v2/device/refresh", { body: { device_id: id, refresh_token: token, ts, sig: refreshSig(dev, id, token, ts) } });
   const revokedOf = (id) => withDb((d) => d.prepare("SELECT revoked_at, revoked_reason FROM v2_devices WHERE id = ?").get(id));
   const rr1 = await refreshOf(DR, DR.id, DR.refresh, ts3);
-  // A retry of the latest rotation within 10 s, while its new pair is unused (the answer was lost): a fresh pair, the
-  // unused one is gone, the device stays paired and the retry is audited. A second retry of the same token revokes.
-  const rrRetry = await refreshOf(DR, DR.id, DR.refresh, ts3);
+  // A retry of the latest rotation within 10 s, signed anew (a later ts), while its new pair is unused (the answer was
+  // lost): a fresh pair, the unused one is gone, the device stays paired and the retry is audited. A second retry of
+  // the same token revokes.
+  const rrRetry = await refreshOf(DR, DR.id, DR.refresh, new Date(Date.parse(ts3) + 1000).toISOString());
   const lostAccess = await call("U1", "GET", "/api/v2/me", { bearer: rr1.json?.access_token });
   const lostRefresh = await refreshOf(DR, DR.id, rr1.json?.refresh_token ?? "");
   const retriedRow = revokedOf(DR.id);
@@ -1362,6 +1363,29 @@ try {
   const used1 = await refreshOf(DU, DU.id, DU.refresh);
   const used2 = await refreshOf(DU, DU.id, used1.json?.refresh_token ?? "");
   const usedReplay = await refreshOf(DU, DU.id, DU.refresh);
+  // A captured request replayed byte for byte, or one signed before the rotating request: never a retry, so it revokes
+  // (a takeover without the device key otherwise). A pair whose access token was already used is never replaced.
+  const DB = keyedDevice("byte replay");
+  const tsB = new Date().toISOString();
+  const sigB = refreshSig(DB, DB.id, DB.refresh, tsB);
+  const byte1 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DB.id, refresh_token: DB.refresh, ts: tsB, sig: sigB } });
+  const byte2 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DB.id, refresh_token: DB.refresh, ts: tsB, sig: sigB } });
+  const byteAccess = await call("U1", "GET", "/api/v2/me", { bearer: byte1.json?.access_token });
+  const DO = keyedDevice("older signature");
+  const tsO = new Date().toISOString();
+  const old1 = await refreshOf(DO, DO.id, DO.refresh, tsO);
+  const oldRetry = await refreshOf(DO, DO.id, DO.refresh, new Date(Date.parse(tsO) - 120_000).toISOString());
+  const DA = keyedDevice("access in use");
+  const acc1 = await refreshOf(DA, DA.id, DA.refresh);
+  const accUse = await call("U1", "GET", "/api/v2/me", { bearer: acc1.json?.access_token });
+  const accRetry = await refreshOf(DA, DA.id, DA.refresh);
+  check(
+    "refresh (LIM-2441 H7a): a byte-identical replay of the rotating request, a retry signed before it, and a retry once the new access token is in use all revoke the device (401 invalid_grant, revoked_reason refresh_reuse); the new pair dies with it",
+    byte1.status === 200 && byte2.status === 401 && revokedOf(DB.id)?.revoked_reason === "refresh_reuse" && byteAccess.status === 401 &&
+      old1.status === 200 && oldRetry.status === 401 && revokedOf(DO.id)?.revoked_reason === "refresh_reuse" &&
+      acc1.status === 200 && accUse.status === 200 && accRetry.status === 401 && revokedOf(DA.id)?.revoked_reason === "refresh_reuse",
+    `${byte1.status} ${byte2.text} ${byteAccess.status} ${old1.status} ${oldRetry.text} ${acc1.status} ${accUse.status} ${accRetry.text} ${JSON.stringify([revokedOf(DB.id), revokedOf(DO.id), revokedOf(DA.id)])}`,
+  );
   check(
     "refresh (LIM-2441 H7a): outside the grace, reuse still revokes the device (401 invalid_grant, revoked_reason refresh_reuse): a retry 11 s after the rotation, and a replay of a token whose new pair was already used",
     late1.status === 200 && lateRetry.status === 401 && lateRetry.json?.error === "invalid_grant" && revokedOf(DL1.id)?.revoked_reason === "refresh_reuse" &&

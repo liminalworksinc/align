@@ -1099,6 +1099,13 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX v2_oauth_goal_sends_goal ON v2_oauth_goal_sends(ws_id, goal_id, version);
   `,
+  // A refresh retried after its answer was lost (LIM-2441 H7a): the signed `ts` of the request that rotated a refresh
+  // token, so a retry must be signed later (a replay of the captured request is not), and when an access token was
+  // first used, so a pair already in use is never replaced.
+  `
+  ALTER TABLE v2_device_tokens ADD COLUMN rotated_ts TEXT;
+  ALTER TABLE v2_device_tokens ADD COLUMN used_at TEXT;
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).
