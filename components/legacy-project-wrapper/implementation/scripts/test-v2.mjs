@@ -12429,8 +12429,17 @@ try {
           } catch { errors++; await request.abort().catch(() => {}); }
         });
         const fit = async () => { overflow ||= await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1); };
+        // Each page loads data after it is drawn (the create page's workspace list replaces its loading line), which moves
+        // the form; a click aimed before that lands beside the button. So let the page settle, type, check the field
+        // kept every key, and only then click.
+        const settle = () => page.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        const fill = async (selector, value) => {
+          await page.type(selector, value);
+          await page.waitForFunction((s, v) => document.querySelector(s)?.value === v, { timeout: 5000 }, selector, value);
+        };
         const submit = async (selector) => {
           await page.waitForFunction((s) => { const button = document.querySelector(s); return button && !button.disabled; }, {}, selector);
+          await settle();
           await page.click(selector);
         };
         let step = "";
@@ -12438,22 +12447,25 @@ try {
           step = "open /new";
           await page.goto(`https://${HOSTED_HOST}/new`, { waitUntil: "networkidle0" });
           await page.waitForSelector('input[name="email"]');
+          await settle();
           await fit();
           step = "send email";
-          await page.type('input[name="email"]', address);
+          await fill('input[name="email"]', address);
           await submit('#email-code button[type="submit"]');
           step = "code field";
           await page.waitForSelector('input[name="code"]');
+          await settle();
           await fit();
           step = "verify code";
-          await page.type('input[name="code"]', mailCode(address));
+          await fill('input[name="code"]', mailCode(address));
           await submit('#email-code button[type="submit"]');
           step = "creation field";
           await page.waitForSelector('input[name="creation_code"]');
+          await settle();
           await fit();
           step = "create";
-          await page.type('form input:not([name])', "Browser tester");
-          await page.type('input[name="creation_code"]', invite);
+          await fill('form input:not([name])', "Browser tester");
+          await fill('input[name="creation_code"]', invite);
           await submit('form button[type="submit"]');
           step = "workspace page";
           await page.waitForFunction(() => /^\/app\/w\//.test(location.pathname));
