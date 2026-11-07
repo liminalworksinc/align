@@ -297,8 +297,11 @@ long to wait, else `... too many device pairings were started recently. Try agai
 
 The `align` CLI SHALL refresh the access token when it is missing or within 2 minutes of expiry by signing
 `align-refresh\n<device_id>\n<sha256hex(refresh_token)>\n<ts>` with the device key and calling
-`POST /api/v2/device/refresh`, serialize refreshes across processes with `~/.align/refresh.lock`, retry a request
-once after a forced refresh on HTTP 401, and mark the device signed out (tokens cleared, `signed_out: true`) when a
+`POST /api/v2/device/refresh`, serialize refreshes across processes with `~/.align/refresh.lock`, try a refresh that
+got no answer (a timeout or a network failure) or a 200 whose body did not arrive once more at once, under the same
+lock and signed again with a later `ts` (the server lets that retry through within 30 seconds of a rotation whose answer
+was lost: `workspaces` "Retrying a refresh whose answer was lost"; test `findings20` "LIM-2441 H7a ..."), without
+reporting the first failure when the second is answered, retry a request once after a forced refresh on HTTP 401, and mark the device signed out (tokens cleared, `signed_out: true`) when a
 refresh returns 400 or 401 other than `clock_skew`, the second attempt returns 401, or the device key is missing. A
 refresh answered 400 `clock_skew` (this computer's clock is more than 5 minutes off the server's) SHALL NOT sign the
 device out: the CLI SHALL keep its tokens, save the offset to the server's `server_time` as `clock_offset_ms` in
