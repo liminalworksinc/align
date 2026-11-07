@@ -184,7 +184,7 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
               {s.ended_reason === "device_signed_out" && (
                 <Note>
                   The machine that shared this session signed out of Align, so sharing ended and Stop or Resume can&apos;t reach it.
-                  {s.agent_stopped ? " It stays stopped on that machine until you run align stop-sharing there." : ""} To share it again, run align login on that machine, then
+                  {s.agent_stopped ? " It stays stopped on that machine until it is shared again and you resume it here." : ""} To share it again, run align login on that machine, then
                   ::align share in the session. To keep it from being shared again, press Stop sharing for good.
                 </Note>
               )}
@@ -193,7 +193,7 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
                   {/* Its machine's name wraps anywhere and what can't wrap is clipped inside the note (C11-2). */}
                   <span className="block overflow-hidden [overflow-wrap:anywhere]">
                     Sharing ended when you left this workspace (or were removed from it), so Stop or Resume can&apos;t reach it.
-                    {s.agent_stopped ? " It stays stopped on your machine until you run align stop-sharing there." : ""} {shareAgain(s)} To keep it from being shared again, press
+                    {s.agent_stopped ? " It stays stopped on your machine until it is shared again and you resume it here." : ""} {shareAgain(s)} To keep it from being shared again, press
                     Stop sharing for good.
                   </span>
                 </Note>
