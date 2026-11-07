@@ -378,12 +378,13 @@ export async function refreshIfNeeded(ctx: Ctx, force = false): Promise<Credenti
       markSignedOut(ctx.home, "device key missing", c.device_id);
       throw new SignedOut("device key missing");
     }
-    // Each attempt is signed anew, with a ts later than the one before: the server lets a retry of a rotation whose
-    // answer was lost through only when it is signed later than the rotating request (LIM-2441 H7a).
-    let lastTs = 0;
-    const attempt = (offset: number) => {
-      lastTs = Math.max(Date.now() + offset, lastTs + 1);
-      const ts = new Date(lastTs).toISOString();
+    // Each attempt is signed anew. A retry of one that got no answer is signed later than it (`after`): the server lets
+    // a retry of a rotation whose answer was lost through only then (LIM-2441 H7a). A clock_skew retry is not one: it
+    // signs with the server's time, earlier than a clock that runs ahead.
+    let sentTs = 0;
+    const attempt = (offset: number, after = 0) => {
+      sentTs = Math.max(Date.now() + offset, after + 1);
+      const ts = new Date(sentTs).toISOString();
       const sig = key.sign(refreshMessage(c.device_id, c.refresh_token!, ts));
       return rawRequest(c.server_url, "POST", "/api/v2/device/refresh", { body: { device_id: c.device_id, refresh_token: c.refresh_token, ts, sig } });
     };
@@ -398,14 +399,14 @@ export async function refreshIfNeeded(ctx: Ctx, force = false): Promise<Credenti
       } catch (e) {
         if (!(e instanceof NetworkError)) throw e;
         ctx.log("refresh: no answer from the server; trying once more, signed again");
-        const again = await attempt(o);
+        const again = await attempt(o, sentTs);
         // Answered the second time: the lost first answer is not the server's trouble for this pass.
         trouble = prior;
         return again;
       }
       if (res.status === 200 && !(res.json?.access_token && res.json?.refresh_token)) {
         ctx.log("refresh: the server's answer did not arrive whole; trying once more, signed again");
-        return attempt(o);
+        return attempt(o, sentTs);
       }
       return res;
     };
