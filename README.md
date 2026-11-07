@@ -38,6 +38,18 @@ Align is Liminal's wedge product, a working prototype. We built the first versio
 
 The app, its local agent and its MCP bridge are in [`components/legacy-project-wrapper/implementation`](components/legacy-project-wrapper/implementation). Its [README](components/legacy-project-wrapper/implementation/README.md) covers running it locally (Mode L), pairing the `align` CLI, connecting an AI app, hosting it, and the test gate. The contract is the specification in [`specs/align`](specs/align).
 
+### litai
+
+The `verify` check runs `litai verify` at a pinned literate-ai revision. To run litai locally at that same revision, use [`scripts/litai.sh`](scripts/litai.sh). It installs litai into `.venv/litai` the first time, or again when the pin changes, then passes its arguments to litai:
+
+```sh
+scripts/litai.sh verify
+scripts/litai.sh project test-receipt run-retained --project . --timeout-seconds 3600 _build/receipt.json
+scripts/litai.sh project test-receipt update _build/receipt.json
+```
+
+It needs Python 3.11 or newer, or uv. The pin is read from `LITAI_SOURCE` in [`.github/workflows/litai-verify.yml`](.github/workflows/litai-verify.yml), so change it there only.
+
 ## Release Engineers
 
 Only these GitHub logins may change the release state, cut a release line or publish a major or minor release with `litai release` (see [`literate.release.json`](literate.release.json)):
