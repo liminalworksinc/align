@@ -414,8 +414,15 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
 /** The sessions an approved work_toward alignment governs stop following its target (inside the caller's tx): their
  *  governing goal is cleared, and a session whose current binding exists only because of this alignment loses it:
  *  its open epoch ends now, it waits for its owner to pick a goal (`suspended`), and it gets one binding_suspended
- *  directive with `cause`. History never moves. */
+ *  directive with `cause`. A governed session that has not opened that binding yet (its binding_changed is still
+ *  pending on its machine) gets a binding_suspended with `effective` `cancel_pending` (LIM-2441): its machine drops the
+ *  pending change and keeps its own binding, so it stays shared here. History never moves. */
 function endGovernance(a: AlignmentRow, at: string, cause: string): void {
+  const governed = all<{ session_key: string }>(
+    "SELECT session_key FROM v2_sessions WHERE ws_id = ? AND governing_alignment_id = ? AND state IN ('shared','suspended')",
+    a.ws_id,
+    a.id,
+  ).map((r) => r.session_key);
   run("UPDATE v2_sessions SET governing_goal_id = NULL, governing_alignment_id = NULL, updated_at = ? WHERE ws_id = ? AND governing_alignment_id = ?", at, a.ws_id, a.id);
   const suspended = all<{ session_key: string }>(
     "SELECT session_key FROM v2_epochs WHERE ws_id = ? AND ends_at IS NULL AND authority = 'alignment' AND alignment_id = ?",
@@ -427,6 +434,8 @@ function endGovernance(a: AlignmentRow, at: string, cause: string): void {
     run("UPDATE v2_sessions SET state = 'suspended', updated_at = ? WHERE ws_id = ? AND session_key = ? AND state = 'shared'", at, a.ws_id, k);
   }
   writeDirective(a.ws_id, "binding_suspended", suspended, null, { goal_id: a.target_goal_id, effective: "next_root_turn", cause });
+  const pending = governed.filter((k) => !suspended.includes(k));
+  writeDirective(a.ws_id, "binding_suspended", pending, null, { goal_id: a.target_goal_id, effective: "cancel_pending", cause });
 }
 
 /** In the transaction that makes a goal achieved or dropped (lib/v2/goals.ts writeGoalVersion): every approved

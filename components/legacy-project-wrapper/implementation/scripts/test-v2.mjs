@@ -10568,9 +10568,22 @@ try {
       !has(browserLL, ask3) && readLL.status === 404 && !has(otherDevice, ask3),
       `${browserLL.length} ${readLL.status} ${otherDevice.length}`,
     );
-    // Revoked: gone. Its session is suspended, and no other session follows the goal.
+    // Revoked: gone, and no other session follows the goal. Its session never opened the binding the alignment gave (its
+    // binding_changed is still pending on its machine): it gets binding_suspended with effective cancel_pending, so its
+    // machine drops that pending change, and it stays shared under its own epoch (LIM-2441 H8).
     await alAct(LM, alW1Ok.json, "revoke");
     const afterRevoke = await feedOf();
+    const l4Dirs = ((await call("LL", "GET", "/api/v2/directives?cursor=0", { bearer: LD.access })).json?.directives ?? []).filter((d) => d.session_keys?.includes(L.l4.key));
+    const l4Bs = l4Dirs.filter((d) => d.kind === "binding_suspended");
+    const l4Row = withDb((d) => d.prepare("SELECT state, governing_goal_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(LW, L.l4.key));
+    const l4Open = withDb((d) => d.prepare("SELECT goal_id FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL").all(LW, L.l4.key));
+    check(
+      "revoke (LIM-2441 H8): a governed session that never opened the alignment's binding gets one binding_suspended (effective cancel_pending, cause alignment:<id>, after its binding_changed), its governing goal is cleared, and it stays shared under its own open epoch",
+      l4Dirs.some((d) => d.kind === "binding_changed") && l4Bs.length === 1 && l4Bs[0].binding?.effective === "cancel_pending" && l4Bs[0].binding?.cause === `alignment:${alW1?.id}` && l4Bs[0].binding?.goal_id === LGC?.id &&
+        l4Dirs.indexOf(l4Bs[0]) > l4Dirs.findIndex((d) => d.kind === "binding_changed") &&
+        l4Row?.state === "shared" && l4Row.governing_goal_id === null && l4Open.length === 1 && l4Open[0].goal_id === LGR?.id,
+      `${JSON.stringify(l4Dirs.map((d) => [d.kind, d.binding]))} ${JSON.stringify(l4Row)} ${JSON.stringify(l4Open)}`,
+    );
     // A second one, approved, ends when its session stops sharing.
     const alW2 = (await la(LL, "POST", "/alignments", { target_goal_id: LGC?.id, choice: "work_toward", session_keys: [L.l5.key] })).json;
     await alAct(LM, alW2, "approve");

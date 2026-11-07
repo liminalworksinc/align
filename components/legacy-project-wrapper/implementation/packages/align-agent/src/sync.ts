@@ -157,6 +157,14 @@ function applySpool(ctx: Ctx, r: SpoolRecord): string | null {
       const share = getShare(ctx, lid);
       if (!share || share.state === "stopped" || share.state === "error") return lid;
       const pending = ctx.db.prepare("SELECT * FROM pending_bindings WHERE local_id=?").get(lid) as { id: string; goal_json: string | null } | undefined;
+      // Opened with a binding the server cancelled meanwhile (its alignment was revoked: LIM-2441): the server would refuse
+      // the epoch, so the session is suspended, as for any revocation, rather than switched.
+      if (r.pending_id && kvGet(ctx.db, `binding_cancelled:${lid}`) === r.pending_id) {
+        ctx.db.prepare("UPDATE shares SET state='suspended', suspended_at=? WHERE local_id=? AND state IN ('shared','pending','suspended')").run(nowIso(), lid);
+        addNotice(ctx, lid, `susp_cancelled_${r.pending_id}`, "Align: this session's goal binding was revoked, so its usage is paused and stays on this machine. Type `::align bind <goal>` or run `align bind` to pick a goal.");
+        renderHot(ctx, lid);
+        return lid;
+      }
       tx(ctx.db, () => {
         const exists = ctx.db.prepare("SELECT 1 FROM epochs WHERE epoch_id=?").get(r.epoch_id);
         if (exists) return;
