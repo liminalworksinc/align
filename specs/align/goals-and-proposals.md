@@ -1146,12 +1146,17 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/goals/{goal}/requests` wit
 
 ### Requirement: Switch goal requests name sessions and a bindable goal
 
-The server SHALL require, for a `switch_goal` request, `session_keys` (1 to 20 sessions on the goal) and `target_goal_id`, a goal other than this one that the sender can read (else 404), and SHALL answer 409 `not_bindable`, naming no goal, session or person, unless the target goal is active and every chosen session's owner may bind that session to it now (their own goal, their team's goal, or an approved allocation transfer for that session).
+The server SHALL require, for a `switch_goal` request, `session_keys` (1 to 20 sessions on the goal) and `target_goal_id`, a goal other than this one that the sender can read (else 404), and SHALL answer 409 `not_bindable`, naming no goal, session or person, unless the target goal is active and every chosen session's owner may bind it themselves (their own goal or their team's goal). A goal a session reaches only through an approved `work_toward` alignment SHALL be refused here the same way: the alignment moves the sessions it lists with its own binding change, and the agent, which reads the same `bindable`, would otherwise have to turn the request down.
 
 #### Scenario: Target the session's owner cannot bind
 
 - **WHEN** an approver asks a member's session to switch to a workspace-visible goal owned by someone in no shared team with that member
 - **THEN** the response is 409 `not_bindable` and its message names neither the goal nor its owner
+
+#### Scenario: Target reached only through an alignment
+
+- **WHEN** an approved `work_toward` alignment lists a member's session for a goal that is neither theirs nor their team's, and an approver asks that session to switch to it
+- **THEN** the response is 409 `not_bindable` naming no goal, and the session still moves to it through the alignment's own `binding_changed`
 
 #### Scenario: Switch to a team goal
 
