@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A tester keeps their v1 invite code on v2: `align-admin codes import` loads unused codes as single-use creation codes,
+  and hosted `/new` redirects to `/app`, where they sign in and enter it.
 - The agent's folder-rule preview recognizes a folder through a filesystem alias, keeps its current goal unless
   another is requested, and says when the confirmation replaces that rule.
 - The live-agent test client uses fresh HTTP connections after synchronous CLI calls so the offline-revocation
