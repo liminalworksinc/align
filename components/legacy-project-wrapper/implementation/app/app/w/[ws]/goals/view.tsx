@@ -1,5 +1,7 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, useAction, useApi } from "../../../_ui/kit";
 import { AnchorsEditor, LimitEditor, MeasuresEditor, TargetShareField, VISIBILITY_LABEL, anchorsDraft, anchorsOut, limitsOut, measuresDraft, measuresOut, takenBy, targetOut, type LimitDraft } from "../../../_ui/goalform";
@@ -11,6 +13,9 @@ import { isBlankText } from "@/lib/v2/text-core.mts";
 const STATUS_TONE = { active: "violet", achieved: "green", dropped: "neutral" } as const;
 
 export default function Goals({ me, ws }: { me: Me; ws: string }) {
+  // ?first=1: arrived from an empty workspace's "Set the first goal". The form is the point: its Goal field takes focus
+  // and the empty line above it, which the person has just been told, is left out.
+  const first = useSearchParams().get("first") === "1";
   const detail = useApi<WsDetail>(`/api/v2/workspaces/${ws}`);
   const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
   const holds = useApi<{ holds: { goal: { id: string } }[] }>(`/api/v2/workspaces/${ws}/holds`);
@@ -31,11 +36,13 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
 
   return (
     <Shell me={me} ws={ws} tab="Goals">
-      <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">Goals</h1>
+      <h1 className={`${PAGE_H1} mb-5`}>Goals</h1>
       <Err>{detail.error ?? feed.error}</Err>
+      {/* Arriving from "Set the first goal" with no goals: no empty list card above the form. */}
+      {!(first && feed.data?.goals.length === 0) && (
       <Card>
         {feed.loading && <Loading />}
-        {feed.data?.goals.length === 0 && <Note>No goals you can see yet.</Note>}
+        {feed.data?.goals.length === 0 && !first && <Note>No goals you can see yet.</Note>}
         <ul className="divide-y divide-zinc-200">
           {feed.data?.goals.map((g) => (
             <li key={g.id} className="py-3">
@@ -67,6 +74,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
           ))}
         </ul>
       </Card>
+      )}
       {canCreate && <NotesSuggest ws={ws} onDone={feed.reload} />}
       {canCreate && (
         <Card title="New goal">
@@ -92,7 +100,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
             }}
           >
             <Field label="Goal">
-              <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required />
+              <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required autoFocus={first} />
             </Field>
             <MeasuresEditor value={measures} onChange={setMeasures} />
             <LimitEditor value={limits} onChange={setLimits} />

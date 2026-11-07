@@ -38,7 +38,7 @@ export function ProposeChange({
   if (!open)
     return (
       <Btn kind="secondary" onClick={() => setOpen(true)}>
-        Propose a change
+        Full change form
       </Btn>
     );
   return (

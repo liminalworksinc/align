@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, TextArea, useAction, useApi, when } from "../../../../_ui/kit";
@@ -162,7 +163,7 @@ function RequestAlignment({ ws, goal, me }: { ws: string; goal: Goal; me: Me }) 
       )}
       <p className="mb-1 text-[14px] text-zinc-600">Your shared sessions{choice === "work_toward" ? " (pick at least one)" : ""}</p>
       {sessions.loading && <Loading />}
-      {live.length === 0 && !sessions.loading && <Note>You have no shared sessions in this workspace. Share one with align share.</Note>}
+      {live.length === 0 && !sessions.loading && <Note>{sessions.error ? "Couldn't read your sessions just now. Reload to try again." : "You have no shared sessions in this workspace. Share one with align share."}</Note>}
       {/* Each session as the Alignments tab names it, "started <time> · …<key end>", so two of one person in one
           repository can be told apart before one is ticked (A1-cross-4). */}
       {shared.map((s) => (
@@ -341,7 +342,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
       {g && (
         <>
           <HoldBanner hold={hold.data?.held ?? null} me={me.id} />
-          <h1 className="mb-2 text-[26px] font-semibold text-zinc-900">{g.title}</h1>
+          <h1 className={`${PAGE_H1} mb-2`}>{g.title}</h1>
           <div className="mb-5 flex flex-wrap gap-2">
             <Pill tone="violet">{g.status}</Pill>
             <Pill>{g.level === "company" ? "company goal" : "team goal"}</Pill>
