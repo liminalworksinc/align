@@ -1,0 +1,915 @@
+{
+  "schema": "align/native-boundary-transfer-review@1",
+  "observed_utc": "2026-11-08T18:43:47.102793+00:00",
+  "review_kind": "Same-agent acceptance reconciliation, not independent maintainer or actual operator security approval",
+  "accepted_classification_sha256": "236b77cbd13222ec77aac7f3fc9c1d8cccaa6a46b662352ca7a5f5fb7d8ddf87",
+  "tested_commit": "6cef3ced7856fb8ad34ff6cad7d3f4af893b32ea",
+  "tested_tree": "b4366b3f0c46132df1cffc3eaccc1d954387ac7e",
+  "source_identity": "sha256:7e92a2b1db1b49f334a96b7ddb4cd5fb334d1e420b5c67b4093655b0e26e4112",
+  "parent_receipt": "sha256:84b86b98e0b05ae2254a5512803c0b1832dc29d1101b11a863cd3a7448b43d6a",
+  "application_checks": 1845,
+  "image_checks": 36,
+  "image_platform": "linux/arm64",
+  "source_members": 441,
+  "qualified_components": 33,
+  "reviewed_source_members": 51,
+  "completed_boundaries": 13,
+  "total_boundaries": 31,
+  "remaining_boundaries": [
+    "B14",
+    "B15",
+    "B16",
+    "B17",
+    "B18",
+    "B19",
+    "B20",
+    "B21",
+    "B22",
+    "B23",
+    "B24",
+    "B25",
+    "B26",
+    "B27",
+    "B28",
+    "B29",
+    "B30",
+    "B31"
+  ],
+  "retained_target_bindings": "Only typed names, shared types and explicit external provider assembly allowed by the accepted classification. All reviewed application algorithms have qualified replacements.",
+  "changed_contract_review": "Storage contract updates record qualified schema history. Interface, directives and local-agent changes correct persistent-stop behavior, covered by the current B10 revision and actual consumer acceptance. Other first11 bindings remain exact.",
+  "global_measured_records": [
+    {
+      "file": "server-auth.parent-full-workflow-proof-v2.json",
+      "sha256": "950e0063e7db17d29339aa1da0f613bffe848eeed4a9f3379d702dd5f3e00385"
+    },
+    {
+      "file": "server-auth.parent-current-readiness-proof-v2.json",
+      "sha256": "e4f97f59359fadf76e821e4567a7fbbfb85088bfac9ebf5bced4bb41d5180786"
+    },
+    {
+      "file": "server-auth.image-acceptance-proof-v1.json",
+      "sha256": "8792b8edfb0fc1b2104da91476f8fc231f4e038c1e02b50a03357cefa3a5bb05"
+    },
+    {
+      "file": "server-auth.image-candidate-source-equivalence-v4.json",
+      "sha256": "cd1ad41cc8f09fb7c45e7a94ad7daa610b24942111720e66f1f34c573b6a4ada"
+    },
+    {
+      "file": "server-auth.production-preparation-proof-v1.json",
+      "sha256": "532bab0f67b6cdc89fd06f3d1f61efcdcd034080d38f4fcc10072953386b39e2"
+    },
+    {
+      "file": "server-auth.serial-hook-acceptance-v2.json",
+      "sha256": "e5e2dadc03ebba9f7f3e76d3b1c1508e13b072e17a2104d2a9f6f0c25525065d"
+    },
+    {
+      "file": "server-auth.approved-transfer-proof-v2.json",
+      "sha256": "1e5a3700ce7bec21e1b54edaaa12fd501c893180b55b410cf5267f4106b20e00"
+    },
+    {
+      "file": "server-auth.prepush-finding-review-v1.json",
+      "sha256": "e1bf8bcaf9321c113fec51e7f63e9036318e745efb6fe85bc57c72f44f2515b7"
+    },
+    {
+      "file": "server-auth.host-minimum-review-proof-v1.json",
+      "sha256": "0d3f2f73996a99e41bf428c493fc50c657c035a356bbf5911abcdf68c5257a89"
+    }
+  ],
+  "rows": [
+    {
+      "boundary": "B01",
+      "name": "MCP paste lines",
+      "accepted_target_responsibility": "Typed provider-specific names bind the already qualified package. Preserve natural public names.",
+      "required_acceptance": "Keep current package, shell controls and full consumer parity; requalify only on authority changes.",
+      "dependencies": [],
+      "current_member_hashes": {
+        "lib/paste-lines.ts": "df130e2f0ce041886a313400215328a01cd56b9bb5757931b97bad7c7e32af96"
+      },
+      "current_qualified_bindings": [
+        {
+          "component": "paste-lines",
+          "provider": ".literate/native-projects/local-paste-lines",
+          "package": "paste_lines",
+          "entry": "acb577e4e07d90b4bff9752dbfd8f03688b26291f4ec33e7f27fd079e48768a0",
+          "lock_identity": "sha256:cf8abb33d52859b57ed5e86477e9da16c9fec6b0f0bd6cd3c457c78c1e768755",
+          "oracle": "paste-lines.json",
+          "oracle_sha256": "31d0d54835a44e773c6e477b391c45252cac938df4081a235189093ab5a55882",
+          "independent_batches": 49
+        }
+      ],
+      "runtime_source_read": true,
+      "retained_roles": "typed aliases, explicit host resources, shared public types and one missing-native-export refusal guard",
+      "original_application_algorithms_in_retained_members": false,
+      "whole_boundary_closed": true,
+      "closure_state": "Qualified behavior and exact current consumer accepted",
+      "required_acceptance_result": "49 private batches and the unchanged 23 shell controls pass. The typed provider names remain exact.",
+      "supporting_measured_records": [
+        {
+          "file": "paste-lines.docs-proof-v1.json",
+          "sha256": "04c92ef128923f63dfe9f5e5ff7e84e2f34cfffce3d37353efb8768091df6107"
+        }
+      ],
+      "typed_target_bindings_permitted_by_accepted_classification": true,
+      "permanent_source_retention_exception": false,
+      "future_changes_require_current_acceptance": true
+    },
+    {
+      "boundary": "B02",
+      "name": "Wording helpers",
+      "accepted_target_responsibility": "Typed module aliases preserve distinct namespaces and public types.",
+      "required_acceptance": "Preserve the frozen actual-consumer observations and qualified package.",
+      "dependencies": [],
+      "current_member_hashes": {
+        "lib/v2/change-words.mts": "d3219eb451a7ea981069dedd29e64acae78af6dc195e7c4115b41194c04e5891",
+        "lib/v2/launch-words.ts": "f5f18f5603a58b62bab1170e0798b472e833e9f52cb859fa80d33ee062f53817",
+        "lib/v2/money.mts": "1f8e6dea6f381f702a05d59a90efb8336ed52d51c9071ff99e8fed99f972b7d9",
+        "lib/v2/plural.mts": "46894d99a43fa2cb52e974da4d1a82ec70568e0522aacc36c64a8666dc31b6ef",
+        "lib/v2/text-core.mts": "7fa117a981cbbdb2b066c0ca664f9ccc1da11676fa00db9de178c09cb8490428"
+      },
+      "current_qualified_bindings": [
+        {
+          "component": "wording",
+          "provider": ".literate/native-projects/local-wording",
+          "package": "wording",
+          "entry": "06ac5c43f41efbeb934b067e891672d4e92ea8eac6ce02c3374f81455cbfd519",
+          "lock_identity": "sha256:4fa2091d8e25739749b904c7c54c6cf20f668b38d1296fadc5dbc736c6273fa4",
+          "oracle": "wording.json",
+          "oracle_sha256": "ef6b4588160fd6c49eb11939201f4e0c385566350496bc565453cb9761e55f19",
+          "independent_batches": 49
+        }
+      ],
+      "runtime_source_read": true,
+      "retained_roles": "typed aliases, explicit host resources, shared public types and one missing-native-export refusal guard",
+      "original_application_algorithms_in_retained_members": false,
+      "whole_boundary_closed": true,
+      "closure_state": "Qualified behavior and exact current consumer accepted",
+      "required_acceptance_result": "The unchanged typed consumers preserve all 49 batches and 4,598,945 frozen observations, including namespace metadata and three bidirectional public types.",
+      "supporting_measured_records": [
+        {
+          "file": "wording.consumer-v1.json",
+          "sha256": "19f49406734279e35340fab34e2e3e1288bea22e83c72750fb51c883d3380fe5"
+        }
+      ],
+      "typed_target_bindings_permitted_by_accepted_classification": true,
+      "permanent_source_retention_exception": false,
+      "future_changes_require_current_acceptance": true
+    },
+    {
+      "boundary": "B03",
+      "name": "Home attention and evidence classes",
+      "accepted_target_responsibility": "Typed names bind the qualified package. UI placement belongs to B20.",
+      "required_acceptance": "Preserve data identity, ordering and current consumer parity.",
+      "dependencies": [],
+      "current_member_hashes": {
+        "lib/v2/home-core.mts": "c8bdb00fb9ed8472e23a837f0a37883360244fa26f0dd7055d2486394da54472"
+      },
+      "current_qualified_bindings": [
+        {
+          "component": "home-attention",
+          "provider": ".literate/native-projects/local-home-attention",
+          "package": "home_attention",
+          "entry": "d7b9687d4911ac3880b4914a034abc3effe189b21720671d23894f7d173421c0",
+          "lock_identity": "sha256:f0a3e33ea3d97d2e943592fb4d731ffff4f6ade51ee1f23ef250ececb2207d02",
+          "oracle": "home-attention.json",
+          "oracle_sha256": "d018472f9c94d01d056cbdd4e6c8a433013a2204374b32b62c29e53246fca485",
+          "independent_batches": 9
+        }
+      ],
+      "runtime_source_read": true,
+      "retained_roles": "typed aliases, explicit host resources, shared public types and one missing-native-export refusal guard",
+      "original_application_algorithms_in_retained_members": false,
+      "whole_boundary_closed": true,
+      "closure_state": "Qualified behavior and exact current consumer accepted",
+      "required_acceptance_result": "The unchanged consumer preserves ordering, object identity, eight functions, three data values and four public types across nine batches and 82,905 observations.",
+      "supporting_measured_records": [
+        {
+          "file": "home-attention.consumer-v1.json",
+          "sha256": "5e1fdde681cc5b88b5f67107b5ac58f82ec8c998c10839bcfa7560a6b5d91513"
+        }
+      ],
+      "typed_target_bindings_permitted_by_accepted_classification": true,
+      "permanent_source_retention_exception": false,
+      "future_changes_require_current_acceptance": true
+    },
+    {
+      "boundary": "B04",
+      "name": "Share-again wording",
+      "accepted_target_responsibility": "Typed naming adapter only.",
+      "required_acceptance": "Preserve the frozen shared-state observations and actual consumer parity.",
+      "dependencies": [],
+      "current_member_hashes": {
+        "lib/v2/share-again.mts": "c6badd680376afc06932e499ae72e1e9e81b20059785c40ccfe7c3c221fc5735"
+      },
+      "current_qualified_bindings": [
+        {
+          "component": "share-again",
+          "provider": ".literate/native-projects/local-share-again",
+          "package": "share_again",
+          "entry": "ffb7fbfd12f53545cf79dc5eeee3127cc15a086a8cd9dfca0cbe860fb70ae045",
+          "lock_identity": "sha256:7951fae384f5784e8e4b8b326fa1a0f9f39374910ad8f643c18432e0c7b6f4dc",
+          "oracle": "share-again.json",
+          "oracle_sha256": "1e5acc246133ed805b11edd04a06260f2e1312505d3ecbdf4f24796fdc744b41",
+          "independent_batches": 13
+        }
+      ],
+      "runtime_source_read": true,
+      "retained_roles": "typed aliases, explicit host resources, shared public types and one missing-native-export refusal guard",
+      "original_application_algorithms_in_retained_members": false,
+      "whole_boundary_closed": true,
+      "closure_state": "Qualified behavior and exact current consumer accepted",
+      "required_acceptance_result": "The unchanged typed naming adapter preserves all 13 batches and 1,163 frozen sharing-state observations.",
+      "supporting_measured_records": [
+        {
+          "file": "share-again.consumer-v1.json",
+          "sha256": "ccbfb666f99a3480f88f3965e3cacaebfecd835863260d03708d0966079a8a06"
+        }
+      ],
+      "typed_target_bindings_permitted_by_accepted_classification": true,
+      "permanent_source_retention_exception": false,
+      "future_changes_require_current_acceptance": true
+    },
+    {
+      "boundary": "B05",
+      "name": "Authorization policy",
+      "accepted_target_responsibility": "Typed alias; callers remain responsible for gathering authenticated facts.",
+      "required_acceptance": "Keep current qualification and test each future caller with real authorization facts.",
+      "dependencies": [],
+      "current_member_hashes": {
+        "lib/v2/policy.ts": "9cd98a89a743b27ef0176e3fd280a0507afa0c5a21c6b83602ea02fb282a80b9"
+      },
+      "current_qualified_bindings": [
+        {
+          "component": "policy",
+          "provider": ".literate/native-projects/local-policy",
+          "package": "policy",
+          "entry": "49bfd5fa6c3616162809ffabbbd0b6fefb654c6366eb34037f27596edc6fc3cd",
+          "lock_identity": "sha256:ee9471acad1dc0ddb5cb885acc0ac15cfedfa7528e290c029aa5434c4df678a7",
+          "oracle": "policy.json",
+          "oracle_sha256": "5450bcf24b9d17533dab59dc5c31a5fc60a5ff813edf6000d91b23abe7a61421",
+          "independent_batches": 43
+        }
+      ],
+      "runtime_source_read": true,
+      "retained_roles": "typed aliases, explicit host resources, shared public types and one missing-native-export refusal guard",
+      "original_application_algorithms_in_retained_members": false,
+      "whole_boundary_closed": true,
+      "closure_state": "Qualified behavior and exact current consumer accepted",
+      "required_acceptance_result": "The qualified policy remains unchanged. Current application tests exercise authenticated role cross-products, including refusal of viewer writes even when the viewer leads a team. Future callers still require real authenticated facts.",
+      "supporting_measured_records": [
+        {
+          "file": "policy.consumer-parity-v1.log",
+          "sha256": "8f59c01383a25091f58cb90d2b57858afc4e1490339e2e76890b0fc1b2331406"
+        },
+        {
+          "file": "policy.consumer-web-v1.log",
+          "sha256": "b7d72bd2da0e0a6745418a9bf336b2c5efb6ae02397525dcbb092760a80a0bd5"
+        }
+      ],
+      "typed_target_bindings_permitted_by_accepted_classification": true,
+      "permanent_source_retention_exception": false,
+      "future_changes_require_current_acceptance": true
+    },
+    {
+      "boundary": "B06",
+      "name": "Input validation and error type",
+      "accepted_target_responsibility": "TypeScript function/factory/constructor bindings and host exception representation.",
+      "required_acceptance": "Keep exact error identity and validation observations; no relaxed inputs.",
+      "dependencies": [],
+      "current_member_hashes": {
+        "lib/errors.ts": "f925b50232e0689ee85c10d08947942c5cf1c05cc7505ac8deeb2c1a61c56a64",
+        "lib/v2/errors.ts": "12e5c900b2e65997e12cd6d8ed9bb41c704e5229d8422b3f124ddc3a87c08176",
+        "lib/v2/validate.ts": "49f351e61d192a3ebe45a50c89670fdb6beb0835bdb248266c6a4dadd31585f2"
+      },
+      "current_qualified_bindings": [
+        {
+          "component": "http-errors",
+          "provider": ".literate/native-projects/local-http-errors",
+          "package": "http_errors",
+          "entry": "704554be799bd2181d52074834b8ad976c9f3c92992bc8e86ac4220f735c6d41",
+          "lock_identity": "sha256:bf5d133418a81b6768c92336725a5af1ea961436738ce74dd51e295f0214820d",
+          "oracle": "http-errors.json",
+          "oracle_sha256": "4244ad9cb49ec270864f3c2fb61dbf0d3ea596edf4a25575967aeef03151dab6",
+          "independent_batches": 9
+        },
+        {
+          "component": "field-validation",
+          "provider": ".literate/native-projects/local-field-validation",
+          "package": "field_validation",
+          "entry": "49f157247f66056c591b443ac086c1b89f2d6d38977438c84fbde9688ff834c5",
+          "lock_identity": "sha256:ca7fb799adfd62ba89b9654c10b35150c6918845ded7dd627a0497fda39eafa3",
+          "oracle": "field-validation.json",
+          "oracle_sha256": "74b859dd962163a5af05c70d6c022ab1a14fd1224a91efd8fe7bc4dce52c5588",
+          "independent_batches": 50
+        }
+      ],
+      "runtime_source_read": true,
+      "retained_roles": "typed aliases, explicit host resources, shared public types and one missing-native-export refusal guard",
+      "original_application_algorithms_in_retained_members": false,
+      "whole_boundary_closed": true,
+      "closure_state": "Qualified behavior and exact current consumer accepted",
+      "required_acceptance_result": "Error constructor and factory identities preserve nine batches and 22,618 observations. Validation preserves 50 batches and 4,549,018 observations, complete namespace compatibility and four negative type controls.",
+      "supporting_measured_records": [
+        {
+          "file": "http-errors.consumer-v1.json",
+          "sha256": "d471760b115deba5f5277716d5849233f23e2fc41edadda6265c21fe9fdce3a9"
+        },
+        {
+          "file": "field-validation.consumer-actual-proof-v1.json",
+          "sha256": "290c200cf9d81e4070ca369d624dcb8aeaa59ceed146a98e9150721da107544e"
+        },
+        {
+          "file": "field-validation.type-proof-v1.json",
+          "sha256": "7e3ae15881787f4f02dad8795a11388e9b5adc58f9e4d20a86dab5f624bb9979"
+        }
+      ],
+      "typed_target_bindings_permitted_by_accepted_classification": true,
+      "permanent_source_retention_exception": false,
+      "future_changes_require_current_acceptance": true
+    },
+    {
+      "boundary": "B07",
+      "name": "Value card rules",
+      "accepted_target_responsibility": "Typed aliases preserve omitted defaults and explicit environment arguments.",
+      "required_acceptance": "Preserve current package and complete consumer parity.",
+      "dependencies": [],
+      "current_member_hashes": {
+        "lib/v2/value-core.mts": "ce0aa08b831430e7d3a27d73186e7e7431138ab84cc8f9eb2b12724fed186a8c"
+      },
+      "current_qualified_bindings": [
+        {
+          "component": "value-rules",
+          "provider": ".literate/native-projects/local-value-rules",
+          "package": "value_rules",
+          "entry": "0b055ae06aae87bc04188102d99ab2f7980e73504443801dc609dcbee9abf53e",
+          "lock_identity": "sha256:f39cbe1c77236a231db677d3abdfb653bbe56415f5d9ac6f9c6805f7d3090154",
+          "oracle": "value-rules.json",
+          "oracle_sha256": "d42bcc4aceb2d3000f1a9d1269f5104cfb2b81a7b04fc3526feea4cedca5270b",
+          "independent_batches": 16
+        }
+      ],
+      "runtime_source_read": true,
+      "retained_roles": "typed aliases, explicit host resources, shared public types and one missing-native-export refusal guard",
+      "original_application_algorithms_in_retained_members": false,
+      "whole_boundary_closed": true,
+      "closure_state": "Qualified behavior and exact current consumer accepted",
+      "required_acceptance_result": "The unchanged aliases preserve all 16 batches and 1,168,597 observations, omitted defaults, readonly tuples, literal types and the complete bidirectional namespace.",
+      "supporting_measured_records": [
+        {
+          "file": "value-rules.consumer-v1.json",
+          "sha256": "d76a51946f7765424501f85faed35e9953a1306bc2c2817e3a8736f4d60ab186"
+        }
+      ],
+      "typed_target_bindings_permitted_by_accepted_classification": true,
+      "permanent_source_retention_exception": false,
+      "future_changes_require_current_acceptance": true
+    },
+    {
+      "boundary": "B08",
+      "name": "Trust Markdown renderer",
+      "accepted_target_responsibility": "JavaScript module binding; page rendering belongs to B21.",
+      "required_acceptance": "Keep current parser observations and trust-page integration.",
+      "dependencies": [],
+      "current_member_hashes": {
+        "lib/trust/markdown.mts": "1c2c1a56ce2bffd051979d50b5fdede1e9fb52c2fe711b5064eea2666e672d1e"
+      },
+      "current_qualified_bindings": [
+        {
+          "component": "trust-markdown",
+          "provider": ".literate/native-projects/local-trust-markdown",
+          "package": "trust_markdown",
+          "entry": "379ee36cfdbe6bedc50051850a645f6cd315a05c0b5058871bd9645c59a20c6e",
+          "lock_identity": "sha256:0c91b85db4d463579d6cbc0199f1df0c12370bfc878a6b9878493fa3a15f6f83",
+          "oracle": "trust-markdown.json",
+          "oracle_sha256": "04988d5089cc8ba530bc99a0f9015be5975cdf19e7fdfa1b44069819a53845d9",
+          "independent_batches": 21
+        }
+      ],
+      "runtime_source_read": true,
+      "retained_roles": "typed aliases, explicit host resources, shared public types and one missing-native-export refusal guard",
+      "original_application_algorithms_in_retained_members": false,
+      "whole_boundary_closed": true,
+      "closure_state": "Qualified behavior and exact current consumer accepted",
+      "required_acceptance_result": "The unchanged parser binding preserves 21 batches and 1,153,547 observations. Current trust-page application and image checks pass. Browser and legal acceptance of the complete public page remain B21 work.",
+      "supporting_measured_records": [
+        {
+          "file": "trust-markdown.consumer-v1.json",
+          "sha256": "409da903fd8f0760be1c83f014947e37a65bc892c74bae206d1560011ffe9ef5"
+        }
+      ],
+      "typed_target_bindings_permitted_by_accepted_classification": true,
+      "permanent_source_retention_exception": false,
+      "future_changes_require_current_acceptance": true
+    },
+    {
+      "boundary": "B09",
+      "name": "Spend parsers and pricing",
+      "accepted_target_responsibility": "Public type and naming bindings; provider log access remains B22.",
+      "required_acceptance": "Preserve each selected parser/version and account for batch/stream equivalence.",
+      "dependencies": [],
+      "current_member_hashes": {
+        "packages/align-agent/src/spend-types.ts": "dc85adfbb9fc08ed6377f6ed984289b4788f1456b1297a6d71834f21d626b30d",
+        "packages/align-agent/src/spend.ts": "ce0c3fb0d19069c904a28b83a50261490eb010b8779c0fc77aadf8ead21deeb1"
+      },
+      "current_qualified_bindings": [
+        {
+          "component": "spend-meter",
+          "provider": ".literate/native-projects/local-spend-meter",
+          "package": "spend_meter",
+          "entry": "d55ac02d4cb9f2eadfcdf1f9ebc5984c95a248a080095ba4b77352a3c8c70e30",
+          "lock_identity": "sha256:bcbf71906f2973c3076d663d7ea70eb91a633cb63d8490b56f4a48820573d4b3",
+          "oracle": "spend-meter.json",
+          "oracle_sha256": "9c2eb5b70cba55afc54b330e608167944700566c845634788e1dfdfb6865469c",
+          "independent_batches": 11
+        },
+        {
+          "component": "spend-stream",
+          "provider": ".literate/native-projects/local-spend-stream",
+          "package": "spend_stream",
+          "entry": "415ae17aa1882f04f7e4fc5a853d38119c40537068597ac43affe39a45453c9b",
+          "lock_identity": "sha256:676954d6b6727dd609d43d253730108eddbea6a8ce3dd0a15639f2da0c9cbf38",
+          "oracle": "spend-stream.json",
+          "oracle_sha256": "8483e0be453d0fc44cd730fedea25bce04b013511efdbcb75ce9036f564eea1a",
+          "independent_batches": 19
+        },
+        {
+          "component": "spend-rounding",
+          "provider": ".literate/native-projects/local-spend-rounding",
+          "package": "spend_rounding",
+          "entry": "b094ec40731519391fff577f3d074e592228d75c9e1dc9af0cae7facac6fc7c6",
+          "lock_identity": "sha256:d399827ac28452040f56573369eda5ef1aba0c8af2e72857a7bf80ca8db0a4cc",
+          "oracle": "spend-rounding.json",
+          "oracle_sha256": "b687fe79eb0e11ae4d69217eef4f2a2bd5c7522cd99e7a7df09615f97ed97406",
+          "independent_batches": 31
+        }
+      ],
+      "runtime_source_read": true,
+      "retained_roles": "typed aliases, explicit host resources, shared public types and one missing-native-export refusal guard",
+      "original_application_algorithms_in_retained_members": false,
+      "whole_boundary_closed": true,
+      "closure_state": "Qualified behavior and exact current consumer accepted",
+      "required_acceptance_result": "All three exact metering packages remain pinned. Current independent batches, transcript and price-version tests pass, including batch and streaming interpretation and rounding. Provider log access remains B22 work.",
+      "supporting_measured_records": [],
+      "typed_target_bindings_permitted_by_accepted_classification": true,
+      "permanent_source_retention_exception": false,
+      "future_changes_require_current_acceptance": true
+    },
+    {
+      "boundary": "B10",
+      "name": "Agent envelopes and notices",
+      "accepted_target_responsibility": "Typed binding and shared wire types; actual hook delivery remains B22.",
+      "required_acceptance": "Keep CONTEXT-001 controls and exact current consumer observations.",
+      "dependencies": [],
+      "current_member_hashes": {
+        "packages/align-agent/src/shared/ended.ts": "45004f49ced28984355aa3b4804f87e05df7af00735590734ec828187ab166fc",
+        "packages/align-agent/src/shared/envelope.ts": "9533101f58e62c70c9af90bfe33c97e497fddff05b465930d7c5c75d4c56b97e",
+        "packages/align-agent/src/shared/notices.ts": "2609b3ad148491df2668279f91293172a0dc6643af61597d37f9362e85a3f599",
+        "packages/align-agent/src/shared/types.ts": "661d09442ffd1842b1001d9bff501ad27c307484a00185232d46108fbac60407"
+      },
+      "current_qualified_bindings": [
+        {
+          "component": "agent-envelope",
+          "provider": ".literate/native-projects/local-agent-envelope-stop-v2",
+          "package": "agent_envelope",
+          "entry": "54ce0e7aad8c95a038f60a274486fff9728b2ea9baecf79e7e068a46bad94b36",
+          "lock_identity": "sha256:f5f010cee3cbe86ce585a551caf4f98090fc85e443dfe5fd22123a1b862c9c75",
+          "oracle": "agent-envelope.json",
+          "oracle_sha256": "5d693d0ed43a2fffc1be5840a3a9f04427e8d7f973dd99a81057db13f318ad3b",
+          "independent_batches": 63
+        },
+        {
+          "component": "share-notices",
+          "provider": ".literate/native-projects/local-share-notices",
+          "package": "share_notices",
+          "entry": "61ae9ff08a3534e81146902b0f7f33fb0a057213ef9f254aa6b5873d5b56268b",
+          "lock_identity": "sha256:078fa8c1d61b7aa0250178dd553e6277ad0b1750a0ad112197301ca319d18e60",
+          "oracle": "share-notices.json",
+          "oracle_sha256": "d4b7b6ed11374df36c1fecf3498f56715c73e15308b893f3a028097fbee450cb",
+          "independent_batches": 14
+        }
+      ],
+      "runtime_source_read": true,
+      "retained_roles": "typed aliases, explicit host resources, shared public types and one missing-native-export refusal guard",
+      "original_application_algorithms_in_retained_members": false,
+      "whole_boundary_closed": true,
+      "closure_state": "Qualified behavior and exact current consumer accepted",
+      "required_acceptance_result": "The current persistent-stop revision passes 63 independent actual-consumer batches and 1,642,893 observations on each host, with bidirectional public types and byte-identical shared types. Current full integration and the unchanged 150 ms networking-blocked hook gate pass. The existing 14 share-notice batches also remain exact.",
+      "supporting_measured_records": [
+        {
+          "file": "agent-envelope-stop.actual-consumer-acceptance-proof-v1.json",
+          "sha256": "5ec7db9f0497b0939fb7cd967ff3fa8471fea6d57bcbdb09eea3076bcf840c37"
+        },
+        {
+          "file": "agent-envelope-stop.linux-consumer-acceptance-proof-v1.json",
+          "sha256": "2b60552de17712ad633877934f59679bf2cffa5865f59fdffd0680db7e0ebd98"
+        }
+      ],
+      "typed_target_bindings_permitted_by_accepted_classification": true,
+      "permanent_source_retention_exception": false,
+      "future_changes_require_current_acceptance": true
+    },
+    {
+      "boundary": "B11",
+      "name": "Shell command parser",
+      "accepted_target_responsibility": "Typed alias to the qualified package.",
+      "required_acceptance": "Preserve current parser corpus and hook integration.",
+      "dependencies": [],
+      "current_member_hashes": {
+        "packages/align-agent/src/hooks/shell.ts": "80014f1dbb0bd0f6d6e4c79082252f71e7d94b44b061dbd64d17fa7137135b8e"
+      },
+      "current_qualified_bindings": [
+        {
+          "component": "shell-words",
+          "provider": ".literate/native-projects/local-shell-words",
+          "package": "shell_words",
+          "entry": "ab25a6e81c1ba42093a99c4687a397b942c9e5a523c3507d6e1dd6e5840216e3",
+          "lock_identity": "sha256:ce8d5aa1404c8ade73c55032533940b2cc93ee82a75c26101229bff02aad2f07",
+          "oracle": "shell-words.json",
+          "oracle_sha256": "20e3b3f83f45fb8166798987ad37870c06477bf31e7febfd4dd48c72800dd0c6",
+          "independent_batches": 23
+        }
+      ],
+      "runtime_source_read": true,
+      "retained_roles": "typed aliases, explicit host resources, shared public types and one missing-native-export refusal guard",
+      "original_application_algorithms_in_retained_members": false,
+      "whole_boundary_closed": true,
+      "closure_state": "Qualified behavior and exact current consumer accepted",
+      "required_acceptance_result": "The unchanged typed parser binding preserves its 23 private batches and 11,108 frozen observations. Current hook integration passes.",
+      "supporting_measured_records": [
+        {
+          "file": "shell-words.consumer-parity-v1.log",
+          "sha256": "677a679c9fe5b6df7aea2ec12c3be9183b3a4c1fa55153496dc9fa00f0b7dc66"
+        }
+      ],
+      "typed_target_bindings_permitted_by_accepted_classification": true,
+      "permanent_source_retention_exception": false,
+      "future_changes_require_current_acceptance": true
+    },
+    {
+      "boundary": "B12",
+      "name": "Storage, settings and request plumbing",
+      "accepted_target_responsibility": "SQLite driver and physical mapping, secure randomness/HMAC, environment and filesystem providers, HTTP streams and typed aliases. SQL programs stay source authority until their replacement qualifies.",
+      "required_acceptance": "Qualify natural zero-argument schema export after the approved SDK fix, then finish portable entity/upgrade, connection/transaction, secret/startup and request-effect contracts with historical, populated, failure and recovery parity.",
+      "dependencies": [
+        "SDK-local-commit",
+        "schema-qualification",
+        "B13-auth-port"
+      ],
+      "current_member_hashes": {
+        "lib/config.ts": "73af817edcc731667d765641e67557f1dd5c37fa49f6490e2b442df7023c4339",
+        "lib/http.ts": "aedad9c33bc41a3743e9614dda6624900d5c63abfc329bc728de8f7202b0bc5b",
+        "lib/identifier-tools.mts": "c635746af9f6f77c0a34278c9118370bae7a5198974075dafe4a42cb59cd4083",
+        "lib/locks.ts": "489fcb1bcd20aca470df2d6081f5865f61ec27d6a724f0156019ab01c4042905",
+        "lib/migration-coordinator.mts": "e15c35fe4ba2ea94ff6624fa5b20231bfeb6e2e35b4001c0a1488a05738297f1",
+        "lib/ratelimit.ts": "4287893214705a19154fe41444119bf0ad466986ec08dd498d2e8fb510bb7e4c",
+        "lib/runtime-settings.mts": "bc30ca0b49389dea28e58ed97da078df99ad87e43a47b3a56d1ce9859ff04cad",
+        "lib/secret.ts": "595c89cd2db97f09721e191a829a9d21441f355d657b463fd48a3f016d4a94c5",
+        "lib/server-secret-tools.mts": "85673288fb9fb0a3fe25791067363ac0370149d3d97fe6775314e0e1f4065880",
+        "lib/startup.ts": "c0d47764b05d132a504227fa40dc147dd8398a9686e5d9b03843bc48e171a258",
+        "lib/storage-schema.mts": "9016af0d520056518b300bc3d6bc8587ef35a1096c88ccfee0f7b6ac36f28ae0",
+        "lib/v2/config.ts": "ac0e143e2efd746b00a23a8c604d0ad25cc30276bce938a1835ae4edebc7567e",
+        "lib/v2/core.mts": "c641e2fb316211cf816e4951d3f29271b79caae7d71246a41922e61003cf9f9f",
+        "lib/v2/db.ts": "9470f4fc3ae49c2e3797b27bd7551cd2f8646dac04d983c91294ca8d8482c059",
+        "lib/v2/events.ts": "93272c4e5d459b69e40bae9c9152c37bab5db44f7eed43eb188a088657acbb64",
+        "lib/v2/http.ts": "afc1acd294124d85ae7fd760c4fb450202e90589c2c727ab8bfb5b60c76e90df",
+        "lib/v2/ids.ts": "0033b16a4e57b0bdbdc7dfbec60765a6c7ed45e3c74c4fc9d891e1c67526f13c",
+        "lib/v2/init.ts": "c248cf09e54eaf2d459cefbd52884a5661a630a00425001ed357c466abc768f6",
+        "lib/v2/limits.ts": "2e8f104e52920a5d0a71072ad00e54563a1f214a260436de49584bda0d4d3d3d",
+        "lib/v2/node-sqlite.d.ts": "05188bcbbf5468dfb53ff8b99a3cb46c4b13b353a6692c73a83510730e8f3767"
+      },
+      "current_qualified_bindings": [
+        {
+          "component": "promise-queues",
+          "provider": ".literate/native-projects/local-promise-queues",
+          "package": "promise_queues",
+          "entry": "b87e9dd3fbb59eb6d1178773c1eea2032c74ae6f148ee3de0d3dfdaab1c22a80",
+          "lock_identity": "sha256:b0266651ecfc6c0b7adc330c7334706d047ccb10aca55fa7349a9e55a6971f99",
+          "oracle": "promise-queues.json",
+          "oracle_sha256": "0710971a2294661117a87a83b2a0b29f0008db7ee409eebf698baa32a307c4c5",
+          "independent_batches": 22
+        },
+        {
+          "component": "migration-coordinator",
+          "provider": ".literate/native-projects/local-migration-coordinator",
+          "package": "migration_coordinator",
+          "entry": "2d10890f84384493eb0eda470814257b39b94663ebbf09d4138c8814389d0c4b",
+          "lock_identity": "sha256:a7a93cc9284c6707b14bca363e91606a25d25a8835b2d4b735670d348baf9021",
+          "oracle": "migration-coordinator.json",
+          "oracle_sha256": "ae55673b9a3a6a7c22f8b2de532497b2f717cf67348414426ac85b5e4b5a65af",
+          "independent_batches": 21
+        },
+        {
+          "component": "runtime-settings",
+          "provider": ".literate/native-projects/local-runtime-settings",
+          "package": "runtime_settings",
+          "entry": "025d2684b60aa5f2725976bf8f320757c800a50b4cbdb77d43da47a23c24173f",
+          "lock_identity": "sha256:adb6f1155a9b1273f41c8a032de5f1541c6cd0189568c3c6bb1d859622c75e76",
+          "oracle": "runtime-settings.json",
+          "oracle_sha256": "7c3425b6b17f930309176cd6e8feed45df6c83b34577b9105b74356c41631e3a",
+          "independent_batches": 62
+        },
+        {
+          "component": "storage-schema",
+          "provider": ".literate/native-projects/local-storage-schema",
+          "package": "storage_schema",
+          "entry": "aad740bd04899735580b67e46c1aa9f34147d4568725e3bb1825c660fc057adc",
+          "lock_identity": "sha256:97d2e9e993bf73876864be5b9ed4099b0ad8e5ea61eb35f3d03c162f4fedb5a2",
+          "oracle": "storage-schema.json",
+          "oracle_sha256": "03e86ce28624a080dc583836e7b49c849d9f23c80c16c9c260b1ac42cf980164",
+          "independent_batches": 51
+        },
+        {
+          "component": "rate-limits",
+          "provider": ".literate/native-projects/local-rate-limits",
+          "package": "rate_limits",
+          "entry": "74fa3952ac67a55c465b4ffa05c0b4ea423b047fbcf886a04071fbbfc4d0d417",
+          "lock_identity": "sha256:79ba5bad11c2cb43de60ad4ea2e92b2aa2666fe9a92d2e4dfd69e19ead099eed",
+          "oracle": "rate-limits.json",
+          "oracle_sha256": "fb8842a7fb7c5b10b5677c7c30f9109d1e86e8617921b3da2ca6f74d9f6b8b1b",
+          "independent_batches": 45
+        },
+        {
+          "component": "identifier-tools",
+          "provider": ".literate/native-projects/local-identifier-tools",
+          "package": "identifier_tools",
+          "entry": "c20277071ebce5a9765f0fb8539d7df3402fa173881898c5812a16ab98f8e60a",
+          "lock_identity": "sha256:8f5a2dbb17d85f165009a557c29c517327bad2ab27154211bd4bdb9fb45e2df3",
+          "oracle": "identifier-tools.json",
+          "oracle_sha256": "89afabe2f6ba478b8b83c9277594e160f8d44f8e02d51ffb2141e7a95ee4c2de",
+          "independent_batches": 51
+        },
+        {
+          "component": "storage-runtime",
+          "provider": ".literate/native-projects/local-storage-runtime",
+          "package": "storage_runtime",
+          "entry": "06c78cf9bb3153f888c6a322473527927e1be9d65fdd03f8742a0db793d0b01f",
+          "lock_identity": "sha256:225d14fc8aec017692865a90db4d7cdcb6795eaf74037a5de50ead61e7e5a6ee",
+          "oracle": "storage-runtime.json",
+          "oracle_sha256": "2b2f811ecc30769e0b168a24b39a7061bdc93a271053d06058ef5fd86efaf539",
+          "independent_batches": 44
+        },
+        {
+          "component": "server-secrets",
+          "provider": ".literate/native-projects/local-server-secrets",
+          "package": "server_secrets",
+          "entry": "f6fea491eae9ad1bd89f89b84dd8aa2dbf6de3741cfc84010e8cb908b11261f0",
+          "lock_identity": "sha256:2d92dec0039f3d759f55f36e67a44ea1aef15778967b2cf2de4b3a808b91364b",
+          "oracle": "server-secrets.json",
+          "oracle_sha256": "aca8f6b7ab8fb9e0b027204d1a4e1bbbc9a61da3798ff31798c1f1bea893dd88",
+          "independent_batches": 36
+        },
+        {
+          "component": "server-startup",
+          "provider": ".literate/native-projects/local-server-startup",
+          "package": "server_startup",
+          "entry": "ec20718754ea09283b9f3c43b42e6296099b661a8ae06b83cf8036043e3cd3df",
+          "lock_identity": "sha256:11edbff4f4292c81f8cf7a82caa2c1fe8ac6bbd4ec6718a9e9dc6efbf136b0b4",
+          "oracle": "server-startup.json",
+          "oracle_sha256": "65d81170d6b5b88135c4b0e49af5fc7e0bb5b8f81877a09bfee49140d80e7b22",
+          "independent_batches": 40
+        },
+        {
+          "component": "server-readiness",
+          "provider": ".literate/native-projects/local-server-readiness",
+          "package": "server_readiness",
+          "entry": "76d78188714bd46a423971a0d08a4fb0e3c7f8f6ac96f4315ef5800687676801",
+          "lock_identity": "sha256:fa28e516663ce7d4e6a7536f71742a85b9b59b01cceb2f43113b7703aeea2eff",
+          "oracle": "server-readiness.json",
+          "oracle_sha256": "b49312bd0ba3616a7ba3d376aa83c4e3cc2317a60c15ab40f570e3865cc836e0",
+          "independent_batches": 40
+        },
+        {
+          "component": "server-request-effects",
+          "provider": ".literate/native-projects/local-server-request-effects",
+          "package": "server_request_effects",
+          "entry": "51da20a582d035546e3f8684179d2b7aad7df32fec9dbfe6c13679a45a239311",
+          "lock_identity": "sha256:d9131037a0cc21f1c76f2a8826039792987ce1d60e72e2a18fe9340fb0abbe13",
+          "oracle": "server-request-effects.json",
+          "oracle_sha256": "c11db8310b0fca8325913e3735278aed6ede7b89841c2ef66688b58b5647d66f",
+          "independent_batches": 46
+        },
+        {
+          "component": "server-client-keys",
+          "provider": ".literate/native-projects/local-server-client-keys",
+          "package": "server_client_keys",
+          "entry": "bfe4ed6ae1e8fbcdaff7785e5bc861e17775cabd334427e29186626da8ad6e29",
+          "lock_identity": "sha256:0231cea2c0e686bf3153dc37fc8bcc0ee090c181897f33ef317a91107effe6a2",
+          "oracle": "server-client-keys.json",
+          "oracle_sha256": "28363fc8ce38204e3493cd37fca4764aaaf7bd5a63fda3a0c0db2aaa32571863",
+          "independent_batches": 11
+        },
+        {
+          "component": "server-core",
+          "provider": ".literate/native-projects/local-server-core",
+          "package": "server_core",
+          "entry": "42373a5a5a42cf85ae1aa6822209402a4911eb5be5fd01fc5be4a852e409e08f",
+          "lock_identity": "sha256:78d541b0174141ab5ae9faa68bfb859985d6680b69bd9ee7b1610382a51090db",
+          "oracle": "server-core.json",
+          "oracle_sha256": "27430ff057ebd32fc8dcbf5408f64b249582ea654af0ebe368df6903ddfe49f1",
+          "independent_batches": 53
+        }
+      ],
+      "runtime_source_read": true,
+      "retained_roles": "typed aliases, explicit host resources, shared public types and one missing-native-export refusal guard",
+      "original_application_algorithms_in_retained_members": false,
+      "whole_boundary_closed": true,
+      "closure_state": "Qualified behavior and exact current consumer accepted",
+      "required_acceptance_result": "All 13 storage and request-plumbing components are qualified, separately admitted and consumed through typed target ports. The natural zero-argument schema export, historical and populated upgrades, transactions, retry/recovery, secrets, startup, readiness, body/stream admission and client-key cases pass. The former full-application, image, current-receipt and authentication dependencies are satisfied by this checkpoint.",
+      "supporting_measured_records": [
+        {
+          "file": "storage-schema.qualification-proof-v9.json",
+          "sha256": "cc7a48095dcce9ef66385fefeaaf6f470aefe0cceb4c5c8193291e682b9484d4"
+        },
+        {
+          "file": "storage-schema.final-admission-proof-v1.json",
+          "sha256": "b6637df1ad56a1ad113404ce89ae3efdc1704ff19ca330d65af06f5111ce9bfc"
+        },
+        {
+          "file": "rate-limits.native-consumer-acceptance-proof-v1.json",
+          "sha256": "dfbf7989dff03d640ee1c76ce489f86c492b63ebd514fdc0331852e17b69bedf"
+        },
+        {
+          "file": "identifier-tools.actual-consumer-parity-proof-v1.json",
+          "sha256": "b77ed0c54859952620a98e92ee202f15fffd79ee501f76f3fd2e0602ffab7fea"
+        },
+        {
+          "file": "storage-runtime.actual-consumer-acceptance-proof-v1.json",
+          "sha256": "65130da9c339e182dd7aa9c4255e2a6cc687b5cdeca16c277665fb2e3f6977c6"
+        },
+        {
+          "file": "server-secrets.actual-consumer-acceptance-proof-v1.json",
+          "sha256": "93c41fa79f6af751ff0e86e51824f83573a9e2c96a0205ae877d4512ba48060f"
+        },
+        {
+          "file": "server-startup.actual-consumer-acceptance-proof-v1.json",
+          "sha256": "35ecc89cbf0f952dde020e95ba98971c2b7999450cc6cc06b302cdb22905a0ea"
+        },
+        {
+          "file": "server-readiness.actual-consumer-acceptance-proof-v1.json",
+          "sha256": "7256312b96c895e4f8adab98899484a1c35fae26a2aeef5cf513e849c68a2708"
+        },
+        {
+          "file": "server-request-effects.actual-consumer-acceptance-proof-v1.json",
+          "sha256": "67b5834ed4b42d60662ac04fd4538e6828236097459eedb7415eedcb9e4ed068"
+        },
+        {
+          "file": "server-client-keys.actual-consumer-acceptance-proof-v1.json",
+          "sha256": "50068c98d72d75e890ce18ef098a606c2be91431db14cee3fb88c6b1931a379a"
+        },
+        {
+          "file": "server-core.actual-consumer-acceptance-proof-v2.json",
+          "sha256": "24424efce5fd897a900d8176564b421fe96754558b0a1c2dc588216a469f4b34"
+        },
+        {
+          "file": "runtime-settings.consumer-parity-v1.json",
+          "sha256": "9d51937cb07de7aabbcae667a2c9aad9273efdbe6895af29e3ab6370d8145804"
+        },
+        {
+          "file": "runtime-settings.consumer-linux-parity-v1.json",
+          "sha256": "6ce4809bf7c42cf751efe22984ff9cbb02454423f14f45ccffeab878b0fa82a0"
+        },
+        {
+          "file": "promise-queues.consumer-v1.json",
+          "sha256": "3982cb5bbef2d8a8d0bdc4c35be9c37eaeb7e0a80727c542b7fe755716b6c487"
+        },
+        {
+          "file": "migration-coordinator.consumer-proof-v1.json",
+          "sha256": "14653c8670f4fca934a8589b442809f2dce652602f8946a55273a3bf4f651a4c"
+        }
+      ],
+      "typed_target_bindings_permitted_by_accepted_classification": true,
+      "permanent_source_retention_exception": false,
+      "future_changes_require_current_acceptance": true
+    },
+    {
+      "boundary": "B13",
+      "name": "Identity and sign-in",
+      "accepted_target_responsibility": "Better Auth, passkey verification, configured identity providers, mail delivery, bot check and crypto use explicit target ports. Standard security primitives remain external dependencies.",
+      "required_acceptance": "Capture complete local/hosted auth schema and upgrade behavior, then acceptance with the actual configured adapters and synthetic accounts. Five/six-table diagnostics alone do not qualify identity.",
+      "dependencies": [
+        "B12-store-port"
+      ],
+      "current_member_hashes": {
+        "lib/identity-effects.mts": "062cf177a33b17ad4c50dd96f9819234b8cdb9bb05f204711aca6b60954de024",
+        "lib/v2/access.ts": "89dee7747a9f201a0feb3750c7da7bab56d603a7438af8ef59862ad29adf01b7",
+        "lib/v2/account.ts": "57c3a4b69b5148ff6817cb3d3081558c521f619a46776cd876c20e71b84afdb1",
+        "lib/v2/auth.ts": "152f29d5eee4008cf7df906691cc21316bfbebaf58c59a1d6d87ea55b866058b",
+        "lib/v2/captcha.ts": "f1fb1d4376650b7460d83d9b33e8b567cbd6add03cc38e59ed87ebe0522b278f",
+        "lib/v2/creation.ts": "76c36cf37eef207136c7fcc7eb72d9087b33fb839688f29d3982f555e2363569",
+        "lib/v2/disposable.ts": "c56edadff7eb326ff05a67ea9a7c2a45a286f6176265df79349eff1de782f248",
+        "lib/v2/lifecycle.ts": "e8b5006b32e036cf1934dd7ddd3391be2fc463d0a04d1e6fbe0a0b97f8ae2370",
+        "lib/v2/local-owner.ts": "cdde7b129b6cd14852f4de94e3310411cc50ec5ef695c0e8a6b869fe0c2d1cc7",
+        "lib/v2/mail.ts": "bf3b47957ff1e088d687954f1d94e4932bd2fee84973420e5fffab091f37df74"
+      },
+      "current_qualified_bindings": [
+        {
+          "component": "server-identity-effects",
+          "provider": ".literate/native-projects/local-server-identity-effects",
+          "package": "server_identity_effects",
+          "entry": "130dc20f92f192e5983773abdebe0e160b5059c17db0fe82efbeb36f7f479188",
+          "lock_identity": "sha256:fab22408cc2d9cd48e1e6a4c18f2c3ffb1b552265f88bf0ae01a3a8c03e87bcd",
+          "oracle": "server-identity-effects.json",
+          "oracle_sha256": "40ea4bc8dbf14f15aefbe390e4f5daa67059db85da28c8001351ef90735d6111",
+          "independent_batches": 4
+        },
+        {
+          "component": "server-account-lifecycle",
+          "provider": ".literate/native-projects/local-server-account-lifecycle",
+          "package": "server_account_lifecycle",
+          "entry": "f979e97da87d09cb7bdd38ba31121fd5a52a9c09b2e031bf14082002ec67b036",
+          "lock_identity": "sha256:405afe3f431540b738616ac2ffc0a09db085736ecead2f884b84726c4baee2f2",
+          "oracle": "server-account-lifecycle.json",
+          "oracle_sha256": "207d712f01cdcb683efa51475d4d2518fb44ee1233cc1782c1292f4601725313",
+          "independent_batches": 4
+        },
+        {
+          "component": "server-workspace-admission",
+          "provider": ".literate/native-projects/local-server-workspace-admission",
+          "package": "server_workspace_admission",
+          "entry": "01aab8479df43d13756748bf117dd088da002e84156a600147b4d3ff968dc94a",
+          "lock_identity": "sha256:18adf3074b60f4670bf51b3e06cd8e16ae3958dac79b6ecff49b2b20912851c3",
+          "oracle": "server-workspace-admission.json",
+          "oracle_sha256": "2e3e673140899926f3440e50c8acb8dc41ea7167e086e3e44381e5a01fcf5084",
+          "independent_batches": 4
+        },
+        {
+          "component": "server-local-owner-bootstrap",
+          "provider": ".literate/native-projects/local-server-local-owner-bootstrap",
+          "package": "server_local_owner_bootstrap",
+          "entry": "46e7ec492f0a97ed188d4c20fcef977878d1f53bdfd083482473272a1ef74f09",
+          "lock_identity": "sha256:24c03e5d8223e14ee64310a80ebafa3c694510a847f53a172cb1ebe4bc81005c",
+          "oracle": "server-local-owner-bootstrap.json",
+          "oracle_sha256": "92197c48ca8b7be819aa30df83566a8f9e7a663943ba9e92cba040acb7fa2c80",
+          "independent_batches": 2
+        },
+        {
+          "component": "server-auth",
+          "provider": ".literate/native-projects/local-server-auth",
+          "package": "server_auth",
+          "entry": "0b0665742f461716ab4550a4ee727630439ec8cc9172e75a4518bc9b6d8141b6",
+          "lock_identity": "sha256:ddfc6d472ed131c56df0100c8b03047fdeb97ce71efc041a8215081ab7c14aa1",
+          "oracle": "server-auth.json",
+          "oracle_sha256": "3e49eba125fabf605ad85c734c548d805780cb27d8e4ae7e551a63b3242729a1",
+          "independent_batches": 35
+        }
+      ],
+      "runtime_source_read": true,
+      "retained_roles": "typed aliases, explicit host resources, shared public types and one missing-native-export refusal guard",
+      "original_application_algorithms_in_retained_members": false,
+      "whole_boundary_closed": true,
+      "closure_state": "Qualified behavior and exact current consumer accepted",
+      "required_acceptance_result": "All five identity components are qualified and admitted. Current package and actual typed-consumer acceptance preserve complete local and hosted authentication schemas, populated upgrades, real configured adapters and synthetic accounts on both hosts. Main authentication preserves 264 source observations, 68 binding records, 12 configured-provider records per host, 13 public value types and seven unchanged callers. Workspace admission retains the exact domain asset. External delivery and real-account browser acceptance remain release work.",
+      "supporting_measured_records": [
+        {
+          "file": "server-auth.admitted-package-proof-v5.json",
+          "sha256": "81c72cd4169896e1ec025d1a0131041080fd12feac8a6c36e0879a4bbff93080"
+        },
+        {
+          "file": "server-auth.actual-consumer-acceptance-proof-v1.json",
+          "sha256": "ae9976f5e38a84c17de54798fb63f79f4dd51eedabdb720428e2ae0ec40b475a"
+        },
+        {
+          "file": "server-auth.r7-consumer-types-proof-v1.json",
+          "sha256": "3784b458505a7bbcc497fc7e37540eb5879f115c475ac8c08208f71fe4dcfb3f"
+        },
+        {
+          "file": "server-identity-effects.actual-consumer-acceptance-proof-v1.json",
+          "sha256": "27e7731a8d7531660a3eaefb9180b6a4fc92517eb53cf4ef02f5f7aa0d56d2a1"
+        },
+        {
+          "file": "server-account-lifecycle.actual-consumer-acceptance-proof-v1.json",
+          "sha256": "d5f573e36166d0651bad5c95650e123338dd94907d10eb6129b29671b3ef771d"
+        },
+        {
+          "file": "server-identity-admission.actual-consumer-acceptance-proof-v1.json",
+          "sha256": "1e5acd1168c0bead070d509370c7a0b8dbd9b23d7923f670545751fa01ad4749"
+        }
+      ],
+      "typed_target_bindings_permitted_by_accepted_classification": true,
+      "permanent_source_retention_exception": false,
+      "future_changes_require_current_acceptance": true
+    }
+  ],
+  "public_tester_deployed": false,
+  "operator_security_accepted": false,
+  "live_qa_gates": 0,
+  "goal_complete": false,
+  "qualification_vm_is_not_a_security_boundary": true,
+  "image_equivalence_excludes_three_test_only_source_changes": true,
+  "historical_records_preserved": true,
+  "reviewed_publication": "server-auth.publication-proof-v1.json",
+  "normal_pre_push_review": {
+    "completed": true,
+    "optout_used": false,
+    "findings": [
+      "f_4c9283b5ecab",
+      "f_456d34de6a82",
+      "f_622b2d74e48e"
+    ],
+    "findings_automatically_dismissed": false,
+    "human_authentication_confirmation_before_merge": true,
+    "readable_qualification_code_inspected": true,
+    "older_tool_versions_refused_by_installed_probe_in8_controls": true,
+    "raw_inherited_metadata_difference_remains_for_tooling_review": true,
+    "native_behavior_acceptance_is_not_human_security_or_merge_approval": true
+  }
+}

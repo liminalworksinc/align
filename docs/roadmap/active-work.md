@@ -153,10 +153,11 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Next action:** Continue remaining accepted native boundaries from the
-  33-library authentication checkpoint. Preserve the previous publication and
-  every failed candidate. The public tester, operator security review and live
-  smoke remain open.
+- **Next action:** Continue B14 workspaces and the other 17 remaining native
+  boundaries from the 33-library checkpoint. The [current transfer review](native-boundary-transfers.md)
+  reconciles B01 through B13 against their accepted requirements and exact current
+  acceptance. Preserve the previous publication and every failed candidate.
+  The public tester, actual operator security review and live smoke remain open.
 - **Account and membership scope:** Preserve all seven account operations and
   both membership lifecycle operations through two supplied-service factories.
   Account captures 21 resources; lifecycle captures six. The caller retains SQL
