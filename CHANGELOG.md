@@ -8,6 +8,9 @@
   another is requested, and says when the confirmation replaces that rule.
 - The live-agent test client uses fresh HTTP connections after synchronous CLI calls so the offline-revocation
   scenario can finish without a stale keep-alive socket reset.
+- Recheck member and open-invite capacity inside the invitation transaction,
+  preserving the early refusal while queued writers wait for SQLite.
+
 - Use qualified authentication configuration and sign-in callbacks through 52
   explicit host resources. Preserve session caps, code limits, delivery cleanup,
   configured schemas and migrations, all 13 public types and seven callers.

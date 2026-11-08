@@ -518,6 +518,14 @@ try {
     ceilingTiming.status === 0 && ceilingTimingResult?.cases === 18 && ceilingTimingResult?.failed === 0,
     ceilingTiming.stderr || ceilingTiming.stdout.slice(0, 300),
   );
+  const inviteCapRun = await commandAsync(process.execPath, ["--no-warnings", "--experimental-vm-modules", "scripts/test-invite-cap.mjs"], process.env);
+  let inviteCapResult = null;
+  try { inviteCapResult = JSON.parse(inviteCapRun.stdout); } catch { inviteCapResult = null; }
+  check(
+    "invite caps: independent SQLite writers recheck member and open-invite capacity after acquiring the transaction",
+    inviteCapRun.status === 0 && inviteCapResult?.passed === 6 && inviteCapResult?.failed === 0,
+    inviteCapRun.stderr || inviteCapRun.stdout.slice(0, 500),
+  );
   // ======== phase local: Mode L with no settings (v2 always on, the local owner, email codes) ========
   const localDir = path.join(tmpRoot, "local");
   // ALIGN_LOCAL_CODES_PER_HOUR=16: Mode L's machine-wide ceiling on code sends (default 60), low here so the test reaches it.

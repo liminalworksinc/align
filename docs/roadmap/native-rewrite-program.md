@@ -9,61 +9,52 @@ until each boundary earns transfer under ADR 0002.
 
 ## Latest candidate status
 
-The previous published checkpoint is `7bdcb130`, with 32 qualified libraries,
-438 retained source members, 1,845 application checks and 36 image checks. Its
-source identities and receipts remain evidence for that exact checkpoint.
+The current candidate corrects [issue #76](https://github.com/liminalworksinc/align/issues/76).
+Invitation creation keeps the early capacity refusal and repeats the same check
+after acquiring the SQLite write lock, immediately before insertion. The
+preserved original exceeds the cap in all three held-lock schedules; the
+correction passes all six held-lock and uncontended schedules on both hosts.
+The source correction is one added check. All 947 prior application expectations
+remain unchanged, and the application harness adds the six-case regression as
+one additional check. The 65 owned scenarios, ten populated SQLite controls and
+353 byte-identical non-invitation observations also pass.
 
-The current candidate registers 33 qualified libraries. Main authentication now
-uses a factory with 52 explicit host resources. Two distinct clean macOS
-qualifications pass 35 independent batches each. A separate admitted generation
-passes five generated smoke tests with zero build-cache hits or repairs. Its
-264 original observations, 68 binding checks and 12 configured Better Auth and
-passkey 1.7.10 records pass on macOS and Linux. The production host assembly also
-passes all 264 observations and 12 actual provider records on each host. All 13
-public value types match and all seven unchanged production callers compile.
+The complete build, test and package workflow passes 1,846 checks with zero
+failures and skips on the same 442-member source `sha256:d3b140776595e681ba9ded9ead514ca429881fa1f1e95d4a941b1f808b5408b0`.
+All 36 image checks, six static assets and the exact root-owned domain asset
+pass against `sha256:e0846ceb4ce798129f100bfe2a4ae3832b8bee72e484078a139c8d54f8274e5e`. Every full-workflow input matches the image
+source. The paired source controls also run under that Linux image's Node
+runtime with networking disabled; they are separate from the canonical HTTP
+image checks. The unchanged 150 ms p95 hook requirement passes with networking
+blocked. Current and CI readers each pass three gates with two declared optional
+skips and explicitly verify all 33 qualified projections. Current parent receipt:
+`sha256:6c802f17b8075718811e528aa317faf63fcd77d694f777a7f1a5547fe0275c41`.
 
-The complete original source remains preserved with its Sensitive
-classification. A signed delegated-policy review permits local static intake;
-its separate policy opt-in remains explicit. Both generation requests and the
-separate admission request were inspected. Exact result binding, retained
-archive custody and the qualified projection are verified. This review is not
-operator security acceptance. Earlier refused candidates remain preserved.
+All 33 qualified providers and their pins remain unchanged. Web materialization
+preserves 830 private batches across 27 libraries. The image preserves the exact
+41-file operator runtime with five qualified packages. The declared retained
+Standard driver remains unchanged; the current and CI readers use exact revision
+`77be5baf` for the reviewed-intake record format. Original failed candidates and
+all failed controls remain preserved.
 
-All prior 32 consumer pins remain exact. Web materialization passes 830 private
-batches across 27 libraries. The source refresh adds the authentication oracle,
-independent harness and a test-only admitted-authentication fixture, for 441 members.
-The first complete application run exposed two tests tied to the retired source
-layout. Provider discovery now uses actual admitted options and scans generated
-JavaScript too. All 18 original clock cases and their exact expected Retry-After
-values remain unchanged; they run the hash-checked admitted authentication factory.
-Missing disclosures, undeclared hosts, changed admitted bytes and the historical
-two-clock error are each refused by focused controls. The original failed run is
-preserved. Production code and all 33 admitted libraries remain unchanged.
-The declared retained build driver remains unchanged; current and CI readers
-use exact revision `77be5baf` for the reviewed-intake record format.
+Main authentication retains its two clean 35-batch qualifications and separate
+admitted generation. The package and production assembly preserve all 264 source
+observations, 68 binding records and 12 configured-provider records on each host,
+13 public value types and seven unchanged callers. Sensitive source
+classification, signed static-intake policy and exact domain-asset custody
+remain unchanged. The operator explicitly confirmed the moved authentication
+checks on 2026-11-08. The [current transfer review](native-boundary-transfers.md)
+therefore records B01 through B13 as accepted transfers.
 
-The complete configured build, test and package workflow passes 1,845
-checks with zero failures or skips on the same 441-member source
-`sha256:7e92a2b1db1b49f334a96b7ddb4cd5fb334d1e420b5c67b4093655b0e26e4112`. All 36 image checks, all six static assets and the
-exact root-owned domain asset pass with unchanged production inputs against `sha256:3b9461d6867d3170fc2a5ec7916acb79540286f0ead1d7c1c308dc159dcd19d5`. The unchanged
-150 ms p95 hook requirement passes with networking blocked. Current and fresh
-CI verification pass three gates with two declared optional skips and each
-verify all 33 qualified projections. Current parent receipt:
-`sha256:84b86b98e0b05ae2254a5512803c0b1832dc29d1101b11a863cd3a7448b43d6a`.
-
-This completes the scoped authentication functional acceptance. Actual checkout
-publication is recorded in Git and the draft PR. The [current transfer review](native-boundary-transfers.md)
-reconciles B01 through B12 as accepted native transfers. B13 identity has
-complete qualification, typed-consumer parity and current full/image/receipt
-results, but remains open until human confirmation of the moved authentication
-checks. Twelve of 31 boundaries are accepted; 19 remain open, including that B13
-review and the 18 implementation boundaries starting with B14 workspaces.
-This count does not estimate the remaining effort. The complete
-migration, public tester URL, actual operator security review and live smoke
-remain open. This same-agent review supplies no independent maintainer or actual
-operator security approval. The architecture record preserves its record-time flags;
-current parent completion is recorded here and in `verification/current.json`.
-See the authentication acceptance record linked from the project guide.
+Thirteen of 31 boundaries are accepted; 18 implementation boundaries remain,
+starting with B14 workspaces. That count does not estimate remaining effort.
+Continue B14 from the deliberately corrected retained baseline. Actual
+publication is recorded in Git and the draft PR. The complete migration, public
+tester URL, real delivery and provider-browser acceptance, actual operator
+security review of the deployed tester, and live smoke remain open. The
+authentication confirmation supplies no independent maintainer review, merge
+approval or deployed-tester security acceptance. Earlier architecture records
+preserve their record-time flags.
 
 ## Current main integration
 

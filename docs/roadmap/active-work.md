@@ -155,10 +155,19 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   authority until each boundary independently qualifies.
 - **Next action:** Continue B14 workspaces and the other 17 remaining native
   boundaries from the 33-library checkpoint. The [current transfer review](native-boundary-transfers.md)
-  records B01 through B12 as accepted transfers. B13 has complete functional
-  acceptance and remains open for human confirmation of the moved authentication
-  checks. Preserve the previous publication and every failed candidate.
+  records B01 through B13 as accepted transfers after the operator's explicit
+  authentication confirmation. Preserve the previous publication and every
+  failed candidate.
   The public tester, actual operator security review and live smoke remain open.
+- **B14 prerequisite:** [Issue #76](https://github.com/liminalworksinc/align/issues/76)
+  reproduces an existing invite-cap race while writers wait for SQLite. The local
+  correction preserves the early check and rechecks under the transaction lock.
+  All six corrected schedules pass on both hosts, while the preserved original
+  fails all three held-lock schedules. The complete workflow passes 1,846 checks
+  on 442 retained members, all 36 image checks and six static assets pass, and
+  both readers verify the current receipt `sha256:6c802f17b8075718811e528aa317faf63fcd77d694f777a7f1a5547fe0275c41`.
+  Git and the draft PR record publication. Native conversion starts from this
+  deliberately corrected source, preserving the failing original controls.
 - **Account and membership scope:** Preserve all seven account operations and
   both membership lifecycle operations through two supplied-service factories.
   Account captures 21 resources; lifecycle captures six. The caller retains SQL

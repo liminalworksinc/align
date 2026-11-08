@@ -1,22 +1,14 @@
 {
-  "schema": "align/native-boundary-transfer-review@2",
-  "observed_utc": "2026-11-08T18:43:47.102793+00:00",
-  "review_kind": "Same-agent acceptance reconciliation, not independent maintainer or actual operator security approval",
+  "schema": "align/native-boundary-transfer-review@3",
+  "observed_utc": "2026-11-08T21:45:39.407822+00:00",
+  "review_kind": "Same-agent source and measured acceptance reconciliation, with explicit operator confirmation of the B13 transfer gate. No independent maintainer or deployed-tester security acceptance.",
   "accepted_classification_sha256": "236b77cbd13222ec77aac7f3fc9c1d8cccaa6a46b662352ca7a5f5fb7d8ddf87",
-  "tested_commit": "6cef3ced7856fb8ad34ff6cad7d3f4af893b32ea",
-  "tested_tree": "b4366b3f0c46132df1cffc3eaccc1d954387ac7e",
-  "source_identity": "sha256:7e92a2b1db1b49f334a96b7ddb4cd5fb334d1e420b5c67b4093655b0e26e4112",
-  "parent_receipt": "sha256:84b86b98e0b05ae2254a5512803c0b1832dc29d1101b11a863cd3a7448b43d6a",
-  "application_checks": 1845,
-  "image_checks": 36,
   "image_platform": "linux/arm64",
-  "source_members": 441,
   "qualified_components": 33,
   "reviewed_source_members": 51,
-  "completed_boundaries": 12,
+  "completed_boundaries": 13,
   "total_boundaries": 31,
   "remaining_boundaries": [
-    "B13",
     "B14",
     "B15",
     "B16",
@@ -74,6 +66,26 @@
     {
       "file": "server-auth.host-minimum-review-proof-v1.json",
       "sha256": "0d3f2f73996a99e41bf428c493fc50c657c035a356bbf5911abcdf68c5257a89"
+    },
+    {
+      "file": "server-workspaces.invite-cap-parent-full-workflow-proof-v1.json",
+      "sha256": "3f41424b3078f550d10a99d02201f979b96d8bd6b99cc1071bf6f8a5bbdb08a9"
+    },
+    {
+      "file": "server-workspaces.invite-cap-parent-current-readiness-proof-v1.json",
+      "sha256": "131656ee48292163b9506581fa9849cf90a308dafa736fff94377f275d55b5f1"
+    },
+    {
+      "file": "server-workspaces.invite-cap-image-source-equivalence-v1.json",
+      "sha256": "ab6974423d3b6c4e558fd483d7ad76cc80c2a51968232aa3ff260b9984ec2991"
+    },
+    {
+      "file": "server-workspaces.invite-cap-image-linux-controls-proof-v1.json",
+      "sha256": "eb117452a9482b51e3dcd70458d906d34f6366a0d90a97122b4f59e189757c5b"
+    },
+    {
+      "file": "server-auth.operator-transfer-confirmation-v1.json",
+      "sha256": "731e63321edee8813e483e356f5531d1d80a8e1cc0ee963498c1648657746b20"
     }
   ],
   "rows": [
@@ -856,8 +868,8 @@
       "runtime_source_read": true,
       "retained_roles": "typed aliases, explicit host resources, shared public types and one missing-native-export refusal guard",
       "original_application_algorithms_in_retained_members": false,
-      "whole_boundary_closed": false,
-      "closure_state": "Functional parity verified; human confirmation of moved authentication checks required before transfer closure and merge",
+      "whole_boundary_closed": true,
+      "closure_state": "Complete qualification and functional acceptance, followed by explicit operator confirmation of the moved authentication checks.",
       "required_acceptance_result": "All five identity components are qualified and admitted. Current package and actual typed-consumer acceptance preserve complete local and hosted authentication schemas, populated upgrades, real configured adapters and synthetic accounts on both hosts. Main authentication preserves 264 source observations, 68 binding records, 12 configured-provider records per host, 13 public value types and seven unchanged callers. Workspace admission retains the exact domain asset. External delivery and real-account browser acceptance remain release work.",
       "supporting_measured_records": [
         {
@@ -889,11 +901,22 @@
       "permanent_source_retention_exception": false,
       "future_changes_require_current_acceptance": true,
       "functional_acceptance_complete": true,
-      "source_retirement_review_pending": true,
-      "blocking_review_findings": [
-        "f_4c9283b5ecab",
-        "f_fcab81184174"
-      ]
+      "source_retirement_review_pending": false,
+      "blocking_review_findings": [],
+      "operator_confirmation": {
+        "confirmed": true,
+        "received_utc": "2026-11-08T20:26:25.265882+00:00",
+        "scope": "Human confirmation of moved B13 authentication checks after complete functional acceptance.",
+        "qualified_auth_source_sha256": "fce2b1acff3b796d0956f06f8d31d9005ed1a503222e92af381c2270eaeed928",
+        "qualification_decision": "sha256:42633dfcb1776825ddcafb1256c42078a243584dacfda7d1be7abfaf0180530b",
+        "authentication_commit": "6cef3ced7856fb8ad34ff6cad7d3f4af893b32ea",
+        "independent_maintainer_review_claimed": false,
+        "final_deployed_tester_security_acceptance": false
+      },
+      "resolved_review_gates": {
+        "f_4c9283b5ecab": "Explicit operator confirmation received.",
+        "f_fcab81184174": "Premature label corrected in fd70cc2a before this later operator confirmation."
+      }
     }
   ],
   "public_tester_deployed": false,
@@ -901,9 +924,8 @@
   "live_qa_gates": 0,
   "goal_complete": false,
   "qualification_vm_is_not_a_security_boundary": true,
-  "image_equivalence_excludes_three_test_only_source_changes": true,
+  "image_equivalence_excludes_three_test_only_source_changes": false,
   "historical_records_preserved": true,
-  "reviewed_publication": "server-auth.publication-proof-v1.json",
   "normal_pre_push_review": {
     "completed": true,
     "optout_used": false,
@@ -919,12 +941,50 @@
     "raw_inherited_metadata_difference_remains_for_tooling_review": true,
     "native_behavior_acceptance_is_not_human_security_or_merge_approval": true,
     "additional_status_finding": "f_fcab81184174",
-    "identity_transfer_closure_pending_human_confirmation": true
+    "identity_transfer_closure_pending_human_confirmation": false,
+    "applies_to_authentication_baseline": "6cef3ced7856fb8ad34ff6cad7d3f4af893b32ea",
+    "human_authentication_confirmation_received": true,
+    "operator_confirmation": {
+      "confirmed": true,
+      "received_utc": "2026-11-08T20:26:25.265882+00:00",
+      "scope": "Human confirmation of moved B13 authentication checks after complete functional acceptance.",
+      "qualified_auth_source_sha256": "fce2b1acff3b796d0956f06f8d31d9005ed1a503222e92af381c2270eaeed928",
+      "qualification_decision": "sha256:42633dfcb1776825ddcafb1256c42078a243584dacfda7d1be7abfaf0180530b",
+      "authentication_commit": "6cef3ced7856fb8ad34ff6cad7d3f4af893b32ea",
+      "independent_maintainer_review_claimed": false,
+      "final_deployed_tester_security_acceptance": false
+    }
   },
   "boundaries_with_complete_functional_acceptance": 13,
   "implementation_boundaries_remaining": 18,
-  "human_confirmation_required_for_transfer_closure": [
-    "B13"
-  ],
-  "corrected_after_review": "f_fcab81184174"
+  "human_confirmation_required_for_transfer_closure": [],
+  "corrected_after_review": "f_fcab81184174",
+  "prior_authentication_acceptance": {
+    "tested_commit": "6cef3ced7856fb8ad34ff6cad7d3f4af893b32ea",
+    "tested_tree": "b4366b3f0c46132df1cffc3eaccc1d954387ac7e",
+    "source_identity": "sha256:7e92a2b1db1b49f334a96b7ddb4cd5fb334d1e420b5c67b4093655b0e26e4112",
+    "parent_receipt": "sha256:84b86b98e0b05ae2254a5512803c0b1832dc29d1101b11a863cd3a7448b43d6a",
+    "application_checks": 1845,
+    "image_checks": 36,
+    "source_members": 441,
+    "reviewed_publication": "server-auth.publication-proof-v1.json"
+  },
+  "operator_authentication_transfer_confirmation": {
+    "confirmed": true,
+    "received_utc": "2026-11-08T20:26:25.265882+00:00",
+    "scope": "Human confirmation of moved B13 authentication checks after complete functional acceptance.",
+    "qualified_auth_source_sha256": "fce2b1acff3b796d0956f06f8d31d9005ed1a503222e92af381c2270eaeed928",
+    "qualification_decision": "sha256:42633dfcb1776825ddcafb1256c42078a243584dacfda7d1be7abfaf0180530b",
+    "authentication_commit": "6cef3ced7856fb8ad34ff6cad7d3f4af893b32ea",
+    "independent_maintainer_review_claimed": false,
+    "final_deployed_tester_security_acceptance": false
+  },
+  "source_identity": "sha256:d3b140776595e681ba9ded9ead514ca429881fa1f1e95d4a941b1f808b5408b0",
+  "parent_receipt": "sha256:6c802f17b8075718811e528aa317faf63fcd77d694f777a7f1a5547fe0275c41",
+  "application_checks": 1846,
+  "image_checks": 36,
+  "source_members": 442,
+  "image_id": "sha256:e0846ceb4ce798129f100bfe2a4ae3832b8bee72e484078a139c8d54f8274e5e",
+  "current_source_checkpoint_recorded_by_git": true,
+  "current_image_all_full_workflow_inputs_exact": true
 }

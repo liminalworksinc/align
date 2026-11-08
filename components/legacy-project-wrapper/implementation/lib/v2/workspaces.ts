@@ -260,6 +260,7 @@ export async function createInvite(pp: PolicyPrincipal, email: string, role: WsR
   const id = newId("inv");
   const at = nowIso();
   await tx(() => {
+    checkMemberCap(pp.wsId, true);
     run(
       "INSERT INTO v2_invites (id, ws_id, token_hash, email, role, team_id, team_role, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       id,
