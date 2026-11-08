@@ -155,8 +155,9 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   authority until each boundary independently qualifies.
 - **Next action:** Continue B14 workspaces and the other 17 remaining native
   boundaries from the 33-library checkpoint. The [current transfer review](native-boundary-transfers.md)
-  reconciles B01 through B13 against their accepted requirements and exact current
-  acceptance. Preserve the previous publication and every failed candidate.
+  records B01 through B12 as accepted transfers. B13 has complete functional
+  acceptance and remains open for human confirmation of the moved authentication
+  checks. Preserve the previous publication and every failed candidate.
   The public tester, actual operator security review and live smoke remain open.
 - **Account and membership scope:** Preserve all seven account operations and
   both membership lifecycle operations through two supplied-service factories.
@@ -275,7 +276,8 @@ authentication candidate below supersedes its pending-intake status.
   - [x] Finish child readiness and register it normally, preserving prior 32 pins.
   - [x] Accept exact production host assembly, all 13 public types and seven callers.
   - [x] Pass the full application and 36 image checks against the final source.
-  - [x] Record a current parent receipt and complete reviewed source-transfer acceptance.
+  - [x] Record a current parent receipt and complete reviewed functional acceptance.
+  - [ ] Obtain human confirmation of the moved authentication checks and close B13 transfer.
 
 The complete build, test and package workflow passes 1,845 checks with
 zero failures and skips on the same 441-member source `sha256:7e92a2b1db1b49f334a96b7ddb4cd5fb334d1e420b5c67b4093655b0e26e4112`.

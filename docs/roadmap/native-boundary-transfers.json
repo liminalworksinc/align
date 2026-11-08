@@ -1,5 +1,5 @@
 {
-  "schema": "align/native-boundary-transfer-review@1",
+  "schema": "align/native-boundary-transfer-review@2",
   "observed_utc": "2026-11-08T18:43:47.102793+00:00",
   "review_kind": "Same-agent acceptance reconciliation, not independent maintainer or actual operator security approval",
   "accepted_classification_sha256": "236b77cbd13222ec77aac7f3fc9c1d8cccaa6a46b662352ca7a5f5fb7d8ddf87",
@@ -13,9 +13,10 @@
   "source_members": 441,
   "qualified_components": 33,
   "reviewed_source_members": 51,
-  "completed_boundaries": 13,
+  "completed_boundaries": 12,
   "total_boundaries": 31,
   "remaining_boundaries": [
+    "B13",
     "B14",
     "B15",
     "B16",
@@ -855,8 +856,8 @@
       "runtime_source_read": true,
       "retained_roles": "typed aliases, explicit host resources, shared public types and one missing-native-export refusal guard",
       "original_application_algorithms_in_retained_members": false,
-      "whole_boundary_closed": true,
-      "closure_state": "Qualified behavior and exact current consumer accepted",
+      "whole_boundary_closed": false,
+      "closure_state": "Functional parity verified; human confirmation of moved authentication checks required before transfer closure and merge",
       "required_acceptance_result": "All five identity components are qualified and admitted. Current package and actual typed-consumer acceptance preserve complete local and hosted authentication schemas, populated upgrades, real configured adapters and synthetic accounts on both hosts. Main authentication preserves 264 source observations, 68 binding records, 12 configured-provider records per host, 13 public value types and seven unchanged callers. Workspace admission retains the exact domain asset. External delivery and real-account browser acceptance remain release work.",
       "supporting_measured_records": [
         {
@@ -886,7 +887,13 @@
       ],
       "typed_target_bindings_permitted_by_accepted_classification": true,
       "permanent_source_retention_exception": false,
-      "future_changes_require_current_acceptance": true
+      "future_changes_require_current_acceptance": true,
+      "functional_acceptance_complete": true,
+      "source_retirement_review_pending": true,
+      "blocking_review_findings": [
+        "f_4c9283b5ecab",
+        "f_fcab81184174"
+      ]
     }
   ],
   "public_tester_deployed": false,
@@ -910,6 +917,14 @@
     "readable_qualification_code_inspected": true,
     "older_tool_versions_refused_by_installed_probe_in8_controls": true,
     "raw_inherited_metadata_difference_remains_for_tooling_review": true,
-    "native_behavior_acceptance_is_not_human_security_or_merge_approval": true
-  }
+    "native_behavior_acceptance_is_not_human_security_or_merge_approval": true,
+    "additional_status_finding": "f_fcab81184174",
+    "identity_transfer_closure_pending_human_confirmation": true
+  },
+  "boundaries_with_complete_functional_acceptance": 13,
+  "implementation_boundaries_remaining": 18,
+  "human_confirmation_required_for_transfer_closure": [
+    "B13"
+  ],
+  "corrected_after_review": "f_fcab81184174"
 }

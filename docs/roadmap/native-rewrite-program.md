@@ -51,12 +51,14 @@ CI verification pass three gates with two declared optional skips and each
 verify all 33 qualified projections. Current parent receipt:
 `sha256:84b86b98e0b05ae2254a5512803c0b1832dc29d1101b11a863cd3a7448b43d6a`.
 
-This completes the scoped authentication transfer acceptance. Actual checkout
+This completes the scoped authentication functional acceptance. Actual checkout
 publication is recorded in Git and the draft PR. The [current transfer review](native-boundary-transfers.md)
-reconciles B01 through B13 against the accepted requirements, exact qualified
-packages, reviewed typed bindings and current consumer/full/image/receipt gates.
-Thirteen of 31 native boundaries are accepted; 18 remain open, starting with B14
-workspaces. This count does not estimate the remaining effort. The complete
+reconciles B01 through B12 as accepted native transfers. B13 identity has
+complete qualification, typed-consumer parity and current full/image/receipt
+results, but remains open until human confirmation of the moved authentication
+checks. Twelve of 31 boundaries are accepted; 19 remain open, including that B13
+review and the 18 implementation boundaries starting with B14 workspaces.
+This count does not estimate the remaining effort. The complete
 migration, public tester URL, actual operator security review and live smoke
 remain open. This same-agent review supplies no independent maintainer or actual
 operator security approval. The architecture record preserves its record-time flags;
