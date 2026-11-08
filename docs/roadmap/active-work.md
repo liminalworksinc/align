@@ -153,11 +153,10 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Next action:** Continue the remaining identity helpers and accepted native
-  boundaries after the complete local account and membership checkpoint. Validate
-  normal immutable-asset custody before workspace admission. The separate main
-  authentication intake issue and proposed parent design remain pending. Preserve
-  reviewed candidates and the actual checkout until specific publication approval.
+- **Next action:** Continue main authentication and all remaining accepted native
+  boundaries from this 32-library checkpoint. Preserve the previous publication
+  and every failed candidate. The public tester, operator security review and
+  live smoke remain open.
 - **Account and membership scope:** Preserve all seven account operations and
   both membership lifecycle operations through two supplied-service factories.
   Account captures 21 resources; lifecycle captures six. The caller retains SQL
@@ -189,38 +188,73 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [x] Pass the immutable production image and current parent receipt gates.
   - [x] Freeze helper transfer acceptance only after those complete gates pass.
 
-See the [scoped account and membership acceptance record](../architecture/server-account-lifecycle-admitted-acceptance.json).
-This local candidate has 30 registered libraries. The prior reviewed 29-library
-checkpoint remains preserved. Original helper snapshots and failed candidates
-remain private evidence. This private candidate completes the helper's local
-transfer acceptance after the complete application, image and current-receipt
-gates. The actual checkout has not been transferred. Main authentication, other
-identity helpers, full B13 and all 31-boundary closure remain open. There is no public
-tester URL and no live security/smoke acceptance. No Git metadata, remote write
-or new worktree was added. Peer/tracker inspection remains the named
-project.tracker_not_a_git_repository skip for this ordinary source artifact.
+See the [account and membership acceptance record](../architecture/server-account-lifecycle-admitted-acceptance.json).
+That completed 30-library checkpoint is published at `a39a99b3`, with passing
+remote CI, 1,845 application checks and 36 image checks. Its source, immutable
+packages and receipt remain preserved.
 
-The complete 30-library build, test and package workflow passes
-1,845 checks with zero failures or skips against the same 434-member source
-`sha256:6cb2bc711e3794ad1889dac5ed23baf50e2abb50b6d852a22d15fab6de8fcc63`. The unchanged hook test passes its 150 ms p95
-requirement with networking blocked. All 36 image, header and startup-refusal
-checks pass against `sha256:de72f1b7ba37f626d2939b9040b7ea4a9ffe00c2b7a8c16f764633d363c83fdc`. All 6,468 image-source files match the
-full-workflow candidate before receipt and documentation metadata updates.
-The operator closure retains its exact 41 files and five qualified packages.
-All six retained static assets match their recorded bytes in the image.
-Current and CI-pinned verification each pass three gates with two declared
-optional skips. Current parent receipt: `sha256:9b7c02f6e6219c5d1316b0972592cd7c9f6f72d84f82da42d898dcadbd24d14b`.
+- **Workspace admission and local startup scope:** The candidate registers 32
+  independently qualified libraries. Workspace admission preserves all nine
+  functions, three stable mutable arrays, Creator and the complete 217324-byte,
+  10083-domain asset through three factories with 16, 18 and one resources.
+  Local owner startup preserves one asynchronous zero-argument function through
+  seven caller-owned resources. Four typed host modules retain configuration,
+  stores, transactions, authentication, errors and operation-time host readers.
+- **Independent helper evidence:**
+  - [x] Preserve all four complete original modules and the full domain data.
+  - [x] Promote reviewed intent through signed authorized-policy review with
+    separate acceptance opt-in. Preserve raw source observations and drafts.
+  - [x] Qualify two distinct clean generations for each helper. Workspace
+    admission passes four batches per run and eight/four generated tests; local
+    startup passes two batches and four generated tests per run.
+  - [x] Admit a separate generation for each helper, with six/three generated
+    smoke tests and all independent acceptance. Keep 51/46 protected files exact.
+  - [x] Prove both admitted packages on macOS and Linux, including exact full
+    asset bytes, named imports, 94 workspace observations, 64 bindings and
+    three adaptive faults; startup passes 59 observations and seven capture
+    failures. Inspect live requests without private source or acceptance payloads.
+  - [x] Complete both children's normal documentation, project-committed cache,
+    cache reuse, entrypoint, verification and current-receipt gates.
+  - [x] Register both ready children through separate normal plan/apply
+    transactions and preserve every previous registry and consumer record.
+  - [x] Execute the four actual typed host modules on both hosts. Workspace
+    retains all 94 observations and loads from three entry directions. Startup
+    retains all 58 functional host observations; its resource-container capture
+    case remains separately qualified and admitted.
+  - [x] Preserve all 13 value types, Creator and three readonly tuple types.
+    All five external callers remain exact and compile.
+  - [x] Materialize 26 web libraries through 795 batches and five operator
+    libraries through 218 batches. Both new packages and the domain asset are
+    byte exact. Forty operator files and all five package entries remain exact;
+    the parent-manifest marker binds the new manifest as required.
+  - [x] Complete configured authentication/store/startup composition and every
+    complete application build, test and package phase on one 438-member source.
+  - [x] Pass all 36 image/header/startup checks and exact raw runtime-asset
+    custody with app-user write refusal, against the same 438 implementation inputs.
+  - [x] Complete parent receipt, source/image equivalence and both verification
+    runtime gates before accepting either helper's source transfer.
 
-The complete configured application suite passes all 947 checks, including
-account deletion, membership cleanup, session endings, passkeys and sign-out.
-Actual typed imports preserve all 50 public records and seven adaptive faults
-on both hosts. All nine value types and PasskeyRow match; the seven external
-callers remain unchanged. Actual account, lifecycle, session and workspace
-modules load from four entry directions on both hosts.
+The first image passes all 36 canonical, header and startup-refusal checks, but
+its actual raw-asset scan finds no full original JSON file. That image and its
+source remain preserved. The retained B26 Docker assembly now explicitly copies
+the reviewed JSON into a root-owned runtime data directory. The corrected image passes all 36 checks and the exact raw-asset gate; the
+root-owned regular file refuses writes by UID 1000. The selected child target already owns the runtime-custody contract;
+complete B26 native conversion remains open.
 
-This is local helper acceptance. The full 31-boundary program, public tester
-URL, operator security review and live smoke remain open. Commit, push and
-deployment require specific approval.
+See the [workspace and startup acceptance record](../architecture/server-identity-admission-admitted-acceptance.json).
+The 32-library checkpoint passes the complete build, test and package workflow
+with 1,845 checks, zero failures and zero skips on one 438-member source
+`sha256:6af01984df14a122040f769df349ed7a82d7b157424ff0165a3213257c3bd1f1`. All 36 image checks, six static assets and the exact
+root-owned runtime data pass. The operator closure retains five qualified
+packages and 41 exact files. Current and CI-pinned verification each pass three
+gates with two declared optional skips. Both readers verify all 32 qualified
+projections using exact revision `7adbe112`. The tested build driver remains
+pinned at `4d672137`. Current parent receipt: `sha256:7fa9ae736adce3b48aee21383419623656db736e50a6128a02cab10dbdafd0c6`.
+The ordinary source artifact and previous publication remain preserved;
+checkpoint publication is recorded separately in Git and the draft PR. Main authentication, complete B13 and all 31 native
+boundary closures remain open. There is no public tester URL or accepted live
+operator security/smoke gate. The separate main-authentication source-intake
+proposal remains part of the Align dependency queue.
 
 - **Sign-in effects scope:** Continue B13 by transferring the complete mail and
   captcha helper surfaces. The five functions and two constants use 15 explicit

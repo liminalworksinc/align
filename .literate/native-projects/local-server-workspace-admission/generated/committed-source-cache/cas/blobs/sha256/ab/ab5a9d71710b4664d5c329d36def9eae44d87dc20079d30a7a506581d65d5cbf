@@ -1,0 +1,151 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { create_creation } = require('../server_workspace_admission/create_creation.js');
+const { create_access } = require('../server_workspace_admission/create_access.js');
+const { create_disposable } = require('../server_workspace_admission/create_disposable.js');
+
+function PublicError(status, code, message) { return { status, code, message }; }
+function creationResources(overrides = {}) {
+  return {
+    config: () => ({ hosted: false }), secret: () => 'test-secret',
+    requireCaptcha: async () => {}, caps: () => ({ workspaces: 5, owned: 2, members: 3 }),
+    creationMode: () => 'codes', CODE_RE: /^code$/, redeemCreationCode: () => true,
+    get: () => undefined, sql: {}, refuseDisposable: () => {}, V2Error: PublicError,
+    conflict: (code, message) => PublicError(409, code, message),
+    forbidden: (code, message) => PublicError(403, code, message),
+    count: (n, unit) => `${n} ${unit}${n === 1 ? '' : 's'}`,
+    readFirstOwnerEmail: () => ' Owner@Example.ORG ',
+    memberCheckNow: () => '2026-01-01T00:00:00.000Z', ...overrides
+  };
+}
+
+const body = { email: 'PERSON@EXAMPLE.ORG', name: 'Person', company: null, team_size: null, use_case: 'Evaluate admission', interest: 'try' };
+const cases = [
+  { id: 'generated-code-needed', args: ['someone@example.org'], expected: true, operation: 'needsCode' },
+  { id: 'generated-owner-exempt', args: ['OWNER@EXAMPLE.ORG'], expected: false, operation: 'needsCode' },
+  { id: 'generated-empty-email', args: [''], expected: true, operation: 'needsCode' },
+  { id: 'generated-zero-session', args: [0], expected: { status: 403, code: 'session_cap', message: 'This device has shared 0 new sessions in the last 24 hours, the limit here. Contact the operator of this Align server to raise it.' }, operation: 'sessionCapError' },
+  { id: 'generated-one-session', args: [1], expected: { status: 403, code: 'session_cap', message: 'This device has shared 1 new session in the last 24 hours, the limit here. Contact the operator of this Align server to raise it.' }, operation: 'sessionCapError' },
+  { id: 'generated-access-insert', args: [{}, 'client-7', body], expected: { received: true }, operation: 'access' }
+];
+
+async function accessExample(args) {
+  const calls = [];
+  let inTx = false;
+  let api;
+  const resources = {
+    config: () => ({ hosted: true }),
+    requireCaptcha: async request => { assert.equal(request, args[0]); calls.push('captcha'); },
+    get: (query, email) => { assert.ok(inTx); assert.match(query, /status = 'pending'/); assert.equal(email, 'person@example.org'); calls.push('get'); },
+    run: (query, ...values) => {
+      assert.ok(inTx); assert.match(query, /^INSERT INTO v2_access_requests/);
+      assert.deepEqual(values, ['ar-test', 'person@example.org', 'Person', null, null, 'Evaluate admission', 'try', '2026-01-01T00:00:00.000Z']);
+      calls.push('insert'); return 1;
+    },
+    tx: async callback => {
+      calls.push('tx'); inTx = true;
+      try { const result = callback(); assert.equal(result, undefined); }
+      finally { inTx = false; }
+      calls.push('commit');
+    },
+    refuseDisposable: email => { assert.equal(email, 'person@example.org'); calls.push('disposable'); },
+    event: (name, options) => { assert.ok(inTx); assert.equal(name, 'access_requested'); assert.deepEqual(options, { props: { interest: 'try', via: 'form' } }); calls.push('event'); return true; },
+    V2Error: PublicError, badRequest: message => PublicError(400, 'bad_request', message),
+    newId: prefix => { assert.equal(prefix, 'ar'); calls.push('id'); return 'ar-test'; },
+    nowIso: () => { calls.push('now'); return '2026-01-01T00:00:00.000Z'; },
+    accessEmailKey: email => { assert.equal(email, 'person@example.org'); calls.push('key'); return 'keyed-email'; },
+    durableCount: function(limits) { assert.equal(arguments.length, 1); assert.ok(inTx); calls.push('count'); },
+    durableRoom: function(limits) {
+      assert.equal(arguments.length, 1);
+      assert.deepEqual(limits, [{ key: 'access-client:client-7', max: 5, windowMs: 3600000 }, { key: 'keyed-email', max: 3, windowMs: 86400000 }]);
+      calls.push('room'); return true;
+    },
+    oneOf: (b, k, allowed) => { assert.equal(b, args[2]); assert.equal(allowed, api.INTERESTS); calls.push(k); return b[k]; },
+    optOneOf: (b, k, allowed) => { assert.equal(b, args[2]); assert.equal(allowed, k === 'via' ? api.VIAS : api.TEAM_SIZES); calls.push(k); return b[k] ?? null; },
+    optStr: (b, k, max) => { assert.equal(b, args[2]); assert.equal(max, 100); calls.push(k); return b[k]; },
+    str: (b, k, max) => { assert.equal(b, args[2]); assert.equal(max, { email: 320, name: 100, use_case: 500 }[k]); calls.push(k); return b[k]; }
+  };
+  api = create_access(resources);
+  const detached = api.createAccessRequest;
+  const result = await detached(...args);
+  assert.deepEqual(calls, ['email', 'name', 'company', 'team_size', 'use_case', 'interest', 'via', 'disposable', 'key', 'room', 'captcha', 'tx', 'room', 'count', 'get', 'id', 'now', 'insert', 'event', 'commit']);
+  return result;
+}
+
+function structuralTests() {
+  const names = ['config', 'secret', 'requireCaptcha', 'caps', 'creationMode', 'CODE_RE', 'redeemCreationCode', 'get', 'sql', 'refuseDisposable', 'V2Error', 'conflict', 'forbidden', 'count', 'readFirstOwnerEmail', 'memberCheckNow'];
+  const read = [];
+  const values = creationResources();
+  const resource = {};
+  for (const key of names) Object.defineProperty(resource, key, { get() { read.push(key); return values[key]; } });
+  const api = create_creation(resource);
+  assert.deepEqual(read, names);
+  assert.deepEqual(Object.values(api).map(fn => fn.length), [1, 3, 3, 1, 2, 1]);
+  assert.equal(create_creation(creationResources({ creationMode: () => 'open', readFirstOwnerEmail: () => { throw 'unreachable'; } })).needsCode(null), false);
+  assert.equal(create_creation(creationResources({ readFirstOwnerEmail: () => '', get: () => { throw 'unreachable'; } })).needsCode(null), true);
+  assert.equal(create_creation(creationResources({ get: () => ({ id: 'deleted-workspace' }) })).needsCode('owner@example.org'), true);
+  const failure = {};
+  assert.throws(() => create_creation(creationResources({ get: () => { throw failure; } })).needsCode('owner@example.org'), e => e === failure);
+  const order = [];
+  const member = create_creation(creationResources({
+    caps: () => ({ members: 3 }), memberCheckNow: () => { order.push('clock'); return 'now'; },
+    get: (query, ...params) => { order.push('get'); assert.deepEqual(params, ['w']); return { n: 2 }; }
+  }));
+  member.checkMemberCap('w', false);
+  assert.deepEqual(order, ['clock', 'get']);
+  assert.equal(api.admitCreation({ id: 'u', email: 'a@b', emailVerified: true }, null, 'w'), false);
+}
+
+async function serviceTests() {
+  const creator = { id: 'u', email: 'person@example.org', emailVerified: false };
+  const request = {};
+  const failure = {};
+  const sql = {};
+  let redemption = 0;
+  const api = create_creation(creationResources({
+    config: () => ({ hosted: true }),
+    get: () => ({ n: 0 }),
+    readFirstOwnerEmail: () => '', sql,
+    redeemCreationCode: function(...args) {
+      assert.deepEqual(args, [sql, 'test-secret', 'code', '', 'u', 'w']);
+      redemption++; return true;
+    },
+    requireCaptcha: req => { assert.equal(req, request); return Promise.reject(failure); }
+  }));
+  await assert.rejects(api.precheckCreation(request, creator, 'code'), e => e === failure);
+  assert.equal(redemption, 0);
+  assert.equal(api.admitCreation(creator, 'code', 'w'), true);
+  assert.equal(redemption, 1);
+  await assert.rejects(api.precheckCreation(request, creator, undefined), e => e.code === 'creation_code_required');
+  const malformed = create_creation(creationResources({ config: () => ({ hosted: true }), creationMode: () => 'open', caps: () => null }));
+  await assert.rejects(malformed.precheckCreation(request, creator, null), TypeError);
+  const absent = create_creation(creationResources({ caps: () => null, get: () => { throw failure; }, memberCheckNow: () => { throw failure; } }));
+  assert.equal(absent.checkRestoreCaps('u'), undefined);
+  assert.equal(absent.checkMemberCap('w', true), undefined);
+  let checked = false;
+  const pattern = { test(value) { assert.equal(this, pattern); assert.equal(value, undefined); checked = true; return false; } };
+  const strict = create_creation(creationResources({ config: () => ({ hosted: true }), creationMode: () => 'open', CODE_RE: pattern }));
+  await assert.rejects(strict.precheckCreation(request, creator, undefined), e => e.code === 'creation_code_invalid');
+  assert.equal(checked, true);
+}
+
+async function execute(test) {
+  if (test.operation === 'access') return accessExample(test.args);
+  const api = create_creation(creationResources());
+  return api[test.operation](...test.args);
+}
+
+async function runTests() {
+  structuralTests();
+  await serviceTests();
+  const results = [];
+  for (const test of cases) {
+    assert.deepEqual(await execute(test), test.expected);
+    results.push({ case_id: test.id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+
+async function smoke() { return execute(cases[0]); }
+module.exports = { runTests, smoke };

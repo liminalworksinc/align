@@ -8,6 +8,11 @@
   another is requested, and says when the confirmation replaces that rule.
 - The live-agent test client uses fresh HTTP connections after synchronous CLI calls so the offline-revocation
   scenario can finish without a stale keep-alive socket reset.
+- Preserve workspace admission and local first-account startup through typed
+  service bindings, with the full reviewed immutable domain data.
+- Carry the exact reviewed domain data into the hosted image as root-owned
+  runtime data readable by the application user.
+
 - Account and membership operations use qualified services through their existing
   typed interfaces. Account cleanup, session endings, shared transactions and
   public failures preserve their behavior. The complete local workflow passes

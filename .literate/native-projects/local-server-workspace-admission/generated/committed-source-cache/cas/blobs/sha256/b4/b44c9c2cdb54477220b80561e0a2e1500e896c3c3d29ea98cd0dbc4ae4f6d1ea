@@ -1,0 +1,8 @@
+export interface DisposableResources<ErrorShape = unknown> {
+  forbidden: (code: string, message: string) => ErrorShape;
+}
+export interface DisposableNamespace {
+  isDisposable(email: string): boolean;
+  refuseDisposable(email: string): void;
+}
+export function create_disposable<ErrorShape>(resources: DisposableResources<ErrorShape>): DisposableNamespace;

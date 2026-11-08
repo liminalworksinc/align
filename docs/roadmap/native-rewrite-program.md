@@ -7,6 +7,32 @@
 The retained implementation at `components/legacy-project-wrapper/implementation` remains source-authority
 until each boundary earns transfer under ADR 0002.
 
+## Latest candidate status
+
+The published 30-library checkpoint is `a39a99b3`, with 1,845 application checks,
+36 image checks and passing remote CI. Earlier source identities and receipts
+below remain historical evidence for their recorded checkpoints.
+
+The accepted local checkpoint registers 32 independently qualified libraries and
+438 retained source members. Workspace admission and local owner startup each
+have two clean qualifications, a separate admitted generation, normal cache and
+current child receipts. Four actual host bindings pass both-host acceptance;
+13 public value types, Creator, three readonly tuple types and all five external
+callers remain exact. The web materializer passes 795 batches across 26 libraries;
+the operator materializer passes 218 batches across five libraries.
+
+The full domain asset remains 217324 exact bytes and 10083 domains through
+source intake, reviewed asset promotion, lock, cache, admission and materialized
+consumers. The corrected image passes all 36 checks, exact raw asset custody and
+application-user write refusal. The complete configured build, test and package
+workflow passes 1,845 checks with zero failures or skips against source
+`sha256:6af01984df14a122040f769df349ed7a82d7b157424ff0165a3213257c3bd1f1`. Current and CI-pinned verification pass, and the
+current parent receipt is `sha256:7fa9ae736adce3b48aee21383419623656db736e50a6128a02cab10dbdafd0c6`.
+This completes only workspace admission and local startup transfer acceptance.
+See the [workspace and startup acceptance record](../architecture/server-identity-admission-admitted-acceptance.json).
+The complete 31-boundary migration, tester URL, actual operator security review
+and live smoke remain open.
+
 ## Current main integration
 
 The requested pull and rebase include main `ba43c5b` and preserve all 188 staged

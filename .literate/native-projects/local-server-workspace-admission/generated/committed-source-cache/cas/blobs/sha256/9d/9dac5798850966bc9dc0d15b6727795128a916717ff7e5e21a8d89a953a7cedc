@@ -1,0 +1,32 @@
+import type { Config, PublicError } from './create_creation.js';
+export type TeamSize = '1' | '2-10' | '11-50' | '51-200' | '201+';
+export type Interest = 'try' | 'evaluate';
+export type Via = 'form' | 'value_card';
+export interface Limit { key: string; max: number; windowMs: number; }
+export interface AccessResources<Request = unknown, Body = unknown, ErrorShape = PublicError> {
+  config: () => Config;
+  requireCaptcha: (request: Request) => Promise<void>;
+  get: <T = Record<string, unknown>>(sql: string, ...params: unknown[]) => T | undefined;
+  run: (sql: string, ...params: unknown[]) => number;
+  tx: <T>(fn: () => T) => Promise<T>;
+  refuseDisposable: (email: string) => void;
+  event: (name: 'access_requested', options?: { ws?: string | null; user?: string | null; props?: { interest: Interest; via: Via }; at?: string }) => boolean;
+  V2Error: new (status: number, code: string, message?: string, extra?: Record<string, unknown>) => ErrorShape;
+  badRequest: (message: string, code?: string) => ErrorShape;
+  newId: (prefix: 'ar') => string;
+  nowIso: () => string;
+  accessEmailKey: (email: string) => string;
+  durableCount: (limits: Limit[], now?: number) => void;
+  durableRoom: (limits: Limit[], now?: number) => boolean;
+  oneOf: <T extends string>(body: Body, key: string, allowed: readonly T[]) => T;
+  optOneOf: <T extends string>(body: Body, key: string, allowed: readonly T[]) => T | null;
+  optStr: (body: Body, key: string, max?: number) => string | null;
+  str: (body: Body, key: string, max?: number, options?: { min?: number }) => string;
+}
+export interface AccessNamespace<Request = unknown, Body = unknown> {
+  TEAM_SIZES: readonly ['1', '2-10', '11-50', '51-200', '201+'];
+  INTERESTS: readonly ['try', 'evaluate'];
+  VIAS: readonly ['form', 'value_card'];
+  createAccessRequest(request: Request, client: string, body: Body): Promise<{ received: true }>;
+}
+export function create_access<Request, Body, ErrorShape>(resources: AccessResources<Request, Body, ErrorShape>): AccessNamespace<Request, Body>;

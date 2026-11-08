@@ -1,0 +1,116 @@
+{
+  "schema": "align/identity-admission-scoped-parent-acceptance@1",
+  "checkpoint_scope": "Workspace admission and local owner startup only. Complete B13, all31boundaries and tester/security/live remain open.",
+  "registered_libraries": 32,
+  "retained_source_members": 438,
+  "qualified_clean_runs_per_helper": 2,
+  "qualification_decisions": {
+    "workspace_admission": "sha256:97a4924da296e6e6e66a1df3be41f9175f14e6f6c227948cbb2fddb43243741e",
+    "local_owner_startup": "sha256:acbe3eb6338583965cb41ab2cf2fced8e4279487edad7f8a4f39bf7cb4da6dcf"
+  },
+  "independent_batches_per_run": {
+    "workspace_admission": 4,
+    "local_owner_startup": 2
+  },
+  "admitted_generated_smoke_tests": {
+    "workspace_admission": 6,
+    "local_owner_startup": 3
+  },
+  "admitted_public_observations_each_host": {
+    "workspace_admission": 94,
+    "local_owner_startup": 59
+  },
+  "workspace_bindings_each_host": 64,
+  "workspace_adaptive_fault_operations": 3,
+  "startup_capture_failure_cases_each_host": 7,
+  "actual_typed_host_modules": 4,
+  "actual_host_functional_records_each_host": {
+    "workspace_admission": 94,
+    "local_owner_startup": 58
+  },
+  "startup_native_capture_case_separately_qualified_and_admitted": true,
+  "public_value_types_exact": 13,
+  "creator_type_exact": true,
+  "readonly_tuple_types_exact": 3,
+  "external_callers_unchanged": 5,
+  "current_child_receipts": {
+    "workspace_admission": "sha256:dc5de38eb3fa5a7adb068562af4d85f4f54dcd543ce8627db3bd67716399daf5",
+    "local_owner_startup": "sha256:aad9dc4f35539f4e084cab77f74f69f8b7ffbed1454a0a7b40fc37dfe0936ecf"
+  },
+  "web_libraries": 26,
+  "web_materialization_batches": 795,
+  "operator_libraries": 5,
+  "operator_materialization_batches": 218,
+  "operator_files": 41,
+  "operator_prior_runtime_files_exact": 40,
+  "operator_parent_manifest_marker_binds_new_manifest": true,
+  "immutable_asset": {
+    "bytes": 217324,
+    "domains": 10083,
+    "sha256": "1b36130a488aae7a4fefc689f9c9b936dc679a7537edda2c3e1003e53814f894",
+    "source_promotion_qualification_admission_cache_and_consumers_byte_exact": true,
+    "runtime_mapping": {
+      "build_source": "/app/lib/native/server_workspace_admission/disposable-domains.json",
+      "runtime_file": "/app/qualified-assets/server_workspace_admission/disposable-domains.json",
+      "owner": "0:0",
+      "application_user_read_only_required": true,
+      "existing_selected_child_target_custody_requirement": true,
+      "retained_B26_assembly_correction": "Dockerfile keeps the exact source bytes independently of bundling. Complete B26 native conversion remains open."
+    }
+  },
+  "current_parent_receipt_path": "verification/current.json",
+  "completion_requirements": [
+    "The complete build/test/package workflow must pass on one438-member source with configured authentication/storage/startup behavior.",
+    "The immutable image must pass canonical/header/startup and actual authored runtime-asset custody gates.",
+    "Current parent receipt and both verification runtimes must pass with source/image equivalence."
+  ],
+  "operator_security_review_accepted": false,
+  "full31_complete": false,
+  "public_url": null,
+  "live_qa_gates": 0,
+  "review_authority": "Authorized-policy self-review and independent acceptance receipts. No independent maintainer or operator security acceptance is implied.",
+  "failed_image_preserved": {
+    "image_id": "sha256:68627cb7d405f16da4d7dee6041eb6d063d1b23ad4b3b13d3a2e81683772888f",
+    "canonical_and_header_startup_checks_passed": 36,
+    "raw_runtime_asset_present": false,
+    "accepted_as_complete": false
+  },
+  "verified_image_acceptance": {
+    "image_id": "sha256:f8ad993ff48025b0f35199d4b659c206f61ce3349df6a647b67d236c0bc46be3",
+    "canonical_cases": 24,
+    "header_cases": 10,
+    "startup_refusals": 2,
+    "raw_runtime_asset": {
+      "schema": "align/runtime-authored-asset-scan@1",
+      "passed": true,
+      "asset_sha256": "1b36130a488aae7a4fefc689f9c9b936dc679a7537edda2c3e1003e53814f894",
+      "asset_bytes": 217324,
+      "regular_image_files": [
+        {
+          "path": "/app/qualified-assets/server_workspace_admission/disposable-domains.json",
+          "uid": 0,
+          "gid": 0,
+          "mode": 420,
+          "application_user_write_refused": true,
+          "directories": [
+            {
+              "path": "/app/qualified-assets/server_workspace_admission",
+              "uid": 0,
+              "gid": 0,
+              "mode": 493
+            },
+            {
+              "path": "/app/qualified-assets",
+              "uid": 0,
+              "gid": 0,
+              "mode": 493
+            }
+          ]
+        }
+      ],
+      "image_id": "sha256:f8ad993ff48025b0f35199d4b659c206f61ce3349df6a647b67d236c0bc46be3"
+    },
+    "all438_implementation_inputs_match": true,
+    "operator_qualified_packages": 5
+  }
+}

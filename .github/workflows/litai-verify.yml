@@ -13,8 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      # literate-ai at the exact revision this project's locks, native children and conversion stage were produced with.
-      LITAI_SOURCE: git+https://github.com/jordanhubbard/literate-ai@b26dd359b32f6138a1b199b79ffbbf8c935b48db
+      # Exact verifier supports every qualified child and immutable asset record.
+      # The retained application's build driver is pinned separately.
+      LITAI_SOURCE: git+https://github.com/jordanhubbard/literate-ai@7adbe1123d6c5b34508d73e1d029a8706c1f90f0
     steps:
       - uses: actions/checkout@v4
         with:
