@@ -9,12 +9,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 
 const root = path.resolve(process.argv[2] ?? path.join(path.dirname(fileURLToPath(import.meta.url)), ".."));
-const authFile = path.resolve(process.argv[3] ?? path.join(root, "lib/v2/auth.ts"));
+const authFile = process.argv[3] ? path.resolve(process.argv[3]) : null;
 const require = createRequire(path.join(root, "package.json"));
 const ts = require("typescript");
 const { APIError } = await import(pathToFileURL(require.resolve("better-auth/api")).href);
 const sha = (value) => crypto.createHash("sha256").update(value).digest("hex");
-const authSource = fs.readFileSync(authFile, "utf8");
+const authSource = authFile ? fs.readFileSync(authFile, "utf8") : null;
+const { qualifiedAuthFixture } = await import("./qualified-auth-fixture.mjs");
 const limiterSource = fs.readFileSync(path.join(root, "lib/v2/limits.ts"), "utf8");
 
 const libraries = JSON.parse(fs.readFileSync(path.join(root, "native/libraries.json"), "utf8")).libraries;
@@ -52,10 +53,14 @@ function compile(source) {
   return result.outputText;
 }
 
+// An explicit third argument retains the historical source counterexample control.
+// Ordinary acceptance uses the exact hash-checked admitted factory below.
+let handlerCode;
+let sendPath = "/email-otp/send-verification-otp";
+if (authSource !== null) {
 const ast = ts.createSourceFile("auth.ts", authSource, ts.ScriptTarget.Latest, true);
 const required = new Set(["OTP_SEND", "OTP_SIGN_IN", "minutes", "tooManyCodesMessage", "machineCeilingMessage", "tooMany", "beforeHook"]);
 const declarations = [];
-let sendPath;
 for (const statement of ast.statements) {
   const names = ts.isFunctionDeclaration(statement) && statement.name
     ? [statement.name.text]
@@ -73,7 +78,8 @@ for (const statement of ast.statements) {
   }
 }
 assert.equal(required.size, 0, "Current sign-in declarations must be present");
-const handlerCode = compile(declarations.join("\n\n") + "\nexport { beforeHook };\n");
+handlerCode = compile(declarations.join("\n\n") + "\nexport { beforeHook };\n");
+}
 const limiterCode = compile(limiterSource);
 
 // Independent, target-specific test fixture for the declared two-column hit store.
@@ -101,12 +107,17 @@ const cases = [
 ];
 
 const observations = [];
+let observedAuthSource = authSource;
 for (const example of cases) {
   const database = new DatabaseSync(":memory:");
   try {
     database.exec(hitSchema);
     const clock = { now: example.now, reads: 0 };
-    const date = { now() { clock.reads++; return clock.now; } };
+    class FixtureDate extends Date {
+      constructor(...args) { super(...(args.length ? args : [clock.now])); }
+      static now() { clock.reads++; return clock.now; }
+    }
+    const date = FixtureDate;
     const store = Object.fromEntries(["get", "all", "run"].map((method) => [method, (sql, ...args) => database.prepare(sql)[method](...args)]));
     const imports = {
       "../native/.bindings/rate_limits.js": { create_limiter },
@@ -134,7 +145,7 @@ for (const example of cases) {
     for (const name of ["takeAll", "durableRoom", "durableCount", "durableRetryAfterMs", "retryAfterMs", "otpEmailKey"]) {
       ports[name] = (...args) => { clock.now += example.perCallStep ?? 0; return api[name](...args); };
     }
-    const handlerContext = vm.createContext({
+    const handlerPorts = {
       APIError, Date: date, ...ports,
       createAuthMiddleware: (handler) => handler,
       endCappedSessions: async () => undefined,
@@ -152,13 +163,28 @@ for (const example of cases) {
         clock.now += example.elapsed;
         return result;
       },
-    });
-    const handler = new vm.SourceTextModule(handlerCode, { context: handlerContext, identifier: "actual-sign-in-hook" });
-    await handler.link(() => { throw new Error("Unexpected selected handler import"); });
-    await handler.evaluate();
+    };
+    let beforeHook;
+    if (handlerCode !== undefined) {
+      const handlerContext = vm.createContext(handlerPorts);
+      const handler = new vm.SourceTextModule(handlerCode, { context: handlerContext, identifier: "historical-sign-in-control" });
+      await handler.link(() => { throw new Error("Unexpected selected handler import"); });
+      await handler.evaluate();
+      beforeHook = handler.namespace.beforeHook;
+    } else {
+      const fixture = await qualifiedAuthFixture(root, {
+        ...handlerPorts,
+        readDate: () => date,
+        publicOrigin: () => example.hosted ? "https://align.example.invalid" : undefined,
+      });
+      beforeHook = fixture.options.hooks.before;
+      observedAuthSource = fs.readFileSync(fixture.sourceFile, "utf8");
+    }
     let failure;
     try {
-      await handler.namespace.beforeHook({
+      await beforeHook({
+        getSignedCookie: async () => undefined,
+        context: { authCookies: { sessionToken: { name: "fixture-session" } }, secret: "fixture-only-cookie-secret" },
         path: sendPath, body: { type: "sign-in", email },
         request: example.noRequest ? undefined : { headers: new Headers({ "fly-client-ip": "192.0.2.10" }) },
       });
@@ -179,8 +205,8 @@ for (const example of cases) {
 const failed = observations.filter((observation) => !observation.passed).length;
 console.log(JSON.stringify({
   schema: "align/auth-ceiling-regression@1", cases: observations.length, passed: observations.length - failed, failed,
-  auth_source_sha256: sha(authSource), limiter_source_sha256: sha(limiterSource), node: process.version, platform: process.platform,
+  auth_source_sha256: sha(observedAuthSource), limiter_source_sha256: sha(limiterSource), node: process.version, platform: process.platform,
   observations,
-  scope: "Actual selected admission and limiter bodies with synthetic ports and in-memory SQLite. Full identity setup, connection/retry wrapper and HTTP/email delivery are excluded.",
+  scope: "Hash-checked admitted authentication factory and actual limiter with synthetic ports and in-memory SQLite. Explicit historical-source controls use selected admission bodies. HTTP/email delivery is excluded.",
 }));
 if (failed) process.exitCode = 1;

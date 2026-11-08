@@ -8,6 +8,12 @@
   another is requested, and says when the confirmation replaces that rule.
 - The live-agent test client uses fresh HTTP connections after synchronous CLI calls so the offline-revocation
   scenario can finish without a stale keep-alive socket reset.
+- Use qualified authentication configuration and sign-in callbacks through 52
+  explicit host resources. Preserve session caps, code limits, delivery cleanup,
+  configured schemas and migrations, all 13 public types and seven callers.
+- Add independent ISO-expiry, getter, coercion and failure-order acceptance while
+  preserving all prior expectations and the 32 existing qualified library pins.
+
 - Preserve workspace admission and local first-account startup through typed
   service bindings, with the full reviewed immutable domain data.
 - Carry the exact reviewed domain data into the hosted image as root-owned

@@ -15,7 +15,7 @@ jobs:
     env:
       # Exact verifier supports every qualified child and immutable asset record.
       # The retained application's build driver is pinned separately.
-      LITAI_SOURCE: git+https://github.com/jordanhubbard/literate-ai@7adbe1123d6c5b34508d73e1d029a8706c1f90f0
+      LITAI_SOURCE: git+https://github.com/jordanhubbard/literate-ai@77be5baf68bbeaf878a5b86151dafffe623beb2e
     steps:
       - uses: actions/checkout@v4
         with:

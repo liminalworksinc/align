@@ -46,6 +46,7 @@ explicit parent change.
 - [Accepted native rewrite decision](decisions/0002-native-literate-ai-rewrite.md)
 - [Accepted classification of all native boundaries](architecture/native-authority-classification.json)
 - [Workspace admission and local startup acceptance](architecture/server-identity-admission-admitted-acceptance.json)
+- [Authentication lifecycle acceptance](architecture/server-auth-admitted-acceptance.json)
 - [Owner decisions for Align v2, 2026-10-30 and 2026-10-31](decisions/0003-owner-decisions-v2.md)
 
 ## Native storage work

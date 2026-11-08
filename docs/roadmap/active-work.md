@@ -153,10 +153,10 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Next action:** Continue main authentication and all remaining accepted native
-  boundaries from this 32-library checkpoint. Preserve the previous publication
-  and every failed candidate. The public tester, operator security review and
-  live smoke remain open.
+- **Next action:** Continue remaining accepted native boundaries from the
+  33-library authentication checkpoint. Preserve the previous publication and
+  every failed candidate. The public tester, operator security review and live
+  smoke remain open.
 - **Account and membership scope:** Preserve all seven account operations and
   both membership lifecycle operations through two supplied-service factories.
   Account captures 21 resources; lifecycle captures six. The caller retains SQL
@@ -251,10 +251,45 @@ gates with two declared optional skips. Both readers verify all 32 qualified
 projections using exact revision `7adbe112`. The tested build driver remains
 pinned at `4d672137`. Current parent receipt: `sha256:7fa9ae736adce3b48aee21383419623656db736e50a6128a02cab10dbdafd0c6`.
 The ordinary source artifact and previous publication remain preserved;
-checkpoint publication is recorded separately in Git and the draft PR. Main authentication, complete B13 and all 31 native
-boundary closures remain open. There is no public tester URL or accepted live
-operator security/smoke gate. The separate main-authentication source-intake
-proposal remains part of the Align dependency queue.
+checkpoint publication is recorded separately in Git and the draft PR. Complete B13 and all 31 native boundary closures remain open. The historical
+32-library run above remains evidence for that exact source and receipt. The
+authentication candidate below supersedes its pending-intake status.
+
+- **Authentication lifecycle scope:** Preserve the complete original module,
+  four constants, nine functions and 52 caller-supplied resources. Signed policy
+  review authorizes local static intake only; Sensitive classification remains.
+  Two fresh clean generations pass 35 batches each. A separate admitted artifact
+  passes the same batches and 264 source plus 68 binding observations on both hosts.
+  The typed production assembly preserves all 13 public value types and seven
+  unchanged callers. Actual configured Better Auth/passkey 1.7.10 checks preserve
+  complete schemas, populated migrations and 12 code/sign-in records per host.
+  The previous admitted candidate was refused after source review exposed
+  uncovered getters, coercion and failure-order differences. 48 additional
+  observations and six added batches now retain those original boundaries;
+  all 23 prior expectations are unchanged.
+- **Authentication lifecycle evidence:**
+  - [x] Qualify two clean generations and admit a separate candidate.
+  - [x] Verify exact signed intake, result binding, retained custody and input separation.
+  - [x] Pass both-host package, binding, callback and configured-provider acceptance.
+  - [x] Finish child readiness and register it normally, preserving prior 32 pins.
+  - [x] Accept exact production host assembly, all 13 public types and seven callers.
+  - [x] Pass the full application and 36 image checks against the final source.
+  - [x] Record a current parent receipt and complete reviewed source-transfer acceptance.
+
+The complete build, test and package workflow passes 1,845 checks with
+zero failures and skips on the same 441-member source `sha256:7e92a2b1db1b49f334a96b7ddb4cd5fb334d1e420b5c67b4093655b0e26e4112`.
+All 36 image checks, six static assets and exact root-owned domain data pass.
+Production and provider inputs are byte-exact with the checked image. Three test
+fixtures changed to exercise admitted code; the original failed run is preserved.
+The unchanged 150 ms p95 hook requirement passes with networking blocked.
+Current and CI readers each pass three gates with two declared optional skips
+and explicitly verify all 33 qualified projections. Current parent receipt:
+`sha256:84b86b98e0b05ae2254a5512803c0b1832dc29d1101b11a863cd3a7448b43d6a`. Actual checkpoint publication is recorded
+separately in Git and the draft PR.
+
+See [authentication acceptance](../architecture/server-auth-admitted-acceptance.json).
+No public tester URL, live QA or actual operator security acceptance is claimed.
+
 
 - **Sign-in effects scope:** Continue B13 by transferring the complete mail and
   captcha helper surfaces. The five functions and two constants use 15 explicit
@@ -262,8 +297,8 @@ proposal remains part of the Align dependency queue.
   configured middleware and its existing public error class. Preserve public
   names/types, detached calls, current values, effect order and failure identity.
   This routine child passes ordinary static source intake. The separate sensitive
-  authentication intake issue and proposed parent design remain pending; this
-  helper does not change those guards or close B13.
+  authentication intake now has its exact signed policy review and qualified
+  child. This helper does not change those guards or close B13.
 - **Sign-in effects evidence:**
   - [x] Preserve both source files and observe all public behavior on both hosts.
   - [x] Author and normally promote complete Component/Node contracts, then pass

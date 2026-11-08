@@ -9,31 +9,60 @@ until each boundary earns transfer under ADR 0002.
 
 ## Latest candidate status
 
-The published 30-library checkpoint is `a39a99b3`, with 1,845 application checks,
-36 image checks and passing remote CI. Earlier source identities and receipts
-below remain historical evidence for their recorded checkpoints.
+The previous published checkpoint is `7bdcb130`, with 32 qualified libraries,
+438 retained source members, 1,845 application checks and 36 image checks. Its
+source identities and receipts remain evidence for that exact checkpoint.
 
-The accepted local checkpoint registers 32 independently qualified libraries and
-438 retained source members. Workspace admission and local owner startup each
-have two clean qualifications, a separate admitted generation, normal cache and
-current child receipts. Four actual host bindings pass both-host acceptance;
-13 public value types, Creator, three readonly tuple types and all five external
-callers remain exact. The web materializer passes 795 batches across 26 libraries;
-the operator materializer passes 218 batches across five libraries.
+The current candidate registers 33 qualified libraries. Main authentication now
+uses a factory with 52 explicit host resources. Two distinct clean macOS
+qualifications pass 35 independent batches each. A separate admitted generation
+passes five generated smoke tests with zero build-cache hits or repairs. Its
+264 original observations, 68 binding checks and 12 configured Better Auth and
+passkey 1.7.10 records pass on macOS and Linux. The production host assembly also
+passes all 264 observations and 12 actual provider records on each host. All 13
+public value types match and all seven unchanged production callers compile.
 
-The full domain asset remains 217324 exact bytes and 10083 domains through
-source intake, reviewed asset promotion, lock, cache, admission and materialized
-consumers. The corrected image passes all 36 checks, exact raw asset custody and
-application-user write refusal. The complete configured build, test and package
-workflow passes 1,845 checks with zero failures or skips against source
-`sha256:6af01984df14a122040f769df349ed7a82d7b157424ff0165a3213257c3bd1f1`. Current and CI-pinned verification pass, and the
-current parent receipt is `sha256:7fa9ae736adce3b48aee21383419623656db736e50a6128a02cab10dbdafd0c6`.
-This completes only workspace admission and local startup transfer acceptance.
-See the [workspace and startup acceptance record](../architecture/server-identity-admission-admitted-acceptance.json).
-The complete 31-boundary migration, tester URL, actual operator security review
-and live smoke remain open.
+The complete original source remains preserved with its Sensitive
+classification. A signed delegated-policy review permits local static intake;
+its separate policy opt-in remains explicit. Both generation requests and the
+separate admission request were inspected. Exact result binding, retained
+archive custody and the qualified projection are verified. This review is not
+operator security acceptance. Earlier refused candidates remain preserved.
+
+All prior 32 consumer pins remain exact. Web materialization passes 830 private
+batches across 27 libraries. The source refresh adds the authentication oracle,
+independent harness and a test-only admitted-authentication fixture, for 441 members.
+The first complete application run exposed two tests tied to the retired source
+layout. Provider discovery now uses actual admitted options and scans generated
+JavaScript too. All 18 original clock cases and their exact expected Retry-After
+values remain unchanged; they run the hash-checked admitted authentication factory.
+Missing disclosures, undeclared hosts, changed admitted bytes and the historical
+two-clock error are each refused by focused controls. The original failed run is
+preserved. Production code and all 33 admitted libraries remain unchanged.
+The declared retained build driver remains unchanged; current and CI readers
+use exact revision `77be5baf` for the reviewed-intake record format.
+
+The complete configured build, test and package workflow passes 1,845
+checks with zero failures or skips on the same 441-member source
+`sha256:7e92a2b1db1b49f334a96b7ddb4cd5fb334d1e420b5c67b4093655b0e26e4112`. All 36 image checks, all six static assets and the
+exact root-owned domain asset pass with unchanged production inputs against `sha256:3b9461d6867d3170fc2a5ec7916acb79540286f0ead1d7c1c308dc159dcd19d5`. The unchanged
+150 ms p95 hook requirement passes with networking blocked. Current and fresh
+CI verification pass three gates with two declared optional skips and each
+verify all 33 qualified projections. Current parent receipt:
+`sha256:84b86b98e0b05ae2254a5512803c0b1832dc29d1101b11a863cd3a7448b43d6a`.
+
+This completes the scoped authentication transfer acceptance. Actual checkout
+publication is recorded in Git and the draft PR. Formal B13 closure, the full
+31-boundary migration, public tester URL, actual operator security review and
+live smoke remain open. The architecture record preserves its record-time flags;
+current parent completion is recorded here and in `verification/current.json`.
+See the authentication acceptance record linked from the project guide.
 
 ## Current main integration
+
+The paragraphs below record earlier integration history. Current `main` remains
+`ba43c5b2` and is already an ancestor of the published checkpoint, as confirmed by
+the latest fetch.
 
 The requested pull and rebase include main `ba43c5b` and preserve all 188 staged
 paths. The earlier complete twenty-one-library run passes 1,830 checks with no

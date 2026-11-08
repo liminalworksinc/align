@@ -1,0 +1,31 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {create_auth} = require('../server_auth/create_auth.js');
+function fixture() {
+  return create_auth({createAuthMiddleware: callback => callback, RECENT_SIGN_IN_MS:900000,readDate:()=>Date,sessionMaxDays:()=>7});
+}
+const cases = [
+  {id:'generated-recent-boundary',args:['isRecentSignIn','1970-01-01T00:00:00.000Z',900000],expected:true},
+  {id:'generated-recent-expired',args:['isRecentSignIn','1970-01-01T00:00:00.000Z',900001],expected:false},
+  {id:'generated-recent-future',args:['isRecentSignIn','1970-01-01T00:00:01.000Z',0],expected:true},
+  {id:'generated-reauth-copy',args:['reauthMessage','add a passkey'],expected:'Sign in again to add a passkey. This needs a sign-in from the last 15 minutes.'},
+  {id:'generated-cap-week',args:['sessionCap','1970-01-01T00:00:00.000Z'],expected:'1970-01-08T00:00:00.000Z'}
+];
+function execute(args) {
+  const api = fixture();
+  const result = api[args[0]](...args.slice(1));
+  return result instanceof Date ? result.toISOString() : result;
+}
+async function runTests() {
+  const results = [];
+  for (const entry of cases) {
+    assert.deepStrictEqual(execute(entry.args),entry.expected);
+    results.push({case_id:entry.id,outcome:'passed'});
+  }
+  const api = fixture();
+  assert.equal(create_auth.length,1);
+  assert.equal(Object.keys(api).length,13);
+  for (const [name,arity] of Object.entries({isRecentSignIn:1,reauthMessage:1,sessionCap:1,passkeyParty:0,tooManyCodesMessage:1,machineCeilingMessage:2,authOptions:0,getAuth:0,migrateAuth:0})) assert.equal(api[name].length,arity);
+  return {schema:'literate-ai/generated-test-results@1',cases:results};
+}
+module.exports = {runTests,smoke:()=>execute(['reauthMessage','add a passkey'])};

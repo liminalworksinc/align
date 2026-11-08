@@ -403,13 +403,13 @@ const { changePrograms } = await import(pathToFileURL(path.join(ROOT, "lib/stora
 // ======== trust: the security pack's claims that the code can check (PRESEED-008) ========
 {
   // Every https host in the server's source (comment lines aside), in fly.toml (its own host aside), and in Better Auth's
-  // code for each sign-in provider lib/v2/auth.ts turns on, must be named in docs/trust/subprocessors.md.
+  // code for each sign-in provider the admitted auth options turn on, must be named in docs/trust/subprocessors.md.
   const sources = [path.join(ROOT, "proxy.ts"), path.join(ROOT, "instrumentation.ts")];
   const walkSrc = (dir) => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) walkSrc(p);
-      else if (/\.(?:ts|tsx|mts)$/.test(e.name) && !e.name.endsWith(".d.ts")) sources.push(p);
+      else if (/\.(?:ts|tsx|mts|js|mjs|cjs)$/.test(e.name) && !e.name.endsWith(".d.ts")) sources.push(p);
     }
   };
   walkSrc(path.join(ROOT, "app"));
@@ -420,8 +420,13 @@ const { changePrograms } = await import(pathToFileURL(path.join(ROOT, "lib/stora
   for (const f of sources) for (const h of hostsIn(code(readFileSync(f, "utf8"), /^(?:\/\/|\/\*|\*)/))) found.set(h, path.relative(ROOT, f));
   const fly = readFileSync(path.join(ROOT, "fly.toml"), "utf8");
   for (const h of hostsIn(code(fly, /^#/))) found.set(h, "fly.toml");
-  const authSrc = readFileSync(path.join(ROOT, "lib/v2/auth.ts"), "utf8");
-  const providers = [...authSrc.matchAll(/social\.(\w+) = /g)].map((m) => m[1]);
+  const { qualifiedAuthFixture } = await import("./qualified-auth-fixture.mjs");
+  const { options: authOptions } = await qualifiedAuthFixture(ROOT, {
+    googleConfigured: () => true,
+    githubConfigured: () => true,
+  });
+  const providers = Object.keys(authOptions.socialProviders);
+  if (providers.some((provider) => !/^[a-z]+$/.test(provider))) throw new Error("Unexpected sign-in provider name");
   for (const prov of providers) {
     for (const h of hostsIn(readFileSync(path.join(ROOT, "node_modules/@better-auth/core/dist/social-providers", `${prov}.mjs`), "utf8"))) found.set(h, `Better Auth ${prov}`);
   }
