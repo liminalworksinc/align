@@ -1,0 +1,3 @@
+'use strict';
+const {remote_path} = require('./core.js');
+module.exports = {remote_path};

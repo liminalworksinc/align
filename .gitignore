@@ -32,4 +32,5 @@ dist/
 # Local recovery records and workstation metadata.
 /.literate/native-additions/
 /.literate/native-child-additions/
+/.literate/native-child-revisions/
 .DS_Store

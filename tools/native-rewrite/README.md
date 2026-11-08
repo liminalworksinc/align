@@ -5,8 +5,9 @@ helpers do not change that environment or publish anything.
 
 `map-retained-boundaries.py SCOPE_PLAN_JSON OUTPUT_JSON` checks that every retained
 source member has a boundary owner. It preserves the distinction between file
-membership and pending authority-class review. The current 398-file scope maps
-without gaps; new unmatched paths fail explicitly.
+membership and the accepted authority classes. The reviewed class record is
+`docs/architecture/native-authority-classification.json`; new unmatched paths fail
+explicitly.
 
 `litai-local.py` forwards the ordinary CLI arguments and adds conservative diagnostic
 redaction. It preserves failure codes, phases and every lifecycle gate. Use the
@@ -210,18 +211,32 @@ consumer pins with:
 ```sh
 python tools/native-rewrite/make-consumer-manifest.py . \
   components/legacy-project-wrapper/implementation/native \
-  spend-meter spend-stream spend-rounding paste-lines policy shell-words share-notices share-again home-attention trust-markdown http-errors promise-queues wording agent-envelope value-rules field-validation migration-coordinator
+  spend-meter spend-stream spend-rounding paste-lines policy shell-words share-notices share-again home-attention trust-markdown http-errors promise-queues wording agent-envelope value-rules field-validation migration-coordinator runtime-settings storage-schema rate-limits identifier-tools \
+  --provider agent-envelope=.literate/native-projects/local-agent-envelope-stop-v2
 ```
 
+When the reviewed revision operation registers a replacement in a different
+physical directory, keep the logical component name and pass its exact registered
+provider path with `--provider COMPONENT=PATH`. For example, a registered envelope
+replacement can be selected with
+`--provider agent-envelope=.literate/native-projects/local-agent-envelope-stop-v2`.
+The helper checks that registration against the child's project definition, then
+performs the existing qualification, lock, cache and verifier checks. The default
+directory convention remains available for other providers. This option does not
+register a child, revise authority or grant execution.
+
 The retained agent build runs `scripts/native-libraries.mjs` from the retained
-implementation. It verifies the pinned package bytes and replays all 157 independent
+implementation. It verifies the pinned package bytes and replays all 161 independent
 acceptance cases before writing the source and distribution copies. Development
 builds check live provider locks and authority heads; sealed builds receive the
 reviewed manifest and the same immutable cache bytes. The full sealed harness
 receipt remains necessary before claiming application integration. Keep all consumed
 libraries in the manifest. The web build selects paste-lines, policy, share-again,
-home-attention, trust-markdown, http-errors, promise-queues, wording, value-rules, field-validation and migration-coordinator, replaying their 302 independent batches; the agent selects the three spend libraries and
-shell-words, share-notices and agent-envelope, replaying 157 batches. `npm run prepare:container` exports the exact
+home-attention, trust-markdown, http-errors, promise-queues, wording, value-rules,
+field-validation, migration-coordinator, runtime-settings, storage-schema,
+rate-limits and identifier-tools, replaying their 511 independent batches. The
+agent selects the three spend libraries and shell-words, share-notices and
+agent-envelope, replaying 161 batches. `npm run prepare:container` exports the exact
 verified web inputs locally.
 The Docker build checks them and reruns web acceptance before compiling, while
 the runtime image contains only the application build and operator files.
@@ -339,3 +354,33 @@ cover nulls, affinity, Unicode length, reference scope, partial uniqueness,
 statement rollback and sequence allocation. The seed factory contains only
 explicit synthetic fixtures. The reconstructor remains an observer control;
 candidate generation must use separately reviewed Component and Flavor authority.
+
+
+## Bound storage consumer
+
+The isolated twenty-two-library candidate adds `storage-runtime` to the web and
+container preparation list. Agent preparation remains six libraries. The complete
+web preparation accepts 555 cases across sixteen libraries; the actual typed
+storage adapter preserves 43 source cases on macOS and Linux and all thirteen
+public export types assign in both directions.
+
+Before pinning a newly admitted child, copy its accepted runtime entry into its
+already-declared portable target with the ordinary local command:
+
+```sh
+litai cache publish --project PATH_TO_CHILD --target project-committed
+```
+
+The manifest helper reads `generated/committed-source-cache`. It deliberately
+refuses an absent or ambiguous entry. Cache transfer preserves the accepted entry;
+the consumer still runs the independent acceptance contract for every hit.
+Keep the explicit registered envelope provider selection when rebuilding all
+consumer records:
+
+```sh
+--provider agent-envelope=.literate/native-projects/local-agent-envelope-stop-v2
+```
+
+This local storage checkpoint leaves complete application, image and current
+parent-receipt acceptance to ADOPT-002. Full 31-boundary and public tester gates
+remain open.

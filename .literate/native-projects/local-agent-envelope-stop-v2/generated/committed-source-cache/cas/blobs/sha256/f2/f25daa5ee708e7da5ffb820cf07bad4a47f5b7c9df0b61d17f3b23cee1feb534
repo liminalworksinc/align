@@ -1,0 +1,14 @@
+LITAI_LANGUAGE_TOOL ?= node
+BUILD_DIR ?= _build
+OUT ?= $(BUILD_DIR)/run
+
+.PHONY: all build test check clean
+all: build
+build:
+	"$(LITAI_LANGUAGE_TOOL)" tools/package.js "$(OUT)"
+test:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+check:
+	"$(LITAI_LANGUAGE_TOOL)" tools/check.js
+clean:
+	"$(LITAI_LANGUAGE_TOOL)" tools/clean.js "$(OUT)"

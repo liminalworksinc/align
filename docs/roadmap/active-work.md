@@ -27,13 +27,16 @@ queue item or let `docs/roadmap/` become a plan archive.
 
 ## Open pull-request landing queue
 
-Tracker reconciliation on 2026-11-05 found seven open reviews. The native rewrite
-checkpoint in #58 is published as `56848383` and remains draft. Its exact-head
-receipt/spec and current-main checks pass. Peer work remains independently owned.
+Tracker reconciliation on 2026-11-05 found seven open reviews. Subsequent native
+rewrite checkpoint `b55849d0` publishes eighteen libraries in draft PR #58. The
+twenty-three-library checkpoint below is verified locally. PR #58 records its
+publication state. Peer statuses below record that earlier survey and remain independently
+owned.
 
 - [#58](https://github.com/liminalworksinc/align/pull/58), native rewrite:
-  seventeen qualified libraries, including numbered storage upgrades. Current head
-  `56848383` matches this worktree and passes hosted CI. The review remains draft.
+  the earlier eighteen-library head was published as `b55849d0`. The twenty-three-library candidate
+  passes all 1,845 application and 36 image/header/startup checks locally. The
+  review remains draft; publication requires the operator's specific go.
 - [#63](https://github.com/liminalworksinc/align/pull/63), integrated v2 frontend:
   peer work, with its receipt/spec check failing at the surveyed head. It changes
   interface consumers and remains separate from the storage contract work.
@@ -56,7 +59,87 @@ reproduces the folder-rule failure on this older base and tracks the matching re
 Open issue [#30](https://github.com/liminalworksinc/align/issues/30) remains covered
 by the existing preseed, deployment and handoff items in this queue.
 
+The 2026-11-06 continuation survey also finds draft peer PRs #67 (imported invite
+codes), #68 (integrated v2 frontend) and #69 (workspace stop ownership). PR #62 is
+green and mergeable at `a9a47a39`; it remains independently owned and unmerged by
+this session. No collectable branches or worktrees were reported. These findings
+do not authorize collecting or publishing peer changes.
+
 ## P0
+
+<a id="native-stop-001"></a>
+### [x] NATIVE-STOP-001 - Preserve workspace stops in native session wording
+
+- **Priority:** P0
+- **Owner:** B10, local/agent-envelope and its typed consumers
+- **Direction:** Complete the requested pull and rebase while preserving main
+  `ba43c5b` and the accepted native rewrite scope.
+- **Conclusion:** A stop set from a workspace now survives stopping sharing and
+  deleting shared history. Main adds `STOP_HOLDS_NO_SHARE`, optional stopped and
+  lost-workspace inputs, and new wording for those states. The earlier qualified
+  library implemented the previous contract. Rebase preserves the incoming stop
+  behavior and the earlier context-priority and ask-attribution corrections in a
+  merged baseline. The two temporary retained modules are now typed consumers of
+  the independently qualified replacement. No permanent retained-source exception
+  is introduced.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Pull and rebase through `ba43c5b`, preserving all 188 staged paths.
+  - [x] Merge the exact corrected retained baseline with the incoming stop fix
+    without changing any generated package or immutable cache.
+  - [x] Extend the authored interfaces, specification and independent observations
+    for persistent stops, lost workspaces, the new constant and optional inputs.
+  - [x] Generate and qualify the revised library through the ordinary lifecycle,
+    including distinct clean builds and a fresh admitted build.
+  - [x] Replace the temporary retained modules with the qualified typed consumers
+    through supported registration and acceptance operations.
+- **Evidence:**
+  - [x] Preserve unchanged context priorities, attribution, public types, defaults
+    and data identity; detect the earlier implementation on changed stop cases.
+  - [x] Pass meaningful stop/share/delete/login/lost-workspace controls on both
+    targets, plus the unchanged 150 ms hook requirement.
+  - [x] Complete the full parent workflow, current receipt, both verification
+    runtimes and fresh image checks for the resulting source before the next
+    authority transfer or publication.
+
+The revised library passes two independent clean generations, all 63 verifier
+batches and 1,642,893 reference observations per run. The new generated suites
+contain 72 and 20 tests. A separate normal admitted build passes 76 checks with
+no failures or skips, has a current receipt and publishes one accepted local
+cache entry. Qualification decision:
+`sha256:8fc47e8f0115084d9d27c6cc879316ee36af06de895ae605d8f4bebab016d8ae`.
+Both qualification runs exclude original implementation files from generation.
+
+The ordinary replacement plan refuses the already-qualified registered child.
+The operator approved [upstream issue #350](https://github.com/jordanhubbard/literate-ai/issues/350)
+and accepted ADR 0065 for a reviewed registration revision that preserves both
+qualified trees. Its local framework commit `ac436ed2` passes 118 managed checks
+and the code, documentation, skill, layout and export gates. The exact clean wheel
+is installed separately. Real qualified revision, failure rollback, process
+interruption, guarded recovery and production consumer acceptance pass from that
+wheel without mocking qualification readers or editing installed source. The
+consumer manifest helper now accepts an explicit registered physical provider
+path while retaining the existing logical component identity and qualification
+checks. The verified parent is transferred byte for byte to this checkout and
+consumes the replacement through its typed public API. All 63 actual-consumer
+batches and 1,642,893 reference observations match on macOS and Linux, and both
+TypeScript namespace directions pass. Production agent assembly accepts all 161
+cases across six libraries. The other twenty consumer records remain unchanged.
+
+The complete macOS build, test and package workflow passes 1,845 checks with no
+failures or skips. Its unchanged serial test passes the 150 ms p95 requirement
+with networking blocked. All three phases bind one 414-file application source:
+`sha256:068a10ef8f8fd954a56193a41547d764826b591cb251be24988376219dfe8adb`.
+All 36 Linux image, header and startup checks pass; the exact three-package
+operator runtime contains 29 files. Current receipt:
+`sha256:1ca7424a6afd0651105b555f4259d305f691602973f0aee2ca6d62545301abac`.
+Both installed and CI-pinned verification pass three gates with two declared
+optional skips. The original index and changed working files are backed up before
+transfer. The checkpoint was staged after local acceptance. PR #58 records its
+publication state; commit, push and PR publication require their separate operator
+go. ADOPT-002 and the public tester gates remain open.
+
 
 Check the parent only after every required subtask and evidence item passes. Add the
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
@@ -64,120 +147,368 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 <a id="adopt-002"></a>
 ### [ ] ADOPT-002 — Native Literate AI rewrite
 
-- **Completion prerequisites:** SEC-001, CONFIG-001, CONTEXT-001, NATIVE-BINDINGS-001, TRUST-PARSER-001, VERIFIER-LINT-001
+- **Completion prerequisites:** SEC-001, CONFIG-001, CONTEXT-001, NATIVE-BINDINGS-001, TRUST-PARSER-001, VERIFIER-LINT-001, NATIVE-STOP-001
 - **Owner:** project architecture / Components / Flavors / skills / assets
 - **Direction:** Execute
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Next action:** After the pending specific local SDK commit approval, build
-  and verify its clean non-editable wheel, then recreate the schema project
-  through ordinary signed promotion and run two clean qualifications. Preserve
-  its natural zero-argument API and all frozen acceptance cases before consumer
-  transfer or SQL retirement. The remaining storage, runtime and authority-class
-  review stay open under the [native rewrite program](native-rewrite-program.md).
-  Runtime settings completes local consumer acceptance across all 22 functions
-  and both data values. Two distinct clean qualification runs and a separate
-  admitted build pass all 62 cases, covering 18,156 observations and seven state
-  traces. Actual macOS and Linux consumers match those results; typed namespaces
-  remain assignable in both directions. Eight cold Node-only operator commands
-  match the retained baseline from a read-only checkout. Explicit packaged code
-  modes support the unprivileged operator, and owned process groups preserve
-  SIGTERM, SIGINT and SIGHUP with cleanup. All 36 image/header/startup checks pass.
-  The complete 404-member build, test and package workflow passes all 1,829 checks
-  with zero failures or skips. Every phase binds the same source identity, and
-  all 4,198 committable files remain unchanged through that run. Both installed
-  verification runtimes pass three gates with two declared optional skips;
-  project validation and owned entrypoints pass. Current receipt:
-  `sha256:cb5556032abc5d569b3b8bb4a31809da4325c3f43078c09157dae7b7f7212a21`.
-  All 18 native children pass 72 actual validate, lock, plan and verify commands.
-  Three corrected contributor guides have fresh ordinary receipts, with accepted
-  source reused and qualification profiles, locks, qualified heads and consumed
-  packages unchanged. The test driver awaits subprocesses, decodes UTF-8 streams
-  incrementally and checks event fields independently. Eighteen injected leak
-  controls, two field/row boundary controls and a real split-byte child process
-  preserve the intended assertions. No interrupted run supplies the current
-  receipt. The registered settings child initially preserves all 17 prior
-  registrations and 3,113 tracked files; later guide repairs change only their
-  owned documentation, review markers and receipts. This local checkpoint remains
-  uncommitted and unpublished. The separate SDK tree is excluded. No schema SQL
-  is retired.
-  The portable contract and SQLite Flavor pass source-bound review. Their verifier
-  passes 212 observations in 51 cases with identical macOS/Linux results and
-  detects all 15 broken variants. Source snapshot:
-  `sha256:77c6c76403ced6b996f9236d3b304b692d86a1ae52b7e1ef93a5fd8e00e86bf5`.
-  All 23 shape descriptions match the historical schemas on both targets,
-  19 additional compatibility cases pass on each, and 16 model controls plus
-  four capture refusals pass. The architecture documents and CONFIG-001 correction
-  pass the full 1,827-check build/test/package workflow, with zero failures or
-  skips. Its source remains a 398-member tree. All 36 hosted image,
-  response-header and startup refusal checks pass against the same immutable
-  image. Both installed and CI-pinned verification runtimes accept the refreshed
-  local receipt:
-  `sha256:16acdfd7a2fde0d5d3561470e6143bd8c99b31b4e50e607df9e73b7575be155c`.
-  These local changes are uncommitted and unpublished. The schema itself is not
-  natively qualified or transferred yet.
-  The seventeen-library checkpoint is published as `56848383` in draft
-  [PR #58](https://github.com/liminalworksinc/align/pull/58). Its exact-head
-  [receipt and spec check](https://github.com/liminalworksinc/align/actions/runs/42141663499)
-  and [current-main check](https://github.com/liminalworksinc/align/actions/runs/42141700921)
-  pass. The complete build, test and package workflow passes all 1,825 application
-  checks, with zero failures or skips. All 24 image checks and ten additional
-  header checks pass. The coordinator passes two clean qualification builds,
-  its separately admitted build, public registration, 213 actual storage checks
-  on macOS and Linux, and 302 web-admission batches across eleven libraries.
-  Sixteen prior registrations and 2,956 tracked child files are preserved.
-  Current receipt: `sha256:5e61ae0fe5bebdf1b28e1ff2112135628f34d8d601ef99dcbd46444507da5547`.
-  The normal pre-push review completed without an opt-out. Its old-Git admission
-  concern is refuted by installed composition checks: effective constraints remain
-  Git >=2.47 and Git LFS >=3.2. Inherited realization labels are unchanged.
-  All 48 tables have observed consumers outside the schema module. The remaining
-  schema, historical SQL, authentication, runtime boundaries and authority-class
-  review remain open. The separate framework tree is excluded from publication.
-  The sixteen-library checkpoint is published as `bb2605c` in draft
-  [PR #58](https://github.com/liminalworksinc/align/pull/58). Its exact-head
-  [receipt and spec check](https://github.com/liminalworksinc/align/actions/runs/42123356635)
-  and [current-main check](https://github.com/liminalworksinc/align/actions/runs/42123419433)
-  pass. B12 starts from that verified checkpoint.
-  The combined build, test and package workflow includes main at `b16f8d1` and
-  passes all 1,825 checks with zero failures or skips.
-  B06 field validation is qualified, separately admitted, publicly registered and
-  consumed through typed aliases. All 4,549,018 observations match the actual
-  consumer; web admission passes 281 batches across ten libraries. The scope has
-  395 members and no gaps. The hosted image passes all 24 checks, and ten additional
-  HTTP cases verify exact framing headers and hosted HSTS on that same image.
-  All fifteen prior registrations, manifest records and
-  2,797 native child files remain unchanged. Continue the remaining authority
-  classes after complete consumer-transfer acceptance. The complete fifteen-library application passes all 1,821 checks with
-  zero failures or skips through the reconciled installed framework at `4d672137`.
-  All 24 image checks pass on the SSD-backed Colima engine for that fifteen-library
-  checkpoint. Last complete fifteen-library receipt:
-  `sha256:8c7f0f604ba43f9185814c94b090480716700daed9fbe1c10e11c37d4c104f73`.
-  Root and CI-pinned verification each pass three gates with two declared skips;
-  project validation and owned-entrypoint checks pass. B07 value rules passes both
-  clean qualification builds, its separate 15-test admitted build and all 1,168,597
-  observations against the actual typed consumer. Namespace and EstimateId types
-  remain compatible in both directions. Web admission passes 231 batches across
-  nine libraries; agent admission passes 157 batches across six. All fourteen prior
-  manifest entries remain identical. The scope has 393 members and no gaps.
-  The accepted registration design, originally local ADR 0060 and now ADR 0064,
-  is implemented in approved local merge commit `4d672137`. Its clean non-editable
-  wheel passes 93 managed installed regressions. The real two-library public-CLI
-  fixture proves read-only planning, stale-plan refusal, actual process interruption,
-  ordinary verification refusal of mixed metadata, exact recovery and successful
-  addition while preserving 525 child files. The former private helper is retired.
-  The operator approved publishing the fifteen-library tree as `a598a6e` to
-  draft PR #58. Only framework changes needed by Align remain in scope.
-  Further commits and publication require specific
-  operator approval. [SDK-FOLLOWUPS-001](#sdk-followups-001), remaining runtime
-  boundaries and authority-class review stay open.
+- **Next action:** Continue the remaining identity helpers and accepted native
+  boundaries after the complete local account and membership checkpoint. Validate
+  normal immutable-asset custody before workspace admission. The separate main
+  authentication intake issue and proposed parent design remain pending. Preserve
+  reviewed candidates and the actual checkout until specific publication approval.
+- **Account and membership scope:** Preserve all seven account operations and
+  both membership lifecycle operations through two supplied-service factories.
+  Account captures 21 resources; lifecycle captures six. The caller retains SQL
+  and transaction ownership. Account uses the explicit membership-removal port.
+  The typed host bindings preserve the existing lifecycle/session/workspace cycle.
+- **Account and membership evidence:**
+  - [x] Preserve both complete sources and characterize 72 source records and
+    37 altered-source controls on both hosts.
+  - [x] Prepare original-free acceptance for 50 public records, 77 binding checks,
+    seven adaptive fault operations and eleven provider-table boundary records.
+  - [x] Normally promote the Component and target; qualify two distinct clean
+    generations with four independent batches each. Inspect both live requests.
+  - [x] Admit a separate generation with eight generated smoke tests; pass
+    independent acceptance and all 50 public records on both hosts. Inspect its
+    live request and preserve all 47 reviewed authority files.
+  - [x] Complete child documentation, portable cache and current receipt through
+    normal commands, with cache reuse and no additional generated source entry.
+  - [x] Register the ready child and pin its admitted consumer through normal
+    transactions. Preserve all 29 prior registry and consumer records.
+  - [x] Execute actual typed host imports and production materialized routes on
+    both hosts. Preserve all 50 public/provider records and seven adaptive faults.
+  - [x] Prove exact public namespace types in both directions, nine value types
+    and PasskeyRow. All seven external callers remain exact and compile.
+  - [x] Load actual account, lifecycle, session and workspace modules from all
+    four entry directions on both hosts; call actual session cleanup. Surrounding
+    ports are controlled in this focused cycle check.
+  - [x] Complete configured authentication/store/dependency composition through
+    the unchanged full application workflow, with exact source membership.
+  - [x] Pass the immutable production image and current parent receipt gates.
+  - [x] Freeze helper transfer acceptance only after those complete gates pass.
+
+See the [scoped account and membership acceptance record](../architecture/server-account-lifecycle-admitted-acceptance.json).
+This local candidate has 30 registered libraries. The prior reviewed 29-library
+checkpoint remains preserved. Original helper snapshots and failed candidates
+remain private evidence. This private candidate completes the helper's local
+transfer acceptance after the complete application, image and current-receipt
+gates. The actual checkout has not been transferred. Main authentication, other
+identity helpers, full B13 and all 31-boundary closure remain open. There is no public
+tester URL and no live security/smoke acceptance. No Git metadata, remote write
+or new worktree was added. Peer/tracker inspection remains the named
+project.tracker_not_a_git_repository skip for this ordinary source artifact.
+
+The complete 30-library build, test and package workflow passes
+1,845 checks with zero failures or skips against the same 434-member source
+`sha256:6cb2bc711e3794ad1889dac5ed23baf50e2abb50b6d852a22d15fab6de8fcc63`. The unchanged hook test passes its 150 ms p95
+requirement with networking blocked. All 36 image, header and startup-refusal
+checks pass against `sha256:de72f1b7ba37f626d2939b9040b7ea4a9ffe00c2b7a8c16f764633d363c83fdc`. All 6,468 image-source files match the
+full-workflow candidate before receipt and documentation metadata updates.
+The operator closure retains its exact 41 files and five qualified packages.
+All six retained static assets match their recorded bytes in the image.
+Current and CI-pinned verification each pass three gates with two declared
+optional skips. Current parent receipt: `sha256:9b7c02f6e6219c5d1316b0972592cd7c9f6f72d84f82da42d898dcadbd24d14b`.
+
+The complete configured application suite passes all 947 checks, including
+account deletion, membership cleanup, session endings, passkeys and sign-out.
+Actual typed imports preserve all 50 public records and seven adaptive faults
+on both hosts. All nine value types and PasskeyRow match; the seven external
+callers remain unchanged. Actual account, lifecycle, session and workspace
+modules load from four entry directions on both hosts.
+
+This is local helper acceptance. The full 31-boundary program, public tester
+URL, operator security review and live smoke remain open. Commit, push and
+deployment require specific approval.
+
+- **Sign-in effects scope:** Continue B13 by transferring the complete mail and
+  captcha helper surfaces. The five functions and two constants use 15 explicit
+  caller-owned resources. The host keeps configuration, delivery, filesystem,
+  configured middleware and its existing public error class. Preserve public
+  names/types, detached calls, current values, effect order and failure identity.
+  This routine child passes ordinary static source intake. The separate sensitive
+  authentication intake issue and proposed parent design remain pending; this
+  helper does not change those guards or close B13.
+- **Sign-in effects evidence:**
+  - [x] Preserve both source files and observe all public behavior on both hosts.
+  - [x] Author and normally promote complete Component/Node contracts, then pass
+    two independent clean qualifications with four acceptance batches each.
+  - [x] Complete a distinct forced generation, retain all 46 authority files,
+    and pass 73 behavior and 66 binding checks on each host. This includes six
+    real filesystem and 17 actual configured middleware observations.
+  - [x] Complete child documentation, local cache and current-receipt readiness.
+  - [x] Register the exact ready child and materialize its locked public import.
+  - [x] Integrate only the typed shared host binding and public aliases. Preserve
+    all actual caller bytes, public types and prior provider records.
+  - [x] Complete actual consumer checks, full application/image acceptance and
+    current parent receipt before retiring retained source authority.
+The complete 29-library build, test and package workflow passes
+1,845 checks with zero failures or skips against the same 432-member
+source `sha256:78959a3818d9160150f0d5c2342d8dcf5b22386a6f1ddc983d49d03afa3f7ddf`. This includes a fresh Next build and
+application type checking. The unchanged serial hook test passes its 150 ms p95
+requirement with networking blocked. All 36 image, response-header and startup
+refusal checks pass against `sha256:610cd6bacd60287b521348c12cf9928b923db9bb41217c4a4233b8f2d29e9f4c`. The exact operator runtime
+retains 41 files and five qualified packages. The image source copy matches the
+full-workflow candidate. Both current and CI-pinned verification pass three gates
+with two declared optional skips. Current parent receipt: `sha256:e76f566893882153d6c82180fbed7dc9579ce664d94ebe603fe65f2279d2f059`.
+
+The sign-in-effects child has two clean qualifications, a distinct admitted
+generation and normal local cache/registration custody. Actual consuming imports
+pass all 73 controlled, filesystem and configured middleware observations on each
+host. All seven public export types match and the three unchanged direct callers
+compile. The supplied public error class and current host providers retain their
+owners. The child package's separate 66 interface checks pass on both hosts.
+
+This completes this helper's local transfer acceptance. The separate complete
+authentication module, other identity helpers and full B13 closure remain open.
+The full 31-boundary program, public tester URL, operator security review and live
+smoke also remain open. Commit, push and deployment require specific approval.
+
+The [admitted-package record](../architecture/server-identity-effects-admitted-acceptance.json)
+binds the exact candidate/source identities and both host results. It proves the
+child package checks. The [actual consumer record](../architecture/server-identity-effects-consumer-acceptance.json)
+adds 73 behavior observations on each host through the three actual typed
+binding/alias files, exact equality for all seven public export types and
+compilation of all three unchanged direct callers. Complete application/image
+acceptance and the current parent receipt pass as recorded above. Live gates remain
+open.
+
+- **Core/event scope:** Cover all of `lib/v2/core.mts` and `lib/v2/events.ts`:
+  public types and mutable event data, existing qualified aliases, creation codes,
+  access-request decisions, workspace deletion/purge, email delivery and formatting,
+  and application event wrappers. Database transactions remain caller-owned.
+  Authentication, domain callers, operator command dispatch, retention and UI keep
+  their owners. Owned database, clock and email providers establish this boundary;
+  no real email or external endpoint is used in source observations.
+- **Core/event test correction:** The first complete parent run exposed a B27
+  test reader coupled to a literal source declaration. Its schema parser returns
+  NaN after the typed bridge delegates SCHEMA_VERSION, while the actual runtime
+  export and real databases remain at version 22. Read the public runtime export
+  without changing the expected version or migration assertions. The generated
+  library, Component, target, qualification and provider pins remain unchanged.
+  Preserve the failed run and repeat complete parent acceptance for this source.
+- **Core/event type projection:** The first full lint gate rejected 12 explicit
+  empty-object type literals in the exact public event-table projection. Preserve
+  those non-nullish empty-record types as `Record<never, never>`, verify exact
+  public type equality and byte-identical emitted JavaScript, and retain the
+  existing lint rule. Generated source and behavioral authority remain unchanged.
+- **Core/event evidence:**
+  - [x] Preserve the exact two source files from reviewed tree 183485db.
+  - [x] Enumerate the complete runtime and type surfaces, capture meaningful
+    populated, failure and recovery observations on macOS and Linux, and reject
+    altered controls before new specifications.
+  - [x] Author Component, Node target and source-independent private acceptance.
+  - [x] Qualify two clean generations, then a separate admitted build with original
+    implementations and private verification commands excluded from generation.
+  - [x] Preserve actual consumers, public types, all callers and prior 27 provider
+    records, then complete production, application/image and current-receipt gates.
+The complete build, test and package workflow passes 1,845 checks
+with zero failures or skips against the same 429-member source
+`sha256:6a376cfb42c38ef654975b5b40e25f05b7347ba7c07c023c9953507af6d8e1f0`. This includes a fresh Next build and its actual
+application type checks. The unchanged serial hook test passes its 150 ms p95
+requirement with networking blocked. All 36 image, response-header and startup
+refusal checks pass against `sha256:c3b340a550ebf69b7d27c70c237105a396c5af8eb55dbaa5dd7f07fda30c2af7`. The exact operator runtime
+contains 41 files and five qualified packages. The image source copy matches the
+frozen candidate; Docker's declared allowlist selects its actual build inputs.
+Both current and CI-pinned verification pass three gates with two declared
+optional skips. Current parent receipt: `sha256:8877d1818e17addadd3f6e7023bfda6d055254c20ad1c7e9a99f488da39f3075`. The consumer observation
+retains its pre-run snapshot; these are the subsequent complete acceptance results.
+
+- **Client-key scope:** Preserve `clientNet` and `clientOf` together, including
+  trimming, case, brackets, zones, IPv6 grouping, IPv4-mapped addresses, existing
+  loose invalid-input behavior, fresh configuration reads and exact header
+  presence/default handling. The caller owns the configuration provider and
+  request headers. Rate-limit storage, thresholds, proxy trust, authentication
+  and request handlers keep their existing owners.
+- **Client-key evidence:**
+  - [x] Freeze exact source, observe both public exports and effect failures on
+    macOS and Linux, and reject meaningful altered controls before authoring specs.
+  - Baseline: 11 matching batches cover 1,995 normalization inputs on each host;
+    all 16 altered source controls are rejected. Configuration and header-access
+    ordering, provider failure identity, real Requests and mode changes are observed.
+  - [x] Author Component, target and source-independent acceptance contracts.
+  - Private verifier and ordinary profile commands pass on macOS and Linux:
+    four positive formats preserve all 11 batches; 16 semantic, 10 binding and
+    18 ambient controls are rejected on each host. The first generated package
+    correctly failed strict export-map admission because an authored capability
+    implied `create` while the target requested `create_client_keys`. The corrected
+    capability `server-client-keys.create-client-keys` now has that exact locked
+    module and symbol. Its fresh oracle binds all 11 cases. Source algorithms and
+    every profile argument and expected result remain unchanged. Two clean
+    generations pass all 11 independent batches each, followed by separate
+    admission. The admitted build passes 18 generated tests and ordinary library
+    acceptance. Its current receipt, local cache and contributor readiness are
+    complete, preserving all 46 reviewed authority files.
+  - [x] Qualify two clean generations and a separate admitted build with original
+    source and private verification commands excluded from generation requests.
+  - [x] Preserve actual consumer observations on both hosts, public types and all
+    six unchanged callers; keep the prior 26 registry and consumer records exact.
+  - [x] Pass production assembly, complete application/image workflows and a current
+    parent receipt before selecting another transfer.
+- **Request scope:** Preserve both public helper namespaces, hosted and local
+  origin checks, bounded body streaming and cancellation, credential selection,
+  provider ordering, response identity, status/headers and hosted log redaction.
+  Configuration, error constructors, authentication, device lookup, readiness
+  and network-key providers retain their existing owners. No endpoint, session
+  implementation, database operation or security policy changes in this transfer.
+- **Request evidence:**
+  - [x] Capture exact source and public types, then observe all public operations,
+    effect ordering and meaningful rejected controls on macOS and Linux.
+  - Source evidence: all 18 runtime exports, 46 matching batches and 24 rejected
+    controls on macOS and Linux. Two clean generations pass all 46 batches each;
+    a separate admitted build passes six generated tests and ordinary acceptance.
+    All 47 reviewed child authority files remain exact. The current child has a
+    portable local cache and completed contributor readiness. Both actual typed
+    consumers preserve every source record on both hosts, and their public types
+    assign both ways. Production web assembly accepts 717 batches in 20 libraries.
+  - [x] Qualify two clean generations and a separate admitted build without
+    original source or private verifier code in generation requests.
+  - [x] Prove actual consumers and public types, preserving all prior provider records.
+  - [x] Pass complete application/image workflows and current parent receipt gates.
+- **Readiness scope:** Preserve one shared promise across callers and module
+  instances, connection-before-auth-before-application migration ordering, exact
+  rejection identity and retry after a failed attempt. Bind to caller-owned state,
+  connection and migration providers. Authentication, schema, database execution,
+  request handlers and later instrumentation retain their existing owners.
+- **Readiness evidence:**
+  - [x] Freeze the exact source, detached API and concurrent/failure observations
+    on macOS and Linux; demonstrate meaningful rejected controls.
+  - [x] Qualify two independent clean generations and a separate admitted build
+    without including the original implementation in generation requests.
+  - [x] Check actual callers and public types, then repeat the complete workflow,
+    image and current receipt gates for the integrated source before continuing.
 - **Evidence:** Phase 1.2 lift-and-shift identity `sha256:316a4e6b641a46788febb1c21b004ad3c00b6d812c10006deb1d05a48207aa49`.
 - **Continuation direction (2026-11-04):** Finish the complete native rewrite program
   and resolve its litai follow-ups. Qualification of an isolated library is an
   intermediate result. Completion requires actual consumer integration, verified
   source retirement, every inventory classification, and full application parity.
 
+The storage service completes local acceptance as the twenty-second qualified
+library. Two distinct clean generations pass 44 independent cases each, followed
+by separate admission. Its actual typed consumer preserves 43 frozen source cases
+on macOS and Linux, and all thirteen public exports remain type compatible. The
+other 21 consumer records remain exact. Build, test and package pass 1,845
+application checks with zero failures or skips against the same 416-file source:
+`sha256:0509b93cf46051b47cf1bc0d6983d579fe4694dd1ba5fa5bdd94f1b8cee36a1f`. All 36 image, header and startup checks pass against
+`sha256:b4b81af81d8a0c83961f371ff47ff335328d0e7dbc67ac89be50a1dfe7f18701`. The image preserves the exact 29-file operator runtime and
+three qualified packages. Both current and CI-pinned verification pass three
+gates with two declared optional skips. The current parent receipt is
+`sha256:16bb7dc363ffba4484d96546f879ae2b7786236f872dfd3461dda9ace180d55b`. The [consumer record](../architecture/storage-runtime-consumer-observation.json)
+preserves the earlier pre-run observation snapshot; this queue records the later
+complete acceptance. This candidate remains separate from the existing staged
+publication checkpoint. ADOPT-002, the public tester URL, operator security review
+and live smoke remain open. The draft PR remains at its existing published head.
+
+The next isolated candidate adds qualified `local/server-secrets`. Two distinct
+clean generations each pass 36 independent cases, followed by separate admission.
+Its actual core and web consumers preserve all 35 original cases on macOS and
+Linux, including both lexical signing callers. The complete core public namespace
+remains type compatible. Both hosts pass all six operator signal comparisons.
+All fifteen operator command comparisons also pass on each host, including
+transaction rollback. Build, test and package pass 1,845 application checks
+with no failures or skips against the same 419-file source `sha256:6cdce3f2f69691e7dceaef1d1437d1d5141fb3846f8106be9182f169bcfc2936`. All 36
+image, header and startup checks pass against `sha256:8fe5ef017c0841ac45846cb2c78e6cbf62b1a18376202f07580e2593bac3c130`. The operator
+runtime matches its exact 34 files and four packages. Both current and CI-pinned
+verification pass three gates with two declared optional skips. Current receipt:
+`sha256:512923c3c7cfef1a8a4c95920556da9f9eb9b88e7e87808a0e26aa7f6f0b0766`. The [secret consumer record](../architecture/server-secrets-consumer-observation.json)
+preserves the pre-run snapshot; this queue records subsequent full acceptance.
+Library counts do not measure completed boundaries in the full 31-boundary program.
+This candidate remains local, and the public tester gates remain open.
+
+The first container attempt rejects startup permission acceptance under the
+root build user. A focused check reproduces that exact rejection. The corrected
+build target owns its application files as `node` and runs native acceptance,
+operator preparation and compilation as that unprivileged user. Runtime entry
+behavior and the private permission checks remain unchanged. Full and image
+acceptance now pass against this corrected source, as recorded below.
+
+The isolated startup candidate adds the twenty-fourth qualified library. Two
+clean generations each pass 40 batches covering 79 private observations. The
+actual typed startup consumer preserves all 78 original source records on macOS
+and Linux. Six natural-exit scenarios pass on each host, including replacement
+ownership and captured paths. Namespace types assign in both directions, and the
+unchanged instrumentation caller compiles. The production web adapter accepts
+631 batches across 18 libraries. All prior 23 registry and consumer records stay
+exact. See the [startup consumer record](../architecture/server-startup-consumer-observation.json).
+The complete build, test and package workflow passes 1,845 checks with
+zero failures or skips against the same 421-file source `sha256:66cded58e93ce4523fe1e60bd2b1a321a2815969f8af260f7df31a2598140a0f`.
+All 36 image, response-header and startup-refusal checks pass against
+`sha256:952d1958a7c7e62301f1dee4163b4a019083bf0f22dfb80715c97e190dd32251`. The operator runtime matches its exact 34 files and four
+qualified packages. The build stage now runs acceptance and compilation as the
+unprivileged node user; its runtime stage and private permission checks are unchanged.
+Both current and CI-pinned verification pass three gates with two declared optional
+skips. Current receipt: `sha256:35a1153632dd27cc4dd4e52e007a4397ba9cd8632361de57db42194959a35e90`. The consumer observation is the earlier
+pre-run snapshot; this queue records subsequent full acceptance. No public tester
+URL or live QA gate is complete. Library counts do not close the 31-boundary program.
+
+The isolated readiness candidate adds the twenty-fifth qualified library.
+Two distinct clean generations each pass 40 independent observations. A separate
+admitted build passes generated tests and ordinary acceptance, and cached rebuilds
+establish a current child receipt without new generation. The actual typed
+consumer preserves all 40 original source records on macOS and Linux. Public
+namespace types assign in both directions, and the unchanged instrumentation
+caller compiles. The production web adapter accepts 671 batches across 19
+libraries. All prior 24 registry and consumer records remain exact. See the
+[readiness consumer record](../architecture/server-readiness-consumer-observation.json).
+Authentication, schema, database execution, startup and request effects retain
+their existing owners. The complete build, test and package workflow passes 1,845 checks
+with zero failures or skips against the same 423-member source
+`sha256:7bddf6f110d8876451eec06e3cb6a07728ec5463543d7034270b62392a704334`. The unchanged serial hook test passes its 150 ms p95
+requirement with networking blocked. All 36 image, response-header and startup
+refusal checks pass against `sha256:0d127f8d0767a518c632d8d58f9ae26d5da6c3b0f147ab44bfcd736111b342f8`. The image preserves the exact
+34-file operator runtime and four qualified packages. Its source copy matches the
+frozen candidate; Docker's declared allowlist selects its build inputs.
+Both current and CI-pinned verification pass three gates with two declared
+optional skips. Current parent receipt: `sha256:28e7a4bbf6f7947e610953ffcd3c5c15bc8c825baf01c6e2350a8ea62a9dc4fc`. The consumer record retains
+the earlier pre-run observation; this record adds the later complete acceptance.
+The complete 31-boundary program remains active. The public tester URL,
+operator security review and live smoke gates remain open.
+
+The isolated request-helper candidate registers the twenty-sixth qualified
+library. It replaces both public HTTP helper modules with typed aliases to the
+admitted provider. All 46 actual-consumer batches match on macOS and Linux.
+Both public namespaces and principal types assign both ways; the unchanged
+instrumentation and three actual request callers compile. Production web
+assembly accepts 717 batches across 20 libraries. All prior 25 registry and
+consumer records remain exact. See the
+[request consumer record](../architecture/server-request-effects-consumer-observation.json).
+Authentication, device storage, configuration, readiness, error implementations
+and endpoints keep their existing owners. The complete build, test and package workflow passes 1,845 checks
+with zero failures or skips against the same 425-member source
+`sha256:bc5e80205c9d00b48cf95bd364a669565edc4e4f31090d6883f4b180d16556b0`. The unchanged serial hook test passes its 150 ms p95
+requirement with networking blocked. All 36 image, response-header and startup
+refusal checks pass against `sha256:2ad64297381e5c36955eedf3b34864c4433b8d7f96b2a3dce2cc5e340f5667ee`. The operator runtime preserves
+the exact 34 files and four qualified packages. The image source copy matches
+the frozen candidate; Docker's declared allowlist selects its actual build inputs.
+Both current and CI-pinned verification pass three gates with two declared
+optional skips. Current parent receipt: `sha256:37a6ceb01b22646cd53fd49e102e0ef2e27bead3a2f4c2e73c2feb1950e8f904`. The consumer record retains
+its pre-run snapshot; these are the subsequent full acceptance results.
+The complete 31-boundary program remains active. The public tester URL,
+operator security review and live smoke gates remain open.
+
+The isolated client-key candidate registers the twenty-seventh qualified
+library. Its typed `lib/ratelimit.ts` binding preserves both public exports and
+all 11 source observation batches on macOS and Linux, covering 1,995 normalization
+inputs per host. The public namespace assigns both ways and all six unchanged
+callers compile. Production web assembly accepts 728 batches across 21 libraries.
+All prior 26 registry and consumer records remain exact. See the
+[client-key consumer record](../architecture/server-client-keys-consumer-observation.json).
+The complete build, test and package workflow passes 1,845 checks
+with zero failures or skips against the same 427-member source
+`sha256:2f1050746a1ca22c28f5f54545d9e6da233a81f6f53a23a2dba832a122e8ce6b`. The unchanged serial hook test passes its 150 ms p95
+requirement with networking blocked. All 36 image, response-header and startup
+refusal checks pass against `sha256:db5154af4a99f8cc39b7d125ed57b7a29665bea1bc3713b2abd1f2b88a807154`. The exact operator runtime
+contains 34 files and four qualified packages. The image source copy matches
+the frozen candidate; Docker's declared allowlist selects its actual build inputs.
+Both current and CI-pinned verification pass three gates with two declared
+optional skips. Current parent receipt: `sha256:7461673a27c26afd0a4401d25aabc25e2d24346210d7e1365ba4380ad017b5f3`. The consumer record retains
+its pre-run snapshot; these are the subsequent full acceptance results.
+The full 31-boundary program remains active. The public tester URL,
+operator security review and live smoke gates remain open.
+
 <a id="context-001"></a>
+
 ### [x] CONTEXT-001 - Preserve context priorities and ask attribution under clipping
 
 - **Priority:** P1
@@ -571,6 +902,12 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [ ] Backup and rollback rehearsed on the hosted volume
   - [ ] Hosted smoke test after deploy, and fly ssh console shows the secrets set
 
+Current forge and Git-ancestry audit: PR #37 merged on 2026-11-04 as
+`ba8a18084195f6bf4795e5c53c4a70c67d8f89cb`; it is already included in main
+`ba43c5b` and this branch. Another merge of that PR is not a remaining action.
+The other tester, legal, operational, release and deployment prerequisites above
+remain separately owned and unverified by the local native checkpoint.
+
 ### [ ] SPEND-001 — AI spend tracking across sessions that need alignment
 
 - **Priority:** P0
@@ -663,7 +1000,7 @@ checks. Its current receipt is `sha256:7f3b84e7019246bdb8bb2edfc9dd043135ce57282
 - **Priority:** P1
 - **Owner:** parent framework application and adapter APIs
 - **Direction:** Finish the native rewrite without private registry writes or unresolved verifier and cache-transport review findings.
-- **Conclusion:** Keep the published export-map fix separate. The remaining parent-owned work needs issue-first authority: a supported qualified-child registration transaction, isolation of generic Python library imports, and accurate local-only native-cache scope. Prepare portable proposals and preserve every existing qualification gate and registered child pin. Obtain specific authorization for missing issue filings and later publication. Link matching existing issues before local parent changes.
+- **Conclusion:** Supported qualified-child registration, generic Python import isolation and local cache scope are locally verified under their filed upstream issues. Commit `7f4e2406` also preserves reviewed callable metadata through ordinary promotion. Its clean non-editable wheel passes 128 managed installed checks. Two clean schema qualifications and a separate admitted build pass with the unchanged public API, case arguments and expected results. Publish the tested contribution only with specific approval and required upstream review.
 - **Depends on:** none
 - **Completion prerequisites:** none
 - **Implementation:**
@@ -671,12 +1008,22 @@ checks. Its current receipt is `sha256:7f3b84e7019246bdb8bb2edfc9dd043135ce57282
   - [x] With explicit authorization, file or link upstream issues before implementation in the isolated parent checkout.
   - [x] Replace the private registry helper with the supported public operation; preserve stale-plan, qualification, collision and rollback refusals.
   - [x] Preserve main's generic Python import isolation and the separate verified-wheel dependency closure; document and test native-cache transport scope.
-  - [ ] Preserve reviewed zero-argument callable metadata through ordinary single-Component promotion under existing upstream issue #132, then qualify the schema without changing its public API or independent cases.
+  - [x] Preserve reviewed zero-argument callable metadata through ordinary single-Component promotion under existing upstream issue #132, then qualify the schema without changing its public API or independent cases. Two clean builds and the separate admitted build pass all 51 cases and 212 observations each.
   - [ ] Publish the tested framework contribution with specific approval and reconcile its canonical design and required review outcomes.
 - **Evidence:**
   - [x] Registration, Python isolation and cache-scope fixtures pass 93 focused installed regressions and the real two-library recovery journey without editing protected pins or generated implementations.
+  - [x] The clean non-editable wheel from `7f4e2406` passes all 128 managed installed checks, including the complete original promotion regression set. Installed module origins and distribution bytes remain bound to the tested wheel.
   - [ ] The framework PR completes its required independent review and exact-head platform/CI qualification before landing.
   - [x] Current fifteen-library consumer integrity, all 1,821 application checks and owned project verification pass with the approved reconciled framework.
+
+Current review audit: approved local framework commit `ac436ed2` provides the
+qualified-child revision required by the persistent-stop transfer. Its clean wheel
+and real installed transaction/recovery acceptance pass. The published PR #313 is
+still at `d4bd72bf`. A paired installed fixture now confirms that its cache collector
+still follows a redirected child ancestor even though the canonical registry reader
+refuses it. Capture limits and custody through the read remain required by that
+review. The specific sanitized issue-filing and correction approval is pending.
+No framework source has changed for this finding. SDK-FOLLOWUPS-001 stays open.
 
 See the [framework integration followups](framework-integration-followups.md) for
 portable contracts, tracker findings and the next issue-first action.
@@ -771,3 +1118,21 @@ under its API usage limit; the approved one-command opt-out was used.
   on macOS and Linux. All 3,113 tracked native child files and the pending SDK
   staged tree remain unchanged. This is local acceptance; publication still
   requires specific operator approval.
+
+<a id="auth-rate-001"></a>
+### [x] AUTH-RATE-001 - Preserve the sign-in ceiling explanation across clock advances
+
+- **Priority:** P2
+- **Owner:** retained B13 sign-in admission caller and B27 regression harness
+- **Direction:** Preserve the canonical Mode L explanation when the machine-wide ceiling keeps sign-in delivery waiting longest.
+- **Outcome:** Local integration passes all 18 deterministic cases on macOS and Linux, the full 1,830-check application workflow and all 36 image, header and startup-refusal checks. Every build, test and package phase binds the same 405-member source, and all 4,201 committable paths remain unchanged through that run. Current receipt: `sha256:32407ec3ed6fccfc9aea6374c7a29b192db677e5317975d0270cb5176053b703`. Both verification runtimes pass three gates with two declared optional skips. Immutable image: `sha256:956a5ab5c8bc1c7afe9fb034fb05af3cb6deb4a093ea4d2998b7b160344cf9b4`. This result remains local; a new commit or publication needs its own specific go.
+- **Conclusion:** The actual handler compares relative retry values sampled across an awaited transaction. A one millisecond advance produces the wrong explanation. Sample once inside the transaction after acquisition and return both wait values together. Keep thresholds, owner exemptions, status, code, retry headers and transaction ownership unchanged. This is an explanation defect, with no demonstrated admission bypass.
+- **Depends on:** ADOPT-002
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Apply the reviewed caller correction and deterministic 18-case regression; invoke it from the ordinary application driver before server startup.
+  - [x] Admit the new B27 harness through the ordinary retained-source scope workflow and refresh the normal receipt after complete checks.
+- **Evidence:**
+  - [x] The unfixed handler fails five of the 18 frozen cases, including a one millisecond clock advance. The fixed handler passes all 18 on macOS and Linux; seven broken-fix controls are detected on both targets.
+  - [x] Full type, lint, application and immutable image checks pass without relaxed thresholds, timeouts, retry budgets, assertions or security policy.
+  - [x] Record the outcome in the changelog. Actual integration and current receipt acceptance pass. Any new commit or publication requires a specific operator go.

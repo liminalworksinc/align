@@ -1,10 +1,18 @@
 # Storage entities and historical upgrades
 
-- **Design status:** proposed; no release-authority transfer
+- **Design status:** schema-program subset qualified locally; remaining storage contracts open
 - **Owning work:** [ADOPT-002](../roadmap/active-work.md#adopt-002)
-- **Generation status:** review inputs only, excluded from candidate generation until source-bound contract review
+- **Generation status:** preserved review input; qualified Component and Flavor authority are recorded in the native rewrite program
 
 ## Contract boundary
+
+The schema-only transfer now qualifies as `local/storage-schema`; the
+[native rewrite program](../roadmap/native-rewrite-program.md) records its
+source-bound review, two clean qualifications, separate admitted build and
+complete consumer acceptance. This document preserves the review rationale.
+Its diagnostic target model remains outside generation. The qualified Component
+and selected Flavor own generated schema behavior. The other storage/runtime
+boundaries retain their source authority until separately qualified.
 
 The store preserves the entities below and supports upgrades from every released
 domain schema version through version 22. The logical contract owns record
@@ -13,7 +21,7 @@ owns physical names, affinity, defaults, null handling, indexes, triggers and
 driver behavior. Better Auth owns its complete account, session, credential and
 passkey schema. The domain store references its account and passkey identities.
 
-The proposed native capability returns the ordered, target-specific change
+The qualified schema capability returns the ordered, target-specific change
 programs. Producing the programs has no database, clock, filesystem, environment,
 authentication or network effects. The already qualified migration coordinator
 executes them in numbered order with one transaction per change, checks references

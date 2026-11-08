@@ -60,7 +60,7 @@ if (spawnSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]).status === 0) {
   process.exit(2);
 }
 /** The schema version the code expects (lib/v2/core.mts), which lib/v2/db.ts checks against its migrations. */
-const SCHEMA_VERSION = Number(/export const SCHEMA_VERSION = (\d+);/.exec(readFileSync(path.join(ROOT, "lib/v2/core.mts"), "utf8"))?.[1]);
+const { SCHEMA_VERSION } = await import(pathToFileURL(path.join(ROOT, "lib/v2/core.mts")).href);
 const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -381,6 +381,8 @@ if (build.status !== 0) {
   console.log(`FAIL  next build\n${(build.stdout + build.stderr).slice(-1500)}`);
   process.exit(1);
 }
+// Historical-upgrade fixtures use the same typed schema binding as the server.
+const { changePrograms } = await import(pathToFileURL(path.join(ROOT, "lib/storage-schema.mts")).href);
 
 // ======== LIM-2455 §F: none of the PR #34 prototype's controls ship (a scan of the served code, no server) ========
 {
@@ -502,6 +504,14 @@ try {
     "command capture: preserves split UTF-8 on stdout and stderr",
     captureEncoding.status === 0 && captureEncoding.stdout === "€" && captureEncoding.stderr === "😀",
     JSON.stringify(captureEncoding),
+  );
+  const ceilingTiming = await commandAsync(process.execPath, ["--experimental-vm-modules", "scripts/test-auth-ceiling.mjs"], process.env);
+  let ceilingTimingResult = null;
+  try { ceilingTimingResult = JSON.parse(ceilingTiming.stdout); } catch { ceilingTimingResult = null; }
+  check(
+    "sign-in limits: machine-ceiling messages use one time after transaction acquisition; address, owner and hosted controls stay correct",
+    ceilingTiming.status === 0 && ceilingTimingResult?.cases === 18 && ceilingTimingResult?.failed === 0,
+    ceilingTiming.stderr || ceilingTiming.stdout.slice(0, 300),
   );
   // ======== phase local: Mode L with no settings (v2 always on, the local owner, email codes) ========
   const localDir = path.join(tmpRoot, "local");
@@ -843,11 +853,10 @@ try {
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
   check("storage (PORT2-001): migration 14 adds last_read_at to connected-app grants, beside last_used_at (connected, not read)", grantCols.includes("last_read_at") && grantCols.includes("last_used_at"), grantCols.join());
   // PORT29: migration 15 on this database, and on a version 14 database that already holds a workspace, a member and a
-  // goal (built in memory from lib/v2/db.ts's own MIGRATIONS, as the server's migrate() applies them).
+  // goal (built in memory from the qualified schema programs, as the server's migrate() applies them).
   const port29Cols = withDb((d) => [["v2_goals", "target_share"], ["v2_goal_versions", "target_share"], ["v2_workspaces", "steering"]].every(([t, c]) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c)));
   const upgraded = (() => {
-    const src = readFileSync(path.join(ROOT, "lib/v2/db.ts"), "utf8");
-    const migrations = new Function(`return [${src.slice(src.indexOf("[", src.indexOf("const MIGRATIONS")) + 1, src.indexOf("];\n\n// The operator script"))}];`)();
+    const migrations = changePrograms();
     const d = new DatabaseSync(":memory:");
     d.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY, name TEXT)");
     migrations.slice(0, 14).forEach((m) => d.exec(m));
@@ -863,8 +872,7 @@ try {
     return out;
   })();
   const upgraded17 = (() => {
-    const src = readFileSync(path.join(ROOT, "lib/v2/db.ts"), "utf8");
-    const migrations = new Function(`return [${src.slice(src.indexOf("[", src.indexOf("const MIGRATIONS")) + 1, src.indexOf("];\n\n// The operator script"))}];`)();
+    const migrations = changePrograms();
     const d = new DatabaseSync(":memory:");
     d.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY, name TEXT)");
     migrations.slice(0, 16).forEach((m) => d.exec(m));
@@ -9097,8 +9105,7 @@ try {
   {
     // C3-1: the migration that keeps why a request target expired.
     const upgraded18 = (() => {
-      const src = readFileSync(path.join(ROOT, "lib/v2/db.ts"), "utf8");
-      const migrations = new Function(`return [${src.slice(src.indexOf("[", src.indexOf("const MIGRATIONS")) + 1, src.indexOf("];\n\n// The operator script"))}];`)();
+      const migrations = changePrograms();
       const d = new DatabaseSync(":memory:");
       d.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY, name TEXT)");
       migrations.slice(0, 17).forEach((m) => d.exec(m));

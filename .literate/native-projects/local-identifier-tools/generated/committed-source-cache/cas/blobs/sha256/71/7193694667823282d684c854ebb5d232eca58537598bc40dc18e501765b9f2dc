@@ -1,0 +1,14 @@
+LITAI_LANGUAGE_TOOL ?= node
+OBJECT_ROOT ?= .artifacts
+OUT ?= $(OBJECT_ROOT)/run
+
+.PHONY: all build test check
+all: build
+build:
+	"$(LITAI_LANGUAGE_TOOL)" tools/package.js "$(OUT)" "$(LITAI_LANGUAGE_TOOL)"
+test:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" --check identifier_tools/create_identifiers.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tests/litai_test.js

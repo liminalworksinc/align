@@ -36,7 +36,7 @@ try {
   const actual = JSON.parse(result.stdout);
   assert.deepEqual(actual.manifest,manifest,"Operator manifest differs from the reviewed inputs");
   assert.deepEqual(actual.files,manifest.files,"Runtime code differs from the exact pinned operator closure");
-  console.log(JSON.stringify({files:manifest.files.length,qualified_packages:2,exact_source_and_package_bytes:true}));
+  console.log(JSON.stringify({files:manifest.files.length,qualified_packages:manifest.libraries.length,exact_source_and_package_bytes:true}));
 } finally {
   fs.rmSync(temporary,{recursive:true,force:true});
 }

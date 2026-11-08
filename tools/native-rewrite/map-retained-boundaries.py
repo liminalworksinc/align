@@ -61,6 +61,9 @@ assign(
             "locks.ts",
             "migration-coordinator.mts",
             "runtime-settings.mts",
+            "identifier-tools.mts",
+            "storage-schema.mts",
+            "server-secret-tools.mts",
             "http.ts",
             "ratelimit.ts",
         ]

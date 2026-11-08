@@ -1,0 +1,182 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const path = require('node:path');
+const { create_tools } = require('../server_secrets/create_tools.js');
+
+function fixture(initial = []) {
+  const files = new Map(initial);
+  const calls = [];
+  let env = {};
+  const context = {
+    environment() { calls.push(['environment']); return env; },
+    join(...parts) { calls.push(['join', ...parts]); return path.join(...parts); },
+    dirname(file) { calls.push(['dirname', file]); return path.dirname(file); },
+    existsSync(file) { calls.push(['existsSync', file]); return files.has(file); },
+    mkdirSync(dir, options) { calls.push(['mkdirSync', dir, options]); },
+    randomBytes(size) { calls.push(['randomBytes', size]); return Buffer.alloc(size, 0xab); },
+    writeFileSync(file, value, options) {
+      calls.push(['writeFileSync', file, value, options]); files.set(file, value);
+    },
+    readFileSync(file, encoding) { calls.push(['readFileSync', file, encoding]); return files.get(file); },
+    createHmac: crypto.createHmac
+  };
+  return { context, files, calls, setEnvironment(value) { env = value; } };
+}
+
+function configured(args, expected) {
+  const f = fixture();
+  const service = create_tools(f.context);
+  assert.deepEqual(f.calls, []);
+  assert.equal(create_tools.length, 1);
+  assert.equal(service.serverSecret.length, 1);
+  assert.equal(service.hmac.length, 2);
+  assert.equal(service.serverSecret.name, 'serverSecret');
+  assert.equal(service.hmac.name, 'hmac');
+  assert.deepEqual(Object.keys(service).sort(), ['hmac', 'serverSecret']);
+  const { serverSecret } = service;
+  const result = serverSecret(...args);
+  assert.equal(result, expected);
+  assert.deepEqual(f.calls, []);
+  return result;
+}
+
+const cases = [
+  { id: 'generated-configured-unicode', execute() {
+    return configured(['room-a', { ALIGN_SECRET: '  café\n雪  ' }], '  café\n雪  ');
+  } },
+  { id: 'generated-configured-zero', execute() {
+    return configured(['room-b', { ALIGN_SECRET: '0' }], '0');
+  } },
+  { id: 'generated-configured-space', execute() {
+    return configured(['room-c', { ALIGN_SECRET: ' \t ' }], ' \t ');
+  } },
+  { id: 'generated-empty-file', execute() {
+    const file = path.join('room-d', '.secret');
+    const f = fixture([[file, '\u2003\n\t ']]);
+    const { serverSecret } = create_tools(f.context);
+    const result = serverSecret(...['room-d', { ALIGN_SECRET: '' }]);
+    assert.equal(result, '');
+    assert.deepEqual(f.calls, [['join', 'room-d', '.secret'], ['existsSync', file], ['readFileSync', file, 'utf8']]);
+    assert.equal(f.files.get(file), '\u2003\n\t ');
+    return result;
+  } },
+  { id: 'generated-existing-text', execute() {
+    const file = path.join('room-e', '.secret');
+    const f = fixture([[file, '\uFEFF  alpha\nbeta  \u00a0']]);
+    const { serverSecret } = create_tools(f.context);
+    const result = serverSecret(...['room-e', {}]);
+    assert.equal(result, 'alpha\nbeta');
+    f.files.set(file, ' next ');
+    assert.equal(serverSecret('room-e', {}), 'next');
+    return result;
+  } },
+  { id: 'generated-persist-entropy', execute() {
+    const f = fixture();
+    const file = path.join('room-f', '.secret');
+    const { serverSecret } = create_tools(f.context);
+    const result = serverSecret(...['room-f', {}]);
+    const expected = 'abababababababababababababababababababababababababababababababab';
+    assert.equal(result, expected);
+    assert.deepEqual(f.calls, [
+      ['join', 'room-f', '.secret'], ['existsSync', file], ['dirname', file],
+      ['mkdirSync', path.dirname(file), { recursive: true }], ['randomBytes', 32],
+      ['writeFileSync', file, expected, { mode: 0o600 }], ['readFileSync', file, 'utf8']
+    ]);
+    assert.equal(serverSecret('room-f', {}), expected);
+    assert.equal(f.calls.filter(call => call[0] === 'randomBytes').length, 1);
+    return result;
+  } }
+];
+
+function resourceContracts() {
+  const f = fixture();
+  const { serverSecret, hmac } = create_tools(f.context);
+  f.context.environment = () => { throw new Error('Replaced reader'); };
+  f.setEnvironment({ ALIGN_SECRET: 'first' });
+  assert.equal(serverSecret('current'), 'first');
+  f.setEnvironment({ ALIGN_SECRET: 'second' });
+  assert.equal(serverSecret('current', undefined), 'second');
+  let reads = 0;
+  assert.equal(serverSecret('getter', { get ALIGN_SECRET() { return ++reads === 1 ? 'truthy' : 'returned'; } }), 'returned');
+  assert.equal(reads, 2);
+  reads = 0;
+  serverSecret('getter-empty', { get ALIGN_SECRET() { reads++; return ''; } });
+  assert.equal(reads, 1);
+
+  // RFC 4231 case 2: independently published SHA-256 HMAC bytes.
+  const expected = Buffer.from('5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843', 'hex').toString('base64url');
+  const before = f.calls.length;
+  assert.equal(hmac('Jefe', 'what do ya want for nothing?'), expected);
+  assert.equal(f.calls.length, before);
+  for (const [key, payload] of [['', ''], ['雪\0', 'event:café\0'], [' key ', 'creation:雪']]) {
+    assert.equal(hmac(key, payload), crypto.createHmac('sha256', key).update(payload).digest('base64url'));
+  }
+
+  const order = ['environment', 'join', 'existsSync', 'dirname', 'mkdirSync', 'randomBytes', 'writeFileSync', 'readFileSync'];
+  for (const failing of order) {
+    const g = fixture();
+    const sentinel = { failing };
+    const calls = [];
+    for (const name of order) {
+      const original = g.context[name];
+      g.context[name] = (...args) => {
+        calls.push(name);
+        if (name === failing) throw sentinel;
+        return original(...args);
+      };
+    }
+    assert.throws(() => create_tools(g.context).serverSecret('failure'), error => error === sentinel);
+    assert.deepEqual(calls, order.slice(0, order.indexOf(failing) + 1));
+    assert.equal(g.files.has(path.join('failure', '.secret')), failing === 'readFileSync');
+  }
+
+  const chain = [];
+  const digestReceiver = { digest(encoding) {
+    assert.equal(this, digestReceiver); chain.push(['digest', encoding]); return 'digest-result';
+  } };
+  const updateReceiver = { update(payload) {
+    assert.equal(this, updateReceiver); chain.push(['update', payload]); return digestReceiver;
+  } };
+  const g = fixture();
+  g.context.createHmac = (algorithm, key) => { chain.push(['createHmac', algorithm, key]); return updateReceiver; };
+  assert.equal(create_tools(g.context).hmac('key\0', 'payload\0'), 'digest-result');
+  assert.deepEqual(chain, [['createHmac', 'sha256', 'key\0'], ['update', 'payload\0'], ['digest', 'base64url']]);
+  for (const failing of ['createHmac', 'update', 'digest']) {
+    const sentinel = { failing };
+    const visited = [];
+    const invoke = name => { visited.push(name); if (name === failing) throw sentinel; };
+    const context = fixture().context;
+    context.createHmac = () => { invoke('createHmac'); return {
+      update() { invoke('update'); return { digest() { invoke('digest'); return ''; } }; }
+    }; };
+    assert.throws(() => create_tools(context).hmac('', ''), error => error === sentinel);
+    const order = ['createHmac', 'update', 'digest'];
+    assert.deepEqual(visited, order.slice(0, order.indexOf(failing) + 1));
+  }
+
+  // Exercise actual caller-provided entropy without assuming any random value.
+  const real = fixture();
+  let bytes;
+  real.context.randomBytes = size => { bytes = crypto.randomBytes(size); return bytes; };
+  const tools = create_tools(real.context);
+  const first = tools.serverSecret('independent-a', {});
+  assert.equal(first, bytes.toString('hex'));
+  const second = tools.serverSecret('independent-b', {});
+  assert.equal(second, bytes.toString('hex'));
+  assert.equal(tools.serverSecret('independent-a', {}), first);
+  assert.equal(real.files.size, 2);
+}
+
+function run() {
+  resourceContracts();
+  const results = cases.map(test => {
+    test.execute();
+    return { case_id: test.id, outcome: 'passed' };
+  });
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+
+function smoke() { return cases[0].execute(); }
+module.exports = { run, smoke };

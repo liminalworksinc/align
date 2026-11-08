@@ -4,125 +4,84 @@
 - **Owning queue item:** [SDK-FOLLOWUPS-001](active-work.md#sdk-followups-001)
 - **Completion / archival evidence:** pending while SDK-FOLLOWUPS-001 remains open
 
-Draft framework PR #313 publishes the export-map correction at `d4bd72bf`.
-Approved local merge commit `4d672137` reconciles the later public registration,
-Python isolation and cache-scope contribution with upstream main. Its clean
-non-editable wheel has SHA-256
-`c275286c5e35093dcefe9a207ef49f69413d1bb3ca880338acd622ff9d2cd15d`.
-Installed module bytes match that exact commit. Publication, independent review,
-supported-platform qualification and exact-head CI remain separate requirements.
+## Current local and published state
 
-## Qualified-child registration
+The approved local framework head is `ac436ed23b11767a3472307e1836217d376cf98e`,
+with tree `906f721f6926a71266e2231221401c142fefbe33`. Its clean non-editable wheel
+has SHA-256 `8dd1cd677cb9bd711c97e9e941b474f7037748e2a19841499d63cef0df0e510b`.
+The installed source matches that commit. The current revision selection passes
+118 managed checks; those focused checks do not replace broad upstream release
+qualification. The actual installed transaction fixture verifies rollback,
+interruption, recovery, stale-plan refusal and the exact registry/evidence union
+while preserving 802 child files. Its final ordinary verification passes.
 
-Filed issue [#315](https://github.com/jordanhubbard/literate-ai/issues/315) owns
-adding an already-qualified child to a qualified retained parent. Issue #48 covers
-replacement and lifecycle rebind of existing registered children. The operator
-accepted local ADR 0060 before implementation; upstream reconciliation renumbered
-that unchanged decision to ADR 0064 because main already used 0060.
+Draft [PR #313](https://github.com/jordanhubbard/literate-ai/pull/313) remains
+published at `d4bd72bf`. The later local registration, isolation, callable metadata,
+cache-scope and qualified-revision changes have not been published by this work.
+Specific publication approval, canonical design reconciliation, required independent
+review, supported-platform qualification and exact-head CI remain open.
 
-The public read-only plan binds the current receipt, authority, registry and exact
-child qualification. Apply rechecks those identities under both metadata locks,
-preserves prior children and retains guarded recovery records. The former private
-local helper is retired. Twenty-five transaction controls pass through the clean
-installed wheel. The actual fifteenth-child addition retains all fourteen prior
-registrations and 421 protected files.
+## Qualified child registration and revision
 
-A separate public-CLI fixture qualifies two fresh libraries through ordinary
-signed two-build qualification and admitted builds. It proves read-only planning,
-stale-receipt and missing-acknowledgement refusal, and actual process interruption
-after registry publication. Ordinary verification rejects the resulting stale
-qualification. Public recovery restores exact prior metadata; a fresh apply
-retains the first child and exact two-child evidence union. Duplicate addition
-refuses, completed recovery preserves metadata bytes, modes and times, and all
-525 protected child files remain unchanged. Recovery also accepts the prior
-wheel's compatible prepared journal. No prepared transaction remains.
+Filed issues [#315](https://github.com/jordanhubbard/literate-ai/issues/315) and
+[#350](https://github.com/jordanhubbard/literate-ai/issues/350) own the supported
+addition and revision transactions. The accepted local addition design was
+renumbered from ADR 0060 to ADR 0064 during upstream reconciliation; accepted
+ADR 0065 owns the narrow revision operation required by the updated stop library.
 
-Upstream [PR #319](https://github.com/jordanhubbard/literate-ai/pull/319) proposes
-ADR 0062 for this same issue. It is still a proposed decision. Coordinate the
-canonical decision and its broader durability, target and review requirements
-before upstream landing; this contribution does not claim those extra requirements
-accepted or complete.
+Read-only plans bind the current receipt, registry, authority and exact child
+qualification. Locked apply rechecks those identities. Guarded recovery preserves
+prior children and rejects stale or inconsistent intermediate state. Actual local
+consumer integration uses the public transactions rather than private registry writes.
+The full upstream design and durability review remains separately required.
 
-## Generic Python import isolation
+## Generic Python import isolation and callable metadata
 
 Filed issue [#316](https://github.com/jordanhubbard/literate-ai/issues/316) covers
-ambient Python imports. Upstream main already fixes generic startup at
-`328261aac`; reconciliation retains its `python_profile is None` guard and isolated
-`-I -S -B` launch. Three additional actual-import controls cover undeclared ambient
-modules, standard-library availability and startup shadowing. Four command
-projection controls and two verified-wheel runtime tests also pass installed.
-Exact artifact-origin checks remain enforced. The separate verified-wheel driver
-retains its explicit dependency closure.
+ambient Python imports. The contribution preserves main's isolated generic launch,
+standard-library availability, exact artifact origins and ambient dependency refusal.
+The separate verified-wheel runtime keeps its declared dependency closure.
 
-## Native-cache transport scope
+Existing issue [#132](https://github.com/jordanhubbard/literate-ai/issues/132) and
+accepted ADR 0051 own singleton input coverage. The local contribution preserves
+reviewed zero-argument callable metadata during ordinary project promotion. The
+schema library subsequently qualifies through two clean generations and separate
+admission with its unchanged API, all 51 cases and 212 observations. Its actual
+consumer and full application acceptance are recorded in the native rewrite program.
+The older intake failures did not require dummy parameters or weaker coverage.
 
-The contribution stages exact registered native caches into sealed local retained
-runs and refuses remote retained admission when those caches are present. Local
-copy and remote-refusal controls pass in the installed retained-receipt suite.
-Current cache membership, digests and source authority remain enforced. Existing
-issue [#307](https://github.com/jordanhubbard/literate-ai/issues/307) covers the
-missing retained Python package-delivery bridge. Issue #235's per-unit native tree
-packages do not establish this feature's remote cache custody.
+## Local cache scope and outstanding ingress review
 
-## Current consumer checkpoint and next action
+The local patch copies exact captured native-cache bytes into sealed retained runs
+and binds them to the lifecycle request. Remote retained admission with those caches
+still refuses before dispatch. Existing issue
+[#307](https://github.com/jordanhubbard/literate-ai/issues/307) concerns the broader
+retained Python package-delivery bridge; this patch does not implement a new remote
+transport protocol.
 
-All 93 focused managed installed regressions pass with zero failures or skips at
-`4d672137`, including registration, recovery, verification, isolation, replacement,
-rebind, cache custody and verified-wheel execution. The complete fifteen-library
-application passes all 1,821 checks through that installed SDK. Current receipt:
-`sha256:8c7f0f604ba43f9185814c94b090480716700daed9fbe1c10e11c37d4c104f73`.
-Root and CI-pinned verification each pass three gates with two declared skips;
-validation and owned-entrypoint checks pass. The same application inputs pass all
-24 image checks on the SSD-backed engine.
+The existing PR #313 review also requires safe local ingress. A current installed
+paired fixture registers an ordinary child, captures its inert cache successfully,
+then redirects that exact child to an owned sibling through a symlink without
+changing the registry. Canonical registry validation rejects the redirected path;
+the cache collector still returns the sibling's bytes under the apparent in-project
+path. The installed collector matches source SHA-256
+`9ec5411311eda7e383af88820a196469ca890d8fcac77eed5d5b4601b187c15d`.
+Only owned synthetic files are involved.
 
-Prepare the Align-related framework contribution's exact publication packet for
-qualified-child registration, generic import isolation and local cache transport.
-Any further local commit, push or tracker update requires specific operator
-approval. Align checkpoint `a598a6e` is published to draft PR #58 with its
-specifically approved hook opt-out. Broader upstream review and qualification
-requirements remain open after these local proofs. The complete native rewrite
-continues under ADOPT-002. The operator's scope is Align only.
+The collector also lacks the requested registry/file-count/per-file/aggregate read
+limits and custody throughout the read. The earlier local-copy and remote-refusal
+tests do not prove these properties. A sanitized specific issue and narrow correction
+proposal are prepared; the operator's specific issue-filing go is pending. The parent
+record-work skill requires filing before source changes, so the SDK remains unchanged.
+An ordinary review bug correction needs no new ADR under ADR 0006. Commits, pushes,
+PR edits, merge and release remain separately authorized.
 
-The local publication draft separates the committed runtime's 93 installed
-regressions from the staged metadata correction's 42 source tests. Upstream main
-has advanced to `dbe7eeb4`; its synthesis implementation still matches the unfixed
-local baseline. Before publication, reconcile the nine newer upstream commits,
-including overlaps in the two planning documents and `standard_project.py`, then
-verify the final committed wheel and exact-head CI. The six-file staged tree
-`be178dbbcf6346f0c6c61375ea6d21f4af32654b` remains unchanged and still awaits its
-specific local commit go. The draft is not posted.
+## Remaining work
 
-## Zero-argument schema qualification
-
-The prepared schema library's public `change_programs()` callable takes no arguments.
-Two ordinary qualification attempts stop at `coding_cli.empty_generation`; the
-retained provider transcript identifies contradictory generated-test requirements.
-The same clean provider configuration passes a separate workspace-write control.
-Existing upstream issue [#132](https://github.com/jordanhubbard/literate-ai/issues/132)
-and accepted parent ADR 0051 own exhaustive coverage of this singleton input domain.
-
-A signed metadata control accepts `interfaces/callable.json` into the reviewed
-specification set, but ordinary project promotion omits that file and produces the
-same lock as the declaration-free child. The supported coverage mode therefore
-cannot reach this source-to-spec child. Preserve the no-argument public API and all
-51 independent acceptance cases, covering 212 observations. Do not add dummy
-arguments, duplicate manifest cases or lower coverage gates.
-
-The portable parent patch preserves the reviewed declaration for a single
-OpenSpec Component and refuses ambiguous ownership and unsupported nested Markdown
-projection. Five focused controls, 16 coverage controls, 13 promotion regressions,
-one actual signed CLI fixture and seven project-verification controls pass without
-failures or skips. Lint and formatting pass. The existing staged verification fix
-is preserved alongside this narrow patch. A clean committed wheel, ordinary fresh
-promotion, two clean qualifications, consumer integration and complete application
-parity remain required. Further commit, push and upstream tracker updates need
-specific operator approval. The production schema remains source-authority.
-
-## Additional forwarded design input
-
-At the operator's request, [#321](https://github.com/jordanhubbard/literate-ai/issues/321)
-forwards the team collaboration proposal for upstream triage. It covers distinct
-member and run identities, provider and surface capabilities, shared versioned
-intent, scoped handoffs, per-run delivery/application receipts, permissions, and
-artifact acceptance. Provider telemetry claims and storage choices are explicitly
-left for validation and design review.
+Record the specific ingress issue with approval, correct only the reproduced review
+finding through the canonical registry/path and bounded-capture owners, and run the
+managed source and clean installed acceptance. Preserve the accepted revision
+transaction, qualification records, generated packages and application behavior.
+Then prepare the exact contribution for its separately approved publication and
+required upstream review. Keep this work limited to Align and the framework support
+it needs. Do not declare SDK-FOLLOWUPS-001 complete from a green downstream receipt.

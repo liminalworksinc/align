@@ -23,6 +23,8 @@ COPY .native-inputs /
 COPY native ./native
 COPY scripts/native-libraries.mjs ./scripts/native-libraries.mjs
 COPY scripts/align-admin-main.mjs scripts/prepare-operator.mjs ./scripts/
+RUN chown -R node:node /app
+USER node
 RUN node scripts/native-libraries.mjs web && node scripts/prepare-operator.mjs /app/.operator-runtime && npx next build
 
 # Runtime: production dependencies and the build output only, run as the unprivileged node user.

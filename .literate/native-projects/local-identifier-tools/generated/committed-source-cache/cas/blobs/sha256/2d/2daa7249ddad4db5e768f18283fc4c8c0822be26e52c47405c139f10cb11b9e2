@@ -1,0 +1,18 @@
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+const destination = path.resolve(process.argv[2]);
+const root = path.resolve(__dirname, '..');
+fs.mkdirSync(destination, { recursive: true });
+for (const name of ['main.js', 'identifier_tools/create_identifiers.js',
+  'identifier_tools/package.json', 'tests/litai_test.js']) {
+  const target = path.join(destination, name);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.copyFileSync(path.join(root, name), target);
+}
+const launcher = '#!' + process.argv[3] + '\n' +
+  "'use strict';\nconst { main } = require('./main.js');\n" +
+  "try { process.stdout.write(JSON.stringify(main(process.argv.slice(2))) + '\\n'); } " +
+  "catch (error) { process.stderr.write(String(error) + '\\n'); process.exitCode = 1; }\n";
+fs.writeFileSync(path.join(destination, 'run'), launcher, { mode: 0o755 });

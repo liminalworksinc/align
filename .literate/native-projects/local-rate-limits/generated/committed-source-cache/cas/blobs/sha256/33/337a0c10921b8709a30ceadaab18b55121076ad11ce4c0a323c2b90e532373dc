@@ -1,0 +1,16 @@
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const destination = path.resolve(process.argv[2]);
+const runtime = process.argv[3];
+if (destination === root) throw new Error('Artifact must have a separate directory');
+for (const relative of ['main.js', 'rate_limits/create_limiter.js', 'rate_limits/package.json', 'tests/litai_test.js']) {
+  const target = path.join(destination, relative);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.copyFileSync(path.join(root, relative), target);
+}
+const launcher = '#!' + runtime + '\n' +
+  "'use strict';\ntry { process.stdout.write(JSON.stringify(require('./main.js').main(process.argv.slice(2))) + '\\n'); } catch (error) { process.stderr.write(String(error.stack || error) + '\\n'); process.exitCode = 1; }\n";
+fs.writeFileSync(path.join(destination, 'run'), launcher, { mode: 0o755 });

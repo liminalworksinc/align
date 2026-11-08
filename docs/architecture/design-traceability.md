@@ -1,6 +1,6 @@
 # Design traceability
 
-<!-- literate-ai:authority-reviewed sha256:3af1f834499c0e70bfadfbed2c6730ed3a9b2ad2f42783218c98ca7c4eb1ac47 -->
+<!-- literate-ai:authority-reviewed sha256:fac9e9f02cd3d072777db6ddfb799c239afb18e9590393e39a19620d0bbc91df -->
 
 [Project guide](../README.md) → design traceability
 
@@ -13,3 +13,12 @@ derived evidence outside source authority. Changes should update the owning arti
 its nearby explanation or diagram,
 and an end-to-end test. Illustrations aid understanding; prose requirements and
 acceptance scenarios remain normative. See the [project map](../user/project-layout.md).
+
+The current B12 review adds the client-key Component, its Node target and one
+typed host binding. All prior 26 registry and consumer records remain exact.
+The [client-key consumer observation](server-client-keys-consumer-observation.json)
+records whole-namespace source parity, public types and six actual callers. The
+normal source-membership refresh must classify its added verifier inputs before
+complete application acceptance. Rate-limit storage, thresholds, proxy trust,
+authentication and request handlers retain their existing owners. This review
+does not close the 31-boundary program or its live tester gates.

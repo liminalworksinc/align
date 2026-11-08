@@ -198,14 +198,19 @@ const beforeHook = createAuthMiddleware(async (ctx) => {
     // Hosted, also 5 per address per hour, stored so a restart doesn't reset it. Keyed by an HMAC of the address, so
     // the table holds no email. All of these count only if all of them allow the send.
     const durable = config().hosted ? [{ key: otpEmailKey(email), max: 5, windowMs: 60 * 60 * 1000 }] : [];
-    const wait = await tx(() => {
-      if (!durableRoom(durable) || !takeAll(limits)) return Math.max(durableRetryAfterMs(durable), retryAfterMs(limits));
-      durableCount(durable);
-      return 0;
+    const { wait, ceilingWait } = await tx(() => {
+      const now = Date.now();
+      if (!durableRoom(durable, now) || !takeAll(limits, now)) {
+        return {
+          wait: Math.max(durableRetryAfterMs(durable, now), retryAfterMs(limits, now)),
+          ceilingWait: ceiling ? retryAfterMs([ceiling], now) : 0,
+        };
+      }
+      durableCount(durable, now);
+      return { wait: 0, ceilingWait: 0 };
     });
     if (wait > 0) {
       // The machine's ceiling, when it is what keeps this send waiting longest, says so in its own words.
-      const ceilingWait = ceiling ? retryAfterMs([ceiling]) : 0;
       throw tooMany(wait, ceiling && ceilingWait > 0 && ceilingWait >= wait ? machineCeilingMessage(wait, ceiling.max) : undefined);
     }
     return;

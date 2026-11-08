@@ -1,0 +1,15 @@
+{
+  "schema": "align/server-core-type-projection-spelling@1",
+  "passed": true,
+  "empty_type_literals_replaced": 12,
+  "original_type": "{}",
+  "equivalent_type": "Record<never, never>",
+  "old_bridge_sha256": "3e7b7eb89fe5e3e2f3b8c8c361335bb83487a922413ba1a57338528e4dcd0569",
+  "new_bridge_sha256": "c641e2fb316211cf816e4951d3f29271b79caae7d71246a41922e61003cf9f9f",
+  "emitted_runtime_javascript_byte_identical": true,
+  "emitted_runtime_sha256": "165e394ea7a600d49a6f7df76febe0a43041d5f1bcae86f28c64b2fd840ad877",
+  "existing_lint_rule_preserved": true,
+  "generated_library_and_authority_unchanged": true,
+  "exact_public_type_equality_and_full_lint_still_required": true,
+  "previous_behavioral_acceptance_reusable_for_identical_runtime": true
+}

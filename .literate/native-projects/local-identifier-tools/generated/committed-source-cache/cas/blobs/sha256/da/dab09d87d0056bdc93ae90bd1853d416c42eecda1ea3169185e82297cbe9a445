@@ -1,0 +1,146 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { randomBytes, createHash } = require('node:crypto');
+const { create_identifiers } = require('../identifier_tools/create_identifiers.js');
+
+const vectors = [
+  { id: 'generated-hash-text', args: ['abc'], expected: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad' },
+  { id: 'generated-hash-empty', args: [''], expected: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' },
+  { id: 'generated-hash-sentence', args: ['The quick brown fox jumps over the lazy dog'], expected: 'd7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592' }
+];
+
+function realService() {
+  return create_identifiers({ randomBytes, createHash, newDate: () => new Date() });
+}
+
+function bindingChecks() {
+  assert.equal(create_identifiers.name, 'create_identifiers');
+  assert.equal(create_identifiers.length, 1);
+  const calls = [];
+  let sample = Buffer.from('f');
+  const context = {
+    randomBytes: function (count) {
+      assert.equal(this, undefined);
+      calls.push(count);
+      return sample;
+    },
+    createHash,
+    newDate: function () {
+      assert.equal(this, undefined);
+      return new Date('2001-02-03T04:05:06.007Z');
+    }
+  };
+  const service = create_identifiers(context);
+  assert.deepEqual(calls, []);
+  for (const [name, arity] of Object.entries({ rand32: 0, newId: 1, secretToken: 0, sha256hex: 1, nowIso: 0 })) {
+    assert.equal(service[name].name, name);
+    assert.equal(service[name].length, arity);
+  }
+  context.randomBytes = () => { throw new Error('Replaced resource'); };
+  const { rand32, newId, secretToken, nowIso } = service;
+  for (const [input, expected] of [['', ''], ['f', 'my'], ['fo', 'mzxq'], ['foo', 'mzxw6'], ['foob', 'mzxw6yq'], ['fooba', 'mzxw6ytb'], ['foobar', 'mzxw6ytboi']]) {
+    sample = Buffer.from(input);
+    assert.equal(rand32(sample.length), expected);
+  }
+  sample = Buffer.alloc(15);
+  assert.equal(rand32(), 'aaaaaaaaaaaaaaaaaaaaaaaa');
+  assert.equal(rand32(undefined), 'aaaaaaaaaaaaaaaaaaaaaaaa');
+  assert.equal(newId('prefix_é'), 'prefix_é_aaaaaaaaaaaaaaaaaaaaaaaa');
+  assert.deepEqual(calls.slice(-3), [15, 15, 15]);
+  sample = Buffer.from([255, 255]);
+  assert.equal(rand32(2), '777q');
+  assert.equal(secretToken(), '__8');
+  assert.equal(calls.at(-1), 32);
+  assert.equal(secretToken(undefined), '__8');
+  assert.equal(calls.at(-1), 32);
+  sample = Buffer.alloc(0);
+  assert.equal(secretToken(0), '');
+  assert.equal(calls.at(-1), 0);
+  assert.equal(nowIso(), '2001-02-03T04:05:06.007Z');
+  const other = create_identifiers({ randomBytes: () => Buffer.from([128]), createHash, newDate: context.newDate });
+  assert.equal(other.rand32(1), 'qa');
+  assert.equal(rand32(0), '');
+
+  const failure = { reason: 'resource refusal' };
+  const bad = create_identifiers({ randomBytes(count) { assert.equal(count, null); throw failure; } });
+  for (const operation of [bad.rand32, bad.secretToken]) {
+    assert.throws(() => operation(null), error => error === failure);
+  }
+  const real = realService();
+  assert.equal(real.rand32(0), '');
+  assert.equal(real.secretToken(0), '');
+  assert.equal(real.rand32(8).length, 13);
+  assert.equal(real.rand32(20).length, 32);
+  assert.match(real.newId('u'), /^u_[a-z2-7]{24}$/);
+  assert.match(real.secretToken(), /^[A-Za-z0-9_-]{43}$/);
+  assert.match(real.nowIso(), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+}
+
+function protocolChecks() {
+  const events = [];
+  const input = Buffer.from([0, 255, 128]);
+  const hash = {
+    update(value) { assert.equal(this, hash); assert.equal(value, input); events.push('update'); return this; },
+    digest(encoding) { assert.equal(this, hash); assert.equal(encoding, 'hex'); events.push('digest'); return 'abcdef'; }
+  };
+  let serial = 0;
+  const context = {
+    createHash: function (algorithm) {
+      assert.equal(this, undefined);
+      assert.equal(algorithm, 'sha256');
+      events.push('createHash');
+      return hash;
+    },
+    newDate: function () {
+      assert.equal(this, undefined);
+      serial += 1;
+      const date = { toISOString() { assert.equal(this, date); return String(serial); } };
+      return date;
+    }
+  };
+  const { sha256hex, nowIso } = create_identifiers(context);
+  assert.deepEqual(events, []);
+  assert.equal(serial, 0);
+  context.createHash = null;
+  context.newDate = null;
+  assert.equal(sha256hex(input), 'abcdef');
+  assert.deepEqual(events, ['createHash', 'update', 'digest']);
+  assert.equal(nowIso(), '1');
+  assert.equal(nowIso(), '2');
+  for (const value of ['', 'A\u0000é😀', Buffer.from([0, 128, 255])]) {
+    assert.equal(realService().sha256hex(value), createHash('sha256').update(value).digest('hex'));
+  }
+  const failure = Symbol('failure');
+  const fail = () => { throw failure; };
+  for (const callback of [fail, () => ({ update: fail }), () => ({ update() { return { digest: fail }; } })]) {
+    assert.throws(() => create_identifiers({ createHash: callback }).sha256hex(input), error => error === failure);
+  }
+  for (const callback of [fail, () => ({ toISOString: fail })]) {
+    assert.throws(() => create_identifiers({ newDate: callback }).nowIso(), error => error === failure);
+  }
+  const buffer = Buffer.from('x');
+  buffer.toString = function (encoding) {
+    assert.equal(this, buffer);
+    assert.equal(encoding, 'base64url');
+    throw failure;
+  };
+  assert.throws(() => create_identifiers({ randomBytes: () => buffer }).secretToken(), error => error === failure);
+}
+
+function run() {
+  bindingChecks();
+  protocolChecks();
+  const service = realService();
+  const cases = vectors.map(test => {
+    assert.equal(service.sha256hex(...test.args), test.expected);
+    return { case_id: test.id, outcome: 'passed' };
+  });
+  return { schema: 'literate-ai/generated-test-results@1', cases };
+}
+
+function smoke() {
+  return realService().sha256hex(...vectors[0].args);
+}
+
+module.exports = { run, smoke };

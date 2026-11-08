@@ -3,7 +3,7 @@
 import argparse
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 
 from literate_ai.adapters.conversion_authority import evidence_for_conversion_stage
@@ -16,14 +16,53 @@ p = argparse.ArgumentParser(description=__doc__)
 p.add_argument("project", type=Path)
 p.add_argument("output", type=Path)
 p.add_argument("components", nargs="+")
+p.add_argument("--provider", action="append", default=[], metavar="COMPONENT=PATH",
+               help="select an exact registered provider directory for a component")
 args = p.parse_args()
 root = args.project.resolve()
+providers = {}
+registry_path = root / ".literate/native-projects.json"
+registry_bytes = None
+for selection in args.provider:
+    component, separator, relative = selection.partition("=")
+    parts = PurePosixPath(relative).parts
+    if (not separator or component not in args.components or component in providers
+            or parts[:2] != (".literate", "native-projects") or len(parts) != 3
+            or PurePosixPath(relative).as_posix() != relative or ".." in parts
+            or "\\" in relative or ":" in relative
+            or any(ord(character) < 32 for character in relative)):
+        raise ValueError("provider must name one selected component and direct native project")
+    current = root
+    for part in parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError("provider cannot follow a symbolic link")
+    if registry_path.is_symlink():
+        raise ValueError("native registry must be a direct regular file")
+    observed = registry_path.read_bytes()
+    if registry_bytes is not None and registry_bytes != observed:
+        raise ValueError("native registry changed during provider selection")
+    registry_bytes = observed
+    registry = json.loads(observed)
+    if registry.get("schema") != "literate-ai/adopted-native-projects@1":
+        raise ValueError("native registry schema mismatch")
+    entries = [entry for entry in registry["projects"] if entry["path"] == relative]
+    if len(entries) != 1:
+        raise ValueError("selected provider must be registered exactly once")
+    manifest_path = root / relative / "literate.project.json"
+    if manifest_path.is_symlink():
+        raise ValueError("provider definition must be a direct regular file")
+    definition = json.loads(manifest_path.read_bytes())
+    if (entries[0]["project_id"] != definition["project_id"] or
+            entries[0]["project_definition_identity"] != canonical_identity(definition).uri):
+        raise ValueError("selected provider does not match its registered identity")
+    providers[component] = relative
 args.output.mkdir(parents=True, exist_ok=True)
 libraries = []
 for name in args.components:
     if not name.replace("-", "").isalnum():
         raise ValueError("component name must be a simple identifier")
-    relative = ".literate/native-projects/local-" + name
+    relative = providers.get(name, ".literate/native-projects/local-" + name)
     child = root / relative
     evidence = evidence_for_conversion_stage(load_project(child), ConversionAuthorityStage.QUALIFIED)
     if len(evidence) != 1:
@@ -73,6 +112,8 @@ for name in args.components:
         "files": sorted(files, key=lambda f: f["path"]), "surface": surface.to_dict(),
         "oracle": oracle_path.name,
         "verifier": verifier.name, "verification_files": hashes})
+if registry_bytes is not None and registry_path.read_bytes() != registry_bytes:
+    raise ValueError("native registry changed while pinning its providers")
 (args.output / "libraries.json").write_text(json.dumps({"schema": "align/native-libraries@1",
     "libraries": libraries}, indent=2) + "\n")
 print("Pinned", len(libraries), "qualified libraries")

@@ -1,0 +1,59 @@
+{
+  "schema": "align/identity-effects-portable-admitted-acceptance@1",
+  "passed": true,
+  "observations": [
+    {
+      "host": "darwin",
+      "node": "v26.3.0",
+      "component_lock_identity": "sha256:fab22408cc2d9cd48e1e6a4c18f2c3ffb1b552265f88bf0ae01a3a8c03e87bcd",
+      "finalized_candidate_identity": "sha256:7609671f9417d9699b86f9f110eb8ae8229c36db00e0dfa84f9c636d9cca195b",
+      "source_tree_identity": {
+        "algorithm": "sha256",
+        "digest": "2c93474876fce5d9300dfe7c1c4a1f030750b4692a9df22916438d315e95b305",
+        "schema": "urn:literate-ai:schema:v1:content-identity"
+      },
+      "forced_separate_generation": true,
+      "build_cache_hits": 0,
+      "repair_attempts": 0,
+      "canonical_package_and_named_import_passed": true,
+      "guarded_module_closure_passed": true,
+      "record_count": 73,
+      "binding_check_count": 66,
+      "controlled_mail_records": 20,
+      "controlled_captcha_records": 30,
+      "real_filesystem_records": 6,
+      "actual_configured_middleware_records": 17,
+      "original_source_imported": false,
+      "application_integrated": false,
+      "live_service_acceptance_claimed": false,
+      "private_result_sha256": "b7864b6ab4994a79bca2f882d7cf8e2bdabc3660b025450e0bde667d323aebd8"
+    },
+    {
+      "host": "linux",
+      "node": "v24.22.2",
+      "component_lock_identity": "sha256:fab22408cc2d9cd48e1e6a4c18f2c3ffb1b552265f88bf0ae01a3a8c03e87bcd",
+      "finalized_candidate_identity": "sha256:7609671f9417d9699b86f9f110eb8ae8229c36db00e0dfa84f9c636d9cca195b",
+      "source_tree_identity": {
+        "algorithm": "sha256",
+        "digest": "2c93474876fce5d9300dfe7c1c4a1f030750b4692a9df22916438d315e95b305",
+        "schema": "urn:literate-ai:schema:v1:content-identity"
+      },
+      "forced_separate_generation": true,
+      "build_cache_hits": 0,
+      "repair_attempts": 0,
+      "canonical_package_and_named_import_passed": true,
+      "guarded_module_closure_passed": true,
+      "record_count": 73,
+      "binding_check_count": 66,
+      "controlled_mail_records": 20,
+      "controlled_captcha_records": 30,
+      "real_filesystem_records": 6,
+      "actual_configured_middleware_records": 17,
+      "original_source_imported": false,
+      "application_integrated": false,
+      "live_service_acceptance_claimed": false,
+      "private_result_sha256": "d077ba05fd178ac0b84c1a9bf7eb645386465f4a83e3dd3a9d19fd198a717d21"
+    }
+  ],
+  "scope": "Separate admitted child package. Actual consuming application and image remain pending."
+}

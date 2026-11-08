@@ -1,0 +1,56 @@
+{
+  "schema": "align/server-client-keys-consumer-observation@1",
+  "status": "partial",
+  "owning_work": "ADOPT-002/B12",
+  "original_module": "lib/ratelimit.ts",
+  "source_sha256": "9453c1e185cc710106ac4eac4bd9304cea2f3501a59f674731dffd5b2cc8fc95",
+  "typed_consumer_sha256": "4287893214705a19154fe41444119bf0ad466986ec08dd498d2e8fb510bb7e4c",
+  "runtime_exports": [
+    "clientNet",
+    "clientOf"
+  ],
+  "source_batches_each_host": 11,
+  "normalization_inputs_each_host": 1995,
+  "source_controls_rejected_each_host": 16,
+  "clean_generations": 2,
+  "independent_batches_each_generation": 11,
+  "qualification_decision": "sha256:66eb4680b4f72084e97d13b419e4c93ca31bb4b3ac169b875e412618824785d5",
+  "qualified_projection": "sha256:144f8557f47031489206748681922e5a3f4f0b1fa9f40352f41d72a6293fba88",
+  "component_lock": "sha256:0231cea2c0e686bf3153dc37fc8bcc0ee090c181897f33ef317a91107effe6a2",
+  "admitted_entry": "sha256:bfe4ed6ae1e8fbcdaff7785e5bc861e17775cabd334427e29186626da8ad6e29",
+  "current_child_receipt": "sha256:c2d713d3c8c9173ec0fd435056ebefa9dc0fd54e11ab97e67ccc8dfe06eaa3bf",
+  "actual_source_records_match_both_hosts": true,
+  "public_namespace_assigns_both_directions": true,
+  "actual_callers_compile": [
+    "lib/v2/http.ts",
+    "lib/v2/auth.ts",
+    "app/oauth/authorize/page.tsx",
+    "app/oauth/token/route.ts",
+    "app/oauth/register/route.ts",
+    "app/api/oauth/approve/route.ts"
+  ],
+  "production_web_libraries": 21,
+  "production_web_batches": 728,
+  "registered_libraries": 27,
+  "prior_registry_and_consumer_records_unchanged": 26,
+  "preserved_semantics": [
+    "Existing trim, case, bracket and zone handling",
+    "IPv6 grouping, IPv4-mapped forms and loose invalid-input behavior",
+    "Fresh configuration per call and no configuration call during module loading",
+    "Local mode avoids header access; hosted mode distinguishes absent and empty headers",
+    "Exact provider failure identity, header receiver and effect order"
+  ],
+  "rate_limit_storage_thresholds_proxy_trust_and_authentication_unchanged": true,
+  "functional_verifier_is_security_sandbox": false,
+  "remaining": [
+    "Complete application build/test/package",
+    "Immutable image acceptance",
+    "Current parent receipt and both verification runtimes",
+    "Remaining 31-boundary program",
+    "Specifically approved publication and deployment",
+    "Public tester URL, operator security review and live smoke"
+  ],
+  "published": false,
+  "deployed": false,
+  "live_qa_gates": 0
+}

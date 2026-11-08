@@ -5,8 +5,14 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
-  // Independently pinned library verifiers use the CommonJS acceptance protocol.
-  { files: ["native/*.cjs", "native/*_harness.js"], rules: { "@typescript-eslint/no-require-imports": "off" } },
+  // Independently pinned CommonJS verifiers run outside the Next.js bundle.
+  {
+    files: ["native/*.cjs", "native/*_harness.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+      "@next/next/no-assign-module-variable": "off",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

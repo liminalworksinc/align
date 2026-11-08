@@ -1,8 +1,9 @@
 # ADR 0002: Rewrite Retained Implementation as Native
 # Literate AI Authority
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-30
+- Accepted: 2026-11-06, explicit operator approval
 - Decision owners: project maintainers
 - Phase 1.2 evidence: `sha256:316a4e6b641a46788febb1c21b004ad3c00b6d812c10006deb1d05a48207aa49`
 
@@ -14,6 +15,13 @@ proved project reorganization only. The retained implementation remains release
 authority until each boundary satisfies the transfer and parity requirements below.
 
 ## Decision
+
+The operator accepted this decision and the complete 31-boundary authority
+classification. The [accepted classification](../architecture/native-authority-classification.json)
+binds all 404 retained members to their reviewed content hashes and identifies
+the Component, Flavor, asset and repository responsibilities for each boundary.
+Mixed boundaries still require explicit contract splits before source retirement.
+No whole runtime boundary has a permanent source-retention exception.
 
 Run a second, independently reviewed migration program that replaces retained
 implementation surfaces with native Literate AI Components, Flavors, skills, and

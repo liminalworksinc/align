@@ -1,0 +1,58 @@
+{
+  "schema": "align/identity-effects-actual-consumer-proof@1",
+  "passed": true,
+  "hosts": {
+    "macos": {
+      "schema": "align/identity-effects-actual-consumer-acceptance@1",
+      "passed": true,
+      "host": "darwin",
+      "node": "v26.3.0",
+      "record_count": 73,
+      "controlled_mail_records": 20,
+      "controlled_captcha_records": 30,
+      "real_filesystem_records": 6,
+      "actual_configured_middleware_records": 17,
+      "actual_materialized_binding_routing_verified": true,
+      "actual_typed_host_and_alias_sources_executed": true,
+      "public_export_names_exact": true,
+      "bridge_source_unchanged": true,
+      "original_implementation_imported": false,
+      "external_requests": 0,
+      "factory_66_binding_checks_owned_by_separate_admitted_package_gate": true,
+      "full_application_image_and_live_acceptance_still_required": true
+    },
+    "linux": {
+      "schema": "align/identity-effects-actual-consumer-acceptance@1",
+      "passed": true,
+      "host": "linux",
+      "node": "v24.22.2",
+      "record_count": 73,
+      "controlled_mail_records": 20,
+      "controlled_captcha_records": 30,
+      "real_filesystem_records": 6,
+      "actual_configured_middleware_records": 17,
+      "actual_materialized_binding_routing_verified": true,
+      "actual_typed_host_and_alias_sources_executed": true,
+      "public_export_names_exact": true,
+      "bridge_source_unchanged": true,
+      "original_implementation_imported": false,
+      "external_requests": 0,
+      "factory_66_binding_checks_owned_by_separate_admitted_package_gate": true,
+      "full_application_image_and_live_acceptance_still_required": true
+    }
+  },
+  "behavior_records_each_host": 73,
+  "type_equality_runtime_exports": 7,
+  "direct_callers_unchanged_and_compile": [
+    "lib/v2/access.ts",
+    "lib/v2/auth.ts",
+    "lib/v2/creation.ts"
+  ],
+  "source_identity_preserved": true,
+  "generated_implementation_hand_edited": false,
+  "application_image_and_current_parent_receipt_pending": true,
+  "source_authority_retirement_complete": false,
+  "all31_complete": false,
+  "public_url": null,
+  "live_qa_gates": 0
+}

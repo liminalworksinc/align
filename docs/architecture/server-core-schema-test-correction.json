@@ -1,0 +1,24 @@
+{
+  "schema": "align/server-core-schema-test-correction@1",
+  "passed": true,
+  "owner": "ADOPT-002 / B27 retained test harness",
+  "original_failed_candidate_preserved": true,
+  "original_failed_candidate_inputs_unchanged": 6128,
+  "ordinary_source_copy_without_git": true,
+  "existing_changed_files": [
+    "CHANGELOG.md",
+    "components/legacy-project-wrapper/implementation/scripts/test-v2.mjs",
+    "docs/roadmap/active-work.md",
+    "docs/roadmap/native-rewrite-program.md"
+  ],
+  "source_test_change": "Replace the literal-source regex with the actual public module export after existing safety checks.",
+  "test_script_old_sha256": "de68540b125fb85c4fc71256b6e665deb03885b313daa15527b52a217ee7fbcb",
+  "test_script_new_sha256": "2c32796df0de6a9283322208f8c0cbf19fe3a0d78e98e8139900c01e1bdef4c9",
+  "expected22_and_all_migration_assertions_unchanged": true,
+  "controls_passed_macos_and_linux": true,
+  "generated_implementations_and_authority_unchanged": true,
+  "registered_children": 28,
+  "prior_qualification_consumer_and_production_checks_reused_for_unchanged_product_inputs": true,
+  "new_full_parent_workflow_required": true,
+  "published": false
+}

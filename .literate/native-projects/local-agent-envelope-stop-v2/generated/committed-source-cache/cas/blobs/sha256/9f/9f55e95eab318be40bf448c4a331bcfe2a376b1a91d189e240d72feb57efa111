@@ -1,0 +1,3 @@
+'use strict';
+const {senders_words} = require('./core.js');
+module.exports = {senders_words};

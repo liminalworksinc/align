@@ -1,0 +1,21 @@
+'use strict';
+
+const { create_client_keys } = require('./server_client_keys/create_client_keys.js');
+const { runTests, smoke } = require('./tests/litai_test.js');
+
+function cli() {
+  try {
+    if (process.argv.length !== 3) throw new Error('Expected one framework mode');
+    let result;
+    if (process.argv[2] === '--litai-test') result = runTests(create_client_keys);
+    else if (process.argv[2] === '--litai-smoke') result = smoke(create_client_keys);
+    else throw new Error('This library has no product command-line entrypoint');
+    process.stdout.write(JSON.stringify(result) + '\n');
+  } catch (error) {
+    process.stderr.write(String(error) + '\n');
+    process.exitCode = 1;
+  }
+}
+
+exports.cli = cli;
+if (require.main === module) cli();

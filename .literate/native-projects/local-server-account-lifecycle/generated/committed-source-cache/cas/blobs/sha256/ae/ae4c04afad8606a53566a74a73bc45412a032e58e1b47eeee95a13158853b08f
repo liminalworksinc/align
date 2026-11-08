@@ -1,0 +1,76 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_account } = require('../server_account_lifecycle/create_account.js');
+const { create_lifecycle } = require('../server_account_lifecycle/create_lifecycle.js');
+
+const cases = [
+  { id: 'generated-list-values', args: ['listPasskeys', 'reader', [{id:'k',name:'',created_at:'stored',last_used_at:null}]], expected: [{id:'k',name:null,created_at:'stored',last_used_at:null}] },
+  { id: 'generated-list-empty', args: ['listPasskeys', 'nobody', []], expected: [] },
+  { id: 'generated-prompt-short-circuit', args: ['passkeyPromptDue', 'owner', [true]], expected: false },
+  { id: 'generated-prompt-eligible', args: ['passkeyPromptDue', 'new', [false,false]], expected: true },
+  { id: 'generated-session-zero', args: ['deleteMemberSessions', 'workspace', 'person', 0], expected: 0 },
+  { id: 'generated-session-count', args: ['deleteMemberSessions', 'workspace', 'person', 4], expected: 4 },
+  { id: 'generated-rename-preserved', args: ['renamePasskey', 'person', 'key', '  untouched  ', 1], expected: {id:'key',name:'  untouched  '} },
+  { id: 'generated-signout-selected', args: ['signOutEverywhere', 'person', {devices:true,apps:false}, 3, 2], expected: {sessions:3,devices:2,apps:0} }
+];
+
+async function execute(operation, ...args) {
+  if (operation === 'listPasskeys') {
+    const [user, rows] = args;
+    return create_account({all: (statement, id) => {assert.equal(id,user); assert.match(statement,/ORDER BY/); return rows;}}).listPasskeys(user);
+  }
+  if (operation === 'passkeyPromptDue') {
+    const [user, results] = args;
+    let reads = 0;
+    const result = create_account({get: () => results[reads++] ? {} : undefined}).passkeyPromptDue(user);
+    assert.equal(reads, results[0] ? 1 : 2);
+    return result;
+  }
+  if (operation === 'deleteMemberSessions') {
+    const [workspace,user,count] = args;
+    let cleaned = 0;
+    const result = create_lifecycle({run: (statement,w,u) => {assert.match(statement,/DELETE FROM v2_sessions/); assert.equal(w,workspace); assert.equal(u,user); return count;}, deleteOrphanDirectives: () => {cleaned++;}}).deleteMemberSessions(workspace,user);
+    assert.equal(cleaned,count ? 1 : 0);
+    return result;
+  }
+  if (operation === 'renamePasskey') {
+    const [user,id,name,count] = args;
+    const account = create_account({tx: async callback => callback(), run: (statement,n,i,u) => {assert.equal(n,name);assert.equal(i,id);assert.equal(u,user);return count;}});
+    return account.renamePasskey(user,id,name);
+  }
+  if (operation === 'signOutEverywhere') {
+    const [user,also,sessions,devices] = args;
+    const calls = [];
+    const account = create_account({nowIso: () => {calls.push('time');return 'at';},tx: async callback => {calls.push('tx');return callback();},run: () => {calls.push('sessions');return sessions;},revokeDevicesOf: (u,reason,actor) => {assert.deepEqual([u,reason,actor],[user,'signed_out_everywhere',user]);calls.push('devices');return devices;},audit: (...values) => {assert.deepEqual(values,[null,user,'account.signed_out_everywhere',user,'at']);calls.push('audit');}});
+    const result = await account.signOutEverywhere(user,also);
+    assert.deepEqual(calls,['time','tx','sessions','devices','audit']);
+    return result;
+  }
+  throw new Error('unknown generated operation');
+}
+
+async function invariants() {
+  for (const [factory,keys] of [[create_account,['all','get','run','tx','audit','LIVE_WS','sql','softDeleteWorkspace','revokeDevicesOf','revokeGrantsOfPerson','actorOf','badRequest','conflict','notFound','nowIso','onMemberRemoved','accessEmailKey','otpEmailKey','noteDeparture','pseudonymise','workspacesNaming']],[create_lifecycle,['all','run','nowIso','revokeGrantsFor','endSessions','deleteOrphanDirectives']]]) {
+    const reads=[];
+    factory(new Proxy({}, {get: (_,key) => {reads.push(key);return undefined;}, ownKeys: () => {throw new Error('enumerated');}}));
+    assert.deepEqual(reads,keys);
+  }
+  const failure = {};
+  const account = create_account({tx: async callback => callback(), get: () => undefined, notFound: () => failure});
+  await assert.rejects(account.deletePasskey('u','k'), error => error === failure);
+  const order=[];
+  const rows=[];
+  create_lifecycle({revokeGrantsFor: () => order.push('revoke'),all: () => {order.push('read');return rows;},nowIso: () => {order.push('time');return 'at';},endSessions: (value,reason,at) => {assert.equal(value,rows);assert.equal(reason,'member_removed');assert.equal(at,'at');order.push('end');},run: () => order.push('write')}).onMemberRemoved('w','u');
+  assert.deepEqual(order,['revoke','read','time','end','write','write']);
+}
+async function runTests() {
+  const results=[];
+  for (const item of cases) {
+    assert.deepEqual(await execute(...item.args),item.expected);
+    results.push({case_id:item.id,outcome:'passed'});
+  }
+  await invariants();
+  return {schema:'literate-ai/generated-test-results@1',cases:results};
+}
+async function smoke() { return execute(...cases[0].args); }
+module.exports = {runTests,smoke};

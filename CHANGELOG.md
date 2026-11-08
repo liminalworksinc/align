@@ -8,6 +8,65 @@
   another is requested, and says when the confirmation replaces that rule.
 - The live-agent test client uses fresh HTTP connections after synchronous CLI calls so the offline-revocation
   scenario can finish without a stale keep-alive socket reset.
+- Account and membership operations use qualified services through their existing
+  typed interfaces. Account cleanup, session endings, shared transactions and
+  public failures preserve their behavior. The complete local workflow passes
+  1,845 application checks and all 36 image, header and startup checks.
+
+- Storage checks read the schema version through its public runtime export while
+  keeping the version and migration assertions unchanged.
+
+- Core and event operations use a qualified library through their existing typed
+  APIs, preserving transaction results, shared values, SQL and failure behavior.
+
+- Client-key helpers use a qualified library through their existing typed API,
+  preserving network normalization, mode changes, header defaults and failures.
+
+- HTTP helpers use qualified bindings through their existing typed APIs,
+  preserving response mapping, origin checks, credential paths and byte limits.
+
+- Readiness uses a qualified library through its existing typed API, preserving
+  shared promise identity, migration order, exact failures and retry behavior.
+
+- Startup uses a qualified library through its existing typed API. PID ownership,
+  file permissions, leftover cleanup, warning order and exit cleanup preserve the
+  original behavior, including replacement ownership and propagated failures.
+
+- Secret-file access and HMAC signing use a qualified library through the existing
+  typed core and web APIs. Environment precedence, exact entropy bytes, file
+  handling, signing and resource failures preserve the original behavior.
+
+- Storage: bind the existing database interface to a qualified service, preserving
+  shared connections, statement caching, atomic callbacks, migration behavior,
+  workspace conditions and audit records.
+
+- Qualified session wording preserves workspace stops after sharing ends or shared
+  history is deleted, while goal holds keep their own release behavior. The typed
+  consumers match 1,642,893 observations on macOS and Linux. The complete current-
+  main workflow passes 1,845 checks, including the unchanged 150 ms serial hook
+  requirement; all 36 image, header and startup checks pass.
+
+- Identifier helpers use a qualified library through the existing typed API and
+  real host resources. The original observations and operator commands match on
+  macOS and Linux, including rollback and cancellation. The complete twenty-one-
+  library workflow passes all 1,830 application and 36 image checks; the operator
+  runtime matches its exact three-package closure.
+
+- Rate limiting now uses a qualified library through the existing typed API.
+  Shared memory, signed keys, durable accounting and caller transactions match
+  the retained behavior on macOS and Linux, including oversized memory stores.
+  The complete twenty-library workflow passes all 1,830 application checks and
+  all 36 image, header and startup-refusal checks.
+
+- SQLite schema programs come from a qualified library through a typed call.
+  Historical shapes, populated upgrades, constraints and recovery match the
+  retained baseline on macOS and Linux. Database execution stays with its caller.
+  The complete workflow passes all 1,830 checks, and all 36 image checks pass.
+
+- Sign-in rate-limit explanations use one time sample after transaction
+  acquisition, so a clock tick preserves the machine-wide ceiling explanation.
+  Admission limits, owner exemptions and retry headers retain their contracts.
+
 - Server and operator settings now share one qualified library while preserving
   their public interfaces and observed behavior. Cold operator commands run with
   Node alone from a read-only checkout; the hosted operator uses the same pinned

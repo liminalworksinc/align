@@ -1,15 +1,17 @@
 # Storage data contract work
 
-- **Status:** active
+- **Status:** partial
 - **Owning queue item:** [ADOPT-002](active-work.md#adopt-002)
 - **Completion / archival evidence:** pending while ADOPT-002 remains open
-- **Design status:** proposed; retained storage remains release authority
+- **Design status:** coordinator and schema-program subsets qualified locally; remaining storage contracts open
 
-B12 follows the verified sixteen-library checkpoint `bb2605c`. The next transfer
-needs an explicit data contract before database-dependent behavior can be
-replaced. This work covers Align's domain schema and migration behavior. Better
-Auth's full schema remains with B13; the referenced external IDs are explicit
-cross-boundary dependencies.
+This work began after the verified sixteen-library checkpoint `bb2605c`.
+The migration coordinator and schema-program transfers now pass local acceptance.
+The [native rewrite program](native-rewrite-program.md) records their qualified
+authority and later checkpoint evidence. Connections, ordinary transactions,
+secret files, startup and request effects still need their own reviewed contracts
+and acceptance. Better Auth's full schema remains with B13; the referenced
+external IDs are explicit cross-boundary dependencies.
 
 ## Baseline and limits
 
@@ -57,18 +59,28 @@ mutation/refusal controls pass. Nineteen additional compatibility cases pass on
 each target. The capture helper reproduces the original inventory byte for byte
 and passes four refusal controls. The
 [contract observations](../architecture/storage-contract-observation.json) bind
-these results to the exact helpers and target description. The 22 original SQL
-bodies in the current consumer still match the frozen baseline exactly.
+these results to the exact helpers and target description. At that original capture, the 22 retained SQL
+bodies matched the frozen baseline exactly. The current consumer obtains its
+programs from the qualified schema package through the typed binding.
 
 The schema-only Component intent and SQLite Flavor pass source-bound review.
 Their frozen verifier covers 212 observations in 51 cases on macOS and Linux and
-detects all 15 broken variants. The natural zero-argument `change_programs()` API
-is blocked by the framework's omission of reviewed callable metadata during
-promotion. The tested parent correction awaits specific local commit approval
-before a clean wheel, fresh ordinary promotion and two clean qualifications.
-The full storage contract and authority classes, native-schema qualification and
-actual source retirement remain open. The diagnostic reconstructor does not
-implement the application and remains excluded from candidate generation.
+detects all 15 broken variants. The reviewed callable-metadata correction is in
+the clean installed framework wheel from `7f4e2406`, with all 128 managed
+regressions passing. Two distinct clean qualifications and a separately generated
+admitted build preserve the natural zero-argument `change_programs()` API and all
+frozen expectations. Decision:
+`sha256:58ac7cc26f50a47dfb19551c1a8b98203f7096a54e8a826bfc41f41560fed546`.
+
+The actual typed consumer matches all 212 baseline observations on macOS and
+Linux. Its local nineteen-library workflow passes all 1,830 application checks
+and all 36 image/header/startup checks. The retained SQL declaration is replaced
+by the typed package call; every other database adapter byte is preserved.
+Three historical probes now use that same binding, retaining all 969 original
+check calls and detecting omitted steps. The accepted 31-boundary classification
+settles owner classes. Remaining mixed storage contracts and their transfer
+acceptance stay open. The diagnostic reconstructor remains excluded from
+candidate generation. This local result does not publish a new checkpoint.
 
 ## Authority and proposed transfer
 
@@ -79,17 +91,18 @@ implement the application and remains excluded from candidate generation.
 - SQLite representation, the Node driver, connection settings, filesystem modes
   and module packaging belong to target requirements in Flavors. Preserve the
   current physical names while retained clients query them directly.
-- The first proposed executable boundary is the numbered migration coordinator.
-  It owns version ordering, transaction boundaries, reference-check ordering and
-  failure cleanup. A target adapter owns the actual database operations. The 22
-  historical SQL bodies remain retained source during this transfer; they are
-  neither reclassified as assets nor passed to generation. Qualifying the
-  coordinator will leave the schema representation and SQL history open.
+- The first executable transfer, the numbered migration coordinator, qualified
+  version ordering, transaction boundaries, reference-check ordering and failure
+  cleanup. A target adapter owns actual database operations. The later schema
+  transfer generates the 22 programs from reviewed Component and SQLite Flavor
+  authority. Retained SQL is neither relabeled as an asset nor passed to
+  generation. Connections and ordinary transaction behavior remain separate.
 - Existing storage and typed clients remain authoritative until independent
   acceptance, two clean regenerative builds, actual consumer parity, the full
   application workflow and the hosted image checks pass.
-- The sixteen qualified library registrations, source caches, public bindings and
-  acceptance inputs remain unchanged while this contract is prepared.
+- The initial sixteen qualified registrations, caches, bindings and acceptance
+  inputs were preserved during contract preparation. Each later public child
+  registration preserves every earlier record and qualified package.
 
 ## Additional retained-runtime baselines
 
@@ -203,7 +216,7 @@ unmapped paths. The full build, test and package workflow passes all 1,825 check
 with zero failures or skips, including the unchanged 150 ms p95 latency gate.
 The source identity is unchanged across all three phases:
 `sha256:d2dbe6225b533cd493bd7a183bc6cd22a1451ea111b59d7dd4430d2f927c991c`.
-The current receipt is
+The seventeen-library checkpoint receipt is
 `sha256:5e61ae0fe5bebdf1b28e1ff2112135628f34d8d601ef99dcbd46444507da5547`.
 The same 398 source members feed an isolated image snapshot. All 24 image checks
 and ten additional header checks pass on image
@@ -336,6 +349,9 @@ contains data transformations; an empty schema cannot establish their parity.
 - Retained `core.mts`: `sha256:aa3ce3dafef8b8ccb6ae18685ef82543a078562036596f3869d0b3dd926f4d06`
 - Final observed schema: `sha256:da3d5c34300aa32a410ace14869321924b7813bc0fc124adf5901bc23dc4911b`
 
-Only the named migration coordinator has qualified. The full schema, historical
-SQL and remaining storage behavior retain source authority; the current consumer
-transfer passes its complete parity checks. The remaining storage work stays open.
+The named coordinator, settings, schema-program, limiter and identifier subsets
+have qualified independently. The schema-program transfer retires the original
+SQL declaration after complete consumer parity. Connection acquisition, ordinary
+transactions, secret files, startup and request effects still retain source
+authority. The full B12 work stays open. The proposed model and its diagnostic
+reconstructor are review evidence, outside candidate source.

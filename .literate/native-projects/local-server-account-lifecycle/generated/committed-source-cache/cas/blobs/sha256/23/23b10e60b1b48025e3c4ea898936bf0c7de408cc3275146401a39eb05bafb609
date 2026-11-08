@@ -1,0 +1,20 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname,'..');
+const destination = path.resolve(process.argv[2]);
+fs.mkdirSync(destination,{recursive:true});
+fs.cpSync(path.join(root,'server_account_lifecycle'),path.join(destination,'server_account_lifecycle'),{recursive:true});
+const sources = new Map();
+function collect(filename) {
+  if (sources.has(filename)) return;
+  const body = fs.readFileSync(path.join(root,filename),'utf8').replace(/^#![^\n]*\n/,'');
+  sources.set(filename,body);
+  const matches = [...body.matchAll(/require\(['"](\.[^'"]+)['"]\)/g)];
+  for (const match of matches) collect(path.posix.normalize(path.posix.join(path.posix.dirname(filename),match[1])));
+}
+collect('main.js');
+let bundle = '#!/usr/bin/env node\n"use strict";\nconst __nativeRequire = require;\nconst __modules = {\n';
+for (const [name,body] of sources) bundle += JSON.stringify(name)+': function(module,exports,require){\n'+body+'\n},\n';
+bundle += '};\nconst __cache = {};\nfunction __load(id){if(__cache[id])return __cache[id].exports;const module={exports:{}};__cache[id]=module;__modules[id](module,module.exports,function(request){if(!request.startsWith("."))return __nativeRequire(request);const parts=id.split("/");parts.pop();for(const part of request.split("/")){if(part==="..")parts.pop();else if(part!==".")parts.push(part);}return __load(parts.join("/"));});return module.exports;}\n__load("main.js");\n';
+fs.writeFileSync(path.join(destination,'run'),bundle,{mode:0o755});

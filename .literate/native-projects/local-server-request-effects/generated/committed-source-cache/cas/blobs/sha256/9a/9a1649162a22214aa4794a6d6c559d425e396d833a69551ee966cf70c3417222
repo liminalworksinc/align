@@ -1,0 +1,114 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_legacy } = require('../server_request_effects/create_legacy.js');
+const { create_v2 } = require('../server_request_effects/create_v2.js');
+
+class HttpError extends Error {
+  constructor(status, message, code) { super(message); this.status = status; this.code = code; }
+}
+class V2Error extends Error {
+  constructor(status, code, message, extra = {}) { super(message); this.status = status; this.code = code; this.extra = extra; }
+}
+function resources(overrides = {}) {
+  return { config: () => ({ hosted: false }), hostAllowed: () => true, HttpError, V2Error,
+    console: { error() {} }, connection: async () => {}, ready: async () => {},
+    clientNet: value => value, getAuth: () => ({ api: { async getSession() { return null; } } }),
+    isRecentSignIn: () => true, reauthMessage: what => `Approve ${what}`,
+    publicOrigin: () => '', deviceFromAccessToken: () => null, userById: () => null,
+    badRequest: message => new V2Error(400, 'bad_request', message), ...overrides };
+}
+function request(body, type) {
+  const headers = new Headers();
+  if (type !== null) headers.set('content-type', type);
+  return { headers, body: new ReadableStream({ start(controller) {
+    controller.enqueue(Buffer.from(body)); controller.close();
+  } }) };
+}
+async function read(version, body, type, max) {
+  const binding = version === 'legacy' ? create_legacy(resources()) : create_v2(resources());
+  const fn = version === 'legacy' ? binding.cappedJson : binding.readJson;
+  return fn(request(body, type), max);
+}
+const cases = [
+  { id: 'generated-object', args: ['v2', '{"count":7,"tags":["a","b"]}', 'application/json', 64], expected: { count: 7, tags: ['a', 'b'] } },
+  { id: 'generated-empty', args: ['v2', ' \n\t', 'text/plain', 3], expected: {} },
+  { id: 'generated-legacy-media', args: ['legacy', '{"nested":{"ok":true}}', 'text/plain', 64], expected: { nested: { ok: true } } },
+  { id: 'generated-exact-cap', args: ['v2', '{}', 'application/json', 2], expected: {} },
+  { id: 'generated-normalized-media', args: ['v2', '{"value":null}', 'Application/JSON; charset=utf-8', 32], expected: { value: null } },
+  { id: 'generated-unicode', args: ['legacy', '{"text":"é"}', null, 13], expected: { text: 'é' } }
+];
+
+async function additionalChecks() {
+  const events = [];
+  const r = resources({ config: () => { events.push('config'); return { hosted: false }; } });
+  const legacy = create_legacy(r);
+  const v2 = create_v2(r);
+  assert.deepEqual(events, []);
+  assert.deepEqual(Object.keys(legacy), ['handle', 'requireJson', 'cappedJson']);
+  assert.deepEqual(Object.keys(v2), ['route', 'noContent', 'rejectBrowser', 'deviceAuth', 'webAuth', 'isRecentSignIn', 'requireRecentSignIn', 'eitherAuth', 'requireSameSite', 'webWrite', 'eitherWrite', 'idParam', 'readJson', 'originOf', 'clientKey']);
+  for (const [name, fn] of Object.entries(legacy)) { assert.equal(fn.name, name); assert.equal(fn.length, 1); }
+  for (const [name, fn] of Object.entries(v2)) {
+    if (name === 'isRecentSignIn') { assert.equal(fn, r.isRecentSignIn); continue; }
+    assert.equal(fn.name, name);
+    assert.equal(fn.length, name === 'noContent' ? 0 : ['idParam', 'requireRecentSignIn'].includes(name) ? 2 : 1);
+  }
+  const req = { headers: { get(key) { events.push(key); return { 'content-type': 'application/json', host: 'localhost:4321' }[key] ?? null; } } };
+  legacy.requireJson(req);
+  assert.deepEqual(events, ['content-type', 'config', 'host', 'origin', 'config']);
+  const response = new Response('unchanged');
+  assert.equal(await legacy.handle(() => response), response);
+  const order = [];
+  const route = create_v2(resources({ connection: async () => { order.push('connection'); }, ready: async () => { order.push('ready'); } })).route;
+  assert.equal(await route((original, params) => { assert.equal(original, req); assert.equal(params, 9); order.push('handler'); return response; })(req, { get params() { order.push('params'); return Promise.resolve(9); } }), response);
+  assert.deepEqual(order, ['connection', 'ready', 'params', 'handler']);
+  const failure = {};
+  await assert.rejects(create_v2(resources({ connection: async () => { throw failure; }, ready: () => assert.fail() })).route(() => assert.fail())(req, { get params() { assert.fail(); } }), error => error === failure);
+  const mapped = await route(() => { throw new V2Error(429, 'slow', 'Wait', { error: 'wrong', message: 'wrong', retry_after: 4 }); })(req, { params: {} });
+  assert.equal(mapped.status, 429); assert.equal(mapped.headers.get('retry-after'), '4');
+  assert.deepEqual(await mapped.json(), { error: 'slow', message: 'Wait', retry_after: 4 });
+  assert.equal(v2.noContent().status, 204); assert.equal(v2.noContent().headers.get('content-type'), null);
+  assert.throws(() => v2.deviceAuth({ headers: new Headers({ origin: '', cookie: '' }) }), error => error.code === 'browser_not_allowed');
+  assert.throws(() => v2.deviceAuth({ headers: new Headers({ cookie: '' }) }), error => error.code === 'cookies_not_allowed');
+  assert.throws(() => v2.deviceAuth({ headers: new Headers({ authorization: '' }) }), error => error.code === 'invalid_token');
+  await assert.rejects(v2.webAuth({ headers: new Headers({ authorization: '' }) }), error => error.code === 'bearer_not_allowed');
+  const principal = { kind: 'device' };
+  assert.equal(create_v2(resources({ deviceFromAccessToken: token => { assert.equal(token, 'abc'); return principal; } })).deviceAuth({ headers: new Headers({ authorization: 'bEaReR abc' }) }), principal);
+  const headers = new Headers();
+  const api = { async getSession(input) { assert.equal(this, api); assert.equal(input.headers, headers); return { user: { id: 'u' }, session: { createdAt: '2000-01-01T00:00:00.000Z' } }; } };
+  const web = create_v2(resources({ getAuth: () => ({ api }), userById: id => { assert.equal(id, 'u'); return { id, name: 'Name', email: 'u@example.test', emailVerified: true, private: 1 }; } }));
+  assert.deepEqual(await web.webAuth({ headers }), { kind: 'web', user: { id: 'u', name: 'Name', email: 'u@example.test' }, emailVerified: true, signedInAt: new Date('2000-01-01T00:00:00.000Z') });
+  const pattern = /a/g;
+  assert.equal(v2.idParam('a', pattern), 'a'); assert.equal(pattern.lastIndex, 1);
+  assert.throws(() => v2.idParam('a', pattern), error => error.code === 'not_found');
+  v2.requireSameSite({ headers: new Headers() });
+  assert.throws(() => v2.requireSameSite({ headers: new Headers({ origin: '' }) }), error => error.code === 'cross_site');
+  assert.equal(v2.originOf({ headers: new Headers() }), 'http://127.0.0.1');
+  assert.equal(v2.clientKey({ headers: new Headers() }), 'local');
+  for (const version of ['legacy', 'v2']) {
+    const binding = version === 'legacy' ? create_legacy(resources()) : create_v2(resources());
+    const fn = version === 'legacy' ? binding.cappedJson : binding.readJson;
+    await assert.rejects(fn(request('{', 'application/json')), error => error.message === 'Send valid JSON');
+    await assert.rejects(fn(request('[]', 'application/json')), error => error.message === 'Send a JSON object');
+    await assert.rejects(fn(request('{"a":[{"prototype":1}]}', 'application/json')), error => error.message === (version === 'legacy' ? '“prototype” is not allowed as a field name (at body.a[0])' : '"prototype" is not allowed as a field name'));
+    let reads = 0; let cancelled = false;
+    const streamReq = { headers: new Headers(), body: { getReader() { return {
+      async read() { reads++; return { done: false, value: Buffer.from('abc') }; },
+      async cancel() { cancelled = true; throw failure; }
+    }; } } };
+    await assert.rejects(fn(streamReq, 2), error => error === failure);
+    assert.equal(reads, 1); assert.equal(cancelled, true);
+    await assert.rejects(fn({ headers: new Headers({ 'content-length': '65537' }), get body() { assert.fail(); } }), error => error.status === 413);
+  }
+}
+
+async function runTests() {
+  const results = [];
+  for (const test of cases) {
+    assert.deepEqual(await read(...test.args), test.expected);
+    results.push({ case_id: test.id, outcome: 'passed' });
+  }
+  await additionalChecks();
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+async function smoke() { return read(...cases[0].args); }
+module.exports = { runTests, smoke };

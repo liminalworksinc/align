@@ -1,0 +1,10 @@
+'use strict';
+const tests = require('./tests/litai_test.js');
+async function main() {
+  let result;
+  if (process.argv[2] === '--litai-test') result = await tests.run();
+  else if (process.argv[2] === '--litai-smoke') result = await tests.smoke();
+  else throw new Error('This library supports only framework test and smoke dispatch.');
+  process.stdout.write(JSON.stringify(result) + '\n');
+}
+main().catch(error => { process.stderr.write(String(error.stack ?? error) + '\n'); process.exitCode = 1; });

@@ -1,0 +1,3 @@
+'use strict';
+const {render_context_delta} = require('./core.js');
+module.exports = {render_context_delta};

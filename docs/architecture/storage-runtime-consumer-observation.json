@@ -1,0 +1,42 @@
+{
+  "schema": "align/storage-runtime-consumer-observation@1",
+  "status": "partial",
+  "owning_work": "ADOPT-002/B12",
+  "original_module": "lib/v2/db.ts",
+  "original_source_sha256": "524519006268bc81fc25414b52f6d9e9c3e8002bd65c8e81c30ecaab7e40b0ef",
+  "typed_consumer_sha256": "9470f4fc3ae49c2e3797b27bd7551cd2f8646dac04d983c91294ca8d8482c059",
+  "public_functions": 12,
+  "public_values": 1,
+  "source_cases_each_platform": 43,
+  "source_controls_each_platform": 13,
+  "qualification_cases_each_clean_generation": 44,
+  "clean_generations": 2,
+  "candidate_controls_each_platform": 33,
+  "qualification_decision": "sha256:e0ce553b77b0759accd231fb4332ba2da10b3f1d63f5637bdfe8a7e7d28a2f76",
+  "qualified_projection": "sha256:4f81ac14df18fd8ac3c9b8c9603d6d7a01b9d7cc044e44c9667ef81ec0a0d86b",
+  "component_lock": "sha256:225d14fc8aec017692865a90db4d7cdcb6795eaf74037a5de50ead61e7e5a6ee",
+  "admitted_entry": "sha256:06c78cf9bb3153f888c6a322473527927e1be9d65fdd03f8742a0db793d0b01f",
+  "actual_consumer_platforms": [
+    "macos",
+    "linux"
+  ],
+  "actual_consumer_source_records_unchanged": true,
+  "real_sqlite_and_filesystem": true,
+  "fixtures": "Owned synthetic data only. Selected constructor, SQL-start/write and permission faults are fixture-only resource instrumentation.",
+  "dependency_scope": "Existing qualified schema programs, migration coordinator and wording helpers; external auth ID tables only, with no full authentication qualification claim.",
+  "timing_scope": "Requested retry budgets and a real-timer event-loop check are observed. Accelerated exhaustion makes no wall-clock timeout claim.",
+  "security_scope": "VM resource controls are functional conformance checks.",
+  "remaining": [
+    "Complete application build/test/package",
+    "Immutable image checks",
+    "Current parent receipt and CI verification",
+    "Full31-boundary program",
+    "Public tester URL, operator security review and live smoke"
+  ],
+  "published": false,
+  "complete_public_namespace_types_match": true,
+  "production_web_acceptance": {
+    "libraries": 16,
+    "cases": 555
+  }
+}
