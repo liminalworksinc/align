@@ -155,4 +155,3 @@ export function memberName(userId: string): string {
 export function nameTo(userId: string, reader: string): string {
   return (0, runtime().nameTo)(userId, reader);
 }
-

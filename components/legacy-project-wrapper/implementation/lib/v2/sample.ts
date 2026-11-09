@@ -37,4 +37,3 @@ export const SAMPLE_LIMIT_TEXT: SampleRuntime["SAMPLE_LIMIT_TEXT"] = sampleServi
 export async function createSampleWorkspace(req: Request, p: WebPrincipal, code: string | null): Promise<{ id: string; name: string; role: "owner"; }> {
   return (0, sampleService.createSampleWorkspace)(req, p, code);
 }
-

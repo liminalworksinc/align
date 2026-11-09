@@ -512,6 +512,8 @@ export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
   const count = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_goals WHERE ws_id = ?", pp.wsId)?.n ?? 0;
   if (count >= 1000) throw conflict("too_many_goals", "This workspace has the maximum number of goals.");
   const id = await tx(() => {
+    const lockedCount = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_goals WHERE ws_id = ?", pp.wsId)?.n ?? 0;
+    if (lockedCount >= 1000) throw conflict("too_many_goals", "This workspace has the maximum number of goals.");
     const created = insertGoal(pp, { title, level, podId, visibility, measures, anchors, dependsOn, limits, targetShare }, at);
     // Here, not in insertGoal: the sample workspace's seeded limit is nobody's first.
     if (limits.length) event("first_limit", { ws: pp.wsId, user: pp.userId, at });

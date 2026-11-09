@@ -526,6 +526,14 @@ try {
     inviteCapRun.status === 0 && inviteCapResult?.passed === 6 && inviteCapResult?.failed === 0,
     inviteCapRun.stderr || inviteCapRun.stdout.slice(0, 500),
   );
+  const goalCapRun = await commandAsync(process.execPath, ["--no-warnings", "scripts/test-goal-cap.mjs"], process.env);
+  let goalCapResult = null;
+  try { goalCapResult = JSON.parse(goalCapRun.stdout); } catch { goalCapResult = null; }
+  check(
+    "goal caps: independent SQLite writers recheck goal capacity after acquiring the transaction",
+    goalCapRun.status === 0 && goalCapResult?.passed === 7 && goalCapResult?.failed === 0,
+    goalCapRun.stderr || goalCapRun.stdout.slice(0, 500),
+  );
   // ======== phase local: Mode L with no settings (v2 always on, the local owner, email codes) ========
   const localDir = path.join(tmpRoot, "local");
   // ALIGN_LOCAL_CODES_PER_HOUR=16: Mode L's machine-wide ceiling on code sends (default 60), low here so the test reaches it.

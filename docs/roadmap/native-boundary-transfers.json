@@ -1,6 +1,6 @@
 {
   "schema": "align/native-boundary-transfer-review@4",
-  "observed_utc": "2026-11-09T01:04:12.933264+00:00",
+  "observed_utc": "2026-11-09T03:08:24.443636+00:00",
   "review_kind": "Same-agent full source, package and measured acceptance review under operator delegation. B13 confirmation remains recorded. No independent maintainer or deployed-tester security acceptance.",
   "accepted_classification_sha256": "236b77cbd13222ec77aac7f3fc9c1d8cccaa6a46b662352ca7a5f5fb7d8ddf87",
   "image_platform": "linux/arm64",
@@ -141,6 +141,46 @@
     {
       "file": "server-workspaces.parent-current-readiness-proof-v1.json",
       "sha256": "03f85f6de1c5c75b2b87f2a5054d7f2dd8578df92344933e8aaaecb4bb1272c0"
+    },
+    {
+      "file": "server-goals.cap-parent-full-workflow-proof-v1.json",
+      "sha256": "fa906024cc52e9a9c7a11d1bc4b0065083f741ffae2d31c555a02581e9c5875d"
+    },
+    {
+      "file": "server-goals.cap-completed-suite-evidence-v1.json",
+      "sha256": "915eede180dde4e1b94abaef579ad2a16000ad880370a13d6cc614515c0a19f9"
+    },
+    {
+      "file": "server-goals.cap-serial-hook-acceptance-v1.json",
+      "sha256": "d69365a0680e3f9abbeb4a42e2f39cd2ae34a4d419e3d105cb873bc9c4b3ad77"
+    },
+    {
+      "file": "server-goals.cap-image-acceptance-proof-v1.json",
+      "sha256": "c3ed1fb717326a23bfde71b10fcaaf71ba35132da2307bcd39588d70cd9e59ef"
+    },
+    {
+      "file": "server-goals.cap-image-source-equivalence-v1.json",
+      "sha256": "2d3a42396cb03092ae4c3d303e18f4f44bb5f3faff4012ca282ae8a734446311"
+    },
+    {
+      "file": "server-goals.cap-image-bundle-sample-proof-v1.json",
+      "sha256": "7b11426d9075a58d171c594778f61960d7fd9765757379b8fbbd3432735dc591"
+    },
+    {
+      "file": "server-goals.cap-parent-current-readiness-proof-v1.json",
+      "sha256": "f50d03fe99921b6908076357bf474a8d8e73d4cb3801f00bd3d3094466297f15"
+    },
+    {
+      "file": "server-goals.cap-focused-acceptance-proof-v1.json",
+      "sha256": "488972b59e2fe62b0e8caa3d4dbaff463430743fdc42083d0d662e8d7c23d0ed"
+    },
+    {
+      "file": "server-goals.cap-wrapper-semantic-equivalence-v1.json",
+      "sha256": "5330ebf3a3a9bd4aa9aa2bcedfccfd8719a3131f8d195178d9b5be4adc3c2fbd"
+    },
+    {
+      "file": "server-workspaces.normal-review-assessment-v1.json",
+      "sha256": "f41e59ef71b133b43dec1edc0ffe30422cffe07ceaba2cf1ede671dda0c498a5"
     }
   ],
   "rows": [
@@ -983,8 +1023,8 @@
         "B13"
       ],
       "current_member_hashes": {
-        "lib/v2/workspaces.ts": "67713126fe47254fa4e3b035bc87f2b59a7eb88f84caaf9ecec0354f75d6dd96",
-        "lib/v2/sample.ts": "c40e77004fb1a23979453931a9887614b568563b5373c4dc741b85e3365295cc"
+        "lib/v2/workspaces.ts": "c5f1a4051dbba73a496f0acc12068990af487739fa09484ce451b2e0ddee7b03",
+        "lib/v2/sample.ts": "b282a2de45eec249c93ae2aa1f546bd8db04348e765a24b66db154996f2b06cc"
       },
       "current_qualified_bindings": [
         {
@@ -1078,7 +1118,17 @@
       "functional_acceptance_complete": true,
       "source_retirement_review_pending": false,
       "blocking_review_findings": [],
-      "original_failed_candidates_and_negative_controls_preserved": true
+      "original_failed_candidates_and_negative_controls_preserved": true,
+      "previous_binding_hashes_at_95947813": {
+        "lib/v2/workspaces.ts": "67713126fe47254fa4e3b035bc87f2b59a7eb88f84caaf9ecec0354f75d6dd96",
+        "lib/v2/sample.ts": "c40e77004fb1a23979453931a9887614b568563b5373c4dc741b85e3365295cc"
+      },
+      "subsequent_binding_cleanup": {
+        "only_extra_EOF_blank_lines_removed": true,
+        "compiled_ESM_byte_identical": true,
+        "complete_new_application_and_image_acceptance": true,
+        "historical_72_unchanged_caller_observation_retained_as_record_time_evidence": true
+      }
     }
   ],
   "public_tester_deployed": false,
@@ -1141,12 +1191,12 @@
     "independent_maintainer_review_claimed": false,
     "final_deployed_tester_security_acceptance": false
   },
-  "source_identity": "sha256:40143c96c3820211ffd90231e8bf94cbe7ab9c5d30891e1ee426b1349f57ddf9",
-  "parent_receipt": "sha256:2f669f2467a02786ae9bcfa3b059d8a2786e2ea91a817165af5386a606d1f058",
-  "application_checks": 1846,
+  "source_identity": "sha256:21f29925336ec608c1f29679b381ffc431edae5d4cbf6565b92fdd0ed86edb21",
+  "parent_receipt": "sha256:6c6de36e107fb2cf623606005829ea579b222c0d3be159cc122504add5d5cdfd",
+  "application_checks": 1847,
   "image_checks": 36,
-  "source_members": 446,
-  "image_id": "sha256:8b66d1650c2d32c18676076e9648d97091a0a4946a95cabd6e5a861ef2a824f4",
+  "source_members": 447,
+  "image_id": "sha256:c9cc9f63aa78f5920402086c5cca327e45cea3ca06a1ae87ba53a77b67e311fc",
   "current_source_checkpoint_recorded_by_git": false,
   "current_image_all_full_workflow_inputs_exact": true,
   "prior_local_checkpoint_acceptance": [
@@ -1159,5 +1209,76 @@
       "image_id": "sha256:e0846ceb4ce798129f100bfe2a4ae3832b8bee72e484078a139c8d54f8274e5e"
     }
   ],
-  "publication_record": "Git history and the draft PR report subsequent publication. This local record claims no push, merge or deployment."
+  "publication_record": "Git history and the draft PR report subsequent publication. This local record claims no push, merge or deployment.",
+  "retained_runtime_checkpoint_history": [
+    {
+      "checkpoint_commit": "95947813fe0a04726f1e680af359350a7b7f2554",
+      "source_identity": "sha256:40143c96c3820211ffd90231e8bf94cbe7ab9c5d30891e1ee426b1349f57ddf9",
+      "parent_receipt": "sha256:2f669f2467a02786ae9bcfa3b059d8a2786e2ea91a817165af5386a606d1f058",
+      "application_checks": 1846,
+      "image_checks": 36,
+      "source_members": 446,
+      "image_id": "sha256:8b66d1650c2d32c18676076e9648d97091a0a4946a95cabd6e5a861ef2a824f4"
+    }
+  ],
+  "current_checkpoint_pending_publication": true,
+  "goal_cap_retained_source_correction": {
+    "issue": "https://github.com/liminalworksinc/align/issues/77",
+    "original_source_sha256": "b57c5f46cfedf024f5b0a1199793b55fb9f682de44c4f77b902519a5ab02d2f5",
+    "corrected_source_sha256": "f2198064ce90b2dcfd8665ca69920153eaf1ab73e78b0882076193d7e01cad8a",
+    "focused_controls_each_host": 7,
+    "original_negative_controls_each_host": 3,
+    "retained_binding_style_cleanups": [
+      {
+        "path": "lib/v2/workspaces.ts",
+        "prior_sha256": "67713126fe47254fa4e3b035bc87f2b59a7eb88f84caaf9ecec0354f75d6dd96",
+        "current_sha256": "c5f1a4051dbba73a496f0acc12068990af487739fa09484ce451b2e0ddee7b03",
+        "change": "Remove extra trailing blank lines only; complete new runtime acceptance required."
+      },
+      {
+        "path": "lib/v2/sample.ts",
+        "prior_sha256": "c40e77004fb1a23979453931a9887614b568563b5373c4dc741b85e3365295cc",
+        "current_sha256": "b282a2de45eec249c93ae2aa1f546bd8db04348e765a24b66db154996f2b06cc",
+        "change": "Remove extra trailing blank lines only; complete new runtime acceptance required."
+      }
+    ],
+    "complete_application_image_and_current_receipt_pending": false,
+    "whole_B15_closed": false,
+    "local_functional_acceptance_complete": true,
+    "application_checks": 1847,
+    "image_checks": 36,
+    "actual_bundled_HTTP_controls": 18,
+    "canonical_service_controls_each_host": 7,
+    "preserved_original_negative_controls_each_host": 3,
+    "independent_service_race_and_single_process_HTTP_scope_separate": true,
+    "actual_second_server_guard_preserved": true,
+    "public_HTTP_reachability_of_original_service_gap_not_established": true,
+    "parent_receipt": "sha256:6c6de36e107fb2cf623606005829ea579b222c0d3be159cc122504add5d5cdfd",
+    "source_identity": "sha256:21f29925336ec608c1f29679b381ffc431edae5d4cbf6565b92fdd0ed86edb21",
+    "image_id": "sha256:c9cc9f63aa78f5920402086c5cca327e45cea3ca06a1ae87ba53a77b67e311fc",
+    "published": false
+  },
+  "workspace_publication_review_followups": {
+    "commit": "95947813fe0a04726f1e680af359350a7b7f2554",
+    "normal_hook_exit_code": 0,
+    "findings": [
+      {
+        "id": "f_2e78693505d1",
+        "severity": "HIGH",
+        "status": "open-for-maintainer-and-operator-security-review"
+      },
+      {
+        "id": "f_09aa12209ec2",
+        "severity": "MED",
+        "status": "open-readable-payload-review"
+      },
+      {
+        "id": "f_eacf8a5e6d43",
+        "severity": "MED",
+        "status": "open-readable-payload-review"
+      }
+    ],
+    "automatic_accept_or_dismiss": false,
+    "actual_operator_security_accepted": false
+  }
 }

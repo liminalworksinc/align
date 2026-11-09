@@ -9,106 +9,52 @@ until each boundary earns transfer under ADR 0002.
 
 ## Latest candidate status
 
-B14 now has two separately qualified and admitted libraries for workspace
-membership/invitations and the sample workspace. The candidate registers 35
-libraries while preserving every prior provider and consumer pin. Original
-source remains preserved separately; the two runtime source files contain typed
-provider assembly and hoisted forwarding functions.
+The current retained-source checkpoint addresses
+[issue #77](https://github.com/liminalworksinc/align/issues/77). Goal creation keeps
+its early 1,000-goal refusal and repeats the same count and exact refusal inside
+the acquired write transaction, immediately before insertion. The original
+service reaches 1,001 goals in each of three held-writer schedules on each host.
+The two-statement correction passes all seven source controls on each host,
+including exact goal/version/audit counts and foreign-key checks. The low-level
+sample insertion path remains unchanged.
 
-Both actual hosts pass the admitted packages: 31 workspace batches with 806
-source observations, 38 bindings, ten populated controls and six contention
-schedules; five sample batches with 31 source records, 11 bindings, clock and
-same-imported-factory isolation, and 60 populated controls covering 53 rollback
-positions. The sample controls use the admitted workspace package and qualified
-store/schema/caps, with controlled goal, contribution and change ports.
-Read [admitted acceptance](../architecture/server-workspaces-admitted-acceptance.json).
+The current single-process production HTTP path already preserves capacity with
+the original source. A second server on the same data directory is refused by
+its existing runtime guard. The service-level invariant gap is therefore kept
+separate from public HTTP exploitability. No runtime guard was weakened.
 
-Production assembly preserves all 30 public value types, assigns both namespaces
-in each direction and compiles all 72 unchanged direct callers. Exact production
-wrappers and admitted package bytes preserve the same workspace/sample behavior
-on macOS and Linux. All 866 private web batches pass across 29 libraries. The
-six-case canonical invite-cap regression also passes through the native factory.
-The private Linux consumer runner uses bounded process batches with the same
-384 MB heap and 768 MB container limits; every original expected observation and
-all 60 sample controls remain present exactly once.
-Read [actual consumer acceptance](../architecture/server-workspaces-consumer-acceptance.json).
+The complete unchanged build, test and package commands pass 1,847 checks with
+zero failures or skips on 447 retained members. All 446 prior members remain;
+the new member is the canonical seven-case goal-cap regression, called by one
+new outer application assertion. Source: `sha256:21f29925336ec608c1f29679b381ffc431edae5d4cbf6565b92fdd0ed86edb21`.
+The two recorded workspace/sample EOF cleanups compile to byte-identical
+JavaScript and are covered by this new runtime epoch.
 
-The complete build, test and package workflow now passes 1,846 checks with zero
-failures or skips on 446 retained members and 35 registered libraries. The
-unchanged 150 ms p95 hook assertion passes with networking blocked. A fresh Linux
-arm64 image passes all 24 canonical checks, ten header checks and two startup
-refusals. All six static assets match. Both raw authored assets, domain data and
-the 1,444-byte sample text, remain exact root-owned files readable by the app user
-and protected against its writes. The image retains the exact 41-file operator
-closure with five qualified packages.
+The fresh Linux arm64 image `sha256:c9cc9f63aa78f5920402086c5cca327e45cea3ca06a1ae87ba53a77b67e311fc` passes all 36 image checks,
+six exact static assets, both root-owned raw assets and the exact 41-file
+operator closure with five qualified packages. Eighteen additional offline
+actual HTTP/SQLite controls cover the sample, invitation, permission and restore
+paths plus supported runtime goal-cap behavior. They do not count as public QA
+or differential service-race proof. Every full-workflow input matches image
+source. The unchanged 150 ms p95 hook assertion passes with networking blocked.
+Both capable readers pass three required gates with two declared optional skips
+and explicitly verify all 35 qualified projections. Current receipt:
+`sha256:6c6de36e107fb2cf623606005829ea579b222c0d3be159cc122504add5d5cdfd`.
 
-An additional isolated production-image check passes 15 real HTTP and SQLite
-controls. It uses actual goal, contribution and change services to create the
-sample, then exercises invitation acceptance, member refusal, last-owner refusal,
-deletion and restore. Owned local accounts and disabled network keep this a local
-bundled acceptance check. It does not count toward public live QA.
+The accepted B14 workspace/sample transfer at 95947813 remains preserved with
+its original package, both-host consumer and 72 unchanged caller observations.
+All 35 library pins and the declared retained Standard driver are unchanged.
+Fourteen of 31 boundaries have local transfer acceptance; B15 through B31 remain
+open. The approval and limit helpers are prepared externally for B15, and no
+partial B15 source retirement is claimed here. Original and failed evidence
+remain intact. Git and the existing draft PR record publication separately.
 
-Every full-workflow input matches the image source. Source identity:
-`sha256:40143c96c3820211ffd90231e8bf94cbe7ab9c5d30891e1ee426b1349f57ddf9`. Image: `sha256:8b66d1650c2d32c18676076e9648d97091a0a4946a95cabd6e5a861ef2a824f4`.
-Current parent receipt: `sha256:2f669f2467a02786ae9bcfa3b059d8a2786e2ea91a817165af5386a606d1f058`. Current and CI readers
-each pass three gates with two declared optional skips and explicitly verify all
-35 qualified projections. The retained Standard driver remains unchanged.
-Read [full local acceptance](native-boundary-transfers.json).
-
-The [transfer review](native-boundary-transfers.md) records B01 through B14 as
-locally accepted. Fourteen of 31 boundaries are accepted, with 17 open. Continue
-B15 goals and decisions. Git and the draft PR record subsequent publication.
-Public tester delivery, real provider-browser behavior, actual operator security
-review and live smoke remain open.
-
-## Previous published invitation-cap checkpoint
-
-The current candidate corrects [issue #76](https://github.com/liminalworksinc/align/issues/76).
-Invitation creation keeps the early capacity refusal and repeats the same check
-after acquiring the SQLite write lock, immediately before insertion. The
-preserved original exceeds the cap in all three held-lock schedules; the
-correction passes all six held-lock and uncontended schedules on both hosts.
-The source correction is one added check. All 947 prior application expectations
-remain unchanged, and the application harness adds the six-case regression as
-one additional check. The 65 owned scenarios, ten populated SQLite controls and
-353 byte-identical non-invitation observations also pass.
-
-The complete build, test and package workflow passes 1,846 checks with zero
-failures and skips on the same 442-member source `sha256:d3b140776595e681ba9ded9ead514ca429881fa1f1e95d4a941b1f808b5408b0`.
-All 36 image checks, six static assets and the exact root-owned domain asset
-pass against `sha256:e0846ceb4ce798129f100bfe2a4ae3832b8bee72e484078a139c8d54f8274e5e`. Every full-workflow input matches the image
-source. The paired source controls also run under that Linux image's Node
-runtime with networking disabled; they are separate from the canonical HTTP
-image checks. The unchanged 150 ms p95 hook requirement passes with networking
-blocked. Current and CI readers each pass three gates with two declared optional
-skips and explicitly verify all 33 qualified projections. Current parent receipt:
-`sha256:6c802f17b8075718811e528aa317faf63fcd77d694f777a7f1a5547fe0275c41`.
-
-All 33 qualified providers and their pins remain unchanged. Web materialization
-preserves 830 private batches across 27 libraries. The image preserves the exact
-41-file operator runtime with five qualified packages. The declared retained
-Standard driver remains unchanged; the current and CI readers use exact revision
-`77be5baf` for the reviewed-intake record format. Original failed candidates and
-all failed controls remain preserved.
-
-Main authentication retains its two clean 35-batch qualifications and separate
-admitted generation. The package and production assembly preserve all 264 source
-observations, 68 binding records and 12 configured-provider records on each host,
-13 public value types and seven unchanged callers. Sensitive source
-classification, signed static-intake policy and exact domain-asset custody
-remain unchanged. The operator explicitly confirmed the moved authentication
-checks on 2026-11-08. The [current transfer review](native-boundary-transfers.md)
-therefore records B01 through B13 as accepted transfers.
-
-Thirteen of 31 boundaries are accepted; 18 implementation boundaries remain,
-starting with B14 workspaces. That count does not estimate remaining effort.
-Continue B14 from the deliberately corrected retained baseline. Actual
-publication is recorded in Git and the draft PR. The complete migration, public
-tester URL, real delivery and provider-browser acceptance, actual operator
-security review of the deployed tester, and live smoke remain open. The
-authentication confirmation supplies no independent maintainer review, merge
-approval or deployed-tester security acceptance. Earlier architecture records
-preserve their record-time flags.
+The normal review of the published workspace checkpoint left three maintainer
+and operator-security follow-ups open. The recorded B13 authentication
+confirmation remains distinct from those findings. This checkpoint grants no
+merge, independent maintainer review, real-provider browser acceptance, public
+tester security acceptance or live smoke. Existing Fly access still does not
+resolve the tester's owning account and active billing access.
 
 ## Current main integration
 

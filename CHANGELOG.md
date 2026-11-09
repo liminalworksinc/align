@@ -8,6 +8,9 @@
   another is requested, and says when the confirmation replaces that rule.
 - The live-agent test client uses fresh HTTP connections after synchronous CLI calls so the offline-revocation
   scenario can finish without a stale keep-alive socket reset.
+- Keep the 1,000-goal workspace cap while concurrent creations wait for SQLite,
+  by rechecking capacity after the writer lock is acquired.
+
 - Preserve workspace membership, invitations and labeled sample creation through
   two qualified libraries with typed application bindings and the exact sample
   text asset. Keep the invitation-cap recheck inside the transaction.

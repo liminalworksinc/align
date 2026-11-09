@@ -153,8 +153,8 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Next action:** Publish the fully verified 35-library B14 checkpoint in the
-  existing draft PR, then continue B15 through B31. The [current transfer review](native-boundary-transfers.md)
+- **Next action:** Publish the verified retained-source goal-cap correction in
+  the existing draft PR, then continue B15 through B31 from that current baseline. The [current transfer review](native-boundary-transfers.md)
   records B01 through B14 as accepted local transfers, leaving 17 boundaries.
   Preserve the previous publication and every failed candidate. The public
   tester, actual operator security review and live smoke remain open.
@@ -184,6 +184,20 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [full local acceptance](native-boundary-transfers.json).
   B14 has earned local transfer acceptance. Publication is recorded in Git and
   the existing draft PR. The full native program and public tester remain open.
+- **B15 admission correction:** [Issue #77](https://github.com/liminalworksinc/align/issues/77)
+  reproduces the 1,000-goal admission race on both hosts using independent SQLite
+  connections and a third held writer. Three held schedules per host leave 1,001
+  goals with matching versions and audits; ordinary and full-cap controls pass.
+  Preserve the early refusal and recheck inside the write transaction immediately
+  before insertion. The existing low-level sample insertion remains unchanged.
+  The corrected retained-source checkpoint passes all seven source controls on
+  each host, the complete 1,847-check workflow, 36 fresh image checks and 18
+  additional offline bundled HTTP controls on 447 members. Both readers verify
+  current receipt `sha256:6c6de36e107fb2cf623606005829ea579b222c0d3be159cc122504add5d5cdfd`. The existing single-process
+  HTTP path already preserves the cap and the runtime refuses a second server;
+  the service gap is not labeled a proven public HTTP exploit. The old source
+  and failed probes remain preserved. This accepts no partial B15 native transfer
+  or public tester. Git and the draft PR record publication separately.
 - **Account and membership scope:** Preserve all seven account operations and
   both membership lifecycle operations through two supplied-service factories.
   Account captures 21 resources; lifecycle captures six. The caller retains SQL
