@@ -414,15 +414,12 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
 /** The sessions an approved work_toward alignment governs stop following its target (inside the caller's tx): their
  *  governing goal is cleared, and a session whose current binding exists only because of this alignment loses it:
  *  its open epoch ends now, it waits for its owner to pick a goal (`suspended`), and it gets one binding_suspended
- *  directive with `cause`. A governed session that has not opened that binding yet (its binding_changed is still
- *  pending on its machine) gets a binding_suspended with `effective` `cancel_pending` (LIM-2441): its machine drops the
- *  pending change and keeps its own binding, so it stays shared here. History never moves. */
+ *  directive with `cause`. A session that got this alignment's binding_changed and has no epoch under it (the change
+ *  may still be pending on its machine, even if another goal has since cleared its governance) gets a binding_suspended
+ *  with `effective` `cancel_pending` (LIM-2441): its machine drops the pending change and keeps its own binding, so it
+ *  stays shared here. Not a session already on that goal by another right, or following it through another alignment,
+ *  whose machine must not pause. History never moves. */
 function endGovernance(a: AlignmentRow, at: string, cause: string): void {
-  const governed = all<{ session_key: string }>(
-    "SELECT session_key FROM v2_sessions WHERE ws_id = ? AND governing_alignment_id = ? AND state IN ('shared','suspended')",
-    a.ws_id,
-    a.id,
-  ).map((r) => r.session_key);
   run("UPDATE v2_sessions SET governing_goal_id = NULL, governing_alignment_id = NULL, updated_at = ? WHERE ws_id = ? AND governing_alignment_id = ?", at, a.ws_id, a.id);
   const suspended = all<{ session_key: string }>(
     "SELECT session_key FROM v2_epochs WHERE ws_id = ? AND ends_at IS NULL AND authority = 'alignment' AND alignment_id = ?",
@@ -434,7 +431,19 @@ function endGovernance(a: AlignmentRow, at: string, cause: string): void {
     run("UPDATE v2_sessions SET state = 'suspended', updated_at = ? WHERE ws_id = ? AND session_key = ? AND state = 'shared'", at, a.ws_id, k);
   }
   writeDirective(a.ws_id, "binding_suspended", suspended, null, { goal_id: a.target_goal_id, effective: "next_root_turn", cause });
-  const pending = governed.filter((k) => !suspended.includes(k));
+  const pending = all<{ session_key: string }>(
+    `SELECT DISTINCT t.session_key FROM v2_directives d
+     JOIN v2_directive_targets t ON t.directive_id = d.id
+     JOIN v2_sessions s ON s.ws_id = t.ws_id AND s.session_key = t.session_key
+     WHERE d.ws_id = ? AND d.kind = 'binding_changed' AND json_extract(d.binding_json, '$.cause') = ?
+       AND s.state IN ('shared','suspended') AND s.governing_goal_id IS NOT ?
+       AND NOT EXISTS (SELECT 1 FROM v2_epochs e WHERE e.ws_id = s.ws_id AND e.session_key = s.session_key AND (e.alignment_id = ? OR (e.ends_at IS NULL AND e.goal_id = ?)))`,
+    a.ws_id,
+    `alignment:${a.id}`,
+    a.target_goal_id,
+    a.id,
+    a.target_goal_id,
+  ).map((r) => r.session_key);
   writeDirective(a.ws_id, "binding_suspended", pending, null, { goal_id: a.target_goal_id, effective: "cancel_pending", cause });
 }
 

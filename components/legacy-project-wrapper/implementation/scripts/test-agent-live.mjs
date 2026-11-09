@@ -1534,6 +1534,49 @@ try {
     unquoted.slice(0, 600),
   );
 
+  // -- LIM-2441 H8, real agent and real server: an alignment revoked after a hook opened the switch. The machine pauses,
+  //    the pause lists the goals to pick, and picking one resumes the session on it with no further step --
+  {
+    const H8_TITLE = "Harden the ledger backups";
+    const H8_KEEP = "Keep the ledger docs current";
+    const H8_PICK = "Tidy the ledger dashboards";
+    const M8 = await freshMilo();
+    const hTeam = (await ws(O2, "POST", "/teams", { name: "Ledger docs" })).json?.id;
+    await ws(O2, "POST", `/teams/${hTeam}/members`, { user_id: M.id, role: "member" });
+    const hOther = (await ws(O2, "POST", "/teams", { name: "Backups" })).json?.id;
+    await ws(O2, "POST", `/teams/${hOther}/members`, { user_id: O.id, role: "lead" });
+    const GHr = await ws(O2, "POST", "/goals", { title: H8_TITLE, team_id: hOther, visibility: "workspace" });
+    const GH = GHr.json;
+    const GK = (await ws(M8, "POST", "/goals", { title: H8_KEEP, team_id: hTeam, visibility: "workspace" })).json;
+    const GP = (await ws(M8, "POST", "/goals", { title: H8_PICK, team_id: hTeam, visibility: "workspace" })).json;
+    const H8 = startQ("h8");
+    const h8Lid = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === H8.sid)?.local_id ?? "none";
+    cli(["share", "--workspace", W, "--goal", GK?.id, "--yes", "--", h8Lid.slice(0, 8)]);
+    sync();
+    const alHr = await ws(M8, "POST", "/alignments", { target_goal_id: GH?.id, choice: "work_toward", session_keys: [H8.key] });
+    const alH = alHr.json;
+    const alHOk = await ws(O2, "POST", `/alignments/${alH?.id}/approve`, { revision: alH?.revision ?? 1 });
+    sync();
+    prompt(H8);
+    const hRevoke = await ws(O2, "POST", `/alignments/${alH?.id}/revoke`, { revision: alHOk.json?.revision ?? 1 });
+    sync();
+    const paused = prompt(H8);
+    const list = /Goals you can pick: (.*?)\. Type/.exec(paused.system ?? "")?.[1] ?? "";
+    const picked = prompt(H8, `::align bind ${H8_PICK}`);
+    const resumed = prompt(H8);
+    sync();
+    const hOpen = openEpochOf(H8.key);
+    const hState = sdb((d) => d.prepare("SELECT state FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, H8.key));
+    const onLost = sdb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND goal_id = ?").get(W, H8.key, GH?.id ?? "")).n;
+    check(
+      "H8 (LIM-2441): an alignment revoked after a hook opened the switch pauses the session; the pause lists the goals to pick and not the lost one; picking one resumes on it at the next prompt; the server has the session shared with an open epoch on the chosen goal and none on the lost goal",
+      alHOk.status === 200 && alHOk.json?.state === "approved" && hRevoke.status === 200 && /so its usage is paused/.test(paused.system ?? "") && list.includes(H8_KEEP) && list.includes(H8_PICK) && !list.includes(H8_TITLE) &&
+        /from your next prompt this session counts toward/.test(picked.json?.reason ?? "") && (resumed.context ?? "").includes(`counts toward goal "${H8_PICK}"`) &&
+        hState?.state === "shared" && hOpen?.goal_id === GP?.id && hOpen?.cause === "manual" && onLost === 0,
+      `${GHr.status} ${alHr.status} ${alHr.text?.slice(0, 200)} ${alHOk.status} ${alHOk.text?.slice(0, 160)} ${hRevoke.status} ${paused.system} ${picked.json?.reason} ${resumed.context} ${JSON.stringify(hState)} ${JSON.stringify(hOpen)} ${onLost}`,
+    );
+  }
+
   // ======== canaries across everything the agent printed or put into context ========
   const all = outputs.join("\n");
   const envelopes = outputs.filter((o) => o.includes("additionalContext")).join("\n");

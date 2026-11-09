@@ -7,12 +7,35 @@ import { bumpGap, kvGet, kvSet, nowIso, tx } from "./db.ts";
 import { addNotice, getShare, renderEndedShares, renderHot, snapshot } from "./hot.ts";
 import { ENDED_UNREAD, endSharesEndedOnServer, enqueue, type EndedOnServer } from "./share.ts";
 import { RESUMED_NOTICE } from "./shared/notices.ts";
+import { clean } from "./shared/envelope.ts";
 import type { Goal, WireHold, WireRequest } from "./shared/types.ts";
 import { loadFeed } from "./goals.ts";
 import { applyHold, applyRequest, validRequest } from "./requests.ts";
 
 /** Workspaces whose feed should be refreshed because a directive referenced a goal we have not cached. */
 const refreshNeeded = new Set<string>();
+
+/** Goals a pause names at most, as `::align goals` shows at most. */
+const PICKABLE_SHOWN = 12;
+
+/**
+ * What a session paused by losing `lostGoalId` tells its person (LIM-2441): why, in the words of its `cause` (a closed
+ * goal is never "revoked"), and the goals they can pick to resume on. The cached feed may still offer the lost goal.
+ */
+export function pauseNotice(ctx: Ctx, ws: string, lostGoalId: string | null, cause: string | null | undefined): string {
+  const why = cause?.startsWith("goal_closed:") ? "the goal this session followed through an alignment was achieved or dropped" : "this session's goal binding was revoked";
+  const open = (loadFeed(ctx.home, ws)?.goals || []).filter((g) => g.bindable && g.status === "active" && g.id !== lostGoalId);
+  const named = open.slice(0, PICKABLE_SHOWN).map((g) => `"${clean(g.title, 100)}"`);
+  const more = open.length - named.length;
+  const picks = named.length ? `Goals you can pick: ${named.join(", ")}${more ? `, and ${more} more (\`::align goals\` lists them)` : ""}.` : "No goal is open to pick right now; `::align goals` shows the latest.";
+  return `Align: ${why}, so its usage is paused and stays on this machine. ${picks} Type \`::align bind <goal>\` or run \`align bind\` to pick a goal, and the session resumes on it at your next prompt.`;
+}
+
+/** The pending binding a cancel dropped for this session, kept for a hook that had already opened it (sync.ts "epoch_open"). */
+export function cancelledBinding(ctx: Ctx, lid: string): { pending_id: string; directive_id: string; cause: string } | null {
+  const v = kvGet(ctx.db, `binding_cancelled:${lid}`);
+  return v ? JSON.parse(v) : null;
+}
 
 export interface Directive {
   id: string;
@@ -144,8 +167,9 @@ function applyOne(ctx: Ctx, d: Directive, lid: string, seq: number, at: string):
           ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=? AND id=?").run(lid, pending.id);
           // A hook may already have opened an epoch with it, spooled for this pass: that epoch suspends the session
           // instead of switching it (sync.ts "epoch_open").
-          kvSet(ctx.db, `binding_cancelled:${lid}`, pending.id);
-          addNotice(ctx, lid, `susp_${d.id}`, "Align: the alignment this session was about to switch goals for was revoked before the switch, so it keeps its current goal.");
+          kvSet(ctx.db, `binding_cancelled:${lid}`, JSON.stringify({ pending_id: pending.id, directive_id: d.id, cause: d.binding.cause }));
+          const before = d.binding.cause?.startsWith("goal_closed:") ? "the goal this session was about to switch to was achieved or dropped before the switch" : "the alignment this session was about to switch goals for was revoked before the switch";
+          addNotice(ctx, lid, `susp_${d.id}`, `Align: ${before}, so it keeps its current goal.`);
         }
         return "received";
       }
@@ -153,8 +177,7 @@ function applyOne(ctx: Ctx, d: Directive, lid: string, seq: number, at: string):
       ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
       // `goal_closed:<alignment>`: the goal it followed through an alignment was achieved or dropped (E2E acycle3
       // A3-cross-2), not a revocation.
-      const why = d.binding?.cause?.startsWith("goal_closed:") ? "the goal this session followed through an alignment was achieved or dropped" : "this session's goal binding was revoked";
-      addNotice(ctx, lid, `susp_${d.id}`, `Align: ${why}, so its usage is paused and stays on this machine. Type \`::align bind <goal>\` or run \`align bind\` to pick a goal.`);
+      addNotice(ctx, lid, `susp_${d.id}`, pauseNotice(ctx, share.workspace_id, d.binding?.goal_id ?? null, d.binding?.cause));
       return "received";
     }
     case "stop": {

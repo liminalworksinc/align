@@ -860,11 +860,11 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   // Dropped once the sync has it, once the share is no longer live (the sync drops the epoch then), or after 10 minutes.
   const opened = inj.opened_epoch;
   if (opened && ((hot.epochs_seen || []).includes(opened.epoch_id) || (hot.share.state !== "shared" && hot.share.state !== "suspended") || Date.now() - Date.parse(opened.at) > 10 * 60_000)) delete inj.opened_epoch;
-  else if (opened && hot.share.state === "shared") goal = opened.goal;
+  else if (opened && (hot.share.state === "shared" || opened.resumed)) goal = opened.goal;
   if ((hot.share.state === "shared" || hot.share.state === "suspended") && pending) {
     if (inj.consumed_binding !== pending.id) {
       const epochId = randomId("ep_");
-      if (pending.goal || !pending.goal_id) inj.opened_epoch = { epoch_id: epochId, goal: pending.goal, at: ts };
+      if (pending.goal || !pending.goal_id) inj.opened_epoch = { epoch_id: epochId, goal: pending.goal, at: ts, ...(hot.share.state === "suspended" ? { resumed: true } : {}) };
       else delete inj.opened_epoch;
       spoolWrite(home, {
         type: "epoch_open",
@@ -888,12 +888,16 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
       applied.push(pending.directive_id);
     }
   }
+  // Paused, and this prompt (or one before it the sync has not recorded yet) applied the goal its person picked: the
+  // session is on that goal from this turn, so the model hears it now and never reads as unbound meanwhile.
+  const resuming = hot.share.state === "suspended" && ((!!pending && (!!pending.goal || !pending.goal_id)) || !!inj.opened_epoch?.resumed);
+  const shareState = resuming ? "shared" : hot.share.state;
   let kind: DeltaKind | null = null;
-  if (hot.share.state === "shared") {
+  if (shareState === "shared") {
     if (!goal) kind = inj.goal_id ? "unbound" : null;
     else if (inj.goal_id !== goal.id || inj.share_state !== "shared") kind = "bound";
     else if (inj.goal_version !== goal.version || inj.goal_status !== goal.status) kind = "updated";
-  } else if (hot.share.state === "suspended") {
+  } else if (shareState === "suspended") {
     if (inj.goal_id || inj.share_state === "shared") kind = "unbound";
     goal = null;
   }
@@ -901,7 +905,7 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   // never told the session stopped counting, so it is told it counts again, with the goal in full (cycles 6, 7).
   if (kind !== "unbound" && sharedAgain(inj, hot, goal)) kind = "bound";
   // Whatever is told now is told about this share.
-  if (kind && hot.share.state === "shared" && hot.share.since) inj.share_since = hot.share.since;
+  if (kind && shareState === "shared" && hot.share.since) inj.share_since = hot.share.since;
   let context: string | null = null;
   if (kind) {
     // A newly bound goal comes with all its limits, as the envelope words them; a version whose limits changed names
@@ -923,9 +927,9 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
     }
     const ended = followedAsksEnded(home, hot.share.workspace_id, inj, kind === "unbound" ? null : goal);
     if (ended) context = `${context}\n${ended}`;
-    markInjected(inj, kind === "unbound" ? null : goal, hot.share.state);
+    markInjected(inj, kind === "unbound" ? null : goal, shareState);
   }
-  if (hot.share.state === "shared" && goal) {
+  if (shareState === "shared" && goal) {
     // A newly bound goal's parents and dependencies arrive with the bound note (from the cached feed when the hot file
     // still has the goal before a move made in this session); later parent or dependency versions as short notes.
     let notes: string[] = [];
@@ -942,10 +946,10 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
     const parts = [context, ...notes, asks, ...changed, card].filter((x): x is string => !!x);
     context = parts.length ? parts.join("\n") : null;
   }
-  if (kind || sameAsInjected(inj, goal, hot.share.state)) {
+  if (kind || sameAsInjected(inj, goal, shareState)) {
     reportApplied(home, lid, inj, [...hot.pending_directives, ...applied]);
   }
-  const req = requestParts(hot, inj, hot.share.state === "shared" && goal ? goal.id : null);
+  const req = requestParts(hot, inj, shareState === "shared" && goal ? goal.id : null);
   if (req.context.length) context = [context, ...req.context].filter(Boolean).join("\n");
   const released = releaseLines(hot, inj);
   if (released.length) context = [context, ...released].filter(Boolean).join("\n");
@@ -1568,7 +1572,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         `  Sharing:  ${hot?.share ? `${hot.share.state} with ${hot.share.workspace_name}` : coming ? `pending with ${coming.workspace_name} (folder rule; the next sync shares it)` : "private"}`,
         `  Goal:     ${
           hot?.share?.state === "suspended"
-            ? "none (the alignment that set it was revoked; `::align bind <goal>` picks one)"
+            ? "none (the alignment that set it no longer applies; `::align bind <goal>` picks one)"
             : hot?.goal
               ? `${hot.goal.title} (v${hot.goal.version}, ${hot.goal.status})`
               : comingGoal

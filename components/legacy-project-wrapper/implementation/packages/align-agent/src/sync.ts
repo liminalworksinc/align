@@ -31,7 +31,7 @@ import { addNotice, addShareNotice, catchUpOtherBuilds, getShare, renderHot, sna
 import { clean, otherWorkspaceWords, outOfReachWords, requestShortId } from "./shared/envelope.ts";
 import { applyShare, bind, endedUnread, endShareRemoved, endShareSignedOutByServer, endShareStoppedByPerson, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, SHARE_UNREAD_WORDS, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
-import { pollDirectives } from "./directives.ts";
+import { cancelledBinding, pauseNotice, pollDirectives } from "./directives.ts";
 import { answerRequest } from "./requests.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { tailAll, type TailResult } from "./tailer.ts";
@@ -157,11 +157,14 @@ function applySpool(ctx: Ctx, r: SpoolRecord): string | null {
       const share = getShare(ctx, lid);
       if (!share || share.state === "stopped" || share.state === "error") return lid;
       const pending = ctx.db.prepare("SELECT * FROM pending_bindings WHERE local_id=?").get(lid) as { id: string; goal_json: string | null } | undefined;
-      // Opened with a binding the server cancelled meanwhile (its alignment was revoked: LIM-2441): the server would refuse
-      // the epoch, so the session is suspended, as for any revocation, rather than switched.
-      if (r.pending_id && kvGet(ctx.db, `binding_cancelled:${lid}`) === r.pending_id) {
+      // Opened with a binding the server cancelled meanwhile (LIM-2441): the server would refuse the epoch, so the session
+      // pauses, as for any loss of its binding, rather than switching, until its person picks a goal. An unread notice that
+      // it would keep its goal is no longer true.
+      const cancelled = r.pending_id ? cancelledBinding(ctx, lid) : null;
+      if (cancelled && cancelled.pending_id === r.pending_id) {
         ctx.db.prepare("UPDATE shares SET state='suspended', suspended_at=? WHERE local_id=? AND state IN ('shared','pending','suspended')").run(nowIso(), lid);
-        addNotice(ctx, lid, `susp_cancelled_${r.pending_id}`, "Align: this session's goal binding was revoked, so its usage is paused and stays on this machine. Type `::align bind <goal>` or run `align bind` to pick a goal.");
+        ctx.db.prepare("DELETE FROM notices WHERE id=?").run(`${lid}/susp_${cancelled.directive_id}`);
+        addNotice(ctx, lid, `susp_cancelled_${r.pending_id}`, pauseNotice(ctx, share.workspace_id, r.goal_id, cancelled.cause));
         renderHot(ctx, lid);
         return lid;
       }

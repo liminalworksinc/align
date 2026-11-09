@@ -2047,16 +2047,26 @@ session keys this device shares in the directive's workspace, and post receipts:
 `hold` `received` and `enforced`, for a `release` `received` and `applied`, and for a `request` `received`, then
 `accepted` or `declined` when it is answered. A
 `binding_suspended` directive SHALL set the share to `suspended`, withhold the session's later usage, show the user
-`Align: this session's goal binding was revoked, so its usage is paused and stays on this machine. Type
-\`::align bind <goal>\` or run \`align bind\` to pick a goal.` (when its `binding.cause` is `goal_closed:<alignment
-id>`, `Align: the goal this session followed through an alignment was achieved or dropped, so its usage is paused ...`
-instead, never "revoked": test `a3cross` "binding_suspended with cause `goal_closed:<alignment>` ..."; E2E acycle3
-A3-cross-2) and give the model the unbound delta at the next prompt. A `binding_suspended` whose `binding.effective` is
-`cancel_pending` (the alignment was revoked before the session switched to its goal: LIM-2441) SHALL instead delete the
-session's pending binding to that goal and leave the share as it is, telling the user, when it deleted one, `Align: the
-alignment this session was about to switch goals for was revoked before the switch, so it keeps its current goal.`;
-when the session's current binding is already that goal, it SHALL be handled as any `binding_suspended` (test `a3cross`
-"LIM-2441 H8 (agent side) ...").
+`Align: this session's goal binding was revoked, so its usage is paused and stays on this machine. Goals you can pick:
+"<goal>", "<goal>". Type \`::align bind <goal>\` or run \`align bind\` to pick a goal, and the session resumes on it at
+your next prompt.` (when its `binding.cause` is `goal_closed:<alignment id>`, `Align: the goal this session followed
+through an alignment was achieved or dropped, so its usage is paused ...` instead, never "revoked": test `a3cross`
+"binding_suspended with cause `goal_closed:<alignment>` ..."; E2E acycle3 A3-cross-2) and give the model the unbound
+delta at the next prompt. The goals named SHALL be those of the cached feed the person can bind now and that are active,
+never the goal the session just lost, at most 12 and then `and <n> more`; with none it SHALL say so (test `a3cross` "the
+pause lists the goals ..."). Picking one, by \`::align bind\` or \`align bind\`, SHALL need no further step: the next
+prompt opens the session's epoch on that goal and tells the model it counts toward it, before any sync has run, and the
+sync returns the share to `shared` (test `a3cross` "the whole path ..."; `scripts/test-agent-live.mjs` "H8 (LIM-2441)
+..."). A `binding_suspended` whose `binding.effective` is `cancel_pending` (its alignment ended before the session
+switched to its goal: LIM-2441) SHALL instead delete the session's pending binding to that goal and leave the share as
+it is, telling the user, when it deleted one, `Align: the alignment this session was about to switch goals for was
+revoked before the switch, so it keeps its current goal.` (when its `binding.cause` is `goal_closed:<alignment id>`,
+`Align: the goal this session was about to switch to was achieved or dropped before the switch, so it keeps its current
+goal.`); when the session's current binding is already that goal, it SHALL be handled as any `binding_suspended` (test
+`a3cross` "LIM-2441 H8 (agent side) ..."). When a hook had already opened the switch that a `cancel_pending` deletes, so
+its `epoch_open` record reaches the agent after the cancel, the agent SHALL NOT send that epoch: it SHALL pause the
+session as for any `binding_suspended`, in the words of the cancel's `binding.cause`, and withdraw the kept-goal notice
+if the user has not read it (test `a3cross` "a hook's switch ingested after the pass that cancelled it ...").
 A share ends with no directive (Stop sharing on the web, say), so the pass SHALL also read the first page's
 `ended_sessions` (this device's sessions whose share the server ended, `directives` "Device fetch of v2 directives by
 cursor") and end each share that is still `shared` or `suspended` here as the usage upload's `sharing_stopped` refusal

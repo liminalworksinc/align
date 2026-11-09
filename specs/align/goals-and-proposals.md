@@ -535,12 +535,12 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/alignments/{id}/{action}` 
 
 ### Requirement: Alignment revocation
 
-The server SHALL let the requester or an approver revoke an `approved` alignment (409 `wrong_state` otherwise), set it `revoked`, and, for `work_toward`, remove the governing goal from its sessions and, for each session whose open epoch was bound only through this alignment, end that epoch now, set the session `suspended` and write a `binding_suspended` directive, and, for each other session it governed (one that never opened an epoch under it), write a `binding_suspended` directive with `effective` `cancel_pending`, which cancels the pending binding change on its machine and leaves the session shared under its own binding (`directives` "binding_suspended on a revoked work_toward alignment"); past usage never moves. A revoked contribution SHALL stop making its source a child of its target.
+The server SHALL let the requester or an approver revoke an `approved` alignment (409 `wrong_state` otherwise), set it `revoked`, and, for `work_toward`, remove the governing goal from its sessions and, for each session whose open epoch was bound only through this alignment, end that epoch now, set the session `suspended` and write a `binding_suspended` directive, and, for each session that received its `binding_changed` and has no epoch under it (unless already on that goal by its own or its team's right, or governed toward it by another alignment), write a `binding_suspended` directive with `effective` `cancel_pending`, which cancels the pending binding change on its machine and leaves the session shared under its own binding (`directives` "binding_suspended on a revoked work_toward alignment"); past usage never moves. A revoked contribution SHALL stop making its source a child of its target.
 
 #### Scenario: Revoking work toward
 
 - **WHEN** the requester revokes an approved `work_toward` alignment
-- **THEN** it becomes `revoked`, its sessions lose the governing goal, sessions whose open binding existed only through it become `suspended` and get a `binding_suspended` directive, and the other sessions it governed get a `binding_suspended` with `effective` `cancel_pending` and stay shared
+- **THEN** it becomes `revoked`, its sessions lose the governing goal, sessions whose open binding existed only through it become `suspended` and get a `binding_suspended` directive, and the other sessions that received its `binding_changed` and have no epoch under it get a `binding_suspended` with `effective` `cancel_pending` and stay shared
 
 ### Requirement: An alignment needs active goals until it is decided
 

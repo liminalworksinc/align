@@ -139,8 +139,8 @@ plus `request` on kind `request` and `hold` on kinds `hold` and `release` (absen
 - `binding_changed`: open a new epoch at the next root turn with `binding.goal_id` (approved allocation transfer).
 - `binding_suspended`: the current binding lost its authority (revoked alignment, or, with `cause`
   `goal_closed:<al_id>`, the alignment's target goal was achieved or dropped): stop uploading usage for the session
-  until the user picks a goal; the agent continues privately. With `effective` `cancel_pending` (a session the revoked
-  alignment governed that never opened its binding): drop the pending `binding_changed` to `goal_id` and keep the
+  until the user picks a goal; the agent continues privately. With `effective` `cancel_pending` (a session that received
+  the ended alignment's `binding_changed` and has no epoch under it): drop the pending `binding_changed` to `goal_id` and keep the
   current binding, unless the session is already bound to `goal_id`, which suspends as above.
 - `stop` / `resume`: set / clear the local stop latch.
 - `request` (`goal` and `binding` null): `"request": { "id": "rq_...", "type": "replan"|"checkpoint"|"switch_goal",
@@ -284,8 +284,9 @@ Approval requirements computed from effects and snapshotted on the revision (see
 Actions: `POST .../alignments/:id/{approve|counter|accept_counter|reject|withdraw|revoke}`, each carrying the `revision`
 the person read (400 without one; 409 `stale_revision` when the request has moved on).
 On approval with `allocation_transfer`: a `binding_changed` directive per session. Revoke is prospective; sessions whose
-binding exists only because of it get `binding_suspended`; the other sessions it governed get `binding_suspended`
-with `effective` `cancel_pending` and stay shared.
+binding exists only because of it get `binding_suspended`; the other sessions that received its `binding_changed` and have no
+epoch under it get `binding_suspended` with `effective` `cancel_pending` and stay shared; a session already on that goal
+by its own or its team's right gets none.
 
 ## Connected AI apps and MCP
 `GET /api/v2/workspaces/:ws/apps` (cookie, members) → `{ "url": "<origin>/api/mcp", "apps": [{ "id": "gr_…", "name",
