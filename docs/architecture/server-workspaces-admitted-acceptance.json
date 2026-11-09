@@ -1,0 +1,71 @@
+{
+  "schema": "align/workspaces-and-sample-admitted-acceptance@1",
+  "components": [
+    {
+      "component": "server-workspaces",
+      "provider": ".literate/native-projects/local-server-workspaces",
+      "qualification_decision": "sha256:2e20a4625173c3ba21e1cae50c91fd45e0c53fecccac648df4d3d8c5787646bd",
+      "clean_runs": 2,
+      "clean_generated_smokes": [
+        3,
+        3
+      ],
+      "private_batches": 31,
+      "admitted_generated_smokes": 4,
+      "admitted_cache_entry": "sha256:789a071d942c1f075c67d13160b30e049674736bb2e6942ff5fb759758719ab6",
+      "admitted_source_tree_identity": {
+        "algorithm": "sha256",
+        "digest": "b283b4475ce2f18a647745fe26579c0c6f4105fab92ebe903cfc05020234867a",
+        "schema": "urn:literate-ai:schema:v1:content-identity"
+      },
+      "admitted_finalized_candidate_identity": "sha256:77c17114da16af89d2b0dea2132c3f22b10164eb6fb1b3f9379cdb60ee4b4657",
+      "both_actual_hosts_package_accepted": true,
+      "entire_admitted_package_source_inspected": true,
+      "ordinary_project_committed_cache_reuse_and_current_receipt": true
+    },
+    {
+      "component": "server-sample",
+      "provider": ".literate/native-projects/local-server-sample",
+      "qualification_decision": "sha256:b9da0c9dc8968c3414080b74f03f32908918247cf155144007fabe952f0fc912",
+      "clean_runs": 2,
+      "clean_generated_smokes": [
+        3,
+        3
+      ],
+      "private_batches": 5,
+      "admitted_generated_smokes": 3,
+      "admitted_cache_entry": "sha256:4619003726e6bde0140b207817665c19c73ced66ebf20c8b783affa2267bc2f3",
+      "admitted_source_tree_identity": {
+        "algorithm": "sha256",
+        "digest": "dfb2e98fb21fcdb6da5f17335e824b6f0d5793ba516ed4b90437639ecc3a08be",
+        "schema": "urn:literate-ai:schema:v1:content-identity"
+      },
+      "admitted_finalized_candidate_identity": "sha256:0edaddf3d4fb7cbe2aed0f88423de9044bd847d0464d8f003836fab28ee068a2",
+      "both_actual_hosts_package_accepted": true,
+      "entire_admitted_package_source_inspected": true,
+      "ordinary_project_committed_cache_reuse_and_current_receipt": true
+    }
+  ],
+  "workspace_source_observations_each_host": 806,
+  "workspace_binding_records_each_host": 38,
+  "workspace_populated_controls_each_host": 10,
+  "invite_contention_schedules_each_host": 6,
+  "sample_source_observations_each_host": 31,
+  "sample_binding_records_each_host": 11,
+  "sample_populated_controls_each_host": 60,
+  "sample_seed_rollback_positions_each_host": 53,
+  "clock_and_same_imported_factory_isolation": true,
+  "sample_asset_bytes": 1444,
+  "sample_asset_sha256": "c502a40c1af1342250b646e8bbba9e0bb97e77b49c6b045db156b201be3008f3",
+  "actual_hosts": [
+    "macOS Node26",
+    "Linux Node24"
+  ],
+  "no_original_implementation_or_private_verifier_in_observed_generation_requests": true,
+  "sample_asset_payload_absent_from_observed_generation_requests": true,
+  "retained_qualification_archive_members_and_typed_input_audits_verified": true,
+  "controlled_goal_contribution_change_ports_do_not_qualify_their_own_algorithms": true,
+  "source_authority_transferred": false,
+  "parent_image_and_current_receipt_pending": true,
+  "operator_security_acceptance_claimed": false
+}

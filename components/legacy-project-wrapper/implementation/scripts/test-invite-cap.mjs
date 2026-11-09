@@ -15,7 +15,7 @@ const require = createRequire(path.join(root, "package.json"));
 const ts = require("typescript");
 const libraries = JSON.parse(fs.readFileSync(path.join(root, "native/libraries.json"), "utf8")).libraries;
 const nativeRoot = path.join(root, "lib/native");
-for (const name of ["storage-runtime", "storage-schema", "migration-coordinator", "wording", "policy", "server-workspace-admission"]) {
+function verifyNativePackage(name) {
   const item = libraries.find((library) => library.component === name);
   assert(item, "Missing qualified dependency: " + name);
   for (const member of item.files) {
@@ -27,6 +27,7 @@ for (const name of ["storage-runtime", "storage-schema", "migration-coordinator"
     assert.equal(crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"), member.digest);
   }
 }
+for (const name of ["storage-runtime", "storage-schema", "migration-coordinator", "wording", "policy", "server-workspace-admission"]) verifyNativePackage(name);
 const { create_store } = require(path.join(nativeRoot, "storage_runtime/create_store.js"));
 const { change_programs } = require(path.join(nativeRoot, "storage_schema/change_programs.js"));
 const { apply_migrations } = require(path.join(nativeRoot, "migration_coordinator/apply_migrations.js"));
@@ -41,6 +42,15 @@ for (const statement of ast.statements) {
   const bindings = statement.importClause?.namedBindings;
   if (!bindings || !ts.isNamedImports(bindings)) continue;
   imports.set(statement.moduleSpecifier.text, bindings.elements.filter((item) => !item.isTypeOnly).map((item) => item.name.text));
+}
+const workspaceBinding = "../native/.bindings/server_workspaces.js";
+let nativeWorkspaceFactory;
+if (imports.has(workspaceBinding)) {
+  verifyNativePackage("server-workspaces");
+  nativeWorkspaceFactory = require(path.join(nativeRoot, "server_workspaces/create_workspaces.js")).create_workspaces;
+  assert.equal(typeof nativeWorkspaceFactory, "function");
+  assert.equal(nativeWorkspaceFactory.name, "create_workspaces");
+  assert.equal(nativeWorkspaceFactory.length, 1);
 }
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
 const now = Date.parse("2026-01-02T03:04:05.000Z");
@@ -77,6 +87,7 @@ async function workspace(store, label, counter) {
     take: () => undefined, secretToken: () => label.repeat(43), newId: (prefix) => prefix + "_" + label,
     nowIso: () => at, sha256hex: (text) => crypto.createHash("sha256").update(text).digest("hex"),
     event: () => undefined, checkMemberCap: (...args) => { creation.checkMemberCap(...args); counter.passed++; } };
+  if (nativeWorkspaceFactory) values.create_workspaces = nativeWorkspaceFactory;
   const resources = new Proxy(values, { get(target, key) {
     if (Object.hasOwn(target, key)) return target[key];
     return () => { throw new Error("Unexpected invite fixture effect: " + String(key)); };

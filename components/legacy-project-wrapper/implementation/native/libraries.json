@@ -15320,6 +15320,669 @@
         "server-auth.json": "3e49eba125fabf605ad85c734c548d805780cb27d8e4ae7e551a63b3242729a1",
         "server-auth-harness-v5.cjs": "f7403a979065e698b1ad2d33a4f4c2af56cc5aa0670037572908343e23f3e0e4"
       }
+    },
+    {
+      "component": "server-workspaces",
+      "provider": ".literate/native-projects/local-server-workspaces",
+      "package": "server_workspaces",
+      "lock_identity": "sha256:65fa3c35c5ba22d1dae2e3178ed957da71bec81ada3d9d8f5c8b1ae58f17f9f2",
+      "lock": {
+        "edges": [],
+        "nodes": [
+          {
+            "interface_bindings": [
+              {
+                "capability": "server-workspaces.create-workspaces",
+                "component_revision": {
+                  "algorithm": "sha256",
+                  "digest": "2d75139f9e5f8fca39448385c3c2f8d85cb6685b9408f91dd435df0013c0d297",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "interface_identity": {
+                  "algorithm": "sha256",
+                  "digest": "8cb038bfcffbacb705d412ecf8a966eaf6a866544cbd83b8545d17e080f63982",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "schema": "urn:literate-ai:schema:v2:component-interface-binding"
+              }
+            ],
+            "requirement_constraint_satisfactions": [],
+            "revision": {
+              "acceptance_contracts": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "7a30e419a203be9589179ed8061e0e49110588f25945ed8604aa8cd87fe33243",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "acceptance-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "qualification/profile.json"
+                }
+              ],
+              "authoring_identity": {
+                "algorithm": "sha256",
+                "digest": "fba585ac4b14f2e9bbd1ac885189af4aeb26e712238d5ed3eefca2533fd72df1",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "authoring_inputs": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "0df5d4b45e8ff6a1e3b670add69e4897fd29bfdcd2e521275d602809e4704f5f",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application-implementation/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "79519b3fde095c4189cd95c0e6ff3049a31557c34938ca5df4d0481b64f6e606",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "7bfdd0ddf52d2ddf5d6ac5ed6536b999da474323978937e72f4e4d3b1dface38",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-specification-planning/SKILL.md"
+                }
+              ],
+              "coordinate": {
+                "name": "server-workspaces",
+                "namespace": "local"
+              },
+              "public_interfaces": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "8cb038bfcffbacb705d412ecf8a966eaf6a866544cbd83b8545d17e080f63982",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "public-interface-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/interface-server-workspaces-create-workspaces-c02ec2a92a.md"
+                }
+              ],
+              "repository_sources": [],
+              "routing_policy": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "99bc0eb9ee3039ccb3836060c199bc94cf1e5aa6c6a92d64235dc6e7065bdb79",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "routing-policy",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "routing/production/staging/dev/routing.json"
+              },
+              "schema": "urn:literate-ai:schema:v2:locked-component-revision",
+              "selected_flavor_revisions": [
+                {
+                  "algorithm": "sha256",
+                  "digest": "8b53550ea8b675fd68ee966f027b7e4cfc8d354ea47abbfc5b35df92a7d6e9ee",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "bb73dbe270fd3ca119ade75e9dfdbb5dda48d9ffd89df3911f562e875aaf9c90",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "bfb7ba5a5269de153a223e7ad59ff21465d2f01b6e4462fbddcc3e437e02b5f7",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                }
+              ],
+              "specification_set_identity": {
+                "algorithm": "sha256",
+                "digest": "ad52d6a7358e9a2cfbf126c23bc82b5667016bba989d983579e73acb8c924052",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "specifications": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "b6d69d285ee0d96c2e9ae65d4eddcb006c62e0f3236aeebbe501bc063839dba7",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/spec.md"
+                }
+              ],
+              "version": "1.0.0",
+              "workflow_definition": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "c5c8c2881fd7d5b1504847e93aee5a91015438bbaf867bfb50d5d215e0b0309d",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "workflow",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "workflows/production/staging/dev/workflow.md"
+              }
+            },
+            "schema": "urn:literate-ai:schema:v2:component-lock-node",
+            "target_flavor_selection": {
+              "component_revision": {
+                "algorithm": "sha256",
+                "digest": "2d75139f9e5f8fca39448385c3c2f8d85cb6685b9408f91dd435df0013c0d297",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "schema": "urn:literate-ai:schema:v2:node-target-flavor-selection",
+              "selection_policy_identity": {
+                "algorithm": "sha256",
+                "digest": "124d1d5fbe3bbac0079f18883f5293a19552ba40326261cc161cd7f034dafadb",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "slots": [
+                {
+                  "selected": [],
+                  "slot": {
+                    "axis": "build.system",
+                    "capability_contract": "server-workspaces.create-workspaces",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "build-system"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "8b53550ea8b675fd68ee966f027b7e4cfc8d354ea47abbfc5b35df92a7d6e9ee",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "javascript"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "implementation.language-ecosystem",
+                    "capability_contract": "server-workspaces.create-workspaces",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "implementation-language-ecosystem"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "bfb7ba5a5269de153a223e7ad59ff21465d2f01b6e4462fbddcc3e437e02b5f7",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "macos"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "platform.os",
+                    "capability_contract": "server-workspaces.create-workspaces",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "platform-os"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "bb73dbe270fd3ca119ade75e9dfdbb5dda48d9ffd89df3911f562e875aaf9c90",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "node-server-workspaces"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "toolchain",
+                    "capability_contract": "server-workspaces.create-workspaces",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "toolchain"
+                  }
+                }
+              ],
+              "target_name": "server-workspaces-host-v1",
+              "target_profile_identity": {
+                "algorithm": "sha256",
+                "digest": "34734036a225b0212cee4f922150581b43bc9294074523652a983f2ab84f055b",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              }
+            }
+          }
+        ],
+        "provider_resolutions": [],
+        "resolver_identity": {
+          "algorithm": "sha256",
+          "digest": "5085d8dcc1825af6e6c4340ff39ac0e130986c12fc447f82fb700dd27dbe8a95",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "root_revision": {
+          "algorithm": "sha256",
+          "digest": "2d75139f9e5f8fca39448385c3c2f8d85cb6685b9408f91dd435df0013c0d297",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "schema": "urn:literate-ai:schema:v2:component-lock",
+        "selection_policy_identity": {
+          "algorithm": "sha256",
+          "digest": "124d1d5fbe3bbac0079f18883f5293a19552ba40326261cc161cd7f034dafadb",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "target_name": "server-workspaces-host-v1",
+        "target_profile_identity": {
+          "algorithm": "sha256",
+          "digest": "34734036a225b0212cee4f922150581b43bc9294074523652a983f2ab84f055b",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        }
+      },
+      "qualified_projection": "sha256:4d1ce0c3a4032ab60f784895db77f8186a26e39566f584bd11ecf4f78ecaa3cf",
+      "authority_head": "provenance/component-authority/65b0953f5ada0e534895dc0a9764f90a95241176d1ad0e642410fb6e2676458f/current.json",
+      "entry": "789a071d942c1f075c67d13160b30e049674736bb2e6942ff5fb759758719ab6",
+      "source_tree": "b283b4475ce2f18a647745fe26579c0c6f4105fab92ebe903cfc05020234867a",
+      "files": [
+        {
+          "path": "create_workspaces.js",
+          "algorithm": "sha256",
+          "digest": "13d2d1d6bd811d363f52b965807c064f83b08db9c7e6007f6eba8341def54f4d",
+          "media_type": "application/octet-stream",
+          "size": 17631
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "5a73130958b0962c0265f5fb837a3b9c94b86127f157828d4711c1770475d5ec",
+          "media_type": "application/octet-stream",
+          "size": 106
+        }
+      ],
+      "surface": {
+        "schema": "urn:literate-ai:schema:v2:library-import-surface@1",
+        "language": "javascript",
+        "package": "server_workspaces",
+        "capabilities": [
+          {
+            "schema": "urn:literate-ai:schema:v2:library-capability-import@1",
+            "capability": "server-workspaces.create-workspaces",
+            "interface_identity": {
+              "schema": "urn:literate-ai:schema:v1:content-identity",
+              "algorithm": "sha256",
+              "digest": "8cb038bfcffbacb705d412ecf8a966eaf6a866544cbd83b8545d17e080f63982"
+            },
+            "module": "server_workspaces/create_workspaces",
+            "symbols": [
+              "create_workspaces"
+            ]
+          }
+        ]
+      },
+      "oracle": "server-workspaces.json",
+      "verifier": "server-workspaces-harness-v4.cjs",
+      "verification_files": {
+        "server-workspaces.json": "090238d5fe85a4115fbe031b072af19a95d12b495427bedd33c8a372cf556708",
+        "server-workspaces-harness-v4.cjs": "e7d93a7d2b7c8eae29ac3c5aa50e23df8a55b870b44a5761c9aaab78a7d80f8a"
+      }
+    },
+    {
+      "component": "server-sample",
+      "provider": ".literate/native-projects/local-server-sample",
+      "package": "server_sample",
+      "lock_identity": "sha256:b5b732d48dcd54e39d4978a161871160db4150d6641b377a60f98d236c079d12",
+      "lock": {
+        "edges": [],
+        "nodes": [
+          {
+            "interface_bindings": [
+              {
+                "capability": "server-sample.create-sample",
+                "component_revision": {
+                  "algorithm": "sha256",
+                  "digest": "2ee81f9252093d01762615117c4bd406505c7248eb89b1aa0bb2e11ea769af18",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "interface_identity": {
+                  "algorithm": "sha256",
+                  "digest": "0b11377393bdebc9a8537310c0c7b886a0e33f805c6c87073b2763fb239e26ec",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "schema": "urn:literate-ai:schema:v2:component-interface-binding"
+              }
+            ],
+            "requirement_constraint_satisfactions": [],
+            "revision": {
+              "acceptance_contracts": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "ad523d59e5b03851089c068a9975bd08f2221867a0c6a80c6868556b46d8512d",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "acceptance-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "qualification/profile.json"
+                }
+              ],
+              "assets": [
+                {
+                  "blob": {
+                    "algorithm": "sha256",
+                    "digest": "c502a40c1af1342250b646e8bbba9e0bb97e77b49c6b045db156b201be3008f3",
+                    "media_type": "application/json",
+                    "size": 1444
+                  },
+                  "schema": "urn:literate-ai:schema:v2:resolved-component-asset",
+                  "selector": {
+                    "asset_id": "sample-text",
+                    "media_type": "application/json",
+                    "path": "source/server_sample/sample-text.json",
+                    "pin": {
+                      "algorithm": "sha256",
+                      "digest": "c502a40c1af1342250b646e8bbba9e0bb97e77b49c6b045db156b201be3008f3",
+                      "schema": "urn:literate-ai:schema:v1:content-identity"
+                    },
+                    "role": "runtime-data",
+                    "schema": "urn:literate-ai:schema:v2:component-asset-selector",
+                    "source": "assets/sample-text"
+                  }
+                }
+              ],
+              "authoring_identity": {
+                "algorithm": "sha256",
+                "digest": "bf50523b8d50482169d43b3ba563b2c8345f264c4de14ca15309145904693973",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "authoring_inputs": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "0df5d4b45e8ff6a1e3b670add69e4897fd29bfdcd2e521275d602809e4704f5f",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application-implementation/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "79519b3fde095c4189cd95c0e6ff3049a31557c34938ca5df4d0481b64f6e606",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "7bfdd0ddf52d2ddf5d6ac5ed6536b999da474323978937e72f4e4d3b1dface38",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-specification-planning/SKILL.md"
+                }
+              ],
+              "coordinate": {
+                "name": "server-sample",
+                "namespace": "local"
+              },
+              "public_interfaces": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "0b11377393bdebc9a8537310c0c7b886a0e33f805c6c87073b2763fb239e26ec",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "public-interface-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/interface-server-sample-create-sample-8155d7abe1.md"
+                }
+              ],
+              "repository_sources": [],
+              "routing_policy": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "99bc0eb9ee3039ccb3836060c199bc94cf1e5aa6c6a92d64235dc6e7065bdb79",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "routing-policy",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "routing/production/staging/dev/routing.json"
+              },
+              "schema": "urn:literate-ai:schema:v2:locked-component-revision",
+              "selected_flavor_revisions": [
+                {
+                  "algorithm": "sha256",
+                  "digest": "650f95d419a8ec84c0a4ed5f9766836a22cb7cc9fc735056fd482a6600381836",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "a5562af2575a246c06cad87a2d237aca5fce89cda8717daaf56892e928b486e7",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "da8e360b04c3f2adbe0af3cdcbb68909520969ac45a0bfa9249e8c8b65f1028b",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                }
+              ],
+              "specification_set_identity": {
+                "algorithm": "sha256",
+                "digest": "addb090fe87935665910cbd9627113e08158a6ef8770ef0c120ee8c1249bcd04",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "specifications": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "931e5df8e7e0f5000a34f4dd33d6c3ff44ed54ecd361731c732342282d548362",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/spec.md"
+                }
+              ],
+              "version": "1.0.0",
+              "workflow_definition": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "c5c8c2881fd7d5b1504847e93aee5a91015438bbaf867bfb50d5d215e0b0309d",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "workflow",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "workflows/production/staging/dev/workflow.md"
+              }
+            },
+            "schema": "urn:literate-ai:schema:v2:component-lock-node",
+            "target_flavor_selection": {
+              "component_revision": {
+                "algorithm": "sha256",
+                "digest": "2ee81f9252093d01762615117c4bd406505c7248eb89b1aa0bb2e11ea769af18",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "schema": "urn:literate-ai:schema:v2:node-target-flavor-selection",
+              "selection_policy_identity": {
+                "algorithm": "sha256",
+                "digest": "b652d0e5ce98ad205bc04c2a29149ff94645cbaee694b17996c052dc36730b90",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "slots": [
+                {
+                  "selected": [],
+                  "slot": {
+                    "axis": "build.system",
+                    "capability_contract": "server-sample.create-sample",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "build-system"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "a5562af2575a246c06cad87a2d237aca5fce89cda8717daaf56892e928b486e7",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "javascript"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "implementation.language-ecosystem",
+                    "capability_contract": "server-sample.create-sample",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "implementation-language-ecosystem"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "da8e360b04c3f2adbe0af3cdcbb68909520969ac45a0bfa9249e8c8b65f1028b",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "macos"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "platform.os",
+                    "capability_contract": "server-sample.create-sample",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "platform-os"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "650f95d419a8ec84c0a4ed5f9766836a22cb7cc9fc735056fd482a6600381836",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "node-server-sample"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "toolchain",
+                    "capability_contract": "server-sample.create-sample",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "toolchain"
+                  }
+                }
+              ],
+              "target_name": "server-sample-host-v1",
+              "target_profile_identity": {
+                "algorithm": "sha256",
+                "digest": "69f9a3f6b99aac415b881761aa9b46000b3b1e0f0831d7e412f121475971b937",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              }
+            }
+          }
+        ],
+        "provider_resolutions": [],
+        "resolver_identity": {
+          "algorithm": "sha256",
+          "digest": "5085d8dcc1825af6e6c4340ff39ac0e130986c12fc447f82fb700dd27dbe8a95",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "root_revision": {
+          "algorithm": "sha256",
+          "digest": "2ee81f9252093d01762615117c4bd406505c7248eb89b1aa0bb2e11ea769af18",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "schema": "urn:literate-ai:schema:v2:component-lock",
+        "selection_policy_identity": {
+          "algorithm": "sha256",
+          "digest": "b652d0e5ce98ad205bc04c2a29149ff94645cbaee694b17996c052dc36730b90",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "target_name": "server-sample-host-v1",
+        "target_profile_identity": {
+          "algorithm": "sha256",
+          "digest": "69f9a3f6b99aac415b881761aa9b46000b3b1e0f0831d7e412f121475971b937",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        }
+      },
+      "qualified_projection": "sha256:f5686d48aae85dd79be0abc4059b21d5295a7ce2bc97ea36065942c75d5752d1",
+      "authority_head": "provenance/component-authority/819d48fb236103feefbef3c57671110524436e5494853cffde6875d90c8cbd5c/current.json",
+      "entry": "4619003726e6bde0140b207817665c19c73ced66ebf20c8b783affa2267bc2f3",
+      "source_tree": "dfb2e98fb21fcdb6da5f17335e824b6f0d5793ba516ed4b90437639ecc3a08be",
+      "files": [
+        {
+          "path": "create_sample.js",
+          "algorithm": "sha256",
+          "digest": "7de7f807535fcf445a0af52197049bf57c9a4ef4e1584dc7f9db7f9b5f8d8a50",
+          "media_type": "application/octet-stream",
+          "size": 3377
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "318e4c94e0abe2805c49d716922e613f0bcce98a2bbe0cf41979076552631bb4",
+          "media_type": "application/octet-stream",
+          "size": 94
+        },
+        {
+          "path": "sample-text.json",
+          "algorithm": "sha256",
+          "digest": "c502a40c1af1342250b646e8bbba9e0bb97e77b49c6b045db156b201be3008f3",
+          "media_type": "application/octet-stream",
+          "size": 1444
+        }
+      ],
+      "surface": {
+        "schema": "urn:literate-ai:schema:v2:library-import-surface@1",
+        "language": "javascript",
+        "package": "server_sample",
+        "capabilities": [
+          {
+            "schema": "urn:literate-ai:schema:v2:library-capability-import@1",
+            "capability": "server-sample.create-sample",
+            "interface_identity": {
+              "schema": "urn:literate-ai:schema:v1:content-identity",
+              "algorithm": "sha256",
+              "digest": "0b11377393bdebc9a8537310c0c7b886a0e33f805c6c87073b2763fb239e26ec"
+            },
+            "module": "server_sample/create_sample",
+            "symbols": [
+              "create_sample"
+            ]
+          }
+        ]
+      },
+      "oracle": "server-sample.json",
+      "verifier": "server-sample-harness-v1.cjs",
+      "verification_files": {
+        "server-sample.json": "6be80c1ca68dc612b2ed47065c8fee2bf5dccb28c62a9001eaa07c0f3049335b",
+        "server-sample-harness-v1.cjs": "50e14e6eb885c84f0cc713f55b1350a159588bf21bbfd15d896d3624194ed50d"
+      }
     }
   ]
 }

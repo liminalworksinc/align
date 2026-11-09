@@ -153,12 +153,11 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Next action:** Continue B14 workspaces and the other 17 remaining native
-  boundaries from the 33-library checkpoint. The [current transfer review](native-boundary-transfers.md)
-  records B01 through B13 as accepted transfers after the operator's explicit
-  authentication confirmation. Preserve the previous publication and every
-  failed candidate.
-  The public tester, actual operator security review and live smoke remain open.
+- **Next action:** Publish the fully verified 35-library B14 checkpoint in the
+  existing draft PR, then continue B15 through B31. The [current transfer review](native-boundary-transfers.md)
+  records B01 through B14 as accepted local transfers, leaving 17 boundaries.
+  Preserve the previous publication and every failed candidate. The public
+  tester, actual operator security review and live smoke remain open.
 - **B14 prerequisite:** [Issue #76](https://github.com/liminalworksinc/align/issues/76)
   reproduces an existing invite-cap race while writers wait for SQLite. The local
   correction preserves the early check and rechecks under the transaction lock.
@@ -168,6 +167,23 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   both readers verify the current receipt `sha256:6c802f17b8075718811e528aa317faf63fcd77d694f777a7f1a5547fe0275c41`.
   Git and the draft PR record publication. Native conversion starts from this
   deliberately corrected source, preserving the failing original controls.
+- **B14 native candidate:** The two workspace/sample libraries pass distinct
+  clean qualifications, separate admissions, complete source inspection and
+  package checks on macOS and Linux. Both child receipts and ordinary committed
+  caches are current. Actual production assembly preserves all 30 public value
+  types and 72 unchanged compiling callers. Web materialization passes 866
+  private batches across 29 libraries. Both-host production observations cover
+  all 806 workspace records, 31 sample records, ten populated workspace controls,
+  six contention schedules and 60 sample controls with 53 rollback positions.
+  The canonical six-case invite-cap regression passes through the native factory.
+  Read [admitted acceptance](../architecture/server-workspaces-admitted-acceptance.json)
+  and [production consumer acceptance](../architecture/server-workspaces-consumer-acceptance.json).
+  The complete 1,846-check workflow, 36 image checks, six static assets, both
+  root-owned raw assets and 15 additional offline bundled HTTP controls pass.
+  Both readers verify all 35 projections and the current receipt. Read
+  [full local acceptance](native-boundary-transfers.json).
+  B14 has earned local transfer acceptance. Publication is recorded in Git and
+  the existing draft PR. The full native program and public tester remain open.
 - **Account and membership scope:** Preserve all seven account operations and
   both membership lifecycle operations through two supplied-service factories.
   Account captures 21 resources; lifecycle captures six. The caller retains SQL

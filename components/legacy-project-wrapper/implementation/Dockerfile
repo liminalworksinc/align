@@ -34,9 +34,10 @@ ENV NODE_ENV=production HOSTED=1 ALIGN_DATA_DIR=/data PORT=8080
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/.next ./.next
-# Preserve the exact reviewed domain data beside the bundled application output.
+# Preserve exact reviewed runtime data beside the bundled application output.
 # Root ownership keeps the runtime data read-only for the node application user.
 COPY --from=build --chown=0:0 /app/lib/native/server_workspace_admission/disposable-domains.json ./qualified-assets/server_workspace_admission/disposable-domains.json
+COPY --from=build --chown=0:0 /app/lib/native/server_sample/sample-text.json ./qualified-assets/server_sample/sample-text.json
 COPY --from=build /app/public ./public
 COPY next.config.ts ./
 # The exact assembled Node-only operator closure, with no cache, verifier or build adapter.

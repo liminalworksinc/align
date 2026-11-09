@@ -1,0 +1,27 @@
+{
+  "schema": "align/workspaces-admitted-local-acceptance@1",
+  "qualified_clean_runs": 2,
+  "private_batches_each_run": 31,
+  "admitted_generated_smoke_tests": 4,
+  "admitted_cache_hits": 0,
+  "admitted_repairs": 0,
+  "actual_hosts": [
+    "macOS Node 26.3.0",
+    "Linux Node 24.22.2"
+  ],
+  "source_observations_each_host": 806,
+  "binding_records_each_host": 38,
+  "populated_controls_each_host": 10,
+  "contention_schedules_each_host": 6,
+  "source_tree_identity": {
+    "algorithm": "sha256",
+    "digest": "b283b4475ce2f18a647745fe26579c0c6f4105fab92ebe903cfc05020234867a",
+    "schema": "urn:literate-ai:schema:v1:content-identity"
+  },
+  "finalized_candidate_identity": "sha256:77c17114da16af89d2b0dea2132c3f22b10164eb6fb1b3f9379cdb60ee4b4657",
+  "complete_admitted_source_inspected": true,
+  "both_host_node_export_map_imports": true,
+  "current_receipt": "../../verification/current.json",
+  "parent_source_authority_transferred": false,
+  "operator_security_accepted": false
+}

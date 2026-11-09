@@ -9,6 +9,60 @@ until each boundary earns transfer under ADR 0002.
 
 ## Latest candidate status
 
+B14 now has two separately qualified and admitted libraries for workspace
+membership/invitations and the sample workspace. The candidate registers 35
+libraries while preserving every prior provider and consumer pin. Original
+source remains preserved separately; the two runtime source files contain typed
+provider assembly and hoisted forwarding functions.
+
+Both actual hosts pass the admitted packages: 31 workspace batches with 806
+source observations, 38 bindings, ten populated controls and six contention
+schedules; five sample batches with 31 source records, 11 bindings, clock and
+same-imported-factory isolation, and 60 populated controls covering 53 rollback
+positions. The sample controls use the admitted workspace package and qualified
+store/schema/caps, with controlled goal, contribution and change ports.
+Read [admitted acceptance](../architecture/server-workspaces-admitted-acceptance.json).
+
+Production assembly preserves all 30 public value types, assigns both namespaces
+in each direction and compiles all 72 unchanged direct callers. Exact production
+wrappers and admitted package bytes preserve the same workspace/sample behavior
+on macOS and Linux. All 866 private web batches pass across 29 libraries. The
+six-case canonical invite-cap regression also passes through the native factory.
+The private Linux consumer runner uses bounded process batches with the same
+384 MB heap and 768 MB container limits; every original expected observation and
+all 60 sample controls remain present exactly once.
+Read [actual consumer acceptance](../architecture/server-workspaces-consumer-acceptance.json).
+
+The complete build, test and package workflow now passes 1,846 checks with zero
+failures or skips on 446 retained members and 35 registered libraries. The
+unchanged 150 ms p95 hook assertion passes with networking blocked. A fresh Linux
+arm64 image passes all 24 canonical checks, ten header checks and two startup
+refusals. All six static assets match. Both raw authored assets, domain data and
+the 1,444-byte sample text, remain exact root-owned files readable by the app user
+and protected against its writes. The image retains the exact 41-file operator
+closure with five qualified packages.
+
+An additional isolated production-image check passes 15 real HTTP and SQLite
+controls. It uses actual goal, contribution and change services to create the
+sample, then exercises invitation acceptance, member refusal, last-owner refusal,
+deletion and restore. Owned local accounts and disabled network keep this a local
+bundled acceptance check. It does not count toward public live QA.
+
+Every full-workflow input matches the image source. Source identity:
+`sha256:40143c96c3820211ffd90231e8bf94cbe7ab9c5d30891e1ee426b1349f57ddf9`. Image: `sha256:8b66d1650c2d32c18676076e9648d97091a0a4946a95cabd6e5a861ef2a824f4`.
+Current parent receipt: `sha256:2f669f2467a02786ae9bcfa3b059d8a2786e2ea91a817165af5386a606d1f058`. Current and CI readers
+each pass three gates with two declared optional skips and explicitly verify all
+35 qualified projections. The retained Standard driver remains unchanged.
+Read [full local acceptance](native-boundary-transfers.json).
+
+The [transfer review](native-boundary-transfers.md) records B01 through B14 as
+locally accepted. Fourteen of 31 boundaries are accepted, with 17 open. Continue
+B15 goals and decisions. Git and the draft PR record subsequent publication.
+Public tester delivery, real provider-browser behavior, actual operator security
+review and live smoke remain open.
+
+## Previous published invitation-cap checkpoint
+
 The current candidate corrects [issue #76](https://github.com/liminalworksinc/align/issues/76).
 Invitation creation keeps the early capacity refusal and repeats the same check
 after acquiring the SQLite write lock, immediately before insertion. The

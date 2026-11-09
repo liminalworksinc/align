@@ -8,6 +8,10 @@
   another is requested, and says when the confirmation replaces that rule.
 - The live-agent test client uses fresh HTTP connections after synchronous CLI calls so the offline-revocation
   scenario can finish without a stale keep-alive socket reset.
+- Preserve workspace membership, invitations and labeled sample creation through
+  two qualified libraries with typed application bindings and the exact sample
+  text asset. Keep the invitation-cap recheck inside the transaction.
+
 - Recheck member and open-invite capacity inside the invitation transaction,
   preserving the early refusal while queued writers wait for SQLite.
 

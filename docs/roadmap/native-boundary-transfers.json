@@ -1,15 +1,14 @@
 {
-  "schema": "align/native-boundary-transfer-review@3",
-  "observed_utc": "2026-11-08T21:45:39.407822+00:00",
-  "review_kind": "Same-agent source and measured acceptance reconciliation, with explicit operator confirmation of the B13 transfer gate. No independent maintainer or deployed-tester security acceptance.",
+  "schema": "align/native-boundary-transfer-review@4",
+  "observed_utc": "2026-11-09T01:04:12.933264+00:00",
+  "review_kind": "Same-agent full source, package and measured acceptance review under operator delegation. B13 confirmation remains recorded. No independent maintainer or deployed-tester security acceptance.",
   "accepted_classification_sha256": "236b77cbd13222ec77aac7f3fc9c1d8cccaa6a46b662352ca7a5f5fb7d8ddf87",
   "image_platform": "linux/arm64",
-  "qualified_components": 33,
-  "reviewed_source_members": 51,
-  "completed_boundaries": 13,
+  "qualified_components": 35,
+  "reviewed_source_members": 53,
+  "completed_boundaries": 14,
   "total_boundaries": 31,
   "remaining_boundaries": [
-    "B14",
     "B15",
     "B16",
     "B17",
@@ -86,6 +85,62 @@
     {
       "file": "server-auth.operator-transfer-confirmation-v1.json",
       "sha256": "731e63321edee8813e483e356f5531d1d80a8e1cc0ee963498c1648657746b20"
+    },
+    {
+      "file": "server-workspaces.qualified-library-proof-v3.json",
+      "sha256": "2f85bfcc88d204de45831c41369aaf832ff86c230ef1c35135afc30840a1a0f4"
+    },
+    {
+      "file": "server-workspaces.admitted-package-proof-v4.json",
+      "sha256": "80e9b4104ac05d8d06b6eb484287fbcf899dc8a28cd4932660bf157582f28885"
+    },
+    {
+      "file": "server-workspaces.current-child-readiness-proof-v1.json",
+      "sha256": "e46d5d6fdc8c8f0a3c7fd2e2066da570429e42a49b5cf3651c1b5b48a7922743"
+    },
+    {
+      "file": "server-sample.qualified-library-proof-v2.json",
+      "sha256": "14a178478363d59a1144411368053da2648d1d00894e19334e065912350ae645"
+    },
+    {
+      "file": "server-sample.admitted-package-proof-v2.json",
+      "sha256": "100397b73ed2b59ffacff0ea7f822e9ed825b44a1fcdf02f4da285a87aa4ab99"
+    },
+    {
+      "file": "server-sample.current-child-readiness-proof-v1.json",
+      "sha256": "c1fdd5bbea2f5595d2789e8d2d23b9379f336eb12927a530e27a9de41db3269b"
+    },
+    {
+      "file": "server-workspaces.actual-consumer-acceptance-proof-v1.json",
+      "sha256": "53997544f5ab73b7aa0e2d9942b471b71b9364749034a0fd40742b1d80e32b3c"
+    },
+    {
+      "file": "server-workspaces.consumer-types-proof-v1.json",
+      "sha256": "4519940666fbcd3cea75935f10fb06867f68b480a563fae20a6a32df0b3a6a5f"
+    },
+    {
+      "file": "server-workspaces.parent-full-workflow-proof-v1.json",
+      "sha256": "1b8ce289124f6420c34893d2be87b8ddd6198ee2fbcabc6bc0b84a63b9ceb529"
+    },
+    {
+      "file": "server-workspaces.completed-suite-evidence-v1.json",
+      "sha256": "79084b7019115ea61a0ab963236ad24e00b3783ee9306fe0f149f677f42f553a"
+    },
+    {
+      "file": "server-workspaces.serial-hook-acceptance-v1.json",
+      "sha256": "77e48bbfe902621d06d2a0e75aad8d1872b7207baa5fc8a0e61f3a3262586181"
+    },
+    {
+      "file": "server-workspaces.image-source-equivalence-v1.json",
+      "sha256": "d5ec4497bd8697fc17b8cd74c0f529be3de22d0690b45751c50110f86de3996f"
+    },
+    {
+      "file": "server-workspaces.image-bundle-sample-proof-v1.json",
+      "sha256": "c45deb52bd6b7422154755fccea8f030162512ae53ab1217d518ae8fb9765fd6"
+    },
+    {
+      "file": "server-workspaces.parent-current-readiness-proof-v1.json",
+      "sha256": "03f85f6de1c5c75b2b87f2a5054d7f2dd8578df92344933e8aaaecb4bb1272c0"
     }
   ],
   "rows": [
@@ -917,6 +972,113 @@
         "f_4c9283b5ecab": "Explicit operator confirmation received.",
         "f_fcab81184174": "Premature label corrected in fd70cc2a before this later operator confirmation."
       }
+    },
+    {
+      "boundary": "B14",
+      "name": "Workspaces and sample",
+      "accepted_target_responsibility": "Store transactions and current sample text/data use explicit bindings. Existing sample labeling remains part of the contract.",
+      "required_acceptance": "Authorization, rollback, last-owner, cap/concurrency and deletion/restore parity on populated fixtures.",
+      "dependencies": [
+        "B12",
+        "B13"
+      ],
+      "current_member_hashes": {
+        "lib/v2/workspaces.ts": "67713126fe47254fa4e3b035bc87f2b59a7eb88f84caaf9ecec0354f75d6dd96",
+        "lib/v2/sample.ts": "c40e77004fb1a23979453931a9887614b568563b5373c4dc741b85e3365295cc"
+      },
+      "current_qualified_bindings": [
+        {
+          "component": "server-workspaces",
+          "provider": ".literate/native-projects/local-server-workspaces",
+          "package": "server_workspaces",
+          "entry": "789a071d942c1f075c67d13160b30e049674736bb2e6942ff5fb759758719ab6",
+          "lock_identity": "sha256:65fa3c35c5ba22d1dae2e3178ed957da71bec81ada3d9d8f5c8b1ae58f17f9f2",
+          "oracle": "server-workspaces.json",
+          "oracle_sha256": "090238d5fe85a4115fbe031b072af19a95d12b495427bedd33c8a372cf556708",
+          "independent_batches": 31
+        },
+        {
+          "component": "server-sample",
+          "provider": ".literate/native-projects/local-server-sample",
+          "package": "server_sample",
+          "entry": "4619003726e6bde0140b207817665c19c73ced66ebf20c8b783affa2267bc2f3",
+          "lock_identity": "sha256:b5b732d48dcd54e39d4978a161871160db4150d6641b377a60f98d236c079d12",
+          "oracle": "server-sample.json",
+          "oracle_sha256": "6be80c1ca68dc612b2ed47065c8fee2bf5dccb28c62a9001eaa07c0f3049335b",
+          "independent_batches": 5
+        }
+      ],
+      "runtime_source_read": true,
+      "retained_roles": "Public TypeScript types, explicit host resource assembly, lazy cycle-safe factory and hoisted forwarding functions; source-backed sample data is an immutable package asset.",
+      "original_application_algorithms_in_retained_members": false,
+      "whole_boundary_closed": true,
+      "closure_state": "Both complete libraries qualify twice, admit separately and pass both-host package/production assembly, typed callers, complete workflow, fresh image and current receipt.",
+      "required_acceptance_result": "Workspace806records/38bindings/10populated/6contention and sample31records/11bindings/60populated/53rollback perhost; changing clock and same-imported-factory isolation. All30public values and72unchanged callers. The real bundled image also passes15offline HTTP/SQLite sample, invitation, refusal, deletion and restore controls using actual goal, contribution and change services.",
+      "supporting_measured_records": [
+        {
+          "file": "server-workspaces.qualified-library-proof-v3.json",
+          "sha256": "2f85bfcc88d204de45831c41369aaf832ff86c230ef1c35135afc30840a1a0f4"
+        },
+        {
+          "file": "server-workspaces.admitted-package-proof-v4.json",
+          "sha256": "80e9b4104ac05d8d06b6eb484287fbcf899dc8a28cd4932660bf157582f28885"
+        },
+        {
+          "file": "server-workspaces.current-child-readiness-proof-v1.json",
+          "sha256": "e46d5d6fdc8c8f0a3c7fd2e2066da570429e42a49b5cf3651c1b5b48a7922743"
+        },
+        {
+          "file": "server-sample.qualified-library-proof-v2.json",
+          "sha256": "14a178478363d59a1144411368053da2648d1d00894e19334e065912350ae645"
+        },
+        {
+          "file": "server-sample.admitted-package-proof-v2.json",
+          "sha256": "100397b73ed2b59ffacff0ea7f822e9ed825b44a1fcdf02f4da285a87aa4ab99"
+        },
+        {
+          "file": "server-sample.current-child-readiness-proof-v1.json",
+          "sha256": "c1fdd5bbea2f5595d2789e8d2d23b9379f336eb12927a530e27a9de41db3269b"
+        },
+        {
+          "file": "server-workspaces.actual-consumer-acceptance-proof-v1.json",
+          "sha256": "53997544f5ab73b7aa0e2d9942b471b71b9364749034a0fd40742b1d80e32b3c"
+        },
+        {
+          "file": "server-workspaces.consumer-types-proof-v1.json",
+          "sha256": "4519940666fbcd3cea75935f10fb06867f68b480a563fae20a6a32df0b3a6a5f"
+        },
+        {
+          "file": "server-workspaces.parent-full-workflow-proof-v1.json",
+          "sha256": "1b8ce289124f6420c34893d2be87b8ddd6198ee2fbcabc6bc0b84a63b9ceb529"
+        },
+        {
+          "file": "server-workspaces.completed-suite-evidence-v1.json",
+          "sha256": "79084b7019115ea61a0ab963236ad24e00b3783ee9306fe0f149f677f42f553a"
+        },
+        {
+          "file": "server-workspaces.serial-hook-acceptance-v1.json",
+          "sha256": "77e48bbfe902621d06d2a0e75aad8d1872b7207baa5fc8a0e61f3a3262586181"
+        },
+        {
+          "file": "server-workspaces.image-source-equivalence-v1.json",
+          "sha256": "d5ec4497bd8697fc17b8cd74c0f529be3de22d0690b45751c50110f86de3996f"
+        },
+        {
+          "file": "server-workspaces.image-bundle-sample-proof-v1.json",
+          "sha256": "c45deb52bd6b7422154755fccea8f030162512ae53ab1217d518ae8fb9765fd6"
+        },
+        {
+          "file": "server-workspaces.parent-current-readiness-proof-v1.json",
+          "sha256": "03f85f6de1c5c75b2b87f2a5054d7f2dd8578df92344933e8aaaecb4bb1272c0"
+        }
+      ],
+      "typed_target_bindings_permitted_by_accepted_classification": true,
+      "permanent_source_retention_exception": false,
+      "future_changes_require_current_acceptance": true,
+      "functional_acceptance_complete": true,
+      "source_retirement_review_pending": false,
+      "blocking_review_findings": [],
+      "original_failed_candidates_and_negative_controls_preserved": true
     }
   ],
   "public_tester_deployed": false,
@@ -955,8 +1117,8 @@
       "final_deployed_tester_security_acceptance": false
     }
   },
-  "boundaries_with_complete_functional_acceptance": 13,
-  "implementation_boundaries_remaining": 18,
+  "boundaries_with_complete_functional_acceptance": 14,
+  "implementation_boundaries_remaining": 17,
   "human_confirmation_required_for_transfer_closure": [],
   "corrected_after_review": "f_fcab81184174",
   "prior_authentication_acceptance": {
@@ -979,12 +1141,23 @@
     "independent_maintainer_review_claimed": false,
     "final_deployed_tester_security_acceptance": false
   },
-  "source_identity": "sha256:d3b140776595e681ba9ded9ead514ca429881fa1f1e95d4a941b1f808b5408b0",
-  "parent_receipt": "sha256:6c802f17b8075718811e528aa317faf63fcd77d694f777a7f1a5547fe0275c41",
+  "source_identity": "sha256:40143c96c3820211ffd90231e8bf94cbe7ab9c5d30891e1ee426b1349f57ddf9",
+  "parent_receipt": "sha256:2f669f2467a02786ae9bcfa3b059d8a2786e2ea91a817165af5386a606d1f058",
   "application_checks": 1846,
   "image_checks": 36,
-  "source_members": 442,
-  "image_id": "sha256:e0846ceb4ce798129f100bfe2a4ae3832b8bee72e484078a139c8d54f8274e5e",
-  "current_source_checkpoint_recorded_by_git": true,
-  "current_image_all_full_workflow_inputs_exact": true
+  "source_members": 446,
+  "image_id": "sha256:8b66d1650c2d32c18676076e9648d97091a0a4946a95cabd6e5a861ef2a824f4",
+  "current_source_checkpoint_recorded_by_git": false,
+  "current_image_all_full_workflow_inputs_exact": true,
+  "prior_local_checkpoint_acceptance": [
+    {
+      "source_identity": "sha256:d3b140776595e681ba9ded9ead514ca429881fa1f1e95d4a941b1f808b5408b0",
+      "parent_receipt": "sha256:6c802f17b8075718811e528aa317faf63fcd77d694f777a7f1a5547fe0275c41",
+      "application_checks": 1846,
+      "image_checks": 36,
+      "source_members": 442,
+      "image_id": "sha256:e0846ceb4ce798129f100bfe2a4ae3832b8bee72e484078a139c8d54f8274e5e"
+    }
+  ],
+  "publication_record": "Git history and the draft PR report subsequent publication. This local record claims no push, merge or deployment."
 }
