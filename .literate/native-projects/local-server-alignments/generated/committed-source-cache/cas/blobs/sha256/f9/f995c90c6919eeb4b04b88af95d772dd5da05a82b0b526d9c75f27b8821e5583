@@ -1,0 +1,17 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const out = process.argv[2];
+if (!out) throw new Error('An artifact output path is required');
+const root = path.resolve(__dirname, '..');
+const destination = path.resolve(out);
+const directory = path.dirname(destination);
+fs.mkdirSync(directory, {recursive:true});
+for (const relative of ['server_alignments/create_alignments.js','server_alignments/package.json','tests/litai_test.js']) {
+  const target = path.join(directory, relative);
+  const source = path.join(root, relative);
+  fs.mkdirSync(path.dirname(target), {recursive:true});
+  if (source !== target) fs.copyFileSync(source, target);
+}
+fs.copyFileSync(path.join(root, 'main.js'), destination);
+fs.chmodSync(destination, 0o755);

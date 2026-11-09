@@ -1,0 +1,70 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {create_goal_limits} = require('../goal_limits/create_goal_limits.js');
+function factory(overrides = {}) {
+  return create_goal_limits({
+    badRequest: message => new Error(message),
+    cleanProse: text => text,
+    isBlankText: text => !text,
+    rand32: () => 'abcdefghijklmnop',
+    readDate: () => Date,
+    ...overrides
+  });
+}
+const cases = [{"id":"generated-clean-controls","args":["cleanText","  Keep\u0000  scope clear  "],"expected":"Keep scope clear"},{"id":"generated-century-boundary","args":["isDay","1900-02-29"],"expected":false},{"id":"generated-leap-day","args":["isDay","2000-02-29"],"expected":true},{"id":"generated-empty-stored","args":["limitsOf",{"limits_json":""}],"expected":[]},{"id":"generated-reuse","args":["limitsIn",[{"type":"must","text":" Keep  scope "}],[{"id":"existing","type":"must","text":"Keep scope","source":null}]],"expected":[{"id":"existing","type":"must","text":"Keep scope","source":null}]}];
+function execute(args) {
+  const api = factory();
+  return api[args[0]](...args.slice(1));
+}
+function contracts() {
+  const reads = [];
+  const services = {badRequest: x => x, cleanProse: x => x, isBlankText: x => !x, rand32: () => 'abcdefghijklmnop', readDate: () => Date};
+  const resources = {};
+  for (const key of Object.keys(services)) Object.defineProperty(resources, key, {get() { reads.push(key); return services[key]; }});
+  const api = create_goal_limits(resources);
+  assert.deepEqual(reads, ['badRequest','cleanProse','isBlankText','rand32','readDate']);
+  assert.deepEqual(Object.keys(api), ['LIMIT_TYPES','LIMITS_MAX','LIMIT_TEXT_MAX','LIMIT_SOURCE_TITLE_MAX','cleanText','isDay','newLimitId','limitsOf','limitsIn']);
+  for (const [name, arity] of [['cleanText',1],['isDay',1],['newLimitId',0],['limitsOf',1],['limitsIn',2]]) {
+    assert.equal(api[name].name, name); assert.equal(api[name].length, arity);
+  }
+  const prev = [];
+  assert.equal(api.limitsIn(undefined, prev), prev);
+  assert.equal(api.newLimitId(), 'lim_abcdefghijkl');
+  api.LIMIT_TYPES.push('custom');
+  assert.equal(api.limitsIn([{type:'custom',text:'x'}], [])[0].type, 'custom');
+  const refusal = {};
+  const failing = factory({badRequest: () => refusal});
+  assert.throws(() => failing.limitsIn(null, []), e => e === refusal);
+  const fault = {};
+  assert.throws(() => factory({cleanProse: () => { throw fault; }}).cleanText('x'), e => e === fault);
+  const messages = [
+    [null,'limits must be a list'],
+    [[{type:'must',text:3}],'limits[0].text must be a string'],
+    [[{type:'must',text:' '}],'limits[0].text is required'],
+    [[{type:'must',text:'a'.repeat(161)}],'limits[0].text is too long (max 160 characters)'],
+    [[{type:'must',text:'x',source:{kind:'manual',date:'2100-02-29'}}],'limits[0].source.date must be a day like 2026-10-22']
+  ];
+  for (const [input,message] of messages) assert.throws(() => factory().limitsIn(input, []), {message});
+  let entropy = 0;
+  const reserved = factory({rand32: () => { entropy++; return 'abcdefghijklmnop'; }});
+  const previous = [{id:'a',type:'must',text:'one',source:null},{id:'b',type:'must',text:'two',source:null}];
+  assert.deepEqual(reserved.limitsIn([{type:'must',text:'two'},{id:'b',type:'must',text:'changed'}],previous),
+    [{id:'lim_abcdefghijkl',type:'must',text:'two',source:null},{id:'b',type:'must',text:'changed',source:null}]);
+  assert.equal(entropy,1);
+  let dates = 0;
+  const calendar = factory({readDate: () => { dates++; return Date; }});
+  assert.equal(calendar.isDay('bad'),false); assert.equal(dates,0);
+  assert.equal(calendar.isDay('2024-02-29'),true); assert.equal(dates,2);
+  const seen = [];
+  const unicode = factory({cleanProse: value => { seen.push(value); return value.replace('é','e'); }, isBlankText: value => { seen.push(value); return false; }});
+  assert.equal(unicode.cleanText(' é\u0085\u2003x '),'e x');
+  assert.deepEqual(seen,[' é \u2003x ','e x']);
+}
+function run() {
+  const results = [];
+  for (const c of cases) { assert.deepEqual(execute(c.args), c.expected); results.push({case_id:c.id,outcome:'passed'}); }
+  contracts();
+  return {schema:'literate-ai/generated-test-results@1',cases:results};
+}
+function smoke() { return execute(cases[0].args); }
+module.exports = {run,smoke};

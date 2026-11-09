@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+'use strict';
+try {
+  process.stdout.write(JSON.stringify(require('./main.js').main()) + '\n');
+} catch (error) {
+  process.stderr.write(String(error.stack || error) + '\n');
+  process.exitCode = 1;
+}

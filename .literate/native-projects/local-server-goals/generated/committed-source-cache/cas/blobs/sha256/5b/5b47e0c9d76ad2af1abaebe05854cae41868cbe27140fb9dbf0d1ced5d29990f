@@ -1,0 +1,11 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const out = process.argv[2];
+if (!out) throw new Error('Missing directory artifact output');
+for (const relative of ['main.js','tests/litai_test.js','server_goals/create_goals.js','server_goals/package.json']) {
+  const destination = path.join(out, relative);
+  fs.mkdirSync(path.dirname(destination), {recursive:true});
+  fs.copyFileSync(path.join(root, relative), destination);
+}

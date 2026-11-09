@@ -153,11 +153,11 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Next action:** Publish the verified retained-source goal-cap correction in
-  the existing draft PR, then continue B15 through B31 from that current baseline. The [current transfer review](native-boundary-transfers.md)
-  records B01 through B14 as accepted local transfers, leaving 17 boundaries.
-  Preserve the previous publication and every failed candidate. The public
-  tester, actual operator security review and live smoke remain open.
+- **Next action:** Publish the verified 47-library B15 checkpoint in the existing
+  draft PR, then continue B16 through B31. The [transfer review](native-boundary-transfers.md)
+  records fifteen local boundary acceptances and sixteen remaining boundaries.
+  Preserve original and failed evidence. Public tester delivery, actual operator
+  security review and live smoke remain open.
 - **B14 prerequisite:** [Issue #76](https://github.com/liminalworksinc/align/issues/76)
   reproduces an existing invite-cap race while writers wait for SQLite. The local
   correction preserves the early check and rechecks under the transaction lock.
@@ -184,6 +184,13 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [full local acceptance](native-boundary-transfers.json).
   B14 has earned local transfer acceptance. Publication is recorded in Git and
   the existing draft PR. The full native program and public tester remain open.
+- **B15 source formatting:** The 47-library candidate passed 1847 application checks and 36 image checks, but the staged diff check caught 180 trailing spaces in compiler-produced type declarations. Candidate4 removes only those spaces from six bindings; complete syntax/type printing and emitted CommonJS/ESNext JavaScript are byte-identical. Preserve the passed candidate and require new full acceptance for the final source bytes before publication.
+- **B15 integration reader:** The first complete 47-library run exposed a test
+  reader that parsed action literals from retained bodies. Read actual public
+  exports through the qualified bindings and preserve the route inventory and
+  every-action stale-revision checks. Original and qualified arrays agree;
+  missing exports, service calls and an extra uncovered action are refused.
+  Preserve the failed candidate and require a fresh complete acceptance.
 - **B15 admission correction:** [Issue #77](https://github.com/liminalworksinc/align/issues/77)
   reproduces the 1,000-goal admission race on both hosts using independent SQLite
   connections and a third held writer. Three held schedules per host leave 1,001
@@ -198,6 +205,14 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   the service gap is not labeled a proven public HTTP exploit. The old source
   and failed probes remain preserved. This accepts no partial B15 native transfer
   or public tester. Git and the draft PR record publication separately.
+- **B15 native transfer:** All twelve qualified libraries have separate fresh
+  admissions, complete source review, both-host package and actual binding
+  acceptance, exact public types and unchanged compiling callers. The combined
+  candidate passes 956 web batches, all 1,847 application checks, 36 fresh image
+  checks and 18 additional offline bundled HTTP/SQLite controls. Both readers
+  verify all 47 projections and the current receipt. Local transfer acceptance
+  is recorded in [the exact ledger](native-boundary-transfers.json). This does
+  not complete ADOPT-002 or any public tester gate.
 - **Account and membership scope:** Preserve all seven account operations and
   both membership lifecycle operations through two supplied-service factories.
   Account captures 21 resources; lifecycle captures six. The caller retains SQL

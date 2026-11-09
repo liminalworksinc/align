@@ -1,0 +1,102 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_records } = require('../server_change_read/create_records.js');
+const view = {"id":"request-a","goal":{"id":"goal-a","title":"Review"},"state":"pending","launch":"waiting","condition":{"kind":"manual"},"requester":{"id":"person-a"},"base_version":2,"revision":3,"reason":"Update","revisions":[{"revision":3,"evidence":[],"snapshot":{"title":"Review"}}],"created_at":"created","updated_at":"updated","diff":{"before":{},"after":{}},"launch_decided_by":null,"launch_decided_at":null,"approved_without_evidence":false};
+class ReadError extends Error { constructor(status) { super('read'); this.status = status; } }
+function service() {
+  return create_records({
+    get: () => ({ x: 1 }),
+    V2Error: ReadError,
+    requestViews: () => [view],
+    requestView: (pp, id) => { if (id === 'missing') throw new ReadError(404); return view; }
+  });
+}
+const behaviorCases = [{"id":"generated-summary","args":[null,"pending",1],"expected":[{"id":"request-a","goal":{"id":"goal-a","title":"Review"},"state":"pending","launch":"waiting","condition":{"kind":"manual"},"requested_by":{"id":"person-a"},"base_version":2,"revision":3,"reason":"Update","evidence":[],"snapshot":{"title":"Review"},"created_at":"created","updated_at":"updated"}]},{"id":"generated-zero-limit","args":[null,"pending",0],"expected":[]},{"id":"generated-negative-limit","args":[null,"unknown",-7],"expected":[]},{"id":"generated-detail","args":[null,"request-a"],"expected":{"id":"request-a","goal":{"id":"goal-a","title":"Review"},"state":"pending","launch":"waiting","condition":{"kind":"manual"},"requested_by":{"id":"person-a"},"base_version":2,"revision":3,"reason":"Update","evidence":[],"snapshot":{"title":"Review"},"created_at":"created","updated_at":"updated","decided_by":null,"decision_note":null,"diff":{},"resulting_version":null,"launch_decided_by":null,"launch_decided_at":null,"approved_without_evidence":false,"decided_at":null}},{"id":"generated-missing-read","args":[null,"missing"],"expected":null}];
+function execute(c) {
+  const api = service();
+  return c.args.length === 3 ? api.listChangeRequests(...c.args) : api.getChangeRequest(...c.args);
+}
+function contracts() {
+  const reads = [];
+  const functions = {
+    get: function(sql) { assert.equal(this, undefined); assert.equal(sql, "SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'v2_change_requests'"); return false; },
+    V2Error: ReadError,
+    requestView: () => { throw new Error('unexpected view'); },
+    requestViews: () => { throw new Error('unexpected views'); }
+  };
+  const resources = {};
+  for (const key of ['get','V2Error','requestView','requestViews']) Object.defineProperty(resources,key,{get() { reads.push(key); return functions[key]; }});
+  const api = create_records(resources);
+  assert.deepEqual(reads,['get','V2Error','requestView','requestViews']);
+  assert.equal(create_records.name,'create_records');
+  assert.equal(create_records.length,1);
+  assert.deepEqual(Object.keys(api),['CHANGE_REQUEST_STATES','listChangeRequests','getChangeRequest']);
+  assert.equal(api.listChangeRequests.length,2);
+  assert.equal(api.getChangeRequest.length,2);
+  assert.equal(api.listChangeRequests.name,'listChangeRequests');
+  assert.equal(api.getChangeRequest.name,'getChangeRequest');
+  assert.deepEqual(api.CHANGE_REQUEST_STATES,['pending','countered','approved','rejected','withdrawn','superseded']);
+  assert.notEqual(api.listChangeRequests(null),api.listChangeRequests(null));
+  assert.equal(api.getChangeRequest(null,'x'),null);
+  assert.notEqual(api.CHANGE_REQUEST_STATES,service().CHANGE_REQUEST_STATES);
+  const result = service().listChangeRequests(null);
+  assert.equal(result[0].condition,view.condition);
+  assert.equal(result[0].requested_by,view.requester);
+  assert.equal(result[0].snapshot,view.revisions[0].snapshot);
+  assert.notEqual(result[0].goal,view.goal);
+  const failure = new ReadError(403);
+  const failing = create_records({get:()=>true,V2Error:ReadError,requestView:()=>{throw failure;},requestViews:()=>{throw failure;}});
+  assert.throws(()=>failing.getChangeRequest(null,'x'),e=>e===failure);
+  assert.throws(()=>failing.listChangeRequests(null),e=>e===failure);
+  const projection = new ReadError(404);
+  const broken = new Proxy({}, {get() { throw projection; }});
+  const inside = create_records({get:()=>true,V2Error:ReadError,requestView:()=>broken,requestViews:()=>[broken]});
+  assert.equal(inside.getChangeRequest(null,'x'),null);
+  assert.throws(()=>inside.listChangeRequests(null),e=>e===projection);
+  const outside = create_records({get:()=>{throw projection;},V2Error:ReadError});
+  assert.throws(()=>outside.getChangeRequest(null,'x'),e=>e===projection);
+  for (const limit of [NaN,-Infinity,-1,0]) assert.deepEqual(service().listChangeRequests(null,'pending',limit),[]);
+  assert.equal(service().listChangeRequests(null,'pending',Infinity).length,1);
+  assert.deepEqual(service().listChangeRequests(null,'pending',0.9),[]);
+  const person = { id: 'reviewer' };
+  const oldLink = {id:'link',revision:1,kind:'document',url:'untrusted:text',label:'Original',source:'supplied',reported_as:'claimed',added_by:person,added_at:'then'};
+  const before = {title:'Old',measures:[],depends_on:['a'],status:'open',limits:null};
+  const after = {title:'New',measures:[{value:1}],depends_on:['b'],status:'closed',limits:[]};
+  const hidden = ['private'];
+  const approved = {...view,state:'approved',launch:'launched',version:8,approved_by:person,rejected_by:null,decision_note:'Accepted',decided_at:'now',diff:{before,after,hidden_depends_on:hidden},revisions:[{revision:1,evidence:[oldLink]},{revision:3,evidence:[],snapshot:view.revisions[0].snapshot}]};
+  const bound = create_records({get:()=>true,V2Error:ReadError,requestView:()=>approved,requestViews:()=>[approved]});
+  const projected = bound.getChangeRequest(null,'request-a');
+  assert.deepEqual(projected,{
+    id:'request-a',goal:{id:'goal-a',title:'Review'},state:'approved',launch:'launched',
+    condition:view.condition,requested_by:view.requester,base_version:2,revision:3,reason:'Update',
+    evidence:[{id:'link',revision:1,kind:'document',url:'untrusted:text',label:'Original',source:'supplied',reported_as:'claimed',added_by:person,added_at:'then'}],
+    snapshot:view.revisions[0].snapshot,created_at:'created',updated_at:'updated',
+    decided_by:person,decision_note:'Accepted',diff:{title:{before:'Old',after:'New'},measures:{before:before.measures,after:after.measures},depends_on:{before:before.depends_on,after:after.depends_on,hidden},status:{before:'open',after:'closed'},limits:{before:[],after:after.limits}},
+    resulting_version:8,launch_decided_by:null,launch_decided_at:null,approved_without_evidence:false,decided_at:'now'
+  });
+  assert.notEqual(projected.evidence[0],oldLink);
+  assert.equal(projected.evidence[0].added_by,person);
+  assert.equal(projected.diff.measures.before,before.measures);
+  assert.equal(projected.diff.measures.after,after.measures);
+  assert.equal(projected.diff.depends_on.hidden,hidden);
+  assert.equal(projected.diff.limits.after,after.limits);
+  approved.state = 'superseded';
+  assert.equal(bound.getChangeRequest(null,'x').decided_by,person);
+  assert.equal(bound.getChangeRequest(null,'x').resulting_version,null);
+  approved.approved_by = null;
+  assert.equal(bound.getChangeRequest(null,'x').decided_by,null);
+  approved.state = 'rejected';
+  approved.rejected_by = person;
+  assert.equal(bound.getChangeRequest(null,'x').decided_by,person);
+}
+function run() {
+  contracts();
+  const cases = [];
+  for (const c of behaviorCases) {
+    assert.deepEqual(execute(c),c.expected);
+    cases.push({case_id:c.id,outcome:'passed'});
+  }
+  return {schema:'literate-ai/generated-test-results@1',cases};
+}
+function smoke() { return execute(behaviorCases[0]); }
+module.exports = {run,smoke};

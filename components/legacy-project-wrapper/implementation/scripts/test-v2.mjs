@@ -43,6 +43,7 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
+import { decisionActions } from "./decision-actions.mjs";
 
 const PORT = Number(process.argv[2]);
 if (!Number.isInteger(PORT) || PORT === 3100) {
@@ -10376,7 +10377,7 @@ try {
     // (DELETE) and holds (PUT/DELETE) aren't [action] routes and have no revisions either.
     const REVISIONED = { alignments: "lib/v2/alignments.ts", "change-requests": "lib/v2/changes.ts", reallocations: "lib/v2/reallocations.ts" };
     const STATE_ONLY = ["asks"];
-    const actionsIn = (rel, name) => JSON.parse(new RegExp(`${name} = (\\[[^\\]]*\\])`).exec(readFileSync(path.join(ROOT, rel), "utf8"))?.[1] ?? "[]");
+    const actionsIn = (rel, name) => decisionActions(ROOT, rel, name);
     const listed = { alignments: actionsIn(REVISIONED.alignments, "ACTIONS"), "change-requests": actionsIn(REVISIONED["change-requests"], "CHANGE_REQUEST_ACTIONS"), reallocations: actionsIn(REVISIONED.reallocations, "REALLOCATION_ACTIONS") };
     check(
       "c10 C10-2 (routes): every decision route ([action]) is classified: alignments, change requests and reallocations carry a revision; asks are state-only",

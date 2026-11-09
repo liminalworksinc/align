@@ -1,0 +1,13 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname,'..');
+const out = process.argv[2];
+if (!out) throw new Error('Output directory is required');
+fs.mkdirSync(out,{recursive:true});
+for (const file of ['run','main.js','server_changes/create_changes.js','server_changes/package.json','tests/litai_test.js']) {
+  const dest = path.join(out,file);
+  fs.mkdirSync(path.dirname(dest),{recursive:true});
+  fs.copyFileSync(path.join(root,file),dest);
+}
+fs.chmodSync(path.join(out,'run'),0o755);

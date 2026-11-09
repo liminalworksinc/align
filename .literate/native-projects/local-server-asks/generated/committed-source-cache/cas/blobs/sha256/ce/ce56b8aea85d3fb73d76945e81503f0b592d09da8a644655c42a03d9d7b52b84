@@ -1,0 +1,14 @@
+'use strict';
+const fs=require('node:fs');
+const path=require('node:path');
+const root=path.resolve(__dirname,'..');
+const output=path.resolve(process.argv[2]||'run');
+const lib=fs.readFileSync(path.join(root,'server_asks/create_asks.js'),'utf8');
+const tests=fs.readFileSync(path.join(root,'tests/litai_test.js'),'utf8');
+const main=fs.readFileSync(path.join(root,'main.js'),'utf8');
+const code='#!/usr/bin/env node\n'+
+  'const libraryModule={exports:{}};\n(function(module,exports){\n'+lib+'\n})(libraryModule,libraryModule.exports);\n'+
+  'const testModule={exports:{}};\n(function(module,exports,require){\n'+tests+'\n})(testModule,testModule.exports,id=>id==="../server_asks/create_asks.js"?libraryModule.exports:require(id));\n'+
+  'const mainModule={exports:{}};\n(function(module,exports,require){\n'+main+'\n})(mainModule,mainModule.exports,id=>id==="./tests/litai_test.js"?testModule.exports:require(id));\n'+
+  'try{process.stdout.write(JSON.stringify(mainModule.exports.main())+"\\n");}catch(e){process.stderr.write(String(e?.stack??e)+"\\n");process.exitCode=1;}\n';
+fs.mkdirSync(path.dirname(output),{recursive:true});fs.writeFileSync(output,code,{mode:0o755});

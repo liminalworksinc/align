@@ -1,0 +1,26 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {create_reallocations}=require('../server_reallocations/create_reallocations.js');
+function action(value) { return create_reallocations({}).assertReallocationAction(value); }
+function runTests() {
+  const cases=[];
+  assert.equal(action('approve'),'approve'); cases.push({case_id:'generated-approve',outcome:'passed'});
+  assert.equal(action('withdraw'),'withdraw'); cases.push({case_id:'generated-last-action',outcome:'passed'});
+  assert.equal(action('launch'),'launch'); cases.push({case_id:'generated-launch-identity',outcome:'passed'});
+  const names=['all','audit','get','run','tx','badRequest','conflict','forbidden','notFound','newId','nowIso','effectiveSet','launchSet','assertTargetsFit','contentOf','goalObj','goalRow','visibleGoal','writeGoalVersion','canReadGoal','memberName','nameTo','assertRevisionReached','optStr','revisionRead','COUNTER_SAME_AS_PROPOSAL'];
+  const reads=[];
+  const resources={};
+  for(const name of names) Object.defineProperty(resources,name,{get(){reads.push(name); return undefined;}});
+  const service=create_reallocations(resources);
+  assert.deepEqual(reads,names);
+  assert.deepEqual(Object.keys(service),['REALLOCATION_STATES','REALLOCATION_ACTIONS','REALLOCATION_GOALS_MAX','createReallocation','actOnReallocation','supersedeReallocations','getReallocation','listReallocations','assertReallocationAction']);
+  for(const [name,length] of [['createReallocation',2],['actOnReallocation',4],['supersedeReallocations',4],['getReallocation',2],['listReallocations',1],['assertReallocationAction',1]]) {assert.equal(service[name].name,name); assert.equal(service[name].length,length); assert.equal(service[name].constructor.name,(name==='createReallocation'||name==='actOnReallocation')?'AsyncFunction':'Function');}
+  service.REALLOCATION_ACTIONS.push('custom'); assert.equal(service.assertReallocationAction('custom'),'custom');
+  const failure={refusal:true};
+  const invalid=create_reallocations({notFound(){assert.equal(this,undefined); return failure;}});
+  assert.throws(()=>invalid.assertReallocationAction('invalid'),error=>error===failure);
+  assert.notEqual(service.REALLOCATION_ACTIONS,invalid.REALLOCATION_ACTIONS);
+  return {schema:'literate-ai/generated-test-results@1',cases};
+}
+function smoke() {return action('approve');}
+module.exports={runTests,smoke};

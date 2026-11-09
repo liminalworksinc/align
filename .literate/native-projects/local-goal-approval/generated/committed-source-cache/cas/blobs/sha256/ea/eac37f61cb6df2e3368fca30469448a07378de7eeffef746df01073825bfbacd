@@ -1,0 +1,119 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_approval } = require('../goal_approval/create_approval.js');
+
+const eligibleSQL = "SELECT user_id FROM v2_members WHERE ws_id = ? AND role IN ('owner','member')";
+const ownerSQL = "SELECT user_id FROM v2_members WHERE ws_id = ? AND role = 'owner' ORDER BY user_id";
+const leadSQL = "SELECT user_id FROM v2_pod_members WHERE ws_id = ? AND pod_id = ? AND role = 'lead'";
+
+// Query responses are sequential snapshots, supplied by a synchronous test service.
+function invoke(operation, goal, requester, snapshots) {
+  let index = 0;
+  const api = create_approval({ all: function (statement, ...bindings) {
+    assert.equal(this, undefined);
+    assert.ok([eligibleSQL, ownerSQL, leadSQL].includes(statement));
+    assert.deepEqual(bindings, statement === leadSQL ? [goal.ws_id, goal.pod_id] : [goal.ws_id]);
+    assert.ok(index < snapshots.length);
+    return snapshots[index++].map(user_id => ({ user_id }));
+  } });
+  const fn = api[operation];
+  const result = fn(goal, requester);
+  assert.equal(index, snapshots.length);
+  return result;
+}
+
+function effects() {
+  const trace = [];
+  let captures = 0;
+  const resources = {};
+  Object.defineProperty(resources, 'all', { get() {
+    captures++;
+    return function (sql, ...args) {
+      assert.equal(this, undefined);
+      trace.push([sql, ...args]);
+      if (sql === leadSQL) return [{ user_id: 'lead' }];
+      if (sql === ownerSQL) return [{ user_id: 'admin' }];
+      return [{ user_id: 'lead' }, { user_id: 'owner' }, { user_id: 'admin' }];
+    };
+  } });
+  const api = create_approval(resources);
+  assert.equal(captures, 1);
+  assert.deepEqual(trace, []);
+  assert.deepEqual(Object.keys(api), ['approvalSet', 'effectiveSet', 'launchSet']);
+  for (const [name, arity] of [['approvalSet', 1], ['effectiveSet', 2], ['launchSet', 2]]) {
+    assert.equal(api[name].name, name);
+    assert.equal(api[name].length, arity);
+  }
+  const goal = {};
+  for (const [key, value] of Object.entries({ owner_id: 'owner', pod_id: 'team', ws_id: 'ws', level: 'company' })) {
+    Object.defineProperty(goal, key, { get() { trace.push(key); return value; } });
+  }
+  Object.defineProperty(goal, 'id', { get() { throw new Error('id read'); } });
+  const launch = api.launchSet;
+  assert.deepEqual(launch(goal, 'lead'), ['admin', 'owner']);
+  assert.deepEqual(trace, [
+    'owner_id', 'pod_id', 'ws_id', 'pod_id', [leadSQL, 'ws', 'team'],
+    'level', 'ws_id', [ownerSQL, 'ws'], 'ws_id', [eligibleSQL, 'ws'],
+    'owner_id', 'ws_id', [ownerSQL, 'ws']
+  ]);
+  assert.equal(captures, 1);
+  const marker = {};
+  assert.throws(() => create_approval(Object.defineProperty({}, 'all', { get() { throw marker; } })), error => error === marker);
+  const fail = create_approval({ all() { throw marker; } });
+  const failGoal = { owner_id: 'x', pod_id: 't', ws_id: 'w', get level() { assert.fail('read after failure'); } };
+  assert.throws(() => fail.approvalSet(failGoal), error => error === marker);
+  assert.throws(() => api.approvalSet({ get owner_id() { throw marker; } }), error => error === marker);
+  const rowFailure = create_approval({ all() { return [{ get user_id() { throw marker; } }]; } });
+  assert.throws(() => rowFailure.approvalSet(failGoal), error => error === marker);
+  let generation = 0;
+  const fresh = create_approval({ all() { return generation++ === 0 ? [{ user_id: 'x' }] : []; } });
+  const simple = { owner_id: 'x', pod_id: null, ws_id: 'w' };
+  const first = fresh.approvalSet(simple);
+  const second = fresh.approvalSet(simple);
+  assert.deepEqual(first, ['x']);
+  assert.deepEqual(second, []);
+  assert.notEqual(first, second);
+}
+
+const cases = [
+  ['generated-company-leads', () => {
+    assert.deepEqual(invoke('approvalSet', { owner_id: 'zoe', pod_id: 'blue', ws_id: 'space', level: 'company' }, null,
+      [['amy', 'amy', 'gone'], ['boss'], ['zoe', 'amy', 'boss']]), ['amy', 'boss', 'zoe']);
+    effects();
+  }],
+  ['generated-empty-fallback', () => {
+    assert.deepEqual(invoke('effectiveSet', { owner_id: 'left', pod_id: null, ws_id: 'empty' }, 'requester', [[], []]), []);
+  }],
+  ['generated-owner-preserved', () => {
+    assert.deepEqual(invoke('effectiveSet', { owner_id: 'self', pod_id: 'team', ws_id: 'w' }, 'self',
+      [['peer', 'peer'], ['self', 'peer']]), ['peer', 'self']);
+  }],
+  ['generated-fallback-row-order', () => {
+    assert.deepEqual(invoke('effectiveSet', { owner_id: 'absent', pod_id: false, ws_id: 'w' }, 'r',
+      [[], ['z', 'a', 'a', 'r']]), ['z', 'a', 'a']);
+  }],
+  ['generated-launch-current-owners', () => {
+    assert.deepEqual(invoke('launchSet', { owner_id: 'retired', pod_id: '', ws_id: 'w', level: 'Company' }, 'r',
+      [[], ['old', 'r'], ['new', 'old', 'new']]), ['new', 'old']);
+  }],
+  ['generated-js-string-order', () => {
+    assert.deepEqual(invoke('approvalSet', { owner_id: '\ue000', pod_id: 'unicode', ws_id: 'w' }, null,
+      [['😀', 'A'], ['\ue000', '😀', 'A']]), ['A', '😀', '\ue000']);
+  }]
+];
+
+function run() {
+  const results = [];
+  for (const [case_id, test] of cases) {
+    test();
+    results.push({ case_id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+
+function smoke() {
+  return invoke('approvalSet', { owner_id: 'zoe', pod_id: 'blue', ws_id: 'space', level: 'company' }, null,
+    [['amy', 'amy', 'gone'], ['boss'], ['zoe', 'amy', 'boss']]);
+}
+
+module.exports = { run, smoke };

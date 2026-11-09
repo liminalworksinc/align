@@ -1,0 +1,101 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {create_requests} = require('../server_requests/create_requests.js');
+
+function fixture() {
+  const calls = [];
+  const goal = {ws_id:'w',id:'g',title:'Current goal',version:7,status:'active'};
+  const request = {id:'rq',type:'replan'};
+  const target = {state:'sent',auto_accepted:0};
+  const resources = {
+    approvalSet:() => ['u'],
+    all:() => [],
+    audit:(...args) => { calls.push(['audit',...args]); },
+    get:(sql,...args) => {
+      calls.push(['get',sql,...args]);
+      if (sql === 'SELECT * FROM v2_requests WHERE ws_id = ? AND id = ?') return args[1] === 'missing' ? undefined : request;
+      if (sql === 'SELECT state, auto_accepted FROM v2_request_targets WHERE request_id = ? AND session_key = ?') return target;
+      return undefined;
+    },
+    run:(...args) => { calls.push(['run',...args]); return 3; },
+    tx:cb => cb(),goalTargets:() => [],writeDirective:(...args) => { calls.push(['directive',...args]); return 'dir'; },
+    V2Error:class V2Error extends Error {},badRequest:(...args) => ({kind:'bad',args}),
+    conflict:(...args) => ({kind:'conflict',args}),forbidden:(...args) => ({kind:'forbidden',args}),
+    notFound:() => ({kind:'missing'}),event:(...args) => { calls.push(['event',...args]); },
+    newId:() => 'rq',nowIso:() => { calls.push(['clock']); return 'fixed-at'; },
+    goalObj:g => g,goalRow:() => goal,transferFor:() => null,visibleGoal:() => goal,
+    authorize:() => ({ok:true}),canReadGoal:pp => pp.wsRole !== 'viewer',
+    optStr:(b,k) => b[k] ?? null,oneOf:(b,k) => b[k],SESSION_KEY_RE:/^s[0-9]+$/,
+    str:(b,k) => b[k],memberName:id => 'Name '+id,memberPrincipal:() => ({}),
+    readDate:() => class { static now() { return 3600000; } toISOString() { return '1970-01-01T00:00:00.000Z'; } }
+  };
+  return {resources,calls,goal,request,target};
+}
+
+const cases = [
+  {id:'generated-owner-hold-view',method:'getHold',args:[{wsRole:'owner',wsId:'w',userId:'o'},'g'],expected:{held:null,can_hold:true}},
+  {id:'generated-viewer-hold-view',method:'getHold',args:[{wsRole:'viewer',wsId:'w',userId:'v'},'g'],expected:{held:null,can_hold:false}},
+  {id:'generated-member-hold-view',method:'getHold',args:[{wsRole:'member',wsId:'w',userId:'u'},'g'],expected:{held:null,can_hold:true}},
+  {id:'generated-other-hold-view',method:'getHold',args:[{wsRole:'member',wsId:'w',userId:'other'},'g'],expected:{held:null,can_hold:false}},
+  {id:'generated-receipt-auto',method:'requestReceipt',args:['w','rq','s1','accepted',true,'u'],expected:'accepted'},
+  {id:'generated-receipt-developer',method:'requestReceipt',args:['w','rq','s1','accepted',false,'u'],expected:'accepted'},
+  {id:'generated-receipt-decline',method:'requestReceipt',args:['w','rq','s2','declined',false,'u'],expected:'declined'},
+  {id:'generated-receipt-received',method:'requestReceipt',args:['w','rq','s3','received',false,'u'],expected:'received'},
+  {id:'generated-receipt-missing',method:'requestReceipt',args:['w','missing','s4','accepted',false,'u'],expected:null},
+  {id:'generated-release-absent',method:'releaseHold',args:['w','g','u','release-at'],expected:false},
+  {id:'generated-held-wire',method:'holdWire',args:[{wsRole:'owner',wsId:'w',userId:'o'},'hold','g',{by:'u',reason:'Pause',at:'hold-at'}],expected:{goal:{id:'g',title:'Current goal'},held_by:{id:'u',name:'Name u'},reason:'Pause',at:'hold-at'}},
+  {id:'generated-release-wire-private',method:'holdWire',args:[{wsRole:'viewer',wsId:'w',userId:'v'},'release','g',{by:'u',at:'release-at'}],expected:{goal:{id:'g',title:null},released_by:{id:'u',name:'Name u'},at:'release-at'}}
+];
+
+function constructionChecks() {
+  const names = ['approvalSet','all','audit','get','run','tx','goalTargets','writeDirective','V2Error','badRequest','conflict','forbidden','notFound','event','newId','nowIso','goalObj','goalRow','transferFor','visibleGoal','authorize','canReadGoal','optStr','oneOf','SESSION_KEY_RE','str','memberName','memberPrincipal','readDate'];
+  const read = [];
+  const f = fixture();
+  const input = {};
+  for (const name of names) Object.defineProperty(input,name,{get() { read.push(name); return f.resources[name]; }});
+  const service = create_requests(input);
+  assert.deepStrictEqual(read,names);
+  assert.deepStrictEqual(f.calls,[]);
+  const exports = ['REQUEST_TYPES','REQUESTS_PER_HOUR','SWITCH_SESSIONS_MAX','NOTE_MAX','holdRow','sendRequest','cancelRequest','expireOpenRequests','listRequests','requestWire','expireStoppedSessionTargets','requestReceipt','requireHolder','getHold','holdGoal','releaseHold','releaseGoal','holdNewlyBound','holdWire','listHolds'];
+  assert.deepStrictEqual(Object.keys(service),exports);
+  const lengths = [2,3,3,4,2,2,3,6,2,2,3,4,2,3,4,1];
+  exports.slice(4).forEach((name,i) => {
+    assert.equal(service[name].name,name);
+    assert.equal(service[name].length,lengths[i]);
+    assert.equal(service[name].constructor.name,['sendRequest','cancelRequest','holdGoal','releaseGoal'].includes(name) ? 'AsyncFunction' : 'Function');
+  });
+  assert.deepStrictEqual(service.REQUEST_TYPES,['replan','checkpoint','switch_goal']);
+  assert.equal(service.REQUESTS_PER_HOUR,20);
+  assert.equal(service.SWITCH_SESSIONS_MAX,20);
+  assert.equal(service.NOTE_MAX,280);
+  assert.notEqual(service.REQUEST_TYPES,create_requests(f.resources).REQUEST_TYPES);
+}
+
+async function runTests() {
+  constructionChecks();
+  const passed = [];
+  for (const c of cases) {
+    const f = fixture();
+    const api = create_requests(f.resources);
+    assert.deepStrictEqual(await api[c.method](...c.args),c.expected);
+    if (c.method === 'requestReceipt') {
+      assert.equal(f.calls[0][0],'get');
+      assert.equal(f.calls[1][0],'get');
+      if (c.expected === null) assert.equal(f.calls.length,2);
+      else {
+        const flag = c.args[4] ? 1 : 0;
+        assert.deepStrictEqual(f.calls[2],['clock']);
+        assert.deepStrictEqual(f.calls[3],['run','UPDATE v2_request_targets SET state = ?, auto_accepted = ?, updated_at = ? WHERE request_id = ? AND session_key = ?',c.expected,flag,'fixed-at','rq',c.args[2]]);
+        if (c.expected === 'received') assert.equal(f.calls.length,4);
+        else assert.deepStrictEqual(f.calls[4],['audit','w','u',c.expected === 'declined' ? 'request.declined' : flag ? 'request.not_declined' : 'request.accepted','rq','fixed-at']);
+      }
+    }
+    passed.push({case_id:c.id,outcome:'passed'});
+  }
+  return {schema:'literate-ai/generated-test-results@1',cases:passed};
+}
+function smoke() {
+  const f = fixture();
+  return create_requests(f.resources).getHold({wsRole:'owner',wsId:'w',userId:'o'},'g');
+}
+module.exports = {runTests,smoke};

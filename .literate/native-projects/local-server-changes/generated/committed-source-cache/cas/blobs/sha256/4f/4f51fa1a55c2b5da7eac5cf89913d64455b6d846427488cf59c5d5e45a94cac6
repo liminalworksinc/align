@@ -1,0 +1,5 @@
+#!/usr/bin/env node
+'use strict';
+const {main} = require('./main.js');
+try { process.stdout.write(JSON.stringify(main(process.argv.slice(2)))+'\n'); }
+catch (error) { process.stderr.write(String(error)+'\n'); process.exitCode = 1; }

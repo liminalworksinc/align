@@ -1,0 +1,142 @@
+{
+  "schema": "align/goal-domain-admitted-preparation@1",
+  "observed_utc": "2026-11-09T17:24:41.448706+00:00",
+  "boundary": "B15",
+  "ready_children": [
+    {
+      "component": "goal-approval",
+      "retained_binding": "lib/v2/approval.ts",
+      "binding_sha256": "923120dbab5a80b75aa581a41ce659b2933d876d90a1d20ba47a59dc99544959",
+      "admitted_entry": "sha256:7c8c1d95d0b928249f37df21427d242fe9132b90b4a221277df08d58858dd818",
+      "child_current_receipt": "sha256:f1d7e59046bdd2441baee5d8e1a6d717b967c9f65065feb299faa9f16fa0446b",
+      "ordered_resources": 1,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "goal-limits",
+      "retained_binding": "lib/v2/goal-limits.ts",
+      "binding_sha256": "4b4b01ae0372cdfeef9458bb8cc9dfb106cb3dc70daae6b40eaccd79fa595885",
+      "admitted_entry": "sha256:93b5a8f8fe9bc98d485ca52fbd9aac321f26cf5f85b9bc673fdd58aad1f546a1",
+      "child_current_receipt": "sha256:c850968c7411bf9c5e5f96381fa3e961dddfb703fb9f4273cd7f3b25ca0900db",
+      "ordered_resources": 5,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "limit-suggest",
+      "retained_binding": "lib/v2/limit-suggest.ts",
+      "binding_sha256": "0e581bdb579a6798ebf88c6e34cc2386254d0cce92c73be5965dcbb9bbdb4f25",
+      "admitted_entry": "sha256:ed81a1e3b87f4c9bb88cc28a52eb37637f69cf0f50facaf124a429faeb77c04d",
+      "child_current_receipt": "sha256:18959ea102e075c93689184e74c31763c902f8a7408cba09c62d7a4d2f08c8bf",
+      "ordered_resources": 14,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-value",
+      "retained_binding": "lib/v2/value.ts",
+      "binding_sha256": "77d4b553de95065b7357656b1463d9749dbd97610338653b87538bf814cf4d4d",
+      "admitted_entry": "sha256:9026b3f3af6eb3c212e851ca635caa35eb02616e8956cbe037b978ba26a0b717",
+      "child_current_receipt": "sha256:f068472649848ea56ade451286a44629f691f0892944fee602e1bdc1fba8ebc1",
+      "ordered_resources": 26,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-change-read",
+      "retained_binding": "lib/v2/changes-read.ts",
+      "binding_sha256": "4b878794dd9592490d0d798b82b70e7c982796947105854f1f7a5dce9a89ff0d",
+      "admitted_entry": "sha256:b57529418691b92d5217b3c95f0f29a48f616ee402ad5558977a5b57fcd4d63e",
+      "child_current_receipt": "sha256:682779045a73ba24605e267e1ed4a2b5079b378983b4fde0080af11a1cc83611",
+      "ordered_resources": 4,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-goals",
+      "retained_binding": "lib/v2/goals.ts",
+      "binding_sha256": "4d8c4cc0984e11171c08ccd3a8afcdfb79dd94b1fd13458c2d3c5505cbb3f88a",
+      "admitted_entry": "sha256:3c3e7b7091759c444c1c70837fa747ffc9adb6e67e2e240c62631a4c74a3d9f2",
+      "child_current_receipt": "sha256:6d3bb49e2b86cfc112771c46b238e26c87a930fe52477c1841761df79b2e6296",
+      "ordered_resources": 31,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-evidence",
+      "retained_binding": "lib/v2/evidence.ts",
+      "binding_sha256": "4f8361b15b9ddcc5fd6d69b41b2a7c485deb5101fb781d4c91eab980f5f03b76",
+      "admitted_entry": "sha256:0658606dad40f4008c0bb3e518b838d0783554b45737e50b9260f3977b06c72a",
+      "child_current_receipt": "sha256:db51940d8508084b12fdf1eb6f3ea8d081fb9d52ea94396a09e6270d2b7bb30a",
+      "ordered_resources": 11,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-reallocations",
+      "retained_binding": "lib/v2/reallocations.ts",
+      "binding_sha256": "57461da6f472e6200c3befc32a9f87536fbbe82f756771d664ce54d74c7ce564",
+      "admitted_entry": "sha256:3dead46341a15a65edd96dafbd7a6b11cc058ba31dc8686aae38e2d25e59b872",
+      "child_current_receipt": "sha256:bf3830c9d06ba4ebc0a69bd7518e497617529cc6bfd345d187c1cc0daea9296f",
+      "ordered_resources": 26,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-requests",
+      "retained_binding": "lib/v2/requests.ts",
+      "binding_sha256": "7e2cc99c1bb6d6afd1e3454d5a1922cb00e579b69f7c15b277fa98b04c71c39b",
+      "admitted_entry": "sha256:dc50cc83db49a8567ff837793914aac81ea35ea0343118e7a34975610e90f936",
+      "child_current_receipt": "sha256:a502c193827bc7082425be3d3fbdb123c4dc3935fd06becb0f3cdc328efb3a6b",
+      "ordered_resources": 29,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-asks",
+      "retained_binding": "lib/v2/asks.ts",
+      "binding_sha256": "b01a7b9928169e4b4dbd1f47f91cee9419a6feb3cf3cbf35ab3daaba09e96085",
+      "admitted_entry": "sha256:91d15d5bf6aebbd049115028c87ed95098043f25f94f07dc5945881b5470e8cb",
+      "child_current_receipt": "sha256:39ffcba740136b12876da964eecbd0a151d9f5ae5a0bd3bf68dde6abb20f2aff",
+      "ordered_resources": 23,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-alignments",
+      "retained_binding": "lib/v2/alignments.ts",
+      "binding_sha256": "e4c93df104d54f330ee6e00d05771706c375965657fa260b7c332429835e7ad4",
+      "admitted_entry": "sha256:c38a7d692770e4730e8e08151df0acf8a20b6a150d4e38511b9e991186ca2f40",
+      "child_current_receipt": "sha256:78e2ababbf476b53c6db9d66cc5a6b1903f722c7d79e5bc1e2b3768ef4a2599c",
+      "ordered_resources": 32,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-changes",
+      "retained_binding": "lib/v2/changes.ts",
+      "binding_sha256": "3de38c8ca655733cd4bafc02b561528c05901c080a09575554bb15d505155889",
+      "admitted_entry": "sha256:e839ea76e79a3eaa5fad4bd54ec69f6f753b91700191f28af49b4823306b9c54",
+      "child_current_receipt": "sha256:d71d4d951666c48ca196c036457883eeb8102cf86294c9b6060f103f8df57499",
+      "ordered_resources": 44,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    }
+  ],
+  "runtime_library_pins": 47,
+  "physical_web_libraries": 41,
+  "combined_private_batches": 956,
+  "independent_store_and_contention_controls": "Preserved seven-case goal-cap regression and the existing complete application suite must run through these actual bindings.",
+  "whole_parent_image_current_receipt_and_transfer_pending": true,
+  "B15_closed": false,
+  "public_tester_delivered": false,
+  "operator_security_accepted": false,
+  "integration_reader_correction": {
+    "problem": "Source-text array parsing no longer reads the public action exports from native forwarding bindings.",
+    "solution": "Read actual public exports without calling surrounding services; preserve route enumeration and every-action stale-revision assertions.",
+    "focused_controls_passed": true,
+    "fresh_complete_acceptance_pending": true,
+    "prior_failed_epoch_preserved": true
+  }
+}

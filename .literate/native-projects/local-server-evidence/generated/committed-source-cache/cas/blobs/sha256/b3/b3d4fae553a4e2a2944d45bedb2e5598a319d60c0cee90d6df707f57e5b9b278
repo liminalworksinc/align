@@ -1,0 +1,69 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_evidence } = require('../server_evidence/create_evidence.js');
+
+function fixture(overrides = {}) {
+  return {
+    all: () => [], get: () => undefined,
+    badRequest: message => new Error(message),
+    goalTargets: () => [], authorize: () => ({ ok: false }),
+    goalSpend: () => ({ total: 0 }), memberName: id => String(id),
+    oneOf: (b, key, choices) => {
+      assert.ok(choices.includes(b[key]));
+      return b[key];
+    },
+    str: (b, key, max) => {
+      assert.equal(typeof b[key], 'string');
+      assert.ok(b[key].length <= max);
+      return b[key];
+    },
+    readURL: () => URL, readDate: () => Date,
+    ...overrides
+  };
+}
+
+function link() {
+  return create_evidence(fixture()).evidenceInput({ kind: 'doc', url: 'https://example.org/guide', label: 'Guide' });
+}
+
+function contracts() {
+  const names = ['EVIDENCE_KINDS', 'EVIDENCE_PER_REVISION', 'evidenceInput', 'evidenceRows', 'evidenceCount', 'evidenceView', 'recordSnapshot', 'snapshotView'];
+  const reads = [];
+  const resources = fixture();
+  const service = create_evidence(new Proxy(resources, { get(target, key) { reads.push(key); return target[key]; } }));
+  assert.deepEqual(reads, ['all', 'get', 'badRequest', 'goalTargets', 'authorize', 'goalSpend', 'memberName', 'oneOf', 'str', 'readURL', 'readDate']);
+  assert.deepEqual(Object.keys(service), names);
+  assert.deepEqual(names.slice(2).map(name => [service[name].name, service[name].length]), names.slice(2).map((name, i) => [name, [1, 1, 2, 2, 3, 3][i]]));
+  assert.deepEqual(service.EVIDENCE_KINDS, ['pr', 'ci_run', 'incident', 'dashboard', 'doc', 'other']);
+  assert.equal(service.EVIDENCE_PER_REVISION, 10);
+  service.EVIDENCE_KINDS.push('custom');
+  assert.equal(service.evidenceInput({ kind: 'custom', url: 'https://example.org', label: '' }).kind, 'custom');
+  assert.equal(create_evidence(fixture()).EVIDENCE_KINDS.length, 6);
+  for (const [url, label, message] of [
+    ['http://example.org', '', 'url must be an https URL'],
+    ['https://user@example.org', '', 'url must not contain a user name or password'],
+    ['https://example.org', 'a\nb', 'label must be one line of text']
+  ]) assert.throws(() => service.evidenceInput({ kind: 'doc', url, label }), { message });
+  const rows = [];
+  const rowService = create_evidence(fixture({ all: function(sql, id) { assert.equal(this, undefined); assert.equal(sql, 'SELECT * FROM v2_change_request_evidence WHERE change_request_id = ? ORDER BY revision, added_at, id'); assert.equal(id, 'r'); return rows; } }));
+  assert.equal(rowService.evidenceRows('r'), rows);
+  const viewService = create_evidence(fixture({ authorize: () => ({ ok: true }) }));
+  const stored = '{"recorded_at":"t","window":{"days":30},"spend":{"total":9},"bound_sessions":2,"last_activity_at":null}';
+  assert.deepEqual(viewService.snapshotView({}, stored, 3), { revision: 3, recorded_by: 'align', recorded_at: 't', window: { days: 30 }, spend: { total: 9 }, spend_hidden: false, bound_sessions: 2, last_activity_at: null });
+  assert.deepEqual(service.snapshotView({}, stored, 3), { revision: 3, recorded_by: 'align', recorded_at: 't', window: { days: 30 }, spend: null, spend_hidden: true, bound_sessions: 2, last_activity_at: null });
+  assert.throws(() => service.snapshotView({}, '{', 0), SyntaxError);
+  const dates = [];
+  const snapshotService = create_evidence(fixture({ readDate: () => { dates.push('date'); return Date; } }));
+  assert.equal(snapshotService.recordSnapshot('w', 'g', '2026-03-31T00:00:00.000Z'), '{"recorded_at":"2026-03-31T00:00:00.000Z","window":{"from":"2026-03-01T00:00:00.000Z","to":"2026-03-31T00:00:00.000Z","days":30},"spend":{"total":0},"bound_sessions":0,"last_activity_at":null}');
+  assert.deepEqual(dates, ['date', 'date']);
+}
+
+function run() {
+  assert.deepEqual(link(), { kind: 'doc', url: 'https://example.org/guide', label: 'Guide' });
+  assert.equal(create_evidence(fixture({ authorize: () => { throw new Error('unexpected authorization'); } })).snapshotView(null, '', 7), null);
+  const countService = create_evidence(fixture({ get: function(sql, id, revision) { assert.equal(this, undefined); assert.equal(sql, 'SELECT COUNT(*) AS n FROM v2_change_request_evidence WHERE change_request_id = ? AND revision = ?'); assert.equal(id, 'request-z'); assert.equal(revision, 4); return undefined; } }));
+  assert.equal(countService.evidenceCount('request-z', 4), 0);
+  contracts();
+  return { schema: 'literate-ai/generated-test-results@1', cases: ['generated-link', 'generated-legacy', 'generated-count'].map(case_id => ({ case_id, outcome: 'passed' })) };
+}
+module.exports = { run, smoke: link };

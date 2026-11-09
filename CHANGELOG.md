@@ -8,6 +8,11 @@
   another is requested, and says when the confirmation replaces that rule.
 - The live-agent test client uses fresh HTTP connections after synchronous CLI calls so the offline-revocation
   scenario can finish without a stale keep-alive socket reset.
+- Keep decision-route coverage tied to public action exports after native binding.
+
+- Prepare goal-service bindings with preserved approval, launch, evidence,
+  session governance and capacity behavior. Complete integration acceptance is pending.
+
 - Keep the 1,000-goal workspace cap while concurrent creations wait for SQLite,
   by rechecking capacity after the writer lock is acquired.
 

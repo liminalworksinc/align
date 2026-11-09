@@ -9,52 +9,42 @@ until each boundary earns transfer under ADR 0002.
 
 ## Latest candidate status
 
-The current retained-source checkpoint addresses
-[issue #77](https://github.com/liminalworksinc/align/issues/77). Goal creation keeps
-its early 1,000-goal refusal and repeats the same count and exact refusal inside
-the acquired write transaction, immediately before insertion. The original
-service reaches 1,001 goals in each of three held-writer schedules on each host.
-The two-statement correction passes all seven source controls on each host,
-including exact goal/version/audit counts and foreign-key checks. The low-level
-sample insertion path remains unchanged.
+The B15 candidate replaces all twelve goal and decision service algorithms with
+qualified libraries, preserving their public types, value-rule aliases and
+explicit host resources. Two clean qualifications and separate fresh admission
+pass for each child. Both hosts pass complete source and actual binding
+comparisons. The retained binding review covers 107 forwarding functions and
+35 native constant references across all twelve files, with no retained
+application algorithm. Original and failed candidates remain preserved.
 
-The current single-process production HTTP path already preserves capacity with
-the original source. A second server on the same data directory is refused by
-its existing runtime guard. The service-level invariant gap is therefore kept
-separate from public HTTP exploitability. No runtime guard was weakened.
+Combined web materialization passes 956 independent batches across 41 libraries.
+The unchanged full build, test and package recipe passes 1,847 application checks
+with zero failures or skips on 472 declared source members. These include the
+24 new independent verifier inputs and the public decision export reader.
+Real application store and browser checks
+exercise the coupled decision services, including approval without launch,
+revision races, dependencies, evidence, contributions, requests and holds. The
+canonical seven-case goal-cap regression passes through the native binding.
 
-The complete unchanged build, test and package commands pass 1,847 checks with
-zero failures or skips on 447 retained members. All 446 prior members remain;
-the new member is the canonical seven-case goal-cap regression, called by one
-new outer application assertion. Source: `sha256:21f29925336ec608c1f29679b381ffc431edae5d4cbf6565b92fdd0ed86edb21`.
-The two recorded workspace/sample EOF cleanups compile to byte-identical
-JavaScript and are covered by this new runtime epoch.
+The fresh Linux arm64 image `sha256:a49d9d5233d83e2874a57eb6804ba9e15410685794e653be1b6d9af8b8489578` passes all 36 image checks,
+six static assets, two root-owned raw assets and the existing operator closure.
+Eighteen additional offline bundled HTTP/SQLite controls pass. The full image
+runtime and provider inputs match the tested candidate. Both capable readers
+verify all 47 qualified projections and the current receipt
+`sha256:2bbe3706ddd25e2527170909eda1b8cecd67d665f15e7959fe042ad42110b85d`. Source: `sha256:a221a0efd6c7b55c14915df68758407cadf5e39b0f342f7b9d56a849a5ac49f6`.
 
-The fresh Linux arm64 image `sha256:c9cc9f63aa78f5920402086c5cca327e45cea3ca06a1ae87ba53a77b67e311fc` passes all 36 image checks,
-six exact static assets, both root-owned raw assets and the exact 41-file
-operator closure with five qualified packages. Eighteen additional offline
-actual HTTP/SQLite controls cover the sample, invitation, permission and restore
-paths plus supported runtime goal-cap behavior. They do not count as public QA
-or differential service-race proof. Every full-workflow input matches image
-source. The unchanged 150 ms p95 hook assertion passes with networking blocked.
-Both capable readers pass three required gates with two declared optional skips
-and explicitly verify all 35 qualified projections. Current receipt:
-`sha256:6c6de36e107fb2cf623606005829ea579b222c0d3be159cc122504add5d5cdfd`.
+The [dated child-preparation record](../architecture/goal-domain-admitted-acceptance.json) remains immutable evidence before parent acceptance. The [transfer ledger](native-boundary-transfers.json) records the later completed parent gates.
 
-The accepted B14 workspace/sample transfer at 95947813 remains preserved with
-its original package, both-host consumer and 72 unchanged caller observations.
-All 35 library pins and the declared retained Standard driver are unchanged.
-Fourteen of 31 boundaries have local transfer acceptance; B15 through B31 remain
-open. The approval and limit helpers are prepared externally for B15, and no
-partial B15 source retirement is claimed here. Original and failed evidence
-remain intact. Git and the existing draft PR record publication separately.
+Fifteen of 31 boundaries have local transfer acceptance. B16 through B31 remain
+open. The session-service candidates are prepared separately; their local child
+checks do not close B16. Publication of this checkpoint is recorded separately
+in Git and the existing draft PR.
 
-The normal review of the published workspace checkpoint left three maintainer
-and operator-security follow-ups open. The recorded B13 authentication
-confirmation remains distinct from those findings. This checkpoint grants no
-merge, independent maintainer review, real-provider browser acceptance, public
-tester security acceptance or live smoke. Existing Fly access still does not
-resolve the tester's owning account and active billing access.
+The prior authentication and compressed-command review findings remain open
+for maintainer and actual operator security review. No finding is automatically
+accepted or dismissed. Public delivery, real-provider browser acceptance, live
+smoke and actual operator security acceptance remain open. The existing tester
+account and founder-only release prerequisites remain separate delivery gates.
 
 ## Current main integration
 

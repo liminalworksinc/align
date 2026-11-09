@@ -1,15 +1,14 @@
 {
   "schema": "align/native-boundary-transfer-review@4",
-  "observed_utc": "2026-11-09T03:08:24.443636+00:00",
+  "observed_utc": "2026-11-09T23:41:09.187743+00:00",
   "review_kind": "Same-agent full source, package and measured acceptance review under operator delegation. B13 confirmation remains recorded. No independent maintainer or deployed-tester security acceptance.",
   "accepted_classification_sha256": "236b77cbd13222ec77aac7f3fc9c1d8cccaa6a46b662352ca7a5f5fb7d8ddf87",
   "image_platform": "linux/arm64",
-  "qualified_components": 35,
-  "reviewed_source_members": 53,
-  "completed_boundaries": 14,
+  "qualified_components": 47,
+  "reviewed_source_members": 65,
+  "completed_boundaries": 15,
   "total_boundaries": 31,
   "remaining_boundaries": [
-    "B15",
     "B16",
     "B17",
     "B18",
@@ -181,6 +180,90 @@
     {
       "file": "server-workspaces.normal-review-assessment-v1.json",
       "sha256": "f41e59ef71b133b43dec1edc0ffe30422cffe07ceaba2cf1ede671dda0c498a5"
+    },
+    {
+      "file": "goal-domain.twelve-target-bindings-review-v2.json",
+      "sha256": "3fc6457bcba247c51bcb112b0ec7865678191c11e2263cde3f592ed472d0cf10"
+    },
+    {
+      "file": "goal-domain.twelve-pending-assembly-proof-v2.json",
+      "sha256": "bdc5e461c32f7af1d9fceb321ec9f73598f4abc9f283b7515bc363a461a96842"
+    },
+    {
+      "file": "goal-domain.twelve-parent-full-workflow-proof-v3.json",
+      "sha256": "fc5c3bad12fd72c6f37f57aa82e4698e67aa15e104b10e5c9de63fc70e52670a"
+    },
+    {
+      "file": "goal-domain.twelve-completed-suite-evidence-v3.json",
+      "sha256": "46143a0f8a8f1abbffb88a7bd1f6d402ea49b8cfb3dbc8ec1f4bb841edc4dd0f"
+    },
+    {
+      "file": "goal-domain.twelve-serial-hook-acceptance-v3.json",
+      "sha256": "ace97247678351fded8e2486f78fa54aa63239b344085abc2a7bb5e50e344d08"
+    },
+    {
+      "file": "goal-domain.twelve-image-acceptance-proof-v3.json",
+      "sha256": "9b9f91e1a26aa0bcee80cdb1748290948022c8d500511993105420ef52c210db"
+    },
+    {
+      "file": "goal-domain.twelve-image-source-equivalence-v3.json",
+      "sha256": "57e14f2b744a09aa5b1bbeb82626850cbb3b92c5c5ce63459de13ebd7f57b632"
+    },
+    {
+      "file": "goal-domain.twelve-image-bundle-sample-proof-v3.json",
+      "sha256": "b956243c3c6fd5db45d6b38c8e5839382e7973aa4dcaee21a553b93daa30b997"
+    },
+    {
+      "file": "goal-domain.twelve-parent-current-readiness-proof-v3.json",
+      "sha256": "843b04a9ff598dd4ba84f1a145617e54a8e70fa629e72f465c3ddaceab662006"
+    },
+    {
+      "file": "goal-approval.current-child-readiness-proof-v1.json",
+      "sha256": "f4a60de159d42f8f596b1c6b926b1ae609f170999c450cae0c8c118671fb8c05"
+    },
+    {
+      "file": "goal-limits.current-child-readiness-proof-v1.json",
+      "sha256": "a36b52b35c9566ca3f43a809be46c77e8d187cdf3d6ac9fc0ad208953751b9df"
+    },
+    {
+      "file": "limit-suggest.current-child-readiness-proof-v1.json",
+      "sha256": "f74cc9b13e48aa2b47d5704c7f762e1be7595d614912793bb8ce7cce16f64a40"
+    },
+    {
+      "file": "server-value.current-child-readiness-proof-v3.json",
+      "sha256": "3af7d109d806fe5b272424839a9f666c2ef55a39839fdf09eb7ae6c49791e7dc"
+    },
+    {
+      "file": "server-change-read.current-child-readiness-proof-v2.json",
+      "sha256": "3045826bdec6010fd4a59ab28a54679a19640736ab532d0d94ca0607d9c52e19"
+    },
+    {
+      "file": "server-goals.current-child-readiness-proof-v5-docs2.json",
+      "sha256": "faa223b0ff9100d933bdd318e5c4967c95adf98bce031e1c2047fc770ead6710"
+    },
+    {
+      "file": "server-evidence.current-child-readiness-proof-v1-docs2.json",
+      "sha256": "2a8888da8fa8955253970d2d131a8fc8c5ccff1be5bf1bd60f2da130fd6a3eb9"
+    },
+    {
+      "file": "server-reallocations.current-child-readiness-proof-v1.json",
+      "sha256": "50b7e6696dbf5dddcd46a6aaba9c79b04ebc9a82d5cbf3374b0b8c2ae6947583"
+    },
+    {
+      "file": "server-requests.current-child-readiness-proof-v3.json",
+      "sha256": "017446ee8f96f5f0a6875da399390563937ded6952ad33c935e33f751cff3adb"
+    },
+    {
+      "file": "server-asks.current-child-readiness-proof-v1.json",
+      "sha256": "c91fac2578fe51522e4d46c498f1b7bc6516e2bff7c64aba24c50fa492214b78"
+    },
+    {
+      "file": "server-alignments.current-child-readiness-proof-v8.json",
+      "sha256": "9c479de899bcb3b088555da3156ccf38fdc52dd2c3b3232fce04bbcf527c3cf0"
+    },
+    {
+      "file": "server-changes.current-child-readiness-proof-v10.json",
+      "sha256": "68302bc9a12f5c3c5a0b0ce7638238c9eaf122966995f6d1e2e60c00bd8ef1aa"
     }
   ],
   "rows": [
@@ -1129,6 +1212,266 @@
         "complete_new_application_and_image_acceptance": true,
         "historical_72_unchanged_caller_observation_retained_as_record_time_evidence": true
       }
+    },
+    {
+      "boundary": "B15",
+      "name": "Goals and decisions",
+      "accepted_target_responsibility": "Caller-owned types, six existing value-rule aliases, supplied host resources, exact forwarding and native constant references.",
+      "required_acceptance": "Every state transition, stale revision, refusal and transaction effect, including approval without launch and evidence that remains an unchecked link.",
+      "dependencies": [
+        "B12",
+        "B13",
+        "B14"
+      ],
+      "current_member_hashes": {
+        "lib/v2/approval.ts": "923120dbab5a80b75aa581a41ce659b2933d876d90a1d20ba47a59dc99544959",
+        "lib/v2/goal-limits.ts": "4b4b01ae0372cdfeef9458bb8cc9dfb106cb3dc70daae6b40eaccd79fa595885",
+        "lib/v2/limit-suggest.ts": "0e581bdb579a6798ebf88c6e34cc2386254d0cce92c73be5965dcbb9bbdb4f25",
+        "lib/v2/value.ts": "77d4b553de95065b7357656b1463d9749dbd97610338653b87538bf814cf4d4d",
+        "lib/v2/changes-read.ts": "4b878794dd9592490d0d798b82b70e7c982796947105854f1f7a5dce9a89ff0d",
+        "lib/v2/goals.ts": "f4e5e7aabe3fbd5893a10fb9c64133ad7667c7e1b2ba33a7c2c9b045944dee4b",
+        "lib/v2/evidence.ts": "90505b2c28401b762b72debe9dd733d085c9e66d78110f6adff7c7831cb1bf11",
+        "lib/v2/reallocations.ts": "45a50da8adfadeea4b64828156cb93c3ae2f0e26fa3df4d2c4ade0f826fe2590",
+        "lib/v2/requests.ts": "07ed80715c366aeccfa072ff65e6544d5dc81badb40bd6c588c6cef9ebd50e83",
+        "lib/v2/asks.ts": "b01a7b9928169e4b4dbd1f47f91cee9419a6feb3cf3cbf35ab3daaba09e96085",
+        "lib/v2/alignments.ts": "ed385a823f68447b891ed646c1f497a2d0579f850dd4160bc5d33700085681e2",
+        "lib/v2/changes.ts": "f2bac97c01a4e922ce216d15b7e5e78776f1ba45c1f54e69a729b3cd47f8b39e"
+      },
+      "current_qualified_bindings": [
+        {
+          "component": "goal-approval",
+          "provider": ".literate/native-projects/local-goal-approval",
+          "package": "goal_approval",
+          "entry": "7c8c1d95d0b928249f37df21427d242fe9132b90b4a221277df08d58858dd818",
+          "lock_identity": "sha256:319fc86d50f24e9af80876cb713047a8de7158b4e5985c63774a45c30f4decfa",
+          "oracle": "goal-approval.json",
+          "oracle_sha256": "5b95784f420a2d7c1ef696e3abb7f3500aca0078a10a149dc330482286485a8c",
+          "independent_batches": 5,
+          "child_current_receipt": "sha256:f1d7e59046bdd2441baee5d8e1a6d717b967c9f65065feb299faa9f16fa0446b"
+        },
+        {
+          "component": "goal-limits",
+          "provider": ".literate/native-projects/local-goal-limits",
+          "package": "goal_limits",
+          "entry": "93b5a8f8fe9bc98d485ca52fbd9aac321f26cf5f85b9bc673fdd58aad1f546a1",
+          "lock_identity": "sha256:f64d542d96c40b8a03a5969dabd416321b7b4175c2697b422daf44a3b4432ce0",
+          "oracle": "goal-limits.json",
+          "oracle_sha256": "d7c6d4ecd8f687943c77779b108bd602cb667e61cd8f4c3b1199358f75239a02",
+          "independent_batches": 5,
+          "child_current_receipt": "sha256:c850968c7411bf9c5e5f96381fa3e961dddfb703fb9f4273cd7f3b25ca0900db"
+        },
+        {
+          "component": "limit-suggest",
+          "provider": ".literate/native-projects/local-limit-suggest",
+          "package": "limit_suggest",
+          "entry": "ed81a1e3b87f4c9bb88cc28a52eb37637f69cf0f50facaf124a429faeb77c04d",
+          "lock_identity": "sha256:cfacf1f796630095c56ded197975d2b96e066d75a5746f7ee2eb56098b30dfe6",
+          "oracle": "limit-suggest.json",
+          "oracle_sha256": "c923510b76d2c24f6f5a04e844f80b7ffcfc335c0bc651d44b372ce72c0b0cfc",
+          "independent_batches": 5,
+          "child_current_receipt": "sha256:18959ea102e075c93689184e74c31763c902f8a7408cba09c62d7a4d2f08c8bf"
+        },
+        {
+          "component": "server-value",
+          "provider": ".literate/native-projects/local-server-value",
+          "package": "server_value",
+          "entry": "9026b3f3af6eb3c212e851ca635caa35eb02616e8956cbe037b978ba26a0b717",
+          "lock_identity": "sha256:88c1548ac6a3fdb2cad374f680fe6b2b9916097b906e1ff81218a817618fa4e5",
+          "oracle": "server-value.json",
+          "oracle_sha256": "3f3d9eae38da6525447fd5f05e8eba974c307d41ce94ee6d6e6a9047af8c6232",
+          "independent_batches": 7,
+          "child_current_receipt": "sha256:f068472649848ea56ade451286a44629f691f0892944fee602e1bdc1fba8ebc1"
+        },
+        {
+          "component": "server-change-read",
+          "provider": ".literate/native-projects/local-server-change-read",
+          "package": "server_change_read",
+          "entry": "b57529418691b92d5217b3c95f0f29a48f616ee402ad5558977a5b57fcd4d63e",
+          "lock_identity": "sha256:f027fc2eb2e39a57fbb600590ce1f0ce3a32a9baa3cf30e6480706495776a308",
+          "oracle": "server-change-read.json",
+          "oracle_sha256": "e0805fb5071850b96730d083076665914261e8e19c03ff257c6ca86e120c936a",
+          "independent_batches": 4,
+          "child_current_receipt": "sha256:682779045a73ba24605e267e1ed4a2b5079b378983b4fde0080af11a1cc83611"
+        },
+        {
+          "component": "server-goals",
+          "provider": ".literate/native-projects/local-server-goals",
+          "package": "server_goals",
+          "entry": "3c3e7b7091759c444c1c70837fa747ffc9adb6e67e2e240c62631a4c74a3d9f2",
+          "lock_identity": "sha256:72cb34c01a934168bf0df4befb77be3280941d03c560d0abcbb2afb2a92d4b6f",
+          "oracle": "server-goals.json",
+          "oracle_sha256": "de8c75c2f7c7d4a153e7732fddd078f1f198b050492721914a1cfdce03cf0b30",
+          "independent_batches": 8,
+          "child_current_receipt": "sha256:6d3bb49e2b86cfc112771c46b238e26c87a930fe52477c1841761df79b2e6296"
+        },
+        {
+          "component": "server-evidence",
+          "provider": ".literate/native-projects/local-server-evidence",
+          "package": "server_evidence",
+          "entry": "0658606dad40f4008c0bb3e518b838d0783554b45737e50b9260f3977b06c72a",
+          "lock_identity": "sha256:ab8b21431550a4182d4a2c2938299fc15c1beb605bdc247b67164aef62b4bbca",
+          "oracle": "server-evidence.json",
+          "oracle_sha256": "b1f748d80336cc9d8075c1e8eda766dc4fa96287f200d0441489c2e42c142a48",
+          "independent_batches": 6,
+          "child_current_receipt": "sha256:db51940d8508084b12fdf1eb6f3ea8d081fb9d52ea94396a09e6270d2b7bb30a"
+        },
+        {
+          "component": "server-reallocations",
+          "provider": ".literate/native-projects/local-server-reallocations",
+          "package": "server_reallocations",
+          "entry": "3dead46341a15a65edd96dafbd7a6b11cc058ba31dc8686aae38e2d25e59b872",
+          "lock_identity": "sha256:e7614fef83fb4b145f4d772ae4bf4df6d760d302116ee970019ca159391619d7",
+          "oracle": "server-reallocations.json",
+          "oracle_sha256": "9375d46913230493523a57f094cdc5f31ccc5995060ab3845efa28485d8c98e8",
+          "independent_batches": 10,
+          "child_current_receipt": "sha256:bf3830c9d06ba4ebc0a69bd7518e497617529cc6bfd345d187c1cc0daea9296f"
+        },
+        {
+          "component": "server-requests",
+          "provider": ".literate/native-projects/local-server-requests",
+          "package": "server_requests",
+          "entry": "dc50cc83db49a8567ff837793914aac81ea35ea0343118e7a34975610e90f936",
+          "lock_identity": "sha256:ddfd1c7f15824f15f47ba22603726c8e2c12bd48bff28aa8c664a580a6391bb5",
+          "oracle": "server-requests.json",
+          "oracle_sha256": "950b45e0e2515eed7b95f23bc99cba8b10cc95fd70b3744121e932dfed94db51",
+          "independent_batches": 10,
+          "child_current_receipt": "sha256:a502c193827bc7082425be3d3fbdb123c4dc3935fd06becb0f3cdc328efb3a6b"
+        },
+        {
+          "component": "server-asks",
+          "provider": ".literate/native-projects/local-server-asks",
+          "package": "server_asks",
+          "entry": "91d15d5bf6aebbd049115028c87ed95098043f25f94f07dc5945881b5470e8cb",
+          "lock_identity": "sha256:7975dbed25347e5011a2c82579fe4071f7ba25e18ee6fd32a949c14c4dd79e95",
+          "oracle": "server-asks.json",
+          "oracle_sha256": "e04ea8a79bd52cf0fc76af21c16b79123a3f8644bdaaa1825b1076ff85989169",
+          "independent_batches": 10,
+          "child_current_receipt": "sha256:39ffcba740136b12876da964eecbd0a151d9f5ae5a0bd3bf68dde6abb20f2aff"
+        },
+        {
+          "component": "server-alignments",
+          "provider": ".literate/native-projects/local-server-alignments",
+          "package": "server_alignments",
+          "entry": "c38a7d692770e4730e8e08151df0acf8a20b6a150d4e38511b9e991186ca2f40",
+          "lock_identity": "sha256:2c992016646a92513fc85465c3a9d6a93dc2730c7559039c7d83f223c5a2a33a",
+          "oracle": "server-alignments.json",
+          "oracle_sha256": "835d6b1bcb35766f1de7c2c969aafdadbf4f02a187e0854e1e2e2cb401236b1c",
+          "independent_batches": 10,
+          "child_current_receipt": "sha256:78e2ababbf476b53c6db9d66cc5a6b1903f722c7d79e5bc1e2b3768ef4a2599c"
+        },
+        {
+          "component": "server-changes",
+          "provider": ".literate/native-projects/local-server-changes",
+          "package": "server_changes",
+          "entry": "e839ea76e79a3eaa5fad4bd54ec69f6f753b91700191f28af49b4823306b9c54",
+          "lock_identity": "sha256:52fdba211598116ea314ae606b8c1016ed5680d4bca377992d88004de28f9226",
+          "oracle": "server-changes.json",
+          "oracle_sha256": "65206cf9349cd837cca1286223b4e4514e9bab36e87db9b58ecaa0e81a115e35",
+          "independent_batches": 10,
+          "child_current_receipt": "sha256:d71d4d951666c48ca196c036457883eeb8102cf86294c9b6060f103f8df57499"
+        }
+      ],
+      "runtime_source_read": true,
+      "retained_roles": "Caller-owned types, explicit supplied resources, exact forwarding, native constant references and inert type-equality witnesses.",
+      "original_application_algorithms_in_retained_members": false,
+      "whole_boundary_closed": true,
+      "functional_acceptance_complete": true,
+      "closure_state": "All twelve libraries qualify twice, admit separately and pass both-host package and actual binding checks, unchanged public types and callers, complete application tests, fresh image and current receipt.",
+      "required_acceptance_result": "Current real application and bundled HTTP/SQLite tests exercise coupled goal changes, approval and launch, revisions, dependencies, contributions, requests, holds and evidence through all twelve actual bindings. Independent original records retain exact refusals, property reads and effects on both hosts. The canonical seven-case goal-cap regression remains in the full application suite.",
+      "supporting_measured_records": [
+        {
+          "file": "goal-domain.twelve-target-bindings-review-v2.json",
+          "sha256": "3fc6457bcba247c51bcb112b0ec7865678191c11e2263cde3f592ed472d0cf10"
+        },
+        {
+          "file": "goal-domain.twelve-pending-assembly-proof-v2.json",
+          "sha256": "bdc5e461c32f7af1d9fceb321ec9f73598f4abc9f283b7515bc363a461a96842"
+        },
+        {
+          "file": "goal-domain.twelve-parent-full-workflow-proof-v3.json",
+          "sha256": "fc5c3bad12fd72c6f37f57aa82e4698e67aa15e104b10e5c9de63fc70e52670a"
+        },
+        {
+          "file": "goal-domain.twelve-completed-suite-evidence-v3.json",
+          "sha256": "46143a0f8a8f1abbffb88a7bd1f6d402ea49b8cfb3dbc8ec1f4bb841edc4dd0f"
+        },
+        {
+          "file": "goal-domain.twelve-serial-hook-acceptance-v3.json",
+          "sha256": "ace97247678351fded8e2486f78fa54aa63239b344085abc2a7bb5e50e344d08"
+        },
+        {
+          "file": "goal-domain.twelve-image-acceptance-proof-v3.json",
+          "sha256": "9b9f91e1a26aa0bcee80cdb1748290948022c8d500511993105420ef52c210db"
+        },
+        {
+          "file": "goal-domain.twelve-image-source-equivalence-v3.json",
+          "sha256": "57e14f2b744a09aa5b1bbeb82626850cbb3b92c5c5ce63459de13ebd7f57b632"
+        },
+        {
+          "file": "goal-domain.twelve-image-bundle-sample-proof-v3.json",
+          "sha256": "b956243c3c6fd5db45d6b38c8e5839382e7973aa4dcaee21a553b93daa30b997"
+        },
+        {
+          "file": "goal-domain.twelve-parent-current-readiness-proof-v3.json",
+          "sha256": "843b04a9ff598dd4ba84f1a145617e54a8e70fa629e72f465c3ddaceab662006"
+        },
+        {
+          "file": "goal-approval.current-child-readiness-proof-v1.json",
+          "sha256": "f4a60de159d42f8f596b1c6b926b1ae609f170999c450cae0c8c118671fb8c05"
+        },
+        {
+          "file": "goal-limits.current-child-readiness-proof-v1.json",
+          "sha256": "a36b52b35c9566ca3f43a809be46c77e8d187cdf3d6ac9fc0ad208953751b9df"
+        },
+        {
+          "file": "limit-suggest.current-child-readiness-proof-v1.json",
+          "sha256": "f74cc9b13e48aa2b47d5704c7f762e1be7595d614912793bb8ce7cce16f64a40"
+        },
+        {
+          "file": "server-value.current-child-readiness-proof-v3.json",
+          "sha256": "3af7d109d806fe5b272424839a9f666c2ef55a39839fdf09eb7ae6c49791e7dc"
+        },
+        {
+          "file": "server-change-read.current-child-readiness-proof-v2.json",
+          "sha256": "3045826bdec6010fd4a59ab28a54679a19640736ab532d0d94ca0607d9c52e19"
+        },
+        {
+          "file": "server-goals.current-child-readiness-proof-v5-docs2.json",
+          "sha256": "faa223b0ff9100d933bdd318e5c4967c95adf98bce031e1c2047fc770ead6710"
+        },
+        {
+          "file": "server-evidence.current-child-readiness-proof-v1-docs2.json",
+          "sha256": "2a8888da8fa8955253970d2d131a8fc8c5ccff1be5bf1bd60f2da130fd6a3eb9"
+        },
+        {
+          "file": "server-reallocations.current-child-readiness-proof-v1.json",
+          "sha256": "50b7e6696dbf5dddcd46a6aaba9c79b04ebc9a82d5cbf3374b0b8c2ae6947583"
+        },
+        {
+          "file": "server-requests.current-child-readiness-proof-v3.json",
+          "sha256": "017446ee8f96f5f0a6875da399390563937ded6952ad33c935e33f751cff3adb"
+        },
+        {
+          "file": "server-asks.current-child-readiness-proof-v1.json",
+          "sha256": "c91fac2578fe51522e4d46c498f1b7bc6516e2bff7c64aba24c50fa492214b78"
+        },
+        {
+          "file": "server-alignments.current-child-readiness-proof-v8.json",
+          "sha256": "9c479de899bcb3b088555da3156ccf38fdc52dd2c3b3232fce04bbcf527c3cf0"
+        },
+        {
+          "file": "server-changes.current-child-readiness-proof-v10.json",
+          "sha256": "68302bc9a12f5c3c5a0b0ce7638238c9eaf122966995f6d1e2e60c00bd8ef1aa"
+        }
+      ],
+      "typed_target_bindings_permitted_by_accepted_classification": true,
+      "permanent_source_retention_exception": false,
+      "future_changes_require_current_acceptance": true,
+      "source_retirement_review_pending": false,
+      "original_failed_candidates_and_negative_controls_preserved": true,
+      "same_agent_review_only": true,
+      "independent_maintainer_review_claimed": false,
+      "actual_operator_security_acceptance_claimed": false
     }
   ],
   "public_tester_deployed": false,
@@ -1167,8 +1510,8 @@
       "final_deployed_tester_security_acceptance": false
     }
   },
-  "boundaries_with_complete_functional_acceptance": 14,
-  "implementation_boundaries_remaining": 17,
+  "boundaries_with_complete_functional_acceptance": 15,
+  "implementation_boundaries_remaining": 16,
   "human_confirmation_required_for_transfer_closure": [],
   "corrected_after_review": "f_fcab81184174",
   "prior_authentication_acceptance": {
@@ -1191,12 +1534,12 @@
     "independent_maintainer_review_claimed": false,
     "final_deployed_tester_security_acceptance": false
   },
-  "source_identity": "sha256:21f29925336ec608c1f29679b381ffc431edae5d4cbf6565b92fdd0ed86edb21",
-  "parent_receipt": "sha256:6c6de36e107fb2cf623606005829ea579b222c0d3be159cc122504add5d5cdfd",
+  "source_identity": "sha256:a221a0efd6c7b55c14915df68758407cadf5e39b0f342f7b9d56a849a5ac49f6",
+  "parent_receipt": "sha256:2bbe3706ddd25e2527170909eda1b8cecd67d665f15e7959fe042ad42110b85d",
   "application_checks": 1847,
   "image_checks": 36,
-  "source_members": 447,
-  "image_id": "sha256:c9cc9f63aa78f5920402086c5cca327e45cea3ca06a1ae87ba53a77b67e311fc",
+  "source_members": 472,
+  "image_id": "sha256:a49d9d5233d83e2874a57eb6804ba9e15410685794e653be1b6d9af8b8489578",
   "current_source_checkpoint_recorded_by_git": false,
   "current_image_all_full_workflow_inputs_exact": true,
   "prior_local_checkpoint_acceptance": [
@@ -1219,6 +1562,15 @@
       "image_checks": 36,
       "source_members": 446,
       "image_id": "sha256:8b66d1650c2d32c18676076e9648d97091a0a4946a95cabd6e5a861ef2a824f4"
+    },
+    {
+      "checkpoint_commit": "c019fcc5b2c3e7e38f05865c785d78c8ad99bce9",
+      "source_identity": "sha256:21f29925336ec608c1f29679b381ffc431edae5d4cbf6565b92fdd0ed86edb21",
+      "parent_receipt": "sha256:6c6de36e107fb2cf623606005829ea579b222c0d3be159cc122504add5d5cdfd",
+      "application_checks": 1847,
+      "image_checks": 36,
+      "source_members": 447,
+      "image_id": "sha256:c9cc9f63aa78f5920402086c5cca327e45cea3ca06a1ae87ba53a77b67e311fc"
     }
   ],
   "current_checkpoint_pending_publication": true,
