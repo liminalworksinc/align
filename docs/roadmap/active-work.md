@@ -27,10 +27,9 @@ queue item or let `docs/roadmap/` become a plan archive.
 
 ## Open pull-request landing queue
 
-The current 2026-11-10 survey confirms draft PR #58 at `4214c45f`, with
-47 qualified libraries and fifteen locally accepted boundaries. The B16 candidate
-has 56 libraries and sixteen local acceptances; its later publication is recorded
-by Git and the PR. Earlier peer statuses below remain historical and independently
+The current 2026-11-10 survey confirms draft PR #58 at `c4b85386`, with
+56 qualified libraries and sixteen locally accepted boundaries. Both CI checks
+pass. B17 original-source controls are prepared outside the published runtime. Earlier peer statuses below remain historical and independently
 owned. The current survey finds no collectable branches or worktrees.
 
 - [#58](https://github.com/liminalworksinc/align/pull/58), native rewrite:
@@ -165,11 +164,25 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Next action:** Publish the verified 56-library B16 checkpoint in the existing
-  draft PR, then continue B17 through B31. The [transfer review](native-boundary-transfers.md)
-  records sixteen local boundary acceptances and fifteen remaining boundaries.
-  Preserve original and failed evidence. Public tester delivery, founder-owned
-  release setup, actual operator security review and live smoke remain open.
+- **Next action:** Complete B17 metrics and retention contracts, native qualification
+  and separate admission. The three frozen members are `lib/v2/metrics-core.mts`,
+  `lib/v2/retention-core.mts` and `lib/v2/retention.ts`. Keep SQL, transactions,
+  environment, clocks and scheduling caller-owned. The proposed two libraries
+  expose one metrics factory and separate retention core/runner factories.
+  Both-host original controls pass 1,199 metrics observations and reject seventeen
+  defects; retention core passes 727 observations on the measured 48-table schema
+  and rejects twenty-four defects. The runner preserves all 422 native-host
+  observations and adds 418 declared-field VM observations, rejecting fourteen
+  defects on each host. Preserve both runner protocols in later actual-caller
+  acceptance. These are original-source preparations, not qualified replacements.
+  Follow current qualification, separate admission, source read, actual callers,
+  cache, parent application/image and receipt gates before closing B17.
+- **Current publication:** The 56-library checkpoint `c4b85386` is on draft PR #58
+  with both CI checks green and sixteen local boundary acceptances. Normal review
+  used no opt-out and returned two more findings, for seven open in total. The
+  [transfer review](native-boundary-transfers.md) links the exact committed runtime
+  sources. B17 through B31, public delivery and actual operator security acceptance
+  remain open.
 - **B14 prerequisite:** [Issue #76](https://github.com/liminalworksinc/align/issues/76)
   reproduces an existing invite-cap race while writers wait for SQLite. The local
   correction preserves the early check and rechecks under the transaction lock.

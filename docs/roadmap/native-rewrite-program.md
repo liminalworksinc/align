@@ -39,11 +39,12 @@ The [B15 child-preparation record](../architecture/goal-domain-admitted-acceptan
 and [B16 child-preparation record](../architecture/session-domain-admitted-acceptance.json)
 remain immutable. The [transfer ledger](native-boundary-transfers.json) records
 the later complete parent acceptance. Sixteen of 31 boundaries have local
-acceptance; B17 through B31 remain open. Publication is recorded separately in
-Git and the existing draft PR.
+acceptance; B17 through B31 remain open. The checkpoint `c4b85386` is published in the existing draft PR; both CI checks
+pass. The transfer review links each committed runtime source for inspection.
 
-The three earlier authentication and compressed-command review findings and two
-additional B15 authorization-relocation findings remain open. The exact review
+Seven review findings remain open: the three earlier authentication and
+compressed-command findings, two B15 authorization-relocation findings, and two
+B16 device/directive relocation and typed-boundary findings. The exact review
 IDs are recorded in the transfer ledger. The review log does not establish that
 the relocated checks are missing. No finding has been automatically accepted or dismissed. Public delivery,
 real-provider browser acceptance, actual operator security review and live smoke

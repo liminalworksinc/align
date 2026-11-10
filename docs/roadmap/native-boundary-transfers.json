@@ -395,6 +395,30 @@
     {
       "file": "server-sessions.actual-consumer-runtime-proof-v2.json",
       "sha256": "e469b517ad9335262677827f08aebf3b74ebc7d08cc8841a03a1319fe487a7dc"
+    },
+    {
+      "file": "session-domain.nine-push-job-v3.json",
+      "sha256": "5d35d8d4b10acdde7529e6ea9bed4cedd819519e04a09db941ecb6f64d130ee3"
+    },
+    {
+      "file": "session-domain.nine-push-v3.log",
+      "sha256": "df78bb24d193e92fb061817a26c2cf2ef9f820f1db64cb62c1552d1b6c6f3067"
+    },
+    {
+      "file": "session-domain.nine-published-pr58-head-v3.json",
+      "sha256": "195dda99fa23f57ce1563c88ca94c675f51f5d0a9bfac2006d4895f33d3b1e08"
+    },
+    {
+      "file": "server-metrics.original-two-host-preflight-v1.json",
+      "sha256": "8caaa458284c3c611ddbdb410c0ff3727574b2834131eec2c67c57255b2dfe20"
+    },
+    {
+      "file": "server-retention.runner-two-host-preflight-v4.json",
+      "sha256": "24a6dae0fba2d7e09b8bce22eef5ed539182b24fa7ca85dcc9784ed4c8dfcd2b"
+    },
+    {
+      "file": "server-retention.core-two-host-preflight-v1.json",
+      "sha256": "d0941bb3d42b0451ca91603f80145e255d8081caa160b8cf9e4e2965f878512b"
     }
   ],
   "rows": [
@@ -1963,7 +1987,19 @@
       "image_id": "sha256:e0846ceb4ce798129f100bfe2a4ae3832b8bee72e484078a139c8d54f8274e5e"
     }
   ],
-  "publication_record": "Git history and the draft PR report subsequent publication. This local record claims no push, merge or deployment.",
+  "publication_record": {
+    "commit": "c4b853866ff5e130fa294f8e70fe5c0530e87aa4",
+    "normal_push_exit_code": 0,
+    "review_bypass": false,
+    "PR": "https://github.com/liminalworksinc/align/pull/58",
+    "is_draft": true,
+    "both_CI_checks_successful": true,
+    "source_identity": "sha256:779a0cbe67e7b90dc34646762dd68972f5c88f3a286010115f78c907e1aceb39",
+    "receipt": "sha256:9b0afc6c68863b56253f21f9c82cc8481aee602fdb00cd7002f25fe2f8624244",
+    "open_review_findings": 7,
+    "public_qa_gates": 0,
+    "operator_security_accepted": false
+  },
   "retained_runtime_checkpoint_history": [
     {
       "checkpoint_commit": "95947813fe0a04726f1e680af359350a7b7f2554",
@@ -1993,7 +2029,7 @@
       "image_id": "sha256:a49d9d5233d83e2874a57eb6804ba9e15410685794e653be1b6d9af8b8489578"
     }
   ],
-  "current_checkpoint_pending_publication": true,
+  "current_checkpoint_pending_publication": false,
   "goal_cap_retained_source_correction": {
     "issue": "https://github.com/liminalworksinc/align/issues/77",
     "original_source_sha256": "b57c5f46cfedf024f5b0a1199793b55fb9f682de44c4f77b902519a5ab02d2f5",
@@ -2077,5 +2113,94 @@
     "findings_are_review_concerns_not_proven_missing_checks": true,
     "automatic_accept_or_dismiss": false,
     "actual_operator_security_accepted": false
-  }
+  },
+  "session_publication_review_followups": {
+    "commit": "c4b853866ff5e130fa294f8e70fe5c0530e87aa4",
+    "normal_hook_exit_code": 0,
+    "review_log": "session-domain.nine-push-v3.log",
+    "review_log_sha256": "df78bb24d193e92fb061817a26c2cf2ef9f820f1db64cb62c1552d1b6c6f3067",
+    "findings": [
+      {
+        "id": "f_5a0e064cc7ff",
+        "severity": "HIGH",
+        "source": "components/legacy-project-wrapper/implementation/lib/v2/devices.ts",
+        "status": "open-for-maintainer-and-operator-security-review",
+        "review_concern": "Inspect signature verification, refresh-token reuse revocation, expiry, clock skew, grant membership and pairing limits in the committed admitted device runtime; inspect the typed boundary assertion."
+      },
+      {
+        "id": "f_d943ad9dd8d1",
+        "severity": "HIGH",
+        "source": "components/legacy-project-wrapper/implementation/lib/v2/directives.ts",
+        "status": "open-for-maintainer-and-operator-security-review",
+        "review_concern": "Inspect device/user scoping, grants and withheld goal snapshots in the committed admitted directive runtime; inspect the typed boundary assertion."
+      }
+    ],
+    "automatic_accept_or_dismiss": false,
+    "actual_operator_security_accepted": false
+  },
+  "publication_runtime_source_index": {
+    "commit": "c4b853866ff5e130fa294f8e70fe5c0530e87aa4",
+    "all_links_revalidated_against_current_manifest_and_committed_bytes": true,
+    "sources": [
+      {
+        "component": "server-workspaces",
+        "provider": ".literate/native-projects/local-server-workspaces",
+        "admitted_entry": "789a071d942c1f075c67d13160b30e049674736bb2e6942ff5fb759758719ab6",
+        "runtime_module": "source/server_workspaces/create_workspaces.js",
+        "committed_blob": ".literate/native-projects/local-server-workspaces/generated/committed-source-cache/cas/blobs/sha256/13/13d2d1d6bd811d363f52b965807c064f83b08db9c7e6007f6eba8341def54f4d",
+        "sha256": "13d2d1d6bd811d363f52b965807c064f83b08db9c7e6007f6eba8341def54f4d",
+        "lines": 301,
+        "commit": "c4b853866ff5e130fa294f8e70fe5c0530e87aa4",
+        "url": "https://github.com/liminalworksinc/align/blob/c4b853866ff5e130fa294f8e70fe5c0530e87aa4/.literate/native-projects/local-server-workspaces/generated/committed-source-cache/cas/blobs/sha256/13/13d2d1d6bd811d363f52b965807c064f83b08db9c7e6007f6eba8341def54f4d#L1"
+      },
+      {
+        "component": "limit-suggest",
+        "provider": ".literate/native-projects/local-limit-suggest",
+        "admitted_entry": "ed81a1e3b87f4c9bb88cc28a52eb37637f69cf0f50facaf124a429faeb77c04d",
+        "runtime_module": "source/limit_suggest/create_suggestions.js",
+        "committed_blob": ".literate/native-projects/local-limit-suggest/generated/committed-source-cache/cas/blobs/sha256/9e/9e13a179918e01270dd1fae1d4cacde674b0907b2541cb25953780c444cbcb77",
+        "sha256": "9e13a179918e01270dd1fae1d4cacde674b0907b2541cb25953780c444cbcb77",
+        "lines": 98,
+        "commit": "c4b853866ff5e130fa294f8e70fe5c0530e87aa4",
+        "url": "https://github.com/liminalworksinc/align/blob/c4b853866ff5e130fa294f8e70fe5c0530e87aa4/.literate/native-projects/local-limit-suggest/generated/committed-source-cache/cas/blobs/sha256/9e/9e13a179918e01270dd1fae1d4cacde674b0907b2541cb25953780c444cbcb77#L1"
+      },
+      {
+        "component": "server-goals",
+        "provider": ".literate/native-projects/local-server-goals",
+        "admitted_entry": "3c3e7b7091759c444c1c70837fa747ffc9adb6e67e2e240c62631a4c74a3d9f2",
+        "runtime_module": "source/server_goals/create_goals.js",
+        "committed_blob": ".literate/native-projects/local-server-goals/generated/committed-source-cache/cas/blobs/sha256/ce/ce100db65fcc720b08ad7e84352905ed1d08d6ab6976dd19b54ecdfda87a17d9",
+        "sha256": "ce100db65fcc720b08ad7e84352905ed1d08d6ab6976dd19b54ecdfda87a17d9",
+        "lines": 383,
+        "commit": "c4b853866ff5e130fa294f8e70fe5c0530e87aa4",
+        "url": "https://github.com/liminalworksinc/align/blob/c4b853866ff5e130fa294f8e70fe5c0530e87aa4/.literate/native-projects/local-server-goals/generated/committed-source-cache/cas/blobs/sha256/ce/ce100db65fcc720b08ad7e84352905ed1d08d6ab6976dd19b54ecdfda87a17d9#L1"
+      },
+      {
+        "component": "server-devices",
+        "provider": ".literate/native-projects/local-server-devices",
+        "admitted_entry": "bf93b95967202a592392ece609a2afeada0f015c6e59a2c5ad020470d91869b8",
+        "runtime_module": "source/server_devices/create_devices.js",
+        "committed_blob": ".literate/native-projects/local-server-devices/generated/committed-source-cache/cas/blobs/sha256/c5/c539c44eb8b656f4b2ae4d3ba68aa52d1da487a075e2299205df33c745c95adf",
+        "sha256": "c539c44eb8b656f4b2ae4d3ba68aa52d1da487a075e2299205df33c745c95adf",
+        "lines": 280,
+        "commit": "c4b853866ff5e130fa294f8e70fe5c0530e87aa4",
+        "url": "https://github.com/liminalworksinc/align/blob/c4b853866ff5e130fa294f8e70fe5c0530e87aa4/.literate/native-projects/local-server-devices/generated/committed-source-cache/cas/blobs/sha256/c5/c539c44eb8b656f4b2ae4d3ba68aa52d1da487a075e2299205df33c745c95adf#L1"
+      },
+      {
+        "component": "server-directives",
+        "provider": ".literate/native-projects/local-server-directives",
+        "admitted_entry": "38872c8c1184392f3811a14a3fef9c539c2c10e8014d361e87a8638a250e56fd",
+        "runtime_module": "source/server_directives/create_directives.js",
+        "committed_blob": ".literate/native-projects/local-server-directives/generated/committed-source-cache/cas/blobs/sha256/ff/ff7843fe4e1ca719769d6f8df35c6505af0c8549058def756a556115dfbd44f7",
+        "sha256": "ff7843fe4e1ca719769d6f8df35c6505af0c8549058def756a556115dfbd44f7",
+        "lines": 122,
+        "commit": "c4b853866ff5e130fa294f8e70fe5c0530e87aa4",
+        "url": "https://github.com/liminalworksinc/align/blob/c4b853866ff5e130fa294f8e70fe5c0530e87aa4/.literate/native-projects/local-server-directives/generated/committed-source-cache/cas/blobs/sha256/ff/ff7843fe4e1ca719769d6f8df35c6505af0c8549058def756a556115dfbd44f7#L1"
+      }
+    ],
+    "independent_security_acceptance_claimed": false
+  },
+  "prior_publication_records": [
+    "Git history and the draft PR report subsequent publication. This local record claims no push, merge or deployment."
+  ]
 }
