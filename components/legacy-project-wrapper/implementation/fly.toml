@@ -14,7 +14,7 @@ primary_region = "sjc"
   ALIGN_PUBLIC_ORIGIN = "https://align-pg-draft.fly.dev"
   # Sign-in codes by email (all three settings, or none and a Google or GitHub client; the key is a secret).
   ALIGN_EMAIL_API_URL = "https://api.resend.com/emails"
-  ALIGN_EMAIL_FROM = "Align <signin@align-pg-draft.fly.dev>"
+  ALIGN_EMAIL_FROM = "Align <signin@theliminalspace.io>"
   # The one address that may make the first account by email code. Set it before the first deploy.
   # ALIGN_FIRST_OWNER_EMAIL = "owner@example.com"
   # Who may create workspaces: codes (default; issue them with scripts/align-admin.mjs), open, or closed. Caps

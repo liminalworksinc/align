@@ -143,7 +143,8 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
     <main className="grid min-h-screen place-items-center bg-[var(--al-bg)] p-6 text-zinc-800">
       <div className="al-in w-full max-w-[460px] rounded-[14px] border border-zinc-200 bg-white p-8">
         <h1 className="mb-1 font-display text-[34px] leading-none">Align</h1>
-        <p className="mb-6 text-[16px] text-zinc-600">Sign in as yourself to see your workspaces, goals and shared sessions.</p>
+        <p className="mb-1 text-[16px] text-zinc-600">Sign in as yourself to see your workspaces, goals and shared sessions.</p>
+        <p className="mb-6 text-[14px] text-zinc-500">Have an invite code? Sign in first, then enter it.</p>
         {(options.google || options.github) && (
           <div className="mb-5 flex flex-col gap-2">
             {options.google && (
