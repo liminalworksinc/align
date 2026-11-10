@@ -1830,7 +1830,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       const other = goal ? null : goalElsewhere(home, hot.share.workspace_id, arg);
       if (other) return `Align: "${clean(other.goal.title, 100)}" is a goal of ${clean(other.feed.workspace_name, 80)}, and this session is shared with ${clean(hot.share.workspace_name, 80)}, so it counts only toward ${clean(hot.share.workspace_name, 80)}'s goals. \`::align goals\` lists them.`;
       if (!goal) return noCachedGoal(arg, feed);
-      if (!goal.bindable) return `Align: "${goal.title}" needs an approved alignment before this session can count toward it.`;
+      if (!goal.bindable) return `Align: "${goal.title}" isn't a goal you can bind: only your own goals and your team's goals. If an approved alignment lists this session, Align moves it there by itself.`;
       // Recorded here, so the very next prompt opens the epoch even before a sync runs (as `align bind` does).
       const inj = readInjected(home, lid);
       const id = randomId("pb_");
