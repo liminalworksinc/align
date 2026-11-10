@@ -2438,7 +2438,11 @@ back to the row's timestamp); rows before the first epoch SHALL stay private, an
 refused SHALL be withheld. Each row SHALL carry only `request_key`, `ts`, `epoch_id`, `model`, `query_source`, the
 six token counters, `basis`, `est_list_usd_micros`, `price_table_version` and `source`. A usage upload answered
 403, 404 or 409 SHALL stop that session's uploads for the pass and log it, and a 404 or an error `sharing_stopped` or `not_shared`
-SHALL mark the share `stopped`; a network error SHALL end the upload step until the next pass.
+SHALL mark the share `stopped`. For 400, 413 or 422, the pass SHALL split the refused batch down to individual rows
+and keep sending that session's other rows, until five of its rows have been refused alone in that pass; the rest
+wait for the next pass. It SHALL set aside only those refused rows whose session had a row accepted this pass; a
+network error, 5xx, 401, 408 or 429 ends the step without treating that row as refused. Diagnostics SHALL contain
+only status, counts and a short local identifier, never request content.
 
 #### Scenario: Root turn beats timestamp
 
