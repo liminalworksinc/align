@@ -1,0 +1,55 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_allocation } = require('../server_allocation/create_allocation.js');
+
+const cases = [
+  { id: 'generated-utc-thursday', args: [0], expected: -259200000 },
+  { id: 'generated-utc-monday', args: [345600000], expected: 345600000 },
+  { id: 'generated-utc-sunday-end', args: [345599999], expected: -259200000 }
+];
+function api() {
+  return create_allocation({ all: () => [], badRequest: message => new Error(message), goalObj: g => g, canReadGoal: () => true, need: () => {}, readDate: () => Date });
+}
+function run() {
+  const results = [];
+  for (const c of cases) {
+    assert.deepStrictEqual(api().weekStart(...c.args), c.expected);
+    results.push({ case_id: c.id, outcome: 'passed' });
+  }
+  checkReports();
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+function checkReports() {
+  const calls = [];
+  const principal = { wsId: 'w' };
+  const data = [
+    [{ goal_id: 'a', fresh: 20, est: 7, unpriced: 0, sessions: 2 }, { goal_id: 'hidden', fresh: 20, est: 0, unpriced: 1, sessions: 1 }],
+    [{ goal_id: null, fresh: 60, est: 3, unpriced: 0, sessions: 0 }],
+    [{ id: 'a', title: 'Alpha', status: 'active', target_share: 30 }, { id: 'b', title: 'Beta', status: 'active', target_share: 10 }]
+  ];
+  const resources = { all: (...args) => { calls.push(args); return data.shift(); }, badRequest: m => new Error(m), goalObj: g => g, canReadGoal: () => true, need: (p, permission) => { assert.equal(p, principal); assert.equal(permission, 'spend.read'); }, readDate: () => Date };
+  const lib = create_allocation(resources);
+  assert.equal(create_allocation.name, 'create_allocation');
+  assert.equal(create_allocation.length, 1);
+  assert.deepStrictEqual(Object.keys(lib), ['allocation', 'weekStart', 'weeklyAllocation', 'feedAllocation']);
+  assert.deepStrictEqual(Object.values(lib).map(f => f.length), [3, 1, 1, 1]);
+  assert.deepStrictEqual(lib.allocation(principal, null, null), {
+    from: null, to: null, total_fresh_tokens: 100, total_est_list_usd_micros: 10, unpriced_requests: 1,
+    rows: [
+      { kind: 'goal', goal: { id: 'a', title: 'Alpha' }, fresh_tokens: 20, share: 20, target_share: 30, gap: -10, est_list_usd_micros: 7, unpriced_requests: 0, sessions: 2 },
+      { kind: 'goal', goal: { id: 'b', title: 'Beta' }, fresh_tokens: 0, share: 0, target_share: 10, gap: -10, est_list_usd_micros: 0, unpriced_requests: 0, sessions: 0 },
+      { kind: 'private', goal: null, fresh_tokens: 20, share: 20, target_share: null, gap: null, est_list_usd_micros: 0, unpriced_requests: 1, sessions: 1 },
+      { kind: 'unallocated', goal: null, fresh_tokens: 60, share: 60, target_share: null, gap: null, est_list_usd_micros: 3, unpriced_requests: 0, sessions: 0 }
+    ], note: 'Agent time is counted in fresh tokens (input, output and cache writes) for every model. Costs are estimates at list price, not a bill.'
+  });
+  assert.deepStrictEqual(calls.map(c => c.slice(1)), [['w', null, null, null, null], ['w', null, null, null, null], ['w']]);
+  const refusal = {};
+  assert.throws(() => create_allocation({ ...resources, need: () => { throw refusal; } }).allocation(principal, 'z', 'a'), e => e === refusal);
+  const feedData = [[{ goal_id: 'x', fresh: 23, est: 0, unpriced: 0, sessions: 1 }, { goal_id: null, fresh: 57, est: 0, unpriced: 0, sessions: 1 }], [], [{ goal_id: 'x' }], [{ id: 'x', target_share: 20 }]];
+  const feed = create_allocation({ ...resources, all: () => feedData.shift(), need: () => { throw new Error('feed permission'); } }).feedAllocation(principal, 0);
+  assert(feed instanceof Map);
+  assert.deepStrictEqual([...feed], [['x', { target_share: 20, share_7d: 29, gap_7d: 8.7, held: true }]]);
+  assert.deepStrictEqual(api().weeklyAllocation(principal, 1, 0), [{ week_start: '1969-12-29T00:00:00.000Z', total_fresh_tokens: 0, rows: [] }]);
+}
+function smoke() { return api().weekStart(...cases[0].args); }
+module.exports = { run, smoke };

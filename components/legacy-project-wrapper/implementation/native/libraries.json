@@ -19775,6 +19775,2850 @@
         "server-changes.json": "65206cf9349cd837cca1286223b4e4514e9bab36e87db9b58ecaa0e81a115e35",
         "server-changes-harness-draft-v1.cjs": "f56e015480b54bbd79ababf1b97fa769304d154cd87d23c41cf263f3c77c45e1"
       }
+    },
+    {
+      "component": "server-steering",
+      "provider": ".literate/native-projects/local-server-steering",
+      "package": "server_steering",
+      "lock_identity": "sha256:bf1067f1e7f22db40afaefb4b48e01c7f849a559f63cc853edd30b474cd96def",
+      "lock": {
+        "edges": [],
+        "nodes": [
+          {
+            "interface_bindings": [
+              {
+                "capability": "server-steering.create-steering",
+                "component_revision": {
+                  "algorithm": "sha256",
+                  "digest": "a6a6f153d9615f468dca945428536ae3e230f6fd53e414f23b3bc157c177475c",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "interface_identity": {
+                  "algorithm": "sha256",
+                  "digest": "090aa92ba84a70a8728953982db3b69225f52bdd3adcabac45ec45dae7c03ef2",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "schema": "urn:literate-ai:schema:v2:component-interface-binding"
+              }
+            ],
+            "requirement_constraint_satisfactions": [],
+            "revision": {
+              "acceptance_contracts": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "d23f4ee3ec9c2dec8fc2946c9e71d3c2bef325023c6c56b54fa91dde3eb92e52",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "acceptance-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "qualification/profile.json"
+                }
+              ],
+              "authoring_identity": {
+                "algorithm": "sha256",
+                "digest": "ad5d29c8ebe471492365a4cc3bb848d968043f0b9c9ad2c5d040f009fc95524a",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "authoring_inputs": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "0df5d4b45e8ff6a1e3b670add69e4897fd29bfdcd2e521275d602809e4704f5f",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application-implementation/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "79519b3fde095c4189cd95c0e6ff3049a31557c34938ca5df4d0481b64f6e606",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "7bfdd0ddf52d2ddf5d6ac5ed6536b999da474323978937e72f4e4d3b1dface38",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-specification-planning/SKILL.md"
+                }
+              ],
+              "coordinate": {
+                "name": "server-steering",
+                "namespace": "local"
+              },
+              "public_interfaces": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "090aa92ba84a70a8728953982db3b69225f52bdd3adcabac45ec45dae7c03ef2",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "public-interface-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/interface-server-steering-create-steering-bb6646ecbf.md"
+                }
+              ],
+              "repository_sources": [],
+              "routing_policy": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "99bc0eb9ee3039ccb3836060c199bc94cf1e5aa6c6a92d64235dc6e7065bdb79",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "routing-policy",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "routing/production/staging/dev/routing.json"
+              },
+              "schema": "urn:literate-ai:schema:v2:locked-component-revision",
+              "selected_flavor_revisions": [
+                {
+                  "algorithm": "sha256",
+                  "digest": "886f850bd6927ca62013e2aa7867dd0d687c91e859ff610744765b059bf0f160",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "abbd16e5e9ab1b191d2fa2deee5acea7f4ba63cd33296867b17d0bb083673a22",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "e9e03948031c2f93697b210239d0eed5ca8596407ec4caeaf4aead6e55782982",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                }
+              ],
+              "specification_set_identity": {
+                "algorithm": "sha256",
+                "digest": "2ead6c3785bfbe309737a5779be029c414ff012597d474a743d879ca22592647",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "specifications": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "d35a5021b553db37746ed1d46fb002d0871faf350c749de2aa37c45279992c8a",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/spec.md"
+                }
+              ],
+              "version": "1.0.0",
+              "workflow_definition": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "c5c8c2881fd7d5b1504847e93aee5a91015438bbaf867bfb50d5d215e0b0309d",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "workflow",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "workflows/production/staging/dev/workflow.md"
+              }
+            },
+            "schema": "urn:literate-ai:schema:v2:component-lock-node",
+            "target_flavor_selection": {
+              "component_revision": {
+                "algorithm": "sha256",
+                "digest": "a6a6f153d9615f468dca945428536ae3e230f6fd53e414f23b3bc157c177475c",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "schema": "urn:literate-ai:schema:v2:node-target-flavor-selection",
+              "selection_policy_identity": {
+                "algorithm": "sha256",
+                "digest": "42443354e59564885dacddc7e203cd3a4dd3f045934d79c98e273d3dbfeace8a",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "slots": [
+                {
+                  "selected": [],
+                  "slot": {
+                    "axis": "build.system",
+                    "capability_contract": "server-steering.create-steering",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "build-system"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "abbd16e5e9ab1b191d2fa2deee5acea7f4ba63cd33296867b17d0bb083673a22",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "javascript"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "implementation.language-ecosystem",
+                    "capability_contract": "server-steering.create-steering",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "implementation-language-ecosystem"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "e9e03948031c2f93697b210239d0eed5ca8596407ec4caeaf4aead6e55782982",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "macos"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "platform.os",
+                    "capability_contract": "server-steering.create-steering",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "platform-os"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "886f850bd6927ca62013e2aa7867dd0d687c91e859ff610744765b059bf0f160",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "node-server-steering"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "toolchain",
+                    "capability_contract": "server-steering.create-steering",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "toolchain"
+                  }
+                }
+              ],
+              "target_name": "server-steering-host-v1",
+              "target_profile_identity": {
+                "algorithm": "sha256",
+                "digest": "1107a1432a01da3bdc0fb27e189f37c0e4f62c79344a35b5d5dfe7a6c3addac6",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              }
+            }
+          }
+        ],
+        "provider_resolutions": [],
+        "resolver_identity": {
+          "algorithm": "sha256",
+          "digest": "5085d8dcc1825af6e6c4340ff39ac0e130986c12fc447f82fb700dd27dbe8a95",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "root_revision": {
+          "algorithm": "sha256",
+          "digest": "a6a6f153d9615f468dca945428536ae3e230f6fd53e414f23b3bc157c177475c",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "schema": "urn:literate-ai:schema:v2:component-lock",
+        "selection_policy_identity": {
+          "algorithm": "sha256",
+          "digest": "42443354e59564885dacddc7e203cd3a4dd3f045934d79c98e273d3dbfeace8a",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "target_name": "server-steering-host-v1",
+        "target_profile_identity": {
+          "algorithm": "sha256",
+          "digest": "1107a1432a01da3bdc0fb27e189f37c0e4f62c79344a35b5d5dfe7a6c3addac6",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        }
+      },
+      "qualified_projection": "sha256:57924449f073171165e936b6406e828a93738f6a7ae7e80c8ecb747f8cec9233",
+      "authority_head": "provenance/component-authority/054132851105969e291bde958b347f52240780f48cd558d0dda3d67fda10c397/current.json",
+      "entry": "132a28ba35373f537d89bf2d091cf376bee83f92d9c16891593a7f52ac63df9d",
+      "source_tree": "6c41161e6c73935b07e9070ebf922e38a985fb7473ddd1532638f7ea3967debe",
+      "files": [
+        {
+          "path": "create_steering.js",
+          "algorithm": "sha256",
+          "digest": "9950518431fd2f6934ff3c1449b974d55aebb4fde139d4e606319703ffbe52c4",
+          "media_type": "application/octet-stream",
+          "size": 3942
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "baac7cc86372363aa9c4d7d4dcaff5bf8a063032604d6abe46018e077287a7bf",
+          "media_type": "application/octet-stream",
+          "size": 100
+        }
+      ],
+      "surface": {
+        "schema": "urn:literate-ai:schema:v2:library-import-surface@1",
+        "language": "javascript",
+        "package": "server_steering",
+        "capabilities": [
+          {
+            "schema": "urn:literate-ai:schema:v2:library-capability-import@1",
+            "capability": "server-steering.create-steering",
+            "interface_identity": {
+              "schema": "urn:literate-ai:schema:v1:content-identity",
+              "algorithm": "sha256",
+              "digest": "090aa92ba84a70a8728953982db3b69225f52bdd3adcabac45ec45dae7c03ef2"
+            },
+            "module": "server_steering/create_steering",
+            "symbols": [
+              "create_steering"
+            ]
+          }
+        ]
+      },
+      "oracle": "server-steering.json",
+      "verifier": "server-steering-harness-draft-v2.cjs",
+      "verification_files": {
+        "server-steering.json": "952ed86d1a58d98382d7abc1178b129b87e66e99f72bfa4e86502c2559ae5292",
+        "server-steering-harness-draft-v2.cjs": "32da61104b38cb3d84042cefc85640a5346effa085204f247c823529ae679234"
+      }
+    },
+    {
+      "component": "server-spend",
+      "provider": ".literate/native-projects/local-server-spend",
+      "package": "server_spend",
+      "lock_identity": "sha256:9dd755a0c6ece671bdba7768dfb1c4995b27f6670335b4b41c7837c1653e37f2",
+      "lock": {
+        "edges": [],
+        "nodes": [
+          {
+            "interface_bindings": [
+              {
+                "capability": "server-spend.create-spend",
+                "component_revision": {
+                  "algorithm": "sha256",
+                  "digest": "fdb63b455091914e7c904cac00968b67a633e853b5a41bdb5f0f5736b661b394",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "interface_identity": {
+                  "algorithm": "sha256",
+                  "digest": "6c786f43e3e4f51ba397d7ea2201af8007cff11c44ca52e33d27a6a96ab36975",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "schema": "urn:literate-ai:schema:v2:component-interface-binding"
+              }
+            ],
+            "requirement_constraint_satisfactions": [],
+            "revision": {
+              "acceptance_contracts": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "7f6f4c4a9c1b13f83269ea569f69402dad75dc1d9f46a34b9726bbceb26c90e9",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "acceptance-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "qualification/profile.json"
+                }
+              ],
+              "authoring_identity": {
+                "algorithm": "sha256",
+                "digest": "1727568a30b2bea18bc03e3917e2e011713a58de9256248319fcc7749aabd30d",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "authoring_inputs": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "0df5d4b45e8ff6a1e3b670add69e4897fd29bfdcd2e521275d602809e4704f5f",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application-implementation/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "79519b3fde095c4189cd95c0e6ff3049a31557c34938ca5df4d0481b64f6e606",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "7bfdd0ddf52d2ddf5d6ac5ed6536b999da474323978937e72f4e4d3b1dface38",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-specification-planning/SKILL.md"
+                }
+              ],
+              "coordinate": {
+                "name": "server-spend",
+                "namespace": "local"
+              },
+              "public_interfaces": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "6c786f43e3e4f51ba397d7ea2201af8007cff11c44ca52e33d27a6a96ab36975",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "public-interface-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/interface-server-spend-create-spend-37b20149eb.md"
+                }
+              ],
+              "repository_sources": [],
+              "routing_policy": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "99bc0eb9ee3039ccb3836060c199bc94cf1e5aa6c6a92d64235dc6e7065bdb79",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "routing-policy",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "routing/production/staging/dev/routing.json"
+              },
+              "schema": "urn:literate-ai:schema:v2:locked-component-revision",
+              "selected_flavor_revisions": [
+                {
+                  "algorithm": "sha256",
+                  "digest": "3e19edb34e9fa18331f9d19d9a5619f01a2304dbb174d71214e65a21c3991336",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "92a2f3f50e51e577fa0ee269525fa3ca9e3025ee49db15d92177ed69c39c5e4d",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "ea8d0373787b4d49723a8126fe37f6f40f63333977ee28e7830d8120d63d279d",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                }
+              ],
+              "specification_set_identity": {
+                "algorithm": "sha256",
+                "digest": "2fb55b70f70b642425015ff2a42ceaf9039a070db4b9b3323899e9530cf798d9",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "specifications": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "8a912a0534a77323ed24c4f142ab7ff0cf5a2b6957f20a35fceb81affc573216",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/spec.md"
+                }
+              ],
+              "version": "1.0.0",
+              "workflow_definition": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "c5c8c2881fd7d5b1504847e93aee5a91015438bbaf867bfb50d5d215e0b0309d",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "workflow",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "workflows/production/staging/dev/workflow.md"
+              }
+            },
+            "schema": "urn:literate-ai:schema:v2:component-lock-node",
+            "target_flavor_selection": {
+              "component_revision": {
+                "algorithm": "sha256",
+                "digest": "fdb63b455091914e7c904cac00968b67a633e853b5a41bdb5f0f5736b661b394",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "schema": "urn:literate-ai:schema:v2:node-target-flavor-selection",
+              "selection_policy_identity": {
+                "algorithm": "sha256",
+                "digest": "1025760e5cc2644c6ceb67e3fe94508cbc355d3bc1c6f2f7685d64835fe54b98",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "slots": [
+                {
+                  "selected": [],
+                  "slot": {
+                    "axis": "build.system",
+                    "capability_contract": "server-spend.create-spend",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "build-system"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "3e19edb34e9fa18331f9d19d9a5619f01a2304dbb174d71214e65a21c3991336",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "javascript"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "implementation.language-ecosystem",
+                    "capability_contract": "server-spend.create-spend",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "implementation-language-ecosystem"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "ea8d0373787b4d49723a8126fe37f6f40f63333977ee28e7830d8120d63d279d",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "macos"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "platform.os",
+                    "capability_contract": "server-spend.create-spend",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "platform-os"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "92a2f3f50e51e577fa0ee269525fa3ca9e3025ee49db15d92177ed69c39c5e4d",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "node-server-spend"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "toolchain",
+                    "capability_contract": "server-spend.create-spend",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "toolchain"
+                  }
+                }
+              ],
+              "target_name": "server-spend-host-v1",
+              "target_profile_identity": {
+                "algorithm": "sha256",
+                "digest": "14bcd47aa917958d13435c5083ae15f02cf652f673d342291de1bd63877328e6",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              }
+            }
+          }
+        ],
+        "provider_resolutions": [],
+        "resolver_identity": {
+          "algorithm": "sha256",
+          "digest": "5085d8dcc1825af6e6c4340ff39ac0e130986c12fc447f82fb700dd27dbe8a95",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "root_revision": {
+          "algorithm": "sha256",
+          "digest": "fdb63b455091914e7c904cac00968b67a633e853b5a41bdb5f0f5736b661b394",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "schema": "urn:literate-ai:schema:v2:component-lock",
+        "selection_policy_identity": {
+          "algorithm": "sha256",
+          "digest": "1025760e5cc2644c6ceb67e3fe94508cbc355d3bc1c6f2f7685d64835fe54b98",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "target_name": "server-spend-host-v1",
+        "target_profile_identity": {
+          "algorithm": "sha256",
+          "digest": "14bcd47aa917958d13435c5083ae15f02cf652f673d342291de1bd63877328e6",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        }
+      },
+      "qualified_projection": "sha256:ae0d6a3be311aef89b1001a8b6ec9274fe06d60ccccb8fbe8049fd87012cc72d",
+      "authority_head": "provenance/component-authority/7bb74104e830432b3cafc365c069e1d4375fd941cad7c034d742ecc05f12c9f4/current.json",
+      "entry": "4707a954d09037f24b85ed74f0266e510612631d2dbe0e7628e08d76628a514a",
+      "source_tree": "c41212671997f9471c18c2533c138c498a42f8a88857365601ca9b17d540b18a",
+      "files": [
+        {
+          "path": "create_spend.js",
+          "algorithm": "sha256",
+          "digest": "76440c83aa246a625b50ea0a71ba9436c9238c4ffa9fb98c6ed13e3eb390f003",
+          "media_type": "application/octet-stream",
+          "size": 6790
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "bafec79805e538460a798fe9fbd73b5026f5f2717f6c9d1836262d39abfaa275",
+          "media_type": "application/octet-stream",
+          "size": 91
+        }
+      ],
+      "surface": {
+        "schema": "urn:literate-ai:schema:v2:library-import-surface@1",
+        "language": "javascript",
+        "package": "server_spend",
+        "capabilities": [
+          {
+            "schema": "urn:literate-ai:schema:v2:library-capability-import@1",
+            "capability": "server-spend.create-spend",
+            "interface_identity": {
+              "schema": "urn:literate-ai:schema:v1:content-identity",
+              "algorithm": "sha256",
+              "digest": "6c786f43e3e4f51ba397d7ea2201af8007cff11c44ca52e33d27a6a96ab36975"
+            },
+            "module": "server_spend/create_spend",
+            "symbols": [
+              "create_spend"
+            ]
+          }
+        ]
+      },
+      "oracle": "server-spend.json",
+      "verifier": "server-spend-harness-draft-v2.cjs",
+      "verification_files": {
+        "server-spend.json": "e45b797963f4a3b0a2421c8762127e9a7cf3a6144fed12c639d1b2bcf221162b",
+        "server-spend-harness-draft-v2.cjs": "fb07e202186de4a5723fc7581485af8735341f3103e3375339c393a7bf513040"
+      }
+    },
+    {
+      "component": "server-goal-activity",
+      "provider": ".literate/native-projects/local-server-goal-activity",
+      "package": "server_goal_activity",
+      "lock_identity": "sha256:d107cc84b08a708aa44e1814ae1512caf2e8ea1396a1b270be73338bca371e32",
+      "lock": {
+        "edges": [],
+        "nodes": [
+          {
+            "interface_bindings": [
+              {
+                "capability": "server-goal-activity.create-goal-activity",
+                "component_revision": {
+                  "algorithm": "sha256",
+                  "digest": "ba1a1beefdf4e214f4ac58c15c39be1fabfad2f3d1351afbf12171fbae25b261",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "interface_identity": {
+                  "algorithm": "sha256",
+                  "digest": "689345cd32b3b0f66a384cd92ac6f73f304db7db939bdd34747d0b804e86814f",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "schema": "urn:literate-ai:schema:v2:component-interface-binding"
+              }
+            ],
+            "requirement_constraint_satisfactions": [],
+            "revision": {
+              "acceptance_contracts": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "2978e6ab7f3135004d761c7b5ce50e3666cfa76b0f2a83f0af088f4a245da2b2",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "acceptance-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "qualification/profile.json"
+                }
+              ],
+              "authoring_identity": {
+                "algorithm": "sha256",
+                "digest": "ac3a7f353cfcb888a633cdcce3ee3e58bcd45dd04aa1a5975f6591f362a8552c",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "authoring_inputs": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "0df5d4b45e8ff6a1e3b670add69e4897fd29bfdcd2e521275d602809e4704f5f",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application-implementation/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "79519b3fde095c4189cd95c0e6ff3049a31557c34938ca5df4d0481b64f6e606",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "7bfdd0ddf52d2ddf5d6ac5ed6536b999da474323978937e72f4e4d3b1dface38",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-specification-planning/SKILL.md"
+                }
+              ],
+              "coordinate": {
+                "name": "server-goal-activity",
+                "namespace": "local"
+              },
+              "public_interfaces": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "689345cd32b3b0f66a384cd92ac6f73f304db7db939bdd34747d0b804e86814f",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "public-interface-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/interface-server-goal-activity-create-goal-activity-1322ddfecc.md"
+                }
+              ],
+              "repository_sources": [],
+              "routing_policy": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "99bc0eb9ee3039ccb3836060c199bc94cf1e5aa6c6a92d64235dc6e7065bdb79",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "routing-policy",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "routing/production/staging/dev/routing.json"
+              },
+              "schema": "urn:literate-ai:schema:v2:locked-component-revision",
+              "selected_flavor_revisions": [
+                {
+                  "algorithm": "sha256",
+                  "digest": "778654306a838dec248575723aa334489eb4eb253b5bdb281198a6c8bd0b6f4c",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "7df191d1bf20c44f6d2aafd9c1ccec346bf8c23d911e94607e36720332cbc65f",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "9cb7b2956d03db8542fda866e1ea6f2d4af0e8ded20beb7ba91b06cfe10b9343",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                }
+              ],
+              "specification_set_identity": {
+                "algorithm": "sha256",
+                "digest": "745547971ab3c6f54f1aa631972da847782afc87836584c7142dda7c1482b427",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "specifications": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "dd6a790110089e3e204bff292622d64b46eb4e30c060fb8a4539672be926bd2c",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/spec.md"
+                }
+              ],
+              "version": "1.0.0",
+              "workflow_definition": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "c5c8c2881fd7d5b1504847e93aee5a91015438bbaf867bfb50d5d215e0b0309d",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "workflow",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "workflows/production/staging/dev/workflow.md"
+              }
+            },
+            "schema": "urn:literate-ai:schema:v2:component-lock-node",
+            "target_flavor_selection": {
+              "component_revision": {
+                "algorithm": "sha256",
+                "digest": "ba1a1beefdf4e214f4ac58c15c39be1fabfad2f3d1351afbf12171fbae25b261",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "schema": "urn:literate-ai:schema:v2:node-target-flavor-selection",
+              "selection_policy_identity": {
+                "algorithm": "sha256",
+                "digest": "6dcb46c794dee411cf42e6d165bd3f85688b87a317924aa12cbea316c2989ed0",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "slots": [
+                {
+                  "selected": [],
+                  "slot": {
+                    "axis": "build.system",
+                    "capability_contract": "server-goal-activity.create-goal-activity",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "build-system"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "7df191d1bf20c44f6d2aafd9c1ccec346bf8c23d911e94607e36720332cbc65f",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "javascript"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "implementation.language-ecosystem",
+                    "capability_contract": "server-goal-activity.create-goal-activity",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "implementation-language-ecosystem"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "778654306a838dec248575723aa334489eb4eb253b5bdb281198a6c8bd0b6f4c",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "macos"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "platform.os",
+                    "capability_contract": "server-goal-activity.create-goal-activity",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "platform-os"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "9cb7b2956d03db8542fda866e1ea6f2d4af0e8ded20beb7ba91b06cfe10b9343",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "node-server-goal-activity"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "toolchain",
+                    "capability_contract": "server-goal-activity.create-goal-activity",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "toolchain"
+                  }
+                }
+              ],
+              "target_name": "server-goal-activity-host-v1",
+              "target_profile_identity": {
+                "algorithm": "sha256",
+                "digest": "1b71f796c753c119a36e9f1c3c5ba292d091195093f63150abe6bf24910f6f98",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              }
+            }
+          }
+        ],
+        "provider_resolutions": [],
+        "resolver_identity": {
+          "algorithm": "sha256",
+          "digest": "5085d8dcc1825af6e6c4340ff39ac0e130986c12fc447f82fb700dd27dbe8a95",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "root_revision": {
+          "algorithm": "sha256",
+          "digest": "ba1a1beefdf4e214f4ac58c15c39be1fabfad2f3d1351afbf12171fbae25b261",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "schema": "urn:literate-ai:schema:v2:component-lock",
+        "selection_policy_identity": {
+          "algorithm": "sha256",
+          "digest": "6dcb46c794dee411cf42e6d165bd3f85688b87a317924aa12cbea316c2989ed0",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "target_name": "server-goal-activity-host-v1",
+        "target_profile_identity": {
+          "algorithm": "sha256",
+          "digest": "1b71f796c753c119a36e9f1c3c5ba292d091195093f63150abe6bf24910f6f98",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        }
+      },
+      "qualified_projection": "sha256:6fadc3de4cc67a9a414ca9854ca6bcf74c6b90a2ad0f933469361d503017516a",
+      "authority_head": "provenance/component-authority/182d0c49cd7ed2c14fde6ffb27ca88072947b00979ab8b8ecbf39cc4b6849ac6/current.json",
+      "entry": "fbff34f971aeb54de6e47a7f5b125a89a279d04a046b12da78cd664c7cc2e1e1",
+      "source_tree": "1fb0daf915f6c446ae8f63c2e6cb276699f0a8102897a4903e4819e12ca70653",
+      "files": [
+        {
+          "path": "create_goal_activity.js",
+          "algorithm": "sha256",
+          "digest": "cd3a9f0de488db3851883b168c6fe43f976a4e3aee88f6b03ab8f197878b056a",
+          "media_type": "application/octet-stream",
+          "size": 5467
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "2a449a71f26c32a8d4a9067eb3df6ad6b33074a10acf4228c8744a7dabd34d54",
+          "media_type": "application/octet-stream",
+          "size": 115
+        }
+      ],
+      "surface": {
+        "schema": "urn:literate-ai:schema:v2:library-import-surface@1",
+        "language": "javascript",
+        "package": "server_goal_activity",
+        "capabilities": [
+          {
+            "schema": "urn:literate-ai:schema:v2:library-capability-import@1",
+            "capability": "server-goal-activity.create-goal-activity",
+            "interface_identity": {
+              "schema": "urn:literate-ai:schema:v1:content-identity",
+              "algorithm": "sha256",
+              "digest": "689345cd32b3b0f66a384cd92ac6f73f304db7db939bdd34747d0b804e86814f"
+            },
+            "module": "server_goal_activity/create_goal_activity",
+            "symbols": [
+              "create_goal_activity"
+            ]
+          }
+        ]
+      },
+      "oracle": "server-goal-activity.json",
+      "verifier": "server-goal-activity-harness-draft-v1.cjs",
+      "verification_files": {
+        "server-goal-activity.json": "1f6098e54c2322e86afa8ea99a56ef2b5d98b75c8cf560b830b04d0268615962",
+        "server-goal-activity-harness-draft-v1.cjs": "cb6671ad8a9337d6147dad6d6d9e261d369230be1b0990ed89e3c143e6298ddd"
+      }
+    },
+    {
+      "component": "server-allocation",
+      "provider": ".literate/native-projects/local-server-allocation",
+      "package": "server_allocation",
+      "lock_identity": "sha256:3ea868e05c607e61cbd4ee4892cc4fdd50eecddfaf313373674e32f92504042d",
+      "lock": {
+        "edges": [],
+        "nodes": [
+          {
+            "interface_bindings": [
+              {
+                "capability": "server-allocation.create-allocation",
+                "component_revision": {
+                  "algorithm": "sha256",
+                  "digest": "2c3279ef6e5515fe872b37cce62b99044f99778eefcd402b1441a04229383721",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "interface_identity": {
+                  "algorithm": "sha256",
+                  "digest": "7e8eba1ff9671e0a739006b00c49c0a37dd3ca1cbbb56e46156c3f3303ebc065",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "schema": "urn:literate-ai:schema:v2:component-interface-binding"
+              }
+            ],
+            "requirement_constraint_satisfactions": [],
+            "revision": {
+              "acceptance_contracts": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "6c62edd5e73ddc70636d387301c915c190396abe57812b24498846e0d77d7bb9",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "acceptance-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "qualification/profile.json"
+                }
+              ],
+              "authoring_identity": {
+                "algorithm": "sha256",
+                "digest": "82823656f222eb6c753850cf8b538f650b7e60e56787ac854b2e63a4a5881951",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "authoring_inputs": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "0df5d4b45e8ff6a1e3b670add69e4897fd29bfdcd2e521275d602809e4704f5f",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application-implementation/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "79519b3fde095c4189cd95c0e6ff3049a31557c34938ca5df4d0481b64f6e606",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "7bfdd0ddf52d2ddf5d6ac5ed6536b999da474323978937e72f4e4d3b1dface38",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-specification-planning/SKILL.md"
+                }
+              ],
+              "coordinate": {
+                "name": "server-allocation",
+                "namespace": "local"
+              },
+              "public_interfaces": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "7e8eba1ff9671e0a739006b00c49c0a37dd3ca1cbbb56e46156c3f3303ebc065",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "public-interface-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/interface-server-allocation-create-allocation-8fc6dc1879.md"
+                }
+              ],
+              "repository_sources": [],
+              "routing_policy": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "99bc0eb9ee3039ccb3836060c199bc94cf1e5aa6c6a92d64235dc6e7065bdb79",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "routing-policy",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "routing/production/staging/dev/routing.json"
+              },
+              "schema": "urn:literate-ai:schema:v2:locked-component-revision",
+              "selected_flavor_revisions": [
+                {
+                  "algorithm": "sha256",
+                  "digest": "58fa06618385ca813568cc7671e4924747f568b2b7232497a5f32dff0acfb111",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "59b0ce4c4925c4a076747ccfd62c95100caf8476f6b0e9ab884a199eebc4aa74",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "a473f8dc826e4497c304ce1abb8497eb7d5cdfa6c8e0956c1f26e4d42a7ef707",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                }
+              ],
+              "specification_set_identity": {
+                "algorithm": "sha256",
+                "digest": "93bbec3aaaf5de65d5ca3317585393fc30c8d7f876a0b97b5d40a55e8e021ae7",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "specifications": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "8672b3c357989b800589db0f2533144e6df82123e854c12ad386c0d5fb60e0c8",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/spec.md"
+                }
+              ],
+              "version": "1.0.0",
+              "workflow_definition": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "c5c8c2881fd7d5b1504847e93aee5a91015438bbaf867bfb50d5d215e0b0309d",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "workflow",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "workflows/production/staging/dev/workflow.md"
+              }
+            },
+            "schema": "urn:literate-ai:schema:v2:component-lock-node",
+            "target_flavor_selection": {
+              "component_revision": {
+                "algorithm": "sha256",
+                "digest": "2c3279ef6e5515fe872b37cce62b99044f99778eefcd402b1441a04229383721",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "schema": "urn:literate-ai:schema:v2:node-target-flavor-selection",
+              "selection_policy_identity": {
+                "algorithm": "sha256",
+                "digest": "68aed5f2214db7b081eff6f6ba6e960ac4d74dbe89de5e60c8946f8109337197",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "slots": [
+                {
+                  "selected": [],
+                  "slot": {
+                    "axis": "build.system",
+                    "capability_contract": "server-allocation.create-allocation",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "build-system"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "58fa06618385ca813568cc7671e4924747f568b2b7232497a5f32dff0acfb111",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "javascript"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "implementation.language-ecosystem",
+                    "capability_contract": "server-allocation.create-allocation",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "implementation-language-ecosystem"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "a473f8dc826e4497c304ce1abb8497eb7d5cdfa6c8e0956c1f26e4d42a7ef707",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "macos"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "platform.os",
+                    "capability_contract": "server-allocation.create-allocation",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "platform-os"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "59b0ce4c4925c4a076747ccfd62c95100caf8476f6b0e9ab884a199eebc4aa74",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "node-server-allocation"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "toolchain",
+                    "capability_contract": "server-allocation.create-allocation",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "toolchain"
+                  }
+                }
+              ],
+              "target_name": "server-allocation-host-v1",
+              "target_profile_identity": {
+                "algorithm": "sha256",
+                "digest": "64a5b2978e5d09fce33ffd9299baa0d7052a973f8fbc98fdf516cbb431436af7",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              }
+            }
+          }
+        ],
+        "provider_resolutions": [],
+        "resolver_identity": {
+          "algorithm": "sha256",
+          "digest": "5085d8dcc1825af6e6c4340ff39ac0e130986c12fc447f82fb700dd27dbe8a95",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "root_revision": {
+          "algorithm": "sha256",
+          "digest": "2c3279ef6e5515fe872b37cce62b99044f99778eefcd402b1441a04229383721",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "schema": "urn:literate-ai:schema:v2:component-lock",
+        "selection_policy_identity": {
+          "algorithm": "sha256",
+          "digest": "68aed5f2214db7b081eff6f6ba6e960ac4d74dbe89de5e60c8946f8109337197",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "target_name": "server-allocation-host-v1",
+        "target_profile_identity": {
+          "algorithm": "sha256",
+          "digest": "64a5b2978e5d09fce33ffd9299baa0d7052a973f8fbc98fdf516cbb431436af7",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        }
+      },
+      "qualified_projection": "sha256:e612894c6a49d9da4c23096871dae356e97ca0d65db2893aeedcd83fade0d974",
+      "authority_head": "provenance/component-authority/aee17b87cae2f51ef4add09c08adf4132889a1eb78207b99aba407044e180e7d/current.json",
+      "entry": "9225a20fbeb3ce05a6c9b5bda7a04c8bece33ecb5f09540af6133f3ce1e5da45",
+      "source_tree": "2c71033c4ebb9225523c6201732aa72bd529ee26f6d2aae1ece9dcba6e5a1491",
+      "files": [
+        {
+          "path": "create_allocation.js",
+          "algorithm": "sha256",
+          "digest": "208858f5605a04ee367dc740ab3e1741653eda0183503917d557fc496a3f91d3",
+          "media_type": "application/octet-stream",
+          "size": 6404
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "8069579eff95db25781936869fc903733c9ad86721571a08d9a3c331c8a4b43c",
+          "media_type": "application/octet-stream",
+          "size": 106
+        }
+      ],
+      "surface": {
+        "schema": "urn:literate-ai:schema:v2:library-import-surface@1",
+        "language": "javascript",
+        "package": "server_allocation",
+        "capabilities": [
+          {
+            "schema": "urn:literate-ai:schema:v2:library-capability-import@1",
+            "capability": "server-allocation.create-allocation",
+            "interface_identity": {
+              "schema": "urn:literate-ai:schema:v1:content-identity",
+              "algorithm": "sha256",
+              "digest": "7e8eba1ff9671e0a739006b00c49c0a37dd3ca1cbbb56e46156c3f3303ebc065"
+            },
+            "module": "server_allocation/create_allocation",
+            "symbols": [
+              "create_allocation"
+            ]
+          }
+        ]
+      },
+      "oracle": "server-allocation.json",
+      "verifier": "server-allocation-harness-draft-v2.cjs",
+      "verification_files": {
+        "server-allocation.json": "20d3e2498a21176e5c5d6476a34317a12aca60892308912cdbda8512f31df075",
+        "server-allocation-harness-draft-v2.cjs": "24560c36efc6dfbe88049a864f727d58e4eb445eb4e41025e5f9282d2b946508"
+      }
+    },
+    {
+      "component": "server-activity",
+      "provider": ".literate/native-projects/local-server-activity",
+      "package": "server_activity",
+      "lock_identity": "sha256:3ea9d42747f2484c705c100f87f4a9a8044d59880bbcfaef1569643fbf63eec1",
+      "lock": {
+        "edges": [],
+        "nodes": [
+          {
+            "interface_bindings": [
+              {
+                "capability": "server-activity.create-activity",
+                "component_revision": {
+                  "algorithm": "sha256",
+                  "digest": "000b66d2a878d7bb819683984e029897f83d233def2d59645a05479528263916",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "interface_identity": {
+                  "algorithm": "sha256",
+                  "digest": "ac9b8606eef890c832d3fd82e21f037fda11970439683273cf31d256db7ff559",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "schema": "urn:literate-ai:schema:v2:component-interface-binding"
+              }
+            ],
+            "requirement_constraint_satisfactions": [],
+            "revision": {
+              "acceptance_contracts": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "f3e6239a73ceb3c50986587251aa271e05c1f24b81d7fa674820551f280db015",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "acceptance-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "qualification/profile.json"
+                }
+              ],
+              "authoring_identity": {
+                "algorithm": "sha256",
+                "digest": "453fbe7a35d167db32716d58fb25e39839aff327173bbb3aa2e8f1ca3e6f2a42",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "authoring_inputs": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "0df5d4b45e8ff6a1e3b670add69e4897fd29bfdcd2e521275d602809e4704f5f",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application-implementation/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "79519b3fde095c4189cd95c0e6ff3049a31557c34938ca5df4d0481b64f6e606",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "7bfdd0ddf52d2ddf5d6ac5ed6536b999da474323978937e72f4e4d3b1dface38",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-specification-planning/SKILL.md"
+                }
+              ],
+              "coordinate": {
+                "name": "server-activity",
+                "namespace": "local"
+              },
+              "public_interfaces": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "ac9b8606eef890c832d3fd82e21f037fda11970439683273cf31d256db7ff559",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "public-interface-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/interface-server-activity-create-activity-d0df59af4a.md"
+                }
+              ],
+              "repository_sources": [],
+              "routing_policy": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "99bc0eb9ee3039ccb3836060c199bc94cf1e5aa6c6a92d64235dc6e7065bdb79",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "routing-policy",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "routing/production/staging/dev/routing.json"
+              },
+              "schema": "urn:literate-ai:schema:v2:locked-component-revision",
+              "selected_flavor_revisions": [
+                {
+                  "algorithm": "sha256",
+                  "digest": "44ef1c00efdfd9575df99b485b228cbdff36665c723a19543e3b7691ee62df50",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "a5d2e35192d7c485f44905dd8e07627a8908b1affc4835ea745a6a47613ee188",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "cf52b5e0912a03be97ebf82f025312f07a8b15ffd99fece4f12122ab2c6928dc",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                }
+              ],
+              "specification_set_identity": {
+                "algorithm": "sha256",
+                "digest": "4532c5b1a902aa9442134e8b5d342f3c80bc817762bb1bb59fb8a72299a7260d",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "specifications": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "bcd5e87e949adfa2bab3edc82604eba30f9d6f271647174f4abe78259e16fa9b",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/spec.md"
+                }
+              ],
+              "version": "1.0.0",
+              "workflow_definition": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "c5c8c2881fd7d5b1504847e93aee5a91015438bbaf867bfb50d5d215e0b0309d",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "workflow",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "workflows/production/staging/dev/workflow.md"
+              }
+            },
+            "schema": "urn:literate-ai:schema:v2:component-lock-node",
+            "target_flavor_selection": {
+              "component_revision": {
+                "algorithm": "sha256",
+                "digest": "000b66d2a878d7bb819683984e029897f83d233def2d59645a05479528263916",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "schema": "urn:literate-ai:schema:v2:node-target-flavor-selection",
+              "selection_policy_identity": {
+                "algorithm": "sha256",
+                "digest": "d4e7315b8c2b72a7decdd9980cc92d2940a8a38cd0248f84568766c38cbf528b",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "slots": [
+                {
+                  "selected": [],
+                  "slot": {
+                    "axis": "build.system",
+                    "capability_contract": "server-activity.create-activity",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "build-system"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "44ef1c00efdfd9575df99b485b228cbdff36665c723a19543e3b7691ee62df50",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "javascript"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "implementation.language-ecosystem",
+                    "capability_contract": "server-activity.create-activity",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "implementation-language-ecosystem"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "a5d2e35192d7c485f44905dd8e07627a8908b1affc4835ea745a6a47613ee188",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "macos"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "platform.os",
+                    "capability_contract": "server-activity.create-activity",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "platform-os"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "cf52b5e0912a03be97ebf82f025312f07a8b15ffd99fece4f12122ab2c6928dc",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "node-server-activity"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "toolchain",
+                    "capability_contract": "server-activity.create-activity",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "toolchain"
+                  }
+                }
+              ],
+              "target_name": "server-activity-host-v1",
+              "target_profile_identity": {
+                "algorithm": "sha256",
+                "digest": "d5ab44e4b4456cd06ecd5611afd2ae6fd1c8f330e18fe0f73619d2bccf561bf2",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              }
+            }
+          }
+        ],
+        "provider_resolutions": [],
+        "resolver_identity": {
+          "algorithm": "sha256",
+          "digest": "5085d8dcc1825af6e6c4340ff39ac0e130986c12fc447f82fb700dd27dbe8a95",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "root_revision": {
+          "algorithm": "sha256",
+          "digest": "000b66d2a878d7bb819683984e029897f83d233def2d59645a05479528263916",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "schema": "urn:literate-ai:schema:v2:component-lock",
+        "selection_policy_identity": {
+          "algorithm": "sha256",
+          "digest": "d4e7315b8c2b72a7decdd9980cc92d2940a8a38cd0248f84568766c38cbf528b",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "target_name": "server-activity-host-v1",
+        "target_profile_identity": {
+          "algorithm": "sha256",
+          "digest": "d5ab44e4b4456cd06ecd5611afd2ae6fd1c8f330e18fe0f73619d2bccf561bf2",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        }
+      },
+      "qualified_projection": "sha256:d93b0f5e478e6d19c557ee9e760d66a083f555dc97aff6c61f45995912efb66b",
+      "authority_head": "provenance/component-authority/e90f9accc36b682a167f13e414903db194b53220e1cf64c877fd3542b765fc12/current.json",
+      "entry": "bf888962269befd4131c9ed894e547a5c3ddda9afec6dc37967cf31f8ef67150",
+      "source_tree": "cf1c3444ab70ee39b34d3759536624d7550404326b556d94e3deac57230e1391",
+      "files": [
+        {
+          "path": "create_activity.js",
+          "algorithm": "sha256",
+          "digest": "10d0e101bfd6b1c2bf056d13d55643e6a0ac456b5d67236198fba011b6070b78",
+          "media_type": "application/octet-stream",
+          "size": 4781
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "382501bed551dfde499761118560f185909931249f5dfa165eb83ffc88203f62",
+          "media_type": "application/octet-stream",
+          "size": 100
+        }
+      ],
+      "surface": {
+        "schema": "urn:literate-ai:schema:v2:library-import-surface@1",
+        "language": "javascript",
+        "package": "server_activity",
+        "capabilities": [
+          {
+            "schema": "urn:literate-ai:schema:v2:library-capability-import@1",
+            "capability": "server-activity.create-activity",
+            "interface_identity": {
+              "schema": "urn:literate-ai:schema:v1:content-identity",
+              "algorithm": "sha256",
+              "digest": "ac9b8606eef890c832d3fd82e21f037fda11970439683273cf31d256db7ff559"
+            },
+            "module": "server_activity/create_activity",
+            "symbols": [
+              "create_activity"
+            ]
+          }
+        ]
+      },
+      "oracle": "server-activity.json",
+      "verifier": "server-activity-harness-draft-v1.cjs",
+      "verification_files": {
+        "server-activity.json": "e252f40d3f543bea04623f005fdf90db64b7106e8990c7806ddd1187e3f9a91e",
+        "server-activity-harness-draft-v1.cjs": "ebb7e66a6a3c11507cc2883e9fcbf93c35d182caa8f4ea715cb92101119ac545"
+      }
+    },
+    {
+      "component": "server-home",
+      "provider": ".literate/native-projects/local-server-home",
+      "package": "server_home",
+      "lock_identity": "sha256:ded1cfccedec9abb28a58030f634c4b2d0d4850f9fd71d6ee1d6f3345ad23e2b",
+      "lock": {
+        "edges": [],
+        "nodes": [
+          {
+            "interface_bindings": [
+              {
+                "capability": "server-home.create-home",
+                "component_revision": {
+                  "algorithm": "sha256",
+                  "digest": "972d74a2344dd63df441f65d00afe47ef47fe12e04ecabc26fd2a6d3afbf511e",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "interface_identity": {
+                  "algorithm": "sha256",
+                  "digest": "1a5f4827357d1102957f4c9c132adf72b97950cb4f96145954d0bfcf5d770c1d",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "schema": "urn:literate-ai:schema:v2:component-interface-binding"
+              }
+            ],
+            "requirement_constraint_satisfactions": [],
+            "revision": {
+              "acceptance_contracts": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "41d214c8dab7a064f0c1fa1b98e45ceab6cd83c125d8027899befc0d7edac684",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "acceptance-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "qualification/profile.json"
+                }
+              ],
+              "authoring_identity": {
+                "algorithm": "sha256",
+                "digest": "c09629769628e605747205bd830c2d5d8a44cef3edb6f19a50e8055b79a55611",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "authoring_inputs": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "0df5d4b45e8ff6a1e3b670add69e4897fd29bfdcd2e521275d602809e4704f5f",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application-implementation/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "79519b3fde095c4189cd95c0e6ff3049a31557c34938ca5df4d0481b64f6e606",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "7bfdd0ddf52d2ddf5d6ac5ed6536b999da474323978937e72f4e4d3b1dface38",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-specification-planning/SKILL.md"
+                }
+              ],
+              "coordinate": {
+                "name": "server-home",
+                "namespace": "local"
+              },
+              "public_interfaces": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "1a5f4827357d1102957f4c9c132adf72b97950cb4f96145954d0bfcf5d770c1d",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "public-interface-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/interface-server-home-create-home-5259a03343.md"
+                }
+              ],
+              "repository_sources": [],
+              "routing_policy": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "99bc0eb9ee3039ccb3836060c199bc94cf1e5aa6c6a92d64235dc6e7065bdb79",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "routing-policy",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "routing/production/staging/dev/routing.json"
+              },
+              "schema": "urn:literate-ai:schema:v2:locked-component-revision",
+              "selected_flavor_revisions": [
+                {
+                  "algorithm": "sha256",
+                  "digest": "7f9849505537df8ddf1d3d93be9022933d3e1c0a44b9122b2cd741d52bfc4c54",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "d5fdb18732172d6ffe88b7dfe240e66e9c3472f941717792ea71539af7ab706d",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "f4dd5f8bb761356444c00d5c9a5d32e5c840b870beaad97a68a06f8bbcf88708",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                }
+              ],
+              "specification_set_identity": {
+                "algorithm": "sha256",
+                "digest": "c34f7c92b72ac527331bd669356f5fb905429629c187abf3fa26ff8a7f295d43",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "specifications": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "d67084eb1decd6b33ffb6b1567ea918232b2ebdfced48822c4bfb91ae613486d",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/spec.md"
+                }
+              ],
+              "version": "1.0.0",
+              "workflow_definition": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "c5c8c2881fd7d5b1504847e93aee5a91015438bbaf867bfb50d5d215e0b0309d",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "workflow",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "workflows/production/staging/dev/workflow.md"
+              }
+            },
+            "schema": "urn:literate-ai:schema:v2:component-lock-node",
+            "target_flavor_selection": {
+              "component_revision": {
+                "algorithm": "sha256",
+                "digest": "972d74a2344dd63df441f65d00afe47ef47fe12e04ecabc26fd2a6d3afbf511e",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "schema": "urn:literate-ai:schema:v2:node-target-flavor-selection",
+              "selection_policy_identity": {
+                "algorithm": "sha256",
+                "digest": "7451660addbd1dd3f2ce24c8171edc18ca40c85103ed4558e7b2567c47428b52",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "slots": [
+                {
+                  "selected": [],
+                  "slot": {
+                    "axis": "build.system",
+                    "capability_contract": "server-home.create-home",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "build-system"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "7f9849505537df8ddf1d3d93be9022933d3e1c0a44b9122b2cd741d52bfc4c54",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "javascript"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "implementation.language-ecosystem",
+                    "capability_contract": "server-home.create-home",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "implementation-language-ecosystem"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "f4dd5f8bb761356444c00d5c9a5d32e5c840b870beaad97a68a06f8bbcf88708",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "macos"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "platform.os",
+                    "capability_contract": "server-home.create-home",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "platform-os"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "d5fdb18732172d6ffe88b7dfe240e66e9c3472f941717792ea71539af7ab706d",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "node-server-home"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "toolchain",
+                    "capability_contract": "server-home.create-home",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "toolchain"
+                  }
+                }
+              ],
+              "target_name": "server-home-host-v1",
+              "target_profile_identity": {
+                "algorithm": "sha256",
+                "digest": "7a24435df5c970f18b9b3d0121e440ee3db47a7c96a7bc50b4c1fbba3345c64d",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              }
+            }
+          }
+        ],
+        "provider_resolutions": [],
+        "resolver_identity": {
+          "algorithm": "sha256",
+          "digest": "5085d8dcc1825af6e6c4340ff39ac0e130986c12fc447f82fb700dd27dbe8a95",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "root_revision": {
+          "algorithm": "sha256",
+          "digest": "972d74a2344dd63df441f65d00afe47ef47fe12e04ecabc26fd2a6d3afbf511e",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "schema": "urn:literate-ai:schema:v2:component-lock",
+        "selection_policy_identity": {
+          "algorithm": "sha256",
+          "digest": "7451660addbd1dd3f2ce24c8171edc18ca40c85103ed4558e7b2567c47428b52",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "target_name": "server-home-host-v1",
+        "target_profile_identity": {
+          "algorithm": "sha256",
+          "digest": "7a24435df5c970f18b9b3d0121e440ee3db47a7c96a7bc50b4c1fbba3345c64d",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        }
+      },
+      "qualified_projection": "sha256:ebc12cfd4da7037018aa692bd25df2cb133e52ea7070eb6fd22a129cacd5096a",
+      "authority_head": "provenance/component-authority/8f046297130b7f423f84af579efae8a9c4827577ad11fbeb686dd7d1cfc9ef1f/current.json",
+      "entry": "94e00b51e74ad2265d1ee0557f6ea9a3e805df1ffe58bdfad6de3be6a9859391",
+      "source_tree": "9b236faa505353948f9380513735373fe62eb76cb870f23899294e28ee14c947",
+      "files": [
+        {
+          "path": "create_home.js",
+          "algorithm": "sha256",
+          "digest": "1a30c49d9fb416eb23e250cf9bbae4db65276a561a2b3ddc422533a5194c73b7",
+          "media_type": "application/octet-stream",
+          "size": 6041
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "cf1a6a82bb585b898a761ea274157f278a3b508c37322d0e43870fa82b1c2b19",
+          "media_type": "application/octet-stream",
+          "size": 88
+        }
+      ],
+      "surface": {
+        "schema": "urn:literate-ai:schema:v2:library-import-surface@1",
+        "language": "javascript",
+        "package": "server_home",
+        "capabilities": [
+          {
+            "schema": "urn:literate-ai:schema:v2:library-capability-import@1",
+            "capability": "server-home.create-home",
+            "interface_identity": {
+              "schema": "urn:literate-ai:schema:v1:content-identity",
+              "algorithm": "sha256",
+              "digest": "1a5f4827357d1102957f4c9c132adf72b97950cb4f96145954d0bfcf5d770c1d"
+            },
+            "module": "server_home/create_home",
+            "symbols": [
+              "create_home"
+            ]
+          }
+        ]
+      },
+      "oracle": "server-home.json",
+      "verifier": "server-home-harness-draft-v1.cjs",
+      "verification_files": {
+        "server-home.json": "f78f1981ab310f3e3ef82661ccddb9a4934898f10d23f834cb572b1c92597135",
+        "server-home-harness-draft-v1.cjs": "cbba430061f38fee5f78f165c275f332134417ad67b5407f2f83ce3377a7271a"
+      }
+    },
+    {
+      "component": "server-directives",
+      "provider": ".literate/native-projects/local-server-directives",
+      "package": "server_directives",
+      "lock_identity": "sha256:1aa95258f35cb7c1f9e773e1057531ea885cdcdebe7e58648a1ba4027e0d5126",
+      "lock": {
+        "edges": [],
+        "nodes": [
+          {
+            "interface_bindings": [
+              {
+                "capability": "server-directives.create-directives",
+                "component_revision": {
+                  "algorithm": "sha256",
+                  "digest": "82a5a4e69400caa402ccc3901eb67441b69514371cea33b0f419d5049d7aeeef",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "interface_identity": {
+                  "algorithm": "sha256",
+                  "digest": "be53937261bec721c40a4d15715a5432c49b7c598fc34d438e63aedb1b85732b",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "schema": "urn:literate-ai:schema:v2:component-interface-binding"
+              }
+            ],
+            "requirement_constraint_satisfactions": [],
+            "revision": {
+              "acceptance_contracts": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "577f713b1be3c2f9fdcb9e79e634df7b0c084d44d93b4fa6600cd03f332baa00",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "acceptance-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "qualification/profile.json"
+                }
+              ],
+              "authoring_identity": {
+                "algorithm": "sha256",
+                "digest": "e37414236c0efd4d46d88402cfba6dae0c7eea81834943312e1c97063989ac40",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "authoring_inputs": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "0df5d4b45e8ff6a1e3b670add69e4897fd29bfdcd2e521275d602809e4704f5f",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application-implementation/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "79519b3fde095c4189cd95c0e6ff3049a31557c34938ca5df4d0481b64f6e606",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "7bfdd0ddf52d2ddf5d6ac5ed6536b999da474323978937e72f4e4d3b1dface38",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-specification-planning/SKILL.md"
+                }
+              ],
+              "coordinate": {
+                "name": "server-directives",
+                "namespace": "local"
+              },
+              "public_interfaces": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "be53937261bec721c40a4d15715a5432c49b7c598fc34d438e63aedb1b85732b",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "public-interface-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/interface-server-directives-create-directives-68d7cab30e.md"
+                }
+              ],
+              "repository_sources": [],
+              "routing_policy": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "99bc0eb9ee3039ccb3836060c199bc94cf1e5aa6c6a92d64235dc6e7065bdb79",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "routing-policy",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "routing/production/staging/dev/routing.json"
+              },
+              "schema": "urn:literate-ai:schema:v2:locked-component-revision",
+              "selected_flavor_revisions": [
+                {
+                  "algorithm": "sha256",
+                  "digest": "25b41f3e8d9d6219061152db0383fcb0120e198113eedea44f02133005db3307",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "98a9fb0dbd7b3ef0e74f404a19c82a5096653551ed07980fade4840af4b7d932",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "b4682d8520f7f9291f3206331742e5fdd609299445a8638c70f7aac74af55345",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                }
+              ],
+              "specification_set_identity": {
+                "algorithm": "sha256",
+                "digest": "3c790a4a13238fb5c89de9465313560af627ff70389e2c4986cf45a627a09b87",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "specifications": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "5e5862f343625f41794fd92e8b1901541609831441556e456825f21c2fb5d375",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/spec.md"
+                }
+              ],
+              "version": "1.0.0",
+              "workflow_definition": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "c5c8c2881fd7d5b1504847e93aee5a91015438bbaf867bfb50d5d215e0b0309d",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "workflow",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "workflows/production/staging/dev/workflow.md"
+              }
+            },
+            "schema": "urn:literate-ai:schema:v2:component-lock-node",
+            "target_flavor_selection": {
+              "component_revision": {
+                "algorithm": "sha256",
+                "digest": "82a5a4e69400caa402ccc3901eb67441b69514371cea33b0f419d5049d7aeeef",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "schema": "urn:literate-ai:schema:v2:node-target-flavor-selection",
+              "selection_policy_identity": {
+                "algorithm": "sha256",
+                "digest": "f1c0de79b6007ac45b782903f096ca242d388cce1c6762ea202bdb20fb94c5bc",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "slots": [
+                {
+                  "selected": [],
+                  "slot": {
+                    "axis": "build.system",
+                    "capability_contract": "server-directives.create-directives",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "build-system"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "b4682d8520f7f9291f3206331742e5fdd609299445a8638c70f7aac74af55345",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "javascript"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "implementation.language-ecosystem",
+                    "capability_contract": "server-directives.create-directives",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "implementation-language-ecosystem"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "98a9fb0dbd7b3ef0e74f404a19c82a5096653551ed07980fade4840af4b7d932",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "macos"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "platform.os",
+                    "capability_contract": "server-directives.create-directives",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "platform-os"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "25b41f3e8d9d6219061152db0383fcb0120e198113eedea44f02133005db3307",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "node-server-directives"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "toolchain",
+                    "capability_contract": "server-directives.create-directives",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "toolchain"
+                  }
+                }
+              ],
+              "target_name": "server-directives-host-v1",
+              "target_profile_identity": {
+                "algorithm": "sha256",
+                "digest": "b82603a5347037e0e8bf524b6859b30591192e43a5203dc67df0e5dafc6513e9",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              }
+            }
+          }
+        ],
+        "provider_resolutions": [],
+        "resolver_identity": {
+          "algorithm": "sha256",
+          "digest": "5085d8dcc1825af6e6c4340ff39ac0e130986c12fc447f82fb700dd27dbe8a95",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "root_revision": {
+          "algorithm": "sha256",
+          "digest": "82a5a4e69400caa402ccc3901eb67441b69514371cea33b0f419d5049d7aeeef",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "schema": "urn:literate-ai:schema:v2:component-lock",
+        "selection_policy_identity": {
+          "algorithm": "sha256",
+          "digest": "f1c0de79b6007ac45b782903f096ca242d388cce1c6762ea202bdb20fb94c5bc",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "target_name": "server-directives-host-v1",
+        "target_profile_identity": {
+          "algorithm": "sha256",
+          "digest": "b82603a5347037e0e8bf524b6859b30591192e43a5203dc67df0e5dafc6513e9",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        }
+      },
+      "qualified_projection": "sha256:28675806d62366319d67fd929bede5e77cdca8cc8f2e002e6a5cf13239ff09c6",
+      "authority_head": "provenance/component-authority/54f7f0553689f4f7b0fb283bbdb8cdd02698136059515db66310fb085cdf3279/current.json",
+      "entry": "38872c8c1184392f3811a14a3fef9c539c2c10e8014d361e87a8638a250e56fd",
+      "source_tree": "100449e71f45891eb73860261d7bc79c8b93c6313c019ab52f8a97e8917d9367",
+      "files": [
+        {
+          "path": "create_directives.js",
+          "algorithm": "sha256",
+          "digest": "ff7843fe4e1ca719769d6f8df35c6505af0c8549058def756a556115dfbd44f7",
+          "media_type": "application/octet-stream",
+          "size": 6982
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "61f02ee78e0198a18d38c26aed51a96e3975ddad8dccce323c84831c4400f742",
+          "media_type": "application/octet-stream",
+          "size": 106
+        }
+      ],
+      "surface": {
+        "schema": "urn:literate-ai:schema:v2:library-import-surface@1",
+        "language": "javascript",
+        "package": "server_directives",
+        "capabilities": [
+          {
+            "schema": "urn:literate-ai:schema:v2:library-capability-import@1",
+            "capability": "server-directives.create-directives",
+            "interface_identity": {
+              "schema": "urn:literate-ai:schema:v1:content-identity",
+              "algorithm": "sha256",
+              "digest": "be53937261bec721c40a4d15715a5432c49b7c598fc34d438e63aedb1b85732b"
+            },
+            "module": "server_directives/create_directives",
+            "symbols": [
+              "create_directives"
+            ]
+          }
+        ]
+      },
+      "oracle": "server-directives.json",
+      "verifier": "server-directives-harness-draft-v3.cjs",
+      "verification_files": {
+        "server-directives.json": "3d326d1e5f6bdbdcd995b9a33a009b8ac0df435be640f7a581e98a7389a0601d",
+        "server-directives-harness-draft-v3.cjs": "ca3ce00bbd1ebd7b6da81fb2d4fcfc8f683db9f5883d6a294dfd13e7dc6287ff"
+      }
+    },
+    {
+      "component": "server-devices",
+      "provider": ".literate/native-projects/local-server-devices",
+      "package": "server_devices",
+      "lock_identity": "sha256:2435550dfdfa61ca3c131e0c4fe3527a01810c44f85a6bc3bb22c7c72930ea41",
+      "lock": {
+        "edges": [],
+        "nodes": [
+          {
+            "interface_bindings": [
+              {
+                "capability": "server-devices.create-devices",
+                "component_revision": {
+                  "algorithm": "sha256",
+                  "digest": "c45dc7070a286f739397b52cdd7c9595f4844b2c95ba68e6e5e2fe75980a4cc0",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "interface_identity": {
+                  "algorithm": "sha256",
+                  "digest": "53a7cbc44dc0a6204128e49f672fedf90e9888c60e898f082d395c85c984a406",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "schema": "urn:literate-ai:schema:v2:component-interface-binding"
+              }
+            ],
+            "requirement_constraint_satisfactions": [],
+            "revision": {
+              "acceptance_contracts": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "0f11351d1ca523cce571a1563a3c5c48363600e19fb15c67b79ed1afb56a0928",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "acceptance-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "qualification/profile.json"
+                }
+              ],
+              "authoring_identity": {
+                "algorithm": "sha256",
+                "digest": "ce1bd69eb82bb1bdc8479884c4d5e3aeeebc746672bb365e83870be53100c135",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "authoring_inputs": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "0df5d4b45e8ff6a1e3b670add69e4897fd29bfdcd2e521275d602809e4704f5f",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application-implementation/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "79519b3fde095c4189cd95c0e6ff3049a31557c34938ca5df4d0481b64f6e606",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "7bfdd0ddf52d2ddf5d6ac5ed6536b999da474323978937e72f4e4d3b1dface38",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-specification-planning/SKILL.md"
+                }
+              ],
+              "coordinate": {
+                "name": "server-devices",
+                "namespace": "local"
+              },
+              "public_interfaces": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "53a7cbc44dc0a6204128e49f672fedf90e9888c60e898f082d395c85c984a406",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "public-interface-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/interface-server-devices-create-devices-ca948f68f7.md"
+                }
+              ],
+              "repository_sources": [],
+              "routing_policy": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "99bc0eb9ee3039ccb3836060c199bc94cf1e5aa6c6a92d64235dc6e7065bdb79",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "routing-policy",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "routing/production/staging/dev/routing.json"
+              },
+              "schema": "urn:literate-ai:schema:v2:locked-component-revision",
+              "selected_flavor_revisions": [
+                {
+                  "algorithm": "sha256",
+                  "digest": "38817075726eb780c57f27ccb0b948ebc7a947168369bc13048b3459575dfe42",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "88450c517ee84563a47d1acc2ed170276f63d93f35018a3e0b258cdfa76062e9",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "8b56f073a549748baf30ef2bb11df63a597c06a8b9e543237a507d7294facbe3",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                }
+              ],
+              "specification_set_identity": {
+                "algorithm": "sha256",
+                "digest": "f9fc1d8a1bf80fb3876bcf23f73bae88e36971f638a60574d92f80f26a70db56",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "specifications": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "b56da17136acdee4e2b6e2740d32c36deefbd243f6e15c6aa609e91907b0215a",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/spec.md"
+                }
+              ],
+              "version": "1.0.0",
+              "workflow_definition": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "c5c8c2881fd7d5b1504847e93aee5a91015438bbaf867bfb50d5d215e0b0309d",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "workflow",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "workflows/production/staging/dev/workflow.md"
+              }
+            },
+            "schema": "urn:literate-ai:schema:v2:component-lock-node",
+            "target_flavor_selection": {
+              "component_revision": {
+                "algorithm": "sha256",
+                "digest": "c45dc7070a286f739397b52cdd7c9595f4844b2c95ba68e6e5e2fe75980a4cc0",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "schema": "urn:literate-ai:schema:v2:node-target-flavor-selection",
+              "selection_policy_identity": {
+                "algorithm": "sha256",
+                "digest": "5f5bbe4b4635342edc052f70384f0853ee480413e5a31b3e213262f1d61ff3a1",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "slots": [
+                {
+                  "selected": [],
+                  "slot": {
+                    "axis": "build.system",
+                    "capability_contract": "server-devices.create-devices",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "build-system"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "88450c517ee84563a47d1acc2ed170276f63d93f35018a3e0b258cdfa76062e9",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "javascript"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "implementation.language-ecosystem",
+                    "capability_contract": "server-devices.create-devices",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "implementation-language-ecosystem"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "8b56f073a549748baf30ef2bb11df63a597c06a8b9e543237a507d7294facbe3",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "macos"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "platform.os",
+                    "capability_contract": "server-devices.create-devices",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "platform-os"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "38817075726eb780c57f27ccb0b948ebc7a947168369bc13048b3459575dfe42",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "node-server-devices"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "toolchain",
+                    "capability_contract": "server-devices.create-devices",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "toolchain"
+                  }
+                }
+              ],
+              "target_name": "server-devices-host-v1",
+              "target_profile_identity": {
+                "algorithm": "sha256",
+                "digest": "8436ef07981fcd7de9a0003927ff14c3f3e688be3336c2d9583347783effbca0",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              }
+            }
+          }
+        ],
+        "provider_resolutions": [],
+        "resolver_identity": {
+          "algorithm": "sha256",
+          "digest": "5085d8dcc1825af6e6c4340ff39ac0e130986c12fc447f82fb700dd27dbe8a95",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "root_revision": {
+          "algorithm": "sha256",
+          "digest": "c45dc7070a286f739397b52cdd7c9595f4844b2c95ba68e6e5e2fe75980a4cc0",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "schema": "urn:literate-ai:schema:v2:component-lock",
+        "selection_policy_identity": {
+          "algorithm": "sha256",
+          "digest": "5f5bbe4b4635342edc052f70384f0853ee480413e5a31b3e213262f1d61ff3a1",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "target_name": "server-devices-host-v1",
+        "target_profile_identity": {
+          "algorithm": "sha256",
+          "digest": "8436ef07981fcd7de9a0003927ff14c3f3e688be3336c2d9583347783effbca0",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        }
+      },
+      "qualified_projection": "sha256:68780317d4e0bdb80b019c3bcb4ac36d2cbba170861c0bc757b309f796bf51d4",
+      "authority_head": "provenance/component-authority/644caf8c3481af70b6e933600e43dee8b13556a15349965d870af39295d4d226/current.json",
+      "entry": "bf93b95967202a592392ece609a2afeada0f015c6e59a2c5ad020470d91869b8",
+      "source_tree": "f5b27dc1c7f8dbe459bfc9e8806c8ef0b264c88a1a6c2706f5d74d0491300d10",
+      "files": [
+        {
+          "path": "create_devices.js",
+          "algorithm": "sha256",
+          "digest": "c539c44eb8b656f4b2ae4d3ba68aa52d1da487a075e2299205df33c745c95adf",
+          "media_type": "application/octet-stream",
+          "size": 19405
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "e2ddbdc943c78334f18541b1210059b045e28c6c22b07486b6a58f486f1151e5",
+          "media_type": "application/octet-stream",
+          "size": 97
+        }
+      ],
+      "surface": {
+        "schema": "urn:literate-ai:schema:v2:library-import-surface@1",
+        "language": "javascript",
+        "package": "server_devices",
+        "capabilities": [
+          {
+            "schema": "urn:literate-ai:schema:v2:library-capability-import@1",
+            "capability": "server-devices.create-devices",
+            "interface_identity": {
+              "schema": "urn:literate-ai:schema:v1:content-identity",
+              "algorithm": "sha256",
+              "digest": "53a7cbc44dc0a6204128e49f672fedf90e9888c60e898f082d395c85c984a406"
+            },
+            "module": "server_devices/create_devices",
+            "symbols": [
+              "create_devices"
+            ]
+          }
+        ]
+      },
+      "oracle": "server-devices.json",
+      "verifier": "server-devices-harness-draft-v1.cjs",
+      "verification_files": {
+        "server-devices.json": "61e1c10c007f544b92ee8fafded49552796ff8b80c1f4bf8f53ff4f033340522",
+        "server-devices-harness-draft-v1.cjs": "ac9dd89dadfeccd1fc7a5ff1609f08c1af8c4c6a42c1b2ccbd5f2a83b953a34f"
+      }
+    },
+    {
+      "component": "server-sessions",
+      "provider": ".literate/native-projects/local-server-sessions",
+      "package": "server_sessions",
+      "lock_identity": "sha256:2cf3eae6b89ea54c01f78865aefccfd150c92adae08a24edc4fdb9fef5f21bd3",
+      "lock": {
+        "edges": [],
+        "nodes": [
+          {
+            "interface_bindings": [
+              {
+                "capability": "server-sessions.create-sessions",
+                "component_revision": {
+                  "algorithm": "sha256",
+                  "digest": "ae0eeec579282ec1389991a88974ada526b36712ee086b747d2e95556189547a",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "interface_identity": {
+                  "algorithm": "sha256",
+                  "digest": "1711818f5757f03accf5d24fc5919284c8256a26446535e53181abec8fd1145f",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "schema": "urn:literate-ai:schema:v2:component-interface-binding"
+              }
+            ],
+            "requirement_constraint_satisfactions": [],
+            "revision": {
+              "acceptance_contracts": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "19740c2c27d6aa3e10290ab3414b804ad587e7a3208fc66b436ca1620e8c5c5e",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "acceptance-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "qualification/profile.json"
+                }
+              ],
+              "authoring_identity": {
+                "algorithm": "sha256",
+                "digest": "a7dc0e1a9e707a59b734c34486d47dcea98f61e2a70e48debb0a06ea871a0e82",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "authoring_inputs": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "0df5d4b45e8ff6a1e3b670add69e4897fd29bfdcd2e521275d602809e4704f5f",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application-implementation/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "79519b3fde095c4189cd95c0e6ff3049a31557c34938ca5df4d0481b64f6e606",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-application/SKILL.md"
+                },
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "7bfdd0ddf52d2ddf5d6ac5ed6536b999da474323978937e72f4e4d3b1dface38",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification-to-source-skill",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "skills/specification-to-source/portable-specification-planning/SKILL.md"
+                }
+              ],
+              "coordinate": {
+                "name": "server-sessions",
+                "namespace": "local"
+              },
+              "public_interfaces": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "1711818f5757f03accf5d24fc5919284c8256a26446535e53181abec8fd1145f",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "public-interface-contract",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/interface-server-sessions-create-sessions-6990482864.md"
+                }
+              ],
+              "repository_sources": [],
+              "routing_policy": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "99bc0eb9ee3039ccb3836060c199bc94cf1e5aa6c6a92d64235dc6e7065bdb79",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "routing-policy",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "routing/production/staging/dev/routing.json"
+              },
+              "schema": "urn:literate-ai:schema:v2:locked-component-revision",
+              "selected_flavor_revisions": [
+                {
+                  "algorithm": "sha256",
+                  "digest": "0513ff64489e1befb837f01f63549dfcfe468102ad10a0db5cb0e265c27007e9",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "5b48f1c445395e79d79d63815f2d030365200a9bafa660545aa95d38f3938fae",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                {
+                  "algorithm": "sha256",
+                  "digest": "f9b0eb572fc40c882c4cad0e468c77f12a9943cde42dedd475d892a4bb29ad8a",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                }
+              ],
+              "specification_set_identity": {
+                "algorithm": "sha256",
+                "digest": "c081f2f9d98d4ca85c8740b29feb356c0b8e07602e58c11cf4f014adcde1eca3",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "specifications": [
+                {
+                  "identity": {
+                    "algorithm": "sha256",
+                    "digest": "643d96683f4caec56d8005edac47343ac5ce50b486b194ff2a5ef30c550db709",
+                    "schema": "urn:literate-ai:schema:v1:content-identity"
+                  },
+                  "kind": "specification",
+                  "schema": "urn:literate-ai:schema:v1:content-reference",
+                  "uri": "specs/derived/spec.md"
+                }
+              ],
+              "version": "1.0.0",
+              "workflow_definition": {
+                "identity": {
+                  "algorithm": "sha256",
+                  "digest": "c5c8c2881fd7d5b1504847e93aee5a91015438bbaf867bfb50d5d215e0b0309d",
+                  "schema": "urn:literate-ai:schema:v1:content-identity"
+                },
+                "kind": "workflow",
+                "schema": "urn:literate-ai:schema:v1:content-reference",
+                "uri": "workflows/production/staging/dev/workflow.md"
+              }
+            },
+            "schema": "urn:literate-ai:schema:v2:component-lock-node",
+            "target_flavor_selection": {
+              "component_revision": {
+                "algorithm": "sha256",
+                "digest": "ae0eeec579282ec1389991a88974ada526b36712ee086b747d2e95556189547a",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "schema": "urn:literate-ai:schema:v2:node-target-flavor-selection",
+              "selection_policy_identity": {
+                "algorithm": "sha256",
+                "digest": "9329d8a8dca36481d144310c7cd0bbfd25ac466974b82af45c0b5bb1e8a0a8dc",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              },
+              "slots": [
+                {
+                  "selected": [],
+                  "slot": {
+                    "axis": "build.system",
+                    "capability_contract": "server-sessions.create-sessions",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "build-system"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "f9b0eb572fc40c882c4cad0e468c77f12a9943cde42dedd475d892a4bb29ad8a",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "javascript"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "implementation.language-ecosystem",
+                    "capability_contract": "server-sessions.create-sessions",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "implementation-language-ecosystem"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "0513ff64489e1befb837f01f63549dfcfe468102ad10a0db5cb0e265c27007e9",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "macos"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "platform.os",
+                    "capability_contract": "server-sessions.create-sessions",
+                    "cardinality": "exactly-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "platform-os"
+                  }
+                },
+                {
+                  "selected": [
+                    {
+                      "flavor_revision": {
+                        "algorithm": "sha256",
+                        "digest": "5b48f1c445395e79d79d63815f2d030365200a9bafa660545aa95d38f3938fae",
+                        "schema": "urn:literate-ai:schema:v1:content-identity"
+                      },
+                      "value": "node-server-sessions"
+                    }
+                  ],
+                  "slot": {
+                    "axis": "toolchain",
+                    "capability_contract": "server-sessions.create-sessions",
+                    "cardinality": "zero-or-one",
+                    "maximum": null,
+                    "minimum": null,
+                    "slot_id": "toolchain"
+                  }
+                }
+              ],
+              "target_name": "server-sessions-host-v1",
+              "target_profile_identity": {
+                "algorithm": "sha256",
+                "digest": "59cd5400fbadae359a1ebfb088a5d3a335d043130ff9a5e32e1e9a4871962e9f",
+                "schema": "urn:literate-ai:schema:v1:content-identity"
+              }
+            }
+          }
+        ],
+        "provider_resolutions": [],
+        "resolver_identity": {
+          "algorithm": "sha256",
+          "digest": "5085d8dcc1825af6e6c4340ff39ac0e130986c12fc447f82fb700dd27dbe8a95",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "root_revision": {
+          "algorithm": "sha256",
+          "digest": "ae0eeec579282ec1389991a88974ada526b36712ee086b747d2e95556189547a",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "schema": "urn:literate-ai:schema:v2:component-lock",
+        "selection_policy_identity": {
+          "algorithm": "sha256",
+          "digest": "9329d8a8dca36481d144310c7cd0bbfd25ac466974b82af45c0b5bb1e8a0a8dc",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        },
+        "target_name": "server-sessions-host-v1",
+        "target_profile_identity": {
+          "algorithm": "sha256",
+          "digest": "59cd5400fbadae359a1ebfb088a5d3a335d043130ff9a5e32e1e9a4871962e9f",
+          "schema": "urn:literate-ai:schema:v1:content-identity"
+        }
+      },
+      "qualified_projection": "sha256:fd5e6d983edf13492692ff57238c804201568a3276448a644400874b75efa9a8",
+      "authority_head": "provenance/component-authority/e30f29e127d96c42a01fad6df73575794fd55ff7a66c3c7c7ea7dde27e2e73a7/current.json",
+      "entry": "39c137d41b814b47c16059bbbb5b1f5d2afada7087365400e599851950a2f74c",
+      "source_tree": "8c8243dea19196fd7e5a23e4ae1c403ccb9ba181a2c83f5436db5ce6994fcf5d",
+      "files": [
+        {
+          "path": "create_sessions.js",
+          "algorithm": "sha256",
+          "digest": "cb4ab6d846efa7c8cf26b0c1ca245323e8f06e4d497d3ca2b4b01d01509811d0",
+          "media_type": "application/octet-stream",
+          "size": 19493
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "4669dd89e9e8088cb5594091da112385a266fa59a2baae0e37c1565b52457ebd",
+          "media_type": "application/octet-stream",
+          "size": 100
+        }
+      ],
+      "surface": {
+        "schema": "urn:literate-ai:schema:v2:library-import-surface@1",
+        "language": "javascript",
+        "package": "server_sessions",
+        "capabilities": [
+          {
+            "schema": "urn:literate-ai:schema:v2:library-capability-import@1",
+            "capability": "server-sessions.create-sessions",
+            "interface_identity": {
+              "schema": "urn:literate-ai:schema:v1:content-identity",
+              "algorithm": "sha256",
+              "digest": "1711818f5757f03accf5d24fc5919284c8256a26446535e53181abec8fd1145f"
+            },
+            "module": "server_sessions/create_sessions",
+            "symbols": [
+              "create_sessions"
+            ]
+          }
+        ]
+      },
+      "oracle": "server-sessions.json",
+      "verifier": "server-sessions-harness-draft-v3.cjs",
+      "verification_files": {
+        "server-sessions.json": "45ed9fb5a801ce51c6c72cd16fd088b2c50911ffcd3095fcaad7390221219791",
+        "server-sessions-harness-draft-v3.cjs": "b1e26fea521c5c0f9546c6994bcccea0abd508ce207581fb51290a557ff4d5dd"
+      }
     }
   ]
 }

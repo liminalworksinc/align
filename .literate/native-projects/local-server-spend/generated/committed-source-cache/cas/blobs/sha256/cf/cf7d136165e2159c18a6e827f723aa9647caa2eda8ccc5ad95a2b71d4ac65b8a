@@ -1,0 +1,21 @@
+'use strict';
+
+function main(args) {
+  if (args.length !== 1) throw new Error('Expected one framework mode');
+  const tests = require('./tests/litai_test.js');
+  if (args[0] === '--litai-test') return tests.runTests();
+  if (args[0] === '--litai-smoke') return tests.smoke();
+  throw new Error('This component exposes an importable library only');
+}
+
+function dispatch() {
+  try {
+    process.stdout.write(JSON.stringify(main(process.argv.slice(2))) + '\n');
+  } catch (error) {
+    process.stderr.write(String(error && error.stack || error) + '\n');
+    process.exitCode = 1;
+  }
+}
+
+module.exports = {main, dispatch};
+if (require.main === module) dispatch();

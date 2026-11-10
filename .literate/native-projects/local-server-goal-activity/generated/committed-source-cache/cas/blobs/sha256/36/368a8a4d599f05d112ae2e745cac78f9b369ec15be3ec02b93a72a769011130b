@@ -1,0 +1,92 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {create_goal_activity} = require('../server_goal_activity/create_goal_activity.js');
+
+function invoke(fixture) {
+  const principal = {...fixture.principal, pods: new Set(fixture.principal.pods)};
+  let timeIndex = 0;
+  const resources = {
+    all(sql) { return sql.startsWith('SELECT path') ? [] : fixture.lines; },
+    get(sql) {
+      if (sql.startsWith('SELECT COUNT(*)')) return {n: fixture.unbound};
+      if (sql.startsWith('SELECT COUNT(DISTINCT')) return undefined;
+      return {t: fixture.times[timeIndex++]};
+    },
+    visibleGoals() { return fixture.goals; },
+    visibleGoal() { return fixture.goal; },
+    activityEvidence({sessions}) { return sessions ? 'reported' : 'empty'; },
+    nowIso() { return '1970-01-01T00:00:00.000Z'; },
+    readDate() {
+      return class extends Date { static now() { return fixture.now; } };
+    }
+  };
+  const service = create_goal_activity(resources);
+  return fixture.operation === 'goalsActivity' ? service.goalsActivity(principal) : service.goalActivity(principal, fixture.goal.id);
+}
+
+function countFixture(userId = 'reader') {
+  return {operation:'goalActivity', principal:{wsId:'w',userId,wsRole:'member',pods:[]},
+    goal:{ws_id:'w',id:'g',title:'Goal',owner_id:'writer',pod_id:null,status:'active'},lines:[],times:[],now:0};
+}
+function emptyResult(detail = null) {
+  return {sessions:0,active_now:0,by_harness:{'claude-code':0,codex:0},last_activity_at:null,evidence_class:'empty',detail};
+}
+
+const cases = [
+  ['generated-count-empty', () => {
+    const actual = invoke(countFixture());
+    assert.deepStrictEqual(actual, emptyResult());
+    return actual;
+  }],
+  ['generated-owner-empty', () => {
+    const actual = invoke(countFixture('writer'));
+    assert.deepStrictEqual(actual, emptyResult({files:[],files_hidden:0,mine:[]}));
+    return actual;
+  }],
+  ['generated-aggregate-empty', () => {
+    const actual = invoke({operation:'goalsActivity',principal:{wsId:'w',userId:'reader',wsRole:'member',pods:[]},goals:[],unbound:3,now:0});
+    assert.deepStrictEqual(actual, {goals:[],unbound:3});
+    return actual;
+  }],
+  ['generated-cutoff-inclusive', () => {
+    const fixture = countFixture('writer');
+    fixture.lines = [{session_key:'s',user_id:'writer',harness:'codex',state:'shared',agent_stopped:0,open_goal:'g',governing_goal_id:null}];
+    fixture.times = ['1970-01-01T00:00:00.000Z',null,'1970-01-01T00:00:00.000Z',null,null];
+    fixture.now = 5400000;
+    const actual = invoke(fixture);
+    assert.deepStrictEqual(actual, {sessions:1,active_now:1,by_harness:{'claude-code':0,codex:1},
+      last_activity_at:'1970-01-01T00:00:00.000Z',evidence_class:'reported',detail:{files:[],files_hidden:0,
+        mine:[{session_key:'s',harness:'codex',state:'shared',last_activity_at:'1970-01-01T00:00:00.000Z'}]}});
+    return actual;
+  }]
+];
+
+function contractChecks() {
+  const reads = [];
+  const resourceNames = ['all','get','visibleGoals','visibleGoal','activityEvidence','nowIso','readDate'];
+  const resources = {};
+  for (const name of resourceNames) Object.defineProperty(resources, name, {get() {reads.push(name);return undefined;}});
+  const service = create_goal_activity(resources);
+  assert.deepStrictEqual(reads, resourceNames);
+  assert.equal(create_goal_activity.length, 1);
+  assert.deepStrictEqual(Object.keys(service), ['ACTIVITY_WINDOW_DAYS','seesActivityDetail','goalActivity','goalsActivity']);
+  assert.equal(service.ACTIVITY_WINDOW_DAYS, 14);
+  assert.equal(service.seesActivityDetail.length, 2);
+  assert.equal(service.goalActivity.length, 2);
+  assert.equal(service.goalsActivity.length, 1);
+  const principal = {userId:'u', get pods() {throw new Error('owner must short circuit');}};
+  assert.equal(service.seesActivityDetail(principal, {owner_id:'u'}), true);
+  const pods = {has(id) {assert.equal(this,pods);assert.equal(id,'t');return true;}};
+  assert.equal(service.seesActivityDetail({userId:'u',pods}, {owner_id:'v',pod_id:'t'}), true);
+  const refusal = {};
+  const visibility = create_goal_activity({visibleGoal() {throw refusal;}, readDate() {throw new Error('clock before refusal');}});
+  assert.throws(() => visibility.goalActivity({}, 'g'), error => error === refusal);
+}
+
+function run() {
+  contractChecks();
+  const results = cases.map(([case_id, execute]) => {execute();return {case_id,outcome:'passed'};});
+  return {schema:'literate-ai/generated-test-results@1',cases:results};
+}
+function smoke() {return cases[0][1]();}
+module.exports = {run,smoke};

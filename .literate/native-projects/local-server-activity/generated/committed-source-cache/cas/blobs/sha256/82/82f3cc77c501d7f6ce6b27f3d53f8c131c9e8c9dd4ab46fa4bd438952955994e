@@ -1,0 +1,100 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_activity } = require('../server_activity/create_activity.js');
+const stamp = '2000-01-01T00:00:00.000Z';
+const principal = () => ({ userId: 'u', wsId: 'w' });
+const device = () => ({ deviceId: 'd' });
+const item = (at, kind) => ({ at, kind, repo_id: '0123456789abcdef', session_key: 's' });
+function fixture(rows = []) {
+  const writes = [];
+  const effects = [];
+  class Clock extends Date { static now() { effects.push('now'); return 946684800000; } }
+  const resources = {
+    all: (...args) => { effects.push(['all', ...args]); return rows; },
+    run: (...args) => { writes.push(args); },
+    tx: callback => {
+      const size = writes.length;
+      try { return callback(); } catch (error) { writes.length = size; throw error; }
+    },
+    badRequest: message => new Error(message),
+    nowIso: () => stamp,
+    goalObj: row => row,
+    goalRow: (ws, id) => { effects.push(['goal', ws, id]); return id === 'missing' ? null : { id }; },
+    canReadGoal: (pp, goal) => goal.id === 'visible',
+    openEpoch: () => ({ goal_id: 'g' }),
+    sessionRow: () => ({ user_id: 'u', device_id: 'd', state: 'shared' }),
+    need: (pp, permission) => effects.push(['need', pp, permission]),
+    cleanProse: text => text.trim(),
+    isBlankText: text => !text.trim(),
+    personName: (id, name) => name ?? 'Deleted person',
+    SESSION_KEY_RE: /^s$/,
+    readDate: () => { effects.push('date'); return Clock; }
+  };
+  return { api: create_activity(resources), resources, writes, effects };
+}
+const cases = [
+  {
+    id: 'generated-empty',
+    args: () => [principal(), device(), { items: [] }],
+    expected: { accepted: 0, refused: [], server_time: stamp }
+  },
+  {
+    id: 'generated-future-equality',
+    args: () => [principal(), device(), { items: [item('2000-01-01T00:05:00.000Z', 'claim')] }],
+    expected: { accepted: 1, refused: [], server_time: stamp }
+  },
+  {
+    id: 'generated-refusal-order',
+    args: () => [principal(), device(), { items: [item('2000-01-01T00:05:00.001Z', 'edit'), item('1999-12-30T23:59:59.999Z', 'task')] }],
+    expected: { accepted: 0, refused: [{ index: 0, reason: 'clock_skew' }, { index: 1, reason: 'too_old' }], server_time: stamp }
+  }
+];
+async function additionalChecks() {
+  const order = [];
+  const f = fixture();
+  const keys = ['all','run','tx','badRequest','nowIso','goalObj','goalRow','canReadGoal','openEpoch','sessionRow','need','cleanProse','isBlankText','personName','SESSION_KEY_RE','readDate'];
+  const api = create_activity(new Proxy(f.resources, { get(target, key) { order.push(key); return target[key]; } }));
+  assert.deepEqual(order, keys);
+  assert.deepEqual(Object.keys(api), ['ingestActivity', 'activityFor']);
+  assert.equal(create_activity.name, 'create_activity');
+  assert.equal(create_activity.length, 1);
+  assert.equal(api.ingestActivity.name, 'ingestActivity');
+  assert.equal(api.ingestActivity.length, 3);
+  assert.equal(api.ingestActivity.constructor.name, 'AsyncFunction');
+  assert.equal(api.activityFor.name, 'activityFor');
+  assert.equal(api.activityFor.length, 2);
+  assert.equal(api.activityFor.constructor.name, 'Function');
+  const hashReads = [];
+  const valid = item('2000-01-01T00:00:00.000Z', 'edit');
+  Object.defineProperty(valid, 'path_hash', { get() { hashReads.push(1); return 'abcdef0123456789'; } });
+  await api.ingestActivity(principal(), device(), { items: [valid] });
+  assert.equal(hashReads.length, 6);
+  const rollback = fixture();
+  await assert.rejects(rollback.api.ingestActivity(principal(), device(), { items: [item(stamp, 'edit'), null] }), /each item must be an object/);
+  assert.deepEqual(rollback.writes, []);
+  const observations = [];
+  const row = new Proxy({ seq: 9, goal_id: 'missing', user_id: 'other' }, { get(target, key) { observations.push(key); return target[key]; } });
+  const feed = fixture([row, { seq: 10, goal_id: 'missing', user_id: 'other' }]);
+  assert.deepEqual(feed.api.activityFor(principal(), 3), { cursor: 10, items: [] });
+  assert.deepEqual(observations.slice(0, 2), ['goal_id', 'user_id']);
+  assert.deepEqual(feed.effects.filter(e => Array.isArray(e) && e[0] === 'goal'), [['goal', 'w', 'missing']]);
+  assert.deepEqual(fixture().api.activityFor(principal(), 21), { cursor: 21, items: [] });
+}
+async function runTests() {
+  const results = [];
+  for (const test of cases) {
+    const f = fixture();
+    assert.deepEqual(await f.api.ingestActivity(...test.args()), test.expected);
+    const cleanup = f.writes[f.writes.length - 1];
+    assert.deepEqual(cleanup, ['DELETE FROM v2_activity WHERE ws_id = ? AND expires_at < ?', 'w', stamp]);
+    if (test.id === 'generated-future-equality') {
+      assert.deepEqual(f.writes[0], ['INSERT INTO v2_activity (ws_id, session_key, user_id, goal_id, repo_id, kind, path_hash, path, text, at, expires_at)\n         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 'w', 's', 'u', 'g', '0123456789abcdef', 'claim', null, null, null, '2000-01-01T00:05:00.000Z', '2000-01-01T01:05:00.000Z']);
+    }
+    results.push({ case_id: test.id, outcome: 'passed' });
+  }
+  await additionalChecks();
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+async function smoke() { return fixture().api.ingestActivity(...cases[0].args()); }
+exports.runTests = runTests;
+exports.smoke = smoke;

@@ -1,0 +1,105 @@
+{
+  "schema": "align/session-domain-admitted-preparation@1",
+  "observed_utc": "2026-11-10T00:56:51.260410+00:00",
+  "boundary": "B16",
+  "ready_children": [
+    {
+      "component": "server-steering",
+      "retained_binding": "lib/v2/steering.ts",
+      "binding_sha256": "a9d108798b4285944b1cd729fc22b459a045ab1d8e5f37f2fd9754a0d6983c28",
+      "admitted_entry": "sha256:132a28ba35373f537d89bf2d091cf376bee83f92d9c16891593a7f52ac63df9d",
+      "child_current_receipt": "sha256:60e32b2b941d081e3eae635860143b156e1b5006e0f65595dd1344b81efb5bb1",
+      "ordered_resources": 11,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-spend",
+      "retained_binding": "lib/v2/spend.ts",
+      "binding_sha256": "d42a932716d3716ab4fe70ed3e1100d18260be6d0db2d6668a43159560042ee7",
+      "admitted_entry": "sha256:4707a954d09037f24b85ed74f0266e510612631d2dbe0e7628e08d76628a514a",
+      "child_current_receipt": "sha256:9b7eae69d001d77e1e29f049957b79fa14932a1e4f984fd38a04989da11489b6",
+      "ordered_resources": 5,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-goal-activity",
+      "retained_binding": "lib/v2/goal-activity.ts",
+      "binding_sha256": "8bfb6fe98694be958f70b01734c7b5609ddc9c893d7268cf220434ca385d4933",
+      "admitted_entry": "sha256:fbff34f971aeb54de6e47a7f5b125a89a279d04a046b12da78cd664c7cc2e1e1",
+      "child_current_receipt": "sha256:498ea9cc74e03eb31b9b68913b83a8dba2c689ec5a826f2efb5436ac48a3c96b",
+      "ordered_resources": 7,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-allocation",
+      "retained_binding": "lib/v2/allocation.ts",
+      "binding_sha256": "25c4ee65780a3e2a3005dafd3d6a7517150163b0dc2a3417fa3d42910a08789e",
+      "admitted_entry": "sha256:9225a20fbeb3ce05a6c9b5bda7a04c8bece33ecb5f09540af6133f3ce1e5da45",
+      "child_current_receipt": "sha256:a49ec5ea8285c359dc9bee4e3684f448fb83e274c04288fc69c45b3da923cca2",
+      "ordered_resources": 6,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-activity",
+      "retained_binding": "lib/v2/activity.ts",
+      "binding_sha256": "3c82f7154d672764f4be51d01dd6e0a1fa3b8e0fe11d724b48012024016c9cb9",
+      "admitted_entry": "sha256:bf888962269befd4131c9ed894e547a5c3ddda9afec6dc37967cf31f8ef67150",
+      "child_current_receipt": "sha256:1587b724cfbd5336799a09f211374fb08a7a9a9e2169919c607d2ca836063e48",
+      "ordered_resources": 16,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-home",
+      "retained_binding": "lib/v2/home.ts",
+      "binding_sha256": "376d9e70a51a74895795b4861f1ef2a287caabd0e494c1661dddc50a3e9c549d",
+      "admitted_entry": "sha256:94e00b51e74ad2265d1ee0557f6ea9a3e805df1ffe58bdfad6de3be6a9859391",
+      "child_current_receipt": "sha256:bb70551d755dbb66e68982880a3916d1349fd1f2b4ea153633714df8ec1bac6b",
+      "ordered_resources": 14,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-directives",
+      "retained_binding": "lib/v2/directives.ts",
+      "binding_sha256": "b0b2c34d63ee085bed2cfae09fd3bad34ef0b265b6bc981017bc7be3b1bc0660",
+      "admitted_entry": "sha256:38872c8c1184392f3811a14a3fef9c539c2c10e8014d361e87a8638a250e56fd",
+      "child_current_receipt": "sha256:141ca0ffc5fc3db6eb100a80c8700f935e99a8b3917d83ad598809cef8a10795",
+      "ordered_resources": 21,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-devices",
+      "retained_binding": "lib/v2/devices.ts",
+      "binding_sha256": "03c0d93cbeede40feaf9405d4449a65591b6544efeefea32936b65c927288bd1",
+      "admitted_entry": "sha256:bf93b95967202a592392ece609a2afeada0f015c6e59a2c5ad020470d91869b8",
+      "child_current_receipt": "sha256:07d92b0b148fa05d5de68f18f261d3953c729c15cc94ec787f92c70b07a54831",
+      "ordered_resources": 24,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    },
+    {
+      "component": "server-sessions",
+      "retained_binding": "lib/v2/sessions.ts",
+      "binding_sha256": "4243ca48b005c3e0faa8b82c713d1fcdf92e0c6a1610b323c2d11c1d7dda6b66",
+      "admitted_entry": "sha256:39c137d41b814b47c16059bbbb5b1f5d2afada7087365400e599851950a2f74c",
+      "child_current_receipt": "sha256:b5e1d68a13ce5ba2ca057d415efb9b28714cd21f83ec6c145f048f9f20486de4",
+      "ordered_resources": 37,
+      "child_ready": true,
+      "complete_parent_and_image_acceptance_pending": true
+    }
+  ],
+  "runtime_library_pins": 56,
+  "physical_web_libraries": 50,
+  "combined_private_batches": 1046,
+  "independent_store_and_contention_controls": "Original cross-device, replay, epoch, ordering, stopping, deletion, metering and transaction observations remain independent. The complete application suite must run through the actual bindings.",
+  "whole_parent_image_current_receipt_and_transfer_pending": true,
+  "B16_closed": false,
+  "public_tester_delivered": false,
+  "operator_security_accepted": false
+}

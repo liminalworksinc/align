@@ -1,0 +1,139 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const {create_sessions} = require('../server_sessions/create_sessions.js');
+
+const resourceNames = ['caps', 'sessionCapError', 'all', 'audit', 'get', 'run', 'tx', 'takeDurable', 'V2Error', 'badRequest', 'conflict', 'notFound', 'event', 'nowIso', 'sha256hex', 'goalObj', 'goalRow', 'transferFor', 'authorize', 'canReadGoal', 'stopStatus', 'writeDirective', 'need', 'expireStoppedSessionTargets', 'holdNewlyBound', 'personName', 'shareAgainText', 'shareAgainWords', 'sharingStoppedText', 'b64url', 'iso', 'nonNegInt', 'oneOf', 'optInt', 'optStr', 'str', 'readDate'];
+class TestError extends Error {
+  constructor(status, code, message, details) { super(message); this.status = status; this.code = code; this.details = details; }
+}
+function fixture(overrides = {}) {
+  const calls = [];
+  const at = '2026-01-01T00:00:00.000Z';
+  const defaults = {
+    caps: () => null,
+    sessionCapError: max => new TestError(429, 'cap', String(max)),
+    all: () => [], audit: () => {}, get: () => null,
+    run: () => 1, tx: cb => cb(), takeDurable: () => true,
+    V2Error: TestError, badRequest: m => new TestError(400, 'bad_request', m),
+    conflict: (c, m) => new TestError(409, c, m), notFound: () => new TestError(404, 'not_found', 'Not found'),
+    event: () => {}, nowIso: () => at, sha256hex: s => s,
+    goalObj: g => g, goalRow: () => null, transferFor: () => null,
+    authorize: () => ({ok: true}), canReadGoal: () => true,
+    stopStatus: () => null, writeDirective: () => 'directive-result', need: () => {},
+    expireStoppedSessionTargets: () => {}, holdNewlyBound: () => {},
+    personName: (id, name) => name ?? id,
+    shareAgainText: v => String(v), shareAgainWords: () => 'Share again.',
+    sharingStoppedText: () => 'Sharing stopped.',
+    b64url: (b, k) => b[k], iso: (b, k) => b[k],
+    nonNegInt: (b, k) => b[k], oneOf: (b, k) => b[k],
+    optInt: (b, k) => b[k] ?? null, optStr: (b, k) => b[k] ?? null,
+    str: (b, k) => b[k], readDate: () => ({parse: Date.parse, now: () => Date.parse(at)})
+  };
+  const resources = {};
+  const captured = [];
+  for (const name of resourceNames) {
+    const port = Object.hasOwn(overrides, name) ? overrides[name] : defaults[name];
+    const value = name === 'V2Error' ? port : function (...args) {
+      assert.equal(this, undefined);
+      calls.push([name, ...args]);
+      return port(...args);
+    };
+    Object.defineProperty(resources, name, {get() { captured.push(name); return value; }});
+  }
+  const api = create_sessions(resources);
+  assert.deepEqual(captured, resourceNames);
+  const metadata = [
+    ['endSessions', 3, 'Function'], ['sessionRow', 2, 'Function'], ['openEpoch', 2, 'Function'],
+    ['ownSession', 3, 'Function'], ['putSession', 4, 'AsyncFunction'], ['openBindingEpoch', 4, 'AsyncFunction'],
+    ['USAGE_FIELDS'], ['ingestUsage', 4, 'AsyncFunction'], ['stopSharing', 3, 'AsyncFunction'],
+    ['deleteSession', 3, 'AsyncFunction'], ['setAgentStop', 3, 'AsyncFunction'], ['listSessions', 1, 'Function']
+  ];
+  assert.deepEqual(Object.keys(api), metadata.map(x => x[0]));
+  assert.equal(create_sessions.name, 'create_sessions');
+  assert.equal(create_sessions.length, 1);
+  for (const [name, length, kind] of metadata) {
+    if (length === undefined) continue;
+    assert.equal(api[name].name, name);
+    assert.equal(api[name].length, length);
+    assert.equal(api[name].constructor.name, kind);
+  }
+  return {api, calls, captured};
+}
+
+function checkEnding(args, expected) {
+  const {api, calls} = fixture();
+  const result = api.endSessions(...args);
+  assert.deepEqual(result, expected);
+  const wanted = [];
+  for (const s of args[0]) {
+    wanted.push(['run', 'UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL', args[2], s.ws_id, s.session_key]);
+    wanted.push(['run', "UPDATE v2_sessions SET state = 'stopped', stopped_at = COALESCE(stopped_at, ?), ended_reason = ?, governing_goal_id = NULL,\n         governing_alignment_id = NULL, updated_at = ? WHERE ws_id = ? AND session_key = ?", args[2], args[1], args[2], s.ws_id, s.session_key]);
+    wanted.push(['run', "UPDATE v2_request_targets SET state = 'expired', ended_reason = ?, updated_at = ? WHERE ws_id = ? AND session_key = ? AND state IN ('sent','received')", args[1], args[2], s.ws_id, s.session_key]);
+  }
+  assert.deepEqual(calls, wanted);
+  return result;
+}
+const cases = [
+  {
+    id: 'generated-ending-two',
+    run: () => checkEnding([[{ws_id: 'workspace-a', session_key: 'session-a'}, {ws_id: 'workspace-b', session_key: 'session-b'}], 'member_removed', '2026-01-01T00:00:00.000Z'], 2)
+  },
+  {
+    id: 'generated-ending-empty',
+    run: () => checkEnding([[], 'device_signed_out', '2026-01-02T00:00:00.000Z'], 0)
+  },
+  {
+    id: 'generated-ending-repeated',
+    run: () => checkEnding([[{ws_id: 'workspace-c', session_key: 'same-key'}, {ws_id: 'workspace-c', session_key: 'same-key'}, {ws_id: 'workspace-c', session_key: 'same-key'}], 'member_removed', '2026-01-03T00:00:00.000Z'], 3)
+  },
+  {
+    id: 'generated-list-member-empty',
+    run: () => {
+      const {api, calls} = fixture();
+      const result = api.listSessions({wsId: 'workspace-a', userId: 'person-a', wsRole: 'member'});
+      assert.deepEqual(result, {mine: [], all: null});
+      assert.deepEqual(calls, [['all', 'SELECT * FROM v2_sessions WHERE ws_id = ? AND user_id = ? ORDER BY started_at DESC', 'workspace-a', 'person-a']]);
+      return result;
+    }
+  },
+  {
+    id: 'generated-list-owner-empty',
+    run: () => {
+      const {api, calls} = fixture();
+      const result = api.listSessions({wsId: 'workspace-b', userId: 'person-b', wsRole: 'owner'});
+      assert.deepEqual(result, {mine: [], all: []});
+      assert.deepEqual(calls, [
+        ['all', 'SELECT * FROM v2_sessions WHERE ws_id = ? AND user_id = ? ORDER BY started_at DESC', 'workspace-b', 'person-b'],
+        ['all', "SELECT s.*, u.name AS owner_name FROM v2_sessions s LEFT JOIN ba_user u ON u.id = s.user_id WHERE s.ws_id = ? AND s.state <> 'stopped' ORDER BY s.started_at DESC", 'workspace-b']
+      ]);
+      return result;
+    }
+  },
+  {
+    id: 'generated-usage-empty',
+    run: async () => {
+      const row = {user_id: 'person-c', device_id: 'device-c', state: 'shared'};
+      const {api, calls} = fixture({get: () => row});
+      const pp = {wsId: 'workspace-c', userId: 'person-c'};
+      const result = await api.ingestUsage(pp, {kind: 'device', deviceId: 'device-c'}, 'session-c', {rows: []});
+      assert.deepEqual(result, {accepted: 0, duplicates: 0, conflicts: 0, refused: []});
+      assert.deepEqual(calls.map(c => c[0]), ['get', 'need', 'nowIso', 'tx', 'all']);
+      assert.strictEqual(calls[1][1], pp);
+      assert.deepEqual(calls[1].slice(2), ['session.manage', {kind: 'session', ownerId: 'person-c'}]);
+      assert.equal(calls[3][1].constructor.name, 'Function');
+      assert.deepEqual(calls[4], ['all', 'SELECT epoch_id, starts_at, ends_at FROM v2_epochs WHERE ws_id = ? AND session_key = ?', 'workspace-c', 'session-c']);
+      return result;
+    }
+  }
+];
+async function runTests() {
+  const results = [];
+  for (const c of cases) {
+    await c.run();
+    results.push({case_id: c.id, outcome: 'passed'});
+  }
+  return {schema: 'literate-ai/generated-test-results@1', cases: results};
+}
+async function smoke() { return cases[0].run(); }
+module.exports = {runTests, smoke};

@@ -1,0 +1,11 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const out = process.argv[2];
+if (!out) throw new Error('OUT is required');
+const root = path.resolve(__dirname, '..');
+fs.mkdirSync(out, { recursive: true });
+for (const name of ['main.js', 'server_steering', 'tests']) {
+  fs.cpSync(path.join(root, name), path.join(out, name), { recursive: true });
+}
+fs.writeFileSync(path.join(out, 'run'), '#!/usr/bin/env node\n\'use strict\';\nrequire(\'./main.js\');\n', { mode: 0o755 });

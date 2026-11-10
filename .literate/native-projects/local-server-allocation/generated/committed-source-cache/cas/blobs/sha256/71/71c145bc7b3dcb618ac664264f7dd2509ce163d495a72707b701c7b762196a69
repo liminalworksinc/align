@@ -1,0 +1,10 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const out = path.resolve(process.argv[2]);
+fs.mkdirSync(out, { recursive: true });
+for (const name of ['server_allocation', 'tests']) fs.cpSync(path.join(root, name), path.join(out, name), { recursive: true });
+fs.copyFileSync(path.join(root, 'main.js'), path.join(out, 'main.js'));
+fs.copyFileSync(path.join(root, 'main.js'), path.join(out, 'run'));
+fs.chmodSync(path.join(out, 'run'), 0o755);

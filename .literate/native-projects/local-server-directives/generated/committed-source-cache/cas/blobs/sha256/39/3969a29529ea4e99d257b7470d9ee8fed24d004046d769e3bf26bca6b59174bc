@@ -1,0 +1,91 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {create_directives} = require('../server_directives/create_directives.js');
+
+function resources(overrides = {}) {
+  const unexpected = () => { throw new Error('Unexpected supplied service call'); };
+  return {all: unexpected, get: unexpected, run: unexpected, tx: unexpected,
+    V2Error: class extends Error {}, badRequest: message => new Error(message),
+    notFound: () => new Error('not found'), event: unexpected, newId: unexpected,
+    nowIso: unexpected, goalCore: unexpected, goalObj: unexpected,
+    bindableFor: unexpected, goalRow: unexpected, canReadGoal: unexpected,
+    principalIn: unexpected, expireStoppedSessionTargets: unexpected,
+    holdWire: unexpected, requestReceipt: unexpected, requestWire: unexpected,
+    readDate: unexpected, ...overrides};
+}
+
+const cases = [
+  {id: 'generated-cursor-example', args: ['parseCursor', '1234'], expected: 1234},
+  {id: 'generated-cursor-empty', args: ['parseCursor', ''], expected: 0},
+  {id: 'generated-cursor-coercion', args: ['parseCursor', 91], expected: 91},
+  {id: 'generated-saved-legacy', args: ['goalSnapshot', '{"id":"g7","pod":"group7","visibility":"pod","level":"","limits":false,"target_share":0,"unknown":7}'],
+    expected: {id: 'g7', level: '', limits: false, target_share: 0, unknown: 7, team: 'group7', visibility: 'team'}},
+  {id: 'generated-write-empty', args: ['writeDirective', 'w7', 'stop', [], null, null], expected: null},
+  {id: 'generated-feed-empty', args: ['directivesFor', {grants: []}, 7], expected: []},
+  {id: 'generated-ended-empty', args: ['endedSessionsFor', {grants: []}, 0], expected: []},
+  {id: 'generated-stop-absent', args: ['stopStatus', 'w8', 's8'], expected: null}
+];
+
+function invoke(args) {
+  const api = create_directives(resources({get: () => undefined}));
+  const [method, ...values] = args;
+  return api[method](...values);
+}
+
+async function checkObservations() {
+  const names = ['all', 'get', 'run', 'tx', 'V2Error', 'badRequest', 'notFound', 'event', 'newId', 'nowIso', 'goalCore', 'goalObj', 'bindableFor', 'goalRow', 'canReadGoal', 'principalIn', 'expireStoppedSessionTargets', 'holdWire', 'requestReceipt', 'requestWire', 'readDate'];
+  const reads = [];
+  const supplied = resources();
+  const getters = {};
+  for (const name of names) Object.defineProperty(getters, name, {get() { reads.push(name); return supplied[name]; }});
+  const api = create_directives(getters);
+  assert.deepEqual(reads, names);
+  assert.deepEqual(Object.keys(api), ['writeDirective', 'goalTargets', 'goalVersionDirective', 'goalSnapshot', 'directivesFor', 'endedSessionsFor', 'parseCursor', 'RECEIPT_STATES', 'recordReceipt', 'stopStatus']);
+  for (const [name, length] of Object.entries({writeDirective: 6, goalTargets: 2, goalVersionDirective: 2, goalSnapshot: 1, directivesFor: 2, endedSessionsFor: 1, parseCursor: 1, recordReceipt: 5, stopStatus: 2})) {
+    assert.equal(api[name].name, name);
+    assert.equal(api[name].length, length);
+    assert.equal(api[name].constructor.name, name === 'recordReceipt' ? 'AsyncFunction' : 'Function');
+  }
+  assert.strictEqual(api.RECEIPT_STATES, api.RECEIPT_STATES);
+  assert.deepEqual(api.RECEIPT_STATES, ['received', 'applied', 'enforced', 'accepted', 'declined']);
+  const trace = [];
+  const writer = create_directives(resources({newId: prefix => { trace.push(prefix); return 'd7'; }, nowIso: () => 'clock7',
+    run: (...args) => {trace.push(args); return 1;}, event: (...args) => trace.push(args)}));
+  assert.equal(writer.writeDirective('w7', 'stop', ['z', 'a', 'z'], null, null), 'd7');
+  assert.deepEqual(trace, ['dir',
+    ['INSERT INTO v2_directives (id, ws_id, kind, goal_id, goal_json, binding_json, request_json, hold_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', 'd7', 'w7', 'stop', null, null, null, null, null, 'clock7'],
+    ['INSERT INTO v2_directive_targets (ws_id, directive_id, session_key) VALUES (?, ?, ?)', 'w7', 'd7', 'z'],
+    ['INSERT INTO v2_directive_targets (ws_id, directive_id, session_key) VALUES (?, ?, ?)', 'w7', 'd7', 'a'],
+    ['first_directive', {ws: 'w7', props: {kind: 'stop'}}]]);
+  const commits = [];
+  class Refusal extends Error {
+    constructor(status, code, message, details) { super(message); Object.assign(this, {status, code, details}); }
+  }
+  const receipt = create_directives(resources({
+    get: () => ({ws_id: 'w7', kind: 'request', request_json: '{"request_id":"r7"}', session_state: 'stopped'}),
+    tx: callback => {const value = callback(); commits.push(value); return Promise.resolve(value);},
+    nowIso: () => 'clock7', expireStoppedSessionTargets: (...args) => {assert.deepEqual(args, ['w7', 's7', 'clock7']); return 0;}, V2Error: Refusal
+  }));
+  await assert.rejects(receipt.recordReceipt({user: {id: 'u7'}, deviceId: 'v7', grants: new Set(['w7'])}, 'd7', 's7', 'accepted', 'at7'), error => {
+    assert.ok(error instanceof Refusal);
+    assert.equal(error.status, 409);
+    assert.equal(error.code, 'request_expired');
+    assert.equal(error.message, "This request expired: this session's sharing was stopped, so it no longer takes answers.");
+    assert.deepEqual(error.details, {ended_reason: null});
+    assert.deepEqual(commits, [0]);
+    return true;
+  });
+}
+
+async function runTests() {
+  const outcomes = [];
+  for (const entry of cases) {
+    assert.deepEqual(await invoke(entry.args), entry.expected);
+    outcomes.push({case_id: entry.id, outcome: 'passed'});
+  }
+  await checkObservations();
+  return {schema: 'literate-ai/generated-test-results@1', cases: outcomes};
+}
+function smoke() { return invoke(cases[0].args); }
+exports.runTests = runTests;
+exports.smoke = smoke;

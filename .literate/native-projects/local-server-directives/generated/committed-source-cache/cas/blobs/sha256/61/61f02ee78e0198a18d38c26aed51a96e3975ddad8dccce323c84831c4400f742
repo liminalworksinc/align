@@ -1,0 +1,1 @@
+{"name":"server_directives","type":"commonjs","exports":{"./create_directives":"./create_directives.js"}}

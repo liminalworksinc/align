@@ -27,11 +27,11 @@ queue item or let `docs/roadmap/` become a plan archive.
 
 ## Open pull-request landing queue
 
-Tracker reconciliation on 2026-11-05 found seven open reviews. Subsequent native
-rewrite checkpoint `b55849d0` publishes eighteen libraries in draft PR #58. The
-twenty-three-library checkpoint below is verified locally. PR #58 records its
-publication state. Peer statuses below record that earlier survey and remain independently
-owned.
+The current 2026-11-10 survey confirms draft PR #58 at `4214c45f`, with
+47 qualified libraries and fifteen locally accepted boundaries. The B16 candidate
+has 56 libraries and sixteen local acceptances; its later publication is recorded
+by Git and the PR. Earlier peer statuses below remain historical and independently
+owned. The current survey finds no collectable branches or worktrees.
 
 - [#58](https://github.com/liminalworksinc/align/pull/58), native rewrite:
   the earlier eighteen-library head was published as `b55849d0`. The twenty-three-library candidate
@@ -64,6 +64,18 @@ codes), #68 (integrated v2 frontend) and #69 (workspace stop ownership). PR #62 
 green and mergeable at `a9a47a39`; it remains independently owned and unmerged by
 this session. No collectable branches or worktrees were reported. These findings
 do not authorize collecting or publishing peer changes.
+
+The current survey also records [#71](https://github.com/liminalworksinc/align/pull/71)
+(bindability), [#72](https://github.com/liminalworksinc/align/pull/72) (trust pages),
+[#73](https://github.com/liminalworksinc/align/pull/73) (refresh grace) and
+[#74](https://github.com/liminalworksinc/align/pull/74) (pending bindings) as draft
+peer work with failing CI at the surveyed heads.
+[#75](https://github.com/liminalworksinc/align/pull/75) (pinned CLI bootstrap) is
+green and mergeable. PRs #59 and #67 are green drafts, #64 is a conflicting green
+draft, and #68 has failing CI. None is merged or collected by this session.
+Issues #76 and #77 remain covered by the B14 and B15 correction records below.
+The operator continuation retains the full native rewrite scope through B31 and
+its acceptance gates; the local checkpoint does not complete that work.
 
 ## P0
 
@@ -153,11 +165,11 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Next action:** Publish the verified 47-library B15 checkpoint in the existing
-  draft PR, then continue B16 through B31. The [transfer review](native-boundary-transfers.md)
-  records fifteen local boundary acceptances and sixteen remaining boundaries.
-  Preserve original and failed evidence. Public tester delivery, actual operator
-  security review and live smoke remain open.
+- **Next action:** Publish the verified 56-library B16 checkpoint in the existing
+  draft PR, then continue B17 through B31. The [transfer review](native-boundary-transfers.md)
+  records sixteen local boundary acceptances and fifteen remaining boundaries.
+  Preserve original and failed evidence. Public tester delivery, founder-owned
+  release setup, actual operator security review and live smoke remain open.
 - **B14 prerequisite:** [Issue #76](https://github.com/liminalworksinc/align/issues/76)
   reproduces an existing invite-cap race while writers wait for SQLite. The local
   correction preserves the early check and rechecks under the transaction lock.
@@ -213,6 +225,13 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   verify all 47 projections and the current receipt. Local transfer acceptance
   is recorded in [the exact ledger](native-boundary-transfers.json). This does
   not complete ADOPT-002 or any public tester gate.
+- **B16 native transfer:** All nine libraries have current local readiness and
+  both-host actual caller acceptance. The current 56-library candidate passes
+  1,046 web batches, all 1,847 application checks, 36 fresh image checks and
+  18 unchanged offline HTTP/SQLite controls. Twenty-one passed assertions cover
+  fourteen required interaction groups. Both readers verify all 56 projections
+  and the current receipt. The [exact ledger](native-boundary-transfers.json)
+  records local acceptance; ADOPT-002 and public tester gates remain open.
 - **Account and membership scope:** Preserve all seven account operations and
   both membership lifecycle operations through two supplied-service factories.
   Account captures 21 resources; lifecycle captures six. The caller retains SQL

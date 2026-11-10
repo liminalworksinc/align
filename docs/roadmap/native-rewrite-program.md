@@ -9,42 +9,46 @@ until each boundary earns transfer under ADR 0002.
 
 ## Latest candidate status
 
-The B15 candidate replaces all twelve goal and decision service algorithms with
-qualified libraries, preserving their public types, value-rule aliases and
-explicit host resources. Two clean qualifications and separate fresh admission
-pass for each child. Both hosts pass complete source and actual binding
-comparisons. The retained binding review covers 107 forwarding functions and
-35 native constant references across all twelve files, with no retained
-application algorithm. Original and failed candidates remain preserved.
+The B16 candidate replaces all nine session, device, steering, spend, allocation,
+activity, Home and directive service algorithms with qualified libraries. The
+retained members contain caller-owned types, 141 supplied resource bindings, 54 exact
+forwarding functions and 15 references to native constants. Every child has two
+clean qualifications of its current authority, separate fresh admission,
+complete source review, both-host package and actual caller acceptance, and
+unchanged public types. The spending contract remains identical to qualification
+version 4; a separate fifth admission passes the generated-test formatting gate.
+Original and failed artifacts and both earlier parent candidates are preserved.
 
-Combined web materialization passes 956 independent batches across 41 libraries.
-The unchanged full build, test and package recipe passes 1,847 application checks
-with zero failures or skips on 472 declared source members. These include the
-24 new independent verifier inputs and the public decision export reader.
-Real application store and browser checks
-exercise the coupled decision services, including approval without launch,
-revision races, dependencies, evidence, contributions, requests and holds. The
-canonical seven-case goal-cap regression passes through the native binding.
+Combined materialization passes 1,046 independent batches for 50 web libraries.
+The complete unchanged build, test and package recipe passes 1,847 application
+checks with zero failures or skips on 490 declared source members. Twenty-one
+passed assertions directly witness fourteen requirement groups through real
+production Next servers, HTTP and SQLite, including credential rotation/replay,
+device/session isolation, epochs, usage, stopping and history deletion, directive
+delivery and receipts, metering, steering, allocation, activity and Home.
 
-The fresh Linux arm64 image `sha256:a49d9d5233d83e2874a57eb6804ba9e15410685794e653be1b6d9af8b8489578` passes all 36 image checks,
-six static assets, two root-owned raw assets and the existing operator closure.
-Eighteen additional offline bundled HTTP/SQLite controls pass. The full image
-runtime and provider inputs match the tested candidate. Both capable readers
-verify all 47 qualified projections and the current receipt
-`sha256:2bbe3706ddd25e2527170909eda1b8cecd67d665f15e7959fe042ad42110b85d`. Source: `sha256:a221a0efd6c7b55c14915df68758407cadf5e39b0f342f7b9d56a849a5ac49f6`.
+The fresh Linux arm64 image `sha256:058081ac3355bbe219204efaf36185b6031e7f82c6eb5a5853d598d4dac159ae` passes all 36 image checks,
+six exact static assets, two root-owned raw assets and the unchanged 41-file,
+five-package operator closure. Eighteen unchanged offline bundled workspace and
+goal HTTP/SQLite controls pass. All frozen image runtime and provider inputs match
+the full-tested source. Both capable readers explicitly verify all 56 qualified
+projections and the current receipt `sha256:9b0afc6c68863b56253f21f9c82cc8481aee602fdb00cd7002f25fe2f8624244`.
+Source: `sha256:779a0cbe67e7b90dc34646762dd68972f5c88f3a286010115f78c907e1aceb39`.
 
-The [dated child-preparation record](../architecture/goal-domain-admitted-acceptance.json) remains immutable evidence before parent acceptance. The [transfer ledger](native-boundary-transfers.json) records the later completed parent gates.
+The [B15 child-preparation record](../architecture/goal-domain-admitted-acceptance.json)
+and [B16 child-preparation record](../architecture/session-domain-admitted-acceptance.json)
+remain immutable. The [transfer ledger](native-boundary-transfers.json) records
+the later complete parent acceptance. Sixteen of 31 boundaries have local
+acceptance; B17 through B31 remain open. Publication is recorded separately in
+Git and the existing draft PR.
 
-Fifteen of 31 boundaries have local transfer acceptance. B16 through B31 remain
-open. The session-service candidates are prepared separately; their local child
-checks do not close B16. Publication of this checkpoint is recorded separately
-in Git and the existing draft PR.
-
-The prior authentication and compressed-command review findings remain open
-for maintainer and actual operator security review. No finding is automatically
-accepted or dismissed. Public delivery, real-provider browser acceptance, live
-smoke and actual operator security acceptance remain open. The existing tester
-account and founder-only release prerequisites remain separate delivery gates.
+The three earlier authentication and compressed-command review findings and two
+additional B15 authorization-relocation findings remain open. The exact review
+IDs are recorded in the transfer ledger. The review log does not establish that
+the relocated checks are missing. No finding has been automatically accepted or dismissed. Public delivery,
+real-provider browser acceptance, actual operator security review and live smoke
+remain open. The existing founder-owned setup and deployment hold remain separate
+release requirements.
 
 ## Current main integration
 

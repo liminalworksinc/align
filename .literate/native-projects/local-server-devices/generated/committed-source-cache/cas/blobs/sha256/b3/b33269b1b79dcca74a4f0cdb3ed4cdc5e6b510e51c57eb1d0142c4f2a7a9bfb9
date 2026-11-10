@@ -1,0 +1,176 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {create_devices} = require('../server_devices/create_devices.js');
+const cases = [
+  {id:"generated-normalize-formatted",method:"normalizeUserCode",args:[" bcdf ghjk "],expected:"BCDF-GHJK"},
+  {id:"generated-normalize-short",method:"normalizeUserCode",args:["BCDF"],expected:null},
+  {id:"generated-normalize-vowel",method:"normalizeUserCode",args:["ABCD-FGHJ"],expected:null},
+  {id:"generated-normalize-idempotent",method:"normalizeUserCode",args:["BCDF-GHJK"],expected:"BCDF-GHJK"},
+  {id:"generated-normalize-punctuation",method:"normalizeUserCode",args:["b.c.d.f--g/h/j/k"],expected:"BCDF-GHJK"},
+  {id:"generated-workspace-empty",method:"workspaceIdsOf",args:[{}],expected:[]},
+  {id:"generated-workspace-order",method:"workspaceIdsOf",args:[{"workspace_ids":[" beta ","alpha","beta",""," alpha "]}],expected:["beta","alpha"]},
+  {id:"generated-workspace-null",method:"workspaceIdsOf",args:[{"workspace_ids":null}],expected:[]},
+  {id:"generated-browser-trim",method:"userCodeOf",args:[{"user_code":"  bcdf-ghjk  "}],expected:"bcdf-ghjk"},
+  {id:"generated-owner-found",method:"deviceOwnedBy",args:["dv-test","usr-test"],expected:true},
+  {id:"generated-owner-missing",method:"deviceOwnedBy",args:["dv-absent","usr-test"],expected:false},
+  {id:"generated-user-projection",method:"userById",args:["usr-test"],expected:{"id":"usr-test","name":"Tester","email":"tester@example.invalid","emailVerified":true}},
+  {id:"generated-access-malformed",method:"deviceFromAccessToken",args:["alnd_short"],expected:null},
+  {id:"generated-refresh-message",method:"refreshMessage",args:["dv-test","","2030-01-01T00:00:00.000Z"],expected:"align-refresh\ndv-test\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n2030-01-01T00:00:00.000Z"},
+  {id:"generated-live-rows",method:"liveDevicesOf",args:["usr-empty"],expected:[]},
+  {id:"generated-list-empty",method:"listDevices",args:["usr-empty"],expected:[]}
+];
+
+function fixture() {
+  const calls = [];
+  class V2Error extends Error {
+    constructor(status,code,message,details) { super(message); this.status=status; this.code=code; this.details=details; }
+  }
+  const resources = {
+    createPublicKey: value => value,
+    verify: () => true,
+    randomInt: () => 0,
+    config: () => ({hosted:true}),
+    all: (...args) => { calls.push(['all',...args]); return []; },
+    audit: (...args) => { calls.push(['audit',...args]); },
+    get: (sql,...args) => {
+      calls.push(['get',sql,...args]);
+      if (sql === 'SELECT 1 AS x FROM v2_devices WHERE id = ? AND user_id = ?' && args[0] === 'dv-test' && args[1] === 'usr-test') return {x:1};
+      if (sql === 'SELECT id, name, email, emailVerified FROM ba_user WHERE id = ?' && args[0] === 'usr-test') return {id:'usr-test',name:'Tester',email:'tester@example.invalid',emailVerified:1,private:'hidden'};
+      return undefined;
+    },
+    LIVE_WS: column => `${column} IN (SELECT id FROM v2_workspaces WHERE deleted_at IS NULL)`,
+    run: (...args) => { calls.push(['run',...args]); },
+    tx: fn => { const result=fn(); calls.push(['commit']); return result; },
+    V2Error,
+    badRequest: message => new V2Error(400,'bad_request',message),
+    conflict: (code,message) => new V2Error(409,code,message),
+    event: (...args) => { calls.push(['event',...args]); },
+    newId: prefix => `${prefix}-test`,
+    nowIso: () => '2030-01-01T00:00:00.000Z',
+    secretToken: () => 'test-secret',
+    sha256hex: value => {
+      if (value === '') return 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+      return `test-hash:${value}`;
+    },
+    retryAfterMs: () => 60000,
+    take: (...args) => { calls.push(['take',...args]); },
+    takeAll: () => true,
+    endSessions: (...args) => { calls.push(['endSessions',...args]); },
+    readDate: () => Date,
+    readBuffer: () => Buffer
+  };
+  return {resources,calls};
+}
+
+async function run() {
+  const results = [];
+  for (const c of cases) {
+    const {resources,calls} = fixture();
+    const api = create_devices(resources);
+    const actual = await api[c.method](...c.args);
+    assert.deepStrictEqual(actual,c.expected);
+    if (c.method === 'deviceOwnedBy') assert.deepStrictEqual(calls,[['get','SELECT 1 AS x FROM v2_devices WHERE id = ? AND user_id = ?',...c.args]]);
+    if (c.method === 'deviceFromAccessToken') assert.deepStrictEqual(calls,[]);
+    results.push({case_id:c.id,outcome:'passed'});
+  }
+  await contractChecks();
+  return {schema:'literate-ai/generated-test-results@1',cases:results};
+}
+
+async function contractChecks() {
+  const f = fixture();
+  const order = [];
+  const resources = new Proxy(f.resources,{get(target,key) { order.push(key); return target[key]; }});
+  const api = create_devices(resources);
+  assert.deepStrictEqual(order,['createPublicKey','verify','randomInt','config','all','audit','get','LIVE_WS','run','tx','V2Error','badRequest','conflict','event','newId','nowIso','secretToken','sha256hex','retryAfterMs','take','takeAll','endSessions','readDate','readBuffer']);
+  assert.equal(Object.keys(api).length,30);
+  assert.equal(create_devices.name,'create_devices');
+  assert.equal(create_devices.length,1);
+  for (const [name,length] of Object.entries({userById:1,normalizeUserCode:1,authorize:3,token:1,refreshMessage:3,refresh:1,revokeDevice:3,revokeDevicesOf:3,deviceFromAccessToken:1,userCodeOf:1,workspaceIdsOf:1,lookupRequest:2,decideRequest:4,listDevices:1,liveDevicesOf:1,addWorkspaceToDevices:4,grantWorkspace:3,deviceOwnedBy:2})) {
+    assert.equal(api[name].name,name);
+    assert.equal(api[name].length,length);
+    assert.equal(api[name].constructor.name,['authorize','token','refresh','revokeDevice','decideRequest','grantWorkspace'].includes(name)?'AsyncFunction':'Function');
+  }
+  const sentinel = {};
+  assert.throws(() => api.normalizeUserCode({toUpperCase(){throw sentinel;}}),e => e === sentinel);
+  assert.throws(() => api.userCodeOf({user_code:' '.repeat(40)}),e => e.message === api.EMPTY_CODE);
+  assert.throws(() => api.workspaceIdsOf({workspace_ids:Array(51).fill('w')}),e => e.message === api.TOO_MANY_WORKSPACES);
+  assert.throws(() => api.workspaceIdsOf({workspace_ids:[...Array(50).fill('w'),3]}),e => e.message === api.WORKSPACES_UNREADABLE);
+  assert.deepStrictEqual(api.workspaceIdsOf({workspace_ids:Array(50).fill('w')}),['w']);
+
+  const polling = fixture();
+  polling.resources.get = () => ({id:'req',state:'pending',expires_at:'2999-01-01T00:00:00.000Z',last_poll_at:null});
+  await assert.rejects(create_devices(polling.resources).token('opaque'),e => e.code === 'authorization_pending');
+  assert.deepStrictEqual(polling.calls.map(c=>c[0]),['run','commit']);
+  assert.equal(polling.calls[0][1],'UPDATE v2_device_requests SET last_poll_at = ? WHERE id = ?');
+
+  const hand = fixture();
+  const observed = [];
+  hand.resources.get = sql => sql.startsWith('SELECT user_id, name, revoked_at')
+    ? {get user_id(){observed.push('next');return 'u';},revoked_at:true}
+    : {get user_id(){observed.push('gone');return 'u';}};
+  await create_devices(hand.resources).revokeDevice('old','logout','u','next');
+  assert.deepStrictEqual(observed,['next','gone']);
+
+  const post = fixture();
+  let reads = 0;
+  post.resources.tx = () => ({get error(){reads++;return 'access_denied';}});
+  await assert.rejects(create_devices(post.resources).token('unused'),e => e.code === 'access_denied' && e.message === 'access denied');
+  assert.equal(reads,1);
+
+  class Clock extends Date { static now() { return 1893456000000; } }
+  const publicKey = Buffer.alloc(32).toString('base64url');
+  const pairing = fixture();
+  let randomCalls = 0;
+  let secrets = 0;
+  pairing.resources.readDate = () => Clock;
+  pairing.resources.randomInt = n => { assert.equal(n,20); randomCalls++; return 0; };
+  pairing.resources.secretToken = n => { assert.equal(n,32); secrets++; return 'pairing-secret'; };
+  const paired = await create_devices(pairing.resources).authorize({public_key:publicKey,device_name:'Terminal'},'network','https://example.invalid');
+  assert.deepStrictEqual(paired,{device_code:'pairing-secret',user_code:'BBBB-BBBB',verification_uri:'https://example.invalid/app/device',expires_in:600,interval:5});
+  assert.equal(randomCalls,8);
+  assert.equal(secrets,1);
+  assert.deepStrictEqual(pairing.calls[1],['run',"DELETE FROM v2_device_requests WHERE expires_at < ? AND state <> 'approved'",'2029-12-31T23:00:00.000Z']);
+  assert.deepStrictEqual(pairing.calls[2],['run',"INSERT INTO v2_device_requests (id, device_code_hash, user_code, device_name, public_key, created_at, expires_at, interval_s, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')",'dr-test','test-hash:pairing-secret','BBBB-BBBB','Terminal',publicKey,'2030-01-01T00:00:00.000Z','2030-01-01T00:10:00.000Z',5]);
+
+  const limited = fixture();
+  let taken;
+  limited.resources.takeAll = limits => { taken=limits[0]; return false; };
+  limited.resources.retryAfterMs = limits => { assert.strictEqual(limits[0],taken); return 60001; };
+  limited.resources.secretToken = () => { throw new Error('No entropy before refusal'); };
+  limited.resources.readDate = () => { throw new Error('No clock before refusal'); };
+  await assert.rejects(create_devices(limited.resources).authorize({public_key:publicKey},'net','origin'),e => e.status === 429 && e.code === 'rate_limited' && e.details.retry_after === 61 && e.message === 'Too many device pairings were started from this network in the last hour (the limit is 10). Try again in 2 minutes.');
+  assert.deepStrictEqual(taken,{key:'device-authorize:net',max:10,windowMs:3600000});
+
+  const replay = fixture();
+  replay.resources.readDate = () => Clock;
+  replay.resources.get = sql => sql.startsWith('SELECT id, public_key, revoked_at')
+    ? {id:'dv-test',public_key:publicKey,revoked_at:null}
+    : {rotated_at:'2029-12-31T23:59:00.000Z',expires_at:'2030-02-01T00:00:00.000Z'};
+  await assert.rejects(create_devices(replay.resources).refresh({device_id:'dv-test',refresh_token:'old',ts:'2030-01-01T00:00:00.000Z',sig:''}),e => e.status === 401 && e.details === undefined);
+  assert.deepStrictEqual(replay.calls.map(c=>c[0]),['run','run','all','endSessions','audit','commit']);
+  assert.strictEqual(replay.calls[3][1].length,0);
+  assert.deepStrictEqual(replay.calls[4],['audit',null,null,'device.revoked','dv-test','2030-01-01T00:00:00.000Z']);
+
+  const access = fixture();
+  access.resources.readDate = () => Clock;
+  access.resources.get = sql => sql.startsWith('SELECT t.device_id')
+    ? {device_id:'dv-test',expires_at:'2030-01-01T01:00:00.000Z',name:'Terminal',user_id:'usr-test',revoked_at:null,last_seen_at:'2029-12-31T23:55:00.000Z'}
+    : {id:'usr-test',name:'Tester',email:'tester@example.invalid',emailVerified:true};
+  access.resources.all = () => [{ws_id:'w2'},{ws_id:'w1'},{ws_id:'w2'}];
+  const principal = create_devices(access.resources).deviceFromAccessToken('alnd_01234567890123456789');
+  assert.deepStrictEqual(principal,{kind:'device',user:{id:'usr-test',name:'Tester',email:'tester@example.invalid'},deviceId:'dv-test',deviceName:'Terminal',grants:new Set(['w2','w1'])});
+  assert.deepStrictEqual(access.calls,[]);
+
+  const grant = fixture();
+  grant.resources.get = () => ({x:1});
+  const inputIds = ['d','d'];
+  assert.strictEqual(create_devices(grant.resources).addWorkspaceToDevices('u','w',inputIds,'at'),inputIds);
+  assert.deepStrictEqual(grant.calls,[['run','INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)','d','w'],['audit','w','u','device.workspace_added','d','at'],['run','INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)','d','w'],['audit','w','u','device.workspace_added','d','at']]);
+}
+
+function smoke() {
+  return create_devices(fixture().resources).normalizeUserCode(' bcdf ghjk ');
+}
+exports.run = run;
+exports.smoke = smoke;

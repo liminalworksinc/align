@@ -1,0 +1,8 @@
+/** Structural caller-owned domain values are passed through without reinterpretation. */
+export interface HomeChange { id: unknown; goal: unknown; state: unknown; requester: unknown; reason: unknown; next: unknown; waiting_on: unknown; updated_at: unknown }
+export interface HomeDeclined { id: unknown; goal: unknown; reason: unknown; rejected_by: unknown; rejection_reason: unknown; decided_at: unknown }
+export interface HomeAsk { id: unknown; state: unknown; team: unknown; goal: unknown; text: unknown; from_label: unknown; requester: unknown; next: 'accept' | 'done' }
+export interface HomeAlignment { id: unknown; state: unknown; requester: unknown; target_goal: unknown; choice: unknown; source_goal: unknown; sessions: { label: unknown; started_at: unknown; key_end: unknown }[]; next: unknown; waiting_on: unknown; updated_at: unknown }
+export interface HomeGoal { id: unknown; title: unknown; version: unknown; level: 'company' | 'team'; team: { id: unknown; name: unknown } | null; owner: { id: unknown; name: unknown }; mine: boolean }
+export interface HomeApp { id: unknown; name: unknown; connected_by: unknown; approved_at: unknown; last_used_at: unknown; last_read_at: unknown; evidence_class: unknown }
+export interface WorkspaceHome { me: unknown; change_requests: { waiting_on_me: HomeChange[]; waiting_on_others: HomeChange[]; declined: HomeDeclined[] } | null; asks: { waiting_on_me: HomeAsk[] } | null; alignments: { waiting_on_me: HomeAlignment[]; waiting_on_others: HomeAlignment[] } | null; goals: HomeGoal[] | null; apps: { everyone: boolean; items: HomeApp[] } | null }

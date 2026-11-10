@@ -1,0 +1,6 @@
+LITAI_LANGUAGE_TOOL ?= node
+.PHONY: all test
+all:
+	"$(LITAI_LANGUAGE_TOOL)" tools/package.js "$(OUT)"
+test:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
