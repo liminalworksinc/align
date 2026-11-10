@@ -4237,12 +4237,13 @@ try {
       await page.waitForFunction(() => document.body.innerText.includes("Northstar (sample)") && !document.body.innerText.includes("Create the Northstar sample"), { timeout: 15000 });
       await page.type("main form input", "UI workspace");
       await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create")?.click())]);
-      // A new workspace opens on its Home, which points to the Goals tab for the first goal.
-      await page.waitForFunction(() => !!document.querySelector('h1[data-home-count="0"]') && document.body.innerText.includes("No active goals you can see.") && [...document.querySelectorAll("a")].some((a) => a.textContent === "Create a goal"), { timeout: 15000 });
+      // A new workspace opens on its Home, which says it has no goals and leads with "Set the first goal" (LIM-2472 round 2:
+      // the first-run card replaces the empty goal list), which opens the Goals tab's form.
+      await page.waitForFunction(() => document.querySelector('h1[data-home-count="0"]')?.textContent === "No goals here yet" && [...document.querySelectorAll('[data-first-run="empty"] a[data-first-goal]')].some((a) => a.textContent === "Set the first goal"), { timeout: 15000 });
       const wsUrl = page.url();
       const newWsH1 = await page.$eval("h1[data-home-count]", (e) => e.textContent);
-      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("a")].find((a) => a.textContent === "Create a goal")?.click())]);
-      check("ui (Chrome): a new workspace opens on its Home (\"Nothing needs you\"); with no goals it links to the Goals tab at /app/w/<ws>/goals", newWsH1 === "Nothing needs you" && new URL(page.url()).pathname === `${new URL(wsUrl).pathname}/goals`, `${newWsH1} ${page.url()}`);
+      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => document.querySelector('[data-first-run="empty"] a[data-first-goal]')?.click())]);
+      check("ui (Chrome, LIM-2472 round 2): a new workspace opens on its Home (\"No goals here yet\"); its first-run card's \"Set the first goal\" opens the Goals tab at /app/w/<ws>/goals?first=1", newWsH1 === "No goals here yet" && new URL(page.url()).pathname === `${new URL(wsUrl).pathname}/goals` && new URL(page.url()).searchParams.get("first") === "1", `${newWsH1} ${page.url()}`);
       await page.waitForFunction(() => document.body.innerText.includes("New goal") && document.body.innerText.includes("Level"), { timeout: 15000 });
       await page.type('main form input:not([aria-label])', "Browser goal");
       await page.type('input[aria-label="Measure 1"]', "Browser measure");
