@@ -42,14 +42,24 @@ the later complete parent acceptance. Sixteen of 31 boundaries have local
 acceptance; B17 through B31 remain open. The checkpoint `c4b85386` is published in the existing draft PR; both CI checks
 pass. The transfer review links each committed runtime source for inspection.
 
-Seven review findings remain open: the three earlier authentication and
-compressed-command findings, two B15 authorization-relocation findings, and two
-B16 device/directive relocation and typed-boundary findings. The exact review
-IDs are recorded in the transfer ledger. The review log does not establish that
-the relocated checks are missing. No finding has been automatically accepted or dismissed. Public delivery,
-real-provider browser acceptance, actual operator security review and live smoke
-remain open. The existing founder-owned setup and deployment hold remain separate
-release requirements.
+Twenty review findings remain open: six HIGH and fourteen MEDIUM. Earlier counts
+of seven covered only the recent publication groups. The
+[authorization findings guide](native-authorization-findings.md) lists every ID,
+the original checks on pinned main, exact materialized source ranges and commands
+to read both sides. No finding is accepted or dismissed by this checkpoint.
+Independent review and actual operator security acceptance remain the operator's.
+
+The operator approved the [exact retained list](native-retention-proposal.md):
+280 paths across B20, B21, B23 through B27, B29, B30 and B31. The
+[classification record](native-retention-classification.json)
+preserves path membership, hashes, reasons and approval. This documentation-only
+candidate closes sixteen native plus ten retained boundaries only after normal
+publication. Its unchanged 490-member runtime has the same complete application,
+image and receipt acceptance recorded above; no suite is rerun for a documentation
+change. B17, B18, B19, B22 and B28 remain service or command migration work.
+Deployment, tester configuration, upstream writes, merging and review bypass are
+outside this migration. No rebase is authorized before operator confirmation that
+the cutover PRs have merged.
 
 ## Current main integration
 

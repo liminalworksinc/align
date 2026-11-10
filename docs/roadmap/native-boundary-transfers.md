@@ -4,7 +4,15 @@
 - **Owning queue item:** [ADOPT-002](active-work.md#adopt-002)
 - **Completion / archival evidence:** pending while ADOPT-002 remains open; exact accepted checkpoint and per-boundary results are recorded below
 
-Sixteen of 31 boundaries have local native transfer acceptance, B01 through B16. The operator confirmation for moved B13 authentication remains recorded. Fifteen boundaries remain open, B17 through B31, for implementation and acceptance. This count does not estimate the remaining effort.
+Sixteen of 31 boundaries have native transfer acceptance, B01 through B16.
+The operator approved exactly 280 retained paths across ten further boundaries:
+B20, B21, B23 through B27, B29, B30 and B31. This supporting candidate records
+26 closed boundaries, effective only after normal publication: sixteen native
+and ten intentionally retained. B17, B18, B19, B22 and B28 remain open.
+The [classification record](native-retention-classification.json)
+and [approved path list](native-retention-proposal.md) preserve the exact scope.
+The runtime source is unchanged, so the complete application and image results
+remain current. No suite is rerun for a documentation-only change.
 
 This same-agent review reconciles the accepted classification with exact qualified packages, 74 reviewed target-binding files, the complete 1,847-check workflow, 36 Linux arm64 image checks, 18 additional offline bundled HTTP controls and the current parent receipt. The separate goal-cap service controls pass all seven corrected cases on each host and reject the three held-writer cases in the preserved original. The current single-process HTTP probe also preserves capacity with the original source, and the runtime refuses a second server on the same data directory. The service-level gap is not claimed as a proven public HTTP exploit. This record supplies no independent maintainer or actual operator security acceptance.
 
@@ -29,7 +37,7 @@ This same-agent review reconciles the accepted classification with exact qualifi
 | B15 Goals and decisions | All twelve libraries qualify twice and admit separately. Both-host original-record, package and actual binding comparisons pass. The 47-library candidate passes the complete 1,847-check workflow, 36 fresh image checks, 18 additional offline bundled HTTP/SQLite controls and both current-receipt readers. Retained code is types, resource assembly, aliases, forwarding and native constants. Approval remains separate from launch; evidence remains an unchecked link. |
 | B16 Sessions, devices and steering | All nine current libraries pass qualification, separate admission and both-host package and actual caller comparisons. The 56-library candidate passes 1,046 combined web batches, the complete 1,847-check production application workflow, 36 fresh image checks, 18 unchanged offline bundled HTTP/SQLite controls and both receipt readers. Fourteen requirement groups contain 21 directly checked passed assertions. Retained members contain types, resources, forwarding and native constants. |
 
-The accepted classification permits the remaining typed aliases, shared wire types and explicit target providers. They preserve public interfaces while qualified packages own the replaced algorithms. No permanent runtime-source exception is introduced. Future contract or caller changes require current acceptance.
+The accepted classification permits the remaining typed aliases, shared wire types and explicit target providers. They preserve public interfaces while qualified packages own the replaced algorithms. The later operator-approved retained classification is recorded separately; it does not alter the native acceptance of B01 through B16. Future contract or caller changes require current acceptance.
 
 Earlier scoped records keep their original pending-at-record-time flags. Their application, image, receipt and authentication dependencies are resolved only for this exact checkpoint. The original failed candidates and failed full run remain preserved.
 
@@ -43,9 +51,9 @@ The B14 table row records its original transfer epoch at 95947813. Current retai
 
 The later workspace publication at 95947813 completed normal pre-push review with no opt-out. Its three findings about relocated authorization and compressed qualification commands remain open for maintainer and operator security review. Exact runtime source links and readable decoded command records are retained. No finding was automatically accepted or dismissed.
 
-The B15 publication at 4214c45f completed normal pre-push review with no opt-out. Two additional HIGH findings remain open: `f_3c2e305a94d7` requests inspection of relocated suggestion authorization, validation and rate limits; `f_4bd94fac41bd` requests inspection of relocated goal authorization, visibility and validation. The review log alone does not establish that these checks are missing. These two findings and the three earlier findings remain open. No finding was automatically accepted or dismissed.
+The B15 publication at 4214c45f completed normal pre-push review with no opt-out. Two additional HIGH findings remain open: `f_3c2e305a94d7` requests inspection of relocated suggestion authorization, validation and rate limits; `f_4bd94fac41bd` requests inspection of relocated goal authorization, visibility and validation. The review log alone does not establish that these checks are missing. These two findings and every earlier ledger finding remain open. No finding was automatically accepted or dismissed.
 
-The B16 checkpoint `c4b85386` was published through normal pre-push review with no opt-out. Both CI checks pass. Two further HIGH findings remain open: `f_5a0e064cc7ff` covers relocated device authentication and its typed boundary assertion; `f_d943ad9dd8d1` covers relocated directive authorization and its typed boundary assertion. All seven findings remain open. No finding was automatically accepted or dismissed.
+The B16 checkpoint `c4b85386` was published through normal pre-push review with no opt-out. Both CI checks pass. Two further HIGH findings remain open: `f_5a0e064cc7ff` covers relocated device authentication and its typed boundary assertion; `f_d943ad9dd8d1` covers relocated directive authorization and its typed boundary assertion. The full ledger has twenty open findings, including these two. The former count of seven covered only recent publication groups. No finding was automatically accepted or dismissed.
 
 The exact admitted runtime sources are committed in the source cache and match the current manifest. These fixed source links support human inspection of relocated checks:
 
@@ -56,3 +64,12 @@ The exact admitted runtime sources are committed in the source cache and match t
 - [server-directives runtime](https://github.com/liminalworksinc/align/blob/c4b853866ff5e130fa294f8e70fe5c0530e87aa4/.literate/native-projects/local-server-directives/generated/committed-source-cache/cas/blobs/sha256/ff/ff7843fe4e1ca719769d6f8df35c6505af0c8549058def756a556115dfbd44f7#L1), 122 lines, SHA-256 `ff7843fe4e1ca719769d6f8df35c6505af0c8549058def756a556115dfbd44f7`.
 
 The source index proves source custody and location. It does not supply independent security review or actual operator acceptance.
+
+## Current complete findings register
+
+The [authorization findings guide](native-authorization-findings.md) records all
+twenty open IDs, six HIGH and fourteen MEDIUM, exact original-main and materialized
+source references, historical review files and side-by-side reading commands.
+Zero overrides are recorded. No finding is accepted or dismissed. The retained
+classification and functional acceptance do not establish operator security
+acceptance.

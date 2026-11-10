@@ -27,7 +27,7 @@ queue item or let `docs/roadmap/` become a plan archive.
 
 ## Open pull-request landing queue
 
-The current 2026-11-10 survey confirms draft PR #58 at `c4b85386`, with
+The current 2026-11-10 survey confirms draft PR #58 at `07da0d28`, with
 56 qualified libraries and sixteen locally accepted boundaries. Both CI checks
 pass. B17 original-source controls are prepared outside the published runtime. Earlier peer statuses below remain historical and independently
 owned. The current survey finds no collectable branches or worktrees.
@@ -164,7 +164,16 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Next action:** Complete B17 metrics and retention contracts, native qualification
+- **Current direction:** Complete all 31 boundaries on draft PR #58. Local commits
+  and one normal push per checkpoint are authorized by the operator's current
+  goal. New qualification profiles use repository-relative paths. Retained
+  classification needs the operator's approval of the proposed list. Limit each
+  library to three attempts. Keep framework follow-ups local and recorded; no
+  upstream writes, review bypass, merge or rebase is authorized. Deployment and
+  tester configuration are outside this migration.
+- **Next action:** Publish the approved supporting-boundary checkpoint with the relocated-check
+  comparison file and all twenty open findings, then complete B17 metrics and
+  retention contracts, native qualification
   and separate admission. The three frozen members are `lib/v2/metrics-core.mts`,
   `lib/v2/retention-core.mts` and `lib/v2/retention.ts`. Keep SQL, transactions,
   environment, clocks and scheduling caller-owned. The proposed two libraries
@@ -177,12 +186,21 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   acceptance. These are original-source preparations, not qualified replacements.
   Follow current qualification, separate admission, source read, actual callers,
   cache, parent application/image and receipt gates before closing B17.
-- **Current publication:** The 56-library checkpoint `c4b85386` is on draft PR #58
+- **Current publication:** The 56-library source checkpoint `c4b85386` and metadata
+  follow-up `07da0d28` are on draft PR #58
   with both CI checks green and sixteen local boundary acceptances. Normal review
-  used no opt-out and returned two more findings, for seven open in total. The
+  used no opt-out. The authoritative review ledger has twenty open findings,
+  six high and fourteen medium, with zero dispositions changed. Earlier counts
+  of seven covered only the recent publication groups. The
   [transfer review](native-boundary-transfers.md) links the exact committed runtime
   sources. B17 through B31, public delivery and actual operator security acceptance
   remain open.
+- **Retained classification:** The operator approved the exact 280 paths in
+  [the ten-boundary proposal](native-retention-proposal.md): B20, B21, B23 through
+  B27, B29, B30 and B31. The supporting candidate preserves current full application and image acceptance on unchanged source; the ten closures take effect only after normal publication.
+  B17, B18, B19, B22 and B28 still require service or command migration. The
+  [authorization findings guide](native-authorization-findings.md) preserves all
+  twenty review dispositions and provides main/materialized reading commands.
 - **B14 prerequisite:** [Issue #76](https://github.com/liminalworksinc/align/issues/76)
   reproduces an existing invite-cap race while writers wait for SQLite. The local
   correction preserves the early check and rechecks under the transaction lock.
