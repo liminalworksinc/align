@@ -321,10 +321,15 @@ function askNeed(a: AskLite, me: string): Need {
 function alignmentNeed(a: Alignment, me: string): Need | null {
   const target = a.target_goal?.visible && a.target_goal.id && a.target_goal.title ? { id: a.target_goal.id, title: a.target_goal.title } : null;
   const base = { key: `al:${a.id}`, kind: "alignment" as const, goal: target, quote: a.note, evidence: none(), review: null, word: "" };
-  // What tells two alignments on one goal apart (the source goal) leads, so a one-line row never truncates it away.
+  // What tells two alignments on one goal apart leads, so a one-line row never truncates it away: the source goal, or
+  // for sessions the choice and each session's key end (A1-cross-9, as the Alignments tab names them).
   const src = a.source_goal ? (a.source_goal.visible && a.source_goal.title ? a.source_goal.title : "a goal you can't see") : null;
   const asker = a.requester.id === me ? "You ask" : `${a.requester.name} asks`;
-  const cause = src ? `From ${src}: ${asker.toLowerCase().startsWith("you") ? "you ask" : asker} to align with ${target ? "this goal" : "a goal you can't see"}` : `${asker} to align with ${target ? target.title : "a goal you can't see"}`;
+  const choice = a.choice === "contribution" ? "Contribution only" : "Work toward, usage moves";
+  const sessions = a.sessions.length === 1 ? `session …${a.sessions[0].key_end}` : a.sessions.length ? `sessions ${a.sessions.map((x) => `…${x.key_end}`).join(", ")}` : "";
+  const cause = src
+    ? `From ${src}: ${asker.toLowerCase().startsWith("you") ? "you ask" : asker} to align with ${target ? "this goal" : "a goal you can't see"}`
+    : `${[choice, sessions].filter(Boolean).join(" · ")}: ${asker.toLowerCase().startsWith("you") ? "you ask" : asker} to align with ${target ? "this goal" : "a goal you can't see"}`;
   if (a.state === "approved" || a.state === "rejected" || a.state === "withdrawn" || a.state === "revoked")
     return { ...base, phase: "done", tone: a.state === "approved" ? "approved" : a.state === "rejected" ? "declined" : "draft", word: a.state === "approved" ? "Alignment approved" : a.state === "rejected" ? "Alignment declined" : a.state === "revoked" ? "Alignment revoked" : "Alignment withdrawn", cause, since: { at: a.closed_at ?? a.updated_at, field: a.closed_at ? "closed_at" : "updated_at" }, action: null, who: null };
   const lastH = a.history.reduce<Alignment["history"][number] | null>((m, h) => (!m || h.revision > m.revision ? h : m), null);

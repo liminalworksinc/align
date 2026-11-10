@@ -4158,7 +4158,7 @@ try {
       await page.type('#test-idp input[type="email"]', "ui@example.test");
       await page.type('#test-idp input[type="password"]', "browser-pass-1");
       await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => document.querySelector("#test-idp button[type=submit]")?.click())]);
-      await page.waitForFunction(() => document.body.innerText.includes("Your workspaces") && document.body.innerText.includes("Create the Northstar sample"), { timeout: 15000 });
+      await page.waitForFunction(() => document.body.innerText.includes("No workspaces yet") && document.body.innerText.includes("Create the Northstar sample"), { timeout: 15000 });
       // First run: the sample, then its pending change request approved from the Requests tab.
       await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create the Northstar sample")?.click())]);
       await page.waitForFunction(() => document.body.innerText.includes("Expand to regulated customers") && document.body.innerText.includes("Pass the security review"), { timeout: 15000 });
@@ -4232,7 +4232,7 @@ try {
       await page.goto(`${sampleUrl}/goals/${sampleGoal}`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Change requests") && document.body.innerText.includes("approved") && document.body.innerText.includes("version 2"), { timeout: 15000 });
       const ownGoalText = await page.evaluate(() => document.body.innerText);
-      check("ui (Chrome): first run offers the Northstar sample; its request is approved and launched from the Requests tab; the owner's goal page lists it (\"Approved with 1 evidence link, none verified.\", \"It became version 2\") without Propose a change", !ownGoalText.includes("Propose a change") && ownGoalText.includes("Approved with 1 evidence link, none verified.") && ownGoalText.includes("It became version 2") && /Waiting on me 1/.test(requestsText), `${requestsText.slice(0, 200)} | ${ownGoalText.slice(0, 400)}`);
+      check("ui (Chrome): first run offers the Northstar sample; its request is approved and launched from the Requests tab; the owner's goal page lists it (\"Approved with 1 evidence link, none verified.\", \"It became version 2\") without its own Full change form (the rail's Propose a change is on every page)", !ownGoalText.includes("Full change form") && ownGoalText.includes("Approved with 1 evidence link, none verified.") && ownGoalText.includes("It became version 2") && /Waiting on me 1/.test(requestsText), `${requestsText.slice(0, 200)} | ${ownGoalText.slice(0, 400)}`);
       await page.goto(`${BASE}/app`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Northstar (sample)") && !document.body.innerText.includes("Create the Northstar sample"), { timeout: 15000 });
       await page.type("main form input", "UI workspace");
@@ -4302,7 +4302,7 @@ try {
       await pk.type('#test-idp input[type="email"]', "pk@example.test");
       await pk.type('#test-idp input[type="password"]', "browser-pass-2");
       await Promise.all([pk.waitForNavigation({ waitUntil: "networkidle0" }), pk.evaluate(() => document.querySelector("#test-idp button[type=submit]")?.click())]);
-      await pk.waitForFunction(() => document.body.innerText.includes("Your workspaces"), { timeout: 15000 });
+      await pk.waitForFunction(() => document.body.innerText.includes("No workspaces yet"), { timeout: 15000 });
       const promptText = await pkText();
       await pkClick("Add a passkey", "#passkey-prompt a");
       await pk.waitForFunction(() => document.body.innerText.includes("No passkeys yet.") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Add a passkey"), { timeout: 15000 });
@@ -6863,8 +6863,8 @@ try {
         const dvGoal = await page.evaluate((id) => document.querySelector(`[data-cr="${id}"]`)?.innerText ?? "", crD.json?.id);
         check(
           "ui (Chrome, main #53, LIM-2472): the requester's unseen decline returns under Needs you; its review names the decider, reason and next step, and its goal page retains the reason; it fits 390 px",
-          inNeeds && dv.status === "declined" && /Declined/.test(dv.text) && /Your request/.test(dv.text) && /Hank Other declined your request/.test(dvReview) && /Home: not this quarter/.test(dvReview) && /A declined request is closed/.test(dvReview) && /Open the goal to propose again/.test(dvReview) && /Reason: Home: not this quarter/.test(dvGoal) && dv.sw <= dv.W && errors.length === 0,
-          `${inNeeds} ${JSON.stringify(dv)} | ${dvReview.slice(0, 300)} | ${dvGoal.slice(0, 300)} ${errors.join(" | ")}`,
+          inNeeds && dv.status === "declined" && /Declined/.test(dv.text) && /Declined by Hank Other: “Home: not this quarter”/.test(dv.text) && /Hank Other declined your request/.test(dvReview) && /Home: not this quarter/.test(dvReview) && /A declined request is closed/.test(dvReview) && /Open the goal to propose again/.test(dvReview) && /Reason: Home: not this quarter/.test(dvGoal) && dv.sw <= dv.W && errors.length === 0,
+          `${inNeeds} ${JSON.stringify(dv)} | ${dvReview.slice(0, 300).replace(/\n/g, " / ")} | ${dvGoal.slice(0, 600).replace(/\n/g, " / ")} ${errors.join(" | ")}`,
         );
       } catch (e) {
         check("ui (Chrome) home declined run", false, e?.stack ?? e);
@@ -8585,7 +8585,7 @@ try {
         // F5 (ui): the propose form offers only goals everyone deciding can see, and says some aren't offered.
         const pB = await as(KB);
         await open(pB, `/app/w/${KW}/goals/${KCI3.id}`);
-        await press(pB, "#change-requests", "Propose a change");
+        await press(pB, "#change-requests", "Full change form");
         await pB.waitForFunction(() => /Send for approval/.test(document.querySelector("#change-requests")?.innerText ?? ""), { timeout: 15000 });
         await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
         const proposeForm = await pB.evaluate(() => document.querySelector("#change-requests form")?.innerText ?? "");
@@ -9116,7 +9116,7 @@ try {
 
         // C3-3 (ui): the propose form doesn't offer the goals that would make a loop, and says why.
         await open(pO, `/app/w/${XW}/goals/${GQ?.id}`);
-        await press(pO, "#change-requests", "Propose a change");
+        await press(pO, "#change-requests", "Full change form");
         await pO.waitForFunction(() => /Send for approval/.test(document.querySelector("#change-requests")?.innerText ?? ""), { timeout: 15000 }).catch(() => undefined);
         await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
         const qForm = await textOf(pO, "#change-requests form");
@@ -10799,15 +10799,16 @@ try {
           JSON.stringify({ decL, decM, wdL, wdM, rvL, rvM, decCardL: decCardL.slice(0, 300) }),
         );
 
-        // A1-cross-9 (ui): Milo's Home tells the two requests apart.
+        // A1-cross-9 (ui): Milo's Home tells the two requests apart: each Needs row leads with the choice and its session's key end.
         await open(pM, `/app/w/${LW}`);
-        await pM.waitForSelector(`[data-home-item="alignment:${alP1?.id}"]`, { timeout: 15000 }).catch(() => undefined);
-        const d1 = await textOf(pM, `[data-home-item="alignment:${alP1?.id}"] [data-home-detail]`);
-        const d2 = await textOf(pM, `[data-home-item="alignment:${alP2?.id}"] [data-home-detail]`);
+        const rowWith = (end) => pM.evaluate((e) => [...document.querySelectorAll('[data-needs="list"] li')].map((li) => li.innerText).find((t) => t.includes(`session …${e}`)) ?? "", end);
+        await pM.waitForFunction((e) => [...document.querySelectorAll('[data-needs="list"] li')].some((li) => li.innerText.includes(`session …${e}`)), { timeout: 15000 }, L.l2.key.slice(-6)).catch(() => undefined);
+        const d1 = await rowWith(L.l2.key.slice(-6));
+        const d2 = await rowWith(L.l3.key.slice(-6));
         check(
-          "A1-cross-9 (ui): the Home's two alignment items from one person on one goal differ: \"Contribution only · session: claude-code session · started <time> · …<key end>\" and \"Work toward, usage moves · session: …\"",
-          d1.startsWith("Contribution only · session: ") && d1.includes(`…${L.l2.key.slice(-6)}`) && d2.startsWith("Work toward, usage moves · session: ") && d2.includes(`…${L.l3.key.slice(-6)}`) && d1 !== d2,
-          `${d1} | ${d2}`,
+          "A1-cross-9 (ui): the Home's two alignment rows from one person on one goal differ: \"Contribution only · session …<key end>: <name> asks to align with this goal\" and \"Work toward, usage moves · session …<key end>: …\"",
+          d1.includes(`Contribution only · session …${L.l2.key.slice(-6)}: `) && d2.includes(`Work toward, usage moves · session …${L.l3.key.slice(-6)}: `) && d1 !== d2,
+          `${d1.replace(/\n/g, " / ")} | ${d2.replace(/\n/g, " / ")}`,
         );
 
         // Sessions tab (works but confusing): a stopped session says sharing stopped, never "Counting under: no goal".
