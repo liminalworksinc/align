@@ -1,0 +1,33 @@
+{
+  "schema": "align/native-child-admitted-local-acceptance@1",
+  "component": "server-metrics",
+  "qualified_runs": 2,
+  "private_batches_each_run": 8,
+  "admitted_generated_tests": 7,
+  "cache_hits": 0,
+  "repairs": 0,
+  "actual_hosts": [
+    "macOS host",
+    "Linux control image"
+  ],
+  "private_batch_record_counts": [
+    36,
+    42,
+    174,
+    77,
+    48,
+    48,
+    623,
+    151
+  ],
+  "negative_controls_refused_each_host": 17,
+  "complete_runtime_package_read": true,
+  "CommonJS_and_ESM_package_imports": true,
+  "actual_typed_callers_passed_both_hosts": true,
+  "admitted_factory_sha256": "c58e2e50685375e7a32d022dca6f4220b13d6cf86a39924e2d8b6bf7b799eb05",
+  "current_receipt": "../../verification/current.json",
+  "full_parent_acceptance_pending": true,
+  "parent_source_authority_transferred": false,
+  "whole_B17_complete": false,
+  "operator_security_accepted": false
+}

@@ -8,6 +8,10 @@
   another is requested, and says when the confirmation replaces that rule.
 - The live-agent test client uses fresh HTTP connections after synchronous CLI calls so the offline-revocation
   scenario can finish without a stale keep-alive socket reset.
+- Move metrics and retention rules into qualified libraries while preserving
+  reports, identity cleanup, rollback and scheduling behavior. All 1,847
+  application checks and 36 image checks pass; normal publication is pending.
+
 - Bind session, device, steering, spending, allocation, activity, Home and directive
   services to nine qualified libraries while retaining their public interfaces.
 

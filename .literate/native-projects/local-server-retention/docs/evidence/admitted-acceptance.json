@@ -1,0 +1,47 @@
+{
+  "schema": "align/native-child-admitted-local-acceptance@1",
+  "component": "server-retention",
+  "qualified_runs": 2,
+  "private_batches_each_run": 12,
+  "admitted_generated_tests": 3,
+  "cache_hits": 0,
+  "repairs": 0,
+  "actual_hosts": [
+    "macOS host",
+    "Linux control image"
+  ],
+  "core_batch_counts": [
+    16,
+    42,
+    108,
+    58,
+    24,
+    48,
+    38,
+    137,
+    256
+  ],
+  "VM_runner_batch_counts": [
+    216,
+    145,
+    57
+  ],
+  "native_runner_batch_counts": [
+    216,
+    149,
+    57
+  ],
+  "core_mutants_rejected_each_host": 24,
+  "runner_mutants_rejected_each_host": 14,
+  "extra_timer_handle_cases_each_host": 14,
+  "complete_runtime_package_read": true,
+  "CommonJS_and_ESM_package_imports": true,
+  "actual_typed_callers_passed_both_hosts": true,
+  "core_factory_sha256": "d77b52d7fb249b3eab08614bd5d0bb1fbe6e44bc72a2707e0a848d8e14b5cc69",
+  "runner_factory_sha256": "e6d60c92c57ecbf098e30ae172cc91d6351b97acab5522f30ec48c7e3c00acec",
+  "current_receipt": "../../verification/current.json",
+  "full_parent_acceptance_pending": true,
+  "parent_source_authority_transferred": false,
+  "whole_B17_complete": false,
+  "operator_security_accepted": false
+}

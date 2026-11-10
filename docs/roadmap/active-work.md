@@ -27,9 +27,14 @@ queue item or let `docs/roadmap/` become a plan archive.
 
 ## Open pull-request landing queue
 
-The current 2026-11-10 survey confirms draft PR #58 at `07da0d28`, with
-56 qualified libraries and sixteen locally accepted boundaries. Both CI checks
-pass. B17 original-source controls are prepared outside the published runtime. Earlier peer statuses below remain historical and independently
+The 2026-11-10 publication check confirms draft PR #58 at `a902ae75`, with
+56 qualified libraries and 26 closed boundaries: sixteen native and ten approved
+retained boundaries. Both CI checks pass. The operator lifted the B17 attempt-limit
+stop on November 10. Metrics qualifies on attempt four, passes separate admission,
+both-host package and actual caller checks, and has a current child receipt.
+Retention attempt two now qualifies, admits separately and passes both-host
+core and scheduler caller checks, including fourteen additional timer cases. All original sources, private baselines and failures remain preserved.
+Earlier peer statuses below remain historical and independently
 owned. The current survey finds no collectable branches or worktrees.
 
 - [#58](https://github.com/liminalworksinc/align/pull/58), native rewrite:
@@ -164,40 +169,37 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Current direction:** Complete all 31 boundaries on draft PR #58. Local commits
-  and one normal push per checkpoint are authorized by the operator's current
-  goal. New qualification profiles use repository-relative paths. Retained
-  classification needs the operator's approval of the proposed list. Limit each
-  library to three attempts. Keep framework follow-ups local and recorded; no
+- **Current direction:** Complete all 31 boundaries on draft PR #58. The goal permits checkpoint publication; the latest session
+  instructions require a specific go for each commit or push, naming the tree. New qualification profiles use repository-relative paths. Retained
+  classification needs the operator's approval of the proposed list. The operator
+  lifted the three-attempt stop on November 10 and reactivated the goal. Diagnose
+  each failure before another attempt and preserve every failed candidate.
+  Keep framework follow-ups local and recorded; no
   upstream writes, review bypass, merge or rebase is authorized. Deployment and
   tester configuration are outside this migration.
-- **Next action:** Publish the approved supporting-boundary checkpoint with the relocated-check
-  comparison file and all twenty open findings, then complete B17 metrics and
-  retention contracts, native qualification
-  and separate admission. The three frozen members are `lib/v2/metrics-core.mts`,
-  `lib/v2/retention-core.mts` and `lib/v2/retention.ts`. Keep SQL, transactions,
-  environment, clocks and scheduling caller-owned. The proposed two libraries
-  expose one metrics factory and separate retention core/runner factories.
-  Both-host original controls pass 1,199 metrics observations and reject seventeen
-  defects; retention core passes 727 observations on the measured 48-table schema
-  and rejects twenty-four defects. The runner preserves all 422 native-host
-  observations and adds 418 declared-field VM observations, rejecting fourteen
-  defects on each host. Preserve both runner protocols in later actual-caller
-  acceptance. These are original-source preparations, not qualified replacements.
-  Follow current qualification, separate admission, source read, actual callers,
-  cache, parent application/image and receipt gates before closing B17.
-- **Current publication:** The 56-library source checkpoint `c4b85386` and metadata
-  follow-up `07da0d28` are on draft PR #58
-  with both CI checks green and sixteen local boundary acceptances. Normal review
+- **Next action:** Transfer and stage the reviewed B17 source, then obtain the
+  specific commit go for its exact staged tree. Complete normal push review,
+  verify CI at the remote head and update draft PR #58 before counting B17 closed.
+  The 58-library candidate passes 1,847 application checks, 36 fresh image checks,
+  18 offline HTTP/SQLite controls and both current-receipt readers. Its 52 web
+  packages pass 1,066 private batches; the operator closure is seven packages and
+  50 files. Metrics preserves 1,199 original observations. Retention preserves
+  727 core, 422 native scheduler and separate 418 VM scheduler observations, plus
+  fourteen additional timer comparisons. All baselines and failures remain
+  preserved. Documentation and findings were prepared before acceptance; these
+  updates record measured results only. Never rerun the suite for a doc change.
+- **Current publication:** The 56-library source checkpoint `c4b85386` and supporting
+  publication `a902ae75` are on draft PR #58 with both CI checks green: sixteen
+  native and ten approved retained closures. Normal review
   used no opt-out. The authoritative review ledger has twenty open findings,
   six high and fourteen medium, with zero dispositions changed. Earlier counts
   of seven covered only the recent publication groups. The
   [transfer review](native-boundary-transfers.md) links the exact committed runtime
-  sources. B17 through B31, public delivery and actual operator security acceptance
-  remain open.
+  sources. B17, B18, B19, B22 and B28 remain migration work. Actual operator
+  security acceptance is separate; deployment and tester work are out of scope.
 - **Retained classification:** The operator approved the exact 280 paths in
   [the ten-boundary proposal](native-retention-proposal.md): B20, B21, B23 through
-  B27, B29, B30 and B31. The supporting candidate preserves current full application and image acceptance on unchanged source; the ten closures take effect only after normal publication.
+  B27, B29, B30 and B31. The supporting publication preserves current full application and image acceptance on unchanged source; all ten approved retained closures are now published.
   B17, B18, B19, B22 and B28 still require service or command migration. The
   [authorization findings guide](native-authorization-findings.md) preserves all
   twenty review dispositions and provides main/materialized reading commands.

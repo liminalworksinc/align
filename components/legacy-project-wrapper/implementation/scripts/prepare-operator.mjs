@@ -62,14 +62,14 @@ export function prepareOperator(implementation, destination) {
       fs.writeFileSync(output, bytes, {flag:"wx"});
     }
     const native = prepareNative(implementation, [path.join(staging, "lib/native")],
-      {components:["runtime-settings", "value-rules", "identifier-tools", "server-secrets", "server-core"]});
+      {components:["runtime-settings", "value-rules", "identifier-tools", "server-secrets", "server-core", "server-metrics", "server-retention"]});
     for (const {original,bytes} of observations) {
       if (!fs.readFileSync(original).equals(bytes)) throw new Error("Operator inputs changed during preparation");
     }
     // The build may run as root, while the packaged command runs as the node user.
     // Normalize only this owned code tree; the launcher's outer temporary directory stays private.
     runtimePermissions(staging);
-    const manifest = {schema:"align/operator-runtime@1", libraries:["runtime-settings", "value-rules", "identifier-tools", "server-secrets", "server-core"], files:operatorFiles(staging)};
+    const manifest = {schema:"align/operator-runtime@1", libraries:["runtime-settings", "value-rules", "identifier-tools", "server-secrets", "server-core", "server-metrics", "server-retention"], files:operatorFiles(staging)};
     const manifestPath = path.join(staging, ".operator-manifest.json");
     fs.writeFileSync(manifestPath, JSON.stringify(manifest)+"\n", {flag:"wx"});
     fs.chmodSync(manifestPath, 0o644);

@@ -1,0 +1,81 @@
+{
+  "schema": "align/metrics-retention-admitted-preparation@1",
+  "observed_utc": "2026-11-10T14:36:27.981896+00:00",
+  "boundary": "B17",
+  "ready_children": [
+    {
+      "component": "server-metrics",
+      "admitted_entry": "sha256:21634d808b7692406bb1e20f3064e097e549b18d2569919844e56d4458d0122f",
+      "child_current_receipt": "sha256:357fbdb738776d846133af6a236629837e24897289ad1a7c9f751b5d4caaedcd",
+      "public_capabilities": [
+        "server-metrics.create-metrics"
+      ],
+      "admitted_package_members": [
+        {
+          "path": "create_metrics.js",
+          "algorithm": "sha256",
+          "digest": "c58e2e50685375e7a32d022dca6f4220b13d6cf86a39924e2d8b6bf7b799eb05",
+          "media_type": "application/octet-stream",
+          "size": 15582
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "ab7aeed583ab6c08b23fe76f31acfd08bc79d6836a56c85439a71cbb94c38b7e",
+          "media_type": "application/octet-stream",
+          "size": 97
+        }
+      ],
+      "child_ready": true
+    },
+    {
+      "component": "server-retention",
+      "admitted_entry": "sha256:e7d329fec41877adf171ab534f7d0ce4afafe216cdf8ce63cdd715a879e419bb",
+      "child_current_receipt": "sha256:89db1052f0e9c29e963f97f5398a16eaf2b006a40972fbd1bfab335373a4e3d1",
+      "public_capabilities": [
+        "server-retention.create-retention",
+        "server-retention.create-retention-runner"
+      ],
+      "admitted_package_members": [
+        {
+          "path": "create_retention.js",
+          "algorithm": "sha256",
+          "digest": "d77b52d7fb249b3eab08614bd5d0bb1fbe6e44bc72a2707e0a848d8e14b5cc69",
+          "media_type": "application/octet-stream",
+          "size": 12164
+        },
+        {
+          "path": "create_retention_runner.js",
+          "algorithm": "sha256",
+          "digest": "e6d60c92c57ecbf098e30ae172cc91d6351b97acab5522f30ec48c7e3c00acec",
+          "media_type": "application/octet-stream",
+          "size": 925
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "23680a9e6de0d631ce75ffb9a9c7413003233df1dace9efc7bd04604bbdfb056",
+          "media_type": "application/octet-stream",
+          "size": 162
+        }
+      ],
+      "child_ready": true
+    }
+  ],
+  "runtime_library_pins": 58,
+  "physical_web_libraries": 52,
+  "operator_packages": 7,
+  "operator_files": 50,
+  "metrics_records_each_host": 1199,
+  "retention_core_records_each_host": 727,
+  "native_scheduler_records_each_host": 422,
+  "VM_scheduler_records_each_host": 418,
+  "additional_timer_handle_cases_each_host": 14,
+  "actual_callers_and_forwarders_checked": true,
+  "original_baselines_and_failed_candidates_preserved": true,
+  "findings_guide_sha256": "b99591f0e8484f20f8db0c4248d9831b26814791bb7f4cbc4c6dc95b2770f663",
+  "all20_findings_undecided": true,
+  "whole_parent_image_current_receipt_and_transfer_pending": true,
+  "B17_closed": false,
+  "operator_security_accepted": false
+}

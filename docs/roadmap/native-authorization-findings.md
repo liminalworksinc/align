@@ -2,7 +2,7 @@
 
 - **Status:** active
 - **Owning queue item:** [ADOPT-002](active-work.md#adopt-002)
-- **Completion / archival evidence:** source navigation prepared for B01 through B16; later service boundaries pending
+- **Completion / archival evidence:** source navigation prepared for B01 through B17; later service boundaries pending
 
 The normal reviewer ledger has **20 open findings: six HIGH and fourteen MEDIUM**. All remain undecided. This file records locations and reading commands; it does not accept or dismiss a finding, establish semantic equivalence, or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
 
@@ -12,8 +12,8 @@ The normal reviewer ledger has **20 open findings: six HIGH and fourteen MEDIUM*
 - Published source checkpoint: `c4b853866ff5e130fa294f8e70fe5c0530e87aa4`; published metadata follow-up: `07da0d288a2df25b26cc3a194a93e556a2ec73d9`.
 - Original path prefix: `components/legacy-project-wrapper/implementation/`.
 - Generated path prefix: `_build/native-review-source/`. The file and one-based line references below refer to the materialized source, not the forwarding bindings.
-- The normal materializer checks the manifest, authority pins, cache entries, file hashes and all 1,207 existing acceptance batches for all 56 libraries. Materialized source bytes match every manifest file digest. No new generation or qualification was performed for this guide.
-- Reviewed ledger SHA-256: `5bcb416b227c64af9f74a4e3f4c58e020178bfd42122020b98ef7a470caac224`; zero overrides. Read it with `liminal-review log --repo .`. Do not run an accept or dismiss command.
+- The normal materializer checks the manifest, authority pins, cache entries, file hashes and all 1,227 acceptance batches for all 58 current libraries. Materialized source bytes match every manifest file digest. No new generation or qualification was performed for this guide.
+- Reviewed ledger SHA-256: `b4695536c285f46c22830f67da7e07d67c1ad25e902aaffd7fc80c8873e83c96`; zero overrides. Read it with `liminal-review log --repo .`. Do not run an accept or dismiss command.
 
 ## Read original and generated source side by side
 
@@ -1294,7 +1294,7 @@ The B13 disposable-domain table is an immutable input, not a generated security 
 | B14: Workspaces and sample | Native acceptance recorded | Native operations and relevant check locations indexed above. |
 | B15: Goals and decisions | Native acceptance recorded | Native operations and relevant check locations indexed above. |
 | B16: Sessions, devices and steering | Native acceptance recorded | Native operations and relevant check locations indexed above. |
-| B17: Metrics and retention | Service migration pending | Original source remains authoritative. No generated enforcement counterpart is claimed. Update this file with exact pairs before closure. |
+| B17: Metrics and retention | Source comparisons and local functional acceptance complete; publication pending | Exact main and separately admitted materialized locations are in the B17 appendix. |
 | B18: MCP, OAuth and stdio relay | Service migration pending | Original source remains authoritative. No generated enforcement counterpart is claimed. Update this file with exact pairs before closure. |
 | B19: HTTP API | Service migration pending | Original source remains authoritative. No generated enforcement counterpart is claimed. Update this file with exact pairs before closure. |
 | B20: Web UI | Approved retained closure, effective with normal supporting publication | Exact retained paths and hashes are in the approved retention list. No check has moved from those paths into a generated library. Retained security-relevant adapter locations are indexed below. |
@@ -1328,3 +1328,92 @@ The approved supporting classification retains these checks in their original ta
 The authoritative ledger remains the source of finding status. All twenty IDs above are open, with zero overrides and no accept/dismiss action. Passing functional tests and providing readable generated source do not decide those findings. Independent review and actual operator security acceptance belong to the operator.
 
 The operation catalog includes 522 original operation groups and 2381 guard, call and option sites. This count describes navigation coverage, not a count of security findings or independently accepted checks.
+
+## B17 metrics and retention source comparisons
+
+These additional locations refer to the separately admitted B17 packages in the
+58-library candidate. They were prepared before full application and image
+acceptance, which now pass. Normal publication remains pending. No finding is accepted or dismissed by this index.
+Original main remains `ba43c5b28cc0620472b4a09ab699fbc529c1afcb`. Use the `pair` helper above after materializing
+the current complete manifest into `_build/native-review-source`.
+
+The unchanged original caller admission remains in B12 and B18/B19. Metrics
+checks include explicit letter verification, bounded references, duplicates,
+date selection and content-free report populations. Retention enforces its
+existing workspace/person SQL scope, membership and deadline branches, optional
+tables, dry-run rollback and scheduling/error behavior. Inspect the complete
+SQL-bearing operation ranges, including queries whose scope is inside SQL text.
+The supplied test-identity gate and purge implementation retain their B12
+source locations. These operations do not create an additional authenticated
+principal admission or rate limiter.
+
+### lib/v2/metrics-core.mts
+
+| Original operation and check lines on main | Materialized operation and check lines | Read side by side |
+| --- | --- | --- |
+| `lib/v2/metrics-core.mts:36` through 40, `percentile`. Checks: 37. | `server_metrics/create_metrics.js:27` through 31, `percentile`. Checks: 28. | `pair lib/v2/metrics-core.mts 36 40 server_metrics/create_metrics.js 27 31` |
+| `lib/v2/metrics-core.mts:42` through 42, `share`. Checks: 42. | `server_metrics/create_metrics.js:45` through 45, `share`. Checks: 45. | `pair lib/v2/metrics-core.mts 42 42 server_metrics/create_metrics.js 45 45` |
+| `lib/v2/metrics-core.mts:55` through 67, `recordLoi`. Checks: 56, 57, 58, 60, 63, 64. | `server_metrics/create_metrics.js:32` through 44, `recordLoi`. Checks: 33, 34, 35, 37, 40, 41. | `pair lib/v2/metrics-core.mts 55 67 server_metrics/create_metrics.js 32 44` |
+| `lib/v2/metrics-core.mts:125` through 125, `round`. Checks: 125. | `server_metrics/create_metrics.js:1` through 224, `full generated module, factored or retained forwarding`. Checks: 28, 33, 34, 35, 37, 40, 41, 45, 53, 76, 79, 83, 85, 93, 98, 99, 104, 107, 119, 124, 148, 152, 167, 168, 175, 192, 194, 211, 219. | `pair lib/v2/metrics-core.mts 125 125 server_metrics/create_metrics.js 1 224` |
+| `lib/v2/metrics-core.mts:130` through 304, `buildReport`. Checks: 139, 163, 176, 188, 190, 199, 207, 208, 219, 250, 257. | `server_metrics/create_metrics.js:47` through 162, `buildReport`. Checks: 53, 76, 79, 83, 85, 93, 98, 99, 104, 107, 119, 124, 148, 152. | `pair lib/v2/metrics-core.mts 130 304 server_metrics/create_metrics.js 47 162` |
+| `lib/v2/metrics-core.mts:167` through 172, `minutesTo`. Checks: 171. | `server_metrics/create_metrics.js:1` through 224, `full generated module, factored or retained forwarding`. Checks: 28, 33, 34, 35, 37, 40, 41, 45, 53, 76, 79, 83, 85, 93, 98, 99, 104, 107, 119, 124, 148, 152, 167, 168, 175, 192, 194, 211, 219. | `pair lib/v2/metrics-core.mts 167 172 server_metrics/create_metrics.js 1 224` |
+| `lib/v2/metrics-core.mts:212` through 216, `kept`. Checks: 214. | `server_metrics/create_metrics.js:1` through 224, `full generated module, factored or retained forwarding`. Checks: 28, 33, 34, 35, 37, 40, 41, 45, 53, 76, 79, 83, 85, 93, 98, 99, 104, 107, 119, 124, 148, 152, 167, 168, 175, 192, 194, 211, 219. | `pair lib/v2/metrics-core.mts 212 216 server_metrics/create_metrics.js 1 224` |
+| `lib/v2/metrics-core.mts:308` through 308, `pct`. Checks: 308. | `server_metrics/create_metrics.js:167` through 167, `pct`. Checks: 167. | `pair lib/v2/metrics-core.mts 308 308 server_metrics/create_metrics.js 167 167` |
+| `lib/v2/metrics-core.mts:309` through 314, `dur`. Checks: 310, 311, 312. | `server_metrics/create_metrics.js:168` through 168, `dur`. Checks: 168. | `pair lib/v2/metrics-core.mts 309 314 server_metrics/create_metrics.js 168 168` |
+| `lib/v2/metrics-core.mts:323` through 415, `formatReport`. Checks: 328, 359, 364, 366, 396, 407, 409. | `server_metrics/create_metrics.js:163` through 221, `formatReport`. Checks: 167, 168, 175, 192, 194, 211, 219. | `pair lib/v2/metrics-core.mts 323 415 server_metrics/create_metrics.js 163 221` |
+| `lib/v2/metrics-core.mts:28` through 32, `weekStart`. Checks: complete operation. | `server_metrics/create_metrics.js:22` through 26, `weekStart`. Checks: complete operation. | `pair lib/v2/metrics-core.mts 28 32 server_metrics/create_metrics.js 22 26` |
+| `lib/v2/metrics-core.mts:33` through 33, `isoDay`. Checks: complete operation. | `server_metrics/create_metrics.js:1` through 224, `full generated module, factored or retained forwarding`. Checks: 28, 33, 34, 35, 37, 40, 41, 45, 53, 76, 79, 83, 85, 93, 98, 99, 104, 107, 119, 124, 148, 152, 167, 168, 175, 192, 194, 211, 219. | `pair lib/v2/metrics-core.mts 33 33 server_metrics/create_metrics.js 1 224` |
+| `lib/v2/metrics-core.mts:124` through 127, `timing`. Checks: complete operation. | `server_metrics/create_metrics.js:143` through 153, `timing`. Checks: 148, 152. | `pair lib/v2/metrics-core.mts 124 127 server_metrics/create_metrics.js 143 153` |
+| `lib/v2/metrics-core.mts:133` through 133, `count`. Checks: complete operation. | `server_metrics/create_metrics.js:56` through 58, `count`. Checks: complete operation. | `pair lib/v2/metrics-core.mts 133 133 server_metrics/create_metrics.js 56 58` |
+| `lib/v2/metrics-core.mts:142` through 142, `reached`. Checks: complete operation. | `server_metrics/create_metrics.js:1` through 224, `full generated module, factored or retained forwarding`. Checks: 28, 33, 34, 35, 37, 40, 41, 45, 53, 76, 79, 83, 85, 93, 98, 99, 104, 107, 119, 124, 148, 152, 167, 168, 175, 192, 194, 211, 219. | `pair lib/v2/metrics-core.mts 142 142 server_metrics/create_metrics.js 1 224` |
+| `lib/v2/metrics-core.mts:193` through 193, `activeIn`. Checks: complete operation. | `server_metrics/create_metrics.js:1` through 224, `full generated module, factored or retained forwarding`. Checks: 28, 33, 34, 35, 37, 40, 41, 45, 53, 76, 79, 83, 85, 93, 98, 99, 104, 107, 119, 124, 148, 152, 167, 168, 175, 192, 194, 211, 219. | `pair lib/v2/metrics-core.mts 193 193 server_metrics/create_metrics.js 1 224` |
+| `lib/v2/metrics-core.mts:258` through 259, `wsEvents`. Checks: complete operation. | `server_metrics/create_metrics.js:125` through 127, `wsEvents`. Checks: complete operation. | `pair lib/v2/metrics-core.mts 258 259 server_metrics/create_metrics.js 125 127` |
+| `lib/v2/metrics-core.mts:315` through 315, `usdOf`. Checks: complete operation. | `server_metrics/create_metrics.js:1` through 224, `full generated module, factored or retained forwarding`. Checks: 28, 33, 34, 35, 37, 40, 41, 45, 53, 76, 79, 83, 85, 93, 98, 99, 104, 107, 119, 124, 148, 152, 167, 168, 175, 192, 194, 211, 219. | `pair lib/v2/metrics-core.mts 315 315 server_metrics/create_metrics.js 1 224` |
+| `lib/v2/metrics-core.mts:317` through 320, `table`. Checks: complete operation. | `server_metrics/create_metrics.js:170` through 173, `table`. Checks: complete operation. | `pair lib/v2/metrics-core.mts 317 320 server_metrics/create_metrics.js 170 173` |
+
+### lib/v2/retention-core.mts
+
+| Original operation and check lines on main | Materialized operation and check lines | Read side by side |
+| --- | --- | --- |
+| `lib/v2/retention-core.mts:51` through 57, `retentionNow`. Checks: 52, 54. | `server_retention/create_retention.js:25` through 31, `retentionNow`. Checks: 26, 28. | `pair lib/v2/retention-core.mts 51 57 server_retention/create_retention.js 25 31` |
+| `lib/v2/retention-core.mts:67` through 71, `personName`. Checks: 69. | `server_retention/create_retention.js:33` through 36, `personName`. Checks: 35. | `pair lib/v2/retention-core.mts 67 71 server_retention/create_retention.js 33 36` |
+| `lib/v2/retention-core.mts:134` through 160, `pseudonymise`. Checks: 137. | `server_retention/create_retention.js:53` through 69, `pseudonymise`. Checks: 56. | `pair lib/v2/retention-core.mts 134 160 server_retention/create_retention.js 53 69` |
+| `lib/v2/retention-core.mts:246` through 301, `<module>`. Checks: 246, 255, 270, 271, 301. | `server_retention/create_retention.js:1` through 156, `full generated module, factored or retained forwarding`. Checks: 26, 28, 35, 56, 115, 120, 127, 128, 144, 146, 147, 148. | `pair lib/v2/retention-core.mts 246 301 server_retention/create_retention.js 1 156` |
+| `lib/v2/retention-core.mts:314` through 350, `runRetention`. Checks: 337, 341, 344. | `server_retention/create_retention.js:95` through 151, `runRetention`. Checks: 115, 120, 127, 128, 144, 146, 147, 148. | `pair lib/v2/retention-core.mts 314 350 server_retention/create_retention.js 95 151` |
+| `lib/v2/retention-core.mts:43` through 43, `daysBefore`. Checks: complete operation. | `server_retention/create_retention.js:73` through 73, `daysBefore`. Checks: complete operation. | `pair lib/v2/retention-core.mts 43 43 server_retention/create_retention.js 73 73` |
+| `lib/v2/retention-core.mts:44` through 48, `monthsBefore`. Checks: complete operation. | `server_retention/create_retention.js:74` through 78, `monthsBefore`. Checks: complete operation. | `pair lib/v2/retention-core.mts 44 48 server_retention/create_retention.js 74 78` |
+| `lib/v2/retention-core.mts:63` through 63, `formerMemberId`. Checks: complete operation. | `server_retention/create_retention.js:32` through 32, `formerMemberId`. Checks: complete operation. | `pair lib/v2/retention-core.mts 63 63 server_retention/create_retention.js 32 32` |
+| `lib/v2/retention-core.mts:108` through 117, `workspacesNaming`. Checks: complete operation. | `server_retention/create_retention.js:37` through 46, `workspacesNaming`. Checks: complete operation. | `pair lib/v2/retention-core.mts 108 117 server_retention/create_retention.js 37 46` |
+| `lib/v2/retention-core.mts:121` through 123, `noteDeparture`. Checks: complete operation. | `server_retention/create_retention.js:47` through 49, `noteDeparture`. Checks: complete operation. | `pair lib/v2/retention-core.mts 121 123 server_retention/create_retention.js 47 49` |
+| `lib/v2/retention-core.mts:126` through 128, `cancelDeparture`. Checks: complete operation. | `server_retention/create_retention.js:50` through 52, `cancelDeparture`. Checks: complete operation. | `pair lib/v2/retention-core.mts 126 128 server_retention/create_retention.js 50 52` |
+| `lib/v2/retention-core.mts:165` through 165, `deleteOrphanDirectives`. Checks: complete operation. | `server_retention/create_retention.js:70` through 72, `deleteOrphanDirectives`. Checks: complete operation. | `pair lib/v2/retention-core.mts 165 165 server_retention/create_retention.js 70 72` |
+| `lib/v2/retention-core.mts:171` through 187, `rollUpSession`. Checks: complete operation. | `server_retention/create_retention.js:80` through 94, `rollUpSession`. Checks: complete operation. | `pair lib/v2/retention-core.mts 171 187 server_retention/create_retention.js 80 94` |
+| `lib/v2/retention-core.mts:189` through 189, `tableExists`. Checks: complete operation. | `server_retention/create_retention.js:79` through 79, `tableExists`. Checks: complete operation. | `pair lib/v2/retention-core.mts 189 189 server_retention/create_retention.js 79 79` |
+| `lib/v2/retention-core.mts:353` through 357, `describeCounts`. Checks: complete operation. | `server_retention/create_retention.js:152` through 152, `describeCounts`. Checks: complete operation. | `pair lib/v2/retention-core.mts 353 357 server_retention/create_retention.js 152 152` |
+
+### lib/v2/retention.ts
+
+| Original operation and check lines on main | Materialized operation and check lines | Read side by side |
+| --- | --- | --- |
+| `lib/v2/retention.ts:43` through 50, `runLogged`. Checks: 46, 48. | `server_retention/create_retention_runner.js:6` through 15, `loggedRun`. Checks: 9, 13. | `pair lib/v2/retention.ts 43 50 server_retention/create_retention_runner.js 6 15` |
+| `lib/v2/retention.ts:53` through 58, `startRetention`. Checks: 55. | `server_retention/create_retention_runner.js:5` through 21, `startRetention`. Checks: 9, 13, 17. | `pair lib/v2/retention.ts 53 58 server_retention/create_retention_runner.js 5 21` |
+| `lib/v2/retention.ts:29` through 29, `workspacesNaming`. Checks: complete operation. | `server_retention/create_retention_runner.js:1` through 25, `full generated module, factored or retained forwarding`. Checks: 9, 13, 17. | `pair lib/v2/retention.ts 29 29 server_retention/create_retention_runner.js 1 25` |
+| `lib/v2/retention.ts:31` through 31, `noteDeparture`. Checks: complete operation. | `server_retention/create_retention_runner.js:1` through 25, `full generated module, factored or retained forwarding`. Checks: 9, 13, 17. | `pair lib/v2/retention.ts 31 31 server_retention/create_retention_runner.js 1 25` |
+| `lib/v2/retention.ts:33` through 33, `cancelDeparture`. Checks: complete operation. | `server_retention/create_retention_runner.js:1` through 25, `full generated module, factored or retained forwarding`. Checks: 9, 13, 17. | `pair lib/v2/retention.ts 33 33 server_retention/create_retention_runner.js 1 25` |
+| `lib/v2/retention.ts:35` through 35, `pseudonymise`. Checks: complete operation. | `server_retention/create_retention_runner.js:1` through 25, `full generated module, factored or retained forwarding`. Checks: 9, 13, 17. | `pair lib/v2/retention.ts 35 35 server_retention/create_retention_runner.js 1 25` |
+| `lib/v2/retention.ts:37` through 37, `deleteOrphanDirectives`. Checks: complete operation. | `server_retention/create_retention_runner.js:1` through 25, `full generated module, factored or retained forwarding`. Checks: 9, 13, 17. | `pair lib/v2/retention.ts 37 37 server_retention/create_retention_runner.js 1 25` |
+| `lib/v2/retention.ts:39` through 39, `runRetention`. Checks: complete operation. | `server_retention/create_retention_runner.js:1` through 25, `full generated module, factored or retained forwarding`. Checks: 9, 13, 17. | `pair lib/v2/retention.ts 39 39 server_retention/create_retention_runner.js 1 25` |
+
+The original six database forwarders in `retention.ts` remain typed caller
+assembly. Their original and proposed transports pass the separate caller
+comparison, including database/transaction receivers and secret lookup. Their
+full-module fallback above points at the scheduler for context; no relocated
+authorization counterpart is claimed for retained forwarding.
+
+The source review also preserves the rejected optional-base timer variation.
+The admitted scheduler matches fourteen additional original timer-handle cases
+on both hosts. Native 422-record and VM 418-record scheduler baselines remain
+separate and unchanged. All twenty review findings remain undecided.
+
+This B17 appendix adds 42 operation groups, 55 indexed check sites
+and 42 exact reading commands. These are navigation counts.

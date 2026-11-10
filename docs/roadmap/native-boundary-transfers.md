@@ -6,15 +6,26 @@
 
 Sixteen of 31 boundaries have native transfer acceptance, B01 through B16.
 The operator approved exactly 280 retained paths across ten further boundaries:
-B20, B21, B23 through B27, B29, B30 and B31. This supporting candidate records
-26 closed boundaries, effective only after normal publication: sixteen native
-and ten intentionally retained. B17, B18, B19, B22 and B28 remain open.
+B20, B21, B23 through B27, B29, B30 and B31. The supporting checkpoint `a902ae75` is published with green CI and records
+26 closed boundaries: sixteen native and ten intentionally retained. B17, B18, B19, B22 and B28 remain open.
 The [classification record](native-retention-classification.json)
 and [approved path list](native-retention-proposal.md) preserve the exact scope.
 The runtime source is unchanged, so the complete application and image results
 remain current. No suite is rerun for a documentation-only change.
 
-This same-agent review reconciles the accepted classification with exact qualified packages, 74 reviewed target-binding files, the complete 1,847-check workflow, 36 Linux arm64 image checks, 18 additional offline bundled HTTP controls and the current parent receipt. The separate goal-cap service controls pass all seven corrected cases on each host and reject the three held-writer cases in the preserved original. The current single-process HTTP probe also preserves capacity with the original source, and the runtime refuses a second server on the same data directory. The service-level gap is not claimed as a proven public HTTP exploit. This record supplies no independent maintainer or actual operator security acceptance.
+The B17 candidate has complete functional acceptance: 58 qualified libraries,
+52 web packages, 1,066 private web batches and a 50-file, seven-package operator
+closure. The complete application passes all 1,847 checks with no failures or
+skips. The fresh image passes 36 checks and 18 additional offline HTTP/SQLite
+controls. Both receipt readers verify all 58 projections. Source identity:
+`sha256:31c84d1ac09ccf39b9c3d1d74e7d7599148c6536c95df52bd3457fbb89972895`. Current receipt:
+`sha256:273cd4a97bacaf3766e656d515e884759ac7d84640ecdae899bb8e3438e40bd8`. Image: `sha256:67b7b74f3f941c1939893899ea5442d7ff7ddbb9ade0b4334215c5ee0bd2fc54`.
+The exact runtime and provider inputs match across both runs. Publication,
+green CI and the draft PR body update remain pending, so published progress is
+still 26 of 31. This checkpoint will close B17 for a total of 27: seventeen native
+and ten approved retained. B18, B19, B22 and B28 will remain open.
+
+This same-agent review reconciles the accepted classification with exact qualified packages, 77 reviewed target-binding files, the complete 1,847-check workflow, 36 Linux arm64 image checks, 18 additional offline bundled HTTP controls and the current parent receipt. The separate goal-cap service controls pass all seven corrected cases on each host and reject the three held-writer cases in the preserved original. The current single-process HTTP probe also preserves capacity with the original source, and the runtime refuses a second server on the same data directory. The service-level gap is not claimed as a proven public HTTP exploit. This record supplies no independent maintainer or actual operator security acceptance.
 
 [Exact members, package pins and measured-record hashes](native-boundary-transfers.json). The immutable authentication baseline is commit `6cef3ced7856fb8ad34ff6cad7d3f4af893b32ea` and tree `b4366b3f0c46132df1cffc3eaccc1d954387ac7e`. Its recorded acceptance remains historical. The current correction source, image and receipt are bound separately in the linked JSON, and Git records their publication checkpoint.
 
@@ -36,6 +47,7 @@ This same-agent review reconciles the accepted classification with exact qualifi
 | B14 Workspaces and sample | Both libraries qualify twice and admit separately. Both-host production assembly preserves 806 workspace and 31 sample records, all populated, rollback and contention controls, 30 public value types and 72 unchanged callers. The complete 1,846-check workflow, 36 image checks, 15 additional offline bundled HTTP controls, two immutable root-owned assets and the current 35-library receipt pass. |
 | B15 Goals and decisions | All twelve libraries qualify twice and admit separately. Both-host original-record, package and actual binding comparisons pass. The 47-library candidate passes the complete 1,847-check workflow, 36 fresh image checks, 18 additional offline bundled HTTP/SQLite controls and both current-receipt readers. Retained code is types, resource assembly, aliases, forwarding and native constants. Approval remains separate from launch; evidence remains an unchecked link. |
 | B16 Sessions, devices and steering | All nine current libraries pass qualification, separate admission and both-host package and actual caller comparisons. The 56-library candidate passes 1,046 combined web batches, the complete 1,847-check production application workflow, 36 fresh image checks, 18 unchanged offline bundled HTTP/SQLite controls and both receipt readers. Fourteen requirement groups contain 21 directly checked passed assertions. Retained members contain types, resources, forwarding and native constants. |
+| B17 Product metrics and retention | Both libraries qualify twice, admit separately and pass both-host package and actual caller comparisons. The 58-library candidate passes 1,066 web batches, 1,847 application checks, 36 image checks, 18 offline HTTP/SQLite controls and both current-receipt readers. Exact main/materialized comparisons are in the findings guide. Closure takes effect after normal publication, green CI and the PR body update. |
 
 The accepted classification permits the remaining typed aliases, shared wire types and explicit target providers. They preserve public interfaces while qualified packages own the replaced algorithms. The later operator-approved retained classification is recorded separately; it does not alter the native acceptance of B01 through B16. Future contract or caller changes require current acceptance.
 
