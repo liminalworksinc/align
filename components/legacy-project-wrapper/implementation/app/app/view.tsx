@@ -117,8 +117,8 @@ export default function Home({ me, creation }: { me: Me; creation: CreationOptio
             </Field>
             {creation.needsCode && (
               <>
-                <Field label="Creation code" hint="Each code creates one workspace. It came in the email that answered your access request.">
-                  <Input name="creation_code" value={code} onChange={(e) => setCode(e.target.value)} maxLength={100} autoComplete="off" placeholder="alc_…" required />
+                <Field label="Creation code" hint="Each code creates one workspace. Use the code you were given.">
+                  <Input name="creation_code" value={code} onChange={(e) => setCode(e.target.value)} maxLength={100} autoComplete="off" required />
                 </Field>
                 <p className="mb-3 text-[14px] text-zinc-600">
                   No code yet?{" "}
