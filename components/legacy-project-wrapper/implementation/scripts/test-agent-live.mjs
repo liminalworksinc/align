@@ -1553,6 +1553,16 @@ try {
     const h8Lid = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === H8.sid)?.local_id ?? "none";
     cli(["share", "--workspace", W, "--goal", GK?.id, "--yes", "--", h8Lid.slice(0, 8)]);
     sync();
+    // Another of Milo's sessions follows a different Backups goal through its own approved alignment: that goal is that
+    // session's to work on, not one the paused session can pick.
+    const H8_ELSEWHERE = "Audit the ledger exports";
+    const GX = (await ws(O2, "POST", "/goals", { title: H8_ELSEWHERE, team_id: hOther, visibility: "workspace" })).json;
+    const HX = startQ("h8x");
+    const hxLid = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === HX.sid)?.local_id ?? "none";
+    cli(["share", "--workspace", W, "--goal", GK?.id, "--yes", "--", hxLid.slice(0, 8)]);
+    sync();
+    const alX = (await ws(M8, "POST", "/alignments", { target_goal_id: GX?.id, choice: "work_toward", session_keys: [HX.key] })).json;
+    const alXOk = await ws(O2, "POST", `/alignments/${alX?.id}/approve`, { revision: alX?.revision ?? 1 });
     const alHr = await ws(M8, "POST", "/alignments", { target_goal_id: GH?.id, choice: "work_toward", session_keys: [H8.key] });
     const alH = alHr.json;
     const alHOk = await ws(O2, "POST", `/alignments/${alH?.id}/approve`, { revision: alH?.revision ?? 1 });
@@ -1574,6 +1584,11 @@ try {
         /from your next prompt this session counts toward/.test(picked.json?.reason ?? "") && (resumed.context ?? "").includes(`counts toward goal "${H8_PICK}"`) &&
         hState?.state === "shared" && hOpen?.goal_id === GP?.id && hOpen?.cause === "manual" && onLost === 0,
       `${GHr.status} ${alHr.status} ${alHr.text?.slice(0, 200)} ${alHOk.status} ${alHOk.text?.slice(0, 160)} ${hRevoke.status} ${paused.system} ${picked.json?.reason} ${resumed.context} ${JSON.stringify(hState)} ${JSON.stringify(hOpen)} ${onLost}`,
+    );
+    check(
+      "H8 (LIM-2441): the pause never lists a goal the session can't take, here one reached only through another session's approved alignment",
+      alXOk.status === 200 && alXOk.json?.state === "approved" && list.length > 0 && !list.includes(H8_ELSEWHERE),
+      `${alXOk.status} ${alXOk.text?.slice(0, 160)} list=${list}`,
     );
   }
 
