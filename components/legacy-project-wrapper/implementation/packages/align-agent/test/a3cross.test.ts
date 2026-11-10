@@ -15,7 +15,7 @@ import { ensureSession } from "../src/ledger.ts";
 import { renderHot } from "../src/hot.ts";
 import { renderCard, type SiblingSummary } from "../src/shared/envelope.ts";
 import { writeJsonAtomic } from "../src/shared/fsx.ts";
-import { layout, localId, spoolWrite } from "../src/shared/layout.ts";
+import { layout, listSpool, localId, spoolWrite } from "../src/shared/layout.ts";
 import type { Ask, FeedFile, Goal, GoalSnapshot, Harness, Limit } from "../src/shared/types.ts";
 import { FakeServer } from "./fake-server.ts";
 import { ctxFor, makeEnv, runCli, runHook, touch, type TestEnv } from "./helpers.ts";
@@ -488,6 +488,35 @@ describe("LIM-2441 H8 (agent side): an alignment revoked before its session swit
     assert.equal((await runCli(s.t, ["sync"])).code, 0);
     assert.equal(s.row().state, "suspended");
     assert.doesNotMatch(JSON.stringify(s.prompt()), /counts toward goal "Cut hook latency"/);
+    assert.doesNotMatch(JSON.stringify(s.prompt()), /counts toward goal "Cut hook latency"/);
+  });
+
+  test("a switch opened while already paused, then cancelled before its record is ingested: it stops reading as the goal and the model is told", async () => {
+    const s = await setup();
+    const key = s.row().session_key;
+    s.fake.pushDirective({ ...cancel, binding: { goal_id: "g_ship", effective: "next_root_turn", cause: "alignment:al_8" }, session_keys: [key] });
+    assert.equal((await runCli(s.t, ["sync"])).code, 0);
+    assert.equal(s.row().state, "suspended");
+    s.prompt();
+    const perf = s.fake.goals.get("ws_acme")!.find((g) => g.id === "g_perf")!;
+    s.fake.pushDirective({ ws: "ws_acme", kind: "binding_changed", session_keys: [key], goal: perf, binding: { goal_id: "g_perf", effective: "next_root_turn", cause: "alignment:al_9" } });
+    assert.equal((await runCli(s.t, ["sync"])).code, 0);
+    assert.match(s.prompt().hookSpecificOutput?.additionalContext ?? "", /counts toward goal "Cut hook latency"/);
+    // The pass that applies the cancel runs before this hook's record reaches the ingest.
+    const held = path.join(s.t.root, "held-spool");
+    fs.mkdirSync(held);
+    const files = listSpool(s.t.home);
+    assert.equal(files.length > 0, true);
+    for (const f of files) fs.renameSync(f, path.join(held, path.basename(f)));
+    s.fake.pushDirective({ ...cancel, session_keys: [key] });
+    assert.equal((await runCli(s.t, ["sync"])).code, 0);
+    for (const f of files) fs.renameSync(path.join(held, path.basename(f)), f);
+    assert.equal((await runCli(s.t, ["sync"])).code, 0);
+    assert.equal(s.row().state, "suspended");
+    assert.equal([...s.fake.epochs.values()].some((e) => e.goal_id === "g_perf"), false);
+    const told = s.prompt();
+    assert.match(told.hookSpecificOutput?.additionalContext ?? "", /no longer bound to an Align goal/);
+    assert.doesNotMatch(JSON.stringify(told), /counts toward goal "Cut hook latency"/);
     assert.doesNotMatch(JSON.stringify(s.prompt()), /counts toward goal "Cut hook latency"/);
   });
 

@@ -2066,7 +2066,9 @@ goal.`); when the session's current binding is already that goal, it SHALL be ha
 `a3cross` "LIM-2441 H8 (agent side) ..."). When a hook had already opened the switch that a `cancel_pending` deletes, so
 its `epoch_open` record reaches the agent after the cancel, the agent SHALL NOT send that epoch: it SHALL pause the
 session as for any `binding_suspended`, in the words of the cancel's `binding.cause`, and withdraw the kept-goal notice
-if the user has not read it (test `a3cross` "a hook's switch ingested after the pass that cancelled it ...").
+if the user has not read it (test `a3cross` "a hook's switch ingested after the pass that cancelled it ..."). If the
+session was already paused when the hook opened that switch, the switch SHALL stop reading as the session's goal and the
+next prompt SHALL give the model the unbound delta (test `a3cross` "a switch opened while already paused ...").
 A share ends with no directive (Stop sharing on the web, say), so the pass SHALL also read the first page's
 `ended_sessions` (this device's sessions whose share the server ended, `directives` "Device fetch of v2 directives by
 cursor") and end each share that is still `shared` or `suspended` here as the usage upload's `sharing_stopped` refusal

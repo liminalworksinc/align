@@ -95,7 +95,8 @@ export interface HotState {
   context_goals?: ContextGoal[];
   /** Requests sent to this session (REQ-002): pending ones, and recently answered or withdrawn ones the hooks still tell. */
   requests?: HotRequest[];
-  /** This session's newest epochs as the sync recorded them, so a hook can tell whether the epoch it opened is in. */
+  /** This session's newest epochs as the sync recorded them, and one it dropped because its binding was cancelled, so a
+   *  hook can tell whether the sync is done with the epoch it opened. */
   epochs_seen?: string[];
   /** Goal holds on this session that were released (the release directive, who released it, the goal's title). */
   released_holds?: { directive_id: string; goal_id?: string; goal_title: string; by: string }[];

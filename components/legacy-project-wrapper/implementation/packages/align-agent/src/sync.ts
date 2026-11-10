@@ -164,6 +164,7 @@ function applySpool(ctx: Ctx, r: SpoolRecord): string | null {
       if (cancelled && cancelled.pending_id === r.pending_id) {
         ctx.db.prepare("UPDATE shares SET state='suspended', suspended_at=? WHERE local_id=? AND state IN ('shared','pending','suspended')").run(nowIso(), lid);
         ctx.db.prepare("DELETE FROM notices WHERE id=?").run(`${lid}/susp_${cancelled.directive_id}`);
+        kvSet(ctx.db, `epoch_cancelled:${lid}`, r.epoch_id);
         addNotice(ctx, lid, `susp_cancelled_${r.pending_id}`, pauseNotice(ctx, share.workspace_id, r.goal_id, cancelled.cause));
         renderHot(ctx, lid);
         return lid;

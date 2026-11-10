@@ -180,7 +180,7 @@ The server SHALL, when a `work_toward` alignment becomes approved, for each list
 
 ### Requirement: binding_suspended on a revoked work_toward alignment
 
-The server SHALL, when an approved `work_toward` alignment is revoked, clear the governing goal of the sessions it governed, end the open epoch of every session whose open binding exists only through that alignment, move those sessions from `shared` to `suspended`, and write one `binding_suspended` directive targeting exactly those sessions with `goal` null and `binding` `{ goal_id: <target goal id>, effective: "next_root_turn", cause: "alignment:<alignment id>" }`. Every session (shared or suspended) that received that alignment's `binding_changed` and has no epoch under it, whose change may still be pending on its machine even if another goal has since cleared its governing goal, SHALL get one `binding_suspended` directive with `binding` `{ goal_id: <target goal id>, effective: "cancel_pending", cause: "alignment:<alignment id>" }` and SHALL keep its state and its own open epoch: its machine drops the pending change and keeps its current binding (LIM-2441). A session whose open epoch is already on the target goal (its own or its team's), or that another alignment now governs toward that goal, SHALL NOT get it.
+The server SHALL, when an approved `work_toward` alignment is revoked, clear the governing goal of the sessions it governed, end the open epoch of every session whose open binding exists only through that alignment, move those sessions from `shared` to `suspended`, and write one `binding_suspended` directive targeting exactly those sessions with `goal` null and `binding` `{ goal_id: <target goal id>, effective: "next_root_turn", cause: "alignment:<alignment id>" }`. Every session (shared or suspended) that received that alignment's `binding_changed` and has no epoch under it, whose change may still be pending on its machine even if another goal has since cleared its governing goal, SHALL get one `binding_suspended` directive with `binding` `{ goal_id: <target goal id>, effective: "cancel_pending", cause: "alignment:<alignment id>" }` and SHALL keep its state and its own open epoch: its machine drops the pending change and keeps its current binding (LIM-2441). A session with any open epoch on the target goal, whatever gave it that goal, or that another alignment now governs toward that goal, SHALL NOT get it.
 
 The server SHALL do the same, with `binding.cause` `goal_closed:<alignment id>`, for every approved `work_toward`
 alignment whose target goal becomes `achieved` or `dropped`, in the transaction that writes that version and after its
@@ -200,7 +200,7 @@ A3-cross-2).
 #### Scenario: Revocation with no epoch from the alignment
 
 - **WHEN** a revoked `work_toward` alignment governed sessions that never opened an epoch under it (`scripts/test-v2.mjs` "revoke (LIM-2441 H8): a governed session that never opened the alignment's binding ...")
-- **THEN** their governing goal is cleared, each gets one `binding_suspended` directive with `effective` `cancel_pending` after its `binding_changed`, and each stays `shared` under its own open epoch
+- **THEN** their governing goal is cleared, each that received its `binding_changed` gets one `binding_suspended` directive with `effective` `cancel_pending` after it, unless it has an open epoch on the target goal or another alignment now governs it toward that goal, and each stays `shared` under its own open epoch
 
 #### Scenario: Revocation reaching a session whose governance had already been cleared
 

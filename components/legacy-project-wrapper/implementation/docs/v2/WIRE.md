@@ -285,8 +285,8 @@ Actions: `POST .../alignments/:id/{approve|counter|accept_counter|reject|withdra
 the person read (400 without one; 409 `stale_revision` when the request has moved on).
 On approval with `allocation_transfer`: a `binding_changed` directive per session. Revoke is prospective; sessions whose
 binding exists only because of it get `binding_suspended`; the other sessions that received its `binding_changed` and have no
-epoch under it get `binding_suspended` with `effective` `cancel_pending` and stay shared; a session already on that goal
-by its own or its team's right gets none.
+epoch under it get `binding_suspended` with `effective` `cancel_pending` and stay shared; a session with an open epoch on that
+goal, or that another alignment now governs toward it, gets none.
 
 ## Connected AI apps and MCP
 `GET /api/v2/workspaces/:ws/apps` (cookie, members) → `{ "url": "<origin>/api/mcp", "apps": [{ "id": "gr_…", "name",
