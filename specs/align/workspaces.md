@@ -49,7 +49,7 @@ Directives (including stop and resume) are in `directives`, the MCP endpoint and
 | Ask | `ask_…`: something a person recorded that a team was asked to do (by "Faculty", in a meeting or by hand), owned by the team asked; `open`, `accepted`, `done`, `declined` or `withdrawn` |
 | Mention | A later time an ask came up again (date, what was said, where), at most 10 per ask |
 | Goal activity | Counts of the sessions bound to a goal over the last 14 days, from bindings, usage times and work signals, never from what agents wrote |
-| Creation code | `alc_…`: a single-use, expiring code that lets one hosted workspace be created, optionally bound to one email address; only its HMAC is stored |
+| Creation code | `alc_…`, or an imported v1 invite code (20 lowercase hex characters): a single-use, expiring code that lets one hosted workspace be created, optionally bound to one email address; only its HMAC is stored |
 | Access request | `ar_…`: someone's request, from the public `/app/request-access` form, for a creation code; pending, approved or declined by the operator |
 | Operator | Whoever runs the hosted server; `scripts/align-admin.mjs` is their tool for codes, requests and workspaces |
 | Audit row | `{at, actor, action, object_id}` written by each change a person makes (and by a few automatic events); `actor` is null only for system actions |
@@ -650,10 +650,13 @@ the same transaction that creates the workspace.
 
 ### Requirement: Creation codes
 
-The server SHALL accept a creation code (`alc_` and 32 base32 characters) only once, only before it expires (14 days
-after it was made unless the operator chose otherwise), only if it was not revoked and, for a code bound to an email
-address, only from a signed-in person whose verified email is that address; it SHALL store only an HMAC of the code
-under `ALIGN_SECRET` and record which workspace the code created.
+The server SHALL accept a creation code (`alc_` and 32 base32 characters, or a v1 invite code of exactly 20 lowercase hex
+characters) only once, only before it expires (14 days after it was made unless the operator chose otherwise), only if
+it was not revoked and, for a code bound to an email address, only from a signed-in person whose verified email is
+that address; it SHALL store only an HMAC of the code under `ALIGN_SECRET` and record which workspace the code created.
+A v1 invite code exists only if the operator imported it (`align-admin codes import`): the import accepts one `code` or `code,email` per line, normalizes a supplied address by trimming and lowercasing it, and binds that code to that address. Code-only lines remain unbound for provider sign-up. It validates every line before writing, rejects empty addresses and extra fields,
+skips every code v1 recorded as spent, prints counts and line numbers but never a code or address, and leaves a code already present exactly as it
+is. The server never reads v1's files.
 
 #### Scenario: Code spent
 
@@ -663,7 +666,22 @@ under `ALIGN_SECRET` and record which workspace the code created.
 #### Scenario: Unusable codes
 
 - **WHEN** a create names a malformed code, a revoked code, an expired code, or a code bound to another address
-- **THEN** the server responds 403 `creation_code_invalid` and spends no code
+- **THEN** the server responds 403 `creation_code_invalid` with the message "That creation code isn't valid. It may be mistyped, used, expired, revoked or for another email address. Reply to the message with your code for a new one." and spends no code
+
+#### Scenario: A tester keeps their v1 invite code
+
+- **WHEN** the operator imports a file of v1 invite codes, and a person signs in and creates a workspace with one of them
+- **THEN** the create is 201 and the code is spent; the same code again is 403 `creation_code_invalid`, also after the workspace is purged and after the file is imported again; a code v1 recorded as spent, a code of 19 or 21 hex characters, an uppercase one, or one that was never imported is 403 `creation_code_invalid`
+
+#### Scenario: An imported bound code admits a new tester
+
+- **WHEN** the operator imports a code bound to a new tester's address and the tester verifies that address by email code
+- **THEN** sign-in succeeds without a prior invite; that tester can create one workspace with the imported code, another address cannot spend it, and re-importing never changes an existing binding or revives a spent code
+
+#### Scenario: A create that fails keeps the code
+
+- **WHEN** a create with a valid code fails after the code was redeemed in its transaction
+- **THEN** no workspace exists and the code is unspent, so the same code then creates the workspace
 
 #### Scenario: Nothing in clear
 
