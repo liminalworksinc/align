@@ -37,7 +37,11 @@ interface Detail {
  *  New version form's Status select. */
 function DropGoal({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () => void }) {
   const [asking, setAsking] = useState(false);
+  // Gone the moment the drop is recorded, so a second Confirm is never offered on the version it replaced (founder
+  // review of e780d842: the confirmation stayed on screen until a reload).
+  const [dropped, setDropped] = useState(false);
   const act = useAction();
+  if (dropped) return null;
   if (!asking)
     return (
       <div className="mb-5">
@@ -72,7 +76,10 @@ function DropGoal({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () => 
                     target_share: goal.target_share ?? null,
                   },
                 }),
-              onDone,
+              () => {
+                setDropped(true);
+                onDone();
+              },
             )
           }
         >
