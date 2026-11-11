@@ -176,4 +176,24 @@ describe("server default", () => {
       await fake.stop();
     }
   });
+  test("`align login` says which server it pairs with and why: --server, ALIGN_SERVER, a server saved by an earlier login", async () => {
+    const fake = new FakeServer({ accessTtl: 3600 });
+    await fake.start();
+    try {
+      const origin = new URL(fake.url).origin;
+      const t = installed({ ALIGN_DEVICE_POLL_SCALE_MS: "10" });
+      const flag = await runCli(t, ["login", "--server", `${fake.url}/`, "--name", "Test Mac"]);
+      assert.equal(flag.code, 0, flag.stderr);
+      assert.ok(flag.stdout.startsWith(`Pairing with ${origin} (from --server).\n`), flag.stdout);
+      const saved = await runCli(t, ["login", "--name", "Test Mac"]);
+      assert.equal(saved.code, 0, saved.stderr);
+      assert.ok(saved.stdout.startsWith(`Pairing with ${origin} (saved by an earlier login).\n`), saved.stdout);
+      const env = installed({ ALIGN_SERVER: fake.url, ALIGN_DEVICE_POLL_SCALE_MS: "10" });
+      const viaEnv = await runCli(env, ["login", "--name", "Test Mac"]);
+      assert.equal(viaEnv.code, 0, viaEnv.stderr);
+      assert.ok(viaEnv.stdout.startsWith(`Pairing with ${origin} (from ALIGN_SERVER).\n`), viaEnv.stdout);
+    } finally {
+      await fake.stop();
+    }
+  });
 });

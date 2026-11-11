@@ -31,17 +31,47 @@ export function codexLine(url: string): string | null {
   return u ? `codex mcp add align --url ${shq(u)}` : null;
 }
 
-/** The align CLI as a release asset (LIM-2504): one tarball, no runtime dependencies, Node 24 or later. The stable
- *  `latest/download` name resolves once a release carries the asset; publishing it is the founder's step. */
-export const AGENT_TARBALL = "https://github.com/liminalworksinc/align/releases/latest/download/liminal-align-agent.tgz";
+/** A published align CLI release (LIM-2504): its version and the sha256 of its tarball, from the release workflow's
+ *  output (.github/workflows/agent-release.yml) after the founder checks its attestation. */
+export interface AgentRelease {
+  version: string;
+  sha256: string;
+}
+
+/** THE SWITCH. null until a release `agent-v<version>` carrying `liminal-align-agent-<version>.tgz` exists; until then
+ *  the Apps tab shows the build-from-source line, never a link that 404s. Set it in the same change that follows the
+ *  founder publishing the release (packages/align-agent/README.md, "Publishing a release"). */
+export const AGENT_RELEASE: AgentRelease | null = null;
+
+export const AGENT_REPO = "https://github.com/liminalworksinc/align";
 /** Where an installed `align` signs in by default (packages/align-agent/src/context.ts HOSTED_SERVER). */
 export const HOSTED_ORIGIN = "https://align-pg-draft.fly.dev";
+/** The agent package inside a clone of the repo. */
+export const AGENT_DIR = "align/components/legacy-project-wrapper/implementation/packages/align-agent";
 
-/** Install the align CLI, add its hooks, and pair this machine: on the hosted server a plain `align login`, anywhere
- *  else `--server` with this server's origin, taken from the checked MCP URL and single-quoted. */
-export function agentInstallLine(url: string): string | null {
+const VERSION = /^\d+\.\d+\.\d+$/;
+const SHA256 = /^[0-9a-f]{64}$/;
+
+/** The tarball's file name and pinned URL (never `latest`), or null for a release that isn't well formed. */
+export function agentTarball(r: AgentRelease | null): { file: string; url: string } | null {
+  if (!r || !VERSION.test(r.version) || !SHA256.test(r.sha256)) return null;
+  const file = `liminal-align-agent-${r.version}.tgz`;
+  return { file, url: `${AGENT_REPO}/releases/download/agent-v${r.version}/${file}` };
+}
+
+/**
+ * The Apps tab's align CLI line, or null for a URL Align couldn't have made. With a release (`kind: "release"`): fetch
+ * the pinned tarball, check its sha256 (shasum stops the line on a mismatch, before npm runs), install that file,
+ * add the hooks, pair. Without one (`kind: "source"`): clone, build and install from the repo. Both end with a plain
+ * `align login` on the hosted server and `--server '<origin>'` (from the checked MCP URL, single-quoted) elsewhere.
+ */
+export function agentInstallLine(url: string, release: AgentRelease | null = AGENT_RELEASE): { kind: "release" | "source"; line: string } | null {
   const u = safeMcpUrl(url);
   if (!u) return null;
   const origin = u.slice(0, -"/api/mcp".length);
-  return `npm install -g ${AGENT_TARBALL} && align install && align login${origin === HOSTED_ORIGIN ? "" : ` --server ${shq(origin)}`}`;
+  const login = `align install && align login${origin === HOSTED_ORIGIN ? "" : ` --server ${shq(origin)}`}`;
+  const t = agentTarball(release);
+  if (t && release)
+    return { kind: "release", line: `curl -fsSLO ${t.url} && echo '${release.sha256}  ${t.file}' | shasum -a 256 -c && npm install -g ./${t.file} && ${login}` };
+  return { kind: "source", line: `git clone --depth 1 ${AGENT_REPO}.git && cd ${AGENT_DIR} && npm ci && npm run build && npm install -g . && ${login}` };
 }

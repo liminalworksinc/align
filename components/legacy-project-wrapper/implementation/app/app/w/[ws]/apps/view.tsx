@@ -118,10 +118,21 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
                   <p className="text-[14px] text-(--text-2)">Your app opens Align&apos;s approval page. Once you approve, it is listed under Connections below.</p>
                 </Step>
                 <Step n={4} title="For goal context inside Claude Code and Codex sessions, install the align CLI">
-                  <p className="text-[14px] text-(--text-2)">
-                    Needs Node 24 or later. Paste into a terminal: it installs <code className="font-mono text-[13px]">align</code>, adds its hooks, and prints a code to enter on Align&apos;s device page.
-                  </p>
-                  <PasteLine label="align CLI" line={agentInstallLine(apps.data.url)} />
+                  {(() => {
+                    const cli = agentInstallLine(apps.data.url);
+                    return (
+                      <>
+                        <p className="text-[14px] text-(--text-2)">
+                          Needs Node 24 or later.{" "}
+                          {cli?.kind === "release"
+                            ? "Paste into a terminal: it downloads the release, checks its checksum, installs"
+                            : "Paste into a terminal: until the align CLI has a release, this builds it from the public repo and installs"}{" "}
+                          <code className="font-mono text-[13px]">align</code>, adds its hooks, and prints a code to enter on Align&apos;s device page.
+                        </p>
+                        <PasteLine label="align CLI" line={cli?.line ?? null} />
+                      </>
+                    );
+                  })()}
                 </Step>
               </ol>
             )}

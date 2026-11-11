@@ -8,7 +8,8 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { agentInstallLine, AGENT_TARBALL, claudeCodeLine, codexLine, HOSTED_ORIGIN, safeMcpUrl, shq } from "../lib/paste-lines.ts";
+import { createHash } from "node:crypto";
+import { AGENT_DIR, AGENT_RELEASE, AGENT_REPO, agentInstallLine, agentTarball, claudeCodeLine, codexLine, HOSTED_ORIGIN, safeMcpUrl, shq } from "../lib/paste-lines.ts";
 
 let passed = 0;
 let failed = 0;
@@ -89,15 +90,39 @@ check(
   codexLine.length === 1 && claudeCodeLine.length === 1 && calls.length === 2 && calls.every((c) => /^(?:claudeCodeLine|codexLine)\(apps\.data\.url\)$/.test(c)) && !/company/i.test(view),
   calls.join(" "),
 );
-// The align CLI line (LIM-2504): plain `align login` on the hosted server, `--server '<origin>'` anywhere else, none
-// for a URL Align couldn't have made; the view builds it from the same checked MCP URL.
+// The align CLI line (LIM-2504). The switch: no release is set in the committed file, so the Apps tab shows the
+// build-from-source line and never a release link that would 404. With a release: a pinned, versioned URL (never
+// `latest`) and a sha256 check before npm installs the file. Plain `align login` on the hosted server, `--server
+// '<origin>'` anywhere else, nothing for a URL Align couldn't have made; the view builds it from the checked MCP URL.
+const BYTES = "pretend tarball bytes\n";
+const REL = { version: "0.2.0", sha256: createHash("sha256").update(BYTES).digest("hex") };
+const PINNED = `${AGENT_REPO}/releases/download/agent-v0.2.0/liminal-align-agent-0.2.0.tgz`;
+const src = agentInstallLine(URL);
 check(
-  "the align CLI line: hosted origin signs in with a plain align login, another origin is single-quoted after --server, a bad URL gives none",
-  agentInstallLine(`${HOSTED_ORIGIN}/api/mcp`) === `npm install -g ${AGENT_TARBALL} && align install && align login` &&
-    agentInstallLine(URL) === `npm install -g ${AGENT_TARBALL} && align install && align login --server 'http://127.0.0.1:3331'` &&
-    agentInstallLine("http://evil.test/api/mcp; touch x") === null &&
+  "the align CLI switch is off in the committed file: no release, so the source line (clone, build, install), never a release URL",
+  AGENT_RELEASE === null && src?.kind === "source" &&
+    src.line === `git clone --depth 1 ${AGENT_REPO}.git && cd ${AGENT_DIR} && npm ci && npm run build && npm install -g . && align install && align login --server 'http://127.0.0.1:3331'` &&
+    !/releases/.test(src.line),
+  JSON.stringify(src),
+);
+const rel = agentInstallLine(URL, REL);
+check(
+  "with a release: the pinned versioned URL, a sha256 check that runs before npm, npm installs the checked file, and never `latest`",
+  rel?.kind === "release" &&
+    rel.line === `curl -fsSLO ${PINNED} && echo '${REL.sha256}  liminal-align-agent-0.2.0.tgz' | shasum -a 256 -c && npm install -g ./liminal-align-agent-0.2.0.tgz && align install && align login --server 'http://127.0.0.1:3331'` &&
+    !/latest/.test(rel.line) && agentTarball(REL)?.url === PINNED,
+  JSON.stringify(rel),
+);
+check(
+  "a release that isn't well formed (version or sha256) falls back to the source line",
+  [{ version: "0.2", sha256: REL.sha256 }, { version: "0.2.0;x", sha256: REL.sha256 }, { version: "0.2.0", sha256: "abc" }, { version: "0.2.0", sha256: REL.sha256.toUpperCase() }].every((r) => agentInstallLine(URL, r)?.kind === "source"),
+);
+check(
+  "on the hosted server both lines end with a plain align login; a bad URL gives no line; the view builds it from apps.data.url",
+  agentInstallLine(`${HOSTED_ORIGIN}/api/mcp`)?.line.endsWith("&& align install && align login") === true &&
+    agentInstallLine(`${HOSTED_ORIGIN}/api/mcp`, REL)?.line.endsWith("&& align install && align login") === true &&
+    agentInstallLine("http://evil.test/api/mcp; touch x") === null && agentInstallLine("http://evil.test/api/mcp; touch x", REL) === null &&
     /agentInstallLine\(apps\.data\.url\)/.test(view),
-  agentInstallLine(URL),
 );
 check("the lines carry no hooks, settings file or agent instruction file", ![claudeCodeLine(URL), codexLine(URL)].some((l) => /AGENTS|hooks|settings|node -e|printf|>>/.test(l)), claudeCodeLine(URL));
 
@@ -129,6 +154,40 @@ for (const shell of SHELLS) {
     check(`${path.basename(shell)} lines ran`, false, e.stderr?.toString() || e.message);
   } finally {
     rmSync(box.root, { recursive: true, force: true });
+  }
+}
+// ---- the release line in every shell: curl, npm and align are stubs; shasum is the real one ----
+for (const shell of SHELLS) {
+  for (const [label, sha, expectInstall] of [["matching checksum", REL.sha256, true], ["tampered tarball (checksum differs)", createHash("sha256").update("other bytes").digest("hex"), false]]) {
+    const box = sandbox();
+    try {
+      for (const name of ["npm", "align"]) {
+        const f = path.join(box.bin, name);
+        writeFileSync(f, `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a"; done >> "${box.bin}/${name}.args"\necho --- >> "${box.bin}/${name}.args"\n`);
+        chmodSync(f, 0o755);
+      }
+      // curl -fsSLO <url>: writes the URL's last segment into the current folder.
+      writeFileSync(path.join(box.bin, "curl"), `#!/bin/sh\nfor a in "$@"; do u="$a"; done\nprintf '%s' ${shq(BYTES)} > "\${u##*/}"\n`);
+      chmodSync(path.join(box.bin, "curl"), 0o755);
+      const line = agentInstallLine(URL, { version: "0.2.0", sha256: sha }).line;
+      let failedLine = false;
+      try {
+        run(shell, line, box);
+      } catch {
+        failedLine = true;
+      }
+      const npm = argsOf(box, "npm");
+      const al = argsOf(box, "align");
+      check(
+        `${path.basename(shell)}: release line with a ${label}: ${expectInstall ? "npm installs ./liminal-align-agent-0.2.0.tgz, then align install and align login --server" : "the line stops at shasum; npm and align never run"}`,
+        expectInstall
+          ? !failedLine && JSON.stringify(npm) === JSON.stringify([["install", "-g", "./liminal-align-agent-0.2.0.tgz"]]) && JSON.stringify(al) === JSON.stringify([["install"], ["login", "--server", "http://127.0.0.1:3331"]])
+          : failedLine && npm.length === 0 && al.length === 0,
+        `failed=${failedLine} npm=${JSON.stringify(npm)} align=${JSON.stringify(al)}`,
+      );
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
+    }
   }
 }
 check(`at least sh and bash were tried (${SHELLS.join(", ")})`, SHELLS.length >= 2, SHELLS.join(","));

@@ -11,15 +11,34 @@ Zero runtime dependencies (Node 24+: `node:sqlite`, `node:crypto`, `fetch`).
 
 ## Install
 
+Until a release exists (the switch is `AGENT_RELEASE` in `lib/paste-lines.ts`; the Apps tab follows it), from source:
+
 ```
-npm install -g https://github.com/liminalworksinc/align/releases/latest/download/liminal-align-agent.tgz && align install && align login
+git clone --depth 1 https://github.com/liminalworksinc/align.git && cd align/components/legacy-project-wrapper/implementation/packages/align-agent && npm ci && npm run build && npm install -g . && align install && align login
 ```
 
-`align login` signs in to the hosted server (`https://align-pg-draft.fly.dev`) unless told otherwise:
-`align login --server <url>` for another one, `align login --dev` (or `ALIGN_DEV=1`) for the local dev server on
-127.0.0.1:3100, and `ALIGN_SERVER=<url>` overrides both. A server saved by an earlier login is kept.
+Once release `agent-v<version>` is published, a pinned tarball whose checksum is checked before npm installs it:
 
-The release asset is `npm pack` of this folder (`prepack` builds `dist/`), uploaded as `liminal-align-agent.tgz`.
+```
+curl -fsSLO https://github.com/liminalworksinc/align/releases/download/agent-v<version>/liminal-align-agent-<version>.tgz && echo '<sha256>  liminal-align-agent-<version>.tgz' | shasum -a 256 -c && npm install -g ./liminal-align-agent-<version>.tgz && align install && align login
+```
+
+`align login` says which server it pairs with and why. It signs in to the hosted server
+(`https://align-pg-draft.fly.dev`) unless told otherwise: `align login --server <url>` for another one,
+`align login --dev` (or `ALIGN_DEV=1`) for the local dev server on 127.0.0.1:3100, and `ALIGN_SERVER=<url>` overrides
+both. A server saved by an earlier login is kept.
+
+### Publishing a release (founder only)
+
+1. Once, in the repo's settings: turn on **immutable releases** (Settings, General, Releases, "Enable release
+   immutability"), so a published release's assets and tag can't be changed or replaced afterwards.
+2. Actions, **agent-release**, Run workflow (on `main`). It typechecks, tests, runs `npm pack`, attests the tarball's
+   build provenance and uploads it with its `.sha256` as an artifact. It creates no tag or release and publishes nothing.
+3. Download the artifact and verify it: `gh attestation verify liminal-align-agent-<version>.tgz --repo liminalworksinc/align`
+   and `shasum -a 256 -c liminal-align-agent-<version>.tgz.sha256`.
+4. Create release `agent-v<version>` from that commit with the `.tgz` as its asset, then publish it.
+5. In a PR, set `AGENT_RELEASE` in `lib/paste-lines.ts` to `{ version, sha256 }` from the run's summary. Until then the
+   Apps tab keeps the source line, so it never shows a link that 404s.
 
 ## Commands
 
