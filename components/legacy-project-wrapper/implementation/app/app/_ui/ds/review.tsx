@@ -219,9 +219,10 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
         {!waits && !launch && cr.state === "approved" && cr.launch === "launched" && `Launched by ${who(cr.launch_decided_by, me)}, ${at(cr.launch_decided_at)}: version ${cr.version} is now the launched version.${delivery.value !== undefined ? ` ${deliveryStatement(cr.version!, delivery.value)}` : ""}`}
         {!waits && !launch && cr.state !== "approved" && cr.state_note}
       </p>
-      {/* The decider (and anyone but the requester, whose Returned block quotes it) sees the reason given (founder ruling,
-          PR 68 pass 1 item 17). */}
-      {cr.state === "rejected" && cr.rejection_reason && cr.requester.id !== me && (
+      {/* The reason given shows to the decider and the request's approvers only (founder rulings, PR 68 pass 1 item 17 and
+          LIM-2472 60253f95): never to a viewer or someone outside the team. The requester's Returned block quotes it.
+          Display only: the server sends it to every reader of the request. */}
+      {cr.state === "rejected" && cr.rejection_reason && cr.requester.id !== me && (cr.rejected_by?.id === me || cr.approvers.some((a) => a.id === me)) && (
         <p data-decline-reason className="text-[14px] text-(--text-1) [overflow-wrap:anywhere]">
           Reason: “{cr.rejection_reason}”
         </p>

@@ -6945,6 +6945,27 @@ try {
           inNeeds && dv.status === "declined" && /Declined/.test(dv.text) && /Declined by Hank Other: “Home: not this quarter”/.test(dv.text) && /Hank Other declined your request/.test(dvReview) && /Home: not this quarter/.test(dvReview) && /A declined request is closed/.test(dvReview) && /Open the goal to propose again/.test(dvReview) && /Reason: Home: not this quarter/.test(dvGoal) && dv.sw <= dv.W && errors.length === 0,
           `${inNeeds} ${JSON.stringify(dv)} | ${dvReview.slice(0, 300).replace(/\n/g, " / ")} | ${dvGoal.slice(0, 600).replace(/\n/g, " / ")} ${errors.join(" | ")}`,
         );
+        // LIM-2472 60253f95 (founder ruling on Mini S3's delta audit): in the review drawer the decline reason shows to the
+        // decider and the request's approvers only; a viewer and a member outside the approval set don't see it (display
+        // only: the server still sends it to every reader of the request).
+        const crDNow = (await ha(HX, "GET", `/goals/${GX.id}/change-requests/${crD.json?.id}`)).json;
+        const approverIds = (crDNow?.approvers ?? []).map((a) => a.id);
+        const reasonFor = async (u) => {
+          const p = await browser.newPage();
+          await p.setViewport({ width: 1440, height: 900 });
+          await p.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          await p.goto(`${BASE}/app/w/${HW}?review=${GX.id}.${crD.json?.id}`, { waitUntil: "networkidle0" });
+          await p.waitForSelector(`[data-review="${crD.json?.id}"]`, { timeout: 15000 });
+          const r = await p.evaluate(() => document.querySelector("[data-decline-reason]")?.textContent ?? null);
+          await p.close();
+          return r;
+        };
+        const [rX, rO, rV, rL] = [await reasonFor(HX), await reasonFor(HO), await reasonFor(HV), await reasonFor(HL)];
+        check(
+          "ui (Chrome, LIM-2472 60253f95): in the review drawer the decline reason (\"Reason: “Home: not this quarter”\") shows to the decider (Hank Other) and another approver (Hana Owner), never to a viewer (Hope Viewer) or a member outside the approval set (Hugo Lead)",
+          approverIds.includes(HX.id) && approverIds.includes(HO.id) && !approverIds.includes(HL.id) && rX === "Reason: “Home: not this quarter”" && rO === rX && rV === null && rL === null,
+          JSON.stringify({ approverIds, rX, rO, rV, rL }),
+        );
       } catch (e) {
         check("ui (Chrome) home declined run", false, e?.stack ?? e);
       } finally {
