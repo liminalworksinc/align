@@ -205,7 +205,10 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     releases_now: releasesNow(ctx, lid),
     resumed: resumedBy(ctx, lid),
     prior_share: sharedBefore(ctx, lid) ? { stopped: stoppedByPerson(ctx, lid) } : null,
-    epochs_seen: (ctx.db.prepare("SELECT epoch_id FROM epochs WHERE local_id=? ORDER BY rowid DESC LIMIT 10").all(lid) as { epoch_id: string }[]).map((e) => e.epoch_id),
+    epochs_seen: [
+      ...(ctx.db.prepare("SELECT epoch_id FROM epochs WHERE local_id=? ORDER BY rowid DESC LIMIT 10").all(lid) as { epoch_id: string }[]).map((e) => e.epoch_id),
+      ...[kvGet(ctx.db, `epoch_cancelled:${lid}`)].filter((id): id is string => !!id),
+    ],
     updated_at: new Date().toISOString(),
     by: { gen: WRITER_GEN, build: selfBuild().build },
   };
