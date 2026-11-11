@@ -146,7 +146,9 @@ item in the same turn and label why ordering was exceptional.
 7. When a work item carries a `**GitHub issue:**` or `**GitLab issue:**` citation and
    reaches a terminal or attention-needing state — completed, rejected as out of
    scope, or blocked on clarification from the filer — comment on that issue with the
-   matching CLI (`gh issue comment` or `glab issue comment`) and a permalink back to
+   matching CLI (`gh issue comment` or `glab issue comment`) only after verifying
+   explicit operator authorization covers that specific comment. Without that
+   authorization, prepare the comment and wait; do not post it. Include a permalink back to
    the roadmap item (a commit-pinned `blob/<sha>/docs/roadmap/active-work.md#L<start>-
    <end>` line range, not a heading anchor, so it stays accurate as the file grows) and
    the outcome in one or two sentences. Close the issue only when explicitly authorized

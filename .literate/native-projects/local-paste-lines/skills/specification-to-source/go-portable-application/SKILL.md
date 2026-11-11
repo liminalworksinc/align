@@ -18,17 +18,17 @@ dependencies:
       algorithm: "sha256"
       digest: "55dece8843519c6ced884d7cd9eb5d8bff04ebccef055c74c5bfcf176ccd06cd"
 limitations:
-  - "Do not create a go.mod, fetch a module, use cgo, unsafe, build tags, or any package outside the Go standard library."
-  - "Do not place the generated runtime test file behind a build tag, and do not omit source/tests/litai_test.go from any build target that compiles the entrypoint."
+  - "Do not create a go.mod, fetch a module, use cgo, unsafe, build tags, or any external package outside the Go standard library; the generated local runtime-test package is permitted."
+  - "Do not place the generated runtime test file behind a build tag, and do not omit source/tests/runtime_tests.go from any build target that compiles the entrypoint."
 trust: "repository-reviewed"
 ---
 # Go portable JSON application
 
 Implement the selected Go Flavor as straightforward, auditable Go source rooted at
 `source/main.go`, `package main`, compilable by one direct `go build source/main.go`
-invocation with no `go.mod` and no import outside the standard library. Put the native
-generated-test implementation at `source/tests/litai_test.go` as `package tests`,
-include it unconditionally from the application through an explicit import, and dispatch
+invocation with no `go.mod` and imports only from the standard library and its generated local test package. Put the native
+generated-test implementation at `source/tests/runtime_tests.go` as `package tests`,
+include it unconditionally from the application through an explicit relative import with GO111MODULE=off, and dispatch
 the Standard `--litai-test` and `--litai-smoke` modes before ordinary argument parsing
 without reading `source/tests/manifest.json`. Do not gate this file behind a
 `//go:build` tag: the exported runtime artifact must contain it.
@@ -68,6 +68,6 @@ error-handling rule; reserve `panic` exclusively for conditions that indicate th
 Component's own generated code has a bug, never for validating input. Do not add a check
 for an invariant Go's type system already enforces structurally. Do not gate a contract
 check behind a flag, build tag, or environment variable — an unreachable check provides no
-evidence. A `panic` raised during `source/tests/litai_test.go` or `--litai-test` execution
+evidence. A `panic` raised during `source/tests/runtime_tests.go` or `--litai-test` execution
 is an ordinary generated-test failure, not a new failure channel; repair it the same way
 any other failing manifest case is repaired before completing generation.

@@ -22,7 +22,7 @@ COPY docs/RETENTION.md ./docs/RETENTION.md
 COPY .native-inputs /
 COPY native ./native
 COPY scripts/native-libraries.mjs ./scripts/native-libraries.mjs
-COPY scripts/align-admin-main.mjs scripts/prepare-operator.mjs ./scripts/
+COPY scripts/align-admin-main.mjs scripts/retention-main.mjs scripts/sign-in-link-main.mjs scripts/prepare-operator.mjs ./scripts/
 RUN chown -R node:node /app
 USER node
 RUN node scripts/native-libraries.mjs web && node scripts/prepare-operator.mjs /app/.operator-runtime && npx next build

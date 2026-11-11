@@ -23,7 +23,26 @@ root = args.project.resolve()
 providers = {}
 registry_path = root / ".literate/native-projects.json"
 registry_bytes = None
-for selection in args.provider:
+selections = list(args.provider)
+if registry_path.is_symlink():
+    raise ValueError("native registry must be a direct regular file")
+registry_bytes = registry_path.read_bytes()
+registry = json.loads(registry_bytes)
+if registry.get("schema") != "literate-ai/adopted-native-projects@1":
+    raise ValueError("native registry schema mismatch")
+explicit = {selection.partition("=")[0] for selection in selections}
+for name in args.components:
+    if name in explicit:
+        continue
+    entries = [entry for entry in registry["projects"]
+               if entry["project_id"] == "local-" + name]
+    if not entries:
+        entries = [entry for entry in registry["projects"]
+                   if entry["path"] == ".literate/native-projects/local-" + name]
+    if len(entries) != 1:
+        raise ValueError("component requires one registered provider or an explicit selection")
+    selections.append(name + "=" + entries[0]["path"])
+for selection in selections:
     component, separator, relative = selection.partition("=")
     parts = PurePosixPath(relative).parts
     if (not separator or component not in args.components or component in providers
@@ -62,7 +81,7 @@ libraries = []
 for name in args.components:
     if not name.replace("-", "").isalnum():
         raise ValueError("component name must be a simple identifier")
-    relative = providers.get(name, ".literate/native-projects/local-" + name)
+    relative = providers[name]
     child = root / relative
     evidence = evidence_for_conversion_stage(load_project(child), ConversionAuthorityStage.QUALIFIED)
     if len(evidence) != 1:

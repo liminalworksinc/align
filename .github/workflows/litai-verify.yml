@@ -23,6 +23,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.22.2"
+      - name: Readable native source matches accepted cache
+        run: node tools/native-rewrite/review-native-sources.mjs
+      - name: Effective host tool requirements
+        run: python tools/native-rewrite/check-host-tools.py
+      - name: Qualification review copies match recorded profiles
+        run: python tools/native-rewrite/review-qualification-source.py
+      - name: Project instructions and approval scope remain safe
+        run: python tools/native-rewrite/check-review-policy.py
+      - name: Relocated guards preserve independent acceptance
+        run: node --no-warnings --experimental-vm-modules --max-old-space-size=768 tools/native-rewrite/check-relocated-guards.mjs
       - name: Install litai
         run: python -m pip install "$LITAI_SOURCE"
       - name: Receipt, locks and authority are current

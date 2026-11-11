@@ -1,6 +1,6 @@
 # Design traceability
 
-<!-- literate-ai:authority-reviewed sha256:b4dfc7a8a8eea6be5be218abeedca32123283bb2b3581e2a936b4a8f2d357225 -->
+<!-- literate-ai:authority-reviewed sha256:2c0d1ac2b17a38edd0f90ada21bedb8b8177a77b939933b2e2ecaafab4ea2e2b -->
 
 [Project guide](../README.md) → design traceability
 
@@ -13,3 +13,14 @@ derived evidence outside source authority. Changes should update the owning arti
 its nearby explanation or diagram,
 and an end-to-end test. Illustrations aid understanding; prose requirements and
 acceptance scenarios remain normative. See the [project map](../user/project-layout.md).
+
+## Project-local finding remediation
+
+The project copies now require explicit authorization for issue comments,
+commits and pushes. Qualified toolchain snapshots remain unchanged; the owning
+project preflight enforces the stricter base Git and Git LFS requirements.
+Older unused Go guidance uses a runtime file that is included
+by ordinary compilation. These changes leave selected generation contracts,
+accepted component locks, qualification profiles and source caches unchanged.
+This is an authority review of the stated local changes, not independent
+security acceptance or an upstream framework modification.

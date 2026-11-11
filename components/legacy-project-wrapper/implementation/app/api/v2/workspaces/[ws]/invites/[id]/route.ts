@@ -1,9 +1,5 @@
-import { idParam, noContent, route, webWrite } from "@/lib/v2/http";
-import { ID_RE } from "@/lib/v2/validate";
-import { deleteInvite, enter } from "@/lib/v2/workspaces";
+// Typed entry point for the admitted route library.
+import { bindRoute } from "@/lib/v2/native-routes/binding";
+import { routes } from "@/lib/v2/native-routes/workspace-admin-routes";
 
-// DELETE (owners): withdraw an invite that hasn't been accepted.
-export const DELETE = route<{ ws: string; id: string }>(async (req, params) => {
-  await deleteInvite(enter(await webWrite(req), idParam(params.ws, ID_RE)), idParam(params.id, ID_RE));
-  return noContent();
-});
+export const DELETE = bindRoute<{ ws: string; id: string }>(routes, "workspaces/[ws]/invites/[id]", "DELETE");

@@ -4,30 +4,35 @@
 - **Owning queue item:** [ADOPT-002](active-work.md#adopt-002)
 - **Completion / archival evidence:** pending while ADOPT-002 remains open; exact accepted checkpoint and per-boundary results are recorded below
 
-Sixteen of 31 boundaries have native transfer acceptance, B01 through B16.
-The operator approved exactly 280 retained paths across ten further boundaries:
-B20, B21, B23 through B27, B29, B30 and B31. The supporting checkpoint `a902ae75` is published with green CI and records
-26 closed boundaries: sixteen native and ten intentionally retained. B17, B18, B19, B22 and B28 remain open.
-The [classification record](native-retention-classification.json)
-and [approved path list](native-retention-proposal.md) preserve the exact scope.
-The runtime source is unchanged, so the complete application and image results
-remain current. No suite is rerun for a documentation-only change.
+The combined B19/B28 candidate registers 68 qualified libraries. Seven route
+groups supply all 73 canonical v2 routes and three unchanged aliases. All 66
+earlier library descriptors remain exact. The two operator packages are normally
+registered after separate cache acceptance with no generation or repairs.
 
-The B17 candidate has complete functional acceptance: 58 qualified libraries,
-52 web packages, 1,066 private web batches and a 50-file, seven-package operator
-closure. The complete application passes all 1,847 checks with no failures or
-skips. The fresh image passes 36 checks and 18 additional offline HTTP/SQLite
-controls. Both receipt readers verify all 58 projections. Source identity:
-`sha256:31c84d1ac09ccf39b9c3d1d74e7d7599148c6536c95df52bd3457fbb89972895`. Current receipt:
-`sha256:273cd4a97bacaf3766e656d515e884759ac7d84640ecdae899bb8e3438e40bd8`. Image: `sha256:67b7b74f3f941c1939893899ea5442d7ff7ddbb9ade0b4334215c5ee0bd2fc54`.
-The exact runtime and provider inputs match across both runs. Publication,
-green CI and the draft PR body update remain pending, so published progress is
-still 26 of 31. This checkpoint will close B17 for a total of 27: seventeen native
-and ten approved retained. B18, B19, B22 and B28 will remain open.
+All 23 historical findings have technical correction evidence. Readable source
+projections include 270 package files from 68 accepted libraries. Three preserved
+qualification profiles have 62 readable review files with exact executable
+segments. Focused acceptance passes 214 batches across nine guarded services.
+Instruction checks cover 213 files; host preflight intersects every base Git
+and Git LFS declaration while preserving qualified snapshots. No human override,
+independent approval or operator security acceptance is recorded.
 
-This same-agent review reconciles the accepted classification with exact qualified packages, 77 reviewed target-binding files, the complete 1,847-check workflow, 36 Linux arm64 image checks, 18 additional offline bundled HTTP controls and the current parent receipt. The separate goal-cap service controls pass all seven corrected cases on each host and reject the three held-writer cases in the preserved original. The current single-process HTTP probe also preserves capacity with the original source, and the runtime refuses a second server on the same data directory. The service-level gap is not claimed as a proven public HTTP exploit. This record supplies no independent maintainer or actual operator security acceptance.
+B28's actual cold entrypoints pass 28 controls and 34 Node commands on each host.
+They preserve the existing 25-second deadline and write no repository files.
+Sign-in-link startup selects only its helper package; administration selects its
+exact dependencies. Library acceptance batches preserve every case and expected
+result, and a wrong final case is rejected before output installation.
 
-[Exact members, package pins and measured-record hashes](native-boundary-transfers.json). The immutable authentication baseline is commit `6cef3ced7856fb8ad34ff6cad7d3f4af893b32ea` and tree `b4366b3f0c46132df1cffc3eaccc1d954387ac7e`. Its recorded acceptance remains historical. The current correction source, image and receipt are bound separately in the linked JSON, and Git records their publication checkpoint.
+B19's earlier 1,847 application checks, 36 image checks and 18 additional offline
+HTTP/SQLite controls remain preserved for their original source. The current
+combined candidate requires its own complete application/image acceptance and
+normal publication. Published closed progress remains 26 of 31. The exact live
+preparation, acceptance and publication state is in the
+[checkpoint result](../../generated/native-checkpoints/b19-b28.json). This file
+does not assert future results. B18 and B22 remain implementation work; B17 also
+awaits exact-head green CI closure. Deployment and tester configuration remain
+outside this migration.
+
 
 | Boundary | Accepted transfer |
 | --- | --- |

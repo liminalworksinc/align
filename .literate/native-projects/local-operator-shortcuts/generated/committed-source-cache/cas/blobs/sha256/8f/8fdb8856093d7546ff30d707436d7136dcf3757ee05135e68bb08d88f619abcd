@@ -1,0 +1,11 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const destination = path.resolve(process.argv[2]);
+fs.mkdirSync(destination, { recursive: true });
+for (const name of ['operator_shortcuts', 'tests']) {
+  fs.cpSync(path.join(root, name), path.join(destination, name), { recursive: true, filter: filename => !filename.endsWith('manifest.json') });
+}
+fs.copyFileSync(path.join(root, 'main.js'), path.join(destination, 'main.js'));
+fs.writeFileSync(path.join(destination, 'run'), '#!/usr/bin/env node\n\'use strict\';\nrequire(\'./main.js\');\n', { mode: 0o755 });

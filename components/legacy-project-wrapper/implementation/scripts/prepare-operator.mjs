@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { prepareNative } from "./native-libraries.mjs";
 
-const sources = [
+const adminSources = [
   ["scripts/align-admin-main.mjs", "scripts/align-admin.mjs"],
   ["lib/v2/core.mts", "lib/v2/core.mts"],
   ["lib/v2/retention-core.mts", "lib/v2/retention-core.mts"],
@@ -40,7 +40,14 @@ function runtimePermissions(directory) {
   fs.chmodSync(directory, 0o755);
 }
 
-export function prepareOperator(implementation, destination) {
+export function prepareOperator(implementation, destination, {command = "all"} = {}) {
+  if (!["all", "align-admin", "retention", "sign-in-link"].includes(command)) throw new Error("Unknown operator preparation");
+  const shortcutSources = [["scripts/retention-main.mjs", "scripts/retention.mjs"], ["scripts/sign-in-link-main.mjs", "scripts/sign-in-link.mjs"]];
+  const sources = command === "sign-in-link" ? [shortcutSources[1]] : [...adminSources,
+    ...(command === "all" ? shortcutSources : command === "retention" ? [shortcutSources[0]] : [])];
+  const adminComponents = ["runtime-settings", "value-rules", "identifier-tools", "server-secrets", "server-core", "server-metrics", "server-retention", "server-creation-compatibility", "operator-admin"];
+  const components = command === "sign-in-link" ? ["operator-shortcuts"] : [...adminComponents,
+    ...(command === "align-admin" ? [] : ["operator-shortcuts"])];
   implementation = path.resolve(implementation);
   destination = path.resolve(destination);
   if (fs.existsSync(destination)) throw new Error("Operator destination must be new");
@@ -62,14 +69,14 @@ export function prepareOperator(implementation, destination) {
       fs.writeFileSync(output, bytes, {flag:"wx"});
     }
     const native = prepareNative(implementation, [path.join(staging, "lib/native")],
-      {components:["runtime-settings", "value-rules", "identifier-tools", "server-secrets", "server-core", "server-metrics", "server-retention"]});
+      {components, batchCases:true});
     for (const {original,bytes} of observations) {
       if (!fs.readFileSync(original).equals(bytes)) throw new Error("Operator inputs changed during preparation");
     }
     // The build may run as root, while the packaged command runs as the node user.
     // Normalize only this owned code tree; the launcher's outer temporary directory stays private.
     runtimePermissions(staging);
-    const manifest = {schema:"align/operator-runtime@1", libraries:["runtime-settings", "value-rules", "identifier-tools", "server-secrets", "server-core", "server-metrics", "server-retention"], files:operatorFiles(staging)};
+    const manifest = {schema:"align/operator-runtime@1", libraries:components, files:operatorFiles(staging)};
     const manifestPath = path.join(staging, ".operator-manifest.json");
     fs.writeFileSync(manifestPath, JSON.stringify(manifest)+"\n", {flag:"wx"});
     fs.chmodSync(manifestPath, 0o644);
@@ -81,8 +88,8 @@ export function prepareOperator(implementation, destination) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  if (process.argv.length !== 3) throw new Error("Usage: node scripts/prepare-operator.mjs NEW_DESTINATION");
+  if (process.argv.length < 3 || process.argv.length > 4) throw new Error("Usage: node scripts/prepare-operator.mjs NEW_DESTINATION [all|align-admin|retention|sign-in-link]");
   const implementation = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const result = prepareOperator(implementation, process.argv[2]);
+  const result = prepareOperator(implementation, process.argv[2], {command: process.argv[3] || "all"});
   console.log(JSON.stringify({libraries:result.native.libraries, cases:result.native.cases, files:result.manifest.files.length}));
 }

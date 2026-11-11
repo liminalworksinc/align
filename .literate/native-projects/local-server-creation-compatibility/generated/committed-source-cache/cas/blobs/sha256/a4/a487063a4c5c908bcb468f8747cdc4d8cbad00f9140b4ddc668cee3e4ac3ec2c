@@ -1,0 +1,8 @@
+LITAI_LANGUAGE_TOOL ?= node
+.PHONY: test check
+test:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" --check server_creation_compatibility/create_creation_compatibility.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tests/litai_test.js

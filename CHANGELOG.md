@@ -8,6 +8,17 @@
   another is requested, and says when the confirmation replaces that rule.
 - The live-agent test client uses fresh HTTP connections after synchronous CLI calls so the offline-revocation
   scenario can finish without a stale keep-alive socket reset.
+- Preserve v2 routes and operator commands through 68 pinned libraries, expose
+  readable native guard checks and qualification code, and require explicit
+  action authorization in the copied project instructions. See the
+  [checkpoint result](generated/native-checkpoints/b19-b28.json) for acceptance
+  and publication evidence.
+
+- Integrate v2 route providers, creation-code compatibility and refreshed admission
+  with 66 pinned libraries. Combined acceptance and publication remain pending.
+- Preserve registered provider revisions when assembling library manifests and
+  reject missing or ambiguous selections before creating output.
+
 - Move metrics and retention rules into qualified libraries while preserving
   reports, identity cleanup, rollback and scheduling behavior. All 1,847
   application checks and 36 image checks pass; normal publication is pending.

@@ -169,34 +169,27 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [ADR 0002](../decisions/0002-native-literate-ai-rewrite.md) through the
   [native rewrite program](native-rewrite-program.md), preserving retained source
   authority until each boundary independently qualifies.
-- **Current direction:** Complete all 31 boundaries on draft PR #58. The goal permits checkpoint publication; the latest session
-  instructions require a specific go for each commit or push, naming the tree. New qualification profiles use repository-relative paths. Retained
-  classification needs the operator's approval of the proposed list. The operator
-  lifted the three-attempt stop on November 10 and reactivated the goal. Diagnose
-  each failure before another attempt and preserve every failed candidate.
-  Keep framework follow-ups local and recorded; no
-  upstream writes, review bypass, merge or rebase is authorized. Deployment and
-  tester configuration are outside this migration.
-- **Next action:** Transfer and stage the reviewed B17 source, then obtain the
-  specific commit go for its exact staged tree. Complete normal push review,
-  verify CI at the remote head and update draft PR #58 before counting B17 closed.
-  The 58-library candidate passes 1,847 application checks, 36 fresh image checks,
-  18 offline HTTP/SQLite controls and both current-receipt readers. Its 52 web
-  packages pass 1,066 private batches; the operator closure is seven packages and
-  50 files. Metrics preserves 1,199 original observations. Retention preserves
-  727 core, 422 native scheduler and separate 418 VM scheduler observations, plus
-  fourteen additional timer comparisons. All baselines and failures remain
-  preserved. Documentation and findings were prepared before acceptance; these
-  updates record measured results only. Never rerun the suite for a doc change.
-- **Current publication:** The 56-library source checkpoint `c4b85386` and supporting
-  publication `a902ae75` are on draft PR #58 with both CI checks green: sixteen
-  native and ten approved retained closures. Normal review
-  used no opt-out. The authoritative review ledger has twenty open findings,
-  six high and fourteen medium, with zero dispositions changed. Earlier counts
-  of seven covered only the recent publication groups. The
-  [transfer review](native-boundary-transfers.md) links the exact committed runtime
-  sources. B17, B18, B19, B22 and B28 remain migration work. Actual operator
-  security acceptance is separate; deployment and tester work are out of scope.
+- **Current direction:** Complete all 31 boundaries on draft PR #58 under the
+  operator's migration go. Normal review remains required. Diagnose each failed
+  attempt before another launch and preserve original observations and outputs.
+  Keep framework source unchanged and report a framework blocker. Deployment,
+  tester configuration, upstream writes, merges and reviewer opt-out are outside
+  scope. Rebase only after the cutover prerequisite is satisfied at a checkpoint.
+- **Current correction:** The operator requested that every open finding be
+  fixed before continuing the remaining boundaries. Shruti's feedback is
+  optional and supplies no build gate. Follow the
+  [finding remediation plan](native-findings-remediation.md); preserve normal
+  review and distinguish implemented fixes from operator security acceptance.
+  The B19 push was stopped before upload so corrections can be included.
+- **Next action:** Run complete combined B19/B28 application and image acceptance,
+  then current receipt verification, normal publication and exact-head CI. Both
+  operator packages have normal registration and both-host cold caller acceptance.
+  All documentation and ledger preparation precede this acceptance run. The
+  [checkpoint result](../../generated/native-checkpoints/b19-b28.json) supplies
+  measured gate results as they complete without rewriting authority documents.
+  Then continue B22 and deferred B18. Published closure remains 26 of 31 until
+  every checkpoint gate passes. No independent or operator security approval is
+  supplied by functional checks.
 - **Retained classification:** The operator approved the exact 280 paths in
   [the ten-boundary proposal](native-retention-proposal.md): B20, B21, B23 through
   B27, B29, B30 and B31. The supporting publication preserves current full application and image acceptance on unchanged source; all ten approved retained closures are now published.

@@ -1,0 +1,106 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_operator_shortcuts } = require('../operator_shortcuts/create_operator_shortcuts.js');
+
+const cases = [
+  { id: 'generated-factory-empty', args: [{}], expected: {} },
+  { id: 'generated-factory-empty-argv', args: [{ process: { argv: [], env: {} } }], expected: {} },
+  { id: 'generated-factory-live-resources', args: [{ process: { argv: ['node', 'shortcut', '--dry-run'], env: { PORT: '5107' } } }], expected: {} }
+];
+
+function factoryCase(test) {
+  const result = create_operator_shortcuts(...test.args);
+  assert.deepEqual(Object.keys(result), ['retention', 'signInLink']);
+  assert.equal(typeof result.retention, 'function');
+  assert.equal(typeof result.signInLink, 'function');
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), test.expected);
+  return JSON.parse(JSON.stringify(result));
+}
+
+async function commandTests() {
+  const logs = [], errors = [], exits = [];
+  const proc = { argv: ['node', 'shortcut'], env: {}, exit(code) { assert.equal(this, proc); exits.push(code); } };
+  const output = {
+    log(value) { assert.equal(this, output); logs.push(value); },
+    error(value) { assert.equal(this, output); errors.push(value); }
+  };
+  const signal = {};
+  const abort = { timeout(ms) { assert.equal(this, abort); assert.equal(ms, 15000); return signal; } };
+  let delegated = 0, requests = 0, reads = 0;
+  let response = { status: 204, ok: true, async json() { reads++; throw new Error('Success body must remain unread'); } };
+  const resources = {
+    process: proc, console: output, AbortSignal: abort,
+    async runAdmin() { assert.equal(this, undefined); delegated++; },
+    async fetch(url, options) {
+      assert.equal(this, undefined);
+      requests++;
+      const base = 'http://127.0.0.1:' + (proc.env.PORT || 3100);
+      const email = (proc.argv[2] || proc.env.ALIGN_LOCAL_OWNER_EMAIL || 'owner@align.localhost').trim().toLowerCase();
+      assert.equal(url, base + '/api/v2/auth/email-otp/send-verification-otp');
+      assert.deepEqual(options, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ email, type: 'sign-in' }), signal });
+      return response;
+    }
+  };
+  const api = create_operator_shortcuts(resources);
+  assert.equal(requests + delegated + logs.length + errors.length, 0);
+  const argv = proc.argv;
+  proc.argv.push('--dry-run', '--dry-run');
+  assert.equal(await api.retention(), undefined);
+  assert.equal(proc.argv, argv);
+  assert.deepEqual(proc.argv, ['node', 'shortcut', 'retention', 'run', '--dry-run', '--dry-run']);
+  assert.equal(delegated, 1);
+  proc.argv.splice(2, proc.argv.length, '');
+  await api.retention();
+  assert.deepEqual(proc.argv, ['node', 'shortcut', '']);
+  assert.equal(delegated, 1);
+  assert.deepEqual(exits, [2]);
+  assert.deepEqual(errors, ['usage: node scripts/retention.mjs [--dry-run]   (the same as: node scripts/align-admin.mjs retention run [--dry-run])']);
+  proc.argv.splice(2);
+  await api.signInLink();
+  assert.equal(reads, 0);
+  assert.deepEqual(logs, ['A sign-in link for owner@align.localhost was printed in the terminal running Align and saved in <data>/v2/sign-in.txt (data/v2/sign-in.txt by default). It works for 5 minutes.']);
+  proc.env.ALIGN_LOCAL_OWNER_EMAIL = '  SOMEONE@EXAMPLE.ORG  ';
+  proc.env.PORT = '5107';
+  await api.signInLink();
+  assert.match(logs[1], /for someone@example.org was/);
+  proc.argv.push('  OVERRIDE@EXAMPLE.ORG ');
+  await api.signInLink();
+  assert.match(logs[2], /for override@example.org was/);
+  response = { status: 429, ok: true, async json() { assert.equal(this, response); reads++; return { message: 'Wait please', code: 'private-code' }; } };
+  await api.signInLink();
+  assert.equal(errors.at(-1), 'Wait please');
+  response.json = async function () { assert.equal(this, response); throw new Error('Invalid JSON'); };
+  await api.signInLink();
+  assert.equal(errors.at(-1), 'Too many codes were sent. Wait a few minutes, then try again.');
+  response = { status: 403, ok: false, async json() { assert.equal(this, response); return { message: 'Denied', code: 'private-code' }; } };
+  await api.signInLink();
+  assert.equal(errors.at(-1), 'The server at http://127.0.0.1:5107 refused (403: Denied).');
+  response.json = async () => { throw new Error('Invalid JSON'); };
+  await api.signInLink();
+  assert.equal(errors.at(-1), 'The server at http://127.0.0.1:5107 refused (403).');
+  resources.fetch = async function () { assert.equal(this, undefined); throw new Error('Offline'); };
+  await api.signInLink();
+  assert.equal(errors.at(-1), 'No Align server is running at http://127.0.0.1:5107. Start it with npm start, then try again. If it runs on another port, name it: PORT=<port> npm run sign-in-link');
+  assert.equal(JSON.stringify({ logs, errors }).includes('private-code'), false);
+  const exitError = new Error('exit');
+  proc.exit = function () { throw exitError; };
+  await assert.rejects(api.signInLink, error => error === exitError);
+  proc.argv.splice(2, proc.argv.length, '--invalid');
+  await assert.rejects(api.retention, error => error === exitError);
+  proc.argv.splice(2);
+  const adminError = new Error('admin');
+  resources.runAdmin = async function () { assert.equal(this, undefined); throw adminError; };
+  await assert.rejects(api.retention, error => error === adminError);
+}
+
+async function run() {
+  const passed = [];
+  for (const test of cases) {
+    factoryCase(test);
+    passed.push({ case_id: test.id, outcome: 'passed' });
+  }
+  await commandTests();
+  return { schema: 'literate-ai/generated-test-results@1', cases: passed };
+}
+async function smoke() { return factoryCase(cases[0]); }
+module.exports = { run, smoke };

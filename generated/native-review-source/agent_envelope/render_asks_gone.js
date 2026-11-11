@@ -1,0 +1,3 @@
+'use strict';
+const {render_asks_gone} = require('./core.js');
+module.exports = {render_asks_gone};

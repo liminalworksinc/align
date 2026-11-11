@@ -20,6 +20,9 @@ the default branch, or `failed`, do not ignore it.
 2. `litai release advance-default-branch --branch BRANCH --bump minor|major`
    (or `--version`). Use minor after a patch or minor cut; major only when
    the operator scheduled a major.
-3. Review the diff, commit on that branch, and push without force.
+3. Review the diff. Verify that explicit operator authorization covers the
+   specific commit and the specific push before performing either action.
+   Without that authorization, draft and stage, then wait. With authorization,
+   commit on that branch and push without force.
 
 Do not run this as a substitute for `prepare` on the release line.

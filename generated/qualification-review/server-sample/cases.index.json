@@ -1,0 +1,42 @@
+[
+  {
+    "kind": "sample",
+    "capability": "server-sample.create-sample",
+    "golden_data": {
+      "records": 31,
+      "sha256": "72842a1d1d9baad34e9ebbbab8be7afd78c042a2876d2a5f124ed1d1db39c474"
+    }
+  },
+  {
+    "kind": "clock",
+    "capability": "server-sample.create-sample",
+    "golden_data": {
+      "records": 10,
+      "sha256": "171d108e0455575b469c4bb5f7644163ae17e703ed7bfbd3efce88fd74e55c4f"
+    }
+  },
+  {
+    "kind": "isolation",
+    "capability": "server-sample.create-sample",
+    "golden_data": {
+      "records": 4,
+      "sha256": "1740b869ae5e0eed0d4d1695ac9a1d25c6a168afe85a17e1d581d02516d5e363"
+    }
+  },
+  {
+    "kind": "bindings",
+    "capability": "server-sample.create-sample",
+    "golden_data": {
+      "records": 11,
+      "sha256": "d0511f524086fc5f551d6de279e08b204df4b4daeed52c3269642b1d1b6c536f"
+    }
+  },
+  {
+    "kind": "populated",
+    "capability": "server-sample.create-sample",
+    "golden_data": {
+      "records": 9,
+      "sha256": "808e46e7c8fc2bcd45fe4c3b52178a97fa73381b3b17d089177128bc3260cce7"
+    }
+  }
+]

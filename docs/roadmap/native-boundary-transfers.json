@@ -1,14 +1,15 @@
 {
   "schema": "align/native-boundary-transfer-review@4",
-  "observed_utc": "2026-11-10T16:20:33.792261+00:00",
+  "observed_utc": "2026-11-11T20:50:32.499025+00:00",
   "review_kind": "Same-agent full source, package and measured acceptance review under operator delegation. B13 confirmation remains recorded. No independent maintainer or deployed-tester security acceptance.",
   "accepted_classification_sha256": "236b77cbd13222ec77aac7f3fc9c1d8cccaa6a46b662352ca7a5f5fb7d8ddf87",
   "image_platform": "linux/arm64",
-  "qualified_components": 58,
+  "qualified_components": 68,
   "reviewed_source_members": 77,
-  "completed_boundaries": 27,
+  "completed_boundaries": 26,
   "total_boundaries": 31,
   "remaining_boundaries": [
+    "B17",
     "B18",
     "B19",
     "B22",
@@ -2776,9 +2777,9 @@
       "retained_roles": "Types, explicit host resources and forwarding only.",
       "original_application_algorithms_in_retained_members": false,
       "functional_acceptance_complete": true,
-      "whole_boundary_closed": true,
+      "whole_boundary_closed": false,
       "publication_required_before_counting_closed": true,
-      "closure_state": "Functional acceptance complete. The candidate closure becomes effective only after normal publication, green CI and the draft PR body update.",
+      "closure_state": "Functional acceptance passed and source was uploaded. Exact-head green CI and final publication closure remain unproven.",
       "required_acceptance_result": "1847 application checks, 36 fresh image checks and 18 offline bundled HTTP/SQLite controls pass. Both receipt readers verify all 58 qualified projections. Metrics preserves 1199 observations; retention preserves 727 core, 422 native scheduler and separate 418 VM scheduler observations, plus 14 additional timer comparisons, on both hosts.",
       "supporting_measured_records": [
         {
@@ -2879,6 +2880,97 @@
       "same_agent_review_only": true,
       "independent_maintainer_review_claimed": false,
       "actual_operator_security_acceptance_claimed": false
+    },
+    {
+      "boundary": "B19",
+      "name": "V2 HTTP routes",
+      "closure_kind": "native",
+      "accepted_target_responsibility": "Typed route selectors, public types, explicit resources and unchanged compatibility aliases.",
+      "required_acceptance": "All route groups together preserve workspace scope, permissions, validation, bounds and responses; full application and image checks, current receipt and normal publication.",
+      "current_qualified_bindings": [
+        {
+          "component": "server-connected-apps-routes",
+          "provider": ".literate/native-projects/local-server-connected-apps-routes",
+          "entry": "4790d062eae0bba320463194194d6d2af9a06b88bc32fe5bc2553a38df39b330",
+          "lock_identity": "sha256:e0349cc5cb924d656dfa756766bc7f4afa7b1ab2eec84e52dc5981bef0fdf396"
+        },
+        {
+          "component": "server-creation-compatibility",
+          "provider": ".literate/native-projects/local-server-creation-compatibility",
+          "entry": "b525128f2b23af60b8791ec379430759d9ccd74c7781bad867933fb47a38bfd3",
+          "lock_identity": "sha256:9086ef334ca1ca97f1e3788fe13bb531c25e0f97f9911866cd61e6b87ef63629"
+        },
+        {
+          "component": "server-goals-deliberation-routes",
+          "provider": ".literate/native-projects/local-server-goals-deliberation-routes",
+          "entry": "ead0da821f1a69cb223c51457c56f9e3dfd00e5a803343b8d94621ca71099262",
+          "lock_identity": "sha256:2fe4f5de281aa9baca4e597e4a759cb0db30b446fa7db2ec5bee197e37a902b4"
+        },
+        {
+          "component": "server-identity-routes",
+          "provider": ".literate/native-projects/local-server-identity-routes",
+          "entry": "52273f50dabf8183fec85cd19441d0138e0f879cf4427e4b2b5c91656b7677a6",
+          "lock_identity": "sha256:832ab59837bf2b37a92f924b9c2b1765f2197c533fca317f211b51ad71824272"
+        },
+        {
+          "component": "server-sessions-directives-routes",
+          "provider": ".literate/native-projects/local-server-sessions-directives-routes",
+          "entry": "3dbc0775e553fe291f5b55e8364f38333ec86741b517ffbf321a6f8d96e43e0f",
+          "lock_identity": "sha256:8c75b484d6104272ffe493cf23f4cd5d1f503a9181f9f3c64137c7587f1d0cdb"
+        },
+        {
+          "component": "server-team-asks-routes",
+          "provider": ".literate/native-projects/local-server-team-asks-routes",
+          "entry": "574bac556dc633e2b807bc1b0db2ce90f6fa43d4b79a56019ec4a6a6e4f5792e",
+          "lock_identity": "sha256:2252ca0ec5e1397d9b4a7aecc4a0fdf5d16a3e3d054ef61504a0d2defbab67ab"
+        },
+        {
+          "component": "server-workspace-admin-routes",
+          "provider": ".literate/native-projects/local-server-workspace-admin-routes",
+          "entry": "a0be17baecbb6e9378f56d3dbf4abe4608362e3a9114715616ef4f6459056e6a",
+          "lock_identity": "sha256:41ec5f32c867db12b7480a2d95bfa15b31ddfdf10e5a869ea192e15a8dad2637"
+        },
+        {
+          "component": "server-workspace-admission",
+          "provider": ".literate/native-projects/local-server-workspace-admission-current-v2",
+          "entry": "f9201b6afd3fa382fdab58fa04fbf80c29b17bfedd8ca8cf2e11817954db05dd",
+          "lock_identity": "sha256:810ae12bb0597ca72e0ba718494d6c8db22339e248a01a1edbd57de51ea8847f"
+        },
+        {
+          "component": "server-workspace-reporting-routes",
+          "provider": ".literate/native-projects/local-server-workspace-reporting-routes",
+          "entry": "538cfd152ea0859c739ac38fab670b18fb8ce3fb849968f48580ef5c61e7cd41",
+          "lock_identity": "sha256:5dc8aaf5a6775bd133ba75e538ba9744733052c100b4fe27dc5f5a0cea0d2260"
+        }
+      ],
+      "functional_acceptance_complete": false,
+      "whole_boundary_closed": false,
+      "closure_state": "Integrated private candidate. Full application, image, current parent receipt and normal publication remain required.",
+      "source_authority_transferred": false,
+      "findings_navigation": "docs/roadmap/native-authorization-findings.md",
+      "all_findings_undecided": true,
+      "independent_maintainer_review_claimed": false,
+      "actual_operator_security_acceptance_claimed": false
+    },
+    {
+      "boundary": "B28",
+      "name": "Operator commands",
+      "closure_kind": "native",
+      "accepted_target_responsibility": "Caller resource assembly, exact pinned package preparation, temporary directories and operating-system process/signal forwarding.",
+      "qualified_components": [
+        "operator-admin",
+        "operator-shortcuts",
+        "server-creation-compatibility"
+      ],
+      "cold_caller_controls_each_host": 28,
+      "actual_Node_commands_each_host": 34,
+      "current_result": "generated/native-checkpoints/b19-b28.json",
+      "functional_acceptance_complete": false,
+      "whole_boundary_closed": false,
+      "source_authority_transferred": false,
+      "closure_state": "Cold integration passed; combined application/image acceptance and normal publication required.",
+      "findings_navigation": "docs/roadmap/native-authorization-findings.md",
+      "operator_security_acceptance_claimed": false
     }
   ],
   "public_tester_deployed": false,
@@ -3212,175 +3304,201 @@
   "classified_members_in_closed_boundaries": 361,
   "candidate_closure_counts_apply_after_normal_publication": true,
   "current_findings_snapshot": {
-    "count": 20,
+    "count": 23,
     "high": 6,
-    "medium": 14,
-    "ledger_sha256": "b4695536c285f46c22830f67da7e07d67c1ad25e902aaffd7fc80c8873e83c96",
+    "medium": 17,
+    "ledger_sha256": "8f94da4a25f166eb794428f048647baaf3f99206a7e0dfc74dd226678f2805f5",
     "overrides": 0,
+    "guide": "docs/roadmap/native-authorization-findings.md",
+    "guide_sha256": "10f8f29a90bc8cb8f4d875fb2c800c9847187136abb00c1af8bfb3e0843a2f30",
     "findings": [
       {
         "id": "f_c741821f2f4a",
         "severity": "medium",
-        "class": "contradictory-build-contract",
+        "finding_class": "contradictory-build-contract",
         "file": ".literate/native-projects/local-spend-meter/skills/specification-to-source/go-portable-application/SKILL.md",
-        "line": "30",
+        "line": 30,
         "title": "Go skill requires a test file that the Go toolchain always excludes from builds"
       },
       {
         "id": "f_b36c3d29ef7c",
         "severity": "medium",
-        "class": "bypassed-framework-gate",
+        "finding_class": "bypassed-framework-gate",
         "file": "tools/native-rewrite/register-qualified-child.py",
-        "line": "108",
+        "line": 108,
         "title": "Local script writes QUALIFIED parent authority through private framework internals"
       },
       {
         "id": "f_2f5c23666cec",
         "severity": "medium",
-        "class": "weakened-validation",
+        "finding_class": "weakened-validation",
         "file": ".literate/native-projects/local-spend-meter/components/spend-meter/specs/derived/interface-spend-meter-valid-counts-e1a5dfe9e7.md",
-        "line": "9",
+        "line": 9,
         "title": "valid_counts bounds are ambiguous, so negative or huge counts may pass"
       },
       {
         "id": "f_e35fa336a9f8",
         "severity": "medium",
-        "class": "inconsistent-version-constraint",
+        "finding_class": "inconsistent-version-constraint",
         "file": ".literate/native-projects/local-migration-coordinator/flavors/os-macos/host-install/macos/arm64/none.cdx.json",
-        "line": "82",
+        "line": 82,
         "title": "macOS Git realization accepts versions the universal SBOM rejects"
       },
       {
         "id": "f_5054419f9a29",
         "severity": "medium",
-        "class": "opaque-validation-replacement",
+        "finding_class": "opaque-validation-replacement",
         "file": "components/legacy-project-wrapper/implementation/lib/v2/validate.ts",
-        "line": "9",
+        "line": 9,
         "title": "All v2 request validators now come from an unreviewable generated binding behind a type cast"
       },
       {
         "id": "f_745f52b800ff",
         "severity": "medium",
-        "class": "unapproved-external-write",
+        "finding_class": "unapproved-external-write",
         "file": ".literate/native-projects/local-field-validation/skills/agent/record-user-directed-work/SKILL.md",
-        "line": "146",
+        "line": 146,
         "title": "Skill tells agents to post issue comments without an external-write authorization gate"
       },
       {
         "id": "f_84ce9f54c701",
         "severity": "medium",
-        "class": "opaque-generated-dependency",
+        "finding_class": "opaque-generated-dependency",
         "file": "components/legacy-project-wrapper/implementation/lib/v2/db.ts",
-        "line": "1110",
+        "line": 1110,
         "title": "Schema migration control flow moved into a generated module whose source is not in the diff"
       },
       {
         "id": "f_4c9283b5ecab",
         "severity": "high",
-        "class": "opaque-security-logic-relocation",
+        "finding_class": "opaque-security-logic-relocation",
         "file": "components/legacy-project-wrapper/implementation/lib/v2/auth.ts",
-        "line": "38",
+        "line": 38,
         "title": "All auth enforcement moved into an unreviewed generated native binding"
       },
       {
         "id": "f_456d34de6a82",
         "severity": "medium",
-        "class": "obfuscated-executable-payload",
+        "finding_class": "obfuscated-executable-payload",
         "file": ".literate/native-projects/local-server-auth/components/server-auth/qualification/profile.json",
-        "line": "1",
+        "line": 1,
         "title": "Qualification profile runs a large opaque base64 blob as code"
       },
       {
         "id": "f_622b2d74e48e",
         "severity": "medium",
-        "class": "weakened-validation",
+        "finding_class": "weakened-validation",
         "file": ".literate/native-projects/local-server-auth/flavors/os-macos/host-install/macos/arm64/none.cdx.json",
-        "line": "82",
+        "line": 82,
         "title": "macOS Git and Git LFS minimum versions are lower than the base capability requires"
       },
       {
         "id": "f_fcab81184174",
         "severity": "medium",
-        "class": "pending-human-auth-review",
+        "finding_class": "pending-human-auth-review",
         "file": "docs/roadmap/native-boundary-transfers.md",
-        "line": "35",
+        "line": 35,
         "title": "B13 identity boundary marked closed while moved auth checks still need human confirmation"
       },
       {
         "id": "f_202c48750557",
         "severity": "medium",
-        "class": "unverified-human-approval",
+        "finding_class": "unverified-human-approval",
         "file": "docs/roadmap/native-rewrite-program.md",
-        "line": "44",
+        "line": 44,
         "title": "Agent-written record says the operator approved B13 auth transfer, closing the human-confirmation gate"
       },
       {
         "id": "f_2c1e50b9c263",
         "severity": "medium",
-        "class": "cleared-human-gate",
+        "finding_class": "cleared-human-gate",
         "file": "docs/roadmap/native-boundary-transfers.json",
-        "line": "871",
+        "line": 871,
         "title": "Agent recorded operator approval and closed the B13 authentication review gate"
       },
       {
         "id": "f_2e78693505d1",
         "severity": "high",
-        "class": "unreviewable-logic-relocation",
+        "finding_class": "unreviewable-logic-relocation",
         "file": "components/legacy-project-wrapper/implementation/lib/v2/workspaces.ts",
-        "line": "18",
+        "line": 18,
         "title": "All workspace auth, invite and ownership logic moved into an opaque generated binding"
       },
       {
         "id": "f_09aa12209ec2",
         "severity": "medium",
-        "class": "obfuscated-executable-payload",
+        "finding_class": "obfuscated-executable-payload",
         "file": ".literate/native-projects/local-server-sample/components/server-sample/qualification/profile.json",
-        "line": "1",
+        "line": 1,
         "title": "Qualification profile runs a large opaque base64/compressed blob as code"
       },
       {
         "id": "f_eacf8a5e6d43",
         "severity": "medium",
-        "class": "opaque-executed-payload",
+        "finding_class": "opaque-executed-payload",
         "file": ".literate/native-projects/local-server-workspaces/components/server-workspaces/qualification/profile.json",
-        "line": "1",
+        "line": 1,
         "title": "Qualification profile runs eval on gzipped base64 code that can't be reviewed"
       },
       {
         "id": "f_3c2e305a94d7",
         "severity": "high",
-        "class": "removed-auth-check",
+        "finding_class": "removed-auth-check",
         "file": "components/legacy-project-wrapper/implementation/lib/v2/limit-suggest.ts",
-        "line": "67",
+        "line": 67,
         "title": "Viewer 403, read checks, input validation and rate limits moved into an opaque native binding"
       },
       {
         "id": "f_4bd94fac41bd",
         "severity": "high",
-        "class": "opaque-auth-relocation",
+        "finding_class": "opaque-auth-relocation",
         "file": "components/legacy-project-wrapper/implementation/lib/v2/goals.ts",
-        "line": "19",
+        "line": 19,
         "title": "Goal auth and validation checks moved into a native binding that this diff does not show"
       },
       {
         "id": "f_5a0e064cc7ff",
         "severity": "high",
-        "class": "auth-logic-moved-unreviewable",
+        "finding_class": "auth-logic-moved-unreviewable",
         "file": "components/legacy-project-wrapper/implementation/lib/v2/devices.ts",
-        "line": "12",
+        "line": 12,
         "title": "All device auth and token logic was moved into an opaque generated binding, behind an unchecked cast"
       },
       {
         "id": "f_d943ad9dd8d1",
         "severity": "high",
-        "class": "moved-auth-check",
+        "finding_class": "moved-auth-check",
         "file": "components/legacy-project-wrapper/implementation/lib/v2/directives.ts",
-        "line": "65",
+        "line": 65,
         "title": "Device/user scoping and goal-visibility checks moved into an unreviewed native binding"
+      },
+      {
+        "id": "f_a53163d0b124",
+        "severity": "medium",
+        "finding_class": "weakened-version-constraint",
+        "file": ".literate/native-projects/local-server-metrics/flavors/os-macos/host-install/macos/arm64/none.cdx.json",
+        "line": 73,
+        "title": "macOS Git realization permits versions below the base minimum"
+      },
+      {
+        "id": "f_dd723ad9bd62",
+        "severity": "medium",
+        "finding_class": "unapproved-push",
+        "file": ".literate/native-projects/local-server-retention/skills/agent/release-project/advance/SKILL.md",
+        "line": 23,
+        "title": "Directs agents to push without operator authorization"
+      },
+      {
+        "id": "f_5c5fc40549da",
+        "severity": "medium",
+        "finding_class": "unapproved-push",
+        "file": ".literate/native-projects/local-server-metrics/skills/agent/release-project/advance/SKILL.md",
+        "line": 21,
+        "title": "Requires a push without explicit operator approval"
       }
     ],
-    "source_comparison": "docs/roadmap/native-authorization-findings.md",
-    "no_findings_accepted_or_dismissed": true
+    "all_undecided": true,
+    "finding_dispositions_changed": false
   },
   "supporting_retention_checkpoint": {
     "source_checkpoint": "c4b853866ff5e130fa294f8e70fe5c0530e87aa4",
@@ -3433,7 +3551,7 @@
   "published_completed_boundaries": 26,
   "metrics_retention_checkpoint": {
     "functionally_accepted": true,
-    "published": false,
+    "published": true,
     "published_closed_boundaries_before_checkpoint": 26,
     "closed_boundaries_after_normal_publication": 27,
     "physical_web_libraries": 52,
@@ -3449,6 +3567,147 @@
     "authored_docs_and_findings_prepared_before_acceptance": true,
     "post_acceptance_edits_record_results_and_next_action_only": true,
     "no_full_suite_rerun_for_docs": true,
-    "findings_guide_sha256": "0ccdc028f3f381e014030e01c45255d2beb70ab3c9122e4819652bc55590c216"
-  }
+    "findings_guide_sha256": "0ccdc028f3f381e014030e01c45255d2beb70ab3c9122e4819652bc55590c216",
+    "whole_boundary_closed": false,
+    "exact_head_green_CI_verified": false
+  },
+  "closed_native_boundaries": 16,
+  "closed_intentionally_retained_boundaries": 10,
+  "b19_candidate": {
+    "registered_libraries": 66,
+    "web_libraries": 60,
+    "operator_libraries": 8,
+    "canonical_route_files": 73,
+    "compatibility_aliases": 3,
+    "admitted_route_groups": 7,
+    "normal_child_additions": 8,
+    "normal_child_revisions": 1,
+    "web_materialization_cases": 1092,
+    "all183_package_members_match_pins": true,
+    "current_check_navigation_references": 452,
+    "earlier_workspace_operation_ranges_updated": 9,
+    "new_verification_members": {
+      "native/workspace-admission-harness-v6.cjs": {
+        "sha256": "7d75ec94f93709683524889d4777a91a3bb1b44614149a419b6600e698754553",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      },
+      "native/server-workspace-admin-routes.json": {
+        "sha256": "cc8e4c67347a23afb338368b682d537fa200b32625c002a1a09dc59b996f3bb4",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      },
+      "native/server-sessions-directives-routes-harness-v5.cjs": {
+        "sha256": "02cd7448c8ab1127d6dc5464eee7d89f019ee114f02237d72915b7045567119c",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      },
+      "native/server-creation-compatibility.json": {
+        "sha256": "adf3c391efda497b99329042398eb9f6ff85779ba64ce33f88e5703d59ea491c",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      },
+      "native/server-goals-deliberation-routes.json": {
+        "sha256": "9bc2617524bae5186cfe10aea2641331a22cd3ba23ab7bd102a197164d2609d1",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      },
+      "native/server-team-asks-routes-harness-v3.cjs": {
+        "sha256": "758287ada9b5cdd72006723cf7c022ab25c54434e78efa27f1c7de3688a68fc4",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      },
+      "native/server-creation-compatibility-harness-v1.cjs": {
+        "sha256": "3976708652f0f959436f29f3f021972f5ba3d8a4ef88b7968fd344650d2e7293",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      },
+      "native/server-workspace-reporting-routes.json": {
+        "sha256": "02e040ff78a2a27727c3e7b8e9dca8ea71c14d724e316b501c36b434aaf5c79e",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      },
+      "native/server-workspace-admin-routes-harness-v3.cjs": {
+        "sha256": "bef15c3881bfa93a82f92b8209d7607767cb18a8710e1508e260489ec7a5dffd",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      },
+      "native/server-goals-deliberation-routes-harness-v4.cjs": {
+        "sha256": "d761c61cb6727d340128e928ff0c49106db0223ceb02c300ef48a41aa2923cc2",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      },
+      "native/server-workspace-reporting-routes-harness-v1.cjs": {
+        "sha256": "482190196ad10356ab39a1d815bae598e2790db20b32a6f80aee11eb442cf409",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      },
+      "native/server-team-asks-routes.json": {
+        "sha256": "e602ab53a2a12a1110cda3475ef3c03b2dd97b595328bb626794ef2980884883",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      },
+      "native/server-sessions-directives-routes.json": {
+        "sha256": "219b570382d879a13fae47ced75bcc64db54449641c444acc5026c630cca5a14",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      },
+      "native/server-identity-routes.json": {
+        "sha256": "3316d0b1b60dcd587e01306f620a186c4eb17347dd53ae9a81e6c2a9ac037e53",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      },
+      "native/server-connected-apps-routes.json": {
+        "sha256": "99bc460c80769d1a3457c947ce9f92dd2cd815d6eb36d23e902d7bd1ca10a808",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      },
+      "native/server-identity-routes-harness-v4.cjs": {
+        "sha256": "860a0b076610be47d814a5f136e9f03b4e0b91d0bff031f47592b567a898ff7d",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      },
+      "native/server-connected-apps-routes-harness-v1.cjs": {
+        "sha256": "3314363123e66cef3feb0699ab16631f83630572f73b236b74779121292cf6b3",
+        "class": "repository-only acceptance harness",
+        "boundary_owner": "B19",
+        "reason": "Independent verifier or frozen public observations for exact admitted source; not application runtime."
+      }
+    },
+    "full_application_image_parent_receipt_and_publication_pending": true,
+    "whole_boundary_closed": false,
+    "published": false,
+    "operator_security_acceptance_claimed": false,
+    "registered_provider_assembly": {
+      "all66_manifest_providers_registered": true,
+      "unchanged_prior_descriptors": 57,
+      "only_existing_revision": "server-workspace-admission",
+      "envelope_provider": ".literate/native-projects/local-agent-envelope-stop-v2",
+      "sealed_agent_libraries": 6,
+      "sealed_agent_acceptance_cases": 161,
+      "provider_refusal_controls": 4,
+      "first_full_run_failed_due_to_old_unregistered_provider": true,
+      "full_run_after_source_correction_required": true,
+      "framework_source_unchanged": true
+    },
+    "retained_source_members": 519
+  },
+  "current_remediation_record": "generated/native-checkpoints/finding-remediation.json",
+  "combined_checkpoint_result": "generated/native-checkpoints/b19-b28.json"
 }

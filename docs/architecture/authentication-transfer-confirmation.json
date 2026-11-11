@@ -1,0 +1,19 @@
+{
+  "schema": "align/operator-authentication-transfer-confirmation@1",
+  "received_utc": "2026-11-08T20:26:25.265882+00:00",
+  "operator_message": "Authentication awaits human confirmation\u2014 I confirm",
+  "confirmed_gate": "B13 human confirmation of the moved authentication checks",
+  "confirmation_context": "The immediately preceding status identified authentication human confirmation as the remaining B13 gate. The operator explicitly confirmed that item.",
+  "scope": "Accepted B13 authentication transfer, bound to the unchanged reviewed authentication implementation and qualification evidence.",
+  "published_authentication_commit": "6cef3ced7856fb8ad34ff6cad7d3f4af893b32ea",
+  "current_published_checkpoint": "fd70cc2a68dc71d5a6f2b45fb98327bd1cdec68f",
+  "current_published_receipt": "sha256:84b86b98e0b05ae2254a5512803c0b1832dc29d1101b11a863cd3a7448b43d6a",
+  "qualified_auth_source_sha256": "fce2b1acff3b796d0956f06f8d31d9005ed1a503222e92af381c2270eaeed928",
+  "qualified_auth_decision": "sha256:42633dfcb1776825ddcafb1256c42078a243584dacfda7d1be7abfaf0180530b",
+  "prior_finding": "f_4c9283b5ecab",
+  "prior_premature_closure_corrected_in": "fd70cc2a68dc71d5a6f2b45fb98327bd1cdec68f",
+  "accepted_native_transfers_after_confirmation": 13,
+  "remaining_native_implementation_boundaries": 18,
+  "final_deployed_tester_security_acceptance": false,
+  "live_qa_gates": 0
+}

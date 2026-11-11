@@ -1,7 +1,5 @@
-import { idParam, route, webAuth } from "@/lib/v2/http";
-import { getReallocation } from "@/lib/v2/reallocations";
-import { ID_RE } from "@/lib/v2/validate";
-import { enter } from "@/lib/v2/workspaces";
+// Typed entry point for the admitted route library.
+import { bindRoute } from "@/lib/v2/native-routes/binding";
+import { routes } from "@/lib/v2/native-routes/goals-deliberation-routes";
 
-// GET (cookie): one reallocation, if I can read one of its goals.
-export const GET = route<{ ws: string; id: string }>(async (req, params) => getReallocation(enter(await webAuth(req), idParam(params.ws, ID_RE)), idParam(params.id, ID_RE)));
+export const GET = bindRoute<{ ws: string; id: string }>(routes, "workspaces/[ws]/reallocations/[id]", "GET");

@@ -16,6 +16,8 @@
 !next.config.ts
 !tsconfig.json
 !scripts/align-admin-main.mjs
+!scripts/retention-main.mjs
+!scripts/sign-in-link-main.mjs
 !scripts/prepare-operator.mjs
 !docs/trust
 !docs/RETENTION.md

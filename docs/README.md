@@ -57,3 +57,19 @@ storage can replace retained behavior. Its proposed
 [entity and upgrade contract](architecture/storage-entity-contract.md) and
 [contract observations](architecture/storage-contract-observation.json) keep
 logical obligations separate from the SQLite mapping and native qualification.
+
+## Native migration review
+
+- [Boundary program](roadmap/native-rewrite-program.md)
+- [Transfer review](roadmap/native-boundary-transfers.md)
+- [Transfer ledger](roadmap/native-boundary-transfers.json)
+- [Authorization source comparisons](roadmap/native-authorization-findings.md)
+- [Finding corrections](roadmap/native-findings-remediation.md)
+
+Preserved acceptance and classification records:
+
+- [B19 route acceptance](architecture/b19-admitted-acceptance.json)
+- [Goal domain acceptance](architecture/goal-domain-admitted-acceptance.json)
+- [Metrics and retention acceptance](architecture/metrics-retention-admitted-acceptance.json)
+- [Session domain acceptance](architecture/session-domain-admitted-acceptance.json)
+- [Retained boundary classification](roadmap/native-retention-classification.json)

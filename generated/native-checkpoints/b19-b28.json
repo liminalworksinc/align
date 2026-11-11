@@ -1,0 +1,43 @@
+{
+  "schema": "align/native-checkpoint-result@1",
+  "checkpoint": "B19-B28",
+  "state": "local-accepted-publication-pending",
+  "previous_published_head": "9f73aa620d76d8e27040c6b16fcd255fb33aa4ea",
+  "B19_earlier_local_acceptance": {
+    "application_passed": 1847,
+    "image_passed": 36,
+    "offline_HTTP_SQLite_passed": 18,
+    "receipt": "sha256:ef9a5a9a6b85980bc9e1a0be9f5de27f00c803c93f254c74516ce0a54b2bf774"
+  },
+  "candidate_libraries": 68,
+  "B28_cold_command_acceptance": {
+    "passed": true,
+    "controls_each_host": 28,
+    "actual_Node_commands_each_host": 34,
+    "original_deadline_seconds": 25,
+    "no_repository_writes": true
+  },
+  "combined_application_acceptance": true,
+  "combined_image_acceptance": true,
+  "normal_review_completed": false,
+  "published": false,
+  "exact_head_CI_green": false,
+  "published_closed_boundaries": 26,
+  "finding_ledger_entries": 23,
+  "operator_security_accepted": false,
+  "B28_normal_registration_complete": true,
+  "application_passed": 1847,
+  "application_failed": 0,
+  "application_skipped": 0,
+  "source_members": 526,
+  "source_identity": "sha256:a13117f7fc646d33769c0cb199f710372cd9a612fd9b74713010ef19275e1396",
+  "current_parent_receipt": "sha256:108b296237c91be6c3dab2bd7330736382ae93e881a283b29b470eac7a76f684",
+  "image_checks": 36,
+  "image_static_asset_checks": 6,
+  "image_bundled_HTTP_SQLite_checks": 18,
+  "image_id": "sha256:9b36df956db67d523d1f51e72d0cf97277542347ac382abe41bd28bc9efb8028",
+  "both_installed_receipt_readers_passed": true,
+  "independent_review_claimed": false,
+  "retained_test_assertion_restored_to_current_v2": true,
+  "fresh_image_accepted_after_test_only_correction": true
+}

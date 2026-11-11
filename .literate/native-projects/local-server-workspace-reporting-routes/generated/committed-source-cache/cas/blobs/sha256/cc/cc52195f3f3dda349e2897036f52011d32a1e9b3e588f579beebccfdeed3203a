@@ -1,0 +1,78 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {create_workspace_reporting_routes} = require('../server_workspace_reporting_routes/create_workspace_reporting_routes.js');
+
+async function observe(routeName, method, query) {
+  const calls = [];
+  const record = (name, result) => function (...args) {
+    assert.equal(this, undefined);
+    calls.push([name, ...args]);
+    return result;
+  };
+  const req = {url: 'https://example.test/?' + query};
+  const auth = name => function (request) {
+    assert.equal(this, undefined);
+    assert.equal(request, req);
+    calls.push([name]);
+    return 'principal';
+  };
+  let wrappers = 0;
+  const resources = {
+    URL, Date, Response,
+    activity: {activityFor: record('activityFor', {items: []}), ingestActivity: record('ingestActivity', {ok: true})},
+    allocation: {allocation: record('allocation', []), weeklyAllocation: record('weeklyAllocation', [])},
+    errors: {badRequest: message => new Error(message)},
+    goalActivity: {ACTIVITY_WINDOW_DAYS: 14, goalActivity: record('goalActivity', {events: []})},
+    home: {workspaceHome: record('workspaceHome', {title: 'Home'})},
+    http: {
+      deviceAuth: auth('deviceAuth'), eitherAuth: auth('eitherAuth'), webAuth: auth('webAuth'),
+      idParam: function (value, regex) {
+        assert.equal(this, undefined);
+        assert.equal(regex, resources.validate.ID_RE);
+        calls.push(['idParam', value]);
+        return value;
+      },
+      readJson: function (request, limit) {
+        assert.equal(this, undefined);
+        assert.equal(request, req);
+        calls.push(['readJson', limit]);
+        return Promise.resolve({event: 'saved'});
+      },
+      route: function (callback) {
+        assert.equal(this, undefined);
+        wrappers++;
+        return async (request, context) => callback(request, await context.params);
+      }
+    },
+    spend: {spend: record('spend', {total: 0})},
+    steering: {ingestSteering: record('ingestSteering', {ok: true}), steeringCounts: record('steeringCounts', {})},
+    validate: {ID_RE: /^[a-z]+$/},
+    workspaces: {enter: record('enter', 'policy')}
+  };
+  const routes = create_workspace_reporting_routes(resources);
+  assert.equal(wrappers, 7);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(Object.keys(routes), ['workspaces/[ws]/activity', 'workspaces/[ws]/allocation', 'workspaces/[ws]/goals/[goal]/activity', 'workspaces/[ws]/home', 'workspaces/[ws]/spend', 'workspaces/[ws]/steering']);
+  const result = await routes['workspaces/[ws]/' + routeName][method](req, {params: Promise.resolve({ws: 'oak', goal: 'growth'})});
+  return {calls, result};
+}
+
+const cases = [
+  {id: 'generated-activity-page', args: ['activity', 'GET', 'after=19'], expected: {calls: [['deviceAuth'], ['idParam', 'oak'], ['enter', 'principal', 'oak'], ['activityFor', 'policy', 19]], result: {items: []}}},
+  {id: 'generated-activity-negative', args: ['activity', 'GET', 'after=-9'], expected: {calls: [['deviceAuth'], ['idParam', 'oak'], ['enter', 'principal', 'oak'], ['activityFor', 'policy', 0]], result: {items: []}}},
+  {id: 'generated-spend-alias', args: ['spend', 'GET', 'by=pod'], expected: {calls: [['webAuth'], ['idParam', 'oak'], ['enter', 'principal', 'oak'], ['spend', 'policy', 'team', null, null]], result: {total: 0}}},
+  {id: 'generated-allocation-end', args: ['allocation', 'GET', 'to=2025-02-08T00%3A00%3A00Z&weeks=26'], expected: {calls: [['eitherAuth'], ['idParam', 'oak'], ['enter', 'principal', 'oak'], ['allocation', 'policy', '2025-02-01T00:00:00.000Z', '2025-02-08T00:00:00.000Z'], ['weeklyAllocation', 'policy', 26], ['steeringCounts', 'policy', '2025-02-01T00:00:00.000Z', '2025-02-08T00:00:00.000Z']], result: {window: [], weekly: [], steering: {}}}},
+  {id: 'generated-activity-write', args: ['activity', 'POST', ''], expected: {calls: [['deviceAuth'], ['idParam', 'oak'], ['enter', 'principal', 'oak'], ['readJson', 131072], ['ingestActivity', 'policy', 'principal', {event: 'saved'}]], result: {ok: true}}},
+  {id: 'generated-steering-write', args: ['steering', 'POST', ''], expected: {calls: [['deviceAuth'], ['idParam', 'oak'], ['enter', 'principal', 'oak'], ['readJson', 32768], ['ingestSteering', 'policy', 'principal', {event: 'saved'}]], result: {ok: true}}},
+  {id: 'generated-goal-window', args: ['goals/[goal]/activity', 'GET', ''], expected: {calls: [['webAuth'], ['idParam', 'oak'], ['enter', 'principal', 'oak'], ['idParam', 'growth'], ['goalActivity', 'policy', 'growth']], result: {window_days: 14, events: []}}}
+];
+async function run() {
+  const results = [];
+  for (const test of cases) {
+    assert.deepEqual(await observe(...test.args), test.expected);
+    results.push({case_id: test.id, outcome: 'passed'});
+  }
+  return {schema: 'literate-ai/generated-test-results@1', cases: results};
+}
+async function smoke() { return observe(...cases[0].args); }
+module.exports = {run, smoke};

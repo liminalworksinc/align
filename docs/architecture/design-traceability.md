@@ -1,6 +1,6 @@
 # Design traceability
 
-<!-- literate-ai:authority-reviewed sha256:83801beba62b8ff506b912cda55206b3c432bcca7c007efc70b38ecbb02299e3 -->
+<!-- literate-ai:authority-reviewed sha256:53680c61a5aea67a25c1b54378e64c2115026fa70e4e33626c347416f67f0c7a -->
 
 [Project guide](../README.md) → design traceability
 
@@ -22,3 +22,14 @@ normal source-membership refresh must classify its added verifier inputs before
 complete application acceptance. Rate-limit storage, thresholds, proxy trust,
 authentication and request handlers retain their existing owners. This review
 does not close the 31-boundary program or its live tester gates.
+
+## Project-local finding remediation
+
+The project copies now require explicit authorization for issue comments,
+commits and pushes. Qualified toolchain snapshots remain unchanged; the owning
+project preflight enforces the stricter base Git and Git LFS requirements.
+Older unused Go guidance uses a runtime file that is included
+by ordinary compilation. These changes leave selected generation contracts,
+accepted component locks, qualification profiles and source caches unchanged.
+This is an authority review of the stated local changes, not independent
+security acceptance or an upstream framework modification.

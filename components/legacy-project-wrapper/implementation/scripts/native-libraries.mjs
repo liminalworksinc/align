@@ -74,7 +74,7 @@ function install(outputs) {
   for (const item of journal) if (item.prior) fs.rmSync(item.backup, {recursive: true});
 }
 
-export function prepareNative(implementation, destinations, {components, inputDestination} = {}) {
+export function prepareNative(implementation, destinations, {components, inputDestination, batchCases = false} = {}) {
   const observations = [];
   const manifestBytes = read(implementation, "native/libraries.json", observations);
   const manifest = JSON.parse(manifestBytes);
@@ -163,12 +163,13 @@ export function prepareNative(implementation, destinations, {components, inputDe
       fs.writeFileSync(path.join(staging, ".bindings", lib.package + ".d.ts"), [...packageSymbols].sort().map(s =>
         "export declare const " + s + ": (...args: unknown[]) => unknown;\n").join(""));
       exports.push("export * as " + lib.package + " from " + JSON.stringify("./.bindings/" + lib.package + ".js") + ";\n");
-      for (const test of oracle.cases) {
-        const result = spawnSync(process.execPath, [path.join(implementation, "native", lib.verifier), staging, JSON.stringify(lib.surface), JSON.stringify([test])],
+      const groups = batchCases ? [oracle.cases] : oracle.cases.map(test => [test]);
+      for (const selected of groups) {
+        const result = spawnSync(process.execPath, [path.join(implementation, "native", lib.verifier), staging, JSON.stringify(lib.surface), JSON.stringify(selected)],
           {encoding: "utf8", timeout: 30000, maxBuffer: 2 * 1024 * 1024});
-        if (result.error || result.status !== 0) throw new Error("native acceptance failed: " + test.case_id + " " + (result.stderr || result.error));
-        assert.deepEqual(JSON.parse(result.stdout), {schema: "literate-ai/library-acceptance-results@1", cases: [
-          {case_id: test.case_id, capability: test.capability, result: test.expected_result}]});
+        if (result.error || result.status !== 0) throw new Error("native acceptance failed: " + selected.map(test => test.case_id).join(", ") + " " + (result.stderr || result.error));
+        assert.deepEqual(JSON.parse(result.stdout), {schema: "literate-ai/library-acceptance-results@1", cases:
+          selected.map(test => ({case_id: test.case_id, capability: test.capability, result: test.expected_result}))});
       }
       caseTotal += oracle.cases.length;
       if (inputDestination) for (const observation of observations.slice(start)) {
@@ -203,6 +204,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const web = consumer !== "agent";
   console.log(JSON.stringify(prepareNative(implementation,
     web ? [path.join(implementation, "lib/native")] : [path.join(agent, "src/native"), path.join(agent, "dist/native")],
-    {components: web ? ["paste-lines", "policy", "share-again", "home-attention", "trust-markdown", "http-errors", "promise-queues", "wording", "value-rules", "field-validation", "migration-coordinator", "runtime-settings", "storage-schema", "rate-limits", "identifier-tools", "storage-runtime", "server-secrets", "server-startup", "server-readiness", "server-request-effects", "server-client-keys", "server-core", "server-identity-effects", "server-account-lifecycle", "server-workspace-admission", "server-local-owner-bootstrap", "server-auth", "server-workspaces", "server-sample", "goal-approval", "goal-limits", "limit-suggest", "server-value", "server-change-read", "server-goals", "server-evidence", "server-reallocations", "server-requests", "server-asks", "server-alignments", "server-changes", "server-steering", "server-spend", "server-goal-activity", "server-allocation", "server-activity", "server-home", "server-directives", "server-devices", "server-sessions", "server-metrics", "server-retention"] : ["spend-meter", "spend-stream", "spend-rounding", "shell-words", "share-notices", "agent-envelope"],
+    {components: web ? ["paste-lines", "policy", "share-again", "home-attention", "trust-markdown", "http-errors", "promise-queues", "wording", "value-rules", "field-validation", "migration-coordinator", "runtime-settings", "storage-schema", "rate-limits", "identifier-tools", "storage-runtime", "server-secrets", "server-startup", "server-readiness", "server-request-effects", "server-client-keys", "server-core", "server-identity-effects", "server-account-lifecycle", "server-workspace-admission", "server-local-owner-bootstrap", "server-auth", "server-workspaces", "server-sample", "goal-approval", "goal-limits", "limit-suggest", "server-value", "server-change-read", "server-goals", "server-evidence", "server-reallocations", "server-requests", "server-asks", "server-alignments", "server-changes", "server-steering", "server-spend", "server-goal-activity", "server-allocation", "server-activity", "server-home", "server-directives", "server-devices", "server-sessions", "server-metrics", "server-retention", "server-connected-apps-routes", "server-identity-routes", "server-workspace-reporting-routes", "server-team-asks-routes", "server-sessions-directives-routes", "server-workspace-admin-routes", "server-goals-deliberation-routes", "server-creation-compatibility", ...(consumer === "container" ? ["operator-admin", "operator-shortcuts"] : [])] : ["spend-meter", "spend-stream", "spend-rounding", "shell-words", "share-notices", "agent-envelope"],
       inputDestination: consumer === "container" ? path.join(implementation, ".native-inputs") : undefined})));
 }

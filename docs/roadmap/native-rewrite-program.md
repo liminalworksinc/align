@@ -9,49 +9,35 @@ until each boundary earns transfer under ADR 0002.
 
 ## Latest candidate status
 
-B17 metrics and retention have complete local functional acceptance. Both current
-libraries have two clean qualifications, separate fresh admission, full source
-reads, both-host package and actual typed caller checks, portable cache reuse and
-current child receipts. Metrics preserves 1,199 observations. Retention preserves
-727 core observations, 422 native scheduler observations and a separate 418-record
-VM protocol. Fourteen additional timer-handle comparisons pass. Original sources,
-baselines and every failed candidate remain preserved.
+The combined B19/B28 candidate registers 68 qualified libraries. Seven route
+groups supply all 73 canonical v2 routes and three unchanged aliases. All 66
+earlier library descriptors remain exact. The two operator packages are normally
+registered after separate cache acceptance with no generation or repairs.
 
-The integrated candidate has 58 pinned libraries and 494 declared source members.
-Its 52 web packages pass 1,066 private batches. The complete unchanged application
-workflow passes 1,847 checks with no failures or skips. The fresh Linux arm64 image
-`sha256:67b7b74f3f941c1939893899ea5442d7ff7ddbb9ade0b4334215c5ee0bd2fc54` passes 36 image checks, six exact static assets,
-two read-only authored assets and 18 offline bundled HTTP/SQLite controls. The
-operator closure has seven qualified packages and exactly 50 files. Runtime and
-provider inputs match the full-tested source. Both readers verify all 58 qualified
-projections and receipt `sha256:273cd4a97bacaf3766e656d515e884759ac7d84640ecdae899bb8e3438e40bd8`.
-Source identity: `sha256:31c84d1ac09ccf39b9c3d1d74e7d7599148c6536c95df52bd3457fbb89972895`.
+All 23 historical findings have technical correction evidence. Readable source
+projections include 270 package files from 68 accepted libraries. Three preserved
+qualification profiles have 62 readable review files with exact executable
+segments. Focused acceptance passes 214 batches across nine guarded services.
+Instruction checks cover 213 files; host preflight intersects every base Git
+and Git LFS declaration while preserving qualified snapshots. No human override,
+independent approval or operator security acceptance is recorded.
 
-The [transfer ledger](native-boundary-transfers.json) records measured results.
-The [child-preparation record](../architecture/metrics-retention-admitted-acceptance.json)
-keeps its earlier pending-at-record-time flags. Publication, green CI and the
-draft PR body update remain pending. Published progress remains 26 of 31:
-sixteen native and ten intentionally retained. This checkpoint will close B17,
-bringing the total to 27. B18, B19, B22 and B28 will remain open. The published
-checkpoint is `a902ae75`, with both CI checks passing at that checkpoint.
+B28's actual cold entrypoints pass 28 controls and 34 Node commands on each host.
+They preserve the existing 25-second deadline and write no repository files.
+Sign-in-link startup selects only its helper package; administration selects its
+exact dependencies. Library acceptance batches preserve every case and expected
+result, and a wrong final case is rejected before output installation.
 
-The earlier [B15 preparation record](../architecture/goal-domain-admitted-acceptance.json)
-and [B16 preparation record](../architecture/session-domain-admitted-acceptance.json)
-remain historical evidence for their published boundaries.
+B19's earlier 1,847 application checks, 36 image checks and 18 additional offline
+HTTP/SQLite controls remain preserved for their original source. The current
+combined candidate requires its own complete application/image acceptance and
+normal publication. Published closed progress remains 26 of 31. The exact live
+preparation, acceptance and publication state is in the
+[checkpoint result](../../generated/native-checkpoints/b19-b28.json). This file
+does not assert future results. B18 and B22 remain implementation work; B17 also
+awaits exact-head green CI closure. Deployment and tester configuration remain
+outside this migration.
 
-The [authorization findings guide](native-authorization-findings.md) records all
-twenty open findings, six HIGH and fourteen MEDIUM, with exact pinned-main and
-materialized source ranges through B17. No finding is accepted or dismissed.
-Independent review and actual operator security acceptance remain the operator's.
-The [approved retained list](native-retention-proposal.md) remains exactly 280
-paths across ten boundaries. Four newly authored B17 parity files are separately
-classified as repository-only native acceptance harnesses.
-
-Deployment, tester configuration, upstream writes, merging and review bypass are
-outside this migration. No rebase is authorized before operator confirmation that
-the cutover PRs have merged. The operator lifted the attempt limit; each failure
-still requires diagnosis before another attempt. The latest session instructions
-require a specific go for each commit or push.
 
 ## Current main integration
 

@@ -1,0 +1,81 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_goals_deliberation_routes } = require('../server_goals_deliberation_routes/create_goals_deliberation_routes.js');
+
+// These fixtures exercise the exported API with supplied host resources.
+const cases = [
+  { id: 'generated-feed', args: ['GET', 'workspaces/[ws]/goals', { ws: 'space' }, {}], expected: { body: { version: 7, goals: [] }, headers: { etag: '"7"', 'cache-control': 'private, no-cache' }, status: 200 } },
+  { id: 'generated-conditional', args: ['GET', 'workspaces/[ws]/goals', { ws: 'space' }, { 'if-none-match': '"old", W/"7"' }], expected: { body: null, headers: { etag: '"7"', 'cache-control': 'private, no-cache' }, status: 304 } },
+  { id: 'generated-value', args: ['GET', 'workspaces/[ws]/goals/[goal]/change-requests/[id]/value', { ws: 'space', goal: 'goal', id: 'change' }, {}], expected: { body: { entries: [] }, headers: { 'cache-control': 'no-store' }, status: 200 } }
+];
+async function invoke(method, path, params, headers) {
+  const events = [];
+  function free(name, result) {
+    return function (...args) {
+      assert.equal(this, undefined, name + ' receiver');
+      events.push([name, args]);
+      return result;
+    };
+  }
+  const credential = { kind: 'web' };
+  const policy = { workspace: 'space' };
+  class Response {
+    constructor(body, options = {}) {
+      this.body = body;
+      this.headers = options.headers || {};
+      this.status = options.status || 200;
+    }
+    static json(body, options) {
+      assert.equal(this, Response);
+      return new Response(body, options);
+    }
+  }
+  const resources = {
+    Response, URL,
+    http: {
+      route: function (handler) {
+        assert.equal(this, undefined);
+        return async (request, context) => handler(request, await context.params);
+      },
+      eitherAuth: free('eitherAuth', credential), webAuth: free('webAuth', credential),
+      idParam: function (value, regex) {
+        assert.equal(this, undefined);
+        assert.equal(regex, resources.validate.ID_RE);
+        events.push(['id', value]);
+        return value;
+      }
+    },
+    validate: { ID_RE: /^[a-z]+$/ },
+    workspaces: { enter: function (principal, ws) {
+      assert.equal(this, undefined);
+      assert.equal(principal, credential);
+      assert.equal(ws, 'space');
+      events.push(['enter']);
+      return policy;
+    } },
+    goals: { goalsFeed: free('goalsFeed', { version: 7, goals: [] }) },
+    changes: {}, alignments: {}, reallocations: {}, limitSuggest: {},
+    value: { valueView: free('valueView', { entries: [] }) }
+  };
+  const routes = create_goals_deliberation_routes(resources);
+  assert.equal(events.length, 0);
+  assert.equal(Object.keys(routes).length, 18);
+  assert.equal(Object.values(routes).reduce((n, entry) => n + Object.keys(entry).length, 0), 23);
+  const request = { url: 'https://example.test/', headers: { get: key => headers[key] || null } };
+  const response = await routes[path][method](request, { params: Promise.resolve(params) });
+  assert.deepEqual(events.slice(0, 3).map(event => event[0]), [path.endsWith('/value') ? 'webAuth' : 'eitherAuth', 'id', 'enter']);
+  const domain = events[events.length - 1];
+  assert.equal(domain[1][0], policy);
+  if (path.endsWith('/value')) assert.deepEqual(domain[1], [policy, 'goal', 'change']);
+  return { body: response.body, headers: response.headers, status: response.status };
+}
+async function run() {
+  const results = [];
+  for (const test of cases) {
+    assert.deepEqual(await invoke(...test.args), test.expected);
+    results.push({ case_id: test.id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+async function smoke() { return invoke(...cases[0].args); }
+module.exports = { run, smoke };

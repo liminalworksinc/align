@@ -1,0 +1,81 @@
+{
+  "schema": "align/native-finding-remediation@1",
+  "state": "technical-corrections-and-combined-functional-acceptance-complete-normal-review-pending",
+  "finding_ids": [
+    "f_c741821f2f4a",
+    "f_b36c3d29ef7c",
+    "f_2f5c23666cec",
+    "f_e35fa336a9f8",
+    "f_5054419f9a29",
+    "f_745f52b800ff",
+    "f_84ce9f54c701",
+    "f_4c9283b5ecab",
+    "f_456d34de6a82",
+    "f_622b2d74e48e",
+    "f_fcab81184174",
+    "f_202c48750557",
+    "f_2c1e50b9c263",
+    "f_2e78693505d1",
+    "f_09aa12209ec2",
+    "f_eacf8a5e6d43",
+    "f_3c2e305a94d7",
+    "f_4bd94fac41bd",
+    "f_5a0e064cc7ff",
+    "f_d943ad9dd8d1",
+    "f_a53163d0b124",
+    "f_dd723ad9bd62",
+    "f_5c5fc40549da"
+  ],
+  "historical_open_ledger_entries": 23,
+  "finding_override_events_written": 0,
+  "same_agent_runtime_review": true,
+  "independent_review_claimed": false,
+  "operator_security_accepted": false,
+  "native_source_projection": {
+    "libraries": 68,
+    "package_files": 270,
+    "manifest": "generated/native-review-source/manifest.json",
+    "check": "node tools/native-rewrite/review-native-sources.mjs"
+  },
+  "qualification_projection": {
+    "profiles": 3,
+    "readable_files": 62,
+    "executable_segments_preserved": true,
+    "expected_data_kept_in_exact_historical_profiles": true,
+    "check": "python3 tools/native-rewrite/review-qualification-source.py"
+  },
+  "guard_acceptance": {
+    "components": 9,
+    "batches": 214,
+    "check": "node --no-warnings --experimental-vm-modules --max-old-space-size=768 tools/native-rewrite/check-relocated-guards.mjs"
+  },
+  "policy_controls": {
+    "instruction_files": 213,
+    "check": "python3 tools/native-rewrite/check-review-policy.py",
+    "host_preflight": "python3 tools/native-rewrite/check-host-tools.py",
+    "git_range": ">=2.47,<3",
+    "git_lfs_range": ">=3.2,<4",
+    "qualified_toolchain_snapshots_preserved": true
+  },
+  "regression_controls": {
+    "altered_source_projection_rejected": 4,
+    "actual_count_boundary_cases": 11,
+    "go_compiler_original_filename_rejected": true,
+    "go_corrected_filename_runs_tests_and_detects_broken_callback": true,
+    "application_go_added": false
+  },
+  "source_navigation": {
+    "commands_checked": 1511,
+    "original_files": 139,
+    "all_generated_ranges_complete": true,
+    "all_original_ranges_nonempty": true
+  },
+  "authentication_confirmation": "docs/architecture/authentication-transfer-confirmation.json",
+  "current_combined_checkpoint": "B19 plus B28: complete combined application/image acceptance; normal review, publication and exact-head CI remain required.",
+  "framework_modified": false,
+  "deployed": false,
+  "combined_application_passed": 1847,
+  "combined_image_passed": 36,
+  "combined_source_identity": "sha256:a13117f7fc646d33769c0cb199f710372cd9a612fd9b74713010ef19275e1396",
+  "current_parent_receipt": "sha256:108b296237c91be6c3dab2bd7330736382ae93e881a283b29b470eac7a76f684"
+}

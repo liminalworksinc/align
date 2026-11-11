@@ -1,0 +1,79 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {create_creation_compatibility} = require('../server_creation_compatibility/create_creation_compatibility.js');
+
+function fixture() {
+  const calls = [];
+  const resources = {
+    core: {
+      CODE_RE: /^current$/,
+      codeHash: function (secret, code) { assert.equal(this, undefined); calls.push(['key', secret, code]); return 'key:' + code; },
+      rand32: function (length) { assert.equal(this, undefined); calls.push(['random', length]); return 'id'; },
+      recordEvent: function (...args) { assert.equal(this, undefined); calls.push(['event', ...args]); }
+    },
+    createHash: function (algorithm) {
+      assert.equal(this, undefined);
+      calls.push(['hash', algorithm]);
+      return {
+        update(code) { calls.push(['update', code]); this.code = code; return this; },
+        digest(format) { calls.push(['digest', format]); return 'plain:' + this.code; }
+      };
+    },
+    readDate: function () { assert.equal(this, undefined); calls.push(['clock']); return Date; }
+  };
+  return {api: create_creation_compatibility(resources), resources, calls};
+}
+
+function behaviorChecks() {
+  const {api, resources, calls} = fixture();
+  assert.deepEqual(Object.keys(api), ['V1_CODE_RE', 'isCreationCode', 'importCreationCodes', 'redeemCreationCode']);
+  assert.deepEqual([api.isCreationCode.length, api.importCreationCodes.length, api.redeemCreationCode.length], [1, 5, 6]);
+  assert.equal(api.V1_CODE_RE.source, '^[0-9a-f]{20}$');
+  assert.equal(api.V1_CODE_RE.flags, '');
+  assert.equal(api.isCreationCode('current'), true);
+  api.V1_CODE_RE.test = function (value) { assert.equal(this, api.V1_CODE_RE); return value === 'altered'; };
+  assert.equal(api.isCreationCode('altered'), true);
+  delete api.V1_CODE_RE.test;
+  resources.core.codeHash = () => { throw new Error('replacement'); };
+  const a = 'aaaaaaaaaaaaaaaaaaaa';
+  const b = 'bbbbbbbbbbbbbbbbbbbb';
+  const c = 'cccccccccccccccccccc';
+  const writes = [];
+  const db = {
+    run(...args) { assert.equal(this, db); writes.push(args); return writes.length === 1 ? 1 : 0; },
+    get(...args) { assert.equal(this, db); assert.deepEqual(args, ['SELECT 1 AS x FROM v2_creation_codes WHERE code_hash = ? AND redeemed_at IS NOT NULL', 'key:' + b]); return {x: 1}; }
+  };
+  assert.deepEqual(api.importCreationCodes(db, 'secret', [{code:a,email:'A@EXAMPLE.COM'},{code:b,email:null},{code:c,email:null}], new Set(['plain:' + c]), 1, 0), {imported:1,present:1,used:1,spentOnV1:1});
+  assert.deepEqual(writes[0], ['INSERT OR IGNORE INTO v2_creation_codes (id, code_hash, email, created_at, expires_at) VALUES (?, ?, ?, ?, ?)', 'cc_id', 'key:' + a, 'a@example.com', '1970-01-01T00:00:00.000Z', '1970-01-02T00:00:00.000Z']);
+  assert.equal(calls.filter(c => c[0] === 'event').length, 1);
+  assert.equal(calls.filter(c => c[0] === 'key').length, 2);
+  const before = calls.length;
+  assert.throws(() => api.importCreationCodes(db, 's', [{code:a,email:null},{code:b,email:' bad@example.com'}], new Set(), 1, 0), {message:'Invalid import row'});
+  assert.equal(calls.length, before);
+  assert.deepEqual(api.importCreationCodes(db, 's', [], new Set(), 0, 0), {imported:0,present:0,used:0,spentOnV1:0});
+  assert.equal(calls.length, before + 2);
+  const redemptionDb = {run(...args) {
+    assert.equal(this, redemptionDb);
+    assert.deepEqual(args, ['UPDATE v2_creation_codes SET redeemed_at = ?, redeemed_by = ?, ws_id = ?\n       WHERE code_hash = ? AND redeemed_at IS NULL AND revoked_at IS NULL AND expires_at > ? AND (email IS NULL OR email = ?)', '1970-01-01T00:00:00.000Z', 'u', 'w', 'key:' + a, '1970-01-01T00:00:00.000Z', ' x@example.com ']);
+    return 1;
+  }};
+  assert.equal(api.redeemCreationCode(redemptionDb,'s',a,' X@EXAMPLE.COM ','u','w',0), true);
+  assert.equal(api.redeemCreationCode(null,'s','invalid',null,null,null,0), false);
+  const failure = new Error('db failed');
+  assert.throws(() => api.redeemCreationCode({run(){throw failure;}},'s',a,'a@b.c','u','w',0), e => e === failure);
+}
+
+function smoke() { return fixture().api.isCreationCode('0123456789abcdefabcd'); }
+function run() {
+  const api = fixture().api;
+  assert.deepEqual(api.isCreationCode(...['0123456789abcdefabcd']), true);
+  assert.deepEqual(api.isCreationCode(...['']), false);
+  assert.deepEqual(api.isCreationCode(...['0123456789ABCDEFABCD']), false);
+  behaviorChecks();
+  return {schema:'literate-ai/generated-test-results@1',cases:[
+    {case_id:'generated-previous-format',outcome:'passed'},
+    {case_id:'generated-empty-format',outcome:'passed'},
+    {case_id:'generated-uppercase-format',outcome:'passed'}
+  ]};
+}
+module.exports = {run, smoke};
