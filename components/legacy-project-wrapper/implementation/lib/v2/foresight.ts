@@ -57,10 +57,12 @@ function describe(pp: PolicyPrincipal, crId: string, changes: RowChange[]): Omit
   const tables: Foresight["tables"] = {};
   for (const c of changes) (tables[c.table] ??= { insert: 0, update: 0, delete: 0 })[c.op]++;
 
+  // A goal is named as the reader knows it now: its title before this decision (a launch may rename it).
+  const titleBefore = new Map(changes.filter((c) => c.table === "v2_goals" && c.op === "update").map((c) => [String(c.before!.id), String(c.before!.title)]));
   const readable = (id: string): GoalRow | null => {
     const g = goalRow(pp.wsId, id);
     if (!g || !canReadGoal(pp, goalObj(g))) return null;
-    titles[g.id] = g.title;
+    titles[g.id] = titleBefore.get(g.id) ?? g.title;
     return g;
   };
   const nameOf = (id: string | null) => (id ? (readable(id) ? `“${titles[id]}”` : "a goal you can't see") : "no goal");

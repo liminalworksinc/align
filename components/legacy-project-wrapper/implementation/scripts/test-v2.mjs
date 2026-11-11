@@ -10874,7 +10874,7 @@ try {
     results.push(["launch", d3]);
     check(
       "laneb foresight: Launch previewed: \"3 agent sessions switch to version 3\" and \"Recorded as approved and launched as version 3\"",
-      d3.preview.status === 200 && d3.preview.json?.lines.some((l) => l.text === `3 agent sessions switch to version 3 of “Cut onboarding to one day, documented”`) && d3.preview.json.lines.some((l) => l.text === "Recorded as approved and launched as version 3") && d3.real.status === 200,
+      d3.preview.status === 200 && d3.preview.json?.lines.some((l) => l.text === `3 agent sessions switch to version 3 of “Cut onboarding to one day, with a buddy”`) && d3.preview.json.lines.some((l) => l.text === "Recorded as approved and launched as version 3") && d3.real.status === 200,
       `${d3.preview.text.slice(0, 600)} | ${d3.real.status}`,
     );
 
