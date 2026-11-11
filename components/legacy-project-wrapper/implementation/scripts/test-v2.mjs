@@ -427,9 +427,10 @@ if (build.status !== 0) {
   const legal = ["privacy-policy.md", "dpa.md"].map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8"));
   const pack = ["privacy-policy.md", "dpa.md", "subprocessors.md", "security-overview.md", "questionnaire.md"].map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8")).join("\n");
   check(
-    "trust: the privacy policy and DPA open with 'Draft for counsel review'; the pack uses the [LEGAL ENTITY], [ADDRESS] and [PRIVACY CONTACT EMAIL] placeholders, and no PRESEED marker is left in docs/trust or SECURITY.md (every package is merged and its claims checked)",
+    "trust: the privacy policy and DPA open with 'Draft for counsel review'; the pack and the /trust page use legal-entity and contact substitutions with no postal-address placeholder, and no PRESEED marker is left in docs/trust or SECURITY.md (every package is merged and its claims checked)",
     legal.every((t) => t.split("\n").slice(0, 4).join(" ").includes("Draft for counsel review")) &&
-      ["[LEGAL ENTITY]", "[ADDRESS]", "[PRIVACY CONTACT EMAIL]"].every((t) => pack.includes(t)) &&
+      ["[LEGAL ENTITY]", "[PRIVACY CONTACT EMAIL]"].every((t) => pack.includes(t)) && !pack.includes("[ADDRESS]") &&
+      !readFileSync(path.join(ROOT, "app/trust/page.tsx"), "utf8").includes("[ADDRESS]") &&
       !/PRESEED-\d/.test(readdirSync(path.join(ROOT, "docs/trust")).map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8")).join("\n") + readFileSync(path.join(ROOT, "SECURITY.md"), "utf8")) &&
       existsSync(path.join(ROOT, "SECURITY.md")),
     "",

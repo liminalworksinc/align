@@ -2,8 +2,7 @@
 
 > Prepared 2026-10-30, for review before it is sent or published. These answer common questions from CAIQ-Lite and
 > VSA Core style questionnaires about hosted Align, each with a pointer to where it is shown. "No" means no.
-> Answers marked [CONFIRM] depend on account settings outside this repository and must be checked before they are
-> sent. [LEGAL ENTITY] publishes these answers; questions go to [SECURITY CONTACT EMAIL].
+> [LEGAL ENTITY] publishes these answers; questions go to [SECURITY CONTACT EMAIL].
 
 The pointers name sections of the [security overview](security-overview.md), the [privacy policy](privacy-policy.md),
 the [subprocessor list](subprocessors.md), the [retention schedule](../RETENTION.md) and the [DPA note](dpa.md).
@@ -16,7 +15,7 @@ the [subprocessor list](subprocessors.md), the [retention schedule](../RETENTION
 | 2 | Has an independent penetration test been performed? | No | Not yet. Security overview, "Not yet". |
 | 3 | Do you have documented security policies? | Partial | This answer set, the security overview, the retention schedule, the privacy policy and the DPA. No separate policy set. |
 | 4 | Is someone accountable for security? | Yes | [LEGAL ENTITY]; security reports go to [SECURITY CONTACT EMAIL]. |
-| 5 | Do staff have background checks and security training? | No | No formal program: [CONFIRM]. |
+| 5 | Do staff have background checks and security training? | Partial | No background checks. Security work is led by our Security Advisor, who holds OSCE3, OSCP and CISSP. |
 | 6 | Do you have a vulnerability disclosure process? | Yes | `SECURITY.md` and [SECURITY CONTACT EMAIL]. No bug bounty. |
 
 ## Data
@@ -44,7 +43,7 @@ the [subprocessor list](subprocessors.md), the [retention schedule](../RETENTION
 | 20 | Do sensitive actions require re-authentication? | Yes | A sign-in from the last 15 minutes for device and app approval, role changes, removal, deletion, passkeys and more. |
 | 21 | Is access role-based with least privilege? | Yes | Workspace roles (owner, member, viewer), team roles (lead, member) and goal visibility (private, team, workspace). |
 | 22 | Is access removed promptly when someone leaves? | Yes | Removal ends workspace access, team places, device access and connected apps at once. <!-- lib/v2/lifecycle.ts --> |
-| 23 | Is production access restricted and protected by MFA? | Partial | Production is reached only through the Fly.io account (`fly ssh console`, `fly secrets`). MFA on the Fly.io and GitHub accounts: [CONFIRM]. |
+| 23 | Is production access restricted and protected by MFA? | Yes | Production is reached only through the Fly.io account. Fly.io sign-in uses Google accounts with 2-Step Verification, and the GitHub accounts have two-factor enabled. |
 
 ## Encryption and secrets
 
@@ -75,7 +74,7 @@ the [subprocessor list](subprocessors.md), the [retention schedule](../RETENTION
 | 36 | Do logs avoid personal and secret data? | Yes | When hosted, the server logs no request body, path, address, email or code. |
 | 37 | Are there backups? | Yes | Daily Fly.io volume snapshots, kept 7 days. No off-site backups. |
 | 38 | Is there high availability or a disaster recovery plan? | No | One machine in one region, no standby; recovery is a restore from the latest snapshot. |
-| 39 | Is there monitoring and alerting? | Partial | Fly checks the server's health every 30 seconds. No alerting on top of it yet: [CONFIRM]. |
+| 39 | Is there monitoring and alerting? | Partial | Fly checks the server's health every 30 seconds. No alerting on top of it yet. |
 
 ## Incidents, vendors and privacy
 
