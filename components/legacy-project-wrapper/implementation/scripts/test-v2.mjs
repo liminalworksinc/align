@@ -7016,6 +7016,22 @@ try {
           gdNow?.status === "dropped" && gdNow.version === 2 && gdNow.measures?.[0]?.text === "Kept on drop" && !dropAfter.box && !dropAfter.confirm && dropAfter.pills.includes("dropped"),
           JSON.stringify({ dropAfter, status: gdNow?.status, version: gdNow?.version }),
         );
+        // Founder ruling, Nov 11: "Since you last looked" names who created a goal (its owner), and leaves out a goal the
+        // reader created, as it leaves out their other own actions. Hana's last visit is set long ago, so every goal's
+        // creation is since then.
+        const ps = await browser.newPage();
+        await ps.setViewport({ width: 1440, height: 900 });
+        await ps.evaluateOnNewDocument((k) => localStorage.setItem(k, "2000-01-01T00:00:00.000Z"), `align.lastVisit:${HW}:${HO.id}`);
+        await ps.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await ps.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        await ps.waitForFunction(() => /created the goal/.test(document.querySelector("[data-since]")?.innerText ?? ""), { timeout: 15000 }).catch(() => undefined);
+        const sinceText = await ps.evaluate(() => document.querySelector("[data-since]")?.innerText ?? "");
+        await ps.close();
+        check(
+          "ui (Chrome, Since): a goal's creation names its owner (\"Hugo Lead … created the goal\", \"Hank Other … created the goal\"); the reader's own goals (Hana's) get no line, and no creation reads \"Someone\"",
+          /Hugo Lead[\s\S]{0,60}created the goal/.test(sinceText) && /Hank Other[\s\S]{0,60}created the goal/.test(sinceText) && !/Hana Owner[\s\S]{0,60}created the goal/.test(sinceText) && !/You[\s\S]{0,20}created the goal/.test(sinceText) && !/Someone[\s\S]{0,20}created the goal/.test(sinceText),
+          sinceText.slice(0, 900).replace(/\n/g, " / "),
+        );
       } catch (e) {
         check("ui (Chrome) home declined run", false, e?.stack ?? e);
       } finally {

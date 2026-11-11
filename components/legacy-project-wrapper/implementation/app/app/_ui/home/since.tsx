@@ -24,6 +24,8 @@ import type { EvidenceClass } from "@/lib/v2/home-core.mts";
 export interface SinceGoal {
   id: string;
   title: string;
+  /** The goal's owner, who created it (Align never reassigns an owner): names its "created the goal" line. */
+  owner?: { id: string; name: string };
 }
 export interface SinceApp {
   id: string;
@@ -225,10 +227,12 @@ export default function Since({
       for (const v of versions?.get(g.id) ?? []) {
         // A launch writes its version too; that line is already above.
         if (!after(v.created_at, since) || launched.has(`${g.id}:${v.version}`)) continue;
-        // The goal read doesn't say who saved a version, so the line doesn't either.
+        // The goal read doesn't say who saved a version, so a later version's line doesn't either. Version 1 is the goal's
+        // creation, by its owner: named, and left out when it is this person's own (founder ruling, Nov 11).
+        const creator = v.version === 1 && g.owner ? g.owner : null;
         out.push({
           id: `${g.id}:v${v.version}`,
-          who: "Someone",
+          who: creator ? who(creator, "Someone") : "Someone",
           what: v.version === 1 ? "created the goal" : `saved v${v.version}`,
           when: v.created_at,
           object: (
@@ -236,7 +240,7 @@ export default function Since({
               {g.title}
             </Link>
           ),
-          source: { kind: "person", detail: "who not shown" },
+          source: creator ? { kind: "person" } : { kind: "person", detail: "who not shown" },
         });
       }
     }
