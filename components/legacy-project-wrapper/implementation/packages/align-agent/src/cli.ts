@@ -911,7 +911,9 @@ async function goalFor(ctx: Ctx, wsId: string, ref: string): Promise<Goal | null
     /* use the cache */
   }
   const goal = resolveGoal(loadFeed(ctx.home, wsId), ref);
-  if (!goal.bindable) throw new UsageError(`goal "${goal.title}" is not bindable for you yet; it needs an approved alignment`);
+  // Bindable means the person's own goal or their team's. An approved alignment moves the sessions it lists by itself
+  // (binding_changed); it never makes the goal one this person binds.
+  if (!goal.bindable) throw new UsageError(`goal "${goal.title}" isn't one you can bind: only your own goals and your team's goals. An approved alignment moves the sessions it lists by itself`);
   return goal;
 }
 
