@@ -7232,14 +7232,16 @@ try {
 
     // -- presence: a session working toward the goal, paused, and its directive delivered --
     // A device written straight into the database (this phase spent Mode L's pairing limit long ago), granted LW.
+    // Leo's own goal: a member binds a session only to a goal they may bind (theirs, their team's, or with an alignment).
+    const LMG = (await la(LM, "POST", "/goals", { title: "Leo's latency budget", visibility: "workspace" })).json;
     const LMd = { ...insertDevice(LM.id, "Leo's laptop"), secret: randomBytes(32), who: "LM" };
     withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(LMd.id, LW));
     const key = sessionKey(LMd, LW, "claude-code", "live-1");
     const start = new Date(Date.now() - 60_000).toISOString();
     await call("LM", "PUT", `/api/v2/workspaces/${LW}/sessions/${key}`, { bearer: LMd.access, body: { harness: "claude-code", repo_key: repoKey(LMd, LW, "/src/live"), started_at: start, title: "Live floor session" } });
     const oMark = sO.events.length;
-    const bound = await call("LM", "POST", `/api/v2/workspaces/${LW}/sessions/${key}/epochs`, { bearer: LMd.access, body: { epoch_id: epochId(), goal_id: LG.id, starts_at: start, root_turn: null, cause: "manual" } });
-    const pOf = (e) => e?.data?.presence?.find((p) => p.goal_id === LG.id);
+    const bound = await call("LM", "POST", `/api/v2/workspaces/${LW}/sessions/${key}/epochs`, { bearer: LMd.access, body: { epoch_id: epochId(), goal_id: LMG?.id, starts_at: start, root_turn: null, cause: "manual" } });
+    const pOf = (e) => e?.data?.presence?.find((p) => p.goal_id === LMG?.id);
     const working = await sO.next((e) => e.event === "change" && pOf(e)?.working === 1, 3000, oMark);
     const vWorking = await sV.next((e) => e.event === "change" && pOf(e)?.working === 1, 3000);
     const stop = await la(LO, "POST", `/sessions/${key}/stop`, {});
@@ -7252,9 +7254,9 @@ try {
     const all = JSON.stringify([...sO.events, ...sV.events]);
     check(
       "live (presence): a shared session bound to a goal shows as working toward it on the owner's and the viewer's streams; a stop shows it paused with the stop sent; the session's receipt makes it received; a resume brings it back working; presence never carries the session key, its title or its person",
-      bound.status === 201 && !!working && pOf(working).working === 1 && !!vWorking && stop.status === 200 && !!paused && ps?.state === "paused" && ps?.directive?.kind === "stop" && ps?.directive?.delivery === "sent" && rc.status === 200 && !!received && resume.status === 200 && !!back &&
+      [200, 201].includes(bound.status) && !!working && pOf(working).working === 1 && !!vWorking && stop.status === 200 && !!paused && ps?.state === "paused" && ps?.directive?.kind === "stop" && ps?.directive?.delivery === "sent" && rc.status === 200 && !!received && resume.status === 200 && !!back &&
         !all.includes(key) && !all.includes("Live floor session") && !all.includes(LM.id) && /^[0-9a-f]{12}$/.test(ps?.id ?? ""),
-      `${bound.status} ${!!working} ${!!vWorking} ${stop.status} ${JSON.stringify(ps)} ${rc.status} ${!!received} ${resume.status} ${!!back}`,
+      `${bound.status} ${bound.text.slice(0, 120)} ${!!working} ${!!vWorking} ${stop.status} ${JSON.stringify(ps)} ${rc.status} ${!!received} ${resume.status} ${!!back}`,
     );
 
     // -- removed while watching: the stream says gone and ends --
@@ -7271,7 +7273,6 @@ try {
 
     // -- the hosted proxy serves it (an /api/v2 path, on the allowlist) --
     const allow = /const HOSTED_ROUTES = (\/.*\/);/.exec(readFileSync(path.join(ROOT, "proxy.ts"), "utf8"))?.[1];
-    // eslint-disable-next-line no-new-func
     const re = allow ? new Function(`return ${allow}`)() : null;
     check("live: the stream's path is on the hosted proxy's allowlist (proxy.ts HOSTED_ROUTES)", !!re && re.test(`/api/v2/workspaces/${LW}/stream`), String(allow));
 
@@ -7288,21 +7289,39 @@ try {
         await pA.setCookie(...asCookies(LO));
         await pB.setCookie(...asCookies(LM));
         const cr2 = await la(LM, "POST", `/goals/${LG.id}/change-requests`, { base_version: 1, changes: { title: "Ship the live floor today" }, reason: "Live UI: approve across windows" });
+        const cC = await browser.createBrowserContext();
+        const pC = await cC.newPage();
+        await pC.setCookie(...asCookies(LO));
+        for (const pg of [pA, pB, pC]) await pg.setViewport({ width: 1440, height: 900 });
+        // A: the owner on the request's decision page (its lane map). C: the owner's Home in another window, where the
+        // request waits on them. B: the requester's Home, with presence on their own goal.
+        await pA.goto(`${BASE}/app/w/${LW}/decisions/${LG.id}/${cr2.json?.id}`, { waitUntil: "networkidle0" });
+        await pC.goto(`${BASE}/app/w/${LW}`, { waitUntil: "networkidle0" });
         await pB.goto(`${BASE}/app/w/${LW}`, { waitUntil: "networkidle0" });
-        await pB.waitForSelector('[data-live-status="live"]', { timeout: 10000 });
-        const waitingBefore = await pB.waitForFunction(() => document.body.innerText.includes("Waiting on Lia Owner to decide"), { timeout: 5000 }).then(() => true).catch(() => false);
-        await pA.goto(`${BASE}/app/w/${LW}?review=${LG.id}.${cr2.json?.id}`, { waitUntil: "networkidle0" });
-        await pA.waitForSelector('[data-live-status="live"]', { timeout: 10000 });
+        const liveAll = await Promise.all([pA, pB, pC].map((pg) => pg.waitForSelector('[data-live-status="live"], [data-node="deciding"]', { timeout: 12000 }).then(() => true).catch(() => false)));
+        await pC.waitForSelector('[data-live-status="live"]', { timeout: 12000 });
+        await pB.waitForSelector('[data-live-status="live"]', { timeout: 12000 });
+        // The decision page has no Live mark: wait until its stream is open (the hub opens once reads are quiet).
+        await sleep(2500);
+        const deciding = await pA.$('[data-node="deciding"][data-current="1"]');
+        // The request's row in the owner's other Home: "decide" now; once approved it waits on them to launch instead.
+        const rowText = (id) => [...document.querySelectorAll('[data-needs] li')].find((li) => li.querySelector(`a[href*=".${id}"]`))?.innerText ?? null;
+        const rowBefore = await pC.evaluate(rowText, cr2.json?.id);
         const t1 = Date.now();
         const ap2 = await la(LO, "POST", `/goals/${LG.id}/change-requests/${cr2.json?.id}/approve`, { revision: 1 });
-        const arrivedA = await pA.waitForSelector('[data-node="approved"][data-current="1"]', { timeout: 5000 }).then(() => Date.now() - t1).catch(() => null);
-        const lit = await pA.$('[data-node="approved"][data-arrived="1"]');
-        const seenB = await pB.waitForFunction(() => !document.body.innerText.includes("Waiting on Lia Owner to decide"), { timeout: 5000 }).then(() => Date.now() - t1).catch(() => null);
-        const presenceB = await pB.$eval(`[data-presence="${LG.id}"] [data-presence-sentence]`, (el) => el.textContent).catch(() => null);
+        const seenCp = pC
+          .waitForFunction((id, before) => ([...document.querySelectorAll("[data-needs] li")].find((li) => li.querySelector(`a[href*=".${id}"]`))?.innerText ?? null) !== before, { timeout: 5000 }, cr2.json?.id, rowBefore)
+          .then(() => Date.now() - t1)
+          .catch(() => null);
+        const arrivedA = await pA.waitForSelector('[data-node="approved"][data-current="1"][data-arrived="1"]', { timeout: 5000 }).then(() => Date.now() - t1).catch(() => null);
+        const drawn = await pA.$("path.al-draw");
+        const seenC = await seenCp;
+        const rowAfter = await pC.evaluate(rowText, cr2.json?.id);
+        const presenceB = await pB.$eval(`[data-presence="${LMG?.id}"] [data-presence-sentence]`, (el) => el.textContent).catch(() => null);
         check(
-          "live (web): with Home open in two windows, an approval shows in the other within about a second: the reviewer's lane map moves to Approved and lights it, the requester's Home drops the wait, and the goal line reads \"1 agent session is working toward this goal now\"; both headers say Live",
-          cr2.status === 201 && ap2.status === 200 && waitingBefore && arrivedA !== null && arrivedA < 2000 && !!lit && seenB !== null && seenB < 2000 && presenceB === "1 agent session is working toward this goal now",
-          `${cr2.status} ${ap2.status} before=${waitingBefore} A=${arrivedA} lit=${!!lit} B=${seenB} presence=${presenceB}`,
+          "live (web): an approval shows in the other windows within about a second: the decision page's lane map moves from Waiting for a decision to Approved, lights it and draws the line it came along; the request's row in the owner's other Home window moves from deciding to launching; the requester's Home says \"1 agent session is working toward this goal now\" on their goal; the Homes say Live",
+          cr2.status === 201 && ap2.status === 200 && liveAll.every(Boolean) && !!deciding && arrivedA !== null && arrivedA < 2000 && !!drawn && !!rowBefore && seenC !== null && seenC < 2000 && rowAfter !== rowBefore && presenceB === "1 agent session is working toward this goal now",
+          `${cr2.status} ${ap2.status} live=${liveAll} deciding=${!!deciding} A=${arrivedA} drawn=${!!drawn} C=${seenC} [${rowBefore?.slice(0, 80)}] -> [${rowAfter?.slice(0, 80)}] presence=${presenceB}`,
         );
       } finally {
         await browser.close();

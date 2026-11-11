@@ -125,7 +125,22 @@ function hubFor(ws: string): Hub {
  *  long request). */
 const QUIET_MS = 1000;
 const OPEN_LATEST_MS = 8000;
+/** Count every fetch the page makes (some reads don't go through api()), so "quiet" means the whole page is quiet. */
+let fetchCounted = false;
+function countFetches() {
+  if (fetchCounted || typeof window === "undefined" || typeof window.fetch !== "function") return;
+  fetchCounted = true;
+  const real = window.fetch.bind(window);
+  window.fetch = (...args: Parameters<typeof fetch>) => {
+    apiActivity.inflight++;
+    return real(...args).finally(() => {
+      apiActivity.inflight--;
+      apiActivity.settledAt = Date.now();
+    });
+  };
+}
 function acquire(h: Hub) {
+  countFetches();
   h.refs++;
   if (h.refs !== 1 || h.es || h.retry) return;
   const began = Date.now();

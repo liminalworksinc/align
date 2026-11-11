@@ -167,7 +167,7 @@ export function LaneMap({ cr, me, onAct, picked = null }: { cr: ChangeRequest; m
     const ro = new ResizeObserver(measure);
     if (box.current) ro.observe(box.current);
     return () => ro.disconnect();
-  }, [measure, cr]);
+  }, [measure, cr, arrived]);
 
   const lanes: { key: Lane; label: string; role: string; people: { id: string; name: string }[] }[] = [
     { key: "asking", label: "Asking", role: "The person who asked", people: [cr.requester] },
@@ -218,7 +218,8 @@ export function LaneMap({ cr, me, onAct, picked = null }: { cr: ChangeRequest; m
     const on = n === cur;
     const was = done.has(n);
     // Transitions out of other states are hidden until "Show every state" (the historical Ask stays).
-    const out = all.filter((e) => e.from === n && (every || e.from === cur || e.from === "asked"));
+    // While a move animates, the connector it came along stays shown, so its line can draw into the card it lit.
+    const out = all.filter((e) => e.from === n && (every || e.from === cur || e.from === "asked" || (arrived?.from === e.from && arrived.to === e.to)));
     // A state neither passed, current nor one step away is a one-line chip until "Show every state".
     if (!every && !near.has(n))
       return (
