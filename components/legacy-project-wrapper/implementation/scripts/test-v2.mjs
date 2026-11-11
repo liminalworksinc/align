@@ -6962,10 +6962,33 @@ try {
           return r;
         };
         const [rX, rO, rV, rL] = [await reasonFor(HX), await reasonFor(HO), await reasonFor(HV), await reasonFor(HL)];
+        // GX is Hank's own goal with no team, so its approval set is Hank alone: the workspace owner is outside it here.
         check(
-          "ui (Chrome, LIM-2472 60253f95): in the review drawer the decline reason (\"Reason: “Home: not this quarter”\") shows to the decider (Hank Other) and another approver (Hana Owner), never to a viewer (Hope Viewer) or a member outside the approval set (Hugo Lead)",
-          approverIds.includes(HX.id) && approverIds.includes(HO.id) && !approverIds.includes(HL.id) && rX === "Reason: “Home: not this quarter”" && rO === rX && rV === null && rL === null,
+          "ui (Chrome, LIM-2472 60253f95): in the review drawer the decline reason (\"Reason: “Home: not this quarter”\") shows to the decider (Hank Other, the request's only approver), never to the workspace owner outside its approval set (Hana Owner), a viewer (Hope Viewer) or another member (Hugo Lead)",
+          JSON.stringify(approverIds) === JSON.stringify([HX.id]) && rX === "Reason: “Home: not this quarter”" && rO === null && rV === null && rL === null,
           JSON.stringify({ approverIds, rX, rO, rV, rL }),
+        );
+        // Two approvers: Hedy's Core team goal (Hedy owns it, Hugo leads Core). Hank asks; Hugo declines; Hedy, an approver
+        // who didn't decide, sees the reason, and the viewer still doesn't.
+        const GQ = (await ha(HM, "POST", "/goals", { title: "Hedy's audit export", visibility: "workspace", team_id: HT })).json;
+        const crQ2 = await ha(HX, "POST", `/goals/${GQ?.id}/change-requests`, { base_version: 1, changes: { title: "Hedy's audit export, monthly" }, reason: "Monthly is enough" });
+        await ha(HL, "POST", `/goals/${GQ?.id}/change-requests/${crQ2.json?.id}/reject`, { revision: 1, reason: "Weekly is the promise" });
+        const q2Approvers = ((await ha(HM, "GET", `/goals/${GQ?.id}/change-requests/${crQ2.json?.id}`)).json?.approvers ?? []).map((a) => a.id);
+        const reasonOn = async (u, goal, id) => {
+          const p = await browser.newPage();
+          await p.setViewport({ width: 1440, height: 900 });
+          await p.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          await p.goto(`${BASE}/app/w/${HW}?review=${goal}.${id}`, { waitUntil: "networkidle0" });
+          await p.waitForSelector(`[data-review="${id}"]`, { timeout: 15000 });
+          const r = await p.evaluate(() => document.querySelector("[data-decline-reason]")?.textContent ?? null);
+          await p.close();
+          return r;
+        };
+        const [qL, qM, qV] = [await reasonOn(HL, GQ?.id, crQ2.json?.id), await reasonOn(HM, GQ?.id, crQ2.json?.id), await reasonOn(HV, GQ?.id, crQ2.json?.id)];
+        check(
+          "ui (Chrome, LIM-2472 60253f95): on a request with two approvers, the decider (Hugo Lead) and the other approver (Hedy Member, the goal's owner) both see \"Reason: “Weekly is the promise”\"; a viewer (Hope Viewer) doesn't",
+          q2Approvers.includes(HL.id) && q2Approvers.includes(HM.id) && qL === "Reason: “Weekly is the promise”" && qM === qL && qV === null,
+          JSON.stringify({ q2Approvers, qL, qM, qV, created: crQ2.status }),
         );
       } catch (e) {
         check("ui (Chrome) home declined run", false, e?.stack ?? e);
