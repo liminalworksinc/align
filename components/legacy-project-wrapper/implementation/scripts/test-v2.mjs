@@ -10920,6 +10920,27 @@ try {
       pv.status === 403 && pv.json?.error === "read_only" && pz.status === 404 && px.status === 403 && px.json?.error === "not_an_approver" && pStale.status === 400 && pStale.json?.error === "unknown_revision" && pNone.status === 400 && sameDump(before6, dump()),
       `${pv.status} ${pv.json?.error} | ${pz.status} | ${px.status} ${px.json?.error} | ${pStale.status} ${pStale.json?.error} | ${pNone.status}`,
     );
+
+    // held_back.events is the event rows the decision adds (a first-time event already recorded adds none), and
+    // `tables` is there under the test identity provider only.
+    const heldWrong = results.filter(([, d]) => d.preview.json?.held_back?.events !== (d.ops.v2_events?.insert ?? 0) || d.preview.json?.held_back?.mail !== 0);
+    check(
+      "laneb foresight (audit L2): for all five decisions held_back.events is exactly the event rows the decision then wrote (Approve and launch's first approval and launch: some; Launch, later: none), mail 0; `tables` is returned with ALIGN_TEST_IDP=1",
+      heldWrong.length === 0 && d1.preview.json?.held_back?.events > 0 && d3.preview.json?.held_back?.events === 0 && results.every(([, d]) => d.preview.json?.tables && typeof d.preview.json.tables === "object"),
+      heldWrong.map(([a, d]) => `${a}: held ${JSON.stringify(d.preview.json?.held_back)} real events ${d.ops.v2_events?.insert ?? 0}`).join(" | ") || `d1 ${JSON.stringify(d1.preview.json?.held_back)} d3 ${JSON.stringify(d3.preview.json?.held_back)}`,
+    );
+
+    // 30 previews a minute per person (each takes the write lock): Faye has spent 1 above; 35 more give 29 refusals
+    // of her own (403) and then 429 rate_limited; nothing changes.
+    const before7 = dump();
+    const burst = [];
+    for (let i = 0; i < 35; i++) burst.push(await fa(FX, "POST", `/goals/${FG?.id}/change-requests/${cr6?.id}/preview`, { action: "approve", revision: 1 }));
+    const firstLimited = burst.findIndex((r) => r.status === 429);
+    check(
+      "laneb foresight (audit L3): a person's 31st preview within a minute is 429 rate_limited, and every one after it; the database is unchanged",
+      firstLimited === 29 && burst.slice(0, 29).every((r) => r.status === 403) && burst.slice(29).every((r) => r.status === 429 && r.json?.error === "rate_limited") && sameDump(before7, dump()),
+      `first 429 at ${firstLimited}: ${burst.map((r) => r.status).join(",")}`,
+    );
   }
   // ==== end laneb:foresight ====
 

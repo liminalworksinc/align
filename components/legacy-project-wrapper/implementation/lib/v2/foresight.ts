@@ -1,7 +1,9 @@
 import { allocation } from "./allocation";
 import { changeRequestDecision, type ChangeRequestAction } from "./changes";
+import { testIdpEnabled } from "./config";
 import { previewTx, type RowChange } from "./db";
 import { goalObj, goalRow, goalsDependingOn, type GoalRow } from "./goals";
+import { take } from "./limits";
 import { usd } from "./money.mts";
 import { count } from "./plural.mts";
 import { canReadGoal, type PolicyPrincipal } from "./policy";
@@ -14,8 +16,11 @@ import type { Body } from "./validate";
 // itself, in the same order: 404 for a request the caller can't read (an outsider), 403 for a viewer or someone who
 // can't make this decision, and any refusal (409 stale_revision, cycle, …) is the one the decision would get.
 // The answer is in the reader's terms: a goal they can't read is never named (counted, "a goal you can't see"), and
-// sessions are counted, never named or keyed. `tables` counts rows per table and operation, so a check can hold the
-// preview against what the decision then does, row for row.
+// sessions are counted, never named or keyed. With the test identity provider only (never hosted), `tables` counts rows
+// per table and operation, so test-v2 can hold the preview against what the decision then does, row for row. 30
+// previews a minute per person: each takes the write lock.
+
+export const PREVIEWS_PER_MINUTE = 30;
 
 type GoalFields = { title: string; measures: unknown[]; limits: unknown[]; status: string; depends_on: string[] };
 
@@ -35,9 +40,11 @@ export interface Foresight {
   lines: ForesightLine[];
   /** Names of the goals the lines and compares mention by id, readable by the reader only. */
   titles: Record<string, string>;
-  /** What the decision would send, captured and not sent. */
+  /** What the decision would send, captured and not sent: the product event rows it would add (a first-time event already
+   *  recorded adds none), and mail. */
   held_back: { events: number; mail: number };
-  tables: Record<string, { insert: number; update: number; delete: number }>;
+  /** Tests only (ALIGN_TEST_IDP=1, never hosted). */
+  tables?: Record<string, { insert: number; update: number; delete: number }>;
 }
 
 const fieldsOf = (r: Record<string, unknown>): GoalFields => ({
@@ -51,10 +58,10 @@ const fieldsOf = (r: Record<string, unknown>): GoalFields => ({
 const pct = (n: unknown) => (n === null || n === undefined ? "no target" : `${n}%`);
 
 /** The lines a set of row changes amounts to for this reader (inside the preview, before the rollback). */
-function describe(pp: PolicyPrincipal, crId: string, changes: RowChange[]): Omit<Foresight, "action" | "held_back"> {
+function describe(pp: PolicyPrincipal, crId: string, changes: RowChange[]): Omit<Foresight, "action" | "held_back" | "tables"> & { tables: NonNullable<Foresight["tables"]> } {
   const lines: ForesightLine[] = [];
   const titles: Record<string, string> = {};
-  const tables: Foresight["tables"] = {};
+  const tables: NonNullable<Foresight["tables"]> = {};
   for (const c of changes) (tables[c.table] ??= { insert: 0, update: 0, delete: 0 })[c.op]++;
 
   // A goal is named as the reader knows it now: its title before this decision (a launch may rename it).
@@ -179,9 +186,12 @@ function describe(pp: PolicyPrincipal, crId: string, changes: RowChange[]): Omit
 
 /** The preview of one decision on a change request. Throws exactly what the decision would throw. */
 export async function previewChangeRequest(pp: PolicyPrincipal, goalId: string, id: string, action: ChangeRequestAction, b: Body): Promise<Foresight> {
+  take(`foresight:${pp.userId}`, PREVIEWS_PER_MINUTE, 60_000);
   const body = changeRequestDecision(pp, goalId, id, action, b);
   const p = await previewTx(body, (changes) => describe(pp, id, changes));
   if (!p.ok) throw p.error;
-  const held = { events: p.outbound.filter((o) => o.kind === "event").length, mail: p.outbound.filter((o) => o.kind === "mail").length };
-  return { action, ...p.observed!, held_back: held };
+  const { tables, ...seen } = p.observed!;
+  // Events: the rows the decision would add, not every call (a first-time event already recorded adds none).
+  const held = { events: tables.v2_events?.insert ?? 0, mail: p.outbound.filter((o) => o.kind === "mail").length };
+  return { action, ...seen, held_back: held, ...(testIdpEnabled() ? { tables } : {}) };
 }

@@ -205,7 +205,10 @@ export async function previewTx<T, R>(fn: () => T, observe?: (changes: RowChange
       if (observe) out.observed = observe(out.changes);
     }
   } finally {
-    session.close();
+    // Each step on its own, so none can stop the next: the rollback always runs and the module state is always reset.
+    try {
+      session.close();
+    } catch {}
     try {
       d.exec("ROLLBACK TO foresight");
       d.exec("RELEASE foresight");
@@ -215,8 +218,21 @@ export async function previewTx<T, R>(fn: () => T, observe?: (changes: RowChange
     } catch {}
     previewing = null;
     depth--;
+    // A connection still in a transaction here would make every later write fail (or commit the preview): replace it.
+    if (d.isTransaction) reopenDomain(d);
   }
   return out;
+}
+
+/** Close a domain connection left inside a transaction (rolling it back) and open a fresh one in its place. */
+function reopenDomain(d: DatabaseSync) {
+  const db = openDb();
+  try {
+    d.close();
+  } catch {}
+  db.domain = connect(db.file, 0);
+  db.stmts.clear();
+  console.error("Align: an approval preview left its connection in a transaction; it was rolled back and reopened");
 }
 
 /** Whole rows for a changeset's changes: an update's other columns are read from the row as the change leaves it. */
