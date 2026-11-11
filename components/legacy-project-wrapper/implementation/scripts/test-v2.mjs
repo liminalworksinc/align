@@ -10749,6 +10749,177 @@ try {
   }
   // ==== end fix:c12-web ====
 
+  // ==== laneb:foresight ====
+  // Approve with foresight (Lane B): POST …/change-requests/<id>/preview { action, revision, … } runs the decision's own
+  // body and rolls it back. For the five decisions the drawer offers (approve and launch, approve only, launch, decline,
+  // withdraw), the database is identical after a preview (every table, every row), no event row is written, and the
+  // preview's rows per table and operation are exactly the rows the decision then writes. A viewer gets 403, someone
+  // outside the workspace 404, and a member who can't decide the decision's own 403.
+  {
+    const fUsers = {};
+    for (const [who, name] of [
+      ["FO", "Fern Owner"],
+      ["FM", "Femi Asker"],
+      ["FX", "Faye Bystander"],
+      ["FV", "Fio Viewer"],
+      ["FZ", "Finn Outsider"],
+    ])
+      fUsers[who] = await signUp(who, name, `${who.toLowerCase()}@foresight.example.test`);
+    const { FO, FM, FX, FV, FZ } = fUsers;
+    const FW = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "Foresight workspace" } })).json?.id;
+    const fa = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${FW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const [u, role] of [
+      [FM, "member"],
+      [FX, "member"],
+      [FV, "viewer"],
+    ]) {
+      const i = await fa(FO, "POST", "/invites", { email: u.email, role });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    await call("FZ", "POST", "/api/v2/workspaces", { cookie: FZ.cookie, body: { name: "Finn's own workspace" } });
+    const FG = (await fa(FO, "POST", "/goals", { title: "Cut onboarding to one day", visibility: "workspace", measures: [{ text: "Median onboarding", target: "1 day" }] })).json;
+    const FDep = (await fa(FO, "POST", "/goals", { title: "Hire two support engineers", visibility: "workspace", depends_on: [FG?.id] })).json;
+    // Three of Fern's sessions bound to FG, with usage in the last week.
+    const FD = await pairDevice("FO", FO, [FW]);
+    const fStart = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
+    const fKeys = ["a", "b", "c"].map((n) => sessionKey(FD, FW, "claude-code", `foresight-${n}`));
+    for (const [i, k] of fKeys.entries()) {
+      await call("FO", "PUT", `/api/v2/workspaces/${FW}/sessions/${k}`, { bearer: FD.access, body: { harness: "claude-code", repo_key: repoKey(FD, FW, "/src/fern"), repo_alias: "fern-repo", started_at: fStart, title: `Fern session ${i}` } });
+      const e = epochId();
+      await call("FO", "POST", `/api/v2/workspaces/${FW}/sessions/${k}/epochs`, { bearer: FD.access, body: { root_turn: null, cause: "manual", epoch_id: e, goal_id: FG?.id, starts_at: fStart } });
+      await call("FO", "POST", `/api/v2/workspaces/${FW}/sessions/${k}/usage`, { bearer: FD.access, body: { rows: [usageRow(FD, `foresight-${i}`, e)] } });
+    }
+
+    // Every row of every table, keyed by its primary key (rowid where it has none), and the differences between two.
+    const dump = () =>
+      withDb((d) => {
+        const out = {};
+        for (const { name } of d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()) {
+          const pk = d.prepare("SELECT name FROM pragma_table_info(?) WHERE pk > 0 ORDER BY pk").all(name).map((r) => r.name);
+          const withoutRowid = /WITHOUT ROWID/i.test(d.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(name)?.sql ?? "");
+          const rows = d.prepare(`SELECT ${pk.length || withoutRowid ? "" : "rowid AS __rowid, "}* FROM "${name}"`).all();
+          out[name] = Object.fromEntries(rows.map((r) => [JSON.stringify(pk.length ? pk.map((k) => r[k]) : [r.__rowid]), JSON.stringify(r)]));
+        }
+        return out;
+      });
+    const sameDump = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const tableOps = (a, b) => {
+      const out = {};
+      for (const t of new Set([...Object.keys(a), ...Object.keys(b)])) {
+        if (t === "sqlite_sequence" || !t.startsWith("v2_")) continue;
+        const x = a[t] ?? {};
+        const y = b[t] ?? {};
+        const o = { insert: 0, update: 0, delete: 0 };
+        for (const k of Object.keys(y)) if (!(k in x)) o.insert++;
+        else if (x[k] !== y[k]) o.update++;
+        for (const k of Object.keys(x)) if (!(k in y)) o.delete++;
+        if (o.insert || o.update || o.delete) out[t] = o;
+      }
+      return out;
+    };
+    const sortOps = (o) => JSON.stringify(Object.fromEntries(Object.entries(o ?? {}).sort(([a], [b]) => a.localeCompare(b))));
+    const crPathF = (g, id, a) => `/goals/${g}/change-requests/${id}/${a}`;
+    const propose = async (title) => {
+      const v = withDb((d) => d.prepare("SELECT version FROM v2_goals WHERE id = ?").get(FG?.id)?.version);
+      return (await fa(FM, "POST", `/goals/${FG?.id}/change-requests`, { base_version: v, changes: { title }, reason: "Foresight check" })).json;
+    };
+    const eventsNow = () => withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_events").get().n);
+    /** Preview `action` as `u`, then make it: the preview's answer, the database before and after it, and what the
+     *  decision then changed. */
+    const decide = async (u, cr, action, body) => {
+      const before = dump();
+      const ev0 = eventsNow();
+      const preview = await fa(u, "POST", `/goals/${FG?.id}/change-requests/${cr?.id}/preview`, { action, ...body });
+      const afterPreview = dump();
+      const ev1 = eventsNow();
+      const real = await fa(u, "POST", crPathF(FG?.id, cr?.id, action), body);
+      const afterReal = dump();
+      return { preview, real, untouched: sameDump(before, afterPreview), events: ev1 - ev0, ops: tableOps(before, afterReal), afterReal };
+    };
+    const newDirectiveTargets = (d) => Object.keys(d.afterReal.v2_directive_targets ?? {}).length;
+    const results = [];
+
+    // 1. Approve and launch, by the goal's owner.
+    const cr1 = await propose("Cut onboarding to one day, with a buddy");
+    const t0 = Object.keys(dump().v2_directive_targets ?? {}).length;
+    const d1 = await decide(FO, cr1, "approve_and_launch", { revision: 1 });
+    results.push(["approve_and_launch", d1]);
+    check(
+      "laneb foresight: Approve and launch previewed: \"3 agent sessions switch to version 2\", the goal moves from version 1 to 2 with a before and after, 1 dependent goal sees version 2, recorded as approved and launched; events held back, not written",
+      d1.preview.status === 200 && d1.preview.json?.quiet === false &&
+        d1.preview.json.lines.some((l) => l.kind === "agents" && l.text === `3 agent sessions switch to version 2 of “${FG?.title}”`) &&
+        d1.preview.json.lines.some((l) => l.kind === "goal" && l.compare?.before?.title === FG?.title && l.compare?.after?.title === "Cut onboarding to one day, with a buddy") &&
+        d1.preview.json.lines.some((l) => l.kind === "dependents" && l.text === "1 dependent goal sees version 2" && l.detail?.join() === `“${FDep?.title}”`) &&
+        d1.preview.json.lines.some((l) => l.kind === "record" && l.text === "Recorded as approved and launched as version 2") &&
+        d1.preview.json.held_back.events > 0 && d1.preview.json.held_back.mail === 0 && d1.events === 0 &&
+        d1.real.status === 200 && newDirectiveTargets(d1) - t0 === 3,
+      `${d1.preview.status} ${d1.preview.text.slice(0, 900)} | real ${d1.real.status} targets ${newDirectiveTargets(d1) - t0} events ${d1.events}`,
+    );
+
+    // 2. Approve only.
+    const cr2 = await propose("Cut onboarding to one day, documented");
+    const d2 = await decide(FO, cr2, "approve", { revision: 1 });
+    results.push(["approve", d2]);
+    check(
+      "laneb foresight: Approve only previewed as quiet (nothing reaches agents or spend) and \"Recorded as approved, not launched: agents keep the current version\"",
+      d2.preview.status === 200 && d2.preview.json?.quiet === true && d2.preview.json.lines.length === 1 && d2.preview.json.lines[0].text === "Recorded as approved, not launched: agents keep the current version" && d2.real.status === 200,
+      `${d2.preview.text.slice(0, 600)} | ${d2.real.status}`,
+    );
+
+    // 3. Launch the request approved in 2.
+    const d3 = await decide(FO, cr2, "launch", {});
+    results.push(["launch", d3]);
+    check(
+      "laneb foresight: Launch previewed: \"3 agent sessions switch to version 3\" and \"Recorded as approved and launched as version 3\"",
+      d3.preview.status === 200 && d3.preview.json?.lines.some((l) => l.text === `3 agent sessions switch to version 3 of “Cut onboarding to one day, documented”`) && d3.preview.json.lines.some((l) => l.text === "Recorded as approved and launched as version 3") && d3.real.status === 200,
+      `${d3.preview.text.slice(0, 600)} | ${d3.real.status}`,
+    );
+
+    // 4. Decline, with a reason.
+    const cr4 = await propose("Cut onboarding to half a day");
+    const d4 = await decide(FO, cr4, "reject", { revision: 1, reason: "Half a day isn't measurable yet." });
+    results.push(["reject", d4]);
+    check(
+      "laneb foresight: Decline previewed as quiet and \"Recorded as declined, with your reason\"",
+      d4.preview.status === 200 && d4.preview.json?.quiet === true && d4.preview.json.lines.map((l) => l.text).join() === "Recorded as declined, with your reason" && d4.real.status === 200,
+      `${d4.preview.text.slice(0, 600)} | ${d4.real.status}`,
+    );
+
+    // 5. Withdraw, by the person who asked.
+    const cr5 = await propose("Cut onboarding to two days");
+    const d5 = await decide(FM, cr5, "withdraw", { revision: 1 });
+    results.push(["withdraw", d5]);
+    check(
+      "laneb foresight: Withdraw previewed by the requester as quiet and \"Recorded as withdrawn\"",
+      d5.preview.status === 200 && d5.preview.json?.quiet === true && d5.preview.json.lines.map((l) => l.text).join() === "Recorded as withdrawn" && d5.real.status === 200,
+      `${d5.preview.text.slice(0, 600)} | ${d5.real.status}`,
+    );
+
+    // The key check: for all five, nothing changed during the preview, and the preview's rows are the decision's rows.
+    const mismatched = results.filter(([, d]) => !(d.untouched && d.events === 0 && sortOps(d.preview.json?.tables) === sortOps(d.ops)));
+    check(
+      "laneb foresight: for all five decisions the database is identical after the preview (every table and row, sqlite_sequence included), no event row is written, and the preview's rows per table and operation are exactly what the decision then wrote",
+      results.length === 5 && mismatched.length === 0,
+      mismatched.map(([a, d]) => `${a}: untouched ${d.untouched} events ${d.events} preview ${sortOps(d.preview.json?.tables)} real ${sortOps(d.ops)}`).join(" | "),
+    );
+
+    // Who may ask: a viewer 403, an outsider 404, a member outside the approval set gets the decision's own 403; none
+    // changes anything.
+    const cr6 = await propose("Cut onboarding to one day, remote");
+    const before6 = dump();
+    const pv = await fa(FV, "POST", `/goals/${FG?.id}/change-requests/${cr6?.id}/preview`, { action: "approve", revision: 1 });
+    const pz = await fa(FZ, "POST", `/goals/${FG?.id}/change-requests/${cr6?.id}/preview`, { action: "approve", revision: 1 });
+    const px = await fa(FX, "POST", `/goals/${FG?.id}/change-requests/${cr6?.id}/preview`, { action: "approve", revision: 1 });
+    const pStale = await fa(FO, "POST", `/goals/${FG?.id}/change-requests/${cr6?.id}/preview`, { action: "approve", revision: 9 });
+    const pNone = await fa(FO, "POST", `/goals/${FG?.id}/change-requests/${cr6?.id}/preview`, { revision: 1 });
+    check(
+      "laneb foresight: a viewer's preview is 403 read_only, an outsider's 404, a member outside the approval set gets 403 not_an_approver, a revision never reached 400 unknown_revision, no action 400; the database is unchanged",
+      pv.status === 403 && pv.json?.error === "read_only" && pz.status === 404 && px.status === 403 && px.json?.error === "not_an_approver" && pStale.status === 400 && pStale.json?.error === "unknown_revision" && pNone.status === 400 && sameDump(before6, dump()),
+      `${pv.status} ${pv.json?.error} | ${pz.status} | ${px.status} ${px.json?.error} | ${pStale.status} ${pStale.json?.error} | ${pNone.status}`,
+    );
+  }
+  // ==== end laneb:foresight ====
+
   // ==== fix:a1-web ====
   // Regression checks for the alignment cross walk (e2e-reports/acycle1/cross.md: A1-cross-2, -4, -8, -9 and three of its
   // "works but confusing" items), on a workspace of their own, as the walk set it up: LO owns it; LM leads team Cutover
