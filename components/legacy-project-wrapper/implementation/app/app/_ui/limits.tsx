@@ -349,7 +349,9 @@ export function NotesSuggest({ ws, preferGoalId, onDone }: { ws: string; preferG
         }}
       >
         <Field label="Notes, or one limit">
-          <TextArea rows={5} value={notes} maxLength={20000} onChange={(e) => setNotes(e.target.value)} required />
+          {/* Focused when it opens: on the Goals tab it sits after the New goal form (PR 68 pass 1 item 19), so focus
+              brings it into view. */}
+          <TextArea rows={5} value={notes} maxLength={20000} onChange={(e) => setNotes(e.target.value)} required autoFocus data-notes />
         </Field>
         <div className="grid gap-2 sm:grid-cols-[1fr_180px]">
           <Field label="Meeting (optional)">

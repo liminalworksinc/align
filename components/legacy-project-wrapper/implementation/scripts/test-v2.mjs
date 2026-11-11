@@ -4717,8 +4717,10 @@ try {
           await page.goto(`${BASE}/app/w/${LW}/goals`, { waitUntil: "networkidle0" });
           await page.waitForFunction(() => document.body.innerText.includes("Ship the inference cluster"), { timeout: 15000 });
           await click(page, "Paste meeting notes");
-          await page.waitForSelector("textarea");
-          await page.type("textarea", notes);
+          // The notes box itself: the Goals tab's New goal form has textareas of its own (Anchors), and since PR 68 pass 1
+          // item 19 Paste meeting notes comes after that form.
+          await page.waitForSelector("textarea[data-notes]");
+          await page.type("textarea[data-notes]", notes);
           await click(page, "Suggest limits");
         };
         const pe = await asUser(LE);
@@ -8587,8 +8589,21 @@ try {
           `${bumpCI2.status} ${rebK.status} ${rebK.text}`,
         );
 
-        // F5 (ui): the propose form offers only goals everyone deciding can see, and says some aren't offered.
+        // PR 68 pass 1 item 1 (founder ruling): KB's request on this goal (crN1, countered) is still open, so the goal page
+        // says so before any form and offers none. KB then withdraws it (nothing below reads crN1) for F5's form.
         const pB = await as(KB);
+        await open(pB, `/app/w/${KW}/goals/${KCI3.id}`);
+        await pB.waitForSelector(`[data-my-open-request="${crN1?.id}"]`, { timeout: 15000 }).catch(() => undefined);
+        const openLine = await pB.evaluate(() => document.querySelector("[data-my-open-request]")?.textContent ?? "");
+        const formOffered = await pB.evaluate(() => [...document.querySelectorAll("#change-requests button")].some((b) => b.textContent?.trim() === "Full change form"));
+        check(
+          "PR 68 item 1 (ui): with the person's own request on a goal still open (countered), the goal page says \"You already have an open request on this goal\" before any form and offers no Full change form",
+          /^You already have an open request on this goal, below\./.test(openLine) && !formOffered,
+          `${openLine} formOffered=${formOffered}`,
+        );
+        const n1Now = await kRead(KB, KCI3.id, crN1?.id);
+        await kAct(KB, KCI3.id, crN1?.id, "withdraw", { revision: n1Now?.revision });
+        // F5 (ui): the propose form offers only goals everyone deciding can see, and says some aren't offered.
         await open(pB, `/app/w/${KW}/goals/${KCI3.id}`);
         await press(pB, "#change-requests", "Full change form");
         await pB.waitForFunction(() => /Send for approval/.test(document.querySelector("#change-requests")?.innerText ?? ""), { timeout: 15000 });
