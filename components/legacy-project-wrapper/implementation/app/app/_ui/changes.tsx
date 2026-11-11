@@ -227,10 +227,13 @@ function RequestRecord({
       )}
       {cr.condition && <ConditionBox c={cr.condition} said={said} closed={cr.state === "rejected" ? "declined" : cr.state === "withdrawn" ? "withdrawn" : cr.state === "superseded" ? "superseded" : undefined} />}
       {cr.state === "approved" && <ValueCard ws={ws} cr={cr} me={me} titles={titles} />}
+      {/* The reason shows to the requester, the person who declined and the request's approvers only; every other reader
+          sees who declined and when (founder rulings LIM-2472 60253f95, and Nov 11 for the goal page). Display only. */}
       {cr.state === "rejected" && (
-        <p className="text-[14px] text-zinc-600">
+        <p className="text-[14px] text-zinc-600" data-declined-line>
           Declined by {said(cr.rejected_by)}
-          {cr.decided_at ? `, ${when(cr.decided_at)}` : ""}. Reason: {cr.rejection_reason}
+          {cr.decided_at ? `, ${when(cr.decided_at)}` : ""}.
+          {(cr.requester.id === me || cr.rejected_by?.id === me || cr.approvers.some((a) => a.id === me)) && cr.rejection_reason ? ` Reason: ${cr.rejection_reason}` : ""}
         </p>
       )}
       <div className="mt-2">

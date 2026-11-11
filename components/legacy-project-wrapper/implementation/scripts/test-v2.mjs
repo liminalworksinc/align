@@ -6968,6 +6968,24 @@ try {
           JSON.stringify(approverIds) === JSON.stringify([HX.id]) && rX === "Reason: “Home: not this quarter”" && rO === null && rV === null && rL === null,
           JSON.stringify({ approverIds, rX, rO, rV, rL }),
         );
+        // Founder ruling, Nov 11: the goal page's request card follows the same rule. Every reader sees who declined and
+        // when; only the requester, the decider and the request's approvers see the reason.
+        const cardFor = async (u) => {
+          const p = await browser.newPage();
+          await p.setViewport({ width: 1440, height: 900 });
+          await p.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          await p.goto(`${BASE}/app/w/${HW}/goals/${GX.id}`, { waitUntil: "networkidle0" });
+          await p.waitForFunction((id) => !!document.querySelector(`[data-cr="${id}"] [data-declined-line]`), { timeout: 15000 }, crD.json?.id).catch(() => undefined);
+          const t = await p.evaluate((id) => document.querySelector(`[data-cr="${id}"] [data-declined-line]`)?.textContent ?? null, crD.json?.id);
+          await p.close();
+          return t;
+        };
+        const [gV, gX] = [await cardFor(HV), await cardFor(HX)];
+        check(
+          "ui (Chrome, Nov 11 ruling): on the goal page a declined request's card shows every reader \"Declined by Hank Other, <time>.\" but the reason only to the requester, the decider and the request's approvers: Hope Viewer sees no reason, Hank (who declined) does",
+          /^Declined by Hank Other/.test(gV ?? "") && !/Reason:|not this quarter/.test(gV ?? "") && /Reason: Home: not this quarter/.test(gX ?? ""),
+          JSON.stringify({ gV, gX }),
+        );
         // Two approvers: Hedy's Core team goal (Hedy owns it, Hugo leads Core). Hank asks; Hugo declines; Hedy, an approver
         // who didn't decide, sees the reason, and the viewer still doesn't.
         const GQ = (await ha(HM, "POST", "/goals", { title: "Hedy's audit export", visibility: "workspace", team_id: HT })).json;
