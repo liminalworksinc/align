@@ -10780,7 +10780,10 @@ try {
     const FG = (await fa(FO, "POST", "/goals", { title: "Cut onboarding to one day", visibility: "workspace", measures: [{ text: "Median onboarding", target: "1 day" }] })).json;
     const FDep = (await fa(FO, "POST", "/goals", { title: "Hire two support engineers", visibility: "workspace", depends_on: [FG?.id] })).json;
     // Three of Fern's sessions bound to FG, with usage in the last week.
-    const FD = await pairDevice("FO", FO, [FW]);
+    // Written straight into the database, with its grant: this phase has spent the machine's pairing limit by now.
+    const fDev = insertDevice(FO.id, "Fern's laptop");
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(fDev.id, FW));
+    const FD = { ...newDeviceKeys(), who: "FO", user: FO, id: fDev.id, access: fDev.access };
     const fStart = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
     const fKeys = ["a", "b", "c"].map((n) => sessionKey(FD, FW, "claude-code", `foresight-${n}`));
     for (const [i, k] of fKeys.entries()) {

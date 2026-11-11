@@ -111,7 +111,7 @@ function describe(pp: PolicyPrincipal, crId: string, changes: RowChange[]): Omit
     if (changed.length)
       lines.push({
         kind: "goal",
-        text: `${nameOf(id)} moves from version ${from} to ${to}: ${words.join(", ")} change${words.length === 1 ? "s" : ""}`,
+        text: `${nameOf(id)}: version ${from} → version ${to}, changing ${words.join(", ")}`,
         compare: { before: shown(before), after: shown(after), before_label: `Version ${from}`, after_label: `Version ${to}`, hidden: { before: hiddenOf(before.depends_on), after: hiddenOf(after.depends_on) } },
       });
     if (changed.length) {
