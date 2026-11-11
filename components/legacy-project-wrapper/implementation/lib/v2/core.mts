@@ -108,7 +108,7 @@ export const EVENT_PROPS = {
   second_member_joined: {},
   first_change_request: {},
   first_approval: {},
-  first_directive: { kind: ["goal_version", "binding_changed", "binding_suspended", "stop", "resume", "request", "hold", "release"] },
+  first_directive: { kind: ["goal_version", "binding_changed", "binding_suspended", "stop", "resume", "request", "hold", "release", "answer"] },
   first_mcp_read: { client: ["app", "device"] },
   loi_sent: { note_ref: NOTE_REF_RE },
   loi_signed: { note_ref: NOTE_REF_RE, verified_original: ["yes"] },
