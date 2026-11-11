@@ -22,7 +22,8 @@ import type { ChangeRequest, Goal } from "./types";
 
 const WHY_MAX = 2000;
 const TEXT_MAX = 300;
-const TARGET_MAX = 120;
+// The server's limit for a measure's target (lib/v2/goals.ts, measuresIn), as on the New goal form.
+const TARGET_MAX = 100;
 
 type Part = "" | "title" | "add" | "achieved" | "dropped" | `m:${string}`;
 

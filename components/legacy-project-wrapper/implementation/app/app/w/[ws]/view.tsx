@@ -83,11 +83,9 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
     reloadChanges();
     setReloadToken((t) => t + 1);
   }, [reloadHome, reloadChanges]);
-  // "Since you last looked" reads again once a minute while Home stays open (specs/align/interface.md, Workspace Home).
-  const refreshSince = useCallback(() => {
-    reloadHome();
-    reloadChanges();
-  }, [reloadHome, reloadChanges]);
+  // "Since you last looked" reads again once a minute while Home stays open (specs/align/interface.md, Workspace Home),
+  // and the Needs-you list with it, so its count never trails what Since shows (PR 68 audit Low 2).
+  const refreshSince = reloadAll;
   // A request sent from the shell's Propose a change drawer changes this page's counts: read them again (DEFECT 6,
   // PR 68 pass 1: "Waiting on others" stayed 0 until a reload).
   useEffect(() => {

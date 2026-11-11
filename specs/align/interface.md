@@ -566,7 +566,8 @@ reads once when it opens and does not poll (only its first-run card checks the a
 you last looked" section checks for new changes as below).
 
 Home's "Since you last looked" SHALL compare against the last time this person left this workspace's Home on this
-device, in any tab; coming back to Home in the same tab, without a reload, compares against when they left it. While
+device, in any tab; coming back to Home in the same tab, without a reload, compares against when they left it, and a
+reload keeps the comparison the tab had. While
 Home stays open, it SHALL add new changes without a reload, checking at most once a minute. With no earlier visit on
 the device it SHALL say "First visit on this device, so nothing to compare yet." The time is kept in this browser only
 and is never sent to the server.

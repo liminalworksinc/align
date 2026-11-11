@@ -107,7 +107,8 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
             onSubmit={(e) => {
               e.preventDefault();
               // The workspace's first active goal gets "Connect one agent" as its next step (founder ruling, PR 68 pass 1 item 7).
-              const firstGoal = !feed.data?.goals.some((g) => g.status === "active");
+              // Unknown until the goals are read: then it is not called the first (PR 68 audit Low 4).
+              const firstGoal = !!feed.data && !feed.data.goals.some((g) => g.status === "active");
               const sentTitle = title.trim();
               void act.run(
                 async () => {

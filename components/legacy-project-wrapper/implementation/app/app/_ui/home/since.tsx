@@ -15,7 +15,8 @@ import type { EvidenceClass } from "@/lib/v2/home-core.mts";
 // The last visit is when this person last left this workspace's Home on this device, in any tab (specs/align/
 // interface.md, Workspace Home; founder ruling, PR 68 pass 1 item 12). It is kept in this browser only (localStorage),
 // so the wording always says "on this device", and written when Home is left (unmounted, or the tab hidden for good),
-// so coming back to Home in the same tab compares with when they left it. While Home stays open, the section asks Home
+// so coming back to Home in the same tab compares with when they left it. A reload is not leaving: this tab's baseline
+// is held in sessionStorage, so a reload keeps the same list (founder ruling, PR 68 audit Low 1, option A). While Home stays open, the section asks Home
 // to read again at most once a minute and adds what changed. With no earlier visit on this device, it says what the
 // list will show rather than inventing a history. Storage can be blocked: every access is guarded, and blocked storage
 // reads as a first visit.
@@ -50,22 +51,44 @@ function write(store: () => Storage, k: string, v: string) {
     /* storage blocked: the next visit reads as a first one */
   }
 }
+function remove(store: () => Storage, k: string) {
+  try {
+    store().removeItem(k);
+  } catch {
+    /* storage blocked: nothing was kept */
+  }
+}
 
-/** The baseline: when this person last left this Home on this device (null for a first visit), read once per mount;
- *  leaving (unmount, or the page hidden as it unloads) stores now. null until read after mount, so the server and first
- *  client render agree. */
+/** The baseline: when this person last left this Home on this device (null for a first visit), read once per mount.
+ *  This tab keeps it in sessionStorage, so a reload compares against the same time ("none" for a first visit). Leaving
+ *  Home inside the app stores now and drops the tab's baseline; the page unloading (a reload or a closed tab) stores now
+ *  for other tabs and later visits but keeps the tab's baseline, which a closed tab loses anyway. null until read after
+ *  mount, so the server and first client render agree. */
 function useLastVisit(ws: string, me: string): { ready: boolean; since: string | null } {
   const [v, setV] = useState<{ ready: boolean; since: string | null }>({ ready: false, since: null });
   useEffect(() => {
     const k = key(ws, me);
-    const base = read(() => localStorage, k);
-    const t = setTimeout(() => setV({ ready: true, since: base === null || Number.isNaN(Date.parse(base)) ? null : base }), 0);
-    const left = () => write(() => localStorage, k, new Date().toISOString());
-    window.addEventListener("pagehide", left);
+    const base = read(() => sessionStorage, k) ?? read(() => localStorage, k) ?? "none";
+    write(() => sessionStorage, k, base);
+    const t = setTimeout(() => setV({ ready: true, since: base === "none" || Number.isNaN(Date.parse(base)) ? null : base }), 0);
+    let unloading = false;
+    const unload = () => {
+      unloading = true;
+      write(() => localStorage, k, new Date().toISOString());
+    };
+    // Back from the browser's back-forward cache: the page is live again, so leaving it later is leaving Home.
+    const shown = () => {
+      unloading = false;
+    };
+    window.addEventListener("pagehide", unload);
+    window.addEventListener("pageshow", shown);
     return () => {
       clearTimeout(t);
-      window.removeEventListener("pagehide", left);
-      left();
+      window.removeEventListener("pagehide", unload);
+      window.removeEventListener("pageshow", shown);
+      if (unloading) return;
+      write(() => localStorage, k, new Date().toISOString());
+      remove(() => sessionStorage, k);
     };
   }, [ws, me]);
   return v;
