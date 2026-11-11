@@ -12173,6 +12173,14 @@ try {
     hTrustPages[0].status === 200 && hTrustPages[0].text.includes("Our two roles") && hTrustPages[1].status === 200 && hTrustPages[1].text.includes("Subprocessors"),
     hTrustPages.map((r) => r.status).join(" "),
   );
+  // The legal entity ends with its own full stop: a template's "[LEGAL ENTITY]." reads "Liminal Works, Inc." once,
+  // never "Inc.." (founder ruling, Nov 10). Read as text: HTML comments and tags out.
+  const trustText = hTrustPages.map((r) => r.text.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " "));
+  check(
+    "hosted: /privacy and /trust name \"Liminal Works, Inc.\" and never print \"Inc..\" (the filled entity's full stop stands for the sentence's own)",
+    trustText.every((t) => t.includes("Liminal Works, Inc.") && !/Inc\.\s*\./.test(t)),
+    trustText.map((t) => [...t.matchAll(/.{0,40}Inc\.\s*\..{0,20}/g)].map((m) => m[0]).join(" | ")).join(" || "),
+  );
   const hMe = await hosted("GET", "/api/v2/me");
   const hSignIn = await hosted("GET", "/app/sign-in");
   const hSession = await hosted("GET", "/api/v2/auth/get-session");
