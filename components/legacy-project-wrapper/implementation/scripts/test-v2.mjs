@@ -7016,6 +7016,28 @@ try {
           gdNow?.status === "dropped" && gdNow.version === 2 && gdNow.measures?.[0]?.text === "Kept on drop" && !dropAfter.box && !dropAfter.confirm && dropAfter.pills.includes("dropped"),
           JSON.stringify({ dropAfter, status: gdNow?.status, version: gdNow?.version }),
         );
+        // Founder ruling, Nov 11 (Mini 3's inventory, goals 19): the goal read's deciders are the server's effective set for
+        // the reader, the same people a request from them gets as approvers; the owner and a viewer get none. The
+        // propose drawer's "Who decides" names exactly them.
+        const dOf = async (u) => ((await ha(u, "GET", `/goals/${GQ?.id}`)).json?.deciders ?? null);
+        const [dX, dM, dV] = [await dOf(HX), await dOf(HM), await dOf(HV)];
+        const q2Sorted = [...q2Approvers].sort();
+        const pw = await browser.newPage();
+        await pw.setViewport({ width: 1440, height: 900 });
+        await pw.setCookie(...HX.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await pw.goto(`${BASE}/app/w/${HW}/goals/${GQ?.id}`, { waitUntil: "networkidle0" });
+        await pw.evaluate(() => document.querySelector("[data-propose-open]")?.click());
+        await pw.waitForSelector('[data-propose-field="goal"]', { timeout: 15000 });
+        await pw.select('[data-propose-field="goal"]', GQ?.id);
+        await pw.waitForFunction(() => /Who decides/.test(document.body.innerText) && !/Reading who decides/.test(document.body.innerText), { timeout: 15000 }).catch(() => undefined);
+        const drawerText = await pw.evaluate(() => document.querySelector('[data-propose="form"]')?.innerText ?? document.body.innerText.slice(0, 600));
+        await pw.close();
+        check(
+          "goals 19 (Nov 11 ruling): GET …/goals/:id deciders is the server's effective set for the reader (Hank's equals the approvers his request got: Hedy Member and Hugo Lead); the owner (Hedy) and a viewer get []; the propose drawer's Who decides names them",
+          Array.isArray(dX) && JSON.stringify(dX.map((p) => p.id).sort()) === JSON.stringify(q2Sorted) && dX.every((p) => typeof p.name === "string" && p.name) && JSON.stringify(dM) === "[]" && JSON.stringify(dV) === "[]" &&
+            /Hedy Member/.test(drawerText) && /Hugo Lead/.test(drawerText) && !/Usually/.test(drawerText),
+          JSON.stringify({ dX, dM, dV, q2Sorted, drawer: drawerText.slice(0, 400).replace(/\n/g, " / ") }),
+        );
         // Founder ruling, Nov 11: "Since you last looked" names who created a goal (its owner), and leaves out a goal the
         // reader created, as it leaves out their other own actions. Hana's last visit is set long ago, so every goal's
         // creation is since then.
