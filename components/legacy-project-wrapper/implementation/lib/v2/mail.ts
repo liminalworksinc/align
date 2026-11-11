@@ -3,7 +3,7 @@ import path from "node:path";
 import { config } from "../config";
 import { emailApi } from "./config";
 import { postEmail } from "./core.mts";
-import { dbDir } from "./db";
+import { captureOutbound, dbDir, inPreview } from "./db";
 
 // Sign-in code delivery, called by Better Auth's emailOtp sendVerificationOTP (lib/v2/auth.ts).
 // Hosted: one HTTPS POST to a Resend-compatible email API (postEmail in lib/v2/core.mts: {from, to, subject, text},
@@ -23,6 +23,8 @@ export const signInFile = () => path.join(dbDir(), "sign-in.txt");
 
 /** Deliver one sign-in code. Throws (so the send request fails) when the hosted email API refuses or times out. */
 export async function sendSignInCode(email: string, code: string, origin: string): Promise<void> {
+  // An approval preview (lib/v2/foresight.ts) sends nothing: a rollback can't unsend an email. Listed, never sent.
+  if (inPreview()) return captureOutbound({ kind: "mail", what: SIGN_IN_SUBJECT });
   const link = signInLink(origin, email, code);
   if (!config().hosted) {
     const line = `Align sign-in for ${email}: ${link}`;
