@@ -4,7 +4,7 @@
 - **Owning queue item:** [ADOPT-002](active-work.md#adopt-002)
 - **Completion / archival evidence:** source navigation prepared for B01 through B17; later service boundaries pending
 
-The normal reviewer ledger has **20 open findings: six HIGH and fourteen MEDIUM**. All remain undecided. This file records locations and reading commands; it does not accept or dismiss a finding, establish semantic equivalence, or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
+The normal reviewer ledger has **23 open findings: six HIGH and seventeen MEDIUM**. All remain undecided. This file records locations and reading commands; it does not accept or dismiss a finding, establish semantic equivalence, or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
 
 ## Source identities
 
@@ -13,7 +13,7 @@ The normal reviewer ledger has **20 open findings: six HIGH and fourteen MEDIUM*
 - Original path prefix: `components/legacy-project-wrapper/implementation/`.
 - Generated path prefix: `_build/native-review-source/`. The file and one-based line references below refer to the materialized source, not the forwarding bindings.
 - The normal materializer checks the manifest, authority pins, cache entries, file hashes and all 1,227 acceptance batches for all 58 current libraries. Materialized source bytes match every manifest file digest. No new generation or qualification was performed for this guide.
-- Reviewed ledger SHA-256: `b4695536c285f46c22830f67da7e07d67c1ad25e902aaffd7fc80c8873e83c96`; zero overrides. Read it with `liminal-review log --repo .`. Do not run an accept or dismiss command.
+- Reviewed ledger SHA-256: `f37ae54682af962579384bf90995df5e0eb607243c74c44aae5395abc051de49`; zero overrides. Read it with `liminal-review log --repo .`. Do not run an accept or dismiss command.
 
 ## Read original and generated source side by side
 
@@ -69,6 +69,9 @@ pair() {
 | `f_4bd94fac41bd` | HIGH | `components/legacy-project-wrapper/implementation/lib/v2/goals.ts:19` | Goal auth and validation checks moved into a native binding that this diff does not show. B15 goals: read/edit/create authorization, visibility, company owner, field/dependency/target validation, cap and stale versions. Exact pairs below. |
 | `f_5a0e064cc7ff` | HIGH | `components/legacy-project-wrapper/implementation/lib/v2/devices.ts:12` | All device auth and token logic was moved into an opaque generated binding, behind an unchecked cast. B16 device keys, signatures, expiry, replay revocation, pairing limits, membership and user/device scoping. Exact pairs below. The retained unchecked type assertion remains available for review. |
 | `f_d943ad9dd8d1` | HIGH | `components/legacy-project-wrapper/implementation/lib/v2/directives.ts:65` | Device/user scoping and goal-visibility checks moved into an unreviewed native binding. B16 device feed and receipt scope, device grants, ownership and hidden goal snapshots. Exact pairs below. The retained unchecked type assertion remains available for review. |
+| `f_a53163d0b124` | MEDIUM | `.literate/native-projects/local-server-metrics/flavors/os-macos/host-install/macos/arm64/none.cdx.json:73` | macOS Git realization permits versions below the base minimum. B17 inherited toolchain capability constraint, with no generated application guard counterpart. Read the exact review-time realization and base Git capability side by side below. |
+| `f_dd723ad9bd62` | MEDIUM | `.literate/native-projects/local-server-retention/skills/agent/release-project/advance/SKILL.md:23` | Directs agents to push without operator authorization. B17 inherited release instruction, with no original main or generated application check counterpart. Read the exact review-time skill below. This entry records the finding without deciding it. |
+| `f_5c5fc40549da` | MEDIUM | `.literate/native-projects/local-server-metrics/skills/agent/release-project/advance/SKILL.md:21` | Requires a push without explicit operator approval. B17 inherited release instruction, with no original main or generated application check counterpart. The review locator is retained exactly; the complete step is visible in the range below. This finding remains undecided. |
 
 The original review locator and the original check on main are distinct columns of evidence. Some findings concern a profile, inherited skill, tooling or a human gate; those have no generated application check. Their exact historical files are retained below rather than inventing such a check.
 
@@ -117,6 +120,21 @@ git show '4214c45f6d509e33c8153b4d66f5a7029f9b0c5a:components/legacy-project-wra
 git show 'c4b853866ff5e130fa294f8e70fe5c0530e87aa4:components/legacy-project-wrapper/implementation/lib/v2/devices.ts' | nl -ba | sed -n '8,26p'
 # f_d943ad9dd8d1
 git show 'c4b853866ff5e130fa294f8e70fe5c0530e87aa4:components/legacy-project-wrapper/implementation/lib/v2/directives.ts' | nl -ba | sed -n '61,79p'
+```
+
+### B17 findings from the normal checkpoint review
+
+The normal review of `892f408c2131a5bbaaf232b6ac717aecf4c8732d` added the three MEDIUM findings above. The twenty earlier findings and every runtime comparison below remain unchanged. These three concern inherited instructions or capability constraints, so no relocated runtime authorization check is asserted for them. All twenty-three findings remain undecided.
+
+```sh
+# f_a53163d0b124: compare the exact reviewed Git capability and platform realization.
+diff -y -W 240 \
+  <(git show '892f408c2131a5bbaaf232b6ac717aecf4c8732d:.literate/native-projects/local-server-metrics/flavors/os-base/toolchain.cdx.json' | nl -ba | sed -n '43,55p') \
+  <(git show '892f408c2131a5bbaaf232b6ac717aecf4c8732d:.literate/native-projects/local-server-metrics/flavors/os-macos/host-install/macos/arm64/none.cdx.json' | nl -ba | sed -n '78,100p')
+# f_dd723ad9bd62
+git show '892f408c2131a5bbaaf232b6ac717aecf4c8732d:.literate/native-projects/local-server-retention/skills/agent/release-project/advance/SKILL.md' | nl -ba | sed -n '15,28p'
+# f_5c5fc40549da
+git show '892f408c2131a5bbaaf232b6ac717aecf4c8732d:.literate/native-projects/local-server-metrics/skills/agent/release-project/advance/SKILL.md' | nl -ba | sed -n '15,28p'
 ```
 
 ## Detailed comparisons for the relocated enforcement findings
