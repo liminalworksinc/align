@@ -248,9 +248,9 @@ export function LaneMap({ cr, me, onAct, picked = null }: { cr: ChangeRequest; m
         <div className="flex items-center justify-between gap-2">
           <p className={`text-[14px] font-semibold ${on ? "text-(--text-1)" : was ? "text-(--text-2)" : "text-(--text-3)"}`}>{words[n].title}</p>
           {on ? (
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--accent-text)">Now</span>
+            <span className="shrink-0 whitespace-nowrap font-mono text-[10px] uppercase tracking-[0.12em] text-(--accent-text)">Now</span>
           ) : was ? (
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--text-3)">Done</span>
+            <span className="shrink-0 whitespace-nowrap font-mono text-[10px] uppercase tracking-[0.12em] text-(--text-3)">Done</span>
           ) : null}
         </div>
         <p className={`text-[12px] leading-snug ${on ? "text-(--text-2)" : "text-(--text-3)"}`}>{words[n].meaning}</p>
