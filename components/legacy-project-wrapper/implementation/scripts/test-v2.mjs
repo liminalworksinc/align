@@ -10668,9 +10668,22 @@ try {
       !has(browserLL, ask3) && readLL.status === 404 && !has(otherDevice, ask3),
       `${browserLL.length} ${readLL.status} ${otherDevice.length}`,
     );
-    // Revoked: gone. Its session is suspended, and no other session follows the goal.
+    // Revoked: gone, and no other session follows the goal. Its session never opened the binding the alignment gave (its
+    // binding_changed is still pending on its machine): it gets binding_suspended with effective cancel_pending, so its
+    // machine drops that pending change, and it stays shared under its own epoch (LIM-2441 H8).
     await alAct(LM, alW1Ok.json, "revoke");
     const afterRevoke = await feedOf();
+    const l4Dirs = ((await call("LL", "GET", "/api/v2/directives?cursor=0", { bearer: LD.access })).json?.directives ?? []).filter((d) => d.session_keys?.includes(L.l4.key));
+    const l4Bs = l4Dirs.filter((d) => d.kind === "binding_suspended");
+    const l4Row = withDb((d) => d.prepare("SELECT state, governing_goal_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(LW, L.l4.key));
+    const l4Open = withDb((d) => d.prepare("SELECT goal_id FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL").all(LW, L.l4.key));
+    check(
+      "revoke (LIM-2441 H8): a governed session that never opened the alignment's binding gets one binding_suspended (effective cancel_pending, cause alignment:<id>, after its binding_changed), its governing goal is cleared, and it stays shared under its own open epoch",
+      l4Dirs.some((d) => d.kind === "binding_changed") && l4Bs.length === 1 && l4Bs[0].binding?.effective === "cancel_pending" && l4Bs[0].binding?.cause === `alignment:${alW1?.id}` && l4Bs[0].binding?.goal_id === LGC?.id &&
+        l4Dirs.indexOf(l4Bs[0]) > l4Dirs.findIndex((d) => d.kind === "binding_changed") &&
+        l4Row?.state === "shared" && l4Row.governing_goal_id === null && l4Open.length === 1 && l4Open[0].goal_id === LGR?.id,
+      `${JSON.stringify(l4Dirs.map((d) => [d.kind, d.binding]))} ${JSON.stringify(l4Row)} ${JSON.stringify(l4Open)}`,
+    );
     // A second one, approved, ends when its session stops sharing.
     const alW2 = (await la(LL, "POST", "/alignments", { target_goal_id: LGC?.id, choice: "work_toward", session_keys: [L.l5.key] })).json;
     await alAct(LM, alW2, "approve");
@@ -10841,6 +10854,76 @@ try {
         await browser.close();
       }
     } else check("ui (Chrome) available for the a1 web fix checks", false, `no Chrome at ${CHROME}`);
+    // Who the cancel reaches (LIM-2441 H8): every session that got this alignment's binding_changed and has no epoch under
+    // it, even if its governing goal is already gone; never a session already on that goal by its own right.
+    const LGR2 = (await la(LL, "POST", "/goals", { title: "Archive the old ledger snapshots", visibility: "workspace", team_id: TRet })).json;
+    const LGC2 = (await la(LM, "POST", "/goals", { title: "Rehearse the ledger cutover", visibility: "workspace", team_id: TCut })).json;
+    const h8Share = async (name) => (await lShare(`h8-${name}`, 15)).key;
+    const h8Align = async (goal, key) => {
+      const al = (await la(LL, "POST", "/alignments", { target_goal_id: goal?.id, choice: "work_toward", session_keys: [key] })).json;
+      return (await alAct(LM, al, "approve")).json;
+    };
+    const h8Epoch = (key, goal) => call("LL", "POST", `/api/v2/workspaces/${LW}/sessions/${key}/epochs`, { bearer: LD.access, body: { epoch_id: epochId(), goal_id: goal?.id ?? null, starts_at: new Date().toISOString(), root_turn: null, cause: "manual" } });
+    const h8Cancels = async (key) => ((await call("LL", "GET", "/api/v2/directives?cursor=0", { bearer: LD.access })).json?.directives ?? []).filter((d) => d.session_keys?.includes(key) && d.kind === "binding_suspended");
+    const h8Row = (key) => withDb((d) => d.prepare("SELECT state, governing_goal_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(LW, key));
+    const h8Open = (key) => withDb((d) => d.prepare("SELECT goal_id, authority FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL").all(LW, key));
+    // An epoch to another goal cleared its governance, and its machine still holds the binding_changed.
+    const hCleared = await h8Share("cleared");
+    const alCleared = await h8Align(LGC, hCleared);
+    const clearedEpoch = await h8Epoch(hCleared, LGR2);
+    const clearedBefore = h8Row(hCleared);
+    await alAct(LM, alCleared, "revoke");
+    const clearedCancels = await h8Cancels(hCleared);
+    check(
+      "revoke (LIM-2441 H8): a session whose governance another goal already cleared, with the alignment's binding_changed unopened, still gets one binding_suspended cancel_pending and stays shared on the other goal",
+      clearedEpoch.status === 200 && clearedBefore?.governing_goal_id === null && clearedCancels.length === 1 && clearedCancels[0].binding?.effective === "cancel_pending" && clearedCancels[0].binding?.cause === `alignment:${alCleared?.id}` && clearedCancels[0].binding?.goal_id === LGC?.id &&
+        h8Row(hCleared)?.state === "shared" && h8Open(hCleared)[0]?.goal_id === LGR2?.id,
+      `${clearedEpoch.status} ${JSON.stringify(clearedBefore)} ${JSON.stringify(clearedCancels.map((d) => d.binding))} ${JSON.stringify(h8Open(hCleared))}`,
+    );
+    // Already on the goal by its own right: through the team (a real join), and as the goal's owner.
+    const hTeam = await h8Share("team");
+    const alTeam = await h8Align(LGC, hTeam);
+    await la(LO, "POST", `/teams/${TCut}/members`, { user_id: LL.id, role: "member" });
+    const teamEpoch = await h8Epoch(hTeam, LGC);
+    const teamOpen = h8Open(hTeam);
+    await alAct(LM, alTeam, "revoke");
+    await la(LO, "DELETE", `/teams/${TCut}/members/${LL.id}`);
+    const teamCancels = await h8Cancels(hTeam);
+    const hOwn = await h8Share("own");
+    const alOwn = await h8Align(LGC2, hOwn);
+    await h8Epoch(hOwn, LGC2);
+    withDb((d) => d.prepare("UPDATE v2_epochs SET authority = 'own', alignment_id = NULL WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL").run(LW, hOwn));
+    await alAct(LM, alOwn, "revoke");
+    const ownCancels = await h8Cancels(hOwn);
+    check(
+      "revoke (LIM-2441 H8): a session whose open epoch on the goal is its team's, or its own, gets no cancel and stays shared on that goal",
+      teamEpoch.status === 200 && teamOpen[0]?.authority === "pod" && teamCancels.length === 0 && h8Row(hTeam)?.state === "shared" && h8Open(hTeam)[0]?.goal_id === LGC?.id &&
+        ownCancels.length === 0 && h8Row(hOwn)?.state === "shared" && h8Open(hOwn)[0]?.goal_id === LGC2?.id,
+      `${teamEpoch.text?.slice(0, 120)} ${JSON.stringify(teamOpen)} ${JSON.stringify(teamCancels.map((d) => d.binding))} ${JSON.stringify(ownCancels.map((d) => d.binding))}`,
+    );
+    // It opened the binding and later moved off it: nothing is pending on its machine.
+    const hMoved = await h8Share("moved");
+    const alMoved = await h8Align(LGC, hMoved);
+    const movedOn = await h8Epoch(hMoved, LGC);
+    const movedAuthority = h8Open(hMoved)[0]?.authority;
+    await h8Epoch(hMoved, LGR2);
+    await alAct(LM, alMoved, "revoke");
+    check(
+      "revoke (LIM-2441 H8): a session that opened an epoch under the alignment and later moved off it gets no cancel",
+      movedOn.status === 200 && movedAuthority === "alignment" && (await h8Cancels(hMoved)).length === 0 && h8Open(hMoved)[0]?.goal_id === LGR2?.id,
+      `${movedOn.status} ${movedAuthority} ${JSON.stringify(h8Open(hMoved))}`,
+    );
+    // The goal closes with the switch still pending, and with the governance already cleared.
+    const hClosed = await h8Share("closed");
+    const alClosed = await h8Align(LGC2, hClosed);
+    await h8Epoch(hClosed, LGR2);
+    const closedGoal = await la(LM, "POST", `/goals/${LGC2?.id}/versions`, { version: 1, status: "dropped" });
+    const closedCancels = await h8Cancels(hClosed);
+    check(
+      "a goal dropped (LIM-2441 H8): a session with the alignment's binding_changed unopened gets one binding_suspended cancel_pending with cause goal_closed:<id>, and stays shared",
+      closedGoal.status < 300 && closedCancels.length === 1 && closedCancels[0].binding?.effective === "cancel_pending" && closedCancels[0].binding?.cause === `goal_closed:${alClosed?.id}` && h8Row(hClosed)?.state === "shared",
+      `${closedGoal.status} ${closedGoal.text?.slice(0, 160)} ${JSON.stringify(closedCancels.map((d) => d.binding))}`,
+    );
   }
   // ==== end fix:a1-web ====
 

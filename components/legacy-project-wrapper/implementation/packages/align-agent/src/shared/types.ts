@@ -95,7 +95,8 @@ export interface HotState {
   context_goals?: ContextGoal[];
   /** Requests sent to this session (REQ-002): pending ones, and recently answered or withdrawn ones the hooks still tell. */
   requests?: HotRequest[];
-  /** This session's newest epochs as the sync recorded them, so a hook can tell whether the epoch it opened is in. */
+  /** This session's newest epochs as the sync recorded them, and one it dropped because its binding was cancelled, so a
+   *  hook can tell whether the sync is done with the epoch it opened. */
   epochs_seen?: string[];
   /** Goal holds on this session that were released (the release directive, who released it, the goal's title). */
   released_holds?: { directive_id: string; goal_id?: string; goal_title: string; by: string }[];
@@ -229,7 +230,7 @@ export interface InjectedState {
   superseded_bindings?: string[];
   /** The epoch this hook opened last, and its goal, until the sync has recorded it (hot `epochs_seen`): until then the
    *  hot file's goal is the one before it, which must not read as another switch (N1). */
-  opened_epoch?: { epoch_id: string; goal: GoalSnapshot | null; at: string };
+  opened_epoch?: { epoch_id: string; goal: GoalSnapshot | null; at: string; resumed?: boolean };
   /** The share a folder rule asked for at this session's start, until the sync has made it (hot `share`): `::align
    *  status` says it is on its way rather than "private" (cycle 10, section 5). */
   rule_share?: { workspace_id: string; workspace_name: string; goal_id: string | null; goal_title: string | null; at: string };
