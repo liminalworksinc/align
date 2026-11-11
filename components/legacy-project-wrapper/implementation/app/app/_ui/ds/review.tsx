@@ -219,6 +219,13 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
         {!waits && !launch && cr.state === "approved" && cr.launch === "launched" && `Launched by ${who(cr.launch_decided_by, me)}, ${at(cr.launch_decided_at)}: version ${cr.version} is now the launched version.${delivery.value !== undefined ? ` ${deliveryStatement(cr.version!, delivery.value)}` : ""}`}
         {!waits && !launch && cr.state !== "approved" && cr.state_note}
       </p>
+      {/* The decider (and anyone but the requester, whose Returned block quotes it) sees the reason given (founder ruling,
+          PR 68 pass 1 item 17). */}
+      {cr.state === "rejected" && cr.rejection_reason && cr.requester.id !== me && (
+        <p data-decline-reason className="text-[14px] text-(--text-1) [overflow-wrap:anywhere]">
+          Reason: “{cr.rejection_reason}”
+        </p>
+      )}
     </div>
   );
 }
@@ -416,15 +423,15 @@ export function defaultBody(cr: ChangeRequest, choice: Choice): Record<string, u
 /** What a recorded choice says, after "Recorded: " (empty: just "Recorded."). */
 function doneWords(cr: ChangeRequest, choice: Choice): string {
   switch (choice) {
-    // A launch's own line ("Launched by you, <time>: version N is now the launched version.") says the launch with who
-    // and when, so the notice doesn't restate it.
+    // The notice names the launch too (founder ruling, PR 68 pass 1 item 8): the request's own line says who and when.
     case "approve_and_launch":
+      return `you approved revision ${cr.revision} and launched version ${cr.version ?? cr.goal.version + 1}`;
     // One job each: this says what was recorded; the waits line under the request says approval is not launch, and who
     // launches, once (it is there on a cold open too).
     case "approve":
       return `you approved revision ${cr.revision}`;
     case "launch":
-      return "";
+      return `you launched version ${cr.version ?? cr.goal.version + 1}`;
     case "not_yet":
       return "you decided not yet";
     case "accept_if":

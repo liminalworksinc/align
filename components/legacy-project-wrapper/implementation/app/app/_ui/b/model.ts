@@ -62,11 +62,41 @@ export function versions(cr: ChangeRequest): { launched: string; approved: strin
   return { launched, approved: "none", approvedLine: "Not approved", line: "Not approved" };
 }
 
-/** A one-line meaning of the request: what it changes, from the request's own fields. */
+/** A one-line meaning of the request: its first change in words, from the request's own diff, and how many more, so
+ *  two requests on one goal never read alike (founder ruling, PR 68 pass 1 item 9). */
 export function oneLine(cr: ChangeRequest): string {
-  const keys = Object.keys(cr.changes) as (keyof ChangeRequest["changes"])[];
-  const words: Record<string, string> = { title: "the goal's title", measures: "the measures", depends_on: "what it depends on", status: "the goal's status", limits: "the limits" };
-  return keys.length ? `Changes ${keys.map((k) => words[k] ?? k).join(", ")}` : "No field changes";
+  const { before, after } = cr.diff;
+  const q = (s: string) => `“${s.length > 48 ? `${s.slice(0, 47)}…` : s}”`;
+  const out: string[] = [];
+  if (after.title !== undefined && after.title !== before.title) out.push(`Renames it ${q(after.title)}`);
+  if (after.measures) {
+    const b = before.measures ?? [];
+    for (const m of after.measures) {
+      const was = b.find((x) => x.id === m.id);
+      if (!was) out.push(`Adds measure ${q(m.text)}`);
+      else if (was.text === m.text && (was.target ?? null) !== (m.target ?? null)) out.push(`Target of ${q(m.text)}: ${was.target ?? "none"} → ${m.target ?? "none"}`);
+      else if (was.text !== m.text) out.push(`Rewords measure ${q(was.text)}`);
+    }
+    for (const m of b) if (!after.measures.some((x) => x.id === m.id)) out.push(`Removes measure ${q(m.text)}`);
+  }
+  if (after.limits) {
+    const b = before.limits ?? [];
+    for (const l of after.limits) {
+      const was = b.find((x) => x.id === l.id);
+      if (!was) out.push(`Adds limit ${q(l.text)}`);
+      else if (was.text !== l.text || was.type !== l.type) out.push(`Changes limit ${q(was.text)}`);
+    }
+    for (const l of b) if (!after.limits.some((x) => x.id === l.id)) out.push(`Removes limit ${q(l.text)}`);
+  }
+  if (after.status !== undefined && after.status !== before.status) out.push(after.status === "dropped" ? "Drops the goal" : after.status === "achieved" ? "Marks it achieved" : "Makes it active again");
+  if (after.depends_on) out.push("Changes what it depends on");
+  if (!out.length) {
+    // Only an order changed, or the diff is missing: name the fields, as before.
+    const keys = Object.keys(cr.changes) as (keyof ChangeRequest["changes"])[];
+    const words: Record<string, string> = { title: "the goal's title", measures: "the measures", depends_on: "what it depends on", status: "the goal's status", limits: "the limits" };
+    return keys.length ? `Changes ${keys.map((k) => words[k] ?? k).join(", ")}` : "No field changes";
+  }
+  return out.length > 1 ? `${out[0]} and ${out.length - 1} more change${out.length > 2 ? "s" : ""}` : out[0];
 }
 
 export const ago = (iso: string) => {

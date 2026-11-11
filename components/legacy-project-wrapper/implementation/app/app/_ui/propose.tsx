@@ -22,6 +22,7 @@ import type { ChangeRequest, Goal } from "./types";
 
 const WHY_MAX = 2000;
 const TEXT_MAX = 300;
+const TARGET_MAX = 120;
 
 type Part = "" | "title" | "add" | "achieved" | "dropped" | `m:${string}`;
 
@@ -37,42 +38,55 @@ function deciders(g: Goal): string {
   return `Usually ${usual}. You can't decide your own request. The exact people are named when it is sent.`;
 }
 
-/** The change the server takes, from the pick and its words; null when it would change nothing. */
-function changesFor(g: Goal, part: Part, text: string): ChangeRequest["changes"] | null {
+/** The change the server takes, from the pick and its words (a measure's text and target); null when it would change
+ *  nothing. */
+function changesFor(g: Goal, part: Part, text: string, target: string): ChangeRequest["changes"] | null {
   const t = text.trim();
+  const tg = target.trim() || null;
   if (part === "title") return t === g.title ? null : { title: t };
   // A new measure goes without an id: the server gives it one.
-  if (part === "add") return { measures: [...g.measures, { text: t, target: null } as Goal["measures"][number]] };
+  if (part === "add") return { measures: [...g.measures, { text: t, target: tg } as Goal["measures"][number]] };
   if (part === "achieved" || part === "dropped") return g.status === part ? null : { status: part };
   if (part.startsWith("m:")) {
     const id = part.slice(2);
     const m = g.measures.find((x) => x.id === id);
-    if (!m || m.text === t) return null;
-    return { measures: g.measures.map((x) => (x.id === id ? { ...x, text: t } : x)) };
+    if (!m || (m.text === t && (m.target ?? null) === tg)) return null;
+    return { measures: g.measures.map((x) => (x.id === id ? { ...x, text: t, target: tg } : x)) };
   }
   return null;
 }
 
+/** Sent after a request is created here, so a page showing counts (Home) reads them again. */
+export const PROPOSED_EVENT = "align:proposed";
+
+/** The person's own open requests (pending or countered, the server's one-per-goal rule), by goal. */
+export type OpenByGoal = Map<string, ChangeRequest>;
+
 /** A label for the link, from its address: the host and path, at most 120 characters. */
 const linkLabel = (u: URL) => `${u.host}${u.pathname === "/" ? "" : u.pathname}`.slice(0, 120);
 
-function Form({ ws, me, goals, start, onClose }: { ws: string; me?: string; goals: Goal[]; start?: string; onClose: () => void }) {
+function Form({ ws, me, goals, openBy, start, onClose }: { ws: string; me?: string; goals: Goal[]; openBy: OpenByGoal | null; start?: string; onClose: () => void }) {
   const mine = goals.filter((g) => g.status === "active" && g.owner.id !== me);
   const [goalId, setGoalId] = useState(start && mine.some((g) => g.id === start) ? start : "");
   const [part, setPart] = useState<Part>("");
   const [text, setText] = useState("");
+  const [target, setTarget] = useState("");
   const [why, setWhy] = useState("");
   const [link, setLink] = useState("");
-  const [errors, setErrors] = useState<Partial<Record<"goal" | "part" | "text" | "why" | "link" | "form", string>>>({});
+  const [errors, setErrors] = useState<Partial<Record<"goal" | "part" | "text" | "target" | "why" | "link" | "form", string>>>({});
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState<{ cr: ChangeRequest; linkError: string | null } | null>(null);
   const goalRef = useRef<HTMLSelectElement>(null);
   const partRef = useRef<HTMLSelectElement>(null);
   const textRef = useRef<HTMLInputElement>(null);
+  const targetRef = useRef<HTMLInputElement>(null);
   const whyRef = useRef<HTMLTextAreaElement>(null);
   const linkRef = useRef<HTMLInputElement>(null);
   const g = mine.find((x) => x.id === goalId) ?? null;
   const needsText = part === "title" || part === "add" || part.startsWith("m:");
+  const isMeasure = part === "add" || part.startsWith("m:");
+  // Said before the form, not after it is filled (founder ruling, PR 68 pass 1 item 1).
+  const openCr = g ? (openBy?.get(g.id) ?? null) : null;
 
   if (!mine.length)
     return (
@@ -116,8 +130,9 @@ function Form({ ws, me, goals, start, onClose }: { ws: string; me?: string; goal
     if (!g) e.goal = "Choose a goal.";
     if (!part) e.part = "Choose what should change.";
     if (g && part && needsText && !text.trim()) e.text = part === "add" ? "Say what the new measure is." : "Say what it should say instead.";
-    else if (g && part && !changesFor(g, part, text)) e.text = part === "achieved" || part === "dropped" ? "The goal is already marked that way." : "That's what it says now.";
+    else if (g && part && !changesFor(g, part, text, target)) e.text = part === "achieved" || part === "dropped" ? "The goal is already marked that way." : "That's what it says now.";
     if (text.trim().length > TEXT_MAX) e.text = `Keep it to ${TEXT_MAX} characters.`;
+    if (isMeasure && target.trim().length > TARGET_MAX) e.target = `Keep the target to ${TARGET_MAX} characters.`;
     if (!why.trim()) e.why = "Say why this should change.";
     else if (why.length > WHY_MAX) e.why = `Keep it to ${WHY_MAX} characters.`;
     if (link.trim()) {
@@ -134,15 +149,16 @@ function Form({ ws, me, goals, start, onClose }: { ws: string; me?: string; goal
   const send = async () => {
     const e = check();
     setErrors(e);
-    const first = (["goal", "part", "text", "why", "link"] as const).find((k) => e[k]);
+    const first = (["goal", "part", "text", "target", "why", "link"] as const).find((k) => e[k]);
     if (first) {
-      ({ goal: goalRef, part: partRef, text: textRef, why: whyRef, link: linkRef })[first].current?.focus();
+      ({ goal: goalRef, part: partRef, text: textRef, target: targetRef, why: whyRef, link: linkRef })[first].current?.focus();
       return;
     }
     if (!g) return;
     setBusy(true);
     try {
-      const cr = await api<ChangeRequest>(`/api/v2/workspaces/${ws}/goals/${g.id}/change-requests`, { body: { base_version: g.version, changes: changesFor(g, part, text), reason: why.trim() } });
+      const cr = await api<ChangeRequest>(`/api/v2/workspaces/${ws}/goals/${g.id}/change-requests`, { body: { base_version: g.version, changes: changesFor(g, part, text, target), reason: why.trim() } });
+      window.dispatchEvent(new CustomEvent(PROPOSED_EVENT, { detail: ws }));
       let linkError: string | null = null;
       if (link.trim()) {
         const u = new URL(link.trim());
@@ -188,11 +204,29 @@ function Form({ ws, me, goals, start, onClose }: { ws: string; me?: string; goal
           <option value="">Choose a goal</option>
           {mine.map((x) => (
             <option key={x.id} value={x.id}>
-              {x.title} (v{x.version})
+              {x.title} (v{x.version}){openBy?.has(x.id) ? " · your request is open" : ""}
             </option>
           ))}
         </SelectInput>
       </FormField>
+      {openCr ? (
+        <div className="flex flex-col gap-3 text-[15px]" data-propose="open" role="status">
+          <p className="font-semibold text-(--text-1)">You already have an open request on this goal.</p>
+          <p className="text-(--text-2)">
+            {openCr.state === "countered" ? "An approver suggested a change to it; accept it or withdraw it." : "It is waiting for a decision."} Align takes one open request per person and goal: open
+            yours to add to it or withdraw it, then ask again.
+          </p>
+          <div className="flex flex-wrap justify-end gap-3">
+            <button type="button" className={outline} onClick={onClose}>
+              Not now
+            </button>
+            <Link href={`/app/w/${ws}?review=${openCr.goal.id}.${openCr.id}`} className={filled} onClick={onClose} data-propose-open-request>
+              Open your request
+            </Link>
+          </div>
+        </div>
+      ) : (
+      <>
       <FormField
         label="What should change"
         error={errors.part}
@@ -216,7 +250,9 @@ function Form({ ws, me, goals, start, onClose }: { ws: string; me?: string; goal
           onChange={(ev) => {
             const p = ev.target.value as Part;
             setPart(p);
-            setText(p === "title" ? (g?.title ?? "") : p.startsWith("m:") ? (g?.measures.find((m) => `m:${m.id}` === p)?.text ?? "") : "");
+            const m = p.startsWith("m:") ? g?.measures.find((x) => `m:${x.id}` === p) : undefined;
+            setText(p === "title" ? (g?.title ?? "") : (m?.text ?? ""));
+            setTarget(m?.target ?? "");
           }}
         >
           <option value="">{g ? "Choose what" : "Choose a goal first"}</option>
@@ -238,6 +274,12 @@ function Form({ ws, me, goals, start, onClose }: { ws: string; me?: string; goal
       {needsText && (
         <FormField label={part === "add" ? "The new measure" : "It should say"} error={errors.text} count={{ value: text.length, max: TEXT_MAX }}>
           <TextInput ref={textRef} data-propose-field="text" value={text} onChange={(ev) => setText(ev.target.value)} />
+        </FormField>
+      )}
+      {/* A measure's target changes here too (founder ruling, PR 68 pass 1 item 2). */}
+      {isMeasure && (
+        <FormField label="Target" optional error={errors.target} hint={part === "add" ? "Like “5 by Dec 31” or “80%”." : "Clear it to remove the target."}>
+          <TextInput ref={targetRef} data-propose-field="target" value={target} maxLength={TARGET_MAX} onChange={(ev) => setTarget(ev.target.value)} />
         </FormField>
       )}
       {!needsText && errors.text && <p className="text-[13px] font-medium text-(--st-declined)">{errors.text}</p>}
@@ -267,6 +309,8 @@ function Form({ ws, me, goals, start, onClose }: { ws: string; me?: string; goal
           {busy ? "Sending…" : "Send for approval"}
         </button>
       </div>
+      </>
+      )}
     </form>
   );
 }
@@ -284,6 +328,16 @@ function goalHere(): string | undefined {
 export function ProposeControl({ ws, me, className }: { ws: string; me?: string; className?: string }) {
   const [open, setOpen] = useState<{ start?: string } | null>(null);
   const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
+  // Read each time the drawer opens, so the form can say up front that a goal already has the person's open request.
+  // Unread (failed or still reading): the form works as before and the server's refusal still says it.
+  const crs = useApi<{ waiting_on_me: ChangeRequest[]; mine: ChangeRequest[]; others: ChangeRequest[] }>(open ? `/api/v2/workspaces/${ws}/change-requests` : null);
+  const openBy: OpenByGoal | null = crs.data
+    ? new Map(
+        [...crs.data.waiting_on_me, ...crs.data.mine, ...crs.data.others]
+          .filter((c) => c.requester.id === me && (c.state === "pending" || c.state === "countered"))
+          .map((c) => [c.goal.id, c] as const),
+      )
+    : null;
   if (feed.data && feed.data.goals.length === 0) return null;
   return (
     <>
@@ -295,7 +349,7 @@ export function ProposeControl({ ws, me, className }: { ws: string; me?: string;
       {open && (
         <Drawer open onClose={() => setOpen(null)} eyebrow="Change the plan" title="Propose a change">
           {feed.data ? (
-            <Form ws={ws} me={me} goals={feed.data.goals} start={open.start} onClose={() => setOpen(null)} />
+            <Form ws={ws} me={me} goals={feed.data.goals} openBy={openBy} start={open.start} onClose={() => setOpen(null)} />
           ) : feed.error ? (
             <p className="text-[15px] text-(--text-2)">Align couldn&apos;t read the goals just now: {feed.error}</p>
           ) : (

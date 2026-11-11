@@ -562,7 +562,14 @@ section the server could not read SHALL say "unknown", never zero, and nothing o
 doing (no working, stuck, blocked or diverged state, and no claim that an app has the current goal version or is "on
 the current plan": Align knows only which versions it sent an app, never which one the app uses; the decision value
 card names the apps Align sent a launched version). The page
-reads once when it opens and does not poll (only its first-run card checks the apps while it is shown).
+reads once when it opens and does not poll (only its first-run card checks the apps while it is shown, and its "Since
+you last looked" section checks for new changes as below).
+
+Home's "Since you last looked" SHALL compare against the last time this person left this workspace's Home on this
+device, in any tab; coming back to Home in the same tab, without a reload, compares against when they left it. While
+Home stays open, it SHALL add new changes without a reload, checking at most once a minute. With no earlier visit on
+the device it SHALL say "First visit on this device, so nothing to compare yet." The time is kept in this browser only
+and is never sent to the server.
 
 The read SHALL return, for a workspace member or viewer (cookie only: an `Authorization` header gets `403
 bearer_not_allowed`, a non-member `404`), `change_requests` (`waiting_on_me`, `waiting_on_others`, `declined`), `asks`

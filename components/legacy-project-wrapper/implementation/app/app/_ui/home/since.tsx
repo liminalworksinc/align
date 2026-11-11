@@ -12,10 +12,13 @@ import type { EvidenceClass } from "@/lib/v2/home-core.mts";
 // the goals. Each line carries its source: a person's action as Align recorded it, Align itself, or an app's goal read
 // as its evidence class. Nothing here says what an agent did with a goal.
 //
-// The last visit is kept per workspace and person in this browser only (localStorage), so the wording always says "on
-// this device". The baseline for this tab is held in sessionStorage, so a reload or a trip to a review and back keeps
-// the same list instead of emptying it. With no earlier visit on this device, it says what the list will show rather
-// than inventing a history. Storage can be blocked: every access is guarded, and blocked storage reads as a first visit.
+// The last visit is when this person last left this workspace's Home on this device, in any tab (specs/align/
+// interface.md, Workspace Home; founder ruling, PR 68 pass 1 item 12). It is kept in this browser only (localStorage),
+// so the wording always says "on this device", and written when Home is left (unmounted, or the tab hidden for good),
+// so coming back to Home in the same tab compares with when they left it. While Home stays open, the section asks Home
+// to read again at most once a minute and adds what changed. With no earlier visit on this device, it says what the
+// list will show rather than inventing a history. Storage can be blocked: every access is guarded, and blocked storage
+// reads as a first visit.
 
 export interface SinceGoal {
   id: string;
@@ -48,28 +51,47 @@ function write(store: () => Storage, k: string, v: string) {
   }
 }
 
-/** This tab's baseline: the visit before this one on this device ("none" for a first visit), fixed for the tab's life;
- *  the stored last visit moves to now. null until read after mount, so the server and first client render agree. */
+/** The baseline: when this person last left this Home on this device (null for a first visit), read once per mount;
+ *  leaving (unmount, or the page hidden as it unloads) stores now. null until read after mount, so the server and first
+ *  client render agree. */
 function useLastVisit(ws: string, me: string): { ready: boolean; since: string | null } {
   const [v, setV] = useState<{ ready: boolean; since: string | null }>({ ready: false, since: null });
   useEffect(() => {
     const k = key(ws, me);
-    let base = read(() => sessionStorage, k);
-    if (base === null) {
-      base = read(() => localStorage, k) ?? "none";
-      write(() => sessionStorage, k, base);
-    }
-    write(() => localStorage, k, new Date().toISOString());
-    const t = setTimeout(() => setV({ ready: true, since: base === "none" || Number.isNaN(Date.parse(base)) ? null : base }), 0);
-    return () => clearTimeout(t);
+    const base = read(() => localStorage, k);
+    const t = setTimeout(() => setV({ ready: true, since: base === null || Number.isNaN(Date.parse(base)) ? null : base }), 0);
+    const left = () => write(() => localStorage, k, new Date().toISOString());
+    window.addEventListener("pagehide", left);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("pagehide", left);
+      left();
+    };
   }, [ws, me]);
   return v;
+}
+
+/** While Home stays open and visible, ask it to read again once a minute (`onRefresh`), and count the ticks so the
+ *  goal versions read again too. */
+const REFRESH_MS = 60_000;
+function useMinuteTick(onRefresh: (() => void) | undefined): number {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!onRefresh) return;
+    const id = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      onRefresh();
+      setTick((n) => n + 1);
+    }, REFRESH_MS);
+    return () => clearInterval(id);
+  }, [onRefresh]);
+  return tick;
 }
 
 type Versions = Map<string, { version: number; created_at: string }[]>;
 
 /** Each readable goal's versions (GET …/goals/:id, newest first), for versions saved since the last visit. */
-function useVersions(ws: string, goals: SinceGoal[] | null, on: boolean): Versions | null {
+function useVersions(ws: string, goals: SinceGoal[] | null, on: boolean, tick = 0): Versions | null {
   const [v, setV] = useState<Versions | null>(null);
   const ids = goals?.slice(0, MAX_GOALS).map((g) => g.id).join(",") ?? null;
   useEffect(() => {
@@ -94,7 +116,7 @@ function useVersions(ws: string, goals: SinceGoal[] | null, on: boolean): Versio
     return () => {
       live = false;
     };
-  }, [ws, ids, on]);
+  }, [ws, ids, on, tick]);
   return v;
 }
 
@@ -110,9 +132,12 @@ export default function Since({
   goals,
   apps,
   onReview,
+  onRefresh,
 }: {
   ws: string;
   me: string;
+  /** Home reads its requests, goals and apps again (once a minute while open, from this section). */
+  onRefresh?: () => void;
   /** Every change request the person can read (GET …/change-requests, all groups), or null when that read failed. */
   changes: ChangeRequest[] | null;
   /** The goals on the Home (GET …/home → goals), or null when that read failed. */
@@ -124,7 +149,8 @@ export default function Since({
 }) {
   const visit = useLastVisit(ws, me);
   const since = visit.since;
-  const versions = useVersions(ws, goals, !!since);
+  const tick = useMinuteTick(onRefresh);
+  const versions = useVersions(ws, goals, !!since, tick);
   const [all, setAll] = useState(false);
 
   const events = useMemo(() => {

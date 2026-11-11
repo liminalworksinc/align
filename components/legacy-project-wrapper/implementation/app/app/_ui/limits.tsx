@@ -95,6 +95,9 @@ export function useStashedLimits(goalId: string, apply: (d: LimitDraft[]) => voi
 export function GoalLimits({ ws, goal, canEdit, onDone }: { ws: string; goal: Goal; canEdit: boolean; onDone: () => void }) {
   const detail = useApi<WsDetail>(`/api/v2/workspaces/${ws}`);
   const [suggesting, setSuggesting] = useState(false);
+  // After a sent suggestion the card says so in one line (founder ruling, PR 68 pass 1 item 4), and offers no second
+  // suggestion while that request is open (the server allows one open request per person and goal).
+  const [sent, setSent] = useState(false);
   const ls = goal.limits ?? [];
   const member = !!detail.data && detail.data.role !== "viewer";
   const canPropose = member && !canEdit && goal.owner.id !== detail.data?.me && goal.status === "active";
@@ -116,14 +119,29 @@ export function GoalLimits({ ws, goal, canEdit, onDone }: { ws: string; goal: Go
         Limits are part of the goal: they change only through a new version, and agents of sessions bound to this goal get them with it as context set by the people who approve it.
         {canEdit && " Edit them in New version below."}
       </p>
-      {canPropose && !suggesting && (
+      {sent && (
+        <p role="status" data-limit-sent className="mb-2 rounded-(--radius-s) border border-(--line) bg-(--bg-inset) px-3 py-2 text-[14px] text-(--text-1)">
+          Sent for approval. The goal&apos;s owner or a lead of its team decides; nothing changes until they approve and someone launches. It is under Change requests below.
+        </p>
+      )}
+      {canPropose && !suggesting && !sent && (
         <div className="mb-2">
           <Btn kind="secondary" onClick={() => setSuggesting(true)}>
             Suggest a limit
           </Btn>
         </div>
       )}
-      {canPropose && suggesting && <SuggestLimit ws={ws} goal={goal} onClose={() => setSuggesting(false)} onDone={onDone} />}
+      {canPropose && suggesting && (
+        <SuggestLimit
+          ws={ws}
+          goal={goal}
+          onClose={() => setSuggesting(false)}
+          onDone={() => {
+            setSent(true);
+            onDone();
+          }}
+        />
+      )}
       {member && goal.status === "active" && <NotesSuggest ws={ws} preferGoalId={goal.id} onDone={onDone} />}
     </Panel>
   );
@@ -131,7 +149,7 @@ export function GoalLimits({ ws, goal, canEdit, onDone }: { ws: string; goal: Go
 
 /** A change request that adds limits: the goal's limits plus the new ones, for its approval set to decide. */
 function SuggestLimit({ ws, goal, onClose, onDone }: { ws: string; goal: Goal; onClose: () => void; onDone: () => void }) {
-  const [limits, setLimits] = useState<LimitDraft[]>(() => [...limitsDraft(goal.limits), { type: "must_not", text: "", source_title: "", source_date: "" }]);
+  const [limits, setLimits] = useState<LimitDraft[]>(() => [...limitsDraft(goal.limits), { type: "must", text: "", source_title: "", source_date: "" }]);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
   const act = useAction();
@@ -203,8 +221,9 @@ export function LimitEditor({ value, onChange }: { value: LimitDraft[]; onChange
           </div>
         </div>
       ))}
+      {/* A new row starts as "Must", which its placeholder's example is (DEFECT 14, PR 68 pass 1). */}
       {value.length < LIMITS_MAX && (
-        <Btn kind="secondary" onClick={() => onChange([...value, { type: "must_not", text: "", source_title: "", source_date: "" }])}>
+        <Btn kind="secondary" onClick={() => onChange([...value, { type: "must", text: "", source_title: "", source_date: "" }])}>
           Add a limit
         </Btn>
       )}

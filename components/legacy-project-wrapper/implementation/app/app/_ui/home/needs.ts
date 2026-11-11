@@ -24,6 +24,7 @@
 import type { StatusKind } from "../ds";
 import type { Alignment, ChangeRequest } from "../types";
 import { changeWaits, launchWaits, type HomePerson } from "../../../../lib/v2/home-core.mts";
+import { oneLine } from "../b/model";
 
 export type NeedKind = "launch" | "decide" | "returned" | "agent_declined" | "team_ask" | "alignment" | "app_behind";
 export type NeedPhase = "needs_you" | "waiting_on_others" | "done";
@@ -249,7 +250,7 @@ function crNeed(cr: ChangeRequest, me: string, returning?: Set<string>): Need | 
       return { ...base, kind: "launch", phase: "waiting_on_others", tone: "held", cause: asker, since: cr.decided_at ? { at: cr.decided_at, field: "decided_at" } : null, action: null, who: `Nobody can launch it as it stands: ${cr.dependency_loop}` };
     const since = cr.launch === "not_yet" && cr.launch_decided_at ? { at: cr.launch_decided_at, field: "launch_decided_at" } : cr.decided_at ? { at: cr.decided_at, field: "decided_at" } : null;
     return lw.can_launch
-      ? { ...base, kind: "launch", phase: "needs_you", tone: cr.launch === "not_yet" ? "held" : "approved", cause: `${asker}, approved by ${cr.approved_by?.id === me ? "you" : (cr.approved_by?.name ?? "an approver")}`, since, action: { label: `Launch v${next}`, opens: "review: launch" }, who: null }
+      ? { ...base, kind: "launch", phase: "needs_you", tone: cr.launch === "not_yet" ? "held" : "approved", cause: `${oneLine(cr)} · ${asker}, approved by ${cr.approved_by?.id === me ? "you" : (cr.approved_by?.name ?? "an approver")}`, since, action: { label: `Launch v${next}`, opens: "review: launch" }, who: null }
       : { ...base, kind: "launch", phase: "waiting_on_others", tone: cr.launch === "not_yet" ? "held" : "approved", cause: asker, since, action: null, who: `${names(lw.launchers, me)} can launch it` };
   }
 
@@ -263,7 +264,8 @@ function crNeed(cr: ChangeRequest, me: string, returning?: Set<string>): Need | 
     // (a) A decision waiting on you: your `can` has a decision (approve, approve_and_launch, reject or counter).
     if ((w.next === "decide" || w.next === "resolve_loop") && (c.approve || c.approve_and_launch || c.reject || c.counter)) {
       // "Review", not a decision's name: the choice is made in the review.
-      return { ...base, kind: "decide", phase: "needs_you", tone: "pending", cause: asker, since, action: { label: "Review", opens: "review" }, who: null };
+      // What it changes leads, so two requests on one goal never read alike (founder ruling, PR 68 pass 1 item 9).
+      return { ...base, kind: "decide", phase: "needs_you", tone: "pending", cause: `${oneLine(cr)} · ${asker}`, since, action: { label: "Review", opens: "review" }, who: null };
     }
     // (c) Your request that came back: a suggested change to accept, a condition to acknowledge, an update to the
     // goal's current version.

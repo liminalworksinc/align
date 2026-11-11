@@ -54,9 +54,10 @@ function Line({ ws, g, latest, launch, fed, onReview }: { ws: string; g: GoalLin
     <li className="grid min-h-[44px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 px-4 py-1.5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto] max-md:items-start max-md:py-2.5" data-goal-line={g.id}>
       {/* The title wins: it wraps to two lines before it is cut, and the metadata goes first (team, then version). */}
       <div className="flex min-w-0 items-baseline gap-2">
-        <span className="line-clamp-2 min-w-0 text-[14px] font-medium text-(--text-1)" title={g.title}>
+        {/* The title opens the goal (founder ruling, PR 68 pass 1 item 11): it is what everyone clicks. */}
+        <Link href={`/app/w/${ws}/goals/${g.id}`} className="line-clamp-2 min-w-0 text-[14px] font-medium text-(--text-1) hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)" title={g.title} data-goal-title>
           {g.title}
-        </span>
+        </Link>
         <span className="shrink-0 font-mono text-[12px] text-(--text-3) max-[359px]:hidden">
           v{g.version}
           <span className="max-sm:hidden"> · {g.level === "company" ? "Company" : (g.team?.name ?? "Team")}</span>

@@ -95,7 +95,9 @@ export default function FirstRun({
   /** The server's rules for creating a workspace, so an empty workspace offers to create the sample only when it can. */
   creation?: CreationOptions;
 }) {
-  const [open, setOpen] = useState(false);
+  // `?connect=1` (the Goals tab's "Connect one agent" after a first goal) opens the connect steps. Home mounts this card
+  // only after its reads land in the browser, so reading the address here never differs from a server render.
+  const [open, setOpen] = useState(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("connect") === "1");
   // Creating the sample from an empty workspace: the same route and gate as /app's "Create the Northstar sample". The
   // bot check (hosted) is shown only once the person asks for the sample.
   const [makeSample, setMakeSample] = useState<{ asked: boolean; busy: boolean; error: string | null }>({ asked: false, busy: false, error: null });

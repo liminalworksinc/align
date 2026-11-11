@@ -29,6 +29,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
   const [limits, setLimits] = useState<LimitDraft[]>([]);
   const [target, setTarget] = useState("");
   const act = useAction();
+  const [created, setCreated] = useState<{ id: string; title: string; first: boolean } | null>(null);
   const myTeams = detail.data?.teams.filter((p) => p.my_role) ?? [];
   const canCreate = detail.data && detail.data.role !== "viewer";
   const owner = detail.data?.role === "owner";
@@ -54,7 +55,8 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
                 {g.level === "company" && <Pill tone="violet">company</Pill>}
                 <Pill>{VISIBILITY_LABEL[g.visibility]}</Pill>
                 {g.team && <Pill tone="violet">{g.team.name}</Pill>}
-                {g.bindable ? <Pill tone="green">you can bind sessions</Pill> : <Pill tone="amber">needs alignment to bind</Pill>}
+                {/* Binding is about active goals only: a dropped or achieved goal says nothing about it (DEFECT 15, PR 68 pass 1). */}
+                {g.status === "active" && (g.bindable ? <Pill tone="green">you can bind sessions</Pill> : <Pill tone="amber">needs alignment to bind</Pill>)}
                 {held.has(g.id) && (
                   <span data-held-goal={g.id}>
                     <Pill tone="red">agents on hold</Pill>
@@ -75,19 +77,47 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
         </ul>
       </Card>
       )}
-      {canCreate && <NotesSuggest ws={ws} onDone={feed.reload} />}
+      {created && (
+        <div role="status" data-goal-created={created.first ? "first" : "more"} className="mb-4 rounded-(--radius-m) border border-(--line-strong) bg-(--bg-panel) px-4 py-3 text-[15px] text-(--text-1)">
+          <p className="font-semibold">
+            Goal created:{" "}
+            <Link href={`/app/w/${ws}/goals/${created.id}`} className="underline underline-offset-2">
+              {created.title}
+            </Link>
+          </p>
+          {created.first ? (
+            <>
+              <p className="mt-1 text-(--text-2)">Next: connect one agent. It reads this goal at its next turn, as you.</p>
+              <Link
+                href={`/app/w/${ws}?connect=1`}
+                className="mt-3 inline-flex min-h-[40px] items-center rounded-(--radius-s) bg-(--accent) px-3.5 text-[14px] font-medium text-(--text-on-accent) hover:bg-(--accent-hover) max-sm:min-h-[44px]"
+                data-goal-created-next
+              >
+                Connect one agent
+              </Link>
+            </>
+          ) : (
+            <p className="mt-1 text-(--text-2)">It is version 1. People can ask to change it from its page.</p>
+          )}
+        </div>
+      )}
       {canCreate && (
         <Card title="New goal">
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              // The workspace's first active goal gets "Connect one agent" as its next step (founder ruling, PR 68 pass 1 item 7).
+              const firstGoal = !feed.data?.goals.some((g) => g.status === "active");
+              const sentTitle = title.trim();
               void act.run(
-                () =>
-                  api(`/api/v2/workspaces/${ws}/goals`, {
+                async () => {
+                  const g = await api<{ id: string }>(`/api/v2/workspaces/${ws}/goals`, {
                     body: company
                       ? { title, level: "company", visibility: "workspace", measures: measuresOut(measures), anchors: anchorsOut(anchors), limits: limitsOut(limits), target_share: targetOut(target) }
                       : { title, level: "team", visibility, team_id: team || null, measures: measuresOut(measures), anchors: anchorsOut(anchors), limits: limitsOut(limits), target_share: targetOut(target) },
-                  }),
+                  });
+                  setCreated({ id: g.id, title: sentTitle, first: firstGoal });
+                },
                 () => {
                   setTitle("");
                   setMeasures(measuresDraft());
@@ -102,7 +132,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
             <Field label="Goal">
               <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required autoFocus={first} />
             </Field>
-            <MeasuresEditor value={measures} onChange={setMeasures} />
+            <MeasuresEditor value={measures} onChange={setMeasures} keepOne />
             <LimitEditor value={limits} onChange={setLimits} />
             {owner && (
               <Field label="Level" hint="Only workspace owners create company goals. A company goal has no team and everyone in the workspace sees it.">
@@ -152,6 +182,8 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
           </form>
         </Card>
       )}
+      {/* A second way in, after the form rather than above it (founder ruling, PR 68 pass 1 item 19). */}
+      {canCreate && <NotesSuggest ws={ws} onDone={feed.reload} />}
     </Shell>
   );
 }

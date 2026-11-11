@@ -8,6 +8,7 @@ import Since from "../../_ui/home/since";
 import { useRead } from "../../_ui/ds/read";
 import { Loading, Shell, useApi } from "../../_ui/kit";
 import { NotInWorkspace } from "../../_ui/missing";
+import { PROPOSED_EVENT } from "../../_ui/propose";
 import type { CreationOptions, Me } from "../../_ui/server";
 import type { ChangeRequest, Goal } from "../../_ui/types";
 import FirstRun from "./first-run";
@@ -82,6 +83,18 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
     reloadChanges();
     setReloadToken((t) => t + 1);
   }, [reloadHome, reloadChanges]);
+  // "Since you last looked" reads again once a minute while Home stays open (specs/align/interface.md, Workspace Home).
+  const refreshSince = useCallback(() => {
+    reloadHome();
+    reloadChanges();
+  }, [reloadHome, reloadChanges]);
+  // A request sent from the shell's Propose a change drawer changes this page's counts: read them again (DEFECT 6,
+  // PR 68 pass 1: "Waiting on others" stayed 0 until a reload).
+  useEffect(() => {
+    const on = (e: Event) => (e as CustomEvent<string>).detail === ws && reloadAll();
+    window.addEventListener(PROPOSED_EVENT, on);
+    return () => window.removeEventListener(PROPOSED_EVENT, on);
+  }, [ws, reloadAll]);
 
   // "Next" after a decision (round 2): NeedsList hands over its Needs-you rows in its own order; the keys when this
   // review opened are the snapshot; the rows after the decision are `fresh` (undefined while NeedsList reads again).
@@ -143,7 +156,7 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
           <Loading />
         ) : noGoals ? null : (
           <>
-            <Since ws={ws} me={me.id} changes={c.data ? allCrs : null} goals={h.goals} apps={h.apps?.items ?? null} onReview={(goal, id) => setReview({ goal, id })} />
+            <Since ws={ws} me={me.id} changes={c.data ? allCrs : null} goals={h.goals} apps={h.apps?.items ?? null} onReview={(goal, id) => setReview({ goal, id })} onRefresh={refreshSince} />
             <GoalLines ws={ws} goals={h.goals} changes={c.data ? allCrs : null} feed={feed.data?.goals ?? null} canCreate={role === "owner" || role === "member"} onReview={(goal, id) => setReview({ goal, id })} />
           </>
         )}

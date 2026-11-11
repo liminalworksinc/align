@@ -46,6 +46,8 @@ export const NEXT_WORDS = {
   reading: "Checking what else waits on you…",
   unread: "Align couldn't read what else waits on you.",
   none_actionable: "Nothing else waits on a decision from you.",
-  last: "That was the last thing waiting on you.",
+  // True after a decision and after withdrawing one's own request, which waited on someone else (founder ruling, PR 68
+  // pass 1 item 18).
+  last: "Nothing else waits on you.",
   changed: "The list changed while you were here.",
 } as const;
