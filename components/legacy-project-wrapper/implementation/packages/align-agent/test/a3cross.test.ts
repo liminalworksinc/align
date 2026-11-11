@@ -140,7 +140,7 @@ describe("A3-cross-1: an agent refusing or explaining a ban is not told it may c
     }
     assert.equal(
       turn(reply("acycle3 L10")),
-      'Align: the agent\'s last reply may conflict with a limit on goal "Cut over the ledger database": Must not "Drop the old ledger cluster before the cutover." This is a word check on this machine only; nothing was sent or added to the agent\'s context. `align config drift off` turns it off.',
+      'Align: the agent\'s last reply may conflict with a limit on goal "Cut over the ledger database": Must not "Drop the old ledger cluster before the cutover." This is a word check, so Align asked the goal\'s owner whether the agent should go on; it sent the limit and the files this session edited in this stretch with their times, nothing the agent wrote, and their answer reaches the agent at your next prompt after they answer. `align config drift off` turns this off.',
     );
   });
 });

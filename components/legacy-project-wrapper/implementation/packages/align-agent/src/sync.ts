@@ -39,7 +39,7 @@ import { detectGitEdits, fetchPod, settleActivity, uploadActivity } from "./acti
 import { fetchAsks } from "./asks.ts";
 import { computeUnsharedDigest, uploadSteering } from "./allocation.ts";
 import { layout, listSpool, localId } from "./shared/layout.ts";
-import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
+import { readJson, removeFile, writeJsonAtomic } from "./shared/fsx.ts";
 import { STOP_HOLDS_NO_SHARE, type ShareFacts } from "./shared/ended.ts";
 import type { GoalSnapshot, SpoolRecord } from "./shared/types.ts";
 
@@ -207,6 +207,21 @@ function applySpool(ctx: Ctx, r: SpoolRecord): string | null {
     }
     case "command":
       return applyCommand(ctx, r);
+    case "question": {
+      // Only for a session still shared and on that goal: nothing from a stretch that is no longer shared leaves this
+      // machine (LIM-2505). Otherwise the question is dropped, and the next drift may ask again.
+      const share = getShare(ctx, r.local_id);
+      if (!share || share.state !== "shared" || share.binding_goal !== r.goal_id) {
+        removeFile(layout.asked(ctx.home, r.local_id));
+        return r.local_id;
+      }
+      enqueue(ctx, r.local_id, "post_question", {
+        ws: share.workspace_id,
+        session_key: share.session_key,
+        body: { client_id: r.client_id, goal_id: r.goal_id, limit_id: r.limit_id, files: r.files, stretch_from: r.stretch_from, stretch_to: r.stretch_to },
+      });
+      return r.local_id;
+    }
   }
 }
 
@@ -503,6 +518,21 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
       // cycle 13). Not sent again; the request reads expired here, and the session hears the answer was not taken.
       if (r.status === 409 && r.json?.error === "request_expired") {
         answerExpired(ctx, lid, p.directive_id, String(p.body?.state ?? ""), r.json?.ended_reason ?? null);
+        return;
+      }
+      throw new HttpError(r.status, r.json?.error ?? null, r.json);
+    }
+    case "post_question": {
+      const r = await api(ctx, "POST", `${base}/questions`, { body: p.body });
+      if (r.status === 201 || r.status === 200) {
+        // The drift notice at the next prompt says it was asked (hooks/handlers.ts takeDrift).
+        renderHot(ctx, lid);
+        return;
+      }
+      if (r.status === 400 || r.status === 403 || r.status === 404 || r.status === 409) {
+        // Not asked (the session stopped sharing, its goal moved or closed): the next drift may ask again.
+        ctx.log(`question not asked: ${r.json?.error || r.status}`);
+        removeFile(layout.asked(ctx.home, lid));
         return;
       }
       throw new HttpError(r.status, r.json?.error ?? null, r.json);

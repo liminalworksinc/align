@@ -74,6 +74,8 @@ export const layout = {
   driftDir: (h: string) => path.join(h, "drift"),
   /** A local drift notice waiting for the session's next prompt. */
   drift: (h: string, lid: string) => path.join(h, "drift", `${safe(lid)}.json`),
+  /** The drift question this session has open (LIM-2505), until its answer reached the agent. */
+  asked: (h: string, lid: string) => path.join(h, "asked", `${safe(lid)}.json`),
   /** Steering lines shown, one file each, until the sync pass reports them. */
   steeringDir: (h: string) => path.join(h, "steering"),
   /** This machine's agent time outside shared sessions, last 7 days (computed by sync, read by hooks; never uploaded). */

@@ -189,7 +189,7 @@ describe("A2-cross-4: a notice covering several limits names each, and latches o
     const told = turn("We will cut over the ledger with two hours of downtime. There is no reason to wait, so we will drop the old ledger cluster before the cutover. I will also start rewriting the billing service while I am here.");
     assert.equal(
       told,
-      'Align: the agent\'s last reply may conflict with 3 limits on goal "Cut over the ledger database": Must not "Drop the old ledger cluster before the cutover."; Out of scope "Rewriting the billing service."; Must "Cut over the ledger without downtime." This is a word check on this machine only; nothing was sent or added to the agent\'s context. `align config drift off` turns it off.',
+      'Align: the agent\'s last reply may conflict with 3 limits on goal "Cut over the ledger database": Must not "Drop the old ledger cluster before the cutover."; Out of scope "Rewriting the billing service."; Must "Cut over the ledger without downtime." This is a word check, so Align asked the goal\'s owner whether the agent should go on; it sent the limit and the files this session edited in this stretch with their times, nothing the agent wrote, and their answer reaches the agent at your next prompt after they answer. `align config drift off` turns this off.',
     );
     assert.doesNotMatch(told, /Keep the old ledger cluster readable|more of its limits/);
     const inj = readJson<InjectedState>(layout.injected(t.home, lid))!;

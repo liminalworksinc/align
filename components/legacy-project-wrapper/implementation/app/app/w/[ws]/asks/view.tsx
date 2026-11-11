@@ -8,6 +8,7 @@ import { NoticeBox, useNotice } from "../../../_ui/crparts";
 import type { Me } from "../../../_ui/server";
 import type { Goal, WsDetail } from "../../../_ui/types";
 import { isBlankText } from "@/lib/v2/text-core.mts";
+import { AgentQuestions, type Question } from "./questions";
 
 // The Asks tab (PORT-003): what other people asked of teams, recorded from meetings or by hand (GET .../asks). Each card
 // offers only the actions its `can` flags allow; people's text is shown quoted, as written.
@@ -281,6 +282,7 @@ export default function Asks({ me, ws }: { me: Me; ws: string }) {
   const d = useApi<{ asks: Ask[] }>(`/api/v2/workspaces/${ws}/asks`);
   const w = useApi<WsDetail>(`/api/v2/workspaces/${ws}`);
   const goals = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
+  const qs = useApi<{ questions: Question[] }>(`/api/v2/workspaces/${ws}/questions`);
   const role = w.data?.role;
   const myTeams = new Set((w.data?.teams ?? []).filter((t) => t.my_role).map((t) => t.id));
   const all = d.data?.asks ?? [];
@@ -299,7 +301,9 @@ export default function Asks({ me, ws }: { me: Me; ws: string }) {
   return (
     <Shell me={me} ws={ws} tab="Asks">
       <h1 className={`${PAGE_H1} mb-2`}>Asks</h1>
-      <p className="mb-5 max-w-prose text-[15px] text-(--text-2)">What people asked of a team, from meetings or recorded by hand. An open ask is not an agreed goal until a lead of the team accepts it.</p>
+      <p className="mb-5 max-w-prose text-[15px] text-(--text-2)">What people asked of a team, from meetings or recorded by hand, and what agents ask a goal&apos;s owner when their work may drift from it. An open ask is not an agreed goal until a lead of the team accepts it.</p>
+      <Err>{qs.error}</Err>
+      {qs.data && <AgentQuestions ws={ws} me={me.id} questions={qs.data.questions} goals={goals.data?.goals ?? []} onDone={qs.reload} />}
       {d.loading && <Loading />}
       <Err>{d.error}</Err>
       {d.data && (

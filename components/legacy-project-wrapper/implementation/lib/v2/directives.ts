@@ -5,7 +5,8 @@ import { newId, nowIso } from "./ids";
 import { goalCore, goalObj, bindableFor, goalRow, type GoalCore, type GoalRow } from "./goals";
 import { canReadGoal } from "./policy";
 import type { DevicePrincipal } from "./devices";
-import { principalIn } from "./workspaces";
+import { memberName, principalIn } from "./workspaces";
+import type { AnswerJson } from "./questions";
 import { expireStoppedSessionTargets, holdWire, requestReceipt, requestWire, type HoldJson, type RequestJson } from "./requests";
 
 // Directives: what reaches local agents. Only structured content: ratified goal fields, enumerated states and
@@ -13,7 +14,7 @@ import { expireStoppedSessionTargets, holdWire, requestReceipt, requestWire, typ
 // alignment notes or counters. Rows are written inside the transaction of the change that caused them (callers run
 // these functions inside tx()); devices fetch them by cursor.
 
-export type DirectiveKind = "goal_version" | "binding_changed" | "binding_suspended" | "stop" | "resume" | "request" | "hold" | "release";
+export type DirectiveKind = "goal_version" | "binding_changed" | "binding_suspended" | "stop" | "resume" | "request" | "hold" | "release" | "answer";
 export interface Binding {
   goal_id: string | null;
   // binding_suspended: "cancel_pending" when the session never opened the binding it is losing (LIM-2441): its machine
@@ -32,6 +33,7 @@ interface DirectiveRow {
   binding_json: string | null;
   request_json: string | null;
   hold_json: string | null;
+  answer_json: string | null;
   created_at: string;
 }
 
@@ -41,6 +43,8 @@ export interface DirectiveExtra {
   goalId: string;
   request?: RequestJson;
   hold?: HoldJson;
+  /** kind "answer" (LIM-2505): the goal owner's answer to the session's question (lib/v2/questions.ts). */
+  answer?: AnswerJson;
 }
 
 /** Write one directive and its targets. No targets, no directive. */
@@ -49,7 +53,7 @@ export function writeDirective(ws: string, kind: DirectiveKind, sessionKeys: str
   if (!keys.length) return null;
   const id = newId("dir");
   run(
-    "INSERT INTO v2_directives (id, ws_id, kind, goal_id, goal_json, binding_json, request_json, hold_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO v2_directives (id, ws_id, kind, goal_id, goal_json, binding_json, request_json, hold_json, answer_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     id,
     ws,
     kind,
@@ -58,6 +62,7 @@ export function writeDirective(ws: string, kind: DirectiveKind, sessionKeys: str
     binding ? JSON.stringify(binding) : null,
     extra?.request ? JSON.stringify(extra.request) : null,
     extra?.hold ? JSON.stringify(extra.hold) : null,
+    extra?.answer ? JSON.stringify(extra.answer) : null,
     nowIso(),
   );
   for (const k of keys) run("INSERT INTO v2_directive_targets (ws_id, directive_id, session_key) VALUES (?, ?, ?)", ws, id, k);
@@ -106,6 +111,22 @@ export function goalSnapshot(json: string): GoalCore {
   };
 }
 
+/** An answer as the asking session's device sees it: who answered by name, and the goal to switch to only while this
+ *  person can read it (its title included). */
+function answerWire(pp: ReturnType<typeof principalIn>, ws: string, a: AnswerJson) {
+  const t = a.target_goal_id ? goalRow(ws, a.target_goal_id) : undefined;
+  const q = get<{ limit_type: string; limit_text: string }>("SELECT limit_type, limit_text FROM v2_agent_questions WHERE ws_id = ? AND id = ?", ws, a.question_id);
+  return {
+    question_id: a.question_id,
+    limit: q ? { type: q.limit_type, text: q.limit_text } : null,
+    answer: a.answer,
+    text: a.text,
+    target_goal: t && canReadGoal(pp, goalObj(t)) ? { id: t.id, title: t.title } : null,
+    by: memberName(a.by),
+    at: a.at,
+  };
+}
+
 function serialize(dev: DevicePrincipal, d: DirectiveRow, keys: string[]) {
   let goal: (GoalCore & { bindable: boolean }) | null = null;
   const pp = principalIn(dev, d.ws_id);
@@ -126,6 +147,7 @@ function serialize(dev: DevicePrincipal, d: DirectiveRow, keys: string[]) {
     // Only on the kinds that carry them, so the other kinds' shape is unchanged.
     ...(d.kind === "request" ? { request: d.request_json ? requestWire(pp, JSON.parse(d.request_json) as RequestJson) : null } : {}),
     ...(d.kind === "hold" || d.kind === "release" ? { hold: d.hold_json && d.goal_id ? holdWire(pp, d.kind, d.goal_id, JSON.parse(d.hold_json) as HoldJson) : null } : {}),
+    ...(d.kind === "answer" ? { answer: d.answer_json ? answerWire(pp, d.ws_id, JSON.parse(d.answer_json) as AnswerJson) : null } : {}),
   };
 }
 
@@ -136,7 +158,7 @@ export function directivesFor(dev: DevicePrincipal, cursor: number, limit = 100)
   const ws = [...dev.grants];
   if (!ws.length) return [];
   const rows = all<DirectiveRow & { keys: string }>(
-    `SELECT d.seq, d.id, d.ws_id, d.kind, d.goal_id, d.goal_json, d.binding_json, d.request_json, d.hold_json, d.created_at, group_concat(t.session_key, ' ') AS keys
+    `SELECT d.seq, d.id, d.ws_id, d.kind, d.goal_id, d.goal_json, d.binding_json, d.request_json, d.hold_json, d.answer_json, d.created_at, group_concat(t.session_key, ' ') AS keys
      FROM v2_directives d
      JOIN v2_directive_targets t ON t.directive_id = d.id
      JOIN v2_sessions s ON s.ws_id = t.ws_id AND s.session_key = t.session_key

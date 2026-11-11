@@ -12,7 +12,9 @@
 //            change request adding a limit, approved but not launched -> nothing reaches the agent (LAUNCH-001), then
 //            launched -> the goal_version directive -> one limit delta; a second accepted ask ->
 //            one asks delta; the asks feed's ETag; `align asks --json`; `align team`; the local drift notice (a user
-//            systemMessage, nothing in model context, nothing uploaded: checked in the server's database files); and
+//            systemMessage, nothing in model context, no reply text uploaded: checked in the server's database files);
+//            the agent question it asks (LIM-2505: one per stretch, evidence only; a viewer can't answer, another
+//            workspace can't see it; the owner's steer reaches the agent's next turn, receipted); and
 //            `align share --dir --past` (an already-metered past session shared from its start; a session the server
 //            already holds from a later start is not backdated)
 //   requests (REQ-001/002) on a second goal and folder: a checkpoint from an approver (notice with the role, Align's
@@ -446,7 +448,8 @@ try {
     team.stdout.split("Asked of your teams:")[1] ?? team.stdout,
   );
 
-  // ======== the local drift notice: a user systemMessage, nothing in model context, nothing uploaded ========
+  // ======== the local drift notice: a user systemMessage, nothing in model context, no reply text uploaded; the goal's
+  // owner is asked one question with evidence (LIM-2505) ========
   const DRIFT_CANARY = `DRIFT-CANARY-${randomBytes(4).toString("hex")}`;
   const REPLY = `Done. The migration cutover will run during month-end close on the 31st. Ticket ${DRIFT_CANARY} has the details.`;
   const t2 = Date.now();
@@ -458,9 +461,9 @@ try {
   const drift = hook("UserPromptSubmit", { session_id: SID, prompt_id: "p9", prompt: "ok", cwd: repo });
   const driftAgain = hook("UserPromptSubmit", { session_id: SID, prompt_id: "p10", prompt: "ok", cwd: repo });
   check(
-    "drift: Stop adds 0 bytes; the next prompt shows the user a systemMessage naming the crossed limit, with no model context; once",
+    "drift: Stop adds 0 bytes; the next prompt shows the user a systemMessage naming the crossed limit and saying the goal's owner was asked (what was sent, never the reply), with no model context; once",
     stop.code === 0 && stop.stdout === "" &&
-      drift.system === `Align: the agent's last reply may conflict with a limit on goal "${GOAL_TITLE}": Must not "${LIM1}" This is a word check on this machine only; nothing was sent or added to the agent's context. \`align config drift off\` turns it off.` &&
+      drift.system === `Align: the agent's last reply may conflict with a limit on goal "${GOAL_TITLE}": Must not "${LIM1}" This is a word check, so Align asked the goal's owner whether the agent should go on; it sent the limit and the files this session edited in this stretch with their times, nothing the agent wrote, and their answer reaches the agent at your next prompt after they answer. \`align config drift off\` turns this off.` &&
       drift.json?.hookSpecificOutput === undefined && driftAgain.stdout === "",
     `stop=${stop.stdout} drift=${drift.stdout} again=${driftAgain.stdout}`,
   );
@@ -471,6 +474,87 @@ try {
     usage2 === 2 && dbFilesLack(dbFile, DRIFT_CANARY) && dbFilesLack(dbFile, "on the 31st") && dbFilesLack(dbFile, "synthetic prompt"),
     `${usage2}`,
   );
+
+  // ======== agent questions (LIM-2505): one question per stretch of drift, the goal's owner answers on the web, the
+  // answer reaches the agent's next turn; a viewer can't answer, another workspace can't see it ========
+  {
+    const V = await signUp("Vera Viewer", "vera@live.example.test");
+    const X = await signUp("Xavi Outsider", "xavi@live.example.test");
+    const vt = (await ws(O, "POST", "/invites", { email: V.email, role: "viewer" })).json?.token;
+    await call("POST", `/api/v2/invites/${vt}/accept`, { cookie: V.cookie, body: {} });
+    const XW = (await call("POST", "/api/v2/workspaces", { cookie: X.cookie, body: { name: "Elsewhere Inc" } })).json?.id;
+    const qRows = () => sdb((d) => d.prepare("SELECT * FROM v2_agent_questions WHERE ws_id = ? AND session_key = ? ORDER BY created_at").all(W, SKEY));
+    const asked = qRows();
+    const q1 = asked[0];
+    const listM = await ws(M, "GET", "/questions");
+    const mine = listM.json?.questions?.find((q) => q.id === q1?.id);
+    check(
+      "questions: the drift asked the goal's owner one question with evidence: the limit in the goal's own words, Align's why, the stretch; no reply text in it",
+      asked.length === 1 && q1.goal_id === G.id && q1.limit_id === G.limits[0].id && q1.limit_text === LIM1 && q1.state === "open" && !JSON.stringify(q1).includes(DRIFT_CANARY) && !JSON.stringify(q1).includes("on the 31st") &&
+        listM.status === 200 && mine?.evidence?.limit?.text === LIM1 && /rules out/.test(mine?.evidence?.why ?? "") && Array.isArray(mine?.evidence?.files) && mine?.can?.answer === true && mine?.goal?.owner?.id === M.id,
+      `${JSON.stringify(asked).slice(0, 600)} ${listM.text.slice(0, 600)}`,
+    );
+    // The same stretch drifting again: no second question while one is open (never a stream).
+    const t3 = Date.now();
+    const REPLY2 = "Update: I will run the migration cutover during month-end close tonight.";
+    appendLines(transcript, [userLine(SID, "p11", new Date(t3).toISOString(), repo), assistantLine(SID, "req_live_q2", new Date(t3 + 500).toISOString(), repo, REPLY2)]);
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p11", prompt: "go on", cwd: repo });
+    hook("Stop", { session_id: SID, transcript_path: transcript, cwd: repo, last_assistant_message: REPLY2, stop_hook_active: false });
+    sync();
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p12", prompt: "ok", cwd: repo });
+    check("questions: a second drift in the same stretch asks nothing more (one open question per session)", qRows().length === 1, JSON.stringify(qRows().map((q) => q.id)));
+    // Access: a viewer sees it and can't answer; a member who is not the goal's owner can't; another workspace can't see it.
+    const listV = await ws(V, "GET", "/questions");
+    const vAns = await ws(V, "POST", `/questions/${q1?.id}/answer`, { answer: "continue" });
+    const lAns = await ws(L, "POST", `/questions/${q1?.id}/answer`, { answer: "continue" });
+    const xList = await call("GET", `/api/v2/workspaces/${W}/questions`, { cookie: X.cookie });
+    const xOne = await call("GET", `/api/v2/workspaces/${W}/questions/${q1?.id}`, { cookie: X.cookie });
+    const xAns = await call("POST", `/api/v2/workspaces/${W}/questions/${q1?.id}/answer`, { cookie: X.cookie, body: { answer: "continue" } });
+    const xOwn = await call("GET", `/api/v2/workspaces/${XW}/questions/${q1?.id}`, { cookie: X.cookie });
+    check(
+      "questions: a viewer reads the question but answering is 403 read_only; a member who isn't the goal's owner gets 403 not_goal_owner; another workspace's person gets 404 for the list, the question and the answer, and 404 for its id in their own workspace",
+      listV.status === 200 && listV.json?.questions?.some((q) => q.id === q1?.id && q.can.answer === false) && vAns.status === 403 && vAns.json?.error === "read_only" &&
+        lAns.status === 403 && lAns.json?.error === "not_goal_owner" && xList.status === 404 && xOne.status === 404 && xAns.status === 404 && xOwn.status === 404 && qRows()[0].state === "open",
+      `${listV.status} ${vAns.status} ${vAns.text.slice(0, 120)} ${lAns.status} ${lAns.text.slice(0, 120)} ${xList.status} ${xOne.status} ${xAns.status} ${xOwn.status}`,
+    );
+    // The owner steers; the answer becomes an `answer` directive for that session only.
+    const STEER = "Hold the cutover until the 2nd; draft the on-call runbook first.";
+    const blank = await ws(M, "POST", `/questions/${q1?.id}/answer`, { answer: "steer", text: "  " });
+    const ans = await ws(M, "POST", `/questions/${q1?.id}/answer`, { answer: "steer", text: STEER });
+    const again = await ws(M, "POST", `/questions/${q1?.id}/answer`, { answer: "continue" });
+    const dir = sdb((d) => d.prepare("SELECT d.id, d.kind FROM v2_directives d JOIN v2_directive_targets t ON t.directive_id = d.id WHERE d.ws_id = ? AND t.session_key = ? AND d.kind = 'answer'").all(W, SKEY));
+    check(
+      "questions: the owner's steer is recorded once (a blank steer is 400, a second answer 409 already_answered) and written as one `answer` directive to the asking session",
+      blank.status === 400 && ans.status === 200 && ans.json?.delivered === true && ans.json?.question?.answer?.kind === "steer" && ans.json?.question?.answer?.text === STEER &&
+        again.status === 409 && again.json?.error === "already_answered" && dir.length === 1,
+      `${blank.status} ${ans.status} ${ans.text.slice(0, 300)} ${again.status} ${JSON.stringify(dir)}`,
+    );
+    sync();
+    const heard = hook("UserPromptSubmit", { session_id: SID, prompt_id: "p13", prompt: "what now?", cwd: repo });
+    const heardAgain = hook("UserPromptSubmit", { session_id: SID, prompt_id: "p14", prompt: "ok", cwd: repo });
+    sync();
+    const receipts = sdb((d) => d.prepare("SELECT state FROM v2_receipts WHERE directive_id = ? AND session_key = ? ORDER BY state").all(dir[0]?.id, SKEY).map((r) => r.state));
+    check(
+      "questions: the agent's next turn has the answer in its context (who answered, the limit, the steer quoted) and the user is told; once; delivery receipted received and applied",
+      !!heard.context && heard.context.includes(`Milo, the owner of goal "${GOAL_TITLE}", answered: steer.`) && heard.context.includes(`Their note, quoted: "${STEER}"`) && heard.context.includes(`Must not "${LIM1}"`) &&
+        (heard.system ?? "").includes(`answered the agent's question about goal "${GOAL_TITLE}": steer: "${STEER}"`) && !(heardAgain.context ?? "").includes(STEER) &&
+        receipts.includes("received") && receipts.includes("applied"),
+      `heard=${heard.stdout.slice(0, 900)} again=${heardAgain.stdout.slice(0, 300)} receipts=${receipts}`,
+    );
+    // A new stretch: drift after the answer asks again.
+    const t4 = Date.now();
+    const REPLY3 = "Change of plan: we will run the migration cutover during month-end close after all.";
+    appendLines(transcript, [userLine(SID, "p15", new Date(t4).toISOString(), repo), assistantLine(SID, "req_live_q3", new Date(t4 + 500).toISOString(), repo, REPLY3)]);
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p15", prompt: "continue", cwd: repo });
+    hook("Stop", { session_id: SID, transcript_path: transcript, cwd: repo, last_assistant_message: REPLY3, stop_hook_active: false });
+    sync();
+    const after = qRows();
+    check("questions: drift in the stretch after the answer asks a new question", after.length === 2 && after[1].state === "open" && after[0].state === "answered", JSON.stringify(after.map((q) => [q.id, q.state])));
+    // The owner says continue, so the session is not left with an open question for the checks below.
+    await ws(M, "POST", `/questions/${after[1]?.id}/answer`, { answer: "continue" });
+    sync();
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p16", prompt: "ok", cwd: repo });
+  }
 
   // ======== two sessions in one repo (A1-local-1, A1-local-3): a refused edit never goes up, whoever changes its file
   // later; the session that read the file hears which session changed it ========
