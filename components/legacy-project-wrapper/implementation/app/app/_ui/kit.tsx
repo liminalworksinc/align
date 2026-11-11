@@ -30,7 +30,21 @@ export function sentence(message: string): string {
   return /[.!?…]["”]?$/.test(s) ? s : `${s}.`;
 }
 
+/** Reads and writes in flight through api(), and when the last one settled: the live stream (_ui/live.ts) opens once
+ *  the page's own reads have gone quiet, so it never competes with them. */
+export const apiActivity = { inflight: 0, settledAt: 0 };
+
 export async function api<T = unknown>(path: string, init?: { method?: string; body?: unknown; headers?: Record<string, string> }): Promise<T> {
+  apiActivity.inflight++;
+  try {
+    return await apiCall<T>(path, init);
+  } finally {
+    apiActivity.inflight--;
+    apiActivity.settledAt = Date.now();
+  }
+}
+
+async function apiCall<T>(path: string, init?: { method?: string; body?: unknown; headers?: Record<string, string> }): Promise<T> {
   const res = await fetch(path, {
     method: init?.method ?? (init?.body !== undefined ? "POST" : "GET"),
     headers: { ...(init?.body !== undefined ? { "content-type": "application/json" } : {}), ...init?.headers },

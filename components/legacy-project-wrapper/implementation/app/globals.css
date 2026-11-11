@@ -320,3 +320,59 @@ body {
     }
   }
 }
+
+/* ---- Live workspace (LIM-2503): motion that says what caused what. Without a motion preference the states still
+   show (the lit card, the filled dot); only the movement is dropped. ---- */
+@media (prefers-reduced-motion: no-preference) {
+  /* A decision card the request just moved to. */
+  @keyframes al-arrive {
+    0% {
+      box-shadow: 0 0 0 1px var(--accent-text), 0 0 0 0 var(--accent-soft);
+    }
+    40% {
+      box-shadow: 0 0 0 1px var(--accent-text), 0 0 0 10px var(--accent-soft);
+    }
+    100% {
+      box-shadow: 0 0 0 1px var(--accent-text), 0 0 0 0 transparent;
+    }
+  }
+  .al-arrive {
+    animation: al-arrive 1.2s var(--al-ease, ease-out) 0.45s both;
+  }
+  /* The line it came along, drawn from where it was (before the card lights: cause, then effect). */
+  @keyframes al-draw {
+    from {
+      stroke-dashoffset: 1;
+    }
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+  .al-draw {
+    stroke-dasharray: 1;
+    animation: al-draw 0.5s ease-in-out both;
+  }
+  /* A directive reaching a session: a ring closes in on its dot. */
+  @keyframes al-reach {
+    from {
+      box-shadow: 0 0 0 7px var(--accent-soft);
+      opacity: 0.4;
+    }
+    to {
+      box-shadow: 0 0 0 0 transparent;
+      opacity: 1;
+    }
+  }
+  .al-reach {
+    animation: al-reach 0.7s ease-out both;
+  }
+  /* The live dot breathes while the stream is open. */
+  @keyframes al-breathe {
+    50% {
+      opacity: 0.45;
+    }
+  }
+  .al-breathe {
+    animation: al-breathe 2.4s ease-in-out infinite;
+  }
+}

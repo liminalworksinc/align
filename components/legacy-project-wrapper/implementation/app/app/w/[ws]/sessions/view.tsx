@@ -1,4 +1,5 @@
 "use client";
+import { useLiveReload } from "../../../_ui/live";
 import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -92,7 +93,10 @@ interface Refused {
 
 export default function Sessions({ me, ws }: { me: Me; ws: string }) {
   const d = useApi<{ mine: MySession[]; all: AnySession[] | null }>(`/api/v2/workspaces/${ws}/sessions`);
+  // Live (LIM-2503): read again when this person's view of it moves (a stop, a resume, a decision in another window).
+  useLiveReload(ws, ["sessions", "presence"], d.reload);
   const holds = useApi<{ holds: { goal: { id: string; title: string }; held_by: { id: string; name: string }; reason: string | null; held_at: string }[] }>(`/api/v2/workspaces/${ws}/holds`);
+  useLiveReload(ws, ["sessions", "goals", "presence"], holds.reload);
   const act = useAction();
   const base = `/api/v2/workspaces/${ws}/sessions`;
   const [alreadyDeleted, setAlreadyDeleted] = useState(false);

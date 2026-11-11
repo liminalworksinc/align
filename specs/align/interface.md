@@ -559,11 +559,13 @@ you", "Waiting on others", "Active goals", and "Connected apps that read the goa
 "Your declined requests" (only when there is one), "Active goals" and "Connected AI apps · when they last read the
 goals". It SHALL show only what the server holds: a count or a
 section the server could not read SHALL say "unknown", never zero, and nothing on the page SHALL infer what an agent is
-doing (no working, stuck, blocked or diverged state, and no claim that an app has the current goal version or is "on
+doing (no stuck, blocked or diverged state, "working" only as the live presence line defines it under Requirement: Live
+workspace, and no claim that an app has the current goal version or is "on
 the current plan": Align knows only which versions it sent an app, never which one the app uses; the decision value
 card names the apps Align sent a launched version). The page
-reads once when it opens and does not poll (only its first-run card checks the apps while it is shown, and its "Since
-you last looked" section checks for new changes as below, the Needs-you list reading again with it).
+reads when it opens and does not poll: it reads again when the workspace's live stream says one of the person's views
+moved (Requirement: Live workspace); otherwise only its first-run card checks the apps while it is shown, and its "Since
+you last looked" section checks for new changes as below, the Needs-you list reading again with it.
 
 Home's "Since you last looked" SHALL compare against the last time this person left this workspace's Home on this
 device, in any tab; coming back to Home in the same tab, without a reload, compares against when they left it, and a
@@ -672,6 +674,51 @@ read. A workspace owner sees every connected app and anyone else their own, as o
 
 - **WHEN** a workspace has no active goal the person can see
 - **THEN** "Active goals" says "No active goals you can see." with a link to the Goals tab
+
+### Requirement: Live workspace
+
+A workspace page SHALL show what others change there within about a second, without a reload, through one
+Server-Sent Events stream per workspace and tab, `GET /api/v2/workspaces/<ws>/stream` (cookie only; members and
+viewers; a non-member `404`, an `Authorization` header `403 bearer_not_allowed`; at most 4 streams of one person on one
+workspace, a fifth `429 too_many_streams`). The stream SHALL carry no content of its own: after a write to the workspace
+it reads the person's own views again (the Home, the change requests, the goals feed, the sessions, the alignments and
+presence) and names the ones that moved for that person (`change`), and the page reads those again through the reads it
+already makes, so the stream shows nobody anything their reads would not. A write to another workspace, or one the
+person can't read, SHALL send them nothing. Every event has an id; a browser that reconnects with `Last-Event-ID` SHALL
+be told what moved meanwhile, or to read everything again when the id is unknown (a restart). A keep-alive comment every
+15 seconds keeps proxies from closing it; every 30 seconds the stream checks the sign-in and membership again and ends
+with `gone` when either is lost. A page whose stream can't be opened or keeps failing SHALL say so in its header
+("Updates when you act or reload") and keep its reads as before; one with a stream says "Live".
+
+An approval SHALL be seen travelling: on the review's lane map, the card the request moved to lights and the line it came
+along draws itself; on Home's goal lines and the Work page's sessions panel, the live presence line shows, per active
+goal the person can read, a dot per shared session bound to it by its current epoch that Align heard from (shared, bound,
+usage, a receipt or activity) in the last 15 minutes: "<n> agent sessions are working toward this goal now", with
+"· <n> paused" for those whose agent is stopped, whose sharing is suspended or whose goal is held. A dot is filled once
+the session confirmed the newest directive Align sent it (received, applied or enforced: a delivery receipt) and hollow
+while it is only sent; a paused session shows two bars. When a directive reaches a session its dot is ringed for a moment
+and the line says what Align sent ("Align sent the new goal version to 2 sessions."). Presence names no person, key or
+title. With reduced motion the states show without the movement.
+
+#### Scenario: Approve in one window, see it in another
+
+- **WHEN** an approver approves a change request in one window while its requester has Home open in another (`scripts/test-v2.mjs` "live: ...")
+- **THEN** the requester's stream sends `change` naming `home` and `changes` within about a second, and the Home's queue and goal lines read again
+
+#### Scenario: Another workspace
+
+- **WHEN** someone acts in a workspace the person is not in, or on a private goal they can't read
+- **THEN** the person's streams send nothing for it
+
+#### Scenario: Reconnect
+
+- **WHEN** a stream drops and the browser reconnects with the last event id after a change it missed
+- **THEN** the new stream's `hello` names the views that moved; with an id the server doesn't know, `resync: true`
+
+#### Scenario: A paused session
+
+- **WHEN** a workspace owner stops the agent of a session bound to a goal
+- **THEN** presence for that goal moves the session from working to paused and every open page of a person who can read the goal shows "· 1 paused"
 
 ### Requirement: Evidence class on every agent-status item
 

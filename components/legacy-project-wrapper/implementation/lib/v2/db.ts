@@ -86,6 +86,34 @@ export function exec(sql: string) {
 
 const isBusy = (e: unknown) => /SQLITE_BUSY|database is locked/i.test(String((e as Error)?.message ?? e)) || (e as { errcode?: number })?.errcode === 5;
 
+// ---- live: which workspaces a write changed (lib/v2/live.ts streams it) ----
+// A write marks its workspace with touchWs(), usually through audit() or writeDirective(). Inside tx() the marks are
+// held until COMMIT and dropped on ROLLBACK, so a stream never hears of a change that did not happen; outside tx() they
+// are announced at once. The listeners are kept on globalThis, like the connections, so every route bundle shares them.
+type WsListener = (ws: string) => void;
+const gl = globalThis as unknown as { __alignV2WsListeners?: Set<WsListener> };
+const wsListeners = () => (gl.__alignV2WsListeners ??= new Set());
+let pendingWs: Set<string> | null = null;
+function announce(list: Iterable<string>) {
+  for (const ws of list)
+    for (const l of wsListeners()) {
+      try {
+        l(ws);
+      } catch {}
+    }
+}
+/** Mark a workspace as changed by the current write. */
+export function touchWs(ws: string | null | undefined) {
+  if (!ws) return;
+  if (pendingWs) pendingWs.add(ws);
+  else announce([ws]);
+}
+/** Hear of every committed write to a workspace. Returns the unsubscribe. */
+export function onWsChange(l: WsListener): () => void {
+  wsListeners().add(l);
+  return () => wsListeners().delete(l);
+}
+
 let depth = 0;
 /** Run `fn` synchronously inside BEGIN IMMEDIATE ... COMMIT (ROLLBACK if it throws). A busy start is retried
  *  asynchronously for up to ~5 s. Nested calls join the outer transaction. */
@@ -102,10 +130,13 @@ export async function tx<T>(fn: () => T): Promise<T> {
     }
   }
   depth++;
+  const touched = (pendingWs = new Set());
   try {
     const out = fn();
     if (out instanceof Promise) throw new Error("tx() callbacks must be synchronous");
     d.exec("COMMIT");
+    pendingWs = null;
+    announce(touched);
     return out;
   } catch (e) {
     try {
@@ -113,6 +144,7 @@ export async function tx<T>(fn: () => T): Promise<T> {
     } catch {}
     throw e;
   } finally {
+    pendingWs = null;
     depth--;
   }
 }
@@ -1143,4 +1175,5 @@ export const LIVE_WS = (ws: string) => `${ws} IN (SELECT id FROM v2_workspaces W
 
 export function audit(ws: string | null, actor: string | null, action: string, objectId: string | null, at: string) {
   run("INSERT INTO v2_audit (ws_id, actor_id, action, object_id, at) VALUES (?, ?, ?, ?, ?)", ws, actor, action, objectId, at);
+  touchWs(ws);
 }

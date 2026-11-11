@@ -5796,7 +5796,7 @@ try {
         // the focus once the page has settled (no request for half a second), so a read between the two finds no body.
         const settledNotice = async (page, kind) => {
           await page.waitForFunction((k) => document.activeElement?.getAttribute("data-notice") === k, { timeout: 15000 }, kind);
-          await page.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+          await page.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
           await page.waitForFunction((k) => document.activeElement?.getAttribute("data-notice") === k, { timeout: 15000 }, kind);
           return focused(page);
         };
@@ -7053,6 +7053,264 @@ try {
   }
   // ==== end port2:home ====
 
+  // ==== live:stream ====
+  // The live workspace (LIM-2503, lib/v2/live.ts): GET /api/v2/workspaces/<ws>/stream. Its own workspaces: LO owns LW and
+  // a workspace goal; LM is a member (proposes a change, shares a session); LV a viewer; LX owns another workspace LW2.
+  {
+    /** One SSE connection: its status, and the events it got (each with when it arrived). */
+    const sse = (who, p, { cookie, headers = {} } = {}) =>
+      new Promise((resolve, reject) => {
+        const h = { accept: "text/event-stream", ...headers };
+        if (cookie) h.cookie = cookie;
+        const req = http.request({ host: "127.0.0.1", port: PORT, method: "GET", path: p, headers: h }, (res) => {
+          const conn = { status: res.statusCode, headers: res.headers, events: [], body: "", closed: false, waiters: [] };
+          let buf = "";
+          const flush = () => {
+            for (const w of [...conn.waiters]) {
+              const hit = conn.events.find((e, i) => i >= w.from && w.pred(e));
+              if (hit) {
+                conn.waiters.splice(conn.waiters.indexOf(w), 1);
+                clearTimeout(w.t);
+                w.resolve(hit);
+              }
+            }
+          };
+          res.setEncoding("utf8");
+          res.on("data", (c) => {
+            conn.body += c;
+            if (res.statusCode !== 200) return;
+            buf += c;
+            let i;
+            while ((i = buf.indexOf("\n\n")) >= 0) {
+              const block = buf.slice(0, i);
+              buf = buf.slice(i + 2);
+              const e = { at: Date.now(), id: null, event: "message", data: null };
+              for (const line of block.split("\n")) {
+                if (line.startsWith("id: ")) e.id = line.slice(4);
+                else if (line.startsWith("event: ")) e.event = line.slice(7);
+                else if (line.startsWith("data: ")) {
+                  try {
+                    e.data = JSON.parse(line.slice(6));
+                  } catch {
+                    e.data = line.slice(6);
+                  }
+                }
+              }
+              if (e.event !== "message" || e.data !== null) conn.events.push(e);
+            }
+            flush();
+          });
+          res.on("end", () => (conn.closed = true));
+          res.on("error", () => (conn.closed = true));
+          conn.close = () => req.destroy();
+          /** The first event from index `from` on matching `pred`, or null after `ms`. */
+          conn.next = (pred, ms = 3000, from = 0) =>
+            new Promise((ok) => {
+              const w = { pred, from, resolve: ok, t: setTimeout(() => (conn.waiters.splice(conn.waiters.indexOf(w), 1), ok(null)), ms) };
+              conn.waiters.push(w);
+              flush();
+            });
+          if (res.statusCode === 200) resolve(conn);
+          else res.on("end", () => resolve({ ...conn, json: (() => { try { return JSON.parse(conn.body); } catch { return null; } })() }));
+        });
+        req.on("error", reject);
+        req.end();
+      });
+    const lUsers = {};
+    for (const [who, name] of [
+      ["LO", "Lia Owner"],
+      ["LM", "Leo Member"],
+      ["LV", "Lux Viewer"],
+      ["LX", "Lex Outsider"],
+    ])
+      lUsers[who] = await signUp(who, name, `${who.toLowerCase()}@live.example.test`);
+    const { LO, LM, LV, LX } = lUsers;
+    const LW = (await call("LO", "POST", "/api/v2/workspaces", { cookie: LO.cookie, body: { name: "Live workspace" } })).json?.id;
+    const LW2 = (await call("LX", "POST", "/api/v2/workspaces", { cookie: LX.cookie, body: { name: "Elsewhere" } })).json?.id;
+    const la = (u, method, p, body, w = LW) => call(u.who, method, `/api/v2/workspaces/${w}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const [u, role] of [
+      [LM, "member"],
+      [LV, "viewer"],
+    ]) {
+      const i = await la(LO, "POST", "/invites", { email: u.email, role });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const LG = (await la(LO, "POST", "/goals", { title: "Ship the live floor", visibility: "workspace" })).json;
+    const stream = (u, w = LW, headers) => sse(u.who, `/api/v2/workspaces/${w}/stream`, { cookie: u.cookie, headers });
+
+    // -- who may open it: the same rules as the reads --
+    const anon = await sse("anon", `/api/v2/workspaces/${LW}/stream`);
+    const bearer = await sse("LM", `/api/v2/workspaces/${LW}/stream`, { cookie: LM.cookie, headers: { authorization: "Bearer alnd_x" } });
+    const outsider = await stream(LX);
+    const nope = await stream(LM, "ws_doesnotexist0000000000000");
+    const sV = await stream(LV);
+    const vHello = await sV.next((e) => e.event === "hello");
+    const vWrite = await la(LV, "POST", "/goals", { title: "Viewer goal", visibility: "workspace" });
+    check(
+      "live: the stream is cookie-only and scoped like the reads: signed out 401, an Authorization header 403 bearer_not_allowed, a non-member and an unknown workspace 404 (alike), a viewer 200 text/event-stream with hello; a viewer's write is still 403",
+      LW && LG?.id && anon.status === 401 && bearer.status === 403 && bearer.json?.error === "bearer_not_allowed" && outsider.status === 404 && nope.status === 404 && outsider.json?.error === nope.json?.error &&
+        sV.status === 200 && /^text\/event-stream/.test(sV.headers["content-type"]) && /no-transform/.test(sV.headers["cache-control"]) && /^[0-9a-f]{8}\.\d+$/.test(vHello?.id ?? "") && Array.isArray(vHello?.data?.presence) && vWrite.status === 403,
+      `${anon.status} ${bearer.status} ${bearer.body} ${outsider.status} ${nope.status} ${sV.status} ${JSON.stringify(vHello)} ${vWrite.status}`,
+    );
+
+    // -- approve in one window, see it in another within about a second --
+    const sM = await stream(LM);
+    const sO = await stream(LO);
+    await sM.next((e) => e.event === "hello");
+    await sO.next((e) => e.event === "hello");
+    const cr = await la(LM, "POST", `/goals/${LG.id}/change-requests`, { base_version: 1, changes: { title: "Ship the live floor this week" }, reason: "Live: the demo is Friday" });
+    const oSees = await sO.next((e) => e.event === "change" && e.data.views.includes("home"));
+    const mark = sM.events.length;
+    const t0 = Date.now();
+    const ap = await la(LO, "POST", `/goals/${LG.id}/change-requests/${cr.json?.id}/approve`, { revision: 1 });
+    const mSees = await sM.next((e) => e.event === "change" && e.data.views.includes("changes"), 3000, mark);
+    const lag = mSees ? mSees.at - t0 : null;
+    check(
+      "live: a change request sent in one window reaches its approver's stream, and its approval reaches the requester's within about a second (change naming home and changes, with an id); the events carry view names and presence, never the request's words",
+      cr.status === 201 && !!oSees && ap.status === 200 && !!mSees && lag !== null && lag < 1500 && mSees.data.views.includes("home") && /^[0-9a-f]{8}\.\d+$/.test(mSees.id) && !JSON.stringify(sM.events).includes("demo is Friday") && !JSON.stringify(sO.events).includes("demo is Friday"),
+      `${cr.status} ${ap.status} lag=${lag} ${JSON.stringify(sM.events.slice(mark)).slice(0, 400)}`,
+    );
+
+    // -- another workspace's events never arrive; nor does a change the reader can't read --
+    const s2 = await stream(LX, LW2);
+    await s2.next((e) => e.event === "hello");
+    const mMark = sM.events.length;
+    const vMark = sV.events.length;
+    const x2 = await la(LX, "POST", "/goals", { title: "Elsewhere goal", visibility: "workspace" }, LW2);
+    const xSees = await s2.next((e) => e.event === "change", 3000);
+    const oPrivMark = sO.events.length;
+    const priv = await la(LO, "POST", "/goals", { title: "Owner's private plan", visibility: "private" });
+    const oPriv = await sO.next((e) => e.event === "change" && e.data.views.includes("goals"), 3000, oPrivMark);
+    await sleep(1200);
+    check(
+      "live: writes in another workspace reach that workspace's streams and none of this one's; a private goal reaches its owner's stream but no member's or viewer's (their reads didn't move, so nothing is sent)",
+      x2.status === 201 && !!xSees && priv.status === 201 && !!oPriv && sM.events.length === mMark && sV.events.length === vMark && !JSON.stringify(s2.events).includes(LW) && !JSON.stringify(sM.events).includes(LW2),
+      `${x2.status} ${!!xSees} ${priv.status} ${!!oPriv} m+${sM.events.length - mMark} v+${sV.events.length - vMark}`,
+    );
+    s2.close();
+
+    // -- resume: Last-Event-ID --
+    const lastM = [...sM.events].reverse().find((e) => e.id)?.id;
+    sM.close();
+    await sleep(200);
+    const v2 = await la(LO, "POST", "/goals", { title: "Measure the live floor", visibility: "workspace" });
+    const r1 = await stream(LM, LW, { "last-event-id": lastM });
+    const r1h = await r1.next((e) => e.event === "hello");
+    const r1id = r1h?.id;
+    r1.close();
+    await sleep(200);
+    const r2 = await stream(LM, LW, { "last-event-id": r1id });
+    const r2h = await r2.next((e) => e.event === "hello");
+    r2.close();
+    const r3 = await stream(LM, LW, { "last-event-id": "deadbeef.1" });
+    const r3h = await r3.next((e) => e.event === "hello");
+    r3.close();
+    const r4 = await sse("LM", `/api/v2/workspaces/${LW}/stream?last_event_id=${encodeURIComponent(r1id ?? "")}`, { cookie: LM.cookie });
+    const r4h = await r4.next((e) => e.event === "hello");
+    r4.close();
+    check(
+      "live: a reconnect with Last-Event-ID is told what moved while it was away (a new workspace goal: goals and home) and nothing more; with the id it was just given, nothing (resync false, no views); with an id this server doesn't know, resync; ?last_event_id= works like the header",
+      v2.status === 201 && !!lastM && r1h?.data?.resync === false && r1h.data.views.includes("goals") && r1h.data.views.includes("home") && r2h?.data?.resync === false && r2h.data.views.length === 0 && r3h?.data?.resync === true && r4h?.data?.resync === false && r4h.data.views.length === 0,
+      `${v2.status} ${JSON.stringify(r1h?.data?.views)} ${JSON.stringify(r2h?.data)} ${JSON.stringify(r3h?.data)} ${JSON.stringify(r4h?.data)}`.slice(0, 600),
+    );
+
+    // -- a per-person cap --
+    await sleep(300);
+    const capped = [];
+    for (let i = 0; i < 5; i++) capped.push(await stream(LM));
+    const fifth = capped[4];
+    capped[0].close();
+    await sleep(300);
+    const again = await stream(LM);
+    const otherPerson = await stream(LO);
+    check(
+      "live: one person holds at most 4 streams on a workspace (a fifth -> 429 too_many_streams); closing one frees its place; another person's streams don't count",
+      capped.slice(0, 4).every((c) => c.status === 200) && fifth.status === 429 && fifth.json?.error === "too_many_streams" && again.status === 200 && otherPerson.status === 200,
+      `${capped.map((c) => c.status)} ${fifth.body} ${again.status} ${otherPerson.status}`,
+    );
+    for (const c of [...capped.slice(1, 4), again, otherPerson]) c.close?.();
+
+    // -- presence: a session working toward the goal, paused, and its directive delivered --
+    // A device written straight into the database (this phase spent Mode L's pairing limit long ago), granted LW.
+    const LMd = { ...insertDevice(LM.id, "Leo's laptop"), secret: randomBytes(32), who: "LM" };
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(LMd.id, LW));
+    const key = sessionKey(LMd, LW, "claude-code", "live-1");
+    const start = new Date(Date.now() - 60_000).toISOString();
+    await call("LM", "PUT", `/api/v2/workspaces/${LW}/sessions/${key}`, { bearer: LMd.access, body: { harness: "claude-code", repo_key: repoKey(LMd, LW, "/src/live"), started_at: start, title: "Live floor session" } });
+    const oMark = sO.events.length;
+    const bound = await call("LM", "POST", `/api/v2/workspaces/${LW}/sessions/${key}/epochs`, { bearer: LMd.access, body: { epoch_id: epochId(), goal_id: LG.id, starts_at: start, root_turn: null, cause: "manual" } });
+    const pOf = (e) => e?.data?.presence?.find((p) => p.goal_id === LG.id);
+    const working = await sO.next((e) => e.event === "change" && pOf(e)?.working === 1, 3000, oMark);
+    const vWorking = await sV.next((e) => e.event === "change" && pOf(e)?.working === 1, 3000);
+    const stop = await la(LO, "POST", `/sessions/${key}/stop`, {});
+    const paused = await sO.next((e) => e.event === "change" && pOf(e)?.paused === 1, 3000, oMark);
+    const ps = pOf(paused)?.sessions?.[0];
+    const rc = await call("LM", "POST", `/api/v2/directives/${stop.json?.directive_id}/receipts`, { bearer: LMd.access, body: { session_key: key, state: "received", at: new Date().toISOString() } });
+    const received = await sO.next((e) => e.event === "change" && pOf(e)?.sessions?.[0]?.directive?.delivery === "received", 3000, oMark);
+    const resume = await la(LO, "POST", `/sessions/${key}/resume`, {});
+    const back = await sO.next((e) => e.event === "change" && pOf(e)?.working === 1 && pOf(e)?.sessions?.[0]?.directive?.kind === "resume", 3000, oMark);
+    const all = JSON.stringify([...sO.events, ...sV.events]);
+    check(
+      "live (presence): a shared session bound to a goal shows as working toward it on the owner's and the viewer's streams; a stop shows it paused with the stop sent; the session's receipt makes it received; a resume brings it back working; presence never carries the session key, its title or its person",
+      bound.status === 201 && !!working && pOf(working).working === 1 && !!vWorking && stop.status === 200 && !!paused && ps?.state === "paused" && ps?.directive?.kind === "stop" && ps?.directive?.delivery === "sent" && rc.status === 200 && !!received && resume.status === 200 && !!back &&
+        !all.includes(key) && !all.includes("Live floor session") && !all.includes(LM.id) && /^[0-9a-f]{12}$/.test(ps?.id ?? ""),
+      `${bound.status} ${!!working} ${!!vWorking} ${stop.status} ${JSON.stringify(ps)} ${rc.status} ${!!received} ${resume.status} ${!!back}`,
+    );
+
+    // -- removed while watching: the stream says gone and ends --
+    const sV2 = sV;
+    const rm = await la(LO, "DELETE", `/members/${LV.id}`, {});
+    const gone = await sV2.next((e) => e.event === "gone", 3000);
+    await sleep(300);
+    check(
+      "live: a person removed from the workspace while a stream is open gets gone (404) and the stream ends; a new one is 404",
+      [200, 204].includes(rm.status) && gone?.data?.status === 404 && sV2.closed && (await stream(LV)).status === 404,
+      `${rm.status} ${JSON.stringify(gone)} ${sV2.closed}`,
+    );
+    sO.close();
+
+    // -- the hosted proxy serves it (an /api/v2 path, on the allowlist) --
+    const allow = /const HOSTED_ROUTES = (\/.*\/);/.exec(readFileSync(path.join(ROOT, "proxy.ts"), "utf8"))?.[1];
+    // eslint-disable-next-line no-new-func
+    const re = allow ? new Function(`return ${allow}`)() : null;
+    check("live: the stream's path is on the hosted proxy's allowlist (proxy.ts HOSTED_ROUTES)", !!re && re.test(`/api/v2/workspaces/${LW}/stream`), String(allow));
+
+    // -- the web: approve in one window, see it in the other within about a second --
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const asCookies = (u) => u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE }));
+        const cA = await browser.createBrowserContext();
+        const cB = await browser.createBrowserContext();
+        const pA = await cA.newPage();
+        const pB = await cB.newPage();
+        await pA.setCookie(...asCookies(LO));
+        await pB.setCookie(...asCookies(LM));
+        const cr2 = await la(LM, "POST", `/goals/${LG.id}/change-requests`, { base_version: 1, changes: { title: "Ship the live floor today" }, reason: "Live UI: approve across windows" });
+        await pB.goto(`${BASE}/app/w/${LW}`, { waitUntil: "networkidle0" });
+        await pB.waitForSelector('[data-live-status="live"]', { timeout: 10000 });
+        const waitingBefore = await pB.waitForFunction(() => document.body.innerText.includes("Waiting on Lia Owner to decide"), { timeout: 5000 }).then(() => true).catch(() => false);
+        await pA.goto(`${BASE}/app/w/${LW}?review=${LG.id}.${cr2.json?.id}`, { waitUntil: "networkidle0" });
+        await pA.waitForSelector('[data-live-status="live"]', { timeout: 10000 });
+        const t1 = Date.now();
+        const ap2 = await la(LO, "POST", `/goals/${LG.id}/change-requests/${cr2.json?.id}/approve`, { revision: 1 });
+        const arrivedA = await pA.waitForSelector('[data-node="approved"][data-current="1"]', { timeout: 5000 }).then(() => Date.now() - t1).catch(() => null);
+        const lit = await pA.$('[data-node="approved"][data-arrived="1"]');
+        const seenB = await pB.waitForFunction(() => !document.body.innerText.includes("Waiting on Lia Owner to decide"), { timeout: 5000 }).then(() => Date.now() - t1).catch(() => null);
+        const presenceB = await pB.$eval(`[data-presence="${LG.id}"] [data-presence-sentence]`, (el) => el.textContent).catch(() => null);
+        check(
+          "live (web): with Home open in two windows, an approval shows in the other within about a second: the reviewer's lane map moves to Approved and lights it, the requester's Home drops the wait, and the goal line reads \"1 agent session is working toward this goal now\"; both headers say Live",
+          cr2.status === 201 && ap2.status === 200 && waitingBefore && arrivedA !== null && arrivedA < 2000 && !!lit && seenB !== null && seenB < 2000 && presenceB === "1 agent session is working toward this goal now",
+          `${cr2.status} ${ap2.status} before=${waitingBefore} A=${arrivedA} lit=${!!lit} B=${seenB} presence=${presenceB}`,
+        );
+      } finally {
+        await browser.close();
+      }
+    }
+  }
+  // ==== end live:stream ====
+
   // ==== port29:allocation ====
   // Goal sessions: agent time follows priorities (main #29), on a workspace of its own. AO owns it; team Core has a
   // lead (AL, who owns GA) and a member (AM, whose device's sessions do the work and who owns the private goal GP); AX
@@ -8027,7 +8285,7 @@ try {
         const y4Withdrawn = await call("FO", "DELETE", `/api/v2/workspaces/${IWY4}/invites/${ivY4.json?.id}`, { cookie: FO.cookie });
         await press(pY, "main", "Join workspace");
         await pY.waitForFunction(() => document.querySelector("main")?.innerText.includes("can't be used any more"), { timeout: 15000 }).catch(() => undefined);
-        await pY.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        await pY.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const y4 = await pY.evaluate(() => ({ text: document.querySelector("main")?.innerText ?? "", buttons: [...document.querySelectorAll("main button")].map((b) => b.textContent?.trim()) }));
         check(
           "C6-5 (ui): Join on an invite withdrawn while the page was open shows only \"This invite can't be used any more: … You have not joined. …\": no \"You are invited …\", no \"This invite link is not valid\" and no Join button",
@@ -8684,7 +8942,7 @@ try {
         await press(pA, `[data-cr="${crL?.id}"]`, "Not yet");
         // Waits that time out don't stop the run: each check below then says what it saw.
         await pA.waitForFunction(() => document.body.innerText.includes("Not launched yet: you decided not yet") && document.body.innerText.includes("Recorded: you decided not yet"), { timeout: 15000 }).catch(() => undefined);
-        await pA.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const afterNotYet = { text: await cardText(pA, crL?.id), calls: await calls(), loading: await pA.evaluate(() => window.__loading) };
         await pA.evaluate(() => (window.__calls = []));
         await press(pA, `[data-cr="${crL?.id}"]`, "Launch version 2 to agents");
@@ -8696,7 +8954,7 @@ try {
           },
           { timeout: 15000 },
         ).catch(() => undefined);
-        await pA.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const afterLaunch = { text: await cardText(pA, crL?.id), calls: await calls(), loading: await pA.evaluate(() => window.__loading) };
         const posted = (cs, action) => cs.filter((c) => c.method === "POST" && c.url.endsWith(`/${crL?.id}/${action}`)).map((c) => c.body);
         check(
@@ -8769,7 +9027,7 @@ try {
         await open(pB, `/app/w/${KW}/goals/${KCI3.id}`);
         await press(pB, "#change-requests", "Full change form");
         await pB.waitForFunction(() => /Send for approval/.test(document.querySelector("#change-requests")?.innerText ?? ""), { timeout: 15000 });
-        await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const proposeForm = await pB.evaluate(() => document.querySelector("#change-requests form")?.innerText ?? "");
         check(
           "C2 F5 (ui): the propose form's Depends on lists the goals everyone deciding can see (Faster builds for everyone), never the proposer's private goal or the Hardware-only one, and says \"2 goals you can see aren't offered: someone who decides on this goal can't see them.\"",
@@ -8783,7 +9041,7 @@ try {
         const qCard = `[data-cr="${crQ?.id}"]`;
         await pA8.click(`${qCard} [data-decision="Suggest a change"]`);
         await pA8.waitForSelector(`${qCard} [data-decision-input="counter"] form`, { timeout: 15000 });
-        await pA8.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pA8.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const counterForm = await pA8.evaluate((q) => document.querySelector(`${q} [data-decision-input="counter"] form`)?.innerText ?? "", qCard);
         check(
           "C3 (ui): the counter form's Depends on lists the goals the requester and everyone deciding can see (Faster builds for everyone), never Robot firmware or the counterer's private goal, and says \"2 goals you can see aren't offered: Kai Member or someone who decides on this goal can't see them.\"",
@@ -8801,7 +9059,7 @@ try {
         // X5 (ui): the owner's New version form leaves out the goal that would make a loop, and says why.
         await open(pA8, `/app/w/${KW}/goals/${KCI8.id}`);
         await pA8.waitForSelector("#new-version form", { timeout: 15000 }).catch(() => undefined);
-        await pA8.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pA8.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const nvForm = await pA8.evaluate(() => document.querySelector("#new-version form")?.innerText ?? "");
         check(
           "X5 (ui): the New version form's Depends on doesn't offer the goal that already depends on this one and says \"1 goal isn't offered: it already depends on this goal, so adding it would make a loop.\"",
@@ -8825,7 +9083,7 @@ try {
         const kcOut = await ka(KO, "DELETE", `/teams/${KHT}/members/${KC.id}`);
         await press(pC9, `${vCard} [data-confirm="approve"]`, "Confirm: Approve");
         await pC9.waitForFunction((s) => /Not recorded\./.test(document.querySelector(s)?.innerText ?? ""), { timeout: 15000 }, vCard).catch(() => undefined);
-        await pC9.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        await pC9.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const v = await pC9.evaluate(
           (s) => ({
             text: document.querySelector(s)?.innerText ?? "",
@@ -9213,11 +9471,11 @@ try {
         await pS.waitForSelector(rlSel, { timeout: 15000 }).catch(() => undefined);
         await press(pS, rlSel, "Approve (agents switch at launch)");
         await pS.waitForFunction((s) => /Recorded:/.test(document.querySelector(s)?.innerText ?? ""), { timeout: 15000 }, rlSel).catch(() => undefined);
-        await pS.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pS.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const afterApprove = await textOf(pS, rlSel);
         await press(pS, rlSel, "Launch");
         await pS.waitForFunction((s) => /Recorded: you launched/.test(document.querySelector(s)?.innerText ?? ""), { timeout: 15000 }, rlSel).catch(() => undefined);
-        await pS.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pS.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const afterLaunchRl = await textOf(pS, rlSel);
         const gs1After = (await xa(XS, "GET", `/goals/${GS1?.id}`)).json?.goal;
         check(
@@ -9255,7 +9513,7 @@ try {
         });
         await press(pO, `[data-cr="${crL?.id}"]`, "Launch version 2 to agents");
         await pO.waitForFunction(() => document.body.innerText.includes("Recorded: you launched version 2 to agents") && /version 2/.test(document.querySelector("h1")?.nextElementSibling?.textContent ?? ""), { timeout: 15000 }).catch(() => undefined);
-        await pO.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        await pO.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const c34 = await pO.evaluate(() => ({
           gone: window.__agentsGone,
           cards: document.querySelectorAll("#agents-on-goal").length,
@@ -9300,7 +9558,7 @@ try {
         await open(pO, `/app/w/${XW}/goals/${GQ?.id}`);
         await press(pO, "#change-requests", "Full change form");
         await pO.waitForFunction(() => /Send for approval/.test(document.querySelector("#change-requests")?.innerText ?? ""), { timeout: 15000 }).catch(() => undefined);
-        await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const qForm = await textOf(pO, "#change-requests form");
         check(
           "C3-3 (ui): the propose form on Grow trials doesn't offer Ship arms or Arms launch (they already depend on it) and says \"2 goals aren't offered: they already depend on this goal, so adding them would make a loop.\", never that someone can't see them",
@@ -9437,7 +9695,7 @@ try {
         );
         await press(pO, aSel, "Approve");
         await pO.waitForFunction((s) => /Recorded:/.test(document.querySelector(s)?.innerText ?? ""), { timeout: 15000 }, aSel).catch(() => undefined);
-        await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const aAfter = await textOf(pO, aSel);
         const alNow = (await ya(YO, "GET", `/alignments/${al.json?.id}`)).json;
         check(
@@ -9683,7 +9941,7 @@ try {
         const w2No = await zAct(ZA, GW2.id, w2?.id, "reject", { reason: "Declined first" });
         await press(pB, w2Card, "Confirm: Withdraw");
         await pB.waitForFunction((c) => !!document.querySelector(`${c} [data-notice="stale"]`), { timeout: 15000 }, w2Card).catch(() => undefined);
-        await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const w2Text = await textOf(pB, w2Card);
         const w2After = await zRead(ZA, GW2.id, w2?.id);
         check(
@@ -9700,7 +9958,7 @@ try {
         await pA.waitForSelector(`${bCard} [data-decision="Suggest a change"]`, { timeout: 15000 }).catch(() => undefined);
         await pA.click(`${bCard} [data-decision="Suggest a change"]`).catch(() => undefined);
         await pA.waitForSelector(`${bForm} form`, { timeout: 15000 }).catch(() => undefined);
-        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const bOpen = await reviewState(pA, bCard);
         await typeIn(pA, bForm, "Note", "Back to the old name");
         await typeIn(pA, bForm, "Goal", "Behind goal");
@@ -9728,7 +9986,7 @@ try {
         await pA.waitForSelector(`${nCard} [data-decision="Suggest a change"]`, { timeout: 15000 }).catch(() => undefined);
         await pA.click(`${nCard} [data-decision="Suggest a change"]`).catch(() => undefined);
         await pA.waitForSelector(`${nForm} form`, { timeout: 15000 }).catch(() => undefined);
-        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         await typeIn(pA, nForm, "Note", "A thought");
         const nOpen = await reviewState(pA, nCard);
         await typeIn(pA, nForm, "Accept if… (optional condition the requester confirms)", "Docs first");
@@ -9993,7 +10251,7 @@ try {
         const u2Ctr = await qAct(QA, GU2.id, u2?.id, "counter", { revision: 1, changes: { title: "Add after a counter, countered" }, note: "Shorter" });
         await press(pB, u2Card, "Add link");
         await pB.waitForFunction((c) => /Not recorded\./.test(document.querySelector(c)?.innerText ?? "") && /revision 2/.test(document.querySelector(c)?.innerText ?? ""), { timeout: 15000 }, u2Card).catch(() => undefined);
-        await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const u2Ui = await cardState(pB, u2Card);
         check(
           "c9 W6 (ui): Add link on a request countered in another tab reads \"Not recorded. This request changed after you read it: Quinn Approver countered it, and it is now at revision 2. Add the link again if it supports that revision.\" on the reloaded card (now offering Accept the change), never \"…; reload and try again\"",
@@ -10012,7 +10270,7 @@ try {
         const t2No = await qa(QA, "POST", `/reallocations/${t2.json?.id}/reject`, { reason: "Not in the browser" });
         await press(pA, t2Card, "Decline");
         await pA.waitForFunction((c) => !!document.querySelector(`${c} [data-notice]`) && !/needs one of/.test(document.querySelector(c)?.innerText ?? ""), { timeout: 15000 }, t2Card).catch(() => undefined);
-        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const t2Ui = await cardState(pA, t2Card);
         const t3Ui = await cardState(pA, t3Card);
         check(
@@ -10322,7 +10580,7 @@ try {
         const r = await meanwhile();
         await press(pg, card, label);
         await pg.waitForFunction((c) => !!document.querySelector(`${c} [data-notice]`), { timeout: 15000 }, card).catch(() => undefined);
-        await pg.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pg.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         return { r, ui: await cardState(pg, card) };
       };
       try {
@@ -10525,7 +10783,7 @@ try {
         const n2Other = await sRlAct(SC, n2, "not_yet", { revision: 1 });
         await press(pO, card, "Not yet");
         await pO.waitForFunction((c) => !!document.querySelector(`${c} [data-notice]`), { timeout: 15000 }, card).catch(() => undefined);
-        await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const n2Ui = await cardState(pO, card);
         check(
           "c11 W2 (ui): Not yet on a target change card left open while another launcher said not yet reads, focused, \"Not recorded. Sol Lead already decided not yet, so nothing changes: …\"; the card reloads (\"Approved, not launched yet: Sol Lead decided not yet.\", no Not yet button) and only Sol Lead's not yet is recorded",
@@ -10665,7 +10923,7 @@ try {
       const hasButton = (pg, scope, label) => pg.waitForFunction((sc, t) => [...document.querySelectorAll(`${sc} button`)].some((b) => b.textContent?.trim() === t), { timeout: 15000 }, scope, label).catch(() => undefined);
       const noticeOf = async (pg, card) => {
         await pg.waitForFunction((c) => !!document.querySelector(`${c} [data-notice]`), { timeout: 15000 }, card).catch(() => undefined);
-        await pg.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pg.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         return pg.evaluate((c) => {
           const n = document.querySelector(`${c} [data-notice]`);
           return { notice: n?.getAttribute("data-notice") ?? null, text: n?.textContent?.trim() ?? "", focused: !!n && document.activeElement === n, card: document.querySelector(c)?.innerText ?? "" };
@@ -12801,7 +13059,7 @@ try {
         // Each page loads data after it is drawn (the create page's workspace list replaces its loading line), which moves
         // the form; a click aimed before that lands beside the button. So let the page settle, type, check the field
         // kept every key, and only then click.
-        const settle = () => page.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        const settle = () => page.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const fill = async (selector, value) => {
           await page.type(selector, value);
           await page.waitForFunction((s, v) => document.querySelector(s)?.value === v, { timeout: 5000 }, selector, value);
