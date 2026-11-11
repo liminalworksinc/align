@@ -185,22 +185,6 @@ export async function confirmParent(pp: PolicyPrincipal, goalId: string, parentI
   return serializeGoal(pp, goalRow(pp.wsId, goalId)!);
 }
 
-/** Goals this user holds an approved allocation transfer to: an approved work_toward alignment whose current
- *  revision lists one of their sessions. */
-export function transferGoals(wsId: string, userId: string): Set<string> {
-  return new Set(
-    all<{ target_goal_id: string }>(
-      `SELECT DISTINCT a.target_goal_id FROM v2_alignments a
-       JOIN v2_alignment_revisions r ON r.alignment_id = a.id AND r.revision = a.revision
-       JOIN v2_alignment_sessions s ON s.alignment_id = a.id AND s.revision = a.revision
-       JOIN v2_sessions x ON x.ws_id = s.ws_id AND x.session_key = s.session_key
-       WHERE a.ws_id = ? AND a.state = 'approved' AND r.choice = 'work_toward' AND x.user_id = ?`,
-      wsId,
-      userId,
-    ).map((r) => r.target_goal_id),
-  );
-}
-
 /** The approved alignment that transfers this session's allocation to this goal, if any. */
 export function transferFor(wsId: string, sessionKey: string, goalId: string): string | null {
   return (
@@ -217,17 +201,18 @@ export function transferFor(wsId: string, sessionKey: string, goalId: string): s
   );
 }
 
-export function bindableFor(pp: PolicyPrincipal, g: GoalRow, transfers = transferGoals(pp.wsId, pp.userId)): boolean {
-  return g.status === "active" && canBind(pp, goalObj(g), transfers.has(g.id));
+/** General binding choices only. An alignment authorizes its specific sessions, not this person globally. */
+export function bindableFor(pp: PolicyPrincipal, g: GoalRow): boolean {
+  return g.status === "active" && canBind(pp, goalObj(g), false);
 }
 
-export function serializeGoal(pp: PolicyPrincipal, g: GoalRow, transfers?: Set<string>): Goal {
+export function serializeGoal(pp: PolicyPrincipal, g: GoalRow): Goal {
   const core = goalCore(g);
   const visibleDeps = core.depends_on.filter((id) => {
     const d = goalRow(pp.wsId, id);
     return !!d && canReadGoal(pp, goalObj(d));
   });
-  return { ...core, depends_on: visibleDeps, bindable: bindableFor(pp, g, transfers), contributes_to: parentsFor(pp, g) };
+  return { ...core, depends_on: visibleDeps, bindable: bindableFor(pp, g), contributes_to: parentsFor(pp, g) };
 }
 
 /** Every goal this caller may see (own private + pod + workspace), oldest first. */
@@ -239,9 +224,8 @@ export function visibleGoals(pp: PolicyPrincipal): GoalRow[] {
  *  lib/v2/allocation.ts), the workspace's steering switch, and a short version hash of both for ETag / If-None-Match.
  *  Shares are whole percents, so usage moves the hash only when a share moves a full point. */
 export function goalsFeed(pp: PolicyPrincipal) {
-  const transfers = transferGoals(pp.wsId, pp.userId);
   const shares = feedAllocation(pp);
-  const goals = visibleGoals(pp).map((g) => ({ ...serializeGoal(pp, g, transfers), allocation: shares.get(g.id) ?? null }));
+  const goals = visibleGoals(pp).map((g) => ({ ...serializeGoal(pp, g), allocation: shares.get(g.id) ?? null }));
   const steering = workspaceSteering(pp.wsId);
   const version = sha256hex(JSON.stringify({ goals, steering })).slice(0, 16);
   return { version, goals, steering };

@@ -418,12 +418,12 @@ The server SHALL let only a goal's owner confirm the goal still fits a parent's 
 
 ### Requirement: Bindable goals
 
-The server SHALL mark a goal `bindable` for the caller only when it is `active`, the caller is not a viewer, and the goal is the caller's own, belongs to a team the caller is in, or is the target of an approved `work_toward` alignment whose current revision lists one of the caller's sessions. Binding a session to a goal its owner may read but that is not their own, not their team's and not covered by such an alignment SHALL be refused with 403 `alignment_required`, and binding it to a goal that is not `active` with 409 `goal_not_active` (the epoch route is specified in `workspaces`).
+The server SHALL mark a goal `bindable` for the caller only when it is `active`, the caller is not a viewer, and the goal is the caller's own or belongs to a team the caller is in. This person-level flag SHALL remain false for another goal even when an approved `work_toward` alignment covers one of the caller's sessions. That alignment authorizes only its listed sessions, whose binding is delivered by the server; it does not add a general CLI or folder-rule binding choice. After a covered session moves off that goal, the CLI SHALL not offer manual rebinding through this flag. Binding a session to a goal its owner may read but that is not their own, not their team's and not covered by such an alignment SHALL be refused with 403 `alignment_required`, and binding it to a goal that is not `active` with 409 `goal_not_active` (the epoch route is specified in `workspaces`).
 
 #### Scenario: Teammate's goal
 
 - **WHEN** a member of team Product reads an active goal owned by another member of team Product
-- **THEN** the goal has `bindable: true`; a company goal owned by someone else has `bindable: false` until an approved `work_toward` alignment covers one of the caller's sessions
+- **THEN** the goal has `bindable: true`; a company goal owned by someone else has `bindable: false` even when an approved `work_toward` alignment covers one of the caller's sessions
 
 ### Requirement: Approval set of a goal
 
@@ -535,12 +535,12 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/alignments/{id}/{action}` 
 
 ### Requirement: Alignment revocation
 
-The server SHALL let the requester or an approver revoke an `approved` alignment (409 `wrong_state` otherwise), set it `revoked`, and, for `work_toward`, remove the governing goal from its sessions and, for each session whose open epoch was bound only through this alignment, end that epoch now, set the session `suspended` and write a `binding_suspended` directive; past usage never moves. A revoked contribution SHALL stop making its source a child of its target.
+The server SHALL let the requester or an approver revoke an `approved` alignment (409 `wrong_state` otherwise), set it `revoked`, and, for `work_toward`, remove the governing goal from its sessions and, for each session whose open epoch was bound only through this alignment, end that epoch now, set the session `suspended` and write a `binding_suspended` directive, and, for each session that received its `binding_changed` and has no epoch under it (unless it has an open epoch on that goal, or another alignment now governs it toward that goal), write a `binding_suspended` directive with `effective` `cancel_pending`, which cancels the pending binding change on its machine and leaves the session shared under its own binding (`directives` "binding_suspended on a revoked work_toward alignment"); past usage never moves. A revoked contribution SHALL stop making its source a child of its target.
 
 #### Scenario: Revoking work toward
 
 - **WHEN** the requester revokes an approved `work_toward` alignment
-- **THEN** it becomes `revoked`, its sessions lose the governing goal, and sessions whose open binding existed only through it become `suspended` and get a `binding_suspended` directive
+- **THEN** it becomes `revoked`, its sessions lose the governing goal, sessions whose open binding existed only through it become `suspended` and get a `binding_suspended` directive, and the other sessions that received its `binding_changed` and have no epoch under it get a `binding_suspended` with `effective` `cancel_pending` and stay shared
 
 ### Requirement: An alignment needs active goals until it is decided
 
@@ -1146,12 +1146,17 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/goals/{goal}/requests` wit
 
 ### Requirement: Switch goal requests name sessions and a bindable goal
 
-The server SHALL require, for a `switch_goal` request, `session_keys` (1 to 20 sessions on the goal) and `target_goal_id`, a goal other than this one that the sender can read (else 404), and SHALL answer 409 `not_bindable`, naming no goal, session or person, unless the target goal is active and every chosen session's owner may bind that session to it now (their own goal, their team's goal, or an approved allocation transfer for that session).
+The server SHALL require, for a `switch_goal` request, `session_keys` (1 to 20 sessions on the goal) and `target_goal_id`, a goal other than this one that the sender can read (else 404), and SHALL answer 409 `not_bindable`, naming no goal, session or person, unless the target goal is active and every chosen session's owner may bind it themselves (their own goal or their team's goal). A goal a session reaches only through an approved `work_toward` alignment SHALL be refused here the same way: the alignment moves the sessions it lists with its own binding change, and the agent, which reads the same `bindable`, would otherwise have to turn the request down.
 
 #### Scenario: Target the session's owner cannot bind
 
 - **WHEN** an approver asks a member's session to switch to a workspace-visible goal owned by someone in no shared team with that member
 - **THEN** the response is 409 `not_bindable` and its message names neither the goal nor its owner
+
+#### Scenario: Target reached only through an alignment
+
+- **WHEN** an approved `work_toward` alignment lists a member's session for a goal that is neither theirs nor their team's, and an approver asks that session to switch to it
+- **THEN** the response is 409 `not_bindable` naming no goal, and the session still moves to it through the alignment's own `binding_changed`
 
 #### Scenario: Switch to a team goal
 

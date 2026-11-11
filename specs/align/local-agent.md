@@ -2050,11 +2050,28 @@ session keys this device shares in the directive's workspace, and post receipts:
 `hold` `received` and `enforced`, for a `release` `received` and `applied`, and for a `request` `received`, then
 `accepted` or `declined` when it is answered. A
 `binding_suspended` directive SHALL set the share to `suspended`, withhold the session's later usage, show the user
-`Align: this session's goal binding was revoked, so its usage is paused and stays on this machine. Type
-\`::align bind <goal>\` or run \`align bind\` to pick a goal.` (when its `binding.cause` is `goal_closed:<alignment
-id>`, `Align: the goal this session followed through an alignment was achieved or dropped, so its usage is paused ...`
-instead, never "revoked": test `a3cross` "binding_suspended with cause `goal_closed:<alignment>` ..."; E2E acycle3
-A3-cross-2) and give the model the unbound delta at the next prompt.
+`Align: this session's goal binding was revoked, so its usage is paused and stays on this machine. Goals you can pick:
+"<goal>", "<goal>". Type \`::align bind <goal>\` or run \`align bind\` to pick a goal, and the session resumes on it at
+your next prompt.` (when its `binding.cause` is `goal_closed:<alignment id>`, `Align: the goal this session followed
+through an alignment was achieved or dropped, so its usage is paused ...` instead, never "revoked": test `a3cross`
+"binding_suspended with cause `goal_closed:<alignment>` ..."; E2E acycle3 A3-cross-2) and give the model the unbound
+delta at the next prompt. The goals named SHALL be those of the cached feed the person can bind now and that are active,
+never the goal the session just lost, at most 12 and then `and <n> more`; with none it SHALL say so (test `a3cross` "the
+pause lists the goals ..."). Picking one, by \`::align bind\` or \`align bind\`, SHALL need no further step: the next
+prompt opens the session's epoch on that goal and tells the model it counts toward it, before any sync has run, and the
+sync returns the share to `shared` (test `a3cross` "the whole path ..."; `scripts/test-agent-live.mjs` "H8 (LIM-2441)
+..."). A `binding_suspended` whose `binding.effective` is `cancel_pending` (its alignment ended before the session
+switched to its goal: LIM-2441) SHALL instead delete the session's pending binding to that goal and leave the share as
+it is, telling the user, when it deleted one, `Align: the alignment this session was about to switch goals for was
+revoked before the switch, so it keeps its current goal.` (when its `binding.cause` is `goal_closed:<alignment id>`,
+`Align: the goal this session was about to switch to was achieved or dropped before the switch, so it keeps its current
+goal.`); when the session's current binding is already that goal, it SHALL be handled as any `binding_suspended` (test
+`a3cross` "LIM-2441 H8 (agent side) ..."). When a hook had already opened the switch that a `cancel_pending` deletes, so
+its `epoch_open` record reaches the agent after the cancel, the agent SHALL NOT send that epoch: it SHALL pause the
+session as for any `binding_suspended`, in the words of the cancel's `binding.cause`, and withdraw the kept-goal notice
+if the user has not read it (test `a3cross` "a hook's switch ingested after the pass that cancelled it ..."). If the
+session was already paused when the hook opened that switch, the switch SHALL stop reading as the session's goal and the
+next prompt SHALL give the model the unbound delta (test `a3cross` "a switch opened while already paused ...").
 A share ends with no directive (Stop sharing on the web, say), so the pass SHALL also read the first page's
 `ended_sessions` (this device's sessions whose share the server ended, `directives` "Device fetch of v2 directives by
 cursor") and end each share that is still `shared` or `suspended` here as the usage upload's `sharing_stopped` refusal
@@ -2441,7 +2458,11 @@ back to the row's timestamp); rows before the first epoch SHALL stay private, an
 refused SHALL be withheld. Each row SHALL carry only `request_key`, `ts`, `epoch_id`, `model`, `query_source`, the
 six token counters, `basis`, `est_list_usd_micros`, `price_table_version` and `source`. A usage upload answered
 403, 404 or 409 SHALL stop that session's uploads for the pass and log it, and a 404 or an error `sharing_stopped` or `not_shared`
-SHALL mark the share `stopped`; a network error SHALL end the upload step until the next pass.
+SHALL mark the share `stopped`. For 400, 413 or 422, the pass SHALL split the refused batch down to individual rows
+and keep sending that session's other rows, until five of its rows have been refused alone in that pass; the rest
+wait for the next pass. It SHALL set aside only those refused rows whose session had a row accepted this pass; a
+network error, 5xx, 401, 408 or 429 ends the step without treating that row as refused. Diagnostics SHALL contain
+only status, counts and a short local identifier, never request content.
 
 #### Scenario: Root turn beats timestamp
 
