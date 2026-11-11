@@ -35,7 +35,7 @@ import { cancelledBinding, pauseNotice, pollDirectives } from "./directives.ts";
 import { answerRequest } from "./requests.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { tailAll, type TailResult } from "./tailer.ts";
-import { detectGitEdits, fetchPod, settleActivity, uploadActivity } from "./activity.ts";
+import { detectGitEdits, fetchPod, settleActivity, signalsAllowed, uploadActivity } from "./activity.ts";
 import { fetchAsks } from "./asks.ts";
 import { computeUnsharedDigest, uploadSteering } from "./allocation.ts";
 import { layout, listSpool, localId } from "./shared/layout.ts";
@@ -215,10 +215,12 @@ function applySpool(ctx: Ctx, r: SpoolRecord): string | null {
         removeFile(layout.asked(ctx.home, r.local_id));
         return r.local_id;
       }
+      // File paths only with work signals on (founder ruling 2026-11-11), whatever the hook spooled.
+      const files = signalsAllowed(ctx, r.local_id, getSession(ctx.db, r.local_id)?.cwd ?? null) ? r.files : [];
       enqueue(ctx, r.local_id, "post_question", {
         ws: share.workspace_id,
         session_key: share.session_key,
-        body: { client_id: r.client_id, goal_id: r.goal_id, limit_id: r.limit_id, files: r.files, stretch_from: r.stretch_from, stretch_to: r.stretch_to },
+        body: { client_id: r.client_id, goal_id: r.goal_id, limit_id: r.limit_id, files, stretch_from: r.stretch_from, stretch_to: r.stretch_to },
       });
       return r.local_id;
     }
@@ -523,7 +525,9 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
       throw new HttpError(r.status, r.json?.error ?? null, r.json);
     }
     case "post_question": {
-      const r = await api(ctx, "POST", `${base}/questions`, { body: p.body });
+      // Work signals turned off since it was queued: still no paths.
+      const body = signalsAllowed(ctx, lid, getSession(ctx.db, lid)?.cwd ?? null) ? p.body : { ...p.body, files: [] };
+      const r = await api(ctx, "POST", `${base}/questions`, { body });
       if (r.status === 201 || r.status === 200) {
         // The drift notice at the next prompt says it was asked (hooks/handlers.ts takeDrift).
         renderHot(ctx, lid);

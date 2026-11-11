@@ -463,7 +463,7 @@ try {
   check(
     "drift: Stop adds 0 bytes; the next prompt shows the user a systemMessage naming the crossed limit and saying the goal's owner was asked (what was sent, never the reply), with no model context; once",
     stop.code === 0 && stop.stdout === "" &&
-      drift.system === `Align: the agent's last reply may conflict with a limit on goal "${GOAL_TITLE}": Must not "${LIM1}" This is a word check, so Align asked the goal's owner whether the agent should go on; it sent the limit and the files this session edited in this stretch with their times, nothing the agent wrote, and their answer reaches the agent at your next prompt after they answer. \`align config drift off\` turns this off.` &&
+      drift.system === `Align: the agent's last reply may conflict with a limit on goal "${GOAL_TITLE}": Must not "${LIM1}" This is a word check, so Align asked the goal's owner whether the agent should go on; it sent the limit and the time, no file paths, nothing the agent wrote, and their answer reaches the agent at your next prompt after they answer. \`align config drift off\` turns this off.` &&
       drift.json?.hookSpecificOutput === undefined && driftAgain.stdout === "",
     `stop=${stop.stdout} drift=${drift.stdout} again=${driftAgain.stdout}`,
   );
@@ -554,6 +554,115 @@ try {
     await ws(M, "POST", `/questions/${after[1]?.id}/answer`, { answer: "continue" });
     sync();
     hook("UserPromptSubmit", { session_id: SID, prompt_id: "p16", prompt: "ok", cwd: repo });
+
+    // ---- the audit of 91c07d7e (LIM-2505): M2 the server's own path rule, M3 a goal switch, M1 pseudonymisation ----
+    const token = () => JSON.parse(readFileSync(path.join(alignHome, "credentials.json"), "utf8")).access_token;
+    const now = new Date().toISOString();
+    const BAD = ["C:/Users/x/secret.txt", "..\\..\\etc\\passwd", "\\\\server\\share\\x", "~/.ssh/id_rsa", "src/\u202Etxt.exe", "a\u200Bb", "./a", "a//b", "/etc/passwd", "src/../../x"];
+    const before = qRows().length;
+    const refused = [];
+    for (const [i, p] of BAD.entries())
+      refused.push(
+        (await call("POST", `/api/v2/workspaces/${W}/sessions/${SKEY}/questions`, { bearer: token(), body: { client_id: `q_badpath_${i}_0000`, goal_id: G.id, limit_id: G.limits[0].id, files: [{ path: p, at: now }], stretch_from: now, stretch_to: now } })).status,
+      );
+    check(
+      "questions (audit M2): the server refuses a path a modified agent could send: a drive letter, backslashes, ~, a bidi override, a zero-width space, ./, an empty segment, an absolute path, .. (400 each, nothing stored)",
+      refused.every((st) => st === 400) && qRows().length === before,
+      JSON.stringify(refused),
+    );
+    // M3: a question left open on goal G, then the session moves to G2 and drifts there: G2's owner is asked.
+    const G2LIM = "The nightly export must never run during peak hours.";
+    const G2 = (await ws(M, "POST", "/goals", { title: "Ship the nightly ledger export", team_id: PLATFORM, visibility: "workspace", measures: [{ text: "Export lands by 06:00" }], limits: [{ type: "must_not", text: G2LIM, source: { kind: "manual", title: "", date: "2026-11-11" } }] })).json;
+    const turn = (id, reply) => {
+      const at = Date.now();
+      appendLines(transcript, [userLine(SID, id, new Date(at).toISOString(), repo), assistantLine(SID, `req_${id}`, new Date(at + 500).toISOString(), repo, reply)]);
+      hook("UserPromptSubmit", { session_id: SID, prompt_id: id, prompt: "go on", cwd: repo });
+      hook("Stop", { session_id: SID, transcript_path: transcript, cwd: repo, last_assistant_message: reply, stop_hook_active: false });
+      sync();
+    };
+    // G's other limit (the first has had its 3 notices in this session): out of scope.
+    turn("p17", "I started rewriting the billing service to use the new queue.");
+    const openOnG = qRows().find((q) => q.state === "open" && q.goal_id === G.id);
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p18", prompt: `::align bind ${G2?.id}`, cwd: repo });
+    sync();
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p19", prompt: "ok", cwd: repo });
+    sync();
+    turn("p20", "Done. The nightly export will run during peak hours from now on.");
+    const onG2 = qRows().find((q) => q.goal_id === G2?.id);
+    const stale = await ws(M, "POST", `/questions/${openOnG?.id}/answer`, { answer: "continue" });
+    check(
+      "questions (audit M3): after the session moves from goal G (a question still open there) to G2 and drifts, G2's owner is asked; G's question is superseded and can no longer be answered (409 question_superseded)",
+      !!openOnG && !!onG2 && onG2.state === "open" && qRows().find((q) => q.id === openOnG.id)?.state === "superseded" && stale.status === 409 && stale.json?.error === "question_superseded",
+      `${JSON.stringify(qRows().map((q) => [q.goal_id, q.state]))} ${stale.status} ${stale.text.slice(0, 160)}`,
+    );
+    await ws(M, "POST", `/questions/${onG2?.id}/answer`, { answer: "continue" });
+    sync();
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p21", prompt: `::align bind ${G.id}`, cwd: repo });
+    sync();
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p22", prompt: "ok", cwd: repo });
+    sync();
+    // M1: pseudonymising the person who asked and answered (on a copy of the server's database) leaves no id of theirs
+    // in a question or an answer directive.
+    sdb((d) => d.exec("PRAGMA wal_checkpoint(TRUNCATE)"));
+    const copy = path.join(tmpRoot, "pseudo.sqlite");
+    writeFileSync(copy, readFileSync(dbFile));
+    const retention = await import(pathToFileURL(path.join(ROOT, "lib/v2/retention-core.mts")).href);
+    const cd = new DatabaseSync(copy);
+    const sql = { run: (q, ...p) => Number(cd.prepare(q).run(...p).changes), get: (q, ...p) => cd.prepare(q).get(...p), all: (q, ...p) => cd.prepare(q).all(...p) };
+    const named = retention.workspacesNaming(sql, M.id).includes(W);
+    const pid = retention.pseudonymise(sql, W, M.id, new Date().toISOString(), "test-secret");
+    const left = cd.prepare("SELECT COUNT(*) AS n FROM v2_agent_questions WHERE ws_id = ? AND (asked_by = ? OR answered_by = ?)").get(W, M.id, M.id).n;
+    const leftDir = cd.prepare("SELECT COUNT(*) AS n FROM v2_directives WHERE ws_id = ? AND answer_json IS NOT NULL AND instr(answer_json, ?) > 0").get(W, M.id).n;
+    const nowBy = cd.prepare("SELECT COUNT(*) AS n FROM v2_agent_questions WHERE ws_id = ? AND asked_by = ? AND answered_by = ?").get(W, pid, pid).n;
+    cd.close();
+    check(
+      "questions (audit M1): pseudonymising the person who asked and answered rewrites asked_by, answered_by and the answer directive's by to their Former member id",
+      named && left === 0 && leftDir === 0 && nowBy >= 2,
+      `${named} ${left} ${leftDir} ${nowBy} ${pid}`,
+    );
+  }
+
+  // ======== founder ruling 2026-11-11 (D5): a drift question names files only with work signals on ========
+  {
+    const qOf = (key) => sdb((d) => d.prepare("SELECT files_json FROM v2_agent_questions WHERE ws_id = ? AND session_key = ?").all(W, key));
+    const runIn = async (name, signals) => {
+      const dir = path.join(tmpRoot, "work", name);
+      mkdirSync(path.join(dir, "src"), { recursive: true });
+      spawnSync("git", ["init", "-q", dir]);
+      cli(["share", "--dir", dir, "--workspace", W, "--goal", G.id, ...(signals ? ["--signals"] : []), "--yes"]);
+      const sid = randomUUID();
+      const tr = path.join(claudeDir, "projects", `-work-${name}`, `${sid}.jsonl`);
+      hook("SessionStart", { session_id: sid, source: "startup", cwd: dir, transcript_path: tr });
+      hook("UserPromptSubmit", { session_id: sid, prompt_id: `${name}-p1`, prompt: "go", cwd: dir, transcript_path: tr });
+      sync();
+      const file = path.join(dir, "src", `${name}-cutover.sql`);
+      const input = { file_path: file, content: "-- cutover\n" };
+      hook("PreToolUse", { session_id: sid, cwd: dir, tool_name: "Write", tool_input: input, tool_use_id: `tu_${name}` });
+      writeFileSync(file, input.content);
+      hook("PostToolUse", { session_id: sid, cwd: dir, tool_name: "Write", tool_input: input, tool_use_id: `tu_${name}` });
+      const reply = "Done. The migration cutover will run during month-end close on the 31st.";
+      const at = Date.now();
+      writeLines(tr, [userLine(sid, `${name}-p2`, new Date(at).toISOString(), dir), assistantLine(sid, `req_${name}`, new Date(at + 500).toISOString(), dir, reply)]);
+      hook("UserPromptSubmit", { session_id: sid, prompt_id: `${name}-p2`, prompt: "cut over", cwd: dir, transcript_path: tr });
+      hook("Stop", { session_id: sid, transcript_path: tr, cwd: dir, last_assistant_message: reply, stop_hook_active: false });
+      sync();
+      sync();
+      const told = hook("UserPromptSubmit", { session_id: sid, prompt_id: `${name}-p3`, prompt: "ok", cwd: dir, transcript_path: tr });
+      return { key: sessionKey(W, "claude-code", sid), file: `src/${name}-cutover.sql`, told };
+    };
+    const off = await runIn("signals-off", false);
+    const on = await runIn("signals-on", true);
+    const offRows = qOf(off.key);
+    const onRows = qOf(on.key);
+    sdb((d) => d.exec("PRAGMA wal_checkpoint(PASSIVE)"));
+    const listed = (await ws(M, "GET", "/questions")).json?.questions ?? [];
+    check(
+      "D5 ruling: work signals off -> the question reached the server with no file path (stored [], nowhere in the database files, none on the web) and the notice says no file paths; work signals on -> the edited file's repo-relative path is stored and shown, and the notice says files were sent",
+      offRows.length === 1 && offRows[0].files_json === "[]" && dbFilesLack(dbFile, off.file) && !JSON.stringify(listed).includes(off.file) && (off.told.system ?? "").includes("it sent the limit and the time, no file paths") &&
+        onRows.length === 1 && JSON.parse(onRows[0].files_json).map((f) => f.path).join() === on.file && JSON.stringify(listed).includes(on.file) &&
+        (on.told.system ?? "").includes("it sent the limit and the files this session edited in this stretch with their times"),
+      `${JSON.stringify(offRows)} ${JSON.stringify(onRows)} off=${off.told.system} on=${on.told.system}`,
+    );
   }
 
   // ======== two sessions in one repo (A1-local-1, A1-local-3): a refused edit never goes up, whoever changes its file

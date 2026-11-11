@@ -105,6 +105,9 @@ export interface HotState {
   /** The release directives still in force on this session (none of them withdrawn by a later hold on its goal), so
    *  a release notice is told only while its release holds (E2E-AGENT cycle 14 C14-2). Absent from older agents. */
   releases_now?: string[];
+  /** Whether this session shares work signals (`align share --signals`, or its folder rule's): a drift question
+   *  names the files it edited only then (LIM-2505, founder ruling 2026-11-11). Absent: off. */
+  signals?: boolean;
   /** Answers to this session's drift questions (LIM-2505), newest last: the hook tells each to the agent once. */
   answers?: HotAnswer[];
   /** The build that wrote this file (its writer generation and build id): one an older build wrote is re-rendered by
@@ -120,6 +123,8 @@ export interface HotState {
 export interface WireAnswer {
   question_id: string;
   limit: { type: string; text: string } | null;
+  /** The goal the question was about (servers from the LIM-2505 audit on; absent before: read as the bound goal). */
+  goal?: { id: string; title: string } | null;
   answer: "continue" | "steer" | "switch";
   text: string | null;
   target_goal: { id: string; title: string } | null;

@@ -1147,7 +1147,7 @@ const MIGRATIONS: string[] = [
     stretch_to TEXT NOT NULL,
     asked_by TEXT NOT NULL,
     client_id TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('open','answered')),
+    state TEXT NOT NULL CHECK (state IN ('open','answered','superseded')),
     answer TEXT CHECK (answer IS NULL OR answer IN ('continue','steer','switch')),
     answer_text TEXT,
     target_goal_id TEXT,

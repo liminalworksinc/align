@@ -200,9 +200,12 @@ function takeDrift(home: string, lid: string, hot: HotState | null, inj: Injecte
   const quote = (i: DriftFile["items"][number]) => `${LIMIT_WORDS[i.type] ?? "Must"} "${clean(i.text, 160)}"`;
   const what = named.length === 1 ? `a limit on goal "${clean(file.goal_title, 80)}": ${quote(named[0])}` : `${named.length} limits on goal "${clean(file.goal_title, 80)}": ${named.map(quote).join("; ")}`;
   // A question to the goal's owner went out for this drift (LIM-2505): said as what it is, never "nothing was sent".
-  const asked = readJson<{ goal_id?: string }>(layout.asked(home, lid))?.goal_id === file.goal_id;
-  if (asked)
-    return `${endSentence(`Align: the agent's last reply may conflict with ${what}`)} This is a word check, so Align asked the goal's owner whether the agent should go on; it sent the limit and the files this session edited in this stretch with their times, nothing the agent wrote, and their answer reaches the agent at your next prompt after they answer. \`align config drift off\` turns this off.`;
+  const asked = readJson<{ goal_id?: string; paths?: boolean }>(layout.asked(home, lid));
+  if (asked?.goal_id === file.goal_id) {
+    // File paths go only with work signals on (founder ruling 2026-11-11).
+    const sent = asked.paths ? "the limit and the files this session edited in this stretch with their times" : "the limit and the time, no file paths";
+    return `${endSentence(`Align: the agent's last reply may conflict with ${what}`)} This is a word check, so Align asked the goal's owner whether the agent should go on; it sent ${sent}, nothing the agent wrote, and their answer reaches the agent at your next prompt after they answer. \`align config drift off\` turns this off.`;
+  }
   return `${endSentence(`Align: the agent's last reply may conflict with ${what}`)} This is a word check on this machine only; nothing was sent or added to the agent's context. \`align config drift off\` turns it off.`;
 }
 

@@ -42,7 +42,7 @@ interface QuestionRow {
   stretch_to: string;
   asked_by: string;
   client_id: string;
-  state: "open" | "answered";
+  state: "open" | "answered" | "superseded";
   answer: Answer | null;
   answer_text: string | null;
   target_goal_id: string | null;
@@ -69,6 +69,13 @@ const WHY: Record<string, string> = {
 };
 const why = (type: string) => WHY[type] ?? WHY.must;
 
+/** A repo-relative path as the agent writes it (packages/align-agent/src/hooks/questions.ts): ASCII letters, digits,
+ *  `._@+-`, spaces and `/` only, so no drive letter, backslash, `~`, control, bidi-override or zero-width character;
+ *  no empty, `.` or `..` segment. */
+const PATH_RE = /^[A-Za-z0-9._@+\-][A-Za-z0-9._@+\-/ ]*$/;
+export const safePath = (p: unknown): p is string =>
+  typeof p === "string" && p.length <= PATH_MAX && PATH_RE.test(p) && p.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+
 const fileList = (v: unknown): { path: string; at: string }[] => {
   if (v === undefined) return [];
   if (!Array.isArray(v)) throw badRequest("files must be a list");
@@ -76,7 +83,7 @@ const fileList = (v: unknown): { path: string; at: string }[] => {
   return v.map((f) => {
     const p = (f as { path?: unknown })?.path;
     const at = (f as { at?: unknown })?.at;
-    if (typeof p !== "string" || !p || p.length > PATH_MAX || /\p{Cc}/u.test(p) || p.startsWith("/") || p.split("/").includes("..")) throw badRequest("each file path must be a repo-relative path");
+    if (!safePath(p)) throw badRequest("each file path must be a repo-relative path");
     if (typeof at !== "string" || Number.isNaN(Date.parse(at))) throw badRequest("each file needs an ISO time");
     return { path: p, at: new Date(at).toISOString() };
   });
@@ -149,10 +156,17 @@ export async function askQuestion(pp: PolicyPrincipal, dev: DevicePrincipal, key
   if (!limit) throw badRequest("limit_id is not one of the goal's limits");
   return tx(() => {
     const same = get<QuestionRow>("SELECT * FROM v2_agent_questions WHERE ws_id = ? AND session_key = ? AND client_id = ?", pp.wsId, key, clientId);
-    const open = same ?? get<QuestionRow>("SELECT * FROM v2_agent_questions WHERE ws_id = ? AND session_key = ? AND state = 'open'", pp.wsId, key);
-    if (open) return { question: view(pp, open, goalRow(pp.wsId, open.goal_id)!), fresh: false };
-    const id = newId("aq");
+    if (same) return { question: view(pp, same, goalRow(pp.wsId, same.goal_id)!), fresh: false };
     const at = nowIso();
+    const open = get<QuestionRow>("SELECT * FROM v2_agent_questions WHERE ws_id = ? AND session_key = ? AND state = 'open'", pp.wsId, key);
+    // One open question per session, on the goal it counts toward now: one left open on a goal the session has moved
+    // from no longer stands for this stretch, so it is superseded (never answerable again) and this one is asked.
+    if (open && open.goal_id === goalId) return { question: view(pp, open, goalRow(pp.wsId, open.goal_id)!), fresh: false };
+    if (open) {
+      run("UPDATE v2_agent_questions SET state = 'superseded' WHERE ws_id = ? AND id = ?", pp.wsId, open.id);
+      audit(pp.wsId, pp.userId, "question.superseded", open.id, at);
+    }
+    const id = newId("aq");
     run(
       `INSERT INTO v2_agent_questions (id, ws_id, session_key, goal_id, goal_version, limit_id, limit_type, limit_text, files_json, stretch_from, stretch_to,
          asked_by, client_id, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`,
@@ -226,6 +240,7 @@ export async function answerQuestion(pp: PolicyPrincipal, id: string, b: Body) {
   }
   return tx(() => {
     const cur = rowById(pp.wsId, id)!;
+    if (cur.state === "superseded") throw new V2Error(409, "question_superseded", "This question is closed: the session moved to another goal.");
     if (cur.state !== "open") throw new V2Error(409, "already_answered", "This question was already answered.");
     const at = nowIso();
     const live = get<{ state: string }>("SELECT state FROM v2_sessions WHERE ws_id = ? AND session_key = ?", pp.wsId, cur.session_key);

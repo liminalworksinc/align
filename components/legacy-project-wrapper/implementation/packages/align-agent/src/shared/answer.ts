@@ -12,6 +12,7 @@ export function validAnswer(a: unknown): a is WireAnswer {
     (x.answer !== "steer" || (typeof x.text === "string" && !!x.text.trim())) &&
     typeof x.by === "string" &&
     (x.target_goal === null || (typeof x.target_goal?.id === "string" && typeof x.target_goal?.title === "string")) &&
-    (x.limit === null || x.limit === undefined || (typeof x.limit?.type === "string" && typeof x.limit?.text === "string"))
+    (x.limit === null || x.limit === undefined || (typeof x.limit?.type === "string" && typeof x.limit?.text === "string")) &&
+    (x.goal === null || x.goal === undefined || (typeof x.goal?.id === "string" && typeof x.goal?.title === "string"))
   );
 }

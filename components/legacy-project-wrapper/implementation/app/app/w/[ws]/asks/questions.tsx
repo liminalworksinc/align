@@ -14,7 +14,7 @@ import { isBlankText } from "@/lib/v2/text-core.mts";
 type AnswerKind = "continue" | "steer" | "switch";
 interface Question {
   id: string;
-  state: "open" | "answered";
+  state: "open" | "answered" | "superseded";
   goal: { id: string; title: string; version: number; owner: { id: string; name: string } };
   asked_by: { id: string; name: string };
   asked_at: string;
@@ -108,7 +108,7 @@ function AnswerForm({ ws, q, goals, onDone }: { ws: string; q: Question; goals: 
       )}
       {kind === "switch" && (
         <div className="mt-3 rounded-(--radius-m) border border-(--edge) p-3" data-answer-form="switch">
-          <Field label="Goal this work belongs to (optional)" hint="The agent stops this work and its person picks the goal; nothing switches on its own.">
+          <Field label="Goal this work belongs to (optional)" hint="The agent stops this work and its person picks the goal; nothing switches on its own. A goal they can't read reaches them as no goal named.">
             <Select value={target} onChange={(e) => setTarget(e.target.value)}>
               <option value="">Not sure: ask them to pick</option>
               {others.map((g) => (
@@ -139,7 +139,7 @@ function QuestionCard({ ws, q, me, goals, onDone }: { ws: string; q: Question; m
             {q.goal.title}
           </Link>
         </h3>
-        <Pill tone={q.state === "open" ? "amber" : "green"}>{q.state === "open" ? "waiting" : "answered"}</Pill>
+        <Pill tone={q.state === "open" ? "amber" : q.state === "answered" ? "green" : "neutral"}>{q.state === "open" ? "waiting" : q.state === "answered" ? "answered" : "closed"}</Pill>
       </div>
       <p className="mb-3 text-[14px] text-(--text-2)">
         {q.evidence.files.length ? `${q.evidence.files.length} file${q.evidence.files.length > 1 ? "s" : ""} edited in this stretch.` : "No file edits recorded in this stretch."} Agent reported from its machine: the
@@ -153,6 +153,7 @@ function QuestionCard({ ws, q, me, goals, onDone }: { ws: string; q: Question; m
           {q.answer.kind === "switch" && q.answer.target_goal ? ` to ${q.answer.target_goal.title}` : ""}.
         </p>
       )}
+      {q.state === "superseded" && <p className="mt-3 text-[14px] text-(--text-2)">Closed without an answer: the session moved to another goal.</p>}
       {q.can.answer ? (
         <AnswerForm ws={ws} q={q} goals={goals} onDone={onDone} />
       ) : (

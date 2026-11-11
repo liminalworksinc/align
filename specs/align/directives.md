@@ -488,14 +488,19 @@ The server SHALL serve directives only through `/api/v2/directives`, `/api/v2/di
 The server SHALL take an agent's question about drift (LIM-2505, `lib/v2/questions.ts`) only from the device that shared
 the session, while the session is shared and bound to the goal now and the goal is active, with a limit that is one of
 the goal's current limits; it SHALL store the limit's text from the goal, never from the device, and keep at most one
-open question per session (asking again returns the open one, 200). Whoever reads the goal sees the question
+open question per session (asking again on the same goal returns the open one, 200; asking on the goal the session
+counts toward now supersedes one left open on another goal, which can no longer be answered: 409
+`question_superseded`). A file path SHALL be repo-relative in ASCII letters, digits, `._@+-`, spaces and `/` only, with
+no empty, `.` or `..` segment (so no drive letter, backslash, `~`, control, bidi-override or zero-width character); any
+other is 400. Whoever reads the goal sees the question
 (`GET .../questions`, `GET .../questions/:id`), with its evidence marked agent-reported; anyone else, in this workspace
 or another, gets 404. Only the goal's owner answers (`POST .../questions/:id/answer`, `continue`, `steer` with a note
 of 1 to 500 characters, or `switch` with an optional active goal the owner reads): a viewer gets 403 `read_only`,
 another member 403 `not_goal_owner`, a second answer 409 `already_answered`. The answer SHALL be written as one
 `answer` directive targeting only the asking session (none when its sharing has stopped), carrying the question's id,
-the limit, the answer, the note, the goal to switch to (only while the session's person reads it) and who answered, by
-name. An answer never switches a binding.
+the limit, the goal the question was about and the goal to switch to (each only while the session's person reads it),
+the answer, the note and who answered, by name. An answer never switches a binding. Pseudonymisation of a person who
+left or deleted their account rewrites a question's `asked_by` and `answered_by` and an answer directive's `by`.
 
 #### Scenario: Viewer and other workspace
 

@@ -115,10 +115,13 @@ export function goalSnapshot(json: string): GoalCore {
  *  person can read it (its title included). */
 function answerWire(pp: ReturnType<typeof principalIn>, ws: string, a: AnswerJson) {
   const t = a.target_goal_id ? goalRow(ws, a.target_goal_id) : undefined;
-  const q = get<{ limit_type: string; limit_text: string }>("SELECT limit_type, limit_text FROM v2_agent_questions WHERE ws_id = ? AND id = ?", ws, a.question_id);
+  const q = get<{ limit_type: string; limit_text: string; goal_id: string }>("SELECT limit_type, limit_text, goal_id FROM v2_agent_questions WHERE ws_id = ? AND id = ?", ws, a.question_id);
+  const g = q ? goalRow(ws, q.goal_id) : undefined;
   return {
     question_id: a.question_id,
     limit: q ? { type: q.limit_type, text: q.limit_text } : null,
+    /** The goal the question was about (LIM-2505 audit L1), so an answer is never told as about another goal. */
+    goal: g && canReadGoal(pp, goalObj(g)) ? { id: g.id, title: g.title } : null,
     answer: a.answer,
     text: a.text,
     target_goal: t && canReadGoal(pp, goalObj(t)) ? { id: t.id, title: t.title } : null,

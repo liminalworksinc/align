@@ -102,6 +102,8 @@ export const PERSON_COLUMNS: readonly (readonly [table: string, column: string])
   ["v2_reallocations", "decided_by"],
   ["v2_reallocation_revisions", "author_id"],
   ["v2_reallocation_approvals", "user_id"],
+  ["v2_agent_questions", "asked_by"],
+  ["v2_agent_questions", "answered_by"],
 ];
 
 /** Every workspace whose rows name this person (or hold their pending departure). */
@@ -112,6 +114,7 @@ export function workspacesNaming(db: Sql, userId: string): string[] {
   parts.push("SELECT ws_id FROM v2_alignment_revisions WHERE instr(approvers_json, ?1) > 0");
   parts.push("SELECT ws_id FROM v2_directives WHERE goal_json IS NOT NULL AND json_extract(goal_json, '$.owner.id') = ?1");
   parts.push("SELECT ws_id FROM v2_directives WHERE hold_json IS NOT NULL AND json_extract(hold_json, '$.by') = ?1");
+  parts.push("SELECT ws_id FROM v2_directives WHERE answer_json IS NOT NULL AND json_extract(answer_json, '$.by') = ?1");
   parts.push("SELECT ws_id FROM v2_invites WHERE accepted_by = ?1");
   return db.all<{ ws_id: string }>(parts.join(" UNION "), userId).map((r) => r.ws_id);
 }
@@ -156,6 +159,8 @@ export function pseudonymise(db: Sql, wsId: string, userId: string, at: string, 
   );
   // A hold or release directive names who held or released the goal.
   db.run("UPDATE v2_directives SET hold_json = json_set(hold_json, '$.by', ?) WHERE ws_id = ? AND hold_json IS NOT NULL AND json_extract(hold_json, '$.by') = ?", pid, wsId, userId);
+  // An answer directive names who answered the agent's question (LIM-2505).
+  db.run("UPDATE v2_directives SET answer_json = json_set(answer_json, '$.by', ?) WHERE ws_id = ? AND answer_json IS NOT NULL AND json_extract(answer_json, '$.by') = ?", pid, wsId, userId);
   return pid;
 }
 

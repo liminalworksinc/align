@@ -14,6 +14,7 @@ import { readJson } from "./shared/fsx.ts";
 import { storedText, type ReleaseReaches, type ShareFacts, type ShareNow } from "./shared/ended.ts";
 import { isShareStateNotice, noticeKind } from "./shared/notices.ts";
 import { validAnswer } from "./shared/answer.ts";
+import { signalsAllowed } from "./activity.ts";
 import { NEWEST_BUILD, selfBuild, WRITER_GEN, type BuildMark } from "./build.ts";
 import type { EndedWhy, GoalSnapshot, HoldLatch, HotAnswer, HotRequest, HotState, Latch, MeFile, RequestState, ShareState } from "./shared/types.ts";
 
@@ -219,6 +220,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     releases_now: releasesNow(ctx, lid),
     resumed: resumedBy(ctx, lid),
     answers: live ? hotAnswers(ctx, lid) : [],
+    signals: live ? signalsAllowed(ctx, lid, s.cwd) : false,
     prior_share: sharedBefore(ctx, lid) ? { stopped: stoppedByPerson(ctx, lid) } : null,
     epochs_seen: [
       ...(ctx.db.prepare("SELECT epoch_id FROM epochs WHERE local_id=? ORDER BY rowid DESC LIMIT 10").all(lid) as { epoch_id: string }[]).map((e) => e.epoch_id),
