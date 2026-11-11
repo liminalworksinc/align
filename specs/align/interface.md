@@ -46,12 +46,21 @@ screen says "team".
 | `/oauth/authorize` | Connect <app> to Align | A person connecting an AI app (recent sign-in) | Grant an AI app read-only access to one workspace as themselves (or, when the app asks, read access plus agent-reported evidence links) |
 | (any) | Error page | Anyone | Plain error with Try again |
 
-Navigation: every `/app` page except sign-in has a top bar with the **Align** mark (a link to `/app`), a workspace
-switcher (shown once the person has a workspace), **Devices**, **Account**, the person's name (email on hover) and
-**Sign out**. Under it, a person with no passkey who has not dismissed the offer sees the add-a-passkey prompt. Inside
-a workspace a second bar shows the workspace name, the person's role and the tabs Home, Goals,
-People, Sessions, Alignments, Requests, Asks, Spend and Apps, with the current tab highlighted. Opening a workspace
-(from the list, the switcher, a new workspace, the sample or an invite) lands on its Home.
+Navigation: every `/app` page except sign-in and the decision page (which has its own frame, below) has, at 1024 px and
+wider, a left rail with the **Align** mark (a link to `/app`) and, at narrower widths, a top bar with the mark, the
+workspace's name and a **Menu** button that opens the same navigation as a sheet (focus moves into it, Escape closes it
+and returns focus to **Menu**). The navigation holds, in order: **Propose a change** inside a workspace for anyone who
+is not a viewer (see "Propose a change from the goal page"); the workspace switcher and "You are an owner", "You are a
+member" or "You are a viewer", once the person has a workspace; inside a workspace, **Home**, then "Plan" (**Goals**,
+**Alignments**, **Requests**, **Asks**), "Agents" (**Sessions**, **Apps**, **Spend**) and "Team" (**People**, and
+**Record** for a workspace owner), the current page marked; and at its foot **Devices**, **Account**, **Sign out**,
+the person's name (email on hover) and the appearance setting. The Work, Dependencies and decision pages are opened
+from a goal or a decision, not from this navigation. Above the page, a person with no passkey who has not dismissed the
+offer sees the add-a-passkey prompt. The decision page (`/app/w/<ws>/decisions/<goal>/<id>`) has a narrow rail (the
+**A** mark for all workspaces, "Decision desk" (the Home), "Goals", "Work" (the Sessions tab), "Alignments", "Asks", "Apps", "People", "Spend" and the
+person's initials for **Account**), a breadcrumb with the workspace switcher, and on a phone a **Menu** that adds
+**Account**, **All workspaces** and **Sign out**. Opening a workspace (from the list, the switcher, a new workspace, the
+sample or an invite) lands on its Home.
 
 ### Requirement: Root path redirects to the web app
 
@@ -736,9 +745,11 @@ counted as a read. A workspace owner's read has every connected app and anyone e
 ### Requirement: Evidence class on every agent-status item
 
 Every item in the web app that says what agents or their sessions did, received or reported SHALL carry exactly one
-evidence class, shown as a plain pill with the words of the Home ("delivery receipt", "agent reported", "not
-observed", `lib/v2/home-core.mts`), and nothing SHALL be inferred past it (no working, stuck, blocked or diverged
-state): the Home's connected apps (see "Workspace Home"); the goal page's Agent activity card ("agent reported" from
+evidence class, and nothing SHALL be inferred past it (no working, stuck, blocked or diverged state). The Home's Needs
+list, the Apps tab, the Requests list, the review drawer and the Work page show it as a label with an icon: "Receipt",
+"Agent reported", "Self-reported" (a link a person added) or "Not observed" (dashed), `app/app/_ui/ds/evidence-label.tsx`.
+The items below show it as a plain pill in the words of `lib/v2/home-core.mts`, lower case ("delivery receipt", "agent
+reported", "not observed"): the goal page's Agent activity card ("agent reported" from
 the align CLI's bindings, usage and work signals, else "not observed"); each session's answer on the Agents on this goal
 card ("delivery receipt" for a request received and not answered, "agent reported" for an answer, "not observed"
 otherwise); the value card's "Agents on the new version" line ("delivery receipt" once any receipt for the launched
@@ -1085,7 +1096,7 @@ and a closed "Details" disclosure.
 #### Scenario: Approved, not launched
 
 - **WHEN** a request is approved and not launched
-- **THEN** the card says "Approved, agents still on v<n> until launch" (n its base version), who approved it and when, and after a not yet "Not launched yet: <name> decided not yet, <time>."; never "agents on v<n+1>"; it lists who can launch ("Can launch: …" from `launchers`), and for someone whose `can.launch` is set offers **Launch version <n+1> to agents** (`launch`) and, unless the last decision already was not yet, **Not yet** (`not_yet`), both posting `{revision}` (the revision on screen; the server refuses a stale one with 409 `stale_revision`, shown as "Not recorded. <message>", and a **Not yet** on a card left open while someone said not yet elsewhere with 409 `wrong_state` "<name> already decided not yet, so nothing changes: …", shown the same way: E2E-WEB cycle 11 W2). A "Not recorded. <message>" line keeps the server's message as it was written, adding only a full stop when it has none: a message that opens with a person's name keeps the name as they wrote it ("Not recorded. carol already decided not yet, …" on a card that says "carol decided not yet"), never capitalised (`scripts/test-v2.mjs` "c12 C12-1 (ui, E2E-WEB cycle 12): ..."). Each then shows "Recorded: …" on the reloaded card like every other decision: "Recorded: you launched version <n+1> to agents. They get it at their next turn." or "Recorded: you decided not yet. Agents stay on version <n> until someone launches version <n+1>." A card names each person one way: the reader is "you" in every line ("Approved by you", "Launched by you", "Declined by you"), anyone else by name
+- **THEN** the card says "Approved, agents still on v<n> until launch" (n its base version), who approved it and when, and after a not yet "Not launched yet: <name> decided not yet, <time>."; never "agents on v<n+1>"; it lists who can launch ("Can launch: …" from `launchers`), and for someone whose `can.launch` is set offers **Launch version <n+1> to agents** (`launch`) and, unless the last decision already was not yet, **Not yet** (`not_yet`), both posting `{revision}` (the revision on screen; the server refuses a stale one with 409 `stale_revision`, shown as "Not recorded. <message>", and a **Not yet** on a card left open while someone said not yet elsewhere with 409 `wrong_state` "<name> already decided not yet, so nothing changes: …", shown the same way: E2E-WEB cycle 11 W2). A "Not recorded. <message>" line keeps the server's message as it was written, adding only a full stop when it has none: a message that opens with a person's name keeps the name as they wrote it ("Not recorded. carol already decided not yet, …" on a card that says "carol decided not yet"), never capitalised (`scripts/test-v2.mjs` "c12 C12-1 (ui, E2E-WEB cycle 12): ..."). Each then shows "Recorded: …" on the reloaded card like every other decision: "Recorded: you launched version <n+1>." (the review drawer's wording) or "Recorded: you decided not yet. Agents stay on version <n> until someone launches version <n+1>." A card names each person one way: the reader is "you" in every line ("Approved by you", "Launched by you", "Declined by you"), anyone else by name
 
 #### Scenario: The list after a launch
 
@@ -1165,7 +1176,7 @@ when nothing is.
 
 ### Requirement: Evidence on change request cards
 
-Every change request card (on the goal page and in the Requests tab) SHALL show, under "Evidence for revision <n>"
+Every change request card on the goal page SHALL show (the Requests tab lists requests as one Desk list and opens each in the review drawer, which has its own evidence summary; see "Workspace Requests tab"), under "Evidence for revision <n>"
 (or "No evidence attached." when the current revision has no links), the Align snapshot of the current revision as "Recorded by Align at revision <n>" (the goal's estimated spend in the last 30 days, by the money rule the MCP snapshot line uses (`lib/v2/money.mts`: rounded to four decimals first, then "$0.0010" under one cent, "under $0.0001" for a cost that is not zero but would round to "$0.0000", and two decimals from one cent, so 9,999 micro-dollars reads "$0.01" as 10,000 does; `scripts/test-v2.mjs` "C7-3: ..."), with its request count, "1 request" for one as in the MCP snapshot line (one count-and-noun helper, `lib/v2/plural.mts`, for both: `scripts/test-v2.mjs` "C5-4: ..."), and its models, or "Spend on this goal is hidden from you.", the sessions bound to it and its last activity), and each link on the current revision with its kind ("Pull request", "CI run", "Incident", "Dashboard", "Doc" or "Link"), its label as a link to its URL that opens in a new tab with `rel="noopener noreferrer"`, the URL's host, who added it ("you" for the person) and "self-reported" or "agent-reported". It SHALL never call a link verified. Links on earlier revisions SHALL be listed under "From revision <n>". When `can.add_evidence` is set, **Add evidence** SHALL open a form with a kind, an https link and "What it shows" (at most 120 characters) whose **Add link** posts `{kind, url, label, revision}` to `.../change-requests/<id>/evidence` (a 409, for a request declined, withdrawn, approved or countered meanwhile or a link already there, is refused like any decision: the form closes, the card shows a focused alert "Not recorded. <the server's message>", such as "Not recorded. This request was declined by <name>, so nothing changes.", and reloads to show the request as it is now: `scripts/test-v2.mjs` "C8-1 (ui): ..."); a link whose `can_remove` is set SHALL offer **Remove**, which sends `DELETE .../evidence/<evidence id>` (a 409, for a request declined, withdrawn or countered meanwhile, is refused as **Add link**'s is: a focused alert "Not recorded. <the server's message>", such as "Not recorded. This request was declined by <name>, so nothing changes.", and the card reloads to show the request as it is now: `scripts/test-v2.mjs` "c9 W1 (ui): ..."). Once approved, the card SHALL say "Approved without evidence on the approved revision (<r>)." (links on earlier revisions are still listed under "From revision <n>") or "Approved with <n> evidence link(s), none verified." An **Add link** for a link that can no longer become an `https://` one (`http://…`) SHALL stay disabled with the hint "Use an https:// link: Align keeps only https links."
 
 #### Scenario: Approve without evidence

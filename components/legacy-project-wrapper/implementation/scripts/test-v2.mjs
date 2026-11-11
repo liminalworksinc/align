@@ -8777,8 +8777,8 @@ try {
           `${JSON.stringify(posted(afterNotYet.calls, "not_yet"))} ${JSON.stringify(posted(afterLaunch.calls, "launch"))}`,
         );
         check(
-          "C2 F4: Not yet and Launch each leave a \"Recorded: …\" line like every other decision (\"Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.\", \"Recorded: you launched version 2 to agents. They get it at their next turn.\")",
-          afterNotYet.text.includes("Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.") && afterLaunch.text.includes("Recorded: you launched version 2 to agents. They get it at their next turn."),
+          "C2 F4: Not yet and Launch each leave a \"Recorded: …\" line like every other decision (\"Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.\", \"Recorded: you launched version 2.\" (the drawer's wording, Nov 11))",
+          afterNotYet.text.includes("Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.") && afterLaunch.text.includes("Recorded: you launched version 2.") && !afterLaunch.text.includes("next turn"),
           `${afterNotYet.text.slice(0, 300)} | ${afterLaunch.text.slice(0, 300)}`,
         );
         check(

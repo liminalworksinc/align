@@ -58,7 +58,7 @@ The events, where they are recorded and what they may carry:
 | `loi_signed` | the operator records it with `--verified-original` | the workspace, none | `note_ref`, `verified_original`: `yes` |
 | `first_ask` | the workspace's first ask, recorded or imported (the `workspaces` part) | the workspace, the person | none |
 | `first_limit` | the workspace's first goal version saved with at least one limit (the `goals-and-proposals` part) | the workspace, the person | none |
-| `value_card_viewed` | the value card was at least half on screen for the person who approved its change request (the web app shows the card to that approver only), the first time in the workspace | the workspace, the person | none |
+| `value_card_viewed` | the value card's top 240 px was at least 75% on screen (inside the window and the column it scrolls in) for one second, for the person who approved its change request (the web app shows the card to that approver only), the first time in the workspace; a shorter glance is not a view | the workspace, the person | none |
 | `value_reported` | a person's first value report in the workspace | the workspace, the person | `estimate`: `same_day`, `two_to_three_days`, `about_a_week`, `longer` or `would_not_be_decided` |
 | `follow_up_clicked` | a person's first click on the value card's follow-up link in the workspace | the workspace, the person | none |
 | `first_request` | the workspace's first request to a goal's agents (the `goals-and-proposals` part) | the workspace, the sender | `type`: `replan`, `checkpoint` or `switch_goal` |

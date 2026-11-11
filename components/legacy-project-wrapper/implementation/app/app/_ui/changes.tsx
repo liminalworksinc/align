@@ -147,7 +147,7 @@ function RequestRecord({
         kind: "done",
         text:
           action === "launch"
-            ? `Recorded: you launched version ${next} to agents. They get it at their next turn.`
+            ? `Recorded: you launched version ${next}.`
             : `Recorded: you decided not yet. Agents stay on version ${cr.goal.version} until someone launches version ${next}.`,
       });
       onDone();
