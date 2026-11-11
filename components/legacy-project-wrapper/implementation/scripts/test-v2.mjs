@@ -7075,6 +7075,38 @@ try {
           /Hugo Lead[\s\S]{0,60}created the goal/.test(sinceText) && /Hank Other[\s\S]{0,60}created the goal/.test(sinceText) && !/Hana Owner[\s\S]{0,60}created the goal/.test(sinceText) && !/You[\s\S]{0,20}created the goal/.test(sinceText) && !/Someone[\s\S]{0,20}created the goal/.test(sinceText),
           sinceText.slice(0, 900).replace(/\n/g, " / "),
         );
+        // Mini 5's click walk, Nov 11: at 390 wide the review drawer's "More actions" menu opened below its footer, so
+        // Decline, the last item, was off screen and only reachable by keyboard. Hugo asks Hank to change Hank's goal;
+        // Hank opens it in the review drawer on a phone, opens More actions, and every item lies inside the screen and
+        // is the element under its own centre; a real pointer tap on Decline opens the decline step. The request is
+        // then withdrawn, so nothing after this changes.
+        const gxNow = await ha(HL, "GET", `/goals/${GX.id}`);
+        const crM = await ha(HL, "POST", `/goals/${GX.id}/change-requests`, { base_version: gxNow.json?.goal?.version, changes: { title: "Hank's side project, menu check" }, reason: "Menu check at 390" });
+        const pm = await browser.newPage();
+        await pm.setViewport({ width: 390, height: 844, hasTouch: true, isMobile: true });
+        await pm.setCookie(...HX.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await pm.goto(`${BASE}/app/w/${HW}?review=${GX.id}.${crM.json?.id}`, { waitUntil: "networkidle0" });
+        await pm.waitForSelector(`[data-review-actions="${crM.json?.id}"] [data-more-actions] summary`, { visible: true, timeout: 15000 });
+        await pm.tap(`[data-review-actions="${crM.json?.id}"] [data-more-actions] summary`);
+        await pm.waitForSelector('[data-more-actions][open] [role="menuitem"]', { visible: true, timeout: 5000 });
+        await sleep(300);
+        const menu = await pm.evaluate(() =>
+          [...document.querySelectorAll('[data-more-actions][open] [role="menuitem"]')].map((b) => {
+            const r = b.getBoundingClientRect();
+            const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return { t: b.textContent?.trim(), inside: r.top >= 0 && r.bottom <= window.innerHeight && r.left >= 0 && r.right <= window.innerWidth, hit: !!top && (top === b || b.contains(top)), h: Math.round(r.height) };
+          }),
+        );
+        await pm.tap('[data-more-actions][open] [role="menuitem"][data-decision="Decline"]');
+        const declineOpen = await pm.waitForSelector(`[data-review-actions="${crM.json?.id}"] [data-decision-input="reject"]`, { visible: true, timeout: 5000 }).then(() => true).catch(() => false);
+        const pmW = await pm.evaluate(() => ({ sw: document.scrollingElement.scrollWidth, W: window.innerWidth }));
+        await pm.close();
+        const wdM = await ha(HL, "POST", `/goals/${GX.id}/change-requests/${crM.json?.id}/withdraw`, {});
+        check(
+          "ui (Chrome, 390x844, Mini 5 Nov 11): in the review drawer every item of the \"More actions\" menu is inside the screen, at least 44 px tall and the element under its own centre (Decline included, the last one); tapping Decline opens the decline step; no sideways scroll",
+          crM.status === 201 && menu.length > 0 && menu.some((m) => m.t === "Decline") && menu.every((m) => m.inside && m.hit && m.h >= 44) && declineOpen && pmW.sw <= pmW.W && wdM.status === 200,
+          `${crM.status} ${JSON.stringify(menu)} declineOpen=${declineOpen} ${JSON.stringify(pmW)} withdraw=${wdM.status}`,
+        );
       } catch (e) {
         check("ui (Chrome) home declined run", false, e?.stack ?? e);
       } finally {
