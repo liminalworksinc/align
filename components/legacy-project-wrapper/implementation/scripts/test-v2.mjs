@@ -6990,6 +6990,32 @@ try {
           q2Approvers.includes(HL.id) && q2Approvers.includes(HM.id) && qL === "Reason: “Weekly is the promise”" && qM === qL && qV === null,
           JSON.stringify({ q2Approvers, qL, qM, qV, created: crQ2.status }),
         );
+        // PR 68 item 13 (founder review of e780d842): Drop this goal → Confirm drops it (next version, status dropped) and the
+        // confirmation goes away at once, with no second Confirm on the replaced version and no reload needed.
+        const GD = (await ha(HO, "POST", "/goals", { title: "Hana's goal to drop", visibility: "workspace", measures: [{ text: "Kept on drop", target: "1" }] })).json;
+        const pd = await browser.newPage();
+        await pd.setViewport({ width: 390, height: 844 });
+        await pd.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await pd.goto(`${BASE}/app/w/${HW}/goals/${GD?.id}`, { waitUntil: "networkidle0" });
+        const pressD = (label) => pd.evaluate((t) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === t)?.click(), label);
+        await pd.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Drop this goal"), { timeout: 15000 });
+        await pressD("Drop this goal");
+        await pd.waitForSelector("[data-drop-goal]", { timeout: 15000 });
+        await pressD("Confirm: drop the goal");
+        await pd.waitForFunction(() => [...document.querySelectorAll("main h1 + div span")].some((s) => s.textContent?.trim() === "dropped"), { timeout: 15000 }).catch(() => undefined);
+        await new Promise((r) => setTimeout(r, 800));
+        const dropAfter = await pd.evaluate(() => ({
+          box: !!document.querySelector("[data-drop-goal]"),
+          confirm: [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Confirm: drop the goal" || b.textContent?.trim() === "Drop this goal"),
+          pills: [...document.querySelectorAll("main h1 + div span")].map((s) => s.textContent?.trim()),
+        }));
+        const gdNow = (await ha(HO, "GET", `/goals/${GD?.id}`)).json?.goal;
+        await pd.close();
+        check(
+          "ui (Chrome, PR 68 item 13): Drop this goal → Confirm makes the next version, marked dropped, keeping its measures; the confirmation and its Confirm go away at once, without a reload",
+          gdNow?.status === "dropped" && gdNow.version === 2 && gdNow.measures?.[0]?.text === "Kept on drop" && !dropAfter.box && !dropAfter.confirm && dropAfter.pills.includes("dropped"),
+          JSON.stringify({ dropAfter, status: gdNow?.status, version: gdNow?.version }),
+        );
       } catch (e) {
         check("ui (Chrome) home declined run", false, e?.stack ?? e);
       } finally {
