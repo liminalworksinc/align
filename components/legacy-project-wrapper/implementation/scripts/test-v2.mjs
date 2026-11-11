@@ -7024,7 +7024,10 @@ try {
         await ps.evaluateOnNewDocument((k) => localStorage.setItem(k, "2000-01-01T00:00:00.000Z"), `align.lastVisit:${HW}:${HO.id}`);
         await ps.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
         await ps.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
-        await ps.waitForFunction(() => /created the goal/.test(document.querySelector("[data-since]")?.innerText ?? ""), { timeout: 15000 }).catch(() => undefined);
+        await ps.waitForFunction(() => { const s = document.querySelector("[data-since]"); return !!s && s.getAttribute("data-since") !== "reading" && /created the goal/.test(s.innerText); }, { timeout: 15000 }).catch(() => undefined);
+        // The section shows its first 8 lines; "Show all N" opens the rest, where the other creations are.
+        await ps.evaluate(() => [...document.querySelectorAll("[data-since] button")].find((b) => /^Show all \d+$/.test(b.textContent?.trim() ?? ""))?.click());
+        await ps.waitForFunction(() => [...document.querySelectorAll("[data-since] button")].some((b) => b.textContent?.trim() === "Show fewer") || ![...document.querySelectorAll("[data-since] button")].some((b) => /^Show all/.test(b.textContent?.trim() ?? "")), { timeout: 15000 }).catch(() => undefined);
         const sinceText = await ps.evaluate(() => document.querySelector("[data-since]")?.innerText ?? "");
         await ps.close();
         check(
