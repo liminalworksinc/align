@@ -64,7 +64,10 @@ export function ForesightPanel({ path, choice, body }: { path: string; choice: F
         </p>
       )}
       {now?.f && (
-        <ul className="flex min-w-0 flex-col gap-1">
+        // On a phone the confirmation is a sheet that doesn't scroll: the lines scroll here, so an opened compare never
+        // pushes the other lines or the Confirm button off the screen.
+        <ul data-foresight-lines className="flex min-w-0 flex-col gap-1 max-sm:max-h-[36dvh] max-sm:overflow-y-auto max-sm:overscroll-contain">
+
           {now.f.quiet && (
             <li data-foresight-line="quiet" className="pl-[18px] text-[14px] text-(--text-1)">
               Nothing changes for agents or spend.
