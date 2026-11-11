@@ -28,7 +28,7 @@ import {
   signedOutWords,
   type Credentials,
 } from "./api.ts";
-import { openCtx, saveConfig, type Ctx } from "./context.ts";
+import { DEV_SERVER, openCtx, saveConfig, type Ctx } from "./context.ts";
 import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
 import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedByLogin, endedReason, endedState, endedUnsent, getShare, notMember, releaseOf, renderEndedShares, stopOutlivesShare } from "./hot.ts";
@@ -70,7 +70,7 @@ class UsageError extends Error {}
 
 const HELP = `align ${VERSION}: Align local agent
 
-  align login [--server <url>] [--name <device name>]
+  align login [--server <url> | --dev] [--name <device name>]
   align logout
   align status
   align sessions [--all] [--json]
@@ -313,10 +313,11 @@ const INVISIBLE = /[\p{Cc}\p{Cf}\p{Cs}\s\u2028\u2029\u115F\u1160\u3164\uFFA0\u28
 const MARKS_ONLY = /\p{M}+/gu;
 
 async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values } = parseArgs({ args: argv, options: { server: { type: "string" }, name: { type: "string" } }, allowPositionals: false });
+  const { values } = parseArgs({ args: argv, options: { server: { type: "string" }, dev: { type: "boolean" }, name: { type: "string" } }, allowPositionals: false });
+  if (values.server && values.dev) throw new UsageError("pass --server <url> or --dev, not both");
   // A blank `--name` is refused here, before a pairing is started (each counts toward the server's hourly limit).
   if (values.name !== undefined && !values.name.replace(INVISIBLE, "").replace(MARKS_ONLY, "")) throw new UsageError(nameRefused(EMPTY_NAME));
-  const server = (values.server || ctx.config.server_url).replace(/\/$/, "");
+  const server = (values.server || (values.dev ? DEV_SERVER : ctx.config.server_url)).replace(/\/$/, "");
   const deviceName = values.name || ctx.config.device_name || `${os.userInfo().username}'s ${os.hostname().replace(/\.local$/, "")}`;
   // A device this machine signed out of while the server was unreachable is revoked first, so its sessions end there
   // and can be shared again from the new pairing.

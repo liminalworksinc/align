@@ -30,3 +30,18 @@ export function codexLine(url: string): string | null {
   const u = safeMcpUrl(url);
   return u ? `codex mcp add align --url ${shq(u)}` : null;
 }
+
+/** The align CLI as a release asset (LIM-2504): one tarball, no runtime dependencies, Node 24 or later. The stable
+ *  `latest/download` name resolves once a release carries the asset; publishing it is the founder's step. */
+export const AGENT_TARBALL = "https://github.com/liminalworksinc/align/releases/latest/download/liminal-align-agent.tgz";
+/** Where an installed `align` signs in by default (packages/align-agent/src/context.ts HOSTED_SERVER). */
+export const HOSTED_ORIGIN = "https://align-pg-draft.fly.dev";
+
+/** Install the align CLI, add its hooks, and pair this machine: on the hosted server a plain `align login`, anywhere
+ *  else `--server` with this server's origin, taken from the checked MCP URL and single-quoted. */
+export function agentInstallLine(url: string): string | null {
+  const u = safeMcpUrl(url);
+  if (!u) return null;
+  const origin = u.slice(0, -"/api/mcp".length);
+  return `npm install -g ${AGENT_TARBALL} && align install && align login${origin === HOSTED_ORIGIN ? "" : ` --server ${shq(origin)}`}`;
+}

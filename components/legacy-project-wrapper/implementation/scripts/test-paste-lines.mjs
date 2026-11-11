@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { claudeCodeLine, codexLine, safeMcpUrl, shq } from "../lib/paste-lines.ts";
+import { agentInstallLine, AGENT_TARBALL, claudeCodeLine, codexLine, HOSTED_ORIGIN, safeMcpUrl, shq } from "../lib/paste-lines.ts";
 
 let passed = 0;
 let failed = 0;
@@ -88,6 +88,16 @@ check(
   "the Apps tab calls each line builder once with only the URL; the builders take one parameter; no workspace or company name reaches them",
   codexLine.length === 1 && claudeCodeLine.length === 1 && calls.length === 2 && calls.every((c) => /^(?:claudeCodeLine|codexLine)\(apps\.data\.url\)$/.test(c)) && !/company/i.test(view),
   calls.join(" "),
+);
+// The align CLI line (LIM-2504): plain `align login` on the hosted server, `--server '<origin>'` anywhere else, none
+// for a URL Align couldn't have made; the view builds it from the same checked MCP URL.
+check(
+  "the align CLI line: hosted origin signs in with a plain align login, another origin is single-quoted after --server, a bad URL gives none",
+  agentInstallLine(`${HOSTED_ORIGIN}/api/mcp`) === `npm install -g ${AGENT_TARBALL} && align install && align login` &&
+    agentInstallLine(URL) === `npm install -g ${AGENT_TARBALL} && align install && align login --server 'http://127.0.0.1:3331'` &&
+    agentInstallLine("http://evil.test/api/mcp; touch x") === null &&
+    /agentInstallLine\(apps\.data\.url\)/.test(view),
+  agentInstallLine(URL),
 );
 check("the lines carry no hooks, settings file or agent instruction file", ![claudeCodeLine(URL), codexLine(URL)].some((l) => /AGENTS|hooks|settings|node -e|printf|>>/.test(l)), claudeCodeLine(URL));
 

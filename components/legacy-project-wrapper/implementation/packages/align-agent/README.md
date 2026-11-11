@@ -9,10 +9,22 @@ reach the server. Wire contract: `docs/v2/WIRE.md`. Harness facts and sources: `
 
 Zero runtime dependencies (Node 24+: `node:sqlite`, `node:crypto`, `fetch`).
 
+## Install
+
+```
+npm install -g https://github.com/liminalworksinc/align/releases/latest/download/liminal-align-agent.tgz && align install && align login
+```
+
+`align login` signs in to the hosted server (`https://align-pg-draft.fly.dev`) unless told otherwise:
+`align login --server <url>` for another one, `align login --dev` (or `ALIGN_DEV=1`) for the local dev server on
+127.0.0.1:3100, and `ALIGN_SERVER=<url>` overrides both. A server saved by an earlier login is kept.
+
+The release asset is `npm pack` of this folder (`prepack` builds `dist/`), uploaded as `liminal-align-agent.tgz`.
+
 ## Commands
 
 ```
-align login [--server <url>] [--name <device name>]   device flow; key-bound tokens; names your other paired devices
+align login [--server <url> | --dev] [--name <name>] device flow; key-bound tokens; names your other paired devices
 align logout                                          revokes this device, wipes tokens and the device key; this
                                                       machine's shares stop (sessions stopped or held from the web
                                                       stay blocked: after `align login`, `::align share` shares one
