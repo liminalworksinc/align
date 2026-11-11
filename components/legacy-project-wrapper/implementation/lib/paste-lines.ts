@@ -39,15 +39,13 @@ export interface AgentRelease {
 }
 
 /** THE SWITCH. null until a release `agent-v<version>` carrying `liminal-align-agent-<version>.tgz` exists; until then
- *  the Apps tab shows the build-from-source line, never a link that 404s. Set it in the same change that follows the
+ *  the Apps tab keeps its current steps (no step 4), never a link that 404s. Set it in the same change that follows the
  *  founder publishing the release (packages/align-agent/README.md, "Publishing a release"). */
 export const AGENT_RELEASE: AgentRelease | null = null;
 
 export const AGENT_REPO = "https://github.com/liminalworksinc/align";
 /** Where an installed `align` signs in by default (packages/align-agent/src/context.ts HOSTED_SERVER). */
 export const HOSTED_ORIGIN = "https://align-pg-draft.fly.dev";
-/** The agent package inside a clone of the repo. */
-export const AGENT_DIR = "align/components/legacy-project-wrapper/implementation/packages/align-agent";
 
 const VERSION = /^\d+\.\d+\.\d+$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -60,18 +58,16 @@ export function agentTarball(r: AgentRelease | null): { file: string; url: strin
 }
 
 /**
- * The Apps tab's align CLI line, or null for a URL Align couldn't have made. With a release (`kind: "release"`): fetch
- * the pinned tarball, check its sha256 (shasum stops the line on a mismatch, before npm runs), install that file,
- * add the hooks, pair. Without one (`kind: "source"`): clone, build and install from the repo. Both end with a plain
- * `align login` on the hosted server and `--server '<origin>'` (from the checked MCP URL, single-quoted) elsewhere.
+ * The Apps tab's step 4 line, or null: no release set (or one that isn't well formed), or a URL Align couldn't have
+ * made. Fetch the pinned tarball, check its sha256 (shasum stops the line on a mismatch, before npm runs), install
+ * that file, add the hooks, pair: a plain `align login` on the hosted server, `--server '<origin>'` (from the checked
+ * MCP URL, single-quoted) elsewhere.
  */
-export function agentInstallLine(url: string, release: AgentRelease | null = AGENT_RELEASE): { kind: "release" | "source"; line: string } | null {
+export function agentInstallLine(url: string, release: AgentRelease | null = AGENT_RELEASE): string | null {
   const u = safeMcpUrl(url);
-  if (!u) return null;
+  const t = agentTarball(release);
+  if (!u || !t || !release) return null;
   const origin = u.slice(0, -"/api/mcp".length);
   const login = `align install && align login${origin === HOSTED_ORIGIN ? "" : ` --server ${shq(origin)}`}`;
-  const t = agentTarball(release);
-  if (t && release)
-    return { kind: "release", line: `curl -fsSLO ${t.url} && echo '${release.sha256}  ${t.file}' | shasum -a 256 -c && npm install -g ./${t.file} && ${login}` };
-  return { kind: "source", line: `git clone --depth 1 ${AGENT_REPO}.git && cd ${AGENT_DIR} && npm ci && npm run build && npm install -g . && ${login}` };
+  return `curl -fsSLO ${t.url} && echo '${release.sha256}  ${t.file}' | shasum -a 256 -c && npm install -g ./${t.file} && ${login}`;
 }

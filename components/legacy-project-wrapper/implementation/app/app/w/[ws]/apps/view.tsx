@@ -115,25 +115,24 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
                   <PasteLine label="Codex" line={codexLine(apps.data.url)} />
                 </Step>
                 <Step n={3} title="Approve it in Align">
-                  <p className="text-[14px] text-(--text-2)">Your app opens Align&apos;s approval page. Once you approve, it is listed under Connections below.</p>
+                  {agentInstallLine(apps.data.url) === null ? (
+                  <p className="text-[14px] text-(--text-2)">
+                    Your app opens Align&apos;s approval page. Once you approve, it is listed under Connections below. For goal context inside Claude Code and Codex sessions, install the align CLI (
+                    <code className="font-mono text-[13px]">align login</code>, <code className="font-mono text-[13px]">align install</code>).
+                  </p>
+                  ) : (
+                    <p className="text-[14px] text-(--text-2)">Your app opens Align&apos;s approval page. Once you approve, it is listed under Connections below.</p>
+                  )}
                 </Step>
-                <Step n={4} title="For goal context inside Claude Code and Codex sessions, install the align CLI">
-                  {(() => {
-                    const cli = agentInstallLine(apps.data.url);
-                    return (
-                      <>
-                        <p className="text-[14px] text-(--text-2)">
-                          Needs Node 24 or later.{" "}
-                          {cli?.kind === "release"
-                            ? "Paste into a terminal: it downloads the release, checks its checksum, installs"
-                            : "Paste into a terminal: until the align CLI has a release, this builds it from the public repo and installs"}{" "}
-                          <code className="font-mono text-[13px]">align</code>, adds its hooks, and prints a code to enter on Align&apos;s device page.
-                        </p>
-                        <PasteLine label="align CLI" line={cli?.line ?? null} />
-                      </>
-                    );
-                  })()}
-                </Step>
+                {/* Only once AGENT_RELEASE names a published release (lib/paste-lines.ts); until then step 3 above keeps the current text. */}
+                {agentInstallLine(apps.data.url) !== null && (
+                  <Step n={4} title="For goal context inside Claude Code and Codex sessions, install the align CLI">
+                    <p className="text-[14px] text-(--text-2)">
+                      Needs Node 24 or later. Paste into a terminal: it downloads the release, checks its checksum, installs <code className="font-mono text-[13px]">align</code>, adds its hooks, and prints a code to enter on Align&apos;s device page.
+                    </p>
+                    <PasteLine label="align CLI" line={agentInstallLine(apps.data.url)} />
+                  </Step>
+                )}
               </ol>
             )}
             </Panel>

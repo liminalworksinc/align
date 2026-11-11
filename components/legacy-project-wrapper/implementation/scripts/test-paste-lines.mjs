@@ -9,7 +9,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { AGENT_DIR, AGENT_RELEASE, AGENT_REPO, agentInstallLine, agentTarball, claudeCodeLine, codexLine, HOSTED_ORIGIN, safeMcpUrl, shq } from "../lib/paste-lines.ts";
+import { AGENT_RELEASE, AGENT_REPO, agentInstallLine, agentTarball, claudeCodeLine, codexLine, HOSTED_ORIGIN, safeMcpUrl, shq } from "../lib/paste-lines.ts";
 
 let passed = 0;
 let failed = 0;
@@ -90,39 +90,36 @@ check(
   codexLine.length === 1 && claudeCodeLine.length === 1 && calls.length === 2 && calls.every((c) => /^(?:claudeCodeLine|codexLine)\(apps\.data\.url\)$/.test(c)) && !/company/i.test(view),
   calls.join(" "),
 );
-// The align CLI line (LIM-2504). The switch: no release is set in the committed file, so the Apps tab shows the
-// build-from-source line and never a release link that would 404. With a release: a pinned, versioned URL (never
-// `latest`) and a sha256 check before npm installs the file. Plain `align login` on the hosted server, `--server
-// '<origin>'` anywhere else, nothing for a URL Align couldn't have made; the view builds it from the checked MCP URL.
+// The align CLI line (LIM-2504). The switch: no release is set in the committed file, so there is no line and the
+// Apps tab keeps its current step 3 text (PR 68's, byte for byte) with no step 4: never a link that 404s. With a
+// release: a pinned, versioned URL (never `latest`) and a sha256 check before npm installs the file. Plain `align
+// login` on the hosted server, `--server '<origin>'` anywhere else, nothing for a URL Align couldn't have made.
 const BYTES = "pretend tarball bytes\n";
 const REL = { version: "0.2.0", sha256: createHash("sha256").update(BYTES).digest("hex") };
 const PINNED = `${AGENT_REPO}/releases/download/agent-v0.2.0/liminal-align-agent-0.2.0.tgz`;
-const src = agentInstallLine(URL);
+const CURRENT_STEP3 = `Your app opens Align&apos;s approval page. Once you approve, it is listed under Connections below. For goal context inside Claude Code and Codex sessions, install the align CLI (
+                    <code className="font-mono text-[13px]">align login</code>, <code className="font-mono text-[13px]">align install</code>).`;
 check(
-  "the align CLI switch is off in the committed file: no release, so the source line (clone, build, install), never a release URL",
-  AGENT_RELEASE === null && src?.kind === "source" &&
-    src.line === `git clone --depth 1 ${AGENT_REPO}.git && cd ${AGENT_DIR} && npm ci && npm run build && npm install -g . && align install && align login --server 'http://127.0.0.1:3331'` &&
-    !/releases/.test(src.line),
-  JSON.stringify(src),
+  "the align CLI switch is off in the committed file: no release, no line; the view keeps the current step 3 text when there is none, and shows step 4 only with a line",
+  AGENT_RELEASE === null && agentInstallLine(URL) === null && agentInstallLine(`${HOSTED_ORIGIN}/api/mcp`) === null &&
+    view.includes(`{agentInstallLine(apps.data.url) === null ? (\n                  <p className="text-[14px] text-(--text-2)">\n                    ${CURRENT_STEP3}`) &&
+    view.includes("{agentInstallLine(apps.data.url) !== null && (\n                  <Step n={4}") &&
+    !/git clone|npm ci/.test(view),
 );
 const rel = agentInstallLine(URL, REL);
 check(
   "with a release: the pinned versioned URL, a sha256 check that runs before npm, npm installs the checked file, and never `latest`",
-  rel?.kind === "release" &&
-    rel.line === `curl -fsSLO ${PINNED} && echo '${REL.sha256}  liminal-align-agent-0.2.0.tgz' | shasum -a 256 -c && npm install -g ./liminal-align-agent-0.2.0.tgz && align install && align login --server 'http://127.0.0.1:3331'` &&
-    !/latest/.test(rel.line) && agentTarball(REL)?.url === PINNED,
-  JSON.stringify(rel),
+  rel === `curl -fsSLO ${PINNED} && echo '${REL.sha256}  liminal-align-agent-0.2.0.tgz' | shasum -a 256 -c && npm install -g ./liminal-align-agent-0.2.0.tgz && align install && align login --server 'http://127.0.0.1:3331'` &&
+    !/latest/.test(rel) && agentTarball(REL)?.url === PINNED,
+  rel,
 );
 check(
-  "a release that isn't well formed (version or sha256) falls back to the source line",
-  [{ version: "0.2", sha256: REL.sha256 }, { version: "0.2.0;x", sha256: REL.sha256 }, { version: "0.2.0", sha256: "abc" }, { version: "0.2.0", sha256: REL.sha256.toUpperCase() }].every((r) => agentInstallLine(URL, r)?.kind === "source"),
+  "a release that isn't well formed (version or sha256) gives no line, so the view falls back to the current step 3 text",
+  [{ version: "0.2", sha256: REL.sha256 }, { version: "0.2.0;x", sha256: REL.sha256 }, { version: "0.2.0", sha256: "abc" }, { version: "0.2.0", sha256: REL.sha256.toUpperCase() }].every((r) => agentInstallLine(URL, r) === null),
 );
 check(
-  "on the hosted server both lines end with a plain align login; a bad URL gives no line; the view builds it from apps.data.url",
-  agentInstallLine(`${HOSTED_ORIGIN}/api/mcp`)?.line.endsWith("&& align install && align login") === true &&
-    agentInstallLine(`${HOSTED_ORIGIN}/api/mcp`, REL)?.line.endsWith("&& align install && align login") === true &&
-    agentInstallLine("http://evil.test/api/mcp; touch x") === null && agentInstallLine("http://evil.test/api/mcp; touch x", REL) === null &&
-    /agentInstallLine\(apps\.data\.url\)/.test(view),
+  "with a release on the hosted server the line ends with a plain align login; a bad URL gives no line",
+  agentInstallLine(`${HOSTED_ORIGIN}/api/mcp`, REL)?.endsWith("&& align install && align login") === true && agentInstallLine("http://evil.test/api/mcp; touch x", REL) === null,
 );
 check("the lines carry no hooks, settings file or agent instruction file", ![claudeCodeLine(URL), codexLine(URL)].some((l) => /AGENTS|hooks|settings|node -e|printf|>>/.test(l)), claudeCodeLine(URL));
 
@@ -169,7 +166,7 @@ for (const shell of SHELLS) {
       // curl -fsSLO <url>: writes the URL's last segment into the current folder.
       writeFileSync(path.join(box.bin, "curl"), `#!/bin/sh\nfor a in "$@"; do u="$a"; done\nprintf '%s' ${shq(BYTES)} > "\${u##*/}"\n`);
       chmodSync(path.join(box.bin, "curl"), 0o755);
-      const line = agentInstallLine(URL, { version: "0.2.0", sha256: sha }).line;
+      const line = agentInstallLine(URL, { version: "0.2.0", sha256: sha });
       let failedLine = false;
       try {
         run(shell, line, box);

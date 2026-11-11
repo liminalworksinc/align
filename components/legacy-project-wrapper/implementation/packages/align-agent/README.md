@@ -11,13 +11,9 @@ Zero runtime dependencies (Node 24+: `node:sqlite`, `node:crypto`, `fetch`).
 
 ## Install
 
-Until a release exists (the switch is `AGENT_RELEASE` in `lib/paste-lines.ts`; the Apps tab follows it), from source:
-
-```
-git clone --depth 1 https://github.com/liminalworksinc/align.git && cd align/components/legacy-project-wrapper/implementation/packages/align-agent && npm ci && npm run build && npm install -g . && align install && align login
-```
-
-Once release `agent-v<version>` is published, a pinned tarball whose checksum is checked before npm installs it:
+From a checkout: `npm ci && npm run build` here, then `align install` and `align login`. Once release
+`agent-v<version>` is published (and `AGENT_RELEASE` in `lib/paste-lines.ts` names it, which is what makes the Apps tab
+show it), a pinned tarball whose checksum is checked before npm installs it:
 
 ```
 curl -fsSLO https://github.com/liminalworksinc/align/releases/download/agent-v<version>/liminal-align-agent-<version>.tgz && echo '<sha256>  liminal-align-agent-<version>.tgz' | shasum -a 256 -c && npm install -g ./liminal-align-agent-<version>.tgz && align install && align login
@@ -34,11 +30,16 @@ both. A server saved by an earlier login is kept.
    immutability"), so a published release's assets and tag can't be changed or replaced afterwards.
 2. Actions, **agent-release**, Run workflow (on `main`). It typechecks, tests, runs `npm pack`, attests the tarball's
    build provenance and uploads it with its `.sha256` as an artifact. It creates no tag or release and publishes nothing.
-3. Download the artifact and verify it: `gh attestation verify liminal-align-agent-<version>.tgz --repo liminalworksinc/align`
-   and `shasum -a 256 -c liminal-align-agent-<version>.tgz.sha256`.
+3. Download the artifact and verify it. The attestation must come from this workflow, run on `main`; a build attested
+   from any other workflow or branch fails here:
+   ```
+   gh attestation verify liminal-align-agent-<version>.tgz --repo liminalworksinc/align \
+     --signer-workflow liminalworksinc/align/.github/workflows/agent-release.yml --source-ref refs/heads/main
+   shasum -a 256 -c liminal-align-agent-<version>.tgz.sha256
+   ```
 4. Create release `agent-v<version>` from that commit with the `.tgz` as its asset, then publish it.
 5. In a PR, set `AGENT_RELEASE` in `lib/paste-lines.ts` to `{ version, sha256 }` from the run's summary. Until then the
-   Apps tab keeps the source line, so it never shows a link that 404s.
+   Apps tab keeps its current steps (no step 4), so it never shows a link that 404s.
 
 ## Commands
 

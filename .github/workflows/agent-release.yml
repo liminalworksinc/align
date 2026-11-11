@@ -8,6 +8,8 @@ permissions:
   contents: read
 jobs:
   build:
+    # Attested from main only: the documented `gh attestation verify --source-ref refs/heads/main` rejects anything else.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
