@@ -386,12 +386,17 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/limits/suggest {notes, sou
 
 ### Requirement: One goal with its versions and contributions
 
-The server SHALL serve one goal on `GET /api/v2/workspaces/{ws}/goals/{goal}` (browser session) as `{goal, versions, contributions, can_edit, can_propose, hidden_depends_on}`: `goal` as in the feed, `versions` every version newest first as `{version, title, status, content_hash, created_at}`, `contributions` the readable source goals of approved alignments targeting this goal as `{goal:{id, title}}`, `can_edit` true only for the goal's owner when not a viewer, `can_propose` true exactly when "Proposing a change request" would not refuse the reader for who they are or the goal's status: not the goal's owner, not a viewer, and the goal `active`, and `hidden_depends_on` the number of the goal's dependencies the reader may not read (never which; `goal.depends_on` lists only the readable ones). A goal the caller may not read SHALL be 404.
+The server SHALL serve one goal on `GET /api/v2/workspaces/{ws}/goals/{goal}` (browser session) as `{goal, versions, contributions, can_edit, can_propose, deciders, hidden_depends_on}`: `goal` as in the feed, `versions` every version newest first as `{version, title, status, content_hash, created_at}`, `contributions` the readable source goals of approved alignments targeting this goal as `{goal:{id, title}}`, `can_edit` true only for the goal's owner when not a viewer, `can_propose` true exactly when "Proposing a change request" would not refuse the reader for who they are or the goal's status: not the goal's owner, not a viewer, and the goal `active`, `deciders` the people who would decide a change request from the reader on this goal as it stands now, as `{id, name}`: the goal's effective set for the reader as requester (its approval set under the requester rule, with the workspace-owner fallback; see "Requester rule and workspace-owner fallback"), empty when `can_propose` is false and when nobody is eligible yet, and `hidden_depends_on` the number of the goal's dependencies the reader may not read (never which; `goal.depends_on` lists only the readable ones). A goal the caller may not read SHALL be 404.
 
 #### Scenario: Owner opens their goal
 
 - **WHEN** the owner of a goal at version 3 opens it
 - **THEN** the response has three `versions` (3, 2, 1), `can_edit: true` and `can_propose: false`; a member reading the same goal gets `can_edit: false` and `can_propose: true`, and a viewer gets both false
+
+#### Scenario: Who would decide
+
+- **WHEN** a member who is not a lead reads an active team goal whose approval set is its owner and one lead, and the owner and a viewer read the same goal
+- **THEN** the member's `deciders` names the owner and the lead, the same people a change request from the member would list as its approvers; the owner and the viewer get `deciders: []`
 
 ### Requirement: Parents come from approved alignments
 
@@ -441,7 +446,7 @@ The server SHALL compute a goal's approval set, at the time it is needed, as the
 
 ### Requirement: Requester rule and workspace-owner fallback
 
-Wherever a goal's consent is needed (an alignment requirement, a change request or a goal in a reallocation), the server SHALL treat one approval from the goal's approval set as that goal's consent, SHALL count the requester toward the set only when the requester is the goal's owner, and, when the requester is not the goal's owner and the set holds no one other than the requester, SHALL use the workspace owners other than the requester as the set. If even that set is empty, the request SHALL stay open until someone eligible exists or the requester withdraws it.
+Wherever a goal's consent is needed (an alignment requirement, a change request or a goal in a reallocation), the server SHALL treat one approval from the goal's approval set as that goal's consent, SHALL count the requester toward the set only when the requester is the goal's owner, and, when the requester is not the goal's owner and the set holds no one other than the requester, SHALL use the workspace owners other than the requester as the set. If even that set is empty, the request SHALL stay open until someone eligible exists or the requester withdraws it. The web app's **Propose a change** drawer SHALL name "Who decides" from the goal read's `deciders` (see "One goal with its versions and contributions") and SHALL never work the set out itself; with `deciders` empty it says "Nobody can decide it yet. It stays open until someone can, or until you withdraw it."
 
 #### Scenario: Lead asks against their own team's goal
 
@@ -740,7 +745,12 @@ The server SHALL keep, on a `counter`, every dependency on the request's current
 
 ### Requirement: One open change request per goal and requester
 
-The server SHALL refuse a second change request from the same person on the same goal while their earlier one is `pending` or `countered`, with 409 `already_open`.
+The server SHALL refuse a second change request from the same person on the same goal while their earlier one is `pending` or `countered`, with 409 `already_open`. The web app SHALL name that open request before offering any form: on the goal page, in place of the **Full change form**, "You already have an open request on this goal, below." above the request's card in the "Change requests" list; in the **Propose a change** drawer, once that goal is chosen and in place of the rest of the form, "You already have an open request on this goal." with an **Open your request** link to the request's review (`/app/w/{ws}?review=<goal>.<id>`). The server's 409 stays for anything sent anyway.
+
+#### Scenario: Open request named before the form
+
+- **WHEN** a member with a countered request on a goal opens that goal's page, or chooses that goal in the **Propose a change** drawer
+- **THEN** the goal page shows no **Full change form** and says the open request is below; the drawer shows no change fields and offers **Open your request**; nothing is sent
 
 #### Scenario: Second request
 
@@ -1077,12 +1087,12 @@ The server SHALL approve a revision that has no evidence links like any other, a
 
 ### Requirement: Change request controls in the app
 
-The goal page SHALL offer **Propose a change** on any `active` goal the person can read but does not own, unless they are a viewer, and a "Change requests" list whose approve, approve and launch, reject and counter controls appear only for people in the goal's approval set, whose launch and not yet controls appear only for the request's launch set, and whose acknowledge control appears only for the requester; the workspace SHALL have a "Requests" tab, read from `GET /api/v2/workspaces/{ws}/change-requests`, with the groups waiting on me, mine and others, each control appearing only when the server's `can` flag allows it. The "Requests" tab SHALL show change requests only; alignments keep their own "Alignments" tab.
+The goal page SHALL offer **Propose a change** on any `active` goal the person can read but does not own, unless they are a viewer: the shell's **Propose a change** drawer, with the goal chosen, and on the page itself the **Full change form** (shown when the goal read's `can_propose` is true and the person has no open request on the goal; see "One open change request per goal and requester"); and a "Change requests" list whose approve, approve and launch, reject and counter controls appear only for people in the goal's approval set, whose launch and not yet controls appear only for the request's launch set, and whose acknowledge control appears only for the requester; the workspace SHALL have a "Requests" tab, read from `GET /api/v2/workspaces/{ws}/change-requests`, that shows the groups waiting on me, mine and others as one list filtered by "Waiting on me", "Waiting on others", "Decided" and "All", where a row opens the request's review drawer (`?review=<goal>.<id>`), each control appearing only when the server's `can` flag allows it. The "Requests" tab SHALL show change requests only; alignments keep their own "Alignments" tab.
 
 #### Scenario: Non-owner proposes from the goal page
 
 - **WHEN** a member opens a goal they do not own
-- **THEN** the page shows **Propose a change**, which posts to `.../goals/<goal>/change-requests` with the current version as `base_version`
+- **THEN** the page shows **Propose a change** and the **Full change form**, each of which posts to `.../goals/<goal>/change-requests` with the current version as `base_version`
 
 ### Requirement: Creating the Northstar sample workspace
 

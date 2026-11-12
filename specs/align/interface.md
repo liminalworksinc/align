@@ -11,7 +11,8 @@ to. Everyone signs in as a person (Google, GitHub, an email one-time code or a p
 shared passcode. `/` redirects to `/app`. Every path under `/app` is served in Mode L and when hosted.
 
 Each page reads the `/api/v2` endpoints it needs when it loads and reloads them after each of its own actions; pages
-do not poll, except the Home's first-run card, which checks the Apps endpoint while it is shown. A page shows only the controls the server would accept from the signed-in person: their workspace role
+do not poll, except the Home: its first-run card checks the Apps endpoint while it is shown, and while the Home stays
+open it reads again at most once a minute (see "Workspace Home"). A page shows only the controls the server would accept from the signed-in person: their workspace role
 (`owner`, `member` or `viewer`), their team role (`lead` or `member`), whether they own a goal or are in its approval
 set, and the `can` flags the server returns on alignments and change requests. "Pod" is stored data only: every
 screen says "team".
@@ -26,27 +27,40 @@ screen says "team".
 | `/app/device` | Connect a device | A signed-in person (recent sign-in) | Approve the code that `align login` printed |
 | `/app/devices` | Your devices | A signed-in person | List and revoke paired devices, and give one a workspace |
 | `/app/invite/<token>` | Workspace invite | The invited person | Join a workspace (and team) from an invite link |
-| `/app/w/<ws>` | Home | Workspace members | What waits on the person and on others, the active goals, and when connected AI apps last read the goals or connected |
+| `/app/w/<ws>` | Home | Workspace members | What needs the person, what waits on others and what is done; what changed since they last looked; the active goals |
 | `/app/w/<ws>/goals` | Goals tab | Workspace members | Goals the person can read; create a goal |
 | `/app/w/<ws>/goals/<goal>` | Goal page | Workspace members | One goal: versions, tree, new version, alignment request, change requests |
 | `/app/w/<ws>/people` | People tab | Workspace members | Members, roles, invites, teams, leaving, deleting the workspace |
 | `/app/w/<ws>/sessions` | Sessions tab | Workspace members | Shared sessions, stop and resume |
 | `/app/w/<ws>/alignments` | Alignments tab | Workspace members | Alignment requests the person is part of |
-| `/app/w/<ws>/requests` | Requests tab | Workspace members | Change requests: waiting on me, mine, others |
+| `/app/w/<ws>/requests` | Requests tab | Workspace members | Change requests: waiting on me, waiting on others, decided, all |
 | `/app/w/<ws>/asks` | Asks tab | Workspace members | What teams were asked to do: waiting on me, my teams', mine, others; record and import asks |
 | `/app/w/<ws>/spend` | Spend tab | Workspace members | Usage and estimated cost by goal, team or session |
 | `/app/w/<ws>/apps` | Apps tab | Workspace members | Connected AI apps and how to connect one |
+| `/app/w/<ws>/work` | Work | Workspace members | What Align knows about the work behind a decision: its evidence, what Align sent, the sessions on the goal and connected apps' goal reads (`?goal=<goal>&cr=<id>` leads with that decision, `?goal=<goal>` with the goal's open or latest one; bare, an index of goals) |
+| `/app/w/<ws>/record` | Decision record | Workspace members | The decision record as a timeline of what Align recorded; with `?cr=<id>` it is titled "Review" and the review leads, its record follows (`?goal=<goal>` narrows it) |
+| `/app/w/<ws>/decisions/<goal>/<id>` | Decision | Workspace members | One change request as a decision: where it is and who decides, its actions, the request, its change and evidence, and links to its record, its work and the goal dependencies |
+| `/app/w/<ws>/dependencies` | Goal dependencies | Workspace members | Each goal under the goal it contributes to, with what it depends on; choose one for its details and to compare its versions |
 | `/privacy` | Privacy policy | Anyone, signed in or not | Align's privacy policy (public, also when hosted) |
 | `/trust` | Trust | Anyone, signed in or not | Security overview, subprocessors, retention, DPA, questionnaire answers and contact |
 | `/oauth/authorize` | Connect <app> to Align | A person connecting an AI app (recent sign-in) | Grant an AI app read-only access to one workspace as themselves (or, when the app asks, read access plus agent-reported evidence links) |
 | (any) | Error page | Anyone | Plain error with Try again |
 
-Navigation: every `/app` page except sign-in has a top bar with the **Align** mark (a link to `/app`), a workspace
-switcher (shown once the person has a workspace), **Devices**, **Account**, the person's name (email on hover) and
-**Sign out**. Under it, a person with no passkey who has not dismissed the offer sees the add-a-passkey prompt. Inside
-a workspace a second bar shows the workspace name, the person's role and the tabs Home, Goals,
-People, Sessions, Alignments, Requests, Asks, Spend and Apps, with the current tab highlighted. Opening a workspace
-(from the list, the switcher, a new workspace, the sample or an invite) lands on its Home.
+Navigation: every `/app` page except sign-in and the decision page (which has its own frame, below) has, at 1024 px and
+wider, a left rail with the **Align** mark (a link to `/app`) and, at narrower widths, a top bar with the mark, the
+workspace's name and a **Menu** button that opens the same navigation as a sheet (focus moves into it, Escape closes it
+and returns focus to **Menu**). The navigation holds, in order: **Propose a change** inside a workspace for anyone who
+is not a viewer (see "Propose a change from the goal page"); the workspace switcher and "You are an owner", "You are a
+member" or "You are a viewer", once the person has a workspace; inside a workspace, **Home**, then "Plan" (**Goals**,
+**Alignments**, **Requests**, **Asks**), "Agents" (**Sessions**, **Apps**, **Spend**) and "Team" (**People**, and
+**Record** for a workspace owner), the current page marked; and at its foot **Devices**, **Account**, **Sign out**,
+the person's name (email on hover) and the appearance setting. The Work, Dependencies and decision pages are opened
+from a goal or a decision, not from this navigation. Above the page, a person with no passkey who has not dismissed the
+offer sees the add-a-passkey prompt. The decision page (`/app/w/<ws>/decisions/<goal>/<id>`) has a narrow rail (the
+**A** mark for all workspaces, "Decision desk" (the Home), "Goals", "Work" (the Sessions tab), "Alignments", "Asks", "Apps", "People", "Spend" and the
+person's initials for **Account**), a breadcrumb with the workspace switcher, and on a phone a **Menu** that adds
+**Account**, **All workspaces** and **Sign out**. Opening a workspace (from the list, the switcher, a new workspace, the
+sample or an invite) lands on its Home.
 
 ### Requirement: Root path redirects to the web app
 
@@ -552,20 +566,60 @@ with a link to `/app/devices`, since a refused Join grants nothing.
 
 ### Requirement: Workspace Home
 
-The Home at `/app/w/<ws>`, a workspace's landing view, SHALL show under "Know what needs you", from one read of
-`GET /api/v2/workspaces/<ws>/home`, a line saying how many things wait on the person, four count tiles ("Waiting on
-you", "Waiting on others", "Active goals", and "Connected apps that read the goals" as "<read> of <connected>", or
-"Connected apps" with none), each a link to its section, and the sections "Waiting on you", "Waiting on others",
-"Your declined requests" (only when there is one), "Active goals" and "Connected AI apps · when they last read the
-goals". It SHALL show only what the server holds: a count or a
-section the server could not read SHALL say "unknown", never zero, and nothing on the page SHALL infer what an agent is
-doing (no stuck, blocked or diverged state, "working" only as the live presence line defines it under Requirement: Live
-workspace, and no claim that an app has the current goal version or is "on
-the current plan": Align knows only which versions it sent an app, never which one the app uses; the decision value
-card names the apps Align sent a launched version). The page
-reads when it opens and does not poll: it reads again when the workspace's live stream says one of the person's views
-moved (Requirement: Live workspace); otherwise only its first-run card checks the apps while it is shown, and its "Since
-you last looked" section checks for new changes as below, the Needs-you list reading again with it.
+The Home at `/app/w/<ws>`, a workspace's landing view, SHALL show, in this order, a heading that states how many things
+need the person, the first-run card (see "Home first-run card"), one Needs list, "Since you last looked" and "Goals".
+It reads `GET /api/v2/workspaces/<ws>/home` (goals and apps), `GET .../change-requests` and `GET .../goals`, and the
+Needs list makes its own reads: `GET .../change-requests`, `GET .../asks?state=open,accepted,done,declined`,
+`GET .../alignments`, `GET .../home`, `GET .../goals`, `GET /api/v2/workspaces`, the requests to agents on up to 12
+active goals the person reads (their own first), and the value read of the latest launch on up to 12 goals (newest
+first). It SHALL show only what the server holds: a count or a source the server could not read SHALL be said to be
+unknown, never zero, and nothing on the page SHALL infer what an agent is doing (no stuck, blocked or diverged state,
+"working" only as the live presence line defines it under Requirement: Live workspace, and no claim that an app has the current goal version or is "on the current plan": Align knows only which
+versions it sent an app, never which one the app uses; the decision value card names the apps Align sent a launched
+version). The page reads when it opens and again after a decision in the review drawer or a request sent from the
+"Propose a change" drawer, and again when the workspace's live stream says one of the person's views moved (Requirement:
+Live workspace); it does not poll (only its first-run card checks the apps while it is shown, and its "Since you last
+looked" section checks for new changes as below, the Needs-you list reading again with it).
+
+The heading SHALL read "<n> things need you" ("1 thing needs you"), or "Nothing needs you"; when a source could not be
+read, "At least <n> things need you" ("Some of this could not be read" for none); "Needs you" while the list reads and
+"Home" until the Home read lands. In a workspace with no active goal the person can see it SHALL read "No goals here
+yet" while nothing needs them; the Needs list is then hidden, and there is no "Since you last looked" and no "Goals".
+
+The Needs list SHALL be one ranked list with the filters "Needs you" (the default), "Waiting on others" and "Done", each
+with its count ("Waiting" for "Waiting on others" below 400 px; with a source unread, a count reads "<n>+", or "?" for
+none), and a search field ("Search") when the filter holds more than 8 rows. A row SHALL show its kind as a status
+pill, the goal's title (a link to what the row opens), a line saying who asked or what caused it and, when it is
+someone else's move, whose (such as "Waiting on <names>" or "<names> can launch it"), how long it has waited ("time not recorded" when Align has no time),
+its evidence, and at most one outlined action. The kinds are "Approved, not launched" (**Launch v<n>**), "Decision"
+(**Review**, its line leading with what the request changes, then "<requester>'s request"), "Your request came back"
+(**See the change**, **See the condition** or **Update to v<n>**), "Declined" (**Propose again**), "Agent declined" (a
+request to agents that a session declined, **Open the requests**), "Team ask" (**Accept or decline** or **Mark
+done**), "Alignment" (**Review** or **Accept the change**) and "Launched, not sent" ("Align has not sent v<n> to the
+app <app>.", for a connected app the person can see that has read the goals but was not sent the goal's latest
+launched version, with **See apps** when the person connected it); a row waiting on others or done carries its own
+word ("Change suggested", "Needs an update", "Launched as v<n>", "Declined", "Withdrawn", "Superseded", "Approved",
+"Ask done", and so on). A change request's row opens it in the review drawer over the Home (`?review=<goal>.<id>`),
+and closing the drawer returns to the same list; any other row opens the tab that holds it. A row's evidence SHALL be
+its change request's evidence summary (a decision with no links says "No evidence attached", an approval recorded
+without links "Approved without evidence"), or, for other kinds, chips by class ("Receipt", "Agent reported", "Not
+observed", "Self-reported"). With two rows or more a line names the order, "Ranked for someone who approves: launches
+and decisions first." or "Ranked for your own requests first.", with **How it's ranked**. A source that could not be
+read is named above the list: "Align couldn't read the <sources> just now, so this list may be missing items and its
+counts are at least what you see. Reload to try again." A connected app Align has recorded no goal read from is not a
+row: one muted line under the list says "Align has recorded no goal read from <app>" (with who connected it when that
+isn't the person, and "or <n> other apps"), with **See apps**. A row the person decided in the drawer stays in place,
+greyed, as "Decided" with "You decided this just now. It leaves Needs you when you change the filter." until the
+filter changes. Empty, "Waiting on others" says "Nothing you're part of is waiting on someone else." and "Done" says
+"Nothing decided yet."; "Needs you" says nothing, since the heading has the count.
+
+"Goals" SHALL list one line per active goal from the Home read: its title (a link to the goal page), "v<n>" and
+"Company" or its team, a **Work** link (`/app/w/<ws>/work?goal=<goal>`), and chips only where there is something to
+say: the goal's latest approved change not launched yet (its state pill, which opens that change in the review
+drawer), "Held", the newest launch's delivery and agent time above zero, from the shared evidence summary. **All goals**
+links to the Goals tab. When the change requests could not be read it says "Align couldn't read change requests just
+now, so the plan state of each goal is unknown."; when the goals could not be read, "Align couldn't read the goals just
+now."
 
 Home's "Since you last looked" SHALL compare against the last time this person left this workspace's Home on this
 device, in any tab; coming back to Home in the same tab, without a reload, compares against when they left it, and a
@@ -574,6 +628,8 @@ Home stays open, it SHALL add new changes without a reload, checking at most onc
 reads again with it, so its count never trails what Since shows. With no earlier visit on
 the device it SHALL say "First visit on this device, so nothing to compare yet." The time is kept in this browser only
 and is never sent to the server.
+A goal's creation line SHALL name its owner, who created it (Align never reassigns an owner), and a goal the reader
+created gets no line, like their other own actions; a later saved version's line still says "Someone".
 
 The read SHALL return, for a workspace member or viewer (cookie only: an `Authorization` header gets `403
 bearer_not_allowed`, a non-member `404`), `change_requests` (`waiting_on_me`, `waiting_on_others`, `declined`), `asks`
@@ -592,9 +648,10 @@ workspace owner) a company goal. An ask waits on the person when its `waiting_on
 `done` once accepted). An alignment the person is part of waits on its requester when countered and, when pending, on
 everyone who could satisfy a requirement nobody has satisfied yet; its item SHALL carry its `choice`, `source_goal` and
 `sessions` (each `{label, started_at, key_end}` as the alignment view names them, never another person's key) and its
-row SHALL say them under the title, "Contribution only" or "Work toward, usage moves", then "from “<source goal>”" when
-there is one and "session: <label> · started <time> · …<key end>" ("<n> sessions: …" for several), so two requests of
-one person on one goal never read alike (e2e-reports/acycle1/cross.md A1-cross-9). Active goals are the readable active goals, the
+Needs row SHALL lead with them, "From <source goal>: <requester> asks to align with this goal" when there is a source
+goal, else "<Contribution only or Work toward, usage moves> · session …<key end>: <requester> asks to align with this
+goal" ("sessions …<key end>, …<key end>" for several), so two requests of one person on one goal never read alike
+(e2e-reports/acycle1/cross.md A1-cross-9). Active goals are the readable active goals, the
 person's own (owned, their team's, or a company goal for a workspace owner) first. An approved change request that is
 not launched (`launch` `pending` or `not_yet`) SHALL be listed with `next: "launch"` as "Approved, not launched": waiting
 on the person when their `can.launch` flag is set, otherwise under waiting on others, with `waiting_on` its `launchers`,
@@ -605,75 +662,86 @@ nobody can launch it as it stands.
 The decide card tells an approver who declines that the requester sees their reason, so the requester's Home SHALL
 show it (main #53): `change_requests.declined` lists, per active goal, the person's own latest change request there
 when it is `rejected`, with the goal (its current version), `reason`, `rejected_by`, `rejection_reason` and
-`decided_at`, newest decision first. It waits on nobody, is counted in no tile or summary, and is on nobody else's Home.
-It stays until the person sends a newer request on that goal (whatever becomes of that one) or the goal closes. Each is
-a row "<approver> declined your request on <goal>" with "Declined <time>. Reason: “<reason>”. Your change wasn't made;
-the goal is at version <n>." and **Open** (the goal page's change requests, where the record is).
+`decided_at`, newest decision first, and is on nobody else's read. On the Home, the person's newest request on an
+active goal, when it was declined, SHALL come back to their Needs you (founder ruling, LIM-2472 eaa5cf92) as a
+"Declined" row, "Declined by <approver>: “<reason>”", with **Propose again** (the goal page's change requests), and is
+counted in the heading. It leaves Needs you, into Done, once the person opens it (its review, or **Propose again**),
+which is kept in this browser only, per workspace and person (with storage blocked it keeps coming back), or once they
+send a newer request on that goal or the goal closes. It is on nobody else's Needs you.
 
-Every agent-status item SHALL show exactly one evidence class, "delivery receipt" (a `received`, `applied` or
-`enforced` receipt, or a goal read Align served), "agent reported" (the agent's own claim or evidence link) or "not
-observed" (Align has nothing), and the read SHALL return the same class as `evidence_class`. Each connected app is
-listed with what the Apps tab has: its name, who connected it, when it was approved, `last_used_at` (**Last
-connected**) and `last_read_at` (**Last read the goals**, the `mcp` part's goal read). Only an app with a
-`last_read_at` is a delivery receipt, with "Read the goals <time>"; an app that connected but has no goal read is not
-observed, with "Connected <time>, no goal read seen yet", and one with neither is not observed with "Approved <time>,
-no goal read seen yet". A connection SHALL never be shown or counted as a read. The tile counts the apps with a goal
-read. A workspace owner sees every connected app and anyone else their own, as on the Apps tab.
+Every agent-status item SHALL show exactly one evidence class, and the read SHALL return it as `evidence_class`:
+`delivery_receipt` (a `received`, `applied` or `enforced` receipt, or a goal read Align served), `agent_reported` (the
+agent's own claim or evidence link) or `not_observed` (Align has nothing). Each connected app the read returns carries
+what the Apps tab has: its name, who connected it, when it was approved, `last_used_at` and `last_read_at` (the `mcp`
+part's goal read); only an app with a `last_read_at` is a delivery receipt. The Home lists no apps (the Apps tab does):
+an app's goal read since the last visit is a line in "Since you last looked" ("<app> read the goals", with its evidence
+class), and an app with no goal read is the muted line under the Needs list. A connection SHALL never be shown or
+counted as a read. A workspace owner's read has every connected app and anyone else's their own, as on the Apps tab.
 
-#### Scenario: Waiting on you and on others
+#### Scenario: Needs you and waiting on others
 
 - **WHEN** a member proposes a change to a team goal and the team's lead opens the Home
-- **THEN** the lead's "Waiting on you" lists "<requester>'s request on <goal>" with the quoted reason, "Approve it, suggest a change or decline it." and **Open** (the goal page's change requests), and the requester's "Waiting on others" lists it with "Waiting on <lead> to decide."; after a counter it waits on the requester, and after the goal's owner saves a newer version it reads "Waiting on <requester> to update it to version <n>."
+- **THEN** the lead's Needs you lists a "Decision" row with the goal's title, "<what it changes> · <requester>'s request" and **Review**, which opens the request in the review drawer, and the requester's "Waiting on others" lists it with "Your request · Waiting on <lead>"; after a counter it is the requester's "Your request came back" row, "An approver suggested a change", with **See the change**, and after the goal's owner saves a newer version the requester's row reads "The goal moved on to v<n>" with **Update to v<n>**
 
 #### Scenario: Asks and alignments
 
 - **WHEN** an ask of the lead's team is open and an alignment request with a company goal is pending
-- **THEN** the lead's "Waiting on you" lists "<who asked> asked <team>" with the quoted ask, and the workspace owner's lists "<requester> asks to align with <goal>"; each opens its tab
+- **THEN** the lead's Needs you lists a "Team ask" row "<who asked> asked <team>" with **Accept or decline**, and the workspace owner's an "Alignment" row with **Review**; each opens its tab
 
 #### Scenario: Two alignment requests on one goal
 
 - **WHEN** Lena asks twice to align with Milo's goal, contribution only with one session and work toward with another, and Milo opens the Home (`scripts/test-v2.mjs` "A1-cross-9 (ui): ...")
-- **THEN** the two items read "Contribution only · session: claude-code session · started <time> · …<key end>" and "Work toward, usage moves · session: claude-code session · started <time> · …<other key end>"
+- **THEN** the two rows read "Contribution only · session …<key end>: Lena asks to align with this goal" and "Work toward, usage moves · session …<other key end>: Lena asks to align with this goal"
 
-#### Scenario: Connected apps
+#### Scenario: An app with no goal read
 
-- **WHEN** a workspace owner opens the Home with one app that has read the goals and one that has only connected (`initialize` and `tools/list`)
-- **THEN** the tile reads "1 of 2", the first app shows "delivery receipt" and "Read the goals <time>", the second "not observed" and "Connected <time>, no goal read seen yet", the section says that a delivery receipt here is a goal read Align served (recorded at most every 5 minutes), that connecting is not a read, and that Align sees when an app last read the goals, not which version it has or what it does with them, and nothing on the page says "on the current plan"
-
-#### Scenario: Nothing observed
-
-- **WHEN** the person has no connected app they can see
-- **THEN** the section shows one item marked "not observed": no app is connected (for a member, they have not connected one), so Align has observed no goal reads, with a link to the Apps tab
+- **WHEN** a workspace owner opens the Home with no launched change, one app that has read the goals and one that has only connected (`initialize` and `tools/list`)
+- **THEN** neither app is a row; one muted line under the list says "Align has recorded no goal read from <second app>" with **See apps**, nothing counts the connection as a read, and nothing on the page says "on the current plan"
 
 #### Scenario: A failed read
 
-- **WHEN** the Home's read fails, or the server could not read one of its sections
-- **THEN** each affected tile says "unknown", the line says how much is waiting is unknown, and the section says Align couldn't read it just now, so it is unknown; nothing shows zero or "not observed" in its place
+- **WHEN** one of the Needs list's reads fails
+- **THEN** the heading reads "At least <n> things need you" (or "Some of this could not be read"), each filter's count reads "<n>+" (or "?"), and the list says "Align couldn't read the <source> just now, so this list may be missing items and its counts are at least what you see. Reload to try again."; nothing shows zero in its place, and when every read is refused the list says only "Align couldn't read this workspace for you, so what needs you here is unknown. If you aren't a member, ask a workspace owner for an invite."
 
 #### Scenario: Not in the workspace
 
 - **WHEN** a signed-in person who is not a member opens `/app/w/<ws>` or any page under it: the workspace doesn't exist, was deleted, they were removed, or they were never in it
-- **THEN** the page shows only the top bar and "This workspace doesn't exist or you're not in it" with a link to `/app` ("Go to your workspaces"): no workspace tabs, no tiles, no "unknown" and no "Reload" (that is for a read that failed, not for a 404)
+- **THEN** the page shows only the top bar and "This workspace doesn't exist or you're not in it" with a link to `/app` ("Go to your workspaces"): no workspace tabs, no Needs list, no "unknown" and no "Reload" (that is for a read that failed, not for a 404)
 
 #### Scenario: A declined request on the requester's Home
 
 - **WHEN** an approver declines a member's change request with a reason
-- **THEN** the member's Home shows it under "Your declined requests" as "<approver> declined your request on <goal>" with the time, the quoted reason and the goal's version, with **Open** to the goal's change requests; the approver's, the workspace owner's and every other Home don't list it, and no count includes it
+- **THEN** the member's Needs you shows a "Declined" row with the goal's title, "Declined by <approver>: “<reason>”" and **Propose again**, counted in the heading; on the approver's, the workspace owner's and every other Home it is at most a "Declined" row under Done
+
+#### Scenario: Opened, it moves to Done
+
+- **WHEN** that member opens the declined request's review, or presses **Propose again**
+- **THEN** it leaves their Needs you for Done and does not come back in that browser
 
 #### Scenario: A newer request replaces the declined one
 
-- **WHEN** that member then sends a new request on the same goal, and later withdraws it
-- **THEN** the declined request leaves their Home when the new one is sent and does not come back after the withdrawal
+- **WHEN** that member instead sends a new request on the same goal, and later withdraws it
+- **THEN** the declined request leaves their Needs you when the new one is sent and does not come back after the withdrawal
 
-#### Scenario: First-run card after the queue
+#### Scenario: First-run card above the list
 
-- **WHEN** the first-run card is shown and something waits on the person
-- **THEN** the card comes after "Waiting on you", so on a phone the queue is on the first screens; with nothing waiting it comes before the tiles
+- **WHEN** the first-run card is shown and something needs the person (`scripts/test-v2.mjs` "U3 (LIM-2472): ...")
+- **THEN** the compact card comes above the Needs list
 
 #### Scenario: A workspace with no goals
 
-- **WHEN** a workspace has no active goal the person can see
-- **THEN** "Active goals" says "No active goals you can see." with a link to the Goals tab
+- **WHEN** a workspace has no active goal the person can see and nothing needs them
+- **THEN** the heading reads "No goals here yet", the first-run card leads (see "Home first-run card"), and there is no Needs list, no "Since you last looked" and no "Goals"
+
+#### Scenario: Goal lines
+
+- **WHEN** the person opens the Home of a workspace with active goals
+- **THEN** "Goals" has one line per goal: its title linking to the goal page, its version and team, chips only for an approved change not launched (which opens it in the review drawer), "Held", the newest launch's delivery or agent time above zero, and **Work** linking to `/app/w/<ws>/work?goal=<goal>`
+
+#### Scenario: Who created a goal
+
+- **WHEN** another member creates a goal the person can read after the person's last visit, and later saves its version 2
+- **THEN** "Since you last looked" says "<owner> created the goal" and "Someone saved v2"; a goal the person created themselves gets no line
 
 ### Requirement: Live workspace
 
@@ -726,9 +794,11 @@ Presence names no person, key or title. With reduced motion the states show with
 ### Requirement: Evidence class on every agent-status item
 
 Every item in the web app that says what agents or their sessions did, received or reported SHALL carry exactly one
-evidence class, shown as a plain pill with the words of the Home ("delivery receipt", "agent reported", "not
-observed", `lib/v2/home-core.mts`), and nothing SHALL be inferred past it (no working, stuck, blocked or diverged
-state): the Home's connected apps (see "Workspace Home"); the goal page's Agent activity card ("agent reported" from
+evidence class, and nothing SHALL be inferred past it (no working, stuck, blocked or diverged state). The Home's Needs
+list, the Apps tab, the Requests list, the review drawer and the Work page show it as a label with an icon: "Receipt",
+"Agent reported", "Self-reported" (a link a person added) or "Not observed" (dashed), `app/app/_ui/ds/evidence-label.tsx`.
+The items below show it as a plain pill in the words of `lib/v2/home-core.mts`, lower case ("delivery receipt", "agent
+reported", "not observed"): the goal page's Agent activity card ("agent reported" from
 the align CLI's bindings, usage and work signals, else "not observed"); each session's answer on the Agents on this goal
 card ("delivery receipt" for a request received and not answered, "agent reported" for an answer, "not observed"
 otherwise); the value card's "Agents on the new version" line ("delivery receipt" once any receipt for the launched
@@ -743,60 +813,83 @@ read returns the same item (`align_get_goal_activity`), it SHALL carry the same 
 
 ### Requirement: Home first-run card
 
-The Home SHALL show, between its summary line and its count tiles, a first-run card ("Get started") while its read
-returned the apps section and none of those apps (a workspace owner's: every app; anyone else's: their own) has a
-`last_used_at` or `last_read_at`, that is, while Align has seen no app the person can see here make a request. It
-SHALL not show when the apps section is unknown. The card has a **Hide** button that hides it for that workspace in
-the browser's `localStorage` (key `align.firstRun.hidden:<ws>`; when storage is blocked it stays shown, and Hide hides
-it until the page reloads) and moves focus to the page heading.
+The Home SHALL mount its first-run card ("Get started") once its read returned both the goals and the apps sections
+(an unread Home shows no card), right under the heading and above the Needs list. The card ends by rule, never by a
+dismiss: it has no **Hide** button and keeps nothing in browser storage. It takes one of these forms:
 
-The card SHALL offer two paths when the person has a sample: **Explore a sample**, tagged "Fictional", and **Connect
-one agent**, tagged "Claude Code", titled "Two ways to start". A sample is a workspace named "Northstar (sample)" in
-`GET /api/v2/workspaces`. The card never creates one: the sample is offered on `/app` only to a person with no
-workspace who needs no creation code, in Mode L and hosted alike, so on any other Home the card links to the sample
-the person has ("Open the Northstar sample", labelled fictional), on the sample's own Home says the person is in it
-and that its company, teams, goals and change request are fictional, with a link to its Requests tab, and with no
-sample shows only the connect path, titled "Connect one agent".
+- In a workspace with no active goal the person can see, for an owner or member: "Start with a goal", "A goal comes
+  first: it is what people decide on here, and what Align sends to agents." then "Set the first one, or look around the
+  sample first." (when the sample is offered), "Set the first one, or connect one agent first." or "Set the first
+  one.", with **Set the first goal** (the one filled action, a link to `/app/w/<ws>/goals?first=1`), **Explore the
+  sample** (when the sample can be had, as below) and, until an app the person connected has made a request,
+  **Connect one agent**, which opens the connect steps in place ("Hide the steps" closes them). This form shows whether or not the person has connected an agent. For
+  a viewer it is one line, "This workspace has no goals yet. A workspace owner or member sets them."
+- Once the person can read a goal, for an owner or member while no app they connected has a `last_used_at` or
+  `last_read_at`: a compact card, "Connect your agent" and "Your agent reads the goals you can read, as you. It can't
+  approve or change a goal.", with **Explore the sample** (a link, when the person has a sample in another workspace)
+  and **Connect an agent**, which opens the connect steps in place ("Hide the steps" closes them).
+- Otherwise (an app the person connected has made a request, or a viewer with goals to read) no card; on the sample's
+  own Home the line "Northstar is fictional. Its company, teams, goals and change request are made up so you can try
+  each step." stays (it is also at the top of the compact card there).
 
-The connect path SHALL show the Claude Code line of the Apps tab (`lib/paste-lines.ts`, from the MCP URL that
+A sample is a workspace named "Northstar (sample)" in `GET /api/v2/workspaces`. In the empty-workspace form,
+**Explore the sample** links to the person's sample when they have one in another workspace; otherwise, when the
+server's creation options are open and need no creation code, it creates one with `POST /api/v2/workspaces/sample`
+(the same route and bot check as `/app`'s, the check shown only once the person asks: "The sample is Northstar, a
+made-up company in its own workspace, with goals and a change request to try. Nothing in it is real." and "Complete
+the check, then press Explore the sample again.") and opens it; a failure reads "Not created. <message>".
+
+Opening the Home with `?connect=1` (the Goals tab's **Connect one agent** after a workspace's first goal: "Next:
+connect one agent. It reads this goal at its next turn, as you.") SHALL open the connect steps when the card mounts.
+
+The connect steps SHALL say "Paste this into a terminal (sh, bash or zsh), then choose this workspace and Allow on the
+Align page that opens:", show the Claude Code line of the Apps tab (`lib/paste-lines.ts`, from the MCP URL that
 `GET /api/v2/workspaces/<ws>/apps` returns) with **Copy** above it, say that it adds Align to Claude Code for the
-person's user account and starts the sign-in and writes no hooks, list what a connected agent can read as the person,
-one line per read tool the server lists for a `goals:read` token (`lib/mcp/read-tools.ts`, the activity line marked
-agent-reported; in the app's words, "Decision records: who approved or declined a change, and why", never "rejected":
-`scripts/test-v2.mjs` "c9 W2: ..."), say that it can't propose, approve, launch or change anything (and that, if allowed when connecting,
-it can add evidence links labelled agent-reported), and link to the Apps tab for other apps; for a viewer it says
-viewers can't connect apps instead of the line. Its status line (a polite live region) SHALL say only what Align has
-seen: no app connected yet (for anyone but an owner: they haven't connected one), or for each approved app with no
-request "<app>: approved <time>, Align hasn't seen it connect yet", or that the check failed and is retried; it
-explains that once an app connects, the Home and the Apps tab show when it last connected (any request) and,
-separately, when it last read the goals, and that connecting is not a read. While shown and the tab is visible, the
-card SHALL read `GET /api/v2/workspaces/<ws>/apps` every 5 seconds; once an app has a `last_used_at` or `last_read_at`
-it reads the Home again and yields to the "Connected AI apps" section.
+person's user account (every folder) and starts the sign-in and writes no hooks and no settings in their folder, list
+under "It can read, as you" what a connected agent can read, one line per read tool the server lists for a
+`goals:read` token (`lib/mcp/read-tools.ts`, the activity line marked "(agent-reported, not observed by Align)"; in
+the app's words, "Decision records: who approved or declined a change, and why", never "rejected": `scripts/test-v2.mjs`
+"c9 W2: ..."), say that it can't propose, approve, launch or change anything here (and that, if allowed when
+connecting, it can add evidence links to change requests, labelled agent-reported), and link to the Apps tab ("Using
+Codex or another app? See the Apps tab."). Its status line (a polite live region) SHALL say only what Align has seen:
+"No AI app is connected to this workspace yet." (to a workspace owner) or "You haven't connected an AI app to this
+workspace yet.", or for each app the person connected that is approved with no request "<app>: approved <time>, Align
+hasn't seen it connect yet", or "Couldn't check connected AI apps just now. Align tries again in a few seconds."; it
+explains that once an app connects, the Apps tab shows when it last connected (any request to Align) and, separately,
+when it last read the goals, and that connecting is not a read. While mounted and the tab is visible, the card SHALL
+read `GET /api/v2/workspaces/<ws>/apps` at once and then every 5 seconds until an app the person connected has a
+`last_used_at` or `last_read_at`; when that happens after the card saw none, the Home reads again, and the compact
+card goes (the empty-workspace card stays, without **Connect one agent**).
 
-#### Scenario: Two paths
+#### Scenario: An empty workspace
 
-- **WHEN** a person with the Northstar sample opens the Home of another workspace where nobody connected an app
-- **THEN** the card shows "Two ways to start", **Open the Northstar sample** (fictional) linking to the sample's Home, and the connect path with the Claude Code line and **Copy**, the read list with one line per read tool of the server's `tools/list`, what it can't do and "No AI app is connected to this workspace yet."
+- **WHEN** an owner or member who has connected no agent opens the Home of a workspace with no goals
+- **THEN** the card reads "Start with a goal" with **Set the first goal**, **Explore the sample** when the sample can be had, and **Connect one agent**; a viewer sees only "This workspace has no goals yet. A workspace owner or member sets them."
+
+#### Scenario: Compact, above the list
+
+- **WHEN** an owner or member who has connected no agent opens the Home of a workspace with goals, with the Northstar sample in another workspace
+- **THEN** the card reads "Connect your agent" with **Explore the sample** linking to the sample's Home and **Connect an agent**, above the Needs list
+
+#### Scenario: Connect steps
+
+- **WHEN** the person presses **Connect an agent** (or **Connect one agent**)
+- **THEN** the steps show the Claude Code line with **Copy**, the read list with one line per read tool of the server's `tools/list`, what it can't do and "No AI app is connected to this workspace yet." to a workspace owner
+
+#### Scenario: From the Goals tab
+
+- **WHEN** a person creates a workspace's first goal and presses **Connect one agent** on the Goals tab
+- **THEN** the Home opens (`/app/w/<ws>?connect=1`) with the connect steps already open
 
 #### Scenario: In the sample
 
 - **WHEN** the person opens the sample's own Home
-- **THEN** the explore path says they are in the Northstar sample and that it is fictional, and links to its Requests tab
-
-#### Scenario: No sample
-
-- **WHEN** a person with no sample workspace opens a Home with no app seen
-- **THEN** the card is titled "Connect one agent" and shows only the connect path
+- **THEN** it says "Northstar is fictional. Its company, teams, goals and change request are made up so you can try each step."
 
 #### Scenario: Status follows what Align sees
 
 - **WHEN** the person approves an app that has not made a request yet, and later the app makes one
-- **THEN** the status first says "<app>: approved <time>, Align hasn't seen it connect yet", and after the request the card is gone and the Home's "Connected AI apps" section shows the app as "Connected <time>, no goal read seen yet"
-
-#### Scenario: Hide
-
-- **WHEN** the person presses **Hide**
-- **THEN** the card is gone, focus is on the page heading, and it stays hidden on that workspace's Home after a reload in the same browser; with storage blocked, Hide still hides it and nothing fails
+- **THEN** the status first says "<app>: approved <time>, Align hasn't seen it connect yet", and after the request the Home reads again, the compact card is gone, and the Needs list's muted line says "Align has recorded no goal read from <app>" until the app reads the goals
 
 ### Requirement: Web app fits a phone
 
@@ -815,8 +908,9 @@ wide every page SHALL still not scroll sideways: a form row that holds several f
 field collapses. At every width from 500 to 1440 px the Home, Goals, goal, Requests and Apps pages SHALL not
 scroll sideways (page or main column), and a long button label SHALL wrap inside its container. The workspace switcher
 SHALL be the browser's own select, listing only the person's workspaces, so its list never runs off a narrow window.
-A page SHALL read the connected apps at most once (the Home through its one read, the Apps tab through
-`GET .../apps`) and SHALL not poll.
+The Apps tab SHALL read the connected apps once, through `GET .../apps`, and SHALL not poll; the Home reads them
+through `GET .../home` twice when it opens (its own read and its Needs list's) and again at most once a minute while it
+stays open, and its first-run card checks `GET .../apps` as "Home first-run card" says.
 
 #### Scenario: Compact phone chrome
 
@@ -887,7 +981,13 @@ change request with `changes.limits` set to the goal's current limits plus the t
 ### Requirement: Goal page details and new version
 
 The goal page at `/app/w/<ws>/goals/<goal>` SHALL show the goal from `GET /api/v2/workspaces/<ws>/goals/<goal>`, its
-tree and every version, and SHALL give a person the server lets edit it (`can_edit`) a "New version" form.
+tree and every version, and SHALL give a person the server lets edit it (`can_edit`) a "New version" form. On an
+active goal that person SHALL also get **Drop this goal**, its own action, whose confirmation ("Drop “<goal>”?") says
+that it becomes version <n+1>, marked dropped, that sessions bound to it get that at their next turn, that nobody can
+bind new sessions to it and people can no longer ask to change it, and that to bring it back they save a new version
+marked active; **Confirm: drop the goal** saves the next version with status `dropped` and every other field as it is
+(the same write as the New version form's Status), and **Cancel** closes it. The confirmation SHALL go away as soon as
+the drop is recorded, so a second confirm is never offered on the version it replaced.
 
 #### Scenario: Reading a goal
 
@@ -898,6 +998,11 @@ tree and every version, and SHALL give a person the server lets edit it (`can_ed
 
 - **WHEN** the owner edits Goal, measures, limits (kind "Must", "Must not" or "Out of scope", text up to 160 characters, an optional meeting and date; at most 5), Status (Active, Achieved, Dropped), "Target share of agent time (%)" (blank for none), anchors and "Depends on" (other active goals, less those in the goal read's `version_loops`, which it counts: "<n> goals aren't offered: they already depend on this goal, so adding them would make a loop.") and presses **Save version <n+1>**
 - **THEN** the page posts them with `version` to `POST .../goals/<goal>/versions`; a 409 `cycle` shows "That would make these goals depend on each other in a loop." and other errors show the server's message
+
+#### Scenario: Drop this goal
+
+- **WHEN** the owner presses **Drop this goal** on an active goal at version <n> and then **Confirm: drop the goal**
+- **THEN** the page posts the goal's current title, measures, anchors, dependencies, limits and target share with `status: "dropped"` and `version: <n>` to `POST .../goals/<goal>/versions`, the confirmation is gone at once, and the goal reads again at version <n+1>, dropped, with no **Drop this goal**; an error shows the server's message under the confirmation
 
 #### Scenario: Goal tree
 
@@ -932,15 +1037,46 @@ already on this goal, so they aren't offered.") (e2e-reports/acycle1/cross.md A1
 
 ### Requirement: Propose a change from the goal page
 
-The goal page SHALL offer **Propose a change** on an `active` goal to every member who can read the goal, is not a
+The goal page SHALL offer the **Full change form** on an `active` goal to every member who can read the goal, is not a
 viewer and does not own it, as the goal read's `can_propose` says (the page never works the rule out itself), and SHALL
 send the proposal with
-`POST /api/v2/workspaces/<ws>/goals/<goal>/change-requests`.
+`POST /api/v2/workspaces/<ws>/goals/<goal>/change-requests`. While the person has their own open request on the goal
+(pending or countered; Align takes one per person and goal), the page SHALL say so before any form, "You already have
+an open request on this goal, below. Align takes one open request per person and goal: add to it or withdraw it, then
+ask again.", and SHALL not offer the form.
+
+Every workspace page SHALL also offer **Propose a change** in the shell, to anyone but a viewer, while the workspace has
+goals: a drawer ("Change the plan") with a short form. "Goal" offers the active goals the person does not own (the one
+whose page or `?goal=` they are on is chosen), marking a goal with "· your request is open" when they have one; once
+such a goal is chosen the drawer SHALL say so before any field, "You already have an open request on this goal." with
+"It is waiting for a decision." (or "An approver suggested a change to it; accept it or withdraw it.") and "Align takes
+one open request per person and goal: open yours to add to it or withdraw it, then ask again.", with **Open your
+request** (its review on the Home) and **Not now**, and SHALL offer no form. Otherwise "What should change" offers the
+title, each measure, "Add a measure" (under 10 measures), "Mark the goal achieved" and "Drop the goal", with "It should
+say" or "The new measure" (up to 300 characters) and an optional "Target" for a measure; it links to "the goal page's
+full change form" for limits and dependencies. "Why" is required (up to 2000 characters) and "A link" (an https link)
+is optional. "Who decides" SHALL name the people in the goal read's `deciders` (the server's effective set for a
+request from this person), "<names>. You can't decide your own request.", or say "Nobody can decide it yet. It stays
+open until someone can, or until you withdraw it."; the drawer never works the set out itself. A missing or unchanged
+field is said beside it and nothing is sent; **Send for approval** posts `{base_version, changes, reason}` and then
+adds the link as the person's own evidence, and the drawer says "Sent for approval." with who can decide, **Open the
+request** and **Close**. A refusal (`stale_version`, `already_open`, `own_goal`, `goal_not_active`) shows the server's
+message beside "Goal".
 
 #### Scenario: Propose a change
 
-- **WHEN** a member presses **Propose a change**, edits the pre-filled Goal, measures, limits, Status and "Depends on", writes "Why this change" (required, 1 to 2000 characters) and presses **Send for approval**
+- **WHEN** a member presses **Full change form**, edits the pre-filled Goal, measures, limits, Status and "Depends on", writes "Why this change" (required, 1 to 2000 characters) and presses **Send for approval**
 - **THEN** the page posts `{base_version:<current version>, changes:<only the fields that differ>, reason}` and the new request appears in the goal's "Change requests" list as "waiting for approval"; **Send for approval** stays disabled while nothing differs or the reason is empty
+
+#### Scenario: An open request is named first
+
+- **WHEN** a member with a pending request on a goal opens that goal's page, or chooses that goal in the **Propose a change** drawer
+- **THEN** the goal page says "You already have an open request on this goal, below. …" and offers no **Full change form**, and the drawer says "You already have an open request on this goal." with **Open your request**, before anything is typed
+
+#### Scenario: Propose from the drawer
+
+- **WHEN** a member opens **Propose a change** on a goal's page, picks a measure, changes its words, writes why and presses **Send for approval**
+- **THEN** "Who decides" named the goal read's `deciders` before sending, the request is posted, and the drawer says "Sent for approval." with the request's approvers and **Open the request**; a Home that is open reads its counts again
 
 #### Scenario: Only dependencies the deciders can see are offered
 
@@ -960,7 +1096,7 @@ send the proposal with
 #### Scenario: Who does not see it
 
 - **WHEN** the goal's owner or a viewer opens the goal page, or anyone opens an achieved or dropped goal
-- **THEN** there is no **Propose a change**; the owner uses the "New version" form instead
+- **THEN** there is no **Full change form**, and the **Propose a change** drawer doesn't offer that goal (a viewer has no **Propose a change** at all); the owner uses the "New version" form instead
 
 ### Requirement: Change request controls on the goal page
 
@@ -974,7 +1110,7 @@ and a closed "Details" disclosure.
 #### Scenario: Reading a request
 
 - **WHEN** a member opens a request in "Change requests"
-- **THEN** the card, built from the list response, shows the requester and a state pill ("waiting for approval", "approver suggested a change", "approved", "declined", "withdrawn" or "superseded": a request in state `rejected` reads "declined", the app's word for what **Decline** did, as target changes and alignments say it, never "rejected"); a decided request shows the base version, the revision, the reason, a before and after view of each changed field, who approved or declined it ("Declined by <name>", "Declined by you" to the person who declined it) and their note or reason, and every revision with its author and note under "Revisions" once there is more than one; a superseded request says "Closed because the goal was marked achieved or dropped."
+- **THEN** the card, built from the list response, shows the requester and a state pill ("waiting for approval", "approver suggested a change", "approved", "declined", "withdrawn" or "superseded": a request in state `rejected` reads "declined", the app's word for what **Decline** did, as target changes and alignments say it, never "rejected"); a decided request shows the base version, the revision, the reason, a before and after view of each changed field, who approved or declined it ("Declined by <name>", "Declined by you" to the person who declined it) and when, an approver's note, and the decline reason only to the requester, the person who declined it and the request's approvers (every other reader, a viewer included, sees who declined it and when, without the reason), and every revision with its author and note under "Revisions" once there is more than one; a superseded request says "Closed because the goal was marked achieved or dropped."
 
 #### Scenario: Understand an open request
 
@@ -1009,7 +1145,7 @@ and a closed "Details" disclosure.
 #### Scenario: Approved, not launched
 
 - **WHEN** a request is approved and not launched
-- **THEN** the card says "Approved, agents still on v<n> until launch" (n its base version), who approved it and when, and after a not yet "Not launched yet: <name> decided not yet, <time>."; never "agents on v<n+1>"; it lists who can launch ("Can launch: …" from `launchers`), and for someone whose `can.launch` is set offers **Launch version <n+1> to agents** (`launch`) and, unless the last decision already was not yet, **Not yet** (`not_yet`), both posting `{revision}` (the revision on screen; the server refuses a stale one with 409 `stale_revision`, shown as "Not recorded. <message>", and a **Not yet** on a card left open while someone said not yet elsewhere with 409 `wrong_state` "<name> already decided not yet, so nothing changes: …", shown the same way: E2E-WEB cycle 11 W2). A "Not recorded. <message>" line keeps the server's message as it was written, adding only a full stop when it has none: a message that opens with a person's name keeps the name as they wrote it ("Not recorded. carol already decided not yet, …" on a card that says "carol decided not yet"), never capitalised (`scripts/test-v2.mjs` "c12 C12-1 (ui, E2E-WEB cycle 12): ..."). Each then shows "Recorded: …" on the reloaded card like every other decision: "Recorded: you launched version <n+1> to agents. They get it at their next turn." or "Recorded: you decided not yet. Agents stay on version <n> until someone launches version <n+1>." A card names each person one way: the reader is "you" in every line ("Approved by you", "Launched by you", "Declined by you"), anyone else by name
+- **THEN** the card says "Approved, agents still on v<n> until launch" (n its base version), who approved it and when, and after a not yet "Not launched yet: <name> decided not yet, <time>."; never "agents on v<n+1>"; it lists who can launch ("Can launch: …" from `launchers`), and for someone whose `can.launch` is set offers **Launch version <n+1> to agents** (`launch`) and, unless the last decision already was not yet, **Not yet** (`not_yet`), both posting `{revision}` (the revision on screen; the server refuses a stale one with 409 `stale_revision`, shown as "Not recorded. <message>", and a **Not yet** on a card left open while someone said not yet elsewhere with 409 `wrong_state` "<name> already decided not yet, so nothing changes: …", shown the same way: E2E-WEB cycle 11 W2). A "Not recorded. <message>" line keeps the server's message as it was written, adding only a full stop when it has none: a message that opens with a person's name keeps the name as they wrote it ("Not recorded. carol already decided not yet, …" on a card that says "carol decided not yet"), never capitalised (`scripts/test-v2.mjs` "c12 C12-1 (ui, E2E-WEB cycle 12): ..."). Each then shows "Recorded: …" on the reloaded card like every other decision: "Recorded: you launched version <n+1>." (the review drawer's wording) or "Recorded: you decided not yet. Agents stay on version <n> until someone launches version <n+1>." A card names each person one way: the reader is "you" in every line ("Approved by you", "Launched by you", "Declined by you"), anyone else by name
 
 #### Scenario: The list after a launch
 
@@ -1029,7 +1165,7 @@ and a closed "Details" disclosure.
 #### Scenario: A dependency the decider can't see
 
 - **WHEN** someone who decides on a request opens it after it added a dependency they can't read (their approval set changed since), so its `dependency_not_visible` is set
-- **THEN** the card offers neither **Approve** nor **Approve and launch** (on an approved request, no **Launch version <n+1> to agents**) and says "You can't approve this. This request adds a dependency on a goal you can't see, so you can't approve what it asks. Ask <requester> to withdraw it, or to rebase it without that dependency." (for a launch, "You can't launch this. This change adds a dependency on a goal you can't see, so you can't launch what it publishes. …"), naming no goal; "Decides", "Waiting on …" and "Can launch" leave them out; the Home doesn't list it under "Waiting on you" ("Approve it, suggest a change or decline it.", "… until you launch it."); and if they decided before the read changed (they could see it when they opened the card), the refusal reads "Not recorded. <that message>", the Confirm panel closes and nothing is recorded (`scripts/test-v2.mjs` "C4-1 (ui): ...")
+- **THEN** the card offers neither **Approve** nor **Approve and launch** (on an approved request, no **Launch version <n+1> to agents**) and says "You can't approve this. This request adds a dependency on a goal you can't see, so you can't approve what it asks. Ask <requester> to withdraw it, or to rebase it without that dependency." (for a launch, "You can't launch this. This change adds a dependency on a goal you can't see, so you can't launch what it publishes. …"), naming no goal; "Decides", "Waiting on …" and "Can launch" leave them out; the Home's Needs list never offers them **Launch v<n>** on it, and lists an open one under their Needs you as a "Decision" only because they may still decline it or suggest a change; and if they decided before the read changed (they could see it when they opened the card), the refusal reads "Not recorded. <that message>", the Confirm panel closes and nothing is recorded (`scripts/test-v2.mjs` "C4-1 (ui): ...")
 
 #### Scenario: A request that would now close a dependency loop
 
@@ -1061,9 +1197,35 @@ and a closed "Details" disclosure.
 - **WHEN** a viewer opens the goal page
 - **THEN** the change requests are listed with no decision and no action buttons; an open one says whom it waits on
 
+A change request opened in the review drawer (from the Home, the Requests tab, or any link with
+`?review=<goal>.<id>`) SHALL follow the same rules: who asked, the reason once, the change, the evidence and whom it
+waits on, and only the actions its `can` flags allow, each confirmed before it is sent, with the request read again
+first so nothing is sent if it changed. A declined request's reason SHALL be shown in the drawer only to the person who
+declined it and to the request's approvers ("Reason: “<reason>”"), and to its requester as "<name> declined your
+request" with the reason quoted, "A declined request is closed. To try again, propose a revised change on the goal."
+and **Open the goal to propose again**; a viewer, and anyone else outside the approval set, sees no reason there
+(founder ruling, LIM-2472 60253f95). The goal page's request card SHALL follow the same rule (founder ruling, Nov 11):
+every reader sees "Declined by <name>, <time>.", and only the requester, the person who declined it and the request's
+approvers also see "Reason: <reason>". A recorded decision says "Recorded: …" in its own words, among them "Recorded: you
+approved revision <r> and launched version <m>." for **Approve and launch**, "Recorded: you launched version <m>." for
+a launch, and "Recorded: you approved revision <r>. Not launched yet." for an approval alone. On the Home, the drawer
+then says what comes next from the Needs list: "Next: <kind> · <title>" (a link) with **Back to the list**, "Nothing
+else waits on a decision from you." when only rows the person can't act on are left, or "Nothing else waits on you."
+when nothing is.
+
+#### Scenario: A declined request in the review drawer
+
+- **WHEN** an approver declines a request with a reason, and the requester, another approver, a viewer and the person who declined it each open it in the review drawer
+- **THEN** the requester reads "<approver> declined your request" with the reason, the other approver and the person who declined it read "Reason: “<reason>”", and the viewer sees no reason
+
+#### Scenario: Approve and launch from the drawer
+
+- **WHEN** an approver opens the last request waiting on them from the Home and confirms **Approve and launch**
+- **THEN** the drawer says "Recorded: you approved revision <r> and launched version <m>." and then "Nothing else waits on you." with **Back to the list**
+
 ### Requirement: Evidence on change request cards
 
-Every change request card (on the goal page and in the Requests tab) SHALL show, under "Evidence for revision <n>"
+Every change request card on the goal page SHALL show (the Requests tab lists requests as one Desk list and opens each in the review drawer, which has its own evidence summary; see "Workspace Requests tab"), under "Evidence for revision <n>"
 (or "No evidence attached." when the current revision has no links), the Align snapshot of the current revision as "Recorded by Align at revision <n>" (the goal's estimated spend in the last 30 days, by the money rule the MCP snapshot line uses (`lib/v2/money.mts`: rounded to four decimals first, then "$0.0010" under one cent, "under $0.0001" for a cost that is not zero but would round to "$0.0000", and two decimals from one cent, so 9,999 micro-dollars reads "$0.01" as 10,000 does; `scripts/test-v2.mjs` "C7-3: ..."), with its request count, "1 request" for one as in the MCP snapshot line (one count-and-noun helper, `lib/v2/plural.mts`, for both: `scripts/test-v2.mjs` "C5-4: ..."), and its models, or "Spend on this goal is hidden from you.", the sessions bound to it and its last activity), and each link on the current revision with its kind ("Pull request", "CI run", "Incident", "Dashboard", "Doc" or "Link"), its label as a link to its URL that opens in a new tab with `rel="noopener noreferrer"`, the URL's host, who added it ("you" for the person) and "self-reported" or "agent-reported". It SHALL never call a link verified. Links on earlier revisions SHALL be listed under "From revision <n>". When `can.add_evidence` is set, **Add evidence** SHALL open a form with a kind, an https link and "What it shows" (at most 120 characters) whose **Add link** posts `{kind, url, label, revision}` to `.../change-requests/<id>/evidence` (a 409, for a request declined, withdrawn, approved or countered meanwhile or a link already there, is refused like any decision: the form closes, the card shows a focused alert "Not recorded. <the server's message>", such as "Not recorded. This request was declined by <name>, so nothing changes.", and reloads to show the request as it is now: `scripts/test-v2.mjs` "C8-1 (ui): ..."); a link whose `can_remove` is set SHALL offer **Remove**, which sends `DELETE .../evidence/<evidence id>` (a 409, for a request declined, withdrawn or countered meanwhile, is refused as **Add link**'s is: a focused alert "Not recorded. <the server's message>", such as "Not recorded. This request was declined by <name>, so nothing changes.", and the card reloads to show the request as it is now: `scripts/test-v2.mjs` "c9 W1 (ui): ..."). Once approved, the card SHALL say "Approved without evidence on the approved revision (<r>)." (links on earlier revisions are still listed under "From revision <n>") or "Approved with <n> evidence link(s), none verified." An **Add link** for a link that can no longer become an `https://` one (`http://…`) SHALL stay disabled with the hint "Use an https:// link: Align keeps only https links."
 
 #### Scenario: Approve without evidence
@@ -1078,24 +1240,46 @@ Every change request card (on the goal page and in the Requests tab) SHALL show,
 
 ### Requirement: Workspace Requests tab
 
-The Requests tab at `/app/w/<ws>/requests` SHALL show the change requests the person can see, from
-`GET /api/v2/workspaces/<ws>/change-requests`, in three sections: "Waiting on you", "Your requests" and "Others".
+The Requests tab at `/app/w/<ws>/requests`, headed "Change requests", SHALL show the change requests the person can
+see, from one read of `GET /api/v2/workspaces/<ws>/change-requests`, as one list with the filters "Waiting on me",
+"Waiting on others", "Decided" and "All", each with its count ("On me" and "Waiting" below 400 px), starting on
+"Waiting on me" when anything waits on the person and on "All" otherwise, and a search field ("Search goal, person,
+reason"). A line above it says "<n> decisions waiting on you. <m> waiting on others." ("1 decision …", or "Nothing is
+waiting on you. <m> waiting on others."). Each row SHALL show Request (the goal's title, then what the request changes
+in words, its first change and "and <n> more changes" when there are more, and "your request" or "<requester>'s
+request"), State (the Home's word for it as a status pill), Versions ("Asks for v<n>", "Approved v<n>", "Launched v<n>"
+or "Not approved"), Evidence ("No evidence attached" when the current revision has no link, and the shared evidence
+summary) and Updated (how long ago). A row opens the request in the review drawer (`?review=<goal>.<id>`); its action
+is the Home's for that request (**Review**, **Launch v<n>**, **See the change** and so on), else **Review** when its
+`can` flags give the person anything to do, else "No action" for a decided one or whom it waits on ("<names> can
+decide", "… can launch it"). Beside **Review**, a quiet **Approve only** SHALL be offered only when the request has
+evidence on its current revision and the person's `can.approve` is set, never on a row whose action is a launch; it
+sends the approval through the review's own path, reading the request again first and sending nothing if it changed or
+its evidence was removed meanwhile, and the row then says "Recorded: you approved revision <r>. Not launched yet." (or
+"Not recorded. …"). A row never launches.
 
-#### Scenario: Sections
+#### Scenario: Filters
 
 - **WHEN** a member opens the tab
-- **THEN** "Waiting on you" holds the requests whose `waiting_on_me` is true for the person (pending requests they may approve, their own countered requests waiting for them to accept, and approved requests they may launch that nobody has launched yet, including ones someone put off with not yet: the same rule as the Home's "Approved, not launched"), "Your requests" holds the person's other requests, and "Others" holds every other request they can see; each card names the goal (a link to its goal page), the requester, the state pill, the reason and the changed fields, with the same actions as on the goal page
+- **THEN** "Waiting on me" holds the requests whose `waiting_on_me` is true for the person (pending requests they may approve, their own countered requests waiting for them to accept, and approved requests they may launch that nobody has launched yet, including ones someone put off with not yet: the same rule as the Home's "Approved, not launched"), "Waiting on others" the other open ones, "Decided" the rest, and "All" every request they can see; each row opens the review drawer, with the same actions as on the goal page
 
-#### Scenario: Empty sections
+#### Scenario: One-click approval
 
-- **WHEN** a section has nothing
-- **THEN** it shows "Nothing is waiting on you.", "You have not proposed a change. Open someone else's goal to propose one." or "None." respectively; when the person's own requests are all under "Waiting on you", "Your requests" says "No other requests of yours. Yours that need you are under Waiting on you." instead
+- **WHEN** an approver presses **Approve only** on a row whose request has an evidence link
+- **THEN** the request is approved, not launched, and the row says "Recorded: you approved revision <r>. Not launched yet."; a row with no evidence offers only **Review**
+
+#### Scenario: Nothing to show
+
+- **WHEN** the person can read no change request, or a filter has nothing
+- **THEN** the tab says "No change requests yet" ("Nobody has asked to change a goal you can see. …"), or the filter says "Nothing is waiting on you", "Nothing is waiting on others" or "No decided requests" with "Pick another view above."; a failed read says "Change requests unknown" with **Try again**, never that nothing waits
 
 ### Requirement: Decision value card
 
-An approved change request's card, on the goal page and the Requests tab, SHALL show a "What this decision gave you"
-card for every reader of the request, from `GET /api/v2/workspaces/<ws>/goals/<goal>/change-requests/<id>/value`
-(`lib/v2/value.ts`; `409 not_approved` for any other state, `404` for a request the person can't read), with these
+An approved change request's card on the goal page SHALL show a "What this decision gave you" card to the person who
+approved it (the request's `approved_by`) and to nobody else (founder ruling, Nov 11), from
+`GET /api/v2/workspaces/<ws>/goals/<goal>/change-requests/<id>/value` (`lib/v2/value.ts`; `409 not_approved` for any
+other state, `404` for a request the person can't read); for anyone else the page SHALL not make that read, so nothing
+is fetched or recorded for them, and they read the decision record without the card. The card has these
 rows: "Accepted change" (each change in words, one line each, the same lines as the MCP decision record: "<measure>
 target 500 → 600", "Added measure …", "Removed measure …", "Title … → …", "Status … → …", "Added limit …", "Now
 depends on <title>", never a count like "Measures: 1 → 1"; a dependency the reader can't read counted after the named
@@ -1115,18 +1299,18 @@ the app does next; with none, "Align hasn't sent version <n> to a connected app 
 but a workspace owner); marked "delivery receipt" when it lists any app, else "not observed"; main #56), "Measured in
 Align" (proposal to
 approval, approval to launch, and approval to the first `applied` receipt of the launch's directive, from server
-timestamps only; "not yet" while there is none), one optional question with a note, the reports
-of others, and the follow-up link.
+timestamps only; "not yet" while there is none), one optional question with a note, "What others said" (other
+people's reports, when the read's `sees_all_reports` is set and there are any), and the follow-up link.
 
 #### Scenario: The optional question
 
-- **WHEN** a reader answers "Before Align, how long would getting this decision usually take?" with one of five answers (Same day, 2–3 days, About a week, Longer, It wouldn't get decided) and an optional note of at most 500 characters
+- **WHEN** the approver answers "Before Align, how long would getting this decision usually take?" with one of five answers (Same day, 2–3 days, About a week, Longer, It wouldn't get decided) and an optional note of at most 500 characters
 - **THEN** `POST .../value {action: "reported", estimate, note?}` saves their value report (`v2_value_reports`, one per person per request; control, bidi and zero-width characters removed from the note), records `value_reported` with the estimate only, and the card shows "Your estimate: … · Measured here: …" with the note; for 7 days after it was saved they may change it (**Change my answer**), after that the server answers `409 edit_closed`
 
-#### Scenario: Who sees the reports
+#### Scenario: Who sees the card
 
-- **WHEN** the request's requester, a revision author, its approver or a member of its approval set, or a workspace owner opens the card
-- **THEN** "What others said" lists every other person's estimate and note; any other reader sees only their own report
+- **WHEN** the request's approver, its requester, a member of its approval set who did not approve it, a workspace owner and a viewer open the approved request on the goal page
+- **THEN** only the approver sees "What this decision gave you" (with "What others said" listing every other person's estimate and note when the read's `sees_all_reports` is set); for everyone else the card is not shown and `GET .../value` is not read
 
 #### Scenario: Viewed once it is seen
 
@@ -1135,7 +1319,7 @@ of others, and the follow-up link.
 
 #### Scenario: Apps Align sent the launched version
 
-- **WHEN** a change is launched as version 2, one member's app then reads the goals, and a workspace owner's app last read them at version 1
+- **WHEN** a workspace owner approves a change that is launched as version 2, one member's app then reads the goals, and the owner's app last read them at version 1
 - **THEN** the owner's card shows "Connected AI apps" marked "delivery receipt" with "<member's app> (connected by <member>): Align sent it version 2 on <time>" and not the owner's own app; before the launch the row is not shown (`apps` is `null`), and once the member disconnects the app it is gone
 
 #### Scenario: Follow-up link
@@ -1331,8 +1515,9 @@ form and workspace owners an import.
 The goal page SHALL show an "Agent activity" card from `GET /api/v2/workspaces/<ws>/goals/<goal>/activity`, marked
 with the response's one evidence class ("agent reported", or "not observed" with nothing in the window) and saying
 "Sessions people shared toward this goal, last 14 days. Counts come from bindings, not from what agents wrote.", with
-Sessions (and how many per harness, as "<n> Claude Code, <n> Codex"), Active now and Last activity ("None yet" when
-there is none), and, when the response has `detail`, "Files these sessions reported working on" (its paths, then "and
+Sessions (and how many per harness, as "<n> Claude Code, <n> Codex"), "Reported activity, last 90 min" (what the align
+CLI reported in the last 90 minutes, never "active now") and "Last reported activity" ("None yet" when there is none),
+and, when the response has `detail`, "Files these sessions reported working on" (its paths, then "and
 <n> more whose paths aren't shared"; with no path shared, only "These sessions reported working on <n> files whose
 paths aren't shared.", never the heading over an empty list) and "Your sessions" (harness, a state pill and the last
 activity). Nothing on the
@@ -1341,7 +1526,7 @@ card says what agents are doing: the files are what the sessions' align CLI repo
 #### Scenario: Activity card
 
 - **WHEN** a member of the goal's team opens a goal with two bound sessions, one active, and work signals with paths
-- **THEN** the card is marked "agent reported" and shows "Sessions 2 (1 Claude Code, 1 Codex)", "Active now 1", the paths and their own sessions; a reader without the detail sees only the counts, and with no sessions the card is marked "not observed" and says "No shared sessions worked toward this goal in the last 14 days."
+- **THEN** the card is marked "agent reported" and shows "Sessions 2 (1 Claude Code, 1 Codex)", "Reported activity, last 90 min 1", the paths and their own sessions; a reader without the detail sees only the counts, and with no sessions the card is marked "not observed" and says "No shared sessions worked toward this goal in the last 14 days."
 
 ### Requirement: Agents on this goal card
 
@@ -1437,12 +1622,12 @@ workspace owner sees everyone's.
 #### Scenario: Connected apps
 
 - **WHEN** a member opens the tab
-- **THEN** each connection shows the app's name with "Reads only" or, for a grant holding `changes:evidence`, "Reads, and adds evidence links", its redirect host, the person who connected it, when it was approved, **Last connected** (its last request to Align, `Never` when none) and **Last read the goals** (its last call that returned goals, "Not seen yet" when none), under a note that connecting and listing tools is not a read and that Align doesn't see which goal version an app has, with **Disconnect** on the person's own connections (an owner sees **Disconnect** on every connection), which calls `DELETE /api/v2/workspaces/<ws>/apps/<id>`; with none, "No AI apps are connected to this workspace."
+- **THEN** each connection shows the app's name with its evidence label, "Receipt" when it has read the goals and "Not observed" when it hasn't, and "Reads only" or, for a grant holding `changes:evidence`, "Reads, and adds evidence links", its redirect host, the person who connected it, when it was approved, **Last connected** (its last request to Align, `Never` when none) and **Last read the goals** (its last call that returned goals, "Not seen yet" when none), under a note that connecting and listing tools is not a read and that Align doesn't see which goal version an app has, with **Disconnect** on the person's own connections (an owner sees **Disconnect** on every connection), which calls `DELETE /api/v2/workspaces/<ws>/apps/<id>`; with none, "No AI apps are connected to this workspace." for a workspace owner and "None of your AI apps is connected." for anyone else. A "Connected is not the same as read" panel names **Last connected** (it says the app reached Align, not that it read anything), **Last read the goals**, labelled "Receipt" (Align served goals and recorded it), and "Never read", labelled "Not observed", and a panel counts the apps "Connected", "Have read the goals" and "Never read"
 
 #### Scenario: How to connect
 
 - **WHEN** a member who is not a viewer opens the tab
-- **THEN** a "Connect an AI app" card shows the MCP URL `<origin>/api/mcp` with **Copy** and says the app will send them to Align to sign in and choose this workspace; a viewer sees "Viewers can't connect apps to this workspace." instead
+- **THEN** a "Connect an AI app" card shows the MCP URL `<origin>/api/mcp` with **Copy** and says the app will send them to Align to sign in and choose this workspace; a viewer sees "Viewers can't connect apps to this workspace. A member or an owner can." instead
 
 #### Scenario: Terminal lines
 
@@ -1533,15 +1718,26 @@ error for `/app`, `/app/sign-in` or any other page.
 
 ### Requirement: Web app status pills
 
-Pages under `/app` SHALL mark states with plain-word pills whose colors follow one rule: green for a settled good
-state, amber for something waiting or needing attention, red for revoked or stopped, violet for names and labels that
-are not states (a team, a "company" goal, an active goal's status) and for an accepted ask (agreed, under way, like an
-active goal), neutral otherwise.
+Pages under `/app` SHALL mark states with plain-word pills of two kinds. Plain pills follow one rule: green for a
+settled good state, amber for something waiting or needing attention, red for revoked or stopped, violet for names and
+labels that are not states (a team, a "company" goal, an active goal's status) and for an accepted ask (agreed, under
+way, like an active goal), neutral otherwise. Status pills, for the state of a change request, an alignment or an
+alignment requirement wherever they are shown (the Home's Needs list and goal lines, the Requests tab, the review
+drawer, the decision page and the Alignments tab), always carry a word and an icon shape, and follow their own rule:
+orchid for an in-between state (pending, countered, held), green for approved, blue for launched, red for declined, and
+a neutral dashed pill for a withdrawn or superseded change request (a withdrawn or revoked alignment is a plain neutral
+pill). The answers on the Agents on this goal card are plain
+pills with their own colors: "accepted by the developer" green, "declined" red and "pending" violet.
 
 #### Scenario: Pill colors
 
 - **WHEN** a page shows a state
-- **THEN** an approved alignment, alignment requirement or change request, an active device, a linked sign-in method, a shared session, an achieved goal, a goal "you can bind sessions" to and a reviewed parent goal are green; a pending or countered alignment or change request, a requirement still waiting, a suspended session, "needs alignment to bind" and a parent not reviewed against its current version are amber; a revoked device and a stopped agent are red; an open ask is amber, an accepted ask violet, a done ask green, and a declined or withdrawn ask neutral
+- **THEN** an approved change request on the goal page, an active device, a linked sign-in method, a shared session, an achieved goal, a goal "you can bind sessions" to and a reviewed parent goal are green; a pending or countered change request on the goal page, a suspended session, "needs alignment to bind" and a parent not reviewed against its current version are amber; a declined change request on the goal page is neutral; a revoked device, a stopped agent and "agents on hold" are red; an open ask is amber, an accepted ask violet, a done ask green, and a declined or withdrawn ask neutral
+
+#### Scenario: Status pill colors
+
+- **WHEN** a page shows the state of a change request, an alignment or an alignment requirement as a status pill
+- **THEN** a pending or countered one, a requirement still waiting and a held one are orchid, an approved one or an approved requirement green, a launched one blue, a declined one red, and a withdrawn or superseded change request a neutral dashed pill
 
 ## Open questions
 
