@@ -40,7 +40,7 @@ function serviceAt(store,counter,countReads){
   './text-core.mts':{isBlankText:s=>!s.trim()},'./change-words.mts':{DEPENDS_ON_MAX:5},
   './events':{event(){throw new Error('Unexpected limit event');}},
  };
- for(const name of ['./directives','./requests','./alignments','./allocation','./steering','./reallocations'])groups[name]=new Proxy({},{get(_target,key){throw new Error('Unexpected surrounding service '+name+'/'+String(key));}});
+ for(const name of ['./directives','./requests','./alignments','./allocation','./steering','./reallocations','./approval'])groups[name]=new Proxy({},{get(_target,key){throw new Error('Unexpected surrounding service '+name+'/'+String(key));}});
  const exports={};evaluate(name=>{assert(Object.hasOwn(groups,name),name);return groups[name];},exports);return exports;
 }
 async function testCase(round,held,initial){

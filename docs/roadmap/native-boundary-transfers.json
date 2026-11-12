@@ -3304,13 +3304,13 @@
   "classified_members_in_closed_boundaries": 361,
   "candidate_closure_counts_apply_after_normal_publication": true,
   "current_findings_snapshot": {
-    "count": 23,
-    "high": 6,
+    "count": 26,
+    "high": 9,
     "medium": 17,
-    "ledger_sha256": "8f94da4a25f166eb794428f048647baaf3f99206a7e0dfc74dd226678f2805f5",
+    "ledger_sha256": "54742c4259c83802c3dcd02ce2333a7d00f8badc36774873a255848fd49202ab",
     "overrides": 0,
     "guide": "docs/roadmap/native-authorization-findings.md",
-    "guide_sha256": "10f8f29a90bc8cb8f4d875fb2c800c9847187136abb00c1af8bfb3e0843a2f30",
+    "guide_sha256": "fa258c7fb2b0f0578bb1c61064cca415b5d5ccc260b7cf0f5a1c9b83168ea2c9",
     "findings": [
       {
         "id": "f_c741821f2f4a",
@@ -3495,6 +3495,30 @@
         "file": ".literate/native-projects/local-server-metrics/skills/agent/release-project/advance/SKILL.md",
         "line": 21,
         "title": "Requires a push without explicit operator approval"
+      },
+      {
+        "id": "f_3ce9f2db2566",
+        "severity": "high",
+        "finding_class": "unauthorized-push",
+        "file": ".literate/native-projects/local-server-sessions-directives-routes/skills/agent/develop-in-production-workflow/staging/SKILL.md",
+        "line": 17,
+        "title": "Requires pushing without action-specific approval"
+      },
+      {
+        "id": "f_a9b7b0880de4",
+        "severity": "high",
+        "finding_class": "sandbox-escape",
+        "file": ".literate/native-projects/local-server-goals-deliberation-routes/verification/acceptance/server-goals-deliberation-routes-harness-v4.cjs",
+        "line": 73,
+        "title": "Generated code can escape the VM sandbox"
+      },
+      {
+        "id": "f_d0fca6e9a3f5",
+        "severity": "high",
+        "finding_class": "sandbox-escape",
+        "file": ".literate/native-projects/local-server-workspace-admin-routes/verification/acceptance/server-workspace-admin-routes-harness-v3.cjs",
+        "line": null,
+        "title": "Candidate code can escape the VM sandbox through host resources"
       }
     ],
     "all_undecided": true,
