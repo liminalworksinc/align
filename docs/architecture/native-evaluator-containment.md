@@ -40,10 +40,25 @@ process reports UID 65532. The controls also verify that missing Docker and
 symlink candidates fail closed. CI provisions the exact image and runs these
 controls.
 
-This change contains independent oracle execution. It does not retrospectively
-isolate historical qualification, generated tests or build commands. Future
-qualification of these components also needs contained profile execution before
-its output can be described as isolated. VM checks still supply behavioral
+New qualification profiles can embed the readable
+[`contained-profile-bootstrap.cjs`](../../tools/native-rewrite/contained-profile-bootstrap.cjs)
+in their existing relative command arguments. It snapshots only hash-pinned
+driver/manifest inputs and declared package members. Generated mode excludes the
+original implementation and source references. Source mode additionally copies
+the explicitly pinned original reference and raw source. The profile adapter has
+a 60-second deadline and uses the same restricted image. The current-main
+directive profile has passed its build, original-source and generated-reference
+modes with 84 observations in this container. Its owned public probes verify
+three absent host environment values, an absent outside file, absent original
+algorithm in generated mode, an absent Docker socket, read-only candidate input,
+loopback-only interfaces and UID 65532. Missing Docker and symlink input fail
+closed. These checks exercised the macOS launcher with Linux compute; a separate
+Linux launcher run is not claimed.
+
+This change does not retrospectively isolate historical qualification, generated
+tests or Standard build commands. Future qualification of the two reported route
+components must use contained profile execution before it is described as
+isolated. VM checks still supply behavioral
 restrictions inside the evaluator; they are not a security boundary. A candidate
 that compromises its evaluator process may read that container's public test
 inputs. This design does not claim resistance to forged acceptance evidence from
