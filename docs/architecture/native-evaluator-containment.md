@@ -40,9 +40,9 @@ process reports UID 65532. The controls also verify that missing Docker and
 symlink candidates fail closed. CI provisions the exact image and runs these
 controls.
 
-New qualification profiles can embed the readable
+New qualification profiles can load the readable, hash-pinned
 [`contained-profile-bootstrap.cjs`](../../tools/native-rewrite/contained-profile-bootstrap.cjs)
-in their existing relative command arguments. It snapshots only hash-pinned
+through their existing short loader and relative command arguments. It snapshots only hash-pinned
 driver/manifest inputs and declared package members. Generated mode excludes the
 original implementation and source references. Source mode additionally copies
 the explicitly pinned original reference and raw source. The profile adapter has

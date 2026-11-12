@@ -1,6 +1,6 @@
 'use strict';
 // Readable qualification command bootstrap. Candidate code never runs in this host process.
-// Embed these bytes in the typed profile's node -e command, retaining the existing relative argv.
+// Load this hash-pinned file through the profile's existing short relative-file loader.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -8,11 +8,11 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const cp = require('node:child_process');
 const image = 'node@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9';
-const args = process.argv.slice(1);
+async function main(args, repositoryRoot) {
 const [driver, driverHash, mode, manifestPath, manifestHash, ...rest] = args;
 assert(['build', 'source', 'generated'].includes(mode));
 assert.equal(rest.length, mode === 'build' ? 0 : mode === 'source' ? 3 : 1);
-const repository = fs.realpathSync(process.env.ALIGN_NATIVE_QUAL_REPOSITORY);
+const repository = fs.realpathSync(repositoryRoot);
 const work = fs.realpathSync(process.cwd());
 const cache = path.join(os.homedir(), '.cache', 'align-native-oracles');
 fs.mkdirSync(cache, {recursive: true, mode: 0o700});
@@ -125,7 +125,7 @@ try {
     '--security-opt=no-new-privileges', '--pids-limit=64', '--memory=768m', '--cpus=2',
     '--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=16m', '--env=HOME=/tmp',
     '--env=ALIGN_NATIVE_QUAL_REPOSITORY=/inputs/repo',
-    '--mount', `type=bind,source=${snapshot},target=/inputs,readonly`,
+    '--mount', 'type=bind,source=' + snapshot + ',target=/inputs,readonly',
     '--workdir=/inputs/work', '--entrypoint=node', image, '--no-warnings',
     '--max-old-space-size=512', '/inputs/execute.cjs'], {
       env: dockerEnvironment, encoding: 'utf8', timeout: 60000, maxBuffer: 4 * 1024 * 1024});
@@ -141,3 +141,5 @@ try {
     env: dockerEnvironment, stdio: 'ignore', timeout: 10000});
   fs.rmSync(snapshot, {recursive: true, force: true});
 }
+}
+module.exports = {main};
