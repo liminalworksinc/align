@@ -3873,16 +3873,18 @@ try {
           h1: document.querySelector("main h1")?.getBoundingClientRect().top ?? null,
           header: document.querySelector("header")?.innerText ?? "",
           tabs: document.querySelector('nav[aria-label="Workspace"]')?.innerText ?? "",
+          rail: document.querySelector("aside")?.innerText ?? "",
+          workspace: document.querySelector('select[aria-label="Switch workspace"]')?.selectedOptions[0]?.textContent ?? "",
           prompt: document.querySelector("#passkey-prompt")?.innerText ?? null,
         }));
       };
-      const [chrome390, chrome1000] = [await chromeAt(390), await chromeAt(1000)];
+      const [chrome390, chrome1000, chrome1280] = [await chromeAt(390), await chromeAt(1000), await chromeAt(1280)];
       const wsAName = ((await call("U1", "GET", "/api/v2/workspaces", { cookie: U1.cookie })).json?.workspaces ?? []).find((w) => w.id === A)?.name;
       check(
-        "ui (Chrome, main #44): at 390x844 the chrome is compact: the Home's heading starts above y=300, the top bar has no person's name, the passkey prompt is one short sentence and the tab row has no workspace name; at 1000 the name and the workspace show",
+        "ui (Chrome, main #44, LIM-2472): at 390x844 the chrome is compact: the Home's heading starts above y=300, the top bar has no person's name, the passkey prompt is one short sentence and the tab row has no workspace name; at 1000 the top bar names the workspace and not the person; at 1280 the rail names the person and the switcher shows the workspace",
         chrome390.h1 !== null && chrome390.h1 < 300 && !chrome390.header.includes(U1.name) && !chrome390.tabs.includes(wsAName) && (chrome390.prompt === null || (/Sign in with a passkey instead of an email code\./.test(chrome390.prompt) && !/phished/.test(chrome390.prompt))) &&
-          chrome1000.header.includes(U1.name) && chrome1000.tabs.includes(wsAName),
-        JSON.stringify({ wsAName, tabs390: chrome390.tabs.slice(0, 40), tabs1000: chrome1000.tabs.slice(0, 40), h1: chrome390.h1, header390: chrome390.header }),
+          chrome1000.header.includes(wsAName) && !chrome1000.header.includes(U1.name) && chrome1280.rail.includes(U1.name) && chrome1280.workspace === wsAName,
+        JSON.stringify({ wsAName, tabs390: chrome390.tabs.slice(0, 40), header1000: chrome1000.header, rail1280: chrome1280.rail.slice(-120), workspace1280: chrome1280.workspace, h1: chrome390.h1, header390: chrome390.header }),
       );
       await page.setViewport({ width: 390, height: 844 });
       const short = [];
@@ -3948,8 +3950,8 @@ try {
       const appsReads = await readsOf(`/app/w/${A}/apps`);
       const nOf = (xs, re) => xs.filter((x) => re.test(x)).length;
       check(
-        "ui (Chrome, main #44): one read of the connected apps per page and no poll: over 3 s after load the Home reads .../home once and .../apps never, and the Apps tab reads .../apps once",
-        nOf(homeReads, /\/home$/) === 1 && nOf(homeReads, /\/apps$/) === 0 && nOf(appsReads, /\/apps$/) === 1,
+        "ui (Chrome, main #44, LIM-2472): over 3 s after load, for a person whose app Align has seen (so first run stops checking), the Home reads .../home twice (Home and its Needs list) and .../apps once (first run), and the Apps tab reads .../apps once",
+        nOf(homeReads, /\/home$/) === 2 && nOf(homeReads, /\/apps$/) === 1 && nOf(appsReads, /\/apps$/) === 1,
         JSON.stringify({ homeReads, appsReads }),
       );
       const parentNow = (await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${GT.id}`, { cookie: U1.cookie })).json?.goal;
@@ -4233,79 +4235,107 @@ try {
       await page.type('#test-idp input[type="email"]', "ui@example.test");
       await page.type('#test-idp input[type="password"]', "browser-pass-1");
       await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => document.querySelector("#test-idp button[type=submit]")?.click())]);
-      await page.waitForFunction(() => document.body.innerText.includes("Your workspaces") && document.body.innerText.includes("Create the Northstar sample"), { timeout: 15000 });
+      await page.waitForFunction(() => document.body.innerText.includes("No workspaces yet") && document.body.innerText.includes("Create the Northstar sample"), { timeout: 15000 });
       // First run: the sample, then its pending change request approved from the Requests tab.
       await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create the Northstar sample")?.click())]);
       await page.waitForFunction(() => document.body.innerText.includes("Expand to regulated customers") && document.body.innerText.includes("Pass the security review"), { timeout: 15000 });
       const sampleUrl = page.url();
       await page.goto(`${sampleUrl}/requests`, { waitUntil: "networkidle0" });
-      await page.waitForFunction(() => document.body.innerText.includes("Waiting on you") && document.body.innerText.includes("waiting for approval") && document.body.innerText.includes("Pen test window booked"), { timeout: 15000 });
-      const requestsText = await page.evaluate(() => document.body.innerText);
-      // With no evidence, choosing Approve asks first ("Approve without evidence?"); then evidence is added and the
-      // confirmation says what approving does: it records the decision, and agents switch only at launch.
+      await page.waitForFunction(() => !!document.querySelector("[data-desk]") && /^1 decision waiting on you\./.test(document.querySelector("[data-desk-summary]")?.textContent ?? ""), { timeout: 15000 });
+      const sampleCr = await page.$eval("[data-row]", (e) => e.getAttribute("data-row"));
+      const requestsText = await page.evaluate(() => document.querySelector("[data-desk]")?.innerText ?? "");
+      // The row opens the review drawer: the reason and what it changes are there, not on the row.
+      await page.evaluate(() => document.querySelector('[data-desk] a[href*="review="]')?.click());
+      await page.waitForFunction(
+        (id) => {
+          const t = document.querySelector(`[data-review="${id}"]`)?.innerText ?? "";
+          return t.includes("This is a sample change request.") && t.includes("Pen test window booked") && /Waits on you/.test(t);
+        },
+        { timeout: 15000 },
+        sampleCr,
+      );
+      const reviewText = () => page.$eval(`[data-review="${sampleCr}"]`, (e) => e.innerText);
       const clickButton = (label) => page.evaluate((t) => [...document.querySelectorAll("button")].find((b) => b.textContent === t)?.click(), label);
-      await page.click('[data-decision="Approve"]');
-      await page.waitForFunction(() => document.body.innerText.includes("Approve without evidence?") && document.querySelector('[data-decision="Approve"]')?.getAttribute("aria-pressed") === "true", { timeout: 15000 });
-      const approvePanel = await page.evaluate(() => document.body.innerText);
+      const buttonShows = (label) => page.waitForFunction((t) => [...document.querySelectorAll("button")].some((b) => b.textContent === t), { timeout: 15000 }, label);
+      // With no evidence the review says approving is recorded as such, and the confirmation says so again; then evidence
+      // is added and the confirmation says what approving does: it records the decision, and launching is a separate step.
+      const approvePanel = await reviewText();
+      await page.click('[data-decision="Approve only"]');
+      await buttonShows("Review this decision");
+      await clickButton("Review this decision");
+      await page.waitForSelector('[data-confirm="approve"]', { timeout: 15000 });
+      const noEvidenceConfirm = await page.$eval("[data-confirm]", (e) => e.innerText);
+      await clickButton("Back");
+      await buttonShows("Cancel");
+      await clickButton("Cancel");
+      await page.waitForFunction(() => !document.querySelector("[data-decision-input]") && !document.querySelector("[data-confirm]"), { timeout: 15000 });
       await clickButton("Add evidence");
-      await page.waitForSelector('input[type="url"]');
-      await page.type('input[type="url"]', "https://github.com/northstar/security/pull/7");
-      await page.type('input[maxlength="120"]', "Pen-test vendor contract");
+      await page.waitForSelector('[data-add-evidence] input[type="url"]');
+      await page.type('[data-add-evidence] input[type="url"]', "https://github.com/northstar/security/pull/7");
+      await page.type('[data-add-evidence] input[maxlength="120"]', "Pen-test vendor contract");
       await clickButton("Add link");
       await page.waitForFunction(() => [...document.querySelectorAll("a")].some((a) => a.textContent === "Pen-test vendor contract"), { timeout: 15000 });
       const evLink = await page.evaluate(() => {
         const a = [...document.querySelectorAll("a")].find((x) => x.textContent === "Pen-test vendor contract");
-        return { href: a?.getAttribute("href"), target: a?.getAttribute("target"), rel: a?.getAttribute("rel"), text: document.body.innerText };
+        const row = a?.closest("li");
+        return { href: a?.getAttribute("href"), target: a?.getAttribute("target"), rel: a?.getAttribute("rel"), row: row?.innerText ?? "", evidence: row?.querySelector("[data-evidence]")?.getAttribute("data-evidence") ?? null };
       });
+      const evReview = await reviewText();
       check(
-        "ui (Chrome): choosing Approve on a request with no evidence asks \"Approve without evidence?\"; an added link shows its kind, label, host, who added it and \"self-reported\", opens in a new tab with rel noopener noreferrer, beside \"Recorded by Align at revision 1\"",
-        approvePanel.includes("Approve without evidence?") && evLink.href === "https://github.com/northstar/security/pull/7" && evLink.target === "_blank" && evLink.rel === "noopener noreferrer" && /self-reported/.test(evLink.text) && /Pull request/.test(evLink.text) && /github\.com/.test(evLink.text) && /by you/.test(evLink.text) && /Recorded by Align at revision 1/.test(evLink.text) && !/\bverified\b/.test(evLink.text.replace("never verified", "")),
-        JSON.stringify({ ...evLink, text: evLink.text.slice(0, 300) }),
+        "ui (Chrome, LIM-2472): the review of a request with no evidence says \"Approving without evidence is recorded as such.\" and the confirmation says the record will say so; an added link shows as Self-reported with who added it and the revision, opens in a new tab with rel noopener noreferrer, and nothing says verified",
+        approvePanel.includes("Approving without evidence is recorded as such.") && noEvidenceConfirm.includes("No evidence: the record will say it was approved without evidence.") && evLink.href === "https://github.com/northstar/security/pull/7" && evLink.target === "_blank" && evLink.rel === "noopener noreferrer" && evLink.evidence === "self" && /Self-reported/.test(evLink.row) && /you, revision 1/.test(evLink.row) && !/\bverified\b/.test(evReview),
+        JSON.stringify({ ...evLink, approvePanel: approvePanel.slice(0, 300), noEvidenceConfirm: noEvidenceConfirm.slice(0, 300) }),
       );
-      await page.waitForFunction(() => !document.body.innerText.includes("Approve without evidence?"), { timeout: 15000 });
+      await page.click('[data-decision="Approve only"]');
+      await buttonShows("Review this decision");
       await clickButton("Review this decision");
-      await page.waitForFunction(() => document.activeElement?.textContent === "Confirm: Approve", { timeout: 15000 });
+      await page.waitForFunction(() => document.activeElement?.tagName === "H4" && document.activeElement.textContent.startsWith("Approve only: "), { timeout: 15000 });
       const confirmText = await page.$eval("[data-confirm]", (e) => e.innerText);
-      await clickButton("Confirm: Approve");
-      await page.waitForFunction(() => document.body.innerText.includes("Approved, agents still on v1 until launch") && document.body.innerText.includes("Approved with 1 evidence link, none verified."), { timeout: 15000 });
+      await clickButton("Confirm: Approve only");
+      await page.waitForFunction(() => [...document.querySelectorAll('[data-notice="done"]')].some((n) => n.textContent.startsWith("Recorded: you approved revision 1")) && [...document.querySelectorAll("button")].some((b) => b.textContent === "Launch v2"), { timeout: 15000 });
       const approvedText = await page.evaluate(() => document.body.innerText);
       const launchButtons = await page.evaluate(() => [...document.querySelectorAll("button")].map((b) => b.textContent));
       check(
-        "ui (Chrome): the approve confirmation says approval is not launch (agents stay on version 1 until someone launches it) and what happens (version 2 recorded as approved); after confirming the record says \"Recorded: you approved revision 1 as version 2\" and reads \"Approved, agents still on v1 until launch\" (not \"It became version 2\", never \"agents on v2\") and offers Launch version 2 to agents and Not yet",
-        /Approval is not launch\. Agents stay on version 1 until someone who can launch it does\./.test(confirmText) && /waiting for approval → approved\. Version 2 is recorded as approved/.test(confirmText) && /Recorded: you approved revision 1 as version 2/.test(approvedText) &&
-          !approvedText.includes("It became version 2") && !/agents on v2/.test(approvedText) && launchButtons.includes("Launch version 2 to agents") && launchButtons.includes("Not yet"),
+        "ui (Chrome, LIM-2472): the approve confirmation says approval is not launch (version 2 becomes the launched version only when someone launches it); after confirming the review says \"Recorded: you approved revision 1\", \"Approved, not launched\" and that approval is not launch (never \"It became version 2\" or \"agents on v2\") and offers Launch v2 and Not yet",
+        /Approval is not launch: version 2 becomes the launched version only when someone launches it\./.test(confirmText) && /Recorded: you approved revision 1\./.test(approvedText) && /Approved, not launched/.test(approvedText) && /Approval is not launch: version 2 becomes the launched version only when /.test(approvedText) &&
+          !approvedText.includes("It became version 2") && !/agents on v2/.test(approvedText) && launchButtons.includes("Launch v2") && launchButtons.includes("Not yet"),
         `${confirmText.slice(0, 600)} | ${approvedText.slice(0, 600)}`,
       );
-      await clickButton("Launch version 2 to agents");
-      await page.waitForFunction(() => document.body.innerText.includes("Launched, agents on v2") && document.body.innerText.includes("It became version 2") && document.body.innerText.includes("Approved with 1 evidence link, none verified."), { timeout: 15000 });
-      const sampleGoal = await page.evaluate(() => [...document.querySelectorAll("a")].find((a) => a.textContent === "Pass the security review")?.getAttribute("href"));
-      await page.goto(`${BASE}${sampleGoal}`, { waitUntil: "networkidle0" });
+      await page.click('[data-decision="Launch v2"]');
+      await buttonShows("Confirm: Launch v2");
+      await clickButton("Confirm: Launch v2");
+      await page.waitForFunction(() => document.body.innerText.includes("Launched by you") && document.body.innerText.includes("Launched v2"), { timeout: 15000 });
+      const sampleGoal = new URL(page.url()).searchParams.get("review")?.split(".")[0];
+      await page.goto(`${sampleUrl}/goals/${sampleGoal}`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Change requests") && document.body.innerText.includes("approved") && document.body.innerText.includes("version 2"), { timeout: 15000 });
       const ownGoalText = await page.evaluate(() => document.body.innerText);
-      check("ui (Chrome): first run offers the Northstar sample; its request is approved and launched from the Requests tab; the owner's goal page lists it without Propose a change", !ownGoalText.includes("Propose a change") && /Your requests/.test(requestsText), "");
+      check("ui (Chrome): first run offers the Northstar sample; its request is approved and launched from the Requests tab; the owner's goal page lists it (\"Approved with 1 evidence link, none verified.\", \"It became version 2\") without its own Full change form (the rail's Propose a change is on every page)", !ownGoalText.includes("Full change form") && ownGoalText.includes("Approved with 1 evidence link, none verified.") && ownGoalText.includes("It became version 2") && /Waiting on me 1/.test(requestsText), `${requestsText.slice(0, 200)} | ${ownGoalText.slice(0, 400)}`);
       await page.goto(`${BASE}/app`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Northstar (sample)") && !document.body.innerText.includes("Create the Northstar sample"), { timeout: 15000 });
       await page.type("main form input", "UI workspace");
       await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create")?.click())]);
-      // A new workspace opens on its Home, which points to the Goals tab for the first goal.
-      await page.waitForFunction(() => document.body.innerText.includes("Know what needs you") && document.body.innerText.includes("No active goals you can see."), { timeout: 15000 });
+      // A new workspace opens on its Home, which says it has no goals and leads with "Set the first goal" (LIM-2472 round 2:
+      // the first-run card replaces the empty goal list), which opens the Goals tab's form.
+      await page.waitForFunction(() => document.querySelector('h1[data-home-count="0"]')?.textContent === "No goals here yet" && [...document.querySelectorAll('[data-first-run="empty"] a[data-first-goal]')].some((a) => a.textContent === "Set the first goal"), { timeout: 15000 });
       const wsUrl = page.url();
-      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("a")].find((a) => a.textContent === "Create one on the Goals tab.")?.click())]);
-      check("ui (Chrome): a new workspace opens on its Home (\"Know what needs you\"); with no goals it links to the Goals tab at /app/w/<ws>/goals", new URL(page.url()).pathname === `${new URL(wsUrl).pathname}/goals`, page.url());
+      const newWsH1 = await page.$eval("h1[data-home-count]", (e) => e.textContent);
+      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => document.querySelector('[data-first-run="empty"] a[data-first-goal]')?.click())]);
+      check("ui (Chrome, LIM-2472 round 2): a new workspace opens on its Home (\"No goals here yet\"); its first-run card's \"Set the first goal\" opens the Goals tab at /app/w/<ws>/goals?first=1", newWsH1 === "No goals here yet" && new URL(page.url()).pathname === `${new URL(wsUrl).pathname}/goals` && new URL(page.url()).searchParams.get("first") === "1", `${newWsH1} ${page.url()}`);
       await page.waitForFunction(() => document.body.innerText.includes("New goal") && document.body.innerText.includes("Level"), { timeout: 15000 });
       await page.type('main form input:not([aria-label])', "Browser goal");
       await page.type('input[aria-label="Measure 1"]', "Browser measure");
       await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create goal")?.click());
       await page.waitForFunction(() => document.body.innerText.includes("Browser goal") && document.body.innerText.includes("Browser measure"), { timeout: 15000 });
       await page.goto(`${wsUrl}/spend`, { waitUntil: "networkidle0" });
-      await page.waitForFunction(() => document.body.innerText.includes("Estimated list cost") && document.body.innerText.includes("Total"), { timeout: 15000 });
+      // The header row is uppercase in CSS and innerText applies that, so read the cell's textContent.
+      await page.waitForFunction(() => [...document.querySelectorAll("thead th")].some((th) => th.textContent === "Estimated list cost") && document.body.innerText.includes("Total"), { timeout: 15000 });
       const spendText = await page.evaluate(() => document.body.innerText);
       await page.goto(`${wsUrl}/people`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => ["Invite someone", "Teams", "No teams yet.", "Leave workspace", "Create team"].every((x) => document.body.innerText.includes(x)), { timeout: 15000 });
       const peopleText = await page.evaluate(() => document.body.innerText);
       for (const t of ["sessions", "alignments", "requests"]) {
         await page.goto(`${wsUrl}/${t}`, { waitUntil: "networkidle0" });
-        await page.waitForFunction((x) => document.body.innerText.includes(x), { timeout: 15000 }, t === "sessions" ? "Shared sessions" : t === "requests" ? "You have not proposed a change" : "Waiting on you");
+        await page.waitForFunction((x) => document.body.innerText.includes(x), { timeout: 15000 }, t === "sessions" ? "Shared sessions" : t === "requests" ? "No change requests yet" : "Waiting on you");
       }
       await page.goto(`${wsUrl}/apps`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("No AI apps are connected to this workspace.") && document.body.innerText.includes("/api/mcp"), { timeout: 15000 });
@@ -4350,7 +4380,7 @@ try {
       await pk.type('#test-idp input[type="email"]', "pk@example.test");
       await pk.type('#test-idp input[type="password"]', "browser-pass-2");
       await Promise.all([pk.waitForNavigation({ waitUntil: "networkidle0" }), pk.evaluate(() => document.querySelector("#test-idp button[type=submit]")?.click())]);
-      await pk.waitForFunction(() => document.body.innerText.includes("Your workspaces"), { timeout: 15000 });
+      await pk.waitForFunction(() => document.body.innerText.includes("No workspaces yet"), { timeout: 15000 });
       const promptText = await pkText();
       await pkClick("Add a passkey", "#passkey-prompt a");
       await pk.waitForFunction(() => document.body.innerText.includes("No passkeys yet.") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Add a passkey"), { timeout: 15000 });
@@ -4422,6 +4452,7 @@ try {
       await pkClick("Rename");
       await pk.waitForSelector('input[aria-label="Passkey name"]');
       await pk.click('input[aria-label="Passkey name"]', { clickCount: 3 });
+      await pk.$eval('input[aria-label="Passkey name"]', (e) => e.select());
       await pk.type('input[aria-label="Passkey name"]', "Work laptop");
       await pkClick("Save");
       await pk.waitForFunction(() => document.body.innerText.includes("Work laptop") && !document.body.innerText.includes("MacBook passkey"), { timeout: 15000 });
@@ -4759,8 +4790,10 @@ try {
           await page.goto(`${BASE}/app/w/${LW}/goals`, { waitUntil: "networkidle0" });
           await page.waitForFunction(() => document.body.innerText.includes("Ship the inference cluster"), { timeout: 15000 });
           await click(page, "Paste meeting notes");
-          await page.waitForSelector("textarea");
-          await page.type("textarea", notes);
+          // The notes box itself: the Goals tab's New goal form has textareas of its own (Anchors), and since PR 68 pass 1
+          // item 19 Paste meeting notes comes after that form.
+          await page.waitForSelector("textarea[data-notes]");
+          await page.type("textarea[data-notes]", notes);
           await click(page, "Suggest limits");
         };
         const pe = await asUser(LE);
@@ -5191,8 +5224,8 @@ try {
       await page.waitForFunction(() => document.querySelector("#goal-activity")?.textContent.includes("src/sso.ts"), { timeout: 15000 });
       const cardText = await page.evaluate(() => document.querySelector("#goal-activity")?.innerText ?? "");
       check(
-        "ui (Chrome): the goal page's Agent activity card shows sessions by harness, active now, the files and the reader's own sessions, and says counts come from bindings",
-        cardText.includes("Counts come from bindings, not from what agents wrote") && /Sessions\s+2 \(1 Claude Code, 1 Codex\)/.test(cardText) && /Active now\s+1/.test(cardText) && cardText.includes("src/login.ts") && cardText.includes("Your sessions") && errors.length === 0,
+        "ui (Chrome): the goal page's Agent activity card shows sessions by harness, reported activity, the files and the reader's own sessions, and says counts come from bindings",
+        cardText.includes("Counts come from bindings, not from what agents wrote") && /Sessions\s+2 \(1 Claude Code, 1 Codex\)/.test(cardText) && /Reported activity, last 90 min\s+1/.test(cardText) && cardText.includes("src/login.ts") && cardText.includes("Your sessions") && errors.length === 0,
         `${cardText} ${errors.join(" | ")}`,
       );
       const actClasses = await page.$$eval("#goal-activity [data-evidence-class]", (els) => els.map((e) => e.getAttribute("data-evidence-class")));
@@ -5516,7 +5549,35 @@ try {
         page.on("pageerror", (e) => errors.push(e.message));
         await page.setViewport({ width: 1000, height: 420 });
         const [name, ...v] = V1.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
+        const [n3, ...v3] = V3.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
         await page.setCookie({ name, value: v.join("="), url: BASE });
+        // LIM-2472: the card is for the person who approved. V1, the workspace owner, didn't: no card, no read of it, no event.
+        const valueReads = [];
+        const onValueRead = (r) => {
+          if (/\/value$/.test(new URL(r.url()).pathname)) valueReads.push(r.url());
+        };
+        page.on("request", onValueRead);
+        const beforeV1 = eventsIn("value_card_viewed").length;
+        await page.goto(`${BASE}/app/w/${W}/goals/${GV.id}`, { waitUntil: "networkidle0" });
+        await page.waitForSelector(`[data-cr="${crP.json?.id}"]`, { timeout: 15000 });
+        const v1Card = await page.$("[data-value-card]");
+        page.off("request", onValueRead);
+        check(
+          "ui (Chrome, LIM-2472): a workspace owner who didn't approve the request sees no value card on the goal page, makes no read of it and records no view",
+          !v1Card && valueReads.length === 0 && eventsIn("value_card_viewed").length === beforeV1 && errors.length === 0,
+          `${!!v1Card} ${JSON.stringify(valueReads)} ${errors.join(" | ")}`,
+        );
+        // V3 approved it, so V3 gets the card; a non-owner's card lists only their own apps, so give V3 the two apps the
+        // card's apps row tells apart (one sent the launched version, one sent only the version before). Removed below.
+        withDb((d) => {
+          const ins = d.prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, last_read_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, ?, ?, 'app.example', ?, ?, ?, 'h', ?, ?)");
+          ins.run("gr_VALUEVALUEVALUE4", W, V3.id, "c-value-4", "Claude Code", sentAt, sentAt, sentAt, Date.now() + 86_400_000, vkid);
+          ins.run("gr_VALUEVALUEVALUE5", W, V3.id, "c-value-5", "Codex", sentAt, sentAt, sentAt, Date.now() + 86_400_000, vkid);
+          const sent = d.prepare("INSERT INTO v2_oauth_goal_sends (grant_id, ws_id, goal_id, version, sent_at) VALUES (?, ?, ?, ?, ?)");
+          sent.run("gr_VALUEVALUEVALUE4", W, GV.id, 2, sentAt);
+          sent.run("gr_VALUEVALUEVALUE5", W, GV.id, 1, sentAt); // the version before the launch: not this decision's
+        });
+        await page.setCookie({ name: n3, value: v3.join("="), url: BASE });
         const before = eventsIn("value_card_viewed").length;
         await page.goto(`${BASE}/app/w/${W}/goals/${GV.id}`, { waitUntil: "networkidle0" });
         await page.waitForSelector(`[data-value-card="${crP.json?.id}"]`, { timeout: 15000 });
@@ -5551,16 +5612,22 @@ try {
           return { text: row?.innerText ?? "", classes: [...(row?.querySelectorAll("[data-evidence-class]") ?? [])].map((e) => e.getAttribute("data-evidence-class")), apps: [...(row?.querySelectorAll("[data-value-app]") ?? [])].map((e) => e.getAttribute("data-value-app")) };
         });
         check(
-          "ui (Chrome, main #56): the launched request's value card has a \"Connected AI apps\" row with one evidence class (delivery receipt) naming the app Align sent version 2 (\"Claude Code (connected by Vic Two): Align sent it version 2 on <time>\"), not the app sent only version 1, and saying Align can't see what the app does next",
-          /Connected AI apps/i.test(appsRow.text) && JSON.stringify(appsRow.classes) === '["delivery_receipt"]' && JSON.stringify(appsRow.apps) === '["gr_VALUEVALUEVALUE1"]' && /Claude Code \(connected by Vic Two\): Align sent it version 2 on \S/.test(appsRow.text) && !/Codex/.test(appsRow.text) && /can.t see what the app does next/.test(appsRow.text),
+          "ui (Chrome, main #56): the launched request's value card has a \"Connected AI apps\" row with one evidence class (delivery receipt) naming the app Align sent version 2 (to the approver, who connected it: \"Claude Code (connected by you): Align sent it version 2 on <time>\"), not the app sent only version 1, and saying Align can't see what the app does next",
+          /Connected AI apps/i.test(appsRow.text) && JSON.stringify(appsRow.classes) === '["delivery_receipt"]' && JSON.stringify(appsRow.apps) === '["gr_VALUEVALUEVALUE4"]' && /Claude Code \(connected by you\): Align sent it version 2 on \S/.test(appsRow.text) && !/Codex/.test(appsRow.text) && /can.t see what the app does next/.test(appsRow.text),
           JSON.stringify(appsRow),
         );
+        // value_card_viewed is once per person and only V3 can see this card, so a first view on the phone needs V3's
+        // view above cleared. The two test apps go too.
+        withDb((d) => {
+          d.prepare("DELETE FROM v2_oauth_goal_sends WHERE grant_id IN ('gr_VALUEVALUEVALUE4', 'gr_VALUEVALUEVALUE5')").run();
+          d.prepare("DELETE FROM v2_oauth_grants WHERE id IN ('gr_VALUEVALUEVALUE4', 'gr_VALUEVALUEVALUE5')").run();
+          d.prepare("DELETE FROM v2_events WHERE id = (SELECT MAX(id) FROM v2_events WHERE name = 'value_card_viewed' AND ws_id = ?)").run(W);
+        });
         // On a phone (390x844) the card is taller than the screen: its top seen for 1.5 s is a view, once; a second look
-        // adds nothing (V3, the approver, who has not viewed it yet).
+        // adds nothing (V3, the approver).
         {
           const phone = await browser.newPage();
           await phone.setViewport({ width: 390, height: 844 });
-          const [n3, ...v3] = V3.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
           await phone.setCookie({ name: n3, value: v3.join("="), url: BASE });
           const byV3 = () => withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_events WHERE name = 'value_card_viewed' AND ws_id = ? AND actor IS NOT NULL").get(W).n);
           const start = byV3();
@@ -5592,7 +5659,7 @@ try {
         // viewer nobody can approve V1's request.
         {
           await page.setViewport({ width: 1000, height: 900 });
-          await page.setCookie({ name, value: v.join("="), url: BASE }); // the phone page signed this browser in as V3
+          await page.setCookie({ name, value: v.join("="), url: BASE }); // this browser has been signed in as V3 since the value card
           const CONDV = `Accept if the checklist is reviewed ${randomBytes(3).toString("hex")}`;
           const GL2 = (await goalIn(V5, { title: "Launch checklist", visibility: "workspace" })).json;
           const crL = await call("V2", "POST", crBaseV(GL2.id), { cookie: V2.cookie, body: { base_version: 1, changes: { title: "Launch checklist, reviewed" }, reason: "Review it first" } });
@@ -5980,8 +6047,8 @@ try {
         };
         const home = async (page, ws) => {
           await page.goto(`${BASE}/app/w/${ws}`, { waitUntil: "networkidle0" });
-          await page.waitForSelector("[data-home-summary]", { timeout: 15000 });
-          await page.waitForSelector("[data-first-run-status]:not([data-first-run-status=checking])", { timeout: 15000 }).catch(() => undefined);
+          await page.waitForSelector('h1[data-home-count]:not([data-home-count="reading"])', { timeout: 15000 });
+          await page.waitForSelector('[data-first-run-status]:not([data-first-run-status=checking]), [data-first-run="compact"]', { timeout: 15000 }).catch(() => undefined);
         };
         const cardOf = (page) =>
           page.evaluate(() => {
@@ -6007,13 +6074,16 @@ try {
 
         const po = await pageAs(FO);
         await home(po, FW);
+        await po.click('[data-first-run="empty"] button:not([data-sample-create])');
+        await po.waitForSelector('[data-first-run-line]');
         const a = await cardOf(po);
         check(
-          "ui (Chrome, first run): on a workspace where no app was seen, the owner's Home shows \"Two ways to start\": Explore a sample (fictional), linking to their Northstar sample, and Connect one agent with Copy above the Claude Code line, what it can read (one line per read tool in the server's tools/list), what it can't do, \"No AI app is connected to this workspace yet.\" and that connecting is not a read",
-          a?.kind === "two" && a.title === "Two ways to start" && JSON.stringify(a.paths) === JSON.stringify(["sample", "connect"]) && a.sample === `/app/w/${SW}` && /fictional/i.test(a.sampleLabel) && /Fictional/.test(a.text) && /Nothing in it is real/.test(a.text) &&
-            a.line === `claude mcp add --transport http --scope user align 'http://127.0.0.1:${PORT}/api/mcp'; claude mcp login align` && a.copyBeforeLine && JSON.stringify([...a.tools].sort()) === JSON.stringify([...serverTools].sort()) &&
-            /can.t propose, approve, launch or change anything/.test(a.text) && a.status === "none" && a.statusText === "No AI app is connected to this workspace yet." && /Connecting is not a read/.test(a.text) && /last connected \(any request to Align\) and, separately, when it last read the goals/.test(a.text) && errors.length === 0,
-          `${JSON.stringify(a)} ${errors.join(" | ")}`,
+          "ui (Chrome, first run): empty Home offers the first goal and fictional sample; Connect an agent reveals the command, read tools, limits and observed connection status",
+          a?.kind === "empty" && /Set the first goal/.test(a.text) && a.sample === `/app/w/${SW}` && /fictional/.test(a.sampleLabel) &&
+            !!a.line && a.copyBeforeLine && serverTools.every((t) => a.tools.includes(t)) &&
+            /can.t.*propose, approve, launch or change/.test(a.text.replace(/\s+/g, " ")) && /Connecting is not a read/.test(a.text) &&
+            a.statusText === "No AI app is connected to this workspace yet." && errors.length === 0,
+          `kind ${a?.kind}; command ${!!a?.line}; tools ${a?.tools.length}`,
         );
 
         // Live status: an approved app with no request yet, then its first request (a connection): the card yields.
@@ -6026,50 +6096,43 @@ try {
         await po.waitForSelector('[data-first-run-status="approved"]', { timeout: 15000 });
         const st = await cardOf(po);
         withDb((d) => d.prepare("UPDATE v2_oauth_grants SET last_used_at = ? WHERE id = 'gr_FIRSTRUNFIRSTRU1'").run(new Date().toISOString()));
-        await po.waitForFunction(() => !document.querySelector("[data-first-run]") && /Connected .+, no goal read seen yet/.test(document.querySelector("#apps")?.innerText ?? ""), { timeout: 20000 });
-        const appsNow = await po.$eval("#apps", (e) => e.innerText);
+        await po.waitForFunction(() => !document.querySelector('[data-first-run-path="connect"]') && /Align has recorded no goal read from Claude Code/.test(document.querySelector("[data-needs-notice]")?.innerText ?? ""), { timeout: 20000 });
+        const appsNow = await po.$eval("[data-needs-notice]", (e) => e.innerText);
         check(
-          "ui (Chrome, first run): the status follows what Align sees without a reload: an approved app with no request reads \"Claude Code: approved <time>, Align hasn't seen it connect yet\"; after its first request the card is gone and the Home's apps section shows \"Connected <time>, no goal read seen yet\" (not observed), never a read",
-          /^Claude Code: approved .+, Align hasn't seen it connect yet\.$/.test(st?.statusText ?? "") && /Connected .+, no goal read seen yet/.test(appsNow) && !/Read the goals /.test(appsNow) && errors.length === 0,
+          "ui (Chrome, first run, LIM-2472): the status follows what Align sees without a reload: an approved app with no request reads \"Claude Code: approved <time>, Align hasn't seen it connect yet\"; after its first request the connection steps are gone and the Home's notice says Align has recorded no goal read from it, never a read",
+          /^Claude Code: approved .+, Align hasn't seen it connect yet\.$/.test(st?.statusText ?? "") && /Align has recorded no goal read from Claude Code/.test(appsNow) && !/Read the goals /.test(appsNow) && errors.length === 0,
           `${st?.statusText} | ${appsNow.slice(0, 300)} ${errors.join(" | ")}`,
         );
         withDb((d) => d.prepare("DELETE FROM v2_oauth_grants WHERE id = 'gr_FIRSTRUNFIRSTRU1'").run());
 
-        // Hide: per workspace, kept across a reload, focus back on the heading; blocked storage still hides it.
+        // First run ends by rule, never by a dismiss (LIM-2472): no Hide, and the card is back on every load until this
+        // person's app has made a request. With storage blocked the card still shows, with no page error.
+        const hideOf = (page) => page.$$eval("[data-first-run] button", (els) => els.some((b) => b.textContent === "Hide"));
         await home(po, FW);
-        await po.$$eval("[data-first-run] button", (els) => els.find((b) => b.textContent === "Hide")?.click());
-        await sleep(300);
-        const hid = await po.evaluate((ws) => ({ card: !!document.querySelector("[data-first-run]"), focus: document.activeElement?.tagName, stored: localStorage.getItem(`align.firstRun.hidden:${ws}`) }), FW);
-        await home(po, FW);
-        const stillHidden = !(await po.$("[data-first-run]"));
-        await home(po, SW);
-        const s = await cardOf(po);
-        await po.evaluate((ws) => localStorage.removeItem(`align.firstRun.hidden:${ws}`), FW);
+        const hasHide = await hideOf(po);
         await home(po, FW);
         const back = !!(await po.$("[data-first-run]"));
         const pb = await pageAs(FO, 1000, true);
         await home(pb, FW);
         const blockedShown = !!(await pb.$("[data-first-run]"));
-        await pb.$$eval("[data-first-run] button", (els) => els.find((b) => b.textContent === "Hide")?.click());
-        await sleep(300);
-        const blockedHidden = !(await pb.$("[data-first-run]"));
+        const blockedHide = await hideOf(pb);
         await pb.close(); // a page left in the background may be frozen by Chrome
         await po.bringToFront();
         check(
-          "ui (Chrome, first run): Hide removes the card, moves focus to the Home heading and keeps it hidden on that workspace after a reload (localStorage align.firstRun.hidden:<ws>), not on the sample's Home; with storage blocked the card shows and Hide still hides it with no page error",
-          !hid.card && hid.focus === "H1" && hid.stored === "1" && stillHidden && back && blockedShown && blockedHidden && s?.kind === "two" && errors.length === 0,
-          `${JSON.stringify(hid)} ${stillHidden} ${back} ${blockedShown} ${blockedHidden} ${errors.join(" | ")}`,
+          "ui (Chrome, first run, LIM-2472): the card has no Hide and is back after a reload until the person's app makes a request; with storage blocked it still shows, with no page error",
+          !hasHide && back && blockedShown && !blockedHide && errors.length === 0,
+          `${hasHide} ${back} ${blockedShown} ${blockedHide} ${errors.join(" | ")}`,
         );
+        await home(po, SW);
+        const s = await cardOf(po);
+        const sampleHeader = await po.$eval("header", (e) => e.innerText);
         check(
-          "ui (Chrome, first run): on the sample's own Home the explore path says the person is in the Northstar sample, that it is fictional, and links to its change request on the Requests tab",
-          /You are in the Northstar sample/.test(s?.text ?? "") && /fictional/.test(s?.text ?? "") && s?.sample === null,
-          s?.text.slice(0, 400),
+          "ui (Chrome, first run, LIM-2472): the sample has goals, so its own Home shows the compact panel (\"Connect your agent\", no link to the sample it is already in), and the top bar names the workspace \"Northstar (sample)\"",
+          s?.kind === "compact" && /Northstar is fictional/.test(s.text) && /Connect your agent/.test(s.text) && s.sample === null && sampleHeader.includes("Northstar (sample)"),
+          `${s?.text.slice(0, 400)} | ${sampleHeader}`,
         );
-        const sampleReq = await (async () => {
-          await home(po, SW);
-          return po.$$eval("[data-first-run] a", (els) => els.map((e) => [e.textContent, e.getAttribute("href")]));
-        })();
-        check("ui (Chrome, first run): the sample's explore link opens its Requests tab", sampleReq.some(([t, h]) => t === "Open the sample's change request" && h === `/app/w/${SW}/requests`), JSON.stringify(sampleReq));
+        const sampleReq = await po.$$eval('[data-needs="list"] li a', (els) => els.map((e) => [e.textContent, e.getAttribute("href")]));
+        check("ui (Chrome, first run, LIM-2472): on the sample's Home its change request is a Needs you row whose action opens the review", sampleReq.some(([t, h]) => t === "Review" && /review=/.test(h ?? "")), JSON.stringify(sampleReq));
 
         // A member with no sample: one path; a viewer: no line, told viewers can't connect.
         await po.close();
@@ -6082,9 +6145,9 @@ try {
         const v = await cardOf(pv);
         await pv.close();
         check(
-          "ui (Chrome, first run): a member with no sample sees only \"Connect one agent\" and \"You haven't connected an AI app to this workspace yet.\"; a viewer sees no command, only that viewers can't connect AI apps",
-          m?.kind === "connect" && m.title === "Connect one agent" && m.sample === null && !/Explore a sample/.test(m.text) && m.statusText === "You haven't connected an AI app to this workspace yet." && !!m.line &&
-            v?.line === null && /Viewers can.t connect AI apps to this workspace/.test(v?.text ?? "") && errors.length === 0,
+          "ui (Chrome, first run): a member with no goals sees the first-goal and optional connect actions; a viewer sees who can set the goals and no command",
+          m?.kind === "empty" && /Set the first goal/.test(m.text) && /Connect one agent/.test(m.text) && m.line === null &&
+            v?.kind === "viewer-empty" && v?.line === null && /A workspace owner or member sets them/.test(v?.text ?? "") && errors.length === 0,
           `${JSON.stringify(m)?.slice(0, 300)} ${JSON.stringify(v)?.slice(0, 300)}`,
         );
         // On a phone the card and its long line fit.
@@ -6712,30 +6775,24 @@ try {
           await page.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
           return page;
         };
-        const tiles = (page) => page.$$eval("[data-tile]", (els) => Object.fromEntries(els.map((e) => [e.getAttribute("data-tile"), e.firstElementChild?.textContent ?? ""])));
+        const needRows = (page) => page.$$eval('[data-needs="list"] li', (els) => els.map((e) => ({ text: e.innerText, href: e.querySelector("a")?.getAttribute("href") ?? "" })));
+        const filterTo = (page, label) => page.evaluate((t) => [...document.querySelectorAll('[data-needs="list"] [role="radio"]')].find((b) => b.textContent.startsWith(t))?.click(), label);
         const po = await pageAs(HO);
         await po.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
-        await po.waitForSelector("[data-home-app]", { timeout: 15000 });
+        await po.waitForSelector('h1[data-home-count]:not([data-home-count="reading"])', { timeout: 15000 });
         const o = await po.evaluate(() => ({
           text: document.body.innerText,
           tab: [...document.querySelectorAll('nav[aria-label="Workspace"] a')].map((a) => [a.textContent, a.getAttribute("href")]),
-          apps: [...document.querySelectorAll("[data-home-app]")].map((e) => ({ classes: [...e.querySelectorAll("[data-evidence-class]")].map((c) => c.getAttribute("data-evidence-class")), text: e.innerText })),
-          appsSection: document.querySelector("#apps")?.innerText ?? "",
-          items: [...document.querySelectorAll("[data-home-item]")].map((e) => e.getAttribute("data-home-item")),
+          h1: document.querySelector("h1[data-home-count]")?.textContent ?? "",
+          count: document.querySelector("h1[data-home-count]")?.getAttribute("data-home-count") ?? "",
+          notice: document.querySelector("[data-needs-notice]")?.innerText ?? "",
         }));
-        const oT = await tiles(po);
+        const oRows = await needRows(po);
         check(
-          "ui (Chrome): the workspace opens on Home (\"Know what needs you\", the Home tab first, Goals at /goals): tiles Waiting on you 1, Waiting on others 0, Active goals 3, Connected apps that read the goals \"1 of 2\" (the app that only connected is not counted); the alignment is waiting on the owner with Open",
-          /Know what needs you/.test(o.text) && /1 thing waiting on you\./.test(o.text) && o.tab[0]?.[0] === "Home" && o.tab[0][1] === `/app/w/${HW}` && o.tab[1]?.[0] === "Goals" && o.tab[1][1] === `/app/w/${HW}/goals` &&
-            oT["Waiting on you"] === "1" && oT["Waiting on others"] === "0" && oT["Active goals"] === "3" && oT["Connected apps that read the goals"] === "1 of 2" && o.items.includes(`alignment:${alH.json?.id}`) && /Hank Other asks to align with Win the regulated market/.test(o.text),
-          `${JSON.stringify(oT)} ${JSON.stringify(o.tab)} ${o.text.slice(0, 400)}`,
-        );
-        check(
-          "ui (Chrome, §E2): every connected app on Home shows exactly one evidence class (delivery receipt with \"Read the goals <time>\"; the app that only connected not observed with \"Connected <time>, no goal read seen yet\"); the section says connecting is not a read and Align sees goal reads, not which version an app has or what it does; nothing on the page says \"on the current plan\" or infers working, stuck, blocked or diverged",
-          o.apps.length === 2 && o.apps.every((a) => a.classes.length === 1) && o.apps[0].classes[0] === "delivery_receipt" && /delivery receipt/.test(o.apps[0].text) && /Read the goals /.test(o.apps[0].text) && !/Connected .*no goal read/.test(o.apps[0].text) && /connected by Hedy Member/.test(o.apps[0].text) &&
-            o.apps[1].classes[0] === "not_observed" && /not observed/.test(o.apps[1].text) && /Connected .+, no goal read seen yet/.test(o.apps[1].text) && !/Read the goals/.test(o.apps[1].text) &&
-            /Connecting is not a read/.test(o.appsSection) && /not which version it has or what it does with them/.test(o.appsSection) && !/\b(working|stuck|blocked|diverged)\b/i.test(o.appsSection) && !/current plan/i.test(o.text) && errors.length === 0,
-          `${JSON.stringify(o.apps)} ${errors.join(" | ")}`,
+          "ui (Chrome, LIM-2472): the workspace opens on Home (\"1 thing needs you\", the Home tab first, Goals at /goals); the alignment is the owner's one row, titled with their goal, says it comes from Hank's goal and offers Review",
+          o.count === "1" && o.h1 === "1 thing needs you" && oRows.length === 1 && o.tab[0]?.[0] === "Home" && o.tab[0][1] === `/app/w/${HW}` && o.tab[1]?.[0] === "Goals" && o.tab[1][1] === `/app/w/${HW}/goals` &&
+            oRows[0].href === `/app/w/${HW}/alignments` && /Win the regulated market/.test(oRows[0].text) && /From Hank's side project: Hank Other asks to align with this goal/.test(oRows[0].text) && /Review/.test(oRows[0].text),
+          `${o.h1} ${o.count} ${JSON.stringify(oRows)} ${JSON.stringify(o.tab)}`,
         );
         // The Apps tab: Last connected and Last read the goals, never one "Last read" fed by a connection.
         const pa = await pageAs(HO);
@@ -6747,6 +6804,7 @@ try {
             text: r.innerText,
             connected: r.querySelector('[data-label="Last connected"]')?.textContent ?? null,
             read: r.querySelector('[data-label="Last read the goals"]')?.textContent ?? null,
+            evidence: [...r.querySelectorAll("[data-evidence]")].map((e) => e.getAttribute("data-evidence")),
           })),
           note: document.querySelector("[data-apps-times]")?.textContent ?? "",
           text: document.body.innerText,
@@ -6760,33 +6818,47 @@ try {
             /connecting and listing tools included/.test(ap.note) && /Last read the goals is its last call that returned goals/.test(ap.note) && /doesn.t see which goal version an app has/.test(ap.note) && !/current plan/i.test(ap.text) && errors.length === 0,
           `${JSON.stringify(ap.heads)} ${JSON.stringify(ap.rows)} ${ap.note}`,
         );
+        check(
+          "ui (Chrome, §E2, LIM-2472): on the Apps tab every connected app shows exactly one evidence class (Receipt for the app that read the goals, Hedy Member's; Not observed for the app that only connected) under \"Connected is not the same as read\"; Home keeps one line naming the app with no goal read; nothing says \"on the current plan\" or infers working, stuck, blocked or diverged",
+          JSON.stringify(claude?.evidence) === '["receipt"]' && /Hedy Member/.test(claude.text) && JSON.stringify(codex?.evidence) === '["unobserved"]' && /Connected is not the same as read/.test(ap.text) && /Align has recorded no goal read from Codex\./.test(o.notice) &&
+            !/\b(working|stuck|blocked|diverged)\b/i.test(`${ap.text} ${o.notice}`) && !/current plan/i.test(o.text) && errors.length === 0,
+          `${JSON.stringify(ap.rows)} ${o.notice} ${errors.join(" | ")}`,
+        );
         const pl = await pageAs(HL);
         await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
-        await pl.waitForSelector("[data-home-app]", { timeout: 15000 });
-        const l = await pl.evaluate(() => ({ text: document.body.innerText, waiting: document.querySelector("#waiting")?.innerText ?? "", others: document.querySelector("#others")?.innerText ?? "", none: document.querySelector('[data-home-app="none"]')?.innerText ?? "", noneClasses: [...document.querySelectorAll('[data-home-app="none"] [data-evidence-class]')].map((c) => c.getAttribute("data-evidence-class")) }));
+        await pl.waitForSelector('h1[data-home-count]:not([data-home-count="reading"])', { timeout: 15000 });
+        const lRows = await needRows(pl);
+        const lFirst = await pl.evaluate(() => ({ kind: document.querySelector("[data-first-run]")?.getAttribute("data-first-run") ?? null, text: document.querySelector("[data-first-run]")?.innerText ?? "" }));
+        await filterTo(pl, "Waiting on others");
+        await pl.waitForFunction(() => [...document.querySelectorAll('[data-needs="list"] li')].some((e) => e.innerText.includes("Needs an update")), { timeout: 15000 }).catch(() => undefined);
+        const lOthers = await needRows(pl);
+        // The ask's words moved off Home: its row opens the Asks tab, which quotes them.
+        await pl.goto(`${BASE}/app/w/${HW}/asks`, { waitUntil: "networkidle0" });
+        await pl.waitForFunction(() => document.body.innerText.includes("“Home: write the runbook”"), { timeout: 15000 }).catch(() => undefined);
+        const lAsks = await pl.evaluate(() => document.body.innerText);
         check(
-          "ui (Chrome): the lead's Home lists the ask waiting on them (\"Compliance asked Core\", the quoted text) and, under Waiting on others, the change request waiting on Hedy Member to update it to version 2; with no app of their own, one \"not observed\" item",
-          /Compliance asked Core/.test(l.waiting) && /“Home: write the runbook”/.test(l.waiting) && /Hedy Member's request on Ship the audit log \(v2\)/.test(l.others) && /Waiting on Hedy Member to update it to version 2\./.test(l.others) &&
-            JSON.stringify(l.noneClasses) === JSON.stringify(["not_observed"]) && /Align has observed no goal reads/.test(l.none) && errors.length === 0,
-          `${l.waiting.slice(0, 300)} | ${l.others.slice(0, 300)} | ${l.none} ${errors.join(" | ")}`,
+          "ui (Chrome, LIM-2472): the lead's Home lists the ask waiting on them (a Team ask row, \"Compliance asked Core\", opening the Asks tab, which quotes the text) and, under the Waiting on others filter, the change request needing an update from Hedy Member; with no app of their own, the compact first-run panel",
+          lRows.some((r) => /Team ask/.test(r.text) && /Compliance asked Core/.test(r.text) && r.href === `/app/w/${HW}/asks`) && lAsks.includes("“Home: write the runbook”") &&
+            lOthers.some((r) => /Ship the audit log \(v2\)/.test(r.text) && /Needs an update/.test(r.text) && /Waiting on Hedy Member/.test(r.text)) && lFirst.kind === "compact" && /Connect your agent/.test(lFirst.text) && errors.length === 0,
+          `${JSON.stringify(lRows)} | ${JSON.stringify(lOthers)} | ${JSON.stringify(lFirst)} ${errors.join(" | ")}`,
         );
-        // A failed read of the Home: every count says unknown, never zero.
+        // A failed read of the Home: the list says what it couldn't read and its count is a lower bound, never zero.
         const pf = await pageAs(HO);
         await pf.setRequestInterception(true);
         pf.on("request", (r) => (r.url().endsWith(`/api/v2/workspaces/${HW}/home`) ? r.respond({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "server_error", message: "Server error" }) }) : r.continue()));
         await pf.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
-        await pf.waitForSelector("[data-tile]", { timeout: 15000 });
-        const fT = await tiles(pf);
-        const fText = await pf.evaluate(() => document.body.innerText);
+        await pf.waitForSelector("[data-needs-partial]", { timeout: 15000 });
+        await pf.waitForSelector('h1[data-home-count]:not([data-home-count="reading"])', { timeout: 15000 });
+        const f = await pf.evaluate(() => ({ text: document.body.innerText, h1: document.querySelector("h1[data-home-count]")?.textContent ?? "", partial: document.querySelector("[data-needs-partial]")?.textContent ?? "", firstRun: !!document.querySelector("[data-first-run]"), notice: !!document.querySelector("[data-needs-notice]") }));
         check(
-          "ui (Chrome, §E2): when the Home's read fails every tile says unknown (never 0), the summary says how much is waiting is unknown, and the apps section says their reads are unknown",
-          Object.keys(fT).length === 4 && Object.values(fT).every((v) => v === "unknown") && /so how much is waiting is unknown/.test(fText) && /whether any of them read the goals is unknown/.test(fText) && !/Nothing is waiting on you/.test(fText) && !/\bnot observed\b/.test(fText),
-          `${JSON.stringify(fT)} ${fText.slice(0, 500)}`,
+          "ui (Chrome, §E2, LIM-2472): when the Home's read fails the list says it couldn't read the workspace summary, the heading is a lower bound and never \"Nothing needs you\", the goals say they couldn't be read, and first run and the apps notice stay away (an unread Home says nothing about them)",
+          /the workspace summary/.test(f.partial) && /^(At least \d+ things? needs? you|Some of this could not be read)$/.test(f.h1) && !/Nothing needs you/.test(f.text) && f.text.includes("Align couldn't read the goals just now.") && !f.firstRun && !f.notice,
+          JSON.stringify({ ...f, text: f.text.slice(0, 500) }),
         );
         // On a phone: the lead's Home with its queue fits 390 px.
         const pp = await pageAs(HL, 390);
         await pp.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
-        await pp.waitForSelector("[data-home-app]", { timeout: 15000 });
+        await pp.waitForSelector('[data-needs="list"]', { timeout: 15000 });
         const pm = await pp.evaluate(() => ({ sw: document.scrollingElement.scrollWidth, W: window.innerWidth }));
         check("ui (Chrome, 390x844): the Home with its queue has no sideways scroll", pm.sw <= pm.W && errors.length === 0, `${JSON.stringify(pm)} ${errors.join(" | ")}`);
       } catch (e) {
@@ -6817,9 +6889,10 @@ try {
         await page.setViewport({ width: 1000, height: 844 });
         await page.setCookie(...HX.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
         await page.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
-        await page.waitForFunction(() => document.body.innerText.includes("Approved, not launched"), { timeout: 15000 });
-        const hx = await page.evaluate(() => document.querySelector("#waiting")?.innerText ?? document.body.innerText);
-        check("ui (Chrome): the launcher's Home lists the approved change under waiting on you as \"Approved, not launched\", agents still on version 1 until they launch it", /Approved, not launched: agents are still on version 1 until you launch it\./.test(hx), hx.slice(0, 400));
+        await page.waitForFunction(() => [...document.querySelectorAll('[data-needs="list"] li')].some((e) => e.innerText.includes("Approved, not launched")), { timeout: 15000 });
+        const hx = await page.$$eval('[data-needs="list"] li', (els) => els.map((e) => e.innerText).find((t) => t.includes("Approved, not launched")) ?? "");
+        const hxPage = await page.evaluate(() => document.body.innerText);
+        check("ui (Chrome, LIM-2472): the launcher's Home lists the approved change as \"Approved, not launched\", approved by them, with Launch v2 as its action; nothing says what agents are on", /Hedy Member's request, approved by you/.test(hx) && /Launch v2/.test(hx) && !/agents are still on/.test(hxPage), hx.slice(0, 400));
       } catch (e) {
         check("ui (Chrome) home launch run", false, e?.stack ?? e);
       } finally {
@@ -6853,23 +6926,186 @@ try {
         await page.setViewport({ width: 390, height: 844 });
         await page.setCookie(...HM.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
         await page.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
-        await page.waitForSelector(`[data-home-item="declined:${crD.json?.id}"]`, { timeout: 15000 });
-        const dv = await page.evaluate((id) => {
-          const row = document.querySelector(`[data-home-item="declined:${id}"]`);
-          return {
-            text: row?.innerText ?? "",
-            href: row?.querySelector("a")?.getAttribute("href") ?? "",
-            section: row?.closest("section[aria-label]")?.getAttribute("aria-label") ?? "",
-            summary: document.querySelector("[data-home-summary]")?.textContent ?? "",
-            sw: document.scrollingElement.scrollWidth,
-            W: window.innerWidth,
-          };
-        }, crD.json?.id);
+        await page.waitForSelector('h1[data-home-count]:not([data-home-count="reading"])', { timeout: 15000 });
+        const declinedLink = `[data-needs="list"] a[href*="review=${GX.id}.${crD.json?.id}"]`;
+        const inNeeds = !!(await page.$(declinedLink));
+        await page.waitForSelector(declinedLink, { timeout: 15000 });
+        const dv = await page.evaluate((sel) => {
+          const row = document.querySelector(sel)?.closest("li");
+          return { text: row?.innerText ?? "", status: row?.querySelector("[data-status]")?.getAttribute("data-status") ?? "", sw: document.scrollingElement.scrollWidth, W: window.innerWidth };
+        }, declinedLink);
+        await page.evaluate((sel) => document.querySelector(sel)?.click(), declinedLink);
+        await page.waitForSelector(`[data-review="${crD.json?.id}"]`, { timeout: 15000 });
+        const dvReview = await page.$eval(`[data-review="${crD.json?.id}"]`, (e) => e.innerText);
+        // Opening a returned decline shows its reason and marks it seen; it then moves to Done.
+        await page.goto(`${BASE}/app/w/${HW}/goals/${GX.id}`, { waitUntil: "networkidle0" });
+        await page.waitForFunction((id) => (document.querySelector(`[data-cr="${id}"]`)?.innerText ?? "").includes("Reason:"), { timeout: 15000 }, crD.json?.id).catch(() => undefined);
+        const dvGoal = await page.evaluate((id) => document.querySelector(`[data-cr="${id}"]`)?.innerText ?? "", crD.json?.id);
         check(
-          "ui (Chrome, main #53): the requester's Home lists \"Hank Other declined your request on <goal>\" under \"Your declined requests\" with when, the quoted reason and \"Your change wasn't made; the goal is at version 2.\", and Open goes to the goal's change requests; the summary still counts only what waits on them; it fits 390 px",
-          /Hank Other declined your request on Hank's side project, shipped/.test(dv.text) && /Declined .+\. Reason: “Home: not this quarter”\. Your change wasn.t made; the goal is at version 2\./.test(dv.text) && dv.section === "Your declined requests" &&
-            dv.href === `/app/w/${HW}/goals/${GX.id}#change-requests` && !/declined/i.test(dv.summary) && dv.sw <= dv.W && errors.length === 0,
-          `${JSON.stringify(dv)} ${errors.join(" | ")}`,
+          "ui (Chrome, main #53, LIM-2472): the requester's unseen decline returns under Needs you; its review names the decider, reason and next step, and its goal page retains the reason; it fits 390 px",
+          inNeeds && dv.status === "declined" && /Declined/.test(dv.text) && /Declined by Hank Other: “Home: not this quarter”/.test(dv.text) && /Hank Other declined your request/.test(dvReview) && /Home: not this quarter/.test(dvReview) && /A declined request is closed/.test(dvReview) && /Open the goal to propose again/.test(dvReview) && /Reason: Home: not this quarter/.test(dvGoal) && dv.sw <= dv.W && errors.length === 0,
+          `${inNeeds} ${JSON.stringify(dv)} | ${dvReview.slice(0, 300).replace(/\n/g, " / ")} | ${dvGoal.slice(0, 600).replace(/\n/g, " / ")} ${errors.join(" | ")}`,
+        );
+        // LIM-2472 60253f95 (founder ruling on Mini S3's delta audit): in the review drawer the decline reason shows to the
+        // decider and the request's approvers only; a viewer and a member outside the approval set don't see it (display
+        // only: the server still sends it to every reader of the request).
+        const crDNow = (await ha(HX, "GET", `/goals/${GX.id}/change-requests/${crD.json?.id}`)).json;
+        const approverIds = (crDNow?.approvers ?? []).map((a) => a.id);
+        const reasonFor = async (u) => {
+          const p = await browser.newPage();
+          await p.setViewport({ width: 1440, height: 900 });
+          await p.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          await p.goto(`${BASE}/app/w/${HW}?review=${GX.id}.${crD.json?.id}`, { waitUntil: "networkidle0" });
+          await p.waitForSelector(`[data-review="${crD.json?.id}"]`, { timeout: 15000 });
+          const r = await p.evaluate(() => document.querySelector("[data-decline-reason]")?.textContent ?? null);
+          await p.close();
+          return r;
+        };
+        const [rX, rO, rV, rL] = [await reasonFor(HX), await reasonFor(HO), await reasonFor(HV), await reasonFor(HL)];
+        // GX is Hank's own goal with no team, so its approval set is Hank alone: the workspace owner is outside it here.
+        check(
+          "ui (Chrome, LIM-2472 60253f95): in the review drawer the decline reason (\"Reason: “Home: not this quarter”\") shows to the decider (Hank Other, the request's only approver), never to the workspace owner outside its approval set (Hana Owner), a viewer (Hope Viewer) or another member (Hugo Lead)",
+          JSON.stringify(approverIds) === JSON.stringify([HX.id]) && rX === "Reason: “Home: not this quarter”" && rO === null && rV === null && rL === null,
+          JSON.stringify({ approverIds, rX, rO, rV, rL }),
+        );
+        // Founder ruling, Nov 11: the goal page's request card follows the same rule. Every reader sees who declined and
+        // when; only the requester, the decider and the request's approvers see the reason.
+        const cardFor = async (u) => {
+          const p = await browser.newPage();
+          await p.setViewport({ width: 1440, height: 900 });
+          await p.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          await p.goto(`${BASE}/app/w/${HW}/goals/${GX.id}`, { waitUntil: "networkidle0" });
+          await p.waitForFunction((id) => !!document.querySelector(`[data-cr="${id}"] [data-declined-line]`), { timeout: 15000 }, crD.json?.id).catch(() => undefined);
+          const t = await p.evaluate((id) => document.querySelector(`[data-cr="${id}"] [data-declined-line]`)?.textContent ?? null, crD.json?.id);
+          await p.close();
+          return t;
+        };
+        const [gV, gX] = [await cardFor(HV), await cardFor(HX)];
+        check(
+          "ui (Chrome, Nov 11 ruling): on the goal page a declined request's card shows every reader \"Declined by Hank Other, <time>.\" but the reason only to the requester, the decider and the request's approvers: Hope Viewer sees no reason, Hank (who declined) does",
+          /^Declined by Hank Other/.test(gV ?? "") && !/Reason:|not this quarter/.test(gV ?? "") && /Reason: Home: not this quarter/.test(gX ?? ""),
+          JSON.stringify({ gV, gX }),
+        );
+        // Two approvers: Hedy's Core team goal (Hedy owns it, Hugo leads Core). Hank asks; Hugo declines; Hedy, an approver
+        // who didn't decide, sees the reason, and the viewer still doesn't.
+        const GQ = (await ha(HM, "POST", "/goals", { title: "Hedy's audit export", visibility: "workspace", team_id: HT })).json;
+        const crQ2 = await ha(HX, "POST", `/goals/${GQ?.id}/change-requests`, { base_version: 1, changes: { title: "Hedy's audit export, monthly" }, reason: "Monthly is enough" });
+        await ha(HL, "POST", `/goals/${GQ?.id}/change-requests/${crQ2.json?.id}/reject`, { revision: 1, reason: "Weekly is the promise" });
+        const q2Approvers = ((await ha(HM, "GET", `/goals/${GQ?.id}/change-requests/${crQ2.json?.id}`)).json?.approvers ?? []).map((a) => a.id);
+        const reasonOn = async (u, goal, id) => {
+          const p = await browser.newPage();
+          await p.setViewport({ width: 1440, height: 900 });
+          await p.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          await p.goto(`${BASE}/app/w/${HW}?review=${goal}.${id}`, { waitUntil: "networkidle0" });
+          await p.waitForSelector(`[data-review="${id}"]`, { timeout: 15000 });
+          const r = await p.evaluate(() => document.querySelector("[data-decline-reason]")?.textContent ?? null);
+          await p.close();
+          return r;
+        };
+        const [qL, qM, qV] = [await reasonOn(HL, GQ?.id, crQ2.json?.id), await reasonOn(HM, GQ?.id, crQ2.json?.id), await reasonOn(HV, GQ?.id, crQ2.json?.id)];
+        check(
+          "ui (Chrome, LIM-2472 60253f95): on a request with two approvers, the decider (Hugo Lead) and the other approver (Hedy Member, the goal's owner) both see \"Reason: “Weekly is the promise”\"; a viewer (Hope Viewer) doesn't",
+          q2Approvers.includes(HL.id) && q2Approvers.includes(HM.id) && qL === "Reason: “Weekly is the promise”" && qM === qL && qV === null,
+          JSON.stringify({ q2Approvers, qL, qM, qV, created: crQ2.status }),
+        );
+        // PR 68 item 13 (founder review of e780d842): Drop this goal → Confirm drops it (next version, status dropped) and the
+        // confirmation goes away at once, with no second Confirm on the replaced version and no reload needed.
+        const GD = (await ha(HO, "POST", "/goals", { title: "Hana's goal to drop", visibility: "workspace", measures: [{ text: "Kept on drop", target: "1" }] })).json;
+        const pd = await browser.newPage();
+        await pd.setViewport({ width: 390, height: 844 });
+        await pd.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await pd.goto(`${BASE}/app/w/${HW}/goals/${GD?.id}`, { waitUntil: "networkidle0" });
+        const pressD = (label) => pd.evaluate((t) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === t)?.click(), label);
+        await pd.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Drop this goal"), { timeout: 15000 });
+        await pressD("Drop this goal");
+        await pd.waitForSelector("[data-drop-goal]", { timeout: 15000 });
+        await pressD("Confirm: drop the goal");
+        await pd.waitForFunction(() => [...document.querySelectorAll("main h1 + div span")].some((s) => s.textContent?.trim() === "dropped"), { timeout: 15000 }).catch(() => undefined);
+        await new Promise((r) => setTimeout(r, 800));
+        const dropAfter = await pd.evaluate(() => ({
+          box: !!document.querySelector("[data-drop-goal]"),
+          confirm: [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Confirm: drop the goal" || b.textContent?.trim() === "Drop this goal"),
+          pills: [...document.querySelectorAll("main h1 + div span")].map((s) => s.textContent?.trim()),
+        }));
+        const gdNow = (await ha(HO, "GET", `/goals/${GD?.id}`)).json?.goal;
+        await pd.close();
+        check(
+          "ui (Chrome, PR 68 item 13): Drop this goal → Confirm makes the next version, marked dropped, keeping its measures; the confirmation and its Confirm go away at once, without a reload",
+          gdNow?.status === "dropped" && gdNow.version === 2 && gdNow.measures?.[0]?.text === "Kept on drop" && !dropAfter.box && !dropAfter.confirm && dropAfter.pills.includes("dropped"),
+          JSON.stringify({ dropAfter, status: gdNow?.status, version: gdNow?.version }),
+        );
+        // Founder ruling, Nov 11 (Mini 3's inventory, goals 19): the goal read's deciders are the server's effective set for
+        // the reader, the same people a request from them gets as approvers; the owner and a viewer get none. The
+        // propose drawer's "Who decides" names exactly them.
+        const dOf = async (u) => ((await ha(u, "GET", `/goals/${GQ?.id}`)).json?.deciders ?? null);
+        const [dX, dM, dV] = [await dOf(HX), await dOf(HM), await dOf(HV)];
+        const q2Sorted = [...q2Approvers].sort();
+        const pw = await browser.newPage();
+        await pw.setViewport({ width: 1440, height: 900 });
+        await pw.setCookie(...HX.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await pw.goto(`${BASE}/app/w/${HW}/goals/${GQ?.id}`, { waitUntil: "networkidle0" });
+        await pw.evaluate(() => document.querySelector("[data-propose-open]")?.click());
+        await pw.waitForSelector('[data-propose-field="goal"]', { timeout: 15000 });
+        await pw.select('[data-propose-field="goal"]', GQ?.id);
+        await pw.waitForFunction(() => /Who decides/.test(document.body.innerText) && !/Reading who decides/.test(document.body.innerText), { timeout: 15000 }).catch(() => undefined);
+        const drawerText = await pw.evaluate(() => document.querySelector('[data-propose="form"]')?.innerText ?? document.body.innerText.slice(0, 600));
+        await pw.close();
+        check(
+          "goals 19 (Nov 11 ruling): GET …/goals/:id deciders is the server's effective set for the reader (Hank's equals the approvers his request got: Hedy Member and Hugo Lead); the owner (Hedy) and a viewer get []; the propose drawer's Who decides names them",
+          Array.isArray(dX) && JSON.stringify(dX.map((p) => p.id).sort()) === JSON.stringify(q2Sorted) && dX.every((p) => typeof p.name === "string" && p.name) && JSON.stringify(dM) === "[]" && JSON.stringify(dV) === "[]" &&
+            /Hedy Member/.test(drawerText) && /Hugo Lead/.test(drawerText) && !/Usually/.test(drawerText),
+          JSON.stringify({ dX, dM, dV, q2Sorted, drawer: drawerText.slice(0, 400).replace(/\n/g, " / ") }),
+        );
+        // Founder ruling, Nov 11: "Since you last looked" names who created a goal (its owner), and leaves out a goal the
+        // reader created, as it leaves out their other own actions. Hana's last visit is set long ago, so every goal's
+        // creation is since then.
+        const ps = await browser.newPage();
+        await ps.setViewport({ width: 1440, height: 900 });
+        await ps.evaluateOnNewDocument((k) => localStorage.setItem(k, "2000-01-01T00:00:00.000Z"), `align.lastVisit:${HW}:${HO.id}`);
+        await ps.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await ps.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        await ps.waitForFunction(() => { const s = document.querySelector("[data-since]"); return !!s && s.getAttribute("data-since") !== "reading" && /created the goal/.test(s.innerText); }, { timeout: 15000 }).catch(() => undefined);
+        // The section shows its first 8 lines; "Show all N" opens the rest, where the other creations are.
+        await ps.evaluate(() => [...document.querySelectorAll("[data-since] button")].find((b) => /^Show all \d+$/.test(b.textContent?.trim() ?? ""))?.click());
+        await ps.waitForFunction(() => [...document.querySelectorAll("[data-since] button")].some((b) => b.textContent?.trim() === "Show fewer") || ![...document.querySelectorAll("[data-since] button")].some((b) => /^Show all/.test(b.textContent?.trim() ?? "")), { timeout: 15000 }).catch(() => undefined);
+        const sinceText = await ps.evaluate(() => document.querySelector("[data-since]")?.innerText ?? "");
+        await ps.close();
+        check(
+          "ui (Chrome, Since): a goal's creation names its owner (\"Hugo Lead … created the goal\", \"Hank Other … created the goal\"); the reader's own goals (Hana's) get no line, and no creation reads \"Someone\"",
+          /Hugo Lead[\s\S]{0,60}created the goal/.test(sinceText) && /Hank Other[\s\S]{0,60}created the goal/.test(sinceText) && !/Hana Owner[\s\S]{0,60}created the goal/.test(sinceText) && !/You[\s\S]{0,20}created the goal/.test(sinceText) && !/Someone[\s\S]{0,20}created the goal/.test(sinceText),
+          sinceText.slice(0, 900).replace(/\n/g, " / "),
+        );
+        // Mini 5's click walk, Nov 11: at 390 wide the review drawer's "More actions" menu opened below its footer, so
+        // Decline, the last item, was off screen and only reachable by keyboard. Hugo asks Hank to change Hank's goal;
+        // Hank opens it in the review drawer on a phone, opens More actions, and every item lies inside the screen and
+        // is the element under its own centre; a real pointer tap on Decline opens the decline step. The request is
+        // then withdrawn, so nothing after this changes.
+        const gxNow = await ha(HL, "GET", `/goals/${GX.id}`);
+        const crM = await ha(HL, "POST", `/goals/${GX.id}/change-requests`, { base_version: gxNow.json?.goal?.version, changes: { title: "Hank's side project, menu check" }, reason: "Menu check at 390" });
+        const pm = await browser.newPage();
+        await pm.setViewport({ width: 390, height: 844, hasTouch: true, isMobile: true });
+        await pm.setCookie(...HX.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await pm.goto(`${BASE}/app/w/${HW}?review=${GX.id}.${crM.json?.id}`, { waitUntil: "networkidle0" });
+        await pm.waitForSelector(`[data-review-actions="${crM.json?.id}"] [data-more-actions] summary`, { visible: true, timeout: 15000 });
+        await pm.tap(`[data-review-actions="${crM.json?.id}"] [data-more-actions] summary`);
+        await pm.waitForSelector('[data-more-actions][open] [role="menuitem"]', { visible: true, timeout: 5000 });
+        await sleep(300);
+        const menu = await pm.evaluate(() =>
+          [...document.querySelectorAll('[data-more-actions][open] [role="menuitem"]')].map((b) => {
+            const r = b.getBoundingClientRect();
+            const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return { t: b.textContent?.trim(), inside: r.top >= 0 && r.bottom <= window.innerHeight && r.left >= 0 && r.right <= window.innerWidth, hit: !!top && (top === b || b.contains(top)), h: Math.round(r.height) };
+          }),
+        );
+        await pm.tap('[data-more-actions][open] [role="menuitem"][data-decision="Decline"]');
+        const declineOpen = await pm.waitForSelector(`[data-review-actions="${crM.json?.id}"] [data-decision-input="reject"]`, { visible: true, timeout: 5000 }).then(() => true).catch(() => false);
+        const pmW = await pm.evaluate(() => ({ sw: document.scrollingElement.scrollWidth, W: window.innerWidth }));
+        await pm.close();
+        const wdM = await ha(HL, "POST", `/goals/${GX.id}/change-requests/${crM.json?.id}/withdraw`, {});
+        check(
+          "ui (Chrome, 390x844, Mini 5 Nov 11): in the review drawer every item of the \"More actions\" menu is inside the screen, at least 44 px tall and the element under its own centre (Decline included, the last one); tapping Decline opens the decline step; no sideways scroll",
+          crM.status === 201 && menu.length > 0 && menu.some((m) => m.t === "Decline") && menu.every((m) => m.inside && m.hit && m.h >= 44) && declineOpen && pmW.sw <= pmW.W && wdM.status === 200,
+          `${crM.status} ${JSON.stringify(menu)} declineOpen=${declineOpen} ${JSON.stringify(pmW)} withdraw=${wdM.status}`,
         );
       } catch (e) {
         check("ui (Chrome) home declined run", false, e?.stack ?? e);
@@ -7642,12 +7878,16 @@ try {
         const homeFO = (await fa(FO, "GET", "/home")).json;
         const pO = await as(FO);
         await open(pO, `/app/w/${FW}/requests`);
-        const waitingUi = await pO.evaluate(() => [...document.querySelectorAll("main section")].find((s) => s.querySelector("h2")?.textContent === "Waiting on you")?.innerText ?? "");
+        await pO.waitForSelector(`[data-row="${crN?.id}"]`, { timeout: 15000 }).catch(() => undefined);
+        const waitingUi = await pO.evaluate((id) => ({ row: document.querySelector(`[data-row="${id}"]`)?.innerText ?? "", filter: document.querySelector('[data-desk] [role="radio"][aria-checked="true"]')?.textContent ?? "" }), crN?.id);
+        // Who decided not yet is on the goal page's card; the Requests row and its review don't name them.
+        await open(pO, `/app/w/${FW}/goals/${GCI.id}`);
+        const waitingCard = await cardText(pO, crN?.id);
         check(
-          "B9: after approve then not yet, the workspace owner (who may launch) has it waiting on them on the Requests tab (waiting_on_me, under \"Waiting on you\") and on the Home (\"Approved, not launched\", next launch): the same rule",
+          "B9 (LIM-2472): after approve then not yet, the workspace owner (who may launch) has it waiting on them on the Requests tab (waiting_on_me, a row under the default \"Waiting on me\" filter) and on the Home (next launch): the same rule; the goal page says who decided not yet",
           apN.status === 200 && nyN.json?.launch === "not_yet" && groupsFO?.waiting_on_me?.some((c) => c.id === crN?.id && c.waiting_on_me) && !groupsFO.others.some((c) => c.id === crN?.id) &&
-            homeFO?.change_requests?.waiting_on_me?.some((c) => c.id === crN?.id && c.next === "launch") && waitingUi.includes("Cut CI time in half") && /Not launched yet: Fran Lead decided not yet/.test(waitingUi),
-          `${apN.status} ${nyN.json?.launch} ${JSON.stringify(groupsFO?.waiting_on_me?.map((c) => c.id))} ${waitingUi.slice(0, 200)}`,
+            homeFO?.change_requests?.waiting_on_me?.some((c) => c.id === crN?.id && c.next === "launch") && waitingUi.row.includes("Cut CI time in half") && /^Waiting on me \d+$/.test(waitingUi.filter) && /Not launched yet: Fran Lead decided not yet/.test(waitingCard),
+          `${apN.status} ${nyN.json?.launch} ${JSON.stringify(groupsFO?.waiting_on_me?.map((c) => c.id))} ${JSON.stringify(waitingUi)} ${waitingCard.slice(0, 200)}`,
         );
         // B5 and B13: the approver counters with a condition, reads their own note, then declines.
         const ctr = await fAct(FC, GG.id, crD.json?.id, "counter", { revision: 1, changes: { title: "Grow trials 2x by Q3" }, note: "A shorter change", condition: "Finance agrees" });
@@ -7723,10 +7963,12 @@ try {
         const sample = await call("FS", "POST", "/api/v2/workspaces/sample", { cookie: FS.cookie, body: {} });
         const pS = await as(FS);
         await open(pS, `/app/w/${sample.json?.id}/requests`);
+        await pS.waitForFunction(() => /^1 decision waiting on you\./.test(document.querySelector("[data-desk-summary]")?.textContent ?? ""), { timeout: 15000 }).catch(() => undefined);
         const sampleReq = await text(pS);
+        const sampleSummary = await text(pS, "[data-desk-summary]");
         check(
-          "B12: in the Northstar sample the Requests tab lists the person's request under Waiting on you and \"Your requests\" says so (\"No other requests of yours…\"), never \"You have not proposed a change\"",
-          sample.status === 201 && /You proposed a change/.test(sampleReq) && sampleReq.includes("No other requests of yours. Yours that need you are under Waiting on you.") && !sampleReq.includes("You have not proposed a change"),
+          "B12 (LIM-2472): in the Northstar sample the Requests tab says one decision waits on the person and its row says it is their own request, never \"You have not proposed a change\" or \"No change requests yet\"",
+          sample.status === 201 && /^1 decision waiting on you\./.test(sampleSummary) && /your request/.test(sampleReq) && !sampleReq.includes("You have not proposed a change") && !sampleReq.includes("No change requests yet"),
           sampleReq.slice(0, 400),
         );
         // U9: restoring says connected apps don't come back.
@@ -7902,14 +8144,27 @@ try {
           const hs = await phone.evaluate(() =>
             [...document.querySelectorAll("header button, header select, #passkey-prompt button, #passkey-prompt a, main button, main select")]
               .filter((b) => b.getBoundingClientRect().height > 0 && getComputedStyle(b).visibility !== "hidden")
-              .map((b) => [b.textContent.trim().slice(0, 30) || b.getAttribute("aria-label") || b.tagName, Math.round(b.getBoundingClientRect().height * 100) / 100]),
+              .map((b) => {
+                b.scrollIntoView({ block: "center" });
+                const r = b.getBoundingClientRect();
+                let height = r.height;
+                // A compact chip may extend its target with a pseudo-element. Prove the full 44px area
+                // actually hits this control, including its edges; CSS dimensions alone can hide overlap.
+                if (height < 44) {
+                  const cy = r.top + r.height / 2;
+                  const hits = [r.left + 1, r.left + r.width / 2, r.right - 1].every((x) =>
+                    [cy - 21.5, cy, cy + 21.5].every((y) => b.contains(document.elementFromPoint(x, y))));
+                  if (hits) height = 44;
+                }
+                return [b.textContent.trim().slice(0, 30) || b.getAttribute("aria-label") || b.tagName, Math.round(height * 100) / 100];
+              }),
           );
           counted += hs.length;
           for (const [t, h] of hs) if (h < 44) short.push(`${p} "${t}" ${h}px`);
         }
         const prompt = await phone.evaluate(() => !!document.querySelector("#passkey-prompt"));
         check(
-          "B6: at 390 px every button and select on the top bar, the page and the passkey prompt (Sign out, Not now, Paste meeting notes, Remove included) is at least 44 px tall",
+          "B6: at 390 px every button and select on the top bar, the page and the passkey prompt (Sign out, Not now, Paste meeting notes, Remove included) has a hit-tested tap target at least 44 px tall",
           counted >= 40 && short.length === 0,
           `${counted} controls; prompt ${prompt}; ${short.slice(0, 8).join(" | ")}`,
         );
@@ -7927,14 +8182,15 @@ try {
           wide320.length === 0 && measureW >= 200,
           `${wide320.join(" | ")} measure ${measureW}`,
         );
-        // U3: with something waiting on them and no app seen, the Home's first-run card follows the queue.
+        // U3 (LIM-2472): with something waiting on them and no app seen, the compact first-run panel sits above the list.
         await open(pO, `/app/w/${FW}`);
+        await pO.waitForSelector('h1[data-home-count]:not([data-home-count="reading"])', { timeout: 15000 }).catch(() => undefined);
         const order = await pO.evaluate(() => {
-          const w = document.querySelector("#waiting");
+          const n = document.querySelector("[data-needs]");
           const f = document.querySelector("[data-first-run]");
-          return { both: !!w && !!f, after: !!w && !!f && !!(w.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING) };
+          return { both: !!n && !!f, above: !!n && !!f && !!(f.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING), kind: f?.getAttribute("data-first-run") ?? null, count: Number(document.querySelector("h1[data-home-count]")?.getAttribute("data-home-count")) };
         });
-        check("U3: when something waits on the person, the Home's first-run card comes after \"Waiting on you\"", order.both && order.after, JSON.stringify(order));
+        check("U3 (LIM-2472): when something waits on the person, the Home's compact first-run panel comes above the Needs you list", order.both && order.above && order.kind === "compact" && order.count >= 1, JSON.stringify(order));
         check("web fix (ui): no page error in any of these pages", errors.length === 0, errors.slice(0, 3).join(" | "));
       } catch (e) {
         check("web fix (ui) run", false, e?.stack ?? e);
@@ -8521,8 +8777,8 @@ try {
           `${JSON.stringify(posted(afterNotYet.calls, "not_yet"))} ${JSON.stringify(posted(afterLaunch.calls, "launch"))}`,
         );
         check(
-          "C2 F4: Not yet and Launch each leave a \"Recorded: …\" line like every other decision (\"Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.\", \"Recorded: you launched version 2 to agents. They get it at their next turn.\")",
-          afterNotYet.text.includes("Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.") && afterLaunch.text.includes("Recorded: you launched version 2 to agents. They get it at their next turn."),
+          "C2 F4: Not yet and Launch each leave a \"Recorded: …\" line like every other decision (\"Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.\", \"Recorded: you launched version 2.\" (the drawer's wording, Nov 11))",
+          afterNotYet.text.includes("Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.") && afterLaunch.text.includes("Recorded: you launched version 2.") && !afterLaunch.text.includes("next turn"),
           `${afterNotYet.text.slice(0, 300)} | ${afterLaunch.text.slice(0, 300)}`,
         );
         check(
@@ -8567,10 +8823,23 @@ try {
           `${bumpCI2.status} ${rebK.status} ${rebK.text}`,
         );
 
-        // F5 (ui): the propose form offers only goals everyone deciding can see, and says some aren't offered.
+        // PR 68 pass 1 item 1 (founder ruling): KB's request on this goal (crN1, countered) is still open, so the goal page
+        // says so before any form and offers none. KB then withdraws it (nothing below reads crN1) for F5's form.
         const pB = await as(KB);
         await open(pB, `/app/w/${KW}/goals/${KCI3.id}`);
-        await press(pB, "#change-requests", "Propose a change");
+        await pB.waitForSelector(`[data-my-open-request="${crN1?.id}"]`, { timeout: 15000 }).catch(() => undefined);
+        const openLine = await pB.evaluate(() => document.querySelector("[data-my-open-request]")?.textContent ?? "");
+        const formOffered = await pB.evaluate(() => [...document.querySelectorAll("#change-requests button")].some((b) => b.textContent?.trim() === "Full change form"));
+        check(
+          "PR 68 item 1 (ui): with the person's own request on a goal still open (countered), the goal page says \"You already have an open request on this goal\" before any form and offers no Full change form",
+          /^You already have an open request on this goal, below\./.test(openLine) && !formOffered,
+          `${openLine} formOffered=${formOffered}`,
+        );
+        const n1Now = await kRead(KB, KCI3.id, crN1?.id);
+        await kAct(KB, KCI3.id, crN1?.id, "withdraw", { revision: n1Now?.revision });
+        // F5 (ui): the propose form offers only goals everyone deciding can see, and says some aren't offered.
+        await open(pB, `/app/w/${KW}/goals/${KCI3.id}`);
+        await press(pB, "#change-requests", "Full change form");
         await pB.waitForFunction(() => /Send for approval/.test(document.querySelector("#change-requests")?.innerText ?? ""), { timeout: 15000 });
         await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
         const proposeForm = await pB.evaluate(() => document.querySelector("#change-requests form")?.innerText ?? "");
@@ -9101,7 +9370,7 @@ try {
 
         // C3-3 (ui): the propose form doesn't offer the goals that would make a loop, and says why.
         await open(pO, `/app/w/${XW}/goals/${GQ?.id}`);
-        await press(pO, "#change-requests", "Propose a change");
+        await press(pO, "#change-requests", "Full change form");
         await pO.waitForFunction(() => /Send for approval/.test(document.querySelector("#change-requests")?.innerText ?? ""), { timeout: 15000 }).catch(() => undefined);
         await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
         const qForm = await textOf(pO, "#change-requests form");
@@ -9846,6 +10115,9 @@ try {
         // W2 (ui): the Home's first-run card lists what an agent reads in the app's words.
         const pO = await as(QO);
         await open(pO, `/app/w/${QW}`);
+        // QW has goals, so the panel is compact: the read list is behind "Connect an agent".
+        await pO.waitForSelector('[data-first-run="compact"]', { timeout: 15000 }).catch(() => undefined);
+        await press(pO, "[data-first-run]", "Connect an agent");
         await pO.waitForSelector('[data-tool="align_get_decision_record"]', { timeout: 15000 }).catch(() => undefined);
         const readLine = await textOf(pO, '[data-tool="align_get_decision_record"]');
         const homeText = await textOf(pO, "main");
@@ -10794,15 +11066,16 @@ try {
           JSON.stringify({ decL, decM, wdL, wdM, rvL, rvM, decCardL: decCardL.slice(0, 300) }),
         );
 
-        // A1-cross-9 (ui): Milo's Home tells the two requests apart.
+        // A1-cross-9 (ui): Milo's Home tells the two requests apart: each Needs row leads with the choice and its session's key end.
         await open(pM, `/app/w/${LW}`);
-        await pM.waitForSelector(`[data-home-item="alignment:${alP1?.id}"]`, { timeout: 15000 }).catch(() => undefined);
-        const d1 = await textOf(pM, `[data-home-item="alignment:${alP1?.id}"] [data-home-detail]`);
-        const d2 = await textOf(pM, `[data-home-item="alignment:${alP2?.id}"] [data-home-detail]`);
+        const rowWith = (end) => pM.evaluate((e) => [...document.querySelectorAll('[data-needs="list"] li')].map((li) => li.innerText).find((t) => t.includes(`session …${e}`)) ?? "", end);
+        await pM.waitForFunction((e) => [...document.querySelectorAll('[data-needs="list"] li')].some((li) => li.innerText.includes(`session …${e}`)), { timeout: 15000 }, L.l2.key.slice(-6)).catch(() => undefined);
+        const d1 = await rowWith(L.l2.key.slice(-6));
+        const d2 = await rowWith(L.l3.key.slice(-6));
         check(
-          "A1-cross-9 (ui): the Home's two alignment items from one person on one goal differ: \"Contribution only · session: claude-code session · started <time> · …<key end>\" and \"Work toward, usage moves · session: …\"",
-          d1.startsWith("Contribution only · session: ") && d1.includes(`…${L.l2.key.slice(-6)}`) && d2.startsWith("Work toward, usage moves · session: ") && d2.includes(`…${L.l3.key.slice(-6)}`) && d1 !== d2,
-          `${d1} | ${d2}`,
+          "A1-cross-9 (ui): the Home's two alignment rows from one person on one goal differ: \"Contribution only · session …<key end>: <name> asks to align with this goal\" and \"Work toward, usage moves · session …<key end>: …\"",
+          d1.includes(`Contribution only · session …${L.l2.key.slice(-6)}: `) && d2.includes(`Work toward, usage moves · session …${L.l3.key.slice(-6)}: `) && d1 !== d2,
+          `${d1.replace(/\n/g, " / ")} | ${d2.replace(/\n/g, " / ")}`,
         );
 
         // Sessions tab (works but confusing): a stopped session says sharing stopped, never "Counting under: no goal".
@@ -12016,6 +12289,14 @@ try {
     "hosted: /privacy and /trust are served (200, the privacy policy and the trust page); nothing under them is",
     hTrustPages[0].status === 200 && hTrustPages[0].text.includes("Our two roles") && hTrustPages[1].status === 200 && hTrustPages[1].text.includes("Subprocessors"),
     hTrustPages.map((r) => r.status).join(" "),
+  );
+  // The legal entity ends with its own full stop: a template's "[LEGAL ENTITY]." reads "Liminal Works, Inc." once,
+  // never "Inc.." (founder ruling, Nov 10). Read as text: HTML comments and tags out.
+  const trustText = hTrustPages.map((r) => r.text.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " "));
+  check(
+    "hosted: /privacy and /trust name \"Liminal Works, Inc.\" and never print \"Inc..\" (the filled entity's full stop stands for the sentence's own)",
+    trustText.every((t) => t.includes("Liminal Works, Inc.") && !/Inc\.\s*\./.test(t)),
+    trustText.map((t) => [...t.matchAll(/.{0,40}Inc\.\s*\..{0,20}/g)].map((m) => m[0]).join(" | ")).join(" || "),
   );
   const hMe = await hosted("GET", "/api/v2/me");
   const hSignIn = await hosted("GET", "/app/sign-in");

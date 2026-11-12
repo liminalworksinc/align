@@ -86,6 +86,9 @@ function fillText(v: string, opts: ParseOptions): Inline[] {
     const value = fill[m[0]];
     out.push(EMAIL.test(value) ? { t: "link", href: `mailto:${value}`, c: [{ t: "text", v: value }] } : { t: "text", v: value });
     at = m.index! + m[0].length;
+    // A value that ends a sentence itself ("Liminal Works, Inc.") takes the place of the template's own full stop, so
+    // "[LEGAL ENTITY]." reads "Liminal Works, Inc." and never "Inc.." (founder ruling, Nov 10).
+    if (value.endsWith(".") && v[at] === ".") at += 1;
   }
   if (at < v.length) out.push({ t: "text", v: v.slice(at) });
   return out;

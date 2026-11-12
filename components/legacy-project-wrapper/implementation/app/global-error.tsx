@@ -6,7 +6,7 @@ import "./globals.css";
 export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full font-sans">
+      <body className="min-h-full bg-(--bg-page) font-sans text-(--text-1)">
         <ErrorNotice digest={error.digest} reset={reset} />
       </body>
     </html>
