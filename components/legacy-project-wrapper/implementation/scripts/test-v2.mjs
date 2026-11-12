@@ -12223,7 +12223,8 @@ try {
   // ======== phase events: product events (PRESEED-007) and the operator's report ========
   // Mode L with the test IdP on a fresh data directory: a scripted set of actions, so every funnel count is known.
   const evDir = path.join(tmpRoot, "events");
-  await mustStart({ ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1" });
+  // ALIGN_LIVE_STREAMS_TOTAL=2: the server-wide live stream cap (default 200), low so the check below reaches it.
+  await mustStart({ ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1", ALIGN_LIVE_STREAMS_TOTAL: "2" });
   dbFile = path.join(evDir, "v2", "align.sqlite");
   {
     // Z4 (E2E-WEB cycle 6), on this fresh server (the pairing limit of the first one is spent): a device name is one line.
@@ -12316,6 +12317,37 @@ try {
     const W = (await call("E1", "POST", "/api/v2/workspaces", { cookie: e1.cookie, body: { name: WS_NAME } })).json?.id;
     const WQ = (await call("E3", "POST", "/api/v2/workspaces", { cookie: e3.cookie, body: { name: "Quiet Kestrel Workspace" } })).json?.id;
     const WS_SAMPLE = (await call("E1", "POST", "/api/v2/workspaces/sample", { cookie: e1.cookie, body: {} })).json?.id;
+    {
+      // The server-wide live stream cap (2 on this server): past it the refusal says the server is busy, not "this
+      // workspace", since the stream that hits it may be the first one open on its workspace (audit LIM-2503, Low).
+      const openStream = (u, w) =>
+        new Promise((resolve) => {
+          const req = http.request({ host: "127.0.0.1", port: PORT, method: "GET", path: `/api/v2/workspaces/${w}/stream`, headers: { accept: "text/event-stream", cookie: u.cookie } }, (res) => {
+            const c = { status: res.statusCode, body: "", close: () => req.destroy() };
+            res.setEncoding("utf8");
+            if (res.statusCode === 200) return resolve(c);
+            res.on("data", (d) => (c.body += d));
+            res.on("end", () => {
+              try {
+                c.json = JSON.parse(c.body);
+              } catch {}
+              resolve(c);
+            });
+          });
+          req.on("error", () => resolve({ status: 0, body: "", close: () => undefined }));
+          req.end();
+        });
+      const open = [await openStream(e1, W), await openStream(e3, WQ)];
+      const third = await openStream(e1, WS_SAMPLE);
+      for (const c of open) c.close();
+      check(
+        "live: past the server's cap (ALIGN_LIVE_STREAMS_TOTAL, 2 here) a stream -> 429 too_many_streams \"Align is busy and can't keep this view live right now. It reads when you act or reload instead.\", even on a workspace with no stream open, never \"this workspace\"",
+        open.every((c) => c.status === 200) && third.status === 429 && third.json?.error === "too_many_streams" &&
+          third.json?.message === "Align is busy and can't keep this view live right now. It reads when you act or reload instead.",
+        `${open.map((c) => c.status)} ${third.status} ${third.body}`,
+      );
+      await sleep(300);
+    }
     const inv = await ws(e1, "POST", W, "/invites", { email: e2.email, role: "member" });
     await ws(e1, "POST", W, "/invites", { email: "dormant-invitee@example.test", role: "viewer" });
     const acc = await call("E2", "POST", `/api/v2/invites/${inv.json?.token}/accept`, { cookie: e2.cookie, body: {} });

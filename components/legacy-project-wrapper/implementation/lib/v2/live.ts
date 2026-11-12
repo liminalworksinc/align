@@ -173,8 +173,10 @@ export async function openStream(req: Request, wsId: string): Promise<Response> 
   const who = `${pp0.userId}\0${wsId}`;
   if ((s.conns.get(who) ?? 0) >= STREAM_CAP)
     throw new V2Error(429, "too_many_streams", `You have ${STREAM_CAP} live views of this workspace open already. This one reads when you act or reload instead.`);
-  if ((s.wsConns.get(wsId) ?? 0) >= streamsPerWorkspace() || s.total >= streamsTotal())
+  if ((s.wsConns.get(wsId) ?? 0) >= streamsPerWorkspace())
     throw new V2Error(429, "too_many_streams", "This workspace has as many live views open as Align serves at once. This one reads when you act or reload instead.");
+  if (s.total >= streamsTotal())
+    throw new V2Error(429, "too_many_streams", "Align is busy and can't keep this view live right now. It reads when you act or reload instead.");
   s.conns.set(who, (s.conns.get(who) ?? 0) + 1);
   s.wsConns.set(wsId, (s.wsConns.get(wsId) ?? 0) + 1);
   s.total++;
