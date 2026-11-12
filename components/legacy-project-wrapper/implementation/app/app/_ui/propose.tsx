@@ -16,9 +16,9 @@ import type { ChangeRequest, Goal } from "./types";
 // words beside the field it concerns. Evidence is optional until a goal can require it (server work): the form says
 // so, and a link given here is added to the request right after it is created, as the person's own (Self-reported).
 //
-// Who decides, before sending: the goal read doesn't carry the approval set, so the summary names the goal's owner and,
-// for a team goal, its leads, for a company goal the workspace owners. After sending, the request's own approvers are
-// named exactly.
+// Who decides, before sending: the goal read's `deciders` (lib/v2/goals.ts goalDetail), the server's own effective set
+// for a request from this person, so the drawer never works it out (Mini 3's inventory, goals 19: a client guess could
+// name the requester or miss the workspace-owner fallback). After sending, the request's own approvers are named.
 
 const WHY_MAX = 2000;
 const TEXT_MAX = 300;
@@ -32,11 +32,13 @@ const outline =
 const filled =
   "inline-flex min-h-[40px] items-center justify-center rounded-(--radius-s) bg-(--accent) px-3.5 text-[14px] font-medium text-(--text-on-accent) hover:bg-(--accent-hover) disabled:opacity-50 max-sm:min-h-[44px]";
 
-/** Who usually decides, worded so it can't be wrong: the approval set drops the requester and can fall back to the
- *  workspace owners, which the goal read can't show (server ask 22), so the exact people are named only once it's sent. */
-function deciders(g: Goal): string {
-  const usual = g.level === "company" ? `${g.owner.name}, the goal's owner, or a workspace owner` : g.team ? `${g.owner.name}, the goal's owner, or a lead of ${g.team.name}` : `${g.owner.name}, the goal's owner`;
-  return `Usually ${usual}. You can't decide your own request. The exact people are named when it is sent.`;
+/** Who decides, in the server's words: its `deciders` for this person on this goal (undefined while reading, null when
+ *  the read failed). */
+function deciderWords(d: { id: string; name: string }[] | null | undefined): string {
+  if (d === undefined) return "Reading who decides…";
+  if (d === null) return "Align couldn't read who decides just now. They are named when it is sent.";
+  if (!d.length) return "Nobody can decide it yet. It stays open until someone can, or until you withdraw it.";
+  return `${d.map((p) => p.name).join(" or ")}. You can't decide your own request.`;
 }
 
 /** The change the server takes, from the pick and its words (a measure's text and target); null when it would change
@@ -84,6 +86,8 @@ function Form({ ws, me, goals, openBy, start, onClose }: { ws: string; me?: stri
   const whyRef = useRef<HTMLTextAreaElement>(null);
   const linkRef = useRef<HTMLInputElement>(null);
   const g = mine.find((x) => x.id === goalId) ?? null;
+  const detail = useApi<{ deciders?: { id: string; name: string }[] }>(g ? `/api/v2/workspaces/${ws}/goals/${g.id}` : null);
+  const decide = detail.error ? null : detail.loading || !detail.data ? undefined : (detail.data.deciders ?? null);
   const needsText = part === "title" || part === "add" || part.startsWith("m:");
   const isMeasure = part === "add" || part.startsWith("m:");
   // Said before the form, not after it is filled (founder ruling, PR 68 pass 1 item 1).
@@ -292,7 +296,7 @@ function Form({ ws, me, goals, openBy, start, onClose }: { ws: string; me?: stri
       </FormField>
       <FormSummary
         rows={[
-          { label: "Who decides", value: g ? deciders(g) : "The goal's owner, once you choose a goal" },
+          { label: "Who decides", value: g ? deciderWords(decide) : "Named once you choose a goal" },
           { label: "Evidence", value: evidence },
         ]}
         note="Nothing changes until they approve and someone launches."

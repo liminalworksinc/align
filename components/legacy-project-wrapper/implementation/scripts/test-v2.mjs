@@ -6968,6 +6968,24 @@ try {
           JSON.stringify(approverIds) === JSON.stringify([HX.id]) && rX === "Reason: “Home: not this quarter”" && rO === null && rV === null && rL === null,
           JSON.stringify({ approverIds, rX, rO, rV, rL }),
         );
+        // Founder ruling, Nov 11: the goal page's request card follows the same rule. Every reader sees who declined and
+        // when; only the requester, the decider and the request's approvers see the reason.
+        const cardFor = async (u) => {
+          const p = await browser.newPage();
+          await p.setViewport({ width: 1440, height: 900 });
+          await p.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          await p.goto(`${BASE}/app/w/${HW}/goals/${GX.id}`, { waitUntil: "networkidle0" });
+          await p.waitForFunction((id) => !!document.querySelector(`[data-cr="${id}"] [data-declined-line]`), { timeout: 15000 }, crD.json?.id).catch(() => undefined);
+          const t = await p.evaluate((id) => document.querySelector(`[data-cr="${id}"] [data-declined-line]`)?.textContent ?? null, crD.json?.id);
+          await p.close();
+          return t;
+        };
+        const [gV, gX] = [await cardFor(HV), await cardFor(HX)];
+        check(
+          "ui (Chrome, Nov 11 ruling): on the goal page a declined request's card shows every reader \"Declined by Hank Other, <time>.\" but the reason only to the requester, the decider and the request's approvers: Hope Viewer sees no reason, Hank (who declined) does",
+          /^Declined by Hank Other/.test(gV ?? "") && !/Reason:|not this quarter/.test(gV ?? "") && /Reason: Home: not this quarter/.test(gX ?? ""),
+          JSON.stringify({ gV, gX }),
+        );
         // Two approvers: Hedy's Core team goal (Hedy owns it, Hugo leads Core). Hank asks; Hugo declines; Hedy, an approver
         // who didn't decide, sees the reason, and the viewer still doesn't.
         const GQ = (await ha(HM, "POST", "/goals", { title: "Hedy's audit export", visibility: "workspace", team_id: HT })).json;
@@ -7016,6 +7034,28 @@ try {
           gdNow?.status === "dropped" && gdNow.version === 2 && gdNow.measures?.[0]?.text === "Kept on drop" && !dropAfter.box && !dropAfter.confirm && dropAfter.pills.includes("dropped"),
           JSON.stringify({ dropAfter, status: gdNow?.status, version: gdNow?.version }),
         );
+        // Founder ruling, Nov 11 (Mini 3's inventory, goals 19): the goal read's deciders are the server's effective set for
+        // the reader, the same people a request from them gets as approvers; the owner and a viewer get none. The
+        // propose drawer's "Who decides" names exactly them.
+        const dOf = async (u) => ((await ha(u, "GET", `/goals/${GQ?.id}`)).json?.deciders ?? null);
+        const [dX, dM, dV] = [await dOf(HX), await dOf(HM), await dOf(HV)];
+        const q2Sorted = [...q2Approvers].sort();
+        const pw = await browser.newPage();
+        await pw.setViewport({ width: 1440, height: 900 });
+        await pw.setCookie(...HX.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await pw.goto(`${BASE}/app/w/${HW}/goals/${GQ?.id}`, { waitUntil: "networkidle0" });
+        await pw.evaluate(() => document.querySelector("[data-propose-open]")?.click());
+        await pw.waitForSelector('[data-propose-field="goal"]', { timeout: 15000 });
+        await pw.select('[data-propose-field="goal"]', GQ?.id);
+        await pw.waitForFunction(() => /Who decides/.test(document.body.innerText) && !/Reading who decides/.test(document.body.innerText), { timeout: 15000 }).catch(() => undefined);
+        const drawerText = await pw.evaluate(() => document.querySelector('[data-propose="form"]')?.innerText ?? document.body.innerText.slice(0, 600));
+        await pw.close();
+        check(
+          "goals 19 (Nov 11 ruling): GET …/goals/:id deciders is the server's effective set for the reader (Hank's equals the approvers his request got: Hedy Member and Hugo Lead); the owner (Hedy) and a viewer get []; the propose drawer's Who decides names them",
+          Array.isArray(dX) && JSON.stringify(dX.map((p) => p.id).sort()) === JSON.stringify(q2Sorted) && dX.every((p) => typeof p.name === "string" && p.name) && JSON.stringify(dM) === "[]" && JSON.stringify(dV) === "[]" &&
+            /Hedy Member/.test(drawerText) && /Hugo Lead/.test(drawerText) && !/Usually/.test(drawerText),
+          JSON.stringify({ dX, dM, dV, q2Sorted, drawer: drawerText.slice(0, 400).replace(/\n/g, " / ") }),
+        );
         // Founder ruling, Nov 11: "Since you last looked" names who created a goal (its owner), and leaves out a goal the
         // reader created, as it leaves out their other own actions. Hana's last visit is set long ago, so every goal's
         // creation is since then.
@@ -7034,6 +7074,38 @@ try {
           "ui (Chrome, Since): a goal's creation names its owner (\"Hugo Lead … created the goal\", \"Hank Other … created the goal\"); the reader's own goals (Hana's) get no line, and no creation reads \"Someone\"",
           /Hugo Lead[\s\S]{0,60}created the goal/.test(sinceText) && /Hank Other[\s\S]{0,60}created the goal/.test(sinceText) && !/Hana Owner[\s\S]{0,60}created the goal/.test(sinceText) && !/You[\s\S]{0,20}created the goal/.test(sinceText) && !/Someone[\s\S]{0,20}created the goal/.test(sinceText),
           sinceText.slice(0, 900).replace(/\n/g, " / "),
+        );
+        // Mini 5's click walk, Nov 11: at 390 wide the review drawer's "More actions" menu opened below its footer, so
+        // Decline, the last item, was off screen and only reachable by keyboard. Hugo asks Hank to change Hank's goal;
+        // Hank opens it in the review drawer on a phone, opens More actions, and every item lies inside the screen and
+        // is the element under its own centre; a real pointer tap on Decline opens the decline step. The request is
+        // then withdrawn, so nothing after this changes.
+        const gxNow = await ha(HL, "GET", `/goals/${GX.id}`);
+        const crM = await ha(HL, "POST", `/goals/${GX.id}/change-requests`, { base_version: gxNow.json?.goal?.version, changes: { title: "Hank's side project, menu check" }, reason: "Menu check at 390" });
+        const pm = await browser.newPage();
+        await pm.setViewport({ width: 390, height: 844, hasTouch: true, isMobile: true });
+        await pm.setCookie(...HX.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await pm.goto(`${BASE}/app/w/${HW}?review=${GX.id}.${crM.json?.id}`, { waitUntil: "networkidle0" });
+        await pm.waitForSelector(`[data-review-actions="${crM.json?.id}"] [data-more-actions] summary`, { visible: true, timeout: 15000 });
+        await pm.tap(`[data-review-actions="${crM.json?.id}"] [data-more-actions] summary`);
+        await pm.waitForSelector('[data-more-actions][open] [role="menuitem"]', { visible: true, timeout: 5000 });
+        await sleep(300);
+        const menu = await pm.evaluate(() =>
+          [...document.querySelectorAll('[data-more-actions][open] [role="menuitem"]')].map((b) => {
+            const r = b.getBoundingClientRect();
+            const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return { t: b.textContent?.trim(), inside: r.top >= 0 && r.bottom <= window.innerHeight && r.left >= 0 && r.right <= window.innerWidth, hit: !!top && (top === b || b.contains(top)), h: Math.round(r.height) };
+          }),
+        );
+        await pm.tap('[data-more-actions][open] [role="menuitem"][data-decision="Decline"]');
+        const declineOpen = await pm.waitForSelector(`[data-review-actions="${crM.json?.id}"] [data-decision-input="reject"]`, { visible: true, timeout: 5000 }).then(() => true).catch(() => false);
+        const pmW = await pm.evaluate(() => ({ sw: document.scrollingElement.scrollWidth, W: window.innerWidth }));
+        await pm.close();
+        const wdM = await ha(HL, "POST", `/goals/${GX.id}/change-requests/${crM.json?.id}/withdraw`, {});
+        check(
+          "ui (Chrome, 390x844, Mini 5 Nov 11): in the review drawer every item of the \"More actions\" menu is inside the screen, at least 44 px tall and the element under its own centre (Decline included, the last one); tapping Decline opens the decline step; no sideways scroll",
+          crM.status === 201 && menu.length > 0 && menu.some((m) => m.t === "Decline") && menu.every((m) => m.inside && m.hit && m.h >= 44) && declineOpen && pmW.sw <= pmW.W && wdM.status === 200,
+          `${crM.status} ${JSON.stringify(menu)} declineOpen=${declineOpen} ${JSON.stringify(pmW)} withdraw=${wdM.status}`,
         );
       } catch (e) {
         check("ui (Chrome) home declined run", false, e?.stack ?? e);
@@ -8705,8 +8777,8 @@ try {
           `${JSON.stringify(posted(afterNotYet.calls, "not_yet"))} ${JSON.stringify(posted(afterLaunch.calls, "launch"))}`,
         );
         check(
-          "C2 F4: Not yet and Launch each leave a \"Recorded: …\" line like every other decision (\"Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.\", \"Recorded: you launched version 2 to agents. They get it at their next turn.\")",
-          afterNotYet.text.includes("Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.") && afterLaunch.text.includes("Recorded: you launched version 2 to agents. They get it at their next turn."),
+          "C2 F4: Not yet and Launch each leave a \"Recorded: …\" line like every other decision (\"Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.\", \"Recorded: you launched version 2.\" (the drawer's wording, Nov 11))",
+          afterNotYet.text.includes("Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.") && afterLaunch.text.includes("Recorded: you launched version 2.") && !afterLaunch.text.includes("next turn"),
           `${afterNotYet.text.slice(0, 300)} | ${afterLaunch.text.slice(0, 300)}`,
         );
         check(
