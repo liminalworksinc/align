@@ -4,11 +4,11 @@
 - **Owning queue item:** [ADOPT-002](active-work.md#adopt-002)
 - **Completion / archival evidence:** source navigation prepared for B01 through B17, B19 and B28; B18 and B22 remain pending
 
-The normal reviewer ledger has **26 open findings: nine HIGH and seventeen MEDIUM**. Their history is preserved while the operator-requested [remediation](native-findings-remediation.md) proceeds. This file records locations and reading commands; it does not accept or dismiss a finding or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
+The normal reviewer ledger has **29 open findings: nine HIGH and twenty MEDIUM**. Their history is preserved while the operator-requested [remediation](native-findings-remediation.md) proceeds. This file records locations and reading commands; it does not accept or dismiss a finding or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
 
-The earlier 23 have technical correction evidence in the
+Within the earlier 26 findings, 23 have technical correction evidence in the
 [current remediation record](../../generated/native-checkpoints/finding-remediation.json).
-The latest three are indexed below. Their instruction correction and contained evaluator controls are local changes. The shared adapter and normal application consumer assembly pass all 1,259 existing batches across 68 libraries, preserving all 270 runtime package files. The application verification copies now select the tested contained evaluators. This does not claim refreshed per-child SDK receipts; 67 remain historical. Current integrated acceptance, normal publication and operator review remain required.
+The other three of that earlier group are indexed below. Their instruction correction and contained evaluator controls are local changes. The shared adapter and normal application consumer assembly pass all 1,259 existing batches across 68 libraries, preserving all 270 runtime package files. The application verification copies now select the tested contained evaluators. This does not claim refreshed per-child SDK receipts; 67 remain historical. Current integrated acceptance, normal publication and operator review remain required.
 
 ## Source identities
 
@@ -2147,3 +2147,70 @@ nl -ba components/legacy-project-wrapper/implementation/scripts/consume-containe
 nl -ba components/legacy-project-wrapper/implementation/scripts/prepare-container.mjs
 nl -ba components/legacy-project-wrapper/implementation/scripts/test-container-inputs.mjs
 ```
+
+
+## Normal review of the rebased checkpoint: first commit
+
+The normal review of b85a599c5128bb678e209ceae91682cd01c99aa9 added three MEDIUM
+findings. All29 are undecided at this snapshot. The second commit review timed out after 180 seconds, so the normal push
+failed before upload. Four commit reviews remain incomplete. A fresh normal
+push will use a longer per-call wait with every normal gate preserved. No acceptance, dismissal or operator security approval is
+recorded. These source comparisons use current main and the current accepted
+materialized source. Define this helper from the repository root:
+
+```sh
+pair_current() {
+  diff -y -W 240 \
+    <(git show "4d95f5befa36e98012e8ca69933124a0508a4aaf:$ORIGINAL_PREFIX/$1" | nl -ba | sed -n "$2,${3}p") \
+    <(nl -ba "$GENERATED_ROOT/$4" | sed -n "$5,${6}p")
+}
+```
+
+| Finding | Original check on current main | Current materialized source | Read side by side |
+| --- | --- | --- | --- |
+| f_6e478fc0d9b7: Event attribution fields remain mutable | lib/v2/db.ts:743, event update trigger; lib/v2/core.mts:400, workspace redaction | storage_schema/change_programs.js:14, event trigger; server_core/create_core.js:126, workspace redaction; server_retention/create_retention.js:62, actor removal | `pair_current lib/v2/db.ts 730 745 storage_schema/change_programs.js 14 14`; `pair_current lib/v2/core.mts 389 405 server_core/create_core.js 120 132` |
+| f_efc456f72a8e: Unknown prototype names are accepted as events | lib/v2/core.mts:156, property lookup followed by truthiness | server_core/create_core.js:44, same inherited-property lookup | `pair_current lib/v2/core.mts 155 183 server_core/create_core.js 42 55` |
+| f_7f03bca85eb6: Purge mutates data before malformed JSON aborts | lib/v2/core.mts:393, writes before parsing device workspace JSON; line11 delegates transaction ownership to callers | server_core/create_core.js:120, same effect order; server_retention/create_retention.js:100, schedule calls purge within its step | `pair_current lib/v2/core.mts 389 405 server_core/create_core.js 120 132`; read caller transaction boundaries too |
+
+Workspace randomization and actor removal are used by privacy retention. Those
+call sites must remain functional in any correction. The inherited event-name
+lookup is present in both current sources. The purge finding also needs a real
+caller transaction/rollback control: its private trace alone does not establish
+whether the caller rolls back. These are investigation facts. All three findings
+remain open and no technical correction is claimed for them yet.
+
+This guide covers all 29 sealed findings in the current ledger. The ledger
+history remains unchanged and must be reconciled again if a later review adds
+findings.
+
+
+### Actual caller and image evidence for the three new findings
+
+The exact current production image was exercised with its actual Node operator
+and retention commands, a full23-program schema and an owned temporary SQLite
+database. Networking was disabled and the image was read-only. Both commands
+refused malformed device workspace JSON and restored every table exactly. A
+normal purge then succeeded, anonymized the workspace in retained event rows and
+kept the unrelated workspace in the device request. This supplies caller evidence
+for f_7f03bca85eb6. It does not accept or dismiss that finding or establish the
+behavior of every possible caller.
+
+The direct current core API accepted toString, __proto__ and constructor as
+event names. Owned direct SQLite updates could also reassign workspace and actor
+attribution. These two controls remain unsatisfied, supporting continued work on
+f_efc456f72a8e and f_6e478fc0d9b7. No HTTP exploit or correction is claimed. The
+planned restrictions must preserve the privacy transitions proved above.
+
+Evidence: [production image caller controls](../../generated/native-checkpoints/event-purge-caller-controls.json).
+The probe exits2 to report two unsatisfied security controls. It is not a passing
+security gate. The two intended corrections are an own-key event-name check and a new migration24
+that preserves all23 existing migration programs and valid privacy redaction.
+Their contract authoring, qualification, separate admission and integration remain
+pending. No generated source is patched by this documentation checkpoint.
+
+
+Current integrated acceptance: 1,909 application checks, 36 image checks, six
+asset checks and 18 offline HTTP/SQLite controls pass on the unchanged application
+composition at 5eb639f7. The two receipt readers and all70 pinned library packages
+pass their checks. This documentation update does not rerun or extend those
+results. B18, B22 and the four pending current-main service revisions remain open.
