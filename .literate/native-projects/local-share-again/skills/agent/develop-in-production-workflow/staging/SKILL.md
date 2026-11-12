@@ -15,8 +15,10 @@ remote matrix runs once per *batch* rather than once per *change*.
 ## Delta from production
 
 1. Each piece of the batch verifies locally first (`staging/dev/`).
-2. Consolidate, run the complete local suite once, then push. Nothing in the
-   batch is landed until the batch is.
+2. Consolidate and run the complete local suite once. Before any commit or push,
+   verify that explicit operator authorization covers that specific action. If it
+   does not, draft and stage the work, then ask. Existing authorization remains
+   valid within its stated scope. Nothing in the batch is landed until the batch is.
 3. Require the full remote CI matrix on the consolidated push before merging to
    the default branch. Do not merge on local-only confidence.
 4. If remote CI fails, fix forward against the same consolidated commit. Do not

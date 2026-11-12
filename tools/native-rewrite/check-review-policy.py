@@ -14,6 +14,7 @@ for project in projects:
     for relative, required in [
         ('skills/agent/record-user-directed-work/SKILL.md', 'explicit operator authorization covers that specific comment'),
         ('skills/agent/release-project/advance/SKILL.md', 'specific commit and the specific push before performing either action'),
+        ('skills/agent/develop-in-production-workflow/staging/SKILL.md', 'verify that explicit operator authorization covers that specific action'),
         ('skills/specification-to-source/go-portable-application/SKILL.md', 'source/tests/'),
     ]:
         file = project / relative

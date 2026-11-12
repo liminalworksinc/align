@@ -34,6 +34,10 @@ jobs:
         run: python tools/native-rewrite/review-qualification-source.py
       - name: Project instructions and approval scope remain safe
         run: python tools/native-rewrite/check-review-policy.py
+      - name: Pinned independent evaluator runtime
+        run: docker pull node@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9
+      - name: Independent evaluators contain host-realm escapes
+        run: node tools/native-rewrite/test-contained-oracle.mjs
       - name: Relocated guards preserve independent acceptance
         run: node --no-warnings --experimental-vm-modules --max-old-space-size=768 tools/native-rewrite/check-relocated-guards.mjs
       - name: Install litai

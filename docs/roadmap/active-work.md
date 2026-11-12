@@ -180,14 +180,19 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   optional and supplies no build gate. Follow the
   [finding remediation plan](native-findings-remediation.md); preserve normal
   review and distinguish implemented fixes from operator security acceptance.
-  The B19 push was stopped before upload so corrections can be included.
-- **Next action:** Run complete combined B19/B28 application and image acceptance,
-  then current receipt verification, normal publication and exact-head CI. Both
-  operator packages have normal registration and both-host cold caller acceptance.
-  All documentation and ledger preparation precede this acceptance run. The
-  [checkpoint result](../../generated/native-checkpoints/b19-b28.json) supplies
-  measured gate results as they complete without rewriting authority documents.
-  Then continue B22 and deferred B18. Published closure remains 26 of 31 until
+  Checkpoint `51dd7e5e4c8ead355655f865987da415750abfcd` completed normal
+  publication and review with 26 undecided findings. The three newest concern
+  staging authorization and two evaluator escapes. Their local corrections and
+  limits are in the [findings guide](native-authorization-findings.md) and
+  [containment record](../architecture/native-evaluator-containment.md).
+- **Next action:** Reconcile native providers with merged main
+  `4d95f5befa36e98012e8ca69933124a0508a4aaf`, preserve the earlier goal-cap
+  correction, complete current contained acceptance, then application/image
+  acceptance, current receipt verification, normal publication and exact-head CI.
+  The cutover prerequisites have merged and the local rebase is complete.
+  Historical full-suite results do not attest this new candidate. Continue B22
+  and deferred B18 without reopening unchanged source. All documentation and
+  ledger preparation precede the integrated acceptance run. Closure remains 26 of 31 until
   every checkpoint gate passes. No independent or operator security approval is
   supplied by functional checks.
 - **Retained classification:** The operator approved the exact 280 paths in
@@ -195,7 +200,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   B27, B29, B30 and B31. The supporting publication preserves current full application and image acceptance on unchanged source; all ten approved retained closures are now published.
   B17, B18, B19, B22 and B28 still require service or command migration. The
   [authorization findings guide](native-authorization-findings.md) preserves all
-  twenty review dispositions and provides main/materialized reading commands.
+  26 undecided findings and provides main/materialized reading commands.
 - **B14 prerequisite:** [Issue #76](https://github.com/liminalworksinc/align/issues/76)
   reproduces an existing invite-cap race while writers wait for SQLite. The local
   correction preserves the early check and rechecks under the transaction lock.

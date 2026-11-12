@@ -4,19 +4,20 @@
 - **Owning queue item:** [ADOPT-002](active-work.md#adopt-002)
 - **Completion / archival evidence:** source navigation prepared for B01 through B17, B19 and B28; B18 and B22 remain pending
 
-The normal reviewer ledger has **23 open findings: six HIGH and seventeen MEDIUM**. Their history is preserved while the operator-requested [remediation](native-findings-remediation.md) proceeds. This file records locations and reading commands; it does not accept or dismiss a finding or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
+The normal reviewer ledger has **26 open findings: nine HIGH and seventeen MEDIUM**. Their history is preserved while the operator-requested [remediation](native-findings-remediation.md) proceeds. This file records locations and reading commands; it does not accept or dismiss a finding or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
 
-All 23 have technical correction evidence in the
+The earlier 23 have technical correction evidence in the
 [current remediation record](../../generated/native-checkpoints/finding-remediation.json).
-Combined application/image acceptance and normal publication remain required.
+The latest three are indexed below. Their instruction correction and contained evaluator controls are local changes. Current integrated acceptance, normal publication and operator review remain required.
 
 ## Source identities
 
 - Original main for the earlier catalogs: `ba43c5b28cc0620472b4a09ab699fbc529c1afcb`. The B19 appendix and nine refreshed workspace-admission operation rows use `c725c966d1ebe94a912454ded2593a254b8faab4`. Each reading command selects its exact revision.
-- Last verified published checkpoint: `9f73aa620d76d8e27040c6b16fcd255fb33aa4ea`. B19 is a private candidate and remains unpublished. Earlier review-time commit locators below remain unchanged.
+- Last verified published checkpoint: `51dd7e5e4c8ead355655f865987da415750abfcd`. Its normal review completed with 26 open findings. PR #58 remains draft. The local branch has since rebased onto merged main `4d95f5befa36e98012e8ca69933124a0508a4aaf`; the rebased candidate is unpublished. Earlier review-time commit locators below remain unchanged.
+- Reconciliation preserves current-main service changes while their native revisions are prepared. The source pairs below remain exact historical comparisons. They do not assert that the rebased candidate has passed acceptance or that every old generated provider is currently selected. In particular, core, devices, alignments, goals, requests and trust Markdown temporarily retain the current-main implementation. The database retains all 23 current-main schema programs and the reviewed native migration coordinator.
 - Original path prefix: `components/legacy-project-wrapper/implementation/`.
 - Generated path prefix: `generated/native-review-source/`. The exact accepted files are prepared as readable review projections for the PR. The file and one-based line references below refer to these source copies, not the forwarding bindings. Runtime builds continue to use the accepted, pinned caches.
-- The B17 source review materialized 58 libraries and passed 1,227 acceptance batches. The private B19 web materialization passes 1,092 batches for 60 selected web libraries, with all 183 package members matching their pinned digests. The candidate registers 66 libraries including six unchanged agent packages. Materialization reuses accepted source. The local B19 candidate passes all 1,847 application checks, 36 image checks and 18 additional offline HTTP/SQLite controls. Normal publication and exact-head green CI remain pending.
+- The B17 source review materialized 58 libraries and passed 1,227 acceptance batches. The published checkpoint's B19 web materialization passed 1,092 batches for 60 selected web libraries, with all 183 package members matching their pinned digests. The published checkpoint registers 68 libraries. Materialization reuses accepted source. That checkpoint passed all 1,847 application checks, 36 image checks and 18 additional offline HTTP/SQLite controls. Those results predate the main reconciliation. Exact-head green CI remains pending.
 - Reviewed ledger snapshot SHA-256 before B19 publication: `8f94da4a25f166eb794428f048647baaf3f99206a7e0dfc74dd226678f2805f5`; zero overrides. Read it with `liminal-review log --repo .`. Do not run an accept or dismiss command.
 
 ## Read original and generated source side by side
@@ -82,6 +83,10 @@ pair19() {
 | `f_5c5fc40549da` | MEDIUM | `.literate/native-projects/local-server-metrics/skills/agent/release-project/advance/SKILL.md:21` | Requires a push without explicit operator approval. B17 inherited release instruction, with no original main or generated application check counterpart. The review locator is retained exactly; the complete step is visible in the range below. This finding remains undecided. |
 
 The original review locator and the original check on main are distinct columns of evidence. Some findings concern a profile, inherited skill, tooling or a human gate; those have no generated application check. Their exact historical files are retained below rather than inventing such a check.
+
+| `f_3ce9f2db2566` | HIGH | `.literate/native-projects/local-server-sessions-directives-routes/skills/agent/develop-in-production-workflow/staging/SKILL.md:17` | Staging instructions direct an unapproved push. This is workflow policy, not a relocated application check on main. Governing local policy is `AGENTS.md:8`; the corrected child instruction is at `skills/agent/develop-in-production-workflow/staging/SKILL.md:17` under the named child. All 71 local copies now require action-specific authorization; `tools/native-rewrite/check-review-policy.py` checks them. Reading commands below preserve the exact original and corrected sides. |
+| `f_a9b7b0880de4` | HIGH | `.literate/native-projects/local-server-goals-deliberation-routes/verification/acceptance/server-goals-deliberation-routes-harness-v4.cjs:73` | Candidate code recovers a host Function constructor through the blocked require function. This evaluator has no corresponding application check on main and no generated runtime guard counterpart. The exact readable evaluator remains at this path. Its current oracle selects the sibling `server-goals-deliberation-routes-contained-v1.cjs`, which preserves the historical verifier bytes and runs them in a separate restricted container. Controls and limits are described in [the containment record](../architecture/native-evaluator-containment.md). |
+| `f_d0fca6e9a3f5` | HIGH | `.literate/native-projects/local-server-workspace-admin-routes/verification/acceptance/server-workspace-admin-routes-harness-v3.cjs:109` | Candidate factory receives host resource functions. The reviewer supplied no line; line 109 is the verified readable `factory(resources)` call. This is evaluator containment, with no corresponding application check on main or generated runtime guard counterpart. The current oracle selects sibling `server-workspace-admin-routes-contained-v1.cjs`; historical source and containment limits remain readable. |
 
 ### Read the exact review-time files
 
@@ -2033,3 +2038,30 @@ No retired v1 service is imported.
 | accept every ok response status. `scripts/sign-in-link.mjs:29` | `operator_shortcuts/create_operator_shortcuts.js:41` | `pair19 'scripts/sign-in-link.mjs' 27 31 operator_shortcuts/create_operator_shortcuts.js 39 43` |
 | print the successful notice while leaving the success body unread. `scripts/sign-in-link.mjs:34` | `operator_shortcuts/create_operator_shortcuts.js:47` | `pair19 'scripts/sign-in-link.mjs' 32 34 operator_shortcuts/create_operator_shortcuts.js 45 49` |
 | Shared numeric option range checks. `scripts/align-admin.mjs:105` | `operator_admin/create_operator_admin.js:39` | `pair19 scripts/align-admin.mjs 103 107 operator_admin/create_operator_admin.js 37 41` |
+
+## Latest three findings: read the original and correction together
+
+These findings concern workflow instructions and evaluators introduced by the migration. There is no earlier main application authorization check to invent for them. Their application route checks are already indexed in B19 above. The historical evaluator is authored verification source, not a materialized generated product implementation.
+
+```sh
+P=.literate/native-projects/local-server-sessions-directives-routes/skills/agent/develop-in-production-workflow/staging/SKILL.md
+diff -y -W 240 \
+  <(git show "51dd7e5e4c8ead355655f865987da415750abfcd:$P" | nl -ba | sed -n '13,25p') \
+  <(nl -ba "$P" | sed -n '13,27p')
+nl -ba AGENTS.md | sed -n '6,12p'
+
+P=.literate/native-projects/local-server-goals-deliberation-routes/verification/acceptance
+# Exact historical host-function crossing, preserved verbatim in the contained verifier.
+git show "51dd7e5e4c8ead355655f865987da415750abfcd:$P/server-goals-deliberation-routes-harness-v4.cjs" | nl -ba | sed -n '68,80p'
+rg -n 'historicalVerifier|function runSelected|spawnSync|network=none' "$P/server-goals-deliberation-routes-contained-v1.cjs"
+
+P=.literate/native-projects/local-server-workspace-admin-routes/verification/acceptance
+git show "51dd7e5e4c8ead355655f865987da415750abfcd:$P/server-workspace-admin-routes-harness-v3.cjs" | nl -ba | sed -n '68,80p;107,118p'
+rg -n 'historicalVerifier|function runSelected|spawnSync|network=none' "$P/server-workspace-admin-routes-contained-v1.cjs"
+
+# Shared readable adapter and end-to-end controls. The controls use only newly owned public canaries.
+nl -ba tools/native-rewrite/contained-oracle-template.cjs
+node tools/native-rewrite/test-contained-oracle.mjs
+```
+
+All 26 findings remain undecided. Technical correction evidence does not constitute operator acceptance or dismissal. Historical qualification receipts are preserved. Current acceptance through the new evaluator is required before the next integrated candidate can be published.
