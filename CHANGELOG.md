@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Preserve merged v2 changes in the native migration branch, require action authorization in all local staging instructions, and contain independent library evaluation through a pinned, bounded runtime. Integrated acceptance and publication remain pending.
+- Preserve merged v2 changes, enforce action authorization in local staging instructions, and contain library evaluation through a pinned, bounded runtime. Normal consumer assembly passes all 1,259 library batches with unchanged runtime packages; integrated application/image acceptance and publication remain pending.
 
 - A tester keeps their v1 invite code on v2: `align-admin codes import` loads unused codes as single-use creation codes,
   and hosted `/new` redirects to `/app`, where they sign in and enter it.

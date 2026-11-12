@@ -6,16 +6,27 @@ goals/deliberation evaluators. A benign reproduction recovered a newly owned
 public environment canary through `require`, `module` and resource function
 constructors. Both historical evaluators remain readable and unchanged.
 
-All 68 registered libraries now have authored acceptance oracles selecting the
-project-owned contained adapter. The existing 1,259 batches pass against their
-unchanged accepted packages. The workspace-administration SDK rebuild reused its
-qualified source and passed current acceptance. The other 67 current receipts
-and the application verification copies remain pending. The first older-library
-rebuild did not match its historical derivation key and began generation; that
-attempt was stopped before any receipt update. The documented accepted-source
-mode then refused that historical member. No cache key, framework pin, receipt
-or acceptance result was rewritten to bypass either gate. This remains a local
-authored correction until normal integrated acceptance and publication pass.
+All 68 registered libraries and application verification copies now select the
+project-owned contained adapter. Normal consumer assembly validates their
+registered qualification evidence, locks, unique accepted entries and package
+hashes. Its actual materialization passes all 1,259 existing batches, with all
+270 runtime package files byte-identical. The caller sends only case identifiers,
+capabilities and arguments to each verifier, and still compares every returned
+result with the complete original expected value. Batching each library avoids
+repeated container startup. Caller waits are bounded to 60 seconds, or 130 for
+the exhaustive validators, covering the independent worker deadlines below.
+See the [local checkpoint](../../generated/native-checkpoints/evaluator-containment.json).
+
+The workspace-administration SDK rebuild also reused its qualified source and
+passed current acceptance. The other 67 child current receipts remain historical.
+Their older derivations did not all match the current generation context; the
+first unexpected generation was stopped, and the documented accepted-source
+mode refused that historical member. No cache key, framework pin, receipt or
+acceptance result was rewritten to bypass either gate. The existing normal
+qualified-consumer path supplies fresh library acceptance without regenerating
+unchanged packages. This does not claim fresh per-child SDK receipts. Current
+integrated application/image acceptance, normal review and publication remain
+required.
 
 The adapter copies only the declared two-file candidate package into a fresh
 snapshot, preserves the historical verifier bytes under their SHA-256 identity,

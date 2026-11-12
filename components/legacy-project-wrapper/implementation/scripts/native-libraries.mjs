@@ -74,7 +74,7 @@ function install(outputs) {
   for (const item of journal) if (item.prior) fs.rmSync(item.backup, {recursive: true});
 }
 
-export function prepareNative(implementation, destinations, {components, inputDestination, batchCases = false} = {}) {
+export function prepareNative(implementation, destinations, {components, inputDestination, batchCases = true} = {}) {
   const observations = [];
   const manifestBytes = read(implementation, "native/libraries.json", observations);
   const manifest = JSON.parse(manifestBytes);
@@ -165,8 +165,8 @@ export function prepareNative(implementation, destinations, {components, inputDe
       exports.push("export * as " + lib.package + " from " + JSON.stringify("./.bindings/" + lib.package + ".js") + ";\n");
       const groups = batchCases ? [oracle.cases] : oracle.cases.map(test => [test]);
       for (const selected of groups) {
-        const result = spawnSync(process.execPath, [path.join(implementation, "native", lib.verifier), staging, JSON.stringify(lib.surface), JSON.stringify(selected)],
-          {encoding: "utf8", timeout: 30000, maxBuffer: 2 * 1024 * 1024});
+        const result = spawnSync(process.execPath, [path.join(implementation, "native", lib.verifier), staging, JSON.stringify(lib.surface), JSON.stringify(selected.map(test => ({case_id: test.case_id, capability: test.capability, arguments: test.arguments})))],
+          {encoding: "utf8", timeout: lib.component === "field-validation" ? 130000 : 60000, maxBuffer: 2 * 1024 * 1024});
         if (result.error || result.status !== 0) throw new Error("native acceptance failed: " + selected.map(test => test.case_id).join(", ") + " " + (result.stderr || result.error));
         assert.deepEqual(JSON.parse(result.stdout), {schema: "literate-ai/library-acceptance-results@1", cases:
           selected.map(test => ({case_id: test.case_id, capability: test.capability, result: test.expected_result}))});

@@ -8,7 +8,7 @@ The normal reviewer ledger has **26 open findings: nine HIGH and seventeen MEDIU
 
 The earlier 23 have technical correction evidence in the
 [current remediation record](../../generated/native-checkpoints/finding-remediation.json).
-The latest three are indexed below. Their instruction correction and contained evaluator controls are local changes. The shared adapter passes all 1,259 existing batches across 68 libraries; normal SDK receipt refresh and consumer materialization remain pending. Current integrated acceptance, normal publication and operator review remain required.
+The latest three are indexed below. Their instruction correction and contained evaluator controls are local changes. The shared adapter and normal application consumer assembly pass all 1,259 existing batches across 68 libraries, preserving all 270 runtime package files. The application verification copies now select the tested contained evaluators. This does not claim refreshed per-child SDK receipts; 67 remain historical. Current integrated acceptance, normal publication and operator review remain required.
 
 ## Source identities
 

@@ -1,0 +1,159 @@
+'use strict';
+// Authored adapter. The historical verifier below is never invoked in this host process.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const crypto = require('node:crypto');
+const cp = require('node:child_process');
+const SETTINGS = {"inner_sha256":"24560c36efc6dfbe88049a864f727d58e4eb445eb4e41025e5f9282d2b946508","package":"server_allocation","package_files":["create_allocation.js","package.json"],"maximum_cases":10,"image":"node@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9","cpus":2,"memory_mib":768,"worker_seconds":50};
+
+function historicalVerifier() {'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const fixtureModule={exports:{}};
+new Function('require','module','exports',"'use strict';\n// Labeled synthetic private allocation controls on isolated SQLite usage, rollup, goal and hold tables.\nconst assert = require('node:assert/strict');\nconst {DatabaseSync} = require('node:sqlite');\nconst resourceNames = ['all','badRequest','goalObj','canReadGoal','need','readDate'];\nconst metadata = {allocation:3,weekStart:1,weeklyAllocation:1,feedAllocation:1};\nconst nums = ['input','output','cache_read','cache_write_5m','cache_write_1h','cache_write_unsplit','est_list_usd_micros'];\nfunction normalize(value,seen = new Map()) {\n  if (value === undefined) return {$undefined:true};\n  if (typeof value === 'function') return {$function:true};\n  if (typeof value === 'bigint') return {$bigint:String(value)};\n  if (typeof value === 'number' && !Number.isFinite(value)) return {$number:String(value)};\n  if (value === null || typeof value !== 'object') return value;\n  if (seen.has(value)) return {$ref:seen.get(value)};\n  seen.set(value,seen.size);\n  if (Object.prototype.toString.call(value) === '[object Map]') return {$map:Array.from(value.entries(),([key,item])=>[normalize(key,seen),normalize(item,seen)])};\n  if (Array.isArray(value)) return Array.from(value,item => normalize(item,seen));\n  return Object.fromEntries(Object.keys(value).map(key => [key,normalize(value[key],seen)]));\n}\nfunction fixture(settings = {}) {\n  const db = new DatabaseSync(':memory:');\n  db.exec(`CREATE TABLE v2_usage(ws_id TEXT,session_key TEXT,epoch_id TEXT,ts TEXT,model TEXT,basis TEXT,input INTEGER,output INTEGER,cache_read INTEGER,cache_write_5m INTEGER,cache_write_1h INTEGER,cache_write_unsplit INTEGER,est_list_usd_micros INTEGER);\n    CREATE TABLE v2_epochs(ws_id TEXT,session_key TEXT,epoch_id TEXT,goal_id TEXT);\n    CREATE TABLE v2_sessions(ws_id TEXT,session_key TEXT,user_id TEXT,title TEXT,repo_alias TEXT,harness TEXT);\n    CREATE TABLE v2_goals(ws_id TEXT,id TEXT,title TEXT,pod_id TEXT,owner_id TEXT,status TEXT,version INTEGER,target_share REAL);\n    CREATE TABLE v2_goal_holds(ws_id TEXT,goal_id TEXT);\n    CREATE TABLE v2_pods(ws_id TEXT,id TEXT,name TEXT);\n    CREATE TABLE v2_spend_rollups(ws_id TEXT,goal_id TEXT,day TEXT,model TEXT,basis TEXT,requests INTEGER,input INTEGER,output INTEGER,cache_read INTEGER,cache_write_5m INTEGER,cache_write_1h INTEGER,cache_write_unsplit INTEGER,est_list_usd_micros INTEGER,unpriced_requests INTEGER);`);\n  function insert(table,row) {\n    const keys = Object.keys(row);\n    db.prepare('INSERT INTO '+table+' ('+keys.join(',')+') VALUES ('+keys.map(() => '?').join(',')+')').run(...keys.map(k => row[k]));\n  }\n  const goals = settings.goals ?? [\n    {ws_id:'ws1',id:'g1',title:'Alpha',pod_id:'p1',owner_id:'u1',status:'active',version:1,target_share:40},\n    {ws_id:'ws1',id:'g2',title:'Beta',pod_id:null,owner_id:'u2',status:'active',version:1,target_share:20},\n    {ws_id:'ws1',id:'private',title:'Hidden title',pod_id:'p2',owner_id:'u3',status:'active',version:1,target_share:90},\n    {ws_id:'ws2',id:'foreign',title:'Foreign title',pod_id:'p3',owner_id:'u1',status:'active',version:1},\n  ];\n  for (const row of goals) insert('v2_goals',row);\n  for (const row of settings.holds ?? [{ws_id:'ws1',goal_id:'g1'},{ws_id:'ws2',goal_id:'g2'}]) insert('v2_goal_holds',row);\n  for (const row of settings.pods ?? [{ws_id:'ws1',id:'p1',name:'Team one'},{ws_id:'ws1',id:'p2',name:'Private team'},{ws_id:'ws2',id:'p3',name:'Foreign team'}]) insert('v2_pods',row);\n  const sessions = settings.sessions ?? [\n    {ws_id:'ws1',session_key:'s1',user_id:'u1',title:'Own title',repo_alias:'own-repo',harness:'codex'},\n    {ws_id:'ws1',session_key:'s2',user_id:'u2',title:'Other title',repo_alias:'private-repo',harness:'claude'},\n    {ws_id:'ws2',session_key:'s1',user_id:'u1',title:'Foreign',repo_alias:'foreign',harness:'codex'},\n  ];\n  for (const row of sessions) insert('v2_sessions',row);\n  const seeds = settings.usage ?? [\n    ['ws1','s1','g1','2026-11-01T00:00:00.000Z','alpha','api_usd',11],\n    ['ws1','s1','g1','2026-11-02T00:00:00.000Z','beta','subscription_included',13],\n    ['ws1','s2','g2','2026-11-02T12:00:00.000Z','alpha','workspace_credits',17],\n    ['ws1','s2','private','2026-11-03T00:00:00.000Z','gamma','estimated_list_usd',null],\n    ['ws1','s1',null,'2026-11-04T00:00:00.000Z','alpha','unknown',19],\n    ['ws1','s2','missing','2026-11-05T00:00:00.000Z','delta','unexpected_basis',23],\n    ['ws2','s1','foreign','2026-11-02T00:00:00.000Z','alpha','api_usd',99999],\n  ];\n  for (const [i,seed] of seeds.entries()) {\n    const [ws_id,session_key,goal_id,ts,model,basis,cost] = seed;\n    const epoch_id = 'epoch-'+i;\n    insert('v2_epochs',{ws_id,session_key,epoch_id,goal_id});\n    insert('v2_usage',{ws_id,session_key,epoch_id,ts,model,basis,...Object.fromEntries(nums.map((key,j) => [key,key === 'est_list_usd_micros' ? cost : settings.freshValues ? (key === 'input' ? settings.freshValues[i] : key === 'cache_read' ? 999999 : 0) : (i+1)*(j+1)]))});\n  }\n  const rolled = settings.rolled ?? [\n    {ws_id:'ws1',goal_id:'g1',day:'2026-10-01',model:'alpha',basis:'api_usd'},\n    {ws_id:'ws1',goal_id:'private',day:'2026-10-02',model:'beta',basis:'unknown'},\n    {ws_id:'ws1',goal_id:'',day:'2026-10-03',model:'gamma',basis:'subscription_included'},\n    {ws_id:'ws2',goal_id:'foreign',day:'2026-10-01',model:'alpha',basis:'api_usd'},\n  ];\n  for (const row of rolled) insert('v2_spend_rollups',{requests:3,unpriced_requests:1,...Object.fromEntries(nums.map((key,j) => [key,20+j])),...row});\n  let active = false,reads = 0,effects = 0,captures = 0,lastRefusal;\n  const trace = [],fault = new Error('owned allocation failure'),wrapped = new WeakMap(),sequences = new Map();\n  function quiet(fn) {const old=active;active=false;try{return fn();}finally{active=old;}}\n  function watch(value,label) {\n    if (!value || typeof value !== 'object') return value;\n    if (wrapped.has(value)) return wrapped.get(value);\n    const proxy=new Proxy(value,{\n      get(target,key,receiver) {\n        let got;\n        if (active && typeof key === 'string') {\n          trace.push(['get',label,key]);\n          if (++reads === settings.propertyFault) throw fault;\n          const list=settings.sequences?.[label+'.'+key];\n          if (list) {const i=sequences.get(label+'.'+key) ?? 0;sequences.set(label+'.'+key,i+1);got=list[Math.min(i,list.length-1)];}\n          else got=Reflect.get(target,key,receiver);\n        } else got=Reflect.get(target,key,receiver);\n        return watch(got,label+'.'+String(key));\n      },\n      ownKeys(target) {if(active)trace.push(['keys',label]);return Reflect.ownKeys(target);},\n    });\n    wrapped.set(value,proxy);return proxy;\n  }\n  function call(name,fn) {return function(...args) {\n    assert.equal(this,undefined);\n    if(active) {trace.push(['service',name,quiet(() => normalize(args))]);if(++effects === settings.effectFault)throw fault;}\n    return quiet(() => fn(...args));\n  };}\n  const principal=watch({wsId:'ws1',userId:'u1',wsRole:'member',...(settings.principal ?? {})},'pp');\n  class ControlledDate extends Date {static now(){return settings.clockNow ?? Date.parse('2026-11-09T12:00:00.000Z');}}\n  const supplied={\n    readDate:call('readDate',()=>ControlledDate),\n    all:call('all',(sql,...args) => watch(db.prepare(sql).all(...args),'all.'+sql)),\n    badRequest:call('badRequest',message => lastRefusal=Object.hasOwn(settings,'refusalValue') ? settings.refusalValue : Object.assign(new Error(message),{status:400,code:'bad_request'})),\n    goalObj:call('goalObj',goal => goal),\n    canReadGoal:call('canReadGoal',(pp,goal) => {assert.equal(pp,principal);return !(settings.hidden ?? ['private']).includes(goal.id);}),\n    need:call('need',(pp,action) => {assert.equal(pp,principal);assert.equal(action,'spend.read');if(settings.denyNeed)throw(lastRefusal=Object.assign(new Error('Permission denied'),{status:403,code:'owned_denial'}));}),\n  };\n  const resources=new Proxy(supplied,{get(target,key) {trace.push(['capture',String(key)]);if(++captures === settings.captureFault)throw fault;return target[key];},ownKeys(){throw Error('Resource enumeration forbidden');}});\n  async function run(factory,operation = 'allocation') {\n    let result,caught,didThrow=false;\n    try {\n      const api=factory(resources);assert.deepEqual(Object.keys(api),Object.keys(metadata));\n      for(const [key,length]of Object.entries(metadata)){assert.equal(api[key].name,key);assert.equal(api[key].length,length);assert.equal(api[key].constructor.name,'Function');}\n      active=true;\n      if(operation === 'allocation')result=api.allocation(principal,Object.hasOwn(settings,'from') ? settings.from : null,Object.hasOwn(settings,'to') ? settings.to : null);\n      else if(operation === 'weekStart')result=api.weekStart(settings.t);\n      else if(operation === 'weekly')result=api.weeklyAllocation(principal,settings.weeks,settings.nowArg);\n      else if(operation === 'feed')result=api.feedAllocation(principal,settings.nowArg);\n      else throw Error('Unknown operation');\n    } catch(error){caught=error;didThrow=true;}\n    active=false;\n    const output={result:normalize(result),error:didThrow?{thrown:normalize(caught),name:caught?.name,message:caught?.message,code:normalize(caught?.code),status:normalize(caught?.status),sameFault:caught === fault,sameRefusal:caught === lastRefusal}:null,trace,reads,effects,captures};\n    db.close();return output;\n  }\n  return {run};\n}\nmodule.exports={fixture,normalize,resourceNames,metadata,nums};\n")(name=>{assert(['node:assert/strict','node:crypto','node:sqlite'].includes(name));return require(name);},fixtureModule,fixtureModule.exports);
+const semanticModule={exports:{}};
+new Function('require','module','exports',"'use strict';\n// Labeled synthetic private controls, independent of any generated implementation.\nconst entry=(operation,settings={})=>({operation,settings});\nconst goal=(id,target_share=25,status='active',title=id)=>({ws_id:'ws1',id,title,pod_id:null,owner_id:'u1',status,version:1,target_share});\nconst use=(id,at='2026-11-02T00:00:00.000Z',cost=10,ws='ws1',session='s1')=>[ws,session,id,at,'m','api_usd',cost];\nconst times=['2026-11-09T00:00:00.000Z','2026-11-08T23:59:59.999Z','2026-03-08T10:00:00.000Z','2026-11-01T09:00:00.000Z','2024-02-29T12:00:00.000Z','2000-01-01T00:00:00.000Z','1970-01-01T00:00:00.000Z','0099-01-04T00:00:00.000Z'].map(Date.parse);\nfunction semanticBatches(){\n const b=Array.from({length:6},()=>[]);\n for(const principal of [{},{wsId:'ws2'},{wsId:'missing'},{userId:'u2'}])for(const hidden of [[],['private'],['g1','g2','private']])for(const status of ['active','achieved','dropped'])b[0].push(entry('allocation',{principal,hidden,goals:[goal('g1',40,status),goal('g2',20),goal('private',90),goal('zero',0),goal('idle',15)]}));\n const bounds=[null,'','2026-10-01T00:00:00.000Z','2026-10-03T00:00:00.000Z','2026-11-01T00:00:00.000Z','2026-11-02T00:00:00.000Z','2026-11-03T00:00:00.000Z','2026-11-06T00:00:00.000Z','invalid'];\n for(const from of bounds)for(const to of bounds)b[1].push(entry('allocation',{from,to}));\n for(const first of [0,1,149,150,151,999])for(const second of [0,1,851,850,849])for(const target_share of [null,0,5,15.5,100])b[2].push(entry('allocation',{usage:[use('g1'),use('g2')],freshValues:[first,second],rolled:[],goals:[goal('g1',target_share),goal('g2',null)]}));\n for(const t of [...times,0,-1,NaN,Infinity,8.64e15,-8.64e15,undefined,null])b[3].push(entry('weekStart',{t}));\n for(const weeks of [undefined,-2,0,1,2,2.9,6,26,27,Infinity,NaN,null])for(const nowArg of [undefined,times[0],times[1],times[4]])b[3].push(entry('weekly',{weeks,nowArg}));\n for(const nowArg of [undefined,...times.slice(0,5),NaN])for(const hidden of [[],['private'],['g1','g2','private']])b[4].push(entry('feed',{nowArg,hidden}));\n for(const first of [0,49,50,51,149,150,151])for(const target_share of [null,0,5,15])b[4].push(entry('feed',{nowArg:Date.parse('2026-11-09T00:00:00.000Z'),usage:[use('g1'),use('g2')],freshValues:[first,1000-first],rolled:[],goals:[goal('g1',target_share),goal('g2',null)],holds:[]}));\n for(const operation of ['allocation','weekly','feed'])for(const usage of [[],[use(null)],[use('missing')],[use('private')]])for(const rolled of [[],[{ws_id:'ws1',goal_id:'g1',day:'2026-11-02',model:'m',basis:'unknown'}]])b[5].push(entry(operation,{usage,rolled,weeks:1,goals:[goal('g1',40),goal('private',80),goal('no-use',0)]}));\n for(const operation of ['allocation','weekly','feed','weekStart']){\n  b[5].push(entry(operation,{denyNeed:true,weeks:1,t:times[0]}));\n  for(let captureFault=1;captureFault<=6;captureFault++)b[5].push(entry(operation,{captureFault,weeks:1,t:times[0]}));\n }\n for(const refusalValue of [null,false,0,'owned refusal'])b[5].push(entry('allocation',{from:'z',to:'a',refusalValue}));\n for(const operation of ['allocation','weekly','feed'])for(const sequences of [{'pp.wsId':['ws1','ws2','ws1']},{'pp.wsId':['missing','ws1']}])b[5].push(entry(operation,{sequences,weeks:1}));\n for(const target_share of [null,0,20])b[5].push(entry('allocation',{usage:[],rolled:[],goals:[goal('b',target_share),goal('a',target_share)]}));\n for(const [part,total] of [[23,80],[41,80],[51,80]])for(const operation of ['allocation','weekly','feed']){const settings={usage:[use('g1','2026-11-09T00:00:00.000Z'),use('g2','2026-11-09T00:00:00.000Z')],freshValues:[part,total-part],rolled:[],goals:[goal('g1',20),goal('g2',80)],weeks:1,nowArg:Date.parse('2026-11-09T12:00:00.000Z')};b[operation==='feed'?4:2].push(entry(operation,settings));}\n return b;\n}\nconst faultPaths=[entry('allocation'),entry('weekly',{weeks:2}),entry('feed'),entry('weekStart',{t:times[0]}),entry('allocation',{from:'z',to:'a'}),entry('feed',{usage:[],rolled:[],goals:[goal('g1',15)]}),entry('allocation',{usage:[],rolled:[],goals:[goal('g1',15),goal('g2',null),goal('g3',0)]})];\nmodule.exports={semanticBatches,faultPaths};\n")(name=>{if(name==='./server-allocation-fixture-draft-v1.cjs')return fixtureModule.exports;throw Error('Unexpected semantic dependency '+name);},semanticModule,semanticModule.exports);
+const corpusModule={exports:{}};
+new Function('require','module','exports',"'use strict';\nconst crypto = require('node:crypto');\nconst {fixture} = require('./server-allocation-fixture-draft-v1.cjs');\nconst {semanticBatches} = require('./server-allocation-cases-draft-v3.cjs');\nconst plan = require('./server-allocation-fault-plan-draft-v2.json');\nfunction entries(batch) {\n  if (batch < 6) return semanticBatches()[batch];\n  const rows = [];\n  const paths = plan.paths.filter((_,i) => (batch === 6 || batch === 8) ? i < 3 : i >= 3);\n  const field = batch < 8 ? 'propertyFault' : 'effectFault';\n  const count = batch < 8 ? 'reads' : 'effects';\n  for (const path of paths) for (let i = 1; i <= path[count]; i++) {\n    rows.push({operation:path.operation,settings:{...path.settings,[field]:i}});\n  }\n  if (batch === 9) for (let captureFault = 1; captureFault <= 6; captureFault++) {\n    rows.push({operation:'allocation',settings:{captureFault}});\n  }\n  return rows;\n}\nasync function run(factory,batch) {\n  const cases = entries(batch), observations = [];\n  for (const item of cases) observations.push(await fixture(item.settings).run(factory,item.operation));\n  return {batch,records:cases.length,sha256:crypto.createHash('sha256').update(JSON.stringify(observations)).digest('hex')};\n}\nmodule.exports = {entries,run};\n")(name=>{if(name==='./server-allocation-fixture-draft-v1.cjs')return fixtureModule.exports;if(name==='./server-allocation-cases-draft-v3.cjs')return semanticModule.exports;if(name==='./server-allocation-fault-plan-draft-v2.json')return {"paths":[{"operation":"allocation","settings":{},"reads":95,"effects":12,"expected_refusal":false},{"operation":"weekly","settings":{"weeks":2},"reads":107,"effects":30,"expected_refusal":false},{"operation":"feed","settings":{},"reads":61,"effects":12,"expected_refusal":false},{"operation":"weekStart","settings":{"t":1794182400000},"reads":0,"effects":2,"expected_refusal":false},{"operation":"allocation","settings":{"from":"z","to":"a"},"reads":0,"effects":2,"expected_refusal":true},{"operation":"feed","settings":{"usage":[],"rolled":[],"goals":[{"ws_id":"ws1","id":"g1","title":"g1","pod_id":null,"owner_id":"u1","status":"active","version":1,"target_share":15}]},"reads":17,"effects":8,"expected_refusal":false},{"operation":"allocation","settings":{"usage":[],"rolled":[],"goals":[{"ws_id":"ws1","id":"g1","title":"g1","pod_id":null,"owner_id":"u1","status":"active","version":1,"target_share":15},{"ws_id":"ws1","id":"g2","title":"g2","pod_id":null,"owner_id":"u1","status":"active","version":1,"target_share":null},{"ws_id":"ws1","id":"g3","title":"g3","pod_id":null,"owner_id":"u1","status":"active","version":1,"target_share":0}]},"reads":32,"effects":8,"expected_refusal":false}]};assert(['node:assert/strict','node:crypto','node:sqlite'].includes(name));return require(name);},corpusModule,corpusModule.exports);
+const corpus=corpusModule.exports,PLANS=[{"index":0,"golden":{"batch":0,"records":36,"sha256":"b6912f9e750d902e4e959d879b0777852e5be7b4717bbadf78485cb439ad0cb3"}},{"index":1,"golden":{"batch":1,"records":81,"sha256":"73a97d22a60089e5f98a1525d627b53e71763375eb1c9c48ae0c9bddcfcca685"}},{"index":2,"golden":{"batch":2,"records":156,"sha256":"cd63dbf55c8c93b21ad65258f9ead78cc35c43f1b597d595be60ccf189e1de51"}},{"index":3,"golden":{"batch":3,"records":64,"sha256":"2facf57445af0cf315ed856ae4d72d38b9c52c16b68954bf7facbe192d993adf"}},{"index":4,"golden":{"batch":4,"records":52,"sha256":"3d111f20c11f81f51da21ed04968df430b5bccfe2e18338f2411b87370ba027d"}},{"index":5,"golden":{"batch":5,"records":65,"sha256":"fe8ec46b8fe65ed5c4aae7fc122b538c9eeac2bc45c3e40a1ab9c86a13296f50"}},{"index":6,"golden":{"batch":6,"records":263,"sha256":"debb827ff9db5f3e56de8c6662ea3be53810ed9387e4f8a493f80f741d1419f5"}},{"index":7,"golden":{"batch":7,"records":49,"sha256":"da9efe14aab9f7ed9fa5a6769599a169da8bbef3758d87097164be24ae8434b5"}},{"index":8,"golden":{"batch":8,"records":54,"sha256":"7143a9f3f72edc59035b26935d773ac1d47c289588294fd6039849025cb05208"}},{"index":9,"golden":{"batch":9,"records":26,"sha256":"160f8fa18330b5a705e776c8137217b6d02e5af72ea0ce0446b478876a6f4a25"}}],CAPABILITIES=["server-allocation.create-allocation"],SYMBOLS=['create_allocation'];
+const CASE_IDS=PLANS.map((_p,i)=>CAPABILITIES[0]+'-'+String(i+1).padStart(3,'0'));
+function factoryAt(root){
+ const files=[path.join(root,'server_allocation/create_allocation.js'),path.join(root,'source/server_allocation/create_allocation.js')].filter(name=>fs.existsSync(name));
+ assert.equal(files.length,1,'Exact generated module missing or ambiguous');const file=files[0];assert(fs.lstatSync(file).isFile()&&!fs.lstatSync(file).isSymbolicLink());
+ const pkg=path.dirname(file),directory=fs.lstatSync(pkg);
+ assert(directory.isDirectory()&&!directory.isSymbolicLink(),'Native package directory must be regular');
+ assert.deepEqual(fs.readdirSync(pkg).sort(),['create_allocation.js','package.json'],'Exact native package members');
+ for(const name of ['create_allocation.js','package.json']){const stat=fs.lstatSync(path.join(pkg,name));assert(stat.isFile()&&!stat.isSymbolicLink(),'Native package members must be regular files');}
+ const manifest=JSON.parse(fs.readFileSync(path.join(pkg,'package.json'),'utf8'));
+ assert.equal(manifest.name,'server_allocation');assert.equal(manifest.type,'commonjs');
+ assert.deepEqual(manifest.exports,{'./create_allocation':'./create_allocation.js'});
+ const blocked=()=>{throw Error('Forbidden ambient generated effect');};
+ const context=vm.createContext({Date:blocked,fetch:blocked,process:new Proxy({},{get:blocked}),console:new Proxy({},{get:blocked}),setTimeout:blocked,setInterval:blocked,Buffer:undefined},{codeGeneration:{strings:false,wasm:false}});
+ new vm.Script('Math.random=()=>{throw Error("Forbidden ambient randomness")};').runInContext(context,{timeout:1000});
+ const module={exports:{}};
+ new vm.Script('(function(exports,module,require){"use strict";\n'+fs.readFileSync(file,'utf8')+'\n})',{filename:'create_allocation.js'}).runInContext(context,{timeout:1000})(module.exports,module,blocked);
+ assert.deepEqual(Object.keys(module.exports),['create_allocation']);const factory=module.exports.create_allocation;
+ assert.equal(typeof factory,'function');assert.equal(factory.name,'create_allocation');assert.equal(factory.length,1);assert.equal(factory.constructor.name,'Function');return factory;
+}
+async function runSelected(root,_surface,selected){
+ assert(Array.isArray(selected)&&selected.length>0&&selected.length<=PLANS.length);
+ const indices=selected.map(item=>{assert.equal(item.capability,CAPABILITIES[0]);assert(Array.isArray(item.arguments)&&item.arguments.length===1);const index=item.arguments[0];assert(Number.isSafeInteger(index)&&index>=0&&index<PLANS.length);return index;});
+ assert.equal(new Set(indices).size,indices.length);const factory=factoryAt(root),results=[];
+ for(let i=0;i<selected.length;i++){const item=selected[i],plan=PLANS[indices[i]],value=await corpus.run(factory,plan.index);assert.deepEqual(value,plan.golden,'Source characterization differs in batch '+plan.index);results.push({case_id:item.case_id,capability:item.capability,result:value});}
+ return results;
+}
+module.exports={CAPABILITIES,SYMBOLS,CASE_IDS,PLANS,runSelected};
+if(require.main===module){assert.equal(process.argv.length,5);runSelected(process.argv[2],JSON.parse(process.argv[3]),JSON.parse(process.argv[4])).then(cases=>console.log(JSON.stringify({schema:'literate-ai/library-acceptance-results@1',cases}))).catch(error=>{console.error(error.stack);process.exitCode=1;});}
+}
+
+function verifierBytes() {
+  const text = historicalVerifier.toString();
+  const bytes = Buffer.from(text.slice(text.indexOf('{') + 1, -1));
+  assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), SETTINGS.inner_sha256,
+    'Historical verifier bytes changed');
+  return bytes;
+}
+
+function directFile(directory, name) {
+  assert(/^[a-zA-Z0-9_.-]+$/.test(name) && name !== '.' && name !== '..');
+  const file = path.join(directory, name);
+  const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    assert(stat.isFile() && stat.size <= 8 * 1024 * 1024, 'Unsafe candidate member');
+    return fs.readFileSync(descriptor);
+  } finally { fs.closeSync(descriptor); }
+}
+
+async function runSelected(root, surface, selected) {
+  assert(Array.isArray(selected) && selected.length > 0 && selected.length <= SETTINGS.maximum_cases);
+  const input = JSON.stringify({surface, selected});
+  assert(Buffer.byteLength(input) <= 256 * 1024, 'Oversized oracle request');
+  assert(Buffer.byteLength(JSON.stringify(surface)) <= 64 * 1024 &&
+    Buffer.byteLength(JSON.stringify(selected)) <= 64 * 1024, 'Oracle argument exceeds portable CLI bound');
+  const source = fs.realpathSync(root);
+  const candidates = [path.join(source, SETTINGS.package), path.join(source, 'source', SETTINGS.package)]
+    .filter(file => fs.existsSync(file));
+  assert.equal(candidates.length, 1, 'Expected one candidate package');
+  const candidate = candidates[0];
+  // Reject symlinks below the resolved caller root, including an intermediate source directory.
+  let at = source;
+  for (const part of path.relative(source, candidate).split(path.sep)) {
+    at = path.join(at, part);
+    assert(fs.lstatSync(at).isDirectory() && !fs.lstatSync(at).isSymbolicLink());
+  }
+  assert.deepEqual(fs.readdirSync(candidate).sort(), [...SETTINGS.package_files].sort());
+  // Desktop Docker shares the home directory. Its VM need not share the OS temporary directory.
+  const cache = path.join(os.homedir(), '.cache', 'align-native-oracles');
+  fs.mkdirSync(cache, {recursive: true, mode: 0o700});
+  const snapshot = fs.mkdtempSync(path.join(fs.realpathSync(cache), 'evaluation-'));
+  const name = 'align-oracle-' + crypto.randomUUID();
+  assert(!/[\r\n,]/.test(snapshot), 'Unsupported mount path');
+  let started = false;
+  const dockerEnvironment = {...process.env};
+  // Host-side executable configuration must not load application-supplied Node preload hooks.
+  delete dockerEnvironment.NODE_OPTIONS;
+  delete dockerEnvironment.NODE_PATH;
+  try {
+    const packageRoot = path.join(snapshot, 'source', SETTINGS.package);
+    fs.mkdirSync(packageRoot, {recursive: true, mode: 0o755});
+    fs.chmodSync(path.join(snapshot, 'source'), 0o755);
+    fs.chmodSync(packageRoot, 0o755);
+    for (const file of SETTINGS.package_files) {
+      fs.writeFileSync(path.join(packageRoot, file), directFile(candidate, file), {mode: 0o444});
+    }
+    fs.writeFileSync(path.join(snapshot, 'oracle.cjs'), verifierBytes(), {mode: 0o444});
+    fs.writeFileSync(path.join(snapshot, 'request.json'), input, {mode: 0o444});
+    fs.writeFileSync(path.join(snapshot, 'execute.cjs'), [
+      "'use strict';",
+      "const input=require('./request.json');",
+      "const cp=require('node:child_process');",
+      "const result=cp.spawnSync(process.execPath,['--no-warnings','--experimental-vm-modules','--max-old-space-size=512','/inputs/oracle.cjs','/inputs/source',JSON.stringify(input.surface),JSON.stringify(input.selected)],{encoding:'utf8',timeout:130000,maxBuffer:4*1024*1024});",
+      "if(result.error||result.status!==0){console.error(result.error?.code||result.status,result.stderr);process.exitCode=1;}else process.stdout.write(result.stdout);",
+    ].join('\n'), {mode: 0o444});
+    // Do not depend on the caller's umask for container readability.
+    for (const file of SETTINGS.package_files) fs.chmodSync(path.join(packageRoot, file), 0o444);
+    for (const file of ['oracle.cjs', 'request.json', 'execute.cjs']) {
+      fs.chmodSync(path.join(snapshot, file), 0o444);
+    }
+    fs.chmodSync(snapshot, 0o755);
+    const info=cp.spawnSync('docker',['info','--format','{{.NCPU}}'],{env:dockerEnvironment,encoding:'utf8',timeout:10000});
+    if(info.error||info.status!==0)throw Error('Docker runtime unavailable: '+(info.error?.code||info.status));
+    const available=Number(info.stdout.trim());
+    assert(Number.isInteger(available)&&available>=1&&available<=512,'Invalid Docker CPU capacity');
+    const cpus=Math.min(SETTINGS.cpus,available);
+    const argv = ['run', '--rm', '--name', name, '--pull=never', '--network=none', '--read-only',
+      '--user=65532:65532', '--cap-drop=ALL', '--security-opt=no-new-privileges',
+      '--pids-limit=64', '--memory=' + SETTINGS.memory_mib + 'm', '--cpus=' + cpus,
+      '--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=128m', '--env=HOME=/tmp',
+      '--mount', `type=bind,source=${snapshot},target=/inputs,readonly`,
+      '--workdir=/inputs', '--entrypoint=/usr/bin/timeout', SETTINGS.image,
+      '--signal=KILL', SETTINGS.worker_seconds + 's', 'node', '--no-warnings', '--max-old-space-size=512', '/inputs/execute.cjs'];
+    started = true;
+    const result = cp.spawnSync('docker', argv, {env: dockerEnvironment, encoding: 'utf8',
+      timeout: 150000, maxBuffer: 4 * 1024 * 1024});
+    if (result.error || result.status !== 0) {
+      throw Error('Contained oracle failed: ' + (result.error?.code || result.status) + '\n' +
+        String(result.stderr || '').slice(0, 1600));
+    }
+    const value = JSON.parse(result.stdout);
+    assert.equal(value.schema, 'literate-ai/library-acceptance-results@1');
+    assert(Array.isArray(value.cases) && value.cases.length === selected.length);
+    assert.deepEqual(value.cases.map(item => [item.case_id, item.capability]),
+      selected.map(item => [item.case_id, item.capability]));
+    return value.cases;
+  } finally {
+    if (started) cp.spawnSync('docker', ['rm', '--force', name], {
+      env: dockerEnvironment, stdio: 'ignore', timeout: 10000});
+    fs.rmSync(snapshot, {recursive: true, force: true});
+  }
+}
+
+module.exports = {runSelected};
+if (require.main === module) {
+  assert.equal(process.argv.length, 5);
+  runSelected(process.argv[2], JSON.parse(process.argv[3]), JSON.parse(process.argv[4]))
+    .then(cases => process.stdout.write(JSON.stringify({schema: 'literate-ai/library-acceptance-results@1', cases}) + '\n'))
+    .catch(error => {console.error(error.stack); process.exitCode = 1;});
+}

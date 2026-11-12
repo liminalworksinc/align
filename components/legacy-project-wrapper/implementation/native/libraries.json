@@ -2507,10 +2507,10 @@
         ]
       },
       "oracle": "agent-envelope.json",
-      "verifier": "agent-envelope-stop-harness-v1.cjs",
+      "verifier": "agent-envelope-contained-v1.cjs",
       "verification_files": {
-        "agent-envelope.json": "5d693d0ed43a2fffc1be5840a3a9f04427e8d7f973dd99a81057db13f318ad3b",
-        "agent-envelope-stop-harness-v1.cjs": "58bde64098bc452165817842341a539e81340a14d3c68a6dc78d931043516f10"
+        "agent-envelope.json": "00b1e5b1c2a73a131f13675699186914021cc521cc90a45953bf01f022750287",
+        "agent-envelope-contained-v1.cjs": "3a1d21462902a39fd26891c1c89cd4d8a2bd4bc913b76e9e8656da122a164f38"
       }
     },
     {
@@ -2798,10 +2798,10 @@
         ]
       },
       "oracle": "field-validation.json",
-      "verifier": "field-validation-harness.cjs",
+      "verifier": "field-validation-contained-v1.cjs",
       "verification_files": {
-        "field-validation.json": "74b859dd962163a5af05c70d6c022ab1a14fd1224a91efd8fe7bc4dce52c5588",
-        "field-validation-harness.cjs": "05ba968d693365a329a3b25d9154a1d936896b3a0019448150b215d297f7abfd"
+        "field-validation.json": "fa571f4da2bac9068b4cf6f7d762b077eedc82b157e4a5981b0a4652df335732",
+        "field-validation-contained-v1.cjs": "b75a86215606200d827f674a13d0b7e06c5f20fe68c1b2ea5b433779295fb0b0"
       }
     },
     {
@@ -3114,10 +3114,10 @@
         ]
       },
       "oracle": "goal-approval.json",
-      "verifier": "goal-approval-harness-v1.cjs",
+      "verifier": "goal-approval-contained-v1.cjs",
       "verification_files": {
-        "goal-approval.json": "5b95784f420a2d7c1ef696e3abb7f3500aca0078a10a149dc330482286485a8c",
-        "goal-approval-harness-v1.cjs": "acd0833e5b963acfdfb7f323c2a4dc32c264781e964f6904b854759d0496b5e5"
+        "goal-approval.json": "a3c905acb4d5cf653a76ebd5e5e0fc9881d790e4d42172e08ee50f43d885bee5",
+        "goal-approval-contained-v1.cjs": "4c46753be232397ae7a88a43c12df33d5e6aaeb179eb6b8bdb474942dc246fac"
       }
     },
     {
@@ -3430,10 +3430,10 @@
         ]
       },
       "oracle": "goal-limits.json",
-      "verifier": "goal-limits-harness-v1.cjs",
+      "verifier": "goal-limits-contained-v1.cjs",
       "verification_files": {
-        "goal-limits.json": "d7c6d4ecd8f687943c77779b108bd602cb667e61cd8f4c3b1199358f75239a02",
-        "goal-limits-harness-v1.cjs": "6cfc6971d3b81bf11f86fcd2c336e3dd5dd315e5c13edb95e98254e02820a450"
+        "goal-limits.json": "2ee736dc2a807438e12f3b918f159f082d0987eca7256b37a1d6720af6c3e052",
+        "goal-limits-contained-v1.cjs": "e58f29b3bbd7f52bb299afbe7bd35851ab66165e6ea9316046e9f2687dcfa0e0"
       }
     },
     {
@@ -4073,10 +4073,10 @@
         ]
       },
       "oracle": "home-attention.json",
-      "verifier": "home-harness.cjs",
+      "verifier": "home-attention-contained-v1.cjs",
       "verification_files": {
-        "home-attention.json": "d018472f9c94d01d056cbdd4e6c8a433013a2204374b32b62c29e53246fca485",
-        "home-harness.cjs": "24929b9fb07453616f658ba629a042f4a9c80572c0cc346cfaaebe2d7181e098"
+        "home-attention.json": "e1783e4aeb90f86e0bed234225777199ebc66ba0cbf41876c8012a8007d7ea5d",
+        "home-attention-contained-v1.cjs": "3e7a8afe8a6478cad06bbee8143c44852efab8cc68709e99b45027ffbfac4af1"
       }
     },
     {
@@ -4540,10 +4540,10 @@
         ]
       },
       "oracle": "http-errors.json",
-      "verifier": "http-errors-harness.cjs",
+      "verifier": "http-errors-contained-v1.cjs",
       "verification_files": {
-        "http-errors.json": "4244ad9cb49ec270864f3c2fb61dbf0d3ea596edf4a25575967aeef03151dab6",
-        "http-errors-harness.cjs": "d0a44ae42b1775e94dc2e5496f53a148bf14d2372b20861c9f0e0359ed72c546"
+        "http-errors.json": "edf14fabf774946b66862847b55d47cd9806d16ba5f5a18b466986e7dd7ed296",
+        "http-errors-contained-v1.cjs": "bd14521bb7a656319c8bfafb7033d3219a4c38c67032571aa9b8d6d16e904223"
       }
     },
     {
@@ -4856,10 +4856,10 @@
         ]
       },
       "oracle": "identifier-tools.json",
-      "verifier": "identifier-tools-harness-v1.cjs",
+      "verifier": "identifier-tools-contained-v1.cjs",
       "verification_files": {
-        "identifier-tools.json": "89afabe2f6ba478b8b83c9277594e160f8d44f8e02d51ffb2141e7a95ee4c2de",
-        "identifier-tools-harness-v1.cjs": "647b3acec0fe8db568f478c73080a1113817ca7e4956e2de1569535436f97578"
+        "identifier-tools.json": "4c53af7bee703932881cb2b10defce3bb0117910507575f936612a2d55446fb6",
+        "identifier-tools-contained-v1.cjs": "b10d847e230689f765e1ab7d4a422af2e90cd650a56679bc42358d6ae2f1340d"
       }
     },
     {
@@ -5172,10 +5172,10 @@
         ]
       },
       "oracle": "limit-suggest.json",
-      "verifier": "limit-suggest-harness-v1.cjs",
+      "verifier": "limit-suggest-contained-v1.cjs",
       "verification_files": {
-        "limit-suggest.json": "c923510b76d2c24f6f5a04e844f80b7ffcfc335c0bc651d44b372ce72c0b0cfc",
-        "limit-suggest-harness-v1.cjs": "90203467fadc38d2d88fdf0db97d44cad01f5e1f4bac5e162b52e9e3dc1c91ab"
+        "limit-suggest.json": "6e86883e33b2243f0c3b8759bfdae97bcf6ca199798277ba18e20faf31fe1a64",
+        "limit-suggest-contained-v1.cjs": "505cfc124477ae51558ee47a59f8bc183205da79afe4edd41bacf72dbd8bc3d7"
       }
     },
     {
@@ -5463,10 +5463,10 @@
         ]
       },
       "oracle": "migration-coordinator.json",
-      "verifier": "migration-coordinator-harness.cjs",
+      "verifier": "migration-coordinator-contained-v1.cjs",
       "verification_files": {
-        "migration-coordinator.json": "ae55673b9a3a6a7c22f8b2de532497b2f717cf67348414426ac85b5e4b5a65af",
-        "migration-coordinator-harness.cjs": "a0f3bb77bf73c4092fe5e161688b21625c263d456e899a3f1cc5244895d19ec1"
+        "migration-coordinator.json": "8931b3b313a902647ac3b16f725390225a1730d6592c6979863a90c1127669b1",
+        "migration-coordinator-contained-v1.cjs": "652a9633a6d675498a0df024b43b0702e7753c522c0ad3b90d6c21e73ef4eea1"
       }
     },
     {
@@ -5779,10 +5779,10 @@
         ]
       },
       "oracle": "operator-admin.json",
-      "verifier": "operator-admin-harness-v1.cjs",
+      "verifier": "operator-admin-contained-v1.cjs",
       "verification_files": {
-        "operator-admin.json": "47ee5cf34638575da0d914905c31762e1742906455b5262d9ed2e43e819e43ff",
-        "operator-admin-harness-v1.cjs": "c39f8bc9140cd7f20ee3990e9e59f853f5e473bdb93eff4869953c279a78b7de"
+        "operator-admin.json": "a0a7acc1ccc4a96420a241f44686e3605bcb9b926b79ebcc7ebc7d1cf1d37efc",
+        "operator-admin-contained-v1.cjs": "894dbb6b4acbaba5aa5f125438ba8714afdbc467780582262379ba9006e66d77"
       }
     },
     {
@@ -6095,10 +6095,10 @@
         ]
       },
       "oracle": "operator-shortcuts.json",
-      "verifier": "operator-shortcuts-harness-v1.cjs",
+      "verifier": "operator-shortcuts-contained-v1.cjs",
       "verification_files": {
-        "operator-shortcuts.json": "db458b2f794fa73d472bb4eac19d726261da6f6baaef8e0c6468266c71ed0bfa",
-        "operator-shortcuts-harness-v1.cjs": "fe0781d219eb2dc24ec064dcf510314a11834d1948a613baee2e07cdfbd15e78"
+        "operator-shortcuts.json": "53b200c94b1362da60f4058b4130de4d4af5f7dcfc73da83c556870a223db14b",
+        "operator-shortcuts-contained-v1.cjs": "34b5c2f80fc95319f64c9f9c2ce251893c41427836994523a8116160abd73473"
       }
     },
     {
@@ -6518,10 +6518,10 @@
         ]
       },
       "oracle": "paste-lines.json",
-      "verifier": "paste_lines_library_harness.js",
+      "verifier": "paste-lines-contained-v1.cjs",
       "verification_files": {
-        "paste-lines.json": "31d0d54835a44e773c6e477b391c45252cac938df4081a235189093ab5a55882",
-        "paste_lines_library_harness.js": "828f4acfcaf853e5cc52c337f69deafca0396a8ad3472bc03427f943ffca37c7"
+        "paste-lines.json": "72da2892d1fc5b4af28fd5dc1ff22b09feb41fb395d7fb446599862d5dd4ff0c",
+        "paste-lines-contained-v1.cjs": "6a85fb3826d476f631701e07e9f70a4079d02a7e7e55a3d44843de4bb676dec9"
       }
     },
     {
@@ -6941,10 +6941,10 @@
         ]
       },
       "oracle": "policy.json",
-      "verifier": "policy-harness.cjs",
+      "verifier": "policy-contained-v1.cjs",
       "verification_files": {
-        "policy.json": "5450bcf24b9d17533dab59dc5c31a5fc60a5ff813edf6000d91b23abe7a61421",
-        "policy-harness.cjs": "b9b30d840adca57364fa397c493a11409d3f47182e832483fc15831bb9d4038d"
+        "policy.json": "3149538bc5bd7cf98be5ba690284face0f2e5f3bb48f656379481a6e919219d0",
+        "policy-contained-v1.cjs": "1a04e3bd0ce0dea985a20b4b995c90c8c08c4a089647f3d038b998d4b184c34e"
       }
     },
     {
@@ -7232,10 +7232,10 @@
         ]
       },
       "oracle": "promise-queues.json",
-      "verifier": "queues-harness.cjs",
+      "verifier": "promise-queues-contained-v1.cjs",
       "verification_files": {
-        "promise-queues.json": "0710971a2294661117a87a83b2a0b29f0008db7ee409eebf698baa32a307c4c5",
-        "queues-harness.cjs": "aba07dc3343e8b8cb40a6353477ea0d8a94214936e88cee244614cec1be4fb54"
+        "promise-queues.json": "ae46c5366e16317370e0cd9168068621c771a68ddf9d99ad317c107ae0813e42",
+        "promise-queues-contained-v1.cjs": "b4bfa8501c2ebcc2135772b47174fd9e435b978ebeae54694123692c9fa2551d"
       }
     },
     {
@@ -7548,10 +7548,10 @@
         ]
       },
       "oracle": "rate-limits.json",
-      "verifier": "rate-limits-harness-v2.cjs",
+      "verifier": "rate-limits-contained-v1.cjs",
       "verification_files": {
-        "rate-limits.json": "fb8842a7fb7c5b10b5677c7c30f9109d1e86e8617921b3da2ca6f74d9f6b8b1b",
-        "rate-limits-harness-v2.cjs": "66d047c034a6e35d00344ffbd20b8918e7c9c16d12ae69001c371ec31a4f5021"
+        "rate-limits.json": "fbb2dff3544204f4d592aa006d216deba1112edda8fb966339807f482cfc92e9",
+        "rate-limits-contained-v1.cjs": "ce628a9bb82d7f7a1d0c83b2a365870f0a44ddabe4923c7ec3926e4288d4600d"
       }
     },
     {
@@ -7864,10 +7864,10 @@
         ]
       },
       "oracle": "runtime-settings.json",
-      "verifier": "runtime-settings-harness-v4.cjs",
+      "verifier": "runtime-settings-contained-v1.cjs",
       "verification_files": {
-        "runtime-settings.json": "7c3425b6b17f930309176cd6e8feed45df6c83b34577b9105b74356c41631e3a",
-        "runtime-settings-harness-v4.cjs": "bf0b048443d9d03b259e104d0efcd7db8df65e036a129b66c7f7248c32e55e63"
+        "runtime-settings.json": "296ab03c21d947e8853b5b1db211b897a03cadaefd4b15ca129841ba6f61bd91",
+        "runtime-settings-contained-v1.cjs": "4e913e7d8ca62231baeeadb37cad5db0fb77bc59fe902d1f3ed8dceb1386d062"
       }
     },
     {
@@ -8238,10 +8238,10 @@
         ]
       },
       "oracle": "server-account-lifecycle.json",
-      "verifier": "server-account-lifecycle-harness-v3.cjs",
+      "verifier": "server-account-lifecycle-contained-v1.cjs",
       "verification_files": {
-        "server-account-lifecycle.json": "207d712f01cdcb683efa51475d4d2518fb44ee1233cc1782c1292f4601725313",
-        "server-account-lifecycle-harness-v3.cjs": "104a6955a5295c77d5b940b3400f70b456af49e87bd036d280115a1a831cc32b"
+        "server-account-lifecycle.json": "9f03c2d9c00169504f032c9a8f8de54ffbca3a7458377d74461868ac406d0f3c",
+        "server-account-lifecycle-contained-v1.cjs": "24ff97c762178a4cdaa10114b2a0c4bc142eac3a11dfe9da489c8b5e8afaa4b8"
       }
     },
     {
@@ -8554,10 +8554,10 @@
         ]
       },
       "oracle": "server-activity.json",
-      "verifier": "server-activity-harness-draft-v1.cjs",
+      "verifier": "server-activity-contained-v1.cjs",
       "verification_files": {
-        "server-activity.json": "e252f40d3f543bea04623f005fdf90db64b7106e8990c7806ddd1187e3f9a91e",
-        "server-activity-harness-draft-v1.cjs": "ebb7e66a6a3c11507cc2883e9fcbf93c35d182caa8f4ea715cb92101119ac545"
+        "server-activity.json": "b6b83ddbf71a8fbea228a020dca36ed0dfe177efb097ecff3cc7e5595d82a541",
+        "server-activity-contained-v1.cjs": "36051b98294f07a6b0f2eec3410921eba6161ec5068f68fdd4bc279b4fd6d1c8"
       }
     },
     {
@@ -8870,10 +8870,10 @@
         ]
       },
       "oracle": "server-alignments.json",
-      "verifier": "server-alignments-harness-draft-v1.cjs",
+      "verifier": "server-alignments-contained-v1.cjs",
       "verification_files": {
-        "server-alignments.json": "835d6b1bcb35766f1de7c2c969aafdadbf4f02a187e0854e1e2e2cb401236b1c",
-        "server-alignments-harness-draft-v1.cjs": "9e39c1c1f405439eb3004b2abbd391a7916466a01b6717e5643b8df660993409"
+        "server-alignments.json": "e2dc78d7e8d2dc18a9663a044533e286a44738ecc9ef2059504f84f4bf5febb2",
+        "server-alignments-contained-v1.cjs": "beebb79c5a8d4b5c92048eb65994f3f71d9b55f8262be4ff3b2d68048fec4794"
       }
     },
     {
@@ -9186,10 +9186,10 @@
         ]
       },
       "oracle": "server-allocation.json",
-      "verifier": "server-allocation-harness-draft-v2.cjs",
+      "verifier": "server-allocation-contained-v1.cjs",
       "verification_files": {
-        "server-allocation.json": "20d3e2498a21176e5c5d6476a34317a12aca60892308912cdbda8512f31df075",
-        "server-allocation-harness-draft-v2.cjs": "24560c36efc6dfbe88049a864f727d58e4eb445eb4e41025e5f9282d2b946508"
+        "server-allocation.json": "8f93829a9ba52fa00f1afabd10852b05af9393c87dd7f5448753d2342b85e4d1",
+        "server-allocation-contained-v1.cjs": "c4400358e991c96644c6a5b71299d286b8915071ec6af06c6b9ce7e9042234c6"
       }
     },
     {
@@ -9502,10 +9502,10 @@
         ]
       },
       "oracle": "server-asks.json",
-      "verifier": "server-asks-harness-draft-v2.cjs",
+      "verifier": "server-asks-contained-v1.cjs",
       "verification_files": {
-        "server-asks.json": "e04ea8a79bd52cf0fc76af21c16b79123a3f8644bdaaa1825b1076ff85989169",
-        "server-asks-harness-draft-v2.cjs": "b26875e8265c953e7170a239cc799719e93dd383e106d7fcc8b25ceea68b75dd"
+        "server-asks.json": "423c24a2565594e006c98105211d5e09e93d7c8653f323067d30ff435497b71a",
+        "server-asks-contained-v1.cjs": "f48b6eb4e7ea52bd920a0ccf7117d08d0ea4f544a2b69b30fc40c3bd519228c7"
       }
     },
     {
@@ -9818,10 +9818,10 @@
         ]
       },
       "oracle": "server-auth.json",
-      "verifier": "server-auth-harness-v5.cjs",
+      "verifier": "server-auth-contained-v1.cjs",
       "verification_files": {
-        "server-auth.json": "3e49eba125fabf605ad85c734c548d805780cb27d8e4ae7e551a63b3242729a1",
-        "server-auth-harness-v5.cjs": "f7403a979065e698b1ad2d33a4f4c2af56cc5aa0670037572908343e23f3e0e4"
+        "server-auth.json": "e3bbb2f2e70c3c45a39dc3d2e090330b06e9478d72bc9a035bf43a88e0f74910",
+        "server-auth-contained-v1.cjs": "93fd3788792995dbeac313e31dac9c62bfd717aa96e3db3a6305dd22b349abd5"
       }
     },
     {
@@ -10134,10 +10134,10 @@
         ]
       },
       "oracle": "server-change-read.json",
-      "verifier": "server-change-read-harness-draft-v2.cjs",
+      "verifier": "server-change-read-contained-v1.cjs",
       "verification_files": {
-        "server-change-read.json": "e0805fb5071850b96730d083076665914261e8e19c03ff257c6ca86e120c936a",
-        "server-change-read-harness-draft-v2.cjs": "1bcf98fb56def8073ace8dff90f7593585847c29c279ce67c8ec9999c3578d54"
+        "server-change-read.json": "a1b9813f1b93d78570c7ccc92f55c57c48709340931a1555809a3d0dcf679ff1",
+        "server-change-read-contained-v1.cjs": "3b10cb8c66ac095f3ee99acf96b19dd10ed437e6d0a1328d88db9271d641bb1e"
       }
     },
     {
@@ -10450,10 +10450,10 @@
         ]
       },
       "oracle": "server-changes.json",
-      "verifier": "server-changes-harness-draft-v1.cjs",
+      "verifier": "server-changes-contained-v1.cjs",
       "verification_files": {
-        "server-changes.json": "65206cf9349cd837cca1286223b4e4514e9bab36e87db9b58ecaa0e81a115e35",
-        "server-changes-harness-draft-v1.cjs": "f56e015480b54bbd79ababf1b97fa769304d154cd87d23c41cf263f3c77c45e1"
+        "server-changes.json": "01cbc325812956fec790e0492701879085f321075d8794a4ab2fbd171ad2fe0e",
+        "server-changes-contained-v1.cjs": "d5dfccc604b97ef0329eae347c85e38c47da1aa6a42c647a8ca5e0c3db91b1da"
       }
     },
     {
@@ -10766,10 +10766,10 @@
         ]
       },
       "oracle": "server-client-keys.json",
-      "verifier": "server-client-keys-harness-v3.cjs",
+      "verifier": "server-client-keys-contained-v1.cjs",
       "verification_files": {
-        "server-client-keys.json": "28363fc8ce38204e3493cd37fca4764aaaf7bd5a63fda3a0c0db2aaa32571863",
-        "server-client-keys-harness-v3.cjs": "07ca9d5d3e924fc3e4f67a64c4e6f8a9a04f85ce2b0a186055d9e2829320efdb"
+        "server-client-keys.json": "14440cb245ca392b31c31fbedf5f0fd1380cb77e018a75e4b70f6f7ba1f571b5",
+        "server-client-keys-contained-v1.cjs": "60c1767931e92807d06ebca147ff883051d6da693d230ccbd4688b6a722425fb"
       }
     },
     {
@@ -11082,10 +11082,10 @@
         ]
       },
       "oracle": "server-connected-apps-routes.json",
-      "verifier": "server-connected-apps-routes-harness-v1.cjs",
+      "verifier": "server-connected-apps-routes-contained-v1.cjs",
       "verification_files": {
-        "server-connected-apps-routes.json": "99bc460c80769d1a3457c947ce9f92dd2cd815d6eb36d23e902d7bd1ca10a808",
-        "server-connected-apps-routes-harness-v1.cjs": "3314363123e66cef3feb0699ab16631f83630572f73b236b74779121292cf6b3"
+        "server-connected-apps-routes.json": "a44dedeb8bbd59b9c75b0efbb7d987226c68278298b040a6d7a0e6bc94225f0f",
+        "server-connected-apps-routes-contained-v1.cjs": "29e111a424fa559160359cf981c2b289e8d6a61995209d30e2f8c35a37d19429"
       }
     },
     {
@@ -11456,10 +11456,10 @@
         ]
       },
       "oracle": "server-core.json",
-      "verifier": "server-core-harness-v4.cjs",
+      "verifier": "server-core-contained-v1.cjs",
       "verification_files": {
-        "server-core.json": "27430ff057ebd32fc8dcbf5408f64b249582ea654af0ebe368df6903ddfe49f1",
-        "server-core-harness-v4.cjs": "bf4e3d7b3ca20ffa8ec0a39cbfa31426e06e84bec65e747916dbef3e6168f962"
+        "server-core.json": "4f6616bdeeb5f9f725badafd1b2fcaef1e5aa057260d61053f63afa4af6252e6",
+        "server-core-contained-v1.cjs": "7d8a297df98709eb489ce15a80211451b9a22b23b434b96304899b019133024d"
       }
     },
     {
@@ -11772,10 +11772,10 @@
         ]
       },
       "oracle": "server-creation-compatibility.json",
-      "verifier": "server-creation-compatibility-harness-v1.cjs",
+      "verifier": "server-creation-compatibility-contained-v1.cjs",
       "verification_files": {
-        "server-creation-compatibility.json": "adf3c391efda497b99329042398eb9f6ff85779ba64ce33f88e5703d59ea491c",
-        "server-creation-compatibility-harness-v1.cjs": "3976708652f0f959436f29f3f021972f5ba3d8a4ef88b7968fd344650d2e7293"
+        "server-creation-compatibility.json": "e94ed0ba4d7f528a08a2a92dff379f2c629f82864eaf7449de9a19e6c1f667ad",
+        "server-creation-compatibility-contained-v1.cjs": "fe3ab2222f53636934711e1341af62c77075d6d71f91af8960087d5d101e0a28"
       }
     },
     {
@@ -12088,10 +12088,10 @@
         ]
       },
       "oracle": "server-devices.json",
-      "verifier": "server-devices-harness-draft-v1.cjs",
+      "verifier": "server-devices-contained-v1.cjs",
       "verification_files": {
-        "server-devices.json": "61e1c10c007f544b92ee8fafded49552796ff8b80c1f4bf8f53ff4f033340522",
-        "server-devices-harness-draft-v1.cjs": "ac9dd89dadfeccd1fc7a5ff1609f08c1af8c4c6a42c1b2ccbd5f2a83b953a34f"
+        "server-devices.json": "af4412c80ed4a6c91ecf5521c85d6694f300dadb7883725074ad405e81ef7772",
+        "server-devices-contained-v1.cjs": "dd205cc6c9e3778f3a276b2ee855fd238589712e87d4ef3b9b9e8ff4569ba38f"
       }
     },
     {
@@ -12404,10 +12404,10 @@
         ]
       },
       "oracle": "server-directives.json",
-      "verifier": "server-directives-harness-draft-v3.cjs",
+      "verifier": "server-directives-contained-v1.cjs",
       "verification_files": {
-        "server-directives.json": "3d326d1e5f6bdbdcd995b9a33a009b8ac0df435be640f7a581e98a7389a0601d",
-        "server-directives-harness-draft-v3.cjs": "ca3ce00bbd1ebd7b6da81fb2d4fcfc8f683db9f5883d6a294dfd13e7dc6287ff"
+        "server-directives.json": "5b814982b165597c136644ca9777d5b32cf55d025179a73a61f859bae6c783f2",
+        "server-directives-contained-v1.cjs": "a5dc02607b7e7bdc6277d4b81129721cf236c419f96ff838a5c777cb3e9f297e"
       }
     },
     {
@@ -12720,10 +12720,10 @@
         ]
       },
       "oracle": "server-evidence.json",
-      "verifier": "server-evidence-harness-draft-v1.cjs",
+      "verifier": "server-evidence-contained-v1.cjs",
       "verification_files": {
-        "server-evidence.json": "b1f748d80336cc9d8075c1e8eda766dc4fa96287f200d0441489c2e42c142a48",
-        "server-evidence-harness-draft-v1.cjs": "066f3e75e39e13791a5d667ccd4afd1841974fed5aa4143a43479a85282bdbba"
+        "server-evidence.json": "df76f40d67d24a1e7b6eb28c3a9dc2d3c8bfa0c80a165bee10102440357aeba0",
+        "server-evidence-contained-v1.cjs": "bfcb82d859d3272c6d6484f244da9dc0587d4a75dec524691e0b56e95d64bd3a"
       }
     },
     {
@@ -13036,10 +13036,10 @@
         ]
       },
       "oracle": "server-goal-activity.json",
-      "verifier": "server-goal-activity-harness-draft-v1.cjs",
+      "verifier": "server-goal-activity-contained-v1.cjs",
       "verification_files": {
-        "server-goal-activity.json": "1f6098e54c2322e86afa8ea99a56ef2b5d98b75c8cf560b830b04d0268615962",
-        "server-goal-activity-harness-draft-v1.cjs": "cb6671ad8a9337d6147dad6d6d9e261d369230be1b0990ed89e3c143e6298ddd"
+        "server-goal-activity.json": "e3cb582850d2f4f57d389cbadcaf897a88126de38851efcb94cd404ff9627380",
+        "server-goal-activity-contained-v1.cjs": "dca7c2b33b214faa24cd63a4480dd88f6f3ac7e2ccdcaed263bdb1616ea81901"
       }
     },
     {
@@ -13352,10 +13352,10 @@
         ]
       },
       "oracle": "server-goals.json",
-      "verifier": "server-goals-harness-draft-v3.cjs",
+      "verifier": "server-goals-contained-v1.cjs",
       "verification_files": {
-        "server-goals.json": "de8c75c2f7c7d4a153e7732fddd078f1f198b050492721914a1cfdce03cf0b30",
-        "server-goals-harness-draft-v3.cjs": "d5d6622ab91b05dbda8e6421dc1b71258f113aecb7364d027ba405d54914fb88"
+        "server-goals.json": "01328e8fa265685c0348d4e468616842525b7f9a66b71e62b1bca4e6dd07057e",
+        "server-goals-contained-v1.cjs": "634a7bbc29a54501eef94c316744aeab8e396c8c1226b730feb2dde0b1dbff3d"
       }
     },
     {
@@ -13668,10 +13668,10 @@
         ]
       },
       "oracle": "server-goals-deliberation-routes.json",
-      "verifier": "server-goals-deliberation-routes-harness-v4.cjs",
+      "verifier": "server-goals-deliberation-routes-contained-v1.cjs",
       "verification_files": {
-        "server-goals-deliberation-routes.json": "9bc2617524bae5186cfe10aea2641331a22cd3ba23ab7bd102a197164d2609d1",
-        "server-goals-deliberation-routes-harness-v4.cjs": "d761c61cb6727d340128e928ff0c49106db0223ceb02c300ef48a41aa2923cc2"
+        "server-goals-deliberation-routes.json": "8d2012ebd103ba599c97d3a2ba0883ea7bf3261bb9ab7a01763ddc3bcb583a53",
+        "server-goals-deliberation-routes-contained-v1.cjs": "1680e46690bd18a2a64ad99330ef5b33f099868949955099feda8e338657b439"
       }
     },
     {
@@ -13984,10 +13984,10 @@
         ]
       },
       "oracle": "server-home.json",
-      "verifier": "server-home-harness-draft-v1.cjs",
+      "verifier": "server-home-contained-v1.cjs",
       "verification_files": {
-        "server-home.json": "f78f1981ab310f3e3ef82661ccddb9a4934898f10d23f834cb572b1c92597135",
-        "server-home-harness-draft-v1.cjs": "cbba430061f38fee5f78f165c275f332134417ad67b5407f2f83ce3377a7271a"
+        "server-home.json": "2b5c3c158495a88ce7c8c28df11a8c8cc0fb6159a939dbd84621e7c2fdf43dcc",
+        "server-home-contained-v1.cjs": "c065120b34a79f8d37eb43b83040acb843f2e0762b2dd31bd13b49976638b56c"
       }
     },
     {
@@ -14300,10 +14300,10 @@
         ]
       },
       "oracle": "server-identity-effects.json",
-      "verifier": "server-identity-effects-harness-v4.cjs",
+      "verifier": "server-identity-effects-contained-v1.cjs",
       "verification_files": {
-        "server-identity-effects.json": "40ea4bc8dbf14f15aefbe390e4f5daa67059db85da28c8001351ef90735d6111",
-        "server-identity-effects-harness-v4.cjs": "9261236c85a1c39ed69c95615a1045b2f3e7bc95930ddc29047d22a0e76d4a6f"
+        "server-identity-effects.json": "6def3008ee08266fc793b6418fa9ff82336decb79ecc392f945abd1b01939307",
+        "server-identity-effects-contained-v1.cjs": "46d03c1e98954bc4fce2384d5612930a9f1590753a9012473fa9fedc3d8c0b44"
       }
     },
     {
@@ -14616,10 +14616,10 @@
         ]
       },
       "oracle": "server-identity-routes.json",
-      "verifier": "server-identity-routes-harness-v4.cjs",
+      "verifier": "server-identity-routes-contained-v1.cjs",
       "verification_files": {
-        "server-identity-routes.json": "3316d0b1b60dcd587e01306f620a186c4eb17347dd53ae9a81e6c2a9ac037e53",
-        "server-identity-routes-harness-v4.cjs": "860a0b076610be47d814a5f136e9f03b4e0b91d0bff031f47592b567a898ff7d"
+        "server-identity-routes.json": "23b897f0728056cbd7466d82f5adcd7ccc90a1ff63aed2f9be10a7ecf703933c",
+        "server-identity-routes-contained-v1.cjs": "556bd31565eb82f86ada2a439962079e1a0c386996fec4e1f9c321feadc4d234"
       }
     },
     {
@@ -14932,10 +14932,10 @@
         ]
       },
       "oracle": "server-local-owner-bootstrap.json",
-      "verifier": "server-local-owner-harness-v1.cjs",
+      "verifier": "server-local-owner-bootstrap-contained-v1.cjs",
       "verification_files": {
-        "server-local-owner-bootstrap.json": "92197c48ca8b7be819aa30df83566a8f9e7a663943ba9e92cba040acb7fa2c80",
-        "server-local-owner-harness-v1.cjs": "1cd4ba2366fcddc59af76abcb1db1853b692e0bb342fedcf610e49c564c5becf"
+        "server-local-owner-bootstrap.json": "7e6cf8eb7ef9331d10f243af17327febbda1d6c6d31503203e940533a920048b",
+        "server-local-owner-bootstrap-contained-v1.cjs": "aae8dcf39bfe4ce49ffd7187f4135d4e14f346339d83882a20ae470ef9e7c5e9"
       }
     },
     {
@@ -15248,10 +15248,10 @@
         ]
       },
       "oracle": "server-metrics.json",
-      "verifier": "server-metrics-harness-v2.cjs",
+      "verifier": "server-metrics-contained-v1.cjs",
       "verification_files": {
-        "server-metrics.json": "dd52c7a5d819ab1c6a24ffc37176c3ad98815a10744014952b296d58674071f8",
-        "server-metrics-harness-v2.cjs": "85bf334a36da9451d702b5e9e5d195043d25c0e079f461d9615999c4b16eed59"
+        "server-metrics.json": "64c50158eec97cfd7f03b22dcad34f2ff893aaf7ef7a52ea2cc407e99cf17368",
+        "server-metrics-contained-v1.cjs": "608f9760df30d2435354b1425455afb14d0eb8841a826879f585d9d2f3c70aaa"
       }
     },
     {
@@ -15564,10 +15564,10 @@
         ]
       },
       "oracle": "server-readiness.json",
-      "verifier": "server-readiness-harness-v3.cjs",
+      "verifier": "server-readiness-contained-v1.cjs",
       "verification_files": {
-        "server-readiness.json": "b49312bd0ba3616a7ba3d376aa83c4e3cc2317a60c15ab40f570e3865cc836e0",
-        "server-readiness-harness-v3.cjs": "fc6cde7b03311a482b09d008d281349aba6db1f19af72944aaa682c5666658c1"
+        "server-readiness.json": "9e02bd1f30caba66c3d8784baef3bcd561f96807256e4b8c057f969fc8cd70df",
+        "server-readiness-contained-v1.cjs": "eb79624f82a51544b6b9eb6d56a1762ec6f7f752ee772ee1f6af22518432c5bf"
       }
     },
     {
@@ -15880,10 +15880,10 @@
         ]
       },
       "oracle": "server-reallocations.json",
-      "verifier": "server-reallocations-harness-draft-v2.cjs",
+      "verifier": "server-reallocations-contained-v1.cjs",
       "verification_files": {
-        "server-reallocations.json": "9375d46913230493523a57f094cdc5f31ccc5995060ab3845efa28485d8c98e8",
-        "server-reallocations-harness-draft-v2.cjs": "922b96551bbca9d9a2950e82fa4060a8b9891d06dff6ffddbece5813bc073e5e"
+        "server-reallocations.json": "c225881d0c86425364eafec19b2a09a0abe4d10f9ccb54113a172ba590581c0e",
+        "server-reallocations-contained-v1.cjs": "1d16c83a74b0fc53589a57deeefb8fa5a021a6b87c87da7d118118fda4b1ada9"
       }
     },
     {
@@ -16240,10 +16240,10 @@
         ]
       },
       "oracle": "server-request-effects.json",
-      "verifier": "server-request-effects-harness-v3.cjs",
+      "verifier": "server-request-effects-contained-v1.cjs",
       "verification_files": {
-        "server-request-effects.json": "c11db8310b0fca8325913e3735278aed6ede7b89841c2ef66688b58b5647d66f",
-        "server-request-effects-harness-v3.cjs": "354110bc87ae24f52b2b3f60774da799a9375430f531cf5308a2a949d9b08afb"
+        "server-request-effects.json": "174f5871f6da3033a04d160182ae0c98b7f3016bfbe4428d189efd02ca3e2916",
+        "server-request-effects-contained-v1.cjs": "9996e2a7d260161e0b6c1278c042bfb68127dc8010473ac8c98ea81b8e8fb35e"
       }
     },
     {
@@ -16556,10 +16556,10 @@
         ]
       },
       "oracle": "server-requests.json",
-      "verifier": "server-requests-harness-draft-v1.cjs",
+      "verifier": "server-requests-contained-v1.cjs",
       "verification_files": {
-        "server-requests.json": "950b45e0e2515eed7b95f23bc99cba8b10cc95fd70b3744121e932dfed94db51",
-        "server-requests-harness-draft-v1.cjs": "f55eb8cfab7e77a567c864a6a086311719c4ed481f1001113b1f585ad90c68aa"
+        "server-requests.json": "4610af404bda0b49865ef509fb8763e9691ad7b2b2b9ce64d894f78fb44d0396",
+        "server-requests-contained-v1.cjs": "98724e72006f4c534638f21ea7b9bd6c3b870af6d845dcca4a0228515855a422"
       }
     },
     {
@@ -16916,10 +16916,10 @@
         ]
       },
       "oracle": "server-retention.json",
-      "verifier": "server-retention-harness-v2.cjs",
+      "verifier": "server-retention-contained-v1.cjs",
       "verification_files": {
-        "server-retention.json": "cc6602ef6430ad15fbc3ddbd14e2f98a73104a6b1b35b50a5cf92840b0a309bf",
-        "server-retention-harness-v2.cjs": "feec85c2c993d454b9d8923a355749f80d0be5189fdd535b193a7fa828b7cd31"
+        "server-retention.json": "d5e7267fd65dacbe70b0e3e708e0172172ece138dc5636bff7662dd16b8b10e7",
+        "server-retention-contained-v1.cjs": "110a0cf552cb93eac89dc9d385f37e1d358277fa02015b65fc90870f01bed2ef"
       }
     },
     {
@@ -17263,10 +17263,10 @@
         ]
       },
       "oracle": "server-sample.json",
-      "verifier": "server-sample-harness-v1.cjs",
+      "verifier": "server-sample-contained-v1.cjs",
       "verification_files": {
-        "server-sample.json": "6be80c1ca68dc612b2ed47065c8fee2bf5dccb28c62a9001eaa07c0f3049335b",
-        "server-sample-harness-v1.cjs": "50e14e6eb885c84f0cc713f55b1350a159588bf21bbfd15d896d3624194ed50d"
+        "server-sample.json": "2d7484f61525061626b908ce6ab692fbeb7d14336c62954887e38416065be824",
+        "server-sample-contained-v1.cjs": "4ef93624d3d1d183fe2671854cf8ac46475096c83971fbaac442232051ae6375"
       }
     },
     {
@@ -17579,10 +17579,10 @@
         ]
       },
       "oracle": "server-secrets.json",
-      "verifier": "server-secrets-harness-v1.cjs",
+      "verifier": "server-secrets-contained-v1.cjs",
       "verification_files": {
-        "server-secrets.json": "aca8f6b7ab8fb9e0b027204d1a4e1bbbc9a61da3798ff31798c1f1bea893dd88",
-        "server-secrets-harness-v1.cjs": "fc829b455d5ecfc4cb078ac1b03dba37ece04e9e5ab426b2f318b279040e6233"
+        "server-secrets.json": "ae3279cc88e558134783b78d42a855e055b9af3ed5ef44df18316de4f2848d90",
+        "server-secrets-contained-v1.cjs": "27ad7cb08e7b0ad360d9b5ff6eb7e9ce6cddf4bc37f643ef25c7506e5ef4870e"
       }
     },
     {
@@ -17895,10 +17895,10 @@
         ]
       },
       "oracle": "server-sessions.json",
-      "verifier": "server-sessions-harness-draft-v3.cjs",
+      "verifier": "server-sessions-contained-v1.cjs",
       "verification_files": {
-        "server-sessions.json": "45ed9fb5a801ce51c6c72cd16fd088b2c50911ffcd3095fcaad7390221219791",
-        "server-sessions-harness-draft-v3.cjs": "b1e26fea521c5c0f9546c6994bcccea0abd508ce207581fb51290a557ff4d5dd"
+        "server-sessions.json": "d28cf4297135ac8a64222016d2dacf31da1d5315321f1be70fd42bcedcd95934",
+        "server-sessions-contained-v1.cjs": "66eb192b92eee3993e14e43acbe210707f2268e32abc5eb15ef0131d0a639808"
       }
     },
     {
@@ -18211,10 +18211,10 @@
         ]
       },
       "oracle": "server-sessions-directives-routes.json",
-      "verifier": "server-sessions-directives-routes-harness-v5.cjs",
+      "verifier": "server-sessions-directives-routes-contained-v1.cjs",
       "verification_files": {
-        "server-sessions-directives-routes.json": "219b570382d879a13fae47ced75bcc64db54449641c444acc5026c630cca5a14",
-        "server-sessions-directives-routes-harness-v5.cjs": "02cd7448c8ab1127d6dc5464eee7d89f019ee114f02237d72915b7045567119c"
+        "server-sessions-directives-routes.json": "2401af7dda4e58b398ae1468b88da0398e201aaa0b2891151bfffb0e9706302a",
+        "server-sessions-directives-routes-contained-v1.cjs": "4c49e9d126d703faeb1b27d18b6cad28281e3c25bdfa4d45dd226601b5c76f4c"
       }
     },
     {
@@ -18527,10 +18527,10 @@
         ]
       },
       "oracle": "server-spend.json",
-      "verifier": "server-spend-harness-draft-v2.cjs",
+      "verifier": "server-spend-contained-v1.cjs",
       "verification_files": {
-        "server-spend.json": "e45b797963f4a3b0a2421c8762127e9a7cf3a6144fed12c639d1b2bcf221162b",
-        "server-spend-harness-draft-v2.cjs": "fb07e202186de4a5723fc7581485af8735341f3103e3375339c393a7bf513040"
+        "server-spend.json": "93a6c7af40e499a18f59171560ae9eb4551e9b37ca254f6c2e2ea5b9034355a7",
+        "server-spend-contained-v1.cjs": "aa2249a7b70baa4c583f5bbfef0e6779c62b1dbd69404d5dd99bc0143ace15bf"
       }
     },
     {
@@ -18843,10 +18843,10 @@
         ]
       },
       "oracle": "server-startup.json",
-      "verifier": "server-startup-harness-v2.cjs",
+      "verifier": "server-startup-contained-v1.cjs",
       "verification_files": {
-        "server-startup.json": "65d81170d6b5b88135c4b0e49af5fc7e0bb5b8f81877a09bfee49140d80e7b22",
-        "server-startup-harness-v2.cjs": "5d9067db88fa4595dea7021b17c0abbd2fcf9767802b21ebad2c1a15e1f5a3e6"
+        "server-startup.json": "27dc3624b5bb0c2c4d13bd9a1b7aabb27967aad0f3d2904d4ed4ec1a5231d4d0",
+        "server-startup-contained-v1.cjs": "f2fd95e397745c931ea7bdcc93e1a913ad043bdc7256f57387a5751e5859ce3f"
       }
     },
     {
@@ -19159,10 +19159,10 @@
         ]
       },
       "oracle": "server-steering.json",
-      "verifier": "server-steering-harness-draft-v2.cjs",
+      "verifier": "server-steering-contained-v1.cjs",
       "verification_files": {
-        "server-steering.json": "952ed86d1a58d98382d7abc1178b129b87e66e99f72bfa4e86502c2559ae5292",
-        "server-steering-harness-draft-v2.cjs": "32da61104b38cb3d84042cefc85640a5346effa085204f247c823529ae679234"
+        "server-steering.json": "4d7b7cf9fdba4c244596cc3a65017571d0c7139ae29103261aaa7eee05105fd5",
+        "server-steering-contained-v1.cjs": "f42fed6832c0823af897203940b56d557c77a8d998a4b91f4d5b71e42e466237"
       }
     },
     {
@@ -19475,10 +19475,10 @@
         ]
       },
       "oracle": "server-team-asks-routes.json",
-      "verifier": "server-team-asks-routes-harness-v3.cjs",
+      "verifier": "server-team-asks-routes-contained-v1.cjs",
       "verification_files": {
-        "server-team-asks-routes.json": "e602ab53a2a12a1110cda3475ef3c03b2dd97b595328bb626794ef2980884883",
-        "server-team-asks-routes-harness-v3.cjs": "758287ada9b5cdd72006723cf7c022ab25c54434e78efa27f1c7de3688a68fc4"
+        "server-team-asks-routes.json": "bd4ed62a7caa1397c5d2899a4035825e0a4878a695a5c55fed6125158447fbc0",
+        "server-team-asks-routes-contained-v1.cjs": "c02545b392359d15fb51d7ea0ab2bb929b1c0fd8ba791ed8f90469eefc9a0543"
       }
     },
     {
@@ -19791,10 +19791,10 @@
         ]
       },
       "oracle": "server-value.json",
-      "verifier": "server-value-harness-draft-v2.cjs",
+      "verifier": "server-value-contained-v1.cjs",
       "verification_files": {
-        "server-value.json": "3f3d9eae38da6525447fd5f05e8eba974c307d41ce94ee6d6e6a9047af8c6232",
-        "server-value-harness-draft-v2.cjs": "9e489c0595a0b359e4ff67f99bbcdfc43cf381395a0eb8c5cfbc5e29f8e9d45e"
+        "server-value.json": "22cd4e4081bb688814912e83a8336c61ec81d87812ad18c50adb02c11e371e9a",
+        "server-value-contained-v1.cjs": "a0221cfacde098e22c9cc72c4a3ccf1c45e38473ea0bf90f39da3a251f6de2a5"
       }
     },
     {
@@ -20107,10 +20107,10 @@
         ]
       },
       "oracle": "server-workspace-admin-routes.json",
-      "verifier": "server-workspace-admin-routes-harness-v3.cjs",
+      "verifier": "server-workspace-admin-routes-contained-v1.cjs",
       "verification_files": {
-        "server-workspace-admin-routes.json": "cc8e4c67347a23afb338368b682d537fa200b32625c002a1a09dc59b996f3bb4",
-        "server-workspace-admin-routes-harness-v3.cjs": "bef15c3881bfa93a82f92b8209d7607767cb18a8710e1508e260489ec7a5dffd"
+        "server-workspace-admin-routes.json": "3bdf9c1003ba75ef06cace117070a09fb980337a785bcd5256040009d44d8a37",
+        "server-workspace-admin-routes-contained-v1.cjs": "9861eed424d9dc21f488aa8bd9a5d5158c592815f30fc4fbd3eda422913acc4e"
       }
     },
     {
@@ -20570,10 +20570,10 @@
         ]
       },
       "oracle": "server-workspace-admission.json",
-      "verifier": "workspace-admission-harness-v6.cjs",
+      "verifier": "server-workspace-admission-contained-v1.cjs",
       "verification_files": {
-        "server-workspace-admission.json": "98c2f154f44de58791af904ca33d1dd0cf62f73315a76c9691f95ed53b4b3b57",
-        "workspace-admission-harness-v6.cjs": "7d75ec94f93709683524889d4777a91a3bb1b44614149a419b6600e698754553"
+        "server-workspace-admission.json": "bba0d015672003ffe57b2eae5332bc9cfd420c6449c53c267e572c6ed7f764c9",
+        "server-workspace-admission-contained-v1.cjs": "e0695ca787b3fea1fb5f89ffeafd094439e8348ea9e0308e4c42e307eeef47a7"
       }
     },
     {
@@ -20886,10 +20886,10 @@
         ]
       },
       "oracle": "server-workspace-reporting-routes.json",
-      "verifier": "server-workspace-reporting-routes-harness-v1.cjs",
+      "verifier": "server-workspace-reporting-routes-contained-v1.cjs",
       "verification_files": {
-        "server-workspace-reporting-routes.json": "02e040ff78a2a27727c3e7b8e9dca8ea71c14d724e316b501c36b434aaf5c79e",
-        "server-workspace-reporting-routes-harness-v1.cjs": "482190196ad10356ab39a1d815bae598e2790db20b32a6f80aee11eb442cf409"
+        "server-workspace-reporting-routes.json": "bf2cf129704ec26f31d54845b72c7e9a16daa66022ad9ed22ece1171465110e1",
+        "server-workspace-reporting-routes-contained-v1.cjs": "46822120d418edb88b8dd78b0477dfcc8ef5ca145b476ce4115abdcf2066915a"
       }
     },
     {
@@ -21202,10 +21202,10 @@
         ]
       },
       "oracle": "server-workspaces.json",
-      "verifier": "server-workspaces-harness-v4.cjs",
+      "verifier": "server-workspaces-contained-v1.cjs",
       "verification_files": {
-        "server-workspaces.json": "090238d5fe85a4115fbe031b072af19a95d12b495427bedd33c8a372cf556708",
-        "server-workspaces-harness-v4.cjs": "e7d93a7d2b7c8eae29ac3c5aa50e23df8a55b870b44a5761c9aaab78a7d80f8a"
+        "server-workspaces.json": "1a393c1de35eec7e8c504f5a0d19264760a04032c9dc5d0e91a78a18ac2cb33c",
+        "server-workspaces-contained-v1.cjs": "396c1e0404f4be75ae1f5190092697a29069987efd352ac5958295ba31ddb0ee"
       }
     },
     {
@@ -21581,10 +21581,10 @@
         ]
       },
       "oracle": "share-again.json",
-      "verifier": "share-again-harness.cjs",
+      "verifier": "share-again-contained-v1.cjs",
       "verification_files": {
-        "share-again.json": "1e5acc246133ed805b11edd04a06260f2e1312505d3ecbdf4f24796fdc744b41",
-        "share-again-harness.cjs": "64a28be0a6466ba64eb80b9056e3565cae042f9ac17e65d8449c1a5c54028e92"
+        "share-again.json": "9eb885d756e09ccb7e0182b96c1ea92d0ef395298f3988e29ca9020d44b3383e",
+        "share-again-contained-v1.cjs": "68cbe6607b0f848eade307631e1521a170d92e0bd273e8559b49a408cf5492a7"
       }
     },
     {
@@ -22004,10 +22004,10 @@
         ]
       },
       "oracle": "share-notices.json",
-      "verifier": "notices-harness.cjs",
+      "verifier": "share-notices-contained-v1.cjs",
       "verification_files": {
-        "share-notices.json": "d4b7b6ed11374df36c1fecf3498f56715c73e15308b893f3a028097fbee450cb",
-        "notices-harness.cjs": "699241d2bd9cbf9d9a81fc9fb323617294c46e1b718eaa11505c002e1a988816"
+        "share-notices.json": "9e67d0ac4613a03a840ba7827ab3405aba40c3162d8c25849ee426bd7272d236",
+        "share-notices-contained-v1.cjs": "9a9cceeb543322cce1fe57ae0faa29fb2c1232479c4680181768a38dc86b8965"
       }
     },
     {
@@ -22339,10 +22339,10 @@
         ]
       },
       "oracle": "shell-words.json",
-      "verifier": "shell-harness.cjs",
+      "verifier": "shell-words-contained-v1.cjs",
       "verification_files": {
-        "shell-words.json": "20e3b3f83f45fb8166798987ad37870c06477bf31e7febfd4dd48c72800dd0c6",
-        "shell-harness.cjs": "33d08adbc1c18495ccffce80d760c153102eec29e2b7999ff4f189b120d9bb0a"
+        "shell-words.json": "385a27c0c20ce13f4717940416b0feec864f00e935c8379a30356ceaa30e9694",
+        "shell-words-contained-v1.cjs": "476fca4019686da9202890f26eccf2d115801d0a14be625ddb6ef6b0c733aa08"
       }
     },
     {
@@ -22901,10 +22901,10 @@
         ]
       },
       "oracle": "spend-meter.json",
-      "verifier": "spend-library-harness.cjs",
+      "verifier": "spend-meter-contained-v1.cjs",
       "verification_files": {
-        "spend-meter.json": "9c2eb5b70cba55afc54b330e608167944700566c845634788e1dfdfb6865469c",
-        "spend-library-harness.cjs": "32b8314796ecbef053d170dc13425a24c77a868473ed4ca5bce92f2c5cfe0ce9"
+        "spend-meter.json": "b8c5e39212f9213cc1b6572696ae0423e638cc66e7050a92f0eaf7bc8b746cfb",
+        "spend-meter-contained-v1.cjs": "a5c2bd2a0a3d96aa158d5b1c1d3206cb7f328ca70fc61ef3c5f8ad27deefaf01"
       }
     },
     {
@@ -23192,10 +23192,10 @@
         ]
       },
       "oracle": "spend-rounding.json",
-      "verifier": "rounding-harness.cjs",
+      "verifier": "spend-rounding-contained-v1.cjs",
       "verification_files": {
-        "spend-rounding.json": "b687fe79eb0e11ae4d69217eef4f2a2bd5c7522cd99e7a7df09615f97ed97406",
-        "rounding-harness.cjs": "2f79b38388f5d32506321e8cfe782eb8f24989af1074e4dda205ff7e1a4d4761"
+        "spend-rounding.json": "b6428dbf623e1da319daaa38a195d5f80f85eb96c81b847955acd83b077bf749",
+        "spend-rounding-contained-v1.cjs": "a84d2a05ab507b18830debe71e9de1cdcd2812995d00fda9a5c24d07e7ce83ac"
       }
     },
     {
@@ -23754,10 +23754,10 @@
         ]
       },
       "oracle": "spend-stream.json",
-      "verifier": "stream-harness.cjs",
+      "verifier": "spend-stream-contained-v1.cjs",
       "verification_files": {
-        "spend-stream.json": "8483e0be453d0fc44cd730fedea25bce04b013511efdbcb75ce9036f564eea1a",
-        "stream-harness.cjs": "6736b066696c305c66bdd420c7dd42ad97373b52ed0dc64a7058896ae0c0098b"
+        "spend-stream.json": "d84aa009992d079ec9aa31fdb188ee7cc51bec92e607dcee03d7df0d0eec65b6",
+        "spend-stream-contained-v1.cjs": "67f79ab4830567f2e718192be19565b8726e2dc640ddbbd7d19ae3bb42957307"
       }
     },
     {
@@ -24070,10 +24070,10 @@
         ]
       },
       "oracle": "storage-runtime.json",
-      "verifier": "storage-runtime-harness-v2.cjs",
+      "verifier": "storage-runtime-contained-v1.cjs",
       "verification_files": {
-        "storage-runtime.json": "2b2f811ecc30769e0b168a24b39a7061bdc93a271053d06058ef5fd86efaf539",
-        "storage-runtime-harness-v2.cjs": "0fc1b12cfa2e07b143b0496e796c8ef1268e3f07f44d09b1cdd7ee095dd7db36"
+        "storage-runtime.json": "608badbc6ae2f71f5b1a52e2c19387fbe3a45c5df05ca9932cb5d5be39f19618",
+        "storage-runtime-contained-v1.cjs": "c1e82938af1e82dc5f2ff591be42465b23885db5b7e5d826519f8d7bb9e125bd"
       }
     },
     {
@@ -24396,10 +24396,10 @@
         ]
       },
       "oracle": "storage-schema.json",
-      "verifier": "storage-schema-harness-v4.cjs",
+      "verifier": "storage-schema-contained-v1.cjs",
       "verification_files": {
-        "storage-schema.json": "03e86ce28624a080dc583836e7b49c849d9f23c80c16c9c260b1ac42cf980164",
-        "storage-schema-harness-v4.cjs": "73d4225deb3701af22f4ea68a98e9b2493fcda8baaf1d5de927ee884d5cee7cb"
+        "storage-schema.json": "202c354fec5f3a64b763149a390b639fcc129eca6f4314644584e699f4855ed1",
+        "storage-schema-contained-v1.cjs": "1f35f91e15b808d22a18abc41a917474f80c3240c60cb55ef12be9917bc4292d"
       }
     },
     {
@@ -24863,10 +24863,10 @@
         ]
       },
       "oracle": "trust-markdown.json",
-      "verifier": "markdown-harness.cjs",
+      "verifier": "trust-markdown-contained-v1.cjs",
       "verification_files": {
-        "trust-markdown.json": "04988d5089cc8ba530bc99a0f9015be5975cdf19e7fdfa1b44069819a53845d9",
-        "markdown-harness.cjs": "fa4291f0861e41e5a2a523770aad97f91f4d04f441ffdf3d69ca3f24206bf22a"
+        "trust-markdown.json": "d1c247e3809671b2fa055bb2460739d569c8a707f843ccf3422ba6dbfd29d990",
+        "trust-markdown-contained-v1.cjs": "6df8e2da45f217b0dfad26ae82c01ee0d53ab96ba87801cc294b29def909a23d"
       }
     },
     {
@@ -25462,10 +25462,10 @@
         ]
       },
       "oracle": "value-rules.json",
-      "verifier": "value-rules-harness.cjs",
+      "verifier": "value-rules-contained-v1.cjs",
       "verification_files": {
-        "value-rules.json": "d42bcc4aceb2d3000f1a9d1269f5104cfb2b81a7b04fc3526feea4cedca5270b",
-        "value-rules-harness.cjs": "d1f89604f9ae16eb497ba37926e294aaca6b8129f0ef96ff3cdfffe4c4206664"
+        "value-rules.json": "4ca2ff76dab7b46e591329582994c3aba6e5db0b2eebe540b9c52a7d674636f9",
+        "value-rules-contained-v1.cjs": "212dc0987842af92242e78b0e996c5a41f6d509a271a0abe0b2b8e8f8a218adc"
       }
     },
     {
@@ -26457,10 +26457,10 @@
         ]
       },
       "oracle": "wording.json",
-      "verifier": "wording-harness.cjs",
+      "verifier": "wording-contained-v1.cjs",
       "verification_files": {
-        "wording.json": "ef6b4588160fd6c49eb11939201f4e0c385566350496bc565453cb9761e55f19",
-        "wording-harness.cjs": "3eea4d68bad00ea6d0dda61d033b9a02c1bdad564cabf27783335938b64b27ad"
+        "wording.json": "a6bdebafe9d8dcde1017503874bb54b859f813c77c7f31543a0fbc2a93f49156",
+        "wording-contained-v1.cjs": "28787f070de6d4ac05c11227fc9ee0f56c167f993e92d2b159351104610f2f0f"
       }
     }
   ]

@@ -161,7 +161,7 @@ Check the parent only after every required subtask and evidence item passes. Add
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
 <a id="adopt-002"></a>
-### [ ] ADOPT-002 — Native Literate AI rewrite
+### [ ] ADOPT-002 - Native library rewrite
 
 - **Completion prerequisites:** SEC-001, CONFIG-001, CONTEXT-001, NATIVE-BINDINGS-001, TRUST-PARSER-001, VERIFIER-LINT-001, NATIVE-STOP-001
 - **Owner:** project architecture / Components / Flavors / skills / assets
@@ -195,6 +195,18 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   ledger preparation precede the integrated acceptance run. Closure remains 26 of 31 until
   every checkpoint gate passes. No independent or operator security approval is
   supplied by functional checks.
+- **Current implementation evidence:** The normal registered-consumer assembly
+  now passes all 1,259 contained library batches, preserving all 270 runtime
+  package files. The caller batches checks within each library and omits unused
+  expected-result metadata from verifier arguments while retaining every result
+  assertion. The current-v2 directive replacement passed two clean generations,
+  full emitted-source review and separate admission. Eight admitted sync factories
+  match all 803 freshly executed composition observations on both hosts. These
+  private B22 results still need product integration. Hot-state qualification
+  passed its existing 258 observations, but source review found that both outputs
+  change malformed legacy notice-key behavior. Both are held before admission;
+  seven new original-backed controls reproduce the gap, with a clarified binding
+  prepared for a new qualification. No generated runtime was patched.
 - **Retained classification:** The operator approved the exact 280 paths in
   [the ten-boundary proposal](native-retention-proposal.md): B20, B21, B23 through
   B27, B29, B30 and B31. The supporting publication preserves current full application and image acceptance on unchanged source; all ten approved retained closures are now published.
