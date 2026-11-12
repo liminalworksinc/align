@@ -4,7 +4,7 @@
 - **Owning queue item:** [ADOPT-002](active-work.md#adopt-002)
 - **Completion / archival evidence:** source navigation prepared for B01 through B17, B19 and B28; B18 and B22 remain pending
 
-The normal reviewer ledger has **29 open findings: nine HIGH and twenty MEDIUM**. Their history is preserved while the operator-requested [remediation](native-findings-remediation.md) proceeds. This file records locations and reading commands; it does not accept or dismiss a finding or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
+The normal reviewer ledger has **32 open findings: ten HIGH and twenty-two MEDIUM**. Their history is preserved while the operator-requested [remediation](native-findings-remediation.md) proceeds. This file records locations and reading commands; it does not accept or dismiss a finding or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
 
 Within the earlier 26 findings, 23 have technical correction evidence in the
 [current remediation record](../../generated/native-checkpoints/finding-remediation.json).
@@ -2214,3 +2214,51 @@ asset checks and 18 offline HTTP/SQLite controls pass on the unchanged applicati
 composition at 5eb639f7. The two receipt readers and all70 pinned library packages
 pass their checks. This documentation update does not rerun or extend those
 results. B18, B22 and the four pending current-main service revisions remain open.
+
+## Normal review of the rebased checkpoint: second commit
+
+The normal review of `54ecc585f3981f7a2ae45da8eca19386945c74af` completed
+203 read passes and three verification passes. Every call succeeded, and the
+complete diff was read. It sealed three additional findings, bringing this
+snapshot to 32 open findings. Upload stopped because those three IDs were not yet
+in this guide. This is a documentation gate, with no reviewer bypass or finding
+disposition. Earlier counts in this file are historical snapshots.
+
+| Finding | Original check on current main | Current materialized source | Read side by side |
+| --- | --- | --- | --- |
+| `f_1b582b71e2ae` HIGH: malformed device request JSON leaves a partially purged workspace | `lib/v2/core.mts:393`, SQL writes precede JSON parsing at line402. Caller transaction ownership is documented at line11. | `server_core/create_core.js:120`, same purge order. Actual operator transaction is `operator_admin/create_operator_admin.js:106` through108 and purge call at196. Retention purge is `server_retention/create_retention.js:100`; step transactions are at147 through149. | `pair_current lib/v2/core.mts 389 405 server_core/create_core.js 120 132`; inspect caller commands below. The earlier `f_7f03bca85eb6` concerns the same effect ordering. |
+| `f_562447a5a6fb` MEDIUM: spend meter acceptance oracle is deleted | This concerns migration verification, with no original main application authorization check or generated enforcement equivalent. Historical oracle is at `54ecc585^:components/legacy-project-wrapper/implementation/native/spend-meter.json:1`. Original spend validation and pricing remain indexed under B09. | Current canonical oracle is `.literate/native-projects/local-spend-meter/verification/acceptance/spend-meter.json:1`. The consumer copies it at `tools/native-rewrite/make-consumer-manifest.py:118` through126 and runs its cases at `scripts/native-libraries.mjs:166` through173 under the application root. | Compare the complete parsed cases using the command below. All11 cases and110 inputs, including expected results, are equal. Only harness name and digest changed. The generated spend implementation remains in `generated/native-review-source/spend_meter/`. |
+| `f_b402a2b7e0c2` MEDIUM: event trigger allows workspace and actor changes | `lib/v2/db.ts:743`, the trigger excludes `ws_id` and `actor`. Privacy purge and actor removal are at `lib/v2/core.mts:400` and `lib/v2/retention-core.mts:143`. | `storage_schema/change_programs.js:14`, same trigger; `server_core/create_core.js:126`, workspace anonymization; `server_retention/create_retention.js:62`, actor clearing. | `pair_current lib/v2/db.ts 730 745 storage_schema/change_programs.js 14 14`; `pair_current lib/v2/core.mts 389 405 server_core/create_core.js 120 132`; `pair_current lib/v2/retention-core.mts 139 147 server_retention/create_retention.js 58 66`. Earlier `f_6e478fc0d9b7` concerns the same attribution fields. |
+
+Read the caller boundaries and oracle directly from the repository root:
+
+```sh
+nl -ba generated/native-review-source/operator_admin/create_operator_admin.js | sed -n '100,110p;190,198p'
+nl -ba generated/native-review-source/server_retention/create_retention.js | sed -n '58,68p;96,103p;145,151p'
+python3 - <<'COMPARE_SPEND'
+import json, subprocess
+from pathlib import Path
+old = json.loads(subprocess.check_output(['git', 'show',
+    '54ecc585f3981f7a2ae45da8eca19386945c74af^:components/legacy-project-wrapper/implementation/native/spend-meter.json']))
+new = json.loads(Path('.literate/native-projects/local-spend-meter/verification/acceptance/spend-meter.json').read_text())
+assert old['cases'] == new['cases']
+print(len(new['cases']), 'cases;', sum(len(c['arguments']) for c in new['cases']), 'inputs; all expected results equal')
+print('Changed metadata:', [k for k in set(old) | set(new) if old.get(k) != new.get(k)])
+COMPARE_SPEND
+nl -ba tools/native-rewrite/make-consumer-manifest.py | sed -n '115,134p'
+nl -ba components/legacy-project-wrapper/implementation/scripts/native-libraries.mjs | sed -n '134,175p'
+```
+
+The production-image rollback controls already linked above cover the actual
+operator and retention callers. They do not prove direct helper atomicity. A
+core correction will validate every device-request JSON value before the first
+purge write, while callers retain ownership of transactions for SQL failures.
+A separate additive schema24 guard will restrict attribution changes while
+preserving valid actor clearing and multi-event workspace anonymization.
+Both corrections still require generated-source review, admission and integrated
+acceptance. The core runtime qualification passed, but declaration review found
+incorrect public alias signatures, so that candidate is held before admission.
+
+All32 findings remain undecided. This navigation and correction plan supplies no
+independent review, acceptance, dismissal or operator security approval. The
+application composition and its previously recorded acceptance remain unchanged.
