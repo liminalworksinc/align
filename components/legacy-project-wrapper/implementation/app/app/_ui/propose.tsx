@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Drawer, FormField, FormSummary, SelectInput, TextArea, TextInput } from "./ds";
 import { api, ApiError, useApi } from "./kit";
 import type { ChangeRequest, Goal } from "./types";
@@ -332,6 +332,8 @@ function goalHere(): string | undefined {
  *  read once here and handed to the drawer. */
 export function ProposeControl({ ws, me, className }: { ws: string; me?: string; className?: string }) {
   const [open, setOpen] = useState<{ start?: string } | null>(null);
+  // One function for the drawer's life, so nothing about closing changes while someone types (Mini 0, LIM-2472 66fdddad).
+  const close = useCallback(() => setOpen(null), []);
   const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
   // Read each time the drawer opens, so the form can say up front that a goal already has the person's open request.
   // Unread (failed or still reading): the form works as before and the server's refusal still says it.
@@ -352,9 +354,9 @@ export function ProposeControl({ ws, me, className }: { ws: string; me?: string;
       {/* The Drawer renders on document.body and sets its own wrapping, so nothing wraps it here: a wrapper would be a
           flex child of the rail and move the workspace switcher while the drawer is open. */}
       {open && (
-        <Drawer open onClose={() => setOpen(null)} eyebrow="Change the plan" title="Propose a change">
+        <Drawer open onClose={close} eyebrow="Change the plan" title="Propose a change">
           {feed.data ? (
-            <Form ws={ws} me={me} goals={feed.data.goals} openBy={openBy} start={open.start} onClose={() => setOpen(null)} />
+            <Form ws={ws} me={me} goals={feed.data.goals} openBy={openBy} start={open.start} onClose={close} />
           ) : feed.error ? (
             <p className="text-[15px] text-(--text-2)">Align couldn&apos;t read the goals just now: {feed.error}</p>
           ) : (
