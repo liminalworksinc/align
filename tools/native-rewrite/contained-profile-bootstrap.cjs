@@ -123,10 +123,11 @@ try {
   const result = cp.spawnSync('docker', ['run', '--rm', '--name', name, '--pull=never',
     '--network=none', '--read-only', '--user=65532:65532', '--cap-drop=ALL',
     '--security-opt=no-new-privileges', '--pids-limit=64', '--memory=768m', '--cpus=2',
-    '--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=16m', '--env=HOME=/tmp',
+    '--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=128m', '--env=HOME=/tmp',
     '--env=ALIGN_NATIVE_QUAL_REPOSITORY=/inputs/repo',
     '--mount', 'type=bind,source=' + snapshot + ',target=/inputs,readonly',
-    '--workdir=/inputs/work', '--entrypoint=node', image, '--no-warnings',
+    '--workdir=/inputs/work', '--entrypoint=/usr/bin/timeout', image,
+    '--signal=KILL', '50s', 'node', '--no-warnings',
     '--max-old-space-size=512', '/inputs/execute.cjs'], {
       env: dockerEnvironment, encoding: 'utf8', timeout: 60000, maxBuffer: 4 * 1024 * 1024});
   if (result.error || result.status !== 0) {

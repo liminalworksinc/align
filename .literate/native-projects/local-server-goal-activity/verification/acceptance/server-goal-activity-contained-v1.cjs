@@ -1,0 +1,159 @@
+'use strict';
+// Authored adapter. The historical verifier below is never invoked in this host process.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const crypto = require('node:crypto');
+const cp = require('node:child_process');
+const SETTINGS = {"inner_sha256":"cb6671ad8a9337d6147dad6d6d9e261d369230be1b0990ed89e3c143e6298ddd","package":"server_goal_activity","package_files":["create_goal_activity.js","package.json"],"maximum_cases":10,"image":"node@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9","cpus":2,"memory_mib":768,"worker_seconds":50};
+
+function historicalVerifier() {'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const fixtureModule={exports:{}};
+new Function('require','module','exports',"'use strict';\n// Labeled synthetic private controls on isolated SQLite activity tables.\nconst assert=require('node:assert/strict'),{DatabaseSync}=require('node:sqlite');\nconst resourceNames=['all','get','visibleGoals','visibleGoal','activityEvidence','nowIso','readDate'];\nconst metadata={ACTIVITY_WINDOW_DAYS:'value',seesActivityDetail:2,goalActivity:2,goalsActivity:1};\nconst now=Date.parse('2026-11-09T12:00:00.000Z'),live='2026-11-09T12:00:01.000Z';\nfunction normalize(value,seen=new Map()){\n if(value===undefined)return {$undefined:true};\n if(typeof value==='function')return {$function:true};\n if(typeof value==='number'&&!Number.isFinite(value))return {$number:String(value)};\n if(value===null||typeof value!=='object')return value;\n if(seen.has(value))return {$ref:seen.get(value)};seen.set(value,seen.size);\n if(Array.isArray(value))return Array.from(value,x=>normalize(x,seen));\n return Object.fromEntries(Object.keys(value).map(k=>[k,normalize(value[k],seen)]));\n}\nfunction fixture(settings={}){\n const db=new DatabaseSync(':memory:');\n db.exec(`CREATE TABLE v2_sessions(ws_id TEXT,session_key TEXT,user_id TEXT,harness TEXT,state TEXT,agent_stopped INTEGER,governing_goal_id TEXT);\n CREATE TABLE v2_epochs(ws_id TEXT,session_key TEXT,epoch_id TEXT,goal_id TEXT,starts_at TEXT,ends_at TEXT);\n CREATE TABLE v2_usage(ws_id TEXT,session_key TEXT,epoch_id TEXT,ts TEXT);\n CREATE TABLE v2_activity(ws_id TEXT,goal_id TEXT,at TEXT,expires_at TEXT,path TEXT,path_hash TEXT);\n CREATE TABLE v2_pods(ws_id TEXT,id TEXT,name TEXT);`);\n function insert(table,row){const keys=Object.keys(row);db.prepare('INSERT INTO '+table+' ('+keys.join(',')+') VALUES ('+keys.map(()=>'?').join(',')+')').run(...keys.map(k=>row[k]));}\n const goalRows=settings.goals??[\n  {id:'g1',ws_id:'ws1',owner_id:'u1',pod_id:'p1',title:'Alpha',status:'active'},\n  {id:'g2',ws_id:'ws1',owner_id:'u2',pod_id:'p1',title:'Beta',status:'active'},\n  {id:'g3',ws_id:'ws1',owner_id:'u3',pod_id:null,title:'Private',status:'active'},\n  {id:'closed',ws_id:'ws1',owner_id:'u1',pod_id:null,title:'Closed',status:'achieved'},\n  {id:'foreign',ws_id:'ws2',owner_id:'u2',pod_id:'p2',title:'Foreign',status:'active'},\n ];\n for(const row of settings.sessions??[\n  {ws_id:'ws1',session_key:'s1',user_id:'u1',harness:'codex',state:'shared',agent_stopped:0,governing_goal_id:null},\n  {ws_id:'ws1',session_key:'s2',user_id:'u2',harness:'claude-code',state:'shared',agent_stopped:0,governing_goal_id:'g1'},\n  {ws_id:'ws1',session_key:'s3',user_id:'u1',harness:'codex',state:'suspended',agent_stopped:0,governing_goal_id:null},\n  {ws_id:'ws1',session_key:'unbound',user_id:'u1',harness:'codex',state:'shared',agent_stopped:0,governing_goal_id:null},\n  {ws_id:'ws2',session_key:'s1',user_id:'u2',harness:'codex',state:'shared',agent_stopped:0,governing_goal_id:null},\n ])insert('v2_sessions',row);\n for(const row of settings.epochs??[\n  {ws_id:'ws1',session_key:'s1',epoch_id:'e1',goal_id:'g1',starts_at:'2026-11-09T11:00:00.000Z',ends_at:null},\n  {ws_id:'ws1',session_key:'s2',epoch_id:'e2',goal_id:'g2',starts_at:'2026-11-01T00:00:00.000Z',ends_at:null},\n  {ws_id:'ws1',session_key:'s3',epoch_id:'e3',goal_id:'g1',starts_at:'2026-10-27T00:00:00.000Z',ends_at:'2026-11-01T00:00:00.000Z'},\n  {ws_id:'ws1',session_key:'unbound',epoch_id:'e4',goal_id:null,starts_at:'2026-11-09T11:00:00.000Z',ends_at:null},\n  {ws_id:'ws2',session_key:'s1',epoch_id:'e5',goal_id:'foreign',starts_at:'2026-11-09T11:00:00.000Z',ends_at:null},\n ])insert('v2_epochs',row);\n for(const row of settings.usage??[\n  {ws_id:'ws1',session_key:'s1',epoch_id:'e1',ts:'2026-11-09T11:59:00.000Z'},\n  {ws_id:'ws1',session_key:'s2',epoch_id:'e2',ts:'2026-11-09T11:59:30.000Z'},\n  {ws_id:'ws1',session_key:'s3',epoch_id:'e3',ts:'2026-10-31T00:00:00.000Z'},\n  {ws_id:'ws2',session_key:'s1',epoch_id:'e5',ts:'2026-11-09T12:00:00.000Z'},\n ])insert('v2_usage',row);\n for(const row of settings.activity??[\n  {ws_id:'ws1',goal_id:'g1',at:'2026-11-09T11:01:00.000Z',expires_at:'2026-11-10T00:00:00.000Z',path:'src/a.ts',path_hash:'a'},\n  {ws_id:'ws1',goal_id:'g1',at:'2026-11-09T11:02:00.000Z',expires_at:'2026-11-10T00:00:00.000Z',path:'src/a.ts',path_hash:'a'},\n  {ws_id:'ws1',goal_id:'g1',at:'2026-11-09T11:03:00.000Z',expires_at:'2026-11-10T00:00:00.000Z',path:null,path_hash:'a'},\n  {ws_id:'ws1',goal_id:'g1',at:'2026-11-09T11:04:00.000Z',expires_at:'2026-11-10T00:00:00.000Z',path:null,path_hash:'hidden'},\n  {ws_id:'ws1',goal_id:'g1',at:'2026-11-09T11:05:00.000Z',expires_at:live,path:'expired.ts',path_hash:'expired'},\n  {ws_id:'ws2',goal_id:'foreign',at:'2026-11-09T12:00:00.000Z',expires_at:'2026-11-10T00:00:00.000Z',path:'foreign.ts',path_hash:'foreign'},\n ])insert('v2_activity',row);\n for(const row of settings.pods??[{ws_id:'ws1',id:'p1',name:'Team one'},{ws_id:'ws2',id:'p2',name:'Team two'}])insert('v2_pods',row);\n let active=false,reads=0,effects=0,captures=0,lastRefusal;\n const trace=[],fault=new Error('owned goal activity failure'),wrapped=new WeakMap(),known=new WeakSet(),sequences=new Map();\n function quiet(fn){const old=active;active=false;try{return fn();}finally{active=old;}}\n function effect(name,args){if(active){trace.push(['service',name,quiet(()=>normalize(args))]);if(++effects===settings.effectFault)throw fault;}}\n function watch(value,label){\n  if(!value||typeof value!=='object'||known.has(value))return value;\n  if(wrapped.has(value))return wrapped.get(value);\n  const proxy=new Proxy(value,{\n   get(target,key,receiver){let got;\n    if(active&&typeof key==='string'){\n     trace.push(['get',label,key]);if(++reads===settings.propertyFault)throw fault;\n     const list=settings.sequences?.[label+'.'+key];\n     if(list){const i=sequences.get(label+'.'+key)??0;sequences.set(label+'.'+key,i+1);got=list[Math.min(i,list.length-1)];}else got=Reflect.get(target,key,receiver);\n    }else got=Reflect.get(target,key,receiver);\n    return watch(got,label+'.'+String(key));\n   },\n   ownKeys(target){if(active)trace.push(['keys',label]);return Reflect.ownKeys(target);},\n  });wrapped.set(value,proxy);known.add(proxy);return proxy;\n }\n let podProxy;\n const podSet={has(id){assert.equal(this,podProxy);effect('pods.has',[id]);return(settings.memberPods??[]).includes(id);}};\n podProxy=watch(podSet,'pp.pods');\n const principal=watch({wsId:'ws1',userId:'u1',wsRole:'member',...(settings.principal??{}),pods:podSet},'pp');\n const goals=goalRows.map(g=>watch(g,'goal.'+g.id));\n function call(name,fn){return function(...args){assert.equal(this,undefined);effect(name,args);return quiet(()=>fn(...args));};}\n class ControlledDate extends Date{static now(){return settings.now??now;}}\n const supplied={\n  all:call('all',(sql,...args)=>watch(db.prepare(sql).all(...args),'all.'+sql)),\n  get:call('get',(sql,...args)=>watch(db.prepare(sql).get(...args),'get.'+sql)),\n  visibleGoals:call('visibleGoals',pp=>{assert.equal(pp,principal);return watch(goals.filter(g=>g.ws_id===principal.wsId&&!(settings.hidden??['g3']).includes(g.id)),'visibleGoals');}),\n  visibleGoal:call('visibleGoal',(pp,id)=>{assert.equal(pp,principal);const g=goals.find(g=>g.ws_id===principal.wsId&&g.id===id&&!(settings.hidden??['g3']).includes(g.id));if(!g)throw(lastRefusal=Object.assign(new Error('Not found'),{status:404,code:'not_found'}));return g;}),\n  activityEvidence:call('activityEvidence',input=>settings.evidenceClass??(input.sessions||input.last_activity_at?'agent_reported':'not_observed')),\n  nowIso:call('nowIso',()=>settings.live??live),\n  readDate:call('readDate',()=>ControlledDate),\n };\n const resources=new Proxy(supplied,{get(target,key){trace.push(['capture',String(key)]);if(++captures===settings.captureFault)throw fault;return target[key];},ownKeys(){throw Error('Resource enumeration forbidden');}});\n async function run(factory,operation='goal'){\n  let result,caught,didThrow=false;\n  try{\n   const api=factory(resources);assert.deepEqual(Object.keys(api),Object.keys(metadata));assert.equal(api.ACTIVITY_WINDOW_DAYS,14);\n   for(const [name,length]of Object.entries(metadata))if(length!=='value'){assert.equal(api[name].name,name);assert.equal(api[name].length,length);assert.equal(api[name].constructor.name,'Function');}\n   active=true;\n   if(operation==='goal')result=api.goalActivity(principal,settings.goal??'g1');\n   else if(operation==='goals')result=api.goalsActivity(principal);\n   else if(operation==='detail')result=api.seesActivityDetail(principal,goals.find(g=>g.id===(settings.goal??'g1'))??watch(settings.detailGoal??{owner_id:'u2',pod_id:null},'goal.direct'));\n   else throw Error('Unknown operation');\n  }catch(e){caught=e;didThrow=true;}\n  active=false;\n  const output={result:normalize(result),error:didThrow?{thrown:normalize(caught),name:caught?.name,message:caught?.message,code:normalize(caught?.code),status:normalize(caught?.status),sameFault:caught===fault,sameRefusal:caught===lastRefusal}:null,trace,reads,effects,captures};\n  db.close();return output;\n }\n return {run};\n}\nmodule.exports={fixture,normalize,resourceNames,metadata,now,live};\n")(name=>{assert(['node:assert/strict','node:crypto','node:sqlite'].includes(name));return require(name);},fixtureModule,fixtureModule.exports);
+const semanticModule={exports:{}};
+new Function('require','module','exports',"'use strict';\nconst {now,live}=require('./server-goal-activity-fixture-draft-v1.cjs');\nconst entry=(operation,settings={})=>({operation,settings});\nfunction semanticBatches(){\n const b=Array.from({length:6},()=>[]);\n for(const operation of ['goal','goals','detail'])for(const userId of ['u1','u2','u3','absent'])for(const wsRole of ['member','viewer','owner'])for(const memberPods of [[],['p1'],['p2']])b[0].push(entry(operation,{principal:{userId,wsRole},memberPods,hidden:[]}));\n for(const operation of ['goal','goals'])for(const goal of ['g1','g2','g3','closed','foreign','missing'])for(const wsId of ['ws1','ws2','missing'])for(const hidden of [[],['g3'],['g1','g2','g3']])b[1].push(entry(operation,{goal,principal:{wsId},hidden}));\n for(const delta of [-14*86400000-1,-14*86400000,-14*86400000+1,-90*60000-1,-90*60000,-90*60000+1,-1,0,1])for(const state of ['shared','suspended','stopped'])for(const agent_stopped of [0,1]){\n  const timestamp=new Date(now+delta).toISOString();\n  b[2].push(entry('goal',{sessions:[{ws_id:'ws1',session_key:'s1',user_id:'u1',harness:'codex',state,agent_stopped,governing_goal_id:null}],epochs:[{ws_id:'ws1',session_key:'s1',epoch_id:'e1',goal_id:'g1',starts_at:timestamp,ends_at:null}],usage:[],activity:[]}));\n  b[2].push(entry('goal',{epochs:[{ws_id:'ws1',session_key:'s1',epoch_id:'e1',goal_id:'g1',starts_at:'2026-10-01T00:00:00.000Z',ends_at:timestamp}],usage:[],activity:[]}));\n }\n for(const operation of ['goal','goals'])for(const sessions of [[],[{ws_id:'ws1',session_key:'s1',user_id:'u1',harness:'claude-code',state:'shared',agent_stopped:0,governing_goal_id:'g1'}]])for(const epochs of [[],[{ws_id:'ws1',session_key:'s1',epoch_id:'e1',goal_id:null,starts_at:'2026-11-09T11:00:00.000Z',ends_at:null}]])for(const usage of [[],[{ws_id:'ws1',session_key:'s1',epoch_id:'e1',ts:'2026-11-09T11:59:00.000Z'}]])b[3].push(entry(operation,{sessions,epochs,usage,activity:[]}));\n for(const count of [0,1,4,5,7])for(const expired of [false,true])for(const hiddenPath of [false,true]){\n  const activity=Array.from({length:count},(_,i)=>({ws_id:'ws1',goal_id:'g1',at:new Date(now-i*1000).toISOString(),expires_at:expired?live:'2026-11-10T00:00:00.000Z',path:hiddenPath?null:'src/'+i+'.ts',path_hash:'hash'+i}));\n  for(const operation of ['goal','goals'])b[4].push(entry(operation,{activity}));\n }\n for(const operation of ['goal','goals','detail']){\n  for(let captureFault=1;captureFault<=7;captureFault++)b[5].push(entry(operation,{captureFault}));\n  for(const sequences of [{'pp.userId':['u1','u2','u1']},{'goal.g1.id':['g1','g2','g1']},{'pp.wsId':['ws1','ws2','ws1']}])b[5].push(entry(operation,{sequences}));\n }\n for(const operation of ['goal','goals'])for(const value of [0,1e20])b[5].push(entry(operation,{now:value}));\n for(const pods of [[],[{ws_id:'ws1',id:'p1',name:'Changed'}]])b[5].push(entry('goals',{pods}));\n for(const evidenceClass of ['agent_reported','not_observed','controlled-evidence'])b[5].push(entry('goal',{evidenceClass}));\n b[5].push(entry('goals',{goals:[],sessions:[],epochs:[],usage:[],activity:[]}));\n const sessions=[{ws_id:'ws1',session_key:'s1',user_id:'u1',harness:'codex',state:'shared',agent_stopped:0,governing_goal_id:null}];\n const epochs=[{ws_id:'ws1',session_key:'s1',epoch_id:'old',goal_id:'g1',starts_at:'2026-11-09T10:00:00.000Z',ends_at:'2026-11-09T10:40:00.000Z'},{ws_id:'ws1',session_key:'s1',epoch_id:'current',goal_id:'g2',starts_at:'2026-11-09T10:40:00.000Z',ends_at:null}];\n const usage=[{ws_id:'ws1',session_key:'s1',epoch_id:'old',ts:'2026-11-09T10:35:00.000Z'}];\n b[3].push(entry('goal',{sessions,epochs,usage,activity:[]}));\n b[3].push(entry('goal',{sessions:[{...sessions[0],governing_goal_id:'g1'}],epochs,usage,activity:[]}));\n b[3].push(entry('goals',{sessions:[sessions[0],{...sessions[0],session_key:'other',user_id:'u2'},{...sessions[0],ws_id:'ws2',session_key:'foreign'}],epochs:[],usage:[],activity:[]}));\n return b;\n}\nconst faultPaths=[entry('goal'),entry('goal',{principal:{userId:'u2'},memberPods:[]}),entry('goals'),entry('detail',{principal:{userId:'u2'},memberPods:['p1']}),entry('goal',{sessions:[],epochs:[],usage:[],activity:[]}),entry('goals',{goals:[],sessions:[],epochs:[],usage:[],activity:[]})];\nmodule.exports={semanticBatches,faultPaths};\n")(name=>{if(name==='./server-goal-activity-fixture-draft-v1.cjs')return fixtureModule.exports;throw Error('Unexpected semantic dependency '+name);},semanticModule,semanticModule.exports);
+const corpusModule={exports:{}};
+new Function('require','module','exports',"'use strict';\nconst crypto = require('node:crypto');\nconst {fixture} = require('./server-goal-activity-fixture-draft-v1.cjs');\nconst {semanticBatches} = require('./server-goal-activity-cases-draft-v2.cjs');\nconst plan = require('./server-goal-activity-fault-plan-draft-v1.json');\nfunction entries(batch) {\n  if (batch < 6) return semanticBatches()[batch];\n  const rows = [];\n  const paths = plan.paths.filter((_,i) => (batch === 6 || batch === 8) ? i < 3 : i >= 3);\n  const field = batch < 8 ? 'propertyFault' : 'effectFault';\n  const count = batch < 8 ? 'reads' : 'effects';\n  for (const path of paths) for (let i = 1; i <= path[count]; i++) {\n    rows.push({operation:path.operation,settings:{...path.settings,[field]:i}});\n  }\n  if (batch === 9) for (let captureFault = 1; captureFault <= 7; captureFault++) {\n    rows.push({operation:'goal',settings:{captureFault}});\n  }\n  return rows;\n}\nasync function run(factory,batch) {\n  const cases = entries(batch), observations = [];\n  for (const item of cases) observations.push(await fixture(item.settings).run(factory,item.operation));\n  return {batch,records:cases.length,sha256:crypto.createHash('sha256').update(JSON.stringify(observations)).digest('hex')};\n}\nmodule.exports = {entries,run};\n")(name=>{if(name==='./server-goal-activity-fixture-draft-v1.cjs')return fixtureModule.exports;if(name==='./server-goal-activity-cases-draft-v2.cjs')return semanticModule.exports;if(name==='./server-goal-activity-fault-plan-draft-v1.json')return {"schema":"align/goal-activity-original-fault-plan@1","paths":[{"operation":"goal","settings":{},"reads":73,"effects":18,"expected_error":false},{"operation":"goal","settings":{"principal":{"userId":"u2"},"memberPods":[]},"reads":67,"effects":16,"expected_error":false},{"operation":"goals","settings":{},"reads":125,"effects":30,"expected_error":false},{"operation":"detail","settings":{"principal":{"userId":"u2"},"memberPods":["p1"]},"reads":7,"effects":1,"expected_error":false},{"operation":"goal","settings":{"sessions":[],"epochs":[],"usage":[],"activity":[]},"reads":20,"effects":12,"expected_error":false},{"operation":"goals","settings":{"goals":[],"sessions":[],"epochs":[],"usage":[],"activity":[]},"reads":6,"effects":3,"expected_error":false}]};assert(['node:assert/strict','node:crypto','node:sqlite'].includes(name));return require(name);},corpusModule,corpusModule.exports);
+const corpus=corpusModule.exports,PLANS=[{"index":0,"golden":{"batch":0,"records":108,"sha256":"e55d435e467d0887e30c9e2be43146d879ff78c2d89e1f46db264752089db20b"}},{"index":1,"golden":{"batch":1,"records":108,"sha256":"59faa6754ec7553014ce1ac33eaff6daa6335a5a9b0285c87479da0b16bdc59d"}},{"index":2,"golden":{"batch":2,"records":108,"sha256":"4fbd3fd27e2c921a8dae8a38000670dc8f57c9a4430018b0fab14aecb3892d8c"}},{"index":3,"golden":{"batch":3,"records":19,"sha256":"fdbce1bb59bfa2ea71a906b6b9f11378da3bb2399a66ce33cebb2364c744bc2b"}},{"index":4,"golden":{"batch":4,"records":40,"sha256":"592ed90e5d7359e3b0ceeb2f187d8f5681dd569c5e669b697ff768cc0dc2543f"}},{"index":5,"golden":{"batch":5,"records":40,"sha256":"3485fded6b7787be070a3b10188070031c2c021bd05c0dfda952b5dd8706357d"}},{"index":6,"golden":{"batch":6,"records":265,"sha256":"e44c64d3dc4dc752086a18e0daebccffc32a8caa583f1eac24a571a2fd6dea18"}},{"index":7,"golden":{"batch":7,"records":33,"sha256":"eb99b3abbfd699b6282ba3b3792ac6d5fc7295bdf46bdb42ba8b0ed166d323fc"}},{"index":8,"golden":{"batch":8,"records":64,"sha256":"db8f6daaccfdaff453ab4833185b5db9a1b2bcfb0e50b29162d9d43269f01165"}},{"index":9,"golden":{"batch":9,"records":23,"sha256":"74bf6f1777eab69dc6b7887e82743ff0ad7f72b118212c68924d02ac9d5b1b0b"}}],CAPABILITIES=["server-goal-activity.create-goal-activity"],SYMBOLS=['create_goal_activity'];
+const CASE_IDS=PLANS.map((_p,i)=>CAPABILITIES[0]+'-'+String(i+1).padStart(3,'0'));
+function factoryAt(root){
+ const files=[path.join(root,'server_goal_activity/create_goal_activity.js'),path.join(root,'source/server_goal_activity/create_goal_activity.js')].filter(name=>fs.existsSync(name));
+ assert.equal(files.length,1,'Exact generated module missing or ambiguous');const file=files[0];assert(fs.lstatSync(file).isFile()&&!fs.lstatSync(file).isSymbolicLink());
+ const pkg=path.dirname(file),directory=fs.lstatSync(pkg);
+ assert(directory.isDirectory()&&!directory.isSymbolicLink(),'Native package directory must be regular');
+ assert.deepEqual(fs.readdirSync(pkg).sort(),['create_goal_activity.js','package.json'],'Exact native package members');
+ for(const name of ['create_goal_activity.js','package.json']){const stat=fs.lstatSync(path.join(pkg,name));assert(stat.isFile()&&!stat.isSymbolicLink(),'Native package members must be regular files');}
+ const manifest=JSON.parse(fs.readFileSync(path.join(pkg,'package.json'),'utf8'));
+ assert.equal(manifest.name,'server_goal_activity');assert.equal(manifest.type,'commonjs');
+ assert.deepEqual(manifest.exports,{'./create_goal_activity':'./create_goal_activity.js'});
+ const blocked=()=>{throw Error('Forbidden ambient generated effect');};
+ const context=vm.createContext({Date:blocked,fetch:blocked,process:new Proxy({},{get:blocked}),console:new Proxy({},{get:blocked}),setTimeout:blocked,setInterval:blocked,Buffer:undefined},{codeGeneration:{strings:false,wasm:false}});
+ new vm.Script('Math.random=()=>{throw Error("Forbidden ambient randomness")};').runInContext(context,{timeout:1000});
+ const module={exports:{}};
+ new vm.Script('(function(exports,module,require){"use strict";\n'+fs.readFileSync(file,'utf8')+'\n})',{filename:'create_goal_activity.js'}).runInContext(context,{timeout:1000})(module.exports,module,blocked);
+ assert.deepEqual(Object.keys(module.exports),['create_goal_activity']);const factory=module.exports.create_goal_activity;
+ assert.equal(typeof factory,'function');assert.equal(factory.name,'create_goal_activity');assert.equal(factory.length,1);assert.equal(factory.constructor.name,'Function');return factory;
+}
+async function runSelected(root,_surface,selected){
+ assert(Array.isArray(selected)&&selected.length>0&&selected.length<=PLANS.length);
+ const indices=selected.map(item=>{assert.equal(item.capability,CAPABILITIES[0]);assert(Array.isArray(item.arguments)&&item.arguments.length===1);const index=item.arguments[0];assert(Number.isSafeInteger(index)&&index>=0&&index<PLANS.length);return index;});
+ assert.equal(new Set(indices).size,indices.length);const factory=factoryAt(root),results=[];
+ for(let i=0;i<selected.length;i++){const item=selected[i],plan=PLANS[indices[i]],value=await corpus.run(factory,plan.index);assert.deepEqual(value,plan.golden,'Source characterization differs in batch '+plan.index);results.push({case_id:item.case_id,capability:item.capability,result:value});}
+ return results;
+}
+module.exports={CAPABILITIES,SYMBOLS,CASE_IDS,PLANS,runSelected};
+if(require.main===module){assert.equal(process.argv.length,5);runSelected(process.argv[2],JSON.parse(process.argv[3]),JSON.parse(process.argv[4])).then(cases=>console.log(JSON.stringify({schema:'literate-ai/library-acceptance-results@1',cases}))).catch(error=>{console.error(error.stack);process.exitCode=1;});}
+}
+
+function verifierBytes() {
+  const text = historicalVerifier.toString();
+  const bytes = Buffer.from(text.slice(text.indexOf('{') + 1, -1));
+  assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), SETTINGS.inner_sha256,
+    'Historical verifier bytes changed');
+  return bytes;
+}
+
+function directFile(directory, name) {
+  assert(/^[a-zA-Z0-9_.-]+$/.test(name) && name !== '.' && name !== '..');
+  const file = path.join(directory, name);
+  const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    assert(stat.isFile() && stat.size <= 8 * 1024 * 1024, 'Unsafe candidate member');
+    return fs.readFileSync(descriptor);
+  } finally { fs.closeSync(descriptor); }
+}
+
+async function runSelected(root, surface, selected) {
+  assert(Array.isArray(selected) && selected.length > 0 && selected.length <= SETTINGS.maximum_cases);
+  const input = JSON.stringify({surface, selected});
+  assert(Buffer.byteLength(input) <= 256 * 1024, 'Oversized oracle request');
+  assert(Buffer.byteLength(JSON.stringify(surface)) <= 64 * 1024 &&
+    Buffer.byteLength(JSON.stringify(selected)) <= 64 * 1024, 'Oracle argument exceeds portable CLI bound');
+  const source = fs.realpathSync(root);
+  const candidates = [path.join(source, SETTINGS.package), path.join(source, 'source', SETTINGS.package)]
+    .filter(file => fs.existsSync(file));
+  assert.equal(candidates.length, 1, 'Expected one candidate package');
+  const candidate = candidates[0];
+  // Reject symlinks below the resolved caller root, including an intermediate source directory.
+  let at = source;
+  for (const part of path.relative(source, candidate).split(path.sep)) {
+    at = path.join(at, part);
+    assert(fs.lstatSync(at).isDirectory() && !fs.lstatSync(at).isSymbolicLink());
+  }
+  assert.deepEqual(fs.readdirSync(candidate).sort(), [...SETTINGS.package_files].sort());
+  // Desktop Docker shares the home directory. Its VM need not share the OS temporary directory.
+  const cache = path.join(os.homedir(), '.cache', 'align-native-oracles');
+  fs.mkdirSync(cache, {recursive: true, mode: 0o700});
+  const snapshot = fs.mkdtempSync(path.join(fs.realpathSync(cache), 'evaluation-'));
+  const name = 'align-oracle-' + crypto.randomUUID();
+  assert(!/[\r\n,]/.test(snapshot), 'Unsupported mount path');
+  let started = false;
+  const dockerEnvironment = {...process.env};
+  // Host-side executable configuration must not load application-supplied Node preload hooks.
+  delete dockerEnvironment.NODE_OPTIONS;
+  delete dockerEnvironment.NODE_PATH;
+  try {
+    const packageRoot = path.join(snapshot, 'source', SETTINGS.package);
+    fs.mkdirSync(packageRoot, {recursive: true, mode: 0o755});
+    fs.chmodSync(path.join(snapshot, 'source'), 0o755);
+    fs.chmodSync(packageRoot, 0o755);
+    for (const file of SETTINGS.package_files) {
+      fs.writeFileSync(path.join(packageRoot, file), directFile(candidate, file), {mode: 0o444});
+    }
+    fs.writeFileSync(path.join(snapshot, 'oracle.cjs'), verifierBytes(), {mode: 0o444});
+    fs.writeFileSync(path.join(snapshot, 'request.json'), input, {mode: 0o444});
+    fs.writeFileSync(path.join(snapshot, 'execute.cjs'), [
+      "'use strict';",
+      "const input=require('./request.json');",
+      "const cp=require('node:child_process');",
+      "const result=cp.spawnSync(process.execPath,['--no-warnings','--experimental-vm-modules','--max-old-space-size=512','/inputs/oracle.cjs','/inputs/source',JSON.stringify(input.surface),JSON.stringify(input.selected)],{encoding:'utf8',timeout:130000,maxBuffer:4*1024*1024});",
+      "if(result.error||result.status!==0){console.error(result.error?.code||result.status,result.stderr);process.exitCode=1;}else process.stdout.write(result.stdout);",
+    ].join('\n'), {mode: 0o444});
+    // Do not depend on the caller's umask for container readability.
+    for (const file of SETTINGS.package_files) fs.chmodSync(path.join(packageRoot, file), 0o444);
+    for (const file of ['oracle.cjs', 'request.json', 'execute.cjs']) {
+      fs.chmodSync(path.join(snapshot, file), 0o444);
+    }
+    fs.chmodSync(snapshot, 0o755);
+    const info=cp.spawnSync('docker',['info','--format','{{.NCPU}}'],{env:dockerEnvironment,encoding:'utf8',timeout:10000});
+    if(info.error||info.status!==0)throw Error('Docker runtime unavailable: '+(info.error?.code||info.status));
+    const available=Number(info.stdout.trim());
+    assert(Number.isInteger(available)&&available>=1&&available<=512,'Invalid Docker CPU capacity');
+    const cpus=Math.min(SETTINGS.cpus,available);
+    const argv = ['run', '--rm', '--name', name, '--pull=never', '--network=none', '--read-only',
+      '--user=65532:65532', '--cap-drop=ALL', '--security-opt=no-new-privileges',
+      '--pids-limit=64', '--memory=' + SETTINGS.memory_mib + 'm', '--cpus=' + cpus,
+      '--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=128m', '--env=HOME=/tmp',
+      '--mount', `type=bind,source=${snapshot},target=/inputs,readonly`,
+      '--workdir=/inputs', '--entrypoint=/usr/bin/timeout', SETTINGS.image,
+      '--signal=KILL', SETTINGS.worker_seconds + 's', 'node', '--no-warnings', '--max-old-space-size=512', '/inputs/execute.cjs'];
+    started = true;
+    const result = cp.spawnSync('docker', argv, {env: dockerEnvironment, encoding: 'utf8',
+      timeout: 150000, maxBuffer: 4 * 1024 * 1024});
+    if (result.error || result.status !== 0) {
+      throw Error('Contained oracle failed: ' + (result.error?.code || result.status) + '\n' +
+        String(result.stderr || '').slice(0, 1600));
+    }
+    const value = JSON.parse(result.stdout);
+    assert.equal(value.schema, 'literate-ai/library-acceptance-results@1');
+    assert(Array.isArray(value.cases) && value.cases.length === selected.length);
+    assert.deepEqual(value.cases.map(item => [item.case_id, item.capability]),
+      selected.map(item => [item.case_id, item.capability]));
+    return value.cases;
+  } finally {
+    if (started) cp.spawnSync('docker', ['rm', '--force', name], {
+      env: dockerEnvironment, stdio: 'ignore', timeout: 10000});
+    fs.rmSync(snapshot, {recursive: true, force: true});
+  }
+}
+
+module.exports = {runSelected};
+if (require.main === module) {
+  assert.equal(process.argv.length, 5);
+  runSelected(process.argv[2], JSON.parse(process.argv[3]), JSON.parse(process.argv[4]))
+    .then(cases => process.stdout.write(JSON.stringify({schema: 'literate-ai/library-acceptance-results@1', cases}) + '\n'))
+    .catch(error => {console.error(error.stack); process.exitCode = 1;});
+}

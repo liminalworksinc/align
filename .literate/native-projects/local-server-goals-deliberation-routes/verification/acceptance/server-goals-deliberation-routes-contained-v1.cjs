@@ -6,7 +6,7 @@ const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const cp = require('node:child_process');
-const SETTINGS = {"inner_sha256":"d761c61cb6727d340128e928ff0c49106db0223ceb02c300ef48a41aa2923cc2","package":"server_goals_deliberation_routes","package_files":["create_goals_deliberation_routes.js","package.json"],"maximum_cases":4,"image":"node@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9"};
+const SETTINGS = {"inner_sha256":"d761c61cb6727d340128e928ff0c49106db0223ceb02c300ef48a41aa2923cc2","package":"server_goals_deliberation_routes","package_files":["create_goals_deliberation_routes.js","package.json"],"maximum_cases":4,"image":"node@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9","cpus":2,"memory_mib":768,"worker_seconds":50};
 
 function historicalVerifier() {'use strict';
 // Independent private test code, in readable source. No original service algorithm.
@@ -1366,6 +1366,8 @@ async function runSelected(root, surface, selected) {
   assert(Array.isArray(selected) && selected.length > 0 && selected.length <= SETTINGS.maximum_cases);
   const input = JSON.stringify({surface, selected});
   assert(Buffer.byteLength(input) <= 256 * 1024, 'Oversized oracle request');
+  assert(Buffer.byteLength(JSON.stringify(surface)) <= 64 * 1024 &&
+    Buffer.byteLength(JSON.stringify(selected)) <= 64 * 1024, 'Oracle argument exceeds portable CLI bound');
   const source = fs.realpathSync(root);
   const candidates = [path.join(source, SETTINGS.package), path.join(source, 'source', SETTINGS.package)]
     .filter(file => fs.existsSync(file));
@@ -1402,9 +1404,9 @@ async function runSelected(root, surface, selected) {
     fs.writeFileSync(path.join(snapshot, 'execute.cjs'), [
       "'use strict';",
       "const input=require('./request.json');",
-      "require('./oracle.cjs').runSelected('/inputs/source',input.surface,input.selected)",
-      ".then(cases=>process.stdout.write(JSON.stringify({schema:'literate-ai/library-acceptance-results@1',cases})+'\\n'))",
-      ".catch(error=>{console.error(error.stack);process.exitCode=1;});",
+      "const cp=require('node:child_process');",
+      "const result=cp.spawnSync(process.execPath,['--no-warnings','--experimental-vm-modules','--max-old-space-size=512','/inputs/oracle.cjs','/inputs/source',JSON.stringify(input.surface),JSON.stringify(input.selected)],{encoding:'utf8',timeout:130000,maxBuffer:4*1024*1024});",
+      "if(result.error||result.status!==0){console.error(result.error?.code||result.status,result.stderr);process.exitCode=1;}else process.stdout.write(result.stdout);",
     ].join('\n'), {mode: 0o444});
     // Do not depend on the caller's umask for container readability.
     for (const file of SETTINGS.package_files) fs.chmodSync(path.join(packageRoot, file), 0o444);
@@ -1412,16 +1414,21 @@ async function runSelected(root, surface, selected) {
       fs.chmodSync(path.join(snapshot, file), 0o444);
     }
     fs.chmodSync(snapshot, 0o755);
+    const info=cp.spawnSync('docker',['info','--format','{{.NCPU}}'],{env:dockerEnvironment,encoding:'utf8',timeout:10000});
+    if(info.error||info.status!==0)throw Error('Docker runtime unavailable: '+(info.error?.code||info.status));
+    const available=Number(info.stdout.trim());
+    assert(Number.isInteger(available)&&available>=1&&available<=512,'Invalid Docker CPU capacity');
+    const cpus=Math.min(SETTINGS.cpus,available);
     const argv = ['run', '--rm', '--name', name, '--pull=never', '--network=none', '--read-only',
       '--user=65532:65532', '--cap-drop=ALL', '--security-opt=no-new-privileges',
-      '--pids-limit=64', '--memory=768m', '--cpus=2',
-      '--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=16m', '--env=HOME=/tmp',
+      '--pids-limit=64', '--memory=' + SETTINGS.memory_mib + 'm', '--cpus=' + cpus,
+      '--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=128m', '--env=HOME=/tmp',
       '--mount', `type=bind,source=${snapshot},target=/inputs,readonly`,
-      '--workdir=/inputs', '--entrypoint=node', SETTINGS.image,
-      '--no-warnings', '--max-old-space-size=512', '/inputs/execute.cjs'];
+      '--workdir=/inputs', '--entrypoint=/usr/bin/timeout', SETTINGS.image,
+      '--signal=KILL', SETTINGS.worker_seconds + 's', 'node', '--no-warnings', '--max-old-space-size=512', '/inputs/execute.cjs'];
     started = true;
     const result = cp.spawnSync('docker', argv, {env: dockerEnvironment, encoding: 'utf8',
-      timeout: 120000, maxBuffer: 4 * 1024 * 1024});
+      timeout: 150000, maxBuffer: 4 * 1024 * 1024});
     if (result.error || result.status !== 0) {
       throw Error('Contained oracle failed: ' + (result.error?.code || result.status) + '\n' +
         String(result.stderr || '').slice(0, 1600));

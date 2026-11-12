@@ -1,0 +1,157 @@
+'use strict';
+// Authored adapter. The historical verifier below is never invoked in this host process.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const crypto = require('node:crypto');
+const cp = require('node:child_process');
+const SETTINGS = {"inner_sha256":"066f3e75e39e13791a5d667ccd4afd1841974fed5aa4143a43479a85282bdbba","package":"server_evidence","package_files":["create_evidence.js","package.json"],"maximum_cases":6,"image":"node@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9","cpus":2,"memory_mib":768,"worker_seconds":50};
+
+function historicalVerifier() {'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const fixtureModule={exports:{}};
+new Function('require','module','exports',"'use strict';\nconst assert=require('node:assert/strict'),crypto=require('node:crypto');\nconst resourceNames=['all','get','badRequest','goalTargets','authorize','goalSpend','memberName','oneOf','str','readURL','readDate'];\nconst metadata={EVIDENCE_KINDS:['pr','ci_run','incident','dashboard','doc','other'],EVIDENCE_PER_REVISION:10,evidenceInput:1,evidenceRows:1,evidenceCount:2,evidenceView:2,recordSnapshot:3,snapshotView:3};\nconst queries=[\"SELECT * FROM v2_change_request_evidence WHERE change_request_id = ? ORDER BY revision, added_at, id\",\"SELECT COUNT(*) AS n FROM v2_change_request_evidence WHERE change_request_id = ? AND revision = ?\",`SELECT MAX(at) AS at FROM (\n       SELECT MAX(u.ts) AS at FROM v2_usage u JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id WHERE e.ws_id = ? AND e.goal_id = ?\n       UNION ALL SELECT MAX(starts_at) FROM v2_epochs WHERE ws_id = ? AND goal_id = ?\n       UNION ALL SELECT MAX(at) FROM v2_activity WHERE ws_id = ? AND goal_id = ?\n     )`];\nconst at='2026-11-01T12:00:00.000Z';\nfunction row(extra={}){return {id:'e1',ws_id:'ws1',change_request_id:'cr1',revision:2,kind:'pr',url:'https://example.invalid/result',label:'Reported result',source:'person',added_by:'u1',added_at:at,...extra};}\nfunction snapshot(extra={}){return {recorded_at:at,window:{from:'2026-10-02T12:00:00.000Z',to:at,days:30},spend:{total:1,requests:2,models:[{model:'stored-model',cost:1}]},bound_sessions:2,last_activity_at:at,...extra};}\nfunction normalize(value,seen=new Map()){\n if(value===undefined)return {$undefined:true};if(typeof value==='number'&&!Number.isFinite(value))return {$number:String(value)};\n if(value===null||typeof value!=='object')return value;\n if(seen.has(value))return {$ref:seen.get(value)};seen.set(value,seen.size);\n if(Array.isArray(value))return Array.from(value,v=>normalize(v,seen));\n return Object.fromEntries(Object.keys(value).map(k=>[k,normalize(value[k],seen)]));\n}\nfunction fixture(settings={}){\n let active=false,reads=0,effects=0,captures=0,dateReads=0,urlReads=0,lastRefusal;\n const trace=[],wrapped=new WeakMap(),sequences=new Map(),fault=new Error('owned evidence failure');\n function quiet(fn){const old=active;active=false;try{return fn();}finally{active=old;}}\n function effect(name,args){if(active){trace.push(['service',name,quiet(()=>normalize(args))]);if(++effects===settings.effectFault)throw fault;}}\n function watch(value,label){\n  if(!value||typeof value!=='object')return value;if(wrapped.has(value))return wrapped.get(value);\n  const proxy=new Proxy(value,{get(target,key,receiver){let got;\n   if(active&&typeof key==='string'){trace.push(['get',label,key]);if(++reads===settings.propertyFault)throw fault;const name=label+'.'+key,list=settings.sequences?.[name];if(list){const n=sequences.get(name)??0;sequences.set(name,n+1);got=list[Math.min(n,list.length-1)];}else got=Reflect.get(target,key,receiver);}else got=Reflect.get(target,key,receiver);\n   return watch(got,label+'.'+String(key));\n  },ownKeys(target){if(active)trace.push(['keys',label]);return Reflect.ownKeys(target);}});wrapped.set(value,proxy);return proxy;\n }\n const call=(name,fn)=>function(...args){assert.equal(this,undefined);effect(name,args);return quiet(()=>fn(...args));};\n const body=watch(settings.body??{kind:'pr',url:'https://example.invalid/result',label:'Reported result'},'body');\n const evidence=watch(settings.row??row(),'row'),rows=watch([row(),row({id:'e2',source:'agent'})],'rows'),targets=watch(settings.targets??['s1','s2'],'targets'),spend=watch(settings.spend??snapshot().spend,'spend'),pp=watch({wsId:'ws1',userId:'u1',wsRole:'owner'},'pp');\n const supplied={\n  all:call('all',(sql,...args)=>{assert.equal(sql,queries[0]);assert.deepEqual(args,['cr1']);return rows;}),\n  get:call('get',(sql,...args)=>{if(sql===queries[1]){assert.deepEqual(args,['cr1',2]);return Object.hasOwn(settings,'countRow')?watch(settings.countRow,'count'):watch({n:3},'count');}assert.equal(sql,queries[2]);assert.deepEqual(args,['ws1','g1','ws1','g1','ws1','g1']);return Object.hasOwn(settings,'lastRow')?watch(settings.lastRow,'last'):watch({at},'last');}),\n  badRequest:call('badRequest',message=>{lastRefusal=Object.assign(new Error(message),{code:'bad_request'});return lastRefusal;}),\n  goalTargets:call('goalTargets',(ws,id)=>{assert.deepEqual([ws,id],['ws1','g1']);return targets;}),\n  authorize:call('authorize',(principal,action,object)=>{assert.equal(principal,pp);assert.equal(action,'spend.read');assert.deepEqual(Object.keys(object),['kind']);assert.equal(object.kind,'workspace');return watch({ok:settings.canSpend??true},'decision');}),\n  goalSpend:call('goalSpend',(ws,id,from,to)=>{assert.deepEqual([ws,id,to],['ws1','g1',settings.at??at]);assert.equal(typeof from,'string');return spend;}),\n  memberName:call('memberName',id=>'Member '+id),\n  oneOf:call('oneOf',(b,key,choices)=>{assert.equal(b,body);assert.equal(key,'kind');const value=b[key];if(!choices.includes(value))throw Object.assign(new Error('kind: invalid choice'),{code:'bad_request'});return value;}),\n  str:call('str',(b,key,max)=>{assert.equal(b,body);assert.equal(max,key==='url'?2048:120);const value=b[key];if(typeof value!=='string'||!value.trim()||value.trim().length>max)throw Object.assign(new Error(key+': invalid text'),{code:'bad_request'});return value.trim();}),\n  readURL:function(){assert.equal(this,undefined);effect('readURL',[]);const n=++urlReads;return class SuppliedURL{constructor(raw){effect('newURL',[n,raw]);if(settings.urlFailure)throw fault;let actual=settings.urlObject;if(!Object.hasOwn(settings,'urlObject')){const parsed=new URL(raw);actual=Object.fromEntries(['protocol','hostname','username','password','href'].map(k=>[k,parsed[k]]));}return watch(actual,'url');}};},\n  readDate:function(){assert.equal(this,undefined);effect('readDate',[]);const n=++dateReads;\n   const Constructor=class SuppliedDate{constructor(ms){effect('newDate',[n,ms]);let result;result=watch({toISOString(){assert.equal(this,result);effect('toISOString',[n]);return new Date(ms).toISOString();}},'date');return result;}};\n   Constructor.parse=function(value){assert.equal(this,Constructor);effect('date.parse',[n,value]);return Date.parse(value);};return Constructor;\n  },\n };\n const resources=new Proxy(supplied,{get(target,key){trace.push(['capture',String(key)]);if(++captures===settings.captureFault)throw fault;return target[key];},ownKeys(){throw Error('Resource enumeration forbidden');}});\n function run(factory,operation='input'){\n  let api,result,error;\n  try{api=factory(resources);assert.deepEqual(Object.keys(api),Object.keys(metadata));assert.deepEqual(Array.from(api.EVIDENCE_KINDS),metadata.EVIDENCE_KINDS);assert.equal(api.EVIDENCE_PER_REVISION,10);for(const [key,value]of Object.entries(metadata))if(key.startsWith('evidence')||key==='recordSnapshot'||key==='snapshotView'){assert.equal(api[key].name,key);assert.equal(api[key].length,value);assert.equal(api[key].constructor.name,'Function');}\n   if(settings.mutateKinds)api.EVIDENCE_KINDS.push('owned-kind');active=true;\n   if(operation==='input')result=api.evidenceInput(body);\n   else if(operation==='rows')result=api.evidenceRows('cr1');\n   else if(operation==='count')result=api.evidenceCount('cr1',2);\n   else if(operation==='view')result=api.evidenceView(evidence,settings.canRemove??true);\n   else if(operation==='record')result=api.recordSnapshot('ws1','g1',settings.at??at);\n   else if(operation==='snapshot')result=api.snapshotView(pp,Object.hasOwn(settings,'json')?settings.json:JSON.stringify(snapshot()),2);\n   else throw Error('Unknown operation');\n  }catch(e){error=e;}finally{active=false;}\n  return {result:error?undefined:normalize(result),error:error?{name:error.name,message:error.message,code:normalize(error.code),sameFault:error===fault,sameRefusal:error===lastRefusal}:null,trace,reads,effects,dateReads,urlReads,rowsIdentity:operation==='rows'&&!error?result===rows:null,kinds:api?Array.from(api.EVIDENCE_KINDS):null};\n }\n return {run};\n}\nconst hash=value=>crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');\nmodule.exports={row,snapshot,fixture,normalize,hash,resourceNames,metadata};\n")(name=>{assert(['node:assert/strict','node:crypto'].includes(name));return require(name);},fixtureModule,fixtureModule.exports);
+const corpusModule={exports:{}};
+new Function('require','module','exports',"'use strict';\nconst assert=require('node:assert/strict');\nconst {row,snapshot,fixture,hash}=require('./server-evidence-fixture-draft-v1.cjs');\nconst operations=['input','rows','count','view','record','snapshot'];\nconst originalCounts={input:{reads:6,effects:5},rows:{reads:0,effects:1},count:{reads:1,effects:1},view:{reads:10,effects:1},record:{reads:13,effects:8},snapshot:{reads:1,effects:1}};\nfunction entries(index){\n const cases=[],add=(settings={},operation='input')=>cases.push({settings,operation});\n if(index===0){\n  for(const operation of operations){add({},operation);for(let captureFault=1;captureFault<=11;captureFault++)add({captureFault},operation);}\n  add({mutateKinds:true,body:{kind:'owned-kind',url:'https://example.invalid/',label:'Reported result'}});\n  add({mutateKinds:true},'view');\n }else if(index===1){\n  const urls=['https://example.invalid/',' https://example.invalid/a#part ','https://example.invalid:443/a','https://例え.invalid/路径','http://example.invalid/','ftp://example.invalid/','https:///path','not a URL','https:','https://u@example.invalid/','https://:p@example.invalid/','https://u:p@example.invalid/','https://example.invalid/'+ 'a'.repeat(2024),'https://example.invalid/'+ 'a'.repeat(2025),'https://example.invalid/'+ 'é'.repeat(350)];\n  for(const kind of ['pr','ci_run','incident','dashboard','doc','other','unknown'])for(const url of urls)add({body:{kind,url,label:'Reported result'}});\n  for(const label of ['x','x'.repeat(120),'x'.repeat(121),'','   ','first\\u2028second','first\\u2029second',...Array.from({length:32},(_,i)=>'x'+String.fromCharCode(i)+'y'),'x\\u007fy'])add({body:{kind:'pr',url:'https://example.invalid/',label}});\n  const valid={protocol:'https:',hostname:'example.invalid',username:'',password:'',href:'https://example.invalid/'};\n  for(const protocol of ['http:','HTTPS:','https:'])for(const hostname of ['','example.invalid'])for(const username of ['','u'])for(const password of ['','p'])add({urlObject:{...valid,protocol,hostname,username,password}});\n  for(const length of [2047,2048,2049])add({urlObject:{...valid,href:'x'.repeat(length)}});\n  add({urlFailure:true});add({sequences:{'url.href':['https://example.invalid/first','https://example.invalid/second']}});\n }else if(index===2){\n  add({},'rows');\n  for(const countRow of [undefined,null,{}, {n:undefined},{n:null},{n:0},{n:1},{n:NaN}])add({countRow},'count');\n  for(const kind of ['pr','ci_run','incident','dashboard','doc','other'])for(const source of ['person','agent'])for(const canRemove of [false,true])add({row:row({kind,source}),canRemove},'view');\n  add({sequences:{'row.source':['agent','person']}},'view');add({sequences:{'row.added_by':['u1','u2']}},'view');\n }else if(index===3){\n  for(const at of ['2026-11-01T12:00:00.000Z','2024-03-01T00:00:00.000Z','2026-11-01T01:30:00-07:00','1970-01-01T00:00:00.000Z','1969-12-31T23:59:59.999Z','invalid date'])for(const targets of [[],['s1'],['s1','s1','s2']])for(const lastRow of [undefined,null,{}, {at:null},{at:''},{at:'2026-11-01T11:00:00.000Z'}])add({at,targets,lastRow},'record');\n  add({spend:{total:0,requests:0,models:[]}},'record');\n }else if(index===4){\n  const values=[null,'',JSON.stringify(snapshot()),JSON.stringify(snapshot({spend:null,bound_sessions:0,last_activity_at:null})),JSON.stringify(snapshot({window:{from:'a',to:'b',days:30,extension:'retained'},spend:{total:9,models:[{name:'stored',count:1}]}})),'{','null','false','0','[]','{}'];\n  for(const json of values)for(const canSpend of [false,true])add({json,canSpend},'snapshot');\n }else if(index===5){\n  for(const operation of operations){const n=originalCounts[operation];for(let propertyFault=1;propertyFault<=n.reads;propertyFault++)add({propertyFault},operation);for(let effectFault=1;effectFault<=n.effects;effectFault++)add({effectFault},operation);}\n  for(const url of ['invalid URL','http://example.invalid/','https://u:p@example.invalid/'])for(let effectFault=1;effectFault<=6;effectFault++)add({body:{kind:'pr',url,label:'Reported result'},effectFault});\n  for(const json of ['{','null',JSON.stringify(snapshot())])for(const effectFault of [1,2])add({json,effectFault},'snapshot');\n }else throw Error('Invalid batch');\n return cases;\n}\nasync function run(factory,index){const records=entries(index).map(({settings,operation})=>fixture(settings).run(factory,operation));assert(records.length);return {batch:index,records:records.length,sha256:hash(records)};}\nmodule.exports={run,entries,operations,originalCounts};\n")(name=>{if(name==='./server-evidence-fixture-draft-v1.cjs')return fixtureModule.exports;assert(['node:assert/strict','node:crypto'].includes(name));return require(name);},corpusModule,corpusModule.exports);
+const corpus=corpusModule.exports,PLANS=[{"index":0,"golden":{"batch":0,"records":74,"sha256":"d698491e587681a1d49b82fa002316c1f66985c01039d27280203bf512afed49"}},{"index":1,"golden":{"batch":1,"records":174,"sha256":"dfc5b6d2a9d49d160cbe613ab5fd5abb23175134b520a5b7c72ecb88d63f2690"}},{"index":2,"golden":{"batch":2,"records":35,"sha256":"72924613483d42f36dee6c428e16f48117889e8e2468a593375ee476aac0ee99"}},{"index":3,"golden":{"batch":3,"records":109,"sha256":"a47614376a9fbcf9202da41743418c6568d08f45674a9f52d9e926321c1997ab"}},{"index":4,"golden":{"batch":4,"records":22,"sha256":"828b183944da294b5a7f9fee7d76893aeae305b88e2bbe119f54b80f5a1cce16"}},{"index":5,"golden":{"batch":5,"records":72,"sha256":"ec43016fc6ed7b521b92214b66911a11149e6c5bdb2ffe1f8a992a4d9df5942d"}}],CAPABILITIES=["server-evidence.create-evidence"],SYMBOLS=['create_evidence'];
+const CASE_IDS=PLANS.map((_p,i)=>CAPABILITIES[0]+'-'+String(i+1).padStart(3,'0'));
+function factoryAt(root){
+ const files=[path.join(root,'server_evidence/create_evidence.js'),path.join(root,'source/server_evidence/create_evidence.js')].filter(name=>fs.existsSync(name));
+ assert.equal(files.length,1,'Exact generated module missing or ambiguous');const file=files[0];assert(fs.lstatSync(file).isFile()&&!fs.lstatSync(file).isSymbolicLink());
+ const pkg=path.dirname(file),directory=fs.lstatSync(pkg);
+ assert(directory.isDirectory()&&!directory.isSymbolicLink(),'Native package directory must be regular');
+ assert.deepEqual(fs.readdirSync(pkg).sort(),['create_evidence.js','package.json'],'Exact native package members');
+ for(const name of ['create_evidence.js','package.json']){const stat=fs.lstatSync(path.join(pkg,name));assert(stat.isFile()&&!stat.isSymbolicLink(),'Native package members must be regular files');}
+ const manifest=JSON.parse(fs.readFileSync(path.join(pkg,'package.json'),'utf8'));
+ assert.equal(manifest.name,'server_evidence');assert.equal(manifest.type,'commonjs');
+ assert.deepEqual(manifest.exports,{'./create_evidence':'./create_evidence.js'});
+ const blocked=()=>{throw Error('Forbidden ambient generated effect');};
+ const context=vm.createContext({Date:blocked,fetch:blocked,process:new Proxy({},{get:blocked}),console:new Proxy({},{get:blocked}),setTimeout:blocked,setInterval:blocked,Buffer:undefined},{codeGeneration:{strings:false,wasm:false}});
+ new vm.Script('Math.random=()=>{throw Error("Forbidden ambient randomness")};').runInContext(context,{timeout:1000});
+ const module={exports:{}};
+ new vm.Script('(function(exports,module,require){"use strict";\n'+fs.readFileSync(file,'utf8')+'\n})',{filename:'create_evidence.js'}).runInContext(context,{timeout:1000})(module.exports,module,blocked);
+ assert.deepEqual(Object.keys(module.exports),['create_evidence']);const factory=module.exports.create_evidence;
+ assert.equal(typeof factory,'function');assert.equal(factory.name,'create_evidence');assert.equal(factory.length,1);assert.equal(factory.constructor.name,'Function');return factory;
+}
+async function runSelected(root,_surface,selected){
+ assert(Array.isArray(selected)&&selected.length>0&&selected.length<=PLANS.length);
+ const indices=selected.map(item=>{assert.equal(item.capability,CAPABILITIES[0]);assert(Array.isArray(item.arguments)&&item.arguments.length===1);const index=item.arguments[0];assert(Number.isSafeInteger(index)&&index>=0&&index<PLANS.length);return index;});
+ assert.equal(new Set(indices).size,indices.length);const factory=factoryAt(root),results=[];
+ for(let i=0;i<selected.length;i++){const item=selected[i],plan=PLANS[indices[i]],value=await corpus.run(factory,plan.index);assert.deepEqual(value,plan.golden,'Source characterization differs in batch '+plan.index);results.push({case_id:item.case_id,capability:item.capability,result:value});}
+ return results;
+}
+module.exports={CAPABILITIES,SYMBOLS,CASE_IDS,PLANS,runSelected};
+if(require.main===module){assert.equal(process.argv.length,5);runSelected(process.argv[2],JSON.parse(process.argv[3]),JSON.parse(process.argv[4])).then(cases=>console.log(JSON.stringify({schema:'literate-ai/library-acceptance-results@1',cases}))).catch(error=>{console.error(error.stack);process.exitCode=1;});}
+}
+
+function verifierBytes() {
+  const text = historicalVerifier.toString();
+  const bytes = Buffer.from(text.slice(text.indexOf('{') + 1, -1));
+  assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), SETTINGS.inner_sha256,
+    'Historical verifier bytes changed');
+  return bytes;
+}
+
+function directFile(directory, name) {
+  assert(/^[a-zA-Z0-9_.-]+$/.test(name) && name !== '.' && name !== '..');
+  const file = path.join(directory, name);
+  const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    assert(stat.isFile() && stat.size <= 8 * 1024 * 1024, 'Unsafe candidate member');
+    return fs.readFileSync(descriptor);
+  } finally { fs.closeSync(descriptor); }
+}
+
+async function runSelected(root, surface, selected) {
+  assert(Array.isArray(selected) && selected.length > 0 && selected.length <= SETTINGS.maximum_cases);
+  const input = JSON.stringify({surface, selected});
+  assert(Buffer.byteLength(input) <= 256 * 1024, 'Oversized oracle request');
+  assert(Buffer.byteLength(JSON.stringify(surface)) <= 64 * 1024 &&
+    Buffer.byteLength(JSON.stringify(selected)) <= 64 * 1024, 'Oracle argument exceeds portable CLI bound');
+  const source = fs.realpathSync(root);
+  const candidates = [path.join(source, SETTINGS.package), path.join(source, 'source', SETTINGS.package)]
+    .filter(file => fs.existsSync(file));
+  assert.equal(candidates.length, 1, 'Expected one candidate package');
+  const candidate = candidates[0];
+  // Reject symlinks below the resolved caller root, including an intermediate source directory.
+  let at = source;
+  for (const part of path.relative(source, candidate).split(path.sep)) {
+    at = path.join(at, part);
+    assert(fs.lstatSync(at).isDirectory() && !fs.lstatSync(at).isSymbolicLink());
+  }
+  assert.deepEqual(fs.readdirSync(candidate).sort(), [...SETTINGS.package_files].sort());
+  // Desktop Docker shares the home directory. Its VM need not share the OS temporary directory.
+  const cache = path.join(os.homedir(), '.cache', 'align-native-oracles');
+  fs.mkdirSync(cache, {recursive: true, mode: 0o700});
+  const snapshot = fs.mkdtempSync(path.join(fs.realpathSync(cache), 'evaluation-'));
+  const name = 'align-oracle-' + crypto.randomUUID();
+  assert(!/[\r\n,]/.test(snapshot), 'Unsupported mount path');
+  let started = false;
+  const dockerEnvironment = {...process.env};
+  // Host-side executable configuration must not load application-supplied Node preload hooks.
+  delete dockerEnvironment.NODE_OPTIONS;
+  delete dockerEnvironment.NODE_PATH;
+  try {
+    const packageRoot = path.join(snapshot, 'source', SETTINGS.package);
+    fs.mkdirSync(packageRoot, {recursive: true, mode: 0o755});
+    fs.chmodSync(path.join(snapshot, 'source'), 0o755);
+    fs.chmodSync(packageRoot, 0o755);
+    for (const file of SETTINGS.package_files) {
+      fs.writeFileSync(path.join(packageRoot, file), directFile(candidate, file), {mode: 0o444});
+    }
+    fs.writeFileSync(path.join(snapshot, 'oracle.cjs'), verifierBytes(), {mode: 0o444});
+    fs.writeFileSync(path.join(snapshot, 'request.json'), input, {mode: 0o444});
+    fs.writeFileSync(path.join(snapshot, 'execute.cjs'), [
+      "'use strict';",
+      "const input=require('./request.json');",
+      "const cp=require('node:child_process');",
+      "const result=cp.spawnSync(process.execPath,['--no-warnings','--experimental-vm-modules','--max-old-space-size=512','/inputs/oracle.cjs','/inputs/source',JSON.stringify(input.surface),JSON.stringify(input.selected)],{encoding:'utf8',timeout:130000,maxBuffer:4*1024*1024});",
+      "if(result.error||result.status!==0){console.error(result.error?.code||result.status,result.stderr);process.exitCode=1;}else process.stdout.write(result.stdout);",
+    ].join('\n'), {mode: 0o444});
+    // Do not depend on the caller's umask for container readability.
+    for (const file of SETTINGS.package_files) fs.chmodSync(path.join(packageRoot, file), 0o444);
+    for (const file of ['oracle.cjs', 'request.json', 'execute.cjs']) {
+      fs.chmodSync(path.join(snapshot, file), 0o444);
+    }
+    fs.chmodSync(snapshot, 0o755);
+    const info=cp.spawnSync('docker',['info','--format','{{.NCPU}}'],{env:dockerEnvironment,encoding:'utf8',timeout:10000});
+    if(info.error||info.status!==0)throw Error('Docker runtime unavailable: '+(info.error?.code||info.status));
+    const available=Number(info.stdout.trim());
+    assert(Number.isInteger(available)&&available>=1&&available<=512,'Invalid Docker CPU capacity');
+    const cpus=Math.min(SETTINGS.cpus,available);
+    const argv = ['run', '--rm', '--name', name, '--pull=never', '--network=none', '--read-only',
+      '--user=65532:65532', '--cap-drop=ALL', '--security-opt=no-new-privileges',
+      '--pids-limit=64', '--memory=' + SETTINGS.memory_mib + 'm', '--cpus=' + cpus,
+      '--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=128m', '--env=HOME=/tmp',
+      '--mount', `type=bind,source=${snapshot},target=/inputs,readonly`,
+      '--workdir=/inputs', '--entrypoint=/usr/bin/timeout', SETTINGS.image,
+      '--signal=KILL', SETTINGS.worker_seconds + 's', 'node', '--no-warnings', '--max-old-space-size=512', '/inputs/execute.cjs'];
+    started = true;
+    const result = cp.spawnSync('docker', argv, {env: dockerEnvironment, encoding: 'utf8',
+      timeout: 150000, maxBuffer: 4 * 1024 * 1024});
+    if (result.error || result.status !== 0) {
+      throw Error('Contained oracle failed: ' + (result.error?.code || result.status) + '\n' +
+        String(result.stderr || '').slice(0, 1600));
+    }
+    const value = JSON.parse(result.stdout);
+    assert.equal(value.schema, 'literate-ai/library-acceptance-results@1');
+    assert(Array.isArray(value.cases) && value.cases.length === selected.length);
+    assert.deepEqual(value.cases.map(item => [item.case_id, item.capability]),
+      selected.map(item => [item.case_id, item.capability]));
+    return value.cases;
+  } finally {
+    if (started) cp.spawnSync('docker', ['rm', '--force', name], {
+      env: dockerEnvironment, stdio: 'ignore', timeout: 10000});
+    fs.rmSync(snapshot, {recursive: true, force: true});
+  }
+}
+
+module.exports = {runSelected};
+if (require.main === module) {
+  assert.equal(process.argv.length, 5);
+  runSelected(process.argv[2], JSON.parse(process.argv[3]), JSON.parse(process.argv[4]))
+    .then(cases => process.stdout.write(JSON.stringify({schema: 'literate-ai/library-acceptance-results@1', cases}) + '\n'))
+    .catch(error => {console.error(error.stack); process.exitCode = 1;});
+}
