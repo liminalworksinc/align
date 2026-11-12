@@ -195,21 +195,27 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   ledger preparation precede the integrated acceptance run. Closure remains 26 of 31 until
   every checkpoint gate passes. No independent or operator security approval is
   supplied by functional checks.
-- **Current acceptance correction:** The merged-main candidate completed 1,905
-  checks: 1,881 passed and 24 failed. One uses the raw Markdown parser restored
-  during rebase although the admitted parser passes all four list cases. Twenty
-  failures follow new operator test calls that omit await after the helper became
-  asynchronous. Three migration fixtures expose the historical 22-program native
-  schema beside current main's version 23. Restore the qualified Markdown caller,
-  await the 21 new calls, and update schema authority before full acceptance.
-  Preserve the failed candidate and every assertion. B22 hot qualification 4 uses
-  265 original controls after source review rejected the prior legacy-key behavior.
+- **Current acceptance correction:** The trust punctuation regression is fixed.
+  The next complete run passes 1,908 of 1,909 checks; the assembly recovery test
+  instead hits the contained verifier's 50-second deadline. The two structural
+  tests now reuse the existing two-provider fixture, preserving recovery checks
+  and requiring the exact incorrect-result mismatch. Both focused checks pass.
+  No runtime library, sandbox limit or timeout is changed. Complete the current
+  application/image run, receipt and normal publication gates before closure.
+  Read the [current checkpoint inputs](../../generated/native-checkpoints/current-recovery.json).
+- **Current image assembly:** The Docker build deliberately has no nested
+  daemon. Host-contained acceptance now produces a digest-bound input bundle;
+  the builder checks its exact bytes and admitted runtime members. Ten transport
+  controls and a real build pass. Canonical image, full application, current
+  receipt and normal publication remain required. Ten admitted sync factories
+  preserve all 803 original observations on both hosts. Read the
+  [current checkpoint inputs](../../generated/native-checkpoints/current-container.json).
 - **Current implementation evidence:** The normal registered-consumer assembly
   now passes all 1,259 contained library batches, preserving all 270 runtime
   package files. The caller batches checks within each library and omits unused
   expected-result metadata from verifier arguments while retaining every result
   assertion. The current-v2 directive replacement passed two clean generations,
-  full emitted-source review and separate admission. Eight admitted sync factories
+  full emitted-source review and separate admission. Nine admitted sync factories
   match all 803 freshly executed composition observations on both hosts. These
   private B22 results still need product integration. Hot-state qualification
   passed its existing 258 observations, but source review found that both outputs

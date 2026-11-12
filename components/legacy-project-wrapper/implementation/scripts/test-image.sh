@@ -28,8 +28,7 @@ forbidden $'package.json\n.env.production' ""; ok $? "matcher: a top-level .env.
 ! forbidden $'package.json\nnode_modules\npublic' $'/app/lib/env.ts\n/app/.envrc-not'; ok $? "matcher: a clean listing passes (env.ts and .envrc-not are not .env files)"
 
 docker info >/dev/null 2>&1 || { echo "test-image: no Docker daemon"; [ $fails = 0 ] && echo "test-image: matcher checks passed"; exit 2; }
-npm run prepare:container || { echo "FAIL  native container inputs"; exit 1; }
-docker build -q -t "$TAG" . >/dev/null || { echo "FAIL  docker build"; exit 1; }
+node scripts/build-container.mjs "$TAG" >/dev/null || { echo "FAIL  docker build"; exit 1; }
 echo "PASS  docker build"
 
 listing="$(docker run --rm --entrypoint sh "$TAG" -c 'ls -A /app')"
@@ -40,7 +39,7 @@ printf '%s\n' "$listing" | grep -qx 'package.json' && [ "$nobad" -ne 0 ]; ok $? 
 
 operator="$(node scripts/test-operator-image.mjs "$TAG" 2>&1)"
 ok $? "scripts/ and lib/ match the exact pinned operator closure" "$operator"
-docker run --rm --entrypoint sh "$TAG" -c 'test ! -e /.literate && test ! -e /app/native && test ! -e /app/.native-inputs'
+docker run --rm --entrypoint sh "$TAG" -c 'test ! -e /.literate && test ! -e /app/native && test ! -e /app/.native-inputs && test ! -e /app/.native-prepared'
 ok $? "native source caches and acceptance inputs stay out of the runtime image"
 
 docker run --name "$NAME-bad" "$TAG" >/dev/null 2>&1
@@ -63,13 +62,13 @@ st() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 [ "$(st -H 'host: evil.example' -H 'x-forwarded-proto: https' -H 'fly-client-ip: 192.0.2.1' "$B/api/v2/auth/get-session")" = 421 ]; ok $? "a wrong Host -> 421"
 [ "$(st -H 'host: align.test' -H 'x-forwarded-proto: http' -H 'fly-client-ip: 192.0.2.1' "$B/api/v2/auth/get-session")" = 403 ]; ok $? "plain http -> 403"
 [ "$(st -H 'host: align.test' -H 'x-forwarded-proto: https' "$B/api/v2/auth/get-session")" = 403 ]; ok $? "no Fly-Client-IP -> 403"
-loc="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "${EDGE[@]}" "$B/")"
-[ "$loc" = "307 https://align.test/app" ]; ok $? "/ -> 307 to https://align.test/app" "$loc"
+loc="$(for p in / /new; do curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "${EDGE[@]}" "$B$p"; echo; done)"
+[ "$loc" = $'307 https://align.test/app\n307 https://align.test/app' ]; ok $? "/ and the existing /new invite -> 307 to https://align.test/app" "$loc"
 [ "$(st "${EDGE[@]}" "$B/app/sign-in")" = 200 ]; ok $? "the sign-in page is served"
 # The trust pages are built from docs/trust in the build stage; the runtime image has no docs/ and still serves them.
 trust="$(st "${EDGE[@]}" "$B/privacy") $(st "${EDGE[@]}" "$B/trust") $(st "${EDGE[@]}" "$B/trust/security")"
 [ "$trust" = "200 200 404" ]; ok $? "/privacy and /trust are served from the build (nothing under /trust)" "$trust"
-closed="$(for p in /setup /new /w/x /api/state /api/session /api/sessions/events /api/workspaces/config /api/directives; do st "${EDGE[@]}" "$B$p"; echo; done | sort -u | tr '\n' ' ')"
+closed="$(for p in /setup /w/x /api/state /api/session /api/sessions/events /api/workspaces/config /api/directives; do st "${EDGE[@]}" "$B$p"; echo; done | sort -u | tr '\n' ' ')"
 [ "$closed" = "404 " ]; ok $? "paths outside the allowlist (the retired v1 routes among them) -> 404" "$closed"
 # Connected AI apps: the MCP endpoint asks for Align's OAuth sign-in, and the OAuth metadata names this host.
 mcp="$(curl -s -o /dev/null -D - "${EDGE[@]}" -X POST "$B/api/mcp" | tr -d '\r' | grep -i '^www-authenticate:')"

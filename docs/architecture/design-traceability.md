@@ -1,6 +1,6 @@
 # Design traceability
 
-<!-- literate-ai:authority-reviewed sha256:655f251a71f602b7683f60da9ee87432cd4db7a05199db5cd0573d30923eb5d5 -->
+<!-- literate-ai:authority-reviewed sha256:538f26540e9eff01b89436793f8b4d78a1722916d112e78f0cf9294b952c463b -->
 
 [Project guide](../README.md) → design traceability
 
@@ -33,3 +33,16 @@ by ordinary compilation. These changes leave selected generation contracts,
 accepted component locks, qualification profiles and source caches unchanged.
 This is an authority review of the stated local changes, not independent
 security acceptance or an upstream framework modification.
+
+## Native container acceptance transport
+
+Host preparation invokes the existing independent package acceptance in contained
+workers before Docker build. It prepares the selected web bindings and exact
+operator closure, verifies original inputs remained stable, and hashes a manifest
+of every output's path, permissions, size and SHA-256. The host passes that digest
+as an external build argument. The builder checks the manifest against it,
+compares every output file and admitted runtime member, and installs both outputs
+without executing verification code or using a Docker socket. Missing or altered
+inputs fail closed. Repository-only preparation, transport, build and mutation
+controls are assembly tooling under B31. Generated product algorithms retain their
+qualified source authority. The runtime image excludes preparation material.

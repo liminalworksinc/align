@@ -16,7 +16,7 @@ records the B13 transfer decision and explicitly excludes final tester security
 acceptance. It supplies no sign-off from another person.
 
 The [readable source manifest](../../generated/native-review-source/manifest.json)
-is checked against all 68 accepted libraries and 270 package files. The
+is checked against all 70 registered libraries and 274 package files. The
 [qualification review manifest](../../generated/qualification-review/manifest.json)
 links three unchanged historical profiles to 62 readable exported files. Run
 the two exporters in check mode and `tools/native-rewrite/check-review-policy.py`
@@ -50,9 +50,11 @@ acceptance remains preserved. No receipt is patched or reattributed.
 
 The corrections below are implemented and have focused local evidence. Their
 normal publication and the combined checkpoint's full acceptance remain pending.
-The historical reviewer ledger still has 23 entries. Its API has only human
+The reviewer ledger preserves 26 undecided findings. The earlier 23-entry
+correction record is historical; the latest three are indexed below. Its API has only human
 accept/dismiss overrides, so no override is written to represent a code fix.
-These entries remain available alongside the correction evidence.
+These entries remain available alongside the correction evidence. No finding
+is accepted or dismissed.
 The [current correction record](../../generated/native-checkpoints/finding-remediation.json)
 contains the exact counts and reproducible focused checks. The
 [combined checkpoint result](../../generated/native-checkpoints/b19-b28.json)
@@ -83,6 +85,9 @@ records preparation, acceptance and publication as those gates actually finish.
 | f_a53163d0b124 | Enforce the stricter Git base floor in the owning project preflight and CI; preserve audited metrics snapshots. | Verified locally; combined acceptance and normal review pending |
 | f_dd723ad9bd62 | Require explicit commit and push authorization in the retention child's advance instructions. | Verified locally; combined acceptance and normal review pending |
 | f_5c5fc40549da | Require explicit commit and push authorization in the metrics child's advance instructions. | Verified locally; combined acceptance and normal review pending |
+| f_3ce9f2db2566 | Require explicit action authorization in the route child's staging instructions. | Corrected locally; normal review pending |
+| f_a9b7b0880de4 | Contain the historical goals-route evaluator in a nonroot, read-only, network-isolated process and prove owned escape probes fail closed. | Corrected locally; current consumer acceptance and normal review pending |
+| f_d0fca6e9a3f5 | Apply the same contained evaluator to workspace-admin routes while preserving all original observations. | Corrected locally; current consumer acceptance and normal review pending |
 
 Work in this order: source visibility and guard review; qualification readability;
 tooling and approval corrections; focused verification and normal review; the

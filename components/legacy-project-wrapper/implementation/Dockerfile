@@ -4,8 +4,8 @@
 # local agent packages and any .env file never reach the runtime, except the assembled operator command,
 # three core modules and qualified settings closure needed by `fly ssh console`. The trust documents
 # (docs/trust, docs/RETENTION.md) enter the build
-# stage only. The native cache, independent verifiers and build adapter also enter
-# the build stage only, so the image checks the exact qualified packages itself.
+# stage only. The digest-bound native package bundle enters only the build stage;
+# host-contained acceptance precedes the image build.
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -17,15 +17,16 @@ COPY proxy.ts instrumentation.ts next.config.ts tsconfig.json ./
 # The public /privacy and /trust pages are built from these (lib/trust/docs.ts); the runtime stage doesn't copy them.
 COPY docs/trust ./docs/trust
 COPY docs/RETENTION.md ./docs/RETENTION.md
-# Prepared from the exact admitted native caches by npm run prepare:container.
-# Verification and independent acceptance run again inside this clean build stage.
-COPY .native-inputs /
-COPY native ./native
-COPY scripts/native-libraries.mjs ./scripts/native-libraries.mjs
-COPY scripts/align-admin-main.mjs scripts/retention-main.mjs scripts/sign-in-link-main.mjs scripts/prepare-operator.mjs ./scripts/
+# The owning host executes every independent verifier in its contained worker.
+# This stage verifies the exact accepted package bundle against a digest passed
+# outside the Docker context. It needs no nested Docker daemon or socket.
+COPY .native-prepared ./.native-prepared
+COPY native/libraries.json ./native/libraries.json
+COPY scripts/consume-container-inputs.mjs ./scripts/consume-container-inputs.mjs
+ARG ALIGN_NATIVE_PREPARED_SHA256
 RUN chown -R node:node /app
 USER node
-RUN node scripts/native-libraries.mjs web && node scripts/prepare-operator.mjs /app/.operator-runtime && npx next build
+RUN node scripts/consume-container-inputs.mjs "$ALIGN_NATIVE_PREPARED_SHA256" && npx next build
 
 # Runtime: production dependencies, build output and reviewed runtime data, run as the node user.
 FROM node:24-bookworm-slim

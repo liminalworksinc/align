@@ -1,0 +1,30 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {create_trust_text_parser} = require('../trust_text_parser/create_trust_text_parser.js');
+const cases = [{"case_id":"generated-fill-stop","args":["parseInline","Hello {firm}..",{"prefix":"p","fill":{"{firm}":"Acme Inc."}}],"expected_result":[{"t":"text","v":"Hello "},{"t":"text","v":"Acme Inc."},{"t":"text","v":"."}]},{"case_id":"generated-empty","args":["parseInline","",{"prefix":"p"}],"expected_result":[]},{"case_id":"generated-raw-code","args":["parseInline","`TOKEN` TOKEN",{"prefix":"p","fill":{"TOKEN":"value"}}],"expected_result":[{"t":"code","v":"TOKEN"},{"t":"text","v":" "},{"t":"text","v":"value"}]},{"case_id":"generated-document-comment","args":["parseMarkdown","<!-- removed -->\r\nhello\rworld",{"prefix":"p"}],"expected_result":[{"t":"para","c":[{"t":"text","v":"hello world"}]}]},{"case_id":"generated-indented-list","args":["parseMarkdown","   - first\n     - child\n   - second\nend",{"prefix":"p"}],"expected_result":[{"t":"list","ordered":false,"items":[{"c":[{"t":"text","v":"first"}],"sub":{"t":"list","ordered":false,"items":[{"c":[{"t":"text","v":"child"}],"sub":null}]}},{"c":[{"t":"text","v":"second"}],"sub":null}]},{"t":"para","c":[{"t":"text","v":"end"}]}]},{"case_id":"generated-empty-key","args":["parseInline","",{"prefix":"p","fill":{"":"x"}}],"expected_result":[{"t":"text","v":"x"}]}];
+function invoke(args) {
+  const parser = create_trust_text_parser({
+    slug: text => text,
+    safeHref: href => href,
+    plain: nodes => nodes.map(node => node.v || '').join('')
+  });
+  return parser[args[0]](args[1], args[2]);
+}
+function runTests() {
+  const results = [];
+  for (const test of cases) {
+    assert.deepStrictEqual(invoke(test.args), test.expected_result);
+    results.push({case_id: test.case_id, outcome: 'passed'});
+  }
+  const trace = [];
+  const options = {prefix: 'p'};
+  const parser = create_trust_text_parser({
+    slug: text => text, plain: nodes => nodes.map(n => n.v || '').join(''),
+    safeHref: function(href, opts) { assert.equal(this, undefined); assert.equal(opts, options); trace.push(href); return href; }
+  });
+  parser.parseMarkdown('- [parent](parent)\n  - [child](child)\n- [next](next)', options);
+  assert.deepStrictEqual(trace, ['child', 'parent', 'next']);
+  assert.notStrictEqual(parser.parseInline('', options), parser.parseInline('', options));
+  return {schema: 'literate-ai/generated-test-results@1', cases: results};
+}
+module.exports = {runTests, smoke: () => invoke(cases[0].args)};

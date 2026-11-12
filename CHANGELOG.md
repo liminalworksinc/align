@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Run contained native acceptance on the owning host and carry its exact sealed
+  package bundle into image assembly without a nested Docker daemon.
+
+- Use the existing isolated provider fixture for assembly recovery checks and
+  require the exact independent-acceptance mismatch, preserving sandbox limits.
+
+- Carry forward current trust placeholder punctuation and the admitted indented
+  list behavior through a qualified parser with unchanged text helper owners.
+
+- Compose migration 23 with the admitted schema history, restore core and storage
+  bindings, and include schema dependencies in operator packaging. Preserve
+  current-main behavior and the goal-cap correction; current application and
+  image acceptance remain required.
+
 - Restore the admitted trust parser after main reconciliation and await newly
   merged operator-command checks. Preserve the failing schema-23 evidence for
   the remaining native schema revision.

@@ -1,5 +1,6 @@
 // Typed public names for the independently qualified trust Markdown library.
 import * as native from "../native/.bindings/trust_markdown.js";
+import {create_trust_text_parser} from "../native/.bindings/trust_text_parser.js";
 
 export type Inline = {
     t: "text";
@@ -64,6 +65,10 @@ export interface ParseOptions {
 
 export const slug = native.slug as (text: string) => string;
 export const safeHref = native.safe_href as (href: string, opts: ParseOptions) => string | null;
-export const parseInline = native.parse_inline as (s: string, opts: ParseOptions) => Inline[];
 export const plain = native.plain as (c: Inline[]) => string;
-export const parseMarkdown = native.parse_markdown as (md: string, opts: ParseOptions) => Block[];
+const parsing = create_trust_text_parser({slug, safeHref, plain}) as {
+  parseInline(s: string, opts: ParseOptions): Inline[];
+  parseMarkdown(md: string, opts: ParseOptions): Block[];
+};
+export const parseInline = parsing.parseInline;
+export const parseMarkdown = parsing.parseMarkdown;

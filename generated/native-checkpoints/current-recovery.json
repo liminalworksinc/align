@@ -1,0 +1,25 @@
+{
+  "schema": "align/current-native-recovery-checkpoint@1",
+  "state": "assembled-full-acceptance-pending",
+  "base_main": "4d95f5befa36e98012e8ca69933124a0508a4aaf",
+  "registered_libraries": 70,
+  "source_members": 655,
+  "runtime_source_unchanged_from_prior70_candidate": true,
+  "structural_tests_corrected": 2,
+  "focused_structural_checks_passed": 2,
+  "previous_full_application": {
+    "passed": 1908,
+    "failed": 1,
+    "total": 1909
+  },
+  "qualified_runtime_or_sandbox_limits_changed": false,
+  "full_application_accepted": false,
+  "image_accepted": false,
+  "published": false,
+  "historical_closed_boundaries": 26,
+  "undecided_findings": 26,
+  "independent_review_claimed": false,
+  "operator_security_accepted": false,
+  "superseded_by": "generated/native-checkpoints/current-container.json",
+  "historical_inputs_not_attested_by_current_receipt": true
+}

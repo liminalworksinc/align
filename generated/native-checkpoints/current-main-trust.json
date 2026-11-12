@@ -1,0 +1,25 @@
+{
+  "schema": "align/current-main-native-checkpoint@1",
+  "base_main": "4d95f5befa36e98012e8ca69933124a0508a4aaf",
+  "registered_libraries": 70,
+  "prior69_consumer_descriptors_exact": true,
+  "schema_extension_qualification_and_separate_admission": true,
+  "parser_qualification_and_separate_admission": true,
+  "schema_original_observations": 214,
+  "schema_binding_controls": 6,
+  "historical_parser_observations": 27682,
+  "new_parser_observations": 37,
+  "previous_full_application_result": {
+    "passed": 1908,
+    "failed": 1,
+    "total": 1909
+  },
+  "acceptance_authority": "verification/current.json and current retained-source receipt",
+  "normal_publication_required": true,
+  "historical_closed_boundaries": 26,
+  "undecided_findings": 26,
+  "independent_review_claimed": false,
+  "operator_security_accepted": false,
+  "superseded_by": "generated/native-checkpoints/current-container.json",
+  "historical_inputs_not_attested_by_current_receipt": true
+}

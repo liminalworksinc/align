@@ -1,0 +1,20 @@
+{
+  "schema": "align/current-trust-retained-verifier-classification@1",
+  "boundary": "B31",
+  "source_members": 655,
+  "new_paths": [
+    {
+      "path": "native/trust-text-parser-contained-v2.cjs",
+      "sha256": "a5218072ca6ead52453b228c407cb47f4cd003cc4254a10b6099b5ead321ef29",
+      "reason": "Repository-only readable acceptance verifier or declarative oracle. Product parser implementation remains in its separately qualified generated library."
+    },
+    {
+      "path": "native/trust-text-parser.json",
+      "sha256": "6a9d1f5b8aad43b3e4d31e74aa4f62327dcb1e33379aaf0890258b11f16d3145",
+      "reason": "Repository-only readable acceptance verifier or declarative oracle. Product parser implementation remains in its separately qualified generated library."
+    }
+  ],
+  "original280_retained_list_unchanged": true,
+  "no_new_retained_service_exception": true,
+  "authorization": "native-program.operator-go-all-prepared-v1.json"
+}

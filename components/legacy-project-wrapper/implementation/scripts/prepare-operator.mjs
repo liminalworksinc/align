@@ -8,6 +8,7 @@ import { prepareNative } from "./native-libraries.mjs";
 const adminSources = [
   ["scripts/align-admin-main.mjs", "scripts/align-admin.mjs"],
   ["lib/v2/core.mts", "lib/v2/core.mts"],
+  ["lib/storage-schema.mts", "lib/storage-schema.mts"],
   ["lib/v2/retention-core.mts", "lib/v2/retention-core.mts"],
   ["lib/v2/metrics-core.mts", "lib/v2/metrics-core.mts"],
   ["lib/runtime-settings.mts", "lib/runtime-settings.mts"],
@@ -45,7 +46,7 @@ export function prepareOperator(implementation, destination, {command = "all"} =
   const shortcutSources = [["scripts/retention-main.mjs", "scripts/retention.mjs"], ["scripts/sign-in-link-main.mjs", "scripts/sign-in-link.mjs"]];
   const sources = command === "sign-in-link" ? [shortcutSources[1]] : [...adminSources,
     ...(command === "all" ? shortcutSources : command === "retention" ? [shortcutSources[0]] : [])];
-  const adminComponents = ["runtime-settings", "value-rules", "identifier-tools", "server-secrets", "server-core", "server-metrics", "server-retention", "server-creation-compatibility", "operator-admin"];
+  const adminComponents = ["runtime-settings", "value-rules", "identifier-tools", "server-secrets", "server-core", "storage-schema", "storage-refresh-schema", "server-metrics", "server-retention", "server-creation-compatibility", "operator-admin"];
   const components = command === "sign-in-link" ? ["operator-shortcuts"] : [...adminComponents,
     ...(command === "align-admin" ? [] : ["operator-shortcuts"])];
   implementation = path.resolve(implementation);

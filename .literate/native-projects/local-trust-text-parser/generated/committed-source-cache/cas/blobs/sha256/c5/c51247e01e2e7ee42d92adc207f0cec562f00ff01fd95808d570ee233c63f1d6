@@ -1,0 +1,1 @@
+{"name":"trust_text_parser","type":"commonjs","exports":{"./create_trust_text_parser":"./create_trust_text_parser.js"}}

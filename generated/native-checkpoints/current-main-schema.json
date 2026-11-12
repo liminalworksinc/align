@@ -1,0 +1,23 @@
+{
+  "schema": "align/current-main-native-checkpoint@1",
+  "state": "assembled-full-acceptance-pending",
+  "base_main": "4d95f5befa36e98012e8ca69933124a0508a4aaf",
+  "held_ROOT_commit": "6faeeb9c5b7648d0a45fa084ca39421964276187",
+  "registered_libraries": 69,
+  "prior68_consumer_descriptors_exact": true,
+  "schema_extension_qualification_and_separate_admission": true,
+  "schema_original_observations": 214,
+  "authored_binding_controls": 6,
+  "full_application_accepted": false,
+  "image_accepted": false,
+  "published": false,
+  "historical_closed_boundaries": 26,
+  "undecided_findings": 26,
+  "independent_review_claimed": false,
+  "operator_security_accepted": false,
+  "source_members": 653,
+  "operator_checks": 29,
+  "actual_operator_Node_invocations": 35,
+  "superseded_by": "generated/native-checkpoints/current-container.json",
+  "historical_inputs_not_attested_by_current_receipt": true
+}

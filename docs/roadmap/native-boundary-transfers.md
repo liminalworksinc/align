@@ -4,33 +4,82 @@
 - **Owning queue item:** [ADOPT-002](active-work.md#adopt-002)
 - **Completion / archival evidence:** pending while ADOPT-002 remains open; exact accepted checkpoint and per-boundary results are recorded below
 
-The combined B19/B28 candidate registers 68 qualified libraries. Seven route
-groups supply all 73 canonical v2 routes and three unchanged aliases. All 66
-earlier library descriptors remain exact. The two operator packages are normally
-registered after separate cache acceptance with no generation or repairs.
+This current-main candidate registers 70 qualified libraries. It composes the
+unchanged admitted 22-program schema history with migration 23, which adds only
+the nullable rotated_ts and used_at device-token fields. The new trust parser
+carries forward current-main sentence punctuation and the admitted indented-root
+list correction. Its slug, URL-selection and plain-text helpers remain the exact
+previously qualified owners. Core, storage and parsing use typed native bindings.
+Operator packaging includes both schema dependencies.
 
-All 23 historical findings have technical correction evidence. Readable source
-projections include 270 package files from 68 accepted libraries. Three preserved
-qualification profiles have 62 readable review files with exact executable
-segments. Focused acceptance passes 214 batches across nine guarded services.
-Instruction checks cover 213 files; host preflight intersects every base Git
-and Git LFS declaration while preserving qualified snapshots. No human override,
-independent approval or operator security acceptance is recorded.
+The previous integrated run completed 1,909 checks: 1,908 passed and one failed.
+That failure exposed an omitted current-main trust placeholder punctuation rule;
+its inputs and complete logs remain preserved. The parser correction preserves
+all 27,682 historical parser observations and 37 new punctuation, indentation and
+current-document checks. Two clean generations and separate admission precede
+this integrated candidate. Neither qualification alone nor these counts claim
+full application, image, publication or security acceptance. The current receipt
+and normal publication gates determine closure. Historical application and image
+results apply only to their recorded input identities. Current checkpoint inputs
+are in the [checkpoint record](../../generated/native-checkpoints/current-main-trust.json).
 
-B28's actual cold entrypoints pass 28 controls and 34 Node commands on each host.
-They preserve the existing 25-second deadline and write no repository files.
-Sign-in-link startup selects only its helper package; administration selects its
-exact dependencies. Library acceptance batches preserve every case and expected
-result, and a wrong final case is rejected before output installation.
+The subsequent 70-library run fixed the trust regression and again completed
+1,909 checks, with 1,908 passing. Its sole failure was the native assembly
+output-recovery test: the fixture selected all application libraries and its
+contained verifier hit the 50-second deadline before output-path rejection.
+Docker records show exit 137 after 50 seconds, with no OOM event in that window.
+The prior candidate and all suite logs remain exact and preserved.
 
-B19's earlier 1,847 application checks, 36 image checks and 18 additional offline
-HTTP/SQLite controls remain preserved for their original source. The current
-combined candidate requires its own complete application/image acceptance and
-normal publication. Published closed progress remains 26 of 31. The exact live
-preparation, acceptance and publication state is in the
-[checkpoint result](../../generated/native-checkpoints/b19-b28.json). This file
-does not assert future results. B18 and B22 remain implementation work; B17 also
-awaits exact-head green CI closure. Deployment and tester configuration remain
+This candidate changes only the two structural tests to use the existing
+self-contained two-provider fixture. Every previous output-restoration and
+conflicting-file assertion remains. The incorrect-result test now requires the
+actual result/expectation mismatch, so an infrastructure failure cannot satisfy
+it. Both focused tests pass in under one second. No product implementation,
+qualified library, oracle expectation, timeout or sandbox limit is changed.
+Current full application, image, receipt and normal publication gates remain
+required. The [current checkpoint record](../../generated/native-checkpoints/current-recovery.json)
+records those gates separately as they finish.
+
+
+## Contained acceptance and image assembly
+
+The next image build exposed a build-stage dependency gap: the contained
+acceptance adapter requires Docker, which is deliberately absent from the build
+container. The failed image and its BuildKit history remain preserved. No Docker
+socket, nested daemon, network permission or weaker evaluator was added.
+
+The owning host now runs normal independent acceptance for 62 web libraries and
+the exact 12-library operator closure. It seals every prepared file, permission
+and provider selection into a manifest. The build receives that manifest's
+SHA-256 as an argument outside the Docker context, verifies all file membership
+and bytes, and independently compares every runtime package member with its
+admitted descriptor before installing either output. A missing digest, changed
+metadata or bytes, extra file, symlink or output conflict refuses. A recomputed
+bundle seal still cannot admit a changed runtime package. The ten actual-bundle
+transport controls pass. The first real Docker build through this bridge passes.
+Current canonical image, full application, receipt and normal publication gates
+remain required. The [current checkpoint record](../../generated/native-checkpoints/current-container.json)
+records those gates without deciding any finding.
+
+Ten admitted sync factories now preserve all 803 genuine original observations
+on both hosts. Sharing's selected second clean output is separately admitted
+with eight exact source members, six passing generated tests and zero new model
+calls or repairs. Only the original orchestrator remains in that private sync
+composition. Handlers, orchestration, CLI/install integration and full B22
+acceptance remain pending. No deployment or tester configuration changed.
+
+All 26 review findings remain undecided: nine HIGH and seventeen MEDIUM.
+The [findings guide](native-authorization-findings.md) preserves original and
+materialized locations and commands to read both. Technical corrections and
+functional controls record no independent or operator security acceptance.
+
+Published historical closure remains 26 of 31 until the current integrated gates
+and normal publication finish. B17, B19 and B28 are in this integration checkpoint.
+B22 still needs sharing, handlers, sync orchestration and CLI/install integration;
+nine admitted sync factories preserve all 803 original observations on both
+hosts. B18 remains deferred. Devices, alignments, goals and requests retain
+current-main service bodies while their native revisions are prepared. The
+reviewed goal-cap correction remains. Deployment and tester configuration are
 outside this migration.
 
 

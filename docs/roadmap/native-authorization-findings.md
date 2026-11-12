@@ -14,7 +14,7 @@ The latest three are indexed below. Their instruction correction and contained e
 
 - Original main for the earlier catalogs: `ba43c5b28cc0620472b4a09ab699fbc529c1afcb`. The B19 appendix and nine refreshed workspace-admission operation rows use `c725c966d1ebe94a912454ded2593a254b8faab4`. Each reading command selects its exact revision.
 - Last verified published checkpoint: `51dd7e5e4c8ead355655f865987da415750abfcd`. Its normal review completed with 26 open findings. PR #58 remains draft. The local branch has since rebased onto merged main `4d95f5befa36e98012e8ca69933124a0508a4aaf`; the rebased candidate is unpublished. Earlier review-time commit locators below remain unchanged.
-- Reconciliation preserves current-main service changes while their native revisions are prepared. The source pairs below remain exact historical comparisons. They do not assert that the rebased candidate has passed acceptance or that every old generated provider is currently selected. In particular, core, devices, alignments, goals, requests and trust Markdown temporarily retain the current-main implementation. The database retains all 23 current-main schema programs and the reviewed native migration coordinator.
+- Reconciliation preserves current-main service changes while their native revisions are prepared. The source pairs below remain exact historical comparisons. They do not assert that the rebased candidate has passed acceptance or that every old generated provider is currently selected. Core, storage and trust Markdown now use their admitted native bindings, with the new schema extension and current parsing correction. Devices, alignments, goals and requests still preserve current-main service bodies while their native revisions are prepared. The goal-cap carry-forward fix remains intact. The historical source pairs below do not claim current native closure for those pending revisions.
 - Original path prefix: `components/legacy-project-wrapper/implementation/`.
 - Generated path prefix: `generated/native-review-source/`. The exact accepted files are prepared as readable review projections for the PR. The file and one-based line references below refer to these source copies, not the forwarding bindings. Runtime builds continue to use the accepted, pinned caches.
 - The B17 source review materialized 58 libraries and passed 1,227 acceptance batches. The published checkpoint's B19 web materialization passed 1,092 batches for 60 selected web libraries, with all 183 package members matching their pinned digests. The published checkpoint registers 68 libraries. Materialization reuses accepted source. That checkpoint passed all 1,847 application checks, 36 image checks and 18 additional offline HTTP/SQLite controls. Those results predate the main reconciliation. Exact-head green CI remains pending.
@@ -81,12 +81,11 @@ pair19() {
 | `f_a53163d0b124` | MEDIUM | `.literate/native-projects/local-server-metrics/flavors/os-macos/host-install/macos/arm64/none.cdx.json:73` | macOS Git realization permits versions below the base minimum. B17 inherited toolchain capability constraint, with no generated application guard counterpart. Read the exact review-time realization and base Git capability side by side below. |
 | `f_dd723ad9bd62` | MEDIUM | `.literate/native-projects/local-server-retention/skills/agent/release-project/advance/SKILL.md:23` | Directs agents to push without operator authorization. B17 inherited release instruction, with no original main or generated application check counterpart. Read the exact review-time skill below. This entry records the finding without deciding it. |
 | `f_5c5fc40549da` | MEDIUM | `.literate/native-projects/local-server-metrics/skills/agent/release-project/advance/SKILL.md:21` | Requires a push without explicit operator approval. B17 inherited release instruction, with no original main or generated application check counterpart. The review locator is retained exactly; the complete step is visible in the range below. This finding remains undecided. |
-
-The original review locator and the original check on main are distinct columns of evidence. Some findings concern a profile, inherited skill, tooling or a human gate; those have no generated application check. Their exact historical files are retained below rather than inventing such a check.
-
 | `f_3ce9f2db2566` | HIGH | `.literate/native-projects/local-server-sessions-directives-routes/skills/agent/develop-in-production-workflow/staging/SKILL.md:17` | Staging instructions direct an unapproved push. This is workflow policy, not a relocated application check on main. Governing local policy is `AGENTS.md:8`; the corrected child instruction is at `skills/agent/develop-in-production-workflow/staging/SKILL.md:17` under the named child. All 71 local copies now require action-specific authorization; `tools/native-rewrite/check-review-policy.py` checks them. Reading commands below preserve the exact original and corrected sides. |
 | `f_a9b7b0880de4` | HIGH | `.literate/native-projects/local-server-goals-deliberation-routes/verification/acceptance/server-goals-deliberation-routes-harness-v4.cjs:73` | Candidate code recovers a host Function constructor through the blocked require function. This evaluator has no corresponding application check on main and no generated runtime guard counterpart. The exact readable evaluator remains at this path. Its current oracle selects the sibling `server-goals-deliberation-routes-contained-v1.cjs`, which preserves the historical verifier bytes and runs them in a separate restricted container. Controls and limits are described in [the containment record](../architecture/native-evaluator-containment.md). |
 | `f_d0fca6e9a3f5` | HIGH | `.literate/native-projects/local-server-workspace-admin-routes/verification/acceptance/server-workspace-admin-routes-harness-v3.cjs:109` | Candidate factory receives host resource functions. The reviewer supplied no line; line 109 is the verified readable `factory(resources)` call. This is evaluator containment, with no corresponding application check on main or generated runtime guard counterpart. The current oracle selects sibling `server-workspace-admin-routes-contained-v1.cjs`; historical source and containment limits remain readable. |
+
+The original review locator and the original check on main are distinct columns of evidence. Some findings concern a profile, inherited skill, tooling or a human gate; those have no generated application check. Their exact historical files are retained below rather than inventing such a check.
 
 ### Read the exact review-time files
 
@@ -2065,3 +2064,86 @@ node tools/native-rewrite/test-contained-oracle.mjs
 ```
 
 All 26 findings remain undecided. Technical correction evidence does not constitute operator acceptance or dismissal. Historical qualification receipts are preserved. Current acceptance through the new evaluator is required before the next integrated candidate can be published.
+
+## Current-main schema extension and restored callers
+
+This candidate uses main `4d95f5befa36e98012e8ca69933124a0508a4aaf`.
+The device refresh fields are at `lib/v2/db.ts:1106` and `:1107` on that main.
+Their materialized implementation is
+`storage_refresh_schema/extend_device_refresh_schema.js:8`.
+The public schema version is at `lib/v2/core.mts:22` on main. Its current caller
+at `lib/v2/core.mts:133` reads the composed qualified program count. The helper
+provider's historical `SCHEMA_VERSION` property remains unused. The original
+22-program provider is unchanged. The restored storage caller supplies the
+composed history to the admitted runtime and migration coordinator.
+
+Read the exact changes side by side from the repository root:
+
+```sh
+diff -y -W 240 \
+  <(git show '4d95f5befa36e98012e8ca69933124a0508a4aaf:components/legacy-project-wrapper/implementation/lib/v2/db.ts' | nl -ba | sed -n '1100,1109p') \
+  <(nl -ba generated/native-review-source/storage_refresh_schema/extend_device_refresh_schema.js | sed -n '1,14p')
+diff -y -W 240 \
+  <(git show '4d95f5befa36e98012e8ca69933124a0508a4aaf:components/legacy-project-wrapper/implementation/lib/v2/core.mts' | nl -ba | sed -n '20,23p') \
+  <(nl -ba components/legacy-project-wrapper/implementation/lib/v2/core.mts | sed -n '130,136p')
+```
+
+The extension adds no authorization or rate-limit rule. Its original 214 schema
+observations cover history, populated upgrades, constraints and recovery; six
+additional authored controls check array binding. Both emitted runtimes were
+read in full, including generated tests and build inputs, before exact-source
+admission. Functional controls do not decide any of the 26 findings.
+
+## Current-main trust text parsing correction
+
+The current placeholder expansion is at `lib/trust/markdown.mts:91` on main
+`4d95f5befa36e98012e8ca69933124a0508a4aaf`. Its materialized parser is
+`trust_text_parser/create_trust_text_parser.js:22`. The unchanged URL
+policy, slug and plain-text helper owners remain in `trust_markdown`; their earlier
+source pairs remain exact. The parser preserves the prior admitted root-list
+indentation fix, all 27,682 historical parser observations, and 37 new controls.
+It adds no permission, validation or rate-limit authority. No finding is decided.
+
+Read the punctuation and list behavior from both implementations:
+
+```sh
+diff -y -W 240 \
+  <(git show 4d95f5befa36e98012e8ca69933124a0508a4aaf:components/legacy-project-wrapper/implementation/lib/trust/markdown.mts | nl -ba | sed -n '77,99p') \
+  <(nl -ba generated/native-review-source/trust_text_parser/create_trust_text_parser.js | sed -n '1,120p')
+```
+
+## Structural assembly acceptance correction
+
+The preserved 70-library run fixed the trust punctuation check but stopped at
+1,908 of 1,909 passing checks. A contained evaluator hit its 50-second deadline
+inside the output-recovery test before the expected output-path rejection.
+The current two structural tests use the existing self-contained provider pair.
+They preserve output restoration and the unrelated conflicting file, and require
+the actual incorrect-result mismatch rather than accepting any thrown error.
+The focused controls pass. All verifier timeouts, sandbox bounds, generated
+library bytes and 26 undecided findings are unchanged. Current full acceptance
+and normal publication remain required. This changes no relocated application
+permission, validation or rate-limit check.
+
+## Container acceptance transport
+
+The main Docker build has no nested Docker runtime. The native migration's
+contained independent acceptance therefore runs on the owning host. The build
+receives the accepted bundle digest outside its context and checks exact file
+membership, modes, bytes, native authority and admitted runtime members before
+installing web or operator output. These are new assembly input checks in
+`scripts/consume-container-inputs.mjs`; they do not relocate or replace a main
+application authorization check. The runtime image excludes the prepared bundle,
+source caches, verifiers and assembly helpers. Ten actual-bundle controls cover
+normal consumption, missing and changed seals, changed files or authority,
+extra files, symlinks, recomputed metadata with unadmitted source, output
+conflicts and linked output parents. All 26 findings remain undecided.
+
+Read both the original preparation checks and the new transport guard:
+
+```sh
+nl -ba components/legacy-project-wrapper/implementation/scripts/native-libraries.mjs | sed -n '45,195p'
+nl -ba components/legacy-project-wrapper/implementation/scripts/consume-container-inputs.mjs
+nl -ba components/legacy-project-wrapper/implementation/scripts/prepare-container.mjs
+nl -ba components/legacy-project-wrapper/implementation/scripts/test-container-inputs.mjs
+```

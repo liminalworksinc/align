@@ -21,9 +21,11 @@
 !scripts/prepare-operator.mjs
 !docs/trust
 !docs/RETENTION.md
-!.native-inputs
+!.native-prepared
 !native
-!scripts/native-libraries.mjs
+native/*
+!native/libraries.json
+!scripts/consume-container-inputs.mjs
 lib/native
 # Belt and braces inside the allowed folders.
 **/.env

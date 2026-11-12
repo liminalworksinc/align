@@ -1,0 +1,49 @@
+{
+  "schema": "align/current-container-native-checkpoint@1",
+  "state": "local-accepted-publication-pending",
+  "base_main": "4d95f5befa36e98012e8ca69933124a0508a4aaf",
+  "registered_libraries": 70,
+  "source_members": 659,
+  "structural_fixture_controls": 2,
+  "host_web_acceptance": {
+    "libraries": 62,
+    "cases": 1094
+  },
+  "host_operator_acceptance": {
+    "libraries": 12,
+    "cases": 299
+  },
+  "transport_mutation_controls": 10,
+  "real_Docker_build_passed": true,
+  "sandbox_limits_unchanged": true,
+  "new_runtime_generation_for_container_bridge": false,
+  "B22_admitted_sync_factories": 10,
+  "B22_genuine_original_observations_each_host": 803,
+  "full_application_accepted": true,
+  "canonical_image_accepted": false,
+  "published": false,
+  "historical_closed_boundaries": 26,
+  "undecided_findings": 26,
+  "independent_review_claimed": false,
+  "operator_security_accepted": false,
+  "current_image_assertion": "Both / and the current-main /new invitation redirect must return307 to https://align.test/app; all other listed retired routes must stay404",
+  "canonical_image_groups": 24,
+  "previous_canonical_image": {
+    "passed": 23,
+    "failed": 1,
+    "reason": "Retained image assertion expected404 for the current-main /new invitation redirect"
+  },
+  "image_accepted": true,
+  "application_passed": 1909,
+  "application_failed": 0,
+  "application_skipped": 0,
+  "source_identity": "sha256:b6dba141e395eba95e10c097ab20178d6477931994f81d4a971a02565f889a70",
+  "current_parent_receipt": "sha256:17fe53765e5953101ff742d8753ee0ea19c4ace529ae1f7cc916cc9b3573061a",
+  "image_checks": 36,
+  "image_static_asset_checks": 6,
+  "image_bundled_HTTP_SQLite_checks": 18,
+  "image_id": "sha256:575f5b53379b9db213aba11419218583e57ae1808872a779d7fadee5ae25f6f0",
+  "both_installed_receipt_readers_passed": true,
+  "normal_review_completed": false,
+  "exact_head_CI_green": false
+}

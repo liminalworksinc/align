@@ -196,14 +196,25 @@ export function prepareNative(implementation, destinations, {components, inputDe
   } finally { fs.rmSync(temporary, {recursive: true, force: true}); }
 }
 
+export function nativeComponents(consumer) {
+  if (!["agent", "web", "container"].includes(consumer)) throw new Error("unknown native consumer");
+  return consumer === "agent" ? ["spend-meter", "spend-stream", "spend-rounding", "shell-words", "share-notices", "agent-envelope"] : ["paste-lines", "policy", "share-again", "home-attention", "trust-markdown", "trust-text-parser", "http-errors", "promise-queues", "wording", "value-rules", "field-validation", "migration-coordinator", "runtime-settings", "storage-schema", "storage-refresh-schema", "rate-limits", "identifier-tools", "storage-runtime", "server-secrets", "server-startup", "server-readiness", "server-request-effects", "server-client-keys", "server-core", "server-identity-effects", "server-account-lifecycle", "server-workspace-admission", "server-local-owner-bootstrap", "server-auth", "server-workspaces", "server-sample", "goal-approval", "goal-limits", "limit-suggest", "server-value", "server-change-read", "server-goals", "server-evidence", "server-reallocations", "server-requests", "server-asks", "server-alignments", "server-changes", "server-steering", "server-spend", "server-goal-activity", "server-allocation", "server-activity", "server-home", "server-directives", "server-devices", "server-sessions", "server-metrics", "server-retention", "server-connected-apps-routes", "server-identity-routes", "server-workspace-reporting-routes", "server-team-asks-routes", "server-sessions-directives-routes", "server-workspace-admin-routes", "server-goals-deliberation-routes", "server-creation-compatibility", ...(consumer === "container" ? ["operator-admin", "operator-shortcuts"] : [])];
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const implementation = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const agent = path.join(implementation, "packages/align-agent");
   const consumer = process.argv[2] || "agent";
   if (!["agent", "web", "container"].includes(consumer)) throw new Error("unknown native consumer");
   const web = consumer !== "agent";
+  if (consumer === "container") {
+    const accepted = spawnSync(process.execPath, [path.join(implementation, "scripts/prepare-container.mjs")], {stdio: "inherit"});
+    if (accepted.error) throw accepted.error;
+    process.exitCode = accepted.status ?? 1;
+  } else {
   console.log(JSON.stringify(prepareNative(implementation,
     web ? [path.join(implementation, "lib/native")] : [path.join(agent, "src/native"), path.join(agent, "dist/native")],
-    {components: web ? ["paste-lines", "policy", "share-again", "home-attention", "trust-markdown", "http-errors", "promise-queues", "wording", "value-rules", "field-validation", "migration-coordinator", "runtime-settings", "storage-schema", "rate-limits", "identifier-tools", "storage-runtime", "server-secrets", "server-startup", "server-readiness", "server-request-effects", "server-client-keys", "server-core", "server-identity-effects", "server-account-lifecycle", "server-workspace-admission", "server-local-owner-bootstrap", "server-auth", "server-workspaces", "server-sample", "goal-approval", "goal-limits", "limit-suggest", "server-value", "server-change-read", "server-goals", "server-evidence", "server-reallocations", "server-requests", "server-asks", "server-alignments", "server-changes", "server-steering", "server-spend", "server-goal-activity", "server-allocation", "server-activity", "server-home", "server-directives", "server-devices", "server-sessions", "server-metrics", "server-retention", "server-connected-apps-routes", "server-identity-routes", "server-workspace-reporting-routes", "server-team-asks-routes", "server-sessions-directives-routes", "server-workspace-admin-routes", "server-goals-deliberation-routes", "server-creation-compatibility", ...(consumer === "container" ? ["operator-admin", "operator-shortcuts"] : [])] : ["spend-meter", "spend-stream", "spend-rounding", "shell-words", "share-notices", "agent-envelope"],
+    {components: nativeComponents(consumer),
       inputDestination: consumer === "container" ? path.join(implementation, ".native-inputs") : undefined})));
+  }
 }

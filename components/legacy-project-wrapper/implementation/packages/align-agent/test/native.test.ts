@@ -176,18 +176,31 @@ test("native package omissions refuse even when consumer metadata is edited", t 
   unchanged(f.out);
 });
 test("independent acceptance remains required for hash-consistent verifier inputs", t => {
-  const f = fixture(t), lib = f.manifest.libraries[0];
+  const f = overlappingFixture(t), lib = f.libraries[0];
   const oraclePath = path.join(f.app, "native", lib.oracle);
   const oracle = JSON.parse(fs.readFileSync(oraclePath, "utf8"));
   oracle.cases[0].expected_result = {incorrect: true};
   fs.writeFileSync(oraclePath, JSON.stringify(oracle));
   lib.verification_files[lib.oracle] = hash(fs.readFileSync(oraclePath));
-  fs.writeFileSync(path.join(f.app, "native/libraries.json"), JSON.stringify(f.manifest));
-  assert.throws(() => prepareNative(f.app, [f.out]));
+  f.save();
+  fs.mkdirSync(f.out);
+  fs.writeFileSync(path.join(f.out, "preserve"), "previous build");
+  assert.throws(() => prepareNative(f.app, [f.out]), {
+    name: "AssertionError",
+    code: "ERR_ASSERTION",
+    actual: {schema: "literate-ai/library-acceptance-results@1", cases: [
+      {case_id: "fixture-left.count-000", capability: "fixture-left.count", result: "left"}
+    ]},
+    expected: {schema: "literate-ai/library-acceptance-results@1", cases: [
+      {case_id: "fixture-left.count-000", capability: "fixture-left.count", result: {incorrect: true}}
+    ]}
+  });
   unchanged(f.out);
 });
 test("a failed second output restores the first output and keeps the conflicting file", t => {
-  const f = fixture(t), conflict = path.join(f.app, "conflict");
+  const f = overlappingFixture(t), conflict = path.join(f.app, "conflict");
+  fs.mkdirSync(f.out);
+  fs.writeFileSync(path.join(f.out, "preserve"), "previous build");
   fs.writeFileSync(conflict, "unrelated file");
   assert.throws(() => prepareNative(f.app, [f.out, conflict]), /unsafe native output/);
   unchanged(f.out);

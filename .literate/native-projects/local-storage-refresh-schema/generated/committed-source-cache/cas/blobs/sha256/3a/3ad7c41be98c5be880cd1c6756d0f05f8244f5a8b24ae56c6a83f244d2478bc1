@@ -1,0 +1,40 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { extend_device_refresh_schema } = require('../storage_refresh_schema/extend_device_refresh_schema.js');
+
+function runTests() {
+  const cases = [];
+  function check(case_id, prefix, expected, frozen) {
+    const original = prefix.slice();
+    if (frozen) Object.freeze(prefix);
+    const result = extend_device_refresh_schema(prefix);
+    assert.deepStrictEqual(result, expected);
+    assert.deepStrictEqual(prefix, original);
+    assert.notStrictEqual(result, prefix);
+    assert.strictEqual(Object.getPrototypeOf(result), Array.prototype);
+    assert.strictEqual(Object.isFrozen(result), false);
+    const other = extend_device_refresh_schema(prefix);
+    assert.notStrictEqual(result, other);
+    assert.deepStrictEqual(other, expected);
+    result[0] = 'changed by consumer';
+    result.push('another consumer value');
+    assert.deepStrictEqual(prefix, original);
+    assert.deepStrictEqual(other, expected);
+    assert.deepStrictEqual(extend_device_refresh_schema(prefix), expected);
+    assert.strictEqual(extend_device_refresh_schema([])[0], expected[expected.length - 1]);
+    cases.push({ case_id, outcome: 'passed' });
+  }
+  assert.strictEqual(extend_device_refresh_schema.name, 'extend_device_refresh_schema');
+  assert.strictEqual(extend_device_refresh_schema.length, 1);
+  check('generated-ordered-prefix', ['opaque first', 'opaque second'], ['opaque first', 'opaque second', 'ALTER TABLE v2_device_tokens ADD COLUMN rotated_ts TEXT;\nALTER TABLE v2_device_tokens ADD COLUMN used_at TEXT;'], false);
+  check('generated-empty-prefix', [], ['ALTER TABLE v2_device_tokens ADD COLUMN rotated_ts TEXT;\nALTER TABLE v2_device_tokens ADD COLUMN used_at TEXT;'], false);
+  check('generated-frozen-opaque-prefix', ['\u0000\n  ', 'not executable SQL; 😀', ''], ['\u0000\n  ', 'not executable SQL; 😀', '', 'ALTER TABLE v2_device_tokens ADD COLUMN rotated_ts TEXT;\nALTER TABLE v2_device_tokens ADD COLUMN used_at TEXT;'], true);
+  return { schema: 'literate-ai/generated-test-results@1', cases };
+}
+
+function smoke() {
+  return extend_device_refresh_schema(['opaque first', 'opaque second']);
+}
+
+module.exports = { runTests, smoke };

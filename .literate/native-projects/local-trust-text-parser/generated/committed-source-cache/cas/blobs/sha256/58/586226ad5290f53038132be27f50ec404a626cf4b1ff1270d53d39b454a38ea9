@@ -1,0 +1,11 @@
+LITAI_LANGUAGE_TOOL ?= node
+.PHONY: all test check run
+all: check
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" --check trust_text_parser/create_trust_text_parser.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tests/litai_test.js
+test:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+run:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-smoke

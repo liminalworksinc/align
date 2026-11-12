@@ -1,0 +1,9 @@
+'use strict';
+const tests = require('./tests/litai_test.js');
+try {
+  let result;
+  if (process.argv.length === 3 && process.argv[2] === '--litai-test') result = tests.runTests();
+  else if (process.argv.length === 3 && process.argv[2] === '--litai-smoke') result = tests.smoke();
+  else throw new Error('Library artifact supports framework test modes only');
+  process.stdout.write(JSON.stringify(result) + '\n');
+} catch (error) { process.stderr.write(String(error) + '\n'); process.exitCode = 1; }

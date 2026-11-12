@@ -1,7 +1,7 @@
 {
   "schema": "align/readable-native-source@1",
   "authority": "review-copy-only",
-  "library_manifest_sha256": "fa27e13ebbd172b4bce7d5feef842aed424440b6e12fec3b58ff2c5f363e283e",
+  "library_manifest_sha256": "bccb949469ac0c981a8b611f6b51da48d79d0a7ffad0d8a02677be710cd3a225",
   "libraries": [
     {
       "component": "agent-envelope",
@@ -2570,6 +2570,54 @@
           "digest": "bceef5531895b3bd9eada1404e9ced4d6318f57cb742d16c9607c597f35723a8",
           "media_type": "application/octet-stream",
           "size": 234
+        }
+      ]
+    },
+    {
+      "component": "storage-refresh-schema",
+      "package": "storage_refresh_schema",
+      "provider": ".literate/native-projects/local-storage-refresh-schema",
+      "entry": "efc558c482a2616f0c64db6cc05417a06b05241f07951ab8d87830747dbbc563",
+      "source_tree": "b0e11c14a3c789bc33bbd09b63a058329c554d9c9b589c27d2499a4ad901873a",
+      "lock_identity": "sha256:bd8a1f950e35ddf0ce8e46bf53f437459ba371a96b6fdb876fe409c77908395c",
+      "files": [
+        {
+          "path": "extend_device_refresh_schema.js",
+          "algorithm": "sha256",
+          "digest": "88ea9632fe9f4463ce8596eecfc785c9a76c863e14540f0d23d342a97d88eeb6",
+          "media_type": "application/octet-stream",
+          "size": 370
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "b863f451f5f7f5695601b1d4907f8990d1afc5da92e01a53a6a30d630ffd0b6f",
+          "media_type": "application/octet-stream",
+          "size": 133
+        }
+      ]
+    },
+    {
+      "component": "trust-text-parser",
+      "package": "trust_text_parser",
+      "provider": ".literate/native-projects/local-trust-text-parser",
+      "entry": "f7be78cfc9c920ff7a39aa715cba79724b6f7d77d91bd441f8b5f1618aec8018",
+      "source_tree": "b1f82a8934d1980fa3afb23ca15efd076ee373b7c6e1d3271e0e96b109bdf82e",
+      "lock_identity": "sha256:cb2ceb88635c024a5518ecc22d5e06dd022684a966bb04752f0b62b515990efe",
+      "files": [
+        {
+          "path": "create_trust_text_parser.js",
+          "algorithm": "sha256",
+          "digest": "7e8e672aac6c08ce98c492f83239881ae18b70d20db91701ced8c8dc26156813",
+          "media_type": "application/octet-stream",
+          "size": 7906
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "c51247e01e2e7ee42d92adc207f0cec562f00ff01fd95808d570ee233c63f1d6",
+          "media_type": "application/octet-stream",
+          "size": 120
         }
       ]
     }

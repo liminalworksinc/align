@@ -197,3 +197,12 @@ https in the browser. There is no fuller CSP yet.
 `node scripts/test-v2.mjs <port>` builds once and runs every phase on `next start`, the way Fly runs it. Its hosted
 phase sends `Host: align.test`, `X-Forwarded-Proto: https` and `Fly-Client-IP`, the way Fly's edge forwards
 requests. `node scripts/test-oauth.mjs <port>` does the same for connected AI apps.
+
+### Native migration image checks
+
+For the draft native migration, run `node scripts/build-container.mjs align-local`.
+The wrapper runs independent acceptance in the host's contained workers, verifies
+the prepared bundle, and passes its SHA-256 into the local Docker build. A bare
+Docker build requires the matching `ALIGN_NATIVE_PREPARED_SHA256` build argument.
+The build verifies exact accepted package bytes without access to a Docker socket.
+This local image workflow makes no hosted deployment or account change.
