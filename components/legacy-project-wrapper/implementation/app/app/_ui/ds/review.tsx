@@ -695,10 +695,20 @@ export function ReviewActions({
             </button>
           ))}
           {compact && rest.length > 0 && (
-            // Phones only: the same choices in a menu, so the dominant action stands alone on a narrow drawer.
-            <details className="relative sm:hidden" data-more-actions>
+            // Phones only: the same choices in a menu, so the dominant action stands alone on a narrow drawer. The menu is
+            // in the flow (never absolute: in the review drawer these actions are the footer at the foot of the screen, and
+            // an absolute menu hung below it, Decline off screen at 390 wide, Mini 5's click walk, Nov 11). Open, it makes
+            // the footer taller and the body above it shorter, and scrolls so its last item is in view.
+            <details
+              className="w-full sm:hidden"
+              data-more-actions
+              onToggle={(e) => {
+                const d = e.currentTarget;
+                if (d.open) requestAnimationFrame(() => d.querySelector("[role=menu] > :last-child")?.scrollIntoView({ block: "nearest" }));
+              }}
+            >
               <summary className={`${SECONDARY} list-none [&::-webkit-details-marker]:hidden`}>More actions</summary>
-              <div role="menu" aria-label="More actions" className="absolute left-0 z-10 mt-1 flex min-w-[12rem] flex-col gap-1 rounded-(--radius-m) border border-(--line-strong) bg-(--bg-overlay) p-1">
+              <div role="menu" aria-label="More actions" className="mt-1 flex min-w-[12rem] flex-col gap-1 rounded-(--radius-m) border border-(--line-strong) bg-(--bg-overlay) p-1">
                 {rest.map((c) => (
                   <button
                     key={c}
