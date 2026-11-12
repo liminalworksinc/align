@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api, ApiError, Btn, Card, Err, Field, go, Input, Note, Pill, Select, TextArea, useAction, useApi } from "./kit";
+import { api, ApiError, Btn, Err, Field, go, Input, Note, Pill, Select, TextArea, useAction, useApi } from "./kit";
+import { Panel } from "./ds";
 import type { Goal, Limit, WsDetail } from "./types";
 import { isBlankText } from "@/lib/v2/text-core.mts";
 
@@ -15,7 +16,7 @@ export type LimitDraft = { id?: string; type: "must" | "must_not" | "out_of_scop
 export const LIMIT_WORDS: Record<Limit["type"], string> = { must: "Must", must_not: "Must not", out_of_scope: "Out of scope" };
 const LIMITS_MAX = 5;
 const today = () => new Date().toISOString().slice(0, 10);
-const EXAMPLE = "No limits found. Write them as rules, like “The three models must not all fit on the GPU.”";
+const EXAMPLE = "No limits found. Write them as rules, like “Spend on the launch must stay under $40,000.”";
 
 export const limitsDraft = (ls: Limit[] = []): LimitDraft[] =>
   ls.map((l) => ({ id: l.id, type: l.type, text: l.text, source_title: l.source?.title ?? "", source_date: l.source?.date ?? "", source_kind: l.source?.kind }));
@@ -45,8 +46,8 @@ export function LimitChips({ goal }: { goal: Goal }) {
   return (
     <ul aria-label={`Limits of ${goal.title}`} className="mt-1 flex flex-wrap gap-2">
       {ls.slice(0, LIMITS_MAX).map((l) => (
-        <li key={l.id} className="text-[14px] text-zinc-700">
-          <Pill tone={l.type === "must_not" ? "red" : l.type === "must" ? "violet" : "neutral"}>{LIMIT_WORDS[l.type]}</Pill> {l.text}
+        <li key={l.id} className="text-[14px] text-(--text-2)">
+          <Pill>{LIMIT_WORDS[l.type]}</Pill> {l.text}
         </li>
       ))}
     </ul>
@@ -94,50 +95,68 @@ export function useStashedLimits(goalId: string, apply: (d: LimitDraft[]) => voi
 export function GoalLimits({ ws, goal, canEdit, onDone }: { ws: string; goal: Goal; canEdit: boolean; onDone: () => void }) {
   const detail = useApi<WsDetail>(`/api/v2/workspaces/${ws}`);
   const [suggesting, setSuggesting] = useState(false);
+  // After a sent suggestion the card says so in one line (founder ruling, PR 68 pass 1 item 4), and offers no second
+  // suggestion while that request is open (the server allows one open request per person and goal).
+  const [sent, setSent] = useState(false);
   const ls = goal.limits ?? [];
   const member = !!detail.data && detail.data.role !== "viewer";
   const canPropose = member && !canEdit && goal.owner.id !== detail.data?.me && goal.status === "active";
   return (
-    <Card title="Limits">
+    <Panel className="mb-4" title="Limits">
       {ls.length === 0 ? (
         <Note>No limits on this version.</Note>
       ) : (
         <ul className="mb-2 text-[15px]">
           {ls.map((l) => (
             <li key={l.id} className="py-1">
-              <Pill tone={l.type === "must_not" ? "red" : l.type === "must" ? "violet" : "neutral"}>{LIMIT_WORDS[l.type]}</Pill> {l.text}
-              {l.source && <span className="text-[13px] text-zinc-500"> ({sourceWords(l)})</span>}
+              <Pill>{LIMIT_WORDS[l.type]}</Pill> {l.text}
+              {l.source && <span className="text-[13px] text-(--text-3)"> ({sourceWords(l)})</span>}
             </li>
           ))}
         </ul>
       )}
-      <p className="mb-2 text-[14px] text-zinc-500">
+      <p className="mb-2 text-[14px] text-(--text-3)">
         Limits are part of the goal: they change only through a new version, and agents of sessions bound to this goal get them with it as context set by the people who approve it.
         {canEdit && " Edit them in New version below."}
       </p>
-      {canPropose && !suggesting && (
+      {sent && (
+        <p role="status" data-limit-sent className="mb-2 rounded-(--radius-s) border border-(--line) bg-(--bg-inset) px-3 py-2 text-[14px] text-(--text-1)">
+          Sent for approval. The goal&apos;s owner or a lead of its team decides; nothing changes until they approve and someone launches. It is under Change requests below.
+        </p>
+      )}
+      {canPropose && !suggesting && !sent && (
         <div className="mb-2">
           <Btn kind="secondary" onClick={() => setSuggesting(true)}>
             Suggest a limit
           </Btn>
         </div>
       )}
-      {canPropose && suggesting && <SuggestLimit ws={ws} goal={goal} onClose={() => setSuggesting(false)} onDone={onDone} />}
+      {canPropose && suggesting && (
+        <SuggestLimit
+          ws={ws}
+          goal={goal}
+          onClose={() => setSuggesting(false)}
+          onDone={() => {
+            setSent(true);
+            onDone();
+          }}
+        />
+      )}
       {member && goal.status === "active" && <NotesSuggest ws={ws} preferGoalId={goal.id} onDone={onDone} />}
-    </Card>
+    </Panel>
   );
 }
 
 /** A change request that adds limits: the goal's limits plus the new ones, for its approval set to decide. */
 function SuggestLimit({ ws, goal, onClose, onDone }: { ws: string; goal: Goal; onClose: () => void; onDone: () => void }) {
-  const [limits, setLimits] = useState<LimitDraft[]>(() => [...limitsDraft(goal.limits), { type: "must_not", text: "", source_title: "", source_date: "" }]);
+  const [limits, setLimits] = useState<LimitDraft[]>(() => [...limitsDraft(goal.limits), { type: "must", text: "", source_title: "", source_date: "" }]);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
   const act = useAction();
   const changed = !sameLimits(limits, goal.limits ?? []);
   return (
     <form
-      className="mb-3 rounded-[12px] border border-zinc-300 p-3"
+      className="mb-3 rounded-(--radius-m) border border-(--edge) p-3"
       onSubmit={(e) => {
         e.preventDefault();
         setError(null);
@@ -153,7 +172,7 @@ function SuggestLimit({ ws, goal, onClose, onDone }: { ws: string; goal: Goal; o
         });
       }}
     >
-      <p className="mb-2 text-[14px] text-zinc-600">This sends a change request. The goal&apos;s owner or a lead of its team decides; once approved the limits are part of version {goal.version + 1}.</p>
+      <p className="mb-2 text-[14px] text-(--text-2)">This sends a change request. The goal&apos;s owner or a lead of its team decides; once approved the limits are part of version {goal.version + 1}.</p>
       <LimitEditor value={limits} onChange={setLimits} />
       <Field label="Why this limit" hint="Never sent to agents. 1 to 2000 characters.">
         <TextArea rows={2} value={reason} maxLength={2000} onChange={(e) => setReason(e.target.value)} required />
@@ -168,7 +187,7 @@ function SuggestLimit({ ws, goal, onClose, onDone }: { ws: string; goal: Goal; o
       </div>
       {error?.code === "already_open" ? (
         <Err>
-          You already have an open change request on this goal. <a href="#change-requests" className="underline">See it below.</a>
+          You already have an open change request on this goal. <a href="#change-requests" className="font-medium text-(--accent-text) underline underline-offset-2">See it below.</a>
         </Err>
       ) : (
         <Err>{error?.message ?? null}</Err>
@@ -183,7 +202,7 @@ export function LimitEditor({ value, onChange }: { value: LimitDraft[]; onChange
   const set = (i: number, patch: Partial<LimitDraft>) => onChange(value.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   return (
     <div className="mb-3">
-      <span className="mb-1 block text-[14px] text-zinc-600">Limits (what work toward this goal must do, must not do, or leaves out of scope; at most {LIMITS_MAX})</span>
+      <span className="mb-1 block text-[14px] text-(--text-2)">Limits (what work toward this goal must do, must not do, or leaves out of scope; at most {LIMITS_MAX})</span>
       {value.map((l, i) => (
         <div key={i} className="mb-2 grid gap-2 sm:grid-cols-[150px_1fr]">
           <Select aria-label={`Limit ${i + 1} kind`} value={l.type} onChange={(e) => set(i, { type: e.target.value as LimitDraft["type"] })}>
@@ -191,7 +210,7 @@ export function LimitEditor({ value, onChange }: { value: LimitDraft[]; onChange
             <option value="must_not">{LIMIT_WORDS.must_not}</option>
             <option value="out_of_scope">{LIMIT_WORDS.out_of_scope}</option>
           </Select>
-          <Input aria-label={`Limit ${i + 1}`} placeholder="The three models must not all fit on the GPU" value={l.text} maxLength={160} onChange={(e) => set(i, { text: e.target.value })} />
+          <Input aria-label={`Limit ${i + 1}`} placeholder="Spend on the launch must stay under $40,000" value={l.text} maxLength={160} onChange={(e) => set(i, { text: e.target.value })} />
           <span className="hidden sm:block" />
           <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,1fr)_160px_auto] [&>*:first-child]:max-sm:col-span-2">
             <Input aria-label={`Limit ${i + 1} meeting`} placeholder="Where it was said (optional)" value={l.source_title} maxLength={120} onChange={(e) => set(i, { source_title: e.target.value, source_kind: undefined })} />
@@ -202,8 +221,9 @@ export function LimitEditor({ value, onChange }: { value: LimitDraft[]; onChange
           </div>
         </div>
       ))}
+      {/* A new row starts as "Must", which its placeholder's example is (DEFECT 14, PR 68 pass 1). */}
       {value.length < LIMITS_MAX && (
-        <Btn kind="secondary" onClick={() => onChange([...value, { type: "must_not", text: "", source_title: "", source_date: "" }])}>
+        <Btn kind="secondary" onClick={() => onChange([...value, { type: "must", text: "", source_title: "", source_date: "" }])}>
           Add a limit
         </Btn>
       )}
@@ -241,9 +261,9 @@ function GoalGroup({ ws, group, title, date, onDone }: { ws: string; group: Goal
     return { goal, all };
   };
   return (
-    <div className="mb-3 rounded-[12px] border border-zinc-200 p-3">
+    <div className="mb-3 rounded-(--radius-m) border border-(--line) p-3">
       <p className="mb-1 text-[15px]">
-        <Link href={goalPath} className="font-medium text-zinc-900 underline">
+        <Link href={goalPath} className="font-medium text-(--text-1) underline">
           {group.goal.title}
         </Link>
       </p>
@@ -251,11 +271,11 @@ function GoalGroup({ ws, group, title, date, onDone }: { ws: string; group: Goal
         {group.limits.map((l, i) => (
           <li key={i} className="py-1 text-[15px]">
             <label className="flex items-start gap-2">
-              <input type="checkbox" className="mt-1" checked={chosen[i]} onChange={(e) => setChosen((c) => c.map((x, j) => (j === i ? e.target.checked : x)))} />
+              <input type="checkbox" className="mt-1 size-4 shrink-0 accent-(--accent-text)" checked={chosen[i]} onChange={(e) => setChosen((c) => c.map((x, j) => (j === i ? e.target.checked : x)))} />
               <span>
-                <Pill tone={l.type === "must_not" ? "red" : l.type === "must" ? "violet" : "neutral"}>{LIMIT_WORDS[l.type]}</Pill> {l.text}
-                {l.already && <span className="text-[13px] text-zinc-500"> (the goal already has a limit like this)</span>}
-                <span className="block text-[13px] text-zinc-500">Said: “{l.quote}”</span>
+                <Pill>{LIMIT_WORDS[l.type]}</Pill> {l.text}
+                {l.already && <span className="text-[13px] text-(--text-3)"> (the goal already has a limit like this)</span>}
+                <span className="block text-[13px] text-(--text-3)">Said: “{l.quote}”</span>
               </span>
             </label>
           </li>
@@ -263,7 +283,7 @@ function GoalGroup({ ws, group, title, date, onDone }: { ws: string; group: Goal
       </ul>
       {sent ? (
         <Note>
-          Proposed. The goal&apos;s owner or a lead of its team decides on the <Link href={`/app/w/${ws}/requests`} className="underline">Requests</Link> tab.
+          Proposed. The goal&apos;s owner or a lead of its team decides on the <Link href={`/app/w/${ws}/requests`} className="font-medium text-(--accent-text) underline underline-offset-2">Requests</Link> tab.
         </Note>
       ) : (
         <div className="mt-2 flex flex-wrap gap-2">
@@ -314,7 +334,7 @@ export function NotesSuggest({ ws, preferGoalId, onDone }: { ws: string; preferG
   const act = useAction();
   const body = (
     <>
-      <p className="mb-2 text-[14px] text-zinc-500">
+      <p className="mb-2 text-[14px] text-(--text-3)">
         Align picks out sentences like “must”, “must not” and “out of scope”, matches each to a goal you can see, and shows them here. Nothing is saved until the goal&apos;s owner adds them to a new version, or you propose them and someone who approves for the goal agrees.
       </p>
       <form
@@ -329,7 +349,9 @@ export function NotesSuggest({ ws, preferGoalId, onDone }: { ws: string; preferG
         }}
       >
         <Field label="Notes, or one limit">
-          <TextArea rows={5} value={notes} maxLength={20000} onChange={(e) => setNotes(e.target.value)} required />
+          {/* Focused when it opens: on the Goals tab it sits after the New goal form (PR 68 pass 1 item 19), so focus
+              brings it into view. */}
+          <TextArea rows={5} value={notes} maxLength={20000} onChange={(e) => setNotes(e.target.value)} required autoFocus data-notes />
         </Field>
         <div className="grid gap-2 sm:grid-cols-[1fr_180px]">
           <Field label="Meeting (optional)">
@@ -363,14 +385,23 @@ export function NotesSuggest({ ws, preferGoalId, onDone }: { ws: string; preferG
     // On the goal page it sits inside the Limits card, folded away until opened.
     if (!open)
       return (
-        <button type="button" onClick={() => setOpen(true)} className="text-[14px] font-semibold text-violet-700 hover:underline">
+        <button type="button" onClick={() => setOpen(true)} className="text-[14px] font-semibold text-(--accent-text) hover:underline">
           Paste meeting notes
         </button>
       );
-    return <div className="mt-2 rounded-[12px] border border-zinc-300 p-3">{body}</div>;
+    return <div className="mt-2 rounded-(--radius-m) border border-(--edge) p-3">{body}</div>;
   }
+  // Folded, it is the button alone: a card titled with the button's own words said nothing more.
+  if (!open)
+    return (
+      <div className="mb-4">
+        <Btn kind="secondary" onClick={() => setOpen(true)}>
+          Paste meeting notes
+        </Btn>
+      </div>
+    );
   return (
-    <Card title="Paste meeting notes">
+    <Panel className="mb-4" title="Paste meeting notes">
       {open ? (
         body
       ) : (
@@ -378,6 +409,6 @@ export function NotesSuggest({ ws, preferGoalId, onDone }: { ws: string; preferG
           Paste meeting notes
         </Btn>
       )}
-    </Card>
+    </Panel>
   );
 }

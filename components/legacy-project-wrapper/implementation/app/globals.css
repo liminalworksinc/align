@@ -1,59 +1,198 @@
 @import "tailwindcss";
 
+/* Inside a DataTable: whether its rows are stacked, at its own stackBelow. */
+@custom-variant stacked {
+  @media (width < 640px) {
+    &:where([data-stack="640"] *) {
+      @slot;
+    }
+  }
+  @media (width < 1200px) {
+    &:where([data-stack="1200"] *) {
+      @slot;
+    }
+  }
+}
+@custom-variant unstacked {
+  @media (width >= 640px) {
+    &:where([data-stack="640"] *) {
+      @slot;
+    }
+  }
+  @media (width >= 1200px) {
+    &:where([data-stack="1200"] *) {
+      @slot;
+    }
+  }
+}
+
 /*
- * Display face. Founder ruling: Nineties Headliner loads at runtime from the viewer's machine
- * via local() and is NEVER committed to this public repo. Anton (next/font) is the fallback
- * when the face is not installed.
+ * Display face. Founder ruling (LIM-2454 1cb2b974, 2026-11-05): Nineties Headliner loads as a webfont from a PRIVATE
+ * host, so testers see the real face. The font file is never committed to this public repo.
+ * Today: local() only, so a machine without the face falls through the display chain to the canon serifs (no Anton,
+ * ruling 0e0f6774); the host does not exist yet. local() stays first.
+ *
+ * NINETIES_HEADLINER_URL: the one place the hosted URL goes. Replace the src below with the commented one only when
+ * all three are true: the founder has confirmed the licence allows web embedding; the private host is chosen; and the
+ * security headers allow it (font-src in next.config.ts and proxy.ts, Sean's). Never invent a URL here.
  */
 @font-face {
   font-family: "Nineties Headliner";
   src: local("Nineties Headliner"), local("NinetiesHeadliner-Regular");
+  /* src: local("Nineties Headliner"), local("NinetiesHeadliner-Regular"), url("NINETIES_HEADLINER_URL") format("woff2"); */
   font-display: swap;
 }
 
 /*
- * Align dark theme, retuned to the v6 design. Values are the Liminal design-system tokens v6
- * uses (liminal-prototype design-system/tokens/design-tokens.css), named in the comments.
- * The Tailwind palette the components already use is mapped onto these tokens so every
- * zinc/violet/amber/red/emerald class resolves here. Truth colors keep their meaning:
- *   violet = selected/candidate (--al-accent, the Liminal magenta),
- *   amber = unresolved (--al-warn), red = real failed check (--al-fail),
- *   emerald = Sparta-verified only (--al-pass).
+ * LIM-2472 semantic tokens: ONE set of names, a complete value in each theme. Feature components use only these
+ * names (or the Tailwind palette mapped onto them below); never a hex. Meanings (founder rulings, LIM-2454
+ * 0e0f6774): pink = the one primary action and the active selection; orchid (--between) = in-between states
+ * (pending, countered, held); green = a recorded human authorization; cerulean = launched to agents; red = decline,
+ * refusal and failed writes; amber = transient or retryable; Surge coral = urgent reprioritization only.
+ * Elevation is surface lightness plus hairlines, never glow. Measured contrast is in design/prototypes/lim-2472/LIM-2472-FOUNDATION.md.
  */
-:root {
+:root,
+:root[data-theme="dark"] {
   color-scheme: dark;
 
-  /* Near-black page with layered frame surfaces. */
-  --al-bg: #0a0a0b; /* --bg */
-  --al-rail: #08080a; /* --rail-bg */
-  --al-surface: #0e0e11; /* --frame-bg: cards */
-  --al-surface-sunk: #0c0c0f; /* --frame-bg-2: insets, inputs, grey pills */
-  --al-surface-raised: #15161a; /* --frame-bg-3: hover, chips */
-  --al-line: #232327; /* --card-border */
-  --al-line-strong: #2a2a2f; /* --card-border-2: secondary buttons, options */
+  --bg-page: #0b0b0d;
+  --bg-inset: #08080a;
+  --bg-panel: #121316;
+  --bg-raised: #191a1e;
+  --bg-overlay: #202126;
 
-  /* Ink: --text / --text-mid / (one step between) / --text-dim. */
-  --al-ink: #f4f2ee;
-  --al-ink-2: #c9c5bd;
-  --al-ink-3: #a6a29a;
-  --al-ink-4: #8a8780;
+  --text-1: #f4f2ee;
+  --text-2: #bdb9b1;
+  --text-3: #9a968f;
+  --text-on-accent: #ffffff;
 
-  --al-accent: #cc24f5; /* --liminal (orchid-500) */
-  --al-accent-bg: rgb(204 36 245 / 0.1); /* --liminal-bg */
-  --al-warn: #fdc237; /* --watch (amber-orn-500) */
-  --al-warn-bg: rgb(253 194 55 / 0.08);
-  --al-fail: #ed214f; /* --alarm (stability-500) */
-  --al-fail-bg: rgb(237 33 79 / 0.08);
-  --al-pass: #31e682; /* --ui-state-success (connection-500) */
-  --al-pass-bg: rgb(49 230 130 / 0.08);
-  --al-info: #6fa8ff;
-  --al-info-bg: rgb(111 168 255 / 0.08);
-  --al-focus: #8e66fb; /* --ui-focus-ring (clarity-500) */
+  --line: #26272c;
+  --line-strong: #34353b;
+  --edge: #6e6e78; /* control borders, 3:1 or more on every surface */
+  --focus: #b48cff;
+
+  --accent: #bf0078; /* wholeness-600: founder ruling 2026-11-05 (option c), white labels at 6:1 */
+  --accent-hover: #94005c; /* wholeness-700 */
+  --accent-soft: rgb(233 0 149 / 0.14);
+  --accent-text: #ff3db4; /* pink as text on dark surfaces (accent itself is under 4.5:1 on charcoal) */
+  --between: #d975ff; /* orchid, lifted for charcoal */
+  --between-soft: rgb(204 36 245 / 0.14);
+
+  --st-pending: var(--between);
+  --st-pending-soft: var(--between-soft);
+  --st-approved: #3ee68c; /* connection */
+  --st-approved-soft: rgb(49 230 130 / 0.12);
+  --st-launched: #5aa7ff; /* cerulean, lifted for charcoal */
+  --st-launched-soft: rgb(25 126 235 / 0.18);
+  --st-declined: #ff5577; /* stability (--alarm), lifted */
+  --st-declined-soft: rgb(237 33 79 / 0.14);
+  --st-retry: #fdc237; /* watch amber */
+  --st-retry-soft: rgb(253 194 55 / 0.12);
+  --st-urgent: #ff7a52; /* Surge coral, lifted */
+  --st-urgent-soft: rgb(250 85 43 / 0.14);
+
+  --ev-receipt: #3cc9c2; /* expression teal */
+  --ev-receipt-soft: rgb(30 150 146 / 0.18);
+  --ev-reported: #a88bff; /* clarity */
+  --ev-reported-soft: rgb(142 102 251 / 0.14);
+  --ev-unobserved: #a3a09a;
+  --ev-unobserved-soft: rgb(163 160 154 / 0.1);
+
+  --radius-s: 9px;
+  --radius-m: 13px;
+  --radius-l: 19px;
+
+  /* Literal chains live on the --al-* names below; Tailwind's @theme maps its font utilities to those too. */
+  --font-display: var(--al-display);
+  --font-sans: var(--al-sans);
+  --font-mono: var(--al-mono);
+
+  --shadow-pop: 0 0 0 1px var(--line-strong), 0 12px 32px -12px rgb(0 0 0 / 0.7);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-page: #f6f5f2;
+  --bg-inset: #efede9;
+  --bg-panel: #ffffff;
+  --bg-raised: #fbfaf8;
+  --bg-overlay: #ffffff;
+
+  --text-1: #16161a;
+  --text-2: #4a4842;
+  --text-3: #6a675f;
+  --text-on-accent: #ffffff;
+
+  --line: #e4e1db;
+  --line-strong: #d2cec6;
+  --edge: #8a877f;
+  --focus: #6f4dda; /* clarity-600 */
+
+  --accent: #bf0078; /* wholeness-600: white labels on it are 6:1 */
+  --accent-hover: #94005c; /* wholeness-700 */
+  --accent-soft: rgb(233 0 149 / 0.09);
+  --accent-text: #bf0078;
+  --between: #9312b8;
+  --between-soft: rgb(204 36 245 / 0.1);
+
+  --st-pending: var(--between);
+  --st-pending-soft: var(--between-soft);
+  --st-approved: #137a43;
+  --st-approved-soft: rgb(49 230 130 / 0.14);
+  --st-launched: #0f62c0;
+  --st-launched-soft: rgb(25 126 235 / 0.1);
+  --st-declined: #c0123b;
+  --st-declined-soft: rgb(237 33 79 / 0.09);
+  --st-retry: #8a5a00;
+  --st-retry-soft: rgb(253 194 55 / 0.2);
+  --st-urgent: #b83a0a;
+  --st-urgent-soft: rgb(250 85 43 / 0.1);
+
+  --ev-receipt: #0e6f6b;
+  --ev-receipt-soft: rgb(30 150 146 / 0.1);
+  --ev-reported: #5b3fc4;
+  --ev-reported-soft: rgb(142 102 251 / 0.1);
+  --ev-unobserved: #625f58;
+  --ev-unobserved-soft: rgb(98 95 88 / 0.07);
+
+  --shadow-pop: 0 0 0 1px var(--line-strong), 0 14px 32px -14px rgb(22 22 26 / 0.28);
+}
+
+/*
+ * The names the existing screens use, aliased to the semantic tokens so every untouched screen follows the theme.
+ * New code uses the semantic names.
+ */
+:root {
+  --al-bg: var(--bg-page);
+  --al-rail: var(--bg-inset);
+  --al-surface: var(--bg-panel);
+  --al-surface-sunk: var(--bg-inset);
+  --al-surface-raised: var(--bg-raised);
+  --al-line: var(--line);
+  --al-line-strong: var(--line-strong);
+
+  --al-ink: var(--text-1);
+  --al-ink-2: var(--text-2);
+  --al-ink-3: var(--text-3);
+  --al-ink-4: var(--text-3);
+
+  --al-accent: var(--between);
+  --al-accent-bg: var(--between-soft);
+  --al-warn: var(--st-retry);
+  --al-warn-bg: var(--st-retry-soft);
+  --al-fail: var(--st-declined);
+  --al-fail-bg: var(--st-declined-soft);
+  --al-pass: var(--st-approved);
+  --al-pass-bg: var(--st-approved-soft);
+  --al-info: var(--st-launched);
+  --al-info-bg: var(--st-launched-soft);
+  --al-focus: var(--focus);
   --al-ease: cubic-bezier(0.4, 0, 0.2, 1);
 
-  --al-sans: var(--font-space-grotesk), "Space Grotesk", system-ui, sans-serif;
+  --al-sans: var(--font-space-grotesk), "Space Grotesk", ui-sans-serif, sans-serif;
   --al-mono: var(--font-space-mono), "Space Mono", ui-monospace, monospace;
-  --al-display: "Nineties Headliner", var(--font-anton), Impact, sans-serif;
+  --al-display: "Nineties Headliner", "Perfectly Nineties", "Iowan Old Style", Georgia, serif;
 }
 
 @theme inline {
@@ -122,7 +261,12 @@ body {
   line-height: 1.45;
 }
 
-:focus-visible {
+/*
+ * The focus ring for every Tab stop. Elements that only receive focus from code (tabindex="-1": a page heading after
+ * navigation, an error or confirm message, a dialog panel) get none: this rule is unlayered, so it would otherwise beat
+ * an outline-none utility and outline the whole element.
+ */
+:focus-visible:not([tabindex="-1"]) {
   outline: 2px solid var(--al-focus);
   outline-offset: 2px;
   border-radius: 6px;
@@ -163,6 +307,12 @@ body {
  * utility classes still win where they set more.
  */
 @layer base {
+  /* A focus target that only code reaches (tabindex="-1") shows no ring, not the browser's default one; in the base
+     layer, so a component can still add a ring with a utility. Tab stops keep the ring above. */
+  [tabindex="-1"]:focus {
+    outline: none;
+  }
+
   @media (width < 40rem) {
     button,
     select {

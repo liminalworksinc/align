@@ -5,7 +5,8 @@ import { canBind, canReadGoal, type GoalObject, type PolicyPrincipal, type Visib
 import { goalVersionDirective } from "./directives";
 import { event } from "./events";
 import { limitsIn, limitsOf, type Limit } from "./goal-limits";
-import { need } from "./workspaces";
+import { memberName, need } from "./workspaces";
+import { effectiveSet } from "./approval";
 import { personName } from "./retention";
 import { expireOpenRequests, releaseHold } from "./requests";
 import { endAlignmentsToClosedGoal } from "./alignments";
@@ -647,5 +648,9 @@ export function goalDetail(pp: PolicyPrincipal, goalId: string) {
     /** Whether the reader may propose a change (lib/v2/changes.ts's rule: not the owner, not a viewer, an active goal),
      *  so the page shows Propose a change from the server's answer instead of working it out (the checklist's §A). */
     can_propose: g.owner_id !== pp.userId && pp.wsRole !== "viewer" && g.status === "active",
+    /** Who would decide a change request from the reader on this goal, as it stands now: the server's own effective
+     *  set (approval set, requester rule, workspace-owner fallback; lib/v2/approval.ts), so the propose drawer names the
+     *  people and never works them out itself. Empty when the reader can't propose, and when nobody is eligible yet. */
+    deciders: g.owner_id !== pp.userId && pp.wsRole !== "viewer" && g.status === "active" ? effectiveSet(g, pp.userId).map((id) => ({ id, name: memberName(id) })) : [],
   };
 }
