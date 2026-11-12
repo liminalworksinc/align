@@ -7108,6 +7108,64 @@ try {
           crM.status === 201 && menu.length > 0 && menu.some((m) => m.t === "Decline") && menu.every((m) => m.inside && m.hit && m.h >= 44) && declineOpen && pmW.sw <= pmW.W && wdM.status === 200,
           `${crM.status} ${JSON.stringify(menu)} declineOpen=${declineOpen} ${JSON.stringify(pmW)} withdraw=${wdM.status}`,
         );
+        // Mini 0, LIM-2472 66fdddad (founder ruling 8a588dfc): while someone typed in the Propose a change drawer, the
+        // drawer's reads landing re-rendered it, the Drawer's effect reran and moved focus to its panel, and every key
+        // after that was lost. Hugo opens the drawer on Hank's goal with both reads held (his requests, for an open one,
+        // and the goal, for Who decides), types the new measure one key at a time and lets the requests read land part
+        // way through, then types the target the same way while the goal read lands. Both fields keep every key, focus
+        // never leaves them, and the request stores the full text. It is then withdrawn.
+        const MEASURE = "Weekly demo signups from the beta list";
+        const TARGET = "120 by Jan 15";
+        const pf = await browser.newPage();
+        await pf.setViewport({ width: 1440, height: 900 });
+        await pf.setCookie(...HL.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await pf.goto(`${BASE}/app/w/${HW}/goals/${GX.id}`, { waitUntil: "networkidle0" });
+        await pf.setRequestInterception(true);
+        const held = { crs: [], goal: [] };
+        let holding = true;
+        pf.on("request", (r) => {
+          const p = new URL(r.url()).pathname;
+          if (holding && r.method() === "GET" && p === `/api/v2/workspaces/${HW}/change-requests`) held.crs.push(r);
+          else if (holding && r.method() === "GET" && p === `/api/v2/workspaces/${HW}/goals/${GX.id}`) held.goal.push(r);
+          else void r.continue();
+        });
+        const release = (k) => held[k].splice(0).forEach((r) => void r.continue());
+        await pf.evaluate(() => document.querySelector("[data-propose-open]")?.click());
+        await pf.waitForSelector('[data-propose-field="part"]', { visible: true, timeout: 15000 });
+        await pf.select('[data-propose-field="goal"]', GX.id);
+        await pf.select('[data-propose-field="part"]', "add");
+        await pf.waitForSelector('[data-propose-field="text"]', { visible: true, timeout: 5000 });
+        const heldBefore = { crs: held.crs.length, goal: held.goal.length };
+        const lost = [];
+        const typeSlowly = async (field, text, releaseAt, k) => {
+          await pf.focus(`[data-propose-field="${field}"]`);
+          for (let i = 0; i < text.length; i++) {
+            if (i === releaseAt) release(k);
+            await pf.keyboard.type(text[i]);
+            await sleep(70);
+            const on = await pf.evaluate(() => document.activeElement?.getAttribute("data-propose-field") ?? document.activeElement?.tagName ?? null);
+            if (on !== field) lost.push(`${field}@${i}:${on}`);
+          }
+        };
+        await typeSlowly("text", MEASURE, 5, "crs");
+        await typeSlowly("target", TARGET, 3, "goal");
+        holding = false;
+        release("crs");
+        release("goal");
+        const typed = await pf.evaluate(() => ({ text: document.querySelector('[data-propose-field="text"]')?.value, target: document.querySelector('[data-propose-field="target"]')?.value }));
+        await pf.type('[data-propose-field="why"]', "Focus check: typed while the drawer's reads landed");
+        await pf.click("[data-propose-send]");
+        const sent = await pf.waitForSelector('[data-propose="sent"]', { timeout: 15000 }).then(() => true).catch(() => false);
+        await pf.close();
+        const mineF = (await ha(HL, "GET", "/change-requests")).json?.mine ?? [];
+        const crF = mineF.find((c) => c.goal.id === GX.id && (c.state === "pending" || c.state === "countered"));
+        const stored = JSON.stringify(crF?.changes ?? null);
+        const wdF = crF ? await ha(HL, "POST", `/goals/${GX.id}/change-requests/${crF.id}/withdraw`, {}) : { status: 0 };
+        check(
+          "ui (Chrome, Mini 0 LIM-2472 66fdddad): typing one key at a time in the Propose a change drawer while its requests read and its goal read land, focus never leaves the field, the new measure and its target keep every key, and the request stores them in full",
+          heldBefore.crs > 0 && heldBefore.goal > 0 && lost.length === 0 && typed.text === MEASURE && typed.target === TARGET && sent && stored.includes(JSON.stringify(MEASURE)) && stored.includes(JSON.stringify(TARGET)) && wdF.status === 200,
+          JSON.stringify({ heldBefore, lost: lost.slice(0, 8), typed, sent, stored: stored.slice(0, 300), withdraw: wdF.status }),
+        );
       } catch (e) {
         check("ui (Chrome) home declined run", false, e?.stack ?? e);
       } finally {

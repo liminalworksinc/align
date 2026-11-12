@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useId, useRef, useSyncExternalStore, type ReactNode, type RefObject } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useSyncExternalStore, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Kbd } from "./kbd";
 
@@ -48,6 +48,11 @@ export function Drawer({
     () => false,
   );
 
+  // Escape reads the latest onClose without being a dependency: a caller's inline onClose is a new function on each
+  // render, and as a dependency it reran this effect on every re-render while open, whose cleanup and setup moved focus
+  // to the opener and then the panel, so keystrokes in a field were lost mid-typing (Mini 0, LIM-2472 66fdddad). Focus
+  // now moves only when the drawer opens and back when it closes.
+  const close = useEffectEvent(() => onClose());
   useEffect(() => {
     if (!open || !client) return;
     const opener = document.activeElement as HTMLElement | null;
@@ -55,7 +60,7 @@ export function Drawer({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        close();
         return;
       }
       if (e.key !== "Tab" || !panel.current) return;
@@ -81,7 +86,7 @@ export function Drawer({
       document.body.style.overflow = overflow;
       opener?.focus?.();
     };
-  }, [open, client, onClose, initialFocusRef]);
+  }, [open, client, initialFocusRef]);
 
   if (!open || !client) return null;
   return createPortal(
