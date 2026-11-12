@@ -680,25 +680,28 @@ read. A workspace owner sees every connected app and anyone else their own, as o
 A workspace page SHALL show what others change there within about a second, without a reload, through one
 Server-Sent Events stream per workspace and tab, `GET /api/v2/workspaces/<ws>/stream` (cookie only; members and
 viewers; a non-member `404`, an `Authorization` header `403 bearer_not_allowed`; at most 4 streams of one person on one
-workspace, a fifth `429 too_many_streams`). The stream SHALL carry no content of its own: after a write to the workspace
+workspace, and a cap per workspace and per server well under what the server takes in all, so streams never crowd out
+ordinary requests; one more is `429 too_many_streams`). The stream SHALL carry no content of its own: after a write to the workspace
 it reads the person's own views again (the Home, the change requests, the goals feed, the sessions, the alignments and
 presence) and names the ones that moved for that person (`change`), and the page reads those again through the reads it
 already makes, so the stream shows nobody anything their reads would not. A write to another workspace, or one the
-person can't read, SHALL send them nothing. Every event has an id; a browser that reconnects with `Last-Event-ID` SHALL
-be told what moved meanwhile, or to read everything again when the id is unknown (a restart). A keep-alive comment every
+person can't read, SHALL send them nothing, and no event id SHALL let them count such writes: an id is an opaque token
+of their own stream, never a counter. A browser that reconnects with `Last-Event-ID` SHALL be told what moved meanwhile,
+or to read everything again when the id is unknown (a restart). A keep-alive comment every
 15 seconds keeps proxies from closing it; every 30 seconds the stream checks the sign-in and membership again and ends
 with `gone` when either is lost. A page whose stream can't be opened or keeps failing SHALL say so in its header
 ("Updates when you act or reload") and keep its reads as before; one with a stream says "Live".
 
 An approval SHALL be seen travelling: on the review's lane map, the card the request moved to lights and the line it came
-along draws itself; on Home's goal lines and the Work page's sessions panel, the live presence line shows, per active
-goal the person can read, a dot per shared session bound to it by its current epoch that Align heard from (shared, bound,
-usage, a receipt or activity) in the last 15 minutes: "<n> agent sessions are working toward this goal now", with
-"· <n> paused" for those whose agent is stopped, whose sharing is suspended or whose goal is held. A dot is filled once
-the session confirmed the newest directive Align sent it (received, applied or enforced: a delivery receipt) and hollow
-while it is only sent; a paused session shows two bars. When a directive reaches a session its dot is ringed for a moment
-and the line says what Align sent ("Align sent the new goal version to 2 sessions."). Presence names no person, key or
-title. With reduced motion the states show without the movement.
+along draws itself; on Home's goal lines and the Work page's sessions panel, the live presence line shows a member or
+owner, per active goal they can read, how many shared sessions bound to it by their current epoch Align heard from
+(shared, bound, usage, a receipt or activity) in the last 15 minutes: "<n> agent sessions are working toward this goal
+now", with "· <n> paused" for those whose agent is stopped, whose sharing is suspended or whose goal is held, and "(<n>
+yours)". Other people's sessions are counts only, with nothing per session. The person's own sessions are a dot each,
+filled once the session confirmed the newest directive Align sent it (received, applied or enforced: a delivery receipt)
+and hollow while it is only sent; a paused one shows two bars. When a directive reaches one of them its dot is ringed for
+a moment and the line says what Align sent ("Align sent the new goal version to 2 sessions."). A viewer sees no presence.
+Presence names no person, key or title. With reduced motion the states show without the movement.
 
 #### Scenario: Approve in one window, see it in another
 
@@ -718,7 +721,7 @@ title. With reduced motion the states show without the movement.
 #### Scenario: A paused session
 
 - **WHEN** a workspace owner stops the agent of a session bound to a goal
-- **THEN** presence for that goal moves the session from working to paused and every open page of a person who can read the goal shows "· 1 paused"
+- **THEN** presence for that goal counts the session paused instead of working: every open page of a member or owner who can read the goal shows "· 1 paused", and the session's own person also sees its dot as paused with the stop sent; a viewer's page shows no presence
 
 ### Requirement: Evidence class on every agent-status item
 

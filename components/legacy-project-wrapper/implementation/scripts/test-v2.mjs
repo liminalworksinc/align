@@ -780,7 +780,8 @@ try {
     res.end();
   });
   await new Promise((r) => oauthStub.listen(0, "127.0.0.1", r));
-  const onRun = await mustStart({ ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1", ALIGN_TEST_OAUTH_URL: `http://127.0.0.1:${oauthStub.address().port}`, ...ignoredInModeL });
+  // ALIGN_LIVE_STREAMS_PER_WORKSPACE=8: the live workspace's workspace-wide stream cap (default 50), low so live: reaches it.
+  const onRun = await mustStart({ ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1", ALIGN_LIVE_STREAMS_PER_WORKSPACE: "8", ALIGN_TEST_OAUTH_URL: `http://127.0.0.1:${oauthStub.address().port}`, ...ignoredInModeL });
   dbFile = path.join(onDir, "v2", "align.sqlite");
   const mode = (p) => (statSync(p).mode & 0o777).toString(8);
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
@@ -7057,6 +7058,67 @@ try {
   // The live workspace (LIM-2503, lib/v2/live.ts): GET /api/v2/workspaces/<ws>/stream. Its own workspaces: LO owns LW and
   // a workspace goal; LM is a member (proposes a change, shares a session); LV a viewer; LX owns another workspace LW2.
   {
+    // touchWs (lib/v2/touch-core.mts, wired in lib/v2/db.ts): a stream hears only of writes that were committed. Driven
+    // here with a real node:sqlite connection, as tx() and a preview (LIM-2422 previewTx: BEGIN, SAVEPOINT, ROLLBACK) use it.
+    const tc = await import(pathToFileURL(path.join(ROOT, "lib/v2/touch-core.mts")).href);
+    const tdb = new DatabaseSync(":memory:");
+    tdb.exec("CREATE TABLE t (x INTEGER)");
+    const T = tc.createTouches(() => tdb);
+    const heard = [];
+    T.onChange((ws) => heard.push(ws));
+    const step = (fn) => {
+      heard.length = 0;
+      fn();
+      return [...heard];
+    };
+    const auto = step(() => (tdb.exec("INSERT INTO t VALUES (1)"), T.touch("ws_auto")));
+    const committed = step(() => {
+      const h = T.hold();
+      tdb.exec("BEGIN IMMEDIATE");
+      T.touch("ws_a");
+      const inner = T.hold(); // a nested tx() joins the outer one
+      T.touch("ws_b");
+      inner.commit(); // only the outer decides
+      const early = heard.length;
+      T.touch("ws_a");
+      tdb.exec("COMMIT");
+      h.commit();
+      h.discard(); // tx()'s finally after a commit: nothing more
+      if (early) heard.push("EARLY");
+    });
+    const rolledBack = step(() => {
+      const h = T.hold();
+      tdb.exec("BEGIN IMMEDIATE");
+      T.touch("ws_c");
+      tdb.exec("ROLLBACK");
+      h.discard();
+    });
+    const previewBare = step(() => {
+      tdb.exec("BEGIN");
+      tdb.exec("SAVEPOINT preview");
+      tdb.exec("INSERT INTO t VALUES (2)");
+      T.touch("ws_preview");
+      tdb.exec("ROLLBACK TO preview");
+      tdb.exec("ROLLBACK");
+    });
+    const previewHeld = step(() => {
+      const h = T.hold();
+      tdb.exec("BEGIN");
+      tdb.exec("SAVEPOINT preview");
+      T.touch("ws_preview");
+      tdb.exec("ROLLBACK TO preview");
+      tdb.exec("ROLLBACK");
+      h.discard();
+    });
+    const afterPreview = step(() => T.touch("ws_after"));
+    tdb.close();
+    check(
+      "live (touchWs): a stream hears only of committed writes: an autocommitted write at once; tx() after its outer COMMIT, each workspace once, a nested hold deciding nothing; nothing after a ROLLBACK; nothing from a preview (BEGIN, SAVEPOINT, ROLLBACK) whether or not it holds touches (holdTouches + discard); and a write after the preview is heard again",
+      JSON.stringify(auto) === '["ws_auto"]' && JSON.stringify(committed) === '["ws_a","ws_b"]' && rolledBack.length === 0 && previewBare.length === 0 && previewHeld.length === 0 && JSON.stringify(afterPreview) === '["ws_after"]',
+      JSON.stringify({ auto, committed, rolledBack, previewBare, previewHeld, afterPreview }),
+    );
+  }
+  {
     /** One SSE connection: its status, and the events it got (each with when it arrived). */
     const sse = (who, p, { cookie, headers = {} } = {}) =>
       new Promise((resolve, reject) => {
@@ -7149,7 +7211,7 @@ try {
     check(
       "live: the stream is cookie-only and scoped like the reads: signed out 401, an Authorization header 403 bearer_not_allowed, a non-member and an unknown workspace 404 (alike), a viewer 200 text/event-stream with hello; a viewer's write is still 403",
       LW && LG?.id && anon.status === 401 && bearer.status === 403 && bearer.json?.error === "bearer_not_allowed" && outsider.status === 404 && nope.status === 404 && outsider.json?.error === nope.json?.error &&
-        sV.status === 200 && /^text\/event-stream/.test(sV.headers["content-type"]) && /no-transform/.test(sV.headers["cache-control"]) && /^[0-9a-f]{8}\.\d+$/.test(vHello?.id ?? "") && Array.isArray(vHello?.data?.presence) && vWrite.status === 403,
+        sV.status === 200 && /^text\/event-stream/.test(sV.headers["content-type"]) && /no-transform/.test(sV.headers["cache-control"]) && /^[A-Za-z0-9_-]{16}$/.test(vHello?.id ?? "") && Array.isArray(vHello?.data?.presence) && vWrite.status === 403,
       `${anon.status} ${bearer.status} ${bearer.body} ${outsider.status} ${nope.status} ${sV.status} ${JSON.stringify(vHello)} ${vWrite.status}`,
     );
 
@@ -7167,7 +7229,7 @@ try {
     const lag = mSees ? mSees.at - t0 : null;
     check(
       "live: a change request sent in one window reaches its approver's stream, and its approval reaches the requester's within about a second (change naming home and changes, with an id); the events carry view names and presence, never the request's words",
-      cr.status === 201 && !!oSees && ap.status === 200 && !!mSees && lag !== null && lag < 1500 && mSees.data.views.includes("home") && /^[0-9a-f]{8}\.\d+$/.test(mSees.id) && !JSON.stringify(sM.events).includes("demo is Friday") && !JSON.stringify(sO.events).includes("demo is Friday"),
+      cr.status === 201 && !!oSees && ap.status === 200 && !!mSees && lag !== null && lag < 1500 && mSees.data.views.includes("home") && /^[A-Za-z0-9_-]{16}$/.test(mSees.id) && !JSON.stringify(sM.events).includes("demo is Friday") && !JSON.stringify(sO.events).includes("demo is Friday"),
       `${cr.status} ${ap.status} lag=${lag} ${JSON.stringify(sM.events.slice(mark)).slice(0, 400)}`,
     );
 
@@ -7239,25 +7301,72 @@ try {
     const key = sessionKey(LMd, LW, "claude-code", "live-1");
     const start = new Date(Date.now() - 60_000).toISOString();
     await call("LM", "PUT", `/api/v2/workspaces/${LW}/sessions/${key}`, { bearer: LMd.access, body: { harness: "claude-code", repo_key: repoKey(LMd, LW, "/src/live"), started_at: start, title: "Live floor session" } });
+    // Leo watches his own session in full; Lia (owner) sees it only as a count; Lux (viewer) sees no presence at all.
+    const sL = await stream(LM);
+    await sL.next((e) => e.event === "hello");
     const oMark = sO.events.length;
+    const vpMark = sV.events.length;
     const bound = await call("LM", "POST", `/api/v2/workspaces/${LW}/sessions/${key}/epochs`, { bearer: LMd.access, body: { epoch_id: epochId(), goal_id: LMG?.id, starts_at: start, root_turn: null, cause: "manual" } });
     const pOf = (e) => e?.data?.presence?.find((p) => p.goal_id === LMG?.id);
     const working = await sO.next((e) => e.event === "change" && pOf(e)?.working === 1, 3000, oMark);
-    const vWorking = await sV.next((e) => e.event === "change" && pOf(e)?.working === 1, 3000);
+    const mineWorking = await sL.next((e) => e.event === "change" && pOf(e)?.mine?.length === 1, 3000);
     const stop = await la(LO, "POST", `/sessions/${key}/stop`, {});
     const paused = await sO.next((e) => e.event === "change" && pOf(e)?.paused === 1, 3000, oMark);
-    const ps = pOf(paused)?.sessions?.[0];
+    const minePaused = await sL.next((e) => e.event === "change" && pOf(e)?.mine?.[0]?.state === "paused", 3000);
+    const ps = pOf(minePaused)?.mine?.[0];
     const rc = await call("LM", "POST", `/api/v2/directives/${stop.json?.directive_id}/receipts`, { bearer: LMd.access, body: { session_key: key, state: "received", at: new Date().toISOString() } });
-    const received = await sO.next((e) => e.event === "change" && pOf(e)?.sessions?.[0]?.directive?.delivery === "received", 3000, oMark);
+    const received = await sL.next((e) => e.event === "change" && pOf(e)?.mine?.[0]?.directive?.delivery === "received", 3000);
     const resume = await la(LO, "POST", `/sessions/${key}/resume`, {});
-    const back = await sO.next((e) => e.event === "change" && pOf(e)?.working === 1 && pOf(e)?.sessions?.[0]?.directive?.kind === "resume", 3000, oMark);
-    const all = JSON.stringify([...sO.events, ...sV.events]);
+    const back = await sO.next((e) => e.event === "change" && pOf(e)?.working === 1 && pOf(e)?.paused === 0, 3000, oMark);
+    await sleep(400);
+    const ownerPresence = sO.events.slice(oMark).map(pOf).filter(Boolean);
+    const viewerEvents = sV.events.slice(vpMark);
+    const all = JSON.stringify([...sO.events, ...sV.events, ...sL.events]);
     check(
-      "live (presence): a shared session bound to a goal shows as working toward it on the owner's and the viewer's streams; a stop shows it paused with the stop sent; the session's receipt makes it received; a resume brings it back working; presence never carries the session key, its title or its person",
-      [200, 201].includes(bound.status) && !!working && pOf(working).working === 1 && !!vWorking && stop.status === 200 && !!paused && ps?.state === "paused" && ps?.directive?.kind === "stop" && ps?.directive?.delivery === "sent" && rc.status === 200 && !!received && resume.status === 200 && !!back &&
-        !all.includes(key) && !all.includes("Live floor session") && !all.includes(LM.id) && /^[0-9a-f]{12}$/.test(ps?.id ?? ""),
-      `${bound.status} ${bound.text.slice(0, 120)} ${!!working} ${!!vWorking} ${stop.status} ${JSON.stringify(ps)} ${rc.status} ${!!received} ${resume.status} ${!!back}`,
+      "live (presence, founder ruling 2026-11-11): a session bound to a goal counts as working toward it; a stop counts it paused and a resume working again. The owner sees counts only (no per-session ids or delivery, `mine` empty); the session's own person sees it in full (paused with the stop sent, then received); the viewer gets no presence at all; nothing carries the session key, title or person",
+      [200, 201].includes(bound.status) && !!working && !!paused && !!back && stop.status === 200 && resume.status === 200 && rc.status === 200 &&
+        ownerPresence.length >= 3 && ownerPresence.every((p) => Array.isArray(p.mine) && p.mine.length === 0 && !("sessions" in p)) &&
+        !!mineWorking && ps?.state === "paused" && ps?.directive?.kind === "stop" && ps?.directive?.delivery === "sent" && !!received && /^[0-9a-f]{12}$/.test(ps?.id ?? "") &&
+        viewerEvents.every((e) => e.event !== "change" || (Array.isArray(e.data.presence) && e.data.presence.length === 0)) && !viewerEvents.some((e) => e.data?.views?.includes("presence")) &&
+        !all.includes(key) && !all.includes("Live floor session") && !all.includes(LM.id),
+      `${bound.status} ${!!working} ${!!paused} ${!!back} owner=${JSON.stringify(ownerPresence).slice(0, 200)} mine=${JSON.stringify(ps)} ${!!received} viewer=${JSON.stringify(viewerEvents).slice(0, 200)}`,
     );
+
+    // -- M1: an event id says nothing about writes the reader can't see --
+    const m1Mark = sL.events.length;
+    for (let i = 0; i < 3; i++) await la(LO, "POST", `/goals/${priv.json?.id}/versions`, { version: i + 1, title: `Owner's private plan, take ${i + 2}` });
+    await sleep(400);
+    const hiddenSent = sL.events.length - m1Mark;
+    await la(LO, "POST", "/goals", { title: "A visible goal after hidden writes", visibility: "workspace" });
+    const afterHidden = await sL.next((e) => e.event === "change" && e.data.views.includes("goals"), 3000, m1Mark);
+    const ids = sL.events.map((e) => e.id).filter(Boolean);
+    const h1 = await stream(LM);
+    const h1h = await h1.next((e) => e.event === "hello");
+    h1.close();
+    const h2 = await stream(LM);
+    const h2h = await h2.next((e) => e.event === "hello");
+    h2.close();
+    check(
+      "live (audit M1): event ids are opaque per-reader tokens, never a write counter: three writes the reader can't see send them nothing, their next event's id is a fresh random token like every other (no digits run, none repeated), and two hellos with no write between them get unrelated ids",
+      hiddenSent === 0 && !!afterHidden && ids.length >= 3 && ids.every((x) => /^[A-Za-z0-9_-]{16}$/.test(x) && !/\.\d+$/.test(x)) && new Set(ids).size === ids.length && h1h?.id && h2h?.id && h1h.id !== h2h.id,
+      `${hiddenSent} ${!!afterHidden} ${JSON.stringify(ids)} ${h1h?.id} ${h2h?.id}`,
+    );
+    sL.close();
+
+    // -- the workspace-wide cap: streams can't take every request the machine serves --
+    await sleep(300);
+    const wsCap = [];
+    // Open now: Lia's and Lux's. Six more fill the 8; Leo's fourth is under his own cap but over the workspace's.
+    for (const u of [LO, LO, LO, LM, LM, LM]) wsCap.push(await stream(u));
+    const overWs = await stream(LM);
+    const elsewhere = await stream(LX, LW2);
+    check(
+      "live: a workspace holds at most ALIGN_LIVE_STREAMS_PER_WORKSPACE streams (8 here: Lia's and Lux's open ones, 3 more of Lia's and 3 of Leo's); Leo's fourth, under his own cap, -> 429 too_many_streams; another workspace's streams don't count",
+      wsCap.every((c) => c.status === 200) && overWs.status === 429 && overWs.json?.error === "too_many_streams" && /as many live views open/.test(overWs.json?.message ?? "") && elsewhere.status === 200,
+      `${wsCap.map((c) => c.status)} ${overWs.status} ${overWs.body} ${elsewhere.status}`,
+    );
+    for (const c of [...wsCap, elsewhere]) c.close?.();
+    await sleep(300);
 
     // -- removed while watching: the stream says gone and ends --
     const sV2 = sV;
@@ -7319,8 +7428,8 @@ try {
         const rowAfter = await pC.evaluate(rowText, cr2.json?.id);
         const presenceB = await pB.$eval(`[data-presence="${LMG?.id}"] [data-presence-sentence]`, (el) => el.textContent).catch(() => null);
         check(
-          "live (web): an approval shows in the other windows within about a second: the decision page's lane map moves from Waiting for a decision to Approved, lights it and draws the line it came along; the request's row in the owner's other Home window moves from deciding to launching; the requester's Home says \"1 agent session is working toward this goal now\" on their goal; the Homes say Live",
-          cr2.status === 201 && ap2.status === 200 && liveAll.every(Boolean) && !!deciding && arrivedA !== null && arrivedA < 2000 && !!drawn && !!rowBefore && seenC !== null && seenC < 2000 && rowAfter !== rowBefore && presenceB === "1 agent session is working toward this goal now",
+          "live (web): an approval shows in the other windows within about a second: the decision page's lane map moves from Waiting for a decision to Approved, lights it and draws the line it came along; the request's row in the owner's other Home window moves from deciding to launching; the requester's Home says \"1 agent session is working toward this goal now (yours)\" on their goal; the Homes say Live",
+          cr2.status === 201 && ap2.status === 200 && liveAll.every(Boolean) && !!deciding && arrivedA !== null && arrivedA < 2000 && !!drawn && !!rowBefore && seenC !== null && seenC < 2000 && rowAfter !== rowBefore && presenceB === "1 agent session is working toward this goal now (yours)",
           `${cr2.status} ${ap2.status} live=${liveAll} deciding=${!!deciding} A=${arrivedA} drawn=${!!drawn} C=${seenC} [${rowBefore?.slice(0, 80)}] -> [${rowAfter?.slice(0, 80)}] presence=${presenceB}`,
         );
       } finally {

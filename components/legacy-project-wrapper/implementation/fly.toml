@@ -33,11 +33,13 @@ primary_region = "sjc"
   auto_start_machines = false
   min_machines_running = 1
   # Each open workspace tab holds one live stream (LIM-2503, lib/v2/live.ts), a long request. Fly's default limit (25
-  # connections) would queue everyone past the 25th tab, so the limit counts requests and is set well above that.
+  # connections) would queue everyone past the 25th tab, so the limit counts requests (founder ruling 2026-11-11: hard
+  # about 300). The app caps its own streams under that (ALIGN_LIVE_STREAMS_TOTAL, default 200; 50 per workspace), so
+  # streams can never take the room ordinary requests need.
   [http_service.concurrency]
     type = "requests"
-    soft_limit = 400
-    hard_limit = 500
+    soft_limit = 250
+    hard_limit = 300
 
   # The health check comes from inside Fly's network, so it sends what Fly's edge would: the allowlisted Host,
   # forwarded https and a Fly-Client-IP. Without them proxy.ts answers 421 or 403 and the check would fail.

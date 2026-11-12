@@ -1,3 +1,4 @@
+import { createTouches, type TouchHold, type TouchListener, type Touches } from "./touch-core.mts";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
@@ -86,33 +87,20 @@ export function exec(sql: string) {
 
 const isBusy = (e: unknown) => /SQLITE_BUSY|database is locked/i.test(String((e as Error)?.message ?? e)) || (e as { errcode?: number })?.errcode === 5;
 
-// ---- live: which workspaces a write changed (lib/v2/live.ts streams it) ----
-// A write marks its workspace with touchWs(), usually through audit() or writeDirective(). Inside tx() the marks are
-// held until COMMIT and dropped on ROLLBACK, so a stream never hears of a change that did not happen; outside tx() they
-// are announced at once. The listeners are kept on globalThis, like the connections, so every route bundle shares them.
-type WsListener = (ws: string) => void;
-const gl = globalThis as unknown as { __alignV2WsListeners?: Set<WsListener> };
-const wsListeners = () => (gl.__alignV2WsListeners ??= new Set());
-let pendingWs: Set<string> | null = null;
-function announce(list: Iterable<string>) {
-  for (const ws of list)
-    for (const l of wsListeners()) {
-      try {
-        l(ws);
-      } catch {}
-    }
-}
+// ---- live: which workspaces a write changed (lib/v2/live.ts streams it; the rules are lib/v2/touch-core.mts) ----
+// A write marks its workspace with touchWs(), usually through audit() or writeDirective(). Announced only once durable:
+// at once for an autocommitted write; after the outer COMMIT inside tx() (dropped on ROLLBACK); never for a write inside
+// a transaction someone else opened (a preview that rolls back) unless that caller holds touches with holdTouches().
+// Kept on globalThis, like the connections, so every route bundle shares one set of listeners.
+const gt = globalThis as unknown as { __alignV2Touches?: Touches };
+const touches = (): Touches => (gt.__alignV2Touches ??= createTouches(() => openDb().domain));
 /** Mark a workspace as changed by the current write. */
-export function touchWs(ws: string | null | undefined) {
-  if (!ws) return;
-  if (pendingWs) pendingWs.add(ws);
-  else announce([ws]);
-}
+export const touchWs = (ws: string | null | undefined) => touches().touch(ws);
 /** Hear of every committed write to a workspace. Returns the unsubscribe. */
-export function onWsChange(l: WsListener): () => void {
-  wsListeners().add(l);
-  return () => wsListeners().delete(l);
-}
+export const onWsChange = (l: TouchListener) => touches().onChange(l);
+/** For code that opens its own transaction (LIM-2422 previewTx): hold touches, then commit() after a real COMMIT or
+ *  discard() after a ROLLBACK. Without it, touches inside such a transaction are dropped. */
+export const holdTouches = (): TouchHold => touches().hold();
 
 let depth = 0;
 /** Run `fn` synchronously inside BEGIN IMMEDIATE ... COMMIT (ROLLBACK if it throws). A busy start is retried
@@ -130,13 +118,12 @@ export async function tx<T>(fn: () => T): Promise<T> {
     }
   }
   depth++;
-  const touched = (pendingWs = new Set());
+  const held = holdTouches();
   try {
     const out = fn();
     if (out instanceof Promise) throw new Error("tx() callbacks must be synchronous");
     d.exec("COMMIT");
-    pendingWs = null;
-    announce(touched);
+    held.commit();
     return out;
   } catch (e) {
     try {
@@ -144,7 +131,7 @@ export async function tx<T>(fn: () => T): Promise<T> {
     } catch {}
     throw e;
   } finally {
-    pendingWs = null;
+    held.discard();
     depth--;
   }
 }

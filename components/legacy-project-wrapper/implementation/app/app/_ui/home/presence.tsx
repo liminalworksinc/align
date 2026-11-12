@@ -3,11 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import type { GoalPresence, LiveStatus } from "../live";
 
 // Live presence on a goal (LIM-2503): the shared sessions bound to it now, from lib/v2/live.ts presenceFor (sessions
-// Align heard from in the last 15 minutes). A dot per session: filled once the session confirmed the newest directive
-// Align sent it (a delivery receipt), hollow while it is sent and not confirmed, two bars when paused. When a new
-// directive reaches a session its dot is ringed for a moment and the line says what was sent, so an approval or a
-// launch is seen arriving where it lands. Only what Align holds: counts, states and receipts, never what an agent does,
-// and never whose session it is.
+// Align heard from in the last 15 minutes). Founder ruling 2026-11-11: everyone's sessions only as counts ("3 agent
+// sessions are working toward this goal now · 1 paused"); the reader's OWN sessions in full, a dot each: filled once
+// the session confirmed the newest directive Align sent it (a delivery receipt), hollow while it is sent and not
+// confirmed, two bars when paused. When a new directive reaches one of them its dot is ringed for a moment and the line
+// says what was sent, so a launch is seen arriving where it lands. Viewers get no presence (the server sends none).
 
 const KIND: Record<string, string> = {
   goal_version: "the new goal version",
@@ -23,20 +23,22 @@ const DELIVERY: Record<string, string> = { sent: "sent, not confirmed yet", rece
 
 export function presenceSentence(p: GoalPresence): string {
   const s = (n: number) => (n === 1 ? "1 agent session" : `${n} agent sessions`);
-  if (p.working && p.paused) return `${s(p.working)} ${p.working === 1 ? "is" : "are"} working toward this goal now · ${p.paused} paused`;
-  if (p.working) return `${s(p.working)} ${p.working === 1 ? "is" : "are"} working toward this goal now`;
-  return `${s(p.paused)} on this goal ${p.paused === 1 ? "is" : "are"} paused`;
+  const yours = p.mine.length ? ` (${p.mine.length === p.working + p.paused ? (p.mine.length === 1 ? "yours" : "all yours") : `${p.mine.length} yours`})` : "";
+  if (p.working && p.paused) return `${s(p.working)} ${p.working === 1 ? "is" : "are"} working toward this goal now · ${p.paused} paused${yours}`;
+  if (p.working) return `${s(p.working)} ${p.working === 1 ? "is" : "are"} working toward this goal now${yours}`;
+  return `${s(p.paused)} on this goal ${p.paused === 1 ? "is" : "are"} paused${yours}`;
 }
 
-/** What changed for this goal's sessions since the last picture: a new directive reached some, or some paused. */
+/** What changed for the reader's own sessions on this goal since the last picture: a new directive reached some, or
+ *  some paused or resumed. */
 function news(prev: GoalPresence | undefined, next: GoalPresence): { reached: Set<string>; line: string | null } {
   const reached = new Set<string>();
   if (!prev) return { reached, line: null };
-  const before = new Map(prev.sessions.map((s) => [s.id, s]));
+  const before = new Map(prev.mine.map((s) => [s.id, s]));
   const kinds = new Map<string, number>();
   let paused = 0;
   let resumed = 0;
-  for (const s of next.sessions) {
+  for (const s of next.mine) {
     const b = before.get(s.id);
     if (!b) continue;
     if (s.directive && (s.directive.at !== b.directive?.at || s.directive.delivery !== b.directive?.delivery)) {
@@ -71,7 +73,7 @@ export function GoalPresenceLine({ p }: { p: GoalPresence }) {
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px] text-(--text-2)" data-presence={p.goal_id} data-presence-working={p.working} data-presence-paused={p.paused}>
       <span className="flex items-center gap-1" aria-hidden="true">
-        {p.sessions.slice(0, 12).map((s) => {
+        {p.mine.slice(0, 12).map((s) => {
           const confirmed = s.directive && s.directive.delivery !== "sent";
           const ring = flash.reached.has(s.id) ? " al-reach" : "";
           return s.state === "paused" ? (
@@ -88,7 +90,7 @@ export function GoalPresenceLine({ p }: { p: GoalPresence }) {
             />
           );
         })}
-        {p.sessions.length > 12 && <span className="font-mono text-[11px] text-(--text-3)">+{p.sessions.length - 12}</span>}
+        {p.mine.length > 12 && <span className="font-mono text-[11px] text-(--text-3)">+{p.mine.length - 12}</span>}
       </span>
       <span data-presence-sentence>{presenceSentence(p)}</span>
       <span className="font-mono text-[11px] text-(--text-3)" aria-live="polite" data-presence-news>
