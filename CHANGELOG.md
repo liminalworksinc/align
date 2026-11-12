@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Restore the admitted trust parser after main reconciliation and await newly
+  merged operator-command checks. Preserve the failing schema-23 evidence for
+  the remaining native schema revision.
+
 - Preserve merged v2 changes, enforce action authorization in local staging instructions, and contain library evaluation through a pinned, bounded runtime. Normal consumer assembly passes all 1,259 library batches with unchanged runtime packages; integrated application/image acceptance and publication remain pending.
 
 - A tester keeps their v1 invite code on v2: `align-admin codes import` loads unused codes as single-use creation codes,

@@ -12858,10 +12858,10 @@ try {
   const v1Noisy = (r) => [v1Code, v1Unused, v1Kept, v1Spent].some((c) => r.out.includes(c) || r.err.includes(c));
   const v1Rows = () => withDb((d) => d.prepare("SELECT * FROM v2_creation_codes").all());
   const v1Before = v1Rows().length;
-  const v1Imported = admin(v1Args, opGate);
+  const v1Imported = (await admin(v1Args, opGate));
   const v1Added = v1Rows().filter((r) => !r.request_id && r.email === null).sort((x, y) => y.expires_at.localeCompare(x.expires_at)).slice(0, 3);
   const v1Days = (Date.parse(v1Added[0]?.expires_at) - Date.now()) / 86400000;
-  const v1ListOut = admin(["codes", "list"], opGate).out;
+  const v1ListOut = (await admin(["codes", "list"], opGate)).out;
   check(
     "align-admin: codes import --file --used --days 60 loads 3 unbound codes valid for 60 days, skips the 1 spent on v1, says so in counts, and neither the output nor codes list holds a code",
     v1Imported.status === 0 && /Imported 3, for 60 days\. 0 already here, left as they were \(0 of those used\)\. 1 spent on v1, skipped\./.test(v1Imported.out) && v1Rows().length === v1Before + 3 && v1Added.length === 3 && v1Days > 59.9 && v1Days <= 60 && !v1Noisy(v1Imported) && ![v1Code, v1Unused, v1Kept, v1Spent].some((c) => v1ListOut.includes(c)),
@@ -12871,11 +12871,11 @@ try {
   const v1BadUsed = path.join(tmpRoot, "v1-bad-used.json");
   writeFileSync(v1BadFile, `${v1Hex()}\n${v1Code.toUpperCase()}\nalc_${"a".repeat(32)}\n${v1Code.slice(0, 19)}\n${v1Code}0\n`, { mode: 0o600 });
   writeFileSync(v1BadUsed, JSON.stringify({ spent: [] }), { mode: 0o600 });
-  const v1Bad = admin(["codes", "import", "--file", v1BadFile, "--used", v1Used, "--days", "60"], opGate);
-  const v1NoDays = admin(["codes", "import", "--file", v1File, "--used", v1Used], opGate);
-  const v1NoUsed = admin(["codes", "import", "--file", v1File, "--days", "60"], opGate);
-  const v1WrongUsed = admin(["codes", "import", "--file", v1File, "--used", v1BadUsed, "--days", "60"], opGate);
-  const v1MissingUsed = admin(["codes", "import", "--file", v1File, "--used", path.join(tmpRoot, "v1-none.json"), "--days", "60"], opGate);
+  const v1Bad = (await admin(["codes", "import", "--file", v1BadFile, "--used", v1Used, "--days", "60"], opGate));
+  const v1NoDays = (await admin(["codes", "import", "--file", v1File, "--used", v1Used], opGate));
+  const v1NoUsed = (await admin(["codes", "import", "--file", v1File, "--days", "60"], opGate));
+  const v1WrongUsed = (await admin(["codes", "import", "--file", v1File, "--used", v1BadUsed, "--days", "60"], opGate));
+  const v1MissingUsed = (await admin(["codes", "import", "--file", v1File, "--used", path.join(tmpRoot, "v1-none.json"), "--days", "60"], opGate));
   check(
     "align-admin: one line of another shape (alc_, uppercase, 19 or 21 hex) imports nothing, names the lines and never their text; --days and --used are required; a --used file that isn't v1's list or can't be read imports nothing",
     v1Bad.status === 2 && /lines 2, 3, 4, 5\./.test(v1Bad.err) && !v1Bad.err.includes(v1Code.toUpperCase()) && !v1Bad.err.includes("alc_a") && !v1Bad.err.includes(v1Code.slice(0, 19)) && v1NoDays.status === 2 && v1NoUsed.status === 2 && v1WrongUsed.status === 1 && /Nothing imported/.test(v1WrongUsed.err) && v1MissingUsed.status === 1 && /Nothing imported/.test(v1MissingUsed.err) && v1Rows().length === v1Before + 3,
@@ -12886,8 +12886,8 @@ try {
   const v1OldDb = new DatabaseSync(path.join(v1OldDir, "v2", "align.sqlite"));
   v1OldDb.exec("PRAGMA user_version = 1");
   v1OldDb.close();
-  const v1OldRun = admin(v1Args, { ...opGate, ALIGN_DATA_DIR: v1OldDir });
-  const v1NoDbRun = admin(v1Args, { ...opGate, ALIGN_DATA_DIR: path.join(tmpRoot, "v1-no-db") });
+  const v1OldRun = (await admin(v1Args, { ...opGate, ALIGN_DATA_DIR: v1OldDir }));
+  const v1NoDbRun = (await admin(v1Args, { ...opGate, ALIGN_DATA_DIR: path.join(tmpRoot, "v1-no-db") }));
   check(
     "align-admin: codes import refuses a database this version hasn't migrated, and a server that has no database yet, so the import can only follow the deploy",
     v1OldRun.status !== 0 && /not been migrated/.test(v1OldRun.err) && v1NoDbRun.status === 1 && /No Align database/.test(v1NoDbRun.err),
@@ -12916,9 +12916,9 @@ try {
   );
   const v1Replay = await gCreate(BOB, "Bob V1 again", v1Code);
   const v1Row = v1Rows().find((r) => r.ws_id === v1Create.json?.id);
-  const v1Reimport = admin(v1Args, opGate);
-  const v1Purge = admin(["workspaces", "delete", v1Create.json?.id ?? "", "--purge", "--yes"], opGate);
-  admin(v1Args, opGate);
+  const v1Reimport = (await admin(v1Args, opGate));
+  const v1Purge = (await admin(["workspaces", "delete", v1Create.json?.id ?? "", "--purge", "--yes"], opGate));
+  (await admin(v1Args, opGate));
   const v1AfterPurge = await gCreate(BOB, "Bob V1 after", v1Code);
   check(
     "gate (LIM-2473): an imported v1 code creates one workspace (201) and is spent with it; used again -> 403 creation_code_invalid, also after a re-import (0 new, 3 left as they were, 1 of those used, 1 spent on v1) and after that workspace is purged",
@@ -12927,7 +12927,7 @@ try {
   );
   // Testers paste codes from a text message. The route trims (optStr); the shape match stays exact, so case is untouched.
   const v1Pasted = await gCreate(BOB, "Bob V1 pasted", `  ${v1Kept}\n`);
-  const v1PastedPurge = admin(["workspaces", "delete", v1Pasted.json?.id ?? "", "--purge", "--yes"], opGate);
+  const v1PastedPurge = (await admin(["workspaces", "delete", v1Pasted.json?.id ?? "", "--purge", "--yes"], opGate));
   check("gate (LIM-2473): a code pasted with spaces and a newline around it is accepted (201)", v1Pasted.status === 201 && v1PastedPurge.status === 0, `${v1Pasted.status} ${v1Pasted.text} ${v1PastedPurge.status}`);
   const v1Clear = readdirSync(gateDir, { recursive: true }).filter((f) => statSync(path.join(gateDir, f)).isFile()).some((f) => readFileSync(path.join(gateDir, f)).includes(v1Unused));
   check("gate (LIM-2473): an imported code is in no file of the data directory in clear; only its HMAC is stored", !v1Clear);
@@ -12945,16 +12945,16 @@ try {
   const boundArgs = ["codes", "import", "--file", boundFile, "--used", v1Used, "--days", "60"];
   const boundBefore = v1Rows().length;
   writeFileSync(boundFile, `${boundCode}, ${boundAddress.toUpperCase()} \n`, { mode: 0o600 });
-  const boundImport = admin(boundArgs, opGate);
+  const boundImport = (await admin(boundArgs, opGate));
   const boundRow = v1Rows().find((r) => r.email === boundAddress);
-  const boundList = admin(["codes", "list"], opGate);
+  const boundList = (await admin(["codes", "list"], opGate));
   check("LIM-2480: bound import normalizes the address and prints neither address nor code (including codes list)",
     boundImport.status === 0 && boundList.status === 0 && v1Rows().length === boundBefore + 1 && !!boundRow &&
     [boundImport, boundList].every((r) => ![boundCode, boundAddress].some((v) => (r.out + r.err).toLowerCase().includes(v))),
     `import status ${boundImport.status}; row present ${!!boundRow}`);
   const preservedBefore = v1Rows().find((r) => r.id === v1Added.find((x) => !v1Rows().find((y) => y.id === x.id)?.redeemed_at)?.id);
   writeFileSync(boundFile, `${v1Unused},${boundAddress}\n`, { mode: 0o600 });
-  const liveAgain = admin(boundArgs, opGate);
+  const liveAgain = (await admin(boundArgs, opGate));
   const preservedAfter = v1Rows().find((r) => r.id === preservedBefore?.id);
   check("LIM-2480: re-import leaves a live unbound row entirely unchanged",
     liveAgain.status === 0 && !!preservedBefore && JSON.stringify(preservedBefore) === JSON.stringify(preservedAfter));
@@ -12968,18 +12968,18 @@ try {
     `wrong ${boundWrong.status}; sign-in ${boundTester.status}; home ${boundHome.status}; create ${boundCreate.status}`);
   const reboundAddress = ["different-tester", "example.test"].join("@");
   writeFileSync(boundFile, `${boundCode},${reboundAddress}\n`, { mode: 0o600 });
-  const boundAgain = admin(boundArgs, opGate);
+  const boundAgain = (await admin(boundArgs, opGate));
   const boundAfter = v1Rows().find((r) => r.id === boundRow?.id);
   const boundReplay = await gCreate(boundTester, "Imported again", boundCode);
   check("LIM-2480: re-import cannot rebind or revive a used code",
     boundAgain.status === 0 && boundAfter?.email === boundAddress && !!boundAfter?.redeemed_at && boundReplay.status === 403,
     `import ${boundAgain.status}; replay ${boundReplay.status}`);
-  const boundPurge = admin(["workspaces", "delete", boundCreate.json?.id ?? "", "--purge", "--yes"], opGate);
+  const boundPurge = (await admin(["workspaces", "delete", boundCreate.json?.id ?? "", "--purge", "--yes"], opGate));
   check("LIM-2480: imported tester fixture is purged before cap checks", boundPurge.status === 0);
   // Validate all rows before writing, including a good first row followed by malformed private input.
   const invalidBefore = v1Rows().length;
   writeFileSync(boundFile, `${v1Hex()},${boundAddress}\n${v1Hex()},\n${v1Hex()},invalid\n${v1Hex()},${boundAddress},extra\n`, { mode: 0o600 });
-  const boundInvalid = admin(boundArgs, opGate);
+  const boundInvalid = (await admin(boundArgs, opGate));
   check("LIM-2480: malformed bound rows abort the complete import with line numbers only",
     boundInvalid.status === 2 && /lines 2, 3, 4\./.test(boundInvalid.err) && v1Rows().length === invalidBefore &&
     !boundInvalid.err.includes(boundAddress) && !boundInvalid.err.includes("invalid\n"), `status ${boundInvalid.status}`);
@@ -12996,7 +12996,7 @@ try {
         const address = [`browser-${width}-${theme}`, "example.test"].join("@");
         const invite = v1Hex();
         writeFileSync(boundFile, `${invite},${address}\n`, { mode: 0o600 });
-        const imported = admin(boundArgs, opGate);
+        const imported = (await admin(boundArgs, opGate));
         let errors = 0;
         let created = null;
         let createRefused = "";
@@ -13082,7 +13082,7 @@ try {
             `import ${imported.status}; created ${!!created}; errors ${errors}; overflow ${overflow}`);
         } catch (e) { check(`LIM-2480: hosted new tester browser path ${width} ${theme}`, false, `stopped at ${step}: ${String(e?.message ?? e).split("\n")[0].slice(0, 160)}; create ${createRefused || (created ? "201" : "not sent")}; errors ${errors}; overflow ${overflow}`); }
         finally {
-          if (created) check(`LIM-2480: browser fixture cleanup ${width} ${theme}`, admin(["workspaces", "delete", created, "--purge", "--yes"], opGate).status === 0);
+          if (created) check(`LIM-2480: browser fixture cleanup ${width} ${theme}`, (await admin(["workspaces", "delete", created, "--purge", "--yes"], opGate)).status === 0);
           await context.close();
         }
       }

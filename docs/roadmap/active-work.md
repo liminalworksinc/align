@@ -195,6 +195,15 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   ledger preparation precede the integrated acceptance run. Closure remains 26 of 31 until
   every checkpoint gate passes. No independent or operator security approval is
   supplied by functional checks.
+- **Current acceptance correction:** The merged-main candidate completed 1,905
+  checks: 1,881 passed and 24 failed. One uses the raw Markdown parser restored
+  during rebase although the admitted parser passes all four list cases. Twenty
+  failures follow new operator test calls that omit await after the helper became
+  asynchronous. Three migration fixtures expose the historical 22-program native
+  schema beside current main's version 23. Restore the qualified Markdown caller,
+  await the 21 new calls, and update schema authority before full acceptance.
+  Preserve the failed candidate and every assertion. B22 hot qualification 4 uses
+  265 original controls after source review rejected the prior legacy-key behavior.
 - **Current implementation evidence:** The normal registered-consumer assembly
   now passes all 1,259 contained library batches, preserving all 270 runtime
   package files. The caller batches checks within each library and omits unused
