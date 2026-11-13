@@ -492,7 +492,11 @@ open question per session (asking again on the same goal returns the open one, 2
 counts toward now supersedes one left open on another goal, which can no longer be answered: 409
 `question_superseded`). A file path SHALL be repo-relative in ASCII letters, digits, `._@+-`, spaces and `/` only, with
 no empty, `.` or `..` segment (so no drive letter, backslash, `~`, control, bidi-override or zero-width character); any
-other is 400. Whoever reads the goal sees the question
+other is 400. It SHALL keep a file name only when the device says the session shares work signals (`signals: true`)
+and the server already holds that name in the session's own work signals, which arrive only with them on (D5 on the
+server); any other name is dropped. Founder rulings 2026-11-11: the file names are shown only to the goal's owner and
+the person whose agent asked (others get none and `files_hidden`), and a steer note only to the owner who answered and
+the asker (others get `text: null` and `text_hidden`), as decline reasons go only to those who decided. Whoever reads the goal sees the question
 (`GET .../questions`, `GET .../questions/:id`), with its evidence marked agent-reported; anyone else, in this workspace
 or another, gets 404. Only the goal's owner answers (`POST .../questions/:id/answer`, `continue`, `steer` with a note
 of 1 to 500 characters, or `switch` with an optional active goal the owner reads): a viewer gets 403 `read_only`,

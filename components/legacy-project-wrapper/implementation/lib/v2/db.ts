@@ -1143,6 +1143,7 @@ const MIGRATIONS: string[] = [
     limit_type TEXT NOT NULL,
     limit_text TEXT NOT NULL,
     files_json TEXT NOT NULL,
+    paths_shared INTEGER NOT NULL DEFAULT 0 CHECK (paths_shared IN (0, 1)),
     stretch_from TEXT NOT NULL,
     stretch_to TEXT NOT NULL,
     asked_by TEXT NOT NULL,

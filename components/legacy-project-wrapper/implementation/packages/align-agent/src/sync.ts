@@ -526,7 +526,13 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
     }
     case "post_question": {
       // Work signals turned off since it was queued: still no paths.
-      const body = signalsAllowed(ctx, lid, getSession(ctx.db, lid)?.cwd ?? null) ? p.body : { ...p.body, files: [] };
+      const signals = signalsAllowed(ctx, lid, getSession(ctx.db, lid)?.cwd ?? null);
+      const body = { ...p.body, files: signals ? p.body.files : [], signals };
+      // The server keeps a file name only once it holds it in this session's work signals: they go up first.
+      if (body.files.length) {
+        settleActivity(ctx);
+        await uploadActivity(ctx).catch(() => 0);
+      }
       const r = await api(ctx, "POST", `${base}/questions`, { body });
       if (r.status === 201 || r.status === 200) {
         // The drift notice at the next prompt says it was asked (hooks/handlers.ts takeDrift).

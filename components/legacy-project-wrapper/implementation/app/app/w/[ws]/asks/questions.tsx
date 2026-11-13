@@ -22,9 +22,11 @@ interface Question {
     limit: { id: string; type: "must" | "must_not" | "out_of_scope"; text: string };
     why: string;
     files: { path: string; at: string }[];
+    files_hidden: boolean;
+    paths_shared: boolean;
     stretch: { from: string; to: string };
   };
-  answer: { kind: AnswerKind; text: string | null; target_goal: { id: string; title: string } | null; by: { id: string; name: string }; at: string } | null;
+  answer: { kind: AnswerKind; text: string | null; text_hidden: boolean; target_goal: { id: string; title: string } | null; by: { id: string; name: string }; at: string } | null;
   can: { answer: boolean };
 }
 
@@ -62,6 +64,31 @@ function events(q: Question, me: string): TimelineEvent[] {
     ),
   };
   return [...edits.sort((a, b) => a.when.localeCompare(b.when)), asked];
+}
+
+/** What the card says about the files: Agent reported, never the agent's own words; names only to those who may see
+ *  them, and "not shared" (never "none") when the session's work signals were off. */
+function fileLine(q: Question): string {
+  const n = q.evidence.files.length;
+  const what = !q.evidence.paths_shared
+    ? "File names not shared: work signals were off for this session."
+    : q.evidence.files_hidden
+      ? "File names are shown only to the goal's owner and the person whose agent asked."
+      : n
+        ? `${n} file${n > 1 ? "s" : ""} edited in this stretch.`
+        : "No file edits recorded in this stretch.";
+  return `${what} Agent reported from its machine, never the agent's own words.`;
+}
+
+/** "answered Steer: “…”" as one sentence: no second full stop after a quote that ends one. */
+function answerWords(a: NonNullable<Question["answer"]>): string {
+  const head = `answered ${ANSWER_WORDS[a.kind]}`;
+  if (a.kind === "steer") {
+    if (a.text) return `${head}: “${a.text}”${/[.!?]$/.test(a.text.trim()) ? "" : "."}`;
+    if (a.text_hidden) return `${head}. The note is shown only to them and the person whose agent asked.`;
+  }
+  if (a.kind === "switch" && a.target_goal) return `${head} to ${a.target_goal.title}.`;
+  return `${head}.`;
 }
 
 function AnswerForm({ ws, q, goals, onDone }: { ws: string; q: Question; goals: Goal[]; onDone: () => void }) {
@@ -141,16 +168,11 @@ function QuestionCard({ ws, q, me, goals, onDone }: { ws: string; q: Question; m
         </h3>
         <Pill tone={q.state === "open" ? "amber" : q.state === "answered" ? "green" : "neutral"}>{q.state === "open" ? "waiting" : q.state === "answered" ? "answered" : "closed"}</Pill>
       </div>
-      <p className="mb-3 text-[14px] text-(--text-2)">
-        {q.evidence.files.length ? `${q.evidence.files.length} file${q.evidence.files.length > 1 ? "s" : ""} edited in this stretch.` : "No file edits recorded in this stretch."} Agent reported from its machine: the
-        files and times, never the agent&apos;s own words.
-      </p>
+      <p className="mb-3 text-[14px] text-(--text-2)">{fileLine(q)}</p>
       <Timeline events={events(q, me)} />
       {q.answer && (
         <p className="mt-3 text-[14px] text-(--text-1)" data-answer={q.answer.kind}>
-          <span className="font-semibold">{q.answer.by.id === me ? "You" : q.answer.by.name}</span> answered {ANSWER_WORDS[q.answer.kind]}
-          {q.answer.kind === "steer" && q.answer.text ? `: “${q.answer.text}”` : ""}
-          {q.answer.kind === "switch" && q.answer.target_goal ? ` to ${q.answer.target_goal.title}` : ""}.
+          <span className="font-semibold">{q.answer.by.id === me ? "You" : q.answer.by.name}</span> {answerWords(q.answer)}
         </p>
       )}
       {q.state === "superseded" && <p className="mt-3 text-[14px] text-(--text-2)">Closed without an answer: the session moved to another goal.</p>}

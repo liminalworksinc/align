@@ -38,6 +38,8 @@ interface QuestionRow {
   limit_type: string;
   limit_text: string;
   files_json: string;
+  /** The session shared work signals when it asked (the device said so); file names are kept only then. */
+  paths_shared: number;
   stretch_from: string;
   stretch_to: string;
   asked_by: string;
@@ -100,6 +102,11 @@ function view(pp: PolicyPrincipal, q: QuestionRow, g: GoalRow) {
   if (!canReadGoal(pp, goalObj(g))) return null;
   const target = q.target_goal_id ? goalRow(q.ws_id, q.target_goal_id) : undefined;
   const asker = memberName(q.asked_by);
+  // Founder rulings 2026-11-11: the file names go only to the goal's owner and the person whose agent asked; the steer
+  // note only to the owner who answered and the asker (as decline reasons go only to those who decided).
+  const seesFiles = pp.userId === q.asked_by || pp.userId === g.owner_id;
+  const seesNote = pp.userId === q.asked_by || pp.userId === q.answered_by;
+  const files = JSON.parse(q.files_json) as { path: string; at: string }[];
   return {
     id: q.id,
     state: q.state,
@@ -110,14 +117,19 @@ function view(pp: PolicyPrincipal, q: QuestionRow, g: GoalRow) {
     evidence: {
       limit: { id: q.limit_id, type: q.limit_type, text: q.limit_text },
       why: why(q.limit_type),
-      files: JSON.parse(q.files_json) as { path: string; at: string }[],
+      files: seesFiles ? files : [],
+      /** File names exist but this reader may not see them. */
+      files_hidden: !seesFiles && files.length > 0,
+      /** Whether the session shared work signals (file names) at all. */
+      paths_shared: !!q.paths_shared,
       stretch: { from: q.stretch_from, to: q.stretch_to },
       reported_as: "agent-reported" as const,
     },
     answer: q.answer
       ? {
           kind: q.answer,
-          text: q.answer_text,
+          text: seesNote ? q.answer_text : null,
+          text_hidden: !seesNote && !!q.answer_text,
           target_goal: target && canReadGoal(pp, goalObj(target)) ? { id: target.id, title: target.title } : null,
           by: { id: q.answered_by!, name: memberName(q.answered_by!) },
           at: q.answered_at!,
@@ -144,7 +156,16 @@ export async function askQuestion(pp: PolicyPrincipal, dev: DevicePrincipal, key
   const goalId = str(b, "goal_id", 80);
   if (!ID_RE.test(goalId)) throw badRequest("goal_id is not an id");
   const limitId = str(b, "limit_id", 80);
-  const files = fileList(b.files);
+  const sent = fileList(b.files);
+  // D5 on the server too: a file name is kept only when the device says the session shares work signals and the server
+  // already holds that name in this session's own work signals (which arrive only with them on); any other is dropped.
+  const signals = b.signals === true;
+  const known = new Set(
+    signals && sent.length
+      ? all<{ path: string }>("SELECT DISTINCT path FROM v2_activity WHERE ws_id = ? AND session_key = ? AND path IS NOT NULL", pp.wsId, key).map((r) => r.path)
+      : [],
+  );
+  const files = sent.filter((f) => known.has(f.path));
   const from = isoOf(b, "stretch_from");
   const to = isoOf(b, "stretch_to");
   if (Date.parse(from) > Date.parse(to)) throw badRequest("stretch_from is after stretch_to");
@@ -168,8 +189,8 @@ export async function askQuestion(pp: PolicyPrincipal, dev: DevicePrincipal, key
     }
     const id = newId("aq");
     run(
-      `INSERT INTO v2_agent_questions (id, ws_id, session_key, goal_id, goal_version, limit_id, limit_type, limit_text, files_json, stretch_from, stretch_to,
-         asked_by, client_id, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`,
+      `INSERT INTO v2_agent_questions (id, ws_id, session_key, goal_id, goal_version, limit_id, limit_type, limit_text, files_json, paths_shared, stretch_from,
+         stretch_to, asked_by, client_id, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`,
       id,
       pp.wsId,
       key,
@@ -179,6 +200,7 @@ export async function askQuestion(pp: PolicyPrincipal, dev: DevicePrincipal, key
       limit.type,
       limit.text,
       JSON.stringify(files),
+      signals ? 1 : 0,
       from,
       to,
       s.user_id,

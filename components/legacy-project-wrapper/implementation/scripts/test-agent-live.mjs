@@ -529,6 +529,14 @@ try {
         again.status === 409 && again.json?.error === "already_answered" && dir.length === 1,
       `${blank.status} ${ans.status} ${ans.text.slice(0, 300)} ${again.status} ${JSON.stringify(dir)}`,
     );
+    // Founder ruling 2026-11-11: the steer note only to the owner who answered and the person whose agent asked.
+    const noteFor = async (u) => (await ws(u, "GET", `/questions/${q1?.id}`)).json?.question?.answer;
+    const [nM, nV, nL, nO] = [await noteFor(M), await noteFor(V), await noteFor(L), await noteFor(O)];
+    check(
+      "questions (ruling): the steer note is shown to the owner who answered (here also the asker), never to a viewer, another member or a workspace owner who isn't the goal's owner (text null, text_hidden)",
+      nM?.text === STEER && [nV, nL, nO].every((a) => a?.kind === "steer" && a.text === null && a.text_hidden === true),
+      JSON.stringify([nM, nV, nL, nO]).slice(0, 600),
+    );
     sync();
     const heard = hook("UserPromptSubmit", { session_id: SID, prompt_id: "p13", prompt: "what now?", cwd: repo });
     const heardAgain = hook("UserPromptSubmit", { session_id: SID, prompt_id: "p14", prompt: "ok", cwd: repo });
@@ -565,6 +573,22 @@ try {
       refused.push(
         (await call("POST", `/api/v2/workspaces/${W}/sessions/${SKEY}/questions`, { bearer: token(), body: { client_id: `q_badpath_${i}_0000`, goal_id: G.id, limit_id: G.limits[0].id, files: [{ path: p, at: now }], stretch_from: now, stretch_to: now } })).status,
       );
+    // D5 on the server: a safe file name is kept only when the device says work signals are on AND the server already
+    // holds that name in this session's work signals; this session shares none.
+    const forged = [];
+    for (const [i, signals] of [false, true].entries())
+      forged.push(
+        await call("POST", `/api/v2/workspaces/${W}/sessions/${SKEY}/questions`, { bearer: token(), body: { client_id: `q_forged_${i}_0000`, goal_id: G.id, limit_id: G.limits[1].id, files: [{ path: "src/forged.sql", at: now }], stretch_from: now, stretch_to: now, signals } }),
+      );
+    check(
+      "questions (D5 on the server): a question naming a file this session never shared as a work signal stores no file name, whatever the device says about signals",
+      forged.every((r) => r.status === 201 || r.status === 200) && dbFilesLack(dbFile, "src/forged.sql") && !forged.some((r) => JSON.stringify(r.json).includes("forged.sql")),
+      forged.map((r) => `${r.status} ${r.text.slice(0, 200)}`).join(" | "),
+    );
+    // Close what the forged asks opened, so the checks below start from no open question on this session.
+    for (const q of qRows().filter((x) => x.state === "open")) await ws(M, "POST", `/questions/${q.id}/answer`, { answer: "continue" });
+    sync();
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p16b", prompt: "ok", cwd: repo });
     check(
       "questions (audit M2): the server refuses a path a modified agent could send: a drive letter, backslashes, ~, a bidi override, a zero-width space, ./, an empty segment, an absolute path, .. (400 each, nothing stored)",
       refused.every((st) => st === 400) && qRows().length === before,
@@ -620,10 +644,8 @@ try {
       named && left === 0 && leftDir === 0 && nowBy >= 2,
       `${named} ${left} ${leftDir} ${nowBy} ${pid}`,
     );
-  }
 
-  // ======== founder ruling 2026-11-11 (D5): a drift question names files only with work signals on ========
-  {
+    // ======== founder ruling 2026-11-11 (D5): a drift question names files only with work signals on ========
     const qOf = (key) => sdb((d) => d.prepare("SELECT files_json FROM v2_agent_questions WHERE ws_id = ? AND session_key = ?").all(W, key));
     const runIn = async (name, signals) => {
       const dir = path.join(tmpRoot, "work", name);
@@ -656,12 +678,20 @@ try {
     const onRows = qOf(on.key);
     sdb((d) => d.exec("PRAGMA wal_checkpoint(PASSIVE)"));
     const listed = (await ws(M, "GET", "/questions")).json?.questions ?? [];
+    const vOn = (await ws(V, "GET", "/questions")).json?.questions ?? [];
+    const lOn = (await ws(L, "GET", "/questions")).json?.questions ?? [];
     check(
       "D5 ruling: work signals off -> the question reached the server with no file path (stored [], nowhere in the database files, none on the web) and the notice says no file paths; work signals on -> the edited file's repo-relative path is stored and shown, and the notice says files were sent",
       offRows.length === 1 && offRows[0].files_json === "[]" && dbFilesLack(dbFile, off.file) && !JSON.stringify(listed).includes(off.file) && (off.told.system ?? "").includes("it sent the limit and the time, no file paths") &&
         onRows.length === 1 && JSON.parse(onRows[0].files_json).map((f) => f.path).join() === on.file && JSON.stringify(listed).includes(on.file) &&
         (on.told.system ?? "").includes("it sent the limit and the files this session edited in this stretch with their times"),
       `${JSON.stringify(offRows)} ${JSON.stringify(onRows)} off=${off.told.system} on=${on.told.system}`,
+    );
+    check(
+      "questions (ruling): with work signals on, the file names are shown to the goal's owner and the asker only: a viewer and another member see none (files_hidden), and the signals-off question says names were not shared (paths_shared false)",
+      !JSON.stringify(vOn).includes(on.file) && !JSON.stringify(lOn).includes(on.file) && vOn.some((q) => q.evidence.files_hidden === true && q.evidence.paths_shared === true) &&
+        lOn.some((q) => q.evidence.files_hidden === true) && listed.some((q) => q.evidence.paths_shared === false && q.evidence.files.length === 0 && q.evidence.files_hidden === false),
+      `${JSON.stringify(vOn.map((q) => q.evidence)).slice(0, 500)}`,
     );
   }
 
