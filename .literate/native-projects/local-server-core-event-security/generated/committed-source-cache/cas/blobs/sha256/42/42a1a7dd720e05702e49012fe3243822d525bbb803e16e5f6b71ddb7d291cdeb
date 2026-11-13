@@ -1,0 +1,13 @@
+'use strict';
+const tests = require('./tests/litai_test.js');
+async function main() {
+  if (process.argv[2] === '--litai-test') {
+    const cases = await tests.runTests();
+    process.stdout.write(JSON.stringify({schema: 'literate-ai/generated-test-results@1', cases}) + '\n');
+  } else if (process.argv[2] === '--litai-smoke') {
+    process.stdout.write(JSON.stringify(tests.smoke()) + '\n');
+  } else {
+    throw new Error('This library exposes only framework test and smoke dispatch.');
+  }
+}
+main().catch(error => {process.stderr.write(String(error.stack ?? error) + '\n'); process.exitCode = 1;});

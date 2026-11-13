@@ -63,22 +63,38 @@ Every generated `CMakeLists.txt` MUST declare exactly one root target named
 add_executable(litai_artifact ${SOURCES})   # adjust for the selected language ecosystem
 ```
 
-After building `litai_artifact`, a `POST_BUILD` custom command MUST copy the built
-binary to the exact `EXPORT_PATH` so the target always leaves one self-contained
-portable file there, independent of the generator's own output-directory layout:
+Bind the executable itself to the exact `EXPORT_PATH`, rather than relying on a
+copy that only runs after relinking. The lifecycle configures with the requested
+cache value before building the target. A missing exported file must therefore
+be a missing target output, which makes a repeated build recreate it.
 
 ```cmake
-add_custom_command(
-  TARGET litai_artifact POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy
-          $<TARGET_FILE:litai_artifact> "${EXPORT_PATH}"
-)
+# The executable itself is the exact requested export, so missing output rebuilds.
+get_filename_component(_export_directory "${EXPORT_PATH}" DIRECTORY)
+get_filename_component(_export_name "${EXPORT_PATH}" NAME)
+set_target_properties(litai_artifact PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${_export_directory}"
+  OUTPUT_NAME "${_export_name}"
+  PREFIX ""
+  SUFFIX "")
+set(_export_configurations ${CMAKE_CONFIGURATION_TYPES} "${CMAKE_BUILD_TYPE}")
+foreach(_configuration IN LISTS _export_configurations)
+  if(NOT _configuration STREQUAL "")
+    string(TOUPPER "${_configuration}" _configuration_upper)
+    set_target_properties(litai_artifact PROPERTIES
+      "RUNTIME_OUTPUT_DIRECTORY_${_configuration_upper}" "${_export_directory}"
+      "${_configuration_upper}_POSTFIX" "")
+  endif()
+endforeach()
 ```
 
-The lifecycle may invoke `cmake --build <build-dir> --target litai_artifact` repeatedly
-against a new `EXPORT_PATH` while intermediate state remains; the `POST_BUILD` copy runs
-every time the target's build step runs, so a repeated invocation must leave a verified
-regular file at the exact requested `EXPORT_PATH` or fail non-zero.
+The configuration-specific output directories prevent multi-configuration
+generators from inserting a Debug or Release directory. Empty executable prefix,
+suffix and configuration postfix properties preserve the exact requested name,
+including any extension already present in `EXPORT_PATH`. Keep intermediate
+objects beneath `OBJECT_ROOT`. Do not add a second executable or a circular
+export dependency. Normal artifact custody, regular-file validation and runtime
+acceptance remain required after the build.
 
 ## Discoverable tests
 

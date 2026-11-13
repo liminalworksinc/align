@@ -45,5 +45,7 @@
   "image_id": "sha256:575f5b53379b9db213aba11419218583e57ae1808872a779d7fadee5ae25f6f0",
   "both_installed_receipt_readers_passed": true,
   "normal_review_completed": false,
-  "exact_head_CI_green": false
+  "exact_head_CI_green": false,
+  "superseded_by": "generated/native-checkpoints/current-event-integrity.json",
+  "historical_inputs_not_attested_by_current_receipt": true
 }

@@ -9,9 +9,7 @@
 The latest normal review leaves 35 undecided findings. The
 [findings guide](native-authorization-findings.md) maps every entry. Its newest
 three concern two inherited, unselected CMake instructions and a demonstrated
-private-oracle read in the trust parser evaluator. The CMake instructions remain
-unfixed; the selected JavaScript builds do not use them. No framework source is
-changed and no finding is accepted or dismissed.
+private-oracle read in the trust parser evaluator. The two cited CMake instructions have local corrections, with compiler controls and exact cached-source acceptance. The selected JavaScript builds do not use them. The owning canonical copy and the two newly introduced children carry the same rule; unrelated historical qualified copies remain exact. No framework source changes and no finding is accepted or dismissed.
 
 Repair the parser evaluator before the next publication. Candidate execution
 must receive only case inputs, admitted helpers and a golden-free observer.
@@ -40,13 +38,15 @@ application/image acceptance and normal publication remain pending. Read the
 extracted observer and judge with
 `python3 tools/native-rewrite/export-parser-evaluator-review.py --check`.
 
-The event correction also remains pending integration. The schema-24 child is
-admitted and portable. The previous core child is held because its nullable
-actor declaration differs from the actual caller. The corrected contract's
-qualification stopped before generation when the CLI could not refresh its
-login token. Resume that exact intent after authentication is restored, then
-require all 24 public function types and runtime controls before admission.
-Continue local CLI preparation while authentication is pending.
+The event correction is admitted and wired in the current private candidate.
+Both clean core implementations pass 55 qualification batches and all 24 public
+function type comparisons. Separate admission reuses the exact reviewed source
+with no repair. The schema-24 child is admitted, portable and normally registered;
+the replacement core is normally revised into the same parent. Six actual
+Node/SQLite caller controls pass: direct malformed-JSON refusal before writes,
+operator and retention rollback, valid privacy purge, own-key event names and
+attribution restrictions. The application gate includes these controls. Full
+application/image acceptance and normal publication remain pending.
 
 The operator requested: "fix the open findings fully", followed by "then finish
 as many of the remaining boundaries as possible." This authorizes remediation
@@ -60,7 +60,7 @@ records the B13 transfer decision and explicitly excludes final tester security
 acceptance. It supplies no sign-off from another person.
 
 The [readable source manifest](../../generated/native-review-source/manifest.json)
-is checked against all 70 registered libraries and 274 package files. The
+is checked against all 71 registered libraries and 276 package files. The
 [qualification review manifest](../../generated/qualification-review/manifest.json)
 links three unchanged historical profiles to 62 readable exported files. Run
 the two exporters in check mode and `tools/native-rewrite/check-review-policy.py`
@@ -139,3 +139,42 @@ tooling and approval corrections; focused verification and normal review; the
 remaining B19, B22, B28 and B18 boundary work. Reuse accepted source when its
 recorded inputs remain unchanged. Do not repeat application acceptance for a
 documentation-only correction.
+
+## Current cap-fixture correction
+
+The private 71-library application run passes 1,914 of 1,916 checks. Two hosted
+cap checks reuse the operator sign-in created before the long browser matrix.
+An isolated production-image HTTP/SQLite reproduction confirms that a valid
+20-minute-old sign-in refuses deletion and device approval with
+`403 reauth_required`, without deleting rows or approving the pending device.
+A normal new email-code sign-in permits those same actions. The focused local
+probe does not attest hosted caps or captcha. The cap fixtures now obtain fresh
+operator and member sign-ins through the existing hosted email/captcha routes
+after browser coverage. Every previous cap assertion and stale-session refusal
+control remains exact, with one additional successful-sign-in assertion. No
+application guard, timeout or generated source changes. The failed candidate and
+all its inputs remain preserved. Complete one new full application acceptance
+run, current receipt verification and normal publication before closure.
+
+## Local export instruction correction
+
+The corrected local CMake rule makes the executable target output exactly
+`EXPORT_PATH`, with exact naming and explicit per-configuration directories.
+The compiler controls reproduce missing-export failure in the original rule and
+verify recovery and exact paths with Unix Makefiles and Ninja Multi-Config.
+The old rule does successfully relink after changing its configured export path
+in these controls; this counterevidence remains visible. Neither affected
+component selects CMake. The two affected child rebuilds reuse every admitted
+source member with no generation or repair and have current receipts. Apply the
+same instruction to the canonical copy and this checkpoint's new core/schema
+children, using normal cached acceptance for those children too. Preserve other
+historical qualified copies. An attempted broader private rollout made their
+documentation authority and receipts stale and was preserved before restoring
+those unrelated files to the exact frozen state.
+
+The accepted-source-only mode rejected the exact cache selection even on the
+unchanged baseline. Ordinary rebuilding with the matching real provider and
+recorded model succeeds from that same cache. No source-cache key, receipt,
+qualification or framework code was patched to obtain reuse. Parent application
+acceptance, current receipt verification, normal review and publication remain
+required. Read the two CMake checkpoint records linked from the findings guide.

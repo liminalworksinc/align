@@ -326,3 +326,5 @@
     the retained test receipt covers the web app.
 - Initialized the project with Literate AI's specification-led lifecycle and durable
   user-directed work queue.
+
+- Corrected local executable export instructions with compiler controls and unchanged qualified runtime source. Refreshed long-running cap-test sign-ins while preserving recent-authentication refusal checks. Integrated acceptance and normal publication remain required.

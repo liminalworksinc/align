@@ -3,7 +3,7 @@ import type { SQLInputValue } from "node:sqlite";
 import { changePrograms } from "../storage-schema.mts";
 import { createHash } from "node:crypto";
 import { create_creation_compatibility } from "../native/.bindings/server_creation_compatibility.js";
-import { create_core } from "../native/.bindings/server_core.js";
+import { create_core } from "../native/server_core/create_core.js";
 import { serverSecret as sourceServerSecret, hmac as sourceHmac } from "../server-secret-tools.mts";
 import { runtimeSettings } from "../runtime-settings.mts";
 import { identifierTools } from "../identifier-tools.mts";
@@ -106,7 +106,7 @@ const core = create_core({
   readAbortSignal: () => AbortSignal,
   readConsole: () => console,
   readURLSearchParams: () => URLSearchParams,
-}) as unknown as CoreRuntime;
+}) satisfies CoreRuntime;
 
 interface CreationCompatibilityRuntime {
   V1_CODE_RE: RegExp;
@@ -130,7 +130,7 @@ export const ONCE_PER_WORKSPACE: CoreRuntime["ONCE_PER_WORKSPACE"] = core.ONCE_P
 export const REQUEST_STATUSES: CoreRuntime["REQUEST_STATUSES"] = core.REQUEST_STATUSES;
 export const RESTORE_DAYS: CoreRuntime["RESTORE_DAYS"] = core.RESTORE_DAYS;
 // The active schema belongs to the composed native history.
-export const SCHEMA_VERSION = changePrograms().length as 23;
+export const SCHEMA_VERSION = changePrograms().length as 24;
 export const accessRequest: CoreRuntime["accessRequest"] = core.accessRequest;
 export const approveAccessRequest: CoreRuntime["approveAccessRequest"] = core.approveAccessRequest;
 export const codeEmail: CoreRuntime["codeEmail"] = core.codeEmail;

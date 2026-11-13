@@ -1,0 +1,14 @@
+{
+  "schema": "align/native-child-local-evidence@1",
+  "component": "server-core",
+  "admission_review": "server-core.admitted-source-review-v9.json",
+  "admission_review_sha256": "1f0bcf5ddf91e8fd55cf4ca2854b7537cdc7e77c91050af5636d818da51d8495",
+  "admitted_entry": "sha256:8b6c9cebbde2000ccb41ff50945d85e1805ffb8aae5f24a6b45ff74d290c2bc1",
+  "generated_tests_passed": 6,
+  "source_byte_review_complete": true,
+  "no_source_repairs_during_admission": true,
+  "normal_portable_cache_current_acceptance_record": "verification/current.json",
+  "parent_registration_and_full_application_image_acceptance_pending": true,
+  "whole_B12_security_review_complete": false,
+  "operator_security_acceptance_claimed": false
+}

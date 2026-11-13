@@ -21,3 +21,7 @@ Release scope is declared in [release goals](release-goals.json).
 The consuming project's ADOPT-002/B07 owns the next integration step.
 The current receipt proves local cache consumption and acceptance when present
 and current. It does not attest the consuming application or operator review.
+
+## Local unselected export instruction correction
+
+Replace the POST_BUILD-only export recommendation with the tested exact target-output rule in this Align-owned instruction copy. This JavaScript component does not select that instruction. Preserve its definitions, qualification, selected instructions and all admitted source. Require an accepted-source-only cached rebuild, current receipt and exact source before any parent transfer. Both findings remain undecided. No framework source change or operator security acceptance is claimed.

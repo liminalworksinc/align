@@ -8,7 +8,7 @@ The normal reviewer ledger has **35 open findings: ten HIGH and twenty-five MEDI
 
 Within the earlier 26 findings, 23 have technical correction evidence in the
 [current remediation record](../../generated/native-checkpoints/finding-remediation.json).
-The other three of that earlier group are indexed below. Their instruction correction and contained evaluator controls are local changes. The shared adapter and normal application consumer assembly pass all 1,259 existing batches across 68 libraries, preserving all 270 runtime package files. The application verification copies now select the tested contained evaluators. This does not claim refreshed per-child SDK receipts; 67 remain historical. Current integrated acceptance, normal publication and operator review remain required.
+The other three of that earlier group are indexed below. Their instruction correction and contained evaluator controls are local changes. The earlier shared-adapter checkpoint passed 1,259 batches across 68 libraries and preserved 270 runtime package files. Those are historical counts. The current private candidate has 71 libraries and 276 readable package files. Its per-child receipts retain their recorded scope. Current combined acceptance, normal publication and operator review remain required.
 
 ## Source identities
 
@@ -912,18 +912,18 @@ Use `pair` with each row's original and generated range. Main and generated loca
 | `lib/v2/core.mts:38` through 41, `sessionMaxDays`. Check lines: 40. | `runtime_settings/create_settings.js:34` through 34, `sessionMaxDays`. Check lines: 34. | `pair lib/v2/core.mts 38 41 runtime_settings/create_settings.js 34 34` |
 | `lib/v2/core.mts:46` through 61, `rand32`. Check lines: 59. | `identifier_tools/create_identifiers.js:6` through 23, `rand32`. Check lines: 21. | `pair lib/v2/core.mts 46 61 identifier_tools/create_identifiers.js 6 23` |
 | `lib/v2/core.mts:65` through 73, `serverSecret`. Check lines: 66, 68. | `server_secrets/create_tools.js:9` through 18, `serverSecret`. Check lines: 10, 12. | `pair lib/v2/core.mts 65 73 server_secrets/create_tools.js 9 18` |
-| `lib/v2/core.mts:155` through 168, `checkProps`. Check lines: 157, 161, 163, 166. | `server_core/create_core.js:42` through 55, `recordEvent`. Check lines: 45, 48, 49, 50, 51. | `pair lib/v2/core.mts 155 168 server_core/create_core.js 42 55` |
-| `lib/v2/core.mts:207` through 223, `insertCreationCode`. Check lines: 210, 221. | `server_core/create_core.js:56` through 65, `insertCreationCode`. Check lines: 59, 63. | `pair lib/v2/core.mts 207 223 server_core/create_core.js 56 65` |
-| `lib/v2/core.mts:237` through 242, `listCreationCodes`. Check lines: 241. | `server_core/create_core.js:66` through 70, `listCreationCodes`. Check lines: 69. | `pair lib/v2/core.mts 237 242 server_core/create_core.js 66 70` |
-| `lib/v2/core.mts:251` through 266, `redeemCreationCode`. Check lines: 252. | `server_core/create_core.js:74` through 79, `redeemCreationCode`. Check lines: 75. | `pair lib/v2/core.mts 251 266 server_core/create_core.js 74 79` |
-| `lib/v2/core.mts:292` through 296, `listAccessRequests`. Check lines: 293. | `server_core/create_core.js:83` through 86, `listAccessRequests`. Check lines: 84. | `pair lib/v2/core.mts 292 296 server_core/create_core.js 83 86` |
-| `lib/v2/core.mts:301` through 308, `approveAccessRequest`. Check lines: 303. | `server_core/create_core.js:88` through 95, `approveAccessRequest`. Check lines: 90. | `pair lib/v2/core.mts 301 308 server_core/create_core.js 88 95` |
-| `lib/v2/core.mts:311` through 316, `declineAccessRequest`. Check lines: 313. | `server_core/create_core.js:96` through 101, `declineAccessRequest`. Check lines: 98. | `pair lib/v2/core.mts 311 316 server_core/create_core.js 96 101` |
-| `lib/v2/core.mts:321` through 329, `undoApproval`. Check lines: 325. | `server_core/create_core.js:102` through 110, `undoApproval`. Check lines: 106. | `pair lib/v2/core.mts 321 329 server_core/create_core.js 102 110` |
-| `lib/v2/core.mts:351` through 356, `softDeleteWorkspace`. Check lines: 352. | `server_core/create_core.js:114` through 119, `softDeleteWorkspace`. Check lines: 115. | `pair lib/v2/core.mts 351 356 server_core/create_core.js 114 119` |
-| `lib/v2/core.mts:363` through 376, `purgeWorkspace`. Check lines: 373. | `server_core/create_core.js:120` through 132, `purgeWorkspace`. Check lines: 129. | `pair lib/v2/core.mts 363 376 server_core/create_core.js 120 132` |
-| `lib/v2/core.mts:391` through 410, `postEmail`. Check lines: 403, 406, 408. | `server_core/create_core.js:133` through 151, `postEmail`. Check lines: 144, 147, 149. | `pair lib/v2/core.mts 391 410 server_core/create_core.js 133 151` |
-| `lib/v2/core.mts:414` through 431, `codeEmail`. Check lines: 415. | `server_core/create_core.js:152` through 158, `codeEmail`. Check lines: 153. | `pair lib/v2/core.mts 414 431 server_core/create_core.js 152 158` |
+| `lib/v2/core.mts:155` through 168, `checkProps`. Check lines: 157, 161, 163, 166. | `server_core/create_core.js:26` through 36, `recordEvent`. Check lines: 29, 30, 33. | `pair lib/v2/core.mts 155 168 server_core/create_core.js 26 36` |
+| `lib/v2/core.mts:207` through 223, `insertCreationCode`. Check lines: 210, 221. | `server_core/create_core.js:37` through 45, `insertCreationCode`. Check lines: 40, 43. | `pair lib/v2/core.mts 207 223 server_core/create_core.js 37 45` |
+| `lib/v2/core.mts:237` through 242, `listCreationCodes`. Check lines: 241. | `server_core/create_core.js:46` through 49, `listCreationCodes`. Check lines: 48. | `pair lib/v2/core.mts 237 242 server_core/create_core.js 46 49` |
+| `lib/v2/core.mts:251` through 266, `redeemCreationCode`. Check lines: 252. | `server_core/create_core.js:53` through 57, `redeemCreationCode`. Check lines: 54. | `pair lib/v2/core.mts 251 266 server_core/create_core.js 53 57` |
+| `lib/v2/core.mts:292` through 296, `listAccessRequests`. Check lines: 293. | `server_core/create_core.js:61` through 63, `listAccessRequests`. Check lines: 62. | `pair lib/v2/core.mts 292 296 server_core/create_core.js 61 63` |
+| `lib/v2/core.mts:301` through 308, `approveAccessRequest`. Check lines: 303. | `server_core/create_core.js:65` through 72, `approveAccessRequest`. Check lines: 67. | `pair lib/v2/core.mts 301 308 server_core/create_core.js 65 72` |
+| `lib/v2/core.mts:311` through 316, `declineAccessRequest`. Check lines: 313. | `server_core/create_core.js:73` through 78, `declineAccessRequest`. Check lines: 75. | `pair lib/v2/core.mts 311 316 server_core/create_core.js 73 78` |
+| `lib/v2/core.mts:321` through 329, `undoApproval`. Check lines: 325. | `server_core/create_core.js:79` through 87, `undoApproval`. Check lines: 83. | `pair lib/v2/core.mts 321 329 server_core/create_core.js 79 87` |
+| `lib/v2/core.mts:351` through 356, `softDeleteWorkspace`. Check lines: 352. | `server_core/create_core.js:91` through 96, `softDeleteWorkspace`. Check lines: 92. | `pair lib/v2/core.mts 351 356 server_core/create_core.js 91 96` |
+| `lib/v2/core.mts:363` through 376, `purgeWorkspace`. Check lines: 373. | `server_core/create_core.js:97` through 111, `purgeWorkspace`. Check lines: 101. | `pair lib/v2/core.mts 363 376 server_core/create_core.js 97 111` |
+| `lib/v2/core.mts:391` through 410, `postEmail`. Check lines: 403, 406, 408. | `server_core/create_core.js:112` through 125, `postEmail`. Check lines: 118, 121, 123. | `pair lib/v2/core.mts 391 410 server_core/create_core.js 112 125` |
+| `lib/v2/core.mts:414` through 431, `codeEmail`. Check lines: 415. | `server_core/create_core.js:126` through 129, `codeEmail`. Check lines: 127. | `pair lib/v2/core.mts 414 431 server_core/create_core.js 126 129` |
 | `lib/v2/db.ts:30` through 36, `lockDown`. Check lines: 33. | `storage_runtime/create_store.js:17` through 25, `protect`. Check lines: 20. | `pair lib/v2/db.ts 30 36 storage_runtime/create_store.js 17 25` |
 | `lib/v2/db.ts:45` through 57, `openDb`. Check lines: 46. | `storage_runtime/create_store.js:27` through 42, `openDb`. Check lines: 28. | `pair lib/v2/db.ts 45 57 storage_runtime/create_store.js 27 42` |
 | `lib/v2/db.ts:61` through 69, `stmt`. Check lines: 64. | `storage_runtime/create_store.js:45` through 51, `statement`. Check lines: 47. | `pair lib/v2/db.ts 61 69 storage_runtime/create_store.js 45 51` |
@@ -2171,9 +2171,9 @@ pair_current() {
 
 | Finding | Original check on current main | Current materialized source | Read side by side |
 | --- | --- | --- | --- |
-| f_6e478fc0d9b7: Event attribution fields remain mutable | lib/v2/db.ts:743, event update trigger; lib/v2/core.mts:400, workspace redaction | storage_schema/change_programs.js:14, event trigger; server_core/create_core.js:126, workspace redaction; server_retention/create_retention.js:62, actor removal | `pair_current lib/v2/db.ts 730 745 storage_schema/change_programs.js 14 14`; `pair_current lib/v2/core.mts 389 405 server_core/create_core.js 120 132` |
-| f_efc456f72a8e: Unknown prototype names are accepted as events | lib/v2/core.mts:156, property lookup followed by truthiness | server_core/create_core.js:44, same inherited-property lookup | `pair_current lib/v2/core.mts 155 183 server_core/create_core.js 42 55` |
-| f_7f03bca85eb6: Purge mutates data before malformed JSON aborts | lib/v2/core.mts:393, writes before parsing device workspace JSON; line11 delegates transaction ownership to callers | server_core/create_core.js:120, same effect order; server_retention/create_retention.js:100, schedule calls purge within its step | `pair_current lib/v2/core.mts 389 405 server_core/create_core.js 120 132`; read caller transaction boundaries too |
+| f_6e478fc0d9b7: Event attribution fields remain mutable | lib/v2/db.ts:743, event update trigger; lib/v2/core.mts:400, workspace redaction | storage_schema/change_programs.js:14, event trigger; server_core/create_core.js:97, workspace redaction; server_retention/create_retention.js:62, actor removal | `pair_current lib/v2/db.ts 730 745 storage_schema/change_programs.js 14 14`; `pair_current lib/v2/core.mts 389 405 server_core/create_core.js 97 111` |
+| f_efc456f72a8e: Unknown prototype names are accepted as events | lib/v2/core.mts:156, property lookup followed by truthiness | server_core/create_core.js:26, same inherited-property lookup | `pair_current lib/v2/core.mts 155 183 server_core/create_core.js 26 36` |
+| f_7f03bca85eb6: Purge mutates data before malformed JSON aborts | lib/v2/core.mts:393, writes before parsing device workspace JSON; line11 delegates transaction ownership to callers | server_core/create_core.js:97, same effect order; server_retention/create_retention.js:100, schedule calls purge within its step | `pair_current lib/v2/core.mts 389 405 server_core/create_core.js 97 111`; read caller transaction boundaries too |
 
 Workspace randomization and actor removal are used by privacy retention. Those
 call sites must remain functional in any correction. The inherited event-name
@@ -2229,9 +2229,9 @@ disposition. Earlier counts in this file are historical snapshots.
 
 | Finding | Original check on current main | Current materialized source | Read side by side |
 | --- | --- | --- | --- |
-| `f_1b582b71e2ae` HIGH: malformed device request JSON leaves a partially purged workspace | `lib/v2/core.mts:393`, SQL writes precede JSON parsing at line402. Caller transaction ownership is documented at line11. | `server_core/create_core.js:120`, same purge order. Actual operator transaction is `operator_admin/create_operator_admin.js:106` through108 and purge call at196. Retention purge is `server_retention/create_retention.js:100`; step transactions are at147 through149. | `pair_current lib/v2/core.mts 389 405 server_core/create_core.js 120 132`; inspect caller commands below. The earlier `f_7f03bca85eb6` concerns the same effect ordering. |
+| `f_1b582b71e2ae` HIGH: malformed device request JSON leaves a partially purged workspace | `lib/v2/core.mts:393`, SQL writes precede JSON parsing at line402. Caller transaction ownership is documented at line11. | `server_core/create_core.js:97`, same purge order. Actual operator transaction is `operator_admin/create_operator_admin.js:106` through108 and purge call at196. Retention purge is `server_retention/create_retention.js:100`; step transactions are at147 through149. | `pair_current lib/v2/core.mts 389 405 server_core/create_core.js 97 111`; inspect caller commands below. The earlier `f_7f03bca85eb6` concerns the same effect ordering. |
 | `f_562447a5a6fb` MEDIUM: spend meter acceptance oracle is deleted | This concerns migration verification, with no original main application authorization check or generated enforcement equivalent. Historical oracle is at `54ecc585^:components/legacy-project-wrapper/implementation/native/spend-meter.json:1`. Original spend validation and pricing remain indexed under B09. | Current canonical oracle is `.literate/native-projects/local-spend-meter/verification/acceptance/spend-meter.json:1`. The consumer copies it at `tools/native-rewrite/make-consumer-manifest.py:118` through126 and runs its cases at `scripts/native-libraries.mjs:166` through173 under the application root. | Compare the complete parsed cases using the command below. All11 cases and110 inputs, including expected results, are equal. Only harness name and digest changed. The generated spend implementation remains in `generated/native-review-source/spend_meter/`. |
-| `f_b402a2b7e0c2` MEDIUM: event trigger allows workspace and actor changes | `lib/v2/db.ts:743`, the trigger excludes `ws_id` and `actor`. Privacy purge and actor removal are at `lib/v2/core.mts:400` and `lib/v2/retention-core.mts:143`. | `storage_schema/change_programs.js:14`, same trigger; `server_core/create_core.js:126`, workspace anonymization; `server_retention/create_retention.js:62`, actor clearing. | `pair_current lib/v2/db.ts 730 745 storage_schema/change_programs.js 14 14`; `pair_current lib/v2/core.mts 389 405 server_core/create_core.js 120 132`; `pair_current lib/v2/retention-core.mts 139 147 server_retention/create_retention.js 58 66`. Earlier `f_6e478fc0d9b7` concerns the same attribution fields. |
+| `f_b402a2b7e0c2` MEDIUM: event trigger allows workspace and actor changes | `lib/v2/db.ts:743`, the trigger excludes `ws_id` and `actor`. Privacy purge and actor removal are at `lib/v2/core.mts:400` and `lib/v2/retention-core.mts:143`. | `storage_schema/change_programs.js:14`, same trigger; `server_core/create_core.js:97`, workspace anonymization; `server_retention/create_retention.js:62`, actor clearing. | `pair_current lib/v2/db.ts 730 745 storage_schema/change_programs.js 14 14`; `pair_current lib/v2/core.mts 389 405 server_core/create_core.js 97 111`; `pair_current lib/v2/retention-core.mts 139 147 server_retention/create_retention.js 58 66`. Earlier `f_6e478fc0d9b7` concerns the same attribution fields. |
 
 Read the caller boundaries and oracle directly from the repository root:
 
@@ -2277,14 +2277,14 @@ file remain historical snapshots. No review bypass or disposition is recorded.
 
 | Finding | Original on main | Current location and materialized application scope | Read side by side |
 | --- | --- | --- | --- |
-| `f_2ed16557a584`: repeated CMake builds can skip a new export path | Current main `4d95f5be` contains the same inherited build instruction at `skills/specification-to-source/cmake-build-system/SKILL.md:66` through81. This is a generation instruction, with no original application authorization check. | Reviewed locator `.literate/native-projects/local-storage-refresh-schema/skills/specification-to-source/cmake-build-system/SKILL.md:69`. No materialized application guard corresponds to this instruction. The actual selected JavaScript source has `storage_refresh_schema/extend_device_refresh_schema.js:1`; its source SBOM selects JavaScript/Node and the portable JavaScript skill, not CMake. The inherited defect remains unfixed. | Use the first command below; inspect the separately recorded selected dependency names. |
-| `f_e011dbf27d3a`: POST_BUILD does not rerun for an up-to-date target | The same main inherited skill at `skills/specification-to-source/cmake-build-system/SKILL.md:66` through81. There is no relocated application check to invent. | Reviewed locator `.literate/native-projects/local-trust-text-parser/skills/specification-to-source/cmake-build-system/SKILL.md:76`. Its selected source SBOM also uses JavaScript/Node and excludes CMake. The actual parser is `trust_text_parser/create_trust_text_parser.js:1`. The inherited instruction is preserved and this finding remains open. | Use the second command below. This comparison documents scope and does not adjudicate the finding. |
+| `f_2ed16557a584`: repeated CMake builds can skip a new export path | Current main `4d95f5be` contains the same inherited build instruction at `skills/specification-to-source/cmake-build-system/SKILL.md:66` through81. This is a generation instruction, with no original application authorization check. | Reviewed locator `.literate/native-projects/local-storage-refresh-schema/skills/specification-to-source/cmake-build-system/SKILL.md:69`. No materialized application guard corresponds to this instruction. The actual selected JavaScript source has `storage_refresh_schema/extend_device_refresh_schema.js:1`; its source SBOM selects JavaScript/Node and the portable JavaScript skill, not CMake. The local instruction now binds the executable target itself to the exact export path at lines 70 through 99, including configuration-specific directories and an empty postfix. Normal parent acceptance and review remain pending. | Use the first command below; inspect the separately recorded selected dependency names. |
+| `f_e011dbf27d3a`: POST_BUILD does not rerun for an up-to-date target | The same main inherited skill at `skills/specification-to-source/cmake-build-system/SKILL.md:66` through81. There is no relocated application check to invent. | Reviewed locator `.literate/native-projects/local-trust-text-parser/skills/specification-to-source/cmake-build-system/SKILL.md:76`. Its selected source SBOM also uses JavaScript/Node and excludes CMake. The actual parser is `trust_text_parser/create_trust_text_parser.js:1`. The local instruction now uses that same exact-output rule at lines 70 through 99. The finding remains undecided; the corrected selected JavaScript source is unchanged. | Use the second command below. This comparison documents scope and does not adjudicate the finding. |
 | `f_e8e57827838b`: candidate code can read the private oracle | The private-oracle loader is authored migration verification, with no original main application security check. The original parser itself is `lib/trust/markdown.mts:77` through99 on main `4d95f5be`. | `components/legacy-project-wrapper/implementation/native/trust-text-parser-contained-v2.cjs:83` invokes candidate source with a host-realm Function constructor inside the container. The canonical child oracle selects the same contained evaluator. The materialized product parser remains `trust_text_parser/create_trust_text_parser.js:1`, independently readable below; the defect concerns its evaluator authority. | Read the exact reviewed loader with the third command, then compare original and generated parser code using `pair_current lib/trust/markdown.mts 77 99 trust_text_parser/create_trust_text_parser.js 1 90`. |
 
 ```sh
 P=skills/specification-to-source/cmake-build-system/SKILL.md
-diff -y -W 240   <(git show "4d95f5befa36e98012e8ca69933124a0508a4aaf:$P" | nl -ba | sed -n '60,84p')   <(nl -ba ".literate/native-projects/local-storage-refresh-schema/$P" | sed -n '53,78p')
-diff -y -W 240   <(git show "4d95f5befa36e98012e8ca69933124a0508a4aaf:$P" | nl -ba | sed -n '60,84p')   <(nl -ba ".literate/native-projects/local-trust-text-parser/$P" | sed -n '60,84p')
+diff -y -W 240   <(git show "4d95f5befa36e98012e8ca69933124a0508a4aaf:$P" | nl -ba | sed -n '60,84p')   <(nl -ba ".literate/native-projects/local-storage-refresh-schema/$P" | sed -n '60,102p')
+diff -y -W 240   <(git show "4d95f5befa36e98012e8ca69933124a0508a4aaf:$P" | nl -ba | sed -n '60,84p')   <(nl -ba ".literate/native-projects/local-trust-text-parser/$P" | sed -n '60,102p')
 P=components/legacy-project-wrapper/implementation/native/trust-text-parser-contained-v2.cjs
 git show "5eb639f7cc893276d4f2b1210282561ff5f67f71:$P" | nl -ba | sed -n '74,90p'
 nl -ba generated/native-review-source/trust_text_parser/create_trust_text_parser.js | sed -n '1,90p'
@@ -2295,8 +2295,19 @@ cat generated/native-checkpoints/private-oracle-read-control.json
 The CMake behavior is also stated in the [official build-event contract](https://cmake.org/cmake/help/latest/command/add_custom_command.html#build-events):
 a POST_BUILD command participates in building its target and does not establish
 an always-run export action. Neither selected library uses that generation skill.
-Its inherited instruction remains unchanged because framework work is outside
-the operator's current scope. This is scope evidence, not a fix or dismissal.
+The two cited Align-owned instruction copies now make the executable target's
+output the exact requested export. Owned Unix Makefiles and Ninja Multi-Config
+controls reproduce a missing-file failure with the old rule, and the corrected
+rule passes missing-file recovery, reconfiguration to another path, exact naming
+and both configurations. Reconfiguration to a new path also succeeds with the
+historical rule in these controls; preserve that counterevidence. Ordinary cached
+rebuilds of both affected children reuse all nine schema and seven parser source
+members, pass three and six generated tests, and issue current receipts with no
+generation or repair. The canonical instruction and two newly introduced child
+copies use the same correction. Other historical qualified copies remain exact.
+Read `generated/native-checkpoints/cmake-export-controls.json` and
+`generated/native-checkpoints/cmake-local-instruction-corrections.json`. No
+framework checkout changes and no finding is accepted or dismissed.
 
 The owned negative control reproduced the oracle exposure with the exact current
 contained evaluator. The candidate read 159,434 bytes at `/inputs/oracle.cjs` and
@@ -2385,3 +2396,46 @@ pending; the earlier full-suite results do not attest this changed evaluator.
 The private-oracle read control and failed evaluator remain preserved. All 35
 findings, including this corrected finding and the two inherited CMake findings,
 remain undecided.
+
+## Current local event correction candidate
+
+The private candidate selects the separately admitted core attempt 9 and the
+additive event-integrity schema. All 24 public function types match the actual
+current-main callers. The core and event bridges import the admitted declarations
+directly and use `satisfies` checks. The active composed schema is version 24;
+the historical core helper constant remains unused.
+
+The earlier inherited-behavior reproductions remain evidence of the reported
+findings. The current candidate corrects the own-key lookup at
+`server_core/create_core.js:28` through 30 and prepares all device-request JSON
+at `server_core/create_core.js:98` through 102 before any purge write at line103.
+The workspace redaction is now at line108. The additive attribution trigger is
+`storage_event_integrity/extend_event_integrity_schema.js:3`; its decoded SQL
+allows actor clearing and a valid fresh workspace tombstone, and refuses other
+attribution changes. The original 23 schema programs remain byte-identical.
+
+| Undecided findings | Current materialized enforcement | Side-by-side reading |
+| --- | --- | --- |
+| `f_efc456f72a8e` | `server_core/create_core.js:28` through 30 | `pair_current lib/v2/core.mts 155 183 server_core/create_core.js 26 36` |
+| `f_7f03bca85eb6`, `f_1b582b71e2ae` | `server_core/create_core.js:98` through 103 | `pair_current lib/v2/core.mts 389 405 server_core/create_core.js 97 111` |
+| `f_6e478fc0d9b7`, `f_b402a2b7e0c2` | `storage_event_integrity/extend_event_integrity_schema.js:3` and `server_core/create_core.js:108` | `pair_current lib/v2/db.ts 730 745 storage_event_integrity/extend_event_integrity_schema.js 1 10`; `pair_current lib/v2/core.mts 389 405 server_core/create_core.js 97 111` |
+
+Read the one-line SQL value as SQL, and run the actual caller controls:
+
+```sh
+node - <<'READ_ATTRIBUTION_SQL'
+const {extend_event_integrity_schema}=require("./generated/native-review-source/storage_event_integrity/extend_event_integrity_schema.js");
+console.log(extend_event_integrity_schema([])[0]);
+READ_ATTRIBUTION_SQL
+cd components/legacy-project-wrapper/implementation
+node scripts/native-libraries.mjs web
+node --disable-warning=ExperimentalWarning scripts/test-event-integrity.mjs
+```
+
+The six owned Node/SQLite controls pass, including direct-helper no-write
+validation, actual operator and retention rollback, valid privacy purge, own-key
+event names and attribution refusal. Their proof is
+`generated/native-checkpoints/event-integrity-callers.json`. Full application and
+image acceptance and normal publication are pending for this candidate. All 35
+findings remain undecided. No independent review or operator security acceptance
+is asserted. The two inherited unselected CMake findings remain unfixed.

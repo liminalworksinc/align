@@ -1,7 +1,7 @@
 {
   "schema": "align/readable-native-source@1",
   "authority": "review-copy-only",
-  "library_manifest_sha256": "ddb94f5dc7e602d4f1c0d261d1c1bd523ad3f2953e51a204dc76bf9326346deb",
+  "library_manifest_sha256": "b22c303e410c17e64dafc24368dfde0f83688b4e49bd978985dbe3564dec3aeb",
   "libraries": [
     {
       "component": "agent-envelope",
@@ -1148,38 +1148,38 @@
     {
       "component": "server-core",
       "package": "server_core",
-      "provider": ".literate/native-projects/local-server-core",
-      "entry": "42373a5a5a42cf85ae1aa6822209402a4911eb5be5fd01fc5be4a852e409e08f",
-      "source_tree": "28ba240559d7c52dcb3cbe4af215a6e9aeb2d078ea462485836ed952b4d919d2",
-      "lock_identity": "sha256:78d541b0174141ab5ae9faa68bfb859985d6680b69bd9ee7b1610382a51090db",
+      "provider": ".literate/native-projects/local-server-core-event-security",
+      "entry": "8b6c9cebbde2000ccb41ff50945d85e1805ffb8aae5f24a6b45ff74d290c2bc1",
+      "source_tree": "a5499ff617c15c5252a98d5d1d2e8539325fb9e5706a3629f59deb50466e590d",
+      "lock_identity": "sha256:898bf8692dc35644ef801d0549fb88618b4017af9f6e4c98fb3cae22dd2b7a59",
       "files": [
         {
           "path": "create_core.d.ts",
           "algorithm": "sha256",
-          "digest": "502b382f2eaf6730fa43c9146edc931b61db8f43e9adf92413ba7d84ffe8939a",
+          "digest": "06d7572f0c46f24e8e0829fd6c6ba7baa48fc1e65d6b688111ef66070e70af74",
           "media_type": "application/octet-stream",
-          "size": 6093
+          "size": 5964
         },
         {
           "path": "create_core.js",
           "algorithm": "sha256",
-          "digest": "7dfb86af8367e1e15bd0e667c7118f51767c13aeb5534cca7c7995e7254c5ebc",
+          "digest": "f1daa5973b413cb92390a3d8d81f3a5aa6e350b961ad7c0c3cc98d1fc3574c44",
           "media_type": "application/octet-stream",
-          "size": 11056
+          "size": 10964
         },
         {
           "path": "create_events.d.ts",
           "algorithm": "sha256",
-          "digest": "4f4e2765adc6141b1e25517f4e4a5af5df77ebb1c6267a0653b985b221dd0df6",
+          "digest": "f9ed4d2c6d1bcfa5299fb9b020746116ebb38bd8662908c85364ede7951f3c4d",
           "media_type": "application/octet-stream",
-          "size": 620
+          "size": 599
         },
         {
           "path": "create_events.js",
           "algorithm": "sha256",
-          "digest": "76168cdffda0ea0c5b3059f077f0891ea5d36e94173e163bf5ebaf538f27adc0",
+          "digest": "69274f54d476f42fc68e5bcb842be625e8c3ae2ca173d77d008fa4989ef84e4d",
           "media_type": "application/octet-stream",
-          "size": 738
+          "size": 690
         },
         {
           "path": "package.json",
@@ -2594,6 +2594,30 @@
           "digest": "b863f451f5f7f5695601b1d4907f8990d1afc5da92e01a53a6a30d630ffd0b6f",
           "media_type": "application/octet-stream",
           "size": 133
+        }
+      ]
+    },
+    {
+      "component": "storage-event-integrity",
+      "package": "storage_event_integrity",
+      "provider": ".literate/native-projects/local-storage-event-integrity",
+      "entry": "0d1960612cfa93347f4ea77ff7cd36dbf7d25919d8f25349792156b0b7381a61",
+      "source_tree": "a1791a18ea583948ff1633e2681b97a22b4a944542d19e9eff46c6a95c59bb1f",
+      "lock_identity": "sha256:b25a017ece7e33c56ae3067198529f4185e2241974714b06c446352e5bebcb84",
+      "files": [
+        {
+          "path": "extend_event_integrity_schema.js",
+          "algorithm": "sha256",
+          "digest": "ba97366e861307a02bd4111046c00eecd0bbcd105a898a13d066d6add763998f",
+          "media_type": "application/octet-stream",
+          "size": 881
+        },
+        {
+          "path": "package.json",
+          "algorithm": "sha256",
+          "digest": "ec6d77c325efbefb40bb7a9bbc7b55b3540527ff2bc6b4609cf81460f7242a95",
+          "media_type": "application/octet-stream",
+          "size": 158
         }
       ]
     },

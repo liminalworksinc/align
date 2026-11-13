@@ -1,0 +1,75 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {create_core} = require('../server_core/create_core.js');
+const {create_events} = require('../server_core/create_events.js');
+function resources() {
+  return {
+    serverSecret: () => 'secret', hmac: (secret, payload) => payload,
+    runtimeSettings: {testIdpEnabled: () => false, validMaxDays: () => true, sessionMaxDays: () => 14},
+    identifierTools: {rand32: n => 'a'.repeat(n)},
+    readDate: () => Date, readFetch: () => () => Promise.resolve({ok: true}),
+    readAbortSignal: () => ({timeout: () => null}), readConsole: () => ({error() {}}), readURLSearchParams: () => URLSearchParams
+  };
+}
+function eventCase(name, props, changes) {
+  const core = create_core(resources());
+  const db = {run(sql, ...params) {
+    assert.equal(this, db);
+    assert.equal(sql, 'INSERT INTO v2_events (name, ws_id, actor, at, props) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING');
+    assert.deepEqual(params, [name, null, null, '2026-01-01T00:00:00.000Z', JSON.stringify(props)]);
+    return changes;
+  }};
+  return core.recordEvent(db, name, {props, at: '2026-01-01T00:00:00.000Z'});
+}
+function smoke() { return eventCase('first_ask', {}, 1); }
+async function runTests() {
+  const results = [];
+  function check(id, actual, expected) {assert.deepEqual(actual, expected); results.push({case_id: id, outcome: 'passed'});}
+  check('generated-event-empty', eventCase('first_ask', {}, 1), true);
+  check('generated-count-zero', eventCase('device_paired', {workspaces: 0}, 1), true);
+  check('generated-strict-success', eventCase('device_paired', {workspaces: 7}, '1'), false);
+  check('generated-choice', eventCase('first_mcp_read', {client: 'device'}, 0), false);
+  check('generated-note-reference', eventCase('loi_signed', {note_ref: 'A', verified_original: 'yes'}, 1), true);
+  check('generated-estimate', eventCase('value_reported', {estimate: 'about_a_week'}, 1), true);
+  const r = resources();
+  let clocks = 0;
+  r.readDate = () => {clocks++; return Date;};
+  const c = create_core(r), d = create_core(resources());
+  assert.equal(c.hmac, r.hmac);
+  assert.equal(c.rand32, r.identifierTools.rand32);
+  assert.equal(c.EVENT_PROPS.loi_sent.note_ref, c.NOTE_REF_RE);
+  assert.equal(c.EVENT_PROPS.value_reported.estimate, c.ESTIMATES);
+  assert.equal(c.EVENT_PROPS.first_session_captured.harness, c.EVENT_PROPS.first_session_bound.harness);
+  assert.notEqual(c.EVENT_PROPS, d.EVENT_PROPS);
+  const forbiddenDb = {run() {throw new Error('unexpected write');}};
+  for (const name of ['toString', '__proto__', 'constructor']) assert.throws(() => c.recordEvent(forbiddenDb, name), {message: `Unknown event ${name}`});
+  assert.equal(clocks, 0);
+  assert.throws(() => c.recordEvent(forbiddenDb, 'device_paired', {props: {workspaces: -1}}), {message: "Event device_paired can't carry workspaces"});
+  let conversions = 0;
+  const eventName = {[Symbol.toPrimitive](hint) {assert.equal(hint, 'string'); conversions++; return 'access_approved';}};
+  assert.equal(c.recordEvent({run() {return 1;}}, eventName, {at: 'x'}), true);
+  assert.equal(conversions, 1);
+  let writes = 0, entropy = 0;
+  const purgeResources = resources(); purgeResources.identifierTools.rand32 = () => {entropy++; return 'x';};
+  const purgeCore = create_core(purgeResources);
+  assert.throws(() => purgeCore.purgeWorkspace({all() {return [{id:'a', ws_ids_json:'["w","w","other"]'}, {id:'b', ws_ids_json:'!'}];}, run() {writes++;}}, 'w'), SyntaxError);
+  assert.equal(writes, 0); assert.equal(entropy, 0);
+  const trace = [];
+  assert.equal(purgeCore.purgeWorkspace({all() {return [{id:'a', ws_ids_json:'["w","other","w"]'}];}, run(sql, ...params) {trace.push([sql, ...params]); return 1;}}, 'w'), true);
+  assert.deepEqual(trace[6], ['UPDATE v2_device_requests SET ws_ids_json = ? WHERE id = ?', '["other"]', 'a']);
+  assert.equal(trace.length, 8);
+  let callbackResult, rejectionResult;
+  const events = create_events({secret: () => 's', eventActor: (s,u) => s+u, recordEvent: () => 37, sql: {}, get: () => undefined, tx(callback) {
+    assert.equal(callback.length, 0); callbackResult = callback();
+    return {catch(handler) {assert.equal(handler.length, 0); rejectionResult = handler();}};
+  }});
+  assert.equal(events.actorOf('u'), 'su');
+  assert.equal(events.noteFirstMcpRead('w','u','app'), undefined);
+  assert.equal(callbackResult, 37); assert.equal(rejectionResult, undefined);
+  const mail = resources(); const mailTrace = [];
+  mail.readFetch = () => async () => ({body: {cancel() {return {catch(handler) {assert.equal(handler(), undefined); mailTrace.push('cancel');}};}}, get ok() {mailTrace.push('ok'); return true;}});
+  await create_core(mail).postEmail({url:'test',key:'k',from:'f'}, {to:'t',subject:'s',text:'x'}, 'Message');
+  assert.deepEqual(mailTrace, ['cancel','ok']);
+  return results;
+}
+module.exports = {runTests, smoke};

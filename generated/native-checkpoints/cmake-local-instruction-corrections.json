@@ -1,0 +1,102 @@
+{
+  "schema": "align/local-cmake-instruction-correction@1",
+  "state": "local-functional-acceptance-complete-normal-review-pending",
+  "finding_ids": [
+    "f_2ed16557a584",
+    "f_e011dbf27d3a"
+  ],
+  "corrected_instruction_sha256": "c63900e2c13a6b469a1b2cdbecbff1f3a8972b0791456c426135936d1c007eac",
+  "corrected_paths": [
+    "skills/specification-to-source/cmake-build-system/SKILL.md",
+    ".literate/native-projects/local-server-core-event-security/skills/specification-to-source/cmake-build-system/SKILL.md",
+    ".literate/native-projects/local-storage-event-integrity/skills/specification-to-source/cmake-build-system/SKILL.md",
+    ".literate/native-projects/local-storage-refresh-schema/skills/specification-to-source/cmake-build-system/SKILL.md",
+    ".literate/native-projects/local-trust-text-parser/skills/specification-to-source/cmake-build-system/SKILL.md"
+  ],
+  "historical_qualified_copies_preserved": true,
+  "owned_compiler_controls": "cmake-export-controls.json",
+  "affected_child_source_results": [
+    {
+      "component": "storage-refresh-schema",
+      "passed": true,
+      "old_skill_sha256": "625cbf94cd7e4df9d234933bc62ce8e9bc72a2d90b97e43be0d54d0689978171",
+      "corrected_skill_sha256": "c63900e2c13a6b469a1b2cdbecbff1f3a8972b0791456c426135936d1c007eac",
+      "exact_source_members": 9,
+      "generated_tests": {
+        "failed": 0,
+        "passed": 3,
+        "skipped": 0,
+        "total": 3
+      },
+      "receipt_identity": "sha256:d8d2a9a6e1bf0567e5e98b9376959fde01faef906a3bfc9d1e16c8447ce933a0",
+      "ordinary_matching_real_provider_cache": true,
+      "source_generation": {
+        "sha256:5fe8180f2ecf113d3b68867eaf1ae83688bf1d418757c9fc6ebd2644fca2e47b": "reused"
+      },
+      "no_repair": true,
+      "selected_definitions_qualification_and_committed_source_unchanged": true,
+      "unselected_CMake_not_in_managed_source_graph": true
+    },
+    {
+      "component": "trust-text-parser",
+      "passed": true,
+      "old_skill_sha256": "625cbf94cd7e4df9d234933bc62ce8e9bc72a2d90b97e43be0d54d0689978171",
+      "corrected_skill_sha256": "c63900e2c13a6b469a1b2cdbecbff1f3a8972b0791456c426135936d1c007eac",
+      "exact_source_members": 7,
+      "generated_tests": {
+        "failed": 0,
+        "passed": 6,
+        "skipped": 0,
+        "total": 6
+      },
+      "receipt_identity": "sha256:aecdc9f4a5138e6efaa5601ace8fc3e7f400543bf8ea290af37a28c351a38170",
+      "ordinary_matching_real_provider_cache": true,
+      "source_generation": {
+        "sha256:01412d2df5bb05704f8d729b84cd491f34f8e79bda639283874256074cb1e82d": "reused"
+      },
+      "no_repair": true,
+      "selected_definitions_qualification_and_committed_source_unchanged": true,
+      "unselected_CMake_not_in_managed_source_graph": true
+    }
+  ],
+  "no_qualification_or_generated_source_change": true,
+  "no_framework_change": true,
+  "finding_dispositions_written": 0,
+  "parent_application_acceptance_pending": false,
+  "operator_security_accepted": false,
+  "new_checkpoint_child_results": [
+    {
+      "component": "server-core",
+      "exact_source_members": 11,
+      "source_generation": {
+        "sha256:e2d5e030b3527e410c93f2a02511c2db318e35c534dd7130ce3c4d8e593a1205": "reused"
+      },
+      "generated_tests": {
+        "failed": 0,
+        "passed": 6,
+        "skipped": 0,
+        "total": 6
+      },
+      "receipt_identity": "sha256:e636e663665ee859469f68efa5459ca2a7ac53a8ffd23ab825dfc0f20927f224",
+      "no_repair": true
+    },
+    {
+      "component": "storage-event-integrity",
+      "exact_source_members": 9,
+      "source_generation": {
+        "sha256:467f01d40213c05bf0da9f4c6f3c066819c00058cdd039c9850e7707f0680a4d": "reused"
+      },
+      "generated_tests": {
+        "failed": 0,
+        "passed": 3,
+        "skipped": 0,
+        "total": 3
+      },
+      "receipt_identity": "sha256:c32f111c40ca4de7a865fbefdb87605bf052fb94dd778436a4cc31431912e429",
+      "no_repair": true
+    }
+  ],
+  "all4_modified_child_receipts_current": true,
+  "parent_application_passed": 1917,
+  "current_parent_receipt": "sha256:56c5deb712ca472ea2796b8884418b418f6ec6d8ec5ebb170480b279cddc36e2"
+}

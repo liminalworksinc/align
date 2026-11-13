@@ -50,5 +50,7 @@
     "actual_Node_commands_each_host": 35,
     "qualified_packages": 12,
     "no_repository_writes": true
-  }
+  },
+  "superseded_by": "generated/native-checkpoints/current-event-integrity.json",
+  "historical_inputs_not_attested_by_current_receipt": true
 }

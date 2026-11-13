@@ -190,9 +190,15 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   results, preserves the accepted hashes, rejects owned forgery and mutation
   controls, and passes cached child acceptance without changing generated source.
   Combined application/image acceptance and publication remain pending. The
-  corrected core qualification is waiting for the coding CLI login refresh;
-  the schema-24 child is admitted but has not been integrated. Two current-v2
-  CLI packages are promoted for qualification with 54 and 75 original controls.
+  core correction and schema-24 guard are admitted and wired in the private
+  71-library candidate. Their 42 image controls pass. The full application run
+  passes 1,914 of 1,916 checks; the two failing cap fixtures now obtain fresh
+  sign-ins after long browser coverage, preserving every prior assertion.
+  The two cited CMake instruction findings have local corrections with compiler
+  controls and exact cached-source acceptance. CLI operations are admitted;
+  identity qualification 4 was rejected for omitting the raw HTTP options-body
+  wrapper. Revised authored intent preserves all 82 original controls. No
+  failed identity implementation is admitted.
 - **Next action:** Reconcile native providers with merged main
   `4d95f5befa36e98012e8ca69933124a0508a4aaf`, preserve the earlier goal-cap
   correction, complete current contained acceptance, then application/image
@@ -1347,3 +1353,27 @@ under its API usage limit; the approved one-command opt-out was used.
   - [x] The unfixed handler fails five of the 18 frozen cases, including a one millisecond clock advance. The fixed handler passes all 18 on macOS and Linux; seven broken-fix controls are detected on both targets.
   - [x] Full type, lint, application and immutable image checks pass without relaxed thresholds, timeouts, retry budgets, assertions or security policy.
   - [x] Record the outcome in the changelog. Actual integration and current receipt acceptance pass. Any new commit or publication requires a specific operator go.
+
+## Private core and event-integrity integration candidate
+
+ADOPT-002 continues in a private candidate built from the accepted checkpoint. Normal child revision selects the admitted core replacement and normal child addition registers the event-integrity schema. The consumer will compose history, refresh and event integrity, export schema version 24, and check core and event bridges against the admitted declarations. Focused actual-caller checks precede the combined application and image acceptance. Findings remain open for operator review.
+
+The core/schema candidate now passes all six actual Node/SQLite caller controls and the typed application bridges. The operator closure also includes the new schema child. The exact retained drawer, propose surface and v2 checks from main `c22bdab255fbdd324f0fed03a90fa12dbfba2ec6` are included. All documentation and findings navigation will finish before one combined application/image acceptance; no boundary closure or publication is claimed yet.
+
+The retained v2 suite is reconciled by a clean three-way merge of the prior migration checkpoint, main `4d95f5b` and main `c22bdab`. This preserves the actual core import and earlier migration fixtures while adding the new upstream drawer checks. Its exact schema expectation advances from 23 to 24 for the additive event-integrity transition. No prior control is removed.
+
+## Current cap-fixture correction
+
+The private 71-library application run passes 1,914 of 1,916 checks. Two hosted
+cap checks reuse the operator sign-in created before the long browser matrix.
+An isolated production-image HTTP/SQLite reproduction confirms that a valid
+20-minute-old sign-in refuses deletion and device approval with
+`403 reauth_required`, without deleting rows or approving the pending device.
+A normal new email-code sign-in permits those same actions. The focused local
+probe does not attest hosted caps or captcha. The cap fixtures now obtain fresh
+operator and member sign-ins through the existing hosted email/captcha routes
+after browser coverage. Every previous cap assertion and stale-session refusal
+control remains exact, with one additional successful-sign-in assertion. No
+application guard, timeout or generated source changes. The failed candidate and
+all its inputs remain preserved. Complete one new full application acceptance
+run, current receipt verification and normal publication before closure.

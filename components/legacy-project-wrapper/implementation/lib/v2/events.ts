@@ -1,5 +1,5 @@
 // Bind the qualified product-event wrapper to the app's actual providers.
-import { create_events } from "../native/.bindings/server_core.js";
+import { create_events } from "../native/server_core/create_events.js";
 import { secret } from "../secret";
 import { eventActor, recordEvent, type EventName, type EventProps } from "./core.mts";
 import { get, sql, tx } from "./db";
@@ -10,7 +10,7 @@ interface EventRuntime {
     noteFirstMcpRead: (wsId: string, userId: string, client: "app" | "device") => void;
 }
 
-const events = create_events({ secret, eventActor, recordEvent, sql, get, tx }) as unknown as EventRuntime;
+const events = create_events({ secret, eventActor, recordEvent, sql, get, tx }) satisfies EventRuntime;
 
 export const actorOf: EventRuntime["actorOf"] = events.actorOf;
 export const event: EventRuntime["event"] = events.event;

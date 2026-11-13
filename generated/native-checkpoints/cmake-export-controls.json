@@ -1,0 +1,56 @@
+{
+  "schema": "align/inherited-cmake-export-instruction-controls@2",
+  "passed": true,
+  "historical_skill_sha256": "625cbf94cd7e4df9d234933bc62ce8e9bc72a2d90b97e43be0d54d0689978171",
+  "cmake_version": "cmake version 4.3.2",
+  "rows": [
+    {
+      "generator": "Unix Makefiles",
+      "instruction": "historical",
+      "initial_export_valid": true,
+      "missing_export_recovered": false,
+      "new_export_path_created": true,
+      "exact_requested_filename_with_no_debug_postfix": false,
+      "release_configuration_exact_path": false,
+      "only_owned_temporary_project": true
+    },
+    {
+      "generator": "Unix Makefiles",
+      "instruction": "proposed",
+      "initial_export_valid": true,
+      "missing_export_recovered": true,
+      "new_export_path_created": true,
+      "exact_requested_filename_with_no_debug_postfix": true,
+      "release_configuration_exact_path": true,
+      "only_owned_temporary_project": true
+    },
+    {
+      "generator": "Ninja Multi-Config",
+      "instruction": "historical",
+      "initial_export_valid": true,
+      "missing_export_recovered": false,
+      "new_export_path_created": true,
+      "exact_requested_filename_with_no_debug_postfix": false,
+      "release_configuration_exact_path": false,
+      "only_owned_temporary_project": true
+    },
+    {
+      "generator": "Ninja Multi-Config",
+      "instruction": "proposed",
+      "initial_export_valid": true,
+      "missing_export_recovered": true,
+      "new_export_path_created": true,
+      "exact_requested_filename_with_no_debug_postfix": true,
+      "release_configuration_exact_path": true,
+      "only_owned_temporary_project": true
+    }
+  ],
+  "proposed_instruction_file": "/Users/shayaunnejad/liminal/align-litai-native/_build/native-cmake-export-controls-v2/proposed-target-properties.cmake",
+  "Align_or_framework_source_changed": false,
+  "current_frozen_candidate_changed": false,
+  "native_selected_JavaScript_source_changed": false,
+  "qualified_children_or_receipts_not_modified": true,
+  "no_new_application_language": true,
+  "preserved_prior_attempt": "native-cmake-export-controls-v1.py",
+  "prior_fixture_expectation_corrected": "Reconfiguration can itself relink the historical executable after a changed POST_BUILD command. Record that observed success honestly. The actual removed-export repeat remains broken and is the failure tested here."
+}

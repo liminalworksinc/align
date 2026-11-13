@@ -1,6 +1,6 @@
 {
   "schema": "align/native-finding-remediation@1",
-  "state": "technical-corrections-and-combined-functional-acceptance-complete-normal-review-pending",
+  "state": "technical-corrections-and-current-functional-acceptance-complete-normal-review-pending",
   "finding_ids": [
     "f_c741821f2f4a",
     "f_b36c3d29ef7c",
@@ -32,8 +32,8 @@
   "independent_review_claimed": false,
   "operator_security_accepted": false,
   "native_source_projection": {
-    "libraries": 70,
-    "package_files": 274,
+    "libraries": 71,
+    "package_files": 276,
     "manifest": "generated/native-review-source/manifest.json",
     "check": "node tools/native-rewrite/review-native-sources.mjs"
   },
@@ -71,14 +71,14 @@
     "all_original_ranges_nonempty": true
   },
   "authentication_confirmation": "docs/architecture/authentication-transfer-confirmation.json",
-  "current_combined_checkpoint": "Current-main schema and trust corrections, B17, B19 and B28: combined application/image acceptance complete; normal review, publication and exact-head CI remain required.",
+  "current_combined_checkpoint": "Current event integrity and evaluator containment: functional acceptance complete; normal review, publication and exact-head CI remain required. Four current-v2 service revisions remain for B19; B18 and B22 remain incomplete.",
   "framework_modified": false,
   "deployed": false,
-  "combined_application_passed": 1909,
-  "combined_image_passed": 36,
-  "combined_source_identity": "sha256:b6dba141e395eba95e10c097ab20178d6477931994f81d4a971a02565f889a70",
-  "current_parent_receipt": "sha256:17fe53765e5953101ff742d8753ee0ea19c4ace529ae1f7cc916cc9b3573061a",
-  "current_open_ledger_entries": 26,
+  "combined_application_passed": 1917,
+  "combined_image_passed": 42,
+  "combined_source_identity": "sha256:998aa36d58822d4f9ff019c8b3e9ad8f70bbc2d0b631930e049e129aebd3b00b",
+  "current_parent_receipt": "sha256:56c5deb712ca472ea2796b8884418b418f6ec6d8ec5ebb170480b279cddc36e2",
+  "current_open_ledger_entries": 35,
   "current_finding_ids": [
     "f_c741821f2f4a",
     "f_b36c3d29ef7c",
@@ -105,6 +105,17 @@
     "f_5c5fc40549da",
     "f_3ce9f2db2566",
     "f_a9b7b0880de4",
-    "f_d0fca6e9a3f5"
-  ]
+    "f_d0fca6e9a3f5",
+    "f_6e478fc0d9b7",
+    "f_efc456f72a8e",
+    "f_7f03bca85eb6",
+    "f_1b582b71e2ae",
+    "f_562447a5a6fb",
+    "f_b402a2b7e0c2",
+    "f_2ed16557a584",
+    "f_e011dbf27d3a",
+    "f_e8e57827838b"
+  ],
+  "current_checkpoint": "generated/native-checkpoints/current-event-integrity.json",
+  "combined_additional_HTTP_SQLite_passed": 18
 }

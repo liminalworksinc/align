@@ -139,3 +139,19 @@ source references, historical review files and side-by-side reading commands.
 Zero overrides are recorded. No finding is accepted or dismissed. The retained
 classification and functional acceptance do not establish operator security
 acceptance.
+
+## Event-integrity integration checkpoint
+
+The current private candidate registers 71 libraries and exposes 276 exact runtime package files. The admitted core replacement and additive schema-24 guard are connected to typed application callers and the cold operator closure. Six actual Node/SQLite controls pass, and the application suite includes them. Current-main retained UI and tests from `c22bdab255fbdd324f0fed03a90fa12dbfba2ec6` are included. Parser isolation and all 35 undecided findings remain visible in the findings guide. Full application and image acceptance, normal review, publication and exact-head CI are pending. Historical 26-of-31 closures are not advanced by this preparation; current-main devices, alignments, goals and requests still need native revision, and B18/B22 integration remains incomplete.
+
+## Current fixture and local instruction acceptance
+
+The failed 71-library application candidate and all inputs remain preserved.
+The cap fixtures now perform real fresh sign-ins after browser coverage; all
+prior cap assertions and stale-session guard controls remain exact. The two
+cited CMake instruction findings receive tested local exact-output rules, with
+unchanged qualified JavaScript source. These are authored instruction and test
+fixture corrections. Complete a new full application run and current receipt
+checks before publication. All 35 findings remain undecided, historical closure
+is 26 of 31, and no public tester, independent review or operator security
+acceptance is claimed.
