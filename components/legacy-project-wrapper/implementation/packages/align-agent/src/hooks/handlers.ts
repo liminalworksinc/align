@@ -50,10 +50,11 @@ import { layout, localId, spoolWrite } from "../shared/layout.ts";
 import { isShareStateNotice, noticeKind, resumedButHeld } from "../shared/notices.ts";
 import { matchRule, readRules, realDir, removeRule, setRule } from "../shared/rules.ts";
 import { queueSteering, steeringLine, unsharedNote } from "../shared/steering.ts";
-import type { DriftFile, FeedFile, Goal, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
+import type { DriftFile, FeedFile, Goal, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, Limit, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
 import { CLAIM_MS, collisions, commitSubject, crossOverlap, display, editedPaths, liveGoalId, podReport, rawActs, readPaths, record, shellWrites, siblingChanges, siblingNews, activityHot, type Act, type StartingShare } from "./siblings.ts";
 import { changedSince, COMMIT, commitMade, expectations, explainer, reflogMark, settle, shows, type SettleBy } from "./evidence.ts";
 import { markPrivate } from "./private.ts";
+import { answerParts, askAboutDrift } from "./questions.ts";
 
 export interface HookInput {
   session_id?: string;
@@ -198,6 +199,13 @@ function takeDrift(home: string, lid: string, hot: HotState | null, inj: Injecte
   delete inj.drift_shown;
   const quote = (i: DriftFile["items"][number]) => `${LIMIT_WORDS[i.type] ?? "Must"} "${clean(i.text, 160)}"`;
   const what = named.length === 1 ? `a limit on goal "${clean(file.goal_title, 80)}": ${quote(named[0])}` : `${named.length} limits on goal "${clean(file.goal_title, 80)}": ${named.map(quote).join("; ")}`;
+  // A question to the goal's owner went out for this drift (LIM-2505): said as what it is, never "nothing was sent".
+  const asked = readJson<{ goal_id?: string; paths?: boolean }>(layout.asked(home, lid));
+  if (asked?.goal_id === file.goal_id) {
+    // File paths go only with work signals on (founder ruling 2026-11-11).
+    const sent = asked.paths ? "the limit and the files this session edited in this stretch with their times" : "the limit and the time, no file paths";
+    return `${endSentence(`Align: the agent's last reply may conflict with ${what}`)} This is a word check, so Align asked the goal's owner whether the agent should go on; it sent ${sent}, nothing the agent wrote, and their answer reaches the agent at your next prompt after they answer. \`align config drift off\` turns this off.`;
+  }
   return `${endSentence(`Align: the agent's last reply may conflict with ${what}`)} This is a word check on this machine only; nothing was sent or added to the agent's context. \`align config drift off\` turns it off.`;
 }
 
@@ -951,6 +959,10 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   }
   const req = requestParts(hot, inj, shareState === "shared" && goal ? goal.id : null);
   if (req.context.length) context = [context, ...req.context].filter(Boolean).join("\n");
+  // The goal owner's answers to this session's drift questions (LIM-2505): told once, to the model and the user.
+  const answered = shareState === "shared" ? answerParts(home, lid, hot, inj) : { context: [], notices: [], applied: [] };
+  if (answered.context.length) context = [context, ...answered.context].filter(Boolean).join("\n");
+  if (answered.applied.length) reportApplied(home, lid, inj, answered.applied);
   const released = releaseLines(hot, inj);
   if (released.length) context = [context, ...released].filter(Boolean).join("\n");
   const lifted = liftedHolds(home, lid, inj, input.cwd || hot.cwd);
@@ -958,7 +970,7 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   const held = blockingHolds(home, lid, input.cwd || hot.cwd);
   const resumed = resumeLine(hot, inj, held);
   if (resumed) context = [context, resumed].filter(Boolean).join("\n");
-  const notices = [takeNotices(hot, inj, () => held, () => stoppedNow(home, lid)), ...req.notices, ...lifted.notices, takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
+  const notices = [takeNotices(hot, inj, () => held, () => stoppedNow(home, lid)), ...req.notices, ...answered.notices, ...lifted.notices, takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
   writeInjected(home, lid, inj);
   if (!context && !notices) return null;
   const out: Record<string, unknown> = {};
@@ -996,12 +1008,14 @@ export function stop(home: string, harness: Harness, input: HookInput): void {
   const known = { titles: goalTitles(home, hot), texts: limits.map((l) => l.text) };
   const items = keep.map((i) => ({ ...i, digests: [...(i.digests || [])] }));
   let added = false;
+  const crossed: Limit[] = [];
   for (const l of open) {
     // Each crossing sentence once per session: one already told (or waiting) is not told again.
     const fresh = crossings(l, reply, known)
       .map((sen) => crossingDigest(l.id, sen))
       .filter((d) => !seen.has(`${l.id}:${d}`));
     if (!fresh.length) continue;
+    crossed.push(l);
     let item = items.find((i) => i.limit_id === l.id);
     if (!item) items.push((item = { limit_id: l.id, type: l.type, text: l.text, digests: [] }));
     for (const d of fresh) if (!item.digests.includes(d)) (item.digests.push(d), (added = true));
@@ -1009,6 +1023,8 @@ export function stop(home: string, harness: Harness, input: HookInput): void {
   if (!added) return;
   const file: DriftFile = { v: 1, goal_id: hot.goal.id, goal_title: hot.goal.title, items, at: new Date().toISOString() };
   writeJsonAtomic(layout.drift(home, lid), file);
+  // Ask the goal's owner whether to go on (LIM-2505): once per stretch of drift, evidence only (hooks/questions.ts).
+  askAboutDrift(home, lid, hot, inj, crossed, input.cwd || hot.cwd);
 }
 
 /** Every goal title and measure this session could name (Align's own words, so a reply naming one is no crossing):

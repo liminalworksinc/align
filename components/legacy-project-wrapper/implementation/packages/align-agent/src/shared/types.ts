@@ -105,6 +105,11 @@ export interface HotState {
   /** The release directives still in force on this session (none of them withdrawn by a later hold on its goal), so
    *  a release notice is told only while its release holds (E2E-AGENT cycle 14 C14-2). Absent from older agents. */
   releases_now?: string[];
+  /** Whether this session shares work signals (`align share --signals`, or its folder rule's): a drift question
+   *  names the files it edited only then (LIM-2505, founder ruling 2026-11-11). Absent: off. */
+  signals?: boolean;
+  /** Answers to this session's drift questions (LIM-2505), newest last: the hook tells each to the agent once. */
+  answers?: HotAnswer[];
   /** The build that wrote this file (its writer generation and build id): one an older build wrote is re-rendered by
    *  the newer one's next command or pass (E2E-AGENT cycle 14). Absent from agents before that. */
   by?: { gen: number; build: string };
@@ -112,6 +117,23 @@ export interface HotState {
    *  now. `stopped` when its person stopped that share or deleted its history: a folder rule never shares it again. */
   prior_share?: { stopped: boolean } | null;
   updated_at: string;
+}
+
+/** `answer` of a `kind: "answer"` directive (LIM-2505): the goal owner's answer to this session's drift question. */
+export interface WireAnswer {
+  question_id: string;
+  limit: { type: string; text: string } | null;
+  /** The goal the question was about (servers from the LIM-2505 audit on; absent before: read as the bound goal). */
+  goal?: { id: string; title: string } | null;
+  answer: "continue" | "steer" | "switch";
+  text: string | null;
+  target_goal: { id: string; title: string } | null;
+  /** Who answered, by name. */
+  by: string;
+  at: string;
+}
+export interface HotAnswer extends WireAnswer {
+  directive_id: string;
 }
 
 /** The request types someone with authority over a goal may send to its sessions (REQ-002). */
@@ -218,6 +240,10 @@ export interface InjectedState {
    * auto-accepted a safe request.
    */
   requests_seen?: Record<string, { shown?: boolean; told?: string; answer?: "accepted" | "declined"; auto?: boolean }>;
+  /** Answer directives to drift questions already put into context (LIM-2505). */
+  answers_told?: string[];
+  /** When the agent last heard an answer: the next stretch of drift, and the files its question names, start here. */
+  question_stretch_from?: string;
   /** When this session was shown its one steering line, if ever. */
   steering_at?: string;
   /**
@@ -422,5 +448,17 @@ export type SpoolRecord =
       /** `share` from a folder rule at session start: the share's first epoch, chosen by the hook that gave the model the
        *  goal's envelope, so the share the model was told about is known by its id (cycle 7). */
       epoch_id?: string;
+      ts: string;
+    }
+  | {
+      /** The Stop hook asking the bound goal's owner about drift (LIM-2505): evidence only, never the agent's words. */
+      type: "question";
+      local_id: string;
+      client_id: string;
+      goal_id: string;
+      limit_id: string;
+      files: { path: string; at: string }[];
+      stretch_from: string;
+      stretch_to: string;
       ts: string;
     };

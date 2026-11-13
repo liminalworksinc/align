@@ -12,7 +12,9 @@
 //            change request adding a limit, approved but not launched -> nothing reaches the agent (LAUNCH-001), then
 //            launched -> the goal_version directive -> one limit delta; a second accepted ask ->
 //            one asks delta; the asks feed's ETag; `align asks --json`; `align team`; the local drift notice (a user
-//            systemMessage, nothing in model context, nothing uploaded: checked in the server's database files); and
+//            systemMessage, nothing in model context, no reply text uploaded: checked in the server's database files);
+//            the agent question it asks (LIM-2505: one per stretch, evidence only; a viewer can't answer, another
+//            workspace can't see it; the owner's steer reaches the agent's next turn, receipted); and
 //            `align share --dir --past` (an already-metered past session shared from its start; a session the server
 //            already holds from a later start is not backdated)
 //   requests (REQ-001/002) on a second goal and folder: a checkpoint from an approver (notice with the role, Align's
@@ -446,7 +448,8 @@ try {
     team.stdout.split("Asked of your teams:")[1] ?? team.stdout,
   );
 
-  // ======== the local drift notice: a user systemMessage, nothing in model context, nothing uploaded ========
+  // ======== the local drift notice: a user systemMessage, nothing in model context, no reply text uploaded; the goal's
+  // owner is asked one question with evidence (LIM-2505) ========
   const DRIFT_CANARY = `DRIFT-CANARY-${randomBytes(4).toString("hex")}`;
   const REPLY = `Done. The migration cutover will run during month-end close on the 31st. Ticket ${DRIFT_CANARY} has the details.`;
   const t2 = Date.now();
@@ -458,9 +461,9 @@ try {
   const drift = hook("UserPromptSubmit", { session_id: SID, prompt_id: "p9", prompt: "ok", cwd: repo });
   const driftAgain = hook("UserPromptSubmit", { session_id: SID, prompt_id: "p10", prompt: "ok", cwd: repo });
   check(
-    "drift: Stop adds 0 bytes; the next prompt shows the user a systemMessage naming the crossed limit, with no model context; once",
+    "drift: Stop adds 0 bytes; the next prompt shows the user a systemMessage naming the crossed limit and saying the goal's owner was asked (what was sent, never the reply), with no model context; once",
     stop.code === 0 && stop.stdout === "" &&
-      drift.system === `Align: the agent's last reply may conflict with a limit on goal "${GOAL_TITLE}": Must not "${LIM1}" This is a word check on this machine only; nothing was sent or added to the agent's context. \`align config drift off\` turns it off.` &&
+      drift.system === `Align: the agent's last reply may conflict with a limit on goal "${GOAL_TITLE}": Must not "${LIM1}" This is a word check, so Align asked the goal's owner whether the agent should go on; it sent the limit and the time, no file paths, nothing the agent wrote, and their answer reaches the agent at your next prompt after they answer. \`align config drift off\` turns this off.` &&
       drift.json?.hookSpecificOutput === undefined && driftAgain.stdout === "",
     `stop=${stop.stdout} drift=${drift.stdout} again=${driftAgain.stdout}`,
   );
@@ -471,6 +474,226 @@ try {
     usage2 === 2 && dbFilesLack(dbFile, DRIFT_CANARY) && dbFilesLack(dbFile, "on the 31st") && dbFilesLack(dbFile, "synthetic prompt"),
     `${usage2}`,
   );
+
+  // ======== agent questions (LIM-2505): one question per stretch of drift, the goal's owner answers on the web, the
+  // answer reaches the agent's next turn; a viewer can't answer, another workspace can't see it ========
+  {
+    const V = await signUp("Vera Viewer", "vera@live.example.test");
+    const X = await signUp("Xavi Outsider", "xavi@live.example.test");
+    const vt = (await ws(O, "POST", "/invites", { email: V.email, role: "viewer" })).json?.token;
+    await call("POST", `/api/v2/invites/${vt}/accept`, { cookie: V.cookie, body: {} });
+    const XW = (await call("POST", "/api/v2/workspaces", { cookie: X.cookie, body: { name: "Elsewhere Inc" } })).json?.id;
+    const qRows = () => sdb((d) => d.prepare("SELECT * FROM v2_agent_questions WHERE ws_id = ? AND session_key = ? ORDER BY created_at").all(W, SKEY));
+    const asked = qRows();
+    const q1 = asked[0];
+    const listM = await ws(M, "GET", "/questions");
+    const mine = listM.json?.questions?.find((q) => q.id === q1?.id);
+    check(
+      "questions: the drift asked the goal's owner one question with evidence: the limit in the goal's own words, Align's why, the stretch; no reply text in it",
+      asked.length === 1 && q1.goal_id === G.id && q1.limit_id === G.limits[0].id && q1.limit_text === LIM1 && q1.state === "open" && !JSON.stringify(q1).includes(DRIFT_CANARY) && !JSON.stringify(q1).includes("on the 31st") &&
+        listM.status === 200 && mine?.evidence?.limit?.text === LIM1 && /rules out/.test(mine?.evidence?.why ?? "") && Array.isArray(mine?.evidence?.files) && mine?.can?.answer === true && mine?.goal?.owner?.id === M.id,
+      `${JSON.stringify(asked).slice(0, 600)} ${listM.text.slice(0, 600)}`,
+    );
+    // The same stretch drifting again: no second question while one is open (never a stream).
+    const t3 = Date.now();
+    const REPLY2 = "Update: I will run the migration cutover during month-end close tonight.";
+    appendLines(transcript, [userLine(SID, "p11", new Date(t3).toISOString(), repo), assistantLine(SID, "req_live_q2", new Date(t3 + 500).toISOString(), repo, REPLY2)]);
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p11", prompt: "go on", cwd: repo });
+    hook("Stop", { session_id: SID, transcript_path: transcript, cwd: repo, last_assistant_message: REPLY2, stop_hook_active: false });
+    sync();
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p12", prompt: "ok", cwd: repo });
+    check("questions: a second drift in the same stretch asks nothing more (one open question per session)", qRows().length === 1, JSON.stringify(qRows().map((q) => q.id)));
+    // Access: a viewer sees it and can't answer; a member who is not the goal's owner can't; another workspace can't see it.
+    const listV = await ws(V, "GET", "/questions");
+    const vAns = await ws(V, "POST", `/questions/${q1?.id}/answer`, { answer: "continue" });
+    const lAns = await ws(L, "POST", `/questions/${q1?.id}/answer`, { answer: "continue" });
+    const xList = await call("GET", `/api/v2/workspaces/${W}/questions`, { cookie: X.cookie });
+    const xOne = await call("GET", `/api/v2/workspaces/${W}/questions/${q1?.id}`, { cookie: X.cookie });
+    const xAns = await call("POST", `/api/v2/workspaces/${W}/questions/${q1?.id}/answer`, { cookie: X.cookie, body: { answer: "continue" } });
+    const xOwn = await call("GET", `/api/v2/workspaces/${XW}/questions/${q1?.id}`, { cookie: X.cookie });
+    check(
+      "questions: a viewer reads the question but answering is 403 read_only; a member who isn't the goal's owner gets 403 not_goal_owner; another workspace's person gets 404 for the list, the question and the answer, and 404 for its id in their own workspace",
+      listV.status === 200 && listV.json?.questions?.some((q) => q.id === q1?.id && q.can.answer === false) && vAns.status === 403 && vAns.json?.error === "read_only" &&
+        lAns.status === 403 && lAns.json?.error === "not_goal_owner" && xList.status === 404 && xOne.status === 404 && xAns.status === 404 && xOwn.status === 404 && qRows()[0].state === "open",
+      `${listV.status} ${vAns.status} ${vAns.text.slice(0, 120)} ${lAns.status} ${lAns.text.slice(0, 120)} ${xList.status} ${xOne.status} ${xAns.status} ${xOwn.status}`,
+    );
+    // The owner steers; the answer becomes an `answer` directive for that session only.
+    const STEER = "Hold the cutover until the 2nd; draft the on-call runbook first.";
+    const blank = await ws(M, "POST", `/questions/${q1?.id}/answer`, { answer: "steer", text: "  " });
+    const ans = await ws(M, "POST", `/questions/${q1?.id}/answer`, { answer: "steer", text: STEER });
+    const again = await ws(M, "POST", `/questions/${q1?.id}/answer`, { answer: "continue" });
+    const dir = sdb((d) => d.prepare("SELECT d.id, d.kind FROM v2_directives d JOIN v2_directive_targets t ON t.directive_id = d.id WHERE d.ws_id = ? AND t.session_key = ? AND d.kind = 'answer'").all(W, SKEY));
+    check(
+      "questions: the owner's steer is recorded once (a blank steer is 400, a second answer 409 already_answered) and written as one `answer` directive to the asking session",
+      blank.status === 400 && ans.status === 200 && ans.json?.delivered === true && ans.json?.question?.answer?.kind === "steer" && ans.json?.question?.answer?.text === STEER &&
+        again.status === 409 && again.json?.error === "already_answered" && dir.length === 1,
+      `${blank.status} ${ans.status} ${ans.text.slice(0, 300)} ${again.status} ${JSON.stringify(dir)}`,
+    );
+    // Founder ruling 2026-11-11: the steer note only to the owner who answered and the person whose agent asked.
+    const noteFor = async (u) => (await ws(u, "GET", `/questions/${q1?.id}`)).json?.question?.answer;
+    const [nM, nV, nL, nO] = [await noteFor(M), await noteFor(V), await noteFor(L), await noteFor(O)];
+    check(
+      "questions (ruling): the steer note is shown to the owner who answered (here also the asker), never to a viewer, another member or a workspace owner who isn't the goal's owner (text null, text_hidden)",
+      nM?.text === STEER && [nV, nL, nO].every((a) => a?.kind === "steer" && a.text === null && a.text_hidden === true),
+      JSON.stringify([nM, nV, nL, nO]).slice(0, 600),
+    );
+    sync();
+    const heard = hook("UserPromptSubmit", { session_id: SID, prompt_id: "p13", prompt: "what now?", cwd: repo });
+    const heardAgain = hook("UserPromptSubmit", { session_id: SID, prompt_id: "p14", prompt: "ok", cwd: repo });
+    sync();
+    const receipts = sdb((d) => d.prepare("SELECT state FROM v2_receipts WHERE directive_id = ? AND session_key = ? ORDER BY state").all(dir[0]?.id, SKEY).map((r) => r.state));
+    check(
+      "questions: the agent's next turn has the answer in its context (who answered, the limit, the steer quoted) and the user is told; once; delivery receipted received and applied",
+      !!heard.context && heard.context.includes(`Milo, the owner of goal "${GOAL_TITLE}", answered: steer.`) && heard.context.includes(`Their note, quoted: "${STEER}"`) && heard.context.includes(`Must not "${LIM1}"`) &&
+        (heard.system ?? "").includes(`answered the agent's question about goal "${GOAL_TITLE}": steer: "${STEER}"`) && !(heardAgain.context ?? "").includes(STEER) &&
+        receipts.includes("received") && receipts.includes("applied"),
+      `heard=${heard.stdout.slice(0, 900)} again=${heardAgain.stdout.slice(0, 300)} receipts=${receipts}`,
+    );
+    // A new stretch: drift after the answer asks again.
+    const t4 = Date.now();
+    const REPLY3 = "Change of plan: we will run the migration cutover during month-end close after all.";
+    appendLines(transcript, [userLine(SID, "p15", new Date(t4).toISOString(), repo), assistantLine(SID, "req_live_q3", new Date(t4 + 500).toISOString(), repo, REPLY3)]);
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p15", prompt: "continue", cwd: repo });
+    hook("Stop", { session_id: SID, transcript_path: transcript, cwd: repo, last_assistant_message: REPLY3, stop_hook_active: false });
+    sync();
+    const after = qRows();
+    check("questions: drift in the stretch after the answer asks a new question", after.length === 2 && after[1].state === "open" && after[0].state === "answered", JSON.stringify(after.map((q) => [q.id, q.state])));
+    // The owner says continue, so the session is not left with an open question for the checks below.
+    await ws(M, "POST", `/questions/${after[1]?.id}/answer`, { answer: "continue" });
+    sync();
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p16", prompt: "ok", cwd: repo });
+
+    // ---- the audit of 91c07d7e (LIM-2505): M2 the server's own path rule, M3 a goal switch, M1 pseudonymisation ----
+    const token = () => JSON.parse(readFileSync(path.join(alignHome, "credentials.json"), "utf8")).access_token;
+    const now = new Date().toISOString();
+    const BAD = ["C:/Users/x/secret.txt", "..\\..\\etc\\passwd", "\\\\server\\share\\x", "~/.ssh/id_rsa", "src/\u202Etxt.exe", "a\u200Bb", "./a", "a//b", "/etc/passwd", "src/../../x"];
+    const before = qRows().length;
+    const refused = [];
+    for (const [i, p] of BAD.entries())
+      refused.push(
+        (await call("POST", `/api/v2/workspaces/${W}/sessions/${SKEY}/questions`, { bearer: token(), body: { client_id: `q_badpath_${i}_0000`, goal_id: G.id, limit_id: G.limits[0].id, files: [{ path: p, at: now }], stretch_from: now, stretch_to: now } })).status,
+      );
+    // D5 on the server: a safe file name is kept only when the device says work signals are on AND the server already
+    // holds that name in this session's work signals; this session shares none.
+    const forged = [];
+    for (const [i, signals] of [false, true].entries())
+      forged.push(
+        await call("POST", `/api/v2/workspaces/${W}/sessions/${SKEY}/questions`, { bearer: token(), body: { client_id: `q_forged_${i}_0000`, goal_id: G.id, limit_id: G.limits[1].id, files: [{ path: "src/forged.sql", at: now }], stretch_from: now, stretch_to: now, signals } }),
+      );
+    check(
+      "questions (D5 on the server): a question naming a file this session never shared as a work signal stores no file name, whatever the device says about signals",
+      forged.every((r) => r.status === 201 || r.status === 200) && dbFilesLack(dbFile, "src/forged.sql") && !forged.some((r) => JSON.stringify(r.json).includes("forged.sql")),
+      forged.map((r) => `${r.status} ${r.text.slice(0, 200)}`).join(" | "),
+    );
+    // Close what the forged asks opened, so the checks below start from no open question on this session.
+    for (const q of qRows().filter((x) => x.state === "open")) await ws(M, "POST", `/questions/${q.id}/answer`, { answer: "continue" });
+    sync();
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p16b", prompt: "ok", cwd: repo });
+    check(
+      "questions (audit M2): the server refuses a path a modified agent could send: a drive letter, backslashes, ~, a bidi override, a zero-width space, ./, an empty segment, an absolute path, .. (400 each, nothing stored)",
+      refused.every((st) => st === 400) && qRows().length === before,
+      JSON.stringify(refused),
+    );
+    // M3: a question left open on goal G, then the session moves to G2 and drifts there: G2's owner is asked.
+    const G2LIM = "The nightly export must never run during peak hours.";
+    const G2 = (await ws(M, "POST", "/goals", { title: "Ship the nightly ledger export", team_id: PLATFORM, visibility: "workspace", measures: [{ text: "Export lands by 06:00" }], limits: [{ type: "must_not", text: G2LIM, source: { kind: "manual", title: "", date: "2026-11-11" } }] })).json;
+    const turn = (id, reply) => {
+      const at = Date.now();
+      appendLines(transcript, [userLine(SID, id, new Date(at).toISOString(), repo), assistantLine(SID, `req_${id}`, new Date(at + 500).toISOString(), repo, reply)]);
+      hook("UserPromptSubmit", { session_id: SID, prompt_id: id, prompt: "go on", cwd: repo });
+      hook("Stop", { session_id: SID, transcript_path: transcript, cwd: repo, last_assistant_message: reply, stop_hook_active: false });
+      sync();
+    };
+    // G's other limit (the first has had its 3 notices in this session): out of scope.
+    turn("p17", "I started rewriting the billing service to use the new queue.");
+    const openOnG = qRows().find((q) => q.state === "open" && q.goal_id === G.id);
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p18", prompt: `::align bind ${G2?.id}`, cwd: repo });
+    sync();
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p19", prompt: "ok", cwd: repo });
+    sync();
+    turn("p20", "Done. The nightly export will run during peak hours from now on.");
+    const onG2 = qRows().find((q) => q.goal_id === G2?.id);
+    const stale = await ws(M, "POST", `/questions/${openOnG?.id}/answer`, { answer: "continue" });
+    check(
+      "questions (audit M3): after the session moves from goal G (a question still open there) to G2 and drifts, G2's owner is asked; G's question is superseded and can no longer be answered (409 question_superseded)",
+      !!openOnG && !!onG2 && onG2.state === "open" && qRows().find((q) => q.id === openOnG.id)?.state === "superseded" && stale.status === 409 && stale.json?.error === "question_superseded",
+      `${JSON.stringify(qRows().map((q) => [q.goal_id, q.state]))} ${stale.status} ${stale.text.slice(0, 160)}`,
+    );
+    await ws(M, "POST", `/questions/${onG2?.id}/answer`, { answer: "continue" });
+    sync();
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p21", prompt: `::align bind ${G.id}`, cwd: repo });
+    sync();
+    hook("UserPromptSubmit", { session_id: SID, prompt_id: "p22", prompt: "ok", cwd: repo });
+    sync();
+    // M1: pseudonymising the person who asked and answered (on a copy of the server's database) leaves no id of theirs
+    // in a question or an answer directive.
+    sdb((d) => d.exec("PRAGMA wal_checkpoint(TRUNCATE)"));
+    const copy = path.join(tmpRoot, "pseudo.sqlite");
+    writeFileSync(copy, readFileSync(dbFile));
+    const retention = await import(pathToFileURL(path.join(ROOT, "lib/v2/retention-core.mts")).href);
+    const cd = new DatabaseSync(copy);
+    const sql = { run: (q, ...p) => Number(cd.prepare(q).run(...p).changes), get: (q, ...p) => cd.prepare(q).get(...p), all: (q, ...p) => cd.prepare(q).all(...p) };
+    const named = retention.workspacesNaming(sql, M.id).includes(W);
+    const pid = retention.pseudonymise(sql, W, M.id, new Date().toISOString(), "test-secret");
+    const left = cd.prepare("SELECT COUNT(*) AS n FROM v2_agent_questions WHERE ws_id = ? AND (asked_by = ? OR answered_by = ?)").get(W, M.id, M.id).n;
+    const leftDir = cd.prepare("SELECT COUNT(*) AS n FROM v2_directives WHERE ws_id = ? AND answer_json IS NOT NULL AND instr(answer_json, ?) > 0").get(W, M.id).n;
+    const nowBy = cd.prepare("SELECT COUNT(*) AS n FROM v2_agent_questions WHERE ws_id = ? AND asked_by = ? AND answered_by = ?").get(W, pid, pid).n;
+    cd.close();
+    check(
+      "questions (audit M1): pseudonymising the person who asked and answered rewrites asked_by, answered_by and the answer directive's by to their Former member id",
+      named && left === 0 && leftDir === 0 && nowBy >= 2,
+      `${named} ${left} ${leftDir} ${nowBy} ${pid}`,
+    );
+
+    // ======== founder ruling 2026-11-11 (D5): a drift question names files only with work signals on ========
+    const qOf = (key) => sdb((d) => d.prepare("SELECT files_json FROM v2_agent_questions WHERE ws_id = ? AND session_key = ?").all(W, key));
+    const runIn = async (name, signals) => {
+      const dir = path.join(tmpRoot, "work", name);
+      mkdirSync(path.join(dir, "src"), { recursive: true });
+      spawnSync("git", ["init", "-q", dir]);
+      cli(["share", "--dir", dir, "--workspace", W, "--goal", G.id, ...(signals ? ["--signals"] : []), "--yes"]);
+      const sid = randomUUID();
+      const tr = path.join(claudeDir, "projects", `-work-${name}`, `${sid}.jsonl`);
+      hook("SessionStart", { session_id: sid, source: "startup", cwd: dir, transcript_path: tr });
+      hook("UserPromptSubmit", { session_id: sid, prompt_id: `${name}-p1`, prompt: "go", cwd: dir, transcript_path: tr });
+      sync();
+      const file = path.join(dir, "src", `${name}-cutover.sql`);
+      const input = { file_path: file, content: "-- cutover\n" };
+      hook("PreToolUse", { session_id: sid, cwd: dir, tool_name: "Write", tool_input: input, tool_use_id: `tu_${name}` });
+      writeFileSync(file, input.content);
+      hook("PostToolUse", { session_id: sid, cwd: dir, tool_name: "Write", tool_input: input, tool_use_id: `tu_${name}` });
+      const reply = "Done. The migration cutover will run during month-end close on the 31st.";
+      const at = Date.now();
+      writeLines(tr, [userLine(sid, `${name}-p2`, new Date(at).toISOString(), dir), assistantLine(sid, `req_${name}`, new Date(at + 500).toISOString(), dir, reply)]);
+      hook("UserPromptSubmit", { session_id: sid, prompt_id: `${name}-p2`, prompt: "cut over", cwd: dir, transcript_path: tr });
+      hook("Stop", { session_id: sid, transcript_path: tr, cwd: dir, last_assistant_message: reply, stop_hook_active: false });
+      sync();
+      sync();
+      const told = hook("UserPromptSubmit", { session_id: sid, prompt_id: `${name}-p3`, prompt: "ok", cwd: dir, transcript_path: tr });
+      return { key: sessionKey(W, "claude-code", sid), file: `src/${name}-cutover.sql`, told };
+    };
+    const off = await runIn("signals-off", false);
+    const on = await runIn("signals-on", true);
+    const offRows = qOf(off.key);
+    const onRows = qOf(on.key);
+    sdb((d) => d.exec("PRAGMA wal_checkpoint(PASSIVE)"));
+    const listed = (await ws(M, "GET", "/questions")).json?.questions ?? [];
+    const vOn = (await ws(V, "GET", "/questions")).json?.questions ?? [];
+    const lOn = (await ws(L, "GET", "/questions")).json?.questions ?? [];
+    check(
+      "D5 ruling: work signals off -> the question reached the server with no file path (stored [], nowhere in the database files, none on the web) and the notice says no file paths; work signals on -> the edited file's repo-relative path is stored and shown, and the notice says files were sent",
+      offRows.length === 1 && offRows[0].files_json === "[]" && dbFilesLack(dbFile, off.file) && !JSON.stringify(listed).includes(off.file) && (off.told.system ?? "").includes("it sent the limit and the time, no file paths") &&
+        onRows.length === 1 && JSON.parse(onRows[0].files_json).map((f) => f.path).join() === on.file && JSON.stringify(listed).includes(on.file) &&
+        (on.told.system ?? "").includes("it sent the limit and the files this session edited in this stretch with their times"),
+      `${JSON.stringify(offRows)} ${JSON.stringify(onRows)} off=${off.told.system} on=${on.told.system}`,
+    );
+    check(
+      "questions (ruling): with work signals on, the file names are shown to the goal's owner and the asker only: a viewer and another member see none (files_hidden), and the signals-off question says names were not shared (paths_shared false)",
+      !JSON.stringify(vOn).includes(on.file) && !JSON.stringify(lOn).includes(on.file) && vOn.some((q) => q.evidence.files_hidden === true && q.evidence.paths_shared === true) &&
+        lOn.some((q) => q.evidence.files_hidden === true) && listed.some((q) => q.evidence.paths_shared === false && q.evidence.files.length === 0 && q.evidence.files_hidden === false),
+      `${JSON.stringify(vOn.map((q) => q.evidence)).slice(0, 500)}`,
+    );
+  }
 
   // ======== two sessions in one repo (A1-local-1, A1-local-3): a refused edit never goes up, whoever changes its file
   // later; the session that read the file hears which session changed it ========

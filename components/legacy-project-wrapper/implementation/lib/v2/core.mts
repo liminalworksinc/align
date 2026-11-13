@@ -19,7 +19,7 @@ export interface Sql {
 
 /** The PRAGMA user_version of a fully migrated database (lib/v2/db.ts MIGRATIONS.length; db.ts checks they agree).
  *  The operator script refuses any other, so it never writes to a schema it doesn't know. */
-export const SCHEMA_VERSION = 23;
+export const SCHEMA_VERSION = 24;
 
 // ---- settings shared with the operator script (lib/v2/config.ts re-exports these) ----
 
@@ -108,7 +108,7 @@ export const EVENT_PROPS = {
   second_member_joined: {},
   first_change_request: {},
   first_approval: {},
-  first_directive: { kind: ["goal_version", "binding_changed", "binding_suspended", "stop", "resume", "request", "hold", "release"] },
+  first_directive: { kind: ["goal_version", "binding_changed", "binding_suspended", "stop", "resume", "request", "hold", "release", "answer"] },
   first_mcp_read: { client: ["app", "device"] },
   loi_sent: { note_ref: NOTE_REF_RE },
   loi_signed: { note_ref: NOTE_REF_RE, verified_original: ["yes"] },

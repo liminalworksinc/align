@@ -1106,6 +1106,63 @@ const MIGRATIONS: string[] = [
   ALTER TABLE v2_device_tokens ADD COLUMN rotated_ts TEXT;
   ALTER TABLE v2_device_tokens ADD COLUMN used_at TEXT;
   `,
+  // LIM-2505: agent questions (lib/v2/questions.ts). A shared session whose work drifts from its goal asks the goal's
+  // owner one question with evidence (the limit as the goal states it, repo-relative files, the stretch's times; never
+  // the agent's words), and the owner's answer reaches that session as an `answer` directive. v2_directives is rebuilt
+  // for its wider CHECK and the answer_json column (rows, seq and the AUTOINCREMENT counter kept, as in 12).
+  `
+  CREATE TABLE v2_directives_new (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('goal_version','binding_changed','binding_suspended','stop','resume','request','hold','release','answer')),
+    goal_id TEXT,
+    goal_json TEXT,
+    binding_json TEXT,
+    created_at TEXT NOT NULL,
+    request_json TEXT,
+    hold_json TEXT,
+    answer_json TEXT,
+    UNIQUE (ws_id, id),
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id)
+  );
+  INSERT INTO v2_directives_new (seq, id, ws_id, kind, goal_id, goal_json, binding_json, created_at, request_json, hold_json)
+    SELECT seq, id, ws_id, kind, goal_id, goal_json, binding_json, created_at, request_json, hold_json FROM v2_directives;
+  DELETE FROM sqlite_sequence WHERE name = 'v2_directives_new';
+  INSERT INTO sqlite_sequence (name, seq) SELECT 'v2_directives_new', seq FROM sqlite_sequence WHERE name = 'v2_directives';
+  DROP TABLE v2_directives;
+  ALTER TABLE v2_directives_new RENAME TO v2_directives;
+
+  CREATE TABLE v2_agent_questions (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL,
+    session_key TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    goal_version INTEGER NOT NULL,
+    limit_id TEXT NOT NULL,
+    limit_type TEXT NOT NULL,
+    limit_text TEXT NOT NULL,
+    files_json TEXT NOT NULL,
+    paths_shared INTEGER NOT NULL DEFAULT 0 CHECK (paths_shared IN (0, 1)),
+    stretch_from TEXT NOT NULL,
+    stretch_to TEXT NOT NULL,
+    asked_by TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('open','answered','superseded')),
+    answer TEXT CHECK (answer IS NULL OR answer IN ('continue','steer','switch')),
+    answer_text TEXT,
+    target_goal_id TEXT,
+    answered_by TEXT,
+    answered_at TEXT,
+    directive_id TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (ws_id, session_key, client_id),
+    FOREIGN KEY (ws_id, session_key) REFERENCES v2_sessions(ws_id, session_key) ON DELETE CASCADE,
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_agent_questions_ws ON v2_agent_questions(ws_id, state, created_at);
+  CREATE UNIQUE INDEX v2_agent_questions_one_open ON v2_agent_questions(ws_id, session_key) WHERE state = 'open';
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

@@ -3202,8 +3202,10 @@ accepted)`, and ends the section `- (<n> open ask[s] left out because an agent m
 The `align` hook SHALL, on `Stop` for a shared session bound to a goal with limits and unless `align config drift
 off` set `"drift": false` in `config.json`, read the turn's last reply locally (the hook input's
 `last_assistant_message`, else the last assistant text in the last 256 KB of `transcript_path` after the last typed
-prompt) and check it against each of the goal's limits with a word rule (owner decision D5: no model, nothing
-uploaded, never blocks). Where the rule can't tell, it SHALL say nothing: a missed notice costs less than a false alarm
+prompt) and check it against each of the goal's limits with a word rule (owner decision D5: no model, never blocks;
+the reply itself is never uploaded. As ruled 2026-11-11 for LIM-2505, a crossing in a shared session may ask the goal's
+owner a question carrying the limit and its times, and file paths only with work signals on; see "The agent asks the
+goal's owner about drift"). Where the rule can't tell, it SHALL say nothing: a missed notice costs less than a false alarm
 (E2E acycle2 A2-cross-1). Only an explicit statement of the agent's own intent or act counts; an agent refusing a
 limit, explaining it, warning of it or recommending against it never does (E2E acycle3 A3-cross-1). The rule, sentence
 by sentence (sentences split after `.`, `!` or `?` before a capital, at
@@ -3353,6 +3355,40 @@ next to a session shared in the same folder in the last 24 hours, `Align: this f
 - **WHEN** an unshared session starts twice in a repo whose remote matches a goal anchor (test `hooks` "anchor suggestion is user-only, for unshared sessions")
 - **THEN** the first start returns a `systemMessage` with `matches goal "Ship the v2 onboarding flow"` and no `hookSpecificOutput`, and the second prints nothing
 
+### Requirement: The agent asks the goal's owner about drift
+
+When the local drift check finds a crossing for a session that is shared and bound to that goal now (LIM-2505), the
+`Stop` hook SHALL also ask the goal's owner one question, spooled for the sync pass (`question`), which posts it to
+`POST /api/v2/workspaces/:ws/sessions/:key/questions`. One per stretch of drift, never a stream: while
+`~/.align/asked/<lid>.json` holds an open question for the same goal (less than 24 hours old) it SHALL ask nothing
+more; the server holds one open question per session, on the goal it counts toward now (asking on another goal
+supersedes one left open on the goal it moved from). A question SHALL carry evidence only, never the agent's words:
+the crossed limit's id (the server reads its text from the goal) and the stretch's start and end; and only when the
+session shares work signals (`align share --signals`, or the folder rule's; founder ruling 2026-11-11, so "Never
+sent: file paths" stays true without them), the repo-relative paths of the files this session edited toward this goal
+while shared in this stretch (the latest edit of each, newest 20, compared as real paths, none a session that is not
+shared also wrote in the stretch, none outside the server's path rule). The sync pass SHALL send no paths for a
+session whose work signals are off when it queues or sends the question. The stretch starts at the later of the share's start
+and the moment the agent last heard an answer. The sync pass SHALL send it only while the session is still shared and
+bound to that goal, and otherwise drop it. When it was asked, the drift notice says so instead of "nothing was sent":
+`... This is a word check, so Align asked the goal's owner whether the agent should go on; it sent the limit and the
+time, no file paths, nothing the agent wrote, and their answer reaches the agent at your next prompt after they
+answer. \`align config drift off\` turns this off.`, or with work signals on `... it sent the limit and the files this
+session edited in this stretch with their times, nothing the agent wrote, ...`.
+
+The owner's answer arrives as an `answer` directive (see `directives`). The next `UserPromptSubmit` of a shared
+session SHALL put each answer into the agent's context once (who answered by first name, the goal and the limit
+quoted, and for `steer` the owner's note quoted and "Follow it from this turn"; for `switch` "Stop the work this limit
+is about" and the `::align bind` way to pick a goal, never a switch on its own), show the user a `systemMessage` saying
+who answered what, report the directive `applied`, and start the next stretch. An answer about a goal the session no
+longer counts toward reaches the user only, never the agent. The owner's typographic quotes become plain ones, so none
+reads as the end of Align's quote.
+
+#### Scenario: Ask once, answer reaches the next turn
+
+- **WHEN** a shared session bound to a goal with a `must_not` limit replies with a crossing sentence, crosses again before an answer, its goal's owner answers `steer` on the web, and the session drifts again after hearing it (test-agent-live "questions: ...")
+- **THEN** one question is stored with the limit in the goal's words and no reply text; the second crossing asks nothing; a viewer's answer is 403 `read_only`, a member who is not the goal's owner gets 403 `not_goal_owner` and another workspace's person 404; the next prompt's context quotes the steer once and the directive is receipted `received` and `applied`; the drift after the answer asks a new question
+
 ## Open questions
 
 1. **Stale "daemon" leftovers.** The code has no daemon or login item (the only background work is the one-pass
@@ -3435,6 +3471,8 @@ next to a session shared in the same folder in the last 24 hours, `Align: this f
 - `packages/align-agent/src/shared/anchors.ts`
 - `packages/align-agent/src/shared/asks.ts`
 - `packages/align-agent/src/shared/drift.ts`
+- `packages/align-agent/src/hooks/questions.ts`
+- `packages/align-agent/src/shared/answer.ts`
 - `packages/align-agent/src/shared/envelope.ts`
 - `packages/align-agent/src/shared/fsx.ts`
 - `packages/align-agent/src/shared/goaltree.ts`

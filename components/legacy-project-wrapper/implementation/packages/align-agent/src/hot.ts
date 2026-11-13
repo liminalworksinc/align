@@ -13,8 +13,10 @@ import { clean } from "./shared/envelope.ts";
 import { readJson } from "./shared/fsx.ts";
 import { storedText, type ReleaseReaches, type ShareFacts, type ShareNow } from "./shared/ended.ts";
 import { isShareStateNotice, noticeKind } from "./shared/notices.ts";
+import { validAnswer } from "./shared/answer.ts";
+import { signalsAllowed } from "./activity.ts";
 import { NEWEST_BUILD, selfBuild, WRITER_GEN, type BuildMark } from "./build.ts";
-import type { EndedWhy, GoalSnapshot, HoldLatch, HotRequest, HotState, Latch, MeFile, RequestState, ShareState } from "./shared/types.ts";
+import type { EndedWhy, GoalSnapshot, HoldLatch, HotAnswer, HotRequest, HotState, Latch, MeFile, RequestState, ShareState } from "./shared/types.ts";
 
 export { snapshot };
 
@@ -140,6 +142,19 @@ function resumedBy(ctx: Ctx, lid: string): string | null {
   return latch && !latch.stopped && id && latch.directive_id === id ? id : null;
 }
 
+/** The answers to this session's drift questions it received (LIM-2505), the last 10, oldest first. */
+function hotAnswers(ctx: Ctx, lid: string): HotAnswer[] {
+  const rows = ctx.db
+    .prepare("SELECT d.id AS id, d.json AS json FROM directive_sessions ds JOIN directives d ON d.id=ds.directive_id WHERE ds.local_id=? AND d.kind='answer' AND ds.state IN ('received','applied') ORDER BY d.seq DESC LIMIT 10")
+    .all(lid) as { id: string; json: string }[];
+  const out: HotAnswer[] = [];
+  for (const r of rows.reverse()) {
+    const a = (JSON.parse(r.json) as { answer?: unknown }).answer;
+    if (validAnswer(a)) out.push({ ...a, limit: a.limit ?? null, directive_id: r.id });
+  }
+  return out;
+}
+
 export function renderHot(ctx: Ctx, lid: string): HotState | null {
   const s = getSession(ctx.db, lid);
   if (!s) return null;
@@ -204,6 +219,8 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     released_holds: live ? releasedHolds(ctx, lid) : [],
     releases_now: releasesNow(ctx, lid),
     resumed: resumedBy(ctx, lid),
+    answers: live ? hotAnswers(ctx, lid) : [],
+    signals: live ? signalsAllowed(ctx, lid, s.cwd) : false,
     prior_share: sharedBefore(ctx, lid) ? { stopped: stoppedByPerson(ctx, lid) } : null,
     epochs_seen: [
       ...(ctx.db.prepare("SELECT epoch_id FROM epochs WHERE local_id=? ORDER BY rowid DESC LIMIT 10").all(lid) as { epoch_id: string }[]).map((e) => e.epoch_id),

@@ -483,6 +483,34 @@ The server SHALL serve directives only through `/api/v2/directives`, `/api/v2/di
 - **WHEN** a client calls `GET /api/directives/stream?session=claude-code:x`
 - **THEN** the response is HTTP 404
 
+### Requirement: An agent's drift question and its answer
+
+The server SHALL take an agent's question about drift (LIM-2505, `lib/v2/questions.ts`) only from the device that shared
+the session, while the session is shared and bound to the goal now and the goal is active, with a limit that is one of
+the goal's current limits; it SHALL store the limit's text from the goal, never from the device, and keep at most one
+open question per session (asking again on the same goal returns the open one, 200; asking on the goal the session
+counts toward now supersedes one left open on another goal, which can no longer be answered: 409
+`question_superseded`). A file path SHALL be repo-relative in ASCII letters, digits, `._@+-`, spaces and `/` only, with
+no empty, `.` or `..` segment (so no drive letter, backslash, `~`, control, bidi-override or zero-width character); any
+other is 400. It SHALL keep a file name only when the device says the session shares work signals (`signals: true`)
+and the server already holds that name in the session's own work signals, which arrive only with them on (D5 on the
+server); any other name is dropped. Founder rulings 2026-11-11: the file names are shown only to the goal's owner and
+the person whose agent asked (others get none and `files_hidden`), and a steer note only to the owner who answered and
+the asker (others get `text: null` and `text_hidden`), as decline reasons go only to those who decided. Whoever reads the goal sees the question
+(`GET .../questions`, `GET .../questions/:id`), with its evidence marked agent-reported; anyone else, in this workspace
+or another, gets 404. Only the goal's owner answers (`POST .../questions/:id/answer`, `continue`, `steer` with a note
+of 1 to 500 characters, or `switch` with an optional active goal the owner reads): a viewer gets 403 `read_only`,
+another member 403 `not_goal_owner`, a second answer 409 `already_answered`. The answer SHALL be written as one
+`answer` directive targeting only the asking session (none when its sharing has stopped), carrying the question's id,
+the limit, the goal the question was about and the goal to switch to (each only while the session's person reads it),
+the answer, the note and who answered, by name. An answer never switches a binding. Pseudonymisation of a person who
+left or deleted their account rewrites a question's `asked_by` and `answered_by` and an answer directive's `by`.
+
+#### Scenario: Viewer and other workspace
+
+- **WHEN** a viewer and a person from another workspace try to read and answer a question on a workspace-visible goal
+- **THEN** the viewer reads it with `can.answer` false and gets 403 `read_only` on answering; the other person gets 404 for the list, the question and the answer
+
 ## Open questions
 
 - Waking idle agents is out of scope (Owner decision 2026-10-30 keeps it open): a stop or a new goal version takes effect only when the session's next hook starts a sync, so an idle agent learns nothing until someone uses it again, and the Sessions tab shows "Stop sent, not yet received" until then.
@@ -490,6 +518,7 @@ The server SHALL serve directives only through `/api/v2/directives`, `/api/v2/di
 ## Sources
 
 - lib/v2/directives.ts
+- lib/v2/questions.ts
 - lib/v2/requests.ts
 - lib/v2/sessions.ts
 - lib/v2/goals.ts

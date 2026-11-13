@@ -8,7 +8,8 @@ import { addNotice, getShare, renderEndedShares, renderHot, snapshot } from "./h
 import { ENDED_UNREAD, endSharesEndedOnServer, enqueue, type EndedOnServer } from "./share.ts";
 import { RESUMED_NOTICE } from "./shared/notices.ts";
 import { clean } from "./shared/envelope.ts";
-import type { Goal, WireHold, WireRequest } from "./shared/types.ts";
+import type { Goal, WireAnswer, WireHold, WireRequest } from "./shared/types.ts";
+import { validAnswer } from "./shared/answer.ts";
 import { loadFeed } from "./goals.ts";
 import { applyHold, applyRequest, validRequest } from "./requests.ts";
 
@@ -41,7 +42,7 @@ export interface Directive {
   id: string;
   seq: number;
   ws: string;
-  kind: "goal_version" | "binding_changed" | "binding_suspended" | "stop" | "resume" | "request" | "hold" | "release";
+  kind: "goal_version" | "binding_changed" | "binding_suspended" | "stop" | "resume" | "request" | "hold" | "release" | "answer";
   session_keys: string[];
   goal: Goal | null;
   binding: { goal_id: string | null; effective: string; cause: string } | null;
@@ -49,6 +50,8 @@ export interface Directive {
   request?: WireRequest;
   /** kind "hold" and "release" only. */
   hold?: WireHold;
+  /** kind "answer" only (LIM-2505): the goal owner's answer to this session's drift question. */
+  answer?: WireAnswer | null;
   created_at: string;
 }
 
@@ -211,6 +214,9 @@ function applyOne(ctx: Ctx, d: Directive, lid: string, seq: number, at: string):
     case "hold":
     case "release":
       return applyHold(ctx, d.id, d.hold, d.kind === "hold", lid, seq, at);
+    // Kept as the stored directive; the hot file lists it (hot.ts `hotAnswers`) and the next prompt tells the agent.
+    case "answer":
+      return share && validAnswer(d.answer) ? "received" : "stale";
     default:
       return "stale";
   }
