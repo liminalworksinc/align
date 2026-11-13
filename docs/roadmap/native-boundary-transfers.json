@@ -2779,8 +2779,8 @@
       "functional_acceptance_complete": true,
       "whole_boundary_closed": false,
       "publication_required_before_counting_closed": true,
-      "closure_state": "Functional acceptance passed and source was uploaded. Exact-head green CI and final publication closure remain unproven.",
-      "required_acceptance_result": "1847 application checks, 36 fresh image checks and 18 offline bundled HTTP/SQLite controls pass. Both receipt readers verify all 58 qualified projections. Metrics preserves 1199 observations; retention preserves 727 core, 422 native scheduler and separate 418 VM scheduler observations, plus 14 additional timer comparisons, on both hosts.",
+      "closure_state": "Current combined functional acceptance passes; normal review, publication, PR body and exact-head CI remain required before closure.",
+      "required_acceptance_result": "Current candidate: 1917 application, 42 image and 18 additional HTTP/SQLite checks pass; both receipt readers verify 71 qualified projections. Existing original-backed boundary controls remain preserved.",
       "supporting_measured_records": [
         {
           "file": "metrics-retention.parent-assembly-proof-v1.json",
@@ -2968,9 +2968,10 @@
       "functional_acceptance_complete": false,
       "whole_boundary_closed": false,
       "source_authority_transferred": false,
-      "closure_state": "Cold integration passed; combined application/image acceptance and normal publication required.",
+      "closure_state": "Current combined functional acceptance passes; normal review, publication, PR body and exact-head CI remain required before closure.",
       "findings_navigation": "docs/roadmap/native-authorization-findings.md",
-      "operator_security_acceptance_claimed": false
+      "operator_security_acceptance_claimed": false,
+      "required_acceptance_result": "Current candidate: 1917 application, 42 image and 18 additional HTTP/SQLite checks pass; both receipt readers verify 71 qualified projections. Existing original-backed boundary controls remain preserved. Current 13-package,77-file closure passes 29 controls and35 actual Node commands on both hosts: macOS cold checkout and Linux prepared runtime."
     }
   ],
   "public_tester_deployed": false,
@@ -3009,7 +3010,7 @@
       "final_deployed_tester_security_acceptance": false
     }
   },
-  "boundaries_with_complete_functional_acceptance": 27,
+  "boundaries_with_complete_functional_acceptance": 28,
   "implementation_boundaries_remaining": 4,
   "human_confirmation_required_for_transfer_closure": [],
   "corrected_after_review": "f_fcab81184174",
@@ -3033,12 +3034,12 @@
     "independent_maintainer_review_claimed": false,
     "final_deployed_tester_security_acceptance": false
   },
-  "source_identity": "sha256:31c84d1ac09ccf39b9c3d1d74e7d7599148c6536c95df52bd3457fbb89972895",
-  "parent_receipt": "sha256:273cd4a97bacaf3766e656d515e884759ac7d84640ecdae899bb8e3438e40bd8",
-  "application_checks": 1847,
-  "image_checks": 36,
-  "source_members": 494,
-  "image_id": "sha256:67b7b74f3f941c1939893899ea5442d7ff7ddbb9ade0b4334215c5ee0bd2fc54",
+  "source_identity": "sha256:29f6f3bd1e58b922daef50493920b433890980ca96685ca51b0b5a9879a20ca3",
+  "parent_receipt": "sha256:846205aba5f1adb37e07f9b44410575eea26424dd995ff26b543db23075c03fa",
+  "application_checks": 1917,
+  "image_checks": 42,
+  "source_members": 664,
+  "image_id": "sha256:cbc8d3bf10756f1d13a178e1eda9850afd0bf6f70e2ad49cd97ecb6d6d24a776",
   "current_source_checkpoint_recorded_by_git": false,
   "current_image_all_full_workflow_inputs_exact": true,
   "prior_local_checkpoint_acceptance": [
@@ -3298,7 +3299,7 @@
       "operator_security_accepted": false
     }
   ],
-  "native_accepted_boundaries": 17,
+  "native_accepted_boundaries": 18,
   "intentionally_retained_boundaries": 10,
   "intentionally_retained_source_members": 280,
   "classified_members_in_closed_boundaries": 361,
@@ -3733,5 +3734,13 @@
     "retained_source_members": 519
   },
   "current_remediation_record": "generated/native-checkpoints/finding-remediation.json",
-  "combined_checkpoint_result": "generated/native-checkpoints/b19-b28.json"
+  "combined_checkpoint_result": {
+    "record": "generated/native-checkpoints/schema-version-guard.json",
+    "application_passed": 1917,
+    "image_passed": 42,
+    "additional_HTTP_SQLite_passed": 18,
+    "libraries": 71,
+    "all36_findings_undecided": true,
+    "normal_review_publication_and_exact_head_CI_pending": true
+  }
 }

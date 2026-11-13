@@ -4,7 +4,7 @@
 - **Owning queue item:** [ADOPT-002](active-work.md#adopt-002)
 - **Completion / archival evidence:** source navigation prepared for B01 through B17, B19 and B28; B18 and B22 remain pending
 
-The normal reviewer ledger has **35 open findings: ten HIGH and twenty-five MEDIUM**. Their history is preserved while the operator-requested [remediation](native-findings-remediation.md) proceeds. This file records locations and reading commands; it does not accept or dismiss a finding or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
+The normal reviewer ledger has **36 open findings: ten HIGH and twenty-six MEDIUM**. Their history is preserved while the operator-requested [remediation](native-findings-remediation.md) proceeds. This file records locations and reading commands; it does not accept or dismiss a finding or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
 
 Within the earlier 26 findings, 23 have technical correction evidence in the
 [current remediation record](../../generated/native-checkpoints/finding-remediation.json).
@@ -13,7 +13,7 @@ The other three of that earlier group are indexed below. Their instruction corre
 ## Source identities
 
 - Original main for the earlier catalogs: `ba43c5b28cc0620472b4a09ab699fbc529c1afcb`. The B19 appendix and nine refreshed workspace-admission operation rows use `c725c966d1ebe94a912454ded2593a254b8faab4`. Each reading command selects its exact revision.
-- Last verified published checkpoint: `51dd7e5e4c8ead355655f865987da415750abfcd`. Its normal review completed with 26 open findings. PR #58 remains draft. The local branch has since rebased onto merged main `4d95f5befa36e98012e8ca69933124a0508a4aaf`; the rebased candidate is unpublished. Earlier review-time commit locators below remain unchanged.
+- Last verified published checkpoint: `51dd7e5e4c8ead355655f865987da415750abfcd`. Its normal review completed with 26 open findings. PR #58 remains draft. The local branch has since rebased onto merged main `4d95f5befa36e98012e8ca69933124a0508a4aaf`; the rebased candidate is unpublished. Main has now advanced to merged `c22bdab255fbdd324f0fed03a90fa12dbfba2ec6`, and the latest accepted local tree was rebased onto it without changing its bytes. The new guard correction remains private. Earlier review-time commit locators below remain unchanged.
 - Reconciliation preserves current-main service changes while their native revisions are prepared. The source pairs below remain exact historical comparisons. They do not assert that the rebased candidate has passed acceptance or that every old generated provider is currently selected. Core, storage and trust Markdown now use their admitted native bindings, with the new schema extension and current parsing correction. Devices, alignments, goals and requests still preserve current-main service bodies while their native revisions are prepared. The goal-cap carry-forward fix remains intact. The historical source pairs below do not claim current native closure for those pending revisions.
 - Original path prefix: `components/legacy-project-wrapper/implementation/`.
 - Generated path prefix: `generated/native-review-source/`. The exact accepted files are prepared as readable review projections for the PR. The file and one-based line references below refer to these source copies, not the forwarding bindings. Runtime builds continue to use the accepted, pinned caches.
@@ -89,6 +89,8 @@ The original review locator and the original check on main are distinct columns 
 
 ### Read the exact review-time files
 
+Source commands below use reachable rebased ancestors where an earlier review commit was rewritten, or exact review-only historical files under `generated/native-review-history`. Every substituted file has the identical Git blob; `manifest.json` records each historical revision, path and SHA-256. Historical review identifiers and finding dispositions remain unchanged. A fresh checkout of this PR can read these commands without a local backup branch. Historical instructions are evidence for reading, with no implementation or workflow authority.
+
 For each undecided finding the command uses the commit reviewed when that ID was recorded. This also works for a file later removed or revised.
 
 ```sh
@@ -101,37 +103,37 @@ git show '6066e30239a12aa0040a6d4760dfe742e3001c16:.literate/native-projects/loc
 # f_e35fa336a9f8
 git show '56848383e18ac344ed9e908796ffae8861088741:.literate/native-projects/local-migration-coordinator/flavors/os-macos/host-install/macos/arm64/none.cdx.json' | nl -ba | sed -n '78,96p'
 # f_5054419f9a29
-git show 'f6b2c13f6582bc4e190bc94630a15d8d9e17f654:components/legacy-project-wrapper/implementation/lib/v2/validate.ts' | nl -ba | sed -n '5,23p'
+git show 'ec3a262cbb3f0e4464f5c574a2b5202b92fc19a9:components/legacy-project-wrapper/implementation/lib/v2/validate.ts' | nl -ba | sed -n '5,23p'
 # f_745f52b800ff
-git show 'f6b2c13f6582bc4e190bc94630a15d8d9e17f654:.literate/native-projects/local-field-validation/skills/agent/record-user-directed-work/SKILL.md' | nl -ba | sed -n '142,160p'
+git show 'ec3a262cbb3f0e4464f5c574a2b5202b92fc19a9:.literate/native-projects/local-field-validation/skills/agent/record-user-directed-work/SKILL.md' | nl -ba | sed -n '142,160p'
 # f_84ce9f54c701
-git show '8ba9004d4460e05704ebdea2fcc91179489ab68e:components/legacy-project-wrapper/implementation/lib/v2/db.ts' | nl -ba | sed -n '1106,1124p'
+git show '56848383e18ac344ed9e908796ffae8861088741:components/legacy-project-wrapper/implementation/lib/v2/db.ts' | nl -ba | sed -n '1106,1124p'
 # f_4c9283b5ecab
-git show '6cef3ced7856fb8ad34ff6cad7d3f4af893b32ea:components/legacy-project-wrapper/implementation/lib/v2/auth.ts' | nl -ba | sed -n '34,52p'
+git show '06d5517729eab63e871a88526cab631844444234:components/legacy-project-wrapper/implementation/lib/v2/auth.ts' | nl -ba | sed -n '34,52p'
 # f_456d34de6a82
-git show '6cef3ced7856fb8ad34ff6cad7d3f4af893b32ea:.literate/native-projects/local-server-auth/components/server-auth/qualification/profile.json' | nl -ba | sed -n '1,1p'
+git show '06d5517729eab63e871a88526cab631844444234:.literate/native-projects/local-server-auth/components/server-auth/qualification/profile.json' | nl -ba | sed -n '1,1p'
 # f_622b2d74e48e
-git show '6cef3ced7856fb8ad34ff6cad7d3f4af893b32ea:.literate/native-projects/local-server-auth/flavors/os-macos/host-install/macos/arm64/none.cdx.json' | nl -ba | sed -n '78,96p'
+git show '06d5517729eab63e871a88526cab631844444234:.literate/native-projects/local-server-auth/flavors/os-macos/host-install/macos/arm64/none.cdx.json' | nl -ba | sed -n '78,96p'
 # f_fcab81184174
-git show 'e96df6fd45b23ab80d8e10c0aed3d64b701ec883:docs/roadmap/native-boundary-transfers.md' | nl -ba | sed -n '31,35p'
+git show '717647462ed34af89e76df41d2ce3de1dbe3ea8e:docs/roadmap/native-boundary-transfers.md' | nl -ba | sed -n '31,35p'
 # f_202c48750557
-git show '9ca0ce303ec5db02488331944d06d453f7cdc4c6:docs/roadmap/native-rewrite-program.md' | nl -ba | sed -n '40,58p'
+git show 'bf8139086c4f96175cbda88c25501eaf093bff69:docs/roadmap/native-rewrite-program.md' | nl -ba | sed -n '40,58p'
 # f_2c1e50b9c263
-git show '9ca0ce303ec5db02488331944d06d453f7cdc4c6:docs/roadmap/native-boundary-transfers.json' | nl -ba | sed -n '867,885p'
+git show 'bf8139086c4f96175cbda88c25501eaf093bff69:docs/roadmap/native-boundary-transfers.json' | nl -ba | sed -n '867,885p'
 # f_2e78693505d1
-git show '95947813fe0a04726f1e680af359350a7b7f2554:components/legacy-project-wrapper/implementation/lib/v2/workspaces.ts' | nl -ba | sed -n '14,32p'
+git show '7442ff5b479c292568c356f5d96d308482b81b61:components/legacy-project-wrapper/implementation/lib/v2/workspaces.ts' | nl -ba | sed -n '14,32p'
 # f_09aa12209ec2
-git show '95947813fe0a04726f1e680af359350a7b7f2554:.literate/native-projects/local-server-sample/components/server-sample/qualification/profile.json' | nl -ba | sed -n '1,1p'
+git show '7442ff5b479c292568c356f5d96d308482b81b61:.literate/native-projects/local-server-sample/components/server-sample/qualification/profile.json' | nl -ba | sed -n '1,1p'
 # f_eacf8a5e6d43
-git show '95947813fe0a04726f1e680af359350a7b7f2554:.literate/native-projects/local-server-workspaces/components/server-workspaces/qualification/profile.json' | nl -ba | sed -n '1,1p'
+git show '7442ff5b479c292568c356f5d96d308482b81b61:.literate/native-projects/local-server-workspaces/components/server-workspaces/qualification/profile.json' | nl -ba | sed -n '1,1p'
 # f_3c2e305a94d7
-git show '4214c45f6d509e33c8153b4d66f5a7029f9b0c5a:components/legacy-project-wrapper/implementation/lib/v2/limit-suggest.ts' | nl -ba | sed -n '63,68p'
+git show 'c7c11ce59ad7ad6c3c576155a17148af7a94dde3:components/legacy-project-wrapper/implementation/lib/v2/limit-suggest.ts' | nl -ba | sed -n '63,68p'
 # f_4bd94fac41bd
-git show '4214c45f6d509e33c8153b4d66f5a7029f9b0c5a:components/legacy-project-wrapper/implementation/lib/v2/goals.ts' | nl -ba | sed -n '15,33p'
+cat 'generated/native-review-history/7f619e1d9de4c5c69140d146a5fec8cf9928acd7.ts' | nl -ba | sed -n '15,33p'
 # f_5a0e064cc7ff
-git show 'c4b853866ff5e130fa294f8e70fe5c0530e87aa4:components/legacy-project-wrapper/implementation/lib/v2/devices.ts' | nl -ba | sed -n '8,26p'
+cat 'generated/native-review-history/ac4e090a6b2012ad4fcf3e4a8b0ec8f110800c67.ts' | nl -ba | sed -n '8,26p'
 # f_d943ad9dd8d1
-git show 'c4b853866ff5e130fa294f8e70fe5c0530e87aa4:components/legacy-project-wrapper/implementation/lib/v2/directives.ts' | nl -ba | sed -n '61,79p'
+cat 'generated/native-review-history/8d7333bd89640399684236d0a71565cf24d87d27.ts' | nl -ba | sed -n '61,79p'
 ```
 
 ### B17 findings from the normal checkpoint review
@@ -141,12 +143,12 @@ The normal review of `892f408c2131a5bbaaf232b6ac717aecf4c8732d` added the three 
 ```sh
 # f_a53163d0b124: compare the exact reviewed Git capability and platform realization.
 diff -y -W 240 \
-  <(git show '892f408c2131a5bbaaf232b6ac717aecf4c8732d:.literate/native-projects/local-server-metrics/flavors/os-base/toolchain.cdx.json' | nl -ba | sed -n '43,55p') \
-  <(git show '892f408c2131a5bbaaf232b6ac717aecf4c8732d:.literate/native-projects/local-server-metrics/flavors/os-macos/host-install/macos/arm64/none.cdx.json' | nl -ba | sed -n '78,100p')
+  <(git show 'bef600449acbdbdeec00f872e97f533540d667cf:.literate/native-projects/local-server-metrics/flavors/os-base/toolchain.cdx.json' | nl -ba | sed -n '43,55p') \
+  <(git show 'bef600449acbdbdeec00f872e97f533540d667cf:.literate/native-projects/local-server-metrics/flavors/os-macos/host-install/macos/arm64/none.cdx.json' | nl -ba | sed -n '78,100p')
 # f_dd723ad9bd62
-git show '892f408c2131a5bbaaf232b6ac717aecf4c8732d:.literate/native-projects/local-server-retention/skills/agent/release-project/advance/SKILL.md' | nl -ba | sed -n '15,28p'
+git show 'bef600449acbdbdeec00f872e97f533540d667cf:.literate/native-projects/local-server-retention/skills/agent/release-project/advance/SKILL.md' | nl -ba | sed -n '15,28p'
 # f_5c5fc40549da
-git show '892f408c2131a5bbaaf232b6ac717aecf4c8732d:.literate/native-projects/local-server-metrics/skills/agent/release-project/advance/SKILL.md' | nl -ba | sed -n '15,28p'
+git show 'bef600449acbdbdeec00f872e97f533540d667cf:.literate/native-projects/local-server-metrics/skills/agent/release-project/advance/SKILL.md' | nl -ba | sed -n '15,28p'
 ```
 
 ## Detailed comparisons for the relocated enforcement findings
@@ -2045,17 +2047,17 @@ These findings concern workflow instructions and evaluators introduced by the mi
 ```sh
 P=.literate/native-projects/local-server-sessions-directives-routes/skills/agent/develop-in-production-workflow/staging/SKILL.md
 diff -y -W 240 \
-  <(git show "51dd7e5e4c8ead355655f865987da415750abfcd:$P" | nl -ba | sed -n '13,25p') \
+  <(git show "06b3ac8bb3c1f70a529338db056a89362461d27b:$P" | nl -ba | sed -n '13,25p') \
   <(nl -ba "$P" | sed -n '13,27p')
 nl -ba AGENTS.md | sed -n '6,12p'
 
 P=.literate/native-projects/local-server-goals-deliberation-routes/verification/acceptance
 # Exact historical host-function crossing, preserved verbatim in the contained verifier.
-git show "51dd7e5e4c8ead355655f865987da415750abfcd:$P/server-goals-deliberation-routes-harness-v4.cjs" | nl -ba | sed -n '68,80p'
+git show "06b3ac8bb3c1f70a529338db056a89362461d27b:$P/server-goals-deliberation-routes-harness-v4.cjs" | nl -ba | sed -n '68,80p'
 rg -n 'historicalVerifier|function runSelected|spawnSync|network=none' "$P/server-goals-deliberation-routes-contained-v1.cjs"
 
 P=.literate/native-projects/local-server-workspace-admin-routes/verification/acceptance
-git show "51dd7e5e4c8ead355655f865987da415750abfcd:$P/server-workspace-admin-routes-harness-v3.cjs" | nl -ba | sed -n '68,80p;107,118p'
+git show "06b3ac8bb3c1f70a529338db056a89362461d27b:$P/server-workspace-admin-routes-harness-v3.cjs" | nl -ba | sed -n '68,80p;107,118p'
 rg -n 'historicalVerifier|function runSelected|spawnSync|network=none' "$P/server-workspace-admin-routes-contained-v1.cjs"
 
 # Shared readable adapter and end-to-end controls. The controls use only newly owned public canaries.
@@ -2241,8 +2243,7 @@ nl -ba generated/native-review-source/server_retention/create_retention.js | sed
 python3 - <<'COMPARE_SPEND'
 import json, subprocess
 from pathlib import Path
-old = json.loads(subprocess.check_output(['git', 'show',
-    '54ecc585f3981f7a2ae45da8eca19386945c74af^:components/legacy-project-wrapper/implementation/native/spend-meter.json']))
+old = json.loads(Path('generated/native-review-history/f2b131e2d916835bce4c9ec2905e2f256b5159e0.json').read_text())
 new = json.loads(Path('.literate/native-projects/local-spend-meter/verification/acceptance/spend-meter.json').read_text())
 assert old['cases'] == new['cases']
 print(len(new['cases']), 'cases;', sum(len(c['arguments']) for c in new['cases']), 'inputs; all expected results equal')
@@ -2286,7 +2287,7 @@ P=skills/specification-to-source/cmake-build-system/SKILL.md
 diff -y -W 240   <(git show "4d95f5befa36e98012e8ca69933124a0508a4aaf:$P" | nl -ba | sed -n '60,84p')   <(nl -ba ".literate/native-projects/local-storage-refresh-schema/$P" | sed -n '60,102p')
 diff -y -W 240   <(git show "4d95f5befa36e98012e8ca69933124a0508a4aaf:$P" | nl -ba | sed -n '60,84p')   <(nl -ba ".literate/native-projects/local-trust-text-parser/$P" | sed -n '60,102p')
 P=components/legacy-project-wrapper/implementation/native/trust-text-parser-contained-v2.cjs
-git show "5eb639f7cc893276d4f2b1210282561ff5f67f71:$P" | nl -ba | sed -n '74,90p'
+git show "8f0b5c72e87e93024e1304781c7a5015f822f670:$P" | nl -ba | sed -n '74,90p'
 nl -ba generated/native-review-source/trust_text_parser/create_trust_text_parser.js | sed -n '1,90p'
 cat generated/native-checkpoints/cmake-selected-scope.json
 cat generated/native-checkpoints/private-oracle-read-control.json
@@ -2350,7 +2351,7 @@ observation bytes and never evaluates candidate code or trusts a reported digest
 Read the failed loader, the corrected boundary and both extracted stages:
 
 ```sh
-git show 5eb639f7cc893276d4f2b1210282561ff5f67f71:components/legacy-project-wrapper/implementation/native/trust-text-parser-contained-v2.cjs | nl -ba | sed -n '74,90p'
+git show 8f0b5c72e87e93024e1304781c7a5015f822f670:components/legacy-project-wrapper/implementation/native/trust-text-parser-contained-v2.cjs | nl -ba | sed -n '74,90p'
 nl -ba components/legacy-project-wrapper/implementation/native/trust-text-parser-split-contained-v3.cjs | sed -n '23,65p'
 nl -ba generated/native-evaluator-review/trust-text-parser-split-v3/observer/observer.cjs
 nl -ba generated/native-evaluator-review/trust-text-parser-split-v3/judge.cjs
@@ -2438,4 +2439,40 @@ event names and attribution refusal. Their proof is
 `generated/native-checkpoints/event-integrity-callers.json`. Full application and
 image acceptance and normal publication are pending for this candidate. All 35
 findings remain undecided. No independent review or operator security acceptance
-is asserted. The two inherited unselected CMake findings remain unfixed.
+is asserted. Both inherited CMake findings remain undecided; their instruction corrections and owned build controls are recorded above.
+
+## Independent schema-version guard
+
+Finding `f_08d59162f001` remains undecided. Normal review of the historical
+checkpoint found that deriving the active version from `changePrograms().length`
+made the independent migration-count check ineffective. Main at
+`c22bdab255fbdd324f0fed03a90fa12dbfba2ec6` declares the original independent version
+at `components/legacy-project-wrapper/implementation/lib/v2/core.mts:22`.
+The current composition now declares explicit version 24 at
+`components/legacy-project-wrapper/implementation/lib/v2/core.mts:132`. Read the retained qualified count
+check at `generated/native-review-source/storage_runtime/create_store.js:9`
+through line 10. The generated core's separate historical constant 22 remains
+unchanged and is not the active composition's exported version. Its declared
+type accurately describes that native value. The composition owns version 24
+after the two separately qualified schema extensions.
+
+Read the original and current guard side by side:
+
+```sh
+P=components/legacy-project-wrapper/implementation/lib/v2/core.mts
+git show c22bdab255fbdd324f0fed03a90fa12dbfba2ec6:"$P" | sed -n '16,26p'
+nl -ba "$P" | sed -n '124,137p'
+nl -ba generated/native-review-source/storage_runtime/create_store.js | sed -n '1,15p'
+```
+
+The correction restores an independent constant. Six focused controls pass on
+macOS and Linux, evaluating the actual composition and running both qualified
+guards with controlled resources. The same checker rejects the previous derived
+version. Main's original migration-count check is at `lib/v2/db.ts:1112` under the
+application prefix. Current full application/image acceptance and normal
+publication remain required.
+No finding has been accepted or dismissed.
+
+## Current local schema-guard acceptance
+
+The current schema-guard candidate passes 1,917 application checks with no failures or skips, 42 image checks and 18 additional owned HTTP/SQLite controls. Both installed readers verify all 71 qualified projections and the current parent receipt. The B28 current operator closure passes 29 controls across 35 actual Node commands on each host: a cold checkout on macOS and a prepared runtime on Linux. The six focused independent-version controls pass on both hosts. These are functional results. Normal review, publication and exact-head CI remain pending. All 36 findings remain undecided. No independent review or operator security acceptance is asserted.

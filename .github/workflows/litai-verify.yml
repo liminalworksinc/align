@@ -28,6 +28,8 @@ jobs:
           node-version: "24.22.2"
       - name: Readable native source matches accepted cache
         run: node tools/native-rewrite/review-native-sources.mjs
+      - name: Active schema version independently guards storage and commands
+        run: node --no-warnings --experimental-vm-modules tools/native-rewrite/check-active-schema-version.mjs
       - name: Effective host tool requirements
         run: python tools/native-rewrite/check-host-tools.py
       - name: Qualification review copies match recorded profiles

@@ -1,6 +1,6 @@
 {
   "schema": "align/current-event-integrity-candidate@1",
-  "state": "local-accepted-normal-review-and-publication-pending",
+  "state": "local-functional-acceptance-complete-normal-review-and-publication-pending",
   "registered_libraries": 71,
   "readable_package_files": 276,
   "current_main": "c22bdab255fbdd324f0fed03a90fa12dbfba2ec6",
@@ -20,7 +20,6 @@
     "f_6e478fc0d9b7",
     "f_b402a2b7e0c2"
   ],
-  "all35_findings_undecided": true,
   "CMake_findings_unfixed": 0,
   "historical_boundary_closures": 26,
   "new_boundary_closure_claimed": false,
@@ -35,13 +34,14 @@
   "application_failed": 0,
   "application_skipped": 0,
   "source_members": 664,
-  "source_identity": "sha256:998aa36d58822d4f9ff019c8b3e9ad8f70bbc2d0b631930e049e129aebd3b00b",
-  "current_parent_receipt": "sha256:56c5deb712ca472ea2796b8884418b418f6ec6d8ec5ebb170480b279cddc36e2",
+  "source_identity": "sha256:29f6f3bd1e58b922daef50493920b433890980ca96685ca51b0b5a9879a20ca3",
+  "current_parent_receipt": "sha256:846205aba5f1adb37e07f9b44410575eea26424dd995ff26b543db23075c03fa",
   "image_checks": 42,
   "additional_HTTP_SQLite_checks": 18,
-  "image_id": "sha256:552173e244aa345a5c9891eb545f37f918de01ec5b6186832c7bce499c9a4385",
+  "image_id": "sha256:cbc8d3bf10756f1d13a178e1eda9850afd0bf6f70e2ad49cd97ecb6d6d24a776",
   "both_installed_readers_current": true,
   "qualified_projections_each_reader": 71,
   "normal_review_completed": false,
-  "exact_head_CI_green": false
+  "exact_head_CI_green": false,
+  "all36_findings_undecided": true
 }

@@ -1,6 +1,6 @@
 {
   "schema": "align/native-finding-remediation@1",
-  "state": "technical-corrections-and-current-functional-acceptance-complete-normal-review-pending",
+  "state": "local-functional-acceptance-complete-normal-review-and-publication-pending",
   "finding_ids": [
     "f_c741821f2f4a",
     "f_b36c3d29ef7c",
@@ -76,9 +76,9 @@
   "deployed": false,
   "combined_application_passed": 1917,
   "combined_image_passed": 42,
-  "combined_source_identity": "sha256:998aa36d58822d4f9ff019c8b3e9ad8f70bbc2d0b631930e049e129aebd3b00b",
-  "current_parent_receipt": "sha256:56c5deb712ca472ea2796b8884418b418f6ec6d8ec5ebb170480b279cddc36e2",
-  "current_open_ledger_entries": 35,
+  "combined_source_identity": "sha256:29f6f3bd1e58b922daef50493920b433890980ca96685ca51b0b5a9879a20ca3",
+  "current_parent_receipt": "sha256:846205aba5f1adb37e07f9b44410575eea26424dd995ff26b543db23075c03fa",
+  "current_open_ledger_entries": 36,
   "current_finding_ids": [
     "f_c741821f2f4a",
     "f_b36c3d29ef7c",
@@ -114,8 +114,26 @@
     "f_b402a2b7e0c2",
     "f_2ed16557a584",
     "f_e011dbf27d3a",
-    "f_e8e57827838b"
+    "f_e8e57827838b",
+    "f_08d59162f001"
   ],
-  "current_checkpoint": "generated/native-checkpoints/current-event-integrity.json",
-  "combined_additional_HTTP_SQLite_passed": 18
+  "current_checkpoint": "generated/native-checkpoints/schema-version-guard.json",
+  "combined_additional_HTTP_SQLite_passed": 18,
+  "application_acceptance_pending": false,
+  "image_acceptance_pending": false,
+  "application_passed": 1917,
+  "application_failed": 0,
+  "application_skipped": 0,
+  "source_members": 664,
+  "source_identity": "sha256:29f6f3bd1e58b922daef50493920b433890980ca96685ca51b0b5a9879a20ca3",
+  "image_checks": 42,
+  "additional_HTTP_SQLite_checks": 18,
+  "image_id": "sha256:cbc8d3bf10756f1d13a178e1eda9850afd0bf6f70e2ad49cd97ecb6d6d24a776",
+  "both_installed_readers_current": true,
+  "qualified_projections_each_reader": 71,
+  "normal_review_completed": false,
+  "exact_head_CI_green": false,
+  "published": false,
+  "all36_findings_undecided": true,
+  "independent_or_operator_security_accepted": false
 }

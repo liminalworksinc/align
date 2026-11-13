@@ -1377,3 +1377,16 @@ control remains exact, with one additional successful-sign-in assertion. No
 application guard, timeout or generated source changes. The failed candidate and
 all its inputs remain preserved. Complete one new full application acceptance
 run, current receipt verification and normal publication before closure.
+
+### Current schema guard follow-up within ADOPT-002
+
+Normal review added undecided finding `f_08d59162f001`. Publication was stopped
+before upload. The private correction restores an explicit active schema
+version 24, independently checked against the qualified composed migration
+programs. The generated core's historical value 22 remains preserved and unused
+for this active guard. Next: prove mismatch refusal, complete current application
+and image acceptance, refresh the current receipt, then normal publication.
+The findings ledger now contains 36 undecided entries. CLI identity qualification
+and separate cached-source admission pass; parent integration remains pending.
+
+Current ADOPT-002 checkpoint: the independent schema guard now passes six controls on each host, all 1,917 application checks, 42 image checks and 18 additional HTTP/SQLite checks. Both installed readers verify all 71 qualified projections and the current parent receipt. The B17 and B28 current functional candidates await normal review, publication and exact-head CI. The published closure baseline stays 26 of 31. Next action: publish this checkpoint through normal review. All 36 findings remain undecided.

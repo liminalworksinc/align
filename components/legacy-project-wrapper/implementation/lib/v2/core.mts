@@ -1,6 +1,5 @@
 // Bind the qualified core service to the current host. Behavior lives in the library.
 import type { SQLInputValue } from "node:sqlite";
-import { changePrograms } from "../storage-schema.mts";
 import { createHash } from "node:crypto";
 import { create_creation_compatibility } from "../native/.bindings/server_creation_compatibility.js";
 import { create_core } from "../native/server_core/create_core.js";
@@ -129,8 +128,8 @@ export const ONCE_PER_PERSON: CoreRuntime["ONCE_PER_PERSON"] = core.ONCE_PER_PER
 export const ONCE_PER_WORKSPACE: CoreRuntime["ONCE_PER_WORKSPACE"] = core.ONCE_PER_WORKSPACE;
 export const REQUEST_STATUSES: CoreRuntime["REQUEST_STATUSES"] = core.REQUEST_STATUSES;
 export const RESTORE_DAYS: CoreRuntime["RESTORE_DAYS"] = core.RESTORE_DAYS;
-// The active schema belongs to the composed native history.
-export const SCHEMA_VERSION = changePrograms().length as 24;
+// The active schema version independently guards the composed migration count.
+export const SCHEMA_VERSION = 24;
 export const accessRequest: CoreRuntime["accessRequest"] = core.accessRequest;
 export const approveAccessRequest: CoreRuntime["approveAccessRequest"] = core.approveAccessRequest;
 export const codeEmail: CoreRuntime["codeEmail"] = core.codeEmail;
