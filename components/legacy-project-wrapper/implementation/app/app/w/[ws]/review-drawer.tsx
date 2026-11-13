@@ -1,4 +1,5 @@
 "use client";
+import { useLiveReload } from "../../_ui/live";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useGoalTitles } from "../../_ui/changes";
@@ -76,6 +77,8 @@ export function ReviewDrawer({ ws, goal, id, me, choice, onClose, onChanged, onP
   const [r, setR] = useState<{ cr: ChangeRequest | null; status: number | null; error: string | null }>({ cr: null, status: null, error: null });
   const [tick, setTick] = useState(0);
   const reload = useCallback(() => setTick((t) => t + 1), []);
+  // Live (LIM-2503): a decision made elsewhere moves the request here too; the lane map animates the move.
+  useLiveReload(ws, ["changes"], reload);
   useEffect(() => {
     let live = true;
     api<ChangeRequest>(`/api/v2/workspaces/${ws}/goals/${encodeURIComponent(goal)}/change-requests/${encodeURIComponent(id)}`).then(

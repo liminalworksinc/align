@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { EmptyState, Panel, ReviewActions, ReviewBody, StatusPill } from "../../../../../_ui/ds";
 import { useGoalTitles } from "../../../../../_ui/changes";
 import { useApi } from "../../../../../_ui/kit";
+import { useLiveReload } from "../../../../../_ui/live";
 import type { Me } from "../../../../../_ui/server";
 import type { ChangeRequest } from "../../../../../_ui/types";
 import { actsFor, notYours, QuietLink, type Act } from "../../../../../_ui/b/act";
@@ -24,6 +25,9 @@ import { DeskShell } from "../../../../../_ui/b/shell";
 export default function DecisionPage({ me, ws, goal, id }: { me: Me; ws: string; goal: string; id: string }) {
   const d = useApi<ChangeRequest>(`/api/v2/workspaces/${ws}/goals/${goal}/change-requests/${id}`);
   const home = useApi<{ apps: { everyone: boolean; items: HomeApp[] } | null }>(`/api/v2/workspaces/${ws}/home`);
+  // Live (LIM-2503): a decision made in another window moves this request here too; the lane map animates the move.
+  useLiveReload(ws, ["changes"], d.reload);
+  useLiveReload(ws, ["home"], home.reload);
   const titles = useGoalTitles(ws);
   const [opened, setOpened] = useState<{ act: Act | undefined; n: number }>({ act: undefined, n: 0 });
   const [picked, setPicked] = useState<Act | null>(null);

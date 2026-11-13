@@ -19,8 +19,13 @@ export interface Config {
   drift: boolean;
 }
 
+/** The hosted Align server: where an installed `align` signs in unless told otherwise (LIM-2504). */
+export const HOSTED_SERVER = "https://align-pg-draft.fly.dev";
+/** The local dev server (`npm run dev` on 3100): chosen with `align login --dev` or `ALIGN_DEV=1`. */
+export const DEV_SERVER = "http://127.0.0.1:3100";
+
 export const DEFAULT_CONFIG: Config = {
-  server_url: "http://127.0.0.1:3100",
+  server_url: HOSTED_SERVER,
   default_workspace: null,
   tail_days: 14,
   goals_refresh_ms: 10 * 60_000,
@@ -49,7 +54,9 @@ export interface Ctx {
 export function loadConfig(alignHome: string, env: NodeJS.ProcessEnv = process.env): Config {
   const file = readJson<Partial<Config>>(layout.config(alignHome)) || {};
   const c: Config = { ...DEFAULT_CONFIG, ...file };
+  // An explicit ALIGN_SERVER wins; ALIGN_DEV=1 picks the local dev server over the saved or default one.
   if (env.ALIGN_SERVER) c.server_url = env.ALIGN_SERVER;
+  else if (env.ALIGN_DEV === "1") c.server_url = DEV_SERVER;
   if (env.ALIGN_TAIL_DAYS) c.tail_days = Number(env.ALIGN_TAIL_DAYS);
   return c;
 }
@@ -57,7 +64,10 @@ export function loadConfig(alignHome: string, env: NodeJS.ProcessEnv = process.e
 export function saveConfig(alignHome: string, patch: Partial<Config>): Config {
   const current = readJson<Partial<Config>>(layout.config(alignHome)) || {};
   const next = { ...DEFAULT_CONFIG, ...current, ...patch };
-  writeJsonAtomic(layout.config(alignHome), next);
+  // The server is written only once chosen (by `align login`, or an older build that saved it): until then the build's
+  // default applies, so a later build pointing at another hosted address is not overridden by a stale copy.
+  const { server_url: _default, ...rest } = next;
+  writeJsonAtomic(layout.config(alignHome), "server_url" in current || "server_url" in patch ? next : rest);
   return next;
 }
 

@@ -1,4 +1,5 @@
 "use client";
+import { useLiveReload } from "../../../_ui/live";
 import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useState } from "react";
 import { api, ApiError, Btn, Err, Field, Loading, Pill, sentence, Shell, TextArea, useAction, useApi, when } from "../../../_ui/kit";
@@ -234,6 +235,8 @@ function AlignmentCard({ ws, a, me, onDone }: { ws: string; a: Alignment; me: st
 
 export default function Alignments({ me, ws }: { me: Me; ws: string }) {
   const d = useApi<{ waiting_on_me: Alignment[]; mine: Alignment[]; others: Alignment[] }>(`/api/v2/workspaces/${ws}/alignments`);
+  // Live (LIM-2503): read again when this person's view of it moves (a stop, a resume, a decision in another window).
+  useLiveReload(ws, ["alignments"], d.reload);
   const detail = useApi<WsDetail>(`/api/v2/workspaces/${ws}`);
   const section = (title: string, list: Alignment[] | undefined, empty: string) => (
     <Panel className="mb-4" title={title}>

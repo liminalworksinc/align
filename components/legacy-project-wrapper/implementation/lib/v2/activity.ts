@@ -1,4 +1,4 @@
-import { all, run, tx } from "./db";
+import { all, run, touchWs, tx } from "./db";
 import { badRequest } from "./errors";
 import { nowIso } from "./ids";
 import { goalObj, goalRow } from "./goals";
@@ -65,6 +65,7 @@ export async function ingestActivity(pp: PolicyPrincipal, dev: DevicePrincipal, 
   let accepted = 0;
   const refused: { index: number; reason: "clock_skew" | "too_old" | "not_shared" }[] = [];
   await tx(() => {
+    touchWs(pp.wsId);
     for (const [index, raw] of items.entries()) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw badRequest("each item must be an object");
       const it = raw as Body;

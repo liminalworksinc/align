@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
+import { FakeServer } from "./fake-server.ts";
 import { makeEnv, runCli, type TestEnv } from "./helpers.ts";
 
 const envs: TestEnv[] = [];
@@ -113,5 +114,86 @@ describe("install", () => {
     assert.notEqual(r.code, 0);
     assert.match(r.stdout + r.stderr, /is not Align's plugin/);
     assert.equal(fs.readFileSync(path.join(theirs, "SKILL.md"), "utf8"), "---\nname: align\n---\nsomeone else's skill\n");
+  });
+});
+
+// Which server an installed `align` signs in to (LIM-2504): the hosted one by default, the dev one only when asked.
+const HOSTED = "https://align-pg-draft.fly.dev";
+const DEV = "http://127.0.0.1:3100";
+
+/** A sandbox as an installed build sees it: no ALIGN_SERVER. */
+function installed(extra: NodeJS.ProcessEnv = {}): TestEnv {
+  const t = makeEnv(extra);
+  if (!("ALIGN_SERVER" in extra)) delete t.env.ALIGN_SERVER;
+  envs.push(t);
+  return t;
+}
+
+const configFile = (t: TestEnv) => path.join(t.home, "config.json");
+
+describe("server default", () => {
+  test("a fresh install uses the hosted server, and does not pin it in config.json", async () => {
+    const t = installed();
+    const r = await runCli(t, ["config"]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, new RegExp(`server ${HOSTED.replace(/[.]/g, "\\.")}`));
+    assert.doesNotMatch(r.stdout, /127\.0\.0\.1/);
+    assert.equal("server_url" in JSON.parse(fs.readFileSync(configFile(t), "utf8")), false, "the build's default applies until a login chooses one");
+  });
+
+  test("ALIGN_DEV=1 picks the local dev server; ALIGN_SERVER still wins over it", async () => {
+    const dev = await runCli(installed({ ALIGN_DEV: "1" }), ["config"]);
+    assert.equal(dev.code, 0, dev.stderr);
+    assert.match(dev.stdout, /server http:\/\/127\.0\.0\.1:3100/);
+    const both = await runCli(installed({ ALIGN_DEV: "1", ALIGN_SERVER: "http://127.0.0.1:4999" }), ["config"]);
+    assert.match(both.stdout, /server http:\/\/127\.0\.0\.1:4999/);
+  });
+
+  test("a server saved by an earlier build is kept", async () => {
+    const t = installed();
+    fs.mkdirSync(t.home, { recursive: true });
+    fs.writeFileSync(configFile(t), JSON.stringify({ server_url: DEV }));
+    const r = await runCli(t, ["config"]);
+    assert.match(r.stdout, /server http:\/\/127\.0\.0\.1:3100/);
+  });
+
+  test("`align login --dev` with --server is refused before any pairing starts", async () => {
+    const t = installed();
+    const both = await runCli(t, ["login", "--dev", "--server", "http://127.0.0.1:4999"]);
+    assert.notEqual(both.code, 0);
+    assert.match(both.stderr, /--server <url> or --dev, not both/);
+  });
+
+  test("`align login` saves the server it signed in to, so later passes use it", async () => {
+    const fake = new FakeServer({ accessTtl: 3600 });
+    await fake.start();
+    try {
+      const t = installed({ ALIGN_DEVICE_POLL_SCALE_MS: "10" });
+      const r = await runCli(t, ["login", "--server", fake.url, "--name", "Test Mac"]);
+      assert.equal(r.code, 0, r.stderr);
+      assert.equal(JSON.parse(fs.readFileSync(configFile(t), "utf8")).server_url, fake.url);
+    } finally {
+      await fake.stop();
+    }
+  });
+  test("`align login` says which server it pairs with and why: --server, ALIGN_SERVER, a server saved by an earlier login", async () => {
+    const fake = new FakeServer({ accessTtl: 3600 });
+    await fake.start();
+    try {
+      const origin = new URL(fake.url).origin;
+      const t = installed({ ALIGN_DEVICE_POLL_SCALE_MS: "10" });
+      const flag = await runCli(t, ["login", "--server", `${fake.url}/`, "--name", "Test Mac"]);
+      assert.equal(flag.code, 0, flag.stderr);
+      assert.ok(flag.stdout.startsWith(`Pairing with ${origin} (from --server).\n`), flag.stdout);
+      const saved = await runCli(t, ["login", "--name", "Test Mac"]);
+      assert.equal(saved.code, 0, saved.stderr);
+      assert.ok(saved.stdout.startsWith(`Pairing with ${origin} (saved by an earlier login).\n`), saved.stdout);
+      const env = installed({ ALIGN_SERVER: fake.url, ALIGN_DEVICE_POLL_SCALE_MS: "10" });
+      const viaEnv = await runCli(env, ["login", "--name", "Test Mac"]);
+      assert.equal(viaEnv.code, 0, viaEnv.stderr);
+      assert.ok(viaEnv.stdout.startsWith(`Pairing with ${origin} (from ALIGN_SERVER).\n`), viaEnv.stdout);
+    } finally {
+      await fake.stop();
+    }
   });
 });

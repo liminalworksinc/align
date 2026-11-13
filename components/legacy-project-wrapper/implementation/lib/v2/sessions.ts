@@ -1,6 +1,6 @@
 import { caps } from "./config";
 import { sessionCapError } from "./creation";
-import { all, audit, get, run, tx } from "./db";
+import { all, audit, get, run, touchWs, tx } from "./db";
 import { takeDurable } from "./limits";
 import { V2Error, badRequest, conflict, notFound } from "./errors";
 import { event } from "./events";
@@ -131,6 +131,7 @@ export async function putSession(pp: PolicyPrincipal, dev: DevicePrincipal, key:
   const title = optStr(b, "title", 200);
   const at = nowIso();
   const out = await tx(() => {
+    touchWs(pp.wsId);
     const s = sessionRow(pp.wsId, key);
     const ended = s?.state === "stopped" && (s.ended_reason === "device_signed_out" ? s.device_id !== dev.deviceId : s.ended_reason === "member_removed");
     if (s && ended && s.user_id === dev.user.id) {
@@ -233,6 +234,7 @@ export async function openBindingEpoch(pp: PolicyPrincipal, dev: DevicePrincipal
 
   const at = nowIso();
   const out = await tx(() => {
+    touchWs(pp.wsId);
     const open = openEpoch(pp.wsId, key);
     const lastEnd = get<{ m: string | null }>("SELECT MAX(ends_at) AS m FROM v2_epochs WHERE ws_id = ? AND session_key = ?", pp.wsId, key)?.m ?? null;
     if (open && startsAt < open.starts_at) throw conflict("epoch_overlap", "starts_at is before the current epoch started");
@@ -324,6 +326,7 @@ export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key
   const rows = b.rows.map(usageRowIn);
   const at = nowIso();
   return tx(() => {
+    touchWs(pp.wsId);
     const list = all<{ epoch_id: string; starts_at: string; ends_at: string | null }>("SELECT epoch_id, starts_at, ends_at FROM v2_epochs WHERE ws_id = ? AND session_key = ?", pp.wsId, key);
     const epochs = new Map(list.map((e) => [e.epoch_id, e]));
     // Whether some epoch of this session was open at `t`, i.e. the session was shared then.

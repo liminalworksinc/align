@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { when } from "../kit";
 import type { ChangeRequest } from "../types";
 import type { Act } from "./act";
@@ -97,6 +97,22 @@ type Line = { d: string; live: boolean; key: string };
 export function LaneMap({ cr, me, onAct, picked = null }: { cr: ChangeRequest; me: string; onAct: (a: Act) => void; picked?: Act | null }) {
   const cur = currentNode(cr);
   const done = passed(cur, cr);
+  // Live (LIM-2503): when the request moves while the map is open (someone decided in another window, or here), the
+  // card it moved to lights up and the line it came along draws itself, so the cause reads before the effect. Words
+  // for a screen reader say the same; with reduced motion the card is simply lit (app/globals.css).
+  const prevCur = useRef(cur);
+  const [arrived, setArrived] = useState<{ from: Node | null; to: Node } | null>(null);
+  useEffect(() => {
+    const from = prevCur.current;
+    prevCur.current = cur;
+    if (from === cur || !cur) return;
+    const on = setTimeout(() => setArrived({ from, to: cur }), 0);
+    const off = setTimeout(() => setArrived(null), 2400);
+    return () => {
+      clearTimeout(on);
+      clearTimeout(off);
+    };
+  }, [cur]);
   const words = cards(cr, me);
   const all = edges(cr);
   const box = useRef<HTMLDivElement>(null);
@@ -151,7 +167,7 @@ export function LaneMap({ cr, me, onAct, picked = null }: { cr: ChangeRequest; m
     const ro = new ResizeObserver(measure);
     if (box.current) ro.observe(box.current);
     return () => ro.disconnect();
-  }, [measure, cr]);
+  }, [measure, cr, arrived]);
 
   const lanes: { key: Lane; label: string; role: string; people: { id: string; name: string }[] }[] = [
     { key: "asking", label: "Asking", role: "The person who asked", people: [cr.requester] },
@@ -202,7 +218,8 @@ export function LaneMap({ cr, me, onAct, picked = null }: { cr: ChangeRequest; m
     const on = n === cur;
     const was = done.has(n);
     // Transitions out of other states are hidden until "Show every state" (the historical Ask stays).
-    const out = all.filter((e) => e.from === n && (every || e.from === cur || e.from === "asked"));
+    // While a move animates, the connector it came along stays shown, so its line can draw into the card it lit.
+    const out = all.filter((e) => e.from === n && (every || e.from === cur || e.from === "asked" || (arrived?.from === e.from && arrived.to === e.to)));
     // A state neither passed, current nor one step away is a one-line chip until "Show every state".
     if (!every && !near.has(n))
       return (
@@ -223,16 +240,17 @@ export function LaneMap({ cr, me, onAct, picked = null }: { cr: ChangeRequest; m
         key={n}
         data-node={n}
         data-current={on ? "1" : undefined}
+        data-arrived={arrived?.to === n ? "1" : undefined}
         aria-current={on ? "step" : undefined}
-        className={`relative z-10 flex min-w-0 flex-col gap-2 lg:[grid-column:var(--col)] rounded-(--radius-m) border p-3 ${on ? "border-(--accent-text) bg-(--bg-raised) shadow-[0_0_0_1px_var(--accent-text)]" : was ? "border-(--line-strong) bg-(--bg-panel)" : "border-(--line) bg-(--bg-inset)"}`}
+        className={`relative z-10 flex min-w-0 flex-col gap-2 lg:[grid-column:var(--col)] rounded-(--radius-m) border p-3 ${arrived?.to === n ? "al-arrive " : ""}${on ? "border-(--accent-text) bg-(--bg-raised) shadow-[0_0_0_1px_var(--accent-text)]" : was ? "border-(--line-strong) bg-(--bg-panel)" : "border-(--line) bg-(--bg-inset)"}`}
         style={{ "--col": COL[n] + 1 } as CSSProperties}
       >
         <div className="flex items-center justify-between gap-2">
           <p className={`text-[14px] font-semibold ${on ? "text-(--text-1)" : was ? "text-(--text-2)" : "text-(--text-3)"}`}>{words[n].title}</p>
           {on ? (
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--accent-text)">Now</span>
+            <span className="shrink-0 whitespace-nowrap font-mono text-[10px] uppercase tracking-[0.12em] text-(--accent-text)">Now</span>
           ) : was ? (
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--text-3)">Done</span>
+            <span className="shrink-0 whitespace-nowrap font-mono text-[10px] uppercase tracking-[0.12em] text-(--text-3)">Done</span>
           ) : null}
         </div>
         <p className={`text-[12px] leading-snug ${on ? "text-(--text-2)" : "text-(--text-3)"}`}>{words[n].meaning}</p>
@@ -260,9 +278,12 @@ export function LaneMap({ cr, me, onAct, picked = null }: { cr: ChangeRequest; m
             </marker>
           </defs>
           {lines.map((l) => (
-            <path key={l.key} d={l.d} fill="none" strokeLinejoin="round" stroke={l.live ? "var(--accent-text)" : "var(--line-strong)"} strokeWidth={l.live ? 1.5 : 1} strokeDasharray={l.live ? undefined : "4 4"} markerEnd={`url(#${l.live ? "lm-arrow-live" : "lm-arrow"})`} />
+            <path {...(arrived && l.key.startsWith(`${arrived.from}-${arrived.to}-`) ? { className: "al-draw", pathLength: 1 } : { strokeDasharray: l.live ? undefined : "4 4" })} key={l.key} d={l.d} fill="none" strokeLinejoin="round" stroke={l.live ? "var(--accent-text)" : "var(--line-strong)"} strokeWidth={l.live ? 1.5 : 1} markerEnd={`url(#${l.live ? "lm-arrow-live" : "lm-arrow"})`} />
           ))}
         </svg>
+        <p className="sr-only" aria-live="polite">
+          {arrived ? `Moved just now: ${words[arrived.to].title}.` : ""}
+        </p>
         <div className="flex flex-col">
           {lanes.map((lane) => (
             <section
