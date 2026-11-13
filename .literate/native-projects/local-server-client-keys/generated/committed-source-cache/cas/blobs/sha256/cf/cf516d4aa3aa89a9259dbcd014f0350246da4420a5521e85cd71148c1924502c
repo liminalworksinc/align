@@ -1,0 +1,146 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+
+const normalizationCases = [
+  ['generated-dotted-text', ['  010.020.030.040  '], '010.020.030.040'],
+  ['generated-mapped-tail', ['::FFFF:10.20.30.40'], '10.20.30.40'],
+  ['generated-network', ['2001:0DB8:0012:0034:56:78:9a:bc'], '2001:db8:12:34::/64'],
+  ['generated-empty', [' \t '], ''],
+  ['generated-zero-network', ['::'], '0:0:0:0::/64'],
+  ['generated-tail-overflow', ['::FFFF:256.1.2.3'], '::ffff:256.1.2.3'],
+  ['generated-short-colon', ['ab:cd'], 'ab:cd:0:0::/64'],
+  ['generated-multiple-compression', ['1::2::3'], '1:0:0:0::/64'],
+  ['generated-partial-groups', ['12zz:garbage:-1:10000:0:0:0:1'], '12:0:-1:10000::/64'],
+  ['generated-bracket-zone-order', ['[AB:CD]%zone'], 'ab:cd:0:0::/64'],
+  ['generated-dotted-zone', ['[010.020.030.040]%zone'], '010.020.030.040]'],
+  ['generated-zone-inside', [' [FE80::1234%ETH0] '], 'fe80:0:0:0::/64'],
+  ['generated-mapped-hex', ['0:0:0:0:0:ffff:a14:1e28'], '10.20.30.40'],
+  ['generated-extra-groups', ['1:2:3:4:5:6:7:8:9'], '1:2:3:4::/64'],
+  ['generated-signed-mapped', ['0:0:0:0:0:ffff:-1:10000'], '-1.255.256.0'],
+  ['generated-non-address', [' MIXED-CASE%discard '], 'mixed-case'],
+  ['generated-dotted-tail-leading-zero', ['::ffff:001.002.003.004'], '1.2.3.4'],
+  ['generated-idempotent-network', ['2001:db8:12:34::/64'], '2001:db8:12:34::/64'],
+];
+
+function checkBinding(factory) {
+  assert.equal(factory.name, 'create_client_keys');
+  assert.equal(factory.length, 1);
+  const events = [];
+  let mode = false;
+  const provider = function () {
+    assert.equal(this, undefined);
+    events.push('config');
+    return { get hosted() { events.push('hosted'); return mode; } };
+  };
+  const resources = {
+    get config() { events.push('capture'); return provider; },
+  };
+  const first = factory(resources);
+  assert.deepEqual(events, ['capture']);
+  assert.deepEqual(Object.keys(first), ['clientNet', 'clientOf']);
+  assert.equal(first.clientNet.name, 'clientNet');
+  assert.equal(first.clientNet.length, 1);
+  assert.equal(first.clientOf.name, 'clientOf');
+  assert.equal(first.clientOf.length, 1);
+  Object.defineProperty(resources, 'config', { value: () => { throw new Error('reread'); } });
+  const { clientNet, clientOf } = first;
+  assert.equal(clientNet('A:B'), 'a:b:0:0::/64');
+  assert.deepEqual(events, ['capture']);
+  const request = {
+    get headers() {
+      events.push('headers');
+      return headers;
+    },
+  };
+  let headerValue = '::ffff:10.20.30.40';
+  const headers = {
+    get get() {
+      events.push('get');
+      return function (name) {
+        assert.equal(this, headers);
+        assert.equal(arguments.length, 1);
+        assert.equal(name, 'fly-client-ip');
+        events.push('call');
+        return headerValue;
+      };
+    },
+  };
+  events.length = 0;
+  assert.equal(clientOf(request), 'local');
+  assert.deepEqual(events, ['config', 'hosted']);
+  mode = true;
+  events.length = 0;
+  assert.equal(clientOf(request), 'ip:10.20.30.40');
+  assert.deepEqual(events, ['config', 'hosted', 'headers', 'get', 'call']);
+  for (const [value, expected] of [[null, 'ip:unknown'], [undefined, 'ip:unknown'], ['', 'ip:']]) {
+    headerValue = value;
+    assert.equal(clientOf(request), expected);
+  }
+  const second = factory({ config: () => ({ hosted: false }) });
+  assert.notEqual(first, second);
+  assert.equal(second.clientOf(null), 'local');
+  assert.equal(clientOf(new Request('https://example.invalid/', {
+    headers: { 'fly-client-ip': ' [FE80::1%eth0] ' },
+  })), 'ip:fe80:0:0:0::/64');
+  assert.equal(clientOf(new Request('https://example.invalid/')), 'ip:unknown');
+  for (const falsy of [false, null, undefined, 0, '', NaN]) {
+    mode = falsy;
+    assert.equal(clientOf(null), 'local');
+  }
+  for (const truthy of [true, 1, 'false', [], {}]) {
+    mode = truthy;
+    assert.equal(clientOf({ headers: { get() { return ''; } } }), 'ip:');
+  }
+  mode = false;
+  assert.equal(clientOf(null), 'local');
+}
+
+function checkFailures(factory) {
+  const sentinel = {};
+  const failsIdentically = operation => assert.throws(operation, error => error === sentinel);
+  failsIdentically(() => factory({ get config() { throw sentinel; } }));
+  const dormant = factory({ config: null });
+  assert.equal(dormant.clientNet('TEXT'), 'text');
+  assert.throws(() => dormant.clientOf(null), TypeError);
+  failsIdentically(() => factory({ config() { throw sentinel; } }).clientOf(null));
+  failsIdentically(() => factory({ config: () => ({ get hosted() { throw sentinel; } }) }).clientOf(null));
+  const { clientNet, clientOf } = factory({ config: () => ({ hosted: true }) });
+  failsIdentically(() => clientOf({ get headers() { throw sentinel; } }));
+  failsIdentically(() => clientOf({ headers: { get get() { throw sentinel; } } }));
+  failsIdentically(() => clientOf({ headers: { get() { throw sentinel; } } }));
+  failsIdentically(() => clientNet({ trim() { throw sentinel; } }));
+  for (const value of [null, undefined, 5, {}, []]) assert.throws(() => clientNet(value), TypeError);
+  assert.throws(() => clientOf({ headers: { get() { return 0; } } }), TypeError);
+  const order = [];
+  const input = {
+    trim() {
+      assert.equal(this, input);
+      order.push('trim');
+      return {
+        toLowerCase() { order.push('lower'); return '[AB:CD]%zone'; },
+      };
+    },
+  };
+  assert.equal(clientNet(input), 'ab:cd:0:0::/64');
+  assert.deepEqual(order, ['trim', 'lower']);
+}
+
+function runTests(factory) {
+  checkBinding(factory);
+  checkFailures(factory);
+  const { clientNet } = factory({ config() { throw new Error('Normalization invoked configuration'); } });
+  const cases = [];
+  for (const [case_id, args, expected] of normalizationCases) {
+    assert.equal(clientNet(...args), expected, case_id);
+    assert.equal(clientNet(...args), expected, case_id + ' repeat');
+    cases.push({ case_id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases };
+}
+
+function smoke(factory) {
+  return factory({ config: () => ({ hosted: false }) }).clientNet('  010.020.030.040  ');
+}
+
+module.exports = { runTests, smoke };

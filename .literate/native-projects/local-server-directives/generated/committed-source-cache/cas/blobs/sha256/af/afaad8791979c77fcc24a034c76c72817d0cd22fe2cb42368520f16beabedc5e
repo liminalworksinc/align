@@ -1,0 +1,15 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const destination = process.argv[2];
+if (!destination) throw new Error('Missing artifact path');
+const root = path.resolve(__dirname, '..');
+const artifact = path.resolve(destination);
+const directory = path.dirname(artifact);
+fs.mkdirSync(directory, {recursive: true});
+for (const name of ['server_directives', 'tests']) {
+  fs.cpSync(path.join(root, name), path.join(directory, name), {recursive: true});
+}
+fs.copyFileSync(path.join(root, 'main.js'), path.join(directory, 'main.js'));
+fs.copyFileSync(path.join(root, 'run'), artifact);
+fs.chmodSync(artifact, 0o755);

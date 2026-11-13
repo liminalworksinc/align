@@ -1,0 +1,47 @@
+{
+  "workspace_name": "Northstar (sample)",
+  "change_request_reason": "This is a sample change request. Onboarding can't launch to regulated customers until a pen test is booked, so this asks the security goal to measure that too. In a real workspace a teammate proposes changes to a goal they don't own and the goal's owner or team lead decides. Here you own the goal, so you can approve it (then launch it, which is when agents get the new version), suggest a change, reject it, withdraw it or update it to try each step.",
+  "limit_text": "Push the pen-test window past May",
+  "limit_source_title": "Security review kickoff",
+  "team_names": [
+    "Product",
+    "Security"
+  ],
+  "goals": [
+    {
+      "title": "Expand to regulated customers",
+      "measures": [
+        {
+          "text": "Regulated customers live",
+          "target": "3 this year"
+        }
+      ]
+    },
+    {
+      "title": "Pass the security review",
+      "measures": [
+        {
+          "text": "Open high-severity findings",
+          "target": "0"
+        },
+        {
+          "text": "Review signed off",
+          "target": "end of quarter"
+        }
+      ]
+    },
+    {
+      "title": "Ship self-serve onboarding",
+      "measures": [
+        {
+          "text": "New teams set up without help",
+          "target": "80%"
+        }
+      ]
+    }
+  ],
+  "pending_measure": {
+    "text": "Pen test window booked",
+    "target": "before launch"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "schema": "align/findings-navigation@2",
+  "passed": true,
+  "observed_utc": "2026-11-12T23:54:15.400614+00:00",
+  "ledger_sha256": "04660be7841cb41c50a4750af2676ff7c7c3c4d18254784e7aa012a7b4e39405",
+  "open_findings": 32,
+  "high": 10,
+  "medium": 22,
+  "all_ids_in_guide": true,
+  "review_receipt_sha256": "4d9cebeb3de7113b75582dc56dff283f348b49ff84976cc309f9a6f863597a2e",
+  "spend_oracle": {
+    "historical_cases_equal": true,
+    "cases": 11,
+    "inputs": 110,
+    "canonical_sha256": "b8c5e39212f9213cc1b6572696ae0423e638cc66e7050a92f0eaf7bc8b746cfb",
+    "changed_metadata": [
+      "harness",
+      "harness_identity"
+    ]
+  },
+  "dispositions_changed": false,
+  "application_composition_changed": false,
+  "independent_review_claimed": false
+}

@@ -1,7 +1,5 @@
-import { idParam, route, webAuth } from "@/lib/v2/http";
-import { listSessions } from "@/lib/v2/sessions";
-import { ID_RE } from "@/lib/v2/validate";
-import { enter } from "@/lib/v2/workspaces";
+// Typed entry point for the admitted route library.
+import { bindRoute } from "@/lib/v2/native-routes/binding";
+import { routes } from "@/lib/v2/native-routes/sessions-directives-routes";
 
-// GET (cookie): my shared sessions; for workspace owners also every shared session's alias and state.
-export const GET = route<{ ws: string }>(async (req, params) => listSessions(enter(await webAuth(req), idParam(params.ws, ID_RE))));
+export const GET = bindRoute<{ ws: string }>(routes, "workspaces/[ws]/sessions", "GET");

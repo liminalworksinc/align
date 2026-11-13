@@ -1,0 +1,45 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+
+const root = path.resolve(__dirname, '..');
+const output = process.argv[2];
+if (!output) throw new Error('An artifact output path is required');
+const destination = path.resolve(output);
+if (destination === root || destination.startsWith(root + path.sep)) {
+  throw new Error('Build artifacts must be outside the generated source tree');
+}
+const files = ['main.js', 'tests/litai_test.js', 'server_identity_effects/create_effects.js'];
+const bodies = files.map(file => {
+  const source = fs.readFileSync(path.join(root, file), 'utf8').replace(/^#![^\n]*\n/, '');
+  return JSON.stringify(file) + ': function(module, exports, require) {\n' + source + '\n}';
+});
+const bundle = '#!/usr/bin/env node\n' + "'use strict';\n" +
+  'const __nativeRequire = require;\n' +
+  'const __modules = {\n' + bodies.join(',\n') + '\n};\n' +
+  'const __cache = Object.create(null);\n' +
+  'function __load(id) {\n' +
+  '  if (__cache[id]) return __cache[id].exports;\n' +
+  '  const factory = __modules[id];\n' +
+  '  if (!factory) throw new Error("Unknown bundled module: " + id);\n' +
+  '  const module = { exports: {} };\n' +
+  '  __cache[id] = module;\n' +
+  '  function localRequire(name) {\n' +
+  '    if (name.startsWith("node:")) return __nativeRequire(name);\n' +
+  '    if (!name.startsWith(".")) throw new Error("Undeclared dependency: " + name);\n' +
+  '    const p = __nativeRequire("node:path").posix;\n' +
+  '    return __load(p.normalize(p.join(p.dirname(id), name)));\n' +
+  '  }\n' +
+  '  factory(module, module.exports, localRequire);\n' +
+  '  return module.exports;\n' +
+  '}\n' +
+  '__load("main.js").cli(process.argv.slice(2));\n';
+
+fs.mkdirSync(path.dirname(destination), { recursive: true });
+fs.writeFileSync(destination, bundle, { mode: 0o755 });
+fs.chmodSync(destination, 0o755);
+const packageDir = path.join(path.dirname(destination), 'server_identity_effects');
+fs.mkdirSync(packageDir, { recursive: true });
+for (const file of ['package.json', 'create_effects.js']) {
+  fs.copyFileSync(path.join(root, 'server_identity_effects', file), path.join(packageDir, file));
+}

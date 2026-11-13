@@ -1,0 +1,3 @@
+'use strict';
+const {quoted} = require('./core.js');
+module.exports = {quoted};

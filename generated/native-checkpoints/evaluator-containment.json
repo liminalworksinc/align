@@ -1,0 +1,19 @@
+{
+  "schema": "align/contained-native-acceptance-checkpoint@1",
+  "state": "current-library-acceptance-passed-integrated-application-pending",
+  "qualified_libraries": 68,
+  "independent_acceptance_batches": 1259,
+  "materialized_runtime_package_files": 270,
+  "accepted_runtime_package_bytes_unchanged": true,
+  "normal_qualified_manifest_authoring": true,
+  "contained_evaluator_arguments_exclude_expected_results": true,
+  "all_expected_result_comparisons_preserved": true,
+  "bounded_library_batching": true,
+  "caller_sha256": "1d48de3d6598e548d3b9be0f1a24f4da21a209ecfbd20b1e921a99a805363c32",
+  "manifest_sha256": "b9365a45ceb9eda559520792e5646c6657d1a8819094a7cbec4759ecc30b9af1",
+  "child_current_receipts_historical_for67": true,
+  "application_and_image_acceptance_pending": true,
+  "normal_review_and_publication_pending": true,
+  "finding_dispositions": 0,
+  "operator_security_acceptance_recorded": false
+}

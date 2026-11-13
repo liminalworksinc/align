@@ -5,6 +5,10 @@
 # the ordered specification set.
 generated/*
 !generated/committed-source-cache/
+# Readable, hash-checked review projections and checkpoint result records.
+!generated/native-review-source/
+!generated/qualification-review/
+!generated/native-checkpoints/
 .litai-cache-locks/
 .component*.write.lock
 
@@ -28,3 +32,9 @@ dist/
 
 # literate-ai run locks (transient)
 /.litai-locks/
+
+# Local recovery records and workstation metadata.
+/.literate/native-additions/
+/.literate/native-child-additions/
+/.literate/native-child-revisions/
+.DS_Store

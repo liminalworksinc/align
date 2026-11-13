@@ -1,0 +1,12 @@
+LITAI_LANGUAGE_TOOL ?= node
+OUT ?= _build/run
+
+.PHONY: all test check
+all:
+	"$(LITAI_LANGUAGE_TOOL)" tools/package.js "$(OUT)"
+test:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" --check promise_queues/with_lock.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tests/litai_test.js

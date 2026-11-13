@@ -1,0 +1,83 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_value } = require('../server_value/create_value.js');
+
+function fixture(view = false) {
+  const calls = [];
+  let saved;
+  const pp = { wsId: 'w', userId: 'reader', wsRole: 'viewer' };
+  const cr = { id: 'r', state: 'approved', approved_by: { id: 'approver' }, decided_at: '1970-01-01T00:00:00.000Z', goal: { id: 'g' }, launch: 'pending', version: 3, base_version: 2, created_at: '1970-01-02T00:00:00.000Z', approved_without_evidence: false, requester: { id: 'requester' }, approvers: [], revisions: [] };
+  const resources = {
+    appsSentGoalVersion() { throw Error('unexpected apps'); },
+    ESTIMATES: ['small', 'large'],
+    diffOf(p, id) { assert.equal(p, pp); assert.equal(id, 'r'); return null; },
+    getChangeRequest(p, request, goal) { assert.equal(p, pp); assert.equal(request, 'r'); assert.equal(goal, 'g'); return cr; },
+    all() { assert.ok(view); return []; },
+    get(sql, ...args) { calls.push(['get', sql, ...args]); return sql.startsWith('SELECT *') ? undefined : saved; },
+    run(sql, ...args) {
+      calls.push(['run', sql, ...args]);
+      saved = { id: args[0], person_id: args[3], estimate: args[4], note: args[5], created_at: args[6], updated_at: args[7] };
+    },
+    tx(cb) { assert.equal(cb.constructor.name, 'Function'); return cb(); },
+    badRequest(message) { return Error(message); },
+    conflict(code, message) { return Object.assign(Error(message), { code }); },
+    event(name, value) { calls.push(['event', name, value]); return name !== 'follow_up_clicked'; },
+    goalObj() { throw Error('unexpected goalObj'); },
+    goalRow(ws, id) { assert.ok(view); assert.equal(ws, 'w'); assert.equal(id, 'g'); return { id: 'g', title: 'Goal', pod_id: null }; },
+    parentIds(ws, id) { assert.ok(view); assert.equal(ws, 'w'); assert.equal(id, 'g'); return []; },
+    newId(prefix) { assert.equal(prefix, 'vr'); return 'vr-test'; },
+    nowIso() { return '1970-01-01T00:00:00.000Z'; },
+    take(...args) { calls.push(['take', ...args]); },
+    canReadGoal() { throw Error('unexpected canReadGoal'); },
+    oneOf(body, key, choices) { assert.ok(choices.includes(body[key])); return body[key]; },
+    memberName(id) { assert.equal(id, 'reader'); return 'Reader'; },
+    cleanValueText(text) { return text.trim(); },
+    followUpUrl() { return null; },
+    spanWords(ms) { return String(ms); },
+    VALUE_EDIT_DAYS: 2,
+    VALUE_NOTE_MAX: 8,
+    readDate() { return { parse(value) { assert.equal(typeof this.now, 'function'); return Date.parse(value); }, now() { return 172800000; } }; }
+  };
+  const service = create_value(resources);
+  assert.deepEqual(Object.keys(service), ['valueView', 'VALUE_ACTIONS', 'recordValue']);
+  assert.equal(create_value.length, 1);
+  assert.equal(service.valueView.length, 3);
+  assert.equal(service.recordValue.length, 4);
+  assert.equal(service.valueView.name, 'valueView');
+  assert.equal(service.recordValue.constructor.name, 'AsyncFunction');
+  assert.deepEqual(service.VALUE_ACTIONS, ['viewed', 'reported', 'follow_up']);
+  return { service, pp, calls };
+}
+
+const cases = [
+  { id: 'generated-viewed', arguments: [{ wsId: 'w', userId: 'reader', wsRole: 'viewer' }, 'g', 'r', { action: 'viewed' }], expected: { recorded: true, report: null } },
+  { id: 'generated-report-boundary', arguments: [{ wsId: 'w', userId: 'reader', wsRole: 'viewer' }, 'g', 'r', { action: 'reported', estimate: 'small', note: '        ' }], expected: { recorded: true, report: { id: 'vr-test', person: { id: 'reader', name: 'Reader' }, estimate: 'small', note: null, created_at: '1970-01-01T00:00:00.000Z', updated_at: '1970-01-01T00:00:00.000Z', can_edit: false } } },
+  { id: 'generated-follow-up', arguments: [{ wsId: 'w', userId: 'reader', wsRole: 'viewer' }, 'g', 'r', { action: 'follow_up' }], expected: { recorded: false, report: null } },
+  { id: 'generated-pending-view', arguments: [{ wsId: 'w', userId: 'reader', wsRole: 'viewer' }, 'g', 'r'], expected: { change_request_id: 'r', goal: { id: 'g', title: 'Goal', version: null, base_version: 2, team: null }, launch: 'pending', launched_at: null, diff: {}, approved_by: { id: 'approver' }, decided_at: '1970-01-01T00:00:00.000Z', created_at: '1970-01-02T00:00:00.000Z', approved_without_evidence: false, affected: { parents: [], dependents: [] }, delivery: null, apps: null, measured: { proposal_to_decision: '0', decision_to_launch: null, decision_to_first_applied: null }, my_report: null, reports: [], sees_all_reports: false, follow_up_url: null } }
+];
+async function execute(c) {
+  const view = c.arguments.length === 3;
+  const f = fixture(view);
+  const args = c.arguments.slice();
+  assert.deepEqual(args[0], f.pp);
+  args[0] = f.pp;
+  const result = view ? f.service.valueView(...args) : await f.service.recordValue(...args);
+  assert.deepEqual(result, c.expected);
+  if (view) { assert.deepEqual(f.calls, []); return result; }
+  assert.deepEqual(f.calls[0], ['take', 'value:reader', 30, 60000]);
+  const event = f.calls.find(c => c[0] === 'event');
+  const action = args[3].action;
+  assert.deepEqual(event, ['event', action === 'viewed' ? 'value_card_viewed' : action === 'reported' ? 'value_reported' : 'follow_up_clicked', action === 'reported' ? { ws: 'w', user: 'reader', props: { estimate: 'small' } } : { ws: 'w', user: 'reader' }]);
+  if (action !== 'reported') assert.equal(f.calls.length, 2);
+  return result;
+}
+async function test() {
+  const outcomes = [];
+  for (const c of cases) {
+    await execute(c);
+    outcomes.push({ case_id: c.id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases: outcomes };
+}
+async function smoke() { return execute(cases[0]); }
+module.exports = { test, smoke };

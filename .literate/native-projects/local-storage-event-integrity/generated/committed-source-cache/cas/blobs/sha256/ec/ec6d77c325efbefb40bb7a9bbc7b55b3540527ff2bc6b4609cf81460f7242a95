@@ -1,0 +1,7 @@
+{
+  "name": "storage_event_integrity",
+  "type": "commonjs",
+  "exports": {
+    "./extend_event_integrity_schema": "./extend_event_integrity_schema.js"
+  }
+}

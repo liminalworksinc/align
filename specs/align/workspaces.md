@@ -535,6 +535,26 @@ static assets.
 - **WHEN** a hosted server starts with a past `ALIGN_DELETE_BY` left in its environment
 - **THEN** it ignores the setting and serves normally: a hosted server never shuts itself down, and how long data is kept follows the retention schedule
 
+### Requirement: Trust-document list termination
+
+The public trust-document Markdown reader SHALL consume an indented root list
+without repeating its first line. The root indentation limit SHALL be the greater
+of one whitespace character and the initial marker's indentation width, preserving
+the existing treatment of zero- and one-space markers. Markers at or before that
+limit are root items; deeper markers form the
+existing single nested list. Existing document structure, text, links, comments,
+placeholder filling and heading identifiers SHALL remain unchanged.
+
+#### Scenario: Indented unordered root list
+
+- **WHEN** a document begins with a two-space `- first`, a four-space `- nested`, and a two-space `- second`
+- **THEN** parsing terminates with one unordered root list containing `first` and `second`, and `first` contains the one-item nested list `nested`
+
+#### Scenario: Indented ordered root list
+
+- **WHEN** a document begins with four-space ordered markers, with a deeper marker between them
+- **THEN** parsing terminates with the two ordered root items and one nested item, each included once
+
 ### Requirement: Hosted startup checks
 
 The server SHALL refuse to start when hosted, naming each problem, unless `ALIGN_HOSTS` lists the public host names
@@ -552,6 +572,11 @@ URL; and SHALL log one warning when it starts hosted without the Turnstile keys.
 
 - **WHEN** a hosted server starts with none of the email settings and neither provider's id and secret
 - **THEN** it refuses to start and names that it needs the email settings or a Google or GitHub client
+
+#### Scenario: Data directory remains inside the application
+
+- **WHEN** a hosted server's absolute data directory resolves to the application directory or one of its descendants, including an ordinary child named `..private`
+- **THEN** it refuses to start and names that the data directory must be outside the application directory
 
 #### Scenario: Partial or unsafe settings
 
@@ -1028,6 +1053,11 @@ allow a person in any number of teams, with no team inside another.
 
 The server SHALL let only a workspace owner make someone a team lead, change a lead's team role, or remove another
 person who is a lead, while a lead may add and remove the team's members and remove themselves.
+
+#### Scenario: Viewer with a team lead role
+
+- **WHEN** a workspace viewer who is also a team lead adds or removes a team member through a team route or its pod alias
+- **THEN** the server responds 403 `read_only`, preserves team membership and records no team membership write
 
 #### Scenario: Lead promoting someone
 

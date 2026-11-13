@@ -1,0 +1,21 @@
+"use strict";
+const path=require("node:path"),assert=require("node:assert/strict");
+const h=require("./migration-coordinator-harness.cjs");
+assert(process.argv[2],"usage: node test-migration-coordinator-harness.cjs SOURCE_SNAPSHOT");
+const fn=h.baseline(path.resolve(process.argv[2])),controls=[];
+function check(name,vector,mutant){const expected=h.fixture(vector,fn),actual=h.fixture(vector,mutant);assert.notDeepEqual(actual,expected,name);controls.push({name,detected:true});}
+const alter=(execOverride,prepareOverride)=>(ctx,driver,migrations,complete,formatCount)=>fn(ctx,{exec:sql=>execOverride?execOverride(sql,driver):driver.exec(sql),prepare:sql=>prepareOverride?prepareOverride(sql,driver):driver.prepare(sql)},migrations,complete,formatCount);
+check("omitted-reference-check",{target:3,start:0,brokenAt:2,broken:1},alter(null,(sql,d)=>sql==="PRAGMA foreign_key_check"?{all:()=>[]}:d.prepare(sql)));
+check("omitted-rollback",{target:3,start:0,faults:[{op:"apply",at:2,kind:"object",id:"primary"}]},alter((sql,d)=>sql==="ROLLBACK"?undefined:d.exec(sql)));
+check("omitted-reference-restoration",{target:3,start:0},alter((sql,d)=>sql==="PRAGMA foreign_keys = ON"?undefined:d.exec(sql)));
+check("omitted-version-write",{target:3,start:0},alter((sql,d)=>/^PRAGMA user_version =/.test(sql)?undefined:d.exec(sql)));
+check("omitted-per-change-commit",{target:3,start:0},alter((sql,d)=>sql==="COMMIT"?undefined:d.exec(sql)));
+check("swallowed-primary-error",{target:3,start:0,faults:[{op:"apply",at:2,kind:"object",id:"primary"}]},(...args)=>{try{return fn(...args);}catch{}});
+check("replaced-primary-error-identity",{target:3,start:0,faults:[{op:"apply",at:2,kind:"object",id:"primary"}]},(...args)=>{try{return fn(...args);}catch{throw new Error("replacement");}});
+check("completed-failed-upgrade",{target:3,start:0,faults:[{op:"apply",at:2,kind:"object",id:"primary"}]},(ctx,d,m,complete,formatCount)=>{try{return fn(ctx,d,m,complete,formatCount);}finally{complete();}});
+check("wrong-current-version",{target:3,start:0},alter(null,(sql,d)=>sql==="PRAGMA user_version"?{get:()=>({user_version:3})}:d.prepare(sql)));
+check("rollback-error-hidden",{target:3,start:0,faults:[{op:"apply",at:2,kind:"object",id:"primary"},{op:"rollback",at:2,kind:"object",id:"rollback"}]},alter((sql,d)=>{if(sql!=="ROLLBACK")return d.exec(sql);try{return d.exec(sql);}catch{}}));
+check("restoration-error-hidden",{target:3,start:0,faults:[{op:"apply",at:2,kind:"object",id:"primary"},{op:"setReferences",enabled:true,kind:"object",id:"enable"}]},alter((sql,d)=>{if(sql!=="PRAGMA foreign_keys = ON")return d.exec(sql);try{return d.exec(sql);}catch{}}));
+check("formatter-error-hidden",{target:3,start:0,brokenAt:2,broken:2,faults:[{op:"referenceError",at:2,kind:"object",id:"primary"}]},(ctx,d,m,c,formatCount)=>fn(ctx,d,m,c,(...args)=>{try{return formatCount(...args);}catch{return "replacement";}}));
+check("completion-error-hidden",{target:3,start:0,faults:[{op:"complete",kind:"object",id:"completion"}]},(ctx,d,m,c,formatCount)=>fn(ctx,d,m,()=>{try{return c();}catch{}},formatCount));
+console.log(JSON.stringify({passed:true,controls:controls.length}));

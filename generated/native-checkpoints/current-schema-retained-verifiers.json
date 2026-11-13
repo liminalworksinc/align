@@ -1,0 +1,20 @@
+{
+  "schema": "align/current-schema-retained-verifier-classification@1",
+  "boundary": "B31",
+  "source_members": 653,
+  "new_paths": [
+    {
+      "path": "native/storage-refresh-schema-contained-v1.cjs",
+      "sha256": "187947114da7dca84c86637c4bcfefce052b200b705188b451eb936b97e00ee5",
+      "reason": "Repository-only readable acceptance verifier or its declarative oracle. Product implementation remains in the separately qualified generated library."
+    },
+    {
+      "path": "native/storage-refresh-schema.json",
+      "sha256": "47a319708cc3bb8f22ee3a06c2fa79bb1c621ea0b28e029be63739a988aebdd2",
+      "reason": "Repository-only readable acceptance verifier or its declarative oracle. Product implementation remains in the separately qualified generated library."
+    }
+  ],
+  "original280_retained_list_unchanged": true,
+  "no_new_retained_service_exception": true,
+  "authorization": "native-program.operator-go-all-prepared-v1.json"
+}

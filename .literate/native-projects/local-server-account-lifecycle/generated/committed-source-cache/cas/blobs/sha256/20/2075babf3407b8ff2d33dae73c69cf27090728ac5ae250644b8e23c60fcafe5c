@@ -1,0 +1,15 @@
+LITAI_LANGUAGE_TOOL ?= node
+OUT ?= ../artifact
+.PHONY: all test check
+all: test
+	"$(LITAI_LANGUAGE_TOOL)" tools/export.js "$(OUT)"
+	"$(LITAI_LANGUAGE_TOOL)" --check "$(OUT)/run"
+	"$(LITAI_LANGUAGE_TOOL)" "$(OUT)/run" --litai-test
+	"$(LITAI_LANGUAGE_TOOL)" "$(OUT)/run" --litai-smoke
+test: check
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" --check server_account_lifecycle/create_account.js
+	"$(LITAI_LANGUAGE_TOOL)" --check server_account_lifecycle/create_lifecycle.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tests/litai_test.js

@@ -1,9 +1,5 @@
-import { decideRequest, userCodeOf } from "@/lib/v2/devices";
-import { readJson, route, webWrite } from "@/lib/v2/http";
+// Typed entry point for the admitted route library.
+import { bindRoute } from "@/lib/v2/native-routes/binding";
+import { routes } from "@/lib/v2/native-routes/identity-routes";
 
-// POST /api/v2/device/deny (cookie) { user_code }
-export const POST = route(async (req) => {
-  const p = await webWrite(req);
-  const b = await readJson(req, 4096);
-  return decideRequest(p.user.id, userCodeOf(b), "deny", []);
-});
+export const POST = bindRoute<Record<string, string | string[] | undefined>>(routes, "device/deny", "POST");

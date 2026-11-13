@@ -1,0 +1,74 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_creation } = require('../server_workspace_admission/create_creation.js');
+const { create_access } = require('../server_workspace_admission/create_access.js');
+const { create_disposable } = require('../server_workspace_admission/create_disposable.js');
+
+const cases = [
+  ['generated-open', ['needsCode', 'open', 'person@example.org', '', false], false],
+  ['generated-no-owner', ['needsCode', 'codes', 'person@example.org', '', false], true],
+  ['generated-owner-first', ['needsCode', 'codes', 'OWNER@EXAMPLE.ORG', ' owner@example.org ', false], false],
+  ['generated-owner-existing', ['needsCode', 'codes', 'owner@example.org', 'owner@example.org', true], true],
+  ['generated-other-owner', ['needsCode', 'codes', 'other@example.org', 'owner@example.org', false], true],
+  ['generated-closed-code', ['needsCode', 'closed', 'person@example.org', 'owner@example.org', true], false]
+];
+function invoke(operation, mode, email, owner, existing) {
+  let reads = 0;
+  const api = create_creation({ creationMode: () => mode, readFirstOwnerEmail: () => owner,
+    get: () => { reads++; return existing ? { id: 'workspace' } : undefined; } });
+  const result = api.needsCode(email);
+  assert.equal(reads, mode === 'codes' && owner.trim().toLowerCase() === email.toLowerCase() && owner.trim() ? 1 : 0);
+  return result;
+}
+async function extraChecks() {
+  assert.equal(create_creation.length, 1);
+  assert.equal(create_access.length, 1);
+  assert.equal(create_disposable.length, 1);
+  const order = [];
+  const names = ['config', 'secret', 'requireCaptcha', 'caps', 'creationMode', 'isCreationCode', 'redeemCreationCode', 'get', 'sql', 'refuseDisposable', 'V2Error', 'conflict', 'forbidden', 'count', 'readFirstOwnerEmail', 'memberCheckNow'];
+  const resources = {};
+  for (const name of names) Object.defineProperty(resources, name, { get() { order.push(name); return undefined; } });
+  create_creation(resources);
+  assert.deepEqual(order, names);
+  class PublicError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
+  const api = create_creation({ config: () => ({ hosted: false }), V2Error: PublicError,
+    count: (n, unit) => `${n} ${unit}${n === 1 ? '' : 's'}` });
+  assert.equal(api.admitCreation({ id: 'u', email: 'e', emailVerified: true }, null, 'w'), false);
+  await api.precheckCreation({}, { id: 'u', email: 'e', emailVerified: true }, null);
+  const error = api.sessionCapError(2);
+  assert.ok(error instanceof PublicError);
+  assert.equal(error.message, 'This device has shared 2 new sessions in the last 24 hours, the limit here. Contact the operator of this Align server to raise it.');
+  const calls = [];
+  let access;
+  access = create_access({ config: () => ({ hosted: true }),
+    requireCaptcha: async req => { assert.equal(req, request); calls.push('captcha'); },
+    get: () => undefined, run: (...args) => { calls.push(args); },
+    tx: async fn => { calls.push('tx'); const result = fn(); assert.equal(result, undefined); },
+    refuseDisposable: email => { assert.equal(email, 'user@example.org'); },
+    event: (...args) => { calls.push(args); }, V2Error: PublicError,
+    badRequest: message => new PublicError(400, 'bad_request', message),
+    newId: prefix => { assert.equal(prefix, 'ar'); return 'ar-test'; }, nowIso: () => '2026-01-01T00:00:00.000Z',
+    accessEmailKey: email => `email:${email}`, durableCount: limits => { calls.push('count'); assert.equal(limits.length, 2); },
+    durableRoom: limits => { calls.push('room'); assert.deepEqual(limits, [{key:'access-client:client',max:5,windowMs:3600000},{key:'email:user@example.org',max:3,windowMs:86400000}]); return true; },
+    oneOf: (body, key, allowed) => { assert.equal(allowed, access.INTERESTS); return body[key]; },
+    optOneOf: (body, key, allowed) => { assert.equal(allowed, key === 'via' ? access.VIAS : access.TEAM_SIZES); return body[key] ?? null; },
+    optStr: (body, key) => body[key] ?? null, str: (body, key) => body[key]
+  });
+  const request = {};
+  const result = await access.createAccessRequest(request, 'client', {email:'USER@EXAMPLE.ORG',name:'Person',use_case:'Work',interest:'try'});
+  assert.deepEqual(result, {received:true});
+  assert.deepEqual(calls.slice(0, 5), ['room','captcha','tx','room','count']);
+  assert.deepEqual(calls[5].slice(1), ['ar-test','user@example.org','Person',null,null,'Work','try','2026-01-01T00:00:00.000Z']);
+  assert.deepEqual(calls[6], ['access_requested',{props:{interest:'try',via:'form'}}]);
+}
+async function runTests() {
+  const results = [];
+  for (const [id, args, expected] of cases) {
+    assert.deepEqual(invoke(...args), expected);
+    results.push({case_id:id,outcome:'passed'});
+  }
+  await extraChecks();
+  return {schema:'literate-ai/generated-test-results@1',cases:results};
+}
+function smoke() { return invoke(...cases[0][1]); }
+module.exports = { runTests, smoke };

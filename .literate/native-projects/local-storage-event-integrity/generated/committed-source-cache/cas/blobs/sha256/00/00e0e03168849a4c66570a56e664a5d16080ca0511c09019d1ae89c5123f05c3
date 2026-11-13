@@ -1,0 +1,13 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const destination = process.argv[2];
+if (!destination) throw new Error('Output directory required');
+const root = path.resolve(__dirname, '..');
+fs.mkdirSync(destination, { recursive: true });
+for (const relative of ['main.js', 'tests/litai_test.js', 'storage_event_integrity/package.json', 'storage_event_integrity/extend_event_integrity_schema.js']) {
+  const target = path.join(destination, relative);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.copyFileSync(path.join(root, relative), target);
+}
+fs.writeFileSync(path.join(destination, 'run'), '#!/usr/bin/env node\n' + "'use strict';\ntry { process.stdout.write(JSON.stringify(require('./main.js').dispatch(process.argv.slice(2))) + '\\n'); } catch (error) { process.stderr.write(error.message + '\\n'); process.exitCode = 1; }\n", { mode: 0o755 });

@@ -1,0 +1,61 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_home } = require('../server_home/create_home.js');
+
+function invoke(principal, unavailable = false) {
+  const groups = () => ({ waiting_on_me: [], mine: [], others: [] });
+  const resources = {
+    listGrants: () => [], config: () => ({ hosted: true }),
+    listAlignments: groups, listAsks: () => [], changeRequestGroups: groups,
+    all: () => [], goalRow: () => null,
+    visibleGoals: () => { if (unavailable) throw null; return []; },
+    alignmentWaits: () => null, appEvidence: () => null,
+    changeWaits: () => null, launchWaits: () => null,
+    memberName: id => id, readConsole: () => ({ error() {} })
+  };
+  const api = create_home(resources);
+  assert.deepEqual(Object.keys(api), ['workspaceHome']);
+  assert.equal(api.workspaceHome.name, 'workspaceHome');
+  assert.equal(api.workspaceHome.length, 1);
+  return api.workspaceHome(principal);
+}
+const cases = [
+  {
+    id: 'generated-empty-member',
+    args: [{ userId: 'reader-a', wsId: 'space-a', wsRole: 'member' }, false],
+    expected: { me: 'reader-a', change_requests: { waiting_on_me: [], waiting_on_others: [], declined: [] }, asks: { waiting_on_me: [] }, alignments: { waiting_on_me: [], waiting_on_others: [] }, goals: [], apps: { everyone: false, items: [] } }
+  },
+  {
+    id: 'generated-empty-owner',
+    args: [{ userId: 'reader-b', wsId: 'space-b', wsRole: 'owner' }, false],
+    expected: { me: 'reader-b', change_requests: { waiting_on_me: [], waiting_on_others: [], declined: [] }, asks: { waiting_on_me: [] }, alignments: { waiting_on_me: [], waiting_on_others: [] }, goals: [], apps: { everyone: true, items: [] } }
+  },
+  {
+    id: 'generated-unknown-goals',
+    args: [{ userId: 'reader-c', wsId: 'space-c', wsRole: 'member' }, true],
+    expected: { me: 'reader-c', change_requests: { waiting_on_me: [], waiting_on_others: [], declined: [] }, asks: { waiting_on_me: [] }, alignments: { waiting_on_me: [], waiting_on_others: [] }, goals: null, apps: { everyone: false, items: [] } }
+  }
+];
+function run() {
+  assert.equal(create_home.name, 'create_home');
+  assert.equal(create_home.length, 1);
+  const order = [];
+  const keys = ['listGrants', 'config', 'listAlignments', 'listAsks', 'changeRequestGroups',
+    'all', 'goalRow', 'visibleGoals', 'alignmentWaits', 'appEvidence', 'changeWaits',
+    'launchWaits', 'memberName', 'readConsole'];
+  const captured = {};
+  for (const key of keys) Object.defineProperty(captured, key, {
+    get() { order.push(key); return undefined; }
+  });
+  create_home(captured);
+  assert.deepEqual(order, keys);
+  const results = [];
+  for (const test of cases) {
+    assert.deepEqual(invoke(...test.args), test.expected);
+    results.push({ case_id: test.id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+function smoke() { return invoke(...cases[0].args); }
+exports.run = run;
+exports.smoke = smoke;

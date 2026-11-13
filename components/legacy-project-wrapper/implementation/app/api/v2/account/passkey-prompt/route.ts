@@ -1,9 +1,5 @@
-import { dismissPasskeyPrompt } from "@/lib/v2/account";
-import { noContent, route, webWrite } from "@/lib/v2/http";
+// Typed entry point for the admitted route library.
+import { bindRoute } from "@/lib/v2/native-routes/binding";
+import { routes } from "@/lib/v2/native-routes/identity-routes";
 
-// DELETE /api/v2/account/passkey-prompt (cookie): "Not now" on the "add a passkey" prompt, remembered for this person.
-export const DELETE = route(async (req) => {
-  const p = await webWrite(req);
-  await dismissPasskeyPrompt(p.user.id);
-  return noContent();
-});
+export const DELETE = bindRoute<Record<string, string | string[] | undefined>>(routes, "account/passkey-prompt", "DELETE");

@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+'use strict';
+try { require('./main.js').main(process.argv.slice(2)); }
+catch (error) {
+  process.stderr.write(String(error && error.stack || error) + '\n');
+  process.exitCode = 1;
+}

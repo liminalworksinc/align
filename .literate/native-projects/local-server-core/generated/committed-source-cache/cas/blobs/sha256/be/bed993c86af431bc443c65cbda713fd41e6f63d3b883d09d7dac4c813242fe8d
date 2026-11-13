@@ -1,0 +1,188 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_core } = require('../server_core/create_core.js');
+const { create_events } = require('../server_core/create_events.js');
+
+function resources() {
+  return {
+    serverSecret: () => 'secret', hmac: (secret, value) => `${secret}:${value}`,
+    runtimeSettings: { testIdpEnabled: () => false, validMaxDays: () => 14, sessionMaxDays: () => 30 },
+    identifierTools: { rand32: n => n === 15 ? 'id-draw' : 'code-draw' },
+    readDate: () => Date,
+    readFetch: () => { throw new Error('Unexpected fetch'); },
+    readAbortSignal: () => { throw new Error('Unexpected abort'); },
+    readConsole: () => { throw new Error('Unexpected logging'); },
+    readURLSearchParams: () => URLSearchParams
+  };
+}
+
+function exercise(operation, ...args) {
+  const core = create_core(resources());
+  const calls = [];
+  const db = {
+    run(...params) { assert.equal(this, db); calls.push(params); return 1; },
+    get(...params) { assert.equal(this, db); calls.push(params); return undefined; },
+    all(...params) { assert.equal(this, db); calls.push(params); return []; }
+  };
+  if (operation === 'recordEvent') {
+    const [name, options, changes] = args;
+    db.run = function (...params) { assert.equal(this, db); calls.push(params); return changes; };
+    const result = core.recordEvent(db, name, options);
+    assert.deepEqual(calls, [[
+      'INSERT INTO v2_events (name, ws_id, actor, at, props) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
+      name, options.ws ?? null, options.actor ?? null, options.at, JSON.stringify(options.props ?? {})
+    ]]);
+    return result;
+  }
+  if (operation === 'redeemCreationCode') {
+    const result = core.redeemCreationCode(db, ...args);
+    assert.deepEqual(calls, []);
+    return result;
+  }
+  if (operation === 'approveAccessRequest') {
+    const [secret, id, days, now, row] = args;
+    db.get = function (...params) { assert.equal(this, db); calls.push(params); return row; };
+    const result = core.approveAccessRequest(db, secret, id, days, now);
+    assert.deepEqual(calls, [['SELECT * FROM v2_access_requests WHERE id = ?', id]]);
+    return result;
+  }
+  if (operation === 'listAccessRequests') {
+    const [status, rows] = args;
+    db.all = function (...params) { assert.equal(this, db); calls.push(params); return rows; };
+    const result = core.listAccessRequests(db, status);
+    assert.equal(result, rows);
+    assert.deepEqual(calls, [[status ? 'SELECT * FROM v2_access_requests WHERE status = ? ORDER BY created_at, id' : 'SELECT * FROM v2_access_requests ORDER BY created_at, id', ...(status ? [status] : [])]]);
+    return result;
+  }
+  if (operation === 'mutateEstimate') {
+    const [estimate, at] = args;
+    assert.equal(core.EVENT_PROPS.value_reported.estimate, core.ESTIMATES);
+    assert.equal(core.EVENT_PROPS.loi_sent.note_ref, core.NOTE_REF_RE);
+    assert.equal(core.EVENT_PROPS.loi_signed.note_ref, core.NOTE_REF_RE);
+    assert.equal(core.EVENT_PROPS.first_session_captured.harness, core.EVENT_PROPS.member_first_session_captured.harness);
+    assert.equal(core.EVENT_PROPS.first_session_bound.harness, core.EVENT_PROPS.first_session_captured.harness);
+    core.ESTIMATES.push(estimate);
+    assert.equal(create_core(resources()).ESTIMATES.includes(estimate), false);
+    return core.recordEvent(db, 'value_reported', { props: { estimate }, at });
+  }
+  if (operation === 'event') {
+    const [name, options, providerResult] = args;
+    const effects = [];
+    const events = create_events({
+      secret: () => { effects.push('secret'); return 's'; },
+      eventActor: (s, u) => { effects.push([s, u]); return 'actor'; },
+      recordEvent: (...values) => { effects.push(values); return providerResult; },
+      sql: db, get: () => undefined, tx: () => { throw new Error('Unexpected transaction'); }
+    });
+    const event = events.event;
+    const result = event(name, options);
+    assert.deepEqual(effects, ['secret', ['s', options.user], [db, name, {
+      ws: options.ws, actor: 'actor', props: options.props, at: options.at
+    }]]);
+    return result;
+  }
+  if (operation === 'insertCreationCode') {
+    const result = core.insertCreationCode(db, ...args);
+    assert.deepEqual(calls, [
+      ['INSERT INTO v2_creation_codes (id, code_hash, email, request_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)',
+        'cc_id-draw', 's:alc.alc_code-draw', 'a@example.test', null, '1970-01-01T00:00:00.000Z', '1970-01-01T00:00:00.000Z'],
+      ['INSERT INTO v2_events (name, ws_id, actor, at, props) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
+        'code_created', null, null, '1970-01-01T00:00:00.000Z', '{"source":"operator"}']
+    ]);
+    return result;
+  }
+  if (operation === 'softDeleteWorkspace') {
+    const [ws, actor, at, changes] = args;
+    db.run = function (...params) { assert.equal(this, db); calls.push(params); return changes; };
+    const result = core.softDeleteWorkspace(db, ws, actor, at);
+    assert.deepEqual(calls, [['UPDATE v2_workspaces SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL', at, ws]]);
+    return result;
+  }
+  throw new Error(`Unknown generated test operation ${operation}`);
+}
+
+function checkBindingAndCallbacks() {
+  const r = resources();
+  const reads = [];
+  const tracked = new Proxy(r, { get(target, key) { reads.push(key); return target[key]; } });
+  r.runtimeSettings = new Proxy(r.runtimeSettings, { get(target, key) { reads.push(key); return target[key]; } });
+  r.identifierTools = new Proxy(r.identifierTools, { get(target, key) { reads.push(key); return target[key]; } });
+  const core = create_core(tracked);
+  assert.deepEqual(reads, ['serverSecret', 'hmac', 'runtimeSettings', 'identifierTools', 'readDate', 'readFetch', 'readAbortSignal', 'readConsole', 'readURLSearchParams', 'testIdpEnabled', 'validMaxDays', 'sessionMaxDays', 'rand32']);
+  assert.equal(core.serverSecret, r.serverSecret);
+  assert.equal(core.hmac, r.hmac);
+  assert.equal(core.rand32, r.identifierTools.rand32);
+  const detached = core.eventActor;
+  assert.equal(detached('key', 'person'), 'key:ale.person');
+  let callbackResult;
+  let handlerResult = 'unset';
+  const token = {};
+  const events = create_events({ secret: () => 's', eventActor: () => 'a', recordEvent: () => token, sql: {}, get: () => undefined,
+    tx: function (callback) {
+      assert.equal(this, undefined);
+      assert.equal(callback.length, 0);
+      assert.equal(callback.name, '');
+      callbackResult = callback();
+      return { catch(handler) {
+        assert.equal(handler.length, 0);
+        assert.equal(handler.name, '');
+        handlerResult = handler(new Error('deliberate rejection'));
+      } };
+    }
+  });
+  assert.equal(events.noteFirstMcpRead('w', 'u', 'app'), undefined);
+  assert.equal(callbackResult, token);
+  assert.equal(handlerResult, undefined);
+  const name = { [Symbol.toPrimitive](hint) { assert.equal(hint, 'string'); return 'unknown'; } };
+  assert.throws(() => core.recordEvent({}, name), { message: 'Unknown event unknown' });
+  assert.throws(() => core.recordEvent({}, Symbol('unknown')), TypeError);
+  assert.throws(() => core.recordEvent({}, 'device_paired', { props: { workspaces: -1 } }), { message: "Event device_paired can't carry workspaces" });
+}
+
+async function checkEmail() {
+  const r = resources();
+  const effects = [];
+  r.readFetch = () => {
+    effects.push('fetch');
+    return function (url, options) {
+      assert.equal(this, undefined);
+      assert.equal(url, 'https://mail.example.test/send');
+      assert.deepEqual(options, { method: 'POST', headers: { authorization: 'Bearer key', 'content-type': 'application/json' },
+        body: '{"from":"sender","to":"recipient","subject":"subject","text":"text"}', signal: 'signal', redirect: 'error' });
+      effects.push('send');
+      return { body: { cancel() { effects.push('cancel'); return { catch(handler) {
+        assert.equal(handler.length, 0); assert.equal(handler.name, ''); assert.equal(handler(), undefined);
+      } }; } }, get ok() { effects.push('ok'); return true; } };
+    };
+  };
+  const abort = { timeout(ms) { assert.equal(this, abort); assert.equal(ms, 10000); effects.push('timeout'); return 'signal'; } };
+  r.readAbortSignal = () => abort;
+  assert.equal(await create_core(r).postEmail({ url: 'https://mail.example.test/send', key: 'key', from: 'sender' },
+    { to: 'recipient', subject: 'subject', text: 'text' }, 'Invitation'), undefined);
+  assert.deepEqual(effects, ['fetch', 'timeout', 'send', 'cancel', 'ok']);
+}
+
+async function run() {
+  const passed = [];
+  function check(id, args, expected) {
+    assert.deepEqual(exercise(...args), expected);
+    passed.push({ case_id: id, outcome: 'passed' });
+  }
+  check('generated-event-count-zero', ['recordEvent', 'device_paired', { props: { workspaces: 0 }, at: '1970-01-01T00:00:00.000Z' }, 1], true);
+  check('generated-event-strict-result', ['recordEvent', 'access_approved', { at: '1970-01-01T00:00:00.000Z' }, '1'], false);
+  check('generated-code-pattern-refusal', ['redeemCreationCode', 's', 'wrong', 'A@example.test', 'u', 'w', 0], false);
+  check('generated-request-declined', ['approveAccessRequest', 's', 'request-7', 14, 0, { status: 'declined' }], null);
+  check('generated-request-array-identity', ['listAccessRequests', '', []], []);
+  check('generated-shared-estimate-rule', ['mutateEstimate', 'additional-estimate', '1970-01-01T00:00:00.000Z'], true);
+  check('generated-event-provider-value', ['event', 'first_mcp_read', { ws: 'w', user: 'u', props: { client: 'device' }, at: 't' }, 37], 37);
+  check('generated-code-zero-validity', ['insertCreationCode', 's', { email: ' A@Example.Test ', days: 0 }, 0],
+    { id: 'cc_id-draw', code: 'alc_code-draw', email: 'a@example.test', expires_at: '1970-01-01T00:00:00.000Z' });
+  check('generated-soft-delete-refusal', ['softDeleteWorkspace', 'w', 'actor', 't', true], false);
+  checkBindingAndCallbacks();
+  await checkEmail();
+  return { schema: 'literate-ai/generated-test-results@1', cases: passed };
+}
+function smoke() {
+  return exercise('event', 'first_mcp_read', { ws: 'w', user: 'u', props: { client: 'device' }, at: 't' }, 37);
+}
+module.exports = { run, smoke };

@@ -1,0 +1,23 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const sourceRoot = path.resolve(__dirname, '..');
+const destination = path.resolve(process.argv[2]);
+if (destination === sourceRoot) throw new Error('Artifact directory must differ from source root');
+const files = [
+  'main.js', 'run', 'tests/litai_test.js',
+  'server_workspace_admission/package.json',
+  'server_workspace_admission/create_creation.js',
+  'server_workspace_admission/create_access.js',
+  'server_workspace_admission/create_disposable.js',
+  'server_workspace_admission/create_creation.d.ts',
+  'server_workspace_admission/create_access.d.ts',
+  'server_workspace_admission/create_disposable.d.ts',
+  'server_workspace_admission/disposable-domains.json'
+];
+for (const file of files) {
+  const target = path.join(destination, file);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.copyFileSync(path.join(sourceRoot, file), target);
+}
+fs.chmodSync(path.join(destination, 'run'), 0o755);

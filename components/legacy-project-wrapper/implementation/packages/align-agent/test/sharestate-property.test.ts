@@ -36,7 +36,7 @@ after(async () => {
   for (const c of cleanups.reverse()) await c();
 });
 
-const FIXED = [1, 2, 3, 5, 8, 13, 21];
+const FIXED = [1, 2, 3, 5, 8, 13, 21, 1630038945];
 const SEEDS = process.env.ALIGN_PROP_SEEDS
   ? process.env.ALIGN_PROP_SEEDS.split(",").map(Number)
   : [...FIXED, ...Array.from({ length: 2 }, () => Math.floor(Math.random() * 2 ** 31))];
@@ -141,6 +141,30 @@ function wouldTell(t: TestEnv, s: S): { id: string; text: string } | null {
 /** How many checks compared a notice's way out with a deny's, by way: the run must have compared some (not vacuous). */
 const compared: Record<string, number> = {};
 
+test("a previous pairing's stop is not heard by this pairing and does not block its freed session", async () => {
+  const { fake, t } = await world();
+  const [s] = await sessions(t);
+  await runCli(t, ["sync"]);
+  const before = readJson<{ device_id: string }>(layout.credentials(t.home))!;
+  assert.equal(fake.sessions.get(s.key)?.device, before.device_id);
+  assert.equal((await runCli(t, ["login", "--name", "Replacement Mac"])).code, 0);
+  const current = readJson<{ device_id: string }>(layout.credentials(t.home))!;
+  assert.notEqual(current.device_id, before.device_id);
+  assert.equal((await runCli(t, ["stop-sharing", s.lid.slice(0, 8)])).code, 0);
+  assert.equal(fake.sessions.get(s.key)?.state, "shared", "the earlier pairing's server row is still present");
+  const ctx = ctxFor(t);
+  ctx.db.prepare("INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(NEWEST_BUILD, JSON.stringify({ version: "9.9.9", build: "fffffffffff0", gen: WRITER_GEN + 1, since: new Date().toISOString() }));
+  ctx.db.close();
+  const directive = fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [s.key], goal: null, binding: null });
+  assert.equal((await runCli(t, ["sync"])).code, 0);
+  const check = ctxFor(t);
+  assert.equal(check.db.prepare("SELECT id FROM directives WHERE id=?").get(directive.id), undefined, "this pairing cannot receive a directive addressed only to the earlier one");
+  check.db.close();
+  const tool = json(runHook(t, "claude", "PreToolUse", { session_id: s.sid, tool_name: "Bash", tool_input: { command: "true" }, cwd: s.cwd }).stdout);
+  assert.equal(tool?.hookSpecificOutput?.permissionDecisionReason, undefined, "an unheard stop does not block the freed local session");
+  assert.equal(fs.existsSync(layout.latch(t.home, s.lid)), false);
+});
+
 test(`share-state notices agree with the deny and the status views, whatever the order of events (seeds ${SEEDS.join(", ")}; ${STEPS} steps each)`, async () => {
   for (const seed of SEEDS) {
     const rand = rng(seed);
@@ -157,6 +181,10 @@ test(`share-state notices agree with the deny and the status views, whatever the
     const signedIn = () => {
       const c = readJson<{ signed_out?: boolean }>(layout.credentials(t.home));
       return !!c && !c.signed_out;
+    };
+    const liveHere = () => {
+      const device = readJson<{ device_id: string }>(layout.credentials(t.home))?.device_id;
+      return live().filter((s) => fake.sessions.get(s.key)?.device === device);
     };
     const events: Record<string, () => Promise<unknown>> = {
       logout: () => runCli(t, ["logout"]),
@@ -264,15 +292,24 @@ test(`share-state notices agree with the deny and the status views, whatever the
           ctx.db.prepare("INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(NEWEST_BUILD, JSON.stringify({ version: "9.9.9", build: "fffffffffff0", gen: WRITER_GEN + 1, since: new Date().toISOString() }));
           ctx.db.close();
           // A stop or a hold it alone hears is enforced at the next tool call, before the newest build runs.
-          // (Only to a session shared on the server while this machine is signed in: a signed-out pass hears nothing.)
-          const target = signedIn() && live().length && rand() < 0.5 ? pick(live()) : null;
+          // Only this pairing's server sessions receive directives. A replacing login leaves earlier pairings'
+          // server rows present, but this device cannot hear their stop or hold.
+          const eligible = liveHere();
+          const target = signedIn() && eligible.length && rand() < 0.5 ? pick(eligible) : null;
           if (target) {
             // A hold only when the goal is not held already (a hold that is on reached the sessions it was sent to).
             if (rand() < 0.5 || fake.holds.has("ws_acme/g_ship")) fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [target.key], goal: null, binding: null });
             else fake.holdGoal("ws_acme", "g_ship", ss.map((x) => x.key));
             await sync();
             const reason = json(runHook(t, "claude", "PreToolUse", { session_id: target.sid, tool_name: "Bash", tool_input: { command: "true" }, cwd: target.cwd }).stdout)?.hookSpecificOutput?.permissionDecisionReason;
-            assert.ok(reason, `seed ${seed} after ${trail.join(" > ")}: a stop or hold heard only by an older build is not enforced`);
+            const check = ctxFor(t);
+            const localState = check.db.prepare("SELECT state,error FROM shares WHERE local_id=?").get(target.lid);
+            const latchState = check.db.prepare("SELECT stopped FROM latches WHERE local_id=?").get(target.lid);
+            const heldState = check.db.prepare("SELECT COUNT(*) AS n FROM holds WHERE local_id=? AND held=1").get(target.lid);
+            check.db.close();
+            const currentDevice = readJson<{ device_id: string }>(layout.credentials(t.home))?.device_id;
+            const diagnostic = { localState, latchState, heldState, serverState: fake.sessions.get(target.key)?.state, serverOwnedByCurrentDevice: fake.sessions.get(target.key)?.device === currentDevice, latchFile: fs.existsSync(layout.latch(t.home, target.lid)), holdFile: fs.existsSync(layout.hold(t.home, target.lid)) };
+            assert.ok(reason, `seed ${seed} after ${trail.join(" > ")}: a stop or hold heard only by an older build is not enforced ${JSON.stringify(diagnostic)}`);
           } else {
             await pick([() => runCli(t, ["logout"]), () => runCli(t, ["login", "--name", "Prop Mac"]), sync, () => runCli(t, ["stop-sharing", s.lid.slice(0, 8)])])();
           }

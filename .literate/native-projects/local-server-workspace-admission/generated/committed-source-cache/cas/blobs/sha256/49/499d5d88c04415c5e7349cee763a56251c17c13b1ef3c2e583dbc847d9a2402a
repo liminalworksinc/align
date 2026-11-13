@@ -1,0 +1,32 @@
+export type Creator = { id: string; email: string; emailVerified: boolean };
+export type Config = { hosted: boolean; dataDir: string; allowedHosts: Set<string> };
+export type Caps = { workspaces: number; owned: number; members: number; sessionsPerDeviceDay: number };
+export type CreationMode = 'codes' | 'open' | 'closed';
+export interface PublicError { status: number; code: string; message?: string; }
+export interface CreationResources<Sql = unknown, Request = unknown, ErrorShape = PublicError> {
+  config: () => Config;
+  secret: () => string;
+  requireCaptcha: (request: Request) => Promise<void>;
+  caps: (env?: Record<string, string | undefined>) => Caps | null;
+  creationMode: (env?: Record<string, string | undefined>) => CreationMode;
+  CODE_RE: RegExp;
+  redeemCreationCode: (db: Sql, secret: string, code: string, email: string, userId: string, wsId: string, now?: number) => boolean;
+  get: <T = Record<string, unknown>>(sql: string, ...params: unknown[]) => T | undefined;
+  sql: Sql;
+  refuseDisposable: (email: string) => void;
+  V2Error: new (status: number, code: string, message?: string, extra?: Record<string, unknown>) => ErrorShape;
+  conflict: (code: string, message: string) => ErrorShape;
+  forbidden: (code: string, message: string) => ErrorShape;
+  count: (n: number, one: string, many?: string, fmt?: (n: number) => string) => string;
+  readFirstOwnerEmail: () => string | undefined;
+  memberCheckNow: () => string;
+}
+export interface CreationNamespace<Request = unknown, ErrorShape = PublicError> {
+  needsCode(email: string): boolean;
+  precheckCreation(request: Request, creator: Creator, code: string | null): Promise<void>;
+  admitCreation(creator: Creator, code: string | null, workspaceId: string): boolean;
+  checkRestoreCaps(userId: string): void;
+  checkMemberCap(workspaceId: string, countInvites: boolean): void;
+  sessionCapError(max: number): ErrorShape;
+}
+export function create_creation<Sql, Request, ErrorShape>(resources: CreationResources<Sql, Request, ErrorShape>): CreationNamespace<Request, ErrorShape>;

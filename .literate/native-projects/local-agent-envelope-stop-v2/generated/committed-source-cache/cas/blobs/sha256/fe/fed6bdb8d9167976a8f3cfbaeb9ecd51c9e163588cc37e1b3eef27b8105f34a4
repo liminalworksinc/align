@@ -1,0 +1,3 @@
+'use strict';
+const {clean} = require('./core.js');
+module.exports = {clean};

@@ -1,0 +1,48 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { create_identity_routes } = require('../server_identity_routes/create_identity_routes.js');
+
+async function refusal(input) {
+  const effects = [];
+  const free = (name, result) => function () {
+    assert.equal(this, undefined);
+    effects.push(name);
+    return result;
+  };
+  const resources = {
+    Response, URL, config: {}, access: {}, account: {}, devices: {}, errors: {}, validate: {}, workspaces: {},
+    auth: { getAuth: () => { throw new Error('Refused request reached auth SDK'); } },
+    http: { route: callback => async (req, ctx) => callback(req, await ctx.params) },
+    init: { ready: () => { throw new Error('Refused request reached readiness'); } },
+    nextServer: { connection: free('connection') }
+  };
+  const routes = create_identity_routes(resources);
+  assert.deepEqual(effects, []);
+  assert.equal(Object.keys(routes).length, 19);
+  assert.equal(Object.values(routes).reduce((n, route) => n + Object.keys(route).length, 0), 22);
+  assert.equal(routes['auth/[...all]'].GET, routes['auth/[...all]'].POST);
+  const request = new Request('https://example.test/api/v2/auth/session', { headers: { authorization: input.authorization } });
+  const response = await routes['auth/[...all]'][input.method](request);
+  assert.equal(response.status, 403);
+  assert.equal(response.headers.get('content-type'), 'application/json');
+  assert.deepEqual(effects, ['connection']);
+  return response.json();
+}
+
+const cases = [
+  { id: 'generated-auth-bearer', args: [{ authorization: 'Bearer private-device-token', method: 'GET' }], expected: { error: 'bearer_not_allowed', message: 'Web routes do not accept device tokens' } },
+  { id: 'generated-auth-empty', args: [{ authorization: '', method: 'POST' }], expected: { error: 'bearer_not_allowed', message: 'Web routes do not accept device tokens' } },
+  { id: 'generated-auth-basic', args: [{ authorization: 'Basic local-credential', method: 'POST' }], expected: { error: 'bearer_not_allowed', message: 'Web routes do not accept device tokens' } }
+];
+
+async function run() {
+  const results = [];
+  for (const test of cases) {
+    assert.deepEqual(await refusal(...test.args), test.expected);
+    results.push({ case_id: test.id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+async function smoke() { return refusal(...cases[0].args); }
+module.exports = { run, smoke };

@@ -1,0 +1,56 @@
+{
+  "schema": "align/server-request-effects-consumer-observation@1",
+  "status": "partial",
+  "owning_work": "ADOPT-002/B12",
+  "original_modules": {
+    "lib/http.ts": "aeb8cdeca6c5311647a377a2e79aac8c302cbe08eb0b5807051fdc3ceea3585a",
+    "lib/v2/http.ts": "b1a42f7314d8a6625e991e063d7d29abe143158cc771a88dc3f2b12bf2b06986"
+  },
+  "typed_consumers": {
+    "lib/http.ts": "aedad9c33bc41a3743e9614dda6624900d5c63abfc329bc728de8f7202b0bc5b",
+    "lib/v2/http.ts": "afc1acd294124d85ae7fd760c4fb450202e90589c2c727ab8bfb5b60c76e90df"
+  },
+  "runtime_exports": 18,
+  "source_batches_each_host": 46,
+  "source_controls_each_host": 24,
+  "clean_generations": 2,
+  "observations_each_generation": 46,
+  "qualification_decision": "sha256:2fcd7ef6382d71c016322a93acc4d52c076e19905dd16b1bbaa111a70cb17ede",
+  "qualified_projection": "sha256:b42fcfc8d1b5a8904bc00a80a4cf1493dcb862256be855242e724dbd5d2a804b",
+  "component_lock": "sha256:d9131037a0cc21f1c76f2a8826039792987ce1d60e72e2a18fe9340fb0abbe13",
+  "admitted_entry": "sha256:51da20a582d035546e3f8684179d2b7aad7df32fec9dbfe6c13679a45a239311",
+  "current_child_receipt": "sha256:43a38b3e67cb55f3446cf8a3b64519b01ba56bc2733e64467e976370a2d79ff2",
+  "actual_source_records_match_both_hosts": true,
+  "public_namespaces_assign_both_directions": 2,
+  "public_principal_types_assign_both_directions": true,
+  "actual_callers_compile": [
+    "instrumentation.ts",
+    "app/api/v2/device/authorize/route.ts",
+    "app/oauth/register/route.ts",
+    "app/api/oauth/approve/route.ts"
+  ],
+  "production_web_libraries": 20,
+  "production_web_batches": 717,
+  "registered_libraries": 26,
+  "prior_registry_and_consumer_records_unchanged": 25,
+  "authentication_database_configuration_readiness_startup_and_operator_unchanged": true,
+  "functional_vm_is_security_sandbox": false,
+  "preserved_semantics": [
+    "Separate legacy host and origin configuration reads",
+    "Existing distinct host and origin refusal messages",
+    "Connection failure outside route response mapping",
+    "Credential header presence and refusal order",
+    "Byte caps, awaited cancellation and exact provider failures"
+  ],
+  "remaining": [
+    "Complete application build/test/package",
+    "Immutable image acceptance",
+    "Current parent receipt and both verification runtimes",
+    "Remaining 31-boundary program",
+    "Specifically approved publication and deployment",
+    "Public tester URL, operator security review and live smoke"
+  ],
+  "published": false,
+  "deployed": false,
+  "live_qa_gates": 0
+}

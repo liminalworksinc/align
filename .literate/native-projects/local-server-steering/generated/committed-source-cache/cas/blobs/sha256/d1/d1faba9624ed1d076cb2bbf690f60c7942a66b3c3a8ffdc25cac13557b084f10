@@ -1,0 +1,330 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_steering } = require('../server_steering/create_steering.js');
+const cases = [
+  [
+    "generated-switch-on",
+    "example",
+    [
+      "workspaceSteering",
+      {
+        "steering": "on"
+      },
+      "workspace-a"
+    ],
+    "on"
+  ],
+  [
+    "generated-switch-unknown",
+    "invariant",
+    [
+      "workspaceSteering",
+      {
+        "steering": "ON"
+      },
+      "workspace-b"
+    ],
+    "off"
+  ],
+  [
+    "generated-write-noop",
+    "boundary",
+    [
+      "writeSteering",
+      {
+        "steering": "off"
+      },
+      {
+        "wsId": "workspace-a",
+        "userId": "person-a",
+        "wsRole": "owner"
+      },
+      "off",
+      "caller-time"
+    ],
+    "off"
+  ],
+  [
+    "generated-write-change",
+    "example",
+    [
+      "writeSteering",
+      {
+        "steering": "off"
+      },
+      {
+        "wsId": "workspace-a",
+        "userId": "person-a",
+        "wsRole": "owner"
+      },
+      "on",
+      "caller-time"
+    ],
+    "on"
+  ],
+  [
+    "generated-empty-intake",
+    "boundary",
+    [
+      "ingestSteering",
+      {},
+      {
+        "wsId": "workspace-a",
+        "userId": "person-a",
+        "wsRole": "owner"
+      },
+      {
+        "deviceId": "device-a",
+        "user": {
+          "id": "person-a"
+        }
+      },
+      {
+        "events": []
+      }
+    ],
+    {
+      "accepted": 0,
+      "refused": [],
+      "server_time": "1970-01-01T00:00:00.000Z"
+    }
+  ],
+  [
+    "generated-inclusive-and-duplicate",
+    "invariant",
+    [
+      "ingestSteering",
+      {
+        "sessions": {
+          "session-a": {
+            "device_id": "device-a",
+            "user_id": "person-a",
+            "state": "shared"
+          }
+        }
+      },
+      {
+        "wsId": "workspace-a",
+        "userId": "person-a",
+        "wsRole": "owner"
+      },
+      {
+        "deviceId": "device-a",
+        "user": {
+          "id": "person-a"
+        }
+      },
+      {
+        "events": [
+          {
+            "session_key": "session-a",
+            "goal_id": "goal-a",
+            "suggested_goal_id": "goal-b",
+            "share": 0,
+            "target": 100,
+            "at": "1970-01-01T00:05:00.000Z"
+          },
+          {
+            "session_key": "session-a",
+            "goal_id": "goal-a",
+            "suggested_goal_id": "goal-b",
+            "share": 0,
+            "target": 100,
+            "at": "1969-12-18T00:00:00.000Z"
+          },
+          {
+            "session_key": "session-a",
+            "goal_id": "goal-a",
+            "suggested_goal_id": "goal-b",
+            "share": 0,
+            "target": 100,
+            "at": "1970-01-01T00:05:00.000Z"
+          }
+        ]
+      }
+    ],
+    {
+      "accepted": 3,
+      "refused": [],
+      "server_time": "1970-01-01T00:00:00.000Z"
+    }
+  ],
+  [
+    "generated-refusal-indexes",
+    "example",
+    [
+      "ingestSteering",
+      {},
+      {
+        "wsId": "workspace-a",
+        "userId": "person-a",
+        "wsRole": "owner"
+      },
+      {
+        "deviceId": "device-a",
+        "user": {
+          "id": "person-a"
+        }
+      },
+      {
+        "events": [
+          {
+            "session_key": "session-a",
+            "goal_id": "goal-a",
+            "suggested_goal_id": "goal-b",
+            "share": 0,
+            "target": 100,
+            "at": "1970-01-01T00:05:00.001Z"
+          },
+          {
+            "session_key": "session-a",
+            "goal_id": "goal-a",
+            "suggested_goal_id": "goal-b",
+            "share": 0,
+            "target": 100,
+            "at": "1969-12-17T23:59:59.999Z"
+          },
+          {
+            "session_key": "session-a",
+            "goal_id": "goal-a",
+            "suggested_goal_id": "goal-b",
+            "share": 0,
+            "target": 100,
+            "at": "1970-01-01T00:00:00.000Z"
+          }
+        ]
+      }
+    ],
+    {
+      "accepted": 0,
+      "refused": [
+        {
+          "index": 0,
+          "reason": "clock_skew"
+        },
+        {
+          "index": 1,
+          "reason": "too_old"
+        },
+        {
+          "index": 2,
+          "reason": "not_shared"
+        }
+      ],
+      "server_time": "1970-01-01T00:00:00.000Z"
+    }
+  ],
+  [
+    "generated-counts",
+    "example",
+    [
+      "steeringCounts",
+      {
+        "steering": "on",
+        "days": [
+          {
+            "day": "1970-01-01",
+            "n": 2
+          },
+          {
+            "day": "1970-01-03",
+            "n": 5
+          }
+        ]
+      },
+      {
+        "wsId": "workspace-a",
+        "userId": "person-a",
+        "wsRole": "owner"
+      },
+      null,
+      null
+    ],
+    {
+      "steering": "on",
+      "total": 7,
+      "days": [
+        {
+          "day": "1970-01-01",
+          "n": 2
+        },
+        {
+          "day": "1970-01-03",
+          "n": 5
+        }
+      ]
+    }
+  ]
+];
+
+async function invoke(method, fixture, ...args) {
+  const calls = [];
+  const stored = new Set();
+  const days = fixture.days || [];
+  class Clock extends Date {
+    static now() { return 0; }
+  }
+  const resources = {
+    all(sql, ...bindings) { calls.push(['all', sql, ...bindings]); return days; },
+    audit(...args) { calls.push(['audit', ...args]); },
+    get(sql, ...bindings) {
+      calls.push(['get', sql, ...bindings]);
+      if (sql === 'SELECT steering FROM v2_workspaces WHERE id = ?') return { steering: fixture.steering };
+      assert.equal(sql, 'SELECT device_id, user_id, state FROM v2_sessions WHERE ws_id = ? AND session_key = ?');
+      return fixture.sessions && fixture.sessions[bindings[1]];
+    },
+    run(sql, ...bindings) {
+      calls.push(['run', sql, ...bindings]);
+      if (sql.startsWith('INSERT OR IGNORE')) {
+        const key = JSON.stringify([bindings[0], bindings[1], bindings[6]]);
+        if (stored.has(key)) return 0;
+        stored.add(key);
+      }
+      return 1;
+    },
+    async tx(callback) {
+      calls.push(['begin']);
+      const result = callback();
+      assert.equal(result, undefined);
+      calls.push(['commit']);
+      return result;
+    },
+    badRequest(message) { return new Error(message); },
+    nowIso() { calls.push(['recorded-time']); return 'recorded-time'; },
+    need(...args) { calls.push(['need', ...args]); },
+    ID_RE: /^goal-[a-z]+$/,
+    SESSION_KEY_RE: /^session-[a-z]+$/,
+    readDate() { return Clock; }
+  };
+  const service = create_steering(resources);
+  assert.deepEqual(Object.keys(service), ['workspaceSteering', 'writeSteering', 'ingestSteering', 'steeringCounts']);
+  assert.equal(create_steering.length, 1);
+  assert.deepEqual(Object.values(service).map(fn => fn.length), [1, 3, 3, 3]);
+  const result = await service[method](...args);
+  if (method === 'steeringCounts') assert.equal(result.days, days);
+  if (method === 'ingestSteering') {
+    assert.equal(result.accepted + result.refused.length, args[2].events.length);
+    assert.equal(calls.filter(c => c[0] === 'begin').length, 1);
+    assert.equal(calls.filter(c => c[0] === 'commit').length, 1);
+    assert.equal(calls[0][0], 'need');
+    assert.equal(calls[1][0], 'recorded-time');
+  }
+  if (method === 'writeSteering') {
+    const changed = (fixture.steering === 'on' ? 'on' : 'off') !== args[1];
+    assert.equal(calls.filter(c => c[0] === 'audit').length, changed ? 1 : 0);
+    assert.equal(calls.filter(c => c[0] === 'run').length, changed ? 1 : 0);
+  }
+  return result;
+}
+async function run() {
+  const results = [];
+  for (const [id, category, args, expected] of cases) {
+    assert.deepEqual(await invoke(...args), expected);
+    results.push({ case_id: id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+async function smoke() {
+  return invoke(...cases[0][2]);
+}
+module.exports = { run, smoke };

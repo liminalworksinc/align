@@ -1,0 +1,14 @@
+{
+  "schema": "align/native-child-local-evidence@1",
+  "component": "server-workspace-admin-routes",
+  "admission_review": "server-workspace-admin-routes.admitted-source-review-v3.json",
+  "admission_review_sha256": "b5a47c5d55411cb8d8bee043412653ffdc9f5860bda396c41d8d1ebd28102fcd",
+  "admitted_entry": "sha256:a0be17baecbb6e9378f56d3dbf4abe4608362e3a9114715616ef4f6459056e6a",
+  "generated_tests_passed": 3,
+  "source_byte_review_complete": true,
+  "no_source_repairs_during_admission": true,
+  "normal_portable_cache_current_acceptance_record": "verification/current.json",
+  "parent_registration_and_full_application_image_acceptance_pending": true,
+  "whole_B19_closed": false,
+  "operator_security_acceptance_claimed": false
+}

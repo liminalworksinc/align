@@ -1,0 +1,1 @@
+{"name":"limit_suggest","type":"commonjs","exports":{"./create_suggestions":"./create_suggestions.js"}}

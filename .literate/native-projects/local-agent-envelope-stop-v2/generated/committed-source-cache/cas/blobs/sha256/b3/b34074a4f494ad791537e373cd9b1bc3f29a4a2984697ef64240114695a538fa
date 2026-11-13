@@ -1,0 +1,3 @@
+'use strict';
+const {person_name} = require('./core.js');
+module.exports = {person_name};

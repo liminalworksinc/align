@@ -1,0 +1,157 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { URLSearchParams } = require('node:url');
+const path = require('node:path').posix;
+const { create_effects } = require('../server_identity_effects/create_effects.js');
+
+function fixture() {
+  const events = [];
+  const state = { hosted: false, allowedHosts: ['example.test'], settings: null };
+  class V2Error extends Error {
+    constructor(status, code, message) { super(message); this.status = status; this.code = code; }
+  }
+  const consolePort = {
+    log(...args) { assert.equal(this, consolePort); events.push(['log', ...args]); },
+    error(...args) { assert.equal(this, consolePort); events.push(['error', ...args]); },
+  };
+  const abortPort = { timeout(ms) { assert.equal(this, abortPort); events.push(['timeout', ms]); return 'signal'; } };
+  const mailSettings = {};
+  const plugin = {};
+  const resources = {
+    config: () => state,
+    emailApi: () => mailSettings,
+    turnstile: () => state.settings,
+    postEmail: async (...args) => { events.push(['mail', ...args]); return 'discarded'; },
+    dbDir: () => '/data', path,
+    mkdirSync: (...args) => events.push(['mkdir', ...args]),
+    writeFileSync: (...args) => events.push(['write', ...args]),
+    chmodSync: (...args) => events.push(['chmod', ...args]),
+    captcha: options => { events.push(['plugin', options]); return plugin; },
+    V2Error,
+    readURLSearchParams: () => URLSearchParams,
+    readConsole: () => consolePort,
+    readFetch: () => async (...args) => {
+      events.push(['fetch', ...args]);
+      return { ok: true, async json() { return { success: true, hostname: 'EXAMPLE.TEST' }; } };
+    },
+    readAbortSignal: () => abortPort,
+  };
+  return { events, state, resources, mailSettings, plugin, V2Error };
+}
+
+const cases = [
+  { id: 'generated-link-basic', args: ['https://example.test', 'reader@example.test', '7319'],
+    expected: 'https://example.test/app/sign-in?email=reader%40example.test&code=7319' },
+  { id: 'generated-link-empty', args: ['', '', ''], expected: '/app/sign-in?email=&code=' },
+  { id: 'generated-link-encoding', args: ['https://example.test/', 'a+b c&d', 'x/y?='],
+    expected: 'https://example.test//app/sign-in?email=a%2Bb+c%26d&code=x%2Fy%3F%3D' },
+];
+
+async function contracts() {
+  const f = fixture();
+  const reads = [];
+  const service = create_effects(new Proxy(f.resources, {
+    get(target, key) { reads.push(key); return target[key]; },
+    ownKeys() { throw new Error('Container enumeration'); },
+  }));
+  assert.deepEqual(reads, ['config', 'emailApi', 'turnstile', 'postEmail', 'dbDir', 'path',
+    'mkdirSync', 'writeFileSync', 'chmodSync', 'captcha', 'V2Error', 'readURLSearchParams',
+    'readConsole', 'readFetch', 'readAbortSignal']);
+  assert.deepEqual(f.events, []);
+  assert.equal(create_effects.length, 1);
+  assert.deepEqual(Object.keys(service), ['SIGN_IN_SUBJECT', 'CAPTCHA_HEADER', 'signInLink',
+    'signInFile', 'sendSignInCode', 'captchaPlugin', 'requireCaptcha']);
+  assert.equal(service.SIGN_IN_SUBJECT, 'Your Align sign-in code');
+  assert.equal(service.CAPTCHA_HEADER, 'x-captcha-response');
+  for (const [name, arity, kind] of [['signInLink', 3, 'Function'], ['signInFile', 0, 'Function'],
+    ['sendSignInCode', 3, 'AsyncFunction'], ['captchaPlugin', 0, 'Function'], ['requireCaptcha', 1, 'AsyncFunction']]) {
+    assert.equal(service[name].name, name);
+    assert.equal(service[name].length, arity);
+    assert.equal(service[name].constructor.name, kind);
+  }
+  assert.notEqual(service, create_effects(f.resources));
+  f.resources.dbDir = () => { throw new Error('Replaced handle'); };
+  const { signInFile, sendSignInCode, captchaPlugin, requireCaptcha } = service;
+  assert.equal(signInFile(), '/data/sign-in.txt');
+  assert.deepEqual(f.events, []);
+  assert.equal(await sendSignInCode('r', '7', 'https://example.test'), undefined);
+  const line = 'Align sign-in for r: https://example.test/app/sign-in?email=r&code=7';
+  assert.deepEqual(f.events, [
+    ['log', line], ['mkdir', '/data', { recursive: true, mode: 448 }],
+    ['write', '/data/sign-in.txt', line + '\n', { mode: 384 }], ['chmod', '/data/sign-in.txt', 384],
+  ]);
+  f.events.length = 0;
+  f.state.hosted = true;
+  assert.equal(await sendSignInCode('r', '7', 'https://example.test'), undefined);
+  assert.deepEqual(f.events, [['mail', f.mailSettings, {
+    to: 'r', subject: 'Your Align sign-in code',
+    text: "Your Align sign-in code is 7. It works for 5 minutes.\n\nOr open this link to fill it in, then press Sign in: https://example.test/app/sign-in?email=r&code=7\n\nIf you didn't ask to sign in to Align, ignore this email.",
+  }, 'Sign-in email']]);
+  assert.equal(f.events[0][1], f.mailSettings);
+  f.events.length = 0;
+  assert.equal(captchaPlugin(), null);
+  assert.equal(await requireCaptcha(null), undefined);
+  assert.deepEqual(f.events, []);
+  f.state.settings = { secretKey: 'secret', verifyUrl: 'https://verify.test' };
+  assert.equal(captchaPlugin(), f.plugin);
+  assert.deepEqual(f.events, [['plugin', { provider: 'cloudflare-turnstile', secretKey: 'secret',
+    siteVerifyURLOverride: 'https://verify.test',
+    endpoints: ['/email-otp/send-verification-otp', '/sign-in/email-otp'], allowedHostnames: ['example.test'] }]]);
+  const req = (token, ip = null) => ({ headers: { get(name) { return name === 'x-captcha-response' ? token : ip; } } });
+  f.events.length = 0;
+  for (const token of [null, '', 'x'.repeat(4097), '😀'.repeat(2049)]) {
+    await assert.rejects(requireCaptcha(req(token)), error => error instanceof f.V2Error &&
+      error.status === 400 && error.code === 'captcha_required' &&
+      error.message === 'Complete the check that you are a person, then try again.');
+  }
+  assert.deepEqual(f.events, []);
+  assert.equal(await requireCaptcha(req('token', '')), undefined);
+  assert.deepEqual(f.events, [['timeout', 10000], ['fetch', 'https://verify.test', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: '{"secret":"secret","response":"token","remoteip":""}', signal: 'signal', redirect: 'error',
+  }]]);
+  f.events.length = 0;
+  await requireCaptcha(req('x'.repeat(4096)));
+  assert.equal(JSON.parse(f.events[1][2].body).remoteip, undefined);
+  f.state.allowedHosts = ['EXAMPLE.TEST'];
+  await assert.rejects(requireCaptcha(req('token')), error => error instanceof f.V2Error && error.code === 'captcha_failed' && error.status === 403);
+
+  const refusal = { private: 'failure' };
+  const g = fixture();
+  g.state.hosted = true;
+  g.resources.postEmail = () => { throw refusal; };
+  await assert.rejects(create_effects(g.resources).sendSignInCode('r', '7', 'o'), error => error === refusal);
+  g.resources.emailApi = () => null;
+  await assert.rejects(create_effects(g.resources).sendSignInCode('r', '7', 'o'), { message: 'Email sign-in is not configured' });
+
+  const h = fixture();
+  h.state.settings = { secretKey: 's', verifyUrl: 'u' };
+  h.resources.readFetch = () => { throw { name: 'TransportFailure' }; };
+  await assert.rejects(create_effects(h.resources).requireCaptcha(req('t')), error => error instanceof h.V2Error && error.status === 503 && error.code === 'captcha_unavailable');
+  assert.deepEqual(h.events, [['error', 'Captcha check failed:', 'TransportFailure']]);
+  h.resources.readConsole = () => ({ error() { throw refusal; } });
+  await assert.rejects(create_effects(h.resources).requireCaptcha(req('t')), error => error === refusal);
+  h.resources.readFetch = () => async () => ({ ok: true, json: () => ({ success: true, hostname: 1 }) });
+  await assert.rejects(create_effects(h.resources).requireCaptcha(req('t')), {
+    name: 'TypeError', message: 'data.hostname.toLowerCase is not a function',
+  });
+
+  const p = fixture();
+  p.resources.writeFileSync = () => { throw refusal; };
+  await assert.rejects(create_effects(p.resources).sendSignInCode('r', '7', 'o'), error => error === refusal);
+  assert.deepEqual(p.events.map(event => event[0]), ['log', 'mkdir']);
+}
+
+async function run() {
+  const results = [];
+  for (const test of cases) {
+    const service = create_effects(fixture().resources);
+    assert.equal(service.signInLink(...test.args), test.expected);
+    results.push({ case_id: test.id, outcome: 'passed' });
+  }
+  await contracts();
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+
+function smoke() { return create_effects(fixture().resources).signInLink(...cases[0].args); }
+module.exports = { run, smoke };

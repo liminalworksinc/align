@@ -1,6 +1,5 @@
-import { route, webAuth } from "@/lib/v2/http";
-import { previewInvite } from "@/lib/v2/workspaces";
+// Typed entry point for the admitted route library.
+import { bindRoute } from "@/lib/v2/native-routes/binding";
+import { routes } from "@/lib/v2/native-routes/identity-routes";
 
-// GET /api/v2/invites/:token (cookie): which workspace and role, whether my email matches, and (when it does) my paired
-// devices that are not revoked, which accepting may give this workspace too.
-export const GET = route<{ token: string }>(async (req, { token }) => previewInvite(token, (await webAuth(req)).user));
+export const GET = bindRoute<{ token: string }>(routes, "invites/[token]", "GET");

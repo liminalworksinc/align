@@ -1,0 +1,82 @@
+{
+  "batches": [
+    {
+      "batch": 0,
+      "records": 216,
+      "sha256": "d9c028555709d58e57d119c406fe6d9b636fb614cbde809690ec2447bd8fce8f"
+    },
+    {
+      "batch": 1,
+      "records": 149,
+      "sha256": "c6a7e962b97e72796d1c1fe5dd0d289132f56eed5b46b943580d8e9ae892d459"
+    },
+    {
+      "batch": 2,
+      "records": 57,
+      "sha256": "2d591648dfd9b541663d178dd849da7bc2be8b045e1770426a81c666b7d7fed3"
+    }
+  ],
+  "fault_paths": [
+    {
+      "settings": {},
+      "reads": 20,
+      "effects": 5,
+      "captures": 5
+    },
+    {
+      "settings": {
+        "positiveKey": "events_deleted"
+      },
+      "reads": 21,
+      "effects": 8,
+      "captures": 5
+    },
+    {
+      "settings": {
+        "hosted": true,
+        "rejectRun": true
+      },
+      "reads": 5,
+      "effects": 7,
+      "captures": 5
+    },
+    {
+      "settings": {
+        "hosted": false,
+        "rejectRun": true
+      },
+      "reads": 5,
+      "effects": 7,
+      "captures": 5
+    },
+    {
+      "settings": {
+        "existingTimer": true,
+        "positiveKey": "workspaces_purged"
+      },
+      "reads": 18,
+      "effects": 5,
+      "captures": 5
+    },
+    {
+      "settings": {
+        "deferred": true,
+        "calls": 2,
+        "positiveKey": "events_deleted"
+      },
+      "reads": 41,
+      "effects": 13,
+      "captures": 5
+    },
+    {
+      "settings": {
+        "concurrent": true,
+        "deferred": true,
+        "calls": 2
+      },
+      "reads": 39,
+      "effects": 7,
+      "captures": 5
+    }
+  ]
+}

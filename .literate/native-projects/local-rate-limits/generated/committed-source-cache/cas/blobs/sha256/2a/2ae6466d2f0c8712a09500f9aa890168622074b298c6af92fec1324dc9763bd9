@@ -1,0 +1,215 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { create_limiter } = require('../rate_limits/create_limiter.js');
+
+function fixture(entries = [], initialRows = []) {
+  const hits = new Map(entries);
+  let rows = initialRows.map(row => ({ ...row }));
+  let clockCalls = 0;
+  const calls = [];
+  class V2Error extends Error {
+    constructor(status, code, message) {
+      super(message);
+      this.status = status;
+      this.code = code;
+    }
+  }
+  const context = {
+    hits,
+    now: function () { assert.equal(this, undefined); clockCalls++; return 100; },
+    signPayload: function (payload) { assert.equal(this, undefined); return 'signed:' + payload; },
+    V2Error,
+    get: function (sql, key, cutoff) {
+      assert.equal(this, undefined);
+      assert.equal(sql, 'SELECT COUNT(*) AS n FROM v2_rate_hits WHERE key = ? AND at > ?');
+      calls.push(['get', key, cutoff]);
+      return { n: rows.filter(row => row.key === key && row.at > cutoff).length };
+    },
+    all: function (sql, key, cutoff, max) {
+      assert.equal(this, undefined);
+      assert.equal(sql, 'SELECT at FROM v2_rate_hits WHERE key = ? AND at > ? ORDER BY at DESC LIMIT ?');
+      calls.push(['all', key, cutoff, max]);
+      return rows.filter(row => row.key === key && row.at > cutoff)
+        .sort((a, b) => b.at - a.at).slice(0, max).map(({ at }) => ({ at }));
+    },
+    run: function (sql, ...parameters) {
+      assert.equal(this, undefined);
+      calls.push(['run', sql, ...parameters]);
+      if (sql === 'DELETE FROM v2_rate_hits WHERE at <= ?') {
+        rows = rows.filter(row => row.at > parameters[0]);
+      } else {
+        assert.equal(sql, 'INSERT INTO v2_rate_hits (key, at) VALUES (?, ?)');
+        rows.push({ key: parameters[0], at: parameters[1] });
+      }
+    }
+  };
+  const api = create_limiter(context);
+  assert.equal(clockCalls, 0);
+  assert.deepEqual(calls, []);
+  assert.equal(create_limiter.length, 1);
+  for (const [name, fn] of Object.entries(api)) {
+    assert.equal(fn.name, name);
+    assert.equal(fn.length, name === 'take' ? 3 : 1);
+  }
+  return { api, context, hits, calls, rows: () => rows, clockCalls: () => clockCalls };
+}
+
+const cases = [
+  {
+    id: 'generated-batch-admit',
+    test() {
+      const f = fixture();
+      const actual = f.api.takeAll([{ key: 'orchid', max: 2, windowMs: 80 }], 100);
+      assert.equal(actual, true);
+      assert.deepEqual([...f.hits], [['orchid', [100]]]);
+      assert.equal(f.clockCalls(), 0);
+      const other = create_limiter(f.context);
+      const { take } = other;
+      assert.equal(take('orchid', 2, 80, 100), undefined);
+      assert.throws(() => take('orchid', 2, 80, 100), error =>
+        error instanceof f.context.V2Error && error.status === 429 &&
+        error.code === 'rate_limited' && error.message === 'Too many requests, try again later');
+      return actual;
+    }
+  },
+  {
+    id: 'generated-batch-cutoff',
+    test() {
+      const f = fixture([['cutoff', [50]]]);
+      const actual = f.api.takeAll([{ key: 'cutoff', max: 1, windowMs: 50 }], 100);
+      assert.equal(actual, true);
+      assert.deepEqual([...f.hits], [['cutoff', [100]]]);
+      f.hits.clear();
+      for (let i = 0; i < 10004; i++) f.hits.set('k' + i, []);
+      f.api.take('new', 1, 50, 100);
+      assert.equal(f.hits.size, 10000);
+      assert.equal(f.hits.keys().next().value, 'k5');
+      f.hits.set('extra', []);
+      f.api.takeAll([{ key: 'new', max: 2, windowMs: 50 }], 100);
+      assert.equal(f.hits.size, 10000);
+      assert.deepEqual(f.hits.get('new'), [100, 100]);
+      return actual;
+    }
+  },
+  {
+    id: 'generated-empty-durable',
+    test() {
+      const f = fixture([], [{ key: 'old', at: -86399300 }, { key: 'kept', at: -86399299 }]);
+      const actual = f.api.takeDurable([], 700);
+      assert.equal(actual, true);
+      assert.deepEqual(f.rows(), [{ key: 'kept', at: -86399299 }]);
+      assert.deepEqual(f.calls, [['run', 'DELETE FROM v2_rate_hits WHERE at <= ?', -86399300]]);
+      f.calls.length = 0;
+      assert.equal(f.api.durableRoom([], 700), true);
+      assert.equal(f.api.durableRetryAfterMs([], 700), 0);
+      assert.deepEqual(f.calls, []);
+      const { takeDurable } = f.api;
+      f.api.durableRoom = () => { throw new Error('replaced'); };
+      f.api.durableCount = () => { throw new Error('replaced'); };
+      f.context.now = () => { throw new Error('replaced'); };
+      assert.equal(takeDurable([]), true);
+      assert.equal(f.clockCalls(), 1);
+      return actual;
+    }
+  },
+  {
+    id: 'generated-memory-retry',
+    test() {
+      const f = fixture([['unordered', [95, 20, 80, 0]]]);
+      const actual = f.api.retryAfterMs([{ key: 'unordered', max: 2, windowMs: 100 }], 100);
+      assert.equal(actual, 80);
+      assert.deepEqual(f.hits.get('unordered'), [95, 20, 80, 0]);
+      assert.equal(f.api.retryAfterMs([{ key: 'unordered', max: 1, windowMs: 100 }], 50), 145);
+      const failure = {};
+      const broken = create_limiter({ ...f.context, now() { throw failure; } });
+      assert.throws(() => broken.take('x', 1, 1), error => error === failure);
+      assert.equal(f.hits.has('x'), false);
+      return actual;
+    }
+  },
+  {
+    id: 'generated-durable-retry',
+    test() {
+      const f = fixture([], [{ key: 'rows', at: 175 }, { key: 'rows', at: 190 }, { key: 'rows', at: 110 }]);
+      const actual = f.api.durableRetryAfterMs([{ key: 'rows', max: 2, windowMs: 100 }], 200);
+      assert.equal(actual, 75);
+      assert.deepEqual(f.calls, [['all', 'rows', 100, 2]]);
+      f.calls.length = 0;
+      assert.equal(f.api.takeDurable([{ key: 'rows', max: 2, windowMs: 100 }, { key: 'other', max: 1, windowMs: 1 }], 200), false);
+      assert.deepEqual(f.calls, [['get', 'rows', 100]]);
+      const failure = {};
+      let writes = 0;
+      const broken = create_limiter({ ...f.context, run() { if (++writes === 3) throw failure; } });
+      assert.throws(() => broken.durableCount([{ key: 'a' }, { key: 'b' }], 200), error => error === failure);
+      assert.equal(writes, 3);
+      return actual;
+    }
+  },
+  {
+    id: 'generated-otp-text',
+    test() {
+      const f = fixture();
+      const { otpEmailKey } = f.api;
+      f.context.signPayload = () => 'replacement';
+      const actual = otpEmailKey(' A+X@example.test ');
+      assert.equal(actual, 'otp-email-hour:signed:alo. A+X@example.test ');
+      assert.equal(f.clockCalls(), 0);
+      return actual;
+    }
+  },
+  {
+    id: 'generated-access-text',
+    test() {
+      const f = fixture();
+      const actual = f.api.accessEmailKey('a+X@EXAMPLE.test');
+      assert.equal(actual, 'access-email:signed:ala.a+X@EXAMPLE.test');
+      const failure = {};
+      const broken = create_limiter({ ...f.context, signPayload() { throw failure; } });
+      assert.throws(() => broken.accessEmailKey('x'), error => error === failure);
+      return actual;
+    }
+  },
+  {
+    id: 'generated-batch-refusal',
+    test() {
+      const f = fixture([['free', [0]], ['full', [75]]]);
+      const actual = f.api.takeAll([{ key: 'free', max: 2, windowMs: 50 }, { key: 'full', max: 1, windowMs: 50 }], 100);
+      assert.equal(actual, false);
+      assert.deepEqual([...f.hits], [['free', [0]], ['full', [75]]]);
+      f.context.hits = new Map();
+      assert.equal(f.api.takeAll([{ key: 'full', max: 1, windowMs: 50 }], 100), false);
+      assert.equal(create_limiter(f.context).takeAll([{ key: 'full', max: 1, windowMs: 50 }], 100), true);
+      return actual;
+    }
+  },
+  {
+    id: 'generated-duplicate',
+    test() {
+      const f = fixture([['dup', [25]]]);
+      const actual = f.api.takeAll([{ key: 'dup', max: 3, windowMs: 100 }, { key: 'dup', max: 3, windowMs: 100 }], 100);
+      assert.equal(actual, true);
+      assert.deepEqual(f.hits.get('dup'), [25, 100]);
+      f.api.takeAll([{ key: 'dup', max: 5, windowMs: 100 }, { key: 'dup', max: 5, windowMs: 50 }], 100);
+      assert.deepEqual(f.hits.get('dup'), [100, 100]);
+      assert.equal(f.api.durableCount([{ key: 'dup' }, { key: 'dup' }], 100), undefined);
+      assert.deepEqual(f.rows(), [{ key: 'dup', at: 100 }, { key: 'dup', at: 100 }]);
+      return actual;
+    }
+  }
+];
+
+function runTests() {
+  const results = [];
+  for (const item of cases) {
+    item.test();
+    results.push({ case_id: item.id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+
+function smoke() {
+  return cases[0].test();
+}
+
+module.exports = { runTests, smoke };

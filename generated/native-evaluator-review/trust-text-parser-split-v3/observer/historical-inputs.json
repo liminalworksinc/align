@@ -1,0 +1,66 @@
+[
+  {
+    "case_id": "trust-markdown.parse-inline-000",
+    "arguments": [
+      "parseInline",
+      0,
+      4096
+    ]
+  },
+  {
+    "case_id": "trust-markdown.parse-inline-001",
+    "arguments": [
+      "parseInline",
+      4096,
+      4096
+    ]
+  },
+  {
+    "case_id": "trust-markdown.parse-inline-002",
+    "arguments": [
+      "parseInline",
+      8192,
+      4096
+    ]
+  },
+  {
+    "case_id": "trust-markdown.parse-inline-003",
+    "arguments": [
+      "parseInline",
+      12288,
+      1954
+    ]
+  },
+  {
+    "case_id": "trust-markdown.parse-markdown-000",
+    "arguments": [
+      "parseMarkdown",
+      0,
+      4096
+    ]
+  },
+  {
+    "case_id": "trust-markdown.parse-markdown-001",
+    "arguments": [
+      "parseMarkdown",
+      4096,
+      4096
+    ]
+  },
+  {
+    "case_id": "trust-markdown.parse-markdown-002",
+    "arguments": [
+      "parseMarkdown",
+      8192,
+      4096
+    ]
+  },
+  {
+    "case_id": "trust-markdown.parse-markdown-003",
+    "arguments": [
+      "parseMarkdown",
+      12288,
+      1302
+    ]
+  }
+]

@@ -1,0 +1,3 @@
+'use strict';
+const {latch_way_out}=require('./core.js');
+module.exports={latch_way_out};

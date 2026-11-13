@@ -1,0 +1,8 @@
+{
+  "name": "storage_schema",
+  "type": "commonjs",
+  "exports": {
+    "./change_programs": "./change_programs.js"
+  }
+}
+

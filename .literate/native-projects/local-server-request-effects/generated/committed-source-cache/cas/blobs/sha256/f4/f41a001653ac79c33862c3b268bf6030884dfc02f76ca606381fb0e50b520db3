@@ -1,0 +1,33 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const output = path.resolve(process.argv[2] || 'run');
+fs.mkdirSync(path.dirname(output), { recursive: true });
+const modules = [
+  ['legacy', 'server_request_effects/create_legacy.js'],
+  ['v2', 'server_request_effects/create_v2.js'],
+  ['tests', 'tests/litai_test.js']
+];
+const aliases = {
+  '../server_request_effects/create_legacy.js': 'legacy',
+  '../server_request_effects/create_v2.js': 'v2',
+  './tests/litai_test.js': 'tests'
+};
+function rewrite(text) {
+  return text.replace(/^#![^\n]*\n/, '').replace(/require\((['"])([^'"]+)\1\)/g, (match, quote, name) => aliases[name] ? `__modules.${aliases[name]}` : match);
+}
+let bundle = '#!/usr/bin/env node\n\'use strict\';\nconst __modules = {};\n';
+for (const [id, file] of modules) {
+  bundle += `__modules.${id} = (() => { const module = { exports: {} };\n${rewrite(fs.readFileSync(path.join(root, file), 'utf8'))}\nreturn module.exports; })();\n`;
+}
+bundle += rewrite(fs.readFileSync(path.join(root, 'main.js'), 'utf8'));
+fs.writeFileSync(output, bundle, { mode: 0o755 });
+fs.chmodSync(output, 0o755);
+const targetPackage = path.join(path.dirname(output), 'server_request_effects');
+if (targetPackage !== path.join(root, 'server_request_effects')) {
+  fs.mkdirSync(targetPackage, { recursive: true });
+  for (const file of ['package.json', 'create_legacy.js', 'create_v2.js']) {
+    fs.copyFileSync(path.join(root, 'server_request_effects', file), path.join(targetPackage, file));
+  }
+}

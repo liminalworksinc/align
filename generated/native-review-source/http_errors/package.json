@@ -1,0 +1,1 @@
+{"name":"http_errors","type":"commonjs","exports":{"./bad_request":"./bad_request.js","./conflict":"./conflict.js","./data":"./data.js","./forbidden":"./forbidden.js","./not_found":"./not_found.js"}}

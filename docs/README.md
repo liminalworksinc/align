@@ -1,11 +1,10 @@
-# Project guide
+# Align project guide
 
-<!-- DOC-IDENTITY: Replace the quoted placeholder below with a short description
-     of what this project is and does. This is the front door for anyone reading
-     the documentation. -->
-
-> **Replace this paragraph** with a one-to-three sentence description of your
-> project: what it is, what it does, and who it is for.
+Align lets people propose, approve and launch changes to shared goals, then keeps
+connected coding sessions current with the launched version. It records session
+usage and estimated spend against those goals. The web app, local agent and MCP
+connections are described in the README in the
+[application directory](../components/legacy-project-wrapper/implementation).
 
 Start with [getting started](user/getting-started.md) for installation and usage.
 See [active work](roadmap/active-work.md) for current development status.
@@ -44,4 +43,33 @@ explicit parent change.
 ## Adoption decisions
 
 - [Legacy project lift-and-shift decision](decisions/0001-legacy-project-lift-and-shift.md)
+- [Accepted native rewrite decision](decisions/0002-native-literate-ai-rewrite.md)
+- [Accepted classification of all native boundaries](architecture/native-authority-classification.json)
+- [Workspace admission and local startup acceptance](architecture/server-identity-admission-admitted-acceptance.json)
+- [Authentication lifecycle acceptance](architecture/server-auth-admitted-acceptance.json)
 - [Owner decisions for Align v2, 2026-10-30 and 2026-10-31](decisions/0003-owner-decisions-v2.md)
+
+## Native storage work
+
+The [storage data contract](roadmap/storage-data-contract.md) records the B12
+assessment, schema observations and acceptance work remaining before native
+storage can replace retained behavior. Its proposed
+[entity and upgrade contract](architecture/storage-entity-contract.md) and
+[contract observations](architecture/storage-contract-observation.json) keep
+logical obligations separate from the SQLite mapping and native qualification.
+
+## Native migration review
+
+- [Boundary program](roadmap/native-rewrite-program.md)
+- [Transfer review](roadmap/native-boundary-transfers.md)
+- [Transfer ledger](roadmap/native-boundary-transfers.json)
+- [Authorization source comparisons](roadmap/native-authorization-findings.md)
+- [Finding corrections](roadmap/native-findings-remediation.md)
+
+Preserved acceptance and classification records:
+
+- [B19 route acceptance](architecture/b19-admitted-acceptance.json)
+- [Goal domain acceptance](architecture/goal-domain-admitted-acceptance.json)
+- [Metrics and retention acceptance](architecture/metrics-retention-admitted-acceptance.json)
+- [Session domain acceptance](architecture/session-domain-admitted-acceptance.json)
+- [Retained boundary classification](roadmap/native-retention-classification.json)

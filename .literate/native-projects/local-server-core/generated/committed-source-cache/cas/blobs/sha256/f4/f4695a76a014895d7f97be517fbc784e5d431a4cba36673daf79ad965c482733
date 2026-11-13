@@ -1,0 +1,15 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const destination = path.resolve(process.argv[2]);
+if (destination === root || destination.startsWith(root + path.sep)) throw new Error('Artifact must be outside the generated source directory');
+const files = ['main.js', 'tests/litai_test.js', 'server_core/package.json', 'server_core/create_core.js', 'server_core/create_events.js', 'server_core/create_core.d.ts', 'server_core/create_events.d.ts'];
+for (const file of files) {
+  const target = path.join(destination, file);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.copyFileSync(path.join(root, file), target);
+}
+const run = path.join(destination, 'run');
+fs.writeFileSync(run, '#!/usr/bin/env node\n"use strict";\nrequire("./main.js");\n');
+fs.chmodSync(run, 0o755);

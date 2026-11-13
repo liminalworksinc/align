@@ -1,0 +1,26 @@
+{
+  "schema": "align/read-only-review-metadata-excerpts@1",
+  "role": "Exact historical excerpts preserved for human comparison after consolidating unpublished corrections",
+  "excerpts": [
+    {
+      "path": "generated/native-review-history/closure-claims-542b3094.txt",
+      "source_commit": "542b3094b25f36922628aef0570f54fc170639e4",
+      "source_path": "docs/roadmap/native-boundary-transfers.json",
+      "source_first_line": 2810,
+      "source_last_line": 3010,
+      "source_blob_sha256": "fc1e95e676e9cc6263a1daa585f65b7e1d841ba0317043db69eba8d1f0eb5b9f",
+      "excerpt_sha256": "d01aa454577672da59182c5056ddcf9ad4854bba2913d6e4146a1bb9f89be734",
+      "role": "Read-only review-time metadata, never current authority"
+    },
+    {
+      "path": "generated/native-review-history/closure-counts-50e6fa2e.txt",
+      "source_commit": "50e6fa2eb0d2a327e36f0c9245103fbdc2cb357a",
+      "source_path": "docs/roadmap/native-boundary-transfers.json",
+      "source_first_line": 3125,
+      "source_last_line": 3150,
+      "source_blob_sha256": "13827a9aad5097130115da2f7cdc164090f0d1f962b00a9bd93bcaabc583af14",
+      "excerpt_sha256": "c056340320af429d070d8bffcc28b066cd699d57bf21df660ab39d6793790ab6",
+      "role": "Read-only review-time metadata, never current authority"
+    }
+  ]
+}

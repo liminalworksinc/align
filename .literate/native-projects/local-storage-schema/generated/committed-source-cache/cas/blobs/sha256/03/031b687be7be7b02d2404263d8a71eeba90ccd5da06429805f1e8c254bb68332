@@ -1,0 +1,25 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { change_programs } = require('../storage_schema/change_programs.js');
+const expected = require('./expected_programs.js');
+
+function runTests() {
+  const result = change_programs();
+  assert.deepStrictEqual(result, expected);
+  assert.equal(Object.getPrototypeOf(result), Array.prototype);
+  assert.equal(result.length, 22);
+  assert.ok(result.every(program => typeof program === 'string' && program.trim().length > 0));
+  const another = change_programs();
+  assert.notStrictEqual(result, another);
+  result[0] = '';
+  result.splice(1);
+  result.push('modified');
+  assert.deepStrictEqual(another, expected);
+  assert.deepStrictEqual(change_programs(), expected);
+  return {
+    schema: 'literate-ai/generated-test-results@1',
+    cases: [{ case_id: 'generated-change-programs', outcome: 'passed' }]
+  };
+}
+module.exports = { runTests };
+

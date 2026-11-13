@@ -1,0 +1,69 @@
+'use strict';
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const { create_operator_admin } = require('../operator_admin/create_operator_admin.js');
+
+function host(argv) {
+  const logs = [], errors = [], trace = [];
+  const resources = {
+    fs: { existsSync() { trace.push('exists'); return true; }, readFileSync() { throw new Error('Unexpected read'); } },
+    path,
+    core: {
+      CODE_DAYS: 7, RESTORE_DAYS: 30, SCHEMA_VERSION: 4,
+      REQUEST_STATUSES: ['pending', 'approved', 'declined'], V1_CODE_RE: /^[0-9a-f]{20}$/,
+      listCreationCodes() { trace.push('codes'); return []; },
+      listAccessRequests(db, status) { assert.equal(status, undefined); trace.push('requests'); return []; },
+      workspaceSummaries() { trace.push('workspaces'); return []; }
+    },
+    retention: {}, metrics: {},
+    async loadSqlite() {
+      trace.push('load');
+      return { DatabaseSync: class DatabaseSync {
+        constructor(file, options) {
+          assert.equal(file, path.resolve('data', 'v2', 'align.sqlite'));
+          assert.deepEqual(options, { enableForeignKeyConstraints: true, timeout: 5000 });
+          trace.push('open');
+        }
+        exec(sql) { assert.equal(sql, 'PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;'); trace.push('pragma'); }
+        prepare(sql) { assert.equal(sql, 'PRAGMA user_version'); return { get() { trace.push('version'); return { user_version: '4' }; } }; }
+        close() { trace.push('close'); }
+      } };
+    },
+    process: {
+      argv: ['node', 'admin', ...argv], env: {}, cwd() { return path.resolve('.'); },
+      listeners() { return []; }, removeAllListeners() {}, on() {},
+      exit(code) { const error = new Error('exit'); error.code = code; throw error; }
+    },
+    console: { log(...args) { logs.push(args); }, error(...args) { errors.push(args); }, warn() { throw new Error('Unexpected warning'); } },
+    Date, URL
+  };
+  return { resources, logs, errors, trace };
+}
+
+async function check(argv, service) {
+  const h = host(argv);
+  const library = create_operator_admin(h.resources);
+  assert.deepEqual(h.trace, []);
+  assert.deepEqual(Object.keys(library), ['run']);
+  assert.equal(library.run.name, 'run');
+  assert.equal(library.run.length, 0);
+  const result = await library.run();
+  assert.equal(result, undefined);
+  assert.deepEqual(h.logs, [['(none)']]);
+  assert.deepEqual(h.errors, []);
+  assert.deepEqual(h.trace, ['load', 'exists', 'open', 'pragma', 'version', service, 'close']);
+  return result ?? null;
+}
+
+async function runTests() {
+  const cases = [];
+  assert.equal(await check(['codes', 'list'], 'codes'), null);
+  cases.push({ case_id: 'generated-empty-codes', outcome: 'passed' });
+  assert.equal(await check(['requests', 'list'], 'requests'), null);
+  cases.push({ case_id: 'generated-empty-requests', outcome: 'passed' });
+  assert.equal(await check(['workspaces', 'list'], 'workspaces'), null);
+  cases.push({ case_id: 'generated-empty-workspaces', outcome: 'passed' });
+  return cases;
+}
+async function smoke() { return check(['codes', 'list'], 'codes'); }
+module.exports = { runTests, smoke };

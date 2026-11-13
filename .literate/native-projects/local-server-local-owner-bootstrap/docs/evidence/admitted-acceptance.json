@@ -1,0 +1,16 @@
+{
+  "schema": "align/local-owner-child-documentation-evidence@1",
+  "qualification_decision": "sha256:acbe3eb6338583965cb41ab2cf2fced8e4279487edad7f8a4f39bf7cb4da6dcf",
+  "qualified_clean_runs": 2,
+  "independent_batches_each_run": 2,
+  "admitted_generated_smoke_tests": 3,
+  "public_observations_each_host": 59,
+  "capture_failure_identity_cases_each_host": 7,
+  "reviewed_authority_files_unchanged": 46,
+  "current_receipt_path": "verification/current.json",
+  "actual_configured_provider_and_consuming_application_image_still_required": true,
+  "operator_security_review_accepted": false,
+  "public_url": null,
+  "live_qa_gates": 0,
+  "all31_complete": false
+}

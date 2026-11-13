@@ -1,0 +1,201 @@
+        },
+        {
+          "file": "metrics-retention.image-static-assets-proof-v1.json",
+          "sha256": "7d0e7ec50b2c05c437380d048542d83f9b4c94d7f0af378356b1dd4440fc8def"
+        },
+        {
+          "file": "metrics-retention.image-bundle-sample-proof-v1.json",
+          "sha256": "c01313296b30575be9d01fa561f36c7592def9d6f113baa42913985c5cd86a47"
+        },
+        {
+          "file": "metrics-retention.image-source-equivalence-v1.json",
+          "sha256": "427910ade64619f769d17d9186fc1397cb14f12a5d281e4b77ef0cb71e5920b7"
+        },
+        {
+          "file": "metrics-retention.parent-current-readiness-proof-v1.json",
+          "sha256": "9abc9403ed4177ce5744aaf98ce04fc4893f1363bcd7b1b85c81317aed9f988b"
+        },
+        {
+          "file": "metrics-retention.findings-preparation-proof-v1.json",
+          "sha256": "bd0d33edaac850b190fce19ba1bd610b3d1335877800f0a58449167b24a224e4"
+        },
+        {
+          "file": "server-metrics.current-child-readiness-proof-v4.json",
+          "sha256": "5f6e2b6cb35a0f06cf0b00604bd04ae4fbfba6f29de7befe8f7717a337eb1247"
+        },
+        {
+          "file": "server-metrics.actual-consumer-both-hosts-proof-v4.json",
+          "sha256": "a3bbec71e8204b19c24619b64b45590e56985d8dd74653b5fb13646fc4e5b035"
+        },
+        {
+          "file": "server-retention.current-child-readiness-proof-v2.json",
+          "sha256": "477bddf8bf186c2e385e2c7551fc008e6fe7f3799f91e058973cf22dfe525656"
+        },
+        {
+          "file": "server-retention.actual-consumer-both-hosts-proof-v2.json",
+          "sha256": "cb20206acd33af53dc518f7c21e955a76c9813775b587d2ee668374be49070f3"
+        }
+      ],
+      "new_verification_members": {
+        "native/server-metrics.json": {
+          "sha256": "dd52c7a5d819ab1c6a24ffc37176c3ad98815a10744014952b296d58674071f8",
+          "class": "repository-only harness",
+          "boundary_owner": "B17 acceptance",
+          "reason": "Independent frozen parity oracle, never a runtime or generation input."
+        },
+        "native/server-retention-harness-v2.cjs": {
+          "sha256": "feec85c2c993d454b9d8923a355749f80d0be5189fdd535b193a7fa828b7cd31",
+          "class": "repository-only harness",
+          "boundary_owner": "B17 acceptance",
+          "reason": "Independent frozen parity oracle, never a runtime or generation input."
+        },
+        "native/server-metrics-harness-v2.cjs": {
+          "sha256": "85bf334a36da9451d702b5e9e5d195043d25c0e079f461d9615999c4b16eed59",
+          "class": "repository-only harness",
+          "boundary_owner": "B17 acceptance",
+          "reason": "Independent frozen parity oracle, never a runtime or generation input."
+        },
+        "native/server-retention.json": {
+          "sha256": "cc6602ef6430ad15fbc3ddbd14e2f98a73104a6b1b35b50a5cf92840b0a309bf",
+          "class": "repository-only harness",
+          "boundary_owner": "B17 acceptance",
+          "reason": "Independent frozen parity oracle, never a runtime or generation input."
+        }
+      },
+      "typed_target_bindings_permitted_by_accepted_classification": true,
+      "permanent_source_retention_exception": false,
+      "future_changes_require_current_acceptance": true,
+      "original_failed_candidates_and_negative_controls_preserved": true,
+      "same_agent_review_only": true,
+      "independent_maintainer_review_claimed": false,
+      "actual_operator_security_acceptance_claimed": false,
+      "source_authority_transferred": true,
+      "publication_source_checkpoint": "0eeddc0763db744e30ade0439de82412a4c858ba",
+      "publication_CI_record": "generated/native-checkpoints/b17-b28-publication-closure.json",
+      "publication_gates_satisfied": true
+    },
+    {
+      "boundary": "B19",
+      "name": "V2 HTTP routes",
+      "closure_kind": "native",
+      "accepted_target_responsibility": "Typed route selectors, public types, explicit resources and unchanged compatibility aliases.",
+      "required_acceptance": "All route groups together preserve workspace scope, permissions, validation, bounds and responses; full application and image checks, current receipt and normal publication.",
+      "current_qualified_bindings": [
+        {
+          "component": "server-connected-apps-routes",
+          "provider": ".literate/native-projects/local-server-connected-apps-routes",
+          "entry": "4790d062eae0bba320463194194d6d2af9a06b88bc32fe5bc2553a38df39b330",
+          "lock_identity": "sha256:e0349cc5cb924d656dfa756766bc7f4afa7b1ab2eec84e52dc5981bef0fdf396"
+        },
+        {
+          "component": "server-creation-compatibility",
+          "provider": ".literate/native-projects/local-server-creation-compatibility",
+          "entry": "b525128f2b23af60b8791ec379430759d9ccd74c7781bad867933fb47a38bfd3",
+          "lock_identity": "sha256:9086ef334ca1ca97f1e3788fe13bb531c25e0f97f9911866cd61e6b87ef63629"
+        },
+        {
+          "component": "server-goals-deliberation-routes",
+          "provider": ".literate/native-projects/local-server-goals-deliberation-routes",
+          "entry": "ead0da821f1a69cb223c51457c56f9e3dfd00e5a803343b8d94621ca71099262",
+          "lock_identity": "sha256:2fe4f5de281aa9baca4e597e4a759cb0db30b446fa7db2ec5bee197e37a902b4"
+        },
+        {
+          "component": "server-identity-routes",
+          "provider": ".literate/native-projects/local-server-identity-routes",
+          "entry": "52273f50dabf8183fec85cd19441d0138e0f879cf4427e4b2b5c91656b7677a6",
+          "lock_identity": "sha256:832ab59837bf2b37a92f924b9c2b1765f2197c533fca317f211b51ad71824272"
+        },
+        {
+          "component": "server-sessions-directives-routes",
+          "provider": ".literate/native-projects/local-server-sessions-directives-routes",
+          "entry": "3dbc0775e553fe291f5b55e8364f38333ec86741b517ffbf321a6f8d96e43e0f",
+          "lock_identity": "sha256:8c75b484d6104272ffe493cf23f4cd5d1f503a9181f9f3c64137c7587f1d0cdb"
+        },
+        {
+          "component": "server-team-asks-routes",
+          "provider": ".literate/native-projects/local-server-team-asks-routes",
+          "entry": "574bac556dc633e2b807bc1b0db2ce90f6fa43d4b79a56019ec4a6a6e4f5792e",
+          "lock_identity": "sha256:2252ca0ec5e1397d9b4a7aecc4a0fdf5d16a3e3d054ef61504a0d2defbab67ab"
+        },
+        {
+          "component": "server-workspace-admin-routes",
+          "provider": ".literate/native-projects/local-server-workspace-admin-routes",
+          "entry": "a0be17baecbb6e9378f56d3dbf4abe4608362e3a9114715616ef4f6459056e6a",
+          "lock_identity": "sha256:41ec5f32c867db12b7480a2d95bfa15b31ddfdf10e5a869ea192e15a8dad2637"
+        },
+        {
+          "component": "server-workspace-admission",
+          "provider": ".literate/native-projects/local-server-workspace-admission-current-v2",
+          "entry": "f9201b6afd3fa382fdab58fa04fbf80c29b17bfedd8ca8cf2e11817954db05dd",
+          "lock_identity": "sha256:810ae12bb0597ca72e0ba718494d6c8db22339e248a01a1edbd57de51ea8847f"
+        },
+        {
+          "component": "server-workspace-reporting-routes",
+          "provider": ".literate/native-projects/local-server-workspace-reporting-routes",
+          "entry": "538cfd152ea0859c739ac38fab670b18fb8ce3fb849968f48580ef5c61e7cd41",
+          "lock_identity": "sha256:5dc8aaf5a6775bd133ba75e538ba9744733052c100b4fe27dc5f5a0cea0d2260"
+        }
+      ],
+      "functional_acceptance_complete": false,
+      "whole_boundary_closed": false,
+      "closure_state": "Integrated private candidate. Full application, image, current parent receipt and normal publication remain required.",
+      "source_authority_transferred": false,
+      "findings_navigation": "docs/roadmap/native-authorization-findings.md",
+      "all_findings_undecided": true,
+      "independent_maintainer_review_claimed": false,
+      "actual_operator_security_acceptance_claimed": false
+    },
+    {
+      "boundary": "B28",
+      "name": "Operator commands",
+      "closure_kind": "native",
+      "accepted_target_responsibility": "Caller resource assembly, exact pinned package preparation, temporary directories and operating-system process/signal forwarding.",
+      "qualified_components": [
+        "operator-admin",
+        "operator-shortcuts",
+        "server-creation-compatibility"
+      ],
+      "actual_Node_commands_each_host": 35,
+      "current_result": "generated/native-checkpoints/schema-version-guard.json",
+      "functional_acceptance_complete": true,
+      "whole_boundary_closed": true,
+      "source_authority_transferred": true,
+      "closure_state": "Native functional migration closed by the published source checkpoint with normal review, current acceptance, complete source navigation, updated PR body and green exact-head CI. Operator security review remains open.",
+      "findings_navigation": "docs/roadmap/native-authorization-findings.md",
+      "operator_security_acceptance_claimed": false,
+      "required_acceptance_result": "Current candidate: 1917 application, 42 image and 18 additional HTTP/SQLite checks pass; both receipt readers verify 71 qualified projections. Existing original-backed boundary controls remain preserved. Current 13-package,77-file closure passes 29 controls and35 actual Node commands on both hosts: macOS cold checkout and Linux prepared runtime.",
+      "publication_source_checkpoint": "0eeddc0763db744e30ade0439de82412a4c858ba",
+      "publication_CI_record": "generated/native-checkpoints/b17-b28-publication-closure.json",
+      "publication_gates_satisfied": true,
+      "caller_controls_each_host": 29,
+      "cold_checkout_controls_macos": 29,
+      "prepared_runtime_controls_linux": 29,
+      "operator_packages": 13,
+      "operator_files": 77
+    },
+    {
+      "boundary": "B18",
+      "name": "OAuth and MCP",
+      "closure_kind": "native",
+      "functional_acceptance_complete": false,
+      "whole_boundary_closed": false,
+      "source_authority_transferred": false,
+      "closure_state": "Supporting qualification and admission are partial. Complete current source coverage, parent registration, actual caller integration, complete application and image acceptance, findings navigation and normal publication remain required.",
+      "findings_navigation": "docs/roadmap/native-authorization-findings.md",
+      "operator_security_acceptance_claimed": false
+    },
+    {
+      "boundary": "B22",
+      "name": "Agent runtime, hooks, sync and CLI",
+      "closure_kind": "native",
+      "functional_acceptance_complete": false,
+      "whole_boundary_closed": false,
+      "source_authority_transferred": false,
+      "closure_state": "Supporting qualification and admission are partial. Complete current source coverage, parent registration, actual caller integration, complete application and image acceptance, findings navigation and normal publication remain required.",
+      "findings_navigation": "docs/roadmap/native-authorization-findings.md",
+      "operator_security_acceptance_claimed": false
+    }
+  ],
+  "public_tester_deployed": false,
+  "operator_security_accepted": false,
+  "live_qa_gates": 0,

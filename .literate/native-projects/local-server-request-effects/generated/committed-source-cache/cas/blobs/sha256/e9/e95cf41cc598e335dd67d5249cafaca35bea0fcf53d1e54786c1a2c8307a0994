@@ -1,0 +1,1 @@
+{"name":"server_request_effects","type":"commonjs","exports":{"./create_legacy":"./create_legacy.js","./create_v2":"./create_v2.js"}}

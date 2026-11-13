@@ -1,0 +1,14 @@
+{
+  "schema": "align/native-child-local-evidence@1",
+  "component": "operator-admin",
+  "admission_review": "operator-admin.admitted-source-review-v3.json",
+  "admission_review_sha256": "93a2315841cb16e0f6db55f19cad9165335d7b25e9e6a243c73b35d8a8d91f79",
+  "admitted_entry": "sha256:28073908c70dfb2d4a7f10040d103459175535f5dc5e9e7c7e115297b8323d16",
+  "generated_tests_passed": 3,
+  "source_byte_review_complete": true,
+  "no_source_repairs_during_admission": true,
+  "normal_portable_cache_current_acceptance_record": "verification/current.json",
+  "parent_registration_and_full_application_image_acceptance_pending": true,
+  "whole_B28_closed": false,
+  "operator_security_acceptance_claimed": false
+}

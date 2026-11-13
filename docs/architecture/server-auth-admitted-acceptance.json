@@ -1,0 +1,59 @@
+{
+  "schema": "align/authentication-admitted-acceptance@1",
+  "registered_libraries": 33,
+  "prior32_pins_unchanged": true,
+  "original_module_sha256": "b3edc253749ca9f7186b8ed589205561140ea4a2a4bad4040949cbd426749b09",
+  "source_snapshot": "sha256:335c1018f10ce41a626b18e2bbd27f321db22f0e9e2a2dfab1c7c30ffa4ba8bf",
+  "sensitive_classification_preserved": true,
+  "signed_policy_static_review_only": true,
+  "human_intake_approval_claimed": false,
+  "qualification_decision": "sha256:42633dfcb1776825ddcafb1256c42078a243584dacfda7d1be7abfaf0180530b",
+  "clean_runs": 2,
+  "private_batches_each_run": 35,
+  "old23_case_results_preserved": true,
+  "source_observations_each_host": 264,
+  "binding_records_each_host": 68,
+  "additional_precision_observations": 48,
+  "earlier_admitted_candidate_preserved_and_refused": true,
+  "admitted_smoke_tests": {
+    "failed": 0,
+    "passed": 5,
+    "skipped": 0,
+    "total": 5
+  },
+  "admission_build_cache_hits": 0,
+  "admission_repairs": 0,
+  "production_host_resources": 52,
+  "public_value_types_exact": 13,
+  "unchanged_production_callers": 7,
+  "actual_configured_provider_records_each_host": 12,
+  "configured_package_version": "1.7.10",
+  "production_consumer_both_host_acceptance": true,
+  "web_libraries": 27,
+  "web_private_batches": 830,
+  "full_parent_workflow_and_image_pending_at_record_time": true,
+  "current_parent_receipt_pending_at_record_time": true,
+  "all31_complete": false,
+  "public_url": null,
+  "live_qa_gates": 0,
+  "operator_security_review_accepted": false,
+  "application_fixture_correction": {
+    "original_run": "full source-layout failures preserved",
+    "clock_cases_unchanged": 18,
+    "expected_status_codes_and_retries_unchanged": true,
+    "actual_admitted_factory_hash_checked": true,
+    "actual_configured_provider_names": [
+      "google",
+      "github"
+    ],
+    "minimum_external_host_count": 7,
+    "generated_javascript_in_source_scan": true,
+    "negative_controls_refused": [
+      "missing provider disclosure",
+      "undeclared external host",
+      "admitted-source hash mismatch",
+      "historical two-clock error"
+    ],
+    "canonical_admitted_source_edited": false
+  }
+}

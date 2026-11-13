@@ -1,0 +1,43 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { extend_event_integrity_schema } = require('../storage_event_integrity/extend_event_integrity_schema.js');
+
+const expectedProgram = "CREATE TRIGGER v2_events_attribution_guard\nBEFORE UPDATE OF actor, ws_id ON v2_events\nFOR EACH ROW\nWHEN\n  (NEW.actor IS NOT OLD.actor AND NEW.actor IS NOT NULL)\n  OR NOT (\n    NEW.ws_id IS OLD.ws_id\n    OR (\n      EXISTS (SELECT 1 FROM v2_workspaces WHERE id = OLD.ws_id)\n      AND NEW.ws_id IS NOT NULL\n      AND typeof(NEW.ws_id) = 'text'\n      AND length(NEW.ws_id) = 28\n      AND length(CAST(NEW.ws_id AS BLOB)) = 28\n      AND substr(NEW.ws_id, 1, 4) COLLATE BINARY = 'wsx_'\n      AND substr(NEW.ws_id, 5) NOT GLOB '*[^a-z2-7]*'\n      AND NOT EXISTS (SELECT 1 FROM v2_workspaces WHERE id = NEW.ws_id)\n    )\n  )\nBEGIN\n  SELECT RAISE(ABORT, 'v2_events attribution is immutable');\nEND;";
+const cases = [
+  { id: 'generated-prefix-preserved', input: ['SELECT 17;', "-- earlier migration\nSELECT 'retained';"], expected: ['SELECT 17;', "-- earlier migration\nSELECT 'retained';", expectedProgram] },
+  { id: 'generated-empty-prefix', input: [], expected: [expectedProgram] },
+  { id: 'generated-duplicate-empty-strings', input: ['', '', "SELECT 'λ';"], expected: ['', '', "SELECT 'λ';", expectedProgram] }
+];
+
+function runTests() {
+  assert.equal(extend_event_integrity_schema.name, 'extend_event_integrity_schema');
+  assert.equal(extend_event_integrity_schema.length, 1);
+  const results = [];
+  for (const test of cases) {
+    const original = test.input.slice();
+    const input = Object.freeze(test.input.slice());
+    const result = extend_event_integrity_schema(input);
+    assert.deepEqual(result, test.expected);
+    assert.deepEqual(input, original);
+    assert.notEqual(result, input);
+    assert.equal(Object.getPrototypeOf(result), Array.prototype);
+    assert.equal(Object.isFrozen(result), false);
+    const another = extend_event_integrity_schema(input);
+    assert.deepEqual(another, test.expected);
+    assert.notEqual(result, another);
+    result.push('independent mutation');
+    assert.deepEqual(another, test.expected);
+    const mutable = original.slice();
+    assert.deepEqual(extend_event_integrity_schema(mutable), test.expected);
+    assert.deepEqual(mutable, original);
+    assert.equal(Object.isFrozen(mutable), false);
+    results.push({ case_id: test.id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+
+function smoke() {
+  return extend_event_integrity_schema(['SELECT 17;', "-- earlier migration\nSELECT 'retained';"]);
+}
+
+module.exports = { runTests, smoke };

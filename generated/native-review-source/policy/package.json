@@ -1,0 +1,1 @@
+{"name":"policy","version":"1.0.0","type":"commonjs","exports":{"./authorize":"./authorize.js","./can_bind":"./can_bind.js","./can_read_goal":"./can_read_goal.js","./data":"./data.js"}}

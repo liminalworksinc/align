@@ -1,0 +1,1 @@
+{"name":"promise_queues","type":"commonjs","exports":{"./with_lock":"./with_lock.js"}}

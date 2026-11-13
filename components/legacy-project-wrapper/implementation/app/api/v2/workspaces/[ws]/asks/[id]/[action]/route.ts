@@ -1,10 +1,5 @@
-import { actOnAsk, assertAskAction } from "@/lib/v2/asks";
-import { idParam, readJson, route, webWrite } from "@/lib/v2/http";
-import { ID_RE } from "@/lib/v2/validate";
-import { enter } from "@/lib/v2/workspaces";
+// Typed entry point for the admitted route library.
+import { bindRoute } from "@/lib/v2/native-routes/binding";
+import { routes } from "@/lib/v2/native-routes/team-asks-routes";
 
-// POST .../asks/:id/{accept|decline|done|reopen|withdraw|mention} (cookie). mention carries {date, text, source_title}.
-export const POST = route<{ ws: string; id: string; action: string }>(async (req, params) => {
-  const pp = enter(await webWrite(req), idParam(params.ws, ID_RE));
-  return actOnAsk(pp, idParam(params.id, ID_RE), assertAskAction(params.action), await readJson(req, 8 * 1024));
-});
+export const POST = bindRoute<{ ws: string; id: string; action: string }>(routes, "workspaces/[ws]/asks/[id]/[action]", "POST");

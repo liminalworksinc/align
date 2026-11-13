@@ -1,0 +1,26 @@
+{
+  "schema": "align/B19-integrated-candidate-preparation@1",
+  "registered_libraries": 66,
+  "web_libraries": 60,
+  "operator_libraries": 8,
+  "web_materialization_cases": 1092,
+  "source_reading_references": 452,
+  "all23_findings_undecided": true,
+  "complete_application_image_and_current_parent_receipt_required": true,
+  "source_authority_transferred": false,
+  "whole_B19_closed": false,
+  "published": false,
+  "registered_provider_assembly": {
+    "all66_manifest_providers_registered": true,
+    "unchanged_prior_descriptors": 57,
+    "only_existing_revision": "server-workspace-admission",
+    "envelope_provider": ".literate/native-projects/local-agent-envelope-stop-v2",
+    "sealed_agent_libraries": 6,
+    "sealed_agent_acceptance_cases": 161,
+    "provider_refusal_controls": 4,
+    "first_full_run_failed_due_to_old_unregistered_provider": true,
+    "full_run_after_source_correction_required": true,
+    "framework_source_unchanged": true
+  },
+  "retained_source_members": 519
+}

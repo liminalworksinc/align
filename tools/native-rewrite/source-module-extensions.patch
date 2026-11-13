@@ -1,0 +1,152 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 4ae469a1..4e4d3372 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -4,0 +5,2 @@
++- Source conversion recognizes JavaScript and TypeScript module and JSX filename
++  extensions while preserving test, minified and sensitive-content classifications.
+diff --git a/docs/user/source-to-specification.md b/docs/user/source-to-specification.md
+index 8e72375b..d43d3bd9 100644
+--- a/docs/user/source-to-specification.md
++++ b/docs/user/source-to-specification.md
+@@ -108,0 +109,7 @@ is reported as an explicit authentication prerequisite.
++The inert source inventory recognizes JavaScript files with `.js`, `.mjs`, `.cjs`
++and `.jsx` extensions, and TypeScript files with `.ts`, `.mts`, `.cts` and `.tsx`
++extensions. Explicit module filenames keep their original paths and bytes.
++Sensitive, binary and generated files remain excluded; `.test` and `.spec` names
++remain tests, and `.min` names remain minified inputs. Inventory and static
++derivation never execute these files.
++
+diff --git a/src/literate_ai/source_to_specification/inventory.py b/src/literate_ai/source_to_specification/inventory.py
+index 58340b23..a60fdf30 100644
+--- a/src/literate_ai/source_to_specification/inventory.py
++++ b/src/literate_ai/source_to_specification/inventory.py
+@@ -34,0 +35 @@ _SOURCE_LANGUAGES = {
++    ".cjs": "javascript",
+@@ -37,0 +39 @@ _SOURCE_LANGUAGES = {
++    ".cts": "typescript",
+@@ -44,0 +47 @@ _SOURCE_LANGUAGES = {
++    ".jsx": "javascript",
+@@ -47,0 +51,2 @@ _SOURCE_LANGUAGES = {
++    ".mjs": "javascript",
++    ".mts": "typescript",
+@@ -52,0 +58 @@ _SOURCE_LANGUAGES = {
++    ".tsx": "typescript",
+@@ -53,0 +60,5 @@ _SOURCE_LANGUAGES = {
++_SCRIPT_SOURCE_SUFFIXES = frozenset(
++    suffix
++    for suffix, language in _SOURCE_LANGUAGES.items()
++    if language in {"javascript", "typescript"}
++)
+@@ -439,3 +450,4 @@ def _classify(
+-    if name.endswith((".min.js", ".min.css")) or (
+-        len(text) > 4096 and text.count("\n") <= 2
+-    ):
++    if (
++        suffix in _SCRIPT_SOURCE_SUFFIXES | {".css"}
++        and path.stem.lower().endswith(".min")
++    ) or (len(text) > 4096 and text.count("\n") <= 2):
+@@ -448,0 +461,4 @@ def _classify(
++        or (
++            suffix in _SCRIPT_SOURCE_SUFFIXES
++            and path.stem.lower().endswith((".test", ".spec"))
++        )
+diff --git a/tests/critical/test_source_inventory_modules.py b/tests/critical/test_source_inventory_modules.py
+new file mode 100644
+index 00000000..4d15c555
+--- /dev/null
++++ b/tests/critical/test_source_inventory_modules.py
+@@ -0,0 +1,93 @@
++"""Module and JSX source extensions remain eligible without executing input."""
++
++import tempfile
++import unittest
++from pathlib import Path
++
++from literate_ai.source_to_specification.inventory import (
++    SourceFileClassification,
++    inventory_source,
++)
++from literate_ai.source_to_specification.skills import (
++    builtin_skill_set,
++    load_builtin_skill_catalog,
++)
++from literate_ai.source_to_specification.static_workflow import derive_static_checkout
++
++EXTENSIONS = {
++    ".js": "javascript",
++    ".mjs": "javascript",
++    ".cjs": "javascript",
++    ".jsx": "javascript",
++    ".ts": "typescript",
++    ".mts": "typescript",
++    ".cts": "typescript",
++    ".tsx": "typescript",
++}
++SOURCE = (
++    "export function calculate(value) { return value + 1; }\n"
++    "throw new Error('static input must never execute');\n"
++)
++
++
++class SourceInventoryModuleTests(unittest.TestCase):
++    def test_module_and_jsx_extensions_derive_with_their_unchanged_paths(self):
++        catalog = load_builtin_skill_catalog()
++        for extension, language in EXTENSIONS.items():
++            with (
++                self.subTest(extension=extension),
++                tempfile.TemporaryDirectory() as tmp,
++            ):
++                root = Path(tmp)
++                source = root / ("example" + extension)
++                source.write_text(SOURCE, encoding="utf-8")
++                inventory = inventory_source(root)
++                entry = inventory.entries[0]
++                self.assertEqual(entry.path, source.name)
++                self.assertEqual(entry.language, language)
++                self.assertEqual(entry.classification, SourceFileClassification.SOURCE)
++                result = derive_static_checkout(
++                    source=root,
++                    inventory=inventory,
++                    origin_attestation_id="fixture-origin",
++                    skill_set=builtin_skill_set(catalog, languages=(language,)),
++                    skill_catalog=catalog,
++                )
++                self.assertTrue(result.result.observations)
++                self.assertEqual(source.read_text(encoding="utf-8"), SOURCE)
++
++    def test_test_and_minified_names_keep_their_classifications(self):
++        for extension in EXTENSIONS:
++            for stem, expected in (
++                ("example.test", SourceFileClassification.TEST),
++                ("example.spec", SourceFileClassification.TEST),
++                ("example.min", SourceFileClassification.MINIFIED),
++            ):
++                with self.subTest(extension=extension, stem=stem):
++                    with tempfile.TemporaryDirectory() as tmp:
++                        source = Path(tmp) / (stem + extension)
++                        source.write_text(SOURCE, encoding="utf-8")
++                        self.assertEqual(
++                            inventory_source(source).entries[0].classification, expected
++                        )
++
++    def test_sensitive_binary_and_generated_exclusions_still_precede_source(self):
++        for extension in EXTENSIONS:
++            for content, expected in (
++                (
++                    b"api_key='fixture_credential_12345';\n",
++                    SourceFileClassification.SENSITIVE,
++                ),
++                (b"binary\0payload", SourceFileClassification.BINARY),
++                (
++                    b"// @generated\n" + SOURCE.encode(),
++                    SourceFileClassification.GENERATED,
++                ),
++            ):
++                with self.subTest(extension=extension, expected=expected):
++                    with tempfile.TemporaryDirectory() as tmp:
++                        source = Path(tmp) / ("example" + extension)
++                        source.write_bytes(content)
++                        self.assertEqual(
++                            inventory_source(source).entries[0].classification, expected
++                        )

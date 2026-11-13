@@ -1,0 +1,16 @@
+{
+  "schema": "align/private-original-reference@1",
+  "factories": [
+    {
+      "symbol": "create_metrics",
+      "path": "tools/native-rewrite/qualification/metrics-retention-v1/server-metrics/create_metrics.original.cjs",
+      "sha256": "6774bb9ae7347e61756f30366f3a8afbeded6c068570c69f5e42b1db24e1b7f7"
+    }
+  ],
+  "raw_sources": [
+    {
+      "path": "lib/v2/metrics-core.mts",
+      "sha256": "b1efbdd97422e28716e34719428d5e4f4efc86a7cdf67ae67b1fb06f87d4bd21"
+    }
+  ]
+}

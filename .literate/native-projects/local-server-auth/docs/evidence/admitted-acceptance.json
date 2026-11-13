@@ -1,0 +1,19 @@
+{
+  "schema": "align/authentication-child-documentation-evidence@1",
+  "qualification_decision": "sha256:42633dfcb1776825ddcafb1256c42078a243584dacfda7d1be7abfaf0180530b",
+  "qualified_clean_runs": 2,
+  "independent_batches_each_run": 35,
+  "admitted_generated_smoke_tests": 5,
+  "public_observations_each_host": 264,
+  "binding_records_each_host": 68,
+  "actual_configured_provider_records_each_host": 12,
+  "configured_package_version": "1.7.10",
+  "reviewed_authority_files_unchanged": 48,
+  "current_receipt_path": "verification/current.json",
+  "private_intake_validation_is_signature_attestation": false,
+  "consuming_application_types_image_and_parent_receipt_still_required": true,
+  "operator_security_review_accepted": false,
+  "public_url": null,
+  "live_qa_gates": 0,
+  "all31_complete": false
+}

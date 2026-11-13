@@ -1,0 +1,13 @@
+#!/usr/bin/env node
+'use strict';
+const { runTests, smoke } = require('./tests/litai_test.js');
+async function main() {
+  if (process.argv.length !== 3) throw new Error('Expected one framework mode');
+  const mode = process.argv[2];
+  if (mode === '--litai-test') return runTests();
+  if (mode === '--litai-smoke') return smoke();
+  throw new Error('This library has no product command-line interface');
+}
+main().then(result => process.stdout.write(JSON.stringify(result) + '\n'), error => {
+  process.stderr.write(String(error.stack || error) + '\n'); process.exitCode = 1;
+});

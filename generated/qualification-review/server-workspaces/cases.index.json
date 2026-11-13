@@ -1,0 +1,432 @@
+[
+  {
+    "kind": "plain",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "web-principal",
+      "granted-device-principal",
+      "ungranted-device-principal",
+      "member-principal",
+      "missing-member-principal"
+    ],
+    "golden_data": {
+      "records": 16,
+      "sha256": "446df5081d3b719e72c80e8c4847e7894ae7584a6dd2882b8d494cafb5e4a65b"
+    }
+  },
+  {
+    "kind": "plain",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "need-default-object",
+      "need-refused",
+      "enter",
+      "web-workspaces",
+      "device-workspaces"
+    ],
+    "golden_data": {
+      "records": 16,
+      "sha256": "e168fc5fde9399d7164238f429b04e4de727ccd3bfcdf872a385843587b79851"
+    }
+  },
+  {
+    "kind": "plain",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "web-other-workspaces",
+      "device-other-workspaces",
+      "create-blank",
+      "create-redeemed-seed",
+      "workspace-detail"
+    ],
+    "golden_data": {
+      "records": 31,
+      "sha256": "4f7a0c534f55a9029c9db12c54e7ac8892003cf4cff8eb30248517d435915ce8"
+    }
+  },
+  {
+    "kind": "plain",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "missing-workspace",
+      "update-empty",
+      "update-name",
+      "update-steering",
+      "update-both"
+    ],
+    "golden_data": {
+      "records": 30,
+      "sha256": "18b5d78215bc62f65291ac37796513e7f5ed81a1f03266d5ce7cd964fac5f826"
+    }
+  },
+  {
+    "kind": "plain",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "delete-workspace",
+      "deleted-list",
+      "deleted-owned",
+      "live-not-deleted",
+      "expired-deleted"
+    ],
+    "golden_data": {
+      "records": 15,
+      "sha256": "4ab0c7a0b7fba951d17f91e24e4bd23791ba8439c1549015cacbeef3e8483a79"
+    }
+  },
+  {
+    "kind": "plain",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "restore",
+      "restore-disappeared",
+      "role-unchanged",
+      "role-promote",
+      "role-last-owner"
+    ],
+    "golden_data": {
+      "records": 38,
+      "sha256": "f2ab1dbb43f15e57581a14cd3a70a3e967934984f3a7c74a1f52f55288df4260"
+    }
+  },
+  {
+    "kind": "plain",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "role-demote",
+      "remove-other",
+      "leave-self",
+      "remove-and-delete-sessions",
+      "leave-last-owner"
+    ],
+    "golden_data": {
+      "records": 47,
+      "sha256": "ed615a296c8895858eb8aef8f6ea59253f03ef9b85bb8b730bb2efa97fa2f720"
+    }
+  },
+  {
+    "kind": "plain",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "audit-trail",
+      "invite-create",
+      "invite-create-team",
+      "invite-viewer-lead",
+      "invite-team-role-no-team"
+    ],
+    "golden_data": {
+      "records": 40,
+      "sha256": "8e7a283e1ca62036144cd1553470ba35b5192b81679f7c1a4a9a7393f71a8397"
+    }
+  },
+  {
+    "kind": "plain",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "invite-invalid-email",
+      "invite-already-member",
+      "invite-list",
+      "invite-delete",
+      "invite-delete-missing"
+    ],
+    "golden_data": {
+      "records": 23,
+      "sha256": "b34510f6abc38e19096642c6ad44131b8933efa6fc55c3ac99825b07b4779edd"
+    }
+  },
+  {
+    "kind": "plain",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "invite-preview",
+      "invite-preview-other-email",
+      "invite-invalid-token",
+      "invite-expired",
+      "invite-accept"
+    ],
+    "golden_data": {
+      "records": 39,
+      "sha256": "848770fad08fbb2ec1f00536e309a5761c58b1e88d20deb695a513c1fa2590c9"
+    }
+  },
+  {
+    "kind": "plain",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "invite-accept-devices",
+      "invite-already-used-by-member",
+      "invite-accept-unverified-hosted",
+      "invite-accept-email-mismatch",
+      "team-create"
+    ],
+    "golden_data": {
+      "records": 46,
+      "sha256": "573885716531f46e8da9408bcaa79ccbf3200455e41dcd388098cf011f6c01f0"
+    }
+  },
+  {
+    "kind": "plain",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "team-member-set",
+      "team-viewer-as-member",
+      "team-viewer-lead-refused",
+      "team-lead-owner-only",
+      "team-member-remove"
+    ],
+    "golden_data": {
+      "records": 37,
+      "sha256": "3e3e27b90f1d3cc25674f7b533ff4d25ecde58dcd6b669c037a2c8ea832aa79a"
+    }
+  },
+  {
+    "kind": "plain",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "team-lead-self-remove",
+      "team-lead-other-refused",
+      "member-name",
+      "reader-name",
+      "other-name"
+    ],
+    "golden_data": {
+      "records": 20,
+      "sha256": "2af8075754b54136d6ab685af2a8368d6c8065017fc723f6c59aa8460ad03d34"
+    }
+  },
+  {
+    "kind": "properties",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "web-principal",
+      "granted-device-principal",
+      "ungranted-device-principal",
+      "member-principal",
+      "missing-member-principal"
+    ],
+    "golden_data": {
+      "records": 16,
+      "sha256": "5cac2204aa531180527268658c65aafe3b0a1abeca214ebaf3e434a000ce7481"
+    }
+  },
+  {
+    "kind": "properties",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "need-default-object",
+      "need-refused",
+      "enter",
+      "web-workspaces",
+      "device-workspaces"
+    ],
+    "golden_data": {
+      "records": 16,
+      "sha256": "8e82241fc677fdb7505392e9b476159a8fea229d1d46a0cbd5d33e91fac8fc27"
+    }
+  },
+  {
+    "kind": "properties",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "web-other-workspaces",
+      "device-other-workspaces",
+      "create-blank",
+      "create-redeemed-seed",
+      "workspace-detail"
+    ],
+    "golden_data": {
+      "records": 31,
+      "sha256": "22b48c1336878f4afee5fa3f9b0f798f08dfd0ce9487ac8477b8d16888dd74ee"
+    }
+  },
+  {
+    "kind": "properties",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "missing-workspace",
+      "update-empty",
+      "update-name",
+      "update-steering",
+      "update-both"
+    ],
+    "golden_data": {
+      "records": 30,
+      "sha256": "a8bf7907ce2980df09372bae310bf3f6596a4294b38aef2afd266b2e6f5986ba"
+    }
+  },
+  {
+    "kind": "properties",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "delete-workspace",
+      "deleted-list",
+      "deleted-owned",
+      "live-not-deleted",
+      "expired-deleted"
+    ],
+    "golden_data": {
+      "records": 15,
+      "sha256": "1289a09dfe6f83ccda53cfb6874d5dd895a4532e52f19f7c7c0f8083b9824a65"
+    }
+  },
+  {
+    "kind": "properties",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "restore",
+      "restore-disappeared",
+      "role-unchanged",
+      "role-promote",
+      "role-last-owner"
+    ],
+    "golden_data": {
+      "records": 38,
+      "sha256": "766d50acb891e0bb818df5c6e39212cad979b0ce1d321241a98739a9d04891b2"
+    }
+  },
+  {
+    "kind": "properties",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "role-demote",
+      "remove-other",
+      "leave-self",
+      "remove-and-delete-sessions",
+      "leave-last-owner"
+    ],
+    "golden_data": {
+      "records": 47,
+      "sha256": "92ea5453242e3c46525c2c587a6d017d3a689f3c70185f300c91d08b62e9b511"
+    }
+  },
+  {
+    "kind": "properties",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "audit-trail",
+      "invite-create",
+      "invite-create-team",
+      "invite-viewer-lead",
+      "invite-team-role-no-team"
+    ],
+    "golden_data": {
+      "records": 40,
+      "sha256": "4b9e495363a4592f31a35e36216c6d802f059f0d72e2fc827e754e1553ee88d0"
+    }
+  },
+  {
+    "kind": "properties",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "invite-invalid-email",
+      "invite-already-member",
+      "invite-list",
+      "invite-delete",
+      "invite-delete-missing"
+    ],
+    "golden_data": {
+      "records": 23,
+      "sha256": "6902465af3563f56624fa6176c4cb8cd21de0dd1c76758a43cb4d1d8c18188c4"
+    }
+  },
+  {
+    "kind": "properties",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "invite-preview",
+      "invite-preview-other-email",
+      "invite-invalid-token",
+      "invite-expired",
+      "invite-accept"
+    ],
+    "golden_data": {
+      "records": 39,
+      "sha256": "e1024ca154a7dc51ddea611cce1a3433e405df6e3e3b4e308b23611fda0cea58"
+    }
+  },
+  {
+    "kind": "properties",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "invite-accept-devices",
+      "invite-already-used-by-member",
+      "invite-accept-unverified-hosted",
+      "invite-accept-email-mismatch",
+      "team-create"
+    ],
+    "golden_data": {
+      "records": 46,
+      "sha256": "3eca560d6dd3b72a9028fc5047e24488ef1195430a89267f789579d7e0ab53af"
+    }
+  },
+  {
+    "kind": "properties",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "team-member-set",
+      "team-viewer-as-member",
+      "team-viewer-lead-refused",
+      "team-lead-owner-only",
+      "team-member-remove"
+    ],
+    "golden_data": {
+      "records": 37,
+      "sha256": "da99fff6ef318f48e3a48550269b9d6f969f55412ad6d3d02e0f93114ee5449d"
+    }
+  },
+  {
+    "kind": "properties",
+    "capability": "server-workspaces.create-workspaces",
+    "labels": [
+      "team-lead-self-remove",
+      "team-lead-other-refused",
+      "member-name",
+      "reader-name",
+      "other-name"
+    ],
+    "golden_data": {
+      "records": 20,
+      "sha256": "1b4db8371f9a0114ae5f2789875adc545e82ff1128a8d8fa37a6059a0c10c4b7"
+    }
+  },
+  {
+    "kind": "changing",
+    "capability": "server-workspaces.create-workspaces",
+    "golden_data": {
+      "records": 8,
+      "sha256": "3c583adc841b19e7aa5bce980bd54e77af214978078dba97c089736cdc90aee2"
+    }
+  },
+  {
+    "kind": "bindings",
+    "capability": "server-workspaces.create-workspaces",
+    "golden_data": {
+      "records": 38,
+      "sha256": "bddff5421cb520ec0e887a35f2c60cb12bc92291d6fa90e997aa8c5a74ebe7fb"
+    }
+  },
+  {
+    "kind": "populated",
+    "capability": "server-workspaces.create-workspaces",
+    "golden_data": {
+      "records": 6,
+      "sha256": "97b9d64332a6c815b433e2714cfebe4ca589dd78aeed94336fdb69ff4a0b7236"
+    }
+  },
+  {
+    "kind": "contention",
+    "capability": "server-workspaces.create-workspaces",
+    "golden_data": {
+      "records": 5,
+      "sha256": "0d4c20448bd91de78d7d4c51f652a688f263e9964795844048dfd9b2777b0d5b"
+    }
+  },
+  {
+    "kind": "extra",
+    "capability": "server-workspaces.create-workspaces",
+    "golden_data": {
+      "records": 2,
+      "sha256": "12ecc2327020098aa1e9cd06f6bb95521508a393d263d21aa614d3c64d4e6c9b"
+    }
+  }
+]

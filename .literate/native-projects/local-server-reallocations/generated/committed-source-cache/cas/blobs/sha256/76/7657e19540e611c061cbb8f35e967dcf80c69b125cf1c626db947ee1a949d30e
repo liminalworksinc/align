@@ -1,0 +1,12 @@
+'use strict';
+const fs=require('node:fs');
+const path=require('node:path');
+const root=path.resolve(__dirname,'..');
+const destination=process.argv[2];
+if(!destination) throw new Error('OUT is required');
+fs.mkdirSync(destination,{recursive:true});
+for(const file of ['main.js','tests/litai_test.js','server_reallocations/package.json','server_reallocations/create_reallocations.js']) {
+  const target=path.join(destination,file);
+  fs.mkdirSync(path.dirname(target),{recursive:true});
+  fs.copyFileSync(path.join(root,file),target);
+}

@@ -1,0 +1,3 @@
+'use strict';
+const {render_envelope} = require('./core.js');
+module.exports = {render_envelope};

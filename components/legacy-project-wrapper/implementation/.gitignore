@@ -14,6 +14,11 @@ node_modules/
 /build
 *.tsbuildinfo
 next-env.d.ts
+lib/native/
+.native-inputs/
+.native-prepared/
+.native-prepare-*/
+.native-consume-*/
 
 # env + secrets (never commit keys)
 .env

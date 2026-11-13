@@ -1,0 +1,137 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_goals } = require('../server_goals/create_goals.js');
+
+function basicCases() {
+  const api = create_goals({});
+  return [
+    ['generated-target-zero', () => api.targetIn(0), 0],
+    ['generated-target-hundred', () => api.targetIn(100), 100],
+    ['generated-target-clear', () => api.targetIn(null, 37), null],
+    ['generated-pod-wire', () => api.toWireVisibility('pod'), 'team'],
+    ['generated-private-wire', () => api.toWireVisibility('private'), 'private'],
+    ['generated-goal-object', () => api.goalObj({ owner_id: 'u7', visibility: 'pod', pod_id: 't4' }), { kind: 'goal', ownerId: 'u7', visibility: 'pod', podId: 't4' }]
+  ];
+}
+
+async function checkContracts() {
+  const names = ['all','audit','get','run','tx','badRequest','conflict','forbidden','notFound','newId','nowIso','sha256hex','canBind','canReadGoal','goalVersionDirective','event','limitsIn','limitsOf','need','personName','expireOpenRequests','releaseHold','endAlignmentsToClosedGoal','feedAllocation','workspaceSteering','supersedeReallocations','cleanName','optStr','str','isBlankText','DEPENDS_ON_MAX'];
+  const captures = [];
+  const resources = {};
+  for (const name of names) Object.defineProperty(resources, name, { get() { captures.push(name); return undefined; } });
+  const api = create_goals(resources);
+  assert.deepEqual(captures, names);
+  assert.equal(create_goals.length, 1);
+  const arities = { toWireVisibility:1,goalObj:1,goalRow:2,visibleGoal:2,goalCore:1,parentIds:2,reviewParents:4,confirmParent:3,transferGoals:2,transferFor:3,bindableFor:2,serializeGoal:3,visibleGoals:1,goalsFeed:1,unreadableGoals:2,dependencyCycle:3,goalsDependingOn:2,assertNoDependencyCycle:3,sameContent:2,contentOf:1,versionContentOf:3,nextContent:4,targetIn:1,assertTargetsFit:2,insertGoal:3,createGoal:2,writeGoalVersion:4,newGoalVersion:3,goalDetail:2 };
+  assert.equal(Object.keys(api).length, 33);
+  for (const [name, length] of Object.entries(arities)) assert.equal(api[name].length, length, name);
+  assert.deepEqual(api.GOAL_LEVELS, ['company','team']);
+  assert.deepEqual(api.WIRE_VISIBILITIES, ['private','team','workspace']);
+  assert.deepEqual(api.GOAL_STATUSES, ['active','achieved','dropped']);
+  const sentinel = {};
+  const validate = create_goals({ badRequest: () => sentinel });
+  for (const value of [-1, 101, 1.5, '12', false, {}, NaN, Infinity]) assert.throws(() => validate.targetIn(value), e => e === sentinel);
+  assert.equal(validate.targetIn(undefined, 62), 62);
+  assert.equal(validate.targetIn(undefined), null);
+
+  const trace = [];
+  const hashApi = create_goals({ sha256hex: text => { trace.push(text); return text; } });
+  const content = { title:'Plan',measures:[],anchors:{},status:'active',depends_on:['z','a'],limits:[],target_share:null };
+  assert.equal(hashApi.sameContent(content, { ...content, depends_on:['a','z'] }), true);
+  assert.deepEqual(content.depends_on, ['z','a']);
+  assert.deepEqual(trace, ['{"title":"Plan","measures":[],"anchors":{},"status":"active","depends_on":["a","z"]}','{"title":"Plan","measures":[],"anchors":{},"status":"active","depends_on":["a","z"]}']);
+  const graphApi = create_goals({ all: () => [{id:'hidden',depends_on_json:'["self"]'}] });
+  assert.equal(graphApi.dependencyCycle('w','self',['hidden']), true);
+  assert.equal(graphApi.dependencyCycle('w','self',['other']), false);
+  const malformed = create_goals({ all: () => [{id:'other',depends_on_json:'false'}] });
+  assert.throws(() => malformed.dependencyCycle('w','self',['other']), TypeError);
+
+  for (const counts of [[1000], [999,1000]]) {
+    const log = [];
+    const failure = {};
+    const admission = create_goals({
+      optStr: () => null, need: () => {}, str: () => 'Capacity',
+      limitsIn: (v) => v, nowIso: () => { log.push('clock'); return 'at'; },
+      get: (sql, ws) => { assert.equal(sql,'SELECT COUNT(*) AS n FROM v2_goals WHERE ws_id = ?'); assert.equal(ws,'w'); log.push('count'); return { n: counts.shift() }; },
+      tx: callback => { log.push('tx'); return callback(); },
+      conflict: (code, message) => { assert.equal(code,'too_many_goals'); assert.equal(message,'This workspace has the maximum number of goals.'); return failure; },
+      newId: () => { throw new Error('Insertion must not start'); },
+      run: () => { throw new Error('No writes allowed'); },
+      audit: () => { throw new Error('No audit allowed'); },
+      event: () => { throw new Error('No event allowed'); }
+    });
+    const expected = counts.length === 1 ? ['clock','count'] : ['clock','count','tx','count'];
+    await assert.rejects(admission.createGoal({wsId:'w',userId:'u'}, {title:'Capacity'}), e => e === failure);
+    assert.deepEqual(log, expected);
+  }
+
+  const targetFailure = {};
+  const targets = create_goals({
+    all: () => [{id:'hidden',target_share:70},{id:'edited',target_share:30}],
+    conflict: (code, message) => {
+      assert.equal(code, 'targets_over_100');
+      assert.equal(message, 'Targets of active goals would add up to 101%; keep them at 100% or less (other goals already take 70%).');
+      return targetFailure;
+    }
+  });
+  const nextShares = new Map([['edited',30]]);
+  assert.equal(targets.assertTargetsFit('w', nextShares), undefined);
+  assert.deepEqual([...nextShares], [['edited',30]]);
+  assert.throws(() => targets.assertTargetsFit('w', new Map([['edited',31]])), e => e === targetFailure);
+
+  const stale = {};
+  const writes = [];
+  const staleApi = create_goals({
+    run: (...args) => { writes.push(args); return 0; },
+    conflict: (code, message) => {
+      assert.equal(code, 'stale_version');
+      assert.equal(message, 'This goal changed while you were editing. Reload to start from its latest version.');
+      return stale;
+    },
+    audit: () => { throw new Error('Stale writes cannot audit'); }
+  });
+  assert.throws(() => staleApi.writeGoalVersion({ws_id:'w',id:'g',version:2,target_share:null},
+    {title:'Changed',measures:[],anchors:{},depends_on:[],limits:[],status:'active',target_share:null}, 'actor','at'), e => e === stale);
+  assert.deepEqual(writes, [[
+    'UPDATE v2_goals SET version = ?, title = ?, measures_json = ?, anchors_json = ?, depends_on_json = ?, limits_json = ?, target_share = ?, status = ?, updated_at = ? WHERE ws_id = ? AND id = ? AND version = ?',
+    3,'Changed','[]','{}','[]','[]',null,'active','at','w','g',2
+  ]]);
+
+  const order = [];
+  const stored = {id:'g',version:4};
+  const terminal = create_goals({
+    run: sql => { order.push(sql.startsWith('UPDATE v2_goals') ? 'update' : 'immutable'); return 1; },
+    sha256hex: () => { order.push('hash'); return 'test-hash'; },
+    audit: (...args) => { order.push(['audit', ...args]); },
+    all: sql => { order.push(sql); return []; },
+    get: () => { order.push('row'); return stored; },
+    goalVersionDirective: (ws, row) => { assert.equal(row, stored); order.push('directive'); },
+    supersedeReallocations: () => { order.push('reallocations'); },
+    expireOpenRequests: () => { order.push('expire'); },
+    releaseHold: () => { order.push('release'); },
+    endAlignmentsToClosedGoal: () => { order.push('end'); }
+  });
+  assert.equal(terminal.writeGoalVersion({ws_id:'w',id:'g',version:3,target_share:50},
+    {title:'Done',measures:[],anchors:{},depends_on:[],limits:[],status:'achieved',target_share:50}, 'actor','at','author'), stored);
+  assert.deepEqual(order, [
+    'update','hash','immutable',['audit','w','actor','goal.versioned','g','at'],
+    "SELECT DISTINCT target_goal_id FROM v2_alignments WHERE ws_id = ? AND source_goal_id = ? AND state = 'approved' ORDER BY target_goal_id",
+    'row','directive',
+    "SELECT id FROM v2_change_requests WHERE ws_id = ? AND goal_id = ? AND state = 'approved' AND launch IN ('pending','not_yet')",
+    'reallocations',
+    "SELECT id FROM v2_change_requests WHERE ws_id = ? AND goal_id = ? AND state IN ('pending','countered')",
+    'expire','release','end'
+  ]);
+}
+
+async function runTests() {
+  const cases = [];
+  for (const [case_id, invoke, expected] of basicCases()) {
+    assert.deepEqual(invoke(), expected);
+    cases.push({ case_id, outcome:'passed' });
+  }
+  await checkContracts();
+  return { schema:'literate-ai/generated-test-results@1', cases };
+}
+function smoke() { return create_goals({}).targetIn(0); }
+module.exports = { runTests, smoke };

@@ -1,0 +1,16 @@
+{
+  "schema": "align/account-lifecycle-child-documentation-evidence@1",
+  "qualification_decision": "sha256:4c8e427f7b52740ab0c888a752aa9f49d1921ff6b50f9f2a02f2a0e3e68e4211",
+  "qualified_clean_runs": 2,
+  "acceptance_batches_each_run": 4,
+  "admitted_generated_smoke_tests": 8,
+  "public_records_each_host": 50,
+  "binding_checks_each_host": 77,
+  "provider_table_records_each_host": 11,
+  "adaptive_fault_operations": 7,
+  "reviewed_authority_files_unchanged": 47,
+  "actual_configured_composition_and_parent_acceptance_pending": true,
+  "all31_complete": false,
+  "public_url": null,
+  "live_qa_gates": 0
+}

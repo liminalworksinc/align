@@ -1,0 +1,112 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { create_workspace_admin_routes } = require('../server_workspace_admin_routes/create_workspace_admin_routes.js');
+
+const cases = [
+  {
+    id: 'generated-list-empty',
+    arguments: [{ route: 'workspaces', current: [], deleted: [] }],
+    expected: { workspaces: [], deleted: [] }
+  },
+  {
+    id: 'generated-detail',
+    arguments: [{ route: 'workspaces/[ws]', ws: 'workspace-coral', detail: { id: 'workspace-coral', name: 'Coral' } }],
+    expected: { id: 'workspace-coral', name: 'Coral' }
+  },
+  {
+    id: 'generated-audit-order',
+    arguments: [{ route: 'workspaces/[ws]/audit', ws: 'workspace-cedar', audit: [{ action: 'created' }, { action: 'renamed' }] }],
+    expected: { audit: [{ action: 'created' }, { action: 'renamed' }] }
+  }
+];
+
+async function invoke(input) {
+  const calls = [];
+  const req = { url: 'https://example.invalid/api/v2/workspaces' };
+  const web = { user: { id: 'user-coral' } };
+  const principal = { wsRole: 'member' };
+  const pattern = /^[a-z-]+$/;
+  const resources = {
+    Response: { json(value) { assert.equal(this, resources.Response); return value; } },
+    URL,
+    policy: { WS_ROLES: ['owner', 'member'], POD_ROLES: ['member'] },
+    sample: {},
+    validate: { ID_RE: pattern },
+    http: {
+      route: function (body) {
+        assert.equal(this, undefined);
+        return async (request, context) => body(request, await context.params);
+      },
+      webAuth: async function (request) {
+        assert.equal(this, undefined);
+        assert.equal(request, req);
+        calls.push('auth');
+        return web;
+      },
+      idParam: function (value, re) {
+        assert.equal(this, undefined);
+        assert.equal(re, pattern);
+        assert.equal(value, input.ws);
+        assert.match(value, re);
+        calls.push('id');
+        return value;
+      }
+    },
+    workspaces: {
+      workspacesFor: function (value) {
+        assert.equal(this, undefined);
+        assert.equal(value, web);
+        calls.push('current');
+        queueMicrotask(() => calls.push('yield'));
+        return input.current;
+      },
+      deletedWorkspacesFor: function (user) {
+        assert.equal(this, undefined);
+        assert.equal(user, web.user.id);
+        assert.deepEqual(calls, ['auth', 'current']);
+        calls.push('deleted');
+        return input.deleted;
+      },
+      enter: function (value, ws) {
+        assert.equal(this, undefined);
+        assert.equal(value, web);
+        assert.equal(ws, input.ws);
+        calls.push('enter');
+        queueMicrotask(() => calls.push('yield'));
+        return principal;
+      },
+      workspaceDetail: function (value) {
+        assert.equal(this, undefined);
+        assert.equal(value, principal);
+        assert.deepEqual(calls, ['auth', 'id', 'enter']);
+        calls.push('detail');
+        return input.detail;
+      },
+      auditTrail: function (value) {
+        assert.equal(this, undefined);
+        assert.equal(value, principal);
+        assert.deepEqual(calls, ['auth', 'id', 'enter']);
+        calls.push('audit');
+        return input.audit;
+      }
+    }
+  };
+  const routes = create_workspace_admin_routes(resources);
+  assert.deepEqual(calls, []);
+  assert.equal(Object.keys(routes).length, 11);
+  assert.equal(Object.values(routes).reduce((sum, methods) => sum + Object.keys(methods).length, 0), 16);
+  return routes[input.route].GET(req, { params: Promise.resolve({ ws: input.ws }) });
+}
+
+async function run() {
+  const results = [];
+  for (const test of cases) {
+    assert.deepEqual(await invoke(...test.arguments), test.expected);
+    results.push({ case_id: test.id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+
+async function smoke() { return invoke(...cases[0].arguments); }
+module.exports = { run, smoke };

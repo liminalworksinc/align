@@ -1,11 +1,5 @@
-import { GRANT_ID, revokeGrant } from "@/lib/oauth/grants";
-import { idParam, noContent, route, webWrite } from "@/lib/v2/http";
-import { ID_RE } from "@/lib/v2/validate";
-import { enter } from "@/lib/v2/workspaces";
+// Typed entry point for the admitted route library.
+import { bindRoute } from "@/lib/v2/native-routes/binding";
+import { routes } from "@/lib/v2/native-routes/connected-apps-routes";
 
-// DELETE (cookie): disconnect one AI app. Its person or a workspace owner; any other grant is not found. Its access and
-// refresh tokens stop at once (they are checked against the grant on every use).
-export const DELETE = route<{ ws: string; grant: string }>(async (req, params) => {
-  await revokeGrant(enter(await webWrite(req), idParam(params.ws, ID_RE)), idParam(params.grant, GRANT_ID));
-  return noContent();
-});
+export const DELETE = bindRoute<{ ws: string; grant: string }>(routes, "workspaces/[ws]/apps/[grant]", "DELETE");

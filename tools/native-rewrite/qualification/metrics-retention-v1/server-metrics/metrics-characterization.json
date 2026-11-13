@@ -1,0 +1,113 @@
+{
+  "batches": [
+    {
+      "batch": 0,
+      "records": 36,
+      "sha256": "c696a1b3186d5c1ddc55771288d25cd3257c2345954b9e99801de3a0e7390782"
+    },
+    {
+      "batch": 1,
+      "records": 42,
+      "sha256": "6e364ecc5c3b93b2ff4c1ec9fe3614838b9c5a975983b962b805a1045ed59b6f"
+    },
+    {
+      "batch": 2,
+      "records": 174,
+      "sha256": "472ba906d3dc0d50b3d9c8af53674cbd1cb5b2984be88a033b30adcbc4451c8a"
+    },
+    {
+      "batch": 3,
+      "records": 77,
+      "sha256": "4adf4462e1cd6c5b96a7a39e0c1eee5165d1abdcea7e9ebec694bb8b9722e201"
+    },
+    {
+      "batch": 4,
+      "records": 48,
+      "sha256": "fe4ff61cf3bbf9ae498cb43bc506be0203d19ed00cd866a831606c4899e425de"
+    },
+    {
+      "batch": 5,
+      "records": 48,
+      "sha256": "eb695f2b817398df9a7b07a63fc375dc907d3501646b739f4e221282146fc139"
+    },
+    {
+      "batch": 6,
+      "records": 623,
+      "sha256": "a188cad86750f56b3d610ed52ad200faa8560328a3624d49f6edf696f08c115f"
+    },
+    {
+      "batch": 7,
+      "records": 151,
+      "sha256": "dff99a8559f6dd55c7d21cb598fa06e3d2bdf7ddec83e6604f954a5bdd8b87d1"
+    }
+  ],
+  "fault_paths": [
+    {
+      "operation": "report",
+      "settings": {},
+      "reads": 539,
+      "effects": 94,
+      "captures": 4,
+      "dateReads": 60
+    },
+    {
+      "operation": "report",
+      "settings": {
+        "empty": true
+      },
+      "reads": 68,
+      "effects": 45,
+      "captures": 4,
+      "dateReads": 11
+    },
+    {
+      "operation": "loi",
+      "settings": {},
+      "reads": 5,
+      "effects": 5,
+      "captures": 4,
+      "dateReads": 2
+    },
+    {
+      "operation": "loi",
+      "settings": {
+        "options": {
+          "verifiedOriginal": false,
+          "noteRef": "bad ref"
+        }
+      },
+      "reads": 1,
+      "effects": 1,
+      "captures": 4,
+      "dateReads": 1
+    },
+    {
+      "operation": "percentile",
+      "settings": {
+        "empty": true,
+        "values": [
+          9,
+          1,
+          5,
+          3
+        ],
+        "p": 0.75
+      },
+      "reads": 10,
+      "effects": 0,
+      "captures": 4,
+      "dateReads": 0
+    },
+    {
+      "operation": "week",
+      "settings": {
+        "empty": true,
+        "t": 1794700800000
+      },
+      "reads": 0,
+      "effects": 2,
+      "captures": 4,
+      "dateReads": 2
+    }
+  ]
+}

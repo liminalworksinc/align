@@ -1,0 +1,1 @@
+{"name":"shell_words","type":"commonjs","exports":{"./command_words":"./command_words.js","./parse":"./parse.js"}}

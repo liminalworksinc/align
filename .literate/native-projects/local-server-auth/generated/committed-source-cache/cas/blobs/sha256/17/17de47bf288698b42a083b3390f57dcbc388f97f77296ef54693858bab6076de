@@ -1,0 +1,1 @@
+{"name":"server_auth","type":"commonjs","exports":{"./create_auth":"./create_auth.js"}}

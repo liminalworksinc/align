@@ -1,0 +1,14 @@
+LITAI_LANGUAGE_TOOL ?= node
+.PHONY: all test check
+all: check
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" --check trust_markdown/slug.js
+	"$(LITAI_LANGUAGE_TOOL)" --check trust_markdown/plain.js
+	"$(LITAI_LANGUAGE_TOOL)" --check trust_markdown/safe_href.js
+	"$(LITAI_LANGUAGE_TOOL)" --check trust_markdown/parse_inline.js
+	"$(LITAI_LANGUAGE_TOOL)" --check trust_markdown/parse_markdown.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tests/litai_test.js
+test: check
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-smoke

@@ -1,0 +1,17 @@
+LITAI_LANGUAGE_TOOL ?= node
+OBJECT_ROOT ?= .objects
+OUT ?= $(OBJECT_ROOT)/artifact
+
+.PHONY: all test check
+all:
+	"$(LITAI_LANGUAGE_TOOL)" tools/package.js "$(OUT)"
+
+test: check
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check server_client_keys/create_client_keys.js
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tests/litai_test.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tools/package.js
+	"$(LITAI_LANGUAGE_TOOL)" --check run

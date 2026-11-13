@@ -1,0 +1,12 @@
+'use strict';
+const tests = require('./tests/litai_test.js');
+async function main() {
+  if (process.argv.length !== 3) throw new Error('Expected one framework mode');
+  if (process.argv[2] === '--litai-test') {
+    const cases = await tests.runTests();
+    console.log(JSON.stringify({ schema: 'literate-ai/generated-test-results@1', cases }));
+  } else if (process.argv[2] === '--litai-smoke') {
+    console.log(JSON.stringify(await tests.smoke()));
+  } else throw new Error('This artifact is an importable library');
+}
+main().catch(error => { console.error(error.stack || String(error)); process.exitCode = 1; });

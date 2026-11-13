@@ -1,0 +1,114 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_sample } = require('../server_sample/create_sample.js');
+const asset = require('../server_sample/sample-text.json');
+const nativeCases = [
+  { id: 'generated-result-object', args: [{id:'workspace-a'}, {user:{id:'caller-a'}}, 'code-a'], expected: {id:'workspace-a'} },
+  { id: 'generated-null-result', args: [null, {user:{id:'caller-b'}}, null], expected: null },
+  { id: 'generated-nested-result', args: [{workspace:{id:'workspace-c'},created:true}, {user:{id:'caller-c'}}, ''], expected: {workspace:{id:'workspace-c'},created:true} }
+];
+const names = ['audit','run','newId','insertAlignment','insertChangeRequest','goalRow','insertGoal','newLimitId','createWorkspace','readDate'];
+async function execute(c) {
+  const reads = [];
+  const resources = {};
+  let callback;
+  for (const name of names) {
+    Object.defineProperty(resources, name, { get() {
+      reads.push(name);
+      if (name === 'createWorkspace') return function(req, principal, title, code, seed) {
+        assert.equal(this, undefined);
+        assert.equal(arguments.length, 5);
+        assert.equal(req, c.args[0]);
+        assert.equal(principal, c.args[1]);
+        assert.equal(title, asset.workspace_name);
+        assert.equal(code, c.args[2]);
+        callback = seed;
+        return req;
+      };
+      return function() { throw new Error('Unexpected seed effect'); };
+    } });
+  }
+  assert.equal(create_sample.length, 1);
+  const api = create_sample(resources);
+  assert.deepEqual(reads, names);
+  assert.deepEqual(Object.keys(api), ['SAMPLE_NAME','SAMPLE_REASON','SAMPLE_LIMIT_TEXT','createSampleWorkspace']);
+  assert.equal(api.SAMPLE_NAME, asset.workspace_name);
+  assert.equal(api.SAMPLE_REASON, asset.change_request_reason);
+  assert.equal(api.SAMPLE_LIMIT_TEXT, asset.limit_text);
+  assert.equal(typeof api.SAMPLE_NAME, 'string');
+  assert.equal(typeof api.SAMPLE_REASON, 'string');
+  assert.equal(typeof api.SAMPLE_LIMIT_TEXT, 'string');
+  assert.equal(api.createSampleWorkspace.length, 3);
+  const result = await api.createSampleWorkspace(...c.args);
+  assert.equal(result, c.args[0]);
+  assert.deepEqual(result, c.expected);
+  assert.equal(callback.length, 2);
+  assert.equal(callback.constructor.name, 'Function');
+  return result;
+}
+function checkSeed() {
+  let next = 0;
+  let dateReads = 0;
+  let seed;
+  const goals = [];
+  const rows = new Map();
+  const alignments = [];
+  let change;
+  const api = create_sample({
+    audit() { assert.equal(this, undefined); assert.equal(arguments.length, 5); },
+    run() { assert.equal(this, undefined); assert.equal(arguments.length, 5); },
+    newId(prefix) { assert.equal(this, undefined); return prefix + (++next); },
+    insertAlignment(...args) { assert.equal(this, undefined); alignments.push(args); },
+    insertChangeRequest(...args) { assert.equal(this, undefined); change = args; },
+    goalRow(ws, id) { assert.equal(this, undefined); return rows.get(id); },
+    insertGoal(principal, body, at) {
+      assert.equal(this, undefined);
+      const id = 'goal' + goals.length;
+      goals.push({principal,body,at});
+      rows.set(id, {id,measures_json:JSON.stringify(body.measures)});
+      return id;
+    },
+    newLimitId() { assert.equal(this, undefined); return 'limit'; },
+    createWorkspace(req, principal, name, code, callback) { seed = callback; return req; },
+    readDate() { assert.equal(this, undefined); dateReads++; return Date; }
+  });
+  return (async () => {
+    await api.createSampleWorkspace({}, {user:{id:'owner'}}, 'code');
+    const at = '2031-04-05T06:07:08.000Z';
+    assert.equal(seed('ws', at), undefined);
+    assert.equal(dateReads, 6);
+    assert.deepEqual(goals.map(g=>g.at), [at,'2031-04-05T06:07:08.002Z','2031-04-05T06:07:08.001Z']);
+    assert.deepEqual(goals.map(g=>g.body.podId), [null,'pod2','pod1']);
+    assert.deepEqual(goals.map(g=>g.body.dependsOn), [[],[],['goal1']]);
+    assert.equal(goals[0].principal, goals[2].principal);
+    assert.deepEqual([...goals[0].principal.pods], [['pod1','lead'],['pod2','lead']]);
+    assert.equal(goals[0].body.anchors, goals[1].body.anchors);
+    const shared = goals[0].body.anchors;
+    shared.issues.push('observed');
+    assert.equal(alignments.length, 2);
+    assert.equal(alignments[0][1], rows.get('goal0'));
+    assert.equal(alignments[0][2], rows.get('goal2'));
+    assert.equal(alignments[1][2], rows.get('goal1'));
+    assert.notEqual(alignments[0][4], alignments[1][4]);
+    assert.equal(change[1], rows.get('goal1'));
+    assert.equal(change[3], asset.change_request_reason);
+    assert.equal(change[4], at);
+    assert.deepEqual(change[2].measures.slice(0,-1), goals[1].body.measures);
+    assert.equal(change[2].measures.at(-1).text, asset.pending_measure.text);
+    await api.createSampleWorkspace({}, {user:{id:'other'}}, null);
+    seed('other-ws', at);
+    assert.equal(goals[3].body.anchors, shared);
+    assert.notEqual(goals[3].principal, goals[0].principal);
+  })();
+}
+async function runTests() {
+  const results = [];
+  for (const c of nativeCases) {
+    await execute(c);
+    if (c.id === 'generated-nested-result') await checkSeed();
+    results.push({case_id:c.id,outcome:'passed'});
+  }
+  return {schema:'literate-ai/generated-test-results@1',cases:results};
+}
+async function smoke() { return execute(nativeCases[0]); }
+module.exports = { runTests, smoke };

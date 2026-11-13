@@ -1,0 +1,26 @@
+  ],
+  "publication_record": {
+    "commit": "0eeddc0763db744e30ade0439de82412a4c858ba",
+    "tree": "d03c69e8acce6b1b742b0e08b3af3a9fbc8cab68",
+    "normal_push_exit_code": 0,
+    "review_bypass": false,
+    "PR": "https://github.com/liminalworksinc/align/pull/58",
+    "is_draft": true,
+    "both_CI_checks_successful": true,
+    "source_identity": "sha256:29f6f3bd1e58b922daef50493920b433890980ca96685ca51b0b5a9879a20ca3",
+    "receipt": "sha256:846205aba5f1adb37e07f9b44410575eea26424dd995ff26b543db23075c03fa",
+    "open_review_findings": 39,
+    "public_qa_gates": 0,
+    "operator_security_accepted": false,
+    "native_accepted_boundaries": 18,
+    "intentionally_retained_boundaries": 10,
+    "total_closed_boundaries": 26,
+    "CI": [
+      {
+        "name": "verify",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "details_url": "https://github.com/liminalworksinc/align/actions/runs/43463475438/job/132016298564"
+      },
+      {
+        "name": "rebased-on-main",

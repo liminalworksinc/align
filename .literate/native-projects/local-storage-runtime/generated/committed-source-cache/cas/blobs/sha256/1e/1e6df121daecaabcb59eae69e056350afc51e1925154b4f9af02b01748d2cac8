@@ -1,0 +1,262 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
+const { setTimeout } = require('node:timers');
+const { create_store } = require('../storage_runtime/create_store.js');
+
+function fixture(overrides = {}) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-runtime-'));
+  const shared = {};
+  const context = {
+    dataDir: () => directory, shared, DatabaseSync, join: path.join,
+    existsSync: fs.existsSync, mkdirSync: fs.mkdirSync, chmodSync: fs.chmodSync,
+    random: () => 0, setTimeout, schemaVersion: 0, changePrograms: () => [],
+    applyMigrations: resources => resources.complete(),
+    count: (number, noun) => `${number} ${noun}${number === 1 ? '' : 's'}`,
+    ...overrides,
+  };
+  const store = create_store(context);
+  return {
+    directory, context, store,
+    close() {
+      const bundle = context.shared.__alignV2Db;
+      if (bundle) {
+        try { bundle.domain.close(); } finally { bundle.auth.close(); }
+      }
+      fs.rmSync(directory, { recursive: true, force: true });
+    },
+  };
+}
+
+function writeResult(args) {
+  const f = fixture();
+  try {
+    f.store.exec('CREATE TABLE generated_values (value INTEGER)');
+    return f.store.run(...args);
+  } finally { f.close(); }
+}
+
+function sharedAndPrepared() {
+  const f = fixture();
+  try {
+    assert.equal(f.context.shared.__alignV2Db, undefined);
+    const s = f.store;
+    assert.equal(s.dbDir(), path.join(f.directory, 'v2'));
+    assert.equal(s.dbFile(), path.join(f.directory, 'v2', 'align.sqlite'));
+    assert.equal(create_store.length, 1);
+    const arities = { dbDir: 0, dbFile: 0, openDb: 0, authDb: 0, all: 1, get: 1, run: 1,
+      exec: 1, tx: 1, migrate: 0, LIVE_WS: 1, audit: 5 };
+    assert.equal(Object.keys(s).length, 13);
+    for (const [name, arity] of Object.entries(arities)) {
+      assert.equal(s[name].name, name);
+      assert.equal(s[name].length, arity);
+    }
+    assert.deepEqual(Object.keys(s.sql), ['run', 'get', 'all']);
+    assert.equal(s.sql.run, s.run);
+    assert.equal(s.sql.get, s.get);
+    assert.equal(s.sql.all, s.all);
+    const bundle = s.openDb();
+    assert.deepEqual(Object.keys(bundle), ['file', 'domain', 'auth', 'stmts']);
+    assert.notEqual(bundle.domain, bundle.auth);
+    assert.equal(s.authDb(), bundle.auth);
+    assert.equal(create_store(f.context).openDb(), bundle);
+    for (const [connection, timeout] of [[bundle.auth, 5000], [bundle.domain, 0]]) {
+      assert.equal(connection.prepare('PRAGMA busy_timeout').get().timeout, timeout);
+      assert.equal(connection.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
+      assert.equal(connection.prepare('PRAGMA journal_mode').get().journal_mode, 'wal');
+      assert.equal(connection.prepare('PRAGMA synchronous').get().synchronous, 1);
+    }
+    assert.equal(fs.statSync(s.dbDir()).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(bundle.file).mode & 0o777, 0o600);
+    const query = 'SELECT ? AS value';
+    const first = s.get(query, 17);
+    assert.equal(Object.getPrototypeOf(first), null);
+    assert.equal(first.value, 17);
+    const prepared = bundle.stmts.get(query);
+    assert.equal(s.all(query, 29)[0].value, 29);
+    assert.equal(bundle.stmts.get(query), prepared);
+    prepared.setReadBigInts(true);
+    assert.equal(s.get(query, 9007199254740993n).value, 9007199254740993n);
+    const blob = new Uint8Array([0, 127, 255]);
+    assert.deepEqual(s.get('SELECT ? AS blob', blob).blob, blob);
+    assert.equal(s.get('SELECT 1 WHERE 0'), undefined);
+    assert.equal(s.get('SELECT ? AS value', null).value, null);
+    const invalid = 'SELECT FROM';
+    assert.throws(() => s.get(invalid));
+    assert.equal(bundle.stmts.has(invalid), false);
+    let reads = 0;
+    const other = create_store({ ...f.context, dataDir: () => { reads++; return path.join(f.directory, 'changed'); } });
+    assert.equal(other.openDb(), bundle);
+    assert.equal(reads, 0);
+    assert.equal(other.dbDir(), path.join(f.directory, 'changed', 'v2'));
+    assert.equal(reads, 1);
+    const failure = {};
+    bundle.stmts.set('fault', { get() { throw failure; } });
+    assert.throws(() => s.get('fault'), error => error === failure);
+  } finally { f.close(); }
+  let programsRead = 0;
+  assert.throws(() => create_store({ schemaVersion: 2, changePrograms() { programsRead++; return []; } }),
+    { message: 'lib/v2/core.mts SCHEMA_VERSION is 2, but there are 0 migrations' });
+  assert.equal(programsRead, 1);
+}
+
+async function transactionBehavior() {
+  const f = fixture();
+  try {
+    const { exec, run, get, tx } = f.store;
+    exec('CREATE TABLE changes (value INTEGER)');
+    const pending = tx(() => { run('INSERT INTO changes VALUES (?)', 3); return 41; });
+    assert.ok(pending instanceof Promise);
+    assert.equal(await pending, 41);
+    const original = { failure: 'callback' };
+    await assert.rejects(tx(() => { run('INSERT INTO changes VALUES (?)', 8); throw original; }), e => e === original);
+    assert.equal(get('SELECT COUNT(*) AS n FROM changes').n, 1);
+    await assert.rejects(tx(() => Promise.resolve(7)), { message: 'tx() callbacks must be synchronous' });
+    let nested;
+    assert.equal(await tx(() => { nested = tx(() => 19); return 31; }), 31);
+    assert.equal(await nested, 19);
+    let rejection;
+    assert.equal(await tx(() => {
+      rejection = tx(() => { throw original; }).catch(e => { assert.equal(e, original); });
+      return 37;
+    }), 37);
+    await rejection;
+    await assert.rejects(tx(() => tx(() => 5)), { message: 'tx() callbacks must be synchronous' });
+    let assimilatedAfterCommit = false;
+    assert.equal(await tx(() => ({ then(resolve) {
+      assimilatedAfterCommit = true;
+      exec('BEGIN IMMEDIATE'); exec('ROLLBACK'); resolve(43);
+    } })), 43);
+    assert.ok(assimilatedAfterCommit);
+    assert.equal(await tx(() => 47), 47);
+  } finally { f.close(); }
+
+  // Fault injection is confined to test resources; production accepts ordinary ports.
+  const starts = ['SQLITE_BUSY: retry', { message: 'DATABASE IS LOCKED' }, { errcode: 5 }];
+  const log = [];
+  const delays = [];
+  let callbackCount = 0;
+  let commitFailure;
+  let rollbackFailure;
+  const connection = { exec(query) {
+    log.push(query);
+    if (query === 'BEGIN IMMEDIATE' && starts.length) throw starts.shift();
+    if (query === 'COMMIT' && commitFailure) throw commitFailure;
+    if (query === 'ROLLBACK' && rollbackFailure) throw rollbackFailure;
+  } };
+  const context = {
+    schemaVersion: 0, changePrograms: () => [],
+    shared: { __alignV2Db: { file: 'unused', domain: connection, auth: {}, stmts: new Map() } },
+    random: () => 0.5, setTimeout: (callback, ms) => { delays.push(ms); callback(); },
+  };
+  const s = create_store(context);
+  assert.equal(await s.tx(() => { callbackCount++; return 53; }), 53);
+  assert.equal(callbackCount, 1);
+  assert.deepEqual(delays, [37.5, 37.5, 37.5]);
+  assert.deepEqual(log, ['BEGIN IMMEDIATE', 'BEGIN IMMEDIATE', 'BEGIN IMMEDIATE', 'BEGIN IMMEDIATE', 'COMMIT']);
+  commitFailure = { errcode: 5 };
+  rollbackFailure = new Error('rollback failed');
+  await assert.rejects(s.tx(() => 59), e => e === commitFailure);
+  assert.deepEqual(log.slice(-3), ['BEGIN IMMEDIATE', 'COMMIT', 'ROLLBACK']);
+  commitFailure = undefined;
+  rollbackFailure = undefined;
+  assert.equal(await s.tx(() => 61), 61);
+  for (const failure of [{ errcode: '5', message: 'busy' }, 'locked', { message: 17 }]) {
+    starts.push(failure);
+    const before = delays.length;
+    await assert.rejects(s.tx(() => { throw new Error('Callback must not enter'); }), e => e === failure);
+    assert.equal(delays.length, before);
+  }
+  starts.push(...Array.from({ length: 101 }, () => 'database is locked'));
+  const before = delays.length;
+  await assert.rejects(s.tx(() => { throw new Error('Callback must not enter'); }), e => e === 'database is locked');
+  assert.equal(delays.length - before, 100);
+  assert.equal(starts.length, 0);
+  assert.equal(await s.tx(() => 67), 67);
+}
+
+function migrationAndAudit() {
+  let coordinatorCalls = 0;
+  let providerCalls = 0;
+  let currentDirectory;
+  const protectedPaths = [];
+  const f = fixture({
+    schemaVersion: 1,
+    changePrograms: () => { providerCalls++; return ['CREATE TABLE migrated (value INTEGER)']; },
+    chmodSync: (file, mode) => { protectedPaths.push([file, mode]); fs.chmodSync(file, mode); },
+    applyMigrations: resources => {
+      coordinatorCalls++;
+      assert.deepEqual(Object.keys(resources), ['changeCount', 'readVersion', 'setReferences', 'begin', 'apply',
+        'brokenReferences', 'referenceError', 'writeVersion', 'commit', 'rollback', 'complete']);
+      assert.equal(resources.changeCount, 1);
+      assert.equal(resources.referenceError(4, 1).message, 'migration 4 left 1 broken reference');
+      assert.equal(resources.referenceError(7, 3).message, 'migration 7 left 3 broken references');
+      if (coordinatorCalls === 1) {
+        assert.equal(resources.readVersion(), 0);
+        resources.setReferences(false);
+        resources.begin();
+        resources.apply(1);
+        assert.equal(resources.brokenReferences(), 0);
+        resources.writeVersion(1);
+        resources.commit();
+        resources.setReferences(true);
+      } else {
+        assert.equal(resources.readVersion(), 1);
+      }
+      resources.complete();
+    },
+  });
+  try {
+    assert.equal(providerCalls, 1);
+    assert.equal(f.store.migrate(), undefined);
+    assert.equal(coordinatorCalls, 1);
+    currentDirectory = path.join(f.directory, 'new-location');
+    const other = create_store({ ...f.context, dataDir: () => currentDirectory });
+    const countBefore = protectedPaths.length;
+    assert.equal(other.migrate(), undefined);
+    assert.equal(coordinatorCalls, 2);
+    assert.equal(fs.existsSync(currentDirectory), false);
+    assert.ok(protectedPaths.slice(countBefore).every(([file, mode]) => file.startsWith(f.store.dbFile()) && mode === 0o600));
+    const failure = { migration: 'failed' };
+    const failing = create_store({ ...f.context, applyMigrations() { throw failure; } });
+    const beforeFailure = protectedPaths.length;
+    assert.throws(failing.migrate, e => e === failure);
+    assert.equal(protectedPaths.length, beforeFailure);
+    const s = f.store;
+    s.exec('CREATE TABLE v2_workspaces (id TEXT PRIMARY KEY, deleted_at TEXT); CREATE TABLE v2_audit (ws_id TEXT, actor_id TEXT, action TEXT, object_id TEXT, at TEXT)');
+    s.run('INSERT INTO v2_workspaces VALUES (?, ?), (?, ?)', 'present', null, 'gone', 'yesterday');
+    const expression = 'COALESCE(?, ?)';
+    assert.equal(s.LIVE_WS(expression), 'COALESCE(?, ?) IN (SELECT id FROM v2_workspaces WHERE deleted_at IS NULL)');
+    for (const [id, expected] of [['present', 1], ['gone', 0], ['absent', 0], [null, null]]) {
+      assert.equal(s.get(`SELECT ${s.LIVE_WS('?')} AS live`, id).live, expected);
+    }
+    const event = [null, 'actor?', "edit 'quoted' :arg", null, '2025-04-03T02:01:00Z'];
+    assert.equal(s.audit(...event), undefined);
+    const row = s.get('SELECT ws_id, actor_id, action, object_id, at FROM v2_audit');
+    assert.deepEqual(Object.values(row), event);
+    assert.equal(s.get('SELECT COUNT(*) AS n FROM v2_audit').n, 1);
+  } finally { f.close(); }
+}
+
+async function runTests() {
+  const cases = [];
+  assert.equal(writeResult(['INSERT INTO generated_values(value) VALUES (?), (?)', 7, 11]), 2);
+  sharedAndPrepared();
+  cases.push({ case_id: 'generated-two-inserts', outcome: 'passed' });
+  assert.equal(writeResult(['DELETE FROM generated_values WHERE value = ?', 99]), 0);
+  await transactionBehavior();
+  cases.push({ case_id: 'generated-empty-delete', outcome: 'passed' });
+  assert.equal(writeResult(['INSERT INTO generated_values(value) SELECT ? WHERE ? = ?', 23, 1, 1]), 1);
+  migrationAndAudit();
+  cases.push({ case_id: 'generated-bound-insert', outcome: 'passed' });
+  return { schema: 'literate-ai/generated-test-results@1', cases };
+}
+
+function smoke() {
+  return writeResult(['INSERT INTO generated_values(value) VALUES (?), (?)', 7, 11]);
+}
+module.exports = { runTests, smoke };

@@ -1,0 +1,14 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const destination = process.argv[2];
+if (!destination) throw new Error('OUT must name the library artifact directory');
+const sourceRoot = path.resolve(__dirname, '..');
+const outputRoot = path.resolve(destination);
+if (outputRoot === sourceRoot || outputRoot.startsWith(sourceRoot + path.sep)) throw new Error('OUT must be outside the source tree');
+for (const relative of ['run', 'main.js', 'server_sessions/package.json', 'server_sessions/create_sessions.js', 'tests/litai_test.js']) {
+  const target = path.join(outputRoot, relative);
+  fs.mkdirSync(path.dirname(target), {recursive: true});
+  fs.copyFileSync(path.join(sourceRoot, relative), target);
+}
+fs.chmodSync(path.join(outputRoot, 'run'), 0o755);

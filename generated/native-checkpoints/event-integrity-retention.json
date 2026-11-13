@@ -1,0 +1,14 @@
+{
+  "schema": "align/event-integrity-acceptance-retention@1",
+  "boundary": "B27",
+  "paths": [
+    {
+      "path": "scripts/test-event-integrity.mjs",
+      "sha256": "c395f3bec5b9e29c23e393a80fb6d5fe658f7d0c878ddf7d67a8f5dcc8caf201",
+      "reason": "Owned actual Node/SQLite integration controls. Tests are retained under the operator-approved B27 category. No product service algorithm or retention exception."
+    }
+  ],
+  "operator_authorization": "native-program.operator-go-all-prepared-v1.json",
+  "new_service_algorithm_retained": false,
+  "native_evaluators": "Four new native oracle/verifier inputs remain assembly acceptance inputs; generated product behavior remains in the selected qualified child caches."
+}

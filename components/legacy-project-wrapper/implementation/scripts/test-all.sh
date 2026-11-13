@@ -33,6 +33,8 @@ step syntax bash -c 'for f in scripts/*.mjs packages/align-connect/*.mjs; do nod
 
 # The Apps tab's terminal lines in sh, bash and zsh (no server).
 step paste-lines node scripts/test-paste-lines.mjs
+# Actual core, SQLite and cold operator commands against an owned database.
+step event-integrity node --disable-warning=ExperimentalWarning scripts/test-event-integrity.mjs
 
 # ---- servers: each test starts its own production servers on <port> ----
 # The v2 server (docs/v2/WIRE.md): Mode L sign-in and local owner, the edge, Mode L with the test identity provider, hosted.
@@ -60,6 +62,7 @@ count() { # count <log> <regex with two groups: passed, failed>
 }
 count "$LOGDIR/test-v2.log" '^([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/test-oauth.log" '^test-oauth: ([0-9]+) passed, ([0-9]+) failed$'
+count "$LOGDIR/event-integrity.log" '^test-event-integrity: ([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/paste-lines.log" '^test-paste-lines: ([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/test-agent-live.log" '^([0-9]+) passed, ([0-9]+) failed$'
 AGENT_PASS="$(grep -Eo '^(#|ℹ) pass [0-9]+' "$LOGDIR/align-agent.log" 2>/dev/null | awk '{s+=$3} END {print s+0}')"
@@ -70,6 +73,7 @@ echo
 echo "ℹ tests $((TOTAL_PASS + TOTAL_FAIL))"
 echo "ℹ pass $TOTAL_PASS"
 echo "ℹ fail $TOTAL_FAIL"
+echo "$TOTAL_PASS passed, $TOTAL_FAIL failed"
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "test-all: all steps passed (logs in $LOGDIR)"; else echo "test-all: $FAILS step(s) failed (logs in $LOGDIR)"; fi

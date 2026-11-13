@@ -1,0 +1,19 @@
+{
+  "schema": "align/relocated-guard-bounded-request-checkpoint@1",
+  "passed": true,
+  "observed_utc": "2026-11-13T16:14:26.301244+00:00",
+  "published_parent": "be4aa88cb3ab60ea6926e5cd5467f26b93691fa6",
+  "failed_GitHub_run": 43450513114,
+  "failure": "validator container reached unchanged 120-second limit with 50 cases in one request",
+  "correction": "dispatch every original validator case in ordered requests of at most four",
+  "packages": 9,
+  "acceptance_batches": 214,
+  "field_validation_cases": 50,
+  "two_CPU_matrix_seconds": 99.411,
+  "all_original_cases_and_expected_results_preserved": true,
+  "application_sources_and_receipt_unchanged": true,
+  "container_limits_unchanged": true,
+  "normal_review_and_exact_head_CI_pending": true,
+  "open_unique_findings": 37,
+  "operator_security_acceptance": false
+}

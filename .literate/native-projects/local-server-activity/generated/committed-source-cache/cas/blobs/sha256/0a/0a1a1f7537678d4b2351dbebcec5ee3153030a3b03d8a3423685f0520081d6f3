@@ -1,0 +1,12 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const dest = path.resolve(process.argv[2]);
+fs.mkdirSync(dest, { recursive: true });
+for (const file of ['main.js', 'tests/litai_test.js', 'server_activity/package.json', 'server_activity/create_activity.js']) {
+  const target = path.join(dest, file);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.copyFileSync(path.join(root, file), target);
+}
+fs.writeFileSync(path.join(dest, 'run'), '#!/usr/bin/env node\nrequire("./main.js");\n', { mode: 0o755 });

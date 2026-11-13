@@ -43,6 +43,7 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
+import { decisionActions } from "./decision-actions.mjs";
 
 const PORT = Number(process.argv[2]);
 if (!Number.isInteger(PORT) || PORT === 3100) {
@@ -60,7 +61,7 @@ if (spawnSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]).status === 0) {
   process.exit(2);
 }
 /** The schema version the code expects (lib/v2/core.mts), which lib/v2/db.ts checks against its migrations. */
-const SCHEMA_VERSION = Number(/export const SCHEMA_VERSION = (\d+);/.exec(readFileSync(path.join(ROOT, "lib/v2/core.mts"), "utf8"))?.[1]);
+const { SCHEMA_VERSION } = await import(pathToFileURL(path.join(ROOT, "lib/v2/core.mts")).href);
 const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -250,32 +251,43 @@ const withDb = (fn) => {
 
 /** Run the operator script (scripts/align-admin.mjs) with exactly these settings, the way a host admin would. */
 function admin(args, env) {
-  const clean = { ...process.env };
-  for (const k of Object.keys(clean)) if (SETTING.test(k)) delete clean[k];
-  const all = { ...clean, ...env };
-  for (const k of Object.keys(all)) if (all[k] === undefined) delete all[k];
-  const r = spawnSync(process.execPath, ["scripts/align-admin.mjs", ...args], { cwd: ROOT, encoding: "utf8", env: all });
-  return { status: r.status, out: r.stdout ?? "", err: r.stderr ?? "" };
+  return adminAsync(args, env);
 }
-/** admin(), without blocking this process: for commands that call a fake API this test itself serves. */
-function adminAsync(args, env) {
+/** Operator commands also support fake APIs served by this test process. */
+async function adminAsync(args, env) {
   const clean = { ...process.env };
   for (const k of Object.keys(clean)) if (SETTING.test(k)) delete clean[k];
   const all = { ...clean, ...env };
   for (const k of Object.keys(all)) if (all[k] === undefined) delete all[k];
-  return new Promise((resolve) => {
-    const c = spawn(process.execPath, ["scripts/align-admin.mjs", ...args], { cwd: ROOT, env: all, stdio: ["ignore", "pipe", "pipe"] });
-    let out = "";
-    let err = "";
-    c.stdout.on("data", (d) => (out += d));
-    c.stderr.on("data", (d) => (err += d));
-    c.on("close", (status) => resolve({ status, out, err }));
+  const r = await commandAsync(process.execPath, ["scripts/align-admin.mjs", ...args], all);
+  return { status: r.status, out: r.stdout, err: r.stderr };
+}
+/** Keep the test client's HTTP events running while an operator command prepares and executes. */
+function commandAsync(executable, args, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (data) => (stdout += data));
+    child.stderr.on("data", (data) => (stderr += data));
+    child.once("error", reject);
+    child.once("close", (status) => resolve({ status, stdout, stderr }));
   });
 }
 /** Every creation code in a text (alc_ + 32 base32 characters). */
 const codesIn = (text) => text.match(/alc_[a-z2-7]{32}/g) ?? [];
 /** True when no file of this database (main, WAL) contains `needle` as plain bytes. */
 const dbFilesLack = (file, needle) => [file, `${file}-wal`].every((f) => !existsSync(f) || !readFileSync(f).includes(Buffer.from(needle)));
+
+/** Test each stored event field independently; joining fields can manufacture an evidence label. */
+function eventsContainEvidence(events, evidence) {
+  return events.some((event) => Object.values(event).some((value) => {
+    const text = value == null ? "" : String(value);
+    return text.includes("https://") || evidence.some(({ url, label }) => text.includes(url) || text.includes(label));
+  }));
+}
 
 /** The keyed hash that stands for a person in v2_events (lib/v2/core.mts eventActor). */
 const eventActor = (secret, userId) => createHmac("sha256", secret).update(`ale.${userId}`).digest("base64url");
@@ -359,11 +371,19 @@ function invariantHolds(s) {
 }
 
 const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "align-v2-"));
+// Later phases import the agent's TypeScript consumers directly, before its build.
+const nativeAgent = spawnSync(process.execPath, ["scripts/native-libraries.mjs", "agent"], { cwd: ROOT, encoding: "utf8" });
+if (nativeAgent.status !== 0) {
+  console.log(`FAIL  agent native libraries\n${(nativeAgent.stdout + nativeAgent.stderr).slice(-1500)}`);
+  process.exit(1);
+}
 const build = spawnSync("npx", ["next", "build"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, HOSTED: "", ALIGN_DATA_DIR: "" } });
 if (build.status !== 0) {
   console.log(`FAIL  next build\n${(build.stdout + build.stderr).slice(-1500)}`);
   process.exit(1);
 }
+// Historical-upgrade fixtures use the same typed schema binding as the server.
+const { changePrograms } = await import(pathToFileURL(path.join(ROOT, "lib/storage-schema.mts")).href);
 
 // ======== LIM-2455 §F: none of the PR #34 prototype's controls ship (a scan of the served code, no server) ========
 {
@@ -384,13 +404,13 @@ if (build.status !== 0) {
 // ======== trust: the security pack's claims that the code can check (PRESEED-008) ========
 {
   // Every https host in the server's source (comment lines aside), in fly.toml (its own host aside), and in Better Auth's
-  // code for each sign-in provider lib/v2/auth.ts turns on, must be named in docs/trust/subprocessors.md.
+  // code for each sign-in provider the admitted auth options turn on, must be named in docs/trust/subprocessors.md.
   const sources = [path.join(ROOT, "proxy.ts"), path.join(ROOT, "instrumentation.ts")];
   const walkSrc = (dir) => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) walkSrc(p);
-      else if (/\.(?:ts|tsx|mts)$/.test(e.name) && !e.name.endsWith(".d.ts")) sources.push(p);
+      else if (/\.(?:ts|tsx|mts|js|mjs|cjs)$/.test(e.name) && !e.name.endsWith(".d.ts")) sources.push(p);
     }
   };
   walkSrc(path.join(ROOT, "app"));
@@ -401,8 +421,13 @@ if (build.status !== 0) {
   for (const f of sources) for (const h of hostsIn(code(readFileSync(f, "utf8"), /^(?:\/\/|\/\*|\*)/))) found.set(h, path.relative(ROOT, f));
   const fly = readFileSync(path.join(ROOT, "fly.toml"), "utf8");
   for (const h of hostsIn(code(fly, /^#/))) found.set(h, "fly.toml");
-  const authSrc = readFileSync(path.join(ROOT, "lib/v2/auth.ts"), "utf8");
-  const providers = [...authSrc.matchAll(/social\.(\w+) = /g)].map((m) => m[1]);
+  const { qualifiedAuthFixture } = await import("./qualified-auth-fixture.mjs");
+  const { options: authOptions } = await qualifiedAuthFixture(ROOT, {
+    googleConfigured: () => true,
+    githubConfigured: () => true,
+  });
+  const providers = Object.keys(authOptions.socialProviders);
+  if (providers.some((provider) => !/^[a-z]+$/.test(provider))) throw new Error("Unexpected sign-in provider name");
   for (const prov of providers) {
     for (const h of hostsIn(readFileSync(path.join(ROOT, "node_modules/@better-auth/core/dist/social-providers", `${prov}.mjs`), "utf8"))) found.set(h, `Better Auth ${prov}`);
   }
@@ -449,9 +474,67 @@ if (build.status !== 0) {
       JSON.stringify(links) === JSON.stringify(["/trust#retention-the-schedule", "https://example.com", "mailto:privacy@example.com"]),
     `${flat.slice(0, 300)} links=${JSON.stringify(links)}`,
   );
+  const listInputs = [
+    "  - first\n    - nested\n  - second",
+    "    1. first\n      1. nested\n    2. second",
+    "- first\n  - nested\n- second",
+    " - first\n   - nested\n - second",
+  ];
+  const listRun = spawnSync(process.execPath, [
+    "--input-type=module", "--eval",
+    "const {parseMarkdown}=await import(process.argv[1]);process.stdout.write(JSON.stringify(JSON.parse(process.argv[2]).map(value=>parseMarkdown(value,{prefix:'fixture'}))));",
+    pathToFileURL(path.join(ROOT, "lib/trust/markdown.mts")).href, JSON.stringify(listInputs),
+  ], { encoding: "utf8", timeout: 2000, maxBuffer: 64 * 1024 });
+  let listOutput = null;
+  try { listOutput = JSON.parse(listRun.stdout); } catch { listOutput = null; }
+  const listTree = (ordered) => [{ t: "list", ordered, items: [
+    { c: [{ t: "text", v: "first" }], sub: { t: "list", ordered, items: [{ c: [{ t: "text", v: "nested" }], sub: null }] } },
+    { c: [{ t: "text", v: "second" }], sub: null },
+  ] }];
+  check(
+    "trust: indented root lists terminate with every root and nested item once; existing zero- and one-space roots keep their structure",
+    listRun.status === 0 && !listRun.error && JSON.stringify(listOutput) === JSON.stringify([false, true, false, false].map(listTree)),
+    listRun.error?.code || listRun.stderr || listRun.stdout.slice(0, 300),
+  );
 }
 
 try {
+  const captureEncoding = await commandAsync(process.execPath, ["--input-type=module", "-e", [
+    "process.stdout.write(Buffer.from([0xe2,0x82]));",
+    "process.stderr.write(Buffer.from([0xf0,0x9f]));",
+    "await new Promise(resolve=>setTimeout(resolve,100));",
+    "process.stdout.write(Buffer.from([0xac]));",
+    "process.stderr.write(Buffer.from([0x98,0x80]));",
+  ].join("")], process.env);
+  check(
+    "command capture: preserves split UTF-8 on stdout and stderr",
+    captureEncoding.status === 0 && captureEncoding.stdout === "€" && captureEncoding.stderr === "😀",
+    JSON.stringify(captureEncoding),
+  );
+  const ceilingTiming = await commandAsync(process.execPath, ["--experimental-vm-modules", "scripts/test-auth-ceiling.mjs"], process.env);
+  let ceilingTimingResult = null;
+  try { ceilingTimingResult = JSON.parse(ceilingTiming.stdout); } catch { ceilingTimingResult = null; }
+  check(
+    "sign-in limits: machine-ceiling messages use one time after transaction acquisition; address, owner and hosted controls stay correct",
+    ceilingTiming.status === 0 && ceilingTimingResult?.cases === 18 && ceilingTimingResult?.failed === 0,
+    ceilingTiming.stderr || ceilingTiming.stdout.slice(0, 300),
+  );
+  const inviteCapRun = await commandAsync(process.execPath, ["--no-warnings", "--experimental-vm-modules", "scripts/test-invite-cap.mjs"], process.env);
+  let inviteCapResult = null;
+  try { inviteCapResult = JSON.parse(inviteCapRun.stdout); } catch { inviteCapResult = null; }
+  check(
+    "invite caps: independent SQLite writers recheck member and open-invite capacity after acquiring the transaction",
+    inviteCapRun.status === 0 && inviteCapResult?.passed === 6 && inviteCapResult?.failed === 0,
+    inviteCapRun.stderr || inviteCapRun.stdout.slice(0, 500),
+  );
+  const goalCapRun = await commandAsync(process.execPath, ["--no-warnings", "scripts/test-goal-cap.mjs"], process.env);
+  let goalCapResult = null;
+  try { goalCapResult = JSON.parse(goalCapRun.stdout); } catch { goalCapResult = null; }
+  check(
+    "goal caps: independent SQLite writers recheck goal capacity after acquiring the transaction",
+    goalCapRun.status === 0 && goalCapResult?.passed === 7 && goalCapResult?.failed === 0,
+    goalCapRun.stderr || goalCapRun.stdout.slice(0, 500),
+  );
   // ======== phase local: Mode L with no settings (v2 always on, the local owner, email codes) ========
   const localDir = path.join(tmpRoot, "local");
   // ALIGN_LOCAL_CODES_PER_HOUR=16: Mode L's machine-wide ceiling on code sends (default 60), low here so the test reaches it.
@@ -694,14 +777,14 @@ try {
   );
   // -- the operator script on access requests and codes (Mode L: no email settings, so a code is printed) --
   const opEnv = { ALIGN_DATA_DIR: localDir };
-  const reqList = admin(["requests", "list", "--status", "pending"], opEnv);
+  const reqList = (await admin(["requests", "list", "--status", "pending"], opEnv));
   const otherId = withDb((d) => d.prepare("SELECT id FROM v2_access_requests WHERE email = ?").get("other@example.test").id);
   check(
     "align-admin: requests list --status pending lists each request (id, status, interest, name, email, company, team size, use)",
     reqList.status === 0 && reqList.out.includes(arRow.id) && reqList.out.includes("Rea Quest <req@example.test>, Acme, team 2-10") && reqList.out.includes(arBody.use_case) && reqList.out.includes(otherId) && !/ExperimentalWarning/.test(reqList.err),
     reqList.out + reqList.err,
   );
-  const approved = admin(["requests", "approve", arRow.id], opEnv);
+  const approved = (await admin(["requests", "approve", arRow.id], opEnv));
   const approvedCode = codesIn(approved.out)[0] ?? "";
   const arAfter = withDb((d) => d.prepare("SELECT status, decided_at, code_id FROM v2_access_requests WHERE id = ?").get(arRow.id));
   const codeRow = withDb((d) => d.prepare("SELECT * FROM v2_creation_codes WHERE id = ?").get(arAfter.code_id ?? ""));
@@ -710,31 +793,31 @@ try {
     approved.status === 0 && codesIn(approved.out).length === 1 && arAfter.status === "approved" && arAfter.decided_at && codeRow?.email === "req@example.test" && codeRow.request_id === arRow.id && Math.abs(Date.parse(codeRow.expires_at) - Date.now() - 14 * 864e5) < 6e4 && codeRow.code_hash !== approvedCode && dbFilesLack(dbFile, approvedCode),
     approved.out + approved.err + JSON.stringify(codeRow),
   );
-  const again = admin(["requests", "approve", arRow.id], opEnv);
-  const declined = admin(["requests", "decline", otherId], opEnv);
+  const again = (await admin(["requests", "approve", arRow.id], opEnv));
+  const declined = (await admin(["requests", "decline", otherId], opEnv));
   check(
     "align-admin: approving a request that is no longer pending exits 1; requests decline marks one declined and sends nothing",
-    again.status === 1 && /No pending request/.test(again.err) && declined.status === 0 && withDb((d) => d.prepare("SELECT status FROM v2_access_requests WHERE id = ?").get(otherId).status) === "declined" && admin(["requests", "list", "--status", "declined"], opEnv).out.includes(otherId),
+    again.status === 1 && /No pending request/.test(again.err) && declined.status === 0 && withDb((d) => d.prepare("SELECT status FROM v2_access_requests WHERE id = ?").get(otherId).status) === "declined" && (await admin(["requests", "list", "--status", "declined"], opEnv)).out.includes(otherId),
     `${again.status} ${again.err} ${declined.status} ${declined.err}`,
   );
-  const made = admin(["codes", "create", "--count", "2", "--days", "3"], opEnv);
+  const made = (await admin(["codes", "create", "--count", "2", "--days", "3"], opEnv));
   const madeCodes = codesIn(made.out);
-  const listed = admin(["codes", "list"], opEnv);
+  const listed = (await admin(["codes", "list"], opEnv));
   const madeIds = [...made.out.matchAll(/\((cc_[a-z2-7]{24}), anyone, until/g)].map((m) => m[1]);
   check(
     "align-admin: codes create --count 2 --days 3 prints 2 distinct unbound codes once; codes list shows ids, states and bindings and never a code",
     made.status === 0 && madeCodes.length === 2 && madeCodes[0] !== madeCodes[1] && madeIds.length === 2 && listed.status === 0 && madeIds.every((id) => listed.out.includes(id)) && listed.out.includes("bound") && !listed.out.includes("@") && listed.out.includes("live") && codesIn(listed.out).length === 0 && madeCodes.every((c) => dbFilesLack(dbFile, c)),
     made.out + made.err + listed.out,
   );
-  const revoked = admin(["codes", "revoke", madeIds[0]], opEnv);
-  const revokedAgain = admin(["codes", "revoke", madeIds[0]], opEnv);
-  const badArgs = [admin(["codes", "create", "--count", "0"], opEnv), admin(["codes", "create", "--email", "nope"], opEnv), admin(["requests", "list", "--status", "maybe"], opEnv), admin(["nothing", "here"], opEnv)];
+  const revoked = (await admin(["codes", "revoke", madeIds[0]], opEnv));
+  const revokedAgain = (await admin(["codes", "revoke", madeIds[0]], opEnv));
+  const badArgs = [(await admin(["codes", "create", "--count", "0"], opEnv)), (await admin(["codes", "create", "--email", "nope"], opEnv)), (await admin(["requests", "list", "--status", "maybe"], opEnv)), (await admin(["nothing", "here"], opEnv))];
   check(
     "align-admin: codes revoke revokes an unused code (shown as revoked; a second revoke exits 1); bad arguments exit 2 with the usage",
-    revoked.status === 0 && revokedAgain.status === 1 && /revoked/.test(admin(["codes", "list"], opEnv).out) && badArgs.every((r) => r.status === 2),
+    revoked.status === 0 && revokedAgain.status === 1 && /revoked/.test((await admin(["codes", "list"], opEnv)).out) && badArgs.every((r) => r.status === 2),
     `${revoked.status} ${revokedAgain.status} ${badArgs.map((r) => r.status).join(",")}`,
   );
-  const noDb = admin(["codes", "list"], { ALIGN_DATA_DIR: path.join(tmpRoot, "nowhere") });
+  const noDb = (await admin(["codes", "list"], { ALIGN_DATA_DIR: path.join(tmpRoot, "nowhere") }));
   check("align-admin: with no database at ALIGN_DATA_DIR it exits 1 and says so", noDb.status === 1 && /No Align database/.test(noDb.err), noDb.err);
   const loopback = await call("anon", "GET", "/api/v2/me");
   check("local: loopback is not a credential (/api/v2/me without a cookie -> 401)", loopback.status === 401 && loopback.json?.error === "unauthorized", loopback.text);
@@ -786,17 +869,16 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 23, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds, deleted-session markers and the goal versions sent to connected apps included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 23 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 24, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds, deleted-session markers and the goal versions sent to connected apps included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 24 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
   check("storage (PORT2-001): migration 14 adds last_read_at to connected-app grants, beside last_used_at (connected, not read)", grantCols.includes("last_read_at") && grantCols.includes("last_used_at"), grantCols.join());
   // PORT29: migration 15 on this database, and on a version 14 database that already holds a workspace, a member and a
-  // goal (built in memory from lib/v2/db.ts's own MIGRATIONS, as the server's migrate() applies them).
+  // goal (built in memory from the qualified schema programs, as the server's migrate() applies them).
   const port29Cols = withDb((d) => [["v2_goals", "target_share"], ["v2_goal_versions", "target_share"], ["v2_workspaces", "steering"]].every(([t, c]) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c)));
   const upgraded = (() => {
-    const src = readFileSync(path.join(ROOT, "lib/v2/db.ts"), "utf8");
-    const migrations = new Function(`return [${src.slice(src.indexOf("[", src.indexOf("const MIGRATIONS")) + 1, src.indexOf("];\n\n// The operator script"))}];`)();
+    const migrations = changePrograms();
     const d = new DatabaseSync(":memory:");
     d.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY, name TEXT)");
     migrations.slice(0, 14).forEach((m) => d.exec(m));
@@ -812,8 +894,7 @@ try {
     return out;
   })();
   const upgraded17 = (() => {
-    const src = readFileSync(path.join(ROOT, "lib/v2/db.ts"), "utf8");
-    const migrations = new Function(`return [${src.slice(src.indexOf("[", src.indexOf("const MIGRATIONS")) + 1, src.indexOf("];\n\n// The operator script"))}];`)();
+    const migrations = changePrograms();
     const d = new DatabaseSync(":memory:");
     d.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY, name TEXT)");
     migrations.slice(0, 16).forEach((m) => d.exec(m));
@@ -1066,6 +1147,17 @@ try {
       const want = !wsRole ? 404 : policy.WORKSPACE_ROLE_ACTIONS[wsRole].includes(a) ? 200 : 403;
       cases++;
       if ((d.ok ? 200 : d.status) !== want) wrong.push(`${a} as ${wsRole}`);
+    }
+  for (const wsRole of [null, "owner", "member", "viewer"])
+    for (const podRole of [null, "lead", "member"]) {
+      const pp = { userId: "u_me", wsId: "ws_x", wsRole, pods: new Map(podRole ? [["pod_1", podRole]] : []) };
+      const d = policy.authorize(pp, "pod.manage_members", { kind: "pod", podId: "pod_1" });
+      const want = !wsRole ? 404 : wsRole === "viewer" ? 403 : wsRole === "owner" || podRole === "lead" ? 200 : 403;
+      const code = !wsRole ? "not_found" : wsRole === "viewer" ? "read_only" : "not_team_lead";
+      const mismatched = policy.authorize(pp, "pod.manage_members", { kind: "workspace" });
+      cases += 2;
+      if ((d.ok ? 200 : d.status) !== want || (!d.ok && d.code !== code)) wrong.push(`team membership ${wsRole}/${podRole}`);
+      if (mismatched.ok || mismatched.status !== 404 || mismatched.code !== "not_found") wrong.push(`team object ${wsRole}/${podRole}`);
     }
   check(`policy: ${cases} role x pod role x visibility x ownership x transfer cases match the spec (private never readable by a workspace owner)`, wrong.length === 0 && cases > 400, wrong.slice(0, 5).join("; "));
 
@@ -2402,11 +2494,20 @@ try {
     `${JSON.stringify(usdWrong)} ${crC73.status} ${(mcpC73.text ?? "").slice(0, 1500)}`,
   );
   await crAct(U1, GC73.id, crC73.json?.id, "withdraw");
-  const evEventText = withDb((d) => d.prepare("SELECT * FROM v2_events").all()).map((r) => Object.values(r).join(" ")).join("\n");
+  const eventProbe = { id: "ev_fixture", ws_id: "ws_fixture", name: "workspace_created", actor: "actorEndingDoc", at: "2026-11-06T00:00:00Z", props: '{"kind":"empty"}' };
+  const evidenceProbe = [{ url: "https://evidence.example.test/review/42", label: "Doc 2" }];
+  const observerLeaks = Object.keys(eventProbe).flatMap((field) => [evidenceProbe[0].url, evidenceProbe[0].label, "https://other.example.test/leaked"].map((value) => ({ ...eventProbe, [field]: `before ${value} after` })));
+  check(
+    "evidence event observer: detects URLs and labels in every stored field and ignores matches manufactured by joining fields or rows",
+    Object.values(eventProbe).join(" ").includes(evidenceProbe[0].label) && !eventsContainEvidence([eventProbe], evidenceProbe) &&
+      !eventsContainEvidence([{ actor: "actorEndingDoc" }, { at: "2026-11-06T00:00:00Z" }], evidenceProbe) && observerLeaks.every((row) => eventsContainEvidence([row], evidenceProbe)),
+    `${observerLeaks.length} injected leaks`,
+  );
+  const evEventsAll = withDb((d) => d.prepare("SELECT * FROM v2_events").all());
   const evRowsAll = withDb((d) => d.prepare("SELECT url, label FROM v2_change_request_evidence").all());
   check(
     "evidence and product events: no product event holds an evidence link's url or label (events stay content-free)",
-    evRowsAll.length > 0 && evRowsAll.every((e) => !evEventText.includes(e.url) && !evEventText.includes(e.label)) && !evEventText.includes("https://"),
+    evRowsAll.length > 0 && !eventsContainEvidence(evEventsAll, evRowsAll),
     `${evRowsAll.length}`,
   );
   // Two requests approved at the same base: the first launch supersedes the other before its launch.
@@ -2612,6 +2713,16 @@ try {
   const e5 = await epoch(D5, S5, { epoch_id: epochId(), goal_id: G5.id, starts_at: T0 });
   await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P2}/members`, { cookie: U1.cookie, body: { user_id: U2.id, role: "lead" } });
   await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P2}/members`, { cookie: U1.cookie, body: { user_id: U6.id, role: "lead" } });
+  const teamWriteState = () => withDb((d) => ({
+    members: d.prepare("SELECT user_id, role FROM v2_pod_members WHERE ws_id = ? AND pod_id = ? ORDER BY user_id").all(A, P2),
+    audit: d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE ws_id = ? AND object_id = ? AND action IN ('team.member_set', 'team.member_removed')").get(A, P2).n,
+  }));
+  const beforeViewerWrites = teamWriteState();
+  const viewerAdds = await Promise.all(["teams", "pods"].map((path) => call("U6", "POST", `/api/v2/workspaces/${A}/${path}/${P2}/members`, { cookie: U6.cookie, body: { user_id: U3.id, role: "member" } })));
+  const viewerRemoves = await Promise.all(["teams", "pods"].map((path) => call("U6", "DELETE", `/api/v2/workspaces/${A}/${path}/${P2}/members/${U5.id}`, { cookie: U6.cookie })));
+  check("viewer team lead: adding a member through team and pod routes -> 403 read_only", viewerAdds.every((r) => r.status === 403 && r.json?.error === "read_only"), viewerAdds.map((r) => `${r.status}:${r.json?.error}`).join(" "));
+  check("viewer team lead: removing a member through team and pod routes -> 403 read_only", viewerRemoves.every((r) => r.status === 403 && r.json?.error === "read_only"), viewerRemoves.map((r) => `${r.status}:${r.json?.error}`).join(" "));
+  check("viewer team lead: refused writes leave membership and team write audit records unchanged", JSON.stringify(teamWriteState()) === JSON.stringify(beforeViewerWrites));
   const setBefore = await al(U3, { target_goal_id: G5.id, source_goal_id: G3.id, choice: "contribution", session_keys: [] });
   check(
     "approval: a team goal's set is its owner and the team's leads; a viewer who leads the team is never in it",
@@ -4543,16 +4654,16 @@ try {
   const delWs = u9ws[1].json.id;
   const delInv = await call("U9A", "POST", `/api/v2/workspaces/${delWs}/invites`, { cookie: U9.cookie, body: { email: U1.email, role: "member" } });
   await call("U1", "POST", `/api/v2/invites/${delInv.json?.token}/accept`, { cookie: U1.cookie, body: {} });
-  const opWsList = admin(["workspaces", "list"], opOn);
+  const opWsList = (await admin(["workspaces", "list"], opOn));
   const delLine = opWsList.out.split("\n").find((l) => l.startsWith(delWs)) ?? "";
   check(
     "align-admin: workspaces list shows each workspace's id, name, created date, deleted (- when live), member and owner counts, and no names or emails of people",
     opWsList.status === 0 && /^id\s+name\s+created\s+deleted\s+members\s+owners/.test(opWsList.out) && /Nine B\s+\d{4}-\d{2}-\d{2}\s+-\s+2\s+1\s*$/.test(delLine) && !opWsList.out.includes("@") && !opWsList.out.includes("Una Nine"),
     opWsList.out + opWsList.err,
   );
-  const delNoYes = admin(["workspaces", "delete", delWs], opOn);
+  const delNoYes = (await admin(["workspaces", "delete", delWs], opOn));
   check("align-admin: workspaces delete without --yes deletes nothing and exits 1, asking for --yes", delNoYes.status === 1 && /--yes/.test(delNoYes.err) && withDb((d) => !d.prepare("SELECT deleted_at FROM v2_workspaces WHERE id = ?").get(delWs).deleted_at), delNoYes.err);
-  const delYes = admin(["workspaces", "delete", delWs, "--yes"], opOn);
+  const delYes = (await admin(["workspaces", "delete", delWs, "--yes"], opOn));
   const delGone = await call("U1", "GET", `/api/v2/workspaces/${delWs}`, { cookie: U1.cookie });
   const delOwnerList = (await call("U9A", "GET", "/api/v2/workspaces", { cookie: U9.cookie })).json;
   const delKept = withDb((d) => ({
@@ -4560,20 +4671,20 @@ try {
     rows: ["v2_members", "v2_invites"].map((t) => d.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ws_id = ?`).get(delWs).n),
     audit: d.prepare("SELECT actor_id FROM v2_audit WHERE ws_id = ? AND action = 'workspace.deleted'").all(delWs),
   }));
-  const delListed = admin(["workspaces", "list"], opOn).out.split("\n").find((l) => l.startsWith(delWs)) ?? "";
-  const delAgain = admin(["workspaces", "delete", delWs, "--yes"], opOn);
+  const delListed = (await admin(["workspaces", "list"], opOn)).out.split("\n").find((l) => l.startsWith(delWs)) ?? "";
+  const delAgain = (await admin(["workspaces", "delete", delWs, "--yes"], opOn));
   check(
     "align-admin: workspaces delete <id> --yes is the app's soft delete: the running server answers 404 for it at once, its rows stay, the audit records workspace.deleted with no actor (the operator), its owner sees it under deleted (restorable), workspaces list shows when it was deleted, and deleting it again exits 1 pointing at --purge",
     delYes.status === 0 && /restore/.test(delYes.out) && delGone.status === 404 && !!delKept.deleted_at && delKept.rows.every((n) => n > 0) && delKept.audit.length === 1 && delKept.audit[0].actor_id === null &&
       delOwnerList?.deleted?.some((w) => w.id === delWs) && delListed.includes(delKept.deleted_at) && delAgain.status === 1 && /--purge/.test(delAgain.err),
     `${delYes.status} ${delYes.out} ${delYes.err} ${delGone.status} ${JSON.stringify(delKept)} ${delListed} ${delAgain.err}`,
   );
-  const purgeNoYes = admin(["workspaces", "delete", delWs, "--purge"], opOn);
-  const purged = admin(["workspaces", "delete", delWs, "--purge", "--yes"], opOn);
+  const purgeNoYes = (await admin(["workspaces", "delete", delWs, "--purge"], opOn));
+  const purged = (await admin(["workspaces", "delete", delWs, "--purge", "--yes"], opOn));
   const purgeLeft = withDb((d) => ["v2_members", "v2_invites", "v2_audit"].map((t) => d.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ws_id = ?`).get(delWs).n).concat(d.prepare("SELECT COUNT(*) AS n FROM v2_workspaces WHERE id = ?").get(delWs).n));
   check(
     "align-admin: workspaces delete <id> --purge needs --yes too (else nothing changes, exit 1); with it every row of the workspace (members, invites, audit, the workspace) is gone at once; an unknown id exits 1",
-    purgeNoYes.status === 1 && /--purge --yes/.test(purgeNoYes.err) && purged.status === 0 && purgeLeft.every((n) => n === 0) && admin(["workspaces", "delete", delWs, "--purge", "--yes"], opOn).status === 1,
+    purgeNoYes.status === 1 && /--purge --yes/.test(purgeNoYes.err) && purged.status === 0 && purgeLeft.every((n) => n === 0) && (await admin(["workspaces", "delete", delWs, "--purge", "--yes"], opOn)).status === 1,
     `${purgeNoYes.status} ${purgeNoYes.err} ${purged.status} ${purged.err} ${purgeLeft}`,
   );
 
@@ -5494,14 +5605,14 @@ try {
     check("request access page: ?interest=evaluate preselects Evaluate; any other value preselects Try", raEval.status === 200 && checkedOf(raEval.text) === "evaluate" && checkedOf(raPlain.text) === "try", `${checkedOf(raEval.text)} ${checkedOf(raPlain.text)} ${(raEval.text.match(/<input[^>]*name="interest"[^>]*>/g) ?? []).join(" ")}`);
 
     // -- the operator report's Decision value section --
-    const repV = admin(["report", "--json"], opOn);
+    const repV = (await admin(["report", "--json"], opOn));
     let rv = null;
     try {
       rv = JSON.parse(repV.out).value;
     } catch {}
     const sampleWs = withDb((d) => d.prepare("SELECT ws_id FROM v2_events WHERE name = 'workspace_created' AND json_extract(props, '$.kind') = 'sample'").all().map((r) => r.ws_id));
     const evCount = (name, extra = "") => withDb((d) => d.prepare(`SELECT COUNT(*) AS n FROM v2_events WHERE name = ? AND ws_id IS NOT NULL AND ws_id NOT IN (${sampleWs.map(() => "?").join(",") || "''"}) ${extra}`).get(name, ...sampleWs).n);
-    const repText = admin(["report"], opOn).out;
+    const repText = (await admin(["report"], opOn)).out;
     check(
       "report: the value section matches the events (viewed people and workspaces, reported by estimate, follow-up clicks, access from the card by interest, first ask and first limit) and counts the workspace with an approved request; the text table reads Decision value",
       repV.status === 0 && rv && rv.viewed.people === evCount("value_card_viewed") && rv.viewed.workspaces >= 1 && rv.reported.people === evCount("value_reported") && rv.reported.by_estimate.about_a_week >= 1 && rv.reported.by_estimate.two_to_three_days >= 2 &&
@@ -6587,33 +6698,33 @@ try {
     const tAfter = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_request_targets WHERE session_key = ?").get(SM2.key).n);
     check("deleting a session's shared history deletes its request states with its directive deliveries", tBefore >= 2 && del.status === 204 && tAfter === 0, `${tBefore} ${del.status} ${tAfter}`);
     const reqN = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_requests").get().n);
-    const dry = (months) => {
+    const dry = async (months) => {
       const t = new Date();
       t.setUTCMonth(t.getUTCMonth() + months);
-      const r = admin(["retention", "run", "--dry-run"], { ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1", ALIGN_TEST_NOW: t.toISOString() });
+      const r = (await admin(["retention", "run", "--dry-run"], { ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1", ALIGN_TEST_NOW: t.toISOString() }));
       try {
         return JSON.parse(r.out.trim().split("\n").pop()).requests_deleted;
       } catch {
         return `${r.status} ${r.out} ${r.err}`;
       }
     };
-    const dry12 = dry(12);
-    const dry14 = dry(14);
+    const dry12 = (await dry(12));
+    const dry14 = (await dry(14));
     check("retention (dry run): requests are kept 12 months and deleted after 13 (requests_deleted counts every one)", dry12 === 0 && dry14 === reqN && reqN >= 4, `${dry12} ${dry14} ${reqN}`);
     // The markers deleted sessions leave (E2E-AGENT cycle 5) keep 13 months too.
     const markerN = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_deleted_sessions").get().n);
-    const dryMarkers = (months) => {
+    const dryMarkers = async (months) => {
       const t = new Date();
       t.setUTCMonth(t.getUTCMonth() + months);
-      const r = admin(["retention", "run", "--dry-run"], { ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1", ALIGN_TEST_NOW: t.toISOString() });
+      const r = (await admin(["retention", "run", "--dry-run"], { ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1", ALIGN_TEST_NOW: t.toISOString() }));
       try {
         return JSON.parse(r.out.trim().split("\n").pop()).deleted_session_markers_deleted;
       } catch {
         return `${r.status} ${r.out} ${r.err}`;
       }
     };
-    const m12 = dryMarkers(12);
-    const m14 = dryMarkers(14);
+    const m12 = (await dryMarkers(12));
+    const m14 = (await dryMarkers(14));
     check("retention (dry run, E2E-AGENT cycle 5): the markers deleted sessions leave are kept 12 months and deleted after 13 (deleted_session_markers_deleted counts every one)", m12 === 0 && m14 === markerN && markerN >= 3, `${m12} ${m14} ${markerN}`);
   }
   // ==== end req:requests ====
@@ -9016,8 +9127,7 @@ try {
   {
     // C3-1: the migration that keeps why a request target expired.
     const upgraded18 = (() => {
-      const src = readFileSync(path.join(ROOT, "lib/v2/db.ts"), "utf8");
-      const migrations = new Function(`return [${src.slice(src.indexOf("[", src.indexOf("const MIGRATIONS")) + 1, src.indexOf("];\n\n// The operator script"))}];`)();
+      const migrations = changePrograms();
       const d = new DatabaseSync(":memory:");
       d.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY, name TEXT)");
       migrations.slice(0, 17).forEach((m) => d.exec(m));
@@ -10267,7 +10377,7 @@ try {
     // (DELETE) and holds (PUT/DELETE) aren't [action] routes and have no revisions either.
     const REVISIONED = { alignments: "lib/v2/alignments.ts", "change-requests": "lib/v2/changes.ts", reallocations: "lib/v2/reallocations.ts" };
     const STATE_ONLY = ["asks"];
-    const actionsIn = (rel, name) => JSON.parse(new RegExp(`${name} = (\\[[^\\]]*\\])`).exec(readFileSync(path.join(ROOT, rel), "utf8"))?.[1] ?? "[]");
+    const actionsIn = (rel, name) => decisionActions(ROOT, rel, name);
     const listed = { alignments: actionsIn(REVISIONED.alignments, "ACTIONS"), "change-requests": actionsIn(REVISIONED["change-requests"], "CHANGE_REQUEST_ACTIONS"), reallocations: actionsIn(REVISIONED.reallocations, "REALLOCATION_ACTIONS") };
     check(
       "c10 C10-2 (routes): every decision route ([action]) is classified: alignments, change requests and reallocations carry a revision; asks are state-only",
@@ -11256,12 +11366,9 @@ try {
       return d.toISOString();
     };
     const scriptEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !SETTING.test(k)));
-    const retention = (now, { dryRun = false, testIdp = true } = {}) => {
-      const r = spawnSync("node", ["scripts/retention.mjs", ...(dryRun ? ["--dry-run"] : [])], {
-        cwd: ROOT,
-        encoding: "utf8",
-        env: { ...scriptEnv, ALIGN_DATA_DIR: retDir, ...(testIdp ? { ALIGN_TEST_IDP: "1" } : {}), ...(now ? { ALIGN_TEST_NOW: now } : {}) },
-      });
+    const retention = async (now, { dryRun = false, testIdp = true } = {}) => {
+      const r = await commandAsync("node", ["scripts/retention.mjs", ...(dryRun ? ["--dry-run"] : [])],
+        { ...scriptEnv, ALIGN_DATA_DIR: retDir, ...(testIdp ? { ALIGN_TEST_IDP: "1" } : {}), ...(now ? { ALIGN_TEST_NOW: now } : {}) });
       let counts = null;
       try {
         counts = JSON.parse(r.stdout.trim().split("\n").pop());
@@ -11372,7 +11479,7 @@ try {
     // And hosted-access rows naming them: an access request (with its email-keyed rate-limit counter), an unused
     // creation code bound to their email, and a used one they redeemed.
     const ar4 = await call("anon", "POST", "/api/v2/access-requests", { headers: { origin: BASE }, body: { email: r4.email, name: "Ron Four", use_case: "Try it", interest: "try" } });
-    const code4 = admin(["codes", "create", "--email", r4.email], { ALIGN_DATA_DIR: retDir });
+    const code4 = (await admin(["codes", "create", "--email", r4.email], { ALIGN_DATA_DIR: retDir }));
     withDb((d) =>
       d
         .prepare("INSERT INTO v2_creation_codes (id, code_hash, email, created_at, expires_at, redeemed_at, redeemed_by, ws_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
@@ -11524,24 +11631,24 @@ try {
       await call("anon", "POST", "/api/v2/access-requests", { headers: { origin: BASE }, body: { email: `${who}@requests.example.test`, name: who, use_case: "Try it", interest: "try" } });
     }
     const reqId = (who) => q1("SELECT id FROM v2_access_requests WHERE email = ?", `${who}@requests.example.test`)?.id;
-    const reqDecided = [admin(["requests", "decline", reqId("decl")], { ALIGN_DATA_DIR: retDir }), admin(["requests", "approve", reqId("appr"), "--print"], { ALIGN_DATA_DIR: retDir })];
+    const reqDecided = [(await admin(["requests", "decline", reqId("decl")], { ALIGN_DATA_DIR: retDir })), (await admin(["requests", "approve", reqId("appr"), "--print"], { ALIGN_DATA_DIR: retDir }))];
     withDb((d) => d.prepare("UPDATE v2_access_requests SET decided_at = ? WHERE email = ?").run(later(60 * DAY), "appr@requests.example.test"));
     const reqsLeft = () => q("SELECT email FROM v2_access_requests WHERE email LIKE '%@requests.example.test' ORDER BY email").map((r) => r.email.split("@")[0]).join();
-    const runA = retention(later(13 * DAY));
+    const runA = (await retention(later(13 * DAY)));
     check(
       "retention (+13 days): expired email codes, sign-in sessions and activity signals are deleted; an invite 6 days past its expiry stays; a workspace deleted 13 days ago stays restorable; a member removed 13 days ago keeps their name",
       runA.status === 0 && codesBefore > 0 && codes() === 0 && runA.counts.codes_deleted >= 1 && runA.counts.sign_in_sessions_deleted >= 1 && act3.json?.accepted === 1 && runA.counts.activity_deleted === 1 && q1("SELECT COUNT(*) AS n FROM v2_activity").n === 0 && pendingInv() === 1 && w6Exists() && runA.counts.workspaces_purged === 0 && runA.counts.former_members_pseudonymised === 0,
       `${runA.status} ${codesBefore} ${codes()} ${pendingInv()} ${runA.out}`,
     );
-    const runB = retention(later(15 * DAY));
+    const runB = (await retention(later(15 * DAY)));
     check("retention (+15 days): a pending invite 7 days past its expiry is deleted", runB.status === 0 && runB.counts.invites_deleted === 1 && pendingInv() === 0, runB.out);
-    const dry = retention(later(31 * DAY), { dryRun: true });
+    const dry = (await retention(later(31 * DAY), { dryRun: true }));
     check(
       "retention: --dry-run prints what it would do (purge 2 workspaces, pseudonymise 2 former members) and changes nothing",
       dry.status === 0 && dry.counts.dry_run === true && /^Would \(as of /.test(dry.out) && dry.counts.workspaces_purged === 2 && dry.counts.former_members_pseudonymised === 2 && w6Exists() && q1("SELECT user_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W1, S3.key)?.user_id === r3.id,
       dry.out,
     );
-    const noIdp = retention(later(31 * DAY), { testIdp: false });
+    const noIdp = (await retention(later(31 * DAY), { testIdp: false }));
     check(
       "retention: ALIGN_TEST_NOW is ignored without ALIGN_TEST_IDP=1 (the job runs at the real time, so nothing is due)",
       noIdp.status === 0 && Math.abs(Date.parse(noIdp.counts.now) - Date.now()) < 60_000 && noIdp.counts.workspaces_purged === 0 && noIdp.counts.former_members_pseudonymised === 0 && w6Exists(),
@@ -11550,7 +11657,7 @@ try {
     const actor3 = eventActor(readFileSync(path.join(retDir, ".secret"), "utf8").trim(), r3.id);
     const ev3 = (w) => q1("SELECT COUNT(*) AS n FROM v2_events WHERE ws_id = ? AND actor = ?", w, actor3).n;
     const ev3Before = { w1: ev3(W1), own: ev3(W3x), total: q1("SELECT COUNT(*) AS n FROM v2_events").n };
-    const runE = retention(later(31 * DAY));
+    const runE = (await retention(later(31 * DAY)));
     const ev3After = { w1: ev3(W1), own: ev3(W3x), total: q1("SELECT COUNT(*) AS n FROM v2_events").n };
     check(
       "retention (+31 days): making someone \"Former member #n\" in a workspace clears their actor hash from that workspace's product events (the events stay); their events in a workspace they are still in keep it",
@@ -11573,16 +11680,16 @@ try {
       runE.counts.former_members_pseudonymised === 2 && g3Later?.owner?.id === "fm_3" && g3Later.owner.name === "Former member #3" && s3Row?.user_id === "fm_3" && s3Row.device_id === null && Object.keys(r3InW1).length === 0 && !!q1("SELECT 1 AS x FROM ba_user WHERE id = ?", r3.id) && q1("SELECT owner_id FROM v2_goals WHERE id = ?", G5.id)?.owner_id === "fm_2",
       `${JSON.stringify(g3Later?.owner)} ${JSON.stringify(s3Row)} ${JSON.stringify(r3InW1)}`,
     );
-    const runE2 = retention(later(31 * DAY));
+    const runE2 = (await retention(later(31 * DAY)));
     check("retention: running it again with the same clock changes nothing (idempotent)", runE2.status === 0 && ["workspaces_purged", "sessions_rolled_up", "former_members_pseudonymised", "audit_rows_deleted", "invites_deleted"].every((k) => runE2.counts[k] === 0), runE2.out);
     const auditN = () => q1("SELECT COUNT(*) AS n FROM v2_audit WHERE ws_id = ?", W1).n;
-    const runF = retention(monthsLater(11));
+    const runF = (await retention(monthsLater(11)));
     check("retention (+11 months): the audit log and raw session rows are kept", runF.status === 0 && runF.counts.audit_rows_deleted === 0 && runF.counts.sessions_rolled_up === 0 && auditN() > 0, runF.out);
-    const runG = retention(monthsLater(12, 2));
+    const runG = (await retention(monthsLater(12, 2)));
     const rawSessions = () => q1("SELECT COUNT(*) AS n FROM v2_sessions WHERE ws_id = ?", W1).n;
     check("retention (1 year + 2 days): audit rows older than a year are deleted; session rows (13 months) are not yet", runG.status === 0 && runG.counts.audit_rows_deleted > 0 && auditN() === 0 && runG.counts.sessions_rolled_up === 0 && rawSessions() === 2, runG.out);
     const reqsAtYear = reqsLeft();
-    const runH = retention(monthsLater(13, 2));
+    const runH = (await retention(monthsLater(13, 2)));
     const reqsAt13 = reqsLeft();
     await signIn(r1);
     const spendH = (await ws(r1, "GET", W1, "/spend?by=goal")).json;
@@ -11601,13 +11708,13 @@ try {
       spendH?.total?.requests === 5 && invariantHolds(spendH) && g2Row?.requests === 2 && g2Row.est_list_usd_micros === 2 * 12_345 && spendHs?.rows?.length === 1 && spendHs.rows[0].kind === "rolled_up" && spendHs.rows[0].label === "Older sessions (rolled up)" && spendHs.rows[0].requests === 5 && invariantHolds(spendHs) && spendLaterFrom?.total?.requests === 0,
       `${JSON.stringify(spendH?.total?.requests)} ${JSON.stringify(spendHs?.rows)} ${spendLaterFrom?.total?.requests}`,
     );
-    const runReq = retention(monthsLater(15));
+    const runReq = (await retention(monthsLater(15)));
     check(
       "retention: access requests go 13 months after their decision, or after the request while pending: at 1 year + 2 days all 3 stay; at 13 months + 2 days the pending and the declined ones go and the one approved 60 days later stays; it goes by 15 months",
       reqDecided.every((r) => r.status === 0) && reqsAtYear === "appr,decl,pend" && runH.counts.access_requests_deleted === 2 && reqsAt13 === "appr" && runReq.status === 0 && runReq.counts.access_requests_deleted === 1 && reqsLeft() === "",
       `${reqDecided.map((r) => r.err).join(" ")} ${reqsAtYear} ${runH.counts.access_requests_deleted} ${reqsAt13} ${runReq.out}`,
     );
-    const runH2 = retention(monthsLater(13, 2));
+    const runH2 = (await retention(monthsLater(13, 2)));
     await signIn(r1);
     const spendH2 = (await ws(r1, "GET", W1, "/spend?by=goal")).json;
     check("retention: a second roll-up run adds nothing (totals unchanged)", runH2.status === 0 && runH2.counts.sessions_rolled_up === 0 && spendH2?.total?.requests === 5, runH2.out);
@@ -11616,16 +11723,16 @@ try {
     //    rolling expiry is past a cap of 1 day, not past the default 30 --
     const R9 = await signUp("R9", "Ria Nine", "r9@example.test");
     withDb((d) => d.prepare("UPDATE ba_session SET createdAt = ? WHERE userId = ?").run(new Date(Date.now() - 2 * DAY).toISOString(), R9.id));
-    const capRun = (env) => {
-      const r = admin(["retention", "run", "--dry-run"], { ALIGN_DATA_DIR: retDir, ...env });
+    const capRun = async (env) => {
+      const r = (await admin(["retention", "run", "--dry-run"], { ALIGN_DATA_DIR: retDir, ...env }));
       let c = {};
       try {
         c = JSON.parse(r.out.trim().split("\n").pop());
       } catch {}
       return { status: r.status, out: r.out + r.err, n: c.sign_in_sessions_deleted };
     };
-    const capDefault = capRun({});
-    const capOne = capRun({ ALIGN_SESSION_MAX_DAYS: "1" });
+    const capDefault = (await capRun({}));
+    const capOne = (await capRun({ ALIGN_SESSION_MAX_DAYS: "1" }));
     check(
       "align-admin retention run --dry-run reads ALIGN_SESSION_MAX_DAYS as the server does: with 1 it would also delete a 2-day-old session the default 30 keeps, and changes nothing",
       capDefault.status === 0 && capOne.status === 0 && capOne.n === capDefault.n + 1 && q1("SELECT COUNT(*) AS n FROM ba_session WHERE userId = ?", R9.id).n === 1,
@@ -11844,9 +11951,9 @@ try {
     const rmQB = await call("R1", "DELETE", `/api/v2/workspaces/${WA}/members/${QB.id}`, { cookie: r1.cookie });
     const delWP = await ws(r1, "DELETE", WP);
     const wpRows = () => ["v2_asks", "v2_ask_mentions", "v2_value_reports"].map((t) => q1(`SELECT COUNT(*) AS n FROM ${t} WHERE ws_id = ?`, WP).n);
-    const dryQ = retention(later(31 * DAY), { dryRun: true });
+    const dryQ = (await retention(later(31 * DAY), { dryRun: true }));
     const wpBefore = wpRows();
-    const runQ = retention(later(31 * DAY));
+    const runQ = (await retention(later(31 * DAY)));
     await signIn(r1);
     const qbInWA = { ...mentions(QB.id, WA), ...mentions(QB.email, WA) };
     const openNow = (await ws(r1, "GET", WA, `/asks/${qIds.open}`)).json;
@@ -11862,11 +11969,11 @@ try {
     const qLeft = () => q("SELECT state FROM v2_asks WHERE ws_id = ? ORDER BY state", WA).map((r) => r.state).join();
     const vrN = () => q1("SELECT COUNT(*) AS n FROM v2_value_reports").n;
     const vr0 = vrN();
-    const run12 = retention(monthsLater(12));
-    const dry13 = retention(monthsLater(13, 2), { dryRun: true });
+    const run12 = (await retention(monthsLater(12)));
+    const dry13 = (await retention(monthsLater(13, 2), { dryRun: true }));
     const kept13 = { asks: qLeft(), mentions: q1("SELECT COUNT(*) AS n FROM v2_ask_mentions WHERE ws_id = ?", WA).n, vr: vrN() };
-    const run13 = retention(monthsLater(13, 2));
-    const run13b = retention(monthsLater(13, 2));
+    const run13 = (await retention(monthsLater(13, 2)));
+    const run13b = (await retention(monthsLater(13, 2)));
     check(
       "retention (asks): at 12 months nothing goes; at 13 months + 2 days done, declined and withdrawn asks go with their mentions (asks_deleted 3) and open and accepted ones stay, and value reports go (value_reports_deleted); the dry run reports the same and changes nothing; a second run changes nothing",
       run12.status === 0 && run12.counts.asks_deleted === 0 && run12.counts.value_reports_deleted === 0 &&
@@ -12073,9 +12180,9 @@ try {
     const ar1b = await arE({ email: "hopeful-applicant@example.test", name: "Horatio Hopeful", company: "Wobblegong Ltd", use_case: "Steer the Wobblegong agents, again", interest: "try" });
     const ar2 = await arE({ email: "keen-evaluator@example.test", name: "Kerensa Keen", use_case: "Evaluate for the Marmalade team", interest: "evaluate" });
     const reqIds = q("SELECT id, email FROM v2_access_requests ORDER BY created_at");
-    const apr = admin(["requests", "approve", reqIds.find((r) => r.email.startsWith("hopeful"))?.id ?? "", "--print"], evEnv);
-    const dec = admin(["requests", "decline", reqIds.find((r) => r.email.startsWith("keen"))?.id ?? ""], evEnv);
-    const opCodes = admin(["codes", "create", "--count", "2"], evEnv);
+    const apr = (await admin(["requests", "approve", reqIds.find((r) => r.email.startsWith("hopeful"))?.id ?? "", "--print"], evEnv));
+    const dec = (await admin(["requests", "decline", reqIds.find((r) => r.email.startsWith("keen"))?.id ?? ""], evEnv));
+    const opCodes = (await admin(["codes", "create", "--count", "2"], evEnv));
     check(
       "events: access_requested once per request (sending again updates it and records nothing), with its interest; approving records access_approved and code_created (source request), declining access_declined, codes create code_created (source operator) per code; none has a workspace or actor",
       ar1.status === 201 && ar1b.status === 201 && ar2.status === 201 && apr.status === 0 && dec.status === 0 && opCodes.status === 0 &&
@@ -12086,16 +12193,16 @@ try {
     );
 
     // -- LOIs: operator-recorded only; signed needs --verified-original --
-    const loiSent = admin(["events", "record", "loi_sent", "--workspace", W, "--note-ref", "LOI-2026-007"], evEnv);
-    const loiNoVerify = admin(["events", "record", "loi_signed", "--workspace", W], evEnv);
+    const loiSent = (await admin(["events", "record", "loi_sent", "--workspace", W, "--note-ref", "LOI-2026-007"], evEnv));
+    const loiNoVerify = (await admin(["events", "record", "loi_signed", "--workspace", W], evEnv));
     const afterNoVerify = ev("loi_signed").length;
-    const loiBadRef = admin(["events", "record", "loi_signed", "--workspace", W, "--verified-original", "--note-ref", "https://docs.example.test/loi"], evEnv);
-    const loiEmailRef = admin(["events", "record", "loi_sent", "--workspace", WQ, "--note-ref", "someone@example.test"], evEnv);
-    const loiSentVerify = admin(["events", "record", "loi_sent", "--workspace", WQ, "--verified-original"], evEnv);
-    const loiUnknownWs = admin(["events", "record", "loi_sent", "--workspace", "ws_aaaaaaaaaaaaaaaaaaaaaaaa"], evEnv);
-    const loiOther = admin(["events", "record", "first_approval", "--workspace", W], evEnv);
-    const loiSigned = admin(["events", "record", "loi_signed", "--workspace", W, "--verified-original", "--note-ref", "LOI-2026-007"], evEnv);
-    const loiAgain = admin(["events", "record", "loi_signed", "--workspace", W, "--verified-original"], evEnv);
+    const loiBadRef = (await admin(["events", "record", "loi_signed", "--workspace", W, "--verified-original", "--note-ref", "https://docs.example.test/loi"], evEnv));
+    const loiEmailRef = (await admin(["events", "record", "loi_sent", "--workspace", WQ, "--note-ref", "someone@example.test"], evEnv));
+    const loiSentVerify = (await admin(["events", "record", "loi_sent", "--workspace", WQ, "--verified-original"], evEnv));
+    const loiUnknownWs = (await admin(["events", "record", "loi_sent", "--workspace", "ws_aaaaaaaaaaaaaaaaaaaaaaaa"], evEnv));
+    const loiOther = (await admin(["events", "record", "first_approval", "--workspace", W], evEnv));
+    const loiSigned = (await admin(["events", "record", "loi_signed", "--workspace", W, "--verified-original", "--note-ref", "LOI-2026-007"], evEnv));
+    const loiAgain = (await admin(["events", "record", "loi_signed", "--workspace", W, "--verified-original"], evEnv));
     check(
       "align-admin events record: loi_sent records once with the note ref; loi_signed without --verified-original exits 2, says a form or claim is not a signature, and records nothing; a ref that is a URL or email, --verified-original on loi_sent or any other event name exits 2; an unknown workspace exits 1; with --verified-original it records (verified_original yes), and a second time exits 1",
       loiSent.status === 0 && loiNoVerify.status === 2 && /--verified-original/.test(loiNoVerify.err) && /not a signature/.test(loiNoVerify.err) && afterNoVerify === 0 &&
@@ -12142,7 +12249,7 @@ try {
     );
 
     // -- the report --
-    const repJ = admin(["report", "--json"], evEnv);
+    const repJ = (await admin(["report", "--json"], evEnv));
     let rep = null;
     try {
       rep = JSON.parse(repJ.out);
@@ -12172,9 +12279,9 @@ try {
         rep.lois.sent === 1 && rep.lois.signed === 1 && rep.lois.workspaces.length === 1 && rep.lois.workspaces[0].ws_id === W && rep.lois.workspaces[0].signed_at,
       `${JSON.stringify(gb)} ${JSON.stringify(rep?.lois)}`,
     );
-    const repT = admin(["report"], evEnv);
-    const repFuture = admin(["report", "--since", "2999-01-01", "--json"], evEnv);
-    const repBad = admin(["report", "--since", "last week"], evEnv);
+    const repT = (await admin(["report"], evEnv));
+    const repFuture = (await admin(["report", "--since", "2999-01-01", "--json"], evEnv));
+    const repBad = (await admin(["report", "--since", "last week"], evEnv));
     let future = null;
     try {
       future = JSON.parse(repFuture.out);
@@ -12199,9 +12306,9 @@ try {
         q("SELECT COUNT(*) AS n FROM v2_events WHERE actor = ?", eventActor(secretE, e1.id))[0].n > 0 && !q("SELECT 1 AS x FROM ba_user WHERE id = ?", e2.id).length,
       `${e2Before} ${delE2.status} ${delE2.text} ${totalBefore}`,
     );
-    const purge = admin(["workspaces", "delete", WQ, "--purge", "--yes"], evEnv);
+    const purge = (await admin(["workspaces", "delete", WQ, "--purge", "--yes"], evEnv));
     const rekeyed = q("SELECT ws_id FROM v2_events WHERE name = 'workspace_created' AND ws_id LIKE 'wsx_%'");
-    const repAfter = JSON.parse(admin(["report", "--json"], evEnv).out || "null");
+    const repAfter = JSON.parse((await admin(["report", "--json"], evEnv)).out || "null");
     check(
       "events and purging: a purged workspace's events stay under a random wsx_ id, so no row names it and the report still counts it as created",
       purge.status === 0 && ev("workspace_created", WQ).length === 0 && q("SELECT COUNT(*) AS n FROM v2_events WHERE ws_id = ?", WQ)[0].n === 0 && rekeyed.length === 1 && /^wsx_[a-z2-7]{24}$/.test(rekeyed[0].ws_id) && repAfter?.funnel[0].workspaces === 2,
@@ -12216,7 +12323,7 @@ try {
       d.prepare("INSERT INTO v2_events (name, ws_id, at, props) VALUES ('invite_sent', ?, ?, '{\"role\":\"member\"}')").run(W, monthsAgo(14));
       d.prepare("INSERT INTO v2_events (name, ws_id, at, props) VALUES ('invite_sent', ?, ?, '{\"role\":\"viewer\"}')").run(W, monthsAgo(12));
     });
-    const retE = admin(["retention", "run"], evEnv);
+    const retE = (await admin(["retention", "run"], evEnv));
     let retCounts = {};
     try {
       retCounts = JSON.parse(retE.out.trim().split("\n").pop());
@@ -12252,6 +12359,8 @@ try {
     ["a short ALIGN_SECRET", { ALIGN_SECRET: "s".repeat(20) }, "ALIGN_SECRET must be set (32+ characters)"],
     ["a relative ALIGN_DATA_DIR", { ALIGN_DATA_DIR: "data/hosted" }, "ALIGN_DATA_DIR must be an absolute path"],
     ["an ALIGN_DATA_DIR inside the app", { ALIGN_DATA_DIR: path.join(ROOT, "data", "hosted-inside") }, "ALIGN_DATA_DIR must be outside the app directory"],
+    ["an ALIGN_DATA_DIR whose app subdirectory starts with two dots", { ALIGN_DATA_DIR: path.join(ROOT, "..private") }, "ALIGN_DATA_DIR must be outside the app directory"],
+    ["an ALIGN_DATA_DIR nested under a two-dot app subdirectory", { ALIGN_DATA_DIR: path.join(ROOT, "..private", "store") }, "ALIGN_DATA_DIR must be outside the app directory"],
     ["ALIGN_PUBLIC=1", { ALIGN_PUBLIC: "1" }, "Public mode is not supported"],
     ["no BETTER_AUTH_SECRET", { BETTER_AUTH_SECRET: undefined }, "BETTER_AUTH_SECRET must be set"],
     ["a short BETTER_AUTH_SECRET", { BETTER_AUTH_SECRET: "short" }, "BETTER_AUTH_SECRET must be set"],
@@ -12619,7 +12728,7 @@ try {
     `${aNoTok.status} ${aDisp.status} ${aDispSub.status} ${aOk.status}`,
   );
   // -- the operator approves: an email-bound code, emailed, never printed --
-  const noSecret = admin(["requests", "approve", aliceReq.id], { ...opGate, ALIGN_SECRET: undefined });
+  const noSecret = (await admin(["requests", "approve", aliceReq.id], { ...opGate, ALIGN_SECRET: undefined }));
   // E2E-WEB cycle 13 W7: hosted, without ALIGN_PUBLIC_ORIGIN in its environment, the script refuses to email a link to
   // this machine; nothing is approved or sent.
   const mailsBeforeNoOrigin = mails.length;
@@ -12702,12 +12811,12 @@ try {
     `${localApprove.status} ${localApprove.out} ${localApprove.err} ${JSON.stringify(localMail?.body)}`,
   );
   // -- codes made by the operator: revoked, expired and bound to someone else don't work; a disposable address can't create --
-  const gMade = admin(["codes", "create", "--count", "4"], opGate);
+  const gMade = (await admin(["codes", "create", "--count", "4"], opGate));
   const [U1c, U2c, revC, expC] = codesIn(gMade.out);
   const gIds = [...gMade.out.matchAll(/\((cc_[a-z2-7]{24}),/g)].map((m) => m[1]);
-  const bobMade = admin(["codes", "create", "--email", "Bob@Example.test"], opGate);
+  const bobMade = (await admin(["codes", "create", "--email", "Bob@Example.test"], opGate));
   const bobC = codesIn(bobMade.out)[0];
-  admin(["codes", "revoke", gIds[2]], opGate);
+  (await admin(["codes", "revoke", gIds[2]], opGate));
   withDb((d) => d.prepare("UPDATE v2_creation_codes SET expires_at = ? WHERE id = ?").run(new Date(Date.now() - 1000).toISOString(), gIds[3]));
   const useRevoked = await gCreate(ALICE, "Alice Two", revC);
   const useExpired = await gCreate(ALICE, "Alice Two", expC);
@@ -12749,10 +12858,10 @@ try {
   const v1Noisy = (r) => [v1Code, v1Unused, v1Kept, v1Spent].some((c) => r.out.includes(c) || r.err.includes(c));
   const v1Rows = () => withDb((d) => d.prepare("SELECT * FROM v2_creation_codes").all());
   const v1Before = v1Rows().length;
-  const v1Imported = admin(v1Args, opGate);
+  const v1Imported = (await admin(v1Args, opGate));
   const v1Added = v1Rows().filter((r) => !r.request_id && r.email === null).sort((x, y) => y.expires_at.localeCompare(x.expires_at)).slice(0, 3);
   const v1Days = (Date.parse(v1Added[0]?.expires_at) - Date.now()) / 86400000;
-  const v1ListOut = admin(["codes", "list"], opGate).out;
+  const v1ListOut = (await admin(["codes", "list"], opGate)).out;
   check(
     "align-admin: codes import --file --used --days 60 loads 3 unbound codes valid for 60 days, skips the 1 spent on v1, says so in counts, and neither the output nor codes list holds a code",
     v1Imported.status === 0 && /Imported 3, for 60 days\. 0 already here, left as they were \(0 of those used\)\. 1 spent on v1, skipped\./.test(v1Imported.out) && v1Rows().length === v1Before + 3 && v1Added.length === 3 && v1Days > 59.9 && v1Days <= 60 && !v1Noisy(v1Imported) && ![v1Code, v1Unused, v1Kept, v1Spent].some((c) => v1ListOut.includes(c)),
@@ -12762,11 +12871,11 @@ try {
   const v1BadUsed = path.join(tmpRoot, "v1-bad-used.json");
   writeFileSync(v1BadFile, `${v1Hex()}\n${v1Code.toUpperCase()}\nalc_${"a".repeat(32)}\n${v1Code.slice(0, 19)}\n${v1Code}0\n`, { mode: 0o600 });
   writeFileSync(v1BadUsed, JSON.stringify({ spent: [] }), { mode: 0o600 });
-  const v1Bad = admin(["codes", "import", "--file", v1BadFile, "--used", v1Used, "--days", "60"], opGate);
-  const v1NoDays = admin(["codes", "import", "--file", v1File, "--used", v1Used], opGate);
-  const v1NoUsed = admin(["codes", "import", "--file", v1File, "--days", "60"], opGate);
-  const v1WrongUsed = admin(["codes", "import", "--file", v1File, "--used", v1BadUsed, "--days", "60"], opGate);
-  const v1MissingUsed = admin(["codes", "import", "--file", v1File, "--used", path.join(tmpRoot, "v1-none.json"), "--days", "60"], opGate);
+  const v1Bad = (await admin(["codes", "import", "--file", v1BadFile, "--used", v1Used, "--days", "60"], opGate));
+  const v1NoDays = (await admin(["codes", "import", "--file", v1File, "--used", v1Used], opGate));
+  const v1NoUsed = (await admin(["codes", "import", "--file", v1File, "--days", "60"], opGate));
+  const v1WrongUsed = (await admin(["codes", "import", "--file", v1File, "--used", v1BadUsed, "--days", "60"], opGate));
+  const v1MissingUsed = (await admin(["codes", "import", "--file", v1File, "--used", path.join(tmpRoot, "v1-none.json"), "--days", "60"], opGate));
   check(
     "align-admin: one line of another shape (alc_, uppercase, 19 or 21 hex) imports nothing, names the lines and never their text; --days and --used are required; a --used file that isn't v1's list or can't be read imports nothing",
     v1Bad.status === 2 && /lines 2, 3, 4, 5\./.test(v1Bad.err) && !v1Bad.err.includes(v1Code.toUpperCase()) && !v1Bad.err.includes("alc_a") && !v1Bad.err.includes(v1Code.slice(0, 19)) && v1NoDays.status === 2 && v1NoUsed.status === 2 && v1WrongUsed.status === 1 && /Nothing imported/.test(v1WrongUsed.err) && v1MissingUsed.status === 1 && /Nothing imported/.test(v1MissingUsed.err) && v1Rows().length === v1Before + 3,
@@ -12777,8 +12886,8 @@ try {
   const v1OldDb = new DatabaseSync(path.join(v1OldDir, "v2", "align.sqlite"));
   v1OldDb.exec("PRAGMA user_version = 1");
   v1OldDb.close();
-  const v1OldRun = admin(v1Args, { ...opGate, ALIGN_DATA_DIR: v1OldDir });
-  const v1NoDbRun = admin(v1Args, { ...opGate, ALIGN_DATA_DIR: path.join(tmpRoot, "v1-no-db") });
+  const v1OldRun = (await admin(v1Args, { ...opGate, ALIGN_DATA_DIR: v1OldDir }));
+  const v1NoDbRun = (await admin(v1Args, { ...opGate, ALIGN_DATA_DIR: path.join(tmpRoot, "v1-no-db") }));
   check(
     "align-admin: codes import refuses a database this version hasn't migrated, and a server that has no database yet, so the import can only follow the deploy",
     v1OldRun.status !== 0 && /not been migrated/.test(v1OldRun.err) && v1NoDbRun.status === 1 && /No Align database/.test(v1NoDbRun.err),
@@ -12807,9 +12916,9 @@ try {
   );
   const v1Replay = await gCreate(BOB, "Bob V1 again", v1Code);
   const v1Row = v1Rows().find((r) => r.ws_id === v1Create.json?.id);
-  const v1Reimport = admin(v1Args, opGate);
-  const v1Purge = admin(["workspaces", "delete", v1Create.json?.id ?? "", "--purge", "--yes"], opGate);
-  admin(v1Args, opGate);
+  const v1Reimport = (await admin(v1Args, opGate));
+  const v1Purge = (await admin(["workspaces", "delete", v1Create.json?.id ?? "", "--purge", "--yes"], opGate));
+  (await admin(v1Args, opGate));
   const v1AfterPurge = await gCreate(BOB, "Bob V1 after", v1Code);
   check(
     "gate (LIM-2473): an imported v1 code creates one workspace (201) and is spent with it; used again -> 403 creation_code_invalid, also after a re-import (0 new, 3 left as they were, 1 of those used, 1 spent on v1) and after that workspace is purged",
@@ -12818,7 +12927,7 @@ try {
   );
   // Testers paste codes from a text message. The route trims (optStr); the shape match stays exact, so case is untouched.
   const v1Pasted = await gCreate(BOB, "Bob V1 pasted", `  ${v1Kept}\n`);
-  const v1PastedPurge = admin(["workspaces", "delete", v1Pasted.json?.id ?? "", "--purge", "--yes"], opGate);
+  const v1PastedPurge = (await admin(["workspaces", "delete", v1Pasted.json?.id ?? "", "--purge", "--yes"], opGate));
   check("gate (LIM-2473): a code pasted with spaces and a newline around it is accepted (201)", v1Pasted.status === 201 && v1PastedPurge.status === 0, `${v1Pasted.status} ${v1Pasted.text} ${v1PastedPurge.status}`);
   const v1Clear = readdirSync(gateDir, { recursive: true }).filter((f) => statSync(path.join(gateDir, f)).isFile()).some((f) => readFileSync(path.join(gateDir, f)).includes(v1Unused));
   check("gate (LIM-2473): an imported code is in no file of the data directory in clear; only its HMAC is stored", !v1Clear);
@@ -12836,16 +12945,16 @@ try {
   const boundArgs = ["codes", "import", "--file", boundFile, "--used", v1Used, "--days", "60"];
   const boundBefore = v1Rows().length;
   writeFileSync(boundFile, `${boundCode}, ${boundAddress.toUpperCase()} \n`, { mode: 0o600 });
-  const boundImport = admin(boundArgs, opGate);
+  const boundImport = (await admin(boundArgs, opGate));
   const boundRow = v1Rows().find((r) => r.email === boundAddress);
-  const boundList = admin(["codes", "list"], opGate);
+  const boundList = (await admin(["codes", "list"], opGate));
   check("LIM-2480: bound import normalizes the address and prints neither address nor code (including codes list)",
     boundImport.status === 0 && boundList.status === 0 && v1Rows().length === boundBefore + 1 && !!boundRow &&
     [boundImport, boundList].every((r) => ![boundCode, boundAddress].some((v) => (r.out + r.err).toLowerCase().includes(v))),
     `import status ${boundImport.status}; row present ${!!boundRow}`);
   const preservedBefore = v1Rows().find((r) => r.id === v1Added.find((x) => !v1Rows().find((y) => y.id === x.id)?.redeemed_at)?.id);
   writeFileSync(boundFile, `${v1Unused},${boundAddress}\n`, { mode: 0o600 });
-  const liveAgain = admin(boundArgs, opGate);
+  const liveAgain = (await admin(boundArgs, opGate));
   const preservedAfter = v1Rows().find((r) => r.id === preservedBefore?.id);
   check("LIM-2480: re-import leaves a live unbound row entirely unchanged",
     liveAgain.status === 0 && !!preservedBefore && JSON.stringify(preservedBefore) === JSON.stringify(preservedAfter));
@@ -12859,18 +12968,18 @@ try {
     `wrong ${boundWrong.status}; sign-in ${boundTester.status}; home ${boundHome.status}; create ${boundCreate.status}`);
   const reboundAddress = ["different-tester", "example.test"].join("@");
   writeFileSync(boundFile, `${boundCode},${reboundAddress}\n`, { mode: 0o600 });
-  const boundAgain = admin(boundArgs, opGate);
+  const boundAgain = (await admin(boundArgs, opGate));
   const boundAfter = v1Rows().find((r) => r.id === boundRow?.id);
   const boundReplay = await gCreate(boundTester, "Imported again", boundCode);
   check("LIM-2480: re-import cannot rebind or revive a used code",
     boundAgain.status === 0 && boundAfter?.email === boundAddress && !!boundAfter?.redeemed_at && boundReplay.status === 403,
     `import ${boundAgain.status}; replay ${boundReplay.status}`);
-  const boundPurge = admin(["workspaces", "delete", boundCreate.json?.id ?? "", "--purge", "--yes"], opGate);
+  const boundPurge = (await admin(["workspaces", "delete", boundCreate.json?.id ?? "", "--purge", "--yes"], opGate));
   check("LIM-2480: imported tester fixture is purged before cap checks", boundPurge.status === 0);
   // Validate all rows before writing, including a good first row followed by malformed private input.
   const invalidBefore = v1Rows().length;
   writeFileSync(boundFile, `${v1Hex()},${boundAddress}\n${v1Hex()},\n${v1Hex()},invalid\n${v1Hex()},${boundAddress},extra\n`, { mode: 0o600 });
-  const boundInvalid = admin(boundArgs, opGate);
+  const boundInvalid = (await admin(boundArgs, opGate));
   check("LIM-2480: malformed bound rows abort the complete import with line numbers only",
     boundInvalid.status === 2 && /lines 2, 3, 4\./.test(boundInvalid.err) && v1Rows().length === invalidBefore &&
     !boundInvalid.err.includes(boundAddress) && !boundInvalid.err.includes("invalid\n"), `status ${boundInvalid.status}`);
@@ -12887,7 +12996,7 @@ try {
         const address = [`browser-${width}-${theme}`, "example.test"].join("@");
         const invite = v1Hex();
         writeFileSync(boundFile, `${invite},${address}\n`, { mode: 0o600 });
-        const imported = admin(boundArgs, opGate);
+        const imported = (await admin(boundArgs, opGate));
         let errors = 0;
         let created = null;
         let createRefused = "";
@@ -12973,12 +13082,18 @@ try {
             `import ${imported.status}; created ${!!created}; errors ${errors}; overflow ${overflow}`);
         } catch (e) { check(`LIM-2480: hosted new tester browser path ${width} ${theme}`, false, `stopped at ${step}: ${String(e?.message ?? e).split("\n")[0].slice(0, 160)}; create ${createRefused || (created ? "201" : "not sent")}; errors ${errors}; overflow ${overflow}`); }
         finally {
-          if (created) check(`LIM-2480: browser fixture cleanup ${width} ${theme}`, admin(["workspaces", "delete", created, "--purge", "--yes"], opGate).status === 0);
+          if (created) check(`LIM-2480: browser fixture cleanup ${width} ${theme}`, (await admin(["workspaces", "delete", created, "--purge", "--yes"], opGate)).status === 0);
           await context.close();
         }
       }
     } finally { await browser.close(); }
   } else check("LIM-2480: Chrome available for hosted browser coverage", false);
+  // Browser coverage can exceed the recent-sign-in window. Cap controls need fresh sessions.
+  const freshOpsForCaps = await gSignIn("ops@example.test");
+  const freshBobForCaps = await gSignIn("bob@example.test");
+  check("caps: refresh real sign-ins after hosted browser coverage", freshOpsForCaps.status === 200 && !!freshOpsForCaps.cookie && freshBobForCaps.status === 200 && !!freshBobForCaps.cookie, `${freshOpsForCaps.status} ${freshOpsForCaps.text} ${freshBobForCaps.status} ${freshBobForCaps.text}`);
+  OPSG.cookie = freshOpsForCaps.cookie;
+  BOB.cookie = freshBobForCaps.cookie;
   // -- workspaces per account (2 by default) and on the server (4 here) --
   const W3 = await gCreate(OPSG, "Ops Two", U1c);
   const opsThird = await gCreate(OPSG, "Ops Three", U2c);
@@ -12994,7 +13109,7 @@ try {
   const W3id = W3.json?.id;
   const gDel = (who, ws) => hosted("DELETE", `/api/v2/workspaces/${ws}`, { cookie: who.cookie, headers: hOrigin });
   const gRestore = (who, ws) => hosted("POST", `/api/v2/workspaces/${ws}/restore`, { body: {}, cookie: who.cookie, headers: hOrigin });
-  const capC = codesIn(admin(["codes", "create"], opGate).out)[0];
+  const capC = codesIn((await admin(["codes", "create"], opGate)).out)[0];
   const delW3 = await gDel(OPSG, W3id);
   const opsAgain = await gCreate(OPSG, "Ops Three", capC);
   const restoreFull = await gRestore(OPSG, W3id);

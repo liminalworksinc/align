@@ -1,0 +1,14 @@
+{
+  "schema": "align/native-child-local-evidence@1",
+  "component": "server-connected-apps-routes",
+  "admission_review": "server-connected-apps-routes.admitted-source-review-v3.json",
+  "admission_review_sha256": "16740bb2e5783a9c5044494227a12a8ead59d56d94d4f2270d08948d7a754a5f",
+  "admitted_entry": "sha256:4790d062eae0bba320463194194d6d2af9a06b88bc32fe5bc2553a38df39b330",
+  "generated_tests_passed": 3,
+  "source_byte_review_complete": true,
+  "no_source_repairs_during_admission": true,
+  "normal_portable_cache_current_acceptance_record": "verification/current.json",
+  "parent_registration_and_full_application_image_acceptance_pending": true,
+  "whole_B19_closed": false,
+  "operator_security_acceptance_claimed": false
+}

@@ -1,0 +1,59 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {create_validators} = require('../field_validation/create_validators.js');
+function context() {
+  return {badRequest: (...args) => ({args}), cleanProse: text => text.trim(), dropInvisible: text => text, isBlankText: text => text.trim() === '', BLANK_FILLERS: '\u115f\u1160\u3164\uffa0\u2800'};
+}
+const cases = [{"id":"generated-example","args":["oneOf",{"color":"blue"},"color",["red","blue"]],"expected":"blue"},{"id":"generated-zero","args":["nonNegInt",{"n":0},"n"],"expected":0},{"id":"generated-list","args":["strList",{"tags":[" a ","","a"," b "]},"tags"],"expected":["a","b"]},{"id":"generated-timestamp","args":["iso",{"time":"2000-01-01T00:00:00Z"},"time"],"expected":"2000-01-01T00:00:00.000Z"},{"id":"generated-token","args":["b64url",{"token":"a_-"},"token",3,3],"expected":"a_-"},{"id":"generated-name","args":["oneLine",{"name":" A\tB "},"name"],"expected":"A B"},{"id":"generated-grapheme","args":["charCount","á"],"expected":1},{"id":"generated-optional","args":["optStr",{"name":null},"name"],"expected":null},{"id":"generated-revision","args":["revisionRead",{"revision":12}],"expected":12},{"id":"generated-clean","args":["cleanName"," A\n\tB "],"expected":" A B "}];
+function invoke(args) {
+  const v = create_validators(context());
+  const [method,...values] = args;
+  return v[method](...values);
+}
+function contracts() {
+  const ctx = context(), v = create_validators(ctx);
+  assert.equal(Object.keys(v).length, 21);
+  for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(v))) {
+    assert.equal(descriptor.enumerable, true); assert.equal(descriptor.writable, true); assert.equal(descriptor.configurable, true);
+  }
+  const detached = v.str;
+  ctx.cleanProse = () => 'changed';
+  assert.equal(detached({x:' ok '}, 'x'), 'ok');
+  v.nonNegInt = () => 99;
+  assert.equal(v.optInt({x:2}, 'x'), 2);
+  assert.ok(Object.is(v.optInt({x:-0}, 'x'), -0));
+  const reads = [];
+  const body = {get x() { reads.push(1); return 3; }};
+  assert.equal(v.optInt(body, 'x'), 3);
+  assert.equal(reads.length, 3);
+  reads.length = 0;
+  assert.equal(v.optIso({get x(){reads.push(1);return '2000-01-01T00:00:00Z';}},'x'),'2000-01-01T00:00:00.000Z');
+  assert.equal(reads.length,4);
+  const sentinel = {};
+  assert.throws(() => v.str({get x(){throw sentinel;}},'x'), error => error === sentinel);
+  const events = [], failure = {};
+  const w = create_validators({...context(),cleanProse: x => {events.push('clean');return x;},isBlankText: x => {events.push('blank');return !x;},badRequest: (...args) => {events.push(args);return failure;}});
+  assert.throws(() => w.str({x:''},'x'),error => error === failure);
+  assert.deepEqual(events,['clean',['x is required']]);
+  assert.throws(() => w.oneLine({x:'a'+'\u0301'.repeat(7)},'x'),error => error === failure);
+  const other = create_validators(context());
+  assert.notEqual(v.B64URL,other.B64URL);
+  v.B64URL.compile('^a$', 'g');
+  assert.equal(v.b64url({x:'a'},'x',1,1),'a');
+  assert.throws(() => v.b64url({x:'a'},'x',1,1));
+  assert.equal(other.b64url({x:'a'},'x',1,1),'a');
+  v.B64URL = /^z$/;
+  assert.equal(v.b64url({x:'a'},'x',1,1),'a');
+  assert.equal(v.revisionRead({},true),undefined);
+  assert.equal(v.assertRevisionReached('request',NaN,0),undefined);
+  const original = [' a ','a']; assert.deepEqual(v.strList({x:original},'x'),['a']); assert.deepEqual(original,[' a ','a']);
+}
+function run() {
+  const results = [];
+  for (const c of cases) {assert.deepEqual(invoke(c.args),c.expected);results.push({case_id:c.id,outcome:'passed'});}
+  contracts();
+  return {schema:'literate-ai/generated-test-results@1',cases:results};
+}
+function smoke() {return invoke(cases[0].args);}
+module.exports = {run,smoke};
+

@@ -1,0 +1,76 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { create_local_owner_bootstrap } = require('../server_local_owner_bootstrap/create_local_owner_bootstrap.js');
+
+// JSON resource descriptions here are fixture inputs, not a product API.
+const cases = [
+  { id: 'generated-create', args: [{ hosted: false, account: false, email: 'first@example.test', port: '' }], expected: null },
+  { id: 'generated-hosted', args: [{ hosted: true }], expected: null },
+  { id: 'generated-existing', args: [{ hosted: false, account: { x: 1 } }], expected: null }
+];
+
+async function exercise(description) {
+  const events = [];
+  const adapter = {
+    async createUser(...args) {
+      assert.equal(this, adapter);
+      assert.deepEqual(args, [{ email: description.email, name: 'Local owner', emailVerified: true }, { method: 'admin' }]);
+      events.push('create');
+    }
+  };
+  const api = {
+    async sendVerificationOTP(...args) {
+      assert.equal(this, api);
+      assert.equal(args.length, 1);
+      assert.deepEqual(Object.keys(args[0]), ['body', 'headers']);
+      assert.deepEqual(args[0].body, { email: description.email, type: 'sign-in' });
+      assert.ok(args[0].headers instanceof Headers);
+      assert.equal(args[0].headers.get('host'), '127.0.0.1:' + (description.port || '3100'));
+      events.push('send');
+    }
+  };
+  function bare(receiver) { assert.equal(receiver, undefined); }
+  const resources = {
+    config() { bare(this); events.push('config'); return { hosted: description.hosted }; },
+    get(...args) { bare(this); assert.deepEqual(args, ['SELECT 1 AS x FROM ba_user LIMIT 1']); events.push('get'); return description.account; },
+    localOwnerEmail() { bare(this); events.push('email'); return description.email; },
+    getAuth() { bare(this); events.push('auth'); return { get $context() { events.push('context'); return Promise.resolve({ internalAdapter: adapter }); }, get api() { events.push('api'); return api; } }; },
+    getHeadersConstructor() { bare(this); events.push('headers'); return Headers; },
+    readPort() { bare(this); events.push('port'); return description.port; },
+    getConsole() { throw new Error('Unexpected recovery report'); }
+  };
+  const reads = [];
+  const captured = {};
+  for (const key of Object.keys(resources)) Object.defineProperty(captured, key, { get() { reads.push(key); return resources[key]; } });
+  const namespace = create_local_owner_bootstrap(captured);
+  assert.deepEqual(reads, ['config', 'get', 'localOwnerEmail', 'getAuth', 'getHeadersConstructor', 'readPort', 'getConsole']);
+  assert.deepEqual(events, []);
+  assert.equal(create_local_owner_bootstrap.length, 1);
+  assert.deepEqual(Object.keys(namespace), ['ensureLocalOwner']);
+  const operation = namespace.ensureLocalOwner;
+  assert.equal(operation.name, 'ensureLocalOwner');
+  assert.equal(operation.length, 0);
+  for (let invocation = 0; invocation < 2; invocation++) {
+    events.length = 0;
+    const pending = operation();
+    assert.ok(pending instanceof Promise);
+    assert.equal(await pending, undefined);
+    assert.deepEqual(events, description.hosted ? ['config'] : description.account ? ['config', 'get'] : ['config', 'get', 'email', 'auth', 'context', 'create', 'api', 'headers', 'port', 'send']);
+  }
+  assert.equal(reads.length, 7);
+  return null;
+}
+
+async function run() {
+  const results = [];
+  for (const test of cases) {
+    assert.deepEqual(await exercise(...test.args), test.expected);
+    results.push({ case_id: test.id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+
+async function smoke() { return exercise(...cases[0].args); }
+
+module.exports = { run, smoke };

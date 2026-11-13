@@ -1,0 +1,150 @@
+'use strict';
+// Authored adapter. The historical verifier below is never invoked in this host process.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const crypto = require('node:crypto');
+const cp = require('node:child_process');
+const SETTINGS = {"inner_sha256":"6cfc6971d3b81bf11f86fcd2c336e3dd5dd315e5c13edb95e98254e02820a450","package":"goal_limits","package_files":["create_goal_limits.js","package.json"],"maximum_cases":5,"image":"node@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9","cpus":2,"memory_mib":768,"worker_seconds":50};
+
+function historicalVerifier() {'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const fixtureModule={exports:{}};
+new Function('require','module','exports',"'use strict';\n// Private supplied-service fixture. Original parsing and identity algorithms are absent.\nconst assert=require('node:assert/strict'),crypto=require('node:crypto');\nconst NativeDate=Date,resourceNames=['badRequest','cleanProse','isBlankText','rand32','readDate'];\nconst metadata={LIMIT_TYPES:'array',LIMITS_MAX:5,LIMIT_TEXT_MAX:160,LIMIT_SOURCE_TITLE_MAX:120,\n cleanText:[1],isDay:[1],newLimitId:[0],limitsOf:[1],limitsIn:[2]};\nfunction normalize(value,seen=new Map()) {\n if(value===undefined)return {$undefined:true};\n if(typeof value==='number'&&!Number.isFinite(value))return {$number:String(value)};\n if(value===null||typeof value!=='object')return value;\n if(seen.has(value))return {$ref:seen.get(value)};seen.set(value,seen.size);\n if(Array.isArray(value))return value.map(x=>normalize(x,seen));\n return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,normalize(v,seen)]));\n}\nfunction fixture(settings={}) {\n const trace=[],fault=new Error('owned goal limit failure');let effects=0,dates=0,ids=0,reads=0,capturing=false;\n const note=(name,...args)=>{trace.push([name,...args]);if(++effects===settings.effectFault)throw fault;};\n const wrap=(name,fn)=>function(...args){assert.equal(this,undefined);note(name,...args);return fn(...args);};\n function Clock(value){assert(new.target);note('Date:new',value);const actual=new NativeDate(value);const result={toISOString(){assert.equal(this,result);assert.equal(arguments.length,0);note('Date:toISOString');return actual.toISOString();}};return result;}\n Object.defineProperty(Clock,'parse',{get(){note('Date:parse:get');return function(text){assert.equal(this,Clock);note('Date:parse',text);return NativeDate.parse(text);};}});\n const resources={\n  badRequest:wrap('badRequest',message=>({ownedRefusal:true,message})),\n  cleanProse:wrap('cleanProse',text=>settings.proseResult??text),\n  isBlankText:wrap('isBlankText',text=>settings.blankResult??(text==='')),\n  rand32:wrap('rand32',bytes=>{assert.equal(bytes,8);return settings.entropy?.[ids++]??String(ids++).padStart(13,'a');}),\n  readDate:wrap('readDate',()=>{dates++;return Clock;}),\n };\n const watched=(value,label)=>{\n  if(!value||typeof value!=='object')return value;\n  if(Array.isArray(value))return value.map((item,i)=>watched(item,label+'['+i+']'));\n  const target=Object.fromEntries(Object.entries(value).map(([k,v])=>[k,watched(v,label+'.'+k)]));\n  return new Proxy(target,{get(target,key,receiver){if(capturing&&typeof key==='string'){trace.push(['get',label,key]);if(++reads===settings.propertyFault)throw fault;}return Reflect.get(target,key,receiver);}});\n };\n return {resources,trace,fault,watched,effects:()=>effects,reads:()=>reads,dates:()=>dates,begin:()=>{capturing=true;},end:()=>{capturing=false;}};\n}\nfunction service(factory,f) {\n const reads=[];const supplied=new Proxy({},{get(_target,key){reads.push(key);assert(resourceNames.includes(key));return f.resources[key];},ownKeys(){throw new Error('Resource enumeration');}});\n const value=factory(supplied);assert.deepEqual(reads,resourceNames);assert.deepEqual(f.trace,[]);\n assert.deepEqual(Object.keys(value),Object.keys(metadata));\n assert.deepEqual(Array.from(value.LIMIT_TYPES),['must','must_not','out_of_scope']);assert(!Object.isFrozen(value.LIMIT_TYPES));\n for(const [key,kind]of Object.entries(metadata)) {\n  if(Array.isArray(kind)){assert.equal(typeof value[key],'function');assert.equal(value[key].name,key);assert.equal(value[key].length,kind[0]);assert.equal(value[key].constructor.name,'Function');}\n  else if(kind!=='array')assert.equal(value[key],kind);\n }\n return {value,reads};\n}\nfunction invoke(factory,name,args,settings={}) {\n const f=fixture(settings),{value,reads}=service(factory,f);\n const actual=settings.watch?args.map((v,i)=>f.watched(v,'arg'+i)):structuredClone(args);\n const before=JSON.stringify(actual);f.trace.length=0;f.begin();\n let result,error;\n try {result=Reflect.apply(value[name],undefined,actual);}\n catch(e){if(e===f.fault)error={ownedFault:true};else if(e?.ownedRefusal)error=e;else error={name:e.name,message:e.message};}\n const trace=normalize(f.trace);f.end();assert.deepEqual(reads,resourceNames);\n // Input serialization is outside the observed call and excluded from its trace.\n const after=JSON.stringify(actual);assert.equal(after,before);\n return {name,result:normalize(result),error:normalize(error),trace,\n  exact_previous_reference:name==='limitsIn'&&args[0]===undefined?result===actual[1]:null,\n  effects:f.effects(),property_reads:f.reads()};\n}\nfunction stream(records){const hash=crypto.createHash('sha256');let count=0;for(const record of records){hash.update(JSON.stringify(record)+'\\n');count++;}return {records:count,sha256:hash.digest('hex')};}\nfunction* calendar(factory) {\n for(const year of [0,1,4,99,100,400,1600,1700,1800,1900,1999,2000,2004,2026,2100,2400,9999])\n  for(let month=0;month<=13;month++)for(let day=0;day<=32;day++)yield invoke(factory,'isDay',[String(year).padStart(4,'0')+'-'+String(month).padStart(2,'0')+'-'+String(day).padStart(2,'0')]);\n for(const text of ['',null,undefined,0,false,{},[], '2026-1-01','2026-01-1',' 2026-01-01','2026-01-01\\n','２０２６-01-01','2026-00-01','10000-01-01','-001-01-01'])yield invoke(factory,'isDay',[text]);\n}\nconst item=(id,type='must',text='Keep the review short',source=null)=>({...(id===undefined?{}:{id}),type,text,source});\nfunction* allocations(factory,partition) {\n const previous=[[],[item('old-a')],[item('old-a'),item('old-b')],[item('old-a'),item('old-b','must_not','Avoid rework')],\n  [item('old-a','must','Keep the review short',{kind:'manual',title:'',date:'2026-01-02'})],\n  [item('old-a'),item('old-a')],[item(''),item('old-b')]];\n const options=[item(undefined),item('old-a'),item('old-b'),item('unknown'),item(''),item(undefined,'must_not','Avoid rework'),item(undefined,'out_of_scope','Move the review',null),item(undefined,'must','Keep the review short',{kind:'manual',date:'2026-01-02'})];\n for(let p=partition;p<previous.length;p+=2) {\n  yield invoke(factory,'limitsIn',[undefined,previous[p]]);yield invoke(factory,'limitsIn',[[],previous[p]]);\n  for(const first of options) {yield invoke(factory,'limitsIn',[[first],previous[p]]);\n   for(const second of options) {yield invoke(factory,'limitsIn',[[first,second],previous[p]]);\n    for(const third of options)yield invoke(factory,'limitsIn',[[first,second,third],previous[p]]);}}\n }\n}\nfunction* validation(factory) {\n const values=[null,false,0,'',{},[null],[false],[0],['x'],[[]],[{}],...['must','must_not','out_of_scope','MUST','',null,1].map(type=>[{type,text:'Review'}]),\n  ...[undefined,null,false,0,'',' ','\\u0000\\u007f\\u0085','\\tA\\n B\\r','\\u200b','x'.repeat(159),'x'.repeat(160),'x'.repeat(161),'😀'.repeat(80),'😀'.repeat(81)].map(text=>[{type:'must',text}]),\n  ...[undefined,null,1,false,[],{}, {kind:'other'}, {kind:'manual'}, {kind:'meeting',title:1,date:'2026-01-02'}, {kind:'manual',title:null,date:'2026-01-02'}, {kind:'meeting',title:'x'.repeat(120),date:'2026-01-02'}, {kind:'meeting',title:'x'.repeat(121),date:'2026-01-02'}, {kind:'manual',date:'2026-02-29'}, {kind:'manual',date:'2024-02-29'}].map(source=>[{type:'must',text:'Review',source}]),\n  Array.from({length:5},()=>item(undefined)),Array.from({length:6},()=>item(undefined))];\n for(const v of values)yield invoke(factory,'limitsIn',[v,[]]);\n for(const text of ['', 'a\\u0000b\\u007fc\\u0085d',' A\\n\\t B ','\\u200b','😀','x'.repeat(161)])\n  for(const settings of [{},{proseResult:'  transformed\\n text  '},{blankResult:true}])yield invoke(factory,'cleanText',[text],settings);\n for(const limits_json of ['', '[]','[1,2]','null','false','{}','bad json'])yield invoke(factory,'limitsOf',[{limits_json}]);\n for(const entropy of [undefined,['a'.repeat(20)],['']])yield invoke(factory,'newLimitId',[],{entropy});\n}\nfunction faults(factory) {\n const records=[],cases=[['cleanText',['  A\\u0000 B  ']],['isDay',['2024-02-29']],['newLimitId',[]],['limitsOf',[{limits_json:'[]'}]],\n  ['limitsIn',[[item(undefined,'must',' Keep review ',{kind:'meeting',title:' Review ',date:'2026-01-02'})],[item('old')]]],\n  ['limitsIn',[[item('old'),item(undefined),item('old')],[item('old'),item('other')]]]];\n for(const [name,args]of cases) {\n  const plain=invoke(factory,name,args,{watch:true});records.push(plain);\n  for(let i=1;i<=plain.effects;i++){const failed=invoke(factory,name,args,{effectFault:i,watch:true});assert(failed.error.ownedFault);records.push(failed);}\n  for(let i=1;i<=plain.property_reads;i++){const failed=invoke(factory,name,args,{propertyFault:i,watch:true});assert(failed.error.ownedFault);records.push(failed);}\n }\n for(let i=0;i<resourceNames.length;i++) {const fault=new Error('owned resource getter');let reads=[];\n  assert.throws(()=>factory(new Proxy({},{get(_t,key){reads.push(key);if(key===resourceNames[i])throw fault;return ()=>{};}})),e=>e===fault);\n  assert.deepEqual(reads,resourceNames.slice(0,i+1));}\n return stream(records);\n}\nfunction run(factory,index) {\n if(index===0)return stream(calendar(factory));\n if(index===1||index===2)return stream(allocations(factory,index-1));\n if(index===3)return stream(validation(factory));\n assert.equal(index,4);return faults(factory);\n}\nmodule.exports={resourceNames,metadata,fixture,service,normalize,invoke,stream,run};\n")(name=>{assert(['node:assert/strict','node:crypto'].includes(name));return require(name);},fixtureModule,fixtureModule.exports);
+const fixture=fixtureModule.exports;
+const PLANS=[{"index":0,"golden":{"records":7869,"sha256":"4fa3f19ddda8bca1af3127ede0bd62cf804e02918284f0bf49de44e415acdbfb"}},{"index":1,"golden":{"records":2344,"sha256":"2875c18434097caa4ed9fda3aeaf625a10407c2eaa1aeb8badadcbb72f20ab6a"}},{"index":2,"golden":{"records":1758,"sha256":"9b5e69163e881343f26bab43e4f44e91fbecfb59d8c08158474dd8a192ced586"}},{"index":3,"golden":{"records":76,"sha256":"4379ca892f7a1cdf31d6ef30c272c6eab8e6eaa6eb6772a65885635ceaf34833"}},{"index":4,"golden":{"records":89,"sha256":"7a4582876c928cff4574c440f1f0747c1551495a80f6b1084ef367485beb9be5"}}],CAPABILITIES=["goal-limits.create-goal-limits"],SYMBOLS=['create_goal_limits'];
+const CASE_IDS=PLANS.map((_p,i)=>CAPABILITIES[0]+'-'+String(i+1).padStart(3,'0'));
+function factoryAt(root){
+ const names=[path.join(root,'goal_limits/create_goal_limits.js'),path.join(root,'source/goal_limits/create_goal_limits.js')];
+ const files=names.filter(name=>fs.existsSync(name));assert.equal(files.length,1,'Exact generated module missing or ambiguous');
+ const file=files[0];assert(fs.lstatSync(file).isFile()&&!fs.lstatSync(file).isSymbolicLink());
+ const blocked=()=>{throw new Error('Forbidden ambient generated effect');};
+ const context=vm.createContext({Date:blocked,fetch:blocked,process:new Proxy({},{get:blocked}),console:new Proxy({},{get:blocked}),setTimeout:blocked,setInterval:blocked,Buffer:undefined},{codeGeneration:{strings:false,wasm:false}});
+ new vm.Script('Math.random=()=>{throw new Error("Forbidden ambient randomness")};').runInContext(context,{timeout:1000});
+ const script=new vm.Script('(function(exports,module,require){"use strict";\n'+fs.readFileSync(file,'utf8')+'\n})',{filename:'create_goal_limits.js'});
+ const module={exports:{}};script.runInContext(context,{timeout:1000})(module.exports,module,blocked);
+ assert.deepEqual(Object.keys(module.exports),['create_goal_limits']);
+ const factory=module.exports.create_goal_limits;assert.equal(typeof factory,'function');assert.equal(factory.name,'create_goal_limits');assert.equal(factory.length,1);assert.equal(factory.constructor.name,'Function');return factory;
+}
+async function runSelected(root,_surface,selected){
+ assert(Array.isArray(selected)&&selected.length>0&&selected.length<=PLANS.length);
+ const indices=selected.map(item=>{assert.equal(item.capability,CAPABILITIES[0]);assert(Array.isArray(item.arguments)&&item.arguments.length===1);const index=item.arguments[0];assert(Number.isSafeInteger(index)&&index>=0&&index<PLANS.length);return index;});
+ assert.equal(new Set(indices).size,indices.length);const factory=factoryAt(root);
+ return selected.map((item,i)=>{const plan=PLANS[indices[i]],value=fixture.run(factory,plan.index);
+  assert.deepEqual(value,plan.golden,'Source characterization differs in batch '+indices[i]);return {case_id:item.case_id,capability:item.capability,result:value};});
+}
+module.exports={CAPABILITIES,SYMBOLS,CASE_IDS,PLANS,runSelected};
+if(require.main===module){assert.equal(process.argv.length,5);runSelected(process.argv[2],JSON.parse(process.argv[3]),JSON.parse(process.argv[4])).then(cases=>console.log(JSON.stringify({schema:'literate-ai/library-acceptance-results@1',cases}))).catch(error=>{console.error(error.stack);process.exitCode=1;});}
+}
+
+function verifierBytes() {
+  const text = historicalVerifier.toString();
+  const bytes = Buffer.from(text.slice(text.indexOf('{') + 1, -1));
+  assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), SETTINGS.inner_sha256,
+    'Historical verifier bytes changed');
+  return bytes;
+}
+
+function directFile(directory, name) {
+  assert(/^[a-zA-Z0-9_.-]+$/.test(name) && name !== '.' && name !== '..');
+  const file = path.join(directory, name);
+  const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    assert(stat.isFile() && stat.size <= 8 * 1024 * 1024, 'Unsafe candidate member');
+    return fs.readFileSync(descriptor);
+  } finally { fs.closeSync(descriptor); }
+}
+
+async function runSelected(root, surface, selected) {
+  assert(Array.isArray(selected) && selected.length > 0 && selected.length <= SETTINGS.maximum_cases);
+  const input = JSON.stringify({surface, selected});
+  assert(Buffer.byteLength(input) <= 256 * 1024, 'Oversized oracle request');
+  assert(Buffer.byteLength(JSON.stringify(surface)) <= 64 * 1024 &&
+    Buffer.byteLength(JSON.stringify(selected)) <= 64 * 1024, 'Oracle argument exceeds portable CLI bound');
+  const source = fs.realpathSync(root);
+  const candidates = [path.join(source, SETTINGS.package), path.join(source, 'source', SETTINGS.package)]
+    .filter(file => fs.existsSync(file));
+  assert.equal(candidates.length, 1, 'Expected one candidate package');
+  const candidate = candidates[0];
+  // Reject symlinks below the resolved caller root, including an intermediate source directory.
+  let at = source;
+  for (const part of path.relative(source, candidate).split(path.sep)) {
+    at = path.join(at, part);
+    assert(fs.lstatSync(at).isDirectory() && !fs.lstatSync(at).isSymbolicLink());
+  }
+  assert.deepEqual(fs.readdirSync(candidate).sort(), [...SETTINGS.package_files].sort());
+  // Desktop Docker shares the home directory. Its VM need not share the OS temporary directory.
+  const cache = path.join(os.homedir(), '.cache', 'align-native-oracles');
+  fs.mkdirSync(cache, {recursive: true, mode: 0o700});
+  const snapshot = fs.mkdtempSync(path.join(fs.realpathSync(cache), 'evaluation-'));
+  const name = 'align-oracle-' + crypto.randomUUID();
+  assert(!/[\r\n,]/.test(snapshot), 'Unsupported mount path');
+  let started = false;
+  const dockerEnvironment = {...process.env};
+  // Host-side executable configuration must not load application-supplied Node preload hooks.
+  delete dockerEnvironment.NODE_OPTIONS;
+  delete dockerEnvironment.NODE_PATH;
+  try {
+    const packageRoot = path.join(snapshot, 'source', SETTINGS.package);
+    fs.mkdirSync(packageRoot, {recursive: true, mode: 0o755});
+    fs.chmodSync(path.join(snapshot, 'source'), 0o755);
+    fs.chmodSync(packageRoot, 0o755);
+    for (const file of SETTINGS.package_files) {
+      fs.writeFileSync(path.join(packageRoot, file), directFile(candidate, file), {mode: 0o444});
+    }
+    fs.writeFileSync(path.join(snapshot, 'oracle.cjs'), verifierBytes(), {mode: 0o444});
+    fs.writeFileSync(path.join(snapshot, 'request.json'), input, {mode: 0o444});
+    fs.writeFileSync(path.join(snapshot, 'execute.cjs'), [
+      "'use strict';",
+      "const input=require('./request.json');",
+      "const cp=require('node:child_process');",
+      "const result=cp.spawnSync(process.execPath,['--no-warnings','--experimental-vm-modules','--max-old-space-size=512','/inputs/oracle.cjs','/inputs/source',JSON.stringify(input.surface),JSON.stringify(input.selected)],{encoding:'utf8',timeout:130000,maxBuffer:4*1024*1024});",
+      "if(result.error||result.status!==0){console.error(result.error?.code||result.status,result.stderr);process.exitCode=1;}else process.stdout.write(result.stdout);",
+    ].join('\n'), {mode: 0o444});
+    // Do not depend on the caller's umask for container readability.
+    for (const file of SETTINGS.package_files) fs.chmodSync(path.join(packageRoot, file), 0o444);
+    for (const file of ['oracle.cjs', 'request.json', 'execute.cjs']) {
+      fs.chmodSync(path.join(snapshot, file), 0o444);
+    }
+    fs.chmodSync(snapshot, 0o755);
+    const info=cp.spawnSync('docker',['info','--format','{{.NCPU}}'],{env:dockerEnvironment,encoding:'utf8',timeout:10000});
+    if(info.error||info.status!==0)throw Error('Docker runtime unavailable: '+(info.error?.code||info.status));
+    const available=Number(info.stdout.trim());
+    assert(Number.isInteger(available)&&available>=1&&available<=512,'Invalid Docker CPU capacity');
+    const cpus=Math.min(SETTINGS.cpus,available);
+    const argv = ['run', '--rm', '--name', name, '--pull=never', '--network=none', '--read-only',
+      '--user=65532:65532', '--cap-drop=ALL', '--security-opt=no-new-privileges',
+      '--pids-limit=64', '--memory=' + SETTINGS.memory_mib + 'm', '--cpus=' + cpus,
+      '--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=128m', '--env=HOME=/tmp',
+      '--mount', `type=bind,source=${snapshot},target=/inputs,readonly`,
+      '--workdir=/inputs', '--entrypoint=/usr/bin/timeout', SETTINGS.image,
+      '--signal=KILL', SETTINGS.worker_seconds + 's', 'node', '--no-warnings', '--max-old-space-size=512', '/inputs/execute.cjs'];
+    started = true;
+    const result = cp.spawnSync('docker', argv, {env: dockerEnvironment, encoding: 'utf8',
+      timeout: 150000, maxBuffer: 4 * 1024 * 1024});
+    if (result.error || result.status !== 0) {
+      throw Error('Contained oracle failed: ' + (result.error?.code || result.status) + '\n' +
+        String(result.stderr || '').slice(0, 1600));
+    }
+    const value = JSON.parse(result.stdout);
+    assert.equal(value.schema, 'literate-ai/library-acceptance-results@1');
+    assert(Array.isArray(value.cases) && value.cases.length === selected.length);
+    assert.deepEqual(value.cases.map(item => [item.case_id, item.capability]),
+      selected.map(item => [item.case_id, item.capability]));
+    return value.cases;
+  } finally {
+    if (started) cp.spawnSync('docker', ['rm', '--force', name], {
+      env: dockerEnvironment, stdio: 'ignore', timeout: 10000});
+    fs.rmSync(snapshot, {recursive: true, force: true});
+  }
+}
+
+module.exports = {runSelected};
+if (require.main === module) {
+  assert.equal(process.argv.length, 5);
+  runSelected(process.argv[2], JSON.parse(process.argv[3]), JSON.parse(process.argv[4]))
+    .then(cases => process.stdout.write(JSON.stringify({schema: 'literate-ai/library-acceptance-results@1', cases}) + '\n'))
+    .catch(error => {console.error(error.stack); process.exitCode = 1;});
+}

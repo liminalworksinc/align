@@ -1,0 +1,159 @@
+'use strict';
+// Authored adapter. The historical verifier below is never invoked in this host process.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const crypto = require('node:crypto');
+const cp = require('node:child_process');
+const SETTINGS = {"inner_sha256":"cbba430061f38fee5f78f165c275f332134417ad67b5407f2f83ce3377a7271a","package":"server_home","package_files":["create_home.js","package.json"],"maximum_cases":10,"image":"node@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9","cpus":2,"memory_mib":768,"worker_seconds":50};
+
+function historicalVerifier() {'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const fixtureModule={exports:{}};
+new Function('require','module','exports',"'use strict';\n// Labeled synthetic private controls with isolated SQLite team names and controlled neighbouring readers.\nconst assert=require('node:assert/strict'),{DatabaseSync}=require('node:sqlite');\nconst resourceNames=['listGrants','config','listAlignments','listAsks','changeRequestGroups','all','goalRow','visibleGoals','alignmentWaits','appEvidence','changeWaits','launchWaits','memberName','readConsole'];\nconst metadata={workspaceHome:1};\nfunction normalize(value,seen=new Map()){\n if(value===undefined)return{$undefined:true};if(typeof value==='function')return{$function:true};\n if(typeof value==='number'&&!Number.isFinite(value))return{$number:String(value)};\n if(value===null||typeof value!=='object')return value;\n if(seen.has(value))return{$ref:seen.get(value)};seen.set(value,seen.size);\n if(Array.isArray(value))return Array.from(value,x=>normalize(x,seen));\n return Object.fromEntries(Object.keys(value).map(k=>[k,normalize(value[k],seen)]));\n}\nconst person=(id='u2',name='Two')=>({id,name});\nconst goal=(id='g1',extra={})=>({id,ws_id:'ws1',title:'Goal '+id,version:3,level:'team',pod_id:'p1',owner_id:'u1',status:'active',...extra});\nconst change=(id='c1',extra={})=>({id,goal:{id:'g1',title:'Goal',version:3},state:'pending',requester:person(),reason:'Change',waiting_on_me:false,can:{rebase:false},approvers:[person('u1','One')],created_at:'2026-11-09T10:00:00.000Z',updated_at:'2026-11-09T11:00:00.000Z',rejected_by:null,rejection_reason:null,decided_at:null,...extra});\nconst alignment=(id='a1',extra={})=>({id,state:'pending',requester:person(),target_goal:{id:'g1',title:'Goal',visible:true},choice:'work_toward',source_goal:{id:'g2',title:'Source',visible:true},sessions:[{label:'Session',started_at:null,key_end:'abcd'}],waiting_on_me:false,updated_at:'2026-11-09T11:00:00.000Z',...extra});\nfunction fixture(settings={}){\n const db=new DatabaseSync(':memory:');db.exec('CREATE TABLE v2_pods(ws_id TEXT,id TEXT,name TEXT)');\n for(const row of settings.pods??[{ws_id:'ws1',id:'p1',name:'Team one'},{ws_id:'ws2',id:'p1',name:'Foreign team'}])db.prepare('INSERT INTO v2_pods VALUES(?,?,?)').run(row.ws_id,row.id,row.name);\n let active=false,reads=0,effects=0,captures=0,lastRefusal;\n const trace=[],fault=new Error('owned home failure'),wrapped=new WeakMap(),known=new WeakSet(),sequences=new Map();\n function quiet(fn){const old=active;active=false;try{return fn();}finally{active=old;}}\n function effect(name,args){if(active){trace.push(['service',name,quiet(()=>normalize(args))]);if(++effects===settings.effectFault)throw fault;}}\n function watch(value,label){\n  if(!value||typeof value!=='object'||known.has(value))return value;if(wrapped.has(value))return wrapped.get(value);\n  const proxy=new Proxy(value,{get(target,key,receiver){let got;\n   if(active&&typeof key==='string'){trace.push(['get',label,key]);if(++reads===settings.propertyFault)throw fault;const list=settings.sequences?.[label+'.'+key];if(list){const i=sequences.get(label+'.'+key)??0;sequences.set(label+'.'+key,i+1);got=list[Math.min(i,list.length-1)];}else got=Reflect.get(target,key,receiver);}else got=Reflect.get(target,key,receiver);return watch(got,label+'.'+String(key));\n  },ownKeys(target){if(active)trace.push(['keys',label]);return Reflect.ownKeys(target);}});wrapped.set(value,proxy);known.add(proxy);return proxy;\n }\n let podProxy;const pods={has(id){assert.equal(this,podProxy);effect('pods.has',[id]);return(settings.memberPods??['p1']).includes(id);}};podProxy=watch(pods,'pp.pods');\n const principal=watch({wsId:'ws1',userId:'u1',wsRole:'member',pods,...(settings.principal??{})},'pp');\n const goals=(settings.goals??[goal(),goal('g2',{pod_id:null,owner_id:'u2'}),goal('closed',{status:'achieved'})]).map(g=>watch(g,'goal.'+g.id));\n const groups=watch(settings.groups??{waiting_on_me:[change()],mine:[],others:[]},'changes');\n const asks=watch(settings.asks??[{id:'ask1',state:'open',team:{id:'p1',name:'Team one'},goal:{id:'g1',title:'Goal'},text:'Ask',from_label:null,requester:person(),waiting_on_me:true}],'asks');\n const aligns=watch(settings.alignments??{waiting_on_me:[alignment('a1',{waiting_on_me:true})],mine:[],others:[]},'alignments');\n const grants=watch(settings.grants??[{id:'app1',name:'Connected app',user:person(),approved_at:'2026-11-01T00:00:00.000Z',last_used_at:'2026-11-09T10:00:00.000Z',last_read_at:'2026-11-09T11:00:00.000Z'}],'grants');\n function call(name,fn){return function(...args){assert.equal(this,undefined);effect(name,args);if(settings.failPort===name||settings.baseFaultPort===name)throw(settings.throwUndefined?undefined:settings.throwNull?null:(lastRefusal=fault));return quiet(()=>fn(...args));};}\n let consoleProxy;const consoleValue={error(...args){assert.equal(this,consoleProxy);effect('console.error',args);if(settings.consoleFault)throw fault;}};consoleProxy=watch(consoleValue,'console');\n const supplied={\n  listGrants:call('listGrants',pp=>{assert.equal(pp,principal);return grants;}),\n  config:call('config',()=>watch({hosted:settings.hosted??false},'config')),\n  listAlignments:call('listAlignments',pp=>{assert.equal(pp,principal);return aligns;}),\n  listAsks:call('listAsks',(pp,filter)=>{assert.equal(pp,principal);assert.deepEqual(quiet(()=>JSON.parse(JSON.stringify(filter))),{states:['open','accepted']});return asks;}),\n  changeRequestGroups:call('changeRequestGroups',pp=>{assert.equal(pp,principal);return groups;}),\n  all:call('all',(sql,...args)=>watch(db.prepare(sql).all(...args),'all.'+sql)),\n  goalRow:call('goalRow',(ws,id)=>goals.find(g=>g.ws_id===ws&&g.id===id)),\n  visibleGoals:call('visibleGoals',pp=>{assert.equal(pp,principal);return Object.hasOwn(settings,'visibleOverride')?watch(settings.visibleOverride,'visibleGoals'):watch(goals.filter(g=>g.ws_id===principal.wsId),'visibleGoals');}),\n  alignmentWaits:call('alignmentWaits',a=>watch((settings.alignmentWaiting??{a1:{next:'decide',waiting_on:[person()]}})[a.id]??null,'alignmentWait.'+a.id)),\n  appEvidence:call('appEvidence',last=>settings.evidence??(last?'observed_read':'not_observed')),\n  changeWaits:call('changeWaits',v=>watch((settings.changeWaiting??{c1:{next:'decide',waiting_on:[person('u1','One'),person()]}})[v.id]??null,'changeWait.'+v.id)),\n  launchWaits:call('launchWaits',v=>watch((settings.launchWaiting??{})[v.id]??null,'launchWait.'+v.id)),\n  memberName:call('memberName',id=>(settings.names??{u1:'One',u2:'Two'})[id]??'Former member'),\n  readConsole:call('readConsole',()=>consoleProxy),\n };\n const resources=new Proxy(supplied,{get(target,key){trace.push(['capture',String(key)]);if(++captures===settings.captureFault)throw fault;return target[key];},ownKeys(){throw Error('Resource enumeration forbidden');}});\n async function run(factory){\n  let result,caught,didThrow=false;\n  try{const api=factory(resources);assert.deepEqual(Object.keys(api),Object.keys(metadata));assert.equal(api.workspaceHome.name,'workspaceHome');assert.equal(api.workspaceHome.length,1);assert.equal(api.workspaceHome.constructor.name,'Function');active=true;result=api.workspaceHome(principal);}\n  catch(error){caught=error;didThrow=true;}\n  active=false;const output={result:normalize(result),error:didThrow?{thrown:normalize(caught),name:caught?.name,message:caught?.message,sameFault:caught===fault,sameRefusal:caught===lastRefusal}:null,trace,reads,effects,captures};db.close();return output;\n }\n return{run};\n}\nmodule.exports={fixture,normalize,resourceNames,metadata,person,goal,change,alignment};\n")(name=>{assert(['node:assert/strict','node:crypto','node:sqlite'].includes(name));return require(name);},fixtureModule,fixtureModule.exports);
+const semanticModule={exports:{}};
+new Function('require','module','exports',"'use strict';\nconst {person,goal,change,alignment}=require('./server-home-fixture-draft-v1.cjs');\nconst entry=settings=>({operation:'home',settings});\nconst groups=rows=>({waiting_on_me:rows,mine:[],others:[]});\nfunction semanticBatches(){\n const b=[[],[],[],[],[],[]];\n for(const wsRole of ['member','owner'])for(const userId of ['u1','u2','other'])for(const memberPods of [[],['p1']])b[0].push(entry({principal:{wsRole,userId},memberPods}));\n for(const level of ['company','team','other'])for(const status of ['active','achieved','dropped'])for(const pod_id of [null,'p1','missing'])b[0].push(entry({goals:[goal('g1',{level,status,pod_id,owner_id:'u2'})]}));\n b[0].push(entry({goals:[]}));b[0].push(entry({visibleOverride:null}));b[0].push(entry({visibleOverride:{bad:true}}));\n for(const next of ['decide','resolve_loop','rebase','accept_counter','acknowledge'])for(const waiting_on_me of [false,true])for(const requester of [person('u1','One'),person()])b[1].push(entry({groups:groups([change('c1',{waiting_on_me,requester})]),changeWaiting:{c1:{next,waiting_on:[person('u1','One'),person()]}}}));\n for(const can_rebase of [false,true])b[1].push(entry({groups:groups([change('c1',{can:{rebase:can_rebase},approvers:[],requester:person('other','Other'),goal:{id:'missing'}})]),changeWaiting:{c1:{next:'rebase',waiting_on:[person()]}}}));\n for(const can_launch of [false,true])for(const dependency_loop of [false,true])for(const requester of [person('u1','One'),person('other','Other')])b[1].push(entry({groups:groups([change('c1',{requester,dependency_loop,approvers:[],goal:{id:'missing'}})]),launchWaiting:{c1:{can_launch,launchers:[person('u1','One'),person('u2','Zed'),person('u2','Two'),person('u3','Two')]}}}));\n b[1].push(entry({groups:groups([change('c1',{can:undefined})]),changeWaiting:{c1:{next:'decide',waiting_on:[]}}}));\n b[1].push(entry({groups:groups([change('c1')]),changeWaiting:{}}));\n b[1].push(entry({groups:{waiting_on_me:[change()],mine:[change()],others:[change()]}}));\n const rejected=(id,extra={})=>change(id,{state:'rejected',requester:person('u1','One'),rejected_by:person(),rejection_reason:'No',decided_at:'2026-11-09T11:00:00.000Z',...extra});\n for(const status of ['active','achieved','dropped'])for(const second of [rejected('c2'),change('c2',{requester:person('u1','One')}),change('c2'),rejected('c0'),rejected('c2',{created_at:'2026-11-09T09:00:00.000Z'})])b[2].push(entry({goals:[goal('g1',{status})],groups:groups([rejected('c1'),second]),changeWaiting:{}}));\n for(const decided_at of [null,'','2026-11-09T10:00:00.000Z','2026-11-10T00:00:00.000Z'])b[2].push(entry({groups:groups([rejected('c1'),rejected('c2',{goal:{id:'g2',title:'Second',version:2},decided_at})]),changeWaiting:{}}));\n b[2].push(entry({groups:groups([rejected('c1',{goal:{id:'missing'}})]),changeWaiting:{}}));\n b[2].push(entry({groups:{waiting_on_me:[],mine:[rejected('c1')],others:[rejected('c1',{rejection_reason:'Last duplicate'})]},changeWaiting:{}}));\n for(const state of ['open','accepted','done','withdrawn'])for(const waiting_on_me of [false,true])b[3].push(entry({asks:[{id:'ask',state,waiting_on_me,team:{id:'p1',name:'Team'},goal:null,text:'Text',from_label:'Source',requester:person()}]}));\n for(const wsRole of ['member','owner'])for(const last_read_at of [null,'','2026-11-09T10:00:00.000Z'])b[3].push(entry({principal:{wsRole},grants:[{id:'app',name:'App',user:person(),approved_at:'2026-11-01',last_used_at:null,last_read_at}]}));\n b[3].push(entry({grants:[],asks:[]}));b[3].push(entry({evidence:'supplied_evidence'}));\n for(const choice of ['contribution','work_toward'])for(const waiting_on_me of [false,true])for(const sessions of [[],[{label:'Same',started_at:null,key_end:'abcd'}],[null]])b[4].push(entry({alignments:{waiting_on_me:[],mine:[alignment('a1',{choice,waiting_on_me,sessions})],others:[]}}));\n b[4].push(entry({alignments:{waiting_on_me:[alignment('a1',{sessions:[null]})],mine:[],others:[]},alignmentWaiting:{}}));\n b[4].push(entry({alignments:{waiting_on_me:[alignment('a1',{target_goal:{id:null,title:null,visible:false},source_goal:null})],mine:[],others:[]}}));\n b[4].push(entry({alignments:{waiting_on_me:[alignment('a1')],mine:[alignment('a1')],others:[alignment('a1')]}}));\n const ports=['visibleGoals','changeRequestGroups','launchWaits','changeWaits','goalRow','listAsks','listAlignments','alignmentWaits','all','memberName','listGrants','appEvidence'];\n for(const failPort of ports)for(const hosted of [false,true])b[5].push(entry({failPort,hosted,groups:groups([rejected('c1')])}));\n for(const hosted of [false,true])for(const throwKind of ['throwNull','throwUndefined'])b[5].push(entry({failPort:'visibleGoals',hosted,[throwKind]:true}));\n for(const failPort of ['config','readConsole'])b[5].push(entry({failPort,baseFaultPort:'visibleGoals'}));\n b[5].push(entry({baseFaultPort:'visibleGoals',consoleFault:true}));\n b[5].push(entry({sequences:{'pp.userId':['u1','u2','u1']}}));\n b[5].push(entry({sequences:{'goal.g1.pod_id':['p1',null,'p1']}}));\n b[5].push(entry({sequences:{'changeWait.c1.next':['decide','resolve_loop','decide']}}));\n b[0].push(entry({principal:{wsRole:'owner',userId:'other'},memberPods:[],goals:[goal('g1',{level:'company',pod_id:null,owner_id:'u2'})]}));\n b[1].push(entry({groups:groups([change('c1',{goal:{id:'missing'},requester:person('other','Other'),approvers:[person('u1','One')]})])}));\n b[1].push(entry({groups:{waiting_on_me:[change('c1')],mine:[change('c2')],others:[change('c3')]},changeWaiting:{c1:{next:'decide',waiting_on:[person()]},c2:{next:'decide',waiting_on:[person()]},c3:{next:'decide',waiting_on:[person()]}}}));\n b[4].push(entry({alignments:{waiting_on_me:[],mine:[alignment('a1',{sessions:[{label:'Reported',started_at:'2026-11-09T08:00:00.000Z',key_end:'wxyz'}]})],others:[]}}));\n return b;\n}\nmodule.exports={semanticBatches};\n")(name=>{if(name==='./server-home-fixture-draft-v1.cjs')return fixtureModule.exports;throw Error('Unexpected semantic dependency '+name);},semanticModule,semanticModule.exports);
+const corpusModule={exports:{}};
+new Function('require','module','exports',"'use strict';\nconst crypto=require('node:crypto');\nconst {fixture}=require('./server-home-fixture-draft-v1.cjs');\nconst {semanticBatches}=require('./server-home-cases-draft-v2.cjs');\nconst plan=require('./server-home-fault-plan-draft-v1.json');\nfunction entries(batch){\n if(batch<6)return semanticBatches()[batch];\n const rows=[],paths=plan.paths.filter((_,i)=>(batch===6||batch===8)?i<4:i>=4),field=batch<8?'propertyFault':'effectFault',count=batch<8?'reads':'effects';\n for(const p of paths)for(let i=1;i<=p[count];i++)rows.push({operation:p.operation,settings:{...p.settings,[field]:i}});\n if(batch===9)for(let captureFault=1;captureFault<=14;captureFault++)rows.push({operation:'home',settings:{captureFault}});\n return rows;\n}\nasync function run(factory,batch){const cases=entries(batch),observations=[];for(const p of cases)observations.push(await fixture(p.settings).run(factory,p.operation));return{batch,records:cases.length,sha256:crypto.createHash('sha256').update(JSON.stringify(observations)).digest('hex')};}\nmodule.exports={entries,run};\n")(name=>{if(name==='./server-home-fixture-draft-v1.cjs')return fixtureModule.exports;if(name==='./server-home-cases-draft-v2.cjs')return semanticModule.exports;if(name==='./server-home-fault-plan-draft-v1.json')return {"schema":"align/home-private-fault-plan@1","semantic_batch_counts":[42,33,21,16,15,34],"paths":[{"operation":"home","settings":{},"reads":128,"effects":12,"expected_refusal":false},{"operation":"home","settings":{"hosted":true,"failPort":"visibleGoals"},"reads":91,"effects":12,"expected_refusal":false},{"operation":"home","settings":{"hosted":false,"failPort":"listAsks"},"reads":117,"effects":15,"expected_refusal":false},{"operation":"home","settings":{"goals":[],"asks":[],"grants":[],"groups":{"waiting_on_me":[],"mine":[],"others":[]},"alignments":{"waiting_on_me":[],"mine":[],"others":[]}},"reads":26,"effects":5,"expected_refusal":false},{"operation":"home","settings":{"groups":{"waiting_on_me":[{"id":"c1","goal":{"id":"g1","title":"Goal","version":3},"state":"pending","requester":{"id":"u1","name":"One"},"reason":"Change","waiting_on_me":false,"can":{"rebase":false},"approvers":[{"id":"u1","name":"One"}],"created_at":"2026-11-09T10:00:00.000Z","updated_at":"2026-11-09T11:00:00.000Z","rejected_by":null,"rejection_reason":null,"decided_at":null}],"mine":[],"others":[]},"launchWaiting":{"c1":{"can_launch":false,"launchers":[{"id":"u2","name":"Two"},{"id":"u1","name":"One"},{"id":"u2","name":"Last"}]}}},"reads":134,"effects":11,"expected_refusal":false},{"operation":"home","settings":{"groups":{"waiting_on_me":[{"id":"c1","goal":{"id":"g1","title":"Goal","version":3},"state":"rejected","requester":{"id":"u1","name":"One"},"reason":"Change","waiting_on_me":false,"can":{"rebase":false},"approvers":[{"id":"u1","name":"One"}],"created_at":"2026-11-09T10:00:00.000Z","updated_at":"2026-11-09T11:00:00.000Z","rejected_by":{"id":"u2","name":"Two"},"rejection_reason":null,"decided_at":"2026-11-09"}],"mine":[],"others":[]},"changeWaiting":{}},"reads":120,"effects":13,"expected_refusal":false},{"operation":"home","settings":{"baseFaultPort":"visibleGoals","consoleFault":true},"reads":3,"effects":4,"expected_refusal":true},{"operation":"home","settings":{"principal":{"wsRole":"owner","userId":"other"},"memberPods":[],"goals":[{"id":"g1","ws_id":"ws1","title":"Goal g1","version":3,"level":"company","pod_id":"p1","owner_id":"u2","status":"active"}]},"reads":121,"effects":13,"expected_refusal":false}]};assert(['node:assert/strict','node:crypto','node:sqlite'].includes(name));return require(name);},corpusModule,corpusModule.exports);
+const corpus=corpusModule.exports,PLANS=[{"index":0,"golden":{"batch":0,"records":43,"sha256":"d4a93f4b26a315ce90f2c91268781fd6a6f2562b433a7b7b4dc4ff487f9ac572"}},{"index":1,"golden":{"batch":1,"records":35,"sha256":"0f89734b9b3b44fae040eb274a877fc284375f4d06dcdf2a189482b0c86aa808"}},{"index":2,"golden":{"batch":2,"records":21,"sha256":"08259bc2dbb7e75d3f44754131afafddc056e23f5cf34859c1f47cc28263fd6f"}},{"index":3,"golden":{"batch":3,"records":16,"sha256":"768ba7292eb6e818a14915f39255cc1a09e280f7f2e24fba3a970fc04f290295"}},{"index":4,"golden":{"batch":4,"records":16,"sha256":"16d5bb562d562621ac9c860f2fa6cb8377e359fa7369138c50a5fede844f6694"}},{"index":5,"golden":{"batch":5,"records":34,"sha256":"767dde4880ef742820434a74295269048dbe79738c768f6445133e3c0fa32f01"}},{"index":6,"golden":{"batch":6,"records":362,"sha256":"e262799d737e1d47bda15f048af64922ae0c0ce2ec4a714a23b81cecc0d87411"}},{"index":7,"golden":{"batch":7,"records":378,"sha256":"b99e9e18c899ead44749864b81070c3b223022b2d15cc27949b92f92b2ccc7b7"}},{"index":8,"golden":{"batch":8,"records":44,"sha256":"fa4eb143d212af46cc301f6e09affbe5c1f91bc93216f6414e4f764b701ab4d8"}},{"index":9,"golden":{"batch":9,"records":55,"sha256":"0748b1bae7fbebb2d78a378ede62661b003c6b9141daec511e0be4564afd4ea7"}}],CAPABILITIES=["server-home.create-home"],SYMBOLS=['create_home'];
+const CASE_IDS=PLANS.map((_p,i)=>CAPABILITIES[0]+'-'+String(i+1).padStart(3,'0'));
+function factoryAt(root){
+ const files=[path.join(root,'server_home/create_home.js'),path.join(root,'source/server_home/create_home.js')].filter(name=>fs.existsSync(name));
+ assert.equal(files.length,1,'Exact generated module missing or ambiguous');const file=files[0];assert(fs.lstatSync(file).isFile()&&!fs.lstatSync(file).isSymbolicLink());
+ const pkg=path.dirname(file),directory=fs.lstatSync(pkg);
+ assert(directory.isDirectory()&&!directory.isSymbolicLink(),'Native package directory must be regular');
+ assert.deepEqual(fs.readdirSync(pkg).sort(),['create_home.js','package.json'],'Exact native package members');
+ for(const name of ['create_home.js','package.json']){const stat=fs.lstatSync(path.join(pkg,name));assert(stat.isFile()&&!stat.isSymbolicLink(),'Native package members must be regular files');}
+ const manifest=JSON.parse(fs.readFileSync(path.join(pkg,'package.json'),'utf8'));
+ assert.equal(manifest.name,'server_home');assert.equal(manifest.type,'commonjs');
+ assert.deepEqual(manifest.exports,{'./create_home':'./create_home.js'});
+ const blocked=()=>{throw Error('Forbidden ambient generated effect');};
+ const context=vm.createContext({Date:blocked,fetch:blocked,process:new Proxy({},{get:blocked}),console:new Proxy({},{get:blocked}),setTimeout:blocked,setInterval:blocked,Buffer:undefined},{codeGeneration:{strings:false,wasm:false}});
+ new vm.Script('Math.random=()=>{throw Error("Forbidden ambient randomness")};').runInContext(context,{timeout:1000});
+ const module={exports:{}};
+ new vm.Script('(function(exports,module,require){"use strict";\n'+fs.readFileSync(file,'utf8')+'\n})',{filename:'create_home.js'}).runInContext(context,{timeout:1000})(module.exports,module,blocked);
+ assert.deepEqual(Object.keys(module.exports),['create_home']);const factory=module.exports.create_home;
+ assert.equal(typeof factory,'function');assert.equal(factory.name,'create_home');assert.equal(factory.length,1);assert.equal(factory.constructor.name,'Function');return factory;
+}
+async function runSelected(root,_surface,selected){
+ assert(Array.isArray(selected)&&selected.length>0&&selected.length<=PLANS.length);
+ const indices=selected.map(item=>{assert.equal(item.capability,CAPABILITIES[0]);assert(Array.isArray(item.arguments)&&item.arguments.length===1);const index=item.arguments[0];assert(Number.isSafeInteger(index)&&index>=0&&index<PLANS.length);return index;});
+ assert.equal(new Set(indices).size,indices.length);const factory=factoryAt(root),results=[];
+ for(let i=0;i<selected.length;i++){const item=selected[i],plan=PLANS[indices[i]],value=await corpus.run(factory,plan.index);assert.deepEqual(value,plan.golden,'Source characterization differs in batch '+plan.index);results.push({case_id:item.case_id,capability:item.capability,result:value});}
+ return results;
+}
+module.exports={CAPABILITIES,SYMBOLS,CASE_IDS,PLANS,runSelected};
+if(require.main===module){assert.equal(process.argv.length,5);runSelected(process.argv[2],JSON.parse(process.argv[3]),JSON.parse(process.argv[4])).then(cases=>console.log(JSON.stringify({schema:'literate-ai/library-acceptance-results@1',cases}))).catch(error=>{console.error(error.stack);process.exitCode=1;});}
+}
+
+function verifierBytes() {
+  const text = historicalVerifier.toString();
+  const bytes = Buffer.from(text.slice(text.indexOf('{') + 1, -1));
+  assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), SETTINGS.inner_sha256,
+    'Historical verifier bytes changed');
+  return bytes;
+}
+
+function directFile(directory, name) {
+  assert(/^[a-zA-Z0-9_.-]+$/.test(name) && name !== '.' && name !== '..');
+  const file = path.join(directory, name);
+  const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    assert(stat.isFile() && stat.size <= 8 * 1024 * 1024, 'Unsafe candidate member');
+    return fs.readFileSync(descriptor);
+  } finally { fs.closeSync(descriptor); }
+}
+
+async function runSelected(root, surface, selected) {
+  assert(Array.isArray(selected) && selected.length > 0 && selected.length <= SETTINGS.maximum_cases);
+  const input = JSON.stringify({surface, selected});
+  assert(Buffer.byteLength(input) <= 256 * 1024, 'Oversized oracle request');
+  assert(Buffer.byteLength(JSON.stringify(surface)) <= 64 * 1024 &&
+    Buffer.byteLength(JSON.stringify(selected)) <= 64 * 1024, 'Oracle argument exceeds portable CLI bound');
+  const source = fs.realpathSync(root);
+  const candidates = [path.join(source, SETTINGS.package), path.join(source, 'source', SETTINGS.package)]
+    .filter(file => fs.existsSync(file));
+  assert.equal(candidates.length, 1, 'Expected one candidate package');
+  const candidate = candidates[0];
+  // Reject symlinks below the resolved caller root, including an intermediate source directory.
+  let at = source;
+  for (const part of path.relative(source, candidate).split(path.sep)) {
+    at = path.join(at, part);
+    assert(fs.lstatSync(at).isDirectory() && !fs.lstatSync(at).isSymbolicLink());
+  }
+  assert.deepEqual(fs.readdirSync(candidate).sort(), [...SETTINGS.package_files].sort());
+  // Desktop Docker shares the home directory. Its VM need not share the OS temporary directory.
+  const cache = path.join(os.homedir(), '.cache', 'align-native-oracles');
+  fs.mkdirSync(cache, {recursive: true, mode: 0o700});
+  const snapshot = fs.mkdtempSync(path.join(fs.realpathSync(cache), 'evaluation-'));
+  const name = 'align-oracle-' + crypto.randomUUID();
+  assert(!/[\r\n,]/.test(snapshot), 'Unsupported mount path');
+  let started = false;
+  const dockerEnvironment = {...process.env};
+  // Host-side executable configuration must not load application-supplied Node preload hooks.
+  delete dockerEnvironment.NODE_OPTIONS;
+  delete dockerEnvironment.NODE_PATH;
+  try {
+    const packageRoot = path.join(snapshot, 'source', SETTINGS.package);
+    fs.mkdirSync(packageRoot, {recursive: true, mode: 0o755});
+    fs.chmodSync(path.join(snapshot, 'source'), 0o755);
+    fs.chmodSync(packageRoot, 0o755);
+    for (const file of SETTINGS.package_files) {
+      fs.writeFileSync(path.join(packageRoot, file), directFile(candidate, file), {mode: 0o444});
+    }
+    fs.writeFileSync(path.join(snapshot, 'oracle.cjs'), verifierBytes(), {mode: 0o444});
+    fs.writeFileSync(path.join(snapshot, 'request.json'), input, {mode: 0o444});
+    fs.writeFileSync(path.join(snapshot, 'execute.cjs'), [
+      "'use strict';",
+      "const input=require('./request.json');",
+      "const cp=require('node:child_process');",
+      "const result=cp.spawnSync(process.execPath,['--no-warnings','--experimental-vm-modules','--max-old-space-size=512','/inputs/oracle.cjs','/inputs/source',JSON.stringify(input.surface),JSON.stringify(input.selected)],{encoding:'utf8',timeout:130000,maxBuffer:4*1024*1024});",
+      "if(result.error||result.status!==0){console.error(result.error?.code||result.status,result.stderr);process.exitCode=1;}else process.stdout.write(result.stdout);",
+    ].join('\n'), {mode: 0o444});
+    // Do not depend on the caller's umask for container readability.
+    for (const file of SETTINGS.package_files) fs.chmodSync(path.join(packageRoot, file), 0o444);
+    for (const file of ['oracle.cjs', 'request.json', 'execute.cjs']) {
+      fs.chmodSync(path.join(snapshot, file), 0o444);
+    }
+    fs.chmodSync(snapshot, 0o755);
+    const info=cp.spawnSync('docker',['info','--format','{{.NCPU}}'],{env:dockerEnvironment,encoding:'utf8',timeout:10000});
+    if(info.error||info.status!==0)throw Error('Docker runtime unavailable: '+(info.error?.code||info.status));
+    const available=Number(info.stdout.trim());
+    assert(Number.isInteger(available)&&available>=1&&available<=512,'Invalid Docker CPU capacity');
+    const cpus=Math.min(SETTINGS.cpus,available);
+    const argv = ['run', '--rm', '--name', name, '--pull=never', '--network=none', '--read-only',
+      '--user=65532:65532', '--cap-drop=ALL', '--security-opt=no-new-privileges',
+      '--pids-limit=64', '--memory=' + SETTINGS.memory_mib + 'm', '--cpus=' + cpus,
+      '--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=128m', '--env=HOME=/tmp',
+      '--mount', `type=bind,source=${snapshot},target=/inputs,readonly`,
+      '--workdir=/inputs', '--entrypoint=/usr/bin/timeout', SETTINGS.image,
+      '--signal=KILL', SETTINGS.worker_seconds + 's', 'node', '--no-warnings', '--max-old-space-size=512', '/inputs/execute.cjs'];
+    started = true;
+    const result = cp.spawnSync('docker', argv, {env: dockerEnvironment, encoding: 'utf8',
+      timeout: 150000, maxBuffer: 4 * 1024 * 1024});
+    if (result.error || result.status !== 0) {
+      throw Error('Contained oracle failed: ' + (result.error?.code || result.status) + '\n' +
+        String(result.stderr || '').slice(0, 1600));
+    }
+    const value = JSON.parse(result.stdout);
+    assert.equal(value.schema, 'literate-ai/library-acceptance-results@1');
+    assert(Array.isArray(value.cases) && value.cases.length === selected.length);
+    assert.deepEqual(value.cases.map(item => [item.case_id, item.capability]),
+      selected.map(item => [item.case_id, item.capability]));
+    return value.cases;
+  } finally {
+    if (started) cp.spawnSync('docker', ['rm', '--force', name], {
+      env: dockerEnvironment, stdio: 'ignore', timeout: 10000});
+    fs.rmSync(snapshot, {recursive: true, force: true});
+  }
+}
+
+module.exports = {runSelected};
+if (require.main === module) {
+  assert.equal(process.argv.length, 5);
+  runSelected(process.argv[2], JSON.parse(process.argv[3]), JSON.parse(process.argv[4]))
+    .then(cases => process.stdout.write(JSON.stringify({schema: 'literate-ai/library-acceptance-results@1', cases}) + '\n'))
+    .catch(error => {console.error(error.stack); process.exitCode = 1;});
+}

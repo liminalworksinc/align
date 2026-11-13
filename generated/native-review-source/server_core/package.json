@@ -1,0 +1,1 @@
+{"name":"server_core","type":"commonjs","exports":{"./create_core":"./create_core.js","./create_events":"./create_events.js"}}

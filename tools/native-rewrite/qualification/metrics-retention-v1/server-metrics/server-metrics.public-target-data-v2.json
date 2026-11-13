@@ -1,0 +1,699 @@
+{
+  "schema": "align/public-node-port-data@1",
+  "component": "server-metrics",
+  "original_source": "lib/v2/metrics-core.mts",
+  "original_source_sha256": "b1efbdd97422e28716e34719428d5e4f4efc86a7cdf67ae67b1fb06f87d4bd21",
+  "constants": {
+    "LOI_EVENTS": [
+      "loi_sent",
+      "loi_signed"
+    ],
+    "FUNNEL": [
+      {
+        "step": "workspace created",
+        "events": [
+          "workspace_created"
+        ]
+      },
+      {
+        "step": "device paired",
+        "events": [
+          "device_paired"
+        ]
+      },
+      {
+        "step": "first session captured",
+        "events": [
+          "first_session_captured"
+        ]
+      },
+      {
+        "step": "first session bound to a goal",
+        "events": [
+          "first_session_bound"
+        ]
+      },
+      {
+        "step": "second member joined",
+        "events": [
+          "second_member_joined"
+        ]
+      },
+      {
+        "step": "first change request",
+        "events": [
+          "first_change_request"
+        ]
+      },
+      {
+        "step": "first approval or directive",
+        "events": [
+          "first_approval",
+          "first_directive"
+        ]
+      },
+      {
+        "step": "first MCP read",
+        "events": [
+          "first_mcp_read"
+        ]
+      }
+    ],
+    "WAW_WEEKS": 8
+  },
+  "sql": [
+    {
+      "operation": "recordLoi",
+      "source_line": 58,
+      "method": "get",
+      "statement": {
+        "text": "SELECT 1 AS x FROM v2_workspaces WHERE id = ?",
+        "slots": 0
+      },
+      "argument_expression_count": 1,
+      "variadic_arguments_present": false
+    },
+    {
+      "operation": "recordLoi",
+      "source_line": 59,
+      "method": "get",
+      "statement": {
+        "text": "SELECT at FROM v2_events WHERE name = ? AND ws_id = ?",
+        "slots": 0
+      },
+      "argument_expression_count": 2,
+      "variadic_arguments_present": false
+    },
+    {
+      "operation": "count",
+      "source_line": 133,
+      "method": "get",
+      "statement": {
+        "text": "SELECT COUNT(*) AS n FROM v2_events WHERE name = ? AND at >= ? <slot-1>",
+        "slots": 1
+      },
+      "argument_expression_count": 3,
+      "variadic_arguments_present": true
+    },
+    {
+      "operation": "buildReport",
+      "source_line": 134,
+      "method": "all",
+      "statement": {
+        "text": "SELECT ws_id FROM v2_events WHERE name = 'workspace_created' AND json_extract(props, '$.kind') = 'sample'",
+        "slots": 0
+      },
+      "argument_expression_count": 0,
+      "variadic_arguments_present": false
+    },
+    {
+      "operation": "buildReport",
+      "source_line": 138,
+      "method": "all",
+      "statement": {
+        "text": "SELECT ws_id, name, MIN(at) AS at FROM v2_events WHERE ws_id IS NOT NULL GROUP BY ws_id, name",
+        "slots": 0
+      },
+      "argument_expression_count": 0,
+      "variadic_arguments_present": false
+    },
+    {
+      "operation": "buildReport",
+      "source_line": 157,
+      "method": "all",
+      "statement": {
+        "text": "SELECT ws_id, at FROM v2_events WHERE name = 'workspace_created' AND ws_id IS NOT NULL AND at >= ? ORDER BY at",
+        "slots": 0
+      },
+      "argument_expression_count": 1,
+      "variadic_arguments_present": false
+    },
+    {
+      "operation": "buildReport",
+      "source_line": 179,
+      "method": "all",
+      "statement": {
+        "text": "SELECT DISTINCT ws_id, substr(at, 1, 10) AS day FROM (\n       SELECT ws_id, created_at AS at FROM v2_sessions\n       UNION ALL SELECT ws_id, created_at FROM v2_epochs\n       UNION ALL SELECT ws_id, received_at FROM v2_usage\n       UNION ALL SELECT ws_id, at FROM v2_audit WHERE ws_id IS NOT NULL AND actor_id IS NOT NULL\n     ) WHERE at >= ?",
+        "slots": 0
+      },
+      "argument_expression_count": 1,
+      "variadic_arguments_present": false
+    },
+    {
+      "operation": "buildReport",
+      "source_line": 223,
+      "method": "get",
+      "statement": {
+        "text": "SELECT COUNT(*) AS n, SUM(EXISTS (SELECT 1 FROM v2_epochs e WHERE e.ws_id = s.ws_id AND e.session_key = s.session_key AND e.goal_id IS NOT NULL)) AS bound\n     FROM v2_sessions s WHERE s.created_at >= ?",
+        "slots": 0
+      },
+      "argument_expression_count": 1,
+      "variadic_arguments_present": false
+    },
+    {
+      "operation": "buildReport",
+      "source_line": 228,
+      "method": "get",
+      "statement": {
+        "text": "SELECT COUNT(*) AS requests, SUM(e.goal_id IS NOT NULL) AS bound_requests, SUM(u.est_list_usd_micros) AS usd,\n            SUM(CASE WHEN e.goal_id IS NOT NULL THEN u.est_list_usd_micros END) AS bound_usd\n     FROM v2_usage u LEFT JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id\n     WHERE u.ts >= ?",
+        "slots": 0
+      },
+      "argument_expression_count": 1,
+      "variadic_arguments_present": false
+    },
+    {
+      "operation": "buildReport",
+      "source_line": 235,
+      "method": "get",
+      "statement": {
+        "text": "SELECT SUM(requests) AS requests, SUM(CASE WHEN goal_id <> '' THEN requests END) AS bound_requests,\n            SUM(est_list_usd_micros) AS usd, SUM(CASE WHEN goal_id <> '' THEN est_list_usd_micros END) AS bound_usd\n     FROM v2_spend_rollups WHERE day >= ?",
+        "slots": 0
+      },
+      "argument_expression_count": 1,
+      "variadic_arguments_present": false
+    },
+    {
+      "operation": "buildReport",
+      "source_line": 248,
+      "method": "all",
+      "statement": {
+        "text": "SELECT ws_id, name, at FROM v2_events WHERE name IN ('loi_sent', 'loi_signed') AND at >= ? ORDER BY at",
+        "slots": 0
+      },
+      "argument_expression_count": 1,
+      "variadic_arguments_present": false
+    },
+    {
+      "operation": "wsEvents",
+      "source_line": 259,
+      "method": "all",
+      "statement": {
+        "text": "SELECT ws_id FROM v2_events WHERE name = ? AND at >= ? AND ws_id IS NOT NULL <slot-1> <slot-2>",
+        "slots": 2
+      },
+      "argument_expression_count": 4,
+      "variadic_arguments_present": true
+    },
+    {
+      "operation": "buildReport",
+      "source_line": 264,
+      "method": "get",
+      "statement": {
+        "text": "SELECT COUNT(DISTINCT ws_id) AS n FROM v2_change_requests WHERE state = 'approved' AND decided_at >= ? <slot-1>",
+        "slots": 1
+      },
+      "argument_expression_count": 2,
+      "variadic_arguments_present": true
+    }
+  ],
+  "public_types": [
+    "export type LoiEvent = (typeof LOI_EVENTS)[number];",
+    "export type LoiResult = { ok: true; at: string } | { ok: false; reason: \"no_workspace\" | \"verified_original_required\" | \"bad_note_ref\" | \"already_recorded\"; at?: string };",
+    "interface Timing {\n  workspaces: number;\n  median_minutes: number | null;\n  p75_minutes: number | null;\n}",
+    "export interface Report {\n  generated_at: string;\n  since: string | null;\n  access: { requested: number; requested_try: number; requested_evaluate: number; approved: number; declined: number; codes_created: number; codes_from_requests: number; codes_redeemed: number };\n  funnel: { step: string; workspaces: number; of_previous: number | null; of_created: number | null }[];\n  other: { sample_workspaces_created: number; invites_sent: number; invites_accepted: number; people_with_a_first_session: number };\n  time_to_first_value: { from_workspace_created: Timing; from_code_redeemed: Timing };\n  weekly_active_workspaces: { week: string; active: number; growth: number | null; complete: boolean }[];\n  retention: { cohort: string; workspaces: number; week1: number | null; week1_share: number | null; week4: number | null; week4_share: number | null }[];\n  goal_binding: {\n    sessions: number;\n    bound_sessions: number;\n    sessions_share: number | null;\n    requests: number;\n    bound_requests: number;\n    requests_share: number | null;\n    est_list_usd_micros: number;\n    bound_est_list_usd_micros: number;\n    spend_share: number | null;\n  };\n  lois: { sent: number; signed: number; workspaces: { ws_id: string; sent_at: string | null; signed_at: string | null }[] };\n  value: {\n    workspaces_with_approved_request: number;\n    viewed: { people: number; workspaces: number };\n    reported: { people: number; by_estimate: Record<(typeof ESTIMATES)[number], number> };\n    follow_up_clicked: number;\n    access_from_value_card: { try: number; evaluate: number };\n    first_ask: number;\n    first_limit: number;\n  };\n}"
+  ],
+  "text_protocol_tokens": [
+    {
+      "source_line": 328,
+      "text": "Align report, <slot-1><slot-2> (weeks start Monday 00:00 UTC; sample workspaces left out)",
+      "slots": 2
+    },
+    {
+      "source_line": 328,
+      "text": ", since <slot-1>",
+      "slots": 1
+    },
+    {
+      "source_line": 328,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 329,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 330,
+      "text": "Access",
+      "slots": 0
+    },
+    {
+      "source_line": 333,
+      "text": "requested",
+      "slots": 0
+    },
+    {
+      "source_line": 333,
+      "text": "<slot-1> try, <slot-2> evaluate",
+      "slots": 2
+    },
+    {
+      "source_line": 334,
+      "text": "approved",
+      "slots": 0
+    },
+    {
+      "source_line": 335,
+      "text": "declined",
+      "slots": 0
+    },
+    {
+      "source_line": 336,
+      "text": "codes created",
+      "slots": 0
+    },
+    {
+      "source_line": 336,
+      "text": "<slot-1> from requests",
+      "slots": 1
+    },
+    {
+      "source_line": 337,
+      "text": "codes redeemed",
+      "slots": 0
+    },
+    {
+      "source_line": 339,
+      "text": "step",
+      "slots": 0
+    },
+    {
+      "source_line": 339,
+      "text": "count",
+      "slots": 0
+    },
+    {
+      "source_line": 339,
+      "text": "detail",
+      "slots": 0
+    },
+    {
+      "source_line": 341,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 342,
+      "text": "Workspace funnel (workspaces created in the period that reached each step)",
+      "slots": 0
+    },
+    {
+      "source_line": 345,
+      "text": "step",
+      "slots": 0
+    },
+    {
+      "source_line": 345,
+      "text": "workspaces",
+      "slots": 0
+    },
+    {
+      "source_line": 345,
+      "text": "of previous",
+      "slots": 0
+    },
+    {
+      "source_line": 345,
+      "text": "of created",
+      "slots": 0
+    },
+    {
+      "source_line": 347,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 348,
+      "text": "Time to first value (to the first session bound to a goal)",
+      "slots": 0
+    },
+    {
+      "source_line": 351,
+      "text": "from workspace created",
+      "slots": 0
+    },
+    {
+      "source_line": 352,
+      "text": "from code redeemed",
+      "slots": 0
+    },
+    {
+      "source_line": 354,
+      "text": "from",
+      "slots": 0
+    },
+    {
+      "source_line": 354,
+      "text": "workspaces",
+      "slots": 0
+    },
+    {
+      "source_line": 354,
+      "text": "median",
+      "slots": 0
+    },
+    {
+      "source_line": 354,
+      "text": "p75",
+      "slots": 0
+    },
+    {
+      "source_line": 356,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 357,
+      "text": "Weekly active workspaces (a shared session, epoch or usage upload, or a member's audited action, that week)",
+      "slots": 0
+    },
+    {
+      "source_line": 359,
+      "text": "<slot-1> (so far)",
+      "slots": 1
+    },
+    {
+      "source_line": 359,
+      "text": "-",
+      "slots": 0
+    },
+    {
+      "source_line": 359,
+      "text": "<slot-1><slot-2>",
+      "slots": 2
+    },
+    {
+      "source_line": 359,
+      "text": "+",
+      "slots": 0
+    },
+    {
+      "source_line": 359,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 360,
+      "text": "week",
+      "slots": 0
+    },
+    {
+      "source_line": 360,
+      "text": "active",
+      "slots": 0
+    },
+    {
+      "source_line": 360,
+      "text": "week on week",
+      "slots": 0
+    },
+    {
+      "source_line": 362,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 363,
+      "text": "Retention by creation week (active in week 1 and week 4 after it; - until that week ends)",
+      "slots": 0
+    },
+    {
+      "source_line": 366,
+      "text": "-",
+      "slots": 0
+    },
+    {
+      "source_line": 366,
+      "text": "<slot-1> (<slot-2>)",
+      "slots": 2
+    },
+    {
+      "source_line": 366,
+      "text": "-",
+      "slots": 0
+    },
+    {
+      "source_line": 366,
+      "text": "<slot-1> (<slot-2>)",
+      "slots": 2
+    },
+    {
+      "source_line": 367,
+      "text": "cohort",
+      "slots": 0
+    },
+    {
+      "source_line": 367,
+      "text": "workspaces",
+      "slots": 0
+    },
+    {
+      "source_line": 367,
+      "text": "week 1",
+      "slots": 0
+    },
+    {
+      "source_line": 367,
+      "text": "week 4",
+      "slots": 0
+    },
+    {
+      "source_line": 369,
+      "text": "(none)",
+      "slots": 0
+    },
+    {
+      "source_line": 370,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 371,
+      "text": "Bound to goals (sessions shared, and usage, in the period)",
+      "slots": 0
+    },
+    {
+      "source_line": 374,
+      "text": "sessions",
+      "slots": 0
+    },
+    {
+      "source_line": 375,
+      "text": "requests",
+      "slots": 0
+    },
+    {
+      "source_line": 376,
+      "text": "estimated spend",
+      "slots": 0
+    },
+    {
+      "source_line": 378,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 378,
+      "text": "bound",
+      "slots": 0
+    },
+    {
+      "source_line": 378,
+      "text": "total",
+      "slots": 0
+    },
+    {
+      "source_line": 378,
+      "text": "share",
+      "slots": 0
+    },
+    {
+      "source_line": 380,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 381,
+      "text": "Other",
+      "slots": 0
+    },
+    {
+      "source_line": 384,
+      "text": "sample workspaces created",
+      "slots": 0
+    },
+    {
+      "source_line": 385,
+      "text": "invites sent",
+      "slots": 0
+    },
+    {
+      "source_line": 386,
+      "text": "invites accepted",
+      "slots": 0
+    },
+    {
+      "source_line": 387,
+      "text": "people with a first shared session in a workspace",
+      "slots": 0
+    },
+    {
+      "source_line": 389,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 389,
+      "text": "count",
+      "slots": 0
+    },
+    {
+      "source_line": 391,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 392,
+      "text": "Decision value (approved change requests and their value card; one per person per workspace)",
+      "slots": 0
+    },
+    {
+      "source_line": 395,
+      "text": "workspaces with an approved request",
+      "slots": 0
+    },
+    {
+      "source_line": 395,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 396,
+      "text": "value card viewed",
+      "slots": 0
+    },
+    {
+      "source_line": 396,
+      "text": "1 workspace",
+      "slots": 0
+    },
+    {
+      "source_line": 396,
+      "text": "<slot-1> workspaces",
+      "slots": 1
+    },
+    {
+      "source_line": 397,
+      "text": "value reported",
+      "slots": 0
+    },
+    {
+      "source_line": 397,
+      "text": "<slot-1> <slot-2>",
+      "slots": 2
+    },
+    {
+      "source_line": 397,
+      "text": ", ",
+      "slots": 0
+    },
+    {
+      "source_line": 398,
+      "text": "follow-up clicked",
+      "slots": 0
+    },
+    {
+      "source_line": 398,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 399,
+      "text": "access requested from the card",
+      "slots": 0
+    },
+    {
+      "source_line": 399,
+      "text": "<slot-1> try, <slot-2> evaluate",
+      "slots": 2
+    },
+    {
+      "source_line": 400,
+      "text": "workspaces with a first ask",
+      "slots": 0
+    },
+    {
+      "source_line": 400,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 401,
+      "text": "workspaces with a first limit",
+      "slots": 0
+    },
+    {
+      "source_line": 401,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 403,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 403,
+      "text": "count",
+      "slots": 0
+    },
+    {
+      "source_line": 403,
+      "text": "detail",
+      "slots": 0
+    },
+    {
+      "source_line": 405,
+      "text": "",
+      "slots": 0
+    },
+    {
+      "source_line": 406,
+      "text": "LOIs (operator-recorded): <slot-1> sent, <slot-2> signed (verified originals only)",
+      "slots": 2
+    },
+    {
+      "source_line": 409,
+      "text": "-",
+      "slots": 0
+    },
+    {
+      "source_line": 409,
+      "text": "-",
+      "slots": 0
+    },
+    {
+      "source_line": 410,
+      "text": "workspace",
+      "slots": 0
+    },
+    {
+      "source_line": 410,
+      "text": "sent",
+      "slots": 0
+    },
+    {
+      "source_line": 410,
+      "text": "signed",
+      "slots": 0
+    },
+    {
+      "source_line": 414,
+      "text": "\n",
+      "slots": 0
+    }
+  ],
+  "not_an_implementation": true,
+  "contains_private_verification_inputs": false
+}

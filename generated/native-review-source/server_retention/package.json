@@ -1,0 +1,1 @@
+{"name":"server_retention","type":"commonjs","exports":{"./create_retention":"./create_retention.js","./create_retention_runner":"./create_retention_runner.js"}}

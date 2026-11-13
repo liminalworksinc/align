@@ -1,0 +1,21 @@
+LITAI_LANGUAGE_TOOL ?= node
+OBJECT_ROOT ?= ../_build
+OUT ?= $(OBJECT_ROOT)/run
+
+.PHONY: all build test check
+all: build
+
+build:
+	"$(LITAI_LANGUAGE_TOOL)" tools/package.js "$(OUT)"
+
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" --check server_identity_effects/create_effects.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tests/litai_test.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tools/package.js
+
+test: check build
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+	"$(LITAI_LANGUAGE_TOOL)" --check "$(OUT)"
+	"$(LITAI_LANGUAGE_TOOL)" "$(OUT)" --litai-test
+	"$(LITAI_LANGUAGE_TOOL)" "$(OUT)" --litai-smoke

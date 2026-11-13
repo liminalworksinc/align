@@ -1,0 +1,50 @@
+{
+  "schema": "align/event-integrity-caller-controls@2",
+  "execution_completed": true,
+  "security_controls_satisfied": 6,
+  "security_controls_unsatisfied": 0,
+  "records": [
+    {
+      "name": "direct purge validates every device JSON value before its first write",
+      "satisfied": true,
+      "writes": 0
+    },
+    {
+      "name": "actual operator purge rolls back malformed device JSON",
+      "satisfied": true,
+      "actual_Node_command": true,
+      "all_tables_unchanged": true,
+      "status": 1
+    },
+    {
+      "name": "actual retention command rolls back malformed device JSON",
+      "satisfied": true,
+      "actual_Node_command": true,
+      "all_tables_unchanged": true,
+      "status": 1
+    },
+    {
+      "name": "ordinary purge retains privacy redaction and unrelated device workspace",
+      "satisfied": true,
+      "actual_Node_command": true
+    },
+    {
+      "name": "event names restricted to the declared own keys",
+      "satisfied": true,
+      "accepted_inherited_names": [],
+      "scope": "Direct current production core API. No claim of an HTTP exploit."
+    },
+    {
+      "name": "event attribution rejects arbitrary reassignment while allowing privacy redaction",
+      "satisfied": true,
+      "workspace_reassigned": false,
+      "actor_reassigned": false,
+      "scope": "Owned direct SQLite integrity probe. Privacy redaction remains required."
+    }
+  ],
+  "network": "none",
+  "actual_SQLite": true,
+  "owned_temporary_database_only": true,
+  "finding_dispositions_changed": false,
+  "independent_or_operator_security_acceptance": false
+}

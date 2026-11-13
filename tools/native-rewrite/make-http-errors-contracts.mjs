@@ -1,0 +1,21 @@
+// Authored constructor and factory contracts, separate from runtime observations.
+import fs from "node:fs";
+import {createRequire} from "node:module";
+const h=createRequire(import.meta.url)("./http-errors-harness.cjs");
+const common="Synchronous JavaScript API with no I/O, clock or environment reads. Preserve input values and references without mutation. Use ordinary native Error inheritance and coercion, including propagation of the original thrown coercion value. Do not trim, normalize, validate or JSON-serialize arguments. Error instances have inherited name 'Error', ordinary native stack behavior and an own message only when native Error creates one. Physical stack frames depend on invocation paths and are outside the comparison contract. Optional status, code and extra values are retained even if they are undefined, null, non-string or opaque objects at JavaScript call sites. The constructors are shared mutable class objects. Factory-created v2 errors use exactly the same V2Error and prototype returned by data(). With unmodified field prototypes, the instance fields assigned below are ordinary enumerable writable configurable own properties. Assignments use ordinary property assignment: inherited setters run, nonwritable inherited fields cause the normal strict-mode TypeError, and an error thrown by a setter propagates unchanged. Preserve assignment order after super returns. Every construction or factory call creates a new instance. ";
+const intent={
+  data:"data():object. Return a new ordinary object with exactly HttpError followed by V2Error as own enumerable properties. Every wrapper contains the same two shared class objects; do not clone constructors, prototypes or instances, reset mutations, freeze them, or cache the wrapper. HttpError is a native class named HttpError with constructor arity 3: constructor(status:number,message:string,code?:string). Call super(message), then assign this.status=status and this.code=code in that order, including an own code when omitted or undefined. V2Error is a native class named V2Error with constructor arity 4: constructor(status:number,code:string,message?:string,extra?:Record<string,unknown>). Call super(message ?? code), then assign this.status=status, this.code=code and this.extra=extra in that order, including all three properties when undefined. Keep the exact extra object reference and its nested references. Empty message strings do not fall back; null and undefined messages do. Never force a message for super(undefined). Preserve normal JavaScript class invocation, subclassing and prototype behavior, including a TypeError when called without new. In-place changes to either shared constructor or prototype remain observable through every later wrapper and factory instance.",
+  notFound:"not_found():V2Error. Return new V2Error(404,'not_found','Not found'). Ignore all supplied arguments. The own extra field remains present and undefined.",
+  badRequest:"bad_request(message:string,code='bad_request'):V2Error. Return new V2Error(400,code,message). Only an omitted or explicitly undefined code uses the default; null, empty strings and every other supplied value are preserved. V2Error applies its ordinary nullish message fallback to that resulting code.",
+  forbidden:"forbidden(code:string,message:string):V2Error. Return new V2Error(403,code,message), preserving both arguments and V2Error's nullish message fallback. Ignore any additional arguments.",
+  conflict:"conflict(code:string,message:string):V2Error. Return new V2Error(409,code,message), preserving both arguments and V2Error's nullish message fallback. Ignore any additional arguments.",
+};
+const capabilities={};
+for(const [op,cap] of Object.entries(h.CAPABILITY)){
+  if(!intent[op])throw new Error("missing HTTP error contract "+op);
+  capabilities[cap]="JavaScript module http_errors/"+h.SYMBOL[op]+" exports "+intent[op]+" "+common;
+}
+if(Object.keys(intent).length!==Object.keys(capabilities).length)throw new Error("unexpected HTTP error contract");
+if(fs.existsSync(process.argv[2]))throw new Error("refuse an existing HTTP error contract draft");
+fs.writeFileSync(process.argv[2],JSON.stringify({kind:"library",capabilities},null,2)+"\n");
+console.log(JSON.stringify({capabilities:Object.keys(capabilities).length}));

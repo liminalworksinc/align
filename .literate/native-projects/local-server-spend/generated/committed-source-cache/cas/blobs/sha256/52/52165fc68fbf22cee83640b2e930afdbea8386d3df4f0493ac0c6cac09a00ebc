@@ -1,0 +1,12 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const source = path.resolve(__dirname, '..');
+const destination = path.resolve(process.argv[2]);
+if (destination === source) throw new Error('Artifact destination must differ from source');
+for (const name of ['main.js', 'run', 'server_spend/create_spend.js', 'server_spend/package.json', 'tests/litai_test.js']) {
+  const target = path.join(destination, name);
+  fs.mkdirSync(path.dirname(target), {recursive: true});
+  fs.copyFileSync(path.join(source, name), target);
+}
+fs.chmodSync(path.join(destination, 'run'), 0o755);

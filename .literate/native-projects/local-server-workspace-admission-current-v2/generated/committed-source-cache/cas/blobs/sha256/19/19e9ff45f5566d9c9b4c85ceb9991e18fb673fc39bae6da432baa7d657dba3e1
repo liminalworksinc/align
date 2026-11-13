@@ -1,0 +1,13 @@
+LITAI_LANGUAGE_TOOL ?= node
+.PHONY: all test check smoke
+all: check
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" --check server_workspace_admission/create_creation.js
+	"$(LITAI_LANGUAGE_TOOL)" --check server_workspace_admission/create_access.js
+	"$(LITAI_LANGUAGE_TOOL)" --check server_workspace_admission/create_disposable.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tests/litai_test.js
+test:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+smoke:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-smoke

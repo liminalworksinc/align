@@ -1,0 +1,52 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {span_words} = require('../value_rules/span_words.js');
+const {clean_value_text} = require('../value_rules/clean_value_text.js');
+const {safe_follow_up_url} = require('../value_rules/safe_follow_up_url.js');
+const {loi_url_ok} = require('../value_rules/loi_url_ok.js');
+const {estimate_said} = require('../value_rules/estimate_said.js');
+const {follow_up_url} = require('../value_rules/follow_up_url.js');
+const {follow_up_problem} = require('../value_rules/follow_up_problem.js');
+const {value_data} = require('../value_rules/value_data.js');
+const cases = [
+  ['generated-span-zero', span_words, [0], "0 seconds"],
+  ['generated-span-round', span_words, [59500], "1 minute"],
+  ['generated-span-hours', span_words, [7380000], "2 hours 3 minutes"],
+  ['generated-span-days', span_words, [176400000], "2 days 1 hour"],
+  ['generated-span-negative', span_words, [-3], ""],
+  ['generated-text-controls', clean_value_text, [" \u0000Hello\r\n world​ "], "Hello world"],
+  ['generated-text-marks', clean_value_text, ["̧́"], ""],
+  ['generated-text-emoji', clean_value_text, ["👩‍💻 café"], "👩‍💻 café"],
+  ['generated-url-normalize', safe_follow_up_url, [" HTTPS://EXAMPLE.COM:443/a "], "https://example.com/a"],
+  ['generated-url-port', safe_follow_up_url, ["https://example.com:444/"], null],
+  ['generated-url-mail', safe_follow_up_url, ["mailto:a@b.co?subject=Hello"], "mailto:a@b.co?subject=Hello"],
+  ['generated-url-loi', loi_url_ok, ["http://example.org"], false],
+  ['generated-estimate', estimate_said, ["longer"], "longer than a week"],
+  ['generated-fallback', follow_up_url, [{"HOSTED":"1","ALIGN_PUBLIC_ORIGIN":"https://example.org:8443/path"}], "https://example.org:8443/app/request-access?interest=evaluate&via=value_card"],
+  ['generated-warning-empty', follow_up_problem, [{"ALIGN_FOLLOW_UP_URL":"  "}], null]
+];
+function runTests() {
+  const results = [];
+  for (const [case_id, fn, args, expected] of cases) {
+    assert.deepStrictEqual(fn(...args), expected);
+    results.push({case_id, outcome:'passed'});
+  }
+  const first = value_data();
+  const second = value_data();
+  assert.notStrictEqual(first, second);
+  assert.strictEqual(first.ESTIMATE_WORDS, second.ESTIMATE_WORDS);
+  assert.deepStrictEqual(Object.keys(first), ['ESTIMATE_WORDS','VALUE_QUESTION','VALUE_NOTE_MAX','VALUE_EDIT_DAYS']);
+  assert.strictEqual(first.VALUE_NOTE_MAX, 500);
+  assert.strictEqual(first.VALUE_EDIT_DAYS, 7);
+  const row = first.ESTIMATE_WORDS[0];
+  const old = row.said;
+  try { row.said = 'changed'; assert.strictEqual(estimate_said(row.id), 'changed'); }
+  finally { row.said = old; }
+  assert.strictEqual(span_words(Infinity), '');
+  assert.strictEqual(span_words(NaN), '');
+  assert.strictEqual(clean_value_text('a\u200Db'), 'ab');
+  assert.strictEqual(clean_value_text('\uD800x'), 'x');
+  return {schema:'literate-ai/generated-test-results@1', cases:results};
+}
+function smoke() { return span_words(7380000); }
+module.exports = {runTests, smoke};

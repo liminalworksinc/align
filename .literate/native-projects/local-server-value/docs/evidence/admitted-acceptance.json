@@ -1,0 +1,29 @@
+{
+  "schema": "align/value-admitted-local-acceptance@1",
+  "qualified_runs": 2,
+  "private_batches_each_run": 7,
+  "admitted_generated_tests": 4,
+  "cache_hits": 0,
+  "repairs": 0,
+  "actual_hosts": [
+    "macOS Node26.3",
+    "Linux arm64 Node24"
+  ],
+  "private_batch_record_counts": [
+    71,
+    107,
+    44,
+    59,
+    235,
+    485,
+    27
+  ],
+  "negative_controls_refused": 22,
+  "complete_runtime_and_adapters_read": true,
+  "CommonJS_and_ESM_package_imports": true,
+  "current_receipt": "../../verification/current.json",
+  "populated_store_and_actual_typed_consumers_pending": true,
+  "parent_source_authority_transferred": false,
+  "whole_B15_complete": false,
+  "deployed_or_operator_security_accepted": false
+}

@@ -1,0 +1,9 @@
+LITAI_LANGUAGE_TOOL ?= node
+.PHONY: all test check
+all: check
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" --check server_goal_activity/create_goal_activity.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tests/litai_test.js
+test: check
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test

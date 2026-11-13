@@ -1,0 +1,25 @@
+{
+  "schema": "align/private-original-reference@1",
+  "factories": [
+    {
+      "symbol": "create_retention",
+      "path": "tools/native-rewrite/qualification/metrics-retention-v1/server-retention/create_retention.original.cjs",
+      "sha256": "ce88fe7dcd6234b05462ec76dcfdbe7cb0ffa4dca193fa178ae0a647bb11ded5"
+    },
+    {
+      "symbol": "create_retention_runner",
+      "path": "tools/native-rewrite/qualification/metrics-retention-v1/server-retention/create_retention_runner.original.cjs",
+      "sha256": "22ec8d0c20fc475137c9b1e9613e98222f31db4a402d12d9fea1a9a4ef306b9a"
+    }
+  ],
+  "raw_sources": [
+    {
+      "path": "lib/v2/retention-core.mts",
+      "sha256": "33468b861fc72c65505337326cacac89d9d2b9e21c180efbded66f3d06a8208f"
+    },
+    {
+      "path": "lib/v2/retention.ts",
+      "sha256": "95599efd1bad888c391e0adde931b6a4f450ae701b5d556c61bf881d0ae3dc5b"
+    }
+  ]
+}

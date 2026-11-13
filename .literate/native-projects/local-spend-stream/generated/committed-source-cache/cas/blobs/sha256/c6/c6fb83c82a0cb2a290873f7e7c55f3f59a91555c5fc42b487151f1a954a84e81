@@ -1,0 +1,77 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {codex_counts} = require('../spend_stream/codex_counts.js');
+const {count} = require('../spend_stream/count.js');
+const {init_claude_state} = require('../spend_stream/init_claude_state.js');
+const {init_codex_state} = require('../spend_stream/init_codex_state.js');
+const {iso_or_null} = require('../spend_stream/iso_or_null.js');
+const {parse_claude_line} = require('../spend_stream/parse_claude_line.js');
+const {parse_codex_line} = require('../spend_stream/parse_codex_line.js');
+const cases = [
+  ['generated-count-digits', () => assert.deepStrictEqual(count(...["00042"]), 42)],
+  ['generated-count-limit', () => assert.deepStrictEqual(count(...[1000000000000]), 1000000000000)],
+  ['generated-count-absent', () => assert.deepStrictEqual(count(...[null]), null)],
+  ['generated-counts-subtract', () => assert.deepStrictEqual(codex_counts(...[{"input":10,"cached":2,"cache_write":1,"output":3}]), {"input":7,"output":3,"cache_read":2,"cache_write_5m":0,"cache_write_1h":0,"cache_write_unsplit":1})],
+  ['generated-counts-negative', () => assert.deepStrictEqual(codex_counts(...[{"input":2,"cached":3,"cache_write":0,"output":1}]), null)],
+  ['generated-state-empty-group', () => assert.deepStrictEqual(init_codex_state(...[""]), {"native":null,"thread":null,"query_source":"main","auto_review":false,"model":null,"root_turn":null,"has_tur":false,"emitted_tc":false,"prev_total":null,"group":""})],
+  ['generated-claude-path', () => assert.deepStrictEqual(init_claude_state(...["/logs/session-a/subagents/child.jsonl"]), {"session_id":"session-a","prompt_id":null,"subagent":true,"cwd":null})],
+  ['generated-claude-suffix', () => assert.deepStrictEqual(init_claude_state(...["/logs/.jsonl"]), {"session_id":".jsonl","prompt_id":null,"subagent":false,"cwd":null})],
+  ['generated-iso-offset', () => assert.deepStrictEqual(iso_or_null(...["1970-01-01T01:00:00+01:00"]), "1970-01-01T00:00:00.000Z")],
+  ['generated-iso-nonstring', () => assert.deepStrictEqual(iso_or_null(...[false]), null)],
+  ['generated-claude-session', () => assert.deepStrictEqual(parse_claude_line(...["{\"sessionId\":\"s\",\"cwd\":\"/work\",\"timestamp\":\"1970-01-01T00:00:00Z\"}",{"session_id":"s","prompt_id":null,"subagent":false,"cwd":null}]), [{"kind":"session","harness":"claude-code","native_session_id":"s","cwd":"/work","ts":"1970-01-01T00:00:00.000Z"}])],
+  ['generated-claude-malformed', () => assert.deepStrictEqual(parse_claude_line(...["{",{"session_id":"bad","prompt_id":null,"subagent":false,"cwd":null}]), [{"kind":"gap","reason":"malformed_line"}])],
+  ['generated-codex-no-meta', () => assert.deepStrictEqual(parse_codex_line(...["{\"type\":\"token_usage_record\",\"payload\":{}}",{"native":null,"thread":null,"query_source":"main","auto_review":false,"model":null,"root_turn":null,"has_tur":false,"emitted_tc":false,"prev_total":null,"group":"g"}]), [{"kind":"gap","reason":"no_session_meta"}])],
+  ['generated-codex-meta', () => assert.deepStrictEqual(parse_codex_line(...["{\"type\":\"session_meta\",\"payload\":{\"id\":\"thread\",\"cwd\":\"/repo\"}}",{"native":null,"thread":null,"query_source":"main","auto_review":false,"model":null,"root_turn":null,"has_tur":false,"emitted_tc":false,"prev_total":null,"group":"meta"}]), [{"kind":"session","harness":"codex","native_session_id":"thread","cwd":"/repo","ts":null}])],
+  ['generated-claude-skip', () => assert.deepStrictEqual(parse_claude_line(...["not json",{"session_id":"s","prompt_id":null,"subagent":false,"cwd":"/repo"}]), [])],
+  ['generated-codex-request', () => assert.deepStrictEqual(parse_codex_line(...["{\"type\":\"token_usage_record\",\"payload\":{\"response_id\":\"r\",\"usage\":{\"input_tokens\":10,\"cached_input_tokens\":2,\"cache_write_input_tokens\":1,\"output_tokens\":3}}}",{"native":"s","thread":"t","query_source":"main","auto_review":false,"model":null,"root_turn":null,"has_tur":false,"emitted_tc":false,"prev_total":null,"group":"requests"}]), [{"kind":"request","harness":"codex","provider":"openai","provider_id":"resp:r","native_session_id":"s","ts":null,"model":"unknown","query_source":"main","counts":{"input":7,"output":3,"cache_read":2,"cache_write_5m":0,"cache_write_1h":0,"cache_write_unsplit":1},"total_input":10,"finalized":true,"root_turn":null,"source":"rollout","retract_group":null}])],
+  ['generated-claude-request', () => assert.deepStrictEqual(parse_claude_line(...["{\"type\":\"assistant\",\"message\":{\"id\":\"m\",\"model\":\"model-a\",\"usage\":{\"input_tokens\":5,\"output_tokens\":2,\"cache_creation_input_tokens\":9,\"cache_creation\":{\"ephemeral_5m_input_tokens\":3,\"ephemeral_1h_input_tokens\":4}}}}",{"session_id":"s","prompt_id":null,"subagent":false,"cwd":null}]), [{"kind":"request","harness":"claude-code","provider":"anthropic","provider_id":"msg:m","native_session_id":"s","ts":null,"model":"model-a","query_source":"main","counts":{"input":5,"output":2,"cache_read":0,"cache_write_5m":3,"cache_write_1h":4,"cache_write_unsplit":2},"finalized":false,"root_turn":null,"source":"transcript"}])]
+];
+
+function extra_checks() {
+  for (const v of [true, false, '', ' 1', '1.0', -1, 0.5, Infinity, NaN, {}, [], Symbol('x'), 1n, 1000000000001]) assert.ok(Number.isNaN(count(v)));
+  assert.equal(count(undefined), null);
+  assert.ok(Object.is(count(-0), -0));
+  const weird = codex_counts({input: NaN, cached: 0, cache_write: 0, output: Infinity});
+  assert.ok(Number.isNaN(weird.input));
+  assert.equal(weird.output, Infinity);
+  assert.deepStrictEqual(codex_counts({input: 1.5, cached: 0.25, cache_write: 0.5, output: -2}), {input: 0.75, output: -2, cache_read: 0.25, cache_write_5m: 0, cache_write_1h: 0, cache_write_unsplit: 0.5});
+  assert.notEqual(init_codex_state('g'), init_codex_state('g'));
+  assert.notEqual(init_claude_state('a'), init_claude_state('a'));
+  const s = init_codex_state('g');
+  s.extra = {retained: true};
+  parse_codex_line('{"type":"session_meta","payload":{"id":"t","cwd":"/a"}}', s);
+  for (let i = 0; i < 10; i++) parse_codex_line(JSON.stringify({type:'turn_context',payload:{cwd:'/b'+i}}),s);
+  assert.equal(s.cwd, '/a');
+  assert.deepStrictEqual(s.other_cwds, ['/b0','/b1','/b2','/b3','/b4','/b5','/b6','/b7']);
+  assert.deepStrictEqual(s.extra,{retained:true});
+  const tc = n => JSON.stringify({type:'event_msg',payload:{type:'token_count',info:{total_token_usage:{input_tokens:n,output_tokens:2}}}});
+  assert.equal(parse_codex_line(tc(10),s)[0].provider_id,'tc:t:10:0:2');
+  assert.deepStrictEqual(parse_codex_line(tc(10),s),[]);
+  assert.deepStrictEqual(parse_codex_line(tc(9),s),[{kind:'gap',reason:'cumulative_regression'}]);
+  const retract = parse_codex_line('{"type":"token_usage_record","payload":{"response_id":"x"}}',s);
+  assert.deepStrictEqual(retract[0],{kind:'retract',group:'g'});
+  assert.ok(Object.hasOwn(retract[1],'total_input'));
+  assert.equal(retract[1].total_input,undefined);
+  assert.equal(retract[1].counts,null);
+  assert.deepStrictEqual(parse_codex_line(tc(20),s),[]);
+  const c = init_claude_state('/logs/s.jsonl');
+  const row = {type:'user',cwd:'/a',promptId:'p',timestamp:'1970-01-01T00:00:00Z'};
+  assert.equal(parse_claude_line(JSON.stringify(row),c).length,2);
+  assert.equal(c.prompt_id,'p');
+  assert.deepStrictEqual(parse_claude_line(JSON.stringify(row),c),[]);
+  const invalid = {type:'assistant',requestId:'r',message:{model:'m',usage:{input_tokens:true,output_tokens:1}}};
+  assert.equal(parse_claude_line(JSON.stringify(invalid),c)[0].counts,null);
+  const guardian = init_codex_state('g');
+  parse_codex_line('{"type":"session_meta","payload":{"id":"child","session_id":"child","parent_thread_id":"parent","source":{"subagent":{"other":"guardian"}}}}',guardian);
+  assert.equal(guardian.native,'parent');
+  assert.equal(guardian.query_source,'auxiliary');
+  assert.equal(guardian.auto_review,true);
+}
+function run() {
+  const results = [];
+  for (const [case_id, test] of cases) { test(); results.push({case_id, outcome:'passed'}); }
+  extra_checks();
+  return {schema:'literate-ai/generated-test-results@1',cases:results};
+}
+function smoke() { return count('00042'); }
+module.exports = {run, smoke};

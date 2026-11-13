@@ -1,0 +1,46 @@
+'use strict';
+
+function create_access(resources) {
+  const { config, requireCaptcha, get, run, tx, refuseDisposable, event, V2Error,
+    badRequest, newId, nowIso, accessEmailKey, durableCount, durableRoom, oneOf,
+    optOneOf, optStr, str } = resources;
+  const TEAM_SIZES = ['1', '2-10', '11-50', '51-200', '201+'];
+  const INTERESTS = ['try', 'evaluate'];
+  const VIAS = ['form', 'value_card'];
+  async function createAccessRequest(request, client, body) {
+    const email = str(body, 'email', 320).toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw badRequest('Enter an email address');
+    const name = str(body, 'name', 100);
+    const company = optStr(body, 'company', 100);
+    const teamSize = optOneOf(body, 'team_size', TEAM_SIZES);
+    const useCase = str(body, 'use_case', 500);
+    const interest = oneOf(body, 'interest', INTERESTS);
+    const via = optOneOf(body, 'via', VIAS) ?? 'form';
+    if (config().hosted) refuseDisposable(email);
+    const limits = [
+      { key: `access-client:${client}`, max: 5, windowMs: 3600000 },
+      { key: accessEmailKey(email), max: 3, windowMs: 86400000 }
+    ];
+    function room() {
+      if (!durableRoom(limits)) throw new V2Error(429, 'rate_limited', 'Too many requests were sent. Try again later.');
+    }
+    room();
+    await requireCaptcha(request);
+    await tx(() => {
+      room();
+      durableCount(limits);
+      const existing = get("SELECT id FROM v2_access_requests WHERE email = ? AND status = 'pending'", email);
+      if (existing) {
+        run('UPDATE v2_access_requests SET name = ?, company = ?, team_size = ?, use_case = ?, interest = ? WHERE id = ?', name, company, teamSize, useCase, interest, existing.id);
+      } else {
+        const id = newId('ar');
+        const at = nowIso();
+        run("INSERT INTO v2_access_requests (id, email, name, company, team_size, use_case, interest, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)", id, email, name, company, teamSize, useCase, interest, at);
+        event('access_requested', { props: { interest, via } });
+      }
+    });
+    return { received: true };
+  }
+  return { createAccessRequest, TEAM_SIZES, INTERESTS, VIAS };
+}
+module.exports = { create_access };

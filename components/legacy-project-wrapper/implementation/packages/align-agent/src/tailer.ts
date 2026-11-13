@@ -8,9 +8,9 @@ import path from "node:path";
 import type { Ctx } from "./context.ts";
 import { applyEvents } from "./ledger.ts";
 import type { Harness } from "./shared/types.ts";
-import { initClaudeState, parseClaudeLine, type ClaudeFileState } from "./spend/claude.ts";
-import { initCodexState, parseCodexLine, type CodexFileState } from "./spend/codex.ts";
-import type { ParsedEvent } from "./spend/events.ts";
+import { initClaudeState, parseClaudeLine, type ClaudeFileState } from "./spend.ts";
+import { initCodexState, parseCodexLine, type CodexFileState } from "./spend.ts";
+import type { ParsedEvent } from "./spend.ts";
 import { tx } from "./db.ts";
 
 const PREFIX_MAX = 64 * 1024;

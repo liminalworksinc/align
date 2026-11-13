@@ -1,0 +1,66 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {create_changes} = require('../server_changes/create_changes.js');
+const resourceNames = ['all','audit','get','run','tx','V2Error','badRequest','conflict','forbidden','notFound','event','newId','nowIso','effectiveSet','launchSet','contentOf','dependencyCycle','goalObj','goalRow','goalsDependingOn','nextContent','sameContent','unreadableGoals','versionContentOf','visibleGoal','writeGoalVersion','canReadGoal','memberName','memberPrincipal','nameTo','assertRevisionReached','nonNegInt','optStr','revisionRead','str','EVIDENCE_PER_REVISION','evidenceCount','evidenceInput','evidenceRows','evidenceView','recordSnapshot','snapshotView','counterNoChange','counterSameAsRequest'];
+function factory() {
+  const reads = [];
+  const resources = {};
+  for (const name of resourceNames) Object.defineProperty(resources,name,{get() { reads.push(name); return function() { throw new Error('Unexpected resource call: '+name); }; }});
+  const service = create_changes(resources);
+  assert.deepEqual(reads,resourceNames);
+  const names = ['dependencyChoices','dependencyLoops','counterBase','versionLoops','insertChangeRequest','createChangeRequest','actOnChangeRequest','addEvidence','removeEvidence','listChangeRequests','changeRequestGroups','getChangeRequest','assertChangeRequestAction','requestCondition'];
+  const lengths = [3,3,3,3,5,3,5,5,4,1,2,3,1,1];
+  names.forEach((name,i) => { assert.equal(service[name].name,name); assert.equal(service[name].length,lengths[i]); });
+  assert.deepEqual(service.CHANGE_REQUEST_STATES,['pending','countered','approved','rejected','withdrawn','superseded']);
+  assert.deepEqual(service.CHANGE_REQUEST_ACTIONS,['approve','approve_and_launch','launch','not_yet','reject','counter','accept_counter','acknowledge','withdraw','rebase']);
+  assert.deepEqual(service.LAUNCH_STATES,['pending','not_yet','launched','superseded']);
+  return service;
+}
+function example() { return factory().counterBase(null,'goal-a',null); }
+function testInsert() {
+  const calls = [];
+  const service = create_changes({
+    newId(value) { assert.equal(this,undefined); calls.push(['newId',value]); return 'request-new'; },
+    run(...args) { assert.equal(this,undefined); calls.push(['run',...args]); },
+    recordSnapshot(...args) { assert.equal(this,undefined); calls.push(['snapshot',...args]); return 'snapshot'; },
+    audit(...args) { assert.equal(this,undefined); calls.push(['audit',...args]); }
+  });
+  const changes = {title:'Updated'};
+  assert.equal(service.insertChangeRequest({wsId:'workspace',userId:'reader'},{id:'goal',version:7},changes,'Reason','time'),'request-new');
+  assert.deepEqual(calls,[
+    ['newId','cr'],
+    ['run',"INSERT INTO v2_change_requests (id, ws_id, goal_id, requester_id, state, revision, base_version, changes_json, reason, created_at, updated_at)\n     VALUES (?, ?, ?, ?, 'pending', 1, ?, ?, ?, ?, ?)",'request-new','workspace','goal','reader',7,'{"title":"Updated"}','Reason','time','time'],
+    ['snapshot','workspace','goal','time'],
+    ['run','INSERT INTO v2_change_request_revisions (ws_id, change_request_id, revision, base_version, changes_json, note, author_id, created_at, snapshot_json, condition) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)','workspace','request-new',1,7,'{"title":"Updated"}',null,'reader','time','snapshot',null],
+    ['audit','workspace','reader','change_request.created','request-new','time']
+  ]);
+}
+function testConditions() {
+  const rows = [{revision:1,note:null},{revision:2,note:'Suggestion',condition:'Confirm',acknowledged_by:'reader',acknowledged_at:'time'},{revision:3,note:null}];
+  const service = create_changes({all(sql,id) {
+    assert.equal(sql,'SELECT * FROM v2_change_request_revisions WHERE change_request_id = ? ORDER BY revision');
+    assert.equal(id,'request'); return rows;
+  },memberName(id) { assert.equal(id,'reader'); return 'Reader'; }});
+  assert.deepEqual(service.requestCondition('request'),{revision:2,text:'Confirm',acknowledged_by:{id:'reader',name:'Reader'},acknowledged_at:'time'});
+  assert.deepEqual(rows.map(r => r.revision),[1,2,3]);
+}
+function test() {
+  const cases = [];
+  assert.deepEqual(example(),null);
+  cases.push({case_id:'generated-no-counter',outcome:'passed'});
+  assert.deepEqual(factory().counterBase({},'goal-b',''),null);
+  cases.push({case_id:'generated-empty-counter',outcome:'passed'});
+  assert.deepEqual(factory().counterBase({wsRole:'viewer'},'goal-c',false),null);
+  cases.push({case_id:'generated-falsy-counter',outcome:'passed'});
+  const sentinel = {};
+  const service = create_changes({notFound:() => sentinel});
+  assert.equal(service.assertChangeRequestAction('launch'),'launch');
+  assert.throws(() => service.assertChangeRequestAction('invalid'),e => e === sentinel);
+  service.CHANGE_REQUEST_ACTIONS.push('extension');
+  assert.equal(service.assertChangeRequestAction('extension'),'extension');
+  assert.equal(create_changes({}).CHANGE_REQUEST_ACTIONS.includes('extension'),false);
+  testInsert();
+  testConditions();
+  return {schema:'literate-ai/generated-test-results@1',cases};
+}
+module.exports = {test,example};

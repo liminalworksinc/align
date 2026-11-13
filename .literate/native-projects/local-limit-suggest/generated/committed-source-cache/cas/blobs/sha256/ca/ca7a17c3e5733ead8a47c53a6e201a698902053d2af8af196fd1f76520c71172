@@ -1,0 +1,94 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_suggestions } = require('../limit_suggest/create_suggestions.js');
+
+function fixture() {
+  const goal = { id: 'g1', title: 'Orchard', measures_json: '[]', status: 'active', owner_id: 'u1', version: 3 };
+  const effects = [];
+  class V2Error extends Error {
+    constructor(status, code, message) { super(message); this.status = status; this.code = code; }
+  }
+  const resources = {
+    badRequest: message => new Error(message),
+    forbidden: (code, message) => Object.assign(new Error(message), { code }),
+    V2Error,
+    cleanText: text => text.trim().replace(/\s+/g, ' '),
+    isDay: value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value),
+    limitsOf: g => { effects.push(['limits', g]); return []; },
+    LIMIT_SOURCE_TITLE_MAX: 120,
+    LIMIT_TEXT_MAX: 160,
+    goalObj: g => g,
+    goalRow: () => goal,
+    visibleGoals: () => [goal],
+    takeAll: quotas => { effects.push(['quota', quotas]); return true; },
+    isBlankText: text => !text.trim(),
+    canReadGoal: () => true
+  };
+  return { api: create_suggestions(resources), resources, goal, effects };
+}
+
+const cases = [
+  {
+    id: 'generated-orchard-rule',
+    args: [{ wsRole: 'owner', wsId: 'w1', userId: 'u1' }, { notes: 'Orchard must remain pesticide free', source: { title: ' Field notes ', date: '2026-11-01' } }],
+    expected: { suggestions: [{ goal: { id: 'g1', title: 'Orchard', version: 3 }, can_edit: true, can_propose: false, limits: [{ type: 'must', text: 'Orchard must remain pesticide free', quote: 'Orchard must remain pesticide free', source: { kind: 'manual', title: 'Field notes', date: '2026-11-01' }, already: null }] }], dropped: 0 }
+  },
+  {
+    id: 'generated-short-boundary',
+    args: [{ wsRole: 'member', wsId: 'w1', userId: 'u2' }, { notes: 'Orchard must thrive', source: { date: '2026-11-02' } }],
+    expected: { suggestions: [], dropped: 0 }
+  },
+  {
+    id: 'generated-repeat-invariant',
+    args: [{ wsRole: 'member', wsId: 'w1', userId: 'u2' }, { notes: 'Orchard must remain pesticide free; Orchard must remain pesticide free', source: { title: 'Review', date: '2026-11-03' } }],
+    expected: { suggestions: [{ goal: { id: 'g1', title: 'Orchard', version: 3 }, can_edit: false, can_propose: true, limits: [{ type: 'must', text: 'Orchard must remain pesticide free', quote: 'Orchard must remain pesticide free', source: { kind: 'meeting', title: 'Review', date: '2026-11-03' }, already: null }] }], dropped: 1 }
+  }
+];
+
+function additionalChecks() {
+  const { api, goal } = fixture();
+  assert.deepEqual(Object.keys(api), ['NOTES_MAX', 'sentences', 'limitType', 'keyWords', 'sameAs', 'goalFor', 'suggestLimits']);
+  assert.deepEqual(Object.values(api).slice(1).map(f => f.length), [1, 1, 1, 2, 3, 2]);
+  assert.equal(create_suggestions.length, 1);
+  assert.equal(api.NOTES_MAX, 20000);
+  assert.deepEqual(api.sentences('1. First rule! Second rule\n* Third rule; Fourth rule • Fifth rule'), ['First rule!', 'Second rule', 'Third rule', 'Fourth rule', 'Fifth rule']);
+  assert.equal(api.limitType('Ensure orchard must not use pesticides'), 'must');
+  assert.equal(api.limitType('Orchard must stay out of scope'), 'out_of_scope');
+  assert.equal(api.limitType("Orchard can't use any pesticides"), null);
+  assert.equal(api.limitType('Orchard must not use pesticides?'), null);
+  assert.equal(api.limitType('Orchard must not use pesticides'), 'must_not');
+  assert.deepEqual([...api.keyWords('The Orchard orchard APPLES 42 ripe123')], ['orchard', 'apples', 'ripe123']);
+  const record = { text: 'Orchard apples ripe' };
+  assert.equal(api.sameAs([record], 'Orchard ripe fruit'), record);
+  assert.equal(api.sameAs([record], 'the and must'), undefined);
+  assert.equal(api.goalFor([goal, goal], 'Orchards must remain pesticide free', null), goal);
+  const second = { ...goal, id: 'g2' };
+  assert.equal(api.goalFor([goal, second], 'Orchard must remain pesticide free', 'g2'), null);
+  second.title = 'Orchard apples';
+  assert.equal(api.goalFor([goal, second], 'Orchard apples must remain pesticide free', null), second);
+  const capture = [];
+  const { resources } = fixture();
+  const proxy = new Proxy(resources, { get(target, key) { capture.push(key); return target[key]; }, ownKeys() { throw Error('container enumerated'); } });
+  create_suggestions(proxy);
+  assert.deepEqual(capture, ['badRequest', 'forbidden', 'V2Error', 'cleanText', 'isDay', 'limitsOf', 'LIMIT_SOURCE_TITLE_MAX', 'LIMIT_TEXT_MAX', 'goalObj', 'goalRow', 'visibleGoals', 'takeAll', 'isBlankText', 'canReadGoal']);
+  assert.throws(() => api.suggestLimits({ wsRole: 'viewer' }, new Proxy({}, { get() { throw Error('body read'); } })), { code: 'read_only' });
+  const failure = {};
+  assert.throws(() => create_suggestions(new Proxy({}, { get() { throw failure; } })), e => e === failure);
+  const f = fixture();
+  const pp = { wsRole: 'owner', wsId: 'w1', userId: 'u1' };
+  f.api.suggestLimits(pp, { notes: 'Orchard must remain pesticide free', source: { date: '2026-11-01' } });
+  assert.deepEqual(f.effects, [['quota', [{ key: 'limit-suggest:u1', max: 20, windowMs: 60000 }, { key: 'limit-suggest-ws:w1', max: 120, windowMs: 3600000 }]], ['limits', f.goal]]);
+}
+
+function runTests() {
+  const results = [];
+  for (const test of cases) {
+    const { api } = fixture();
+    assert.deepEqual(api.suggestLimits(...test.args), test.expected);
+    results.push({ case_id: test.id, outcome: 'passed' });
+  }
+  additionalChecks();
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+function smoke() { return fixture().api.suggestLimits(...cases[0].args); }
+module.exports = { runTests, smoke };

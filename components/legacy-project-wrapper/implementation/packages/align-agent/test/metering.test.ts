@@ -6,7 +6,7 @@ import { after, describe, test } from "node:test";
 import { applyEvents, ensureSession, epochFor, recordRootTurn } from "../src/ledger.ts";
 import { deviceSecret, repoKey, requestKey, sessionKey } from "../src/keys.ts";
 import { layout, localId } from "../src/shared/layout.ts";
-import { picoToMicros, PRICE_TABLE_VERSION, priceRequest } from "../src/spend/prices.ts";
+import { picoToMicros, PRICE_TABLE_VERSION, priceRequest } from "../src/spend.ts";
 import { tailFile } from "../src/tailer.ts";
 import { promoteSettled } from "../src/sync.ts";
 import {

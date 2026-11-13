@@ -1,0 +1,140 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { create_retention } = require('../server_retention/create_retention.js');
+const { create_retention_runner } = require('../server_retention/create_retention_runner.js');
+
+function makeCore() {
+  return create_retention({ eventActor: (secret,id) => secret + ':' + id,
+    purgeWorkspace: () => {}, RESTORE_DAYS: 14, sessionMaxDays: () => 90,
+    testIdpEnabled: () => false, readDate: () => Date, readProcessEnv: () => ({}) });
+}
+
+const cases = [
+  { id: 'generated-former-name', arguments: ['fm_007', null], expected: 'Former member #007' },
+  { id: 'generated-empty-name', arguments: ['ordinary', ''], expected: '' },
+  { id: 'generated-anchored-name', arguments: ['prefix_fm_7', null], expected: 'Former member' }
+];
+
+function emptyCounts() {
+  return { workspaces_purged: 0, sessions_rolled_up: 0, usage_rows_rolled_up: 0,
+    former_members_pseudonymised: 0, audit_rows_deleted: 0, codes_deleted: 0,
+    sign_in_sessions_deleted: 0, activity_deleted: 0, invites_deleted: 0,
+    access_requests_deleted: 0, events_deleted: 0, asks_deleted: 0,
+    value_reports_deleted: 0, requests_deleted: 0, deleted_session_markers_deleted: 0 };
+}
+
+async function checkRetention() {
+  const core = makeCore();
+  const calls = [];
+  const db = {
+    all(sql, ...args) { assert.equal(this, db); calls.push(['all',sql,...args]); return []; },
+    get(sql, ...args) { assert.equal(this, db); calls.push(['get',sql,...args]); return undefined; },
+    run(sql, ...args) { assert.equal(this, db); calls.push(['run',sql,...args]); return 0; }
+  };
+  let transactions = 0;
+  const now = new Date('2025-03-31T12:00:00.000Z');
+  const result = await core.runRetention(db, function (fn) {
+    assert.equal(this, undefined); assert.equal(fn.length, 0); transactions++; return fn();
+  }, now, { env: {}, secret: 's' });
+  assert.deepEqual(result, emptyCounts());
+  assert.equal(transactions, 11);
+  assert.deepEqual(calls[0], ['all','SELECT id FROM v2_workspaces WHERE deleted_at IS NOT NULL AND deleted_at <= ?', '2025-03-17T12:00:00.000Z']);
+  assert.deepEqual(calls[1], ['all','SELECT id FROM v2_requests WHERE created_at < ?', '2024-03-02T12:00:00.000Z']);
+  const realCalls = calls.slice();
+  calls.length = 0;
+  let signal;
+  transactions = 0;
+  assert.deepEqual(await core.runRetention(db, fn => {
+    transactions++;
+    try { return fn(); } catch (error) { signal = error; throw error; }
+  }, now, { dryRun: true, env: {}, secret: 's' }), emptyCounts());
+  assert.equal(transactions, 1);
+  assert.equal(typeof signal, 'symbol');
+  assert.equal(signal.description, 'dry run');
+  assert.deepEqual(calls, realCalls);
+  const unexpected = { failure: 'original' };
+  await assert.rejects(core.runRetention(db, () => { throw unexpected; }, now, {dryRun: true,env:{}}), error => error === unexpected);
+  await core.runRetention(db, fn => {
+    try { return fn(); } catch (error) { assert.equal(error, signal); throw error; }
+  }, now, {dryRun:true,env:{}});
+  assert.equal(core.describeCounts({alpha_beta: 2, last: 0}), 'alpha beta 2, last 0');
+  assert.equal(core.deleteOrphanDirectives({run: () => 9}), 9);
+  assert.equal(core.noteDeparture(db,'w','u','at'), undefined);
+  assert.equal(core.cancelDeparture(db,'w','u'), undefined);
+  assert.equal(core.PERSON_COLUMNS.length, 30);
+  assert.equal(Object.isFrozen(core.PERSON_COLUMNS), false);
+  assert.equal(core.runRetention.length, 4);
+  assert.equal(core.retentionNow.length, 0);
+}
+
+async function checkRunner() {
+  const events = [];
+  const handle = {unref() { assert.equal(this,handle); events.push('unref'); }};
+  const state = {};
+  const core = {retentionNow() { assert.equal(this,core); return 'now'; },
+    describeCounts() { assert.equal(this,core); return 'sessions rolled up 1'; }, RETENTION_INTERVAL_MS: 86400000};
+  const consolePort = {log(value) { assert.equal(this,consolePort); events.push(value); }, error() { assert.fail('unexpected error'); }};
+  const runner = create_retention_runner({core,runRetention: async function (now) {
+    assert.equal(this,undefined); assert.equal(now,'now'); events.push('run'); return {sessions_rolled_up:1};
+  },globalState:state,readConsole:()=>consolePort,readSetInterval:()=>function (callback,delay) {
+    assert.equal(this,undefined); assert.equal(typeof callback,'function'); assert.equal(delay,86400000); events.push('schedule'); return handle;
+  }});
+  await runner.startRetention(false);
+  await runner.startRetention(false);
+  assert.deepEqual(events,['run','Align retention: sessions rolled up 1','schedule','unref','run','Align retention: sessions rolled up 1']);
+  assert.equal(state.__alignRetention,handle);
+  assert.deepEqual(Object.keys(runner),['startRetention']);
+  assert.equal(runner.startRetention.length,1);
+}
+
+function checkIdentity() {
+  const core = makeCore();
+  const writes = [];
+  const db = {
+    get(sql, ...args) {
+      assert.equal(this,db);
+      if (sql === 'SELECT MAX(n) AS n FROM v2_former_members WHERE ws_id = ?') {
+        assert.deepEqual(args,['workspace']); return {n:8};
+      }
+      if (sql === 'SELECT rowid AS id, removed_at FROM v2_former_members WHERE ws_id = ? AND user_id = ?') {
+        assert.deepEqual(args,['workspace','person']); return {id:15,removed_at:'earlier'};
+      }
+      assert.equal(sql,'SELECT lower(email) AS email FROM ba_user WHERE id = ?');
+      assert.deepEqual(args,['person']); return {email:'person@example.test'};
+    },
+    run(sql, ...args) { assert.equal(this,db); writes.push([sql,...args]); return 1; }
+  };
+  assert.equal(core.pseudonymise(db,'workspace','person','at','key'),'fm_9');
+  assert.equal(writes.length,38);
+  assert.deepEqual(writes[0],['UPDATE v2_former_members SET user_id = NULL, n = ?, pseudonymised_at = ? WHERE rowid = ?',9,'at',15]);
+  assert.deepEqual(writes[1],['DELETE FROM v2_invites WHERE ws_id = ? AND (accepted_by = ? OR (? IS NOT NULL AND lower(email) = ?))','workspace','person','person@example.test','person@example.test']);
+  assert.deepEqual(writes[3],['UPDATE v2_events SET actor = NULL WHERE ws_id = ? AND actor = ?','workspace','key:person']);
+  for (let index = 0; index < 30; index++) {
+    const [table,column] = core.PERSON_COLUMNS[index];
+    assert.deepEqual(writes[index+4],[`UPDATE ${table} SET ${column} = ? WHERE ws_id = ? AND ${column} = ?`,'fm_9','workspace','person']);
+  }
+  assert.deepEqual(writes[35],['UPDATE v2_alignment_revisions SET approvers_json = replace(approvers_json, ?, ?) WHERE ws_id = ? AND instr(approvers_json, ?) > 0','person','fm_9','workspace','person']);
+  assert.deepEqual(writes[36].slice(1),['fm_9','Former member #9','workspace','person']);
+  let clockReads = 0;
+  const clockCore = create_retention({eventActor:()=>'',purgeWorkspace:()=>{},RESTORE_DAYS:14,
+    sessionMaxDays:()=>90,testIdpEnabled:env=>env.test,readDate:()=>{clockReads++;return Date;},readProcessEnv:()=>({test:true,ALIGN_TEST_NOW:'2000-01-01T00:00:00.000Z'})});
+  assert.equal(clockCore.retentionNow().toISOString(),'2000-01-01T00:00:00.000Z');
+  assert.equal(clockReads,2);
+}
+
+async function runTests() {
+  const core = makeCore();
+  const results = [];
+  for (const test of cases) {
+    assert.deepEqual(core.personName(...test.arguments),test.expected);
+    results.push({case_id:test.id,outcome:'passed'});
+  }
+  await checkRetention();
+  await checkRunner();
+  checkIdentity();
+  return {schema:'literate-ai/generated-test-results@1',cases:results};
+}
+
+function smoke() { return makeCore().personName(...cases[0].arguments); }
+module.exports = {runTests,smoke};

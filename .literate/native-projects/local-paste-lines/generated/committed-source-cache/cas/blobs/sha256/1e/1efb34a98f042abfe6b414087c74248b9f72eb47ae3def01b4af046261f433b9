@@ -1,0 +1,33 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { shq } = require('../paste_lines/shq.js');
+const { safe_mcp_url } = require('../paste_lines/safe_mcp_url.js');
+const { codex_line } = require('../paste_lines/codex_line.js');
+const { claude_code_line } = require('../paste_lines/claude_code_line.js');
+
+function runTests() {
+  const cases = [];
+  function check(case_id, actual, expected) {
+    assert.deepStrictEqual(actual, expected, case_id);
+    cases.push({ case_id, outcome: 'passed' });
+  }
+  check('generated-quote-empty', shq(''), "''");
+  check('generated-quote-apostrophes', shq("x'y'z"), "'x'\\''y'\\''z'");
+  check('generated-quote-literals', shq('$HOME`id`\\!\n雪'), "'$HOME`id`\\!\n雪'");
+  check('generated-url-brackets', safe_mcp_url('https://[ABcd::.1]:99999/api/mcp'), 'https://[ABcd::.1]:99999/api/mcp');
+  check('generated-url-port-long', safe_mcp_url('http://host:123456/api/mcp'), null);
+  check('generated-url-scheme-case', safe_mcp_url('HTTPS://host/api/mcp'), null);
+  check('generated-url-query', safe_mcp_url('https://host/api/mcp?x=1'), null);
+  check('generated-codex-valid', codex_line('https://relay.test:0/api/mcp'), "codex mcp add align --url 'https://relay.test:0/api/mcp'");
+  check('generated-claude-valid', claude_code_line('http://devbox:4321/api/mcp'), "claude mcp add --transport http --scope user align 'http://devbox:4321/api/mcp'; claude mcp login align");
+  check('generated-codex-reject', codex_line('https://bad_host/api/mcp'), null);
+  check('generated-claude-reject', claude_code_line('https://user@host/api/mcp'), null);
+  return { schema: 'literate-ai/generated-test-results@1', cases };
+}
+
+function smoke() {
+  return codex_line('https://relay.test:0/api/mcp');
+}
+
+module.exports = { runTests, smoke };

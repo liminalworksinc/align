@@ -1,0 +1,86 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_team_asks_routes } = require('../server_team_asks_routes/create_team_asks_routes.js');
+const cases = [{"case_id":"generated-feed","args":[{"route":"workspaces/[ws]/asks","method":"GET","query":"?state=open&team_id=team7&limit=0","etag":null}],"expected_result":{"status":200,"body":{"version":7,"asks":[]},"headers":{"etag":"\"7\"","cache-control":"private, no-cache"}}},{"case_id":"generated-cache","args":[{"route":"workspaces/[ws]/asks","method":"GET","query":"","etag":"\"other\", W/\"7\""}],"expected_result":{"status":304,"body":null,"headers":{"etag":"\"7\"","cache-control":"private, no-cache"}}},{"case_id":"generated-create","args":[{"route":"workspaces/[ws]/asks","method":"POST","body":{"title":"Review proposal"}}],"expected_result":{"status":201,"body":{"title":"Review proposal"},"headers":{}}},{"case_id":"generated-import","args":[{"route":"workspaces/[ws]/asks/import","method":"POST","body":{"asks":[]}}],"expected_result":{"status":201,"body":{"asks":[]},"headers":{}}},{"case_id":"generated-detail","args":[{"route":"workspaces/[ws]/asks/[id]","method":"GET"}],"expected_result":{"status":200,"body":{"id":"ask7"},"headers":{}}},{"case_id":"generated-action","args":[{"route":"workspaces/[ws]/asks/[id]/[action]","method":"POST","body":{"note":"Done"}}],"expected_result":{"status":200,"body":{"note":"Done"},"headers":{}}}];
+
+async function execute(input) {
+  const calls = [];
+  const principal = { kind: 'web' };
+  const policy = { workspace: 'ws7' };
+  const record = (name, result) => function (...args) {
+    assert.equal(this, undefined);
+    calls.push([name, ...args]);
+    return typeof result === 'function' ? result(...args) : result;
+  };
+  class TestResponse {
+    constructor(body, options = {}) {
+      this.status = options.status || 200;
+      this.body = body;
+      this.headers = options.headers || {};
+    }
+    static json(body, options) { return new TestResponse(body, options); }
+  }
+  const resources = {
+    URL, Response: TestResponse,
+    validate: { ID_RE: /^[a-z0-9]+$/ },
+    workspaces: { enter: record('enter', policy) },
+    http: {
+      route: function (handler) {
+        assert.equal(this, undefined);
+        return async (req, context) => handler(req, await context.params);
+      },
+      eitherAuth: record('eitherAuth', principal),
+      webAuth: record('webAuth', principal),
+      webWrite: record('webWrite', principal),
+      idParam: record('idParam', value => value),
+      readJson: record('readJson', () => input.body),
+    },
+    asks: {
+      asksFeed: record('asksFeed', { version: 7, asks: [] }),
+      getAsk: record('getAsk', { id: 'ask7' }),
+      createAsk: record('createAsk', (p, body) => body),
+      importAsks: record('importAsks', (p, body) => body),
+      assertAskAction: record('assertAskAction', action => action),
+      actOnAsk: record('actOnAsk', (p, id, action, body) => body),
+    },
+  };
+  const routes = create_team_asks_routes(resources);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(Object.keys(routes), ['workspaces/[ws]/asks', 'workspaces/[ws]/asks/[id]', 'workspaces/[ws]/asks/import', 'workspaces/[ws]/asks/[id]/[action]']);
+  const req = { url: 'https://example.test/' + (input.query || ''), headers: { get(name) { assert.equal(this, req.headers); assert.equal(name, 'if-none-match'); return input.etag || null; } } };
+  const result = await routes[input.route][input.method](req, { params: Promise.resolve({ ws: 'ws7', id: 'ask7', action: 'complete' }) });
+  assert.equal(calls[0][0], input.method === 'POST' ? 'webWrite' : input.route.endsWith('[id]') ? 'webAuth' : 'eitherAuth');
+  assert.equal(calls[0][1], req);
+  assert.deepEqual(calls[1], ['idParam', 'ws7', resources.validate.ID_RE]);
+  assert.deepEqual(calls[2], ['enter', principal, 'ws7']);
+  if (input.route === 'workspaces/[ws]/asks' && input.method === 'GET') {
+    const query = new URL(req.url).searchParams;
+    assert.deepEqual(calls[3], ['asksFeed', policy, { state: query.get('state'), teamId: query.get('team_id'), limit: query.get('limit') }, null]);
+    assert.equal(calls.length, 4);
+  } else if (input.method === 'POST') {
+    const action = input.route.endsWith('[action]');
+    const bodyIndex = action ? 5 : 3;
+    if (action) {
+      assert.deepEqual(calls[3], ['idParam', 'ask7', resources.validate.ID_RE]);
+      assert.deepEqual(calls[4], ['assertAskAction', 'complete']);
+    }
+    assert.deepEqual(calls[bodyIndex], ['readJson', req, action ? 8192 : input.route.endsWith('import') ? 524288 : 16384]);
+    assert.deepEqual(calls[bodyIndex + 1], action ? ['actOnAsk', policy, 'ask7', 'complete', input.body] : [input.route.endsWith('import') ? 'importAsks' : 'createAsk', policy, input.body]);
+    assert.equal(calls.length, bodyIndex + 2);
+  } else {
+    assert.deepEqual(calls[3], ['idParam', 'ask7', resources.validate.ID_RE]);
+    assert.deepEqual(calls[4], ['getAsk', policy, 'ask7']);
+    assert.equal(calls.length, 5);
+  }
+  return { status: result.status, body: result.body, headers: result.headers };
+}
+async function run() {
+  const results = [];
+  for (const test of cases) {
+    assert.deepEqual(await execute(...test.args), test.expected_result);
+    results.push({ case_id: test.case_id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+async function smoke() { return execute(...cases[0].args); }
+module.exports = { run, smoke };

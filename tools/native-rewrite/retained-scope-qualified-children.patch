@@ -1,0 +1,313 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index d1b12e36..4ae469a1 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -4,0 +5,5 @@
++- Retained wrapper file membership can be refreshed beside independently qualified
++  native children. The reviewed plan pins their registry and current qualification;
++  promoted source, stale evidence and overlapping ownership still refuse. A new
++  complete retained receipt remains required.
++
+diff --git a/docs/roadmap/active-work.md b/docs/roadmap/active-work.md
+index d564833b..90f7e883 100644
+--- a/docs/roadmap/active-work.md
++++ b/docs/roadmap/active-work.md
+@@ -33525,0 +33526,14 @@ independent review and the complete combined gate from test one.
++
++### [x] RETAINED-SCOPE-CHILDREN-001 - Refresh retained wrapper scope beside qualified native children
++
++- **Priority:** P0
++- **Owner:** retained scope refresh and conversion authority adapters, Goals 1 and 4
++- **Direction:** Allow reviewed retained wrapper membership updates while independently registered native children remain qualified.
++- **Conclusion:** Qualification of separate native children must not imply authority transfer for an unpromoted retained wrapper. Permit only a disjoint retained wrapper with exact current child evidence; preserve all native authority and require a new complete retained receipt.
++- **Depends on:** none
++- **Completion prerequisites:** none
++- **Implementation:**
++  - [x] Bind current registry and verified child projections into the refresh plan; reject root promotions, overlap and stale or unqualified child authority; revalidate under the existing transaction and preserve history.
++- **Evidence:**
++  - [x] Existing scope refresh tests plus qualified-child controls, rollback and drift refusal; isolated installed-wheel planning against a real adopted project; complete new retained consumer receipt.
++- **Evidence:** The focused scope suite passes 11 tests, and retained receipt, readmission and remote-harness regression passes 21 tests. A guarded plan and apply preserve four qualified child projections while refreshing 11 added and four removed paths. A clean-checkout wheel from commit `4548261e3c2293c75b22dcfafd831821c80179a6` has SHA-256 `6bc6c124985ca80e85ee375142266579f8d08cff6ec409eeae6f554a560b1d12`; its separate non-editable installation reports that origin and plans no further scope changes against the real hybrid project. The complete sealed build, test and package workflow passes, with retained receipt `sha256:2b883528374f56bef8faf25ed5f629fb2f6ba641754c8cc17ef5fb6b4547a9ba`. Its compact application-suite count is 937 passed and zero failed; the same complete command also passes 23 shell checks, 183 OAuth checks, 62 live agent checks and 600 agent tests. Publication remains subject to operator authorization.
+diff --git a/docs/user/configuration-and-cli.md b/docs/user/configuration-and-cli.md
+index 445a6e4c..a12e32e5 100644
+--- a/docs/user/configuration-and-cli.md
++++ b/docs/user/configuration-and-cli.md
+@@ -2298 +2298,5 @@ execution occurs only with `--run-component-baselines`. Indirect source/metadata
+-paths and already specification-authoritative projects refuse. Inspect a new plan
++paths and source promoted within the retained project refuse. A qualified aggregate
++can refresh a separate retained wrapper only when every promotion belongs to a
++registered native child outside that source tree. The plan binds the exact registry
++and current qualified projections, and apply checks them again before returning.
++Native qualification and conversion history stay unchanged. Inspect a new plan
+diff --git a/src/literate_ai/adapters/retained_scope_refresh.py b/src/literate_ai/adapters/retained_scope_refresh.py
+index c376a06e..9acd6ee8 100644
+--- a/src/literate_ai/adapters/retained_scope_refresh.py
++++ b/src/literate_ai/adapters/retained_scope_refresh.py
+@@ -12,0 +13,4 @@ from literate_ai._filesystem import stat_is_link_or_reparse
++from literate_ai.adapters.authority import (
++    AuthorityProjectionStoreError,
++    FileAuthorityProjectionStore,
++)
+@@ -14,0 +19,2 @@ from literate_ai.adapters.conversion_authority import (
++    NATIVE_PROJECTS_FILE,
++    ConversionAuthorityError,
+@@ -15,0 +22,2 @@ from literate_ai.adapters.conversion_authority import (
++    _component_projection_identities,
++    _native_project_roots,
+@@ -33,2 +41,5 @@ from literate_ai.contracts import canonical_identity, canonical_json_bytes
+-from literate_ai.contracts.operator_adoption import ConversionAuthorityStage
+-from literate_ai.projects import ProjectConfigurationStore, load_project
++from literate_ai.contracts.operator_adoption import (
++    ConversionAuthorityStage,
++    ConversionAuthorityState,
++)
++from literate_ai.projects import LoadedProject, ProjectConfigurationStore, load_project
+@@ -125,0 +137,41 @@ def _members(root: Path, paths: tuple[str, ...]) -> list[dict[str, Any]]:
++def _qualified_child_basis(
++    project: LoadedProject,
++    state: ConversionAuthorityState,
++    implementation: Path,
++) -> dict[str, Any]:
++    """Separate retained wrapper authority from independent child qualification."""
++
++    try:
++        # A promotion in this project could own the wrapper's retained source.
++        # Only independently registered, disjoint children can justify this path.
++        if FileAuthorityProjectionStore(project.root).coordinates():
++            _fail("source_not_authoritative", "refresh cannot change promoted source")
++        children = _native_project_roots(project)
++        if not children or any(
++            child.is_relative_to(implementation) or implementation.is_relative_to(child)
++            for child in children
++        ):
++            _fail(
++                "source_not_authoritative",
++                "qualified refresh requires native children outside retained source",
++            )
++        current = _component_projection_identities(project, qualified=True)
++    except (AuthorityProjectionStoreError, ConversionAuthorityError) as exc:
++        raise RetainedScopeRefreshError(
++            "retained_scope.native_qualification_invalid",
++            "registered native qualification is missing, stale, or invalid",
++        ) from exc
++    if current != state.evidence_identities:
++        _fail(
++            "native_qualification_stale",
++            "qualified claim does not match current native child projections",
++        )
++    registry = _safe_path(project.root, NATIVE_PROJECTS_FILE)
++    if not stat.S_ISREG(registry.stat().st_mode):
++        _fail("unsafe_path", "native project registry must be a regular file")
++    return {
++        "registry_identity": _identity(registry.read_bytes()),
++        "qualified_projection_identities": [item.uri for item in current],
++    }
++
++
+@@ -158,5 +209,0 @@ def plan_retained_scope_refresh(selected: Path) -> dict[str, Any]:
+-    if state.stage is ConversionAuthorityStage.QUALIFIED:
+-        _fail(
+-            "source_not_authoritative",
+-            "refresh cannot change specification-authoritative source",
+-        )
+@@ -166,0 +214,5 @@ def plan_retained_scope_refresh(selected: Path) -> dict[str, Any]:
++    qualified_children = (
++        _qualified_child_basis(project, state, implementation)
++        if state.stage is ConversionAuthorityStage.QUALIFIED
++        else None
++    )
+@@ -221,0 +274,2 @@ def plan_retained_scope_refresh(selected: Path) -> dict[str, Any]:
++    if qualified_children is not None:
++        value["qualified_native_children"] = qualified_children
+@@ -342,0 +397,15 @@ def apply_retained_scope_refresh(
++            if "qualified_native_children" in plan:
++                current_project = load_project(root)
++                current_state = FilesystemConversionAuthorityStore(root).load_optional()
++                if (
++                    current_state is None
++                    or current_state.stage is not ConversionAuthorityStage.QUALIFIED
++                    or _qualified_child_basis(
++                        current_project, current_state, implementation
++                    )
++                    != plan["qualified_native_children"]
++                ):
++                    _fail(
++                        "metadata_changed",
++                        "native child authority changed during retained refresh",
++                    )
+diff --git a/tests/e2e/test_retained_scope_refresh.py b/tests/e2e/test_retained_scope_refresh.py
+index 8999391a..ae69c5d7 100644
+--- a/tests/e2e/test_retained_scope_refresh.py
++++ b/tests/e2e/test_retained_scope_refresh.py
+@@ -9,0 +10 @@ import unittest
++from dataclasses import replace
+@@ -13,0 +15,7 @@ from literate_ai.adapters import retained_scope_refresh as refresh
++from literate_ai.adapters.conversion_authority import register_native_project
++from literate_ai.contracts import canonical_identity, canonical_json_bytes
++from literate_ai.contracts.operator_adoption import (
++    ConversionAuthorityStage,
++    ConversionAuthorityState,
++)
++from literate_ai.projects import ProjectConfigurationStore, load_project
+@@ -85,0 +94 @@ class RetainedScopeRefreshTests(unittest.TestCase):
++
+@@ -95,0 +105,160 @@ class RetainedScopeRefreshTests(unittest.TestCase):
++    def qualified_child(self):
++        project = load_project(self.root)
++        child = self.root / ".literate/native-projects/tiny"
++        ProjectConfigurationStore(child).create(
++            replace(project.definition, project_id="tiny-native")
++        )
++        register_native_project(project, child)
++        proof = canonical_identity({"fixture": "verified child qualification"})
++        store = refresh.FilesystemConversionAuthorityStore(self.root)
++        prior = store.load_optional()
++        state = ConversionAuthorityState(
++            project_id=project.definition.project_id,
++            stage=ConversionAuthorityStage.QUALIFIED,
++            evidence_identities=(proof,),
++            prior_state_identity=prior.identity,
++        )
++        store.path.write_bytes(canonical_json_bytes(state.to_dict()) + b"\n")
++        return child, state, proof
++
++    def test_qualified_child_plan_is_read_only_and_preserves_qualified_authority(self):
++        _child, state, proof = self.qualified_child()
++        (self.source / "new.txt").write_text("retained change")
++        before = self.snapshot()
++        # Cryptographic promotion reopening is delegated to the existing verifier.
++        # These controls test scope ownership and transaction behavior separately.
++        with mock.patch.object(
++            refresh, "_component_projection_identities", return_value=(proof,)
++        ) as verify:
++            plan = self.plan()
++            self.assertEqual(self.snapshot(), before)
++            self.assertEqual(
++                plan["qualified_native_children"]["qualified_projection_identities"],
++                [proof.uri],
++            )
++            verify.assert_called_once()
++            self.assertTrue(verify.call_args.kwargs["qualified"])
++            code, result = self.apply(plan)
++        self.assertEqual(code, 0, result)
++        self.assertEqual(
++            refresh.FilesystemConversionAuthorityStore(self.root).load_optional(), state
++        )
++        self.assertEqual((self.source / "new.txt").read_text(), "retained change")
++
++    def test_qualified_scope_rejects_a_projection_in_the_retained_project(self):
++        self.qualified_child()
++        before = self.snapshot()
++        with (
++            mock.patch.object(
++                refresh.FileAuthorityProjectionStore,
++                "coordinates",
++                return_value=("component://promoted/root",),
++            ),
++            mock.patch.object(refresh, "_component_projection_identities") as verify,
++        ):
++            code, result = self.invoke()
++        self.assertEqual(code, 2, result)
++        self.assertEqual(
++            result["error"]["code"], "retained_scope.source_not_authoritative"
++        )
++        verify.assert_not_called()
++        self.assertEqual(self.snapshot(), before)
++
++    def test_qualified_scope_rejects_changed_child_qualification(self):
++        self.qualified_child()
++        before = self.snapshot()
++        with mock.patch.object(
++            refresh,
++            "_component_projection_identities",
++            return_value=(canonical_identity({"fixture": "different qualification"}),),
++        ):
++            code, result = self.invoke()
++        self.assertEqual(code, 2, result)
++        self.assertEqual(
++            result["error"]["code"], "retained_scope.native_qualification_stale"
++        )
++        self.assertEqual(self.snapshot(), before)
++
++    def test_qualified_scope_rejects_failed_child_evidence_verification(self):
++        self.qualified_child()
++        before = self.snapshot()
++        with mock.patch.object(
++            refresh,
++            "_component_projection_identities",
++            side_effect=refresh.ConversionAuthorityError(
++                "conversion_authority.component_stage_incomplete", "not qualified"
++            ),
++        ):
++            code, result = self.invoke()
++        self.assertEqual(code, 2, result)
++        self.assertEqual(
++            result["error"]["code"], "retained_scope.native_qualification_invalid"
++        )
++        self.assertEqual(self.snapshot(), before)
++
++    def test_qualified_scope_without_registered_children_remains_forbidden(self):
++        self.qualified_child()
++        (self.root / refresh.NATIVE_PROJECTS_FILE).unlink()
++        before = self.snapshot()
++        code, result = self.invoke()
++        self.assertEqual(code, 2, result)
++        self.assertEqual(
++            result["error"]["code"], "retained_scope.source_not_authoritative"
++        )
++        self.assertEqual(self.snapshot(), before)
++
++    def test_qualified_scope_rejects_retained_source_overlapping_native_children(self):
++        _child, state, _proof = self.qualified_child()
++        with self.assertRaisesRegex(
++            refresh.RetainedScopeRefreshError, "outside retained"
++        ):
++            refresh._qualified_child_basis(load_project(self.root), state, self.root)
++
++    def test_native_registry_change_invalidates_reviewed_scope_plan(self):
++        _child, _state, proof = self.qualified_child()
++        (self.source / "new.txt").write_text("retained change")
++        with mock.patch.object(
++            refresh, "_component_projection_identities", return_value=(proof,)
++        ):
++            plan = self.plan()
++            registry = self.root / refresh.NATIVE_PROJECTS_FILE
++            registry.write_bytes(registry.read_bytes() + b"\n")
++            before = self.snapshot()
++            code, result = self.apply(plan)
++        self.assertEqual(code, 2, result)
++        self.assertEqual(result["error"]["code"], "retained_scope.plan_stale")
++        self.assertEqual(self.snapshot(), before)
++
++    def test_native_registry_drift_during_refresh_rolls_back_only_owned_metadata(self):
++        _child, state, proof = self.qualified_child()
++        (self.source / "new.txt").write_text("retained change")
++        registry = self.root / refresh.NATIVE_PROJECTS_FILE
++        original_update = refresh.ProjectConfigurationStore.update
++
++        def change_registry(store, *args, **kwargs):
++            result = original_update(store, *args, **kwargs)
++            registry.write_bytes(registry.read_bytes() + b"\n")
++            return result
++
++        with mock.patch.object(
++            refresh, "_component_projection_identities", return_value=(proof,)
++        ):
++            plan = self.plan()
++            before = self.snapshot()
++            with mock.patch.object(
++                refresh.ProjectConfigurationStore, "update", new=change_registry
++            ):
++                code, result = self.apply(plan)
++        self.assertEqual(code, 2, result)
++        after = self.snapshot()
++        self.assertNotEqual(
++            after[Path(refresh.NATIVE_PROJECTS_FILE)],
++            before[Path(refresh.NATIVE_PROJECTS_FILE)],
++        )
++        after.pop(Path(refresh.NATIVE_PROJECTS_FILE))
++        before.pop(Path(refresh.NATIVE_PROJECTS_FILE))
++        self.assertEqual(after, before)
++        self.assertEqual(
++            refresh.FilesystemConversionAuthorityStore(self.root).load_optional(), state
++        )
++

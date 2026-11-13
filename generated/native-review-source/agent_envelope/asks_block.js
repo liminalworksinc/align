@@ -1,0 +1,3 @@
+'use strict';
+const {asks_block} = require('./core.js');
+module.exports = {asks_block};

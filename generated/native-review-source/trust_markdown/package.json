@@ -1,0 +1,1 @@
+{"name":"trust_markdown","type":"commonjs","exports":{"./parse_inline":"./parse_inline.js","./parse_markdown":"./parse_markdown.js","./plain":"./plain.js","./safe_href":"./safe_href.js","./slug":"./slug.js"}}

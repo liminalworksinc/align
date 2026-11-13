@@ -1,0 +1,156 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { create_startup } = require('../server_startup/create_startup.js');
+
+function fixture(input) {
+  const calls = [];
+  const files = new Map();
+  const callbacks = [];
+  const state = { directory: '/state', phase: input.phase, pid: input.pid };
+  if (input.owner !== null) files.set('/state/.pid', input.owner);
+  const record = (name, fn) => (...args) => {
+    calls.push([name, ...args]);
+    return fn(...args);
+  };
+  const context = {
+    assertStartupConfig: record('validate', () => {}),
+    environment: record('environment', () => ({ NEXT_PHASE: state.phase })),
+    dataDir: record('dataDir', () => state.directory),
+    dcrDir: record('dcrDir', () => '/clients'),
+    warnings: record('warnings', () => input.warnings),
+    chmodSync: record('chmod', () => {}),
+    existsSync: record('exists', file => files.has(file) || (file === '/clients' && input.entries !== null)),
+    mkdirSync: record('mkdir', () => {}),
+    readFileSync: record('read', file => {
+      if (!files.has(file)) throw new Error('missing');
+      return files.get(file);
+    }),
+    rmSync: record('rm', () => {}),
+    unlinkSync: record('unlink', file => { files.delete(file); }),
+    writeFileSync: record('write', (file, value) => { files.set(file, value); }),
+    readdirSync: record('readdir', () => input.entries),
+    join: record('join', (...parts) => parts.join('/')),
+    dirname: record('dirname', file => file.slice(0, file.lastIndexOf('/'))),
+    pid: record('pid', () => state.pid),
+    kill: record('kill', () => {
+      if (input.probe === 'dead') throw { code: 'ESRCH' };
+      if (input.probe === 'permission') throw { code: 'EPERM' };
+      if (input.probe === 'null') throw null;
+      return false;
+    }),
+    once: record('once', (event, callback) => { callbacks.push(callback); return 123; }),
+    warn: record('warn', () => {})
+  };
+  return { context, calls, files, callbacks, state };
+}
+
+function execute(input) {
+  const f = fixture(input);
+  const binding = create_startup(f.context);
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(Object.keys(binding), ['startup']);
+  assert.equal(binding.startup.name, 'startup');
+  assert.equal(binding.startup.length, 0);
+  for (const name of Object.keys(f.context)) {
+    f.context[name] = () => { throw new Error('Replaced resource invoked'); };
+  }
+  const startup = binding.startup;
+  const result = startup();
+  assert.equal(result, undefined);
+  // JSON metadata represents the void startup result as null.
+  return { f, startup, result: result === undefined ? null : result };
+}
+
+const fresh = { entries: ['keep', '_oauth_clients.json.1234abcd.tmp', '_oauth_clients.json.ABCDEF12.tmp', '_oauth_clients.json.1234567.tmp'], owner: null, phase: '', pid: 73, probe: 'dead', warnings: [' first ', 8] };
+const build = { entries: null, owner: '99', phase: 'phase-production-build', pid: 74, probe: 'alive', warnings: [] };
+const self = { entries: null, owner: ' 0075 ', phase: 'phase-production-build ', pid: 75, probe: 'alive', warnings: [] };
+
+function testFresh() {
+  const { f, result } = execute(fresh);
+  assert.equal(result, null);
+  assert.deepEqual(f.calls.slice(0, -1), [
+    ['validate'], ['environment'], ['dataDir'], ['join', '/state', '.pid'],
+    ['exists', '/state/.pid'], ['dirname', '/state/.pid'],
+    ['mkdir', '/state', { recursive: true, mode: 448 }], ['pid'],
+    ['write', '/state/.pid', '73', { mode: 384 }], ['chmod', '/state/.pid', 384],
+    ['dcrDir'], ['exists', '/clients'], ['readdir', '/clients'],
+    ['join', '/clients', '_oauth_clients.json.1234abcd.tmp'],
+    ['rm', '/clients/_oauth_clients.json.1234abcd.tmp', { force: true }],
+    ['warnings'], ['warn', ' first '], ['warn', 8]
+  ]);
+  assert.equal(f.calls.at(-1)[0], 'once');
+  assert.equal(f.calls.at(-1)[1], 'exit');
+  assert.equal(f.files.get('/state/.pid'), '73');
+  f.state.directory = '/changed';
+  assert.equal(f.callbacks[0](), undefined);
+  assert.equal(f.files.has('/state/.pid'), false);
+  assert.equal(f.callbacks[0](), undefined);
+  return result;
+}
+
+function testBuild() {
+  const { f, result } = execute(build);
+  assert.equal(result, null);
+  assert.deepEqual(f.calls, [['validate'], ['environment']]);
+  assert.equal(f.files.get('/state/.pid'), '99');
+  assert.equal(f.callbacks.length, 0);
+}
+
+function testSelf() {
+  const { f, startup, result } = execute(self);
+  assert.equal(result, null);
+  assert.equal(f.calls.some(call => call[0] === 'kill'), false);
+  f.files.set('/state/.pid', '0075');
+  f.callbacks[0]();
+  assert.equal(f.files.get('/state/.pid'), '0075');
+  f.state.directory = '/next';
+  assert.equal(startup(), undefined);
+  assert.equal(f.callbacks.length, 2);
+  f.files.set('/state/.pid', ' 75\n');
+  f.callbacks[0]();
+  assert.equal(f.files.has('/state/.pid'), false);
+  assert.equal(f.files.get('/next/.pid'), '75');
+  f.callbacks[1]();
+  assert.equal(f.files.has('/next/.pid'), false);
+
+  for (const probe of ['alive', 'permission']) {
+    const other = fixture({ ...self, owner: '0x64', probe });
+    assert.throws(create_startup(other.context).startup, {
+      name: 'Error', message: 'Another Align server (pid 100) is using /state. Stop it first.'
+    });
+    assert.equal(other.files.get('/state/.pid'), '0x64');
+    assert.equal(other.calls.some(call => call[0] === 'write'), false);
+  }
+  const invalid = fixture({ ...self, owner: '100', probe: 'null' });
+  assert.throws(create_startup(invalid.context).startup, TypeError);
+  for (const owner of ['nonnumeric', '0', '100', 'Infinity']) {
+    const stale = fixture({ ...self, owner, probe: 'dead' });
+    assert.equal(create_startup(stale.context).startup(), undefined);
+    assert.equal(stale.files.get('/state/.pid'), '75');
+  }
+  const failure = {};
+  const refused = fixture(self);
+  refused.context.assertStartupConfig = () => { throw failure; };
+  assert.throws(create_startup(refused.context).startup, value => value === failure);
+  assert.deepEqual(refused.calls, []);
+  const warning = fixture({ ...self, warnings: ['stop'] });
+  warning.context.warn = () => { throw failure; };
+  assert.throws(create_startup(warning.context).startup, value => value === failure);
+  assert.equal(warning.files.get('/state/.pid'), '75');
+  assert.equal(warning.callbacks.length, 0);
+}
+
+function run() {
+  const cases = [];
+  for (const [case_id, test] of [
+    ['generated-fresh-owner', testFresh],
+    ['generated-build-phase', testBuild],
+    ['generated-self-owner', testSelf]
+  ]) {
+    test();
+    cases.push({ case_id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases };
+}
+
+module.exports = { run, smoke: testFresh };

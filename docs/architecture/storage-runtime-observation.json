@@ -1,0 +1,227 @@
+{
+  "schema": "align/original-storage-probe@1",
+  "passed": true,
+  "synthetic_fixtures_only": true,
+  "source_sha256": {
+    "db.ts": "43959ae8034598b41d86cf0d77079654c81957a712b0ad05df537718cdaa8977",
+    "core.mts": "aa3ce3dafef8b8ccb6ae18685ef82543a078562036596f3869d0b3dd926f4d06"
+  },
+  "retained_module_transpiled_without_implementation_edits": true,
+  "dependency_binding": {
+    "config": "owned fixture directory",
+    "schema_version": 22,
+    "count": "actual qualified wording package",
+    "driver": "actual node:sqlite"
+  },
+  "original_migrate_executed": true,
+  "stored_data_upgrade_coverage": false,
+  "complete_transaction_or_auth_qualification_claimed": false,
+  "runtime": {
+    "node": "v26.3.0",
+    "sqlite": "3.53.2"
+  },
+  "cases": [
+    {
+      "name": "from-0",
+      "from_version": 0,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-1",
+      "from_version": 1,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-2",
+      "from_version": 2,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-3",
+      "from_version": 3,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-4",
+      "from_version": 4,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-5",
+      "from_version": 5,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-6",
+      "from_version": 6,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-7",
+      "from_version": 7,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-8",
+      "from_version": 8,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-9",
+      "from_version": 9,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-10",
+      "from_version": 10,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-11",
+      "from_version": 11,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-12",
+      "from_version": 12,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-13",
+      "from_version": 13,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-14",
+      "from_version": 14,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-15",
+      "from_version": 15,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-16",
+      "from_version": 16,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-17",
+      "from_version": 17,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-18",
+      "from_version": 18,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-19",
+      "from_version": 19,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-20",
+      "from_version": 20,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-21",
+      "from_version": 21,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "from-22",
+      "from_version": 22,
+      "to_version": 22,
+      "empty_schema_match": true,
+      "passed": true
+    },
+    {
+      "name": "connection-and-modes",
+      "process_wide_reuse": true,
+      "separate_connections": true,
+      "auth_busy_ms": 5000,
+      "domain_busy_ms": 0,
+      "directory_mode": 448,
+      "file_modes": {
+        "align.sqlite": 384,
+        "align.sqlite-wal": 384,
+        "align.sqlite-shm": 384
+      },
+      "passed": true
+    },
+    {
+      "name": "future-version",
+      "input_version": 23,
+      "output_version": 23,
+      "schema_changed": false,
+      "original_behavior": "no-op; not a future-version refusal",
+      "passed": true
+    },
+    {
+      "name": "failed-final-migration",
+      "version_remained": 21,
+      "foreign_keys_restored": true,
+      "created_table_rolled_back": true,
+      "fixture_row_preserved": true,
+      "error": {
+        "name": "Error",
+        "message": "migration 22 left 1 broken reference"
+      },
+      "passed": true
+    },
+    {
+      "name": "observer-index-control",
+      "dropped_index_detected": true,
+      "passed": true
+    }
+  ],
+  "classification": "retained-runtime diagnostic; not native qualification",
+  "source_commit": "bb2605c80db29e03862ac2a2a9affe134184a7da"
+}

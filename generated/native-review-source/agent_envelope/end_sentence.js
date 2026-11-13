@@ -1,0 +1,3 @@
+'use strict';
+const {end_sentence} = require('./core.js');
+module.exports = {end_sentence};

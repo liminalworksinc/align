@@ -1,0 +1,32 @@
+'use strict';
+const fs=require('node:fs');
+const path=require('node:path');
+const root=path.resolve(__dirname,'..');
+const output=process.argv[2];
+if(!output)throw new Error('Expected output path');
+const modules=new Map();
+function collect(file){
+  const absolute=path.resolve(file),id=path.relative(root,absolute).split(path.sep).join('/');
+  if(modules.has(id))return id;
+  const body=fs.readFileSync(absolute,'utf8').replace(/^#![^\n]*\n/,'');
+  modules.set(id,null);
+  const matches=[...body.matchAll(/require\(['"]([^'"]+)['"]\)/g)];
+  const bindings={};
+  for(const match of matches){
+    if(match[1].startsWith('.'))bindings[match[1]]=collect(path.resolve(path.dirname(absolute),match[1]));
+    else if(!match[1].startsWith('node:'))throw new Error('Unexpected dependency '+match[1]);
+  }
+  modules.set(id,{body,bindings});
+  return id;
+}
+collect(path.join(root,'main.js'));
+let bundled='#!/usr/bin/env node\n\'use strict\';\nconst __registry=Object.create(null);\n';
+for(const [id,entry] of modules){
+  bundled+='__registry['+JSON.stringify(id)+']={bindings:'+JSON.stringify(entry.bindings)+',factory:function(require,module,exports){\n'+entry.body+'\n}};\n';
+}
+bundled+="const __cache=Object.create(null);\nfunction __load(id){if(__cache[id])return __cache[id].exports;const e=__registry[id],m={exports:{}};__cache[id]=m;const local=s=>Object.hasOwn(e.bindings,s)?__load(e.bindings[s]):require(s);e.factory(local,m,m.exports);return m.exports;}\n__load('main.js').main();\n";
+fs.mkdirSync(path.dirname(path.resolve(output)),{recursive:true});
+fs.writeFileSync(output,bundled,{mode:0o755});
+fs.chmodSync(output,0o755);
+const destination=path.join(path.dirname(path.resolve(output)),'agent_envelope');
+if(destination!==path.join(root,'agent_envelope'))fs.cpSync(path.join(root,'agent_envelope'),destination,{recursive:true});

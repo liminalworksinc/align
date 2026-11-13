@@ -1,7 +1,5 @@
-import { getAsk } from "@/lib/v2/asks";
-import { idParam, route, webAuth } from "@/lib/v2/http";
-import { ID_RE } from "@/lib/v2/validate";
-import { enter } from "@/lib/v2/workspaces";
+// Typed entry point for the admitted route library.
+import { bindRoute } from "@/lib/v2/native-routes/binding";
+import { routes } from "@/lib/v2/native-routes/team-asks-routes";
 
-// GET (cookie): one ask I can read.
-export const GET = route<{ ws: string; id: string }>(async (req, params) => getAsk(enter(await webAuth(req), idParam(params.ws, ID_RE)), idParam(params.id, ID_RE)));
+export const GET = bindRoute<{ ws: string; id: string }>(routes, "workspaces/[ws]/asks/[id]", "GET");

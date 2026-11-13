@@ -1,0 +1,126 @@
+{
+  "schema": "align/readable-private-qualification@1",
+  "component": "server-metrics",
+  "package": "server_metrics",
+  "package_files": [
+    "package.json",
+    "create_metrics.js"
+  ],
+  "package_exports": {
+    "./create_metrics": "./create_metrics.js"
+  },
+  "capabilities": [
+    {
+      "id": "server-metrics.create-metrics",
+      "symbol": "create_metrics",
+      "module": "create_metrics.js",
+      "fixture": "server-metrics-fixture-draft-v1.cjs",
+      "cases": "server-metrics-cases-draft-v1.cjs",
+      "characterization": "metrics-characterization.json",
+      "resource_count": 4,
+      "default_operation": "report",
+      "runner": false,
+      "constant_data": "server-metrics.public-target-data-v2.json"
+    }
+  ],
+  "plans": [
+    {
+      "capability": "server-metrics.create-metrics",
+      "batch": 0,
+      "expected_result": {
+        "batch": 0,
+        "records": 36,
+        "sha256": "c696a1b3186d5c1ddc55771288d25cd3257c2345954b9e99801de3a0e7390782"
+      }
+    },
+    {
+      "capability": "server-metrics.create-metrics",
+      "batch": 1,
+      "expected_result": {
+        "batch": 1,
+        "records": 42,
+        "sha256": "6e364ecc5c3b93b2ff4c1ec9fe3614838b9c5a975983b962b805a1045ed59b6f"
+      }
+    },
+    {
+      "capability": "server-metrics.create-metrics",
+      "batch": 2,
+      "expected_result": {
+        "batch": 2,
+        "records": 174,
+        "sha256": "472ba906d3dc0d50b3d9c8af53674cbd1cb5b2984be88a033b30adcbc4451c8a"
+      }
+    },
+    {
+      "capability": "server-metrics.create-metrics",
+      "batch": 3,
+      "expected_result": {
+        "batch": 3,
+        "records": 77,
+        "sha256": "4adf4462e1cd6c5b96a7a39e0c1eee5165d1abdcea7e9ebec694bb8b9722e201"
+      }
+    },
+    {
+      "capability": "server-metrics.create-metrics",
+      "batch": 4,
+      "expected_result": {
+        "batch": 4,
+        "records": 48,
+        "sha256": "fe4ff61cf3bbf9ae498cb43bc506be0203d19ed00cd866a831606c4899e425de"
+      }
+    },
+    {
+      "capability": "server-metrics.create-metrics",
+      "batch": 5,
+      "expected_result": {
+        "batch": 5,
+        "records": 48,
+        "sha256": "eb695f2b817398df9a7b07a63fc375dc907d3501646b739f4e221282146fc139"
+      }
+    },
+    {
+      "capability": "server-metrics.create-metrics",
+      "batch": 6,
+      "expected_result": {
+        "batch": 6,
+        "records": 623,
+        "sha256": "a188cad86750f56b3d610ed52ad200faa8560328a3624d49f6edf696f08c115f"
+      }
+    },
+    {
+      "capability": "server-metrics.create-metrics",
+      "batch": 7,
+      "expected_result": {
+        "batch": 7,
+        "records": 151,
+        "sha256": "dff99a8559f6dd55c7d21cb598fa06e3d2bdf7ddec83e6604f954a5bdd8b87d1"
+      }
+    }
+  ],
+  "files": [
+    {
+      "name": "metrics-characterization.json",
+      "path": "tools/native-rewrite/qualification/metrics-retention-v1/server-metrics/metrics-characterization.json",
+      "sha256": "fb124a190e20e101e3909e19c4c4e14af082002a8e72bcabf972cee26c003f44",
+      "size": 2318
+    },
+    {
+      "name": "server-metrics-cases-draft-v1.cjs",
+      "path": "tools/native-rewrite/qualification/metrics-retention-v1/server-metrics/server-metrics-cases-draft-v1.cjs",
+      "sha256": "aa7b50a8ddb70f613126623d6d629b4ef53dc6546ab8f2d808251736cff7c064",
+      "size": 2809
+    },
+    {
+      "name": "server-metrics-fixture-draft-v1.cjs",
+      "path": "tools/native-rewrite/qualification/metrics-retention-v1/server-metrics/server-metrics-fixture-draft-v1.cjs",
+      "sha256": "92806e4bcc70a780e809b612a427a6fd07b80394bf230343d0d910381610eb1c",
+      "size": 11176
+    },
+    {
+      "name": "server-metrics.public-target-data-v2.json",
+      "path": "tools/native-rewrite/qualification/metrics-retention-v1/server-metrics/server-metrics.public-target-data-v2.json",
+      "sha256": "b0a58e3249484324136d872c85838575fdb2cb988e3f27c489ace0f5de0d977c",
+      "size": 17178
+    }
+  ]
+}

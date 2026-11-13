@@ -1,0 +1,614 @@
+[
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "public-surface",
+      "recent:recent",
+      "recent:edge",
+      "recent:old",
+      "recent:future",
+      "recent:invalid",
+      "recent:epoch",
+      "recent:iso"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "c0594338561f52ce95399c9cbdd5a03caa7b0e3b3a67911112901b4b4160c7c4"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "recent:no-now",
+      "code-wait:-1",
+      "ceiling-wait:-1",
+      "code-wait:0",
+      "ceiling-wait:0",
+      "code-wait:1",
+      "ceiling-wait:1",
+      "code-wait:999"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "2ac457e7de2e8141249408372b28766321e829e88189b25eef1849dc35ee81cf"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "ceiling-wait:999",
+      "code-wait:1000",
+      "ceiling-wait:1000",
+      "code-wait:59999",
+      "ceiling-wait:59999",
+      "code-wait:60000",
+      "ceiling-wait:60000",
+      "code-wait:60001"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "283f6137f795d1cd88a47cd88602d1c585f0b95a75d6668f8b4e3be11cf4db68"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "ceiling-wait:60001",
+      "code-wait:120000",
+      "ceiling-wait:120000",
+      "code-wait:3600001",
+      "ceiling-wait:3600001",
+      "code-wait:Infinity",
+      "ceiling-wait:Infinity",
+      "code-wait:NaN"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "f2dcb4fb1819f3f25af7b978fe3e757b998f549a3c50b69297cda761e3a4f250"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "ceiling-wait:NaN",
+      "reauth:delete this account",
+      "reauth:",
+      "reauth:null",
+      "reauth:undefined",
+      "reauth:42",
+      "cap:1:2026-01-02T03:04:05.000Z",
+      "cap:1:Date:2026-01-02T03:04:05.000Z"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "ff7d109b8e7767700c355fd15491c2b5b94f4dfd720d7db12ab09473d5d001be"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "cap:1:invalid",
+      "cap:7:2026-01-02T03:04:05.000Z",
+      "cap:7:Date:2026-01-02T03:04:05.000Z",
+      "cap:7:invalid",
+      "cap:30:2026-01-02T03:04:05.000Z",
+      "cap:30:Date:2026-01-02T03:04:05.000Z",
+      "cap:30:invalid",
+      "cap:365:2026-01-02T03:04:05.000Z"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "b2454323a68866f61cfecbad0a93159309c2c16a4ce53b07a1d233d036ada4cc"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "cap:365:Date:2026-01-02T03:04:05.000Z",
+      "cap:365:invalid",
+      "party:local",
+      "party:local-port",
+      "party:local-public",
+      "party:hosted",
+      "party:hosted-no-origin",
+      "party:hosted-ipv6"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "71d8ff4ab5259c2ed826480cde32caba520090964646b06e263667b0ae567740"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "party:invalid-public",
+      "options:local",
+      "options:hosted",
+      "options:hosted-no-origin",
+      "options:local-test",
+      "options:hosted-test-refused",
+      "options:google",
+      "options:github"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "4229b9433c7d7f1aa6c862bca7b23d91d89fbe01637f7151661af00cb451c1d5"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "options:both-social",
+      "options:email-off",
+      "options:captcha",
+      "secret:new",
+      "secret:existing",
+      "secret:hosted-missing",
+      "secret:environment-whitespace",
+      "options:fresh-environment"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "32e5379517eaac781aaf4d47c7389a522493cd5a5d32bc1f7d328bc6e5f8f6dc"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "before-send:unrelated",
+      "before-send:wrong-type",
+      "before-send:empty-email",
+      "before-send:non-string-email",
+      "before-send:local",
+      "before-send:local-owner",
+      "before-send:in-process",
+      "before-send:hosted"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "0346e095c5d7ded557d387e1e9644397447d1a50568ab6944c026456e5b2fdf4"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "before-send:hosted-no-ip",
+      "before-send:memory-refused",
+      "before-send:durable-refused",
+      "before-send:ceiling-tied",
+      "before-send:ceiling-shorter",
+      "before-send:zero-refusal-wait",
+      "recent-route:/passkey/generate-register-options:none",
+      "recent-route:/passkey/generate-register-options:recent"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "044eb1367a3e3bab96916494207ef316427418504ad1f93cb1c756cb06fa50f2"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "recent-route:/passkey/generate-register-options:old",
+      "recent-route:/passkey/generate-register-options:long-name",
+      "recent-route:/passkey/generate-register-options:trimmed-name",
+      "recent-route:/passkey/generate-register-options:non-string-name",
+      "recent-route:/passkey/verify-registration:none",
+      "recent-route:/passkey/verify-registration:recent",
+      "recent-route:/passkey/verify-registration:old",
+      "recent-route:/passkey/verify-registration:long-name"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "035390e047ef71d749d8f6710b363aa6c2d3618f1acd91659e64d39d170d2e53"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "recent-route:/passkey/verify-registration:trimmed-name",
+      "recent-route:/passkey/verify-registration:non-string-name",
+      "recent-route:/link-social:none",
+      "recent-route:/link-social:recent",
+      "recent-route:/link-social:old",
+      "recent-route:/link-social:long-name",
+      "recent-route:/link-social:trimmed-name",
+      "recent-route:/link-social:non-string-name"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "042154f806016c722b9877524fde0e5012bba6845f49d64cbf78f2a4a3bb4174"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "session:presented-token",
+      "unverified:no-user",
+      "unverified:verified",
+      "unverified:no-record",
+      "unverified:expired",
+      "unverified:exact-expiry",
+      "unverified:correct",
+      "unverified:attempt-two"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "278cf957d0f69c3392cb99669e860998bff08141285a81204cc242e8de931e2a"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "unverified:attempt-three",
+      "unverified:bad-attempt-value",
+      "unverified:wrong-code",
+      "unverified:non-string-code",
+      "after:/email-otp/send-verification-otp:0",
+      "after:/email-otp/send-verification-otp:1",
+      "after:/email-otp/send-verification-otp:2",
+      "after:/email-otp/send-verification-otp:3"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "ab673c144ba973369c4cd0f9ae0d89278536cbf24972f2e2313505e9e2f95e38"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "after:/passkey/verify-registration:0",
+      "after:/passkey/verify-registration:1",
+      "after:/passkey/verify-registration:2",
+      "after:/passkey/verify-registration:3",
+      "after:/unrelated:0",
+      "after:/unrelated:1",
+      "after:/unrelated:2",
+      "after:/unrelated:3"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "417bd3dca2dd2783ff4c034270b9218623deafca7b31eea0383e9a348efb0f65"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "delivery:local",
+      "delivery:allowed",
+      "delivery:untrusted",
+      "delivery:missing",
+      "delivery:public",
+      "delivery-failure:false:false",
+      "delivery-failure:false:true",
+      "delivery-failure:true:false"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "5c9a4d861919eb2ed4668b92e5cc48a184ed76f1489f23272a22cd4927a3a433"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "delivery-failure:true:true",
+      "delivery:wrong-type",
+      "passkey-use:credential_1",
+      "passkey-use:42",
+      "passkey-use:undefined",
+      "database-session:create-unbounded",
+      "database-session:create-at-cap",
+      "database-session:create-default-date"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "c920d49303231a2286c1b36972f23fcd03f1606ed9bf5d353fb9620eaeb5486f"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "database-session:create-no-expiry",
+      "database-session:update-cap",
+      "database-session:update-no-session",
+      "database-session:update-no-expiry",
+      "database-user:non-email",
+      "database-user:local",
+      "database-user:named",
+      "database-user:truncate"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "bc503010a24cfac9cac2fe7c4145963abcc32720e0f689ebbea4e7a147b9fefd"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "database-user:hosted-refuse",
+      "database-user:hosted-invite",
+      "database-user:hosted-code",
+      "database-user:hosted-first",
+      "database-user:hosted-first-occupied",
+      "generated-id:user",
+      "generated-id:ba_user",
+      "generated-id:notuser"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "1456f3abbbb5aac2c98ac718cf70faf9b27294ded4c1af692081aeff2059f6f3"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "generated-id:session",
+      "generated-id:User",
+      "generated-id:",
+      "api-error:400",
+      "api-error:403",
+      "api-error:500",
+      "api-error:ordinary",
+      "api-error:unknown"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "715d9e1c6268f32dd12eab4e3bcdb55bf00efef4d83b352f44703aefa3a926b1"
+    }
+  },
+  {
+    "kind": "edges",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "singleton:reuse",
+      "migration:ordinary",
+      "provider-failure:cookie-delete",
+      "provider-failure:migrations",
+      "provider-failure:database",
+      "provider-failure:hash",
+      "provider-failure:filesystem"
+    ],
+    "golden_data": {
+      "records": 7,
+      "sha256": "9956c6467c04dd09a867d3e3cde261f3c9d816c8b4091ecd28bbaa51c4c19c0d"
+    }
+  },
+  {
+    "kind": "bindings",
+    "capability": "server-auth.create-auth",
+    "golden_data": {
+      "records": 68,
+      "sha256": "5ea5fae93f78183fe2f85c401592870feba402a18378a5bf788231032989b175"
+    }
+  },
+  {
+    "kind": "precision",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "precision:recent-no-email:/passkey/generate-register-options",
+      "precision:recent-no-email:/passkey/verify-registration",
+      "precision:recent-no-email:/link-social",
+      "precision:body-once:/unrelated:false",
+      "precision:body-once:/unrelated:true",
+      "precision:body-once:/email-otp/send-verification-otp:false",
+      "precision:body-once:/email-otp/send-verification-otp:true",
+      "precision:body-once:/sign-in/email-otp:false"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "825c56e45fab029fe0c95fb4fb39d8b7d185d5fcadfc8bd128b180bb16eab92f"
+    }
+  },
+  {
+    "kind": "precision",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "precision:body-once:/sign-in/email-otp:true",
+      "precision:verification-expiry:future-number",
+      "precision:verification-expiry:future-string",
+      "precision:verification-expiry:null",
+      "precision:verification-expiry:valueOf",
+      "precision:verification-expiry:toPrimitive",
+      "precision:verification-expiry:throwing",
+      "precision:delivery-cleanup:missing-context"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "6221c7e04266f3d258dc23f395f7792824802258ff8e572ebdbcca7b273f78a2"
+    }
+  },
+  {
+    "kind": "precision",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "precision:delivery-cleanup:null-context",
+      "precision:delivery-cleanup:missing-adapter",
+      "precision:delivery-cleanup:null-adapter",
+      "precision:delivery-cleanup:missing-method",
+      "precision:delivery-cleanup:sync-throw",
+      "precision:delivery-cleanup:non-promise",
+      "precision:delivery-cleanup:rejected-promise",
+      "precision:delivery-cleanup:absent-ctx"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "db32f8df356db97449e990b4b189027d101b746f9c167a639bcf19bc38da99c3"
+    }
+  },
+  {
+    "kind": "precision",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "precision:session-update-chain:absent-ctx",
+      "precision:session-update-chain:missing-context",
+      "precision:session-update-chain:null-context",
+      "precision:session-update-chain:missing-session",
+      "precision:session-update-chain:null-session",
+      "precision:session-update-chain:missing-inner",
+      "precision:session-update-chain:null-inner",
+      "precision:session-update-chain:missing-createdAt"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "a70975d93501fa8397f26fce4ccb46bac8e827881dad1bda83d1649f10023b63"
+    }
+  },
+  {
+    "kind": "precision",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "precision:session-update-chain:valid",
+      "precision:first-owner:\"\":",
+      "precision:first-owner:\"\":one@example.test",
+      "precision:first-owner:\"   \":",
+      "precision:first-owner:\"   \":one@example.test",
+      "precision:first-owner:\"one@example.test\":",
+      "precision:first-owner:\"one@example.test\":one@example.test",
+      "precision:hosted-invite-clock-order"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "4ec2608b1b59ff51b39430238f9fc3d6bc79b6586bd1ff23c592e0d725bfa776"
+    }
+  },
+  {
+    "kind": "precision",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "precision:delivery-header-order:null:request",
+      "precision:delivery-header-order:null:fallback",
+      "precision:delivery-header-order:null:request-throws",
+      "precision:delivery-header-order:null:headers-throws",
+      "precision:delivery-header-order:https://public.example.test:request",
+      "precision:delivery-header-order:https://public.example.test:fallback",
+      "precision:delivery-header-order:https://public.example.test:request-throws",
+      "precision:delivery-header-order:https://public.example.test:headers-throws"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "9f8fecf48fbc533bc891c4b83c34523ace5318bd0e276016cb1a26afe99916a1"
+    }
+  },
+  {
+    "kind": "extra",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "extra:session-expiry:create:date",
+      "extra:session-expiry:create:iso",
+      "extra:session-expiry:create:number",
+      "extra:session-expiry:create:numeric-string",
+      "extra:session-expiry:create:invalid",
+      "extra:session-expiry:create:null",
+      "extra:session-expiry:create:zero",
+      "extra:session-expiry:create:valueOf"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "b11e6dd387e2e803811ebe22062ffcce399eabc2c53421a07c8ffc9e2c1428a2"
+    }
+  },
+  {
+    "kind": "extra",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "extra:session-expiry:create:primitive",
+      "extra:session-expiry:create:throwing",
+      "extra:session-expiry:update:date",
+      "extra:session-expiry:update:iso",
+      "extra:session-expiry:update:number",
+      "extra:session-expiry:update:numeric-string",
+      "extra:session-expiry:update:invalid",
+      "extra:session-expiry:update:null"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "4d56ea00525e45e0945f717f8bb531393b8f0b425e3672e0dc3c76c77332de94"
+    }
+  },
+  {
+    "kind": "extra",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "extra:session-expiry:update:zero",
+      "extra:session-expiry:update:valueOf",
+      "extra:session-expiry:update:primitive",
+      "extra:session-expiry:update:throwing",
+      "extra:before-path-reads:/passkey/generate-register-options",
+      "extra:before-path-reads:/passkey/verify-registration",
+      "extra:before-path-reads:/link-social",
+      "extra:before-path-reads:/email-otp/send-verification-otp"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "e0a115cdc529443adb83c38ca6c2ff9dab8cec224a42cb99c5e2d7b0018f514c"
+    }
+  },
+  {
+    "kind": "extra",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "extra:before-path-reads:/sign-in/email-otp",
+      "extra:before-path-reads:/unrelated",
+      "extra:before-changing-path:/email-otp/send-verification-otp:/sign-in/email-otp",
+      "extra:before-changing-path:/email-otp/send-verification-otp:/unrelated",
+      "extra:before-changing-path:/unrelated:/email-otp/send-verification-otp",
+      "extra:before-changing-path:/sign-in/email-otp:/email-otp/send-verification-otp",
+      "extra:send-request-reads:false:false",
+      "extra:send-request-reads:false:true"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "f6a110380eb5f6de08067a3bba68a3eb5aeec8997957abc906631e938c897e5c"
+    }
+  },
+  {
+    "kind": "extra",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "extra:send-request-reads:true:false",
+      "extra:send-request-reads:true:true",
+      "extra:verification-value-reads:",
+      "extra:verification-value-reads::0",
+      "extra:verification-value-reads::2",
+      "extra:verification-value-reads::3",
+      "extra:verification-value-reads::bad",
+      "extra:verification-changing-value:false"
+    ],
+    "golden_data": {
+      "records": 8,
+      "sha256": "dc6f23a4d41310287e6c0da5b00c8fb7811d813e31fa538f13824ab5194e57b1"
+    }
+  },
+  {
+    "kind": "extra",
+    "capability": "server-auth.create-auth",
+    "labels": [
+      "extra:verification-changing-value:true"
+    ],
+    "golden_data": {
+      "records": 1,
+      "sha256": "05ff2910a169aa10f7ff6e42ec5284ae6cf8f1d46a02a9714cc801abf6a2dd36"
+    }
+  }
+]

@@ -1,0 +1,11 @@
+'use strict';
+const {runTests,smoke}=require('./tests/litai_test.js');
+function main(args=process.argv.slice(2)) {
+  try {
+    if(args.length!==1)throw new Error('Expected one framework mode');
+    const result=args[0]==='--litai-test'?runTests():args[0]==='--litai-smoke'?smoke():(()=>{throw new Error('This artifact is a library; import agent_envelope modules');})();
+    process.stdout.write(JSON.stringify(result)+'\n');
+  } catch(error) {process.stderr.write(String(error.message)+'\n');process.exitCode=1;}
+}
+module.exports={main};
+if(require.main===module)main();

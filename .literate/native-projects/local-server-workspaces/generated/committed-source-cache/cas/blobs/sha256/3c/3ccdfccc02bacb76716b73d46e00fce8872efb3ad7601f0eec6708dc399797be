@@ -1,0 +1,96 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {create_workspaces} = require('../server_workspaces/create_workspaces.js');
+
+function silentResources(overrides = {}) {
+  const unexpected = () => { throw new Error('Unexpected service effect'); };
+  return Object.assign({all: unexpected, audit: unexpected, get: unexpected,
+    LIVE_WS: unexpected, run: unexpected, sql: {}, tx: unexpected,
+    softDeleteWorkspace: unexpected, admitCreation: unexpected,
+    checkMemberCap: unexpected, checkRestoreCaps: unexpected,
+    precheckCreation: unexpected, V2Error: Error, badRequest: unexpected,
+    conflict: unexpected, forbidden: unexpected, notFound: unexpected,
+    newId: unexpected, nowIso: unexpected, secretToken: unexpected,
+    sha256hex: unexpected, authorize: unexpected, config: unexpected,
+    event: unexpected, take: unexpected, addWorkspaceToDevices: unexpected,
+    liveDevicesOf: unexpected, deleteMemberSessions: unexpected,
+    onMemberRemoved: unexpected, cancelDeparture: unexpected,
+    noteDeparture: unexpected, personName: unexpected, RESTORE_DAYS: 30,
+    workspaceSteering: unexpected, writeSteering: unexpected,
+    oneLine: unexpected, readDate: unexpected}, overrides);
+}
+
+function selfName(userId, reader) {
+  return create_workspaces(silentResources()).nameTo(userId, reader);
+}
+function emptyOther(kind) {
+  return create_workspaces(silentResources()).otherWorkspacesFor({kind});
+}
+function formerName(userId, reader) {
+  return create_workspaces(silentResources({
+    get(query, id) {
+      assert.equal(query, 'SELECT name FROM ba_user WHERE id = ?');
+      assert.equal(id, userId);
+      return {name: 'Rowan'};
+    },
+    personName(id, name) { assert.equal(id, userId); return name; }
+  })).nameTo(userId, reader);
+}
+
+const cases = [
+  {id: 'generated-self-name', args: ['person-a', 'person-a'], expected: 'you', invoke: selfName},
+  {id: 'generated-empty-name', args: ['', ''], expected: 'you', invoke: selfName},
+  {id: 'generated-web-other', args: ['web'], expected: [], invoke: emptyOther},
+  {id: 'generated-former-name', args: ['person-b', 'person-c'], expected: 'Rowan', invoke: formerName}
+];
+
+async function additionalChecks() {
+  const fields = ['all', 'audit', 'get', 'LIVE_WS', 'run', 'sql', 'tx',
+    'softDeleteWorkspace', 'admitCreation', 'checkMemberCap', 'checkRestoreCaps',
+    'precheckCreation', 'V2Error', 'badRequest', 'conflict', 'forbidden', 'notFound',
+    'newId', 'nowIso', 'secretToken', 'sha256hex', 'authorize', 'config', 'event',
+    'take', 'addWorkspaceToDevices', 'liveDevicesOf', 'deleteMemberSessions',
+    'onMemberRemoved', 'cancelDeparture', 'noteDeparture', 'personName', 'RESTORE_DAYS',
+    'workspaceSteering', 'writeSteering', 'oneLine', 'readDate'];
+  const reads = [];
+  const ports = silentResources();
+  const captured = {};
+  for (const key of fields) Object.defineProperty(captured, key, {get() { reads.push(key); return ports[key]; }});
+  const service = create_workspaces(captured);
+  assert.deepEqual(reads, fields);
+  assert.equal(Object.keys(service).length, 26);
+  const lengths = [2, 2, 2, 2, 1, 1, 5, 1, 2, 1, 1, 2, 2, 3, 2, 1, 3, 1, 2, 2, 3, 2, 4, 3, 1, 2];
+  Object.values(service).forEach((fn, i) => assert.equal(fn.length, lengths[i]));
+  const pp = service.principalIn({kind: 'device', grants: new Set(), user: {id: 'u'}}, 'w');
+  assert.deepEqual(pp, {userId: 'u', wsId: 'w', wsRole: null, pods: new Map()});
+  const trace = [];
+  const ws = create_workspaces(silentResources({
+    take: (...a) => trace.push(['take', ...a]),
+    precheckCreation: async () => { trace.push(['precheck']); },
+    newId: prefix => { assert.equal(prefix, 'ws'); return 'ws-new'; },
+    nowIso: () => '2026-01-01T00:00:00.000Z',
+    tx: cb => { const result = cb(); assert.equal(result, undefined); },
+    admitCreation: () => true,
+    run: (...a) => trace.push(['run', ...a]),
+    audit: (...a) => trace.push(['audit', ...a]),
+    event: (...a) => trace.push(['event', ...a])
+  }));
+  assert.deepEqual(await ws.createWorkspace({}, {user: {id: 'u', email: 'u@example.org'}, emailVerified: true}, 'Research', null), {id: 'ws-new', name: 'Research', role: 'owner'});
+  assert.deepEqual(trace[0], ['take', 'ws-create:u', 10, 3600000]);
+  assert.deepEqual(trace.slice(-2), [
+    ['event', 'code_redeemed', {ws: 'ws-new', user: 'u', at: '2026-01-01T00:00:00.000Z'}],
+    ['event', 'workspace_created', {ws: 'ws-new', user: 'u', props: {kind: 'blank'}, at: '2026-01-01T00:00:00.000Z'}]
+  ]);
+}
+
+async function runTests() {
+  const passed = [];
+  for (const c of cases) {
+    assert.deepEqual(await c.invoke(...c.args), c.expected);
+    passed.push({case_id: c.id, outcome: 'passed'});
+  }
+  await additionalChecks();
+  return {schema: 'literate-ai/generated-test-results@1', cases: passed};
+}
+function smoke() { return selfName('person-a', 'person-a'); }
+module.exports = {runTests, smoke};

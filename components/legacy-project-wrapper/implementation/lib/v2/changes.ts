@@ -1,3 +1,4 @@
+// Caller-owned request and hold types and explicit resource bindings.
 import { all, audit, get, run, tx } from "./db";
 import { V2Error, badRequest, conflict, forbidden, notFound } from "./errors";
 import { event } from "./events";
@@ -9,288 +10,175 @@ import { memberName, memberPrincipal, nameTo } from "./workspaces";
 import { assertRevisionReached, nonNegInt, optStr, revisionRead, str, type Body } from "./validate";
 import { EVIDENCE_PER_REVISION, evidenceCount, evidenceInput, evidenceRows, evidenceView, recordSnapshot, snapshotView, type EvidenceSource } from "./evidence";
 import { counterNoChange, counterSameAsRequest } from "./change-words.mts";
+import { create_changes } from "../native/.bindings/server_changes.js";
+import type { Sums } from "./spend";
 
-// Change requests: a member proposes a new version of a goal they can read but don't own (owners just publish a
-// version). The goal's approval set decides, under the requester rule (lib/v2/approval.ts): one approval is enough.
-//   pending -> approved | rejected | withdrawn | superseded;  pending -> countered -> pending (accept_counter)
-//   approve        an approver, at the current revision, while the goal is still at base_version (else 409
-//                  stale_version and the requester rebases). It records the decision and keeps the resulting content
-//                  on the request (approved_json, launch "pending"): no goal version, no directive (LAUNCH-001).
-//   launch         the launch set (the effective approval set plus workspace owners) publishes the approved content
-//                  as the goal's next version, authored by the approver, through writeGoalVersion: the same path as an
-//                  owner's edit, so goal_version directives reach bound sessions in the same transaction. Nothing
-//                  else here writes a directive. not_yet records that it waits (a later decision replaces it);
-//                  approve_and_launch does both in one transaction, audited as two decisions.
-//   reject         an approver, with a reason;  counter: an approver replaces the changes (new revision), optionally
-//                  with an "Accept if…" condition, which only the requester acknowledges (acknowledge, LAUNCH-002):
-//                  never a gate on approval or launch, never "verified".
-//   accept_counter / acknowledge / withdraw / rebase: the requester only
-// A goal that becomes achieved or dropped supersedes every open request on it, and any newer version supersedes the
-// approved requests still waiting for launch (writeGoalVersion does both).
-// A revision may not add a dependency on a goal that someone who must decide on it can't read (409
-// dependency_not_visible): a proposal or rebase is decided by the effective approval set; a counter goes to the
-// requester and then back to that set, so it must be readable by both (C2 N1). A rebase refused for a dependency an
-// approver's counter added says whose suggestion added it, never "you added". A counter keeps the request's
-// dependencies its author can't read, as the goal form does (C2 N2). The propose form offers only the goals the set
-// can read (dependencyChoices, C2 F5), and the counter form only the goals the requester and the set can read.
-// The approval set can change after a dependency was added (someone joins as a lead): approve, approve_and_launch and
-// launch are refused (409 dependency_not_visible) for a decider who can't read a dependency the request adds, so
-// nobody approves or publishes what they can't see (C3). The same predicate (hiddenDependencyRefusal) clears their
-// `can` flags and `waiting_on_me`, and the view says why (dependency_not_visible), so they are never offered it (C4-1).
-// Two open requests can each add the other's goal as a dependency: either alone is fine, but once one launches the other
-// would close a loop. Approve, approve_and_launch and launch are refused (409 cycle) for a request whose dependencies
-// would loop against the goals as they stand at decision time, and the same predicate (dependencyLoop) clears the
-// `can` flags and says why (dependency_loop) to every reader (C5-1). A pending one stays open for a counter without that
-// dependency, a decline or a withdrawal, and waits on its deciders for that (once its requester has updated it, when its
-// goal moved on: a rebase keeping its own changes is not refused for the loop, C6-2); an approved one can't launch until
-// the loop is gone, waits on nobody, and a newer version of its goal supersedes it.
-// A reader still sees only the dependencies they can read, with the others counted (diff.hidden_depends_on).
-// Everyone who can read the goal can read its requests (viewers too); viewers can't act. A request is its own
-// decision record once approved or rejected.
-// Evidence (lib/v2/evidence.ts): each revision carries the snapshot Align recorded when it was written, and the
-// evidence links the requester or an approver added to it while it was current and the request open. Approving a
-// revision with no links is allowed, and recorded (approved_without_evidence, plus its own audit action).
+declare const CHANGE_KEYS: readonly ["title", "measures", "depends_on", "status", "limits"];
 
-export const CHANGE_REQUEST_STATES = ["pending", "countered", "approved", "rejected", "withdrawn", "superseded"] as const;
 export type ChangeRequestState = (typeof CHANGE_REQUEST_STATES)[number];
-export const CHANGE_REQUEST_ACTIONS = ["approve", "approve_and_launch", "launch", "not_yet", "reject", "counter", "accept_counter", "acknowledge", "withdraw", "rebase"] as const;
+
 export type ChangeRequestAction = (typeof CHANGE_REQUEST_ACTIONS)[number];
-/** Where an approved request stands toward agents: pending (no launch decision yet), not_yet, launched, or superseded
- *  (the goal got a newer version, or closed, before the launch). null before approval. */
-export const LAUNCH_STATES = ["pending", "not_yet", "launched", "superseded"] as const;
+
 export type LaunchState = (typeof LAUNCH_STATES)[number];
 
-/** The fields a change request may change (anchors are the owner's: they describe where the owner's work happens).
- *  Limits are goal content too: a change request is how anyone but the owner proposes them, and an approval by the
- *  goal's approval set is what confirms them. */
-const CHANGE_KEYS = ["title", "measures", "depends_on", "status", "limits"] as const;
 type ChangeKey = (typeof CHANGE_KEYS)[number];
+
 export type Changes = Partial<Pick<GoalContent, ChangeKey>>;
 
-const TEXT_MAX = 2000;
-
 interface ChangeRequestRow {
-  id: string;
-  ws_id: string;
-  goal_id: string;
-  requester_id: string;
-  state: ChangeRequestState;
-  revision: number;
-  base_version: number;
-  changes_json: string;
-  reason: string;
-  approved_by: string | null;
-  rejected_by: string | null;
-  decision_note: string | null;
-  version: number | null;
-  created_at: string;
-  updated_at: string;
-  decided_at: string | null;
-  approved_without_evidence: number | null;
-  launch: LaunchState | null;
-  /** The approved-unlaunched version's content (GoalContent JSON), stored at approval. */
-  approved_json: string | null;
-  /** The latest launch decision (not yet or launch): who and when. */
-  launch_by: string | null;
-  launch_at: string | null;
+    id: string;
+    ws_id: string;
+    goal_id: string;
+    requester_id: string;
+    state: ChangeRequestState;
+    revision: number;
+    base_version: number;
+    changes_json: string;
+    reason: string;
+    approved_by: string | null;
+    rejected_by: string | null;
+    decision_note: string | null;
+    version: number | null;
+    created_at: string;
+    updated_at: string;
+    decided_at: string | null;
+    approved_without_evidence: number | null;
+    launch: LaunchState | null;
+    /** The approved-unlaunched version's content (GoalContent JSON), stored at approval. */
+    approved_json: string | null;
+    /** The latest launch decision (not yet or launch): who and when. */
+    launch_by: string | null;
+    launch_at: string | null;
 }
+
 interface RevisionRow {
-  revision: number;
-  base_version: number;
-  changes_json: string;
-  note: string | null;
-  author_id: string;
-  created_at: string;
-  snapshot_json: string | null;
-  /** A counter's "Accept if…" condition, and the requester's acknowledgement of it. */
-  condition: string | null;
-  acknowledged_by: string | null;
-  acknowledged_at: string | null;
+    revision: number;
+    base_version: number;
+    changes_json: string;
+    note: string | null;
+    author_id: string;
+    created_at: string;
+    snapshot_json: string | null;
+    /** A counter's "Accept if…" condition, and the requester's acknowledgement of it. */
+    condition: string | null;
+    acknowledged_by: string | null;
+    acknowledged_at: string | null;
 }
 
-const sortedIds = (ids: string[]) => [...ids].sort().join(",");
+export type ChangeRequestView = ReturnType<typeof requestView>;
 
-/** Validate `changes` against the content it would change (the base version): only title, measures, depends_on,
- *  status and limits, each checked like a new goal version (400, 404 for a dependency the caller can't read, 409 cycle,
- *  409 no_change). Keeps only the fields that differ from the base. A depends_on sent keeps the dependencies in
- *  `keepDepsFrom` (by default the base's) the caller can't read. `loopOk`: no cycle check (a rebase keeping its own
- *  changes, C6-2). */
-function changesIn(pp: PolicyPrincipal, goalId: string, base: GoalContent, v: unknown, keepDepsFrom: string[] = base.depends_on, loopOk = false): Changes {
-  if (!v || typeof v !== "object" || Array.isArray(v)) throw badRequest("changes must be an object with title, measures, depends_on, status or limits");
-  const b = v as Body;
-  const keys = Object.keys(b);
-  if (!keys.length) throw badRequest("changes must name at least one of title, measures, depends_on, status or limits");
-  const other = keys.find((k) => !(CHANGE_KEYS as readonly string[]).includes(k));
-  if (other) throw badRequest(`changes: ${other} can't be proposed (only title, measures, depends_on, status and limits)`);
-  const next = nextContent(pp, goalId, base, b, keepDepsFrom, loopOk);
-  const out: Changes = {};
-  if (next.title !== base.title) out.title = next.title;
-  if (JSON.stringify(next.measures) !== JSON.stringify(base.measures)) out.measures = next.measures;
-  if (sortedIds(next.depends_on) !== sortedIds(base.depends_on)) out.depends_on = next.depends_on;
-  if (next.status !== base.status) out.status = next.status;
-  if (JSON.stringify(next.limits) !== JSON.stringify(base.limits)) out.limits = next.limits;
-  return out;
+// ---- reading (the same object for a list item, one request and a decision record) ----
+declare function requestView(pp: PolicyPrincipal, r: ChangeRequestRow): { id: string; goal: { id: string; title: string; version: number; }; state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded"; revision: number; base_version: number;
+/** True while the request is open and the goal has moved past its base version (approving needs a rebase). */
+behind: boolean; requester: { id: string; name: string; }; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; reason: string; revisions: { revision: number; base_version: number; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; note: string | null;
+/** A counter's "Accept if…" condition (never sent to agents), and who acknowledged it and when. */
+condition: string | null; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; author: { id: string; name: string; }; created_at: string;
+/** The links added while this revision was current (frozen once it is superseded or the request decided). */
+evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }[];
+/** What Align recorded about the goal when this revision was written. */
+snapshot: { revision: number; recorded_by: "align"; recorded_at: string; window: { from: string; to: string; days: number; }; spend: { total: Sums; by_model: { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number; by_basis: Record<"api_usd" | "subscription_included" | "workspace_credits" | "estimated_list_usd" | "unknown", Record<"requests" | "input" | "output" | "cache_read" | "cache_write_5m" | "cache_write_1h" | "cache_write_unsplit" | "est_list_usd_micros" | "unpriced_requests", number>>; model: string; }[]; } | null; spend_hidden: boolean; bound_sessions: number; last_activity_at: string | null; } | null; }[];
+/** depends_on lists only the goals the reader can read; hidden_depends_on counts the others on each side (never
+ *  which), so a diff never reads "Nothing → Nothing" while a dependency the reader can't see changes. */
+diff: { before: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; after: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; hidden_depends_on: { before: number; after: number; } | null; }; approvers: { id: string; name: string; }[];
+/** Who may launch it once approved: the approval set plus workspace owners. */
+launchers: { id: string; name: string; }[]; approved_by: { id: string; name: string; } | null; rejected_by: { id: string; name: string; } | null;
+/** The approver's note (approved) or the rejection reason (rejected). */
+decision_note: string | null; note: string | null; rejection_reason: string | null;
+/** The goal version the launch created (null until launched). */
+version: number | null;
+/** pending (approved, no launch decision yet) | not_yet | launched | superseded (before launch) | null. */
+launch: "pending" | "superseded" | "not_yet" | "launched" | null;
+/** The latest not yet or launch: who and when. */
+launch_decided_by: { id: string; name: string; } | null; launch_decided_at: string | null; condition: { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null;
+/** Links on the current revision (the one an approval decides). */
+evidence_count: number;
+/** Once approved: true when the approved revision had no evidence links. null until then, and for older rows. */
+approved_without_evidence: boolean | null; can: { approve: boolean; approve_and_launch: boolean; reject: boolean; counter: boolean; accept_counter: boolean; acknowledge: boolean; withdraw: boolean; rebase: boolean; add_evidence: boolean; launch: boolean; not_yet: boolean; };
+/** What happened to the request, in the words a `wrong_state` refusal of an action it no longer allows gives
+ *  ("This request was declined by <name>, so nothing changes.", never "rejected"), so a card that finds it changed
+ *  before sending says what the server would (W2). */
+state_note: string;
+/** Why `can.approve` and `can.approve_and_launch` (pending) or `can.launch` (approved) are false although the reader
+ *  decides on it: the refusal they would get (409 dependency_not_visible), naming no goal. null otherwise. */
+dependency_not_visible: string | null;
+/** Why nobody can approve (pending) or launch (approved) it as it stands: a dependency it adds would now close a loop
+ *  (409 cycle), naming no goal; the same for every reader. null otherwise (C5-1). */
+dependency_loop: string | null;
+/** The reader's turn: they may approve it, accept its counter, or launch it (approved and not launched, whether
+ *  nobody decided the launch yet or someone said not yet): the same rule as the workspace Home's queue. A pending
+ *  request that would close a loop waits on its deciders to suggest a change or decline it (C5-1), once its requester
+ *  has updated it to the goal's version (C6-2). */
+waiting_on_me: boolean; created_at: string; updated_at: string; decided_at: string | null; };
+
+interface ChangesRuntime {
+  CHANGE_REQUEST_STATES: readonly ["pending", "countered", "approved", "rejected", "withdrawn", "superseded"];
+  CHANGE_REQUEST_ACTIONS: readonly ["approve", "approve_and_launch", "launch", "not_yet", "reject", "counter", "accept_counter", "acknowledge", "withdraw", "rebase"];
+  LAUNCH_STATES: readonly ["pending", "not_yet", "launched", "superseded"];
+  dependencyChoices: (pp: PolicyPrincipal, goalId: string, counterOf?: string) => string[] | null;
+  dependencyLoops: (pp: PolicyPrincipal, goalId: string, counterOf?: string) => string[] | null;
+  counterBase: (pp: PolicyPrincipal, goalId: string, counterOf?: string) => Changes | null;
+  versionLoops: (pp: PolicyPrincipal, goalId: string, canEdit: boolean) => string[] | null;
+  insertChangeRequest: (pp: PolicyPrincipal, g: GoalRow, changes: Changes, reason: string, at: string) => string;
+  createChangeRequest: (pp: PolicyPrincipal, goalId: string, b: Body) => Promise<{ id: string; goal: { id: string; title: string; version: number; }; state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded"; revision: number; base_version: number; behind: boolean; requester: { id: string; name: string; }; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; reason: string; revisions: { revision: number; base_version: number; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; note: string | null; condition: string | null; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; author: { id: string; name: string; }; created_at: string; evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }[]; snapshot: { revision: number; recorded_by: "align"; recorded_at: string; window: { from: string; to: string; days: number; }; spend: { total: Sums; by_model: { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number; by_basis: Record<"api_usd" | "subscription_included" | "workspace_credits" | "estimated_list_usd" | "unknown", Record<"requests" | "input" | "output" | "cache_read" | "cache_write_5m" | "cache_write_1h" | "cache_write_unsplit" | "est_list_usd_micros" | "unpriced_requests", number>>; model: string; }[]; } | null; spend_hidden: boolean; bound_sessions: number; last_activity_at: string | null; } | null; }[]; diff: { before: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; after: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; hidden_depends_on: { before: number; after: number; } | null; }; approvers: { id: string; name: string; }[]; launchers: { id: string; name: string; }[]; approved_by: { id: string; name: string; } | null; rejected_by: { id: string; name: string; } | null; decision_note: string | null; note: string | null; rejection_reason: string | null; version: number | null; launch: "pending" | "superseded" | "not_yet" | "launched" | null; launch_decided_by: { id: string; name: string; } | null; launch_decided_at: string | null; condition: { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null; evidence_count: number; approved_without_evidence: boolean | null; can: { approve: boolean; approve_and_launch: boolean; reject: boolean; counter: boolean; accept_counter: boolean; acknowledge: boolean; withdraw: boolean; rebase: boolean; add_evidence: boolean; launch: boolean; not_yet: boolean; }; state_note: string; dependency_not_visible: string | null; dependency_loop: string | null; waiting_on_me: boolean; created_at: string; updated_at: string; decided_at: string | null; }>;
+  actOnChangeRequest: (pp: PolicyPrincipal, goalId: string, id: string, action: ChangeRequestAction, b: Body) => Promise<{ id: string; goal: { id: string; title: string; version: number; }; state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded"; revision: number; base_version: number; behind: boolean; requester: { id: string; name: string; }; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; reason: string; revisions: { revision: number; base_version: number; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; note: string | null; condition: string | null; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; author: { id: string; name: string; }; created_at: string; evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }[]; snapshot: { revision: number; recorded_by: "align"; recorded_at: string; window: { from: string; to: string; days: number; }; spend: { total: Sums; by_model: { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number; by_basis: Record<"api_usd" | "subscription_included" | "workspace_credits" | "estimated_list_usd" | "unknown", Record<"requests" | "input" | "output" | "cache_read" | "cache_write_5m" | "cache_write_1h" | "cache_write_unsplit" | "est_list_usd_micros" | "unpriced_requests", number>>; model: string; }[]; } | null; spend_hidden: boolean; bound_sessions: number; last_activity_at: string | null; } | null; }[]; diff: { before: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; after: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; hidden_depends_on: { before: number; after: number; } | null; }; approvers: { id: string; name: string; }[]; launchers: { id: string; name: string; }[]; approved_by: { id: string; name: string; } | null; rejected_by: { id: string; name: string; } | null; decision_note: string | null; note: string | null; rejection_reason: string | null; version: number | null; launch: "pending" | "superseded" | "not_yet" | "launched" | null; launch_decided_by: { id: string; name: string; } | null; launch_decided_at: string | null; condition: { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null; evidence_count: number; approved_without_evidence: boolean | null; can: { approve: boolean; approve_and_launch: boolean; reject: boolean; counter: boolean; accept_counter: boolean; acknowledge: boolean; withdraw: boolean; rebase: boolean; add_evidence: boolean; launch: boolean; not_yet: boolean; }; state_note: string; dependency_not_visible: string | null; dependency_loop: string | null; waiting_on_me: boolean; created_at: string; updated_at: string; decided_at: string | null; }>;
+  addEvidence: (pp: PolicyPrincipal, goalId: string | undefined, id: string, b: Body, source: EvidenceSource) => Promise<{ evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }; change_request: { id: string; goal: { id: string; title: string; version: number; }; state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded"; revision: number; base_version: number; behind: boolean; requester: { id: string; name: string; }; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; reason: string; revisions: { revision: number; base_version: number; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; note: string | null; condition: string | null; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; author: { id: string; name: string; }; created_at: string; evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }[]; snapshot: { revision: number; recorded_by: "align"; recorded_at: string; window: { from: string; to: string; days: number; }; spend: { total: Sums; by_model: { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number; by_basis: Record<"api_usd" | "subscription_included" | "workspace_credits" | "estimated_list_usd" | "unknown", Record<"requests" | "input" | "output" | "cache_read" | "cache_write_5m" | "cache_write_1h" | "cache_write_unsplit" | "est_list_usd_micros" | "unpriced_requests", number>>; model: string; }[]; } | null; spend_hidden: boolean; bound_sessions: number; last_activity_at: string | null; } | null; }[]; diff: { before: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; after: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; hidden_depends_on: { before: number; after: number; } | null; }; approvers: { id: string; name: string; }[]; launchers: { id: string; name: string; }[]; approved_by: { id: string; name: string; } | null; rejected_by: { id: string; name: string; } | null; decision_note: string | null; note: string | null; rejection_reason: string | null; version: number | null; launch: "pending" | "superseded" | "not_yet" | "launched" | null; launch_decided_by: { id: string; name: string; } | null; launch_decided_at: string | null; condition: { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null; evidence_count: number; approved_without_evidence: boolean | null; can: { approve: boolean; approve_and_launch: boolean; reject: boolean; counter: boolean; accept_counter: boolean; acknowledge: boolean; withdraw: boolean; rebase: boolean; add_evidence: boolean; launch: boolean; not_yet: boolean; }; state_note: string; dependency_not_visible: string | null; dependency_loop: string | null; waiting_on_me: boolean; created_at: string; updated_at: string; decided_at: string | null; }; }>;
+  removeEvidence: (pp: PolicyPrincipal, goalId: string | undefined, id: string, evidenceId: string) => Promise<{ id: string; goal: { id: string; title: string; version: number; }; state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded"; revision: number; base_version: number; behind: boolean; requester: { id: string; name: string; }; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; reason: string; revisions: { revision: number; base_version: number; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; note: string | null; condition: string | null; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; author: { id: string; name: string; }; created_at: string; evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }[]; snapshot: { revision: number; recorded_by: "align"; recorded_at: string; window: { from: string; to: string; days: number; }; spend: { total: Sums; by_model: { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number; by_basis: Record<"api_usd" | "subscription_included" | "workspace_credits" | "estimated_list_usd" | "unknown", Record<"requests" | "input" | "output" | "cache_read" | "cache_write_5m" | "cache_write_1h" | "cache_write_unsplit" | "est_list_usd_micros" | "unpriced_requests", number>>; model: string; }[]; } | null; spend_hidden: boolean; bound_sessions: number; last_activity_at: string | null; } | null; }[]; diff: { before: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; after: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; hidden_depends_on: { before: number; after: number; } | null; }; approvers: { id: string; name: string; }[]; launchers: { id: string; name: string; }[]; approved_by: { id: string; name: string; } | null; rejected_by: { id: string; name: string; } | null; decision_note: string | null; note: string | null; rejection_reason: string | null; version: number | null; launch: "pending" | "superseded" | "not_yet" | "launched" | null; launch_decided_by: { id: string; name: string; } | null; launch_decided_at: string | null; condition: { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null; evidence_count: number; approved_without_evidence: boolean | null; can: { approve: boolean; approve_and_launch: boolean; reject: boolean; counter: boolean; accept_counter: boolean; acknowledge: boolean; withdraw: boolean; rebase: boolean; add_evidence: boolean; launch: boolean; not_yet: boolean; }; state_note: string; dependency_not_visible: string | null; dependency_loop: string | null; waiting_on_me: boolean; created_at: string; updated_at: string; decided_at: string | null; }>;
+  listChangeRequests: (pp: PolicyPrincipal, opts?: { state?: string | null; goalId?: string; }) => ChangeRequestView[];
+  changeRequestGroups: (pp: PolicyPrincipal, state?: string | null) => { waiting_on_me: { id: string; goal: { id: string; title: string; version: number; }; state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded"; revision: number; base_version: number; behind: boolean; requester: { id: string; name: string; }; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; reason: string; revisions: { revision: number; base_version: number; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; note: string | null; condition: string | null; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; author: { id: string; name: string; }; created_at: string; evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }[]; snapshot: { revision: number; recorded_by: "align"; recorded_at: string; window: { from: string; to: string; days: number; }; spend: { total: Sums; by_model: { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number; by_basis: Record<"api_usd" | "subscription_included" | "workspace_credits" | "estimated_list_usd" | "unknown", Record<"requests" | "input" | "output" | "cache_read" | "cache_write_5m" | "cache_write_1h" | "cache_write_unsplit" | "est_list_usd_micros" | "unpriced_requests", number>>; model: string; }[]; } | null; spend_hidden: boolean; bound_sessions: number; last_activity_at: string | null; } | null; }[]; diff: { before: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; after: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; hidden_depends_on: { before: number; after: number; } | null; }; approvers: { id: string; name: string; }[]; launchers: { id: string; name: string; }[]; approved_by: { id: string; name: string; } | null; rejected_by: { id: string; name: string; } | null; decision_note: string | null; note: string | null; rejection_reason: string | null; version: number | null; launch: "pending" | "superseded" | "not_yet" | "launched" | null; launch_decided_by: { id: string; name: string; } | null; launch_decided_at: string | null; condition: { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null; evidence_count: number; approved_without_evidence: boolean | null; can: { approve: boolean; approve_and_launch: boolean; reject: boolean; counter: boolean; accept_counter: boolean; acknowledge: boolean; withdraw: boolean; rebase: boolean; add_evidence: boolean; launch: boolean; not_yet: boolean; }; state_note: string; dependency_not_visible: string | null; dependency_loop: string | null; waiting_on_me: boolean; created_at: string; updated_at: string; decided_at: string | null; }[]; mine: { id: string; goal: { id: string; title: string; version: number; }; state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded"; revision: number; base_version: number; behind: boolean; requester: { id: string; name: string; }; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; reason: string; revisions: { revision: number; base_version: number; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; note: string | null; condition: string | null; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; author: { id: string; name: string; }; created_at: string; evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }[]; snapshot: { revision: number; recorded_by: "align"; recorded_at: string; window: { from: string; to: string; days: number; }; spend: { total: Sums; by_model: { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number; by_basis: Record<"api_usd" | "subscription_included" | "workspace_credits" | "estimated_list_usd" | "unknown", Record<"requests" | "input" | "output" | "cache_read" | "cache_write_5m" | "cache_write_1h" | "cache_write_unsplit" | "est_list_usd_micros" | "unpriced_requests", number>>; model: string; }[]; } | null; spend_hidden: boolean; bound_sessions: number; last_activity_at: string | null; } | null; }[]; diff: { before: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; after: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; hidden_depends_on: { before: number; after: number; } | null; }; approvers: { id: string; name: string; }[]; launchers: { id: string; name: string; }[]; approved_by: { id: string; name: string; } | null; rejected_by: { id: string; name: string; } | null; decision_note: string | null; note: string | null; rejection_reason: string | null; version: number | null; launch: "pending" | "superseded" | "not_yet" | "launched" | null; launch_decided_by: { id: string; name: string; } | null; launch_decided_at: string | null; condition: { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null; evidence_count: number; approved_without_evidence: boolean | null; can: { approve: boolean; approve_and_launch: boolean; reject: boolean; counter: boolean; accept_counter: boolean; acknowledge: boolean; withdraw: boolean; rebase: boolean; add_evidence: boolean; launch: boolean; not_yet: boolean; }; state_note: string; dependency_not_visible: string | null; dependency_loop: string | null; waiting_on_me: boolean; created_at: string; updated_at: string; decided_at: string | null; }[]; others: { id: string; goal: { id: string; title: string; version: number; }; state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded"; revision: number; base_version: number; behind: boolean; requester: { id: string; name: string; }; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; reason: string; revisions: { revision: number; base_version: number; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; note: string | null; condition: string | null; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; author: { id: string; name: string; }; created_at: string; evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }[]; snapshot: { revision: number; recorded_by: "align"; recorded_at: string; window: { from: string; to: string; days: number; }; spend: { total: Sums; by_model: { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number; by_basis: Record<"api_usd" | "subscription_included" | "workspace_credits" | "estimated_list_usd" | "unknown", Record<"requests" | "input" | "output" | "cache_read" | "cache_write_5m" | "cache_write_1h" | "cache_write_unsplit" | "est_list_usd_micros" | "unpriced_requests", number>>; model: string; }[]; } | null; spend_hidden: boolean; bound_sessions: number; last_activity_at: string | null; } | null; }[]; diff: { before: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; after: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; hidden_depends_on: { before: number; after: number; } | null; }; approvers: { id: string; name: string; }[]; launchers: { id: string; name: string; }[]; approved_by: { id: string; name: string; } | null; rejected_by: { id: string; name: string; } | null; decision_note: string | null; note: string | null; rejection_reason: string | null; version: number | null; launch: "pending" | "superseded" | "not_yet" | "launched" | null; launch_decided_by: { id: string; name: string; } | null; launch_decided_at: string | null; condition: { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null; evidence_count: number; approved_without_evidence: boolean | null; can: { approve: boolean; approve_and_launch: boolean; reject: boolean; counter: boolean; accept_counter: boolean; acknowledge: boolean; withdraw: boolean; rebase: boolean; add_evidence: boolean; launch: boolean; not_yet: boolean; }; state_note: string; dependency_not_visible: string | null; dependency_loop: string | null; waiting_on_me: boolean; created_at: string; updated_at: string; decided_at: string | null; }[]; };
+  getChangeRequest: (pp: PolicyPrincipal, id: string, goalId?: string) => ChangeRequestView;
+  assertChangeRequestAction: (a: string) => ChangeRequestAction;
+  requestCondition: (id: string) => { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null;
 }
+const changesService = create_changes({
+  all: (...args: Parameters<typeof all>) => all(...args),
+  audit: (...args: Parameters<typeof audit>) => audit(...args),
+  get: (...args: Parameters<typeof get>) => get(...args),
+  run: (...args: Parameters<typeof run>) => run(...args),
+  tx: (...args: Parameters<typeof tx>) => tx(...args),
+  V2Error,
+  badRequest: (...args: Parameters<typeof badRequest>) => badRequest(...args),
+  conflict: (...args: Parameters<typeof conflict>) => conflict(...args),
+  forbidden: (...args: Parameters<typeof forbidden>) => forbidden(...args),
+  notFound: (...args: Parameters<typeof notFound>) => notFound(...args),
+  event: (...args: Parameters<typeof event>) => event(...args),
+  newId: (...args: Parameters<typeof newId>) => newId(...args),
+  nowIso: (...args: Parameters<typeof nowIso>) => nowIso(...args),
+  effectiveSet: (...args: Parameters<typeof effectiveSet>) => effectiveSet(...args),
+  launchSet: (...args: Parameters<typeof launchSet>) => launchSet(...args),
+  contentOf: (...args: Parameters<typeof contentOf>) => contentOf(...args),
+  dependencyCycle: (...args: Parameters<typeof dependencyCycle>) => dependencyCycle(...args),
+  goalObj: (...args: Parameters<typeof goalObj>) => goalObj(...args),
+  goalRow: (...args: Parameters<typeof goalRow>) => goalRow(...args),
+  goalsDependingOn: (...args: Parameters<typeof goalsDependingOn>) => goalsDependingOn(...args),
+  nextContent: (...args: Parameters<typeof nextContent>) => nextContent(...args),
+  sameContent: (...args: Parameters<typeof sameContent>) => sameContent(...args),
+  unreadableGoals: (...args: Parameters<typeof unreadableGoals>) => unreadableGoals(...args),
+  versionContentOf: (...args: Parameters<typeof versionContentOf>) => versionContentOf(...args),
+  visibleGoal: (...args: Parameters<typeof visibleGoal>) => visibleGoal(...args),
+  writeGoalVersion: (...args: Parameters<typeof writeGoalVersion>) => writeGoalVersion(...args),
+  canReadGoal: (...args: Parameters<typeof canReadGoal>) => canReadGoal(...args),
+  memberName: (...args: Parameters<typeof memberName>) => memberName(...args),
+  memberPrincipal: (...args: Parameters<typeof memberPrincipal>) => memberPrincipal(...args),
+  nameTo: (...args: Parameters<typeof nameTo>) => nameTo(...args),
+  assertRevisionReached: (...args: Parameters<typeof assertRevisionReached>) => assertRevisionReached(...args),
+  nonNegInt: (...args: Parameters<typeof nonNegInt>) => nonNegInt(...args),
+  optStr: (...args: Parameters<typeof optStr>) => optStr(...args),
+  revisionRead: (...args: Parameters<typeof revisionRead>) => revisionRead(...args),
+  str: (...args: Parameters<typeof str>) => str(...args),
+  EVIDENCE_PER_REVISION,
+  evidenceCount: (...args: Parameters<typeof evidenceCount>) => evidenceCount(...args),
+  evidenceInput: (...args: Parameters<typeof evidenceInput>) => evidenceInput(...args),
+  evidenceRows: (...args: Parameters<typeof evidenceRows>) => evidenceRows(...args),
+  evidenceView: (...args: Parameters<typeof evidenceView>) => evidenceView(...args),
+  recordSnapshot: (...args: Parameters<typeof recordSnapshot>) => recordSnapshot(...args),
+  snapshotView: (...args: Parameters<typeof snapshotView>) => snapshotView(...args),
+  counterNoChange: (...args: Parameters<typeof counterNoChange>) => counterNoChange(...args),
+  counterSameAsRequest: (...args: Parameters<typeof counterSameAsRequest>) => counterSameAsRequest(...args),
+}) as unknown as ChangesRuntime;
 
-const applied = (base: GoalContent, c: Changes): GoalContent => ({ ...base, ...c });
-
-/** Why an action on a request in another state is refused (409 wrong_state), in the app's words ("declined", never
- *  "rejected") and naming who did it, as the alignments' refusals do (Y5): everyone who may act on a request sees its
- *  requester and approvers. A counter names its author, so a requester whose open card offered **Update to version n**
- *  hears to review it (W6). Every action on a request refuses its state with these words, adding and removing evidence
- *  included (C8-1, c9 W1), and the request view carries them as `state_note`, so a card that finds the request changed
- *  says the same (W2). The reader is "you", never their own name (c9 W3): "You declined this request, …". */
-function crStateRefusal(r: ChangeRequestRow, reader: string): string {
-  switch (r.state) {
-    case "pending":
-      // Said without "reload": the app's card reloads itself on a refusal (c9 W6).
-      return counterRevision(revisionRows(r.id)) ? "The suggested change was already accepted, so this request is waiting for approval." : "This request is waiting for approval.";
-    case "countered": {
-      const author = counterAuthor(r);
-      if (author === reader) return `You countered this request; it waits on ${nameTo(r.requester_id, reader)} to accept it.`;
-      return `This request was countered${author ? ` by ${memberName(author)}` : ""}; review the counter.`;
-    }
-    case "approved":
-      if (r.approved_by === reader) return "You already approved this request.";
-      return `This request was already approved${r.approved_by ? ` by ${memberName(r.approved_by)}` : ""}.`;
-    case "rejected":
-      if (r.rejected_by === reader) return "You declined this request, so nothing changes.";
-      return `This request was declined${r.rejected_by ? ` by ${memberName(r.rejected_by)}` : ""}, so nothing changes.`;
-    case "withdrawn":
-      if (r.requester_id === reader) return "You withdrew this request, so nothing changes.";
-      return `This request was withdrawn by ${memberName(r.requester_id)}, so nothing changes.`;
-    case "superseded":
-      return "This request was superseded: its goal was closed or got a newer version first, so nothing changes.";
-  }
-}
-
-/** Who wrote the request's current revision, when that is a counter (else null). */
-const counterAuthor = (r: ChangeRequestRow): string | null =>
-  r.state === "countered" ? (get<{ author_id: string }>("SELECT author_id FROM v2_change_request_revisions WHERE change_request_id = ? AND revision = ?", r.id, r.revision)?.author_id ?? null) : null;
-
-/** Why an action sent for an earlier revision of a request is refused (409 stale_revision), as a sentence that says what
- *  happened and what to do next, never "reload": the app's card reloads itself on a refusal (c9 W6). A counter meanwhile
- *  names its author ("you" to the reader). `then` is what to do once the request is read again. */
-function crRevisionRefusal(r: ChangeRequestRow, reader: string, then: string): string {
-  const author = counterAuthor(r);
-  const what = author ? `${nameTo(author, reader)} countered it, and it is now at revision ${r.revision}` : `it is now at revision ${r.revision}`;
-  return `This request changed after you read it: ${what}. ${then}`;
-}
-const DECIDE_AGAIN = "Read it again and decide again.";
-
-/** Who must be able to read a dependency a revision adds, and what the refusal says. A proposal (or a rebase) is
- *  decided by the goal's effective approval set; a counter goes back to the requester, who accepts it or not, and then
- *  to that set again. No message names the goal or the person who can't read it. */
-const DEPENDENCY_READERS = {
-  proposal: "Someone who decides on this goal can't see a goal you added as a dependency, so they couldn't see what they approve. Remove it, or ask that goal's owner to share it with them first.",
-  counter: "The person who asked can't see a goal you added as a dependency, so they couldn't see what they accept. Remove it from your suggestion.",
-  counter_approvers: "Someone who decides on this goal can't see a goal you added as a dependency, so they couldn't see what they approve once it is accepted. Remove it from your suggestion, or ask that goal's owner to share it with them first.",
-} as const;
-/** A decision refused because the decider can't read a dependency the request adds (the approval set, or what they can
- *  read, changed after it was added): what they can do, naming no goal. Before approval the requester can still change
- *  the request; an approved one can only be launched by someone who can see it, or proposed again. */
-const decisionRefusedFor = (requester: string, reader: string) =>
-  requester === reader
-    ? "This request adds a dependency on a goal you can't see, so you can't approve what it asks. Withdraw it, or update it without that dependency."
-    : `This request adds a dependency on a goal you can't see, so you can't approve what it asks. Ask ${memberName(requester)} to withdraw it, or to rebase it without that dependency.`;
-const launchRefusedFor = (requester: string, reader: string) =>
-  `This change adds a dependency on a goal you can't see, so you can't launch what it publishes. Ask someone who decides on this goal and can see it to launch it, or ${requester === reader ? "propose" : `ask ${memberName(requester)} to propose`} the change again without that dependency.`;
-/** A rebase refused for a dependency someone else's counter added (the approval set changed since): whose it was. */
-const rebaseRefusedFor = (author: string) =>
-  `Someone who decides on this goal can't see a goal that ${memberName(author)}'s suggestion added as a dependency, so they couldn't see what they approve. Withdraw this request and propose the change again without it, or ask that goal's owner to share it with them first.`;
-
-/** The refusal `pp` gets (409 dependency_not_visible) for deciding to publish `deps` on request `r`, or null: they can't
- *  read a goal `deps` adds to the request's base version. One predicate for the action and for the reader's `can` flags
- *  and `waiting_on_me` (C4-1), so a decider is never offered, or queued for, a decision the server refuses. */
-function hiddenDependencyRefusal(pp: PolicyPrincipal, r: ChangeRequestRow, kind: "approve" | "launch"): string | null {
-  const deps = kind === "approve" ? ((JSON.parse(r.changes_json) as Changes).depends_on ?? []) : r.approved_json ? (JSON.parse(r.approved_json) as GoalContent).depends_on : [];
-  const base = versionContentOf(r.ws_id, r.goal_id, r.base_version)!;
-  if (!unreadableGoals(pp, deps.filter((d) => !base.depends_on.includes(d))).length) return null;
-  return kind === "approve" ? decisionRefusedFor(r.requester_id, pp.userId) : launchRefusedFor(r.requester_id, pp.userId);
-}
-
-/** Why a request can't be approved (pending) or launched (approved) as it stands: a goal it adds as a dependency has come
- *  to depend on this goal since (another request launched, or an owner saved a version), so publishing it would close a
- *  loop. Names no goal; the same words for every reader, but the requester hears "you" (c9 W3). */
-const loopRefusalFor = (r: ChangeRequestRow, reader: string) =>
-  r.state === "approved"
-    ? `A goal this change adds as a dependency has since come to depend on this goal, so launching it would make a loop. It can launch once that loop is gone; a newer version of this goal supersedes it, and ${nameTo(r.requester_id, reader)} can propose the change again without that dependency.`
-    : `A goal this request adds as a dependency has since come to depend on this goal, so approving it would make a loop. Someone who decides on this goal can suggest a change without that dependency or decline it, and ${nameTo(r.requester_id, reader)} can withdraw it.`;
-
-/** The refusal (409 cycle) for approving a pending request, or launching an approved one, whose dependencies would close
- *  a loop against the goals as they stand now, or null. One predicate for the action, the `can` flags (Accept if… in the
- *  app too, C6-1), `waiting_on_me` and the Home (C5-1), so nobody is offered, or queued for, a decision the server
- *  refuses for a loop. A pending request that is behind its goal is checked too, against the goals as they stand: its
- *  requester can still update it (a rebase keeping its changes is not refused for the loop, C6-2), and then it waits on
- *  its deciders like any other. An approved one only on a goal still at its base version (else it is superseded). */
-function dependencyLoop(r: ChangeRequestRow, g: GoalRow, reader: string): string | null {
-  let deps: string[];
-  if (r.state === "pending") {
-    const c = JSON.parse(r.changes_json) as Changes;
-    if (!c.depends_on) return null;
-    deps = c.depends_on;
-  } else if (r.state === "approved" && (r.launch === "pending" || r.launch === "not_yet") && r.approved_json && g.version === r.base_version) {
-    deps = (JSON.parse(r.approved_json) as GoalContent).depends_on;
-  } else return null;
-  return deps.length && dependencyCycle(r.ws_id, r.goal_id, deps) ? loopRefusalFor(r, reader) : null;
-}
-
-/** The first dependency `changes` adds (one not in `already`) that one of `readers` can't read, or null. */
-function hiddenAddedDependency(wsId: string, already: string[], changes: Changes, readers: string[]): string | null {
-  const added = (changes.depends_on ?? []).filter((id) => !already.includes(id));
-  if (!added.length) return null;
-  for (const u of readers) {
-    const hidden = unreadableGoals(memberPrincipal(wsId, u), added);
-    if (hidden.length) return hidden[0];
-  }
-  return null;
-}
-
-/** 409 dependency_not_visible when `changes` adds (relative to `base`, or to `already` when given) a dependency some
- *  of `readers` can't read. A dependency already on the base version is not added. */
-function assertDependenciesVisible(wsId: string, base: GoalContent, changes: Changes, readers: string[], who: keyof typeof DEPENDENCY_READERS, already: string[] = base.depends_on) {
-  if (hiddenAddedDependency(wsId, already, changes, readers)) throw conflict("dependency_not_visible", DEPENDENCY_READERS[who]);
-}
-
-/** Who put `dep` on the request: the author of the first revision of the latest unbroken run of revisions whose changes
- *  depend on it (a rebase keeps it, so it doesn't count as adding it). */
-function dependencyAddedBy(revs: RevisionRow[], dep: string): string | null {
-  let who: string | null = null;
-  for (const v of revs) {
-    if ((JSON.parse(v.changes_json) as Changes).depends_on?.includes(dep)) who ??= v.author_id;
-    else who = null;
-  }
-  return who;
-}
-
-/** Who must be able to read a dependency the reader may add on `g`: for a change request from them, the goal's
- *  effective approval set (with them as the requester); with `counterOf` (a request on that goal), for a counter from
- *  them on it, its requester and its approval set (404 for a request not on the goal). null when they may do neither
- *  (a viewer, a goal that is not active, the goal's owner proposing, someone outside the set countering, a request
- *  that is not pending). The one audience rule for dependency_choices and dependency_loops (C4-2). */
-function dependencyReaders(pp: PolicyPrincipal, g: GoalRow, counterOf?: string): string[] | null {
-  if (pp.wsRole === "viewer" || g.status !== "active") return null;
-  if (counterOf) {
-    // A counter on that request: what it adds goes to the requester, who accepts it, and then to the approval set.
-    const r = crRow(pp.wsId, counterOf);
-    if (!r || r.goal_id !== g.id) throw notFound();
-    const set = effectiveSet(g, r.requester_id);
-    if (r.state !== "pending" || !set.includes(pp.userId)) return null;
-    return [r.requester_id, ...set];
-  }
-  if (g.owner_id === pp.userId) return null;
-  return effectiveSet(g, pp.userId);
-}
-
-/** The goals this reader can read that already depend on `goalId`, directly or through others: adding one as a
- *  dependency would close a loop. */
-function readableLoops(pp: PolicyPrincipal, goalId: string): string[] {
-  return [...goalsDependingOn(pp.wsId, goalId)].filter((id) => {
-    const d = goalRow(pp.wsId, id);
-    return !!d && canReadGoal(pp, goalObj(d));
-  });
-}
-
+export const CHANGE_REQUEST_STATES = changesService.CHANGE_REQUEST_STATES;
+export const CHANGE_REQUEST_ACTIONS = changesService.CHANGE_REQUEST_ACTIONS;
+export const LAUNCH_STATES = changesService.LAUNCH_STATES;
 /** The goals a change request from this reader on `goalId` may add as a dependency: the goals they can read that every
  *  member of the goal's effective approval set (for them as the requester) can read too, so the propose form offers
  *  only what the server accepts (C2 F5), leaving out goals that already depend on this goal, which would close a loop
@@ -298,617 +186,348 @@ function readableLoops(pp: PolicyPrincipal, goalId: string): string[] {
  *  `counterOf` (a request on that goal), the goals a counter from this reader may add: readable by them, the requester
  *  and the request's approval set (404 for a request not on the goal; null when they may not counter it). */
 export function dependencyChoices(pp: PolicyPrincipal, goalId: string, counterOf?: string): string[] | null {
-  const g = visibleGoal(pp, goalId);
-  const readers = dependencyReaders(pp, g, counterOf);
-  if (!readers) return null;
-  const deciders = readers.map((u) => memberPrincipal(pp.wsId, u));
-  const loops = goalsDependingOn(pp.wsId, g.id);
-  return all<GoalRow>("SELECT * FROM v2_goals WHERE ws_id = ? AND id != ? ORDER BY id", pp.wsId, g.id)
-    .filter((d) => !loops.has(d.id) && canReadGoal(pp, goalObj(d)) && deciders.every((dp) => canReadGoal(dp, goalObj(d))))
-    .map((d) => d.id);
+    return (0, changesService.dependencyChoices)(pp, goalId, counterOf);
 }
-
 /** The goals this reader can read that already depend on `goalId` (so dependencyChoices leaves them out: adding one
  *  would close a loop), for the propose or counter form to say why they aren't offered (C3-3). The same audience as
  *  dependencyChoices, `counterOf` included: null exactly when it is (C4-2). */
 export function dependencyLoops(pp: PolicyPrincipal, goalId: string, counterOf?: string): string[] | null {
-  const g = visibleGoal(pp, goalId);
-  return dependencyReaders(pp, g, counterOf) ? readableLoops(pp, g.id) : null;
+    return (0, changesService.dependencyLoops)(pp, goalId, counterOf);
 }
-
 /** What a counter from this reader on request `counterOf` is compared with: the request's base version (its dependencies
  *  limited to those the reader can read; a counter keeps the others), so the Suggest a change form offers Review exactly
  *  when the server would record the counter, also on a request behind its goal (C8-2). null without `counterOf`, and
  *  for a reader who may not counter it (the same audience as dependencyChoices). */
 export function counterBase(pp: PolicyPrincipal, goalId: string, counterOf?: string): Changes | null {
-  if (!counterOf) return null;
-  const g = visibleGoal(pp, goalId);
-  if (!dependencyReaders(pp, g, counterOf)) return null;
-  const base = versionContentOf(pp.wsId, g.id, crRow(pp.wsId, counterOf)!.base_version)!;
-  const hidden = unreadableGoals(pp, base.depends_on);
-  return { title: base.title, measures: base.measures, depends_on: base.depends_on.filter((id) => !hidden.includes(id)), status: base.status, limits: base.limits };
+    return (0, changesService.counterBase)(pp, goalId, counterOf);
 }
-
 /** The goals the New version form leaves out of Depends on because they already depend on `goalId` (saving one would
  *  be refused 409 cycle), for a reader who may save a version (`canEdit`); null otherwise (X5). */
 export function versionLoops(pp: PolicyPrincipal, goalId: string, canEdit: boolean): string[] | null {
-  const g = visibleGoal(pp, goalId);
-  return canEdit ? readableLoops(pp, g.id) : null;
+    return (0, changesService.versionLoops)(pp, goalId, canEdit);
 }
-
-const crRow = (ws: string, id: string) => get<ChangeRequestRow>("SELECT * FROM v2_change_requests WHERE ws_id = ? AND id = ?", ws, id);
-
-const openRequestOf = (ws: string, goalId: string, userId: string) =>
-  get<{ id: string }>("SELECT id FROM v2_change_requests WHERE ws_id = ? AND goal_id = ? AND requester_id = ? AND state IN ('pending','countered')", ws, goalId, userId);
-
-/** The request if the caller can read its goal (and, when named, it is on that goal), else 404. */
-function visibleRequest(pp: PolicyPrincipal, id: string, goalId?: string): ChangeRequestRow {
-  const r = crRow(pp.wsId, id);
-  if (!r || (goalId && r.goal_id !== goalId)) throw notFound();
-  visibleGoal(pp, r.goal_id);
-  return r;
-}
-
 /** Write a new pending request at revision 1 (inside the caller's tx). The create route checks who may ask; the
  *  sample workspace seeds its request through here directly. */
 export function insertChangeRequest(pp: PolicyPrincipal, g: GoalRow, changes: Changes, reason: string, at: string): string {
-  const id = newId("cr");
-  run(
-    `INSERT INTO v2_change_requests (id, ws_id, goal_id, requester_id, state, revision, base_version, changes_json, reason, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'pending', 1, ?, ?, ?, ?, ?)`,
-    id,
-    pp.wsId,
-    g.id,
-    pp.userId,
-    g.version,
-    JSON.stringify(changes),
-    reason,
-    at,
-    at,
-  );
-  writeRevision(pp.wsId, g.id, id, 1, g.version, changes, null, pp.userId, at);
-  audit(pp.wsId, pp.userId, "change_request.created", id, at);
-  return id;
+    return (0, changesService.insertChangeRequest)(pp, g, changes, reason, at);
 }
-
-/** A new revision, with the snapshot Align records for the goal now (in the caller's transaction). */
-function writeRevision(ws: string, goalId: string, id: string, revision: number, baseVersion: number, changes: Changes, note: string | null, author: string, at: string, condition: string | null = null) {
-  run(
-    "INSERT INTO v2_change_request_revisions (ws_id, change_request_id, revision, base_version, changes_json, note, author_id, created_at, snapshot_json, condition) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    ws,
-    id,
-    revision,
-    baseVersion,
-    JSON.stringify(changes),
-    note,
-    author,
-    at,
-    recordSnapshot(ws, goalId, at),
-    condition,
-  );
+export async function createChangeRequest(pp: PolicyPrincipal, goalId: string, b: Body): Promise<{ id: string; goal: { id: string; title: string; version: number; }; state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded"; revision: number; base_version: number;
+/** True while the request is open and the goal has moved past its base version (approving needs a rebase). */
+behind: boolean; requester: { id: string; name: string; }; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; reason: string; revisions: { revision: number; base_version: number; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; note: string | null;
+/** A counter's "Accept if…" condition (never sent to agents), and who acknowledged it and when. */
+condition: string | null; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; author: { id: string; name: string; }; created_at: string;
+/** The links added while this revision was current (frozen once it is superseded or the request decided). */
+evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }[];
+/** What Align recorded about the goal when this revision was written. */
+snapshot: { revision: number; recorded_by: "align"; recorded_at: string; window: { from: string; to: string; days: number; }; spend: { total: Sums; by_model: { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number; by_basis: Record<"api_usd" | "subscription_included" | "workspace_credits" | "estimated_list_usd" | "unknown", Record<"requests" | "input" | "output" | "cache_read" | "cache_write_5m" | "cache_write_1h" | "cache_write_unsplit" | "est_list_usd_micros" | "unpriced_requests", number>>; model: string; }[]; } | null; spend_hidden: boolean; bound_sessions: number; last_activity_at: string | null; } | null; }[];
+/** depends_on lists only the goals the reader can read; hidden_depends_on counts the others on each side (never
+ *  which), so a diff never reads "Nothing → Nothing" while a dependency the reader can't see changes. */
+diff: { before: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; after: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; hidden_depends_on: { before: number; after: number; } | null; }; approvers: { id: string; name: string; }[];
+/** Who may launch it once approved: the approval set plus workspace owners. */
+launchers: { id: string; name: string; }[]; approved_by: { id: string; name: string; } | null; rejected_by: { id: string; name: string; } | null;
+/** The approver's note (approved) or the rejection reason (rejected). */
+decision_note: string | null; note: string | null; rejection_reason: string | null;
+/** The goal version the launch created (null until launched). */
+version: number | null;
+/** pending (approved, no launch decision yet) | not_yet | launched | superseded (before launch) | null. */
+launch: "pending" | "superseded" | "not_yet" | "launched" | null;
+/** The latest not yet or launch: who and when. */
+launch_decided_by: { id: string; name: string; } | null; launch_decided_at: string | null; condition: { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null;
+/** Links on the current revision (the one an approval decides). */
+evidence_count: number;
+/** Once approved: true when the approved revision had no evidence links. null until then, and for older rows. */
+approved_without_evidence: boolean | null; can: { approve: boolean; approve_and_launch: boolean; reject: boolean; counter: boolean; accept_counter: boolean; acknowledge: boolean; withdraw: boolean; rebase: boolean; add_evidence: boolean; launch: boolean; not_yet: boolean; };
+/** What happened to the request, in the words a `wrong_state` refusal of an action it no longer allows gives
+ *  ("This request was declined by <name>, so nothing changes.", never "rejected"), so a card that finds it changed
+ *  before sending says what the server would (W2). */
+state_note: string;
+/** Why `can.approve` and `can.approve_and_launch` (pending) or `can.launch` (approved) are false although the reader
+ *  decides on it: the refusal they would get (409 dependency_not_visible), naming no goal. null otherwise. */
+dependency_not_visible: string | null;
+/** Why nobody can approve (pending) or launch (approved) it as it stands: a dependency it adds would now close a loop
+ *  (409 cycle), naming no goal; the same for every reader. null otherwise (C5-1). */
+dependency_loop: string | null;
+/** The reader's turn: they may approve it, accept its counter, or launch it (approved and not launched, whether
+ *  nobody decided the launch yet or someone said not yet): the same rule as the workspace Home's queue. A pending
+ *  request that would close a loop waits on its deciders to suggest a change or decline it (C5-1), once its requester
+ *  has updated it to the goal's version (C6-2). */
+waiting_on_me: boolean; created_at: string; updated_at: string; decided_at: string | null; }> {
+    return (0, changesService.createChangeRequest)(pp, goalId, b);
 }
-
-const revisionRows = (id: string) => all<RevisionRow>("SELECT * FROM v2_change_request_revisions WHERE change_request_id = ? ORDER BY revision", id);
-
-/** The revision whose condition is the request's: its latest counter (a revision with a note; rebases and the first
- *  revision have none). Its condition may be null. */
-const counterRevision = (revs: RevisionRow[]) => [...revs].reverse().find((v) => v.note !== null);
-
-export async function createChangeRequest(pp: PolicyPrincipal, goalId: string, b: Body) {
-  const g = visibleGoal(pp, goalId);
-  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
-  if (g.owner_id === pp.userId) throw forbidden("own_goal", "You own this goal. Save a new version instead.");
-  if (g.status !== "active") throw conflict("goal_not_active", "This goal is achieved or dropped, so it takes no change requests.");
-  const baseVersion = nonNegInt(b, "base_version");
-  if (baseVersion !== g.version) throw conflict("stale_version", `This goal changed while you were editing. Reload to start from version ${g.version}.`);
-  const reason = str(b, "reason", TEXT_MAX);
-  if (openRequestOf(pp.wsId, g.id, pp.userId)) throw conflict("already_open", "You already have an open change request on this goal.");
-  const changes = changesIn(pp, g.id, contentOf(g), b.changes);
-  const at = nowIso();
-  const id = await tx(() => {
-    // Again inside the transaction: the goal may have moved, or another request been opened, since we read it.
-    const now = goalRow(pp.wsId, g.id)!;
-    if (now.version !== g.version) throw conflict("stale_version", `This goal changed while you were editing. Reload to start from version ${now.version}.`);
-    if (now.status !== "active") throw conflict("goal_not_active", "This goal is achieved or dropped, so it takes no change requests.");
-    if (openRequestOf(pp.wsId, g.id, pp.userId)) throw conflict("already_open", "You already have an open change request on this goal.");
-    assertDependenciesVisible(pp.wsId, contentOf(now), changes, effectiveSet(now, pp.userId), "proposal");
-    const created = insertChangeRequest(pp, now, changes, reason, at);
-    // Here, not in insertChangeRequest: the sample workspace's seeded request is nobody's first.
-    event("first_change_request", { ws: pp.wsId, user: pp.userId, at });
-    return created;
-  });
-  return requestView(pp, crRow(pp.wsId, id)!);
+export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id: string, action: ChangeRequestAction, b: Body): Promise<{ id: string; goal: { id: string; title: string; version: number; }; state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded"; revision: number; base_version: number;
+/** True while the request is open and the goal has moved past its base version (approving needs a rebase). */
+behind: boolean; requester: { id: string; name: string; }; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; reason: string; revisions: { revision: number; base_version: number; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; note: string | null;
+/** A counter's "Accept if…" condition (never sent to agents), and who acknowledged it and when. */
+condition: string | null; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; author: { id: string; name: string; }; created_at: string;
+/** The links added while this revision was current (frozen once it is superseded or the request decided). */
+evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }[];
+/** What Align recorded about the goal when this revision was written. */
+snapshot: { revision: number; recorded_by: "align"; recorded_at: string; window: { from: string; to: string; days: number; }; spend: { total: Sums; by_model: { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number; by_basis: Record<"api_usd" | "subscription_included" | "workspace_credits" | "estimated_list_usd" | "unknown", Record<"requests" | "input" | "output" | "cache_read" | "cache_write_5m" | "cache_write_1h" | "cache_write_unsplit" | "est_list_usd_micros" | "unpriced_requests", number>>; model: string; }[]; } | null; spend_hidden: boolean; bound_sessions: number; last_activity_at: string | null; } | null; }[];
+/** depends_on lists only the goals the reader can read; hidden_depends_on counts the others on each side (never
+ *  which), so a diff never reads "Nothing → Nothing" while a dependency the reader can't see changes. */
+diff: { before: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; after: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; hidden_depends_on: { before: number; after: number; } | null; }; approvers: { id: string; name: string; }[];
+/** Who may launch it once approved: the approval set plus workspace owners. */
+launchers: { id: string; name: string; }[]; approved_by: { id: string; name: string; } | null; rejected_by: { id: string; name: string; } | null;
+/** The approver's note (approved) or the rejection reason (rejected). */
+decision_note: string | null; note: string | null; rejection_reason: string | null;
+/** The goal version the launch created (null until launched). */
+version: number | null;
+/** pending (approved, no launch decision yet) | not_yet | launched | superseded (before launch) | null. */
+launch: "pending" | "superseded" | "not_yet" | "launched" | null;
+/** The latest not yet or launch: who and when. */
+launch_decided_by: { id: string; name: string; } | null; launch_decided_at: string | null; condition: { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null;
+/** Links on the current revision (the one an approval decides). */
+evidence_count: number;
+/** Once approved: true when the approved revision had no evidence links. null until then, and for older rows. */
+approved_without_evidence: boolean | null; can: { approve: boolean; approve_and_launch: boolean; reject: boolean; counter: boolean; accept_counter: boolean; acknowledge: boolean; withdraw: boolean; rebase: boolean; add_evidence: boolean; launch: boolean; not_yet: boolean; };
+/** What happened to the request, in the words a `wrong_state` refusal of an action it no longer allows gives
+ *  ("This request was declined by <name>, so nothing changes.", never "rejected"), so a card that finds it changed
+ *  before sending says what the server would (W2). */
+state_note: string;
+/** Why `can.approve` and `can.approve_and_launch` (pending) or `can.launch` (approved) are false although the reader
+ *  decides on it: the refusal they would get (409 dependency_not_visible), naming no goal. null otherwise. */
+dependency_not_visible: string | null;
+/** Why nobody can approve (pending) or launch (approved) it as it stands: a dependency it adds would now close a loop
+ *  (409 cycle), naming no goal; the same for every reader. null otherwise (C5-1). */
+dependency_loop: string | null;
+/** The reader's turn: they may approve it, accept its counter, or launch it (approved and not launched, whether
+ *  nobody decided the launch yet or someone said not yet): the same rule as the workspace Home's queue. A pending
+ *  request that would close a loop waits on its deciders to suggest a change or decline it (C5-1), once its requester
+ *  has updated it to the goal's version (C6-2). */
+waiting_on_me: boolean; created_at: string; updated_at: string; decided_at: string | null; }> {
+    return (0, changesService.actOnChangeRequest)(pp, goalId, id, action, b);
 }
-
-export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id: string, action: ChangeRequestAction, b: Body) {
-  visibleRequest(pp, id, goalId);
-  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
-  // A revision, when sent, is a whole number (400 in words otherwise, c11 W1) that the request has reached: one it never
-  // reached was never read, so it is 400, not a stale refusal (c11 W3).
-  const sent = revisionRead(b, true);
-  const me = pp.userId;
-  const at = nowIso();
-  await tx(() => {
-    const r = crRow(pp.wsId, id)!; // read inside the transaction
-    assertRevisionReached("request", sent, r.revision);
-    const g = goalRow(pp.wsId, r.goal_id)!;
-    const isRequester = r.requester_id === me;
-    const isApprover = effectiveSet(g, r.requester_id).includes(me);
-    const changes = JSON.parse(r.changes_json) as Changes;
-    const approverOnly = () => {
-      if (!isApprover) throw forbidden("not_an_approver", "Only someone who can approve for this goal can do this.");
-    };
-    const launcherOnly = () => {
-      if (!launchSet(g, r.requester_id).includes(me)) throw forbidden("not_a_launcher", "Only someone who can approve for this goal, or a workspace owner, can launch it.");
-    };
-    const requesterOnly = () => {
-      if (!isRequester) throw forbidden("not_requester", "Only the person who asked can do this.");
-    };
-    const inState = (...s: ChangeRequestState[]) => {
-      if (!s.includes(r.state)) throw conflict("wrong_state", crStateRefusal(r, me));
-    };
-    const expectRevision = (required: boolean) => {
-      if ((required || b.revision !== undefined) && b.revision !== r.revision) throw conflict("stale_revision", crRevisionRefusal(r, me, DECIDE_AGAIN));
-    };
-    /** 409 dependency_not_visible when the caller can't read a dependency the request (approve) or its approved content
-     *  (launch) adds to its base version. */
-    const assertDecidable = (kind: "approve" | "launch") => {
-      const refusal = hiddenDependencyRefusal(pp, r, kind);
-      if (refusal) throw conflict("dependency_not_visible", refusal);
-    };
-    /** 409 cycle when the request's dependencies would close a loop against the goals as they stand now (C5-1). */
-    const assertNoLoop = () => {
-      const refusal = dependencyLoop(r, g, me);
-      if (refusal) throw conflict("cycle", refusal);
-    };
-    /** Record the approval and keep the resulting content on the request, approved but unlaunched (no version, no
-     *  directive). Returns that content. */
-    const approve = (): GoalContent => {
-      approverOnly();
-      inState("pending");
-      expectRevision(true);
-      const note = optStr(b, "note", TEXT_MAX);
-      if (g.version !== r.base_version) {
-        throw conflict("stale_version", `The goal changed after this request was made. ${isRequester ? "You need" : `${memberName(r.requester_id)} needs`} to update it before it can be approved.`);
-      }
-      assertDecidable("approve");
-      assertNoLoop();
-      const next = applied(contentOf(g), changes);
-      if (sameContent(next, contentOf(g))) throw conflict("no_change", "This request no longer changes anything.");
-      // Advisory evidence: approving a revision with no links is allowed, and recorded on the decision and in the audit.
-      const without = evidenceCount(r.id, r.revision) === 0 ? 1 : 0;
-      run(
-        "UPDATE v2_change_requests SET state = 'approved', approved_by = ?, decision_note = ?, decided_at = ?, updated_at = ?, approved_without_evidence = ?, launch = 'pending', approved_json = ? WHERE id = ?",
-        me,
-        note,
-        at,
-        at,
-        without,
-        JSON.stringify(next),
-        r.id,
-      );
-      audit(pp.wsId, me, "change_request.approved", r.id, at);
-      if (without) audit(pp.wsId, me, "change_request.approved_without_evidence", r.id, at);
-      event("first_approval", { ws: pp.wsId, user: me, at });
-      return next;
-    };
-    /** An approved request still waiting for launch, on a goal still at its base version (else 409). */
-    const launchable = () => {
-      if (r.state === "approved" && r.launch === "launched") throw conflict("wrong_state", `This change is already launched as version ${r.version}.`);
-      if (r.state === "superseded" && r.launch === "superseded") throw conflict("wrong_state", `This change was superseded before launch. ${isRequester ? "You" : memberName(r.requester_id)} can propose it again.`);
-      if (r.state !== "approved") throw conflict("wrong_state", crStateRefusal(r, me));
-      // A newer version supersedes it in the same transaction, so this is a guard, not a path.
-      if (g.version !== r.base_version) throw conflict("stale_version", `The goal changed after this change was approved: it is now at version ${g.version}.`);
-    };
-    /** Publish the approved content as the goal's next version (authored by the approver) with its directives. */
-    const launch = (content: GoalContent, approvedBy: string) => {
-      // Launched first, so the new version's supersede-before-launch step leaves this request alone.
-      run("UPDATE v2_change_requests SET launch = 'launched', launch_by = ?, launch_at = ?, updated_at = ? WHERE id = ?", me, at, at, r.id);
-      const written = writeGoalVersion(g, content, me, at, approvedBy);
-      run("UPDATE v2_change_requests SET version = ? WHERE id = ?", written.version, r.id);
-      audit(pp.wsId, me, "change_request.launched", r.id, at);
-      event("first_launch", { ws: pp.wsId, user: me, at });
-    };
-    switch (action) {
-      case "approve": {
-        approve();
-        break;
-      }
-      case "approve_and_launch": {
-        const content = approve();
-        launcherOnly(); // every approver may launch; checked all the same
-        launch(content, me);
-        break;
-      }
-      case "launch": {
-        launcherOnly();
-        launchable();
-        expectRevision(false);
-        const content = JSON.parse(r.approved_json!) as GoalContent;
-        assertDecidable("launch");
-        assertNoLoop();
-        launch(content, r.approved_by!);
-        break;
-      }
-      case "not_yet": {
-        launcherOnly();
-        launchable();
-        expectRevision(false);
-        // Already not yet (in another tab, or by another launcher): recording it again would change nothing (c11 W2).
-        if (r.launch === "not_yet") {
-          const who = r.launch_by === me ? "You" : r.launch_by ? memberName(r.launch_by) : "Someone";
-          throw conflict("wrong_state", `${who} already decided not yet, so nothing changes: agents stay on version ${r.base_version} until someone launches version ${r.base_version + 1}.`);
-        }
-        run("UPDATE v2_change_requests SET launch = 'not_yet', launch_by = ?, launch_at = ?, updated_at = ? WHERE id = ?", me, at, at, r.id);
-        audit(pp.wsId, me, "change_request.not_yet", r.id, at);
-        break;
-      }
-      case "acknowledge": {
-        requesterOnly();
-        inState("pending", "approved");
-        const c = counterRevision(revisionRows(r.id));
-        if (!c?.condition) throw conflict("no_condition", "This request has no condition to acknowledge.");
-        if (b.revision !== undefined && b.revision !== c.revision) throw conflict("stale_revision", `This request changed after you read it: its condition is now on revision ${c.revision}. Read the condition again before you confirm it.`);
-        if (c.acknowledged_by) throw conflict("already_acknowledged", "You already confirmed this condition.");
-        run("UPDATE v2_change_request_revisions SET acknowledged_by = ?, acknowledged_at = ? WHERE change_request_id = ? AND revision = ?", me, at, r.id, c.revision);
-        run("UPDATE v2_change_requests SET updated_at = ? WHERE id = ?", at, r.id);
-        audit(pp.wsId, me, "change_request.condition_acknowledged", r.id, at);
-        break;
-      }
-      case "reject": {
-        approverOnly();
-        inState("pending", "countered");
-        expectRevision(false);
-        const reason = str(b, "reason", TEXT_MAX);
-        run("UPDATE v2_change_requests SET state = 'rejected', rejected_by = ?, decision_note = ?, decided_at = ?, updated_at = ? WHERE id = ?", me, reason, at, at, r.id);
-        audit(pp.wsId, me, "change_request.rejected", r.id, at);
-        break;
-      }
-      case "counter": {
-        approverOnly();
-        inState("pending");
-        expectRevision(false);
-        const note = str(b, "note", TEXT_MAX);
-        const condition = b.condition === undefined || b.condition === null ? null : str(b, "condition", TEXT_MAX);
-        const base = versionContentOf(pp.wsId, g.id, r.base_version)!;
-        // The request's dependencies the counterer can't read stay as the request has them (C2 N2): a form lists only
-        // what its reader can see, so a list without them is not a request to drop them. A counter that doesn't
-        // restate depends_on keeps them too, beside the base's other dependencies.
-        const current = applied(base, changes);
-        const hiddenNow = unreadableGoals(pp, current.depends_on);
-        let sent = b.changes;
-        if (sent && typeof sent === "object" && !Array.isArray(sent) && (sent as Body).depends_on === undefined && sortedIds(hiddenNow) !== sortedIds(unreadableGoals(pp, base.depends_on))) {
-          const hiddenBase = unreadableGoals(pp, base.depends_on);
-          sent = { ...(sent as Body), depends_on: base.depends_on.filter((id) => !hiddenBase.includes(id)) };
-        }
-        // A suggestion that changes nothing on the version the request was made against says what to do instead (C7-2),
-        // naming that version when the goal has moved on since (C8-2).
-        let countered: Changes;
-        try {
-          countered = changesIn(pp, g.id, base, sent, current.depends_on);
-        } catch (e) {
-          if (e instanceof V2Error && e.code === "no_change") throw conflict("no_change", counterNoChange(r.base_version, g.version));
-          throw e;
-        }
-        // One that asks for exactly what the request asks, with no condition to add, is no suggestion: approving it is
-        // (W4). With a condition it is Accept if…, which keeps the request's changes.
-        if (condition === null && sameContent(applied(base, countered), current)) throw conflict("no_change", counterSameAsRequest(memberName(r.requester_id), r.base_version, g.version));
-        // A dependency already on the request or its base was checked when it was added; one this counter adds must be
-        // readable by the requester, who accepts it, and by the approval set, who then decide on it (C2 N1).
-        const already = [...base.depends_on, ...current.depends_on];
-        assertDependenciesVisible(pp.wsId, base, countered, [r.requester_id], "counter", already);
-        assertDependenciesVisible(pp.wsId, base, countered, effectiveSet(g, r.requester_id), "counter_approvers", already);
-        const next = r.revision + 1;
-        writeRevision(pp.wsId, g.id, r.id, next, r.base_version, countered, note, me, at, condition);
-        run("UPDATE v2_change_requests SET state = 'countered', revision = ?, changes_json = ?, updated_at = ? WHERE id = ?", next, JSON.stringify(countered), at, r.id);
-        audit(pp.wsId, me, "change_request.countered", r.id, at);
-        break;
-      }
-      case "accept_counter": {
-        requesterOnly();
-        inState("countered");
-        expectRevision(false);
-        run("UPDATE v2_change_requests SET state = 'pending', updated_at = ? WHERE id = ?", at, r.id);
-        audit(pp.wsId, me, "change_request.counter_accepted", r.id, at);
-        break;
-      }
-      case "withdraw": {
-        requesterOnly();
-        inState("pending", "countered");
-        expectRevision(false);
-        run("UPDATE v2_change_requests SET state = 'withdrawn', updated_at = ? WHERE id = ?", at, r.id);
-        audit(pp.wsId, me, "change_request.withdrawn", r.id, at);
-        break;
-      }
-      case "rebase": {
-        requesterOnly();
-        inState("pending");
-        expectRevision(false);
-        const baseVersion = nonNegInt(b, "base_version");
-        if (baseVersion !== g.version) throw conflict("stale_version", `The goal changed after you read it: it is now at version ${g.version}. Update your request to that version.`);
-        // The changes as sent, or the request's own, checked again against the goal as it is now. Its own changes add
-        // nothing new, so a dependency that has since come to close a loop doesn't refuse the update (C6-2): the request
-        // moves to this version and waits, as any request that would loop does, on its deciders to suggest a change
-        // without that dependency or decline it. Changes sent are checked like a proposal (409 cycle).
-        const own = b.changes === undefined;
-        const rebased = changesIn(pp, g.id, contentOf(g), own ? changes : b.changes, contentOf(g).depends_on, own);
-        const hidden = hiddenAddedDependency(pp.wsId, contentOf(g).depends_on, rebased, effectiveSet(g, r.requester_id));
-        if (hidden) {
-          // The request's own changes, kept: the dependency may have come from an approver's counter, accepted before
-          // the approval set changed. The refusal says whose suggestion it was, never "you added" (C2 N1).
-          const author = b.changes === undefined ? dependencyAddedBy(revisionRows(r.id), hidden) : null;
-          throw conflict("dependency_not_visible", author && author !== r.requester_id ? rebaseRefusedFor(author) : DEPENDENCY_READERS.proposal);
-        }
-        const next = r.revision + 1;
-        writeRevision(pp.wsId, g.id, r.id, next, g.version, rebased, null, me, at);
-        run("UPDATE v2_change_requests SET revision = ?, base_version = ?, changes_json = ?, updated_at = ? WHERE id = ?", next, g.version, JSON.stringify(rebased), at, r.id);
-        audit(pp.wsId, me, "change_request.rebased", r.id, at);
-        break;
-      }
-    }
-  });
-  return requestView(pp, crRow(pp.wsId, id)!);
-}
-
-// ---- evidence links ----
-
-const isOpen = (r: ChangeRequestRow) => r.state === "pending" || r.state === "countered";
-
-/** The requester or an approver may add a link to the current revision of an open request. */
-const mayAddEvidence = (pp: PolicyPrincipal, r: ChangeRequestRow, approvers: string[]) =>
-  pp.wsRole !== "viewer" && isOpen(r) && (r.requester_id === pp.userId || approvers.includes(pp.userId));
-
-/** A link can still be removed, by its author, while its revision is current and the request open; then it is frozen. */
-const mayRemoveEvidence = (pp: PolicyPrincipal, r: ChangeRequestRow, e: { revision: number; added_by: string }) =>
-  pp.wsRole !== "viewer" && isOpen(r) && e.revision === r.revision && e.added_by === pp.userId;
-
 /** Add `{kind, url, label, revision?}` to the request's current revision as the caller, from `source` ("person" for a
  *  web session, "agent" for MCP or a device token). `goalId` is the goal named in the path (MCP names none). */
-export async function addEvidence(pp: PolicyPrincipal, goalId: string | undefined, id: string, b: Body, source: EvidenceSource) {
-  visibleRequest(pp, id, goalId);
-  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
-  const input = evidenceInput(b);
-  const at = nowIso();
-  const evId = await tx(() => {
-    const r = crRow(pp.wsId, id)!; // read inside the transaction
-    const g = goalRow(pp.wsId, r.goal_id)!;
-    const approvers = effectiveSet(g, r.requester_id);
-    if (r.requester_id !== pp.userId && !approvers.includes(pp.userId)) {
-      throw forbidden("not_involved", "Only the person who asked or someone who can approve can add evidence.");
-    }
-    if (!isOpen(r)) throw conflict("wrong_state", crStateRefusal(r, pp.userId)); // in the app's words, as every action's (C8-1)
-    if (b.revision !== undefined && b.revision !== r.revision) throw conflict("stale_revision", crRevisionRefusal(r, pp.userId, "Add the link again if it supports that revision."));
-    if (get("SELECT 1 AS x FROM v2_change_request_evidence WHERE change_request_id = ? AND revision = ? AND url = ?", r.id, r.revision, input.url)) {
-      throw conflict("duplicate_evidence", `This link is already on revision ${r.revision}, so it isn't added twice.`);
-    }
-    if (evidenceCount(r.id, r.revision) >= EVIDENCE_PER_REVISION) throw conflict("too_much_evidence", `A revision holds at most ${EVIDENCE_PER_REVISION} evidence links; remove one to add another.`);
-    const newEv = newId("ev");
-    run(
-      "INSERT INTO v2_change_request_evidence (id, ws_id, change_request_id, revision, kind, url, label, source, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      newEv,
-      pp.wsId,
-      r.id,
-      r.revision,
-      input.kind,
-      input.url,
-      input.label,
-      source,
-      pp.userId,
-      at,
-    );
-    run("UPDATE v2_change_requests SET updated_at = ? WHERE id = ?", at, r.id);
-    audit(pp.wsId, pp.userId, "change_request.evidence_added", r.id, at);
-    return newEv;
-  });
-  const view = requestView(pp, crRow(pp.wsId, id)!);
-  return { evidence: view.revisions.flatMap((v) => v.evidence).find((e) => e.id === evId)!, change_request: view };
+export async function addEvidence(pp: PolicyPrincipal, goalId: string | undefined, id: string, b: Body, source: EvidenceSource): Promise<{ evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }; change_request: { id: string; goal: { id: string; title: string; version: number; }; state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded"; revision: number; base_version: number;
+/** True while the request is open and the goal has moved past its base version (approving needs a rebase). */
+behind: boolean; requester: { id: string; name: string; }; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; reason: string; revisions: { revision: number; base_version: number; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; note: string | null;
+/** A counter's "Accept if…" condition (never sent to agents), and who acknowledged it and when. */
+condition: string | null; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; author: { id: string; name: string; }; created_at: string;
+/** The links added while this revision was current (frozen once it is superseded or the request decided). */
+evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }[];
+/** What Align recorded about the goal when this revision was written. */
+snapshot: { revision: number; recorded_by: "align"; recorded_at: string; window: { from: string; to: string; days: number; }; spend: { total: Sums; by_model: { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number; by_basis: Record<"api_usd" | "subscription_included" | "workspace_credits" | "estimated_list_usd" | "unknown", Record<"requests" | "input" | "output" | "cache_read" | "cache_write_5m" | "cache_write_1h" | "cache_write_unsplit" | "est_list_usd_micros" | "unpriced_requests", number>>; model: string; }[]; } | null; spend_hidden: boolean; bound_sessions: number; last_activity_at: string | null; } | null; }[];
+/** depends_on lists only the goals the reader can read; hidden_depends_on counts the others on each side (never
+ *  which), so a diff never reads "Nothing → Nothing" while a dependency the reader can't see changes. */
+diff: { before: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; after: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; hidden_depends_on: { before: number; after: number; } | null; }; approvers: { id: string; name: string; }[];
+/** Who may launch it once approved: the approval set plus workspace owners. */
+launchers: { id: string; name: string; }[]; approved_by: { id: string; name: string; } | null; rejected_by: { id: string; name: string; } | null;
+/** The approver's note (approved) or the rejection reason (rejected). */
+decision_note: string | null; note: string | null; rejection_reason: string | null;
+/** The goal version the launch created (null until launched). */
+version: number | null;
+/** pending (approved, no launch decision yet) | not_yet | launched | superseded (before launch) | null. */
+launch: "pending" | "superseded" | "not_yet" | "launched" | null;
+/** The latest not yet or launch: who and when. */
+launch_decided_by: { id: string; name: string; } | null; launch_decided_at: string | null; condition: { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null;
+/** Links on the current revision (the one an approval decides). */
+evidence_count: number;
+/** Once approved: true when the approved revision had no evidence links. null until then, and for older rows. */
+approved_without_evidence: boolean | null; can: { approve: boolean; approve_and_launch: boolean; reject: boolean; counter: boolean; accept_counter: boolean; acknowledge: boolean; withdraw: boolean; rebase: boolean; add_evidence: boolean; launch: boolean; not_yet: boolean; };
+/** What happened to the request, in the words a `wrong_state` refusal of an action it no longer allows gives
+ *  ("This request was declined by <name>, so nothing changes.", never "rejected"), so a card that finds it changed
+ *  before sending says what the server would (W2). */
+state_note: string;
+/** Why `can.approve` and `can.approve_and_launch` (pending) or `can.launch` (approved) are false although the reader
+ *  decides on it: the refusal they would get (409 dependency_not_visible), naming no goal. null otherwise. */
+dependency_not_visible: string | null;
+/** Why nobody can approve (pending) or launch (approved) it as it stands: a dependency it adds would now close a loop
+ *  (409 cycle), naming no goal; the same for every reader. null otherwise (C5-1). */
+dependency_loop: string | null;
+/** The reader's turn: they may approve it, accept its counter, or launch it (approved and not launched, whether
+ *  nobody decided the launch yet or someone said not yet): the same rule as the workspace Home's queue. A pending
+ *  request that would close a loop waits on its deciders to suggest a change or decline it (C5-1), once its requester
+ *  has updated it to the goal's version (C6-2). */
+waiting_on_me: boolean; created_at: string; updated_at: string; decided_at: string | null; }; }> {
+    return (0, changesService.addEvidence)(pp, goalId, id, b, source);
 }
-
 /** Remove one of the caller's own links from the current revision of an open request (404 if it isn't there). */
-export async function removeEvidence(pp: PolicyPrincipal, goalId: string | undefined, id: string, evidenceId: string) {
-  visibleRequest(pp, id, goalId);
-  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
-  const at = nowIso();
-  await tx(() => {
-    const r = crRow(pp.wsId, id)!;
-    const e = get<{ revision: number; added_by: string }>("SELECT revision, added_by FROM v2_change_request_evidence WHERE id = ? AND change_request_id = ?", evidenceId, r.id);
-    if (!e) throw notFound();
-    if (e.added_by !== pp.userId) throw forbidden("not_evidence_author", "Only the person who added this link can remove it.");
-    // Frozen: a request no longer open says what happened in the words every refusal of it gives (c9 W1, as adding a link
-    // does: C8-1); on an earlier revision, which one the request is at now.
-    if (!mayRemoveEvidence(pp, r, e)) {
-      throw conflict("evidence_frozen", isOpen(r) ? `This link is on revision ${e.revision}, and the request has moved on to revision ${r.revision}, so the link is kept as it was.` : crStateRefusal(r, pp.userId));
-    }
-    run("DELETE FROM v2_change_request_evidence WHERE id = ?", evidenceId);
-    run("UPDATE v2_change_requests SET updated_at = ? WHERE id = ?", at, r.id);
-    audit(pp.wsId, pp.userId, "change_request.evidence_removed", r.id, at);
-  });
-  return requestView(pp, crRow(pp.wsId, id)!);
+export async function removeEvidence(pp: PolicyPrincipal, goalId: string | undefined, id: string, evidenceId: string): Promise<{ id: string; goal: { id: string; title: string; version: number; }; state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded"; revision: number; base_version: number;
+/** True while the request is open and the goal has moved past its base version (approving needs a rebase). */
+behind: boolean; requester: { id: string; name: string; }; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; reason: string; revisions: { revision: number; base_version: number; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; note: string | null;
+/** A counter's "Accept if…" condition (never sent to agents), and who acknowledged it and when. */
+condition: string | null; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; author: { id: string; name: string; }; created_at: string;
+/** The links added while this revision was current (frozen once it is superseded or the request decided). */
+evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }[];
+/** What Align recorded about the goal when this revision was written. */
+snapshot: { revision: number; recorded_by: "align"; recorded_at: string; window: { from: string; to: string; days: number; }; spend: { total: Sums; by_model: { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number; by_basis: Record<"api_usd" | "subscription_included" | "workspace_credits" | "estimated_list_usd" | "unknown", Record<"requests" | "input" | "output" | "cache_read" | "cache_write_5m" | "cache_write_1h" | "cache_write_unsplit" | "est_list_usd_micros" | "unpriced_requests", number>>; model: string; }[]; } | null; spend_hidden: boolean; bound_sessions: number; last_activity_at: string | null; } | null; }[];
+/** depends_on lists only the goals the reader can read; hidden_depends_on counts the others on each side (never
+ *  which), so a diff never reads "Nothing → Nothing" while a dependency the reader can't see changes. */
+diff: { before: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; after: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; hidden_depends_on: { before: number; after: number; } | null; }; approvers: { id: string; name: string; }[];
+/** Who may launch it once approved: the approval set plus workspace owners. */
+launchers: { id: string; name: string; }[]; approved_by: { id: string; name: string; } | null; rejected_by: { id: string; name: string; } | null;
+/** The approver's note (approved) or the rejection reason (rejected). */
+decision_note: string | null; note: string | null; rejection_reason: string | null;
+/** The goal version the launch created (null until launched). */
+version: number | null;
+/** pending (approved, no launch decision yet) | not_yet | launched | superseded (before launch) | null. */
+launch: "pending" | "superseded" | "not_yet" | "launched" | null;
+/** The latest not yet or launch: who and when. */
+launch_decided_by: { id: string; name: string; } | null; launch_decided_at: string | null; condition: { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null;
+/** Links on the current revision (the one an approval decides). */
+evidence_count: number;
+/** Once approved: true when the approved revision had no evidence links. null until then, and for older rows. */
+approved_without_evidence: boolean | null; can: { approve: boolean; approve_and_launch: boolean; reject: boolean; counter: boolean; accept_counter: boolean; acknowledge: boolean; withdraw: boolean; rebase: boolean; add_evidence: boolean; launch: boolean; not_yet: boolean; };
+/** What happened to the request, in the words a `wrong_state` refusal of an action it no longer allows gives
+ *  ("This request was declined by <name>, so nothing changes.", never "rejected"), so a card that finds it changed
+ *  before sending says what the server would (W2). */
+state_note: string;
+/** Why `can.approve` and `can.approve_and_launch` (pending) or `can.launch` (approved) are false although the reader
+ *  decides on it: the refusal they would get (409 dependency_not_visible), naming no goal. null otherwise. */
+dependency_not_visible: string | null;
+/** Why nobody can approve (pending) or launch (approved) it as it stands: a dependency it adds would now close a loop
+ *  (409 cycle), naming no goal; the same for every reader. null otherwise (C5-1). */
+dependency_loop: string | null;
+/** The reader's turn: they may approve it, accept its counter, or launch it (approved and not launched, whether
+ *  nobody decided the launch yet or someone said not yet): the same rule as the workspace Home's queue. A pending
+ *  request that would close a loop waits on its deciders to suggest a change or decline it (C5-1), once its requester
+ *  has updated it to the goal's version (C6-2). */
+waiting_on_me: boolean; created_at: string; updated_at: string; decided_at: string | null; }> {
+    return (0, changesService.removeEvidence)(pp, goalId, id, evidenceId);
 }
-
-// ---- reading (the same object for a list item, one request and a decision record) ----
-
-function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
-  const g = goalRow(r.ws_id, r.goal_id)!;
-  const readable = (ids: string[]) =>
-    ids.filter((id) => {
-      const d = goalRow(r.ws_id, id);
-      return !!d && canReadGoal(pp, goalObj(d));
-    });
-  const shown = (c: Changes): Changes => (c.depends_on ? { ...c, depends_on: readable(c.depends_on) } : c);
-  const hiddenOf = (ids: string[]) => ids.length - readable(ids).length;
-  const changes = JSON.parse(r.changes_json) as Changes;
-  const fields = CHANGE_KEYS.filter((k) => k in changes);
-  const base = versionContentOf(r.ws_id, r.goal_id, r.base_version)!;
-  const result = r.state === "approved" && r.version ? versionContentOf(r.ws_id, r.goal_id, r.version) : undefined;
-  const after = result ?? applied(base, changes);
-  const pick = (c: GoalContent) => shown(Object.fromEntries(fields.map((k) => [k, c[k]])) as Changes);
-  const approvers = effectiveSet(g, r.requester_id);
-  const launchers = launchSet(g, r.requester_id);
-  const me = pp.userId;
-  const isRequester = r.requester_id === me;
-  const isApprover = approvers.includes(me);
-  const open = isOpen(r);
-  const unlaunched = r.state === "approved" && (r.launch === "pending" || r.launch === "not_yet");
-  const person = (id: string | null) => (id ? { id, name: memberName(id) } : null);
-  const revRows = revisionRows(r.id);
-  const counter = counterRevision(revRows);
-  /** The request's "Accept if…" condition (its latest counter's), and the requester's acknowledgement. */
-  const condition = counter?.condition
-    ? { revision: counter.revision, text: counter.condition, acknowledged_by: person(counter.acknowledged_by), acknowledged_at: counter.acknowledged_at }
-    : null;
-  // A decider who can't read a dependency the request adds would be refused (409 dependency_not_visible): not offered
-  // the decision, not waited on, and told why (C4-1). Computed only where the flag would otherwise be true.
-  const approvable = r.state === "pending" && isApprover && r.base_version === g.version && pp.wsRole !== "viewer";
-  const launchable = unlaunched && launchers.includes(me) && r.base_version === g.version && pp.wsRole !== "viewer";
-  const hiddenRefusal = approvable ? hiddenDependencyRefusal(pp, r, "approve") : launchable ? hiddenDependencyRefusal(pp, r, "launch") : null;
-  // A request whose dependencies would close a loop against the goals as they stand: refused 409 cycle (C5-1).
-  const loop = dependencyLoop(r, g, pp.userId);
-  const can = {
-    approve: approvable && !hiddenRefusal && !loop,
-    approve_and_launch: approvable && !hiddenRefusal && !loop,
-    reject: open && isApprover,
-    counter: r.state === "pending" && isApprover,
-    accept_counter: r.state === "countered" && isRequester,
-    acknowledge: (r.state === "pending" || r.state === "approved") && isRequester && !!condition && !condition.acknowledged_by,
-    withdraw: open && isRequester,
-    rebase: r.state === "pending" && isRequester,
-    add_evidence: mayAddEvidence(pp, r, approvers),
-    launch: launchable && !hiddenRefusal && !loop,
-    not_yet: launchable && r.launch !== "not_yet",
-  };
-  if (pp.wsRole === "viewer") for (const k of Object.keys(can) as (keyof typeof can)[]) can[k] = false;
-  const evidence = evidenceRows(r.id);
-  const revisions = revRows.map((v) => ({
-    revision: v.revision,
-    base_version: v.base_version,
-    changes: shown(JSON.parse(v.changes_json) as Changes),
-    note: v.note,
-    /** A counter's "Accept if…" condition (never sent to agents), and who acknowledged it and when. */
-    condition: v.condition,
-    acknowledged_by: person(v.acknowledged_by),
-    acknowledged_at: v.acknowledged_at,
-    author: person(v.author_id)!,
-    created_at: v.created_at,
-    /** The links added while this revision was current (frozen once it is superseded or the request decided). */
-    evidence: evidence.filter((e) => e.revision === v.revision).map((e) => evidenceView(e, mayRemoveEvidence(pp, r, e))),
-    /** What Align recorded about the goal when this revision was written. */
-    snapshot: snapshotView(pp, v.snapshot_json, v.revision),
-  }));
-  return {
-    id: r.id,
-    goal: { id: g.id, title: g.title, version: g.version },
-    state: r.state,
-    revision: r.revision,
-    base_version: r.base_version,
-    /** True while the request is open and the goal has moved past its base version (approving needs a rebase). */
-    behind: open && r.base_version !== g.version,
-    requester: person(r.requester_id)!,
-    changes: shown(changes),
-    reason: r.reason,
-    revisions,
-    /** depends_on lists only the goals the reader can read; hidden_depends_on counts the others on each side (never
-     *  which), so a diff never reads "Nothing → Nothing" while a dependency the reader can't see changes. */
-    diff: {
-      before: pick(base),
-      after: pick(after),
-      hidden_depends_on: fields.includes("depends_on") ? { before: hiddenOf(base.depends_on), after: hiddenOf(after.depends_on) } : null,
-    },
-    approvers: approvers.map((id) => person(id)!),
-    /** Who may launch it once approved: the approval set plus workspace owners. */
-    launchers: launchers.map((id) => person(id)!),
-    approved_by: person(r.approved_by),
-    rejected_by: person(r.rejected_by),
-    /** The approver's note (approved) or the rejection reason (rejected). */
-    decision_note: r.decision_note,
-    note: r.state === "approved" ? r.decision_note : null,
-    rejection_reason: r.state === "rejected" ? r.decision_note : null,
-    /** The goal version the launch created (null until launched). */
-    version: r.version,
-    /** pending (approved, no launch decision yet) | not_yet | launched | superseded (before launch) | null. */
-    launch: r.launch ?? null,
-    /** The latest not yet or launch: who and when. */
-    launch_decided_by: person(r.launch_by),
-    launch_decided_at: r.launch_at,
-    condition,
-    /** Links on the current revision (the one an approval decides). */
-    evidence_count: evidence.filter((e) => e.revision === r.revision).length,
-    /** Once approved: true when the approved revision had no evidence links. null until then, and for older rows. */
-    approved_without_evidence: r.state === "approved" && r.approved_without_evidence !== null ? r.approved_without_evidence === 1 : null,
-    can,
-    /** What happened to the request, in the words a `wrong_state` refusal of an action it no longer allows gives
-     *  ("This request was declined by <name>, so nothing changes.", never "rejected"), so a card that finds it changed
-     *  before sending says what the server would (W2). */
-    state_note: crStateRefusal(r, me),
-    /** Why `can.approve` and `can.approve_and_launch` (pending) or `can.launch` (approved) are false although the reader
-     *  decides on it: the refusal they would get (409 dependency_not_visible), naming no goal. null otherwise. */
-    dependency_not_visible: hiddenRefusal,
-    /** Why nobody can approve (pending) or launch (approved) it as it stands: a dependency it adds would now close a loop
-     *  (409 cycle), naming no goal; the same for every reader. null otherwise (C5-1). */
-    dependency_loop: loop,
-    /** The reader's turn: they may approve it, accept its counter, or launch it (approved and not launched, whether
-     *  nobody decided the launch yet or someone said not yet): the same rule as the workspace Home's queue. A pending
-     *  request that would close a loop waits on its deciders to suggest a change or decline it (C5-1), once its requester
-     *  has updated it to the goal's version (C6-2). */
-    waiting_on_me: can.approve || can.accept_counter || can.launch || (!!loop && r.state === "pending" && r.base_version === g.version && can.counter),
-    created_at: r.created_at,
-    updated_at: r.updated_at,
-    decided_at: r.decided_at,
-  };
-}
-
-export type ChangeRequestView = ReturnType<typeof requestView>;
-
-function stateFilter(state: string | null | undefined): ChangeRequestState | null {
-  if (state === undefined || state === null || state === "") return null;
-  if (!(CHANGE_REQUEST_STATES as readonly string[]).includes(state)) throw badRequest(`state must be one of ${CHANGE_REQUEST_STATES.join(", ")}`);
-  return state as ChangeRequestState;
-}
-
 /** Change requests on goals the caller can read (viewers included), newest change first, optionally of one state
  *  (400 for an unknown one) and on one goal (404 if the caller can't read it). */
-export function listChangeRequests(pp: PolicyPrincipal, opts: { state?: string | null; goalId?: string } = {}): ChangeRequestView[] {
-  const state = stateFilter(opts.state);
-  if (opts.goalId) visibleGoal(pp, opts.goalId);
-  const rows = opts.goalId
-    ? all<ChangeRequestRow>("SELECT * FROM v2_change_requests WHERE ws_id = ? AND goal_id = ? ORDER BY updated_at DESC, id", pp.wsId, opts.goalId)
-    : all<ChangeRequestRow>("SELECT * FROM v2_change_requests WHERE ws_id = ? ORDER BY updated_at DESC, id", pp.wsId);
-  const readable = new Map<string, boolean>();
-  const canRead = (goalId: string) => {
-    if (!readable.has(goalId)) {
-      const g = goalRow(pp.wsId, goalId);
-      readable.set(goalId, !!g && canReadGoal(pp, goalObj(g)));
-    }
-    return readable.get(goalId)!;
-  };
-  return rows.filter((r) => (!state || r.state === state) && canRead(r.goal_id)).map((r) => requestView(pp, r));
+export function listChangeRequests(pp: PolicyPrincipal, opts: {
+    state?: string | null;
+    goalId?: string;
+} = {}): ChangeRequestView[] {
+    return (0, changesService.listChangeRequests)(pp, opts);
 }
-
 /** The workspace Requests tab: waiting on me (my approve, accept_counter or launch flag), mine, others. */
-export function changeRequestGroups(pp: PolicyPrincipal, state?: string | null) {
-  const views = listChangeRequests(pp, { state });
-  return {
-    waiting_on_me: views.filter((v) => v.waiting_on_me),
-    mine: views.filter((v) => !v.waiting_on_me && v.requester.id === pp.userId),
-    others: views.filter((v) => !v.waiting_on_me && v.requester.id !== pp.userId),
-  };
+export function changeRequestGroups(pp: PolicyPrincipal, state?: string | null): { waiting_on_me: { id: string; goal: { id: string; title: string; version: number; }; state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded"; revision: number; base_version: number;
+/** True while the request is open and the goal has moved past its base version (approving needs a rebase). */
+behind: boolean; requester: { id: string; name: string; }; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; reason: string; revisions: { revision: number; base_version: number; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; note: string | null;
+/** A counter's "Accept if…" condition (never sent to agents), and who acknowledged it and when. */
+condition: string | null; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; author: { id: string; name: string; }; created_at: string;
+/** The links added while this revision was current (frozen once it is superseded or the request decided). */
+evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }[];
+/** What Align recorded about the goal when this revision was written. */
+snapshot: { revision: number; recorded_by: "align"; recorded_at: string; window: { from: string; to: string; days: number; }; spend: { total: Sums; by_model: { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number; by_basis: Record<"api_usd" | "subscription_included" | "workspace_credits" | "estimated_list_usd" | "unknown", Record<"requests" | "input" | "output" | "cache_read" | "cache_write_5m" | "cache_write_1h" | "cache_write_unsplit" | "est_list_usd_micros" | "unpriced_requests", number>>; model: string; }[]; } | null; spend_hidden: boolean; bound_sessions: number; last_activity_at: string | null; } | null; }[];
+/** depends_on lists only the goals the reader can read; hidden_depends_on counts the others on each side (never
+ *  which), so a diff never reads "Nothing → Nothing" while a dependency the reader can't see changes. */
+diff: { before: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; after: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; hidden_depends_on: { before: number; after: number; } | null; }; approvers: { id: string; name: string; }[];
+/** Who may launch it once approved: the approval set plus workspace owners. */
+launchers: { id: string; name: string; }[]; approved_by: { id: string; name: string; } | null; rejected_by: { id: string; name: string; } | null;
+/** The approver's note (approved) or the rejection reason (rejected). */
+decision_note: string | null; note: string | null; rejection_reason: string | null;
+/** The goal version the launch created (null until launched). */
+version: number | null;
+/** pending (approved, no launch decision yet) | not_yet | launched | superseded (before launch) | null. */
+launch: "pending" | "superseded" | "not_yet" | "launched" | null;
+/** The latest not yet or launch: who and when. */
+launch_decided_by: { id: string; name: string; } | null; launch_decided_at: string | null; condition: { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null;
+/** Links on the current revision (the one an approval decides). */
+evidence_count: number;
+/** Once approved: true when the approved revision had no evidence links. null until then, and for older rows. */
+approved_without_evidence: boolean | null; can: { approve: boolean; approve_and_launch: boolean; reject: boolean; counter: boolean; accept_counter: boolean; acknowledge: boolean; withdraw: boolean; rebase: boolean; add_evidence: boolean; launch: boolean; not_yet: boolean; };
+/** What happened to the request, in the words a `wrong_state` refusal of an action it no longer allows gives
+ *  ("This request was declined by <name>, so nothing changes.", never "rejected"), so a card that finds it changed
+ *  before sending says what the server would (W2). */
+state_note: string;
+/** Why `can.approve` and `can.approve_and_launch` (pending) or `can.launch` (approved) are false although the reader
+ *  decides on it: the refusal they would get (409 dependency_not_visible), naming no goal. null otherwise. */
+dependency_not_visible: string | null;
+/** Why nobody can approve (pending) or launch (approved) it as it stands: a dependency it adds would now close a loop
+ *  (409 cycle), naming no goal; the same for every reader. null otherwise (C5-1). */
+dependency_loop: string | null;
+/** The reader's turn: they may approve it, accept its counter, or launch it (approved and not launched, whether
+ *  nobody decided the launch yet or someone said not yet): the same rule as the workspace Home's queue. A pending
+ *  request that would close a loop waits on its deciders to suggest a change or decline it (C5-1), once its requester
+ *  has updated it to the goal's version (C6-2). */
+waiting_on_me: boolean; created_at: string; updated_at: string; decided_at: string | null; }[]; mine: { id: string; goal: { id: string; title: string; version: number; }; state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded"; revision: number; base_version: number;
+/** True while the request is open and the goal has moved past its base version (approving needs a rebase). */
+behind: boolean; requester: { id: string; name: string; }; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; reason: string; revisions: { revision: number; base_version: number; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; note: string | null;
+/** A counter's "Accept if…" condition (never sent to agents), and who acknowledged it and when. */
+condition: string | null; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; author: { id: string; name: string; }; created_at: string;
+/** The links added while this revision was current (frozen once it is superseded or the request decided). */
+evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }[];
+/** What Align recorded about the goal when this revision was written. */
+snapshot: { revision: number; recorded_by: "align"; recorded_at: string; window: { from: string; to: string; days: number; }; spend: { total: Sums; by_model: { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number; by_basis: Record<"api_usd" | "subscription_included" | "workspace_credits" | "estimated_list_usd" | "unknown", Record<"requests" | "input" | "output" | "cache_read" | "cache_write_5m" | "cache_write_1h" | "cache_write_unsplit" | "est_list_usd_micros" | "unpriced_requests", number>>; model: string; }[]; } | null; spend_hidden: boolean; bound_sessions: number; last_activity_at: string | null; } | null; }[];
+/** depends_on lists only the goals the reader can read; hidden_depends_on counts the others on each side (never
+ *  which), so a diff never reads "Nothing → Nothing" while a dependency the reader can't see changes. */
+diff: { before: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; after: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; hidden_depends_on: { before: number; after: number; } | null; }; approvers: { id: string; name: string; }[];
+/** Who may launch it once approved: the approval set plus workspace owners. */
+launchers: { id: string; name: string; }[]; approved_by: { id: string; name: string; } | null; rejected_by: { id: string; name: string; } | null;
+/** The approver's note (approved) or the rejection reason (rejected). */
+decision_note: string | null; note: string | null; rejection_reason: string | null;
+/** The goal version the launch created (null until launched). */
+version: number | null;
+/** pending (approved, no launch decision yet) | not_yet | launched | superseded (before launch) | null. */
+launch: "pending" | "superseded" | "not_yet" | "launched" | null;
+/** The latest not yet or launch: who and when. */
+launch_decided_by: { id: string; name: string; } | null; launch_decided_at: string | null; condition: { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null;
+/** Links on the current revision (the one an approval decides). */
+evidence_count: number;
+/** Once approved: true when the approved revision had no evidence links. null until then, and for older rows. */
+approved_without_evidence: boolean | null; can: { approve: boolean; approve_and_launch: boolean; reject: boolean; counter: boolean; accept_counter: boolean; acknowledge: boolean; withdraw: boolean; rebase: boolean; add_evidence: boolean; launch: boolean; not_yet: boolean; };
+/** What happened to the request, in the words a `wrong_state` refusal of an action it no longer allows gives
+ *  ("This request was declined by <name>, so nothing changes.", never "rejected"), so a card that finds it changed
+ *  before sending says what the server would (W2). */
+state_note: string;
+/** Why `can.approve` and `can.approve_and_launch` (pending) or `can.launch` (approved) are false although the reader
+ *  decides on it: the refusal they would get (409 dependency_not_visible), naming no goal. null otherwise. */
+dependency_not_visible: string | null;
+/** Why nobody can approve (pending) or launch (approved) it as it stands: a dependency it adds would now close a loop
+ *  (409 cycle), naming no goal; the same for every reader. null otherwise (C5-1). */
+dependency_loop: string | null;
+/** The reader's turn: they may approve it, accept its counter, or launch it (approved and not launched, whether
+ *  nobody decided the launch yet or someone said not yet): the same rule as the workspace Home's queue. A pending
+ *  request that would close a loop waits on its deciders to suggest a change or decline it (C5-1), once its requester
+ *  has updated it to the goal's version (C6-2). */
+waiting_on_me: boolean; created_at: string; updated_at: string; decided_at: string | null; }[]; others: { id: string; goal: { id: string; title: string; version: number; }; state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded"; revision: number; base_version: number;
+/** True while the request is open and the goal has moved past its base version (approving needs a rebase). */
+behind: boolean; requester: { id: string; name: string; }; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; reason: string; revisions: { revision: number; base_version: number; changes: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; note: string | null;
+/** A counter's "Accept if…" condition (never sent to agents), and who acknowledged it and when. */
+condition: string | null; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; author: { id: string; name: string; }; created_at: string;
+/** The links added while this revision was current (frozen once it is superseded or the request decided). */
+evidence: { id: string; revision: number; kind: "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other"; url: string; label: string; source: EvidenceSource; reported_as: "agent-reported" | "self-reported"; added_by: { id: string; name: string; }; added_at: string; can_remove: boolean; }[];
+/** What Align recorded about the goal when this revision was written. */
+snapshot: { revision: number; recorded_by: "align"; recorded_at: string; window: { from: string; to: string; days: number; }; spend: { total: Sums; by_model: { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number; by_basis: Record<"api_usd" | "subscription_included" | "workspace_credits" | "estimated_list_usd" | "unknown", Record<"requests" | "input" | "output" | "cache_read" | "cache_write_5m" | "cache_write_1h" | "cache_write_unsplit" | "est_list_usd_micros" | "unpriced_requests", number>>; model: string; }[]; } | null; spend_hidden: boolean; bound_sessions: number; last_activity_at: string | null; } | null; }[];
+/** depends_on lists only the goals the reader can read; hidden_depends_on counts the others on each side (never
+ *  which), so a diff never reads "Nothing → Nothing" while a dependency the reader can't see changes. */
+diff: { before: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; after: Partial<Pick<GoalContent, "title" | "measures" | "depends_on" | "status" | "limits">>; hidden_depends_on: { before: number; after: number; } | null; }; approvers: { id: string; name: string; }[];
+/** Who may launch it once approved: the approval set plus workspace owners. */
+launchers: { id: string; name: string; }[]; approved_by: { id: string; name: string; } | null; rejected_by: { id: string; name: string; } | null;
+/** The approver's note (approved) or the rejection reason (rejected). */
+decision_note: string | null; note: string | null; rejection_reason: string | null;
+/** The goal version the launch created (null until launched). */
+version: number | null;
+/** pending (approved, no launch decision yet) | not_yet | launched | superseded (before launch) | null. */
+launch: "pending" | "superseded" | "not_yet" | "launched" | null;
+/** The latest not yet or launch: who and when. */
+launch_decided_by: { id: string; name: string; } | null; launch_decided_at: string | null; condition: { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null;
+/** Links on the current revision (the one an approval decides). */
+evidence_count: number;
+/** Once approved: true when the approved revision had no evidence links. null until then, and for older rows. */
+approved_without_evidence: boolean | null; can: { approve: boolean; approve_and_launch: boolean; reject: boolean; counter: boolean; accept_counter: boolean; acknowledge: boolean; withdraw: boolean; rebase: boolean; add_evidence: boolean; launch: boolean; not_yet: boolean; };
+/** What happened to the request, in the words a `wrong_state` refusal of an action it no longer allows gives
+ *  ("This request was declined by <name>, so nothing changes.", never "rejected"), so a card that finds it changed
+ *  before sending says what the server would (W2). */
+state_note: string;
+/** Why `can.approve` and `can.approve_and_launch` (pending) or `can.launch` (approved) are false although the reader
+ *  decides on it: the refusal they would get (409 dependency_not_visible), naming no goal. null otherwise. */
+dependency_not_visible: string | null;
+/** Why nobody can approve (pending) or launch (approved) it as it stands: a dependency it adds would now close a loop
+ *  (409 cycle), naming no goal; the same for every reader. null otherwise (C5-1). */
+dependency_loop: string | null;
+/** The reader's turn: they may approve it, accept its counter, or launch it (approved and not launched, whether
+ *  nobody decided the launch yet or someone said not yet): the same rule as the workspace Home's queue. A pending
+ *  request that would close a loop waits on its deciders to suggest a change or decline it (C5-1), once its requester
+ *  has updated it to the goal's version (C6-2). */
+waiting_on_me: boolean; created_at: string; updated_at: string; decided_at: string | null; }[]; } {
+    return (0, changesService.changeRequestGroups)(pp, state);
 }
-
 /** One request with its revisions and diff (a decision record once approved or rejected); 404 when the caller
  *  can't read its goal, or when `goalId` is named and the request is on another goal. */
 export function getChangeRequest(pp: PolicyPrincipal, id: string, goalId?: string): ChangeRequestView {
-  return requestView(pp, visibleRequest(pp, id, goalId));
+    return (0, changesService.getChangeRequest)(pp, id, goalId);
 }
-
 export function assertChangeRequestAction(a: string): ChangeRequestAction {
-  if (!(CHANGE_REQUEST_ACTIONS as readonly string[]).includes(a)) throw notFound();
-  return a as ChangeRequestAction;
+    return (0, changesService.assertChangeRequestAction)(a);
 }
-
 /** A request's "Accept if…" condition and its acknowledgement, for reads that don't build the whole view (the MCP
  *  brief). The caller has checked that the person can read the request's goal. */
-export function requestCondition(id: string) {
-  const c = counterRevision(revisionRows(id));
-  if (!c?.condition) return null;
-  return { revision: c.revision, text: c.condition, acknowledged_by: c.acknowledged_by ? { id: c.acknowledged_by, name: memberName(c.acknowledged_by) } : null, acknowledged_at: c.acknowledged_at };
+export function requestCondition(id: string): { revision: number; text: string; acknowledged_by: { id: string; name: string; } | null; acknowledged_at: string | null; } | null {
+    return (0, changesService.requestCondition)(id);
 }

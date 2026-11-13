@@ -1,0 +1,203 @@
+{
+  "schema": "align/readable-private-qualification@1",
+  "component": "server-retention",
+  "package": "server_retention",
+  "package_files": [
+    "package.json",
+    "create_retention.js",
+    "create_retention_runner.js"
+  ],
+  "package_exports": {
+    "./create_retention": "./create_retention.js",
+    "./create_retention_runner": "./create_retention_runner.js"
+  },
+  "capabilities": [
+    {
+      "id": "server-retention.create-retention",
+      "symbol": "create_retention",
+      "module": "create_retention.js",
+      "fixture": "server-retention-core-fixture-draft-v1.cjs",
+      "cases": "server-retention-core-cases-draft-v1.cjs",
+      "characterization": "core-characterization.json",
+      "resource_count": 7,
+      "default_operation": "run",
+      "runner": false
+    },
+    {
+      "id": "server-retention.create-retention-runner",
+      "symbol": "create_retention_runner",
+      "module": "create_retention_runner.js",
+      "fixture": "server-retention-runner-fixture-draft-v4.cjs",
+      "characterization": "runner-characterization.json",
+      "resource_count": 5,
+      "default_operation": null,
+      "runner": true
+    }
+  ],
+  "plans": [
+    {
+      "capability": "server-retention.create-retention",
+      "batch": 0,
+      "expected_result": {
+        "batch": 0,
+        "records": 16,
+        "sha256": "e82b80fb371cfc5164881cc35dbd2d436dc4b8341a42923c087543c04f1f1309"
+      }
+    },
+    {
+      "capability": "server-retention.create-retention",
+      "batch": 1,
+      "expected_result": {
+        "batch": 1,
+        "records": 42,
+        "sha256": "6e93a707e3515bad6bad932be523525188d33fd5f7df7904a4377bfb0d71f2fd"
+      }
+    },
+    {
+      "capability": "server-retention.create-retention",
+      "batch": 2,
+      "expected_result": {
+        "batch": 2,
+        "records": 108,
+        "sha256": "b7f1194aef5e1ad7dec468741a459163113700ab5540e98334a24979cb2fbff4"
+      }
+    },
+    {
+      "capability": "server-retention.create-retention",
+      "batch": 3,
+      "expected_result": {
+        "batch": 3,
+        "records": 58,
+        "sha256": "fbef32148c571ee8fd291ce79c6df63d1be0c15cbe8f666fce21451245fb9035"
+      }
+    },
+    {
+      "capability": "server-retention.create-retention",
+      "batch": 4,
+      "expected_result": {
+        "batch": 4,
+        "records": 24,
+        "sha256": "d6eb615de21ff1c6ca15bbe052d6c53927f9f8556b083b0097f2143fd1302044"
+      }
+    },
+    {
+      "capability": "server-retention.create-retention",
+      "batch": 5,
+      "expected_result": {
+        "batch": 5,
+        "records": 48,
+        "sha256": "3dc267976810394121bd7a223235de7b423dcfae65f73ec8f82d58de69ff028e"
+      }
+    },
+    {
+      "capability": "server-retention.create-retention",
+      "batch": 6,
+      "expected_result": {
+        "batch": 6,
+        "records": 38,
+        "sha256": "550c21d94c5424f3a915e1a66d1d288ca53a526263f3e4fd7d2a8ce8fa898d3f"
+      }
+    },
+    {
+      "capability": "server-retention.create-retention",
+      "batch": 7,
+      "expected_result": {
+        "batch": 7,
+        "records": 137,
+        "sha256": "6d5c6ebd1d012f2f8581a30eced2bc49b9da31dc05910f30994a02df69b63368"
+      }
+    },
+    {
+      "capability": "server-retention.create-retention",
+      "batch": 8,
+      "expected_result": {
+        "batch": 8,
+        "records": 256,
+        "sha256": "f9e67db5a0ed67ce2100e7fc3ac6d4182a66c8148288f020c3b83d0de17a69d0"
+      }
+    },
+    {
+      "capability": "server-retention.create-retention-runner",
+      "batch": 0,
+      "expected_result": {
+        "batch": 0,
+        "records": 216,
+        "sha256": "dcf76c388229f363b0ce94d02fd4bd79e5af0e4aae661915078f5ab3b2fcad1a"
+      }
+    },
+    {
+      "capability": "server-retention.create-retention-runner",
+      "batch": 1,
+      "expected_result": {
+        "batch": 1,
+        "records": 145,
+        "sha256": "761ee259bdaa1648c227df6633b240aa5facc88c60f3ef622c728934c8134c98"
+      }
+    },
+    {
+      "capability": "server-retention.create-retention-runner",
+      "batch": 2,
+      "expected_result": {
+        "batch": 2,
+        "records": 57,
+        "sha256": "011405cbeea126c33cd5ffd72b0787bfc82fb490d0a18480a9cbbbf416c53140"
+      }
+    }
+  ],
+  "files": [
+    {
+      "name": "core-characterization.json",
+      "path": "tools/native-rewrite/qualification/metrics-retention-v1/server-retention/core-characterization.json",
+      "sha256": "edfa868e64555394e4602866baaae8ee8de46e184f98178e3f06bd17041172ba",
+      "size": 2556
+    },
+    {
+      "name": "native-runner-characterization.json",
+      "path": "tools/native-rewrite/qualification/metrics-retention-v1/server-retention/native-runner-characterization.json",
+      "sha256": "996e61e4da0637c7d261a931b79f77c236efd0f563c6ed97d3d159a8c3f814c9",
+      "size": 1525
+    },
+    {
+      "name": "retention-private-data-v1.json",
+      "path": "tools/native-rewrite/qualification/metrics-retention-v1/server-retention/retention-private-data-v1.json",
+      "sha256": "9f6f2aaa661ab2da51468522968bc56a0d78bc184423ed2705ea1cce687ada78",
+      "size": 274737
+    },
+    {
+      "name": "retention-private-storage-seed-v1.cjs",
+      "path": "tools/native-rewrite/qualification/metrics-retention-v1/server-retention/retention-private-storage-seed-v1.cjs",
+      "sha256": "4706e4aae1658e63abecc854b804fb8e0375d0226fa9ec9ddd210e595c65f0a1",
+      "size": 13665
+    },
+    {
+      "name": "runner-characterization.json",
+      "path": "tools/native-rewrite/qualification/metrics-retention-v1/server-retention/runner-characterization.json",
+      "sha256": "7ebacd9f3aa39d4649ba448d03a28bc292817bd69201b64cf1ba2257d7dcd07a",
+      "size": 1525
+    },
+    {
+      "name": "server-retention-core-cases-draft-v1.cjs",
+      "path": "tools/native-rewrite/qualification/metrics-retention-v1/server-retention/server-retention-core-cases-draft-v1.cjs",
+      "sha256": "fc00ead144d879082ab31a5159eb792874d05a9ecb8929325e8c67bb17830282",
+      "size": 3478
+    },
+    {
+      "name": "server-retention-core-fixture-draft-v1.cjs",
+      "path": "tools/native-rewrite/qualification/metrics-retention-v1/server-retention/server-retention-core-fixture-draft-v1.cjs",
+      "sha256": "c24d7e32ff60054466da29897e155e59fdd3aaf56f336249b72a4f7decd5c85d",
+      "size": 15373
+    },
+    {
+      "name": "server-retention-runner-fixture-draft-v2.cjs",
+      "path": "tools/native-rewrite/qualification/metrics-retention-v1/server-retention/server-retention-runner-fixture-draft-v2.cjs",
+      "sha256": "691d07869614994f98811f561e5f9cd068595fa85e53866ad321bf7ff27d4670",
+      "size": 8316
+    },
+    {
+      "name": "server-retention-runner-fixture-draft-v4.cjs",
+      "path": "tools/native-rewrite/qualification/metrics-retention-v1/server-retention/server-retention-runner-fixture-draft-v4.cjs",
+      "sha256": "7d987421d0f4f15b45af7e760a8cf8d807d1cd4b75b36b5338051d37afa8cc92",
+      "size": 8589
+    }
+  ]
+}

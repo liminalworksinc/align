@@ -1,0 +1,8 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname,'..');
+const out = path.resolve(process.argv[2] || '_build');
+fs.mkdirSync(out,{recursive:true});
+for (const name of ['main.js','server_auth','tests']) fs.cpSync(path.join(root,name),path.join(out,name),{recursive:true,filter:entry=>!entry.endsWith('manifest.json')});
+fs.writeFileSync(path.join(out,'run'),'#!/usr/bin/env node\nrequire("./main.js");\n',{mode:0o755});

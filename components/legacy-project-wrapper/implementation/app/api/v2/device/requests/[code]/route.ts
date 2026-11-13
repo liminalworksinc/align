@@ -1,8 +1,5 @@
-import { lookupRequest } from "@/lib/v2/devices";
-import { route, webAuth } from "@/lib/v2/http";
+// Typed entry point for the admitted route library.
+import { bindRoute } from "@/lib/v2/native-routes/binding";
+import { routes } from "@/lib/v2/native-routes/identity-routes";
 
-// GET /api/v2/device/requests/:user_code (cookie): the pending device behind a code, for /app/device.
-export const GET = route<{ code: string }>(async (req, { code }) => {
-  const p = await webAuth(req);
-  return lookupRequest(p.user.id, code);
-});
+export const GET = bindRoute<{ code: string }>(routes, "device/requests/[code]", "GET");

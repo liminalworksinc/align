@@ -1,0 +1,119 @@
+{
+  "batches": [
+    {
+      "batch": 0,
+      "records": 16,
+      "sha256": "e82b80fb371cfc5164881cc35dbd2d436dc4b8341a42923c087543c04f1f1309"
+    },
+    {
+      "batch": 1,
+      "records": 42,
+      "sha256": "6e93a707e3515bad6bad932be523525188d33fd5f7df7904a4377bfb0d71f2fd"
+    },
+    {
+      "batch": 2,
+      "records": 108,
+      "sha256": "b7f1194aef5e1ad7dec468741a459163113700ab5540e98334a24979cb2fbff4"
+    },
+    {
+      "batch": 3,
+      "records": 58,
+      "sha256": "fbef32148c571ee8fd291ce79c6df63d1be0c15cbe8f666fce21451245fb9035"
+    },
+    {
+      "batch": 4,
+      "records": 24,
+      "sha256": "d6eb615de21ff1c6ca15bbe052d6c53927f9f8556b083b0097f2143fd1302044"
+    },
+    {
+      "batch": 5,
+      "records": 48,
+      "sha256": "3dc267976810394121bd7a223235de7b423dcfae65f73ec8f82d58de69ff028e"
+    },
+    {
+      "batch": 6,
+      "records": 38,
+      "sha256": "550c21d94c5424f3a915e1a66d1d288ca53a526263f3e4fd7d2a8ce8fa898d3f"
+    },
+    {
+      "batch": 7,
+      "records": 137,
+      "sha256": "6d5c6ebd1d012f2f8581a30eced2bc49b9da31dc05910f30994a02df69b63368"
+    },
+    {
+      "batch": 8,
+      "records": 256,
+      "sha256": "f9e67db5a0ed67ce2100e7fc3ac6d4182a66c8148288f020c3b83d0de17a69d0"
+    }
+  ],
+  "fault_paths": [
+    {
+      "operation": "run",
+      "settings": {},
+      "reads": 38,
+      "effects": 58,
+      "captures": 7
+    },
+    {
+      "operation": "run",
+      "settings": {
+        "dryRun": true
+      },
+      "reads": 38,
+      "effects": 48,
+      "captures": 7
+    },
+    {
+      "operation": "run",
+      "settings": {
+        "plantPerson": true,
+        "removeMembership": true,
+        "lastActivityAt": "2027-04-01T00:00:00.000Z"
+      },
+      "reads": 36,
+      "effects": 96,
+      "captures": 7
+    },
+    {
+      "operation": "pseudonymise",
+      "settings": {
+        "plantPerson": true,
+        "removeMembership": true,
+        "outerTx": true
+      },
+      "reads": 3,
+      "effects": 42,
+      "captures": 7
+    },
+    {
+      "operation": "naming",
+      "settings": {
+        "plantPerson": true
+      },
+      "reads": 5,
+      "effects": 1,
+      "captures": 7
+    },
+    {
+      "operation": "clock",
+      "settings": {
+        "env": {
+          "ALIGN_TEST_IDP": "1",
+          "ALIGN_TEST_NOW": "2020-02-29T12:00:00.000Z"
+        }
+      },
+      "reads": 2,
+      "effects": 4,
+      "captures": 7
+    },
+    {
+      "operation": "describe",
+      "settings": {
+        "empty": true
+      },
+      "reads": 15,
+      "effects": 0,
+      "captures": 7
+    }
+  ]
+}

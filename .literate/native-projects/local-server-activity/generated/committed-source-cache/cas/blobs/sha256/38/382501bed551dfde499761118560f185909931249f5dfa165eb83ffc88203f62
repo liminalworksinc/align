@@ -1,0 +1,1 @@
+{"name":"server_activity","type":"commonjs","exports":{"./create_activity":"./create_activity.js"}}

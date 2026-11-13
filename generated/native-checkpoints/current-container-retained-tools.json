@@ -1,0 +1,30 @@
+{
+  "schema": "align/native-container-assembly-retention@1",
+  "boundary": "B31",
+  "source_members": 659,
+  "paths": [
+    {
+      "path": "scripts/build-container.mjs",
+      "sha256": "9e78836bf90b7a939d8874a1addf60534e25bab4730183b07a3220ffed63256e",
+      "reason": "Repository-only assembly: host-contained acceptance, digest-bound input transport, local image build or mutation controls. It introduces no retained product service algorithm."
+    },
+    {
+      "path": "scripts/consume-container-inputs.mjs",
+      "sha256": "93f69faf5f6075036369cdf13ed81ee24d5f870beb23aef210f951a2896a0a58",
+      "reason": "Repository-only assembly: host-contained acceptance, digest-bound input transport, local image build or mutation controls. It introduces no retained product service algorithm."
+    },
+    {
+      "path": "scripts/prepare-container.mjs",
+      "sha256": "8030674d0071978b318daeec1f0a722834a4eedad945a41ccf1d5e562695ef6c",
+      "reason": "Repository-only assembly: host-contained acceptance, digest-bound input transport, local image build or mutation controls. It introduces no retained product service algorithm."
+    },
+    {
+      "path": "scripts/test-container-inputs.mjs",
+      "sha256": "3161880604fe79380437fb3da16c98f96df4f2d493078f1d2b0e92be8158de42",
+      "reason": "Repository-only assembly: host-contained acceptance, digest-bound input transport, local image build or mutation controls. It introduces no retained product service algorithm."
+    }
+  ],
+  "original280_retained_list_unchanged": true,
+  "no_new_service_retention_exception": true,
+  "authorization": "native-program.operator-go-all-prepared-v1.json"
+}

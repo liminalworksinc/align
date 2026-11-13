@@ -1,0 +1,17 @@
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const output = path.resolve(process.argv[2]);
+if (output === root || root.startsWith(output + path.sep)) {
+  throw new Error('Artifact destination must not contain the source tree');
+}
+fs.mkdirSync(output, { recursive: true });
+for (const relative of ['main.js', 'tests/litai_test.js', 'storage_runtime/create_store.js', 'storage_runtime/package.json']) {
+  const destination = path.join(output, relative);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.copyFileSync(path.join(root, relative), destination);
+}
+fs.writeFileSync(path.join(output, 'run'), '#!/usr/bin/env node\n"use strict";\nrequire("./main.js").main(process.argv.slice(2)).then(value => process.stdout.write(JSON.stringify(value) + "\\n"), error => { process.stderr.write(String(error.stack || error) + "\\n"); process.exitCode = 1; });\n');
+fs.chmodSync(path.join(output, 'run'), 0o755);

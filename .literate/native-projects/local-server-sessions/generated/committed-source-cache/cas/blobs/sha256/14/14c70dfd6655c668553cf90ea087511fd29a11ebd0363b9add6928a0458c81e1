@@ -1,0 +1,12 @@
+LITAI_LANGUAGE_TOOL ?= node
+.PHONY: all build test check
+all: build
+build:
+	"$(LITAI_LANGUAGE_TOOL)" tools/package.js "$(OUT)"
+test:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+check:
+	"$(LITAI_LANGUAGE_TOOL)" --check server_sessions/create_sessions.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tests/litai_test.js
+	"$(LITAI_LANGUAGE_TOOL)" --check main.js
+	"$(LITAI_LANGUAGE_TOOL)" --check tools/package.js

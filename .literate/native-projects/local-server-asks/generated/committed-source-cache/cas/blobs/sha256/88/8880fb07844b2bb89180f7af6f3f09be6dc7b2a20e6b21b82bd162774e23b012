@@ -1,0 +1,25 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {create_asks}=require('../server_asks/create_asks.js');
+function service(){return create_asks({});}
+function smoke(){return service().assertAskAction('accept');}
+function runTests(){
+  const cases=[];
+  for(const [id,arg,expected] of [['generated-action-accept','accept','accept'],['generated-action-mention','mention','mention'],['generated-action-reopen','reopen','reopen']]){
+    assert.deepStrictEqual(service().assertAskAction(arg),expected);
+    cases.push({case_id:id,outcome:'passed'});
+  }
+  const names=['all','audit','get','run','tx','V2Error','badRequest','conflict','forbidden','notFound','event','newId','nowIso','sha256hex','take','cleanProse','isBlankText','goalObj','goalRow','canReadGoal','memberName','need','readDate'];
+  const reads=[],resources={};for(const name of names)Object.defineProperty(resources,name,{get(){reads.push(name);return undefined;}});
+  const api=create_asks(resources);assert.deepStrictEqual(reads,names);
+  assert.strictEqual(create_asks.length,1);
+  for(const [name,n] of Object.entries({canReadAsk:2,alignedTeams:2,getAsk:2,listAsks:1,readableAsks:1,asksFeed:2,asksForBrief:1,createAsk:2,importAsks:2,actOnAsk:4,assertAskAction:1})){
+    assert.strictEqual(api[name].name,name);assert.strictEqual(api[name].length,n);
+  }
+  const error={};const live=create_asks({notFound:()=>error});assert.throws(()=>live.assertAskAction('invalid'),e=>e===error);
+  live.ASK_ACTIONS.push('custom');assert.strictEqual(live.assertAskAction('custom'),'custom');
+  assert.strictEqual(api.canReadAsk({wsRole:'member',userId:'u',pods:new Map()}, {created_by:'u'}),true);
+  assert.strictEqual(api.canReadAsk({wsRole:'viewer',userId:'u',pods:new Map()}, {created_by:'v',team_id:'t'}),false);
+  return {schema:'literate-ai/generated-test-results@1',cases};
+}
+module.exports={runTests,smoke};

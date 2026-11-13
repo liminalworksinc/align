@@ -1,0 +1,20 @@
+'use strict';
+const { change_programs } = require('./storage_schema/change_programs.js');
+const { runTests } = require('./tests/litai_test.js');
+
+function cli(argv = process.argv.slice(2)) {
+  try {
+    if (argv.length !== 1) throw new Error('Expected one framework mode.');
+    let result;
+    if (argv[0] === '--litai-test') result = runTests();
+    else if (argv[0] === '--litai-smoke') result = change_programs();
+    else throw new Error('This library has no product command line. Use --litai-test or --litai-smoke.');
+    process.stdout.write(JSON.stringify(result) + '\n');
+  } catch (error) {
+    process.stderr.write(String(error.message || error) + '\n');
+    process.exitCode = 1;
+  }
+}
+module.exports = { cli };
+if (require.main === module) cli();
+

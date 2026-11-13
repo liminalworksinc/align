@@ -2,8 +2,232 @@
 
 ## Unreleased
 
+- Run contained native acceptance on the owning host and carry its exact sealed
+  package bundle into image assembly without a nested Docker daemon.
+
+- Use the existing isolated provider fixture for assembly recovery checks and
+  require the exact independent-acceptance mismatch, preserving sandbox limits.
+
+- Carry forward current trust placeholder punctuation and the admitted indented
+  list behavior through a qualified parser with unchanged text helper owners.
+
+- Compose migration 23 with the admitted schema history, restore core and storage
+  bindings, and include schema dependencies in operator packaging. Preserve
+  current-main behavior and the goal-cap correction; current application and
+  image acceptance remain required.
+
+- Restore the admitted trust parser after main reconciliation and await newly
+  merged operator-command checks. Preserve the failing schema-23 evidence for
+  the remaining native schema revision.
+
+- Preserve merged v2 changes, enforce action authorization in local staging instructions, and contain library evaluation through a pinned, bounded runtime. Normal consumer assembly passes all 1,259 library batches with unchanged runtime packages; integrated application/image acceptance and publication remain pending.
+
 - A tester keeps their v1 invite code on v2: `align-admin codes import` loads unused codes as single-use creation codes,
   and hosted `/new` redirects to `/app`, where they sign in and enter it.
+- The agent's folder-rule preview recognizes a folder through a filesystem alias, keeps its current goal unless
+  another is requested, and says when the confirmation replaces that rule.
+- The live-agent test client uses fresh HTTP connections after synchronous CLI calls so the offline-revocation
+  scenario can finish without a stale keep-alive socket reset.
+- Preserve v2 routes and operator commands through 68 pinned libraries, expose
+  readable native guard checks and qualification code, and require explicit
+  action authorization in the copied project instructions. See the
+  [checkpoint result](generated/native-checkpoints/b19-b28.json) for acceptance
+  and publication evidence.
+
+- Integrate v2 route providers, creation-code compatibility and refreshed admission
+  with 66 pinned libraries. Combined acceptance and publication remain pending.
+- Preserve registered provider revisions when assembling library manifests and
+  reject missing or ambiguous selections before creating output.
+
+- Move metrics and retention rules into qualified libraries while preserving
+  reports, identity cleanup, rollback and scheduling behavior. All 1,847
+  application checks and 36 image checks pass; normal publication is pending.
+
+- Bind session, device, steering, spending, allocation, activity, Home and directive
+  services to nine qualified libraries while retaining their public interfaces.
+
+- Keep decision-route coverage tied to public action exports after native binding.
+
+- Preserve goal-service approval, launch, evidence, session governance and
+  capacity behavior through twelve qualified libraries. The complete local
+  application workflow and fresh image checks pass.
+
+- Keep the 1,000-goal workspace cap while concurrent creations wait for SQLite,
+  by rechecking capacity after the writer lock is acquired.
+
+- Preserve workspace membership, invitations and labeled sample creation through
+  two qualified libraries with typed application bindings and the exact sample
+  text asset. Keep the invitation-cap recheck inside the transaction.
+
+- Recheck member and open-invite capacity inside the invitation transaction,
+  preserving the early refusal while queued writers wait for SQLite.
+
+- Use qualified authentication configuration and sign-in callbacks through 52
+  explicit host resources. Preserve session caps, code limits, delivery cleanup,
+  configured schemas and migrations, all 13 public types and seven callers.
+- Add independent ISO-expiry, getter, coercion and failure-order acceptance while
+  preserving all prior expectations and the 32 existing qualified library pins.
+
+- Preserve workspace admission and local first-account startup through typed
+  service bindings, with the full reviewed immutable domain data.
+- Carry the exact reviewed domain data into the hosted image as root-owned
+  runtime data readable by the application user.
+
+- Account and membership operations use qualified services through their existing
+  typed interfaces. Account cleanup, session endings, shared transactions and
+  public failures preserve their behavior. The complete local workflow passes
+  1,845 application checks and all 36 image, header and startup checks.
+
+- Storage checks read the schema version through its public runtime export while
+  keeping the version and migration assertions unchanged.
+
+- Core and event operations use a qualified library through their existing typed
+  APIs, preserving transaction results, shared values, SQL and failure behavior.
+
+- Client-key helpers use a qualified library through their existing typed API,
+  preserving network normalization, mode changes, header defaults and failures.
+
+- HTTP helpers use qualified bindings through their existing typed APIs,
+  preserving response mapping, origin checks, credential paths and byte limits.
+
+- Readiness uses a qualified library through its existing typed API, preserving
+  shared promise identity, migration order, exact failures and retry behavior.
+
+- Startup uses a qualified library through its existing typed API. PID ownership,
+  file permissions, leftover cleanup, warning order and exit cleanup preserve the
+  original behavior, including replacement ownership and propagated failures.
+
+- Secret-file access and HMAC signing use a qualified library through the existing
+  typed core and web APIs. Environment precedence, exact entropy bytes, file
+  handling, signing and resource failures preserve the original behavior.
+
+- Storage: bind the existing database interface to a qualified service, preserving
+  shared connections, statement caching, atomic callbacks, migration behavior,
+  workspace conditions and audit records.
+
+- Qualified session wording preserves workspace stops after sharing ends or shared
+  history is deleted, while goal holds keep their own release behavior. The typed
+  consumers match 1,642,893 observations on macOS and Linux. The complete current-
+  main workflow passes 1,845 checks, including the unchanged 150 ms serial hook
+  requirement; all 36 image, header and startup checks pass.
+
+- Identifier helpers use a qualified library through the existing typed API and
+  real host resources. The original observations and operator commands match on
+  macOS and Linux, including rollback and cancellation. The complete twenty-one-
+  library workflow passes all 1,830 application and 36 image checks; the operator
+  runtime matches its exact three-package closure.
+
+- Rate limiting now uses a qualified library through the existing typed API.
+  Shared memory, signed keys, durable accounting and caller transactions match
+  the retained behavior on macOS and Linux, including oversized memory stores.
+  The complete twenty-library workflow passes all 1,830 application checks and
+  all 36 image, header and startup-refusal checks.
+
+- SQLite schema programs come from a qualified library through a typed call.
+  Historical shapes, populated upgrades, constraints and recovery match the
+  retained baseline on macOS and Linux. Database execution stays with its caller.
+  The complete workflow passes all 1,830 checks, and all 36 image checks pass.
+
+- Sign-in rate-limit explanations use one time sample after transaction
+  acquisition, so a clock tick preserves the machine-wide ceiling explanation.
+  Admission limits, owner exemptions and retry headers retain their contracts.
+
+- Server and operator settings now share one qualified library while preserving
+  their public interfaces and observed behavior. Cold operator commands run with
+  Node alone from a read-only checkout; the hosted operator uses the same pinned
+  code as its application. The complete workflow passes 1,829 checks, and all
+  36 image, header and startup checks pass.
+- Contributor guides name the actual library Components, targets and pinned
+  runtimes. All 72 validation, lock, plan and verification checks pass across the
+  eighteen registered children.
+
+- Hosted startup rejects data directories inside the application even when a
+  directory name starts with two dots. Valid outside directories remain allowed.
+
+- The retained runner reports the complete test aggregate to the receipt
+  collector. A portable nine-case regression fixture preserves that count and
+  failure handling in every stage.
+
+- Field validation now comes from its qualified library. The typed public API
+  preserves all 4,549,018 compatibility observations, both revision overloads,
+  shared error constructors and data references. The combined application with
+  the latest security fixes passes 1,825 checks with no failures or skips. The
+  hosted image passes 24 checks plus ten response-header checks.
+
+- Value-card wording, note cleaning, follow-up links and measured spans now come
+  from their qualified library. The typed consumer preserves all 1,168,597
+  observations, including shared estimate data and environment defaults. The
+  complete application passes 1,821 checks and all 24 image checks.
+
+- Agent envelope and ended-session wording now come from their qualified
+  library. Both typed consumers preserve all 563,717 observations, and the
+  complete application passes 1,821 checks with all 24 image checks passing.
+  The web test harness prepares agent bindings before importing those consumers
+  in a fresh retained workspace.
+
+- Shared text cleaning, counts, currency and change wording now come from their
+  qualified library. All 4,598,945 observations match through the five typed
+  consumers, and the full application passes 1,821 checks with all 24 image
+  checks passing.
+
+- Shared keyed callback queues now come from their independently qualified
+  library. The original generic API preserves all 5,290 observations, and the
+  complete application workflow passes 1,821 checks with all 24 hosted image
+  checks passing.
+
+- Shared HTTP error constructors and factories now come from their independently
+  qualified library. Both typed consumers preserve all 22,618 observations, and
+  the complete application workflow passes 1,821 checks with all 24 hosted image
+  checks passing.
+
+- Trust-document parsing now comes from its independently qualified Markdown
+  library. The typed consumer preserves all 1,153,547 observations in 21 batches,
+  and the complete application workflow passes 1,821 checks with all 24 hosted
+  image checks passing.
+
+- Home evidence and attention rules now come from their independently qualified
+  library. The typed consumer preserves all 82,905 observations, including shared
+  metadata and original person references. The complete application workflow
+  passes 1,821 checks, and all 24 hosted image checks pass.
+- Trust-document lists with indented root markers now terminate and preserve
+  their root and nested items. The seven existing trust documents render the
+  same parsed structure.
+- Share-again wording now comes from its independently qualified library. The
+  typed consumer preserves all 1,163 observations, and the complete application
+  workflow passes 1,820 checks with 24 hosted image checks passing.
+- Native libraries retain their package namespaces when exports share a name.
+  Flat aliases are available only for unambiguous names; existing integrity,
+  acceptance and installation rollback checks remain enforced.
+- Clipped session context keeps the goal's own measures before its parent's
+  measures. Single-ask notices retain who asked, who accepted and earlier closing
+  counts within the existing character budgets.
+- The local agent consumes qualified shell-reading and session-notice libraries
+  through typed public names. Their original algorithms are retired after direct
+  consumer parity and the complete application workflow pass.
+- Authorization policy now has an independently qualified specification. Two clean
+  builds and the typed application binding match all 331,937 observations from the
+  corrected baseline. The retained file preserves the public types and names while
+  the native package owns the implementation. The complete sealed workflow passes
+  all 1,814 checks, and all 24 hosted image checks pass.
+- A viewer's team lead role no longer allows them to change team membership.
+  Both the team route and its pod alias return `read_only` and leave membership
+  and its audit records unchanged.
+- The Apps tab now consumes the qualified paste-line library. Its original
+  implementation is replaced by typed consumer names. Browser builds and clean
+  container builds verify package files and rerun all 49 independent cases; the
+  complete application workflow and hosted image checks pass.
+- Incremental spend parsing has its own reviewed specification in
+  `.literate/native-projects/local-spend-stream`. Two clean builds match the
+  original on 132 inputs, including 135 observations of parser state after a line.
+  The agent now consumes its qualified package through verified immutable files.
+- Spend parsing and pricing have their own reviewed specification in
+  `.literate/native-projects/local-spend-meter`. Two clean builds pass their tests
+  and match the original on all 110 inputs. The agent now uses this package and the
+  separately qualified rounding helper. The four replaced implementation files
+  are retired after the complete sealed application workflow passes, including
+  all 600 agent tests. Builds verify every package file and rerun independent
+  acceptance before installing the native libraries.
+
 - The agent's folder-rule preview recognizes a folder through a filesystem alias, keeps its current goal unless
   another is requested, and says when the confirmation replaces that rule.
 - The live-agent test client uses fresh HTTP connections after synchronous CLI calls so the offline-revocation
@@ -102,3 +326,5 @@
     the retained test receipt covers the web app.
 - Initialized the project with Literate AI's specification-led lifecycle and durable
   user-directed work queue.
+
+- Corrected local executable export instructions with compiler controls and unchanged qualified runtime source. Refreshed long-running cap-test sign-ins while preserving recent-authentication refusal checks. Integrated acceptance and normal publication remain required.

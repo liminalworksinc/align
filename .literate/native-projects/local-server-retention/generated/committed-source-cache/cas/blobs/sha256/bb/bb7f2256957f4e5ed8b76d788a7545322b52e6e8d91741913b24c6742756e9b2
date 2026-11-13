@@ -1,0 +1,14 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname,'..');
+if (process.argv.length !== 3) throw new Error('Expected artifact directory');
+const output = path.resolve(process.argv[2]);
+if (output === root) throw new Error('Artifact must be separate from source');
+fs.mkdirSync(output,{recursive:true});
+for (const relative of ['main.js','run','tests/litai_test.js','server_retention/package.json','server_retention/create_retention.js','server_retention/create_retention_runner.js']) {
+  const destination = path.join(output,relative);
+  fs.mkdirSync(path.dirname(destination),{recursive:true});
+  fs.copyFileSync(path.join(root,relative),destination);
+}
+fs.chmodSync(path.join(output,'run'),0o755);

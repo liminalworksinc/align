@@ -1,0 +1,54 @@
+{
+  "schema": "align/parser-evaluator-readable-review@1",
+  "wrapper": "components/legacy-project-wrapper/implementation/native/trust-text-parser-split-contained-v3.cjs",
+  "wrapper_sha256": "403396699778c281bb9b11029a7b0e35b98f539b0a892b167c19ae7f01d4aa14",
+  "candidate_mount": "observer files and candidate package only",
+  "judge_mount": "judge.cjs, observations.gz and request.json only",
+  "files": [
+    {
+      "path": "judge.cjs",
+      "sha256": "643448683f7a5ad48e58550c0e9d4fe5dd1b1d0e4ac6bf2cc1b731d956b4cb6d",
+      "bytes": 4051
+    },
+    {
+      "path": "observer/current-documents.json",
+      "sha256": "5f5eb3732d4802c4d45b6fcb7ed65ed0cc5a2e9624bc5a554f82db2448120d2f",
+      "bytes": 58797
+    },
+    {
+      "path": "observer/current-observations.cjs",
+      "sha256": "4ddfd65706d0e2703c7439944755c820453008a359a255cbbafc95d40d6251ce",
+      "bytes": 4907
+    },
+    {
+      "path": "observer/historical-inputs.json",
+      "sha256": "35248aabfb480af86988e29b5caac1d9c4ad9652ec0da727f5a2b8261bab0f00",
+      "bytes": 1039
+    },
+    {
+      "path": "observer/legacy-observations.cjs",
+      "sha256": "fa4291f0861e41e5a2a523770aad97f91f4d04f441ffdf3d69ca3f24206bf22a",
+      "bytes": 39946
+    },
+    {
+      "path": "observer/observer.cjs",
+      "sha256": "0eefcba569c494afdb92e0001211a6fafa19598fbb41b9e7eea956b5c88f159d",
+      "bytes": 1789
+    },
+    {
+      "path": "observer/plain.js",
+      "sha256": "496971ba443f200c2ddf904ef39567417cb0e30fa507b2e62d9f813a417b5d70",
+      "bytes": 174
+    },
+    {
+      "path": "observer/safe_href.js",
+      "sha256": "4c9942e8e5c52675bad6e91d33b899dfc2c650174c814357fe3936dded19cb29",
+      "bytes": 697
+    },
+    {
+      "path": "observer/slug.js",
+      "sha256": "7089d35748eb8f7bce4647a5ba71e89fc958b62d2a51ab8a9e898a2aeec7b291",
+      "bytes": 167
+    }
+  ]
+}

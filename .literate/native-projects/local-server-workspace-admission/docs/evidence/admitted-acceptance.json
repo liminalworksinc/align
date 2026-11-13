@@ -1,0 +1,20 @@
+{
+  "schema": "align/workspace-admission-child-documentation-evidence@1",
+  "qualification_decision": "sha256:97a4924da296e6e6e66a1df3be41f9175f14e6f6c227948cbb2fddb43243741e",
+  "qualified_clean_runs": 2,
+  "independent_batches_each_run": 4,
+  "admitted_generated_smoke_tests": 6,
+  "public_records_each_host": 94,
+  "binding_checks_each_host": 64,
+  "adaptive_fault_operations": 3,
+  "immutable_asset_bytes": 217324,
+  "immutable_asset_domains": 10083,
+  "immutable_asset_sha256": "1b36130a488aae7a4fefc689f9c9b936dc679a7537edda2c3e1003e53814f894",
+  "reviewed_authority_files_unchanged": 51,
+  "current_receipt_path": "verification/current.json",
+  "actual_consuming_application_and_image_still_required": true,
+  "operator_security_review_accepted": false,
+  "public_url": null,
+  "live_qa_gates": 0,
+  "all31_complete": false
+}

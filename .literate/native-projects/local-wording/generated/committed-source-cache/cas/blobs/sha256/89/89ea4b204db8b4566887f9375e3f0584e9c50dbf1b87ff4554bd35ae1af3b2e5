@@ -1,0 +1,9 @@
+LITAI_LANGUAGE_TOOL ?= node
+OUT ?= _build/run
+.PHONY: all test clean
+all:
+	"$(LITAI_LANGUAGE_TOOL)" tools/build.js "$(OUT)"
+test:
+	"$(LITAI_LANGUAGE_TOOL)" main.js --litai-test
+clean:
+	"$(LITAI_LANGUAGE_TOOL)" tools/clean.js

@@ -1,0 +1,185 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { create_sessions_directives_routes } = require('../server_sessions_directives_routes/create_sessions_directives_routes.js');
+
+const cases = [
+  {
+    id: 'generated-directive-page',
+    args: ['directives', 'GET', { cursor: '7', directives: [{ seq: 9 }], ended_sessions: [], grants: ['z', 'a'] }],
+    expected: { directives: [{ seq: 9 }], next_cursor: '9', workspaces: ['a', 'z'], ended_sessions: [] }
+  },
+  {
+    id: 'generated-empty-page',
+    args: ['directives', 'GET', { cursor: '0', directives: [], ended_sessions: [], grants: [] }],
+    expected: { directives: [], next_cursor: '0', workspaces: [], ended_sessions: [] }
+  },
+  {
+    id: 'generated-snapshot',
+    args: ['directives', 'GET', { cursor: '20', directives: [{ seq: 21 }, { seq: 25 }], ended_sessions: ['closed'], grants: ['gamma', 'alpha', 'beta'] }],
+    expected: { directives: [{ seq: 21 }, { seq: 25 }], next_cursor: '25', workspaces: ['alpha', 'beta', 'gamma'], ended_sessions: ['closed'] }
+  }
+];
+
+function fixture(input = {}, onDeviceAuth) {
+  const events = [];
+  const principal = { grants: input.grants || [] };
+  const policy = { workspace: 'workspace' };
+  const request = { url: 'https://example.invalid/?cursor=' + (input.cursor || '0') };
+  const body = input.body || {};
+  const ID_RE = /^[a-z]+$/;
+  const SESSION_KEY_RE = /^[a-z0-9]+$/;
+  const fn = (name, result) => function (...args) {
+    assert.equal(this, undefined);
+    events.push([name, ...args]);
+    return typeof result === 'function' ? result(...args) : result;
+  };
+  const resources = {
+    Response: { json(value, options) { assert.equal(this, resources.Response); return { body: value, status: options.status }; } },
+    URL,
+    errors: { badRequest: fn('badRequest', message => new Error(message)) },
+    http: {
+      route: function (callback) {
+        assert.equal(this, undefined);
+        return async (req, context) => callback(req, await context.params);
+      },
+      deviceAuth: fn('deviceAuth', () => {
+        if (onDeviceAuth) onDeviceAuth(events);
+        return principal;
+      }),
+      webAuth: fn('webAuth', async () => principal),
+      webWrite: fn('webWrite', async () => principal),
+      eitherWrite: fn('eitherWrite', async () => principal),
+      idParam: fn('idParam', (value, re) => {
+        if (!re.test(value)) throw new Error('invalid id');
+        return value;
+      }),
+      noContent: fn('noContent', null),
+      readJson: fn('readJson', async () => body),
+      requireRecentSignIn: fn('requireRecentSignIn', undefined)
+    },
+    workspaces: { enter: fn('enter', policy) },
+    directives: {
+      RECEIPT_STATES: ['accepted', 'rejected'],
+      parseCursor: fn('parseCursor', value => Number(value || 0)),
+      directivesFor: fn('directivesFor', input.directives || []),
+      endedSessionsFor: fn('endedSessionsFor', input.ended_sessions || []),
+      recordReceipt: fn('recordReceipt', { recorded: true })
+    },
+    validate: {
+      ID_RE, SESSION_KEY_RE,
+      str: fn('str', (value, key) => value[key]),
+      oneOf: fn('oneOf', (value, key) => value[key]),
+      iso: fn('iso', (value, key) => value[key])
+    },
+    requests: {}, sessions: {}
+  };
+  for (const name of ['cancelRequest', 'getHold', 'listHolds', 'listRequests', 'releaseGoal', 'sendRequest']) {
+    resources.requests[name] = fn(name, { operation: name });
+  }
+  resources.requests.requireHolder = fn('requireHolder', undefined);
+  resources.requests.holdGoal = fn('holdGoal', async () => ({ body: { held: true }, status: 202 }));
+  for (const name of ['deleteSession', 'ingestUsage', 'listSessions', 'openBindingEpoch', 'putSession', 'setAgentStop', 'stopSharing']) {
+    resources.sessions[name] = fn(name, { operation: name });
+  }
+  const routes = create_sessions_directives_routes(resources);
+  assert.deepEqual(events, []);
+  const invoke = (path, method, params = {}) => routes[path][method](request, { params: Promise.resolve(params) });
+  return { routes, resources, events, principal, policy, request, body, invoke };
+}
+
+async function invokeCase(path, method, input) {
+  const f = fixture(input);
+  const originalGrants = [...f.principal.grants];
+  const result = await f.invoke(path, method);
+  assert.deepEqual(f.principal.grants, originalGrants);
+  assert.deepEqual(f.events.map(e => e[0]), ['deviceAuth', 'parseCursor', 'directivesFor', 'endedSessionsFor']);
+  assert.deepEqual(f.events[2], ['directivesFor', f.principal, Number(input.cursor), 100]);
+  return result;
+}
+
+async function checkRoutes() {
+  const goal = 'workspaces/[ws]/goals/[goal]';
+  const session = 'workspaces/[ws]/sessions/[key]';
+  const params = { ws: 'workspace', goal: 'goal', id: 'request', key: 'session1' };
+  const scenarios = [
+    [goal + '/hold', 'GET', 'webAuth', 'getHold', { operation: 'getHold' }],
+    [goal + '/hold', 'PUT', 'webWrite', 'holdGoal', { body: { held: true }, status: 202 }],
+    [goal + '/hold', 'DELETE', 'webWrite', 'releaseGoal', { operation: 'releaseGoal' }],
+    [goal + '/requests', 'GET', 'webAuth', 'listRequests', { operation: 'listRequests' }],
+    [goal + '/requests', 'POST', 'webWrite', 'sendRequest', { body: { operation: 'sendRequest' }, status: 201 }],
+    [goal + '/requests/[id]', 'DELETE', 'webWrite', 'cancelRequest', { operation: 'cancelRequest' }],
+    ['workspaces/[ws]/holds', 'GET', 'webAuth', 'listHolds', { holds: { operation: 'listHolds' } }],
+    ['workspaces/[ws]/sessions', 'GET', 'webAuth', 'listSessions', { operation: 'listSessions' }],
+    [session, 'PUT', 'deviceAuth', 'putSession', { operation: 'putSession' }],
+    [session, 'DELETE', 'eitherWrite', 'deleteSession', null],
+    [session + '/epochs', 'POST', 'deviceAuth', 'openBindingEpoch', { operation: 'openBindingEpoch' }],
+    [session + '/resume', 'POST', 'webWrite', 'setAgentStop', { operation: 'setAgentStop' }],
+    [session + '/stop', 'POST', 'webWrite', 'setAgentStop', { operation: 'setAgentStop' }],
+    [session + '/stop-sharing', 'POST', 'eitherWrite', 'stopSharing', { operation: 'stopSharing' }],
+    [session + '/usage', 'POST', 'deviceAuth', 'ingestUsage', { operation: 'ingestUsage' }]
+  ];
+  const f0 = fixture();
+  const actualSurface = Object.fromEntries(Object.entries(f0.routes).map(([path, methods]) => [path, Object.keys(methods).sort()]));
+  const expectedSurface = { directives: ['GET'], 'directives/[id]/receipts': ['POST'] };
+  for (const [path, method] of scenarios) (expectedSurface[path] ||= []).push(method);
+  for (const methods of Object.values(expectedSurface)) methods.sort();
+  assert.deepEqual(actualSurface, expectedSurface);
+  for (const [path, method, auth, domain, expected] of scenarios) {
+    const f = fixture();
+    assert.deepEqual(await f.invoke(path, method, params), expected);
+    assert.equal(f.events[0][0], auth);
+    assert.deepEqual(f.events[1], ['idParam', 'workspace', f.resources.validate.ID_RE]);
+    assert.deepEqual(f.events[2], ['enter', f.principal, 'workspace']);
+    const domainEvent = f.events.find(e => e[0] === domain);
+    assert.equal(domainEvent[1], f.policy);
+    const names = f.events.map(e => e[0]);
+    if (path === goal + '/hold' && method !== 'GET') {
+      const holder = names.indexOf('requireHolder');
+      assert.equal(names[holder + 1], 'requireRecentSignIn');
+      assert.equal(names[holder + 2], domain);
+      if (method === 'PUT') assert.equal(names[holder - 1], 'readJson');
+    }
+    const limits = { putSession: 8192, openBindingEpoch: 4096, ingestUsage: 262144, holdGoal: 4096, sendRequest: 4096 };
+    if (limits[domain]) assert.deepEqual(f.events.find(e => e[0] === 'readJson'), ['readJson', f.request, limits[domain]]);
+    if (domain === 'setAgentStop') assert.equal(domainEvent[3], path.endsWith('/stop'));
+    if (method === 'DELETE' && path === session) assert.equal(names[names.length - 1], 'noContent');
+  }
+  const receiptBody = { session_key: 'abc', state: 'accepted', at: '2026-01-01T00:00:00Z', auto_accepted: true };
+  const receipt = fixture({ body: receiptBody });
+  assert.deepEqual(await receipt.invoke('directives/[id]/receipts', 'POST', params), { recorded: true });
+  assert.deepEqual(receipt.events.map(e => e[0]), ['deviceAuth', 'readJson', 'idParam', 'str', 'oneOf', 'iso', 'recordReceipt']);
+  assert.deepEqual(receipt.events[1], ['readJson', receipt.request, 2048]);
+  assert.deepEqual(receipt.events.at(-1), ['recordReceipt', receipt.principal, 'request', 'abc', 'accepted', receiptBody.at, true]);
+  const badReceipt = fixture({ body: { auto_accepted: 1 } });
+  await assert.rejects(badReceipt.invoke('directives/[id]/receipts', 'POST', params), /auto_accepted must be true or false/);
+  assert.deepEqual(badReceipt.events.map(e => e[0]), ['deviceAuth', 'readJson', 'badRequest']);
+  for (const [path, method, expectedBeforeCheckpoint] of [
+    ['directives', 'GET', ['deviceAuth', 'parseCursor', 'directivesFor', 'endedSessionsFor']],
+    ['directives/[id]/receipts', 'POST', ['deviceAuth', 'readJson']],
+    [session, 'PUT', ['deviceAuth', 'idParam', 'enter', 'idParam', 'readJson']],
+    [session + '/epochs', 'POST', ['deviceAuth', 'idParam', 'enter', 'idParam', 'readJson']],
+    [session + '/usage', 'POST', ['deviceAuth', 'idParam', 'enter', 'idParam', 'readJson']]
+  ]) {
+    let snapshot;
+    const f = fixture({ body: receiptBody }, events => {
+      Promise.resolve().then(() => { snapshot = events.map(e => e[0]); });
+    });
+    await f.invoke(path, method, params);
+    assert.deepEqual(snapshot, expectedBeforeCheckpoint);
+  }
+}
+
+async function run() {
+  const results = [];
+  for (const c of cases) {
+    assert.deepEqual(await invokeCase(...c.args), c.expected);
+    results.push({ case_id: c.id, outcome: 'passed' });
+  }
+  await checkRoutes();
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+
+async function smoke() { return invokeCase(...cases[0].args); }
+
+module.exports = { run, smoke };

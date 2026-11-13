@@ -1,0 +1,24 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const output = process.argv[2];
+if (!output) throw new Error('Expected artifact output path');
+const files = ['main.js', 'tests/litai_test.js', 'limit_suggest/create_suggestions.js'];
+const registry = files.map(file => {
+  const body = fs.readFileSync(path.join(root, file), 'utf8').replace(/^#![^\n]*\n/, '');
+  return JSON.stringify(file) + ': function(module, exports, require) {\n' + body + '\n}';
+}).join(',\n');
+const bundle = '#!/usr/bin/env node\n\'use strict\';\nconst registry = {\n' + registry + '\n};\n' +
+  'const cache = Object.create(null);\n' +
+  'function load(id) { if(cache[id]) return cache[id].exports; const module = {exports:{}}; cache[id]=module; registry[id](module,module.exports,spec=>{ if(spec.startsWith("node:")) return require(spec); const parts=id.split("/"); parts.pop(); for(const p of spec.split("/")){if(p==="..")parts.pop();else if(p!==".")parts.push(p);} return load(parts.join("/")); }); return module.exports; }\n' +
+  'try { process.stdout.write(JSON.stringify(load("main.js").main(process.argv.slice(2)))+"\\n"); } catch(e) { process.stderr.write(String(e && e.stack || e)+"\\n"); process.exitCode=1; }\n';
+fs.mkdirSync(path.dirname(path.resolve(output)), { recursive: true });
+fs.writeFileSync(output, bundle, { mode: 0o755 });
+const packageDir = path.join(path.dirname(path.resolve(output)), 'limit_suggest');
+fs.mkdirSync(packageDir, { recursive: true });
+for (const file of ['create_suggestions.js', 'package.json']) {
+  const src = path.join(root, 'limit_suggest', file);
+  const dest = path.join(packageDir, file);
+  if (src !== dest) fs.copyFileSync(src, dest);
+}

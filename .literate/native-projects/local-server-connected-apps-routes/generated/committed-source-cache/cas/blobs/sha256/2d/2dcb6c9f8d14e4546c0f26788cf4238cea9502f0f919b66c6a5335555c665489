@@ -1,0 +1,84 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { create_connected_apps_routes } = require('../server_connected_apps_routes/create_connected_apps_routes.js');
+
+const cases = [
+  { id: 'generated-list', arguments: [{ method: 'GET', ws: 'team7', origin: 'https://example.test', apps: [{ id: 'grant9' }] }], expected: { status: 200, headers: { 'cache-control': 'no-store' }, body: { url: 'https://example.test/mcp', apps: [{ id: 'grant9' }] } } },
+  { id: 'generated-empty', arguments: [{ method: 'GET', ws: 'empty2', origin: 'https://empty.test', apps: [] }], expected: { status: 200, headers: { 'cache-control': 'no-store' }, body: { url: 'https://empty.test/mcp', apps: [] } } },
+  { id: 'generated-revoke', arguments: [{ method: 'DELETE', ws: 'team3', grant: 'grant4', origin: 'https://write.test' }], expected: { status: 204, headers: {}, body: null } }
+];
+
+async function exercise(input) {
+  const effects = [];
+  const principal = {};
+  const policy = {};
+  const request = { origin: input.origin };
+  const ID_RE = /^[a-z0-9]+$/;
+  const GRANT_ID = /^grant[0-9]+$/;
+  let wrapped = 0;
+  function free() { assert.equal(this, undefined); }
+  const resources = {
+    Response: class {
+      static json(body, options) {
+        effects.push('json');
+        return { status: 200, headers: options.headers, body };
+      }
+    },
+    grants: {
+      GRANT_ID,
+      listGrants: function(p) { free.call(this); assert.equal(p, policy); effects.push('list'); return input.apps; },
+      revokeGrant: async function(p, id) { free.call(this); assert.equal(p, policy); assert.equal(id, input.grant); effects.push('revoke'); }
+    },
+    oauth: {
+      MCP_PATH: '/mcp',
+      originOf: function(req) { free.call(this); assert.equal(req, request); effects.push('origin'); return req.origin; }
+    },
+    validate: { ID_RE },
+    workspaces: {
+      enter: function(p, ws) {
+        free.call(this); assert.equal(p, principal); assert.equal(ws, input.ws);
+        effects.push('enter');
+        queueMicrotask(() => effects.push('enter-microtask'));
+        return policy;
+      }
+    },
+    http: {
+      route: function(callback) {
+        free.call(this); wrapped++;
+        return async (req, context) => callback(req, await context.params);
+      },
+      webAuth: async function(req) { free.call(this); assert.equal(req, request); effects.push('auth'); return principal; },
+      webWrite: async function(req) { free.call(this); assert.equal(req, request); effects.push('write'); return principal; },
+      idParam: function(value, pattern) {
+        free.call(this); assert.equal(pattern, value === input.ws ? ID_RE : GRANT_ID);
+        assert.equal(pattern.test(value), true); effects.push(value === input.ws ? 'workspace-id' : 'grant-id'); return value;
+      },
+      noContent: function() { free.call(this); effects.push('no-content'); return { status: 204, headers: {}, body: null }; }
+    }
+  };
+  const routes = create_connected_apps_routes(resources);
+  assert.equal(wrapped, 2);
+  assert.deepEqual(effects, []);
+  assert.deepEqual(Object.keys(routes), ['workspaces/[ws]/apps', 'workspaces/[ws]/apps/[grant]']);
+  assert.deepEqual(Object.keys(routes['workspaces/[ws]/apps']), ['GET']);
+  assert.deepEqual(Object.keys(routes['workspaces/[ws]/apps/[grant]']), ['DELETE']);
+  const path = input.method === 'GET' ? 'workspaces/[ws]/apps' : 'workspaces/[ws]/apps/[grant]';
+  const result = await routes[path][input.method](request, { params: Promise.resolve({ ws: input.ws, grant: input.grant }) });
+  assert.deepEqual(effects, input.method === 'GET'
+    ? ['auth', 'workspace-id', 'enter', 'origin', 'list', 'json', 'enter-microtask']
+    : ['write', 'workspace-id', 'enter', 'grant-id', 'revoke', 'enter-microtask', 'no-content']);
+  return result;
+}
+
+async function run() {
+  const results = [];
+  for (const test of cases) {
+    assert.deepEqual(await exercise(...test.arguments), test.expected);
+    results.push({ case_id: test.id, outcome: 'passed' });
+  }
+  return { schema: 'literate-ai/generated-test-results@1', cases: results };
+}
+
+async function smoke() { return exercise(...cases[0].arguments); }
+module.exports = { run, smoke };

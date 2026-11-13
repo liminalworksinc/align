@@ -1,3 +1,4 @@
+// Caller-owned Sessions types and explicit resource bindings.
 import { caps } from "./config";
 import { sessionCapError } from "./creation";
 import { all, audit, get, run, tx } from "./db";
@@ -15,51 +16,110 @@ import { expireStoppedSessionTargets, holdNewlyBound } from "./requests";
 import { personName } from "./retention";
 import { shareAgainText, shareAgainWords, sharingStoppedText } from "./share-again.mts";
 import { b64url, iso, nonNegInt, oneOf, optInt, optStr, str, type Body } from "./validate";
+import { create_sessions } from "../native/.bindings/server_sessions.js";
 
 // Shared sessions, binding epochs and usage. docs/v2/WIRE.md "Shared sessions".
 // A session belongs to the device (and user) that shared it: any other caller gets 404 for its key, except that any
 // live device of that user may delete its history (deleteSession).
 // Audit rows for session actions name the actor but not the session key, so deleting a session's history leaves no
 // row that mentions it.
-
 export interface SessionRow {
-  ws_id: string;
-  session_key: string;
-  user_id: string;
-  device_id: string | null;
-  harness: "claude-code" | "codex";
-  repo_key: string;
-  repo_alias: string | null;
-  title: string | null;
-  started_at: string;
-  state: "shared" | "suspended" | "stopped";
-  stopped_at: string | null;
-  /** Why a stopped session ended when its person did not stop it: its device signed out (lib/v2/devices.ts), or its
-   *  person was removed from the workspace or left it (lib/v2/lifecycle.ts). Nothing can reach it any more. */
-  ended_reason: EndedReason | null;
-  governing_goal_id: string | null;
-  governing_alignment_id: string | null;
-  agent_stopped: number;
-  conflicts: number;
-  created_at: string;
-  updated_at: string;
+    ws_id: string;
+    session_key: string;
+    user_id: string;
+    device_id: string | null;
+    harness: "claude-code" | "codex";
+    repo_key: string;
+    repo_alias: string | null;
+    title: string | null;
+    started_at: string;
+    state: "shared" | "suspended" | "stopped";
+    stopped_at: string | null;
+    /** Why a stopped session ended when its person did not stop it: its device signed out (lib/v2/devices.ts), or its
+     *  person was removed from the workspace or left it (lib/v2/lifecycle.ts). Nothing can reach it any more. */
+    ended_reason: EndedReason | null;
+    governing_goal_id: string | null;
+    governing_alignment_id: string | null;
+    agent_stopped: number;
+    conflicts: number;
+    created_at: string;
+    updated_at: string;
 }
 
 interface EpochRow {
-  ws_id: string;
-  session_key: string;
-  epoch_id: string;
-  goal_id: string | null;
-  goal_version_at_start: number | null;
-  starts_at: string;
-  ends_at: string | null;
-  root_turn: string | null;
-  cause: string;
-  authority: "none" | "own" | "pod" | "alignment";
-  alignment_id: string | null;
+    ws_id: string;
+    session_key: string;
+    epoch_id: string;
+    goal_id: string | null;
+    goal_version_at_start: number | null;
+    starts_at: string;
+    ends_at: string | null;
+    root_turn: string | null;
+    cause: string;
+    authority: "none" | "own" | "pod" | "alignment";
+    alignment_id: string | null;
 }
 
 export type EndedReason = "device_signed_out" | "member_removed";
+
+type UsageRow = Record<(typeof USAGE_FIELDS)[number] | "request_key", string | number | null>;
+
+type DirectiveKind = NonNullable<ReturnType<typeof stopStatus>>["kind"];
+type ReceiptState = NonNullable<ReturnType<typeof stopStatus>>["receipts"][number]["state"];
+
+interface SessionsRuntime {
+  endSessions: (live: { ws_id: string; session_key: string; }[], reason: EndedReason, at: string) => number;
+  sessionRow: (ws: string, key: string) => SessionRow | undefined;
+  openEpoch: (ws: string, key: string) => EpochRow | undefined;
+  ownSession: (pp: PolicyPrincipal, p: Principal, key: string) => SessionRow;
+  putSession: (pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) => Promise<{ session_key: string; state: "shared" | "suspended" | "stopped"; current_epoch: { epoch_id: string; goal_id: string | null; goal_version_at_start: number | null; starts_at: string; ends_at: string | null; } | null; }>;
+  openBindingEpoch: (pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) => Promise<{ epoch_id: string; goal_id: string | null; goal_version_at_start: number | null; starts_at: string; ends_at: string | null; }>;
+  USAGE_FIELDS: readonly ["epoch_id", "ts", "model", "query_source", "input", "output", "cache_read", "cache_write_5m", "cache_write_1h", "cache_write_unsplit", "basis", "est_list_usd_micros", "price_table_version", "source"];
+  ingestUsage: (pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) => Promise<{ accepted: number; duplicates: number; conflicts: number; refused: string[]; }>;
+  stopSharing: (pp: PolicyPrincipal, p: Principal, key: string) => Promise<{ session_key: string; state: "stopped"; }>;
+  deleteSession: (pp: PolicyPrincipal, p: Principal, key: string) => Promise<void>;
+  setAgentStop: (pp: PolicyPrincipal, key: string, stop: boolean) => Promise<{ directive_id: string | null; agent_stopped: boolean; }>;
+  listSessions: (pp: PolicyPrincipal) => { mine: { session_key: string; harness: "claude-code" | "codex"; repo_alias: string | null; title: string | null; started_at: string; state: "shared" | "suspended" | "stopped"; stopped_at: string | null; ended_reason: EndedReason | null; device: { id: string; name: string; signed_out: boolean; has_workspace: boolean; } | null; current_epoch: { goal: { id: string; title: string; version: number; private?: undefined; } | { id: null; title: null; private: boolean; version?: undefined; } | null; epoch_id: string; goal_id: string | null; goal_version_at_start: number | null; starts_at: string; ends_at: string | null; } | null; governing_goal: { id: string; title: string; version: number; private?: undefined; } | { id: null; title: null; private: boolean; version?: undefined; } | null; agent_stopped: boolean; stop_status: { directive_id: string; kind: DirectiveKind; created_at: string; receipts: { state: ReceiptState; at: string; }[]; } | null; conflicts: number; usage: { requests: number; input: number; output: number; } | undefined; }[]; all: { session_key: string; owner: { id: string; name: string; }; repo_alias: string | null; harness: "claude-code" | "codex"; started_at: string; state: "shared" | "suspended" | "stopped"; agent_stopped: boolean; stop_status: { directive_id: string; kind: DirectiveKind; created_at: string; receipts: { state: ReceiptState; at: string; }[]; } | null; }[] | null; };
+}
+const sessionsService = create_sessions({
+  caps: (...args: Parameters<typeof caps>) => caps(...args),
+  sessionCapError: (...args: Parameters<typeof sessionCapError>) => sessionCapError(...args),
+  all: (...args: Parameters<typeof all>) => all(...args),
+  audit: (...args: Parameters<typeof audit>) => audit(...args),
+  get: (...args: Parameters<typeof get>) => get(...args),
+  run: (...args: Parameters<typeof run>) => run(...args),
+  tx: (...args: Parameters<typeof tx>) => tx(...args),
+  takeDurable: (...args: Parameters<typeof takeDurable>) => takeDurable(...args),
+  V2Error,
+  badRequest: (...args: Parameters<typeof badRequest>) => badRequest(...args),
+  conflict: (...args: Parameters<typeof conflict>) => conflict(...args),
+  notFound: (...args: Parameters<typeof notFound>) => notFound(...args),
+  event: (...args: Parameters<typeof event>) => event(...args),
+  nowIso: (...args: Parameters<typeof nowIso>) => nowIso(...args),
+  sha256hex: (...args: Parameters<typeof sha256hex>) => sha256hex(...args),
+  goalObj: (...args: Parameters<typeof goalObj>) => goalObj(...args),
+  goalRow: (...args: Parameters<typeof goalRow>) => goalRow(...args),
+  transferFor: (...args: Parameters<typeof transferFor>) => transferFor(...args),
+  authorize: (...args: Parameters<typeof authorize>) => authorize(...args),
+  canReadGoal: (...args: Parameters<typeof canReadGoal>) => canReadGoal(...args),
+  stopStatus: (...args: Parameters<typeof stopStatus>) => stopStatus(...args),
+  writeDirective: (...args: Parameters<typeof writeDirective>) => writeDirective(...args),
+  need: (...args: Parameters<typeof need>) => need(...args),
+  expireStoppedSessionTargets: (...args: Parameters<typeof expireStoppedSessionTargets>) => expireStoppedSessionTargets(...args),
+  holdNewlyBound: (...args: Parameters<typeof holdNewlyBound>) => holdNewlyBound(...args),
+  personName: (...args: Parameters<typeof personName>) => personName(...args),
+  shareAgainText: (...args: Parameters<typeof shareAgainText>) => shareAgainText(...args),
+  shareAgainWords: (...args: Parameters<typeof shareAgainWords>) => shareAgainWords(...args),
+  sharingStoppedText: (...args: Parameters<typeof sharingStoppedText>) => sharingStoppedText(...args),
+  b64url: (...args: Parameters<typeof b64url>) => b64url(...args),
+  iso: (...args: Parameters<typeof iso>) => iso(...args),
+  nonNegInt: (...args: Parameters<typeof nonNegInt>) => nonNegInt(...args),
+  oneOf: (...args: Parameters<typeof oneOf>) => oneOf(...args),
+  optInt: (...args: Parameters<typeof optInt>) => optInt(...args),
+  optStr: (...args: Parameters<typeof optStr>) => optStr(...args),
+  str: (...args: Parameters<typeof str>) => str(...args),
+  readDate: () => Date,
+}) as unknown as SessionsRuntime;
 
 /**
  * End sessions nothing can deliver a stop, a resume or a release to any more (inside the caller's tx()): each one still
@@ -71,475 +131,51 @@ export type EndedReason = "device_signed_out" | "member_removed";
  * Used when a device is revoked (lib/v2/devices.ts) and when a member leaves or is removed (lib/v2/lifecycle.ts).
  * Returns how many ended.
  */
-export function endSessions(live: { ws_id: string; session_key: string }[], reason: EndedReason, at: string): number {
-  for (const s of live) {
-    run("UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL", at, s.ws_id, s.session_key);
-    run(
-      `UPDATE v2_sessions SET state = 'stopped', stopped_at = COALESCE(stopped_at, ?), ended_reason = ?, governing_goal_id = NULL,
-         governing_alignment_id = NULL, updated_at = ? WHERE ws_id = ? AND session_key = ?`,
-      at,
-      reason,
-      at,
-      s.ws_id,
-      s.session_key,
-    );
-    // The target keeps why it expired (C3-1): the request then says its sessions ended, never that the goal closed.
-    run(
-      "UPDATE v2_request_targets SET state = 'expired', ended_reason = ?, updated_at = ? WHERE ws_id = ? AND session_key = ? AND state IN ('sent','received')",
-      reason,
-      at,
-      s.ws_id,
-      s.session_key,
-    );
-  }
-  return live.length;
+export function endSessions(live: {
+    ws_id: string;
+    session_key: string;
+}[], reason: EndedReason, at: string): number {
+    return (0, sessionsService.endSessions)(live, reason, at);
 }
-
-/** The refusal for a time a device sent that lies too far ahead of the server's clock: its clock is off (400
- *  clock_skew with the server's time, as a refresh gets), never a bare bad_request. */
-function clockSkew(field: string, sent: string) {
-  const minutes = Math.round((Date.parse(sent) - Date.now()) / 60_000);
-  return new V2Error(400, "clock_skew", `${field} is ${minutes} minutes ahead of the server's clock; this device's clock is off`, { server_time: nowIso() });
-}
-
-const epochOut = (e: EpochRow) => ({ epoch_id: e.epoch_id, goal_id: e.goal_id, goal_version_at_start: e.goal_version_at_start, starts_at: e.starts_at, ends_at: e.ends_at });
-
-export const sessionRow = (ws: string, key: string) => get<SessionRow>("SELECT * FROM v2_sessions WHERE ws_id = ? AND session_key = ?", ws, key);
-export const openEpoch = (ws: string, key: string) => get<EpochRow>("SELECT * FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL", ws, key);
-
+export const sessionRow = (ws: string, key: string): SessionRow | undefined => (0, sessionsService.sessionRow)(ws, key);
+export const openEpoch = (ws: string, key: string): EpochRow | undefined => (0, sessionsService.openEpoch)(ws, key);
 /** The session if this caller owns it (the device that shared it, or its user on the web), else 404. */
 export function ownSession(pp: PolicyPrincipal, p: Principal, key: string): SessionRow {
-  const s = sessionRow(pp.wsId, key);
-  if (!s) throw notFound();
-  need(pp, "session.manage", { kind: "session", ownerId: s.user_id });
-  if (p.kind === "device" && s.device_id !== p.deviceId) throw notFound();
-  return s;
+    return (0, sessionsService.ownSession)(pp, p, key);
 }
-
-const shareOut = (s: SessionRow) => {
-  const e = openEpoch(s.ws_id, s.session_key);
-  return { session_key: s.session_key, state: s.state as "shared" | "suspended" | "stopped", current_epoch: e ? epochOut(e) : null };
-};
-
-export async function putSession(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {
-  need(pp, "session.share");
-  const harness = oneOf(b, "harness", ["claude-code", "codex"] as const);
-  const repoKey = b64url(b, "repo_key", 43, 43);
-  const alias = optStr(b, "repo_alias", 100);
-  const startedAt = iso(b, "started_at");
-  if (Date.parse(startedAt) > Date.now() + FUTURE_SKEW_MS) throw clockSkew("started_at", startedAt);
-  const title = optStr(b, "title", 200);
-  const at = nowIso();
-  const out = await tx(() => {
-    const s = sessionRow(pp.wsId, key);
-    const ended = s?.state === "stopped" && (s.ended_reason === "device_signed_out" ? s.device_id !== dev.deviceId : s.ended_reason === "member_removed");
-    if (s && ended && s.user_id === dev.user.id) {
-      // The session ended because the machine that shared it signed out, or because its person left the workspace (and
-      // has been let back in): the same person's machine, paired again (it still derives the same session key from its
-      // local secret), shares it again from now on.
-      if (s.harness !== harness || s.repo_key !== repoKey) throw conflict("session_conflict", "This session key was shared with a different harness or repo");
-      run(
-        "UPDATE v2_sessions SET device_id = ?, state = 'shared', stopped_at = NULL, ended_reason = NULL, repo_alias = ?, title = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?",
-        dev.deviceId,
-        alias,
-        title,
-        at,
-        pp.wsId,
-        key,
-      );
-      audit(pp.wsId, dev.user.id, "session.shared_again", null, at);
-    } else if (s) {
-      if (s.user_id !== dev.user.id) throw notFound();
-      // A session its person stopped sharing stays stopped, whichever of their devices asks (C4-8): the same answer the
-      // device that shared it gets, not a 404 that reads as "another device holds it".
-      if (s.state === "stopped") throw conflict("sharing_stopped", "Sharing was stopped for this session");
-      if (s.device_id !== dev.deviceId) throw notFound();
-      if (s.harness !== harness || s.repo_key !== repoKey) throw conflict("session_conflict", "This session key was shared with a different harness or repo");
-      run("UPDATE v2_sessions SET repo_alias = ?, title = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?", alias, title, at, pp.wsId, key);
-    } else {
-      // Hosted: at most ALIGN_MAX_SESSIONS_PER_DEVICE_DAY new sessions per device in any 24 hours (counted durably, so
-      // deleting a session doesn't give the slot back).
-      const c = caps();
-      if (c && !takeDurable([{ key: `sessions-device:${dev.deviceId}`, max: c.sessionsPerDeviceDay, windowMs: 24 * 3600 * 1000 }])) throw sessionCapError(c.sessionsPerDeviceDay);
-      run(
-        `INSERT INTO v2_sessions (ws_id, session_key, user_id, device_id, harness, repo_key, repo_alias, title, started_at, state, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'shared', ?, ?)`,
-        pp.wsId,
-        key,
-        dev.user.id,
-        dev.deviceId,
-        harness,
-        repoKey,
-        alias,
-        title,
-        startedAt,
-        at,
-        at,
-      );
-      // The workspace's first shared session, and each person's first in it.
-      event("first_session_captured", { ws: pp.wsId, user: dev.user.id, props: { harness }, at });
-      event("member_first_session_captured", { ws: pp.wsId, user: dev.user.id, props: { harness }, at });
-    }
-    return shareOut(sessionRow(pp.wsId, key)!);
-  });
-  if (out.state === "stopped") throw conflict("sharing_stopped", "Sharing was stopped for this session");
-  return out;
+export async function putSession(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body): Promise<{ session_key: string; state: "shared" | "suspended" | "stopped"; current_epoch: { epoch_id: string; goal_id: string | null; goal_version_at_start: number | null; starts_at: string; ends_at: string | null; } | null; }> {
+    return (0, sessionsService.putSession)(pp, dev, key, b);
 }
-
-const EPOCH_ID = /^ep_[A-Za-z0-9_-]{22,64}$/;
-const FUTURE_SKEW_MS = 5 * 60 * 1000;
-
-export async function openBindingEpoch(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {
-  const s = ownSession(pp, dev, key);
-  if (s.state === "stopped") throw sharingStopped(s);
-  const epochId = str(b, "epoch_id", 70);
-  if (!EPOCH_ID.test(epochId)) throw badRequest("epoch_id must be ep_ followed by 22+ url-safe characters");
-  const goalId = b.goal_id === null || b.goal_id === undefined ? null : str(b, "goal_id", 64);
-  const startsAt = iso(b, "starts_at");
-  const rootTurn = optStr(b, "root_turn", 200);
-  const cause = str(b, "cause", 80);
-  if (cause !== "manual" && !/^directive:dir_[a-z2-7]{24}$/.test(cause)) throw badRequest('cause must be "manual" or "directive:<dir_id>"');
-  if (cause !== "manual" && !get("SELECT 1 AS x FROM v2_directive_targets WHERE ws_id = ? AND directive_id = ? AND session_key = ?", pp.wsId, cause.slice(10), key)) {
-    throw badRequest("cause names a directive that was not sent to this session");
-  }
-  if (Date.parse(startsAt) > Date.now() + FUTURE_SKEW_MS) throw clockSkew("starts_at", startsAt);
-  // A start stored in the future came from a clock that ran ahead: an epoch from the corrected clock moves it back
-  // (below, in the transaction) instead of waiting for real time to catch up.
-  const futureStart = Date.parse(s.started_at) > Date.now();
-  if (Date.parse(startsAt) < Date.parse(s.started_at) && !futureStart) throw badRequest("starts_at is before the session started");
-
-  // Idempotent: the same epoch again returns it; the same id with other values is a conflict.
-  const same = get<EpochRow>("SELECT * FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", pp.wsId, key, epochId);
-  if (same) {
-    if (same.goal_id === goalId && same.starts_at === startsAt) return epochOut(same);
-    throw conflict("epoch_conflict", "This epoch id was already used with different values");
-  }
-
-  // Authority for the binding: own goal, pod goal, or an approved allocation transfer for this session.
-  let authority: EpochRow["authority"] = "none";
-  let alignmentId: string | null = null;
-  let version: number | null = null;
-  if (goalId) {
-    const g = goalRow(pp.wsId, goalId);
-    if (!g || !canReadGoal(pp, goalObj(g))) throw notFound();
-    const transfer = transferFor(pp.wsId, key, goalId);
-    const d = authorize(pp, "goal.bind", { kind: "bind", goal: goalObj(g), hasTransfer: !!transfer });
-    if (!d.ok) throw new V2Error(d.status, d.code, d.message);
-    if (g.status !== "active") throw conflict("goal_not_active", "That goal is no longer active");
-    authority = g.owner_id === pp.userId ? "own" : g.pod_id && pp.pods.has(g.pod_id) ? "pod" : "alignment";
-    alignmentId = authority === "alignment" ? transfer : null;
-    version = g.version;
-  }
-
-  const at = nowIso();
-  const out = await tx(() => {
-    const open = openEpoch(pp.wsId, key);
-    const lastEnd = get<{ m: string | null }>("SELECT MAX(ends_at) AS m FROM v2_epochs WHERE ws_id = ? AND session_key = ?", pp.wsId, key)?.m ?? null;
-    if (open && startsAt < open.starts_at) throw conflict("epoch_overlap", "starts_at is before the current epoch started");
-    if (lastEnd && startsAt < lastEnd) throw conflict("epoch_overlap", "starts_at is before the last epoch ended");
-    if (open) run("UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", startsAt, pp.wsId, key, open.epoch_id);
-    if (startsAt < s.started_at) run("UPDATE v2_sessions SET started_at = ? WHERE ws_id = ? AND session_key = ?", startsAt, pp.wsId, key);
-    run(
-      `INSERT INTO v2_epochs (ws_id, session_key, epoch_id, goal_id, goal_version_at_start, starts_at, root_turn, cause, authority, alignment_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      pp.wsId,
-      key,
-      epochId,
-      goalId,
-      version,
-      startsAt,
-      rootTurn,
-      cause,
-      authority,
-      alignmentId,
-      at,
-    );
-    // Picking a goal ends a suspension. A manual binding to another goal ends any governing goal.
-    const cur = sessionRow(pp.wsId, key)!;
-    const keepGoverning = cur.governing_goal_id !== null && cur.governing_goal_id === goalId;
-    run(
-      "UPDATE v2_sessions SET state = 'shared', governing_goal_id = ?, governing_alignment_id = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?",
-      keepGoverning ? cur.governing_goal_id : null,
-      keepGoverning ? cur.governing_alignment_id : null,
-      at,
-      pp.wsId,
-      key,
-    );
-    // A held goal holds this session too.
-    if (goalId) holdNewlyBound(pp.wsId, goalId, key);
-    // First value: the first time a session in this workspace is bound to a goal.
-    if (goalId && authority !== "none") event("first_session_bound", { ws: pp.wsId, user: pp.userId, props: { harness: cur.harness, authority }, at });
-    return epochOut(get<EpochRow>("SELECT * FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", pp.wsId, key, epochId)!);
-  });
-  return out;
+export async function openBindingEpoch(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body): Promise<{ epoch_id: string; goal_id: string | null; goal_version_at_start: number | null; starts_at: string; ends_at: string | null; }> {
+    return (0, sessionsService.openBindingEpoch)(pp, dev, key, b);
 }
-
-const QUERY_SOURCES = ["main", "subagent", "auxiliary", "unknown"] as const;
-const BASES = ["api_usd", "subscription_included", "workspace_credits", "estimated_list_usd", "unknown"] as const;
-const SOURCES = ["otel", "transcript", "rollout"] as const;
-export const USAGE_FIELDS = ["epoch_id", "ts", "model", "query_source", "input", "output", "cache_read", "cache_write_5m", "cache_write_1h", "cache_write_unsplit", "basis", "est_list_usd_micros", "price_table_version", "source"] as const;
-
-type UsageRow = Record<(typeof USAGE_FIELDS)[number] | "request_key", string | number | null>;
-
-function usageRowIn(v: unknown, i: number): UsageRow {
-  if (!v || typeof v !== "object" || Array.isArray(v)) throw badRequest(`rows[${i}] must be an object`);
-  const b = v as Body;
-  try {
-    return {
-      request_key: b64url(b, "request_key", 16, 128),
-      epoch_id: str(b, "epoch_id", 70),
-      ts: iso(b, "ts"),
-      model: str(b, "model", 100),
-      query_source: oneOf(b, "query_source", QUERY_SOURCES),
-      input: nonNegInt(b, "input"),
-      output: nonNegInt(b, "output"),
-      cache_read: nonNegInt(b, "cache_read"),
-      cache_write_5m: nonNegInt(b, "cache_write_5m"),
-      cache_write_1h: nonNegInt(b, "cache_write_1h"),
-      cache_write_unsplit: nonNegInt(b, "cache_write_unsplit"),
-      basis: oneOf(b, "basis", BASES),
-      est_list_usd_micros: optInt(b, "est_list_usd_micros"),
-      price_table_version: optStr(b, "price_table_version", 64),
-      source: oneOf(b, "source", SOURCES),
-    };
-  } catch (e) {
-    if (e instanceof V2Error) throw badRequest(`rows[${i}]: ${e.message}`);
-    throw e;
-  }
-}
-
-/** 409 sharing_stopped, with why the session's sharing ended when its person did not stop it (`member_removed`: they
- *  left the workspace or were removed, and may be back; `device_signed_out`), else `ended_reason: null`: a device
- *  that never saw the ending can then say what its user can do (`::align share` once they are back), not that the
- *  session was stopped for good (E2E-AGENT cycle 6 C6-3). */
-const sharingStopped = (s: SessionRow) => new V2Error(409, "sharing_stopped", "Sharing was stopped for this session", { ended_reason: s.ended_reason ?? null });
-
+export const USAGE_FIELDS = sessionsService.USAGE_FIELDS;
 /** Idempotent usage batch: INSERT OR IGNORE on (ws, session_key, request_key). The same key with different values is
  *  a conflict and never overwrites; a row whose epoch is unknown or another session's is a conflict too. */
-export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {
-  const s = ownSession(pp, dev, key);
-  if (s.state === "stopped") throw sharingStopped(s);
-  if (!Array.isArray(b.rows)) throw badRequest("rows must be a list");
-  if (b.rows.length > 500) throw new V2Error(413, "too_many_rows", "At most 500 rows per batch");
-  const rows = b.rows.map(usageRowIn);
-  const at = nowIso();
-  return tx(() => {
-    const list = all<{ epoch_id: string; starts_at: string; ends_at: string | null }>("SELECT epoch_id, starts_at, ends_at FROM v2_epochs WHERE ws_id = ? AND session_key = ?", pp.wsId, key);
-    const epochs = new Map(list.map((e) => [e.epoch_id, e]));
-    // Whether some epoch of this session was open at `t`, i.e. the session was shared then.
-    const shared = (t: number) => list.some((e) => Date.parse(e.starts_at) <= t && (e.ends_at === null || t < Date.parse(e.ends_at)));
-    let accepted = 0;
-    let duplicates = 0;
-    let conflicts = 0;
-    // The conflicts that were never stored (an unknown epoch, or made while the session was not shared or before its
-    // epoch started), by key, so the
-    // device counts them as not shared (E2E-AGENT cycle 6); a key stored before with other values is not one of them.
-    const refused: string[] = [];
-    for (const r of rows) {
-      const e = epochs.get(r.epoch_id as string);
-      if (!e) {
-        conflicts++;
-        refused.push(r.request_key as string);
-        continue;
-      }
-      // A row from after its epoch ended, at a time no epoch of this session covers, was made while the session was not
-      // shared (its share had ended and it was shared again later): it is never stored (C5-1). A row from after its
-      // epoch ended while a later epoch was open is the tail of a turn that started in its epoch, and counts there.
-      const t = Date.parse(r.ts as string);
-      // A row from before its epoch started can't have been made in it (in the gap before a re-share, say): never
-      // stored either (Z7).
-      if (t < Date.parse(e.starts_at)) {
-        conflicts++;
-        refused.push(r.request_key as string);
-        continue;
-      }
-      if (e.ends_at !== null && t >= Date.parse(e.ends_at) && !shared(t)) {
-        conflicts++;
-        refused.push(r.request_key as string);
-        continue;
-      }
-      const n = run(
-        `INSERT OR IGNORE INTO v2_usage (ws_id, session_key, request_key, ${USAGE_FIELDS.join(", ")}, received_at)
-         VALUES (?, ?, ?, ${USAGE_FIELDS.map(() => "?").join(", ")}, ?)`,
-        pp.wsId,
-        key,
-        r.request_key,
-        ...USAGE_FIELDS.map((f) => r[f]),
-        at,
-      );
-      if (n) {
-        accepted++;
-        continue;
-      }
-      const prev = get<Record<string, unknown>>(`SELECT ${USAGE_FIELDS.join(", ")} FROM v2_usage WHERE ws_id = ? AND session_key = ? AND request_key = ?`, pp.wsId, key, r.request_key);
-      if (prev && USAGE_FIELDS.every((f) => prev[f] === r[f])) duplicates++;
-      else conflicts++;
-    }
-    if (conflicts) run("UPDATE v2_sessions SET conflicts = conflicts + ? WHERE ws_id = ? AND session_key = ?", conflicts, pp.wsId, key);
-    return { accepted, duplicates, conflicts, refused };
-  });
+export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body): Promise<{ accepted: number; duplicates: number; conflicts: number; refused: string[]; }> {
+    return (0, sessionsService.ingestUsage)(pp, dev, key, b);
 }
-
 /** Stop sharing (future only): no more uploads; the open epoch ends now. History stays until deleted. It is its person's
  *  stop also for a session that had ended (`member_removed`, `device_signed_out`): the reason goes, so it is never
  *  shared again and its refusals say `ended_reason: null` (E2E-AGENT cycle 6). */
-export async function stopSharing(pp: PolicyPrincipal, p: Principal, key: string) {
-  ownSession(pp, p, key);
-  const at = nowIso();
-  await tx(() => {
-    run("UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL", at, pp.wsId, key);
-    run(
-      "UPDATE v2_sessions SET state = 'stopped', stopped_at = COALESCE(stopped_at, ?), ended_reason = NULL, governing_goal_id = NULL, governing_alignment_id = NULL, updated_at = ? WHERE ws_id = ? AND session_key = ?",
-      at,
-      at,
-      pp.wsId,
-      key,
-    );
-    // Nothing answers the requests still waiting on it now: they expire, as for a session that ended (E2E-AGENT cycle 13).
-    expireStoppedSessionTargets(pp.wsId, key, at);
-    audit(pp.wsId, pp.userId, "session.sharing_stopped", null, at);
-  });
-  return { session_key: key, state: "stopped" as const };
+export async function stopSharing(pp: PolicyPrincipal, p: Principal, key: string): Promise<{ session_key: string; state: "stopped"; }> {
+    return (0, sessionsService.stopSharing)(pp, p, key);
 }
-
-/** The marker a deleted session leaves: a hash of the person who shared it and its key, never either one. */
-const deletedKeyHash = (userId: string, key: string) => sha256hex(`deleted-session\0${userId}\0${key}`);
-
 /** Delete shared history: the session, its epochs, usage, directive deliveries and receipts, hard-deleted.
  *  Spend totals change. Directives left with no recipient are removed too. Unlike the session's other calls, any live
  *  device of the person who shared it may do this, not only the device that shared it (C4-1): a re-pair would
  *  otherwise strand the history where only the web could delete it. The audit row names the device that did it. */
-export async function deleteSession(pp: PolicyPrincipal, p: Principal, key: string) {
-  const s = sessionRow(pp.wsId, key);
-  if (!s) {
-    // Deleted already (on the web, say): the account that shared it hears so, anyone else not found (cycle 5).
-    if (get("SELECT 1 AS x FROM v2_deleted_sessions WHERE ws_id = ? AND key_hash = ?", pp.wsId, deletedKeyHash(pp.userId, key))) {
-      throw new V2Error(410, "history_deleted", "This session's shared history was already deleted; nothing is left to delete");
-    }
-    throw notFound();
-  }
-  need(pp, "session.manage", { kind: "session", ownerId: s.user_id });
-  await tx(() => {
-    run("DELETE FROM v2_sessions WHERE ws_id = ? AND session_key = ?", pp.wsId, key);
-    run("INSERT OR REPLACE INTO v2_deleted_sessions (ws_id, key_hash, deleted_at) VALUES (?, ?, ?)", pp.wsId, deletedKeyHash(s.user_id, key), nowIso());
-    run("DELETE FROM v2_directives WHERE ws_id = ? AND NOT EXISTS (SELECT 1 FROM v2_directive_targets t WHERE t.directive_id = v2_directives.id)", pp.wsId);
-    audit(pp.wsId, pp.userId, "session.history_deleted", p.kind === "device" ? p.deviceId : null, nowIso());
-  });
+export async function deleteSession(pp: PolicyPrincipal, p: Principal, key: string): Promise<void> {
+    return (0, sessionsService.deleteSession)(pp, p, key);
 }
-
 /** Stop or resume the session's agent (its local stop latch). The session owner or a workspace owner. */
-export async function setAgentStop(pp: PolicyPrincipal, key: string, stop: boolean) {
-  const s = sessionRow(pp.wsId, key);
-  if (!s) throw notFound();
-  need(pp, "session.stop", { kind: "session", ownerId: s.user_id });
-  // Never report a stop or resume as sent when nothing can deliver it.
-  if (s.ended_reason === "device_signed_out") {
-    throw conflict(
-      "device_signed_out",
-      // The machine offers `::align share` once it is signed in again, as the member_removed refusal says (E2E-AGENT
-      // cycle 14, section 5).
-      "The machine that shared this session signed out of Align, so its sharing ended and a stop or resume can't reach it. Once that machine is signed in again (align login), ::align share in the session shares it again, and then Stop and Resume here reach it; until then, a stopped session stays stopped.",
-    );
-  }
-  if (s.ended_reason === "member_removed") throw conflict("member_removed", memberRemovedRefusal(pp, s));
-  if (s.state === "stopped") throw conflict("sharing_stopped", sharingStoppedRefusal(pp, s));
-  const at = nowIso();
-  const id = await tx(() => {
-    run("UPDATE v2_sessions SET agent_stopped = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?", stop ? 1 : 0, at, pp.wsId, key);
-    audit(pp.wsId, pp.userId, stop ? "session.agent_stopped" : "session.agent_resumed", null, at);
-    return writeDirective(pp.wsId, stop ? "stop" : "resume", [key], null, null);
-  });
-  return { directive_id: id, agent_stopped: stop };
+export async function setAgentStop(pp: PolicyPrincipal, key: string, stop: boolean): Promise<{ directive_id: string | null; agent_stopped: boolean; }> {
+    return (0, sessionsService.setAgentStop)(pp, key, stop);
 }
-
-/** Why a stop or resume can't reach a session that ended when its person left the workspace, and what shares it again
- *  as things stand (E2E-AGENT cycle 12, section 6: never only "align stop-sharing", which gives the session up): while
- *  they are out, back in the workspace with its machine given the workspace again; once they are back, the Sessions
- *  tab's own words for where that machine stands (lib/v2/share-again.mts, E2E-WEB cycle 13 W1: a signed-out machine
- *  needs align login, never just "has this workspace again"), then Stop and Resume here reach it; and once their
- *  account is deleted, nothing (its devices are gone and nobody else can share it: E2E-WEB cycle 13 C13-1). Its
- *  person is "you" to the reader. */
-function memberRemovedRefusal(pp: PolicyPrincipal, s: SessionRow): string {
-  const you = s.user_id === pp.userId;
-  const user = get<{ name: string }>("SELECT name FROM ba_user WHERE id = ?", s.user_id);
-  const name = personName(s.user_id, user?.name);
-  const lead = `This session's sharing ended when ${you ? "you" : name} left this workspace, so a stop or resume can't reach it.`;
-  if (!user) return `${lead} Their account was deleted, so nothing can share it again.`;
-  const member = !!get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", pp.wsId, s.user_id);
-  if (!member) {
-    return `${lead} Once ${you ? "you are" : `${name} is`} back in the workspace and the machine that shared it has the workspace again, ::align share in that session shares it again, and then Stop and Resume here reach it.`;
-  }
-  return `${lead} ${shareAgainText(shareAgainWords(sharedFrom(pp.wsId, s.device_id), you ? null : name))} Then Stop and Resume here reach it.`;
-}
-
-/** Why a stop or resume can't reach a session that is stopped with no `ended_reason`: its person stopped sharing it (only
- *  they can), for good (E2E-WEB cycle 14 W3). Its person is "you" to the reader; once their account is deleted, nothing
- *  shares their work again. */
-function sharingStoppedRefusal(pp: PolicyPrincipal, s: SessionRow): string {
-  if (s.user_id === pp.userId) return sharingStoppedText(null);
-  const user = get<{ name: string }>("SELECT name FROM ba_user WHERE id = ?", s.user_id);
-  return sharingStoppedText(personName(s.user_id, user?.name), { deleted: !user });
-}
-
-/** The machine that shared one of the caller's own sessions, as the Sessions tab words how to share it again (W7): its
- *  name, whether it signed out of Align, and whether it has this workspace now (given back on Join or from the Devices
- *  page). Null when no device is left (its person's account was deleted). */
-function sharedFrom(wsId: string, deviceId: string | null) {
-  const d = deviceId ? get<{ id: string; name: string; revoked_at: string | null }>("SELECT id, name, revoked_at FROM v2_devices WHERE id = ?", deviceId) : undefined;
-  if (!d) return null;
-  const has = !d.revoked_at && !!get("SELECT 1 AS x FROM v2_device_grants WHERE device_id = ? AND ws_id = ?", d.id, wsId);
-  return { id: d.id, name: d.name, signed_out: !!d.revoked_at, has_workspace: has };
-}
-
 /** The sessions page: the caller's own shared sessions in full; for workspace owners, every shared session's
  *  alias, owner, start and state (for stop/resume), never its title or usage. */
-export function listSessions(pp: PolicyPrincipal) {
-  const goalLabel = (id: string | null) => {
-    if (!id) return null;
-    const g = goalRow(pp.wsId, id);
-    return g && canReadGoal(pp, goalObj(g)) ? { id: g.id, title: g.title, version: g.version } : { id: null, title: null, private: true };
-  };
-  const mine = all<SessionRow>("SELECT * FROM v2_sessions WHERE ws_id = ? AND user_id = ? ORDER BY started_at DESC", pp.wsId, pp.userId).map((s) => {
-    const e = openEpoch(pp.wsId, s.session_key);
-    const tokens = get<{ requests: number; input: number; output: number }>(
-      "SELECT COUNT(*) AS requests, COALESCE(SUM(input), 0) AS input, COALESCE(SUM(output), 0) AS output FROM v2_usage WHERE ws_id = ? AND session_key = ?",
-      pp.wsId,
-      s.session_key,
-    );
-    return {
-      session_key: s.session_key,
-      harness: s.harness,
-      repo_alias: s.repo_alias,
-      title: s.title,
-      started_at: s.started_at,
-      state: s.state,
-      stopped_at: s.stopped_at,
-      ended_reason: s.ended_reason,
-      device: sharedFrom(pp.wsId, s.device_id),
-      current_epoch: e ? { ...epochOut(e), goal: goalLabel(e.goal_id) } : null,
-      governing_goal: goalLabel(s.governing_goal_id),
-      agent_stopped: !!s.agent_stopped,
-      stop_status: stopStatus(pp.wsId, s.session_key),
-      conflicts: s.conflicts,
-      usage: tokens,
-    };
-  });
-  const everyone =
-    pp.wsRole === "owner"
-      ? all<SessionRow & { owner_name: string | null }>(
-          "SELECT s.*, u.name AS owner_name FROM v2_sessions s LEFT JOIN ba_user u ON u.id = s.user_id WHERE s.ws_id = ? AND s.state <> 'stopped' ORDER BY s.started_at DESC",
-          pp.wsId,
-        ).map((s) => ({
-          session_key: s.session_key,
-          owner: { id: s.user_id, name: personName(s.user_id, s.owner_name) },
-          repo_alias: s.repo_alias,
-          harness: s.harness,
-          // When it started: with the key's end, it tells one person's sessions in one repository apart (W3).
-          started_at: s.started_at,
-          state: s.state,
-          agent_stopped: !!s.agent_stopped,
-          stop_status: stopStatus(pp.wsId, s.session_key),
-        }))
-      : null;
-  return { mine, all: everyone };
+export function listSessions(pp: PolicyPrincipal): { mine: { session_key: string; harness: "claude-code" | "codex"; repo_alias: string | null; title: string | null; started_at: string; state: "shared" | "suspended" | "stopped"; stopped_at: string | null; ended_reason: EndedReason | null; device: { id: string; name: string; signed_out: boolean; has_workspace: boolean; } | null; current_epoch: { goal: { id: string; title: string; version: number; private?: undefined; } | { id: null; title: null; private: boolean; version?: undefined; } | null; epoch_id: string; goal_id: string | null; goal_version_at_start: number | null; starts_at: string; ends_at: string | null; } | null; governing_goal: { id: string; title: string; version: number; private?: undefined; } | { id: null; title: null; private: boolean; version?: undefined; } | null; agent_stopped: boolean; stop_status: { directive_id: string; kind: DirectiveKind; created_at: string; receipts: { state: ReceiptState; at: string; }[]; } | null; conflicts: number; usage: { requests: number; input: number; output: number; } | undefined; }[]; all: { session_key: string; owner: { id: string; name: string; }; repo_alias: string | null; harness: "claude-code" | "codex";
+// When it started: with the key's end, it tells one person's sessions in one repository apart (W3).
+started_at: string; state: "shared" | "suspended" | "stopped"; agent_stopped: boolean; stop_status: { directive_id: string; kind: DirectiveKind; created_at: string; receipts: { state: ReceiptState; at: string; }[]; } | null; }[] | null; } {
+    return (0, sessionsService.listSessions)(pp);
 }

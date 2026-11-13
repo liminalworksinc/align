@@ -1,0 +1,24 @@
+{
+  "name": "wording",
+  "version": "1.0.0",
+  "type": "commonjs",
+  "exports": {
+    "./plural": "./plural.js",
+    "./count": "./count.js",
+    "./hidden_goals": "./hidden_goals.js",
+    "./with_hidden": "./with_hidden.js",
+    "./depends_on_full": "./depends_on_full.js",
+    "./counter_no_change": "./counter_no_change.js",
+    "./counter_same_as_base": "./counter_same_as_base.js",
+    "./counter_same_as_request": "./counter_same_as_request.js",
+    "./launch_words": "./launch_words.js",
+    "./usd": "./usd.js",
+    "./wording_data": "./wording_data.js",
+    "./drop_controls": "./drop_controls.js",
+    "./drop_invisible": "./drop_invisible.js",
+    "./clean_prose": "./clean_prose.js",
+    "./is_blank_text": "./is_blank_text.js",
+    "./change_words": "./change_words.js",
+    "./diff_words": "./diff_words.js"
+  }
+}

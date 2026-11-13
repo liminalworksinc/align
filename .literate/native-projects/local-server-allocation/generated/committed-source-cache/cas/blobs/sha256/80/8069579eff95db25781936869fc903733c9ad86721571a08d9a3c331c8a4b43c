@@ -1,0 +1,1 @@
+{"name":"server_allocation","type":"commonjs","exports":{"./create_allocation":"./create_allocation.js"}}

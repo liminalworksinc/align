@@ -1,0 +1,35 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const output = path.resolve(process.argv[2] || 'run');
+const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
+function wrap(name, body) {
+  return 'const ' + name + ' = (() => { const module = { exports: {} };\n' +
+    body + '\nreturn module.exports; })();\n';
+}
+// The dependency graph is fixed and local. The resulting entrypoint needs no source files.
+const library = read('storage_schema/change_programs.js');
+const expected = read('tests/expected_programs.js');
+const tests = read('tests/litai_test.js')
+  .replace(/const \{ change_programs \} = [^\n]+;/, 'const { change_programs } = __library;')
+  .replace(/const expected = [^\n]+;/, 'const expected = __expected;');
+const main = read('main.js')
+  .replace(/const \{ change_programs \} = [^\n]+;/, 'const { change_programs } = __library;')
+  .replace(/const \{ runTests \} = [^\n]+;/, 'const { runTests } = __tests;')
+  .replace('if (require.main === module) cli();', '');
+const bundled = '#!/usr/bin/env node\n\'use strict\';\n' +
+  wrap('__library', library) + wrap('__expected', expected) +
+  wrap('__tests', tests) + wrap('__entry', main) + '__entry.cli();\n';
+fs.mkdirSync(path.dirname(output), { recursive: true });
+fs.writeFileSync(output, bundled, { mode: 0o755 });
+fs.chmodSync(output, 0o755);
+// Retain the exact import surface alongside the framework test entrypoint.
+const packageDirectory = path.join(path.dirname(output), 'storage_schema');
+if (packageDirectory !== path.join(root, 'storage_schema')) {
+  fs.mkdirSync(packageDirectory, { recursive: true });
+  for (const name of ['package.json', 'change_programs.js']) {
+    fs.copyFileSync(path.join(root, 'storage_schema', name), path.join(packageDirectory, name));
+  }
+}
+

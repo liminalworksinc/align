@@ -99,8 +99,10 @@ volume (`fly volumes destroy`).
 
 ## Operator script
 
-`scripts/align-admin.mjs` (the v2 replacement for v1's `ws-admin`) is in the image with its three imports,
-`lib/v2/core.mts`, `lib/v2/retention-core.mts` and `lib/v2/metrics-core.mts`. It works on the volume beside the running server and reads the
+`scripts/align-admin.mjs` (the v2 replacement for v1's `ws-admin`) is in the image with its three core modules,
+the shared settings binding and its two pinned native packages. The image checks their exact bytes during
+the build. In a source checkout the same command prepares a temporary runtime using Node alone, without
+writing to the checkout or requiring an npm install. It works on the volume beside the running server and reads the
 server's settings (`ALIGN_SECRET` for codes, `ALIGN_SESSION_MAX_DAYS` for the retention job) from its environment, so
 run it on the machine, where `fly ssh console` has that environment:
 
@@ -139,6 +141,7 @@ counts, durations and workspace ids only. LOIs count only when the operator reco
 fly apps create align-pg-draft
 fly volumes create align_data --size 1 --region sjc
 fly secrets set ALIGN_SECRET=$(openssl rand -hex 32) BETTER_AUTH_SECRET=$(openssl rand -hex 32) ALIGN_EMAIL_API_KEY=...
+npm run prepare:container # verify and stage the exact native library inputs locally
 fly deploy --ha=false     # one machine: in-memory limits, and the volume attaches to one machine
 fly scale count 1
 ```
@@ -194,3 +197,12 @@ https in the browser. There is no fuller CSP yet.
 `node scripts/test-v2.mjs <port>` builds once and runs every phase on `next start`, the way Fly runs it. Its hosted
 phase sends `Host: align.test`, `X-Forwarded-Proto: https` and `Fly-Client-IP`, the way Fly's edge forwards
 requests. `node scripts/test-oauth.mjs <port>` does the same for connected AI apps.
+
+### Native migration image checks
+
+For the draft native migration, run `node scripts/build-container.mjs align-local`.
+The wrapper runs independent acceptance in the host's contained workers, verifies
+the prepared bundle, and passes its SHA-256 into the local Docker build. A bare
+Docker build requires the matching `ALIGN_NATIVE_PREPARED_SHA256` build argument.
+The build verifies exact accepted package bytes without access to a Docker socket.
+This local image workflow makes no hosted deployment or account change.

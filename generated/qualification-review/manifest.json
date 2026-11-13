@@ -1,0 +1,887 @@
+{
+  "schema": "align/readable-qualification-source@1",
+  "review_only": true,
+  "javascript_evaluated": false,
+  "accepted_profiles_modified": false,
+  "profiles": [
+    {
+      "component": "server-auth",
+      "profile": ".literate/native-projects/local-server-auth/components/server-auth/qualification/profile.json",
+      "profile_sha256": "ae2426a5340c0a57dea9efcb9aded11e73a1a5e479e8d809e287f736667dea3f",
+      "commands": [
+        {
+          "field": "source_command",
+          "argv": [
+            "node",
+            "--no-warnings",
+            "--experimental-vm-modules",
+            "--max-old-space-size=384",
+            "-e",
+            "<readable exported code>",
+            "--"
+          ],
+          "original_code_sha256": "596157d7468716be2b922fc3868f7d625f0e87348c64e6a371bf2105967a7479",
+          "layers": [
+            {
+              "encoded_code_sha256": "596157d7468716be2b922fc3868f7d625f0e87348c64e6a371bf2105967a7479",
+              "decompressed_sha256": "d053d502a8d67d727898223638f9f02bda2c8187eabebea8ccc5485d12db6a06"
+            },
+            {
+              "encoded_code_sha256": "d053d502a8d67d727898223638f9f02bda2c8187eabebea8ccc5485d12db6a06",
+              "decompressed_sha256": "f7403a979065e698b1ad2d33a4f4c2af56cc5aa0670037572908343e23f3e0e4"
+            }
+          ],
+          "fully_decoded_sha256": "54dadc2bd80408a5eca2cf10ab86917dfd3fcf2539c9a8bdc46d7614c5eec067",
+          "literals": [
+            {
+              "name": "BODIES",
+              "start_character": 249,
+              "length_characters": 65243,
+              "original_literal_sha256": "10df5d98849f235087886b3d30e6d0c89dae095e610de5667a45851366191826",
+              "files": [
+                {
+                  "path": "server-auth/BODIES/server-auth-binding-cases-v4.mjs",
+                  "sha256": "bfb8021226b3c2465674aa6156cf11d4a98d647878c6ce506a5c4e98664a13a0",
+                  "bytes": 9635
+                },
+                {
+                  "path": "server-auth/BODIES/server-auth-binding-v2.mjs",
+                  "sha256": "7c015f2e1438445c79bca8415ff08b55fe976ceb465f76fd630c8df252cd0404",
+                  "bytes": 3299
+                },
+                {
+                  "path": "server-auth/BODIES/server-auth-extra-cases-v2.mjs",
+                  "sha256": "21aeadc279f1bf33c08c6c350e1e8a425614a2c9ff810824b28cb4a9584d6137",
+                  "bytes": 6794
+                },
+                {
+                  "path": "server-auth/BODIES/server-auth-fixture-v1.mjs",
+                  "sha256": "a6aa65f9e8296eb5f452e4b29fa206ca8ce71b767c2aaf6293955f71cc5c083a",
+                  "bytes": 7767
+                },
+                {
+                  "path": "server-auth/BODIES/server-auth-precision-cases-v1.mjs",
+                  "sha256": "5393406ddb95db3bb83055b4275a8b617a6f69dca1bce85bfe81bacd5a2f94c5",
+                  "bytes": 8815
+                },
+                {
+                  "path": "server-auth/BODIES/server-auth-scenarios-v4.mjs",
+                  "sha256": "94ed51063f33b291baf517b8be2595a9ad64cf1627ad4947a2e9195dd77fcd81",
+                  "bytes": 19272
+                },
+                {
+                  "path": "server-auth/BODIES/loader",
+                  "sha256": "2bdf3fdbbd50b62bc04e4c1daaf07c58d939e77868c06c56ed2e08da2364c285",
+                  "bytes": 8454
+                }
+              ]
+            },
+            {
+              "name": "PLANS",
+              "start_character": 66203,
+              "length_characters": 164537,
+              "original_literal_sha256": "57c4e48d8c329584d2d26b5625942fe8532e1250b44bb9169201369902bc9a84",
+              "files": [
+                {
+                  "path": "server-auth/cases.index.json",
+                  "sha256": "bf271e442eff73dd3b7ee9492b486e0fe5bb5a4119457e233a823218044e9c9b",
+                  "bytes": 18541
+                }
+              ]
+            },
+            {
+              "name": "privateFiles",
+              "start_character": 234026,
+              "length_characters": 28454,
+              "original_literal_sha256": "648a50b52b5f5562ccaa1da5532bb4e25653eceb01d83d57df1ecbfaca50636e",
+              "files": [
+                {
+                  "path": "server-auth/privateFiles/package.json",
+                  "sha256": "8005a3491db7d92f36ac66369861589f9c47123d3a7c71e643fc2c06168cd45a",
+                  "bytes": 25
+                },
+                {
+                  "path": "server-auth/privateFiles/server_auth/create_auth.js",
+                  "sha256": "7ceab82731c498e9be7fdf254d512f9a5b6ee6a89139d0c6ca9d6c32051e56ea",
+                  "bytes": 48
+                },
+                {
+                  "path": "server-auth/privateFiles/server_auth/implementation.cjs",
+                  "sha256": "07d3fa7c9711555f17611de82e302324027ad7feaf7232dc076493b258feebc6",
+                  "bytes": 27400
+                },
+                {
+                  "path": "server-auth/privateFiles/server_auth/package.json",
+                  "sha256": "b064e4c71fe5eb79d1133ad334ab3d11cfbe9477c36cdf7ba74fcbed7a6a1925",
+                  "bytes": 110
+                }
+              ]
+            }
+          ],
+          "readable_code": {
+            "path": "server-auth/source_command.review.js",
+            "sha256": "08fa3211bc7f3eed6345e8ebceb929a106a461aaedb9b38721b07515cdfcb153",
+            "bytes": 5288
+          },
+          "all_executable_segments_preserved": true
+        },
+        {
+          "field": "generated_command",
+          "argv": [
+            "node",
+            "--no-warnings",
+            "--experimental-vm-modules",
+            "--max-old-space-size=384",
+            "-e",
+            "<readable exported code>",
+            "--"
+          ],
+          "original_code_sha256": "bf7e135ab9252b9035ac823e634c4a424b11867137a20d5063016342e70b06fa",
+          "layers": [
+            {
+              "encoded_code_sha256": "bf7e135ab9252b9035ac823e634c4a424b11867137a20d5063016342e70b06fa",
+              "decompressed_sha256": "50b003e94ec1559aabc03ec4a682bdeaf0929a456265244d5d9036f4cba81121"
+            },
+            {
+              "encoded_code_sha256": "50b003e94ec1559aabc03ec4a682bdeaf0929a456265244d5d9036f4cba81121",
+              "decompressed_sha256": "f7403a979065e698b1ad2d33a4f4c2af56cc5aa0670037572908343e23f3e0e4"
+            }
+          ],
+          "fully_decoded_sha256": "f2c2b67debedf58e4a50d1ba3a5e9b7afc824ceabd5238635bb6fc5ce78e5e39",
+          "literals": [
+            {
+              "name": "BODIES",
+              "start_character": 249,
+              "length_characters": 65243,
+              "original_literal_sha256": "10df5d98849f235087886b3d30e6d0c89dae095e610de5667a45851366191826",
+              "files": [
+                {
+                  "path": "server-auth/BODIES/server-auth-binding-cases-v4.mjs",
+                  "sha256": "bfb8021226b3c2465674aa6156cf11d4a98d647878c6ce506a5c4e98664a13a0",
+                  "bytes": 9635
+                },
+                {
+                  "path": "server-auth/BODIES/server-auth-binding-v2.mjs",
+                  "sha256": "7c015f2e1438445c79bca8415ff08b55fe976ceb465f76fd630c8df252cd0404",
+                  "bytes": 3299
+                },
+                {
+                  "path": "server-auth/BODIES/server-auth-extra-cases-v2.mjs",
+                  "sha256": "21aeadc279f1bf33c08c6c350e1e8a425614a2c9ff810824b28cb4a9584d6137",
+                  "bytes": 6794
+                },
+                {
+                  "path": "server-auth/BODIES/server-auth-fixture-v1.mjs",
+                  "sha256": "a6aa65f9e8296eb5f452e4b29fa206ca8ce71b767c2aaf6293955f71cc5c083a",
+                  "bytes": 7767
+                },
+                {
+                  "path": "server-auth/BODIES/server-auth-precision-cases-v1.mjs",
+                  "sha256": "5393406ddb95db3bb83055b4275a8b617a6f69dca1bce85bfe81bacd5a2f94c5",
+                  "bytes": 8815
+                },
+                {
+                  "path": "server-auth/BODIES/server-auth-scenarios-v4.mjs",
+                  "sha256": "94ed51063f33b291baf517b8be2595a9ad64cf1627ad4947a2e9195dd77fcd81",
+                  "bytes": 19272
+                },
+                {
+                  "path": "server-auth/BODIES/loader",
+                  "sha256": "2bdf3fdbbd50b62bc04e4c1daaf07c58d939e77868c06c56ed2e08da2364c285",
+                  "bytes": 8454
+                }
+              ]
+            },
+            {
+              "name": "PLANS",
+              "start_character": 66203,
+              "length_characters": 164537,
+              "original_literal_sha256": "57c4e48d8c329584d2d26b5625942fe8532e1250b44bb9169201369902bc9a84",
+              "files": [
+                {
+                  "path": "server-auth/cases.index.json",
+                  "sha256": "bf271e442eff73dd3b7ee9492b486e0fe5bb5a4119457e233a823218044e9c9b",
+                  "bytes": 18541
+                }
+              ]
+            }
+          ],
+          "readable_code": {
+            "path": "server-auth/generated_command.review.js",
+            "sha256": "d04ce4f330d82aa1d827409044507a99f69ea87beb4873653e0e6f3986c47ad7",
+            "bytes": 4797
+          },
+          "all_executable_segments_preserved": true
+        },
+        {
+          "field": "build_command",
+          "argv": [
+            "node",
+            "--no-warnings",
+            "--experimental-vm-modules",
+            "--max-old-space-size=384",
+            "-e",
+            "<readable exported code>",
+            "--"
+          ],
+          "original_code_sha256": "7a0d27e8d6aab81d8ca0d463a66025ddfdd37f6433e78ed8fbb00f547337662a",
+          "layers": [
+            {
+              "encoded_code_sha256": "7a0d27e8d6aab81d8ca0d463a66025ddfdd37f6433e78ed8fbb00f547337662a",
+              "decompressed_sha256": "a6445d50853c8a0b9ff01661c4b9b13968ee44f0c67a87791353b3853513d686"
+            }
+          ],
+          "fully_decoded_sha256": "a6445d50853c8a0b9ff01661c4b9b13968ee44f0c67a87791353b3853513d686",
+          "literals": [],
+          "readable_code": {
+            "path": "server-auth/build_command.review.js",
+            "sha256": "0d75147841b17ad4279dd738d42d1ebe920b50a6b85769030bea3cab86b02109",
+            "bytes": 2097
+          },
+          "all_executable_segments_preserved": true
+        }
+      ]
+    },
+    {
+      "component": "server-sample",
+      "profile": ".literate/native-projects/local-server-sample/components/server-sample/qualification/profile.json",
+      "profile_sha256": "ad523d59e5b03851089c068a9975bd08f2221867a0c6a80c6868556b46d8512d",
+      "commands": [
+        {
+          "field": "source_command",
+          "argv": [
+            "node",
+            "--no-warnings",
+            "--experimental-vm-modules",
+            "--max-old-space-size=384",
+            "-e",
+            "<readable exported code>",
+            "--"
+          ],
+          "original_code_sha256": "90b6952107d9e636e7d72e9d39a1a3e76e22ecbd10b25d0cf2c8a2a0d040bcad",
+          "layers": [
+            {
+              "encoded_code_sha256": "90b6952107d9e636e7d72e9d39a1a3e76e22ecbd10b25d0cf2c8a2a0d040bcad",
+              "decompressed_sha256": "dbc4550b9f30de8aa89ccc18ba8eeda2fd3f030f26587acadeb0b605c0e27d9d"
+            },
+            {
+              "encoded_code_sha256": "20c009cc882a1a8bc4c570e01748175e4c9e5d119d1db883d5f0c8c8cdd14d9d",
+              "decompressed_sha256": "50e14e6eb885c84f0cc713f55b1350a159588bf21bbfd15d896d3624194ed50d"
+            }
+          ],
+          "fully_decoded_sha256": "85f0e5a5369f5deedca615a85ce3ff73b9012fe65e57f45c4a731a748fb2ba6d",
+          "literals": [
+            {
+              "name": "BODIES",
+              "start_character": 268,
+              "length_characters": 151932,
+              "original_literal_sha256": "56d2833b640fa24b4b703656eadcf995a4bda9df098ea2abb4cc7fc2234ec46f",
+              "files": [
+                {
+                  "path": "server-sample/BODIES/server-workspaces-binding-cases-v1.mjs",
+                  "sha256": "4db3d3e88677ef85ee4c89185ef520447a543bd39ca593e07f5ab3aa2801f443",
+                  "bytes": 4748
+                },
+                {
+                  "path": "server-sample/BODIES/server-workspaces-owned-fixture-v2.mjs",
+                  "sha256": "934d6160721ff8da6898e3fac812e56dfc583f480241d8e8ff27f2dc1e42835c",
+                  "bytes": 8793
+                },
+                {
+                  "path": "server-sample/BODIES/server-workspaces-sample-fixture-v2.mjs",
+                  "sha256": "b587da3640b64fb1688fefe502933e8501889328482adb73003738a6815a35e9",
+                  "bytes": 9074
+                },
+                {
+                  "path": "server-sample/BODIES/server-workspaces-sample-populated-fixture-v1.mjs",
+                  "sha256": "92481a5427f5cea5e6e80533cd4e13dd32a10d755ad0e8ceb111f9ad5d8ae8f1",
+                  "bytes": 10851
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/migration_coordinator/apply_migrations.js",
+                  "sha256": "a9da1b2aefc8cf6b7071326f77d41afad6072ef01de83f5f235131e6a7620862",
+                  "bytes": 734
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/policy/authorize.js",
+                  "sha256": "41275c73065bd053fb25b9612436c45825f539c38b894b1b0a5f2e0ed02faf3e",
+                  "bytes": 3894
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/policy/can_read_goal.js",
+                  "sha256": "341e1b5c4c5146881e4a75ce9717bafe25fbd49b7583fedcf1a8f0768f827399",
+                  "bytes": 514
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/policy/data.js",
+                  "sha256": "535e999f5fe2c8ed6053b1ac1e27fc045022a62f57f6e205970d3d4a40c123f0",
+                  "bytes": 904
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/server_workspace_admission/create_creation.js",
+                  "sha256": "07d9e4025f8099d57fc119b163048aa5eb62bfa74b21fac5f8296c5fcf51b748",
+                  "bytes": 3944
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/server_workspaces/create_workspaces.js",
+                  "sha256": "13d2d1d6bd811d363f52b965807c064f83b08db9c7e6007f6eba8341def54f4d",
+                  "bytes": 17631
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/storage_runtime/create_store.js",
+                  "sha256": "4c01f5ba0180a723858af385e3cde218a140e05b1c0b43c8d77271b8bd8fda47",
+                  "bytes": 4644
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/storage_schema/change_programs.js",
+                  "sha256": "b6108a502097f942307dd7ba023c173e25a8302511bfa5e316a660345fa90043",
+                  "bytes": 64566
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/wording/count.js",
+                  "sha256": "0d71b7a5ac7d9ae4e7d27283dff53b802cfc2a5a9cb7b52d78f789554ded26a7",
+                  "bytes": 162
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/wording/plural.js",
+                  "sha256": "d263327901ef7f54011023f3245f2b050eb2394bd8e48216574584c07cce75f2",
+                  "bytes": 99
+                },
+                {
+                  "path": "server-sample/BODIES/loader",
+                  "sha256": "890784e4e75d046c7f8794832b8828d7f0451c1d3b7058ca55d054ab1e48b09d",
+                  "bytes": 9166
+                }
+              ]
+            },
+            {
+              "name": "PLANS",
+              "start_character": 153508,
+              "length_characters": 95531,
+              "original_literal_sha256": "c90bd512c45d1408ee77d7d9d2909d7995a988aaae4988f0845452b20bb71c43",
+              "files": [
+                {
+                  "path": "server-sample/cases.index.json",
+                  "sha256": "b7f14af073c475e4574a82e3e836756c4d50a1e65b30e9fbd5e41f29fe8a13b3",
+                  "bytes": 1063
+                }
+              ]
+            },
+            {
+              "name": "privateFiles",
+              "start_character": 252643,
+              "length_characters": 6902,
+              "original_literal_sha256": "fd19a770467a0d7a7f2ce5f6eb6a1afb4e8e9fa6f400705aeb3d383e4ef89ff7",
+              "files": [
+                {
+                  "path": "server-sample/privateFiles/server_sample/create_sample.js",
+                  "sha256": "669823476540aede1097e1860fd25ba6134eedbb1b843bca945f81919d67bec8",
+                  "bytes": 4967
+                },
+                {
+                  "path": "server-sample/privateFiles/server_sample/package.json",
+                  "sha256": "318e4c94e0abe2805c49d716922e613f0bcce98a2bbe0cf41979076552631bb4",
+                  "bytes": 94
+                },
+                {
+                  "path": "server-sample/privateFiles/server_sample/sample-text.json",
+                  "sha256": "c502a40c1af1342250b646e8bbba9e0bb97e77b49c6b045db156b201be3008f3",
+                  "bytes": 1444
+                }
+              ]
+            }
+          ],
+          "readable_code": {
+            "path": "server-sample/source_command.review.js",
+            "sha256": "4781d27bf05f1ce337ef37e5831f2f58d13b1117adf9e313e415a29947aaa725",
+            "bytes": 5977
+          },
+          "all_executable_segments_preserved": true
+        },
+        {
+          "field": "generated_command",
+          "argv": [
+            "node",
+            "--no-warnings",
+            "--experimental-vm-modules",
+            "--max-old-space-size=384",
+            "-e",
+            "<readable exported code>",
+            "--"
+          ],
+          "original_code_sha256": "643de1924f5c2ef67ba73215b5840f8845eebfdc79c0777450bc532bc44a9f4c",
+          "layers": [
+            {
+              "encoded_code_sha256": "643de1924f5c2ef67ba73215b5840f8845eebfdc79c0777450bc532bc44a9f4c",
+              "decompressed_sha256": "ddbf60dc0ee5efc569b228df9dd38df580483cc978e2d59937af6da63afeaa30"
+            },
+            {
+              "encoded_code_sha256": "8c770071d4a404abbb0de077b6659b7f9c05a900fd1de0644d100db5e6db7660",
+              "decompressed_sha256": "50e14e6eb885c84f0cc713f55b1350a159588bf21bbfd15d896d3624194ed50d"
+            }
+          ],
+          "fully_decoded_sha256": "e4d19bec634c454b927f5112db80665fee674acf3bad6c95f50cfce6481f25d4",
+          "literals": [
+            {
+              "name": "BODIES",
+              "start_character": 268,
+              "length_characters": 151932,
+              "original_literal_sha256": "56d2833b640fa24b4b703656eadcf995a4bda9df098ea2abb4cc7fc2234ec46f",
+              "files": [
+                {
+                  "path": "server-sample/BODIES/server-workspaces-binding-cases-v1.mjs",
+                  "sha256": "4db3d3e88677ef85ee4c89185ef520447a543bd39ca593e07f5ab3aa2801f443",
+                  "bytes": 4748
+                },
+                {
+                  "path": "server-sample/BODIES/server-workspaces-owned-fixture-v2.mjs",
+                  "sha256": "934d6160721ff8da6898e3fac812e56dfc583f480241d8e8ff27f2dc1e42835c",
+                  "bytes": 8793
+                },
+                {
+                  "path": "server-sample/BODIES/server-workspaces-sample-fixture-v2.mjs",
+                  "sha256": "b587da3640b64fb1688fefe502933e8501889328482adb73003738a6815a35e9",
+                  "bytes": 9074
+                },
+                {
+                  "path": "server-sample/BODIES/server-workspaces-sample-populated-fixture-v1.mjs",
+                  "sha256": "92481a5427f5cea5e6e80533cd4e13dd32a10d755ad0e8ceb111f9ad5d8ae8f1",
+                  "bytes": 10851
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/migration_coordinator/apply_migrations.js",
+                  "sha256": "a9da1b2aefc8cf6b7071326f77d41afad6072ef01de83f5f235131e6a7620862",
+                  "bytes": 734
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/policy/authorize.js",
+                  "sha256": "41275c73065bd053fb25b9612436c45825f539c38b894b1b0a5f2e0ed02faf3e",
+                  "bytes": 3894
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/policy/can_read_goal.js",
+                  "sha256": "341e1b5c4c5146881e4a75ce9717bafe25fbd49b7583fedcf1a8f0768f827399",
+                  "bytes": 514
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/policy/data.js",
+                  "sha256": "535e999f5fe2c8ed6053b1ac1e27fc045022a62f57f6e205970d3d4a40c123f0",
+                  "bytes": 904
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/server_workspace_admission/create_creation.js",
+                  "sha256": "07d9e4025f8099d57fc119b163048aa5eb62bfa74b21fac5f8296c5fcf51b748",
+                  "bytes": 3944
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/server_workspaces/create_workspaces.js",
+                  "sha256": "13d2d1d6bd811d363f52b965807c064f83b08db9c7e6007f6eba8341def54f4d",
+                  "bytes": 17631
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/storage_runtime/create_store.js",
+                  "sha256": "4c01f5ba0180a723858af385e3cde218a140e05b1c0b43c8d77271b8bd8fda47",
+                  "bytes": 4644
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/storage_schema/change_programs.js",
+                  "sha256": "b6108a502097f942307dd7ba023c173e25a8302511bfa5e316a660345fa90043",
+                  "bytes": 64566
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/wording/count.js",
+                  "sha256": "0d71b7a5ac7d9ae4e7d27283dff53b802cfc2a5a9cb7b52d78f789554ded26a7",
+                  "bytes": 162
+                },
+                {
+                  "path": "server-sample/BODIES/dependency/wording/plural.js",
+                  "sha256": "d263327901ef7f54011023f3245f2b050eb2394bd8e48216574584c07cce75f2",
+                  "bytes": 99
+                },
+                {
+                  "path": "server-sample/BODIES/loader",
+                  "sha256": "890784e4e75d046c7f8794832b8828d7f0451c1d3b7058ca55d054ab1e48b09d",
+                  "bytes": 9166
+                }
+              ]
+            },
+            {
+              "name": "PLANS",
+              "start_character": 153508,
+              "length_characters": 95531,
+              "original_literal_sha256": "c90bd512c45d1408ee77d7d9d2909d7995a988aaae4988f0845452b20bb71c43",
+              "files": [
+                {
+                  "path": "server-sample/cases.index.json",
+                  "sha256": "b7f14af073c475e4574a82e3e836756c4d50a1e65b30e9fbd5e41f29fe8a13b3",
+                  "bytes": 1063
+                }
+              ]
+            }
+          ],
+          "readable_code": {
+            "path": "server-sample/generated_command.review.js",
+            "sha256": "7d6c01cbbf839619f0359f027cb440e7f0e2be2dccc51d9b338845489bef597b",
+            "bytes": 5622
+          },
+          "all_executable_segments_preserved": true
+        },
+        {
+          "field": "build_command",
+          "argv": [
+            "node",
+            "--no-warnings",
+            "--experimental-vm-modules",
+            "--max-old-space-size=384",
+            "-e",
+            "<readable exported code>",
+            "--"
+          ],
+          "original_code_sha256": "0e48e095471d28be5082b879208cb1d8dbf2ce4d955deb50e5574f5f779f5545",
+          "layers": [
+            {
+              "encoded_code_sha256": "0e48e095471d28be5082b879208cb1d8dbf2ce4d955deb50e5574f5f779f5545",
+              "decompressed_sha256": "7f2a5853f50b5fbcc9d09a73d86675c832aea567bb16fe77dfbd0beaae0b8e5e"
+            }
+          ],
+          "fully_decoded_sha256": "a54b4ffcf76d1a206c91d6cfdeb2d412b441dc0bb18bd6dcb0e7f8d83d8a3e23",
+          "literals": [],
+          "readable_code": {
+            "path": "server-sample/build_command.review.js",
+            "sha256": "25767652353f8a31217185f6552ff0f1bc0c2428918cac4aacd5f11df8b9c118",
+            "bytes": 1902
+          },
+          "all_executable_segments_preserved": true
+        }
+      ]
+    },
+    {
+      "component": "server-workspaces",
+      "profile": ".literate/native-projects/local-server-workspaces/components/server-workspaces/qualification/profile.json",
+      "profile_sha256": "7a30e419a203be9589179ed8061e0e49110588f25945ed8604aa8cd87fe33243",
+      "commands": [
+        {
+          "field": "source_command",
+          "argv": [
+            "node",
+            "--no-warnings",
+            "--experimental-vm-modules",
+            "--max-old-space-size=384",
+            "-e",
+            "<readable exported code>",
+            "--"
+          ],
+          "original_code_sha256": "6eaeece4b472af004665613682020f5ac622995ef195f1eb41d48633b2f0dfd3",
+          "layers": [
+            {
+              "encoded_code_sha256": "6eaeece4b472af004665613682020f5ac622995ef195f1eb41d48633b2f0dfd3",
+              "decompressed_sha256": "3ff3b18a3adc4352c727c8bba70b5d0fee39a32085d013d2f33d504122656925"
+            },
+            {
+              "encoded_code_sha256": "edfd2d437ba71915c50bb45ca245f83e76f0a8ca4c4c7960eef7649062a760a0",
+              "decompressed_sha256": "e7d93a7d2b7c8eae29ac3c5aa50e23df8a55b870b44a5761c9aaab78a7d80f8a"
+            }
+          ],
+          "fully_decoded_sha256": "2760e192fa5b7144d46906f9dbcaf905df9890a39ffe2a20f4705eeb869e45aa",
+          "literals": [
+            {
+              "name": "BODIES",
+              "start_character": 274,
+              "length_characters": 152109,
+              "original_literal_sha256": "dc3f404e324e4216857616c492b71223b37ef6a7dd2226088d62008d7120e72a",
+              "files": [
+                {
+                  "path": "server-workspaces/BODIES/server-workspaces-binding-cases-v1.mjs",
+                  "sha256": "4db3d3e88677ef85ee4c89185ef520447a543bd39ca593e07f5ab3aa2801f443",
+                  "bytes": 4748
+                },
+                {
+                  "path": "server-workspaces/BODIES/server-workspaces-case-table-v1.mjs",
+                  "sha256": "a52e9ff36a657d9256069c8c1f3e56ae28b24614f5504963dba4949e85afbace",
+                  "bytes": 9565
+                },
+                {
+                  "path": "server-workspaces/BODIES/server-workspaces-contention-fixture-v5.mjs",
+                  "sha256": "c76be3150e69293d410b890f1b5e01a954442fef90c4e9ea479dc4d58a672c4b",
+                  "bytes": 6785
+                },
+                {
+                  "path": "server-workspaces/BODIES/server-workspaces-extra-cases-v1.mjs",
+                  "sha256": "437a15d664d3009067371455f007614208def73c11731be09fc1291ba7f0b52d",
+                  "bytes": 2881
+                },
+                {
+                  "path": "server-workspaces/BODIES/server-workspaces-owned-fixture-v2.mjs",
+                  "sha256": "934d6160721ff8da6898e3fac812e56dfc583f480241d8e8ff27f2dc1e42835c",
+                  "bytes": 8793
+                },
+                {
+                  "path": "server-workspaces/BODIES/server-workspaces-populated-fixture-v2.mjs",
+                  "sha256": "310a37a17eacbb5ee571d0ba0df10465e43521b07265daf5fa81455d0ff856c0",
+                  "bytes": 10238
+                },
+                {
+                  "path": "server-workspaces/BODIES/server-workspaces-precision-cases-v2.mjs",
+                  "sha256": "1410fb33123ed4a23952ccf71ba89bfab5ff04a857b961b821922cb1bb914c18",
+                  "bytes": 8396
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/migration_coordinator/apply_migrations.js",
+                  "sha256": "a9da1b2aefc8cf6b7071326f77d41afad6072ef01de83f5f235131e6a7620862",
+                  "bytes": 734
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/policy/authorize.js",
+                  "sha256": "41275c73065bd053fb25b9612436c45825f539c38b894b1b0a5f2e0ed02faf3e",
+                  "bytes": 3894
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/policy/can_read_goal.js",
+                  "sha256": "341e1b5c4c5146881e4a75ce9717bafe25fbd49b7583fedcf1a8f0768f827399",
+                  "bytes": 514
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/policy/data.js",
+                  "sha256": "535e999f5fe2c8ed6053b1ac1e27fc045022a62f57f6e205970d3d4a40c123f0",
+                  "bytes": 904
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/server_workspace_admission/create_creation.js",
+                  "sha256": "07d9e4025f8099d57fc119b163048aa5eb62bfa74b21fac5f8296c5fcf51b748",
+                  "bytes": 3944
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/storage_runtime/create_store.js",
+                  "sha256": "4c01f5ba0180a723858af385e3cde218a140e05b1c0b43c8d77271b8bd8fda47",
+                  "bytes": 4644
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/storage_schema/change_programs.js",
+                  "sha256": "b6108a502097f942307dd7ba023c173e25a8302511bfa5e316a660345fa90043",
+                  "bytes": 64566
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/wording/count.js",
+                  "sha256": "0d71b7a5ac7d9ae4e7d27283dff53b802cfc2a5a9cb7b52d78f789554ded26a7",
+                  "bytes": 162
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/wording/plural.js",
+                  "sha256": "d263327901ef7f54011023f3245f2b050eb2394bd8e48216574584c07cce75f2",
+                  "bytes": 99
+                },
+                {
+                  "path": "server-workspaces/BODIES/loader",
+                  "sha256": "890784e4e75d046c7f8794832b8828d7f0451c1d3b7058ca55d054ab1e48b09d",
+                  "bytes": 9166
+                }
+              ]
+            },
+            {
+              "name": "PLANS",
+              "start_character": 153578,
+              "length_characters": 838349,
+              "original_literal_sha256": "8524f59b5e42cfd4915fc07330f7e3e102c08f975b02bac01ac17dbbac0c3b1f",
+              "files": [
+                {
+                  "path": "server-workspaces/cases.index.json",
+                  "sha256": "3f35616beb76f86b9c69cc022a7e62aed0b5c49f9d42da588bacd274f0944db8",
+                  "bytes": 10893
+                }
+              ]
+            },
+            {
+              "name": "privateFiles",
+              "start_character": 995772,
+              "length_characters": 24472,
+              "original_literal_sha256": "24c893d6868b9dc2990dcd8bdb44b2d0baf3e8b98cf27976f310cdbc1717596e",
+              "files": [
+                {
+                  "path": "server-workspaces/privateFiles/server_workspaces/create_workspaces.js",
+                  "sha256": "5a1e1d0970f816b03459f6223197bcac1495c4e58f18a83151090eda1eafe6a7",
+                  "bytes": 23601
+                },
+                {
+                  "path": "server-workspaces/privateFiles/server_workspaces/package.json",
+                  "sha256": "5a73130958b0962c0265f5fb837a3b9c94b86127f157828d4711c1770475d5ec",
+                  "bytes": 106
+                }
+              ]
+            }
+          ],
+          "readable_code": {
+            "path": "server-workspaces/source_command.review.js",
+            "sha256": "c77989084d395f39861def848d5ff3118423f33d25169c6b9aa0ae8eae090756",
+            "bytes": 6116
+          },
+          "all_executable_segments_preserved": true
+        },
+        {
+          "field": "generated_command",
+          "argv": [
+            "node",
+            "--no-warnings",
+            "--experimental-vm-modules",
+            "--max-old-space-size=384",
+            "-e",
+            "<readable exported code>",
+            "--"
+          ],
+          "original_code_sha256": "d7923cb57ce1d6cc80741dc7a13d1b8d36a9dc8eb1dc5e36242a1241ef32c808",
+          "layers": [
+            {
+              "encoded_code_sha256": "d7923cb57ce1d6cc80741dc7a13d1b8d36a9dc8eb1dc5e36242a1241ef32c808",
+              "decompressed_sha256": "e8612256a4025d832ba7401af89e0d6eb6e3d7d0e88599375d41db8156ddd28d"
+            },
+            {
+              "encoded_code_sha256": "be76e49daec7223323e06bd160ae65ca7f139b0e72eb6e7936de5d206ee50851",
+              "decompressed_sha256": "e7d93a7d2b7c8eae29ac3c5aa50e23df8a55b870b44a5761c9aaab78a7d80f8a"
+            }
+          ],
+          "fully_decoded_sha256": "645249c1bbe83963d3044199264bf8be865bd699205c536c6cd7334fae1608a5",
+          "literals": [
+            {
+              "name": "BODIES",
+              "start_character": 274,
+              "length_characters": 152109,
+              "original_literal_sha256": "dc3f404e324e4216857616c492b71223b37ef6a7dd2226088d62008d7120e72a",
+              "files": [
+                {
+                  "path": "server-workspaces/BODIES/server-workspaces-binding-cases-v1.mjs",
+                  "sha256": "4db3d3e88677ef85ee4c89185ef520447a543bd39ca593e07f5ab3aa2801f443",
+                  "bytes": 4748
+                },
+                {
+                  "path": "server-workspaces/BODIES/server-workspaces-case-table-v1.mjs",
+                  "sha256": "a52e9ff36a657d9256069c8c1f3e56ae28b24614f5504963dba4949e85afbace",
+                  "bytes": 9565
+                },
+                {
+                  "path": "server-workspaces/BODIES/server-workspaces-contention-fixture-v5.mjs",
+                  "sha256": "c76be3150e69293d410b890f1b5e01a954442fef90c4e9ea479dc4d58a672c4b",
+                  "bytes": 6785
+                },
+                {
+                  "path": "server-workspaces/BODIES/server-workspaces-extra-cases-v1.mjs",
+                  "sha256": "437a15d664d3009067371455f007614208def73c11731be09fc1291ba7f0b52d",
+                  "bytes": 2881
+                },
+                {
+                  "path": "server-workspaces/BODIES/server-workspaces-owned-fixture-v2.mjs",
+                  "sha256": "934d6160721ff8da6898e3fac812e56dfc583f480241d8e8ff27f2dc1e42835c",
+                  "bytes": 8793
+                },
+                {
+                  "path": "server-workspaces/BODIES/server-workspaces-populated-fixture-v2.mjs",
+                  "sha256": "310a37a17eacbb5ee571d0ba0df10465e43521b07265daf5fa81455d0ff856c0",
+                  "bytes": 10238
+                },
+                {
+                  "path": "server-workspaces/BODIES/server-workspaces-precision-cases-v2.mjs",
+                  "sha256": "1410fb33123ed4a23952ccf71ba89bfab5ff04a857b961b821922cb1bb914c18",
+                  "bytes": 8396
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/migration_coordinator/apply_migrations.js",
+                  "sha256": "a9da1b2aefc8cf6b7071326f77d41afad6072ef01de83f5f235131e6a7620862",
+                  "bytes": 734
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/policy/authorize.js",
+                  "sha256": "41275c73065bd053fb25b9612436c45825f539c38b894b1b0a5f2e0ed02faf3e",
+                  "bytes": 3894
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/policy/can_read_goal.js",
+                  "sha256": "341e1b5c4c5146881e4a75ce9717bafe25fbd49b7583fedcf1a8f0768f827399",
+                  "bytes": 514
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/policy/data.js",
+                  "sha256": "535e999f5fe2c8ed6053b1ac1e27fc045022a62f57f6e205970d3d4a40c123f0",
+                  "bytes": 904
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/server_workspace_admission/create_creation.js",
+                  "sha256": "07d9e4025f8099d57fc119b163048aa5eb62bfa74b21fac5f8296c5fcf51b748",
+                  "bytes": 3944
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/storage_runtime/create_store.js",
+                  "sha256": "4c01f5ba0180a723858af385e3cde218a140e05b1c0b43c8d77271b8bd8fda47",
+                  "bytes": 4644
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/storage_schema/change_programs.js",
+                  "sha256": "b6108a502097f942307dd7ba023c173e25a8302511bfa5e316a660345fa90043",
+                  "bytes": 64566
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/wording/count.js",
+                  "sha256": "0d71b7a5ac7d9ae4e7d27283dff53b802cfc2a5a9cb7b52d78f789554ded26a7",
+                  "bytes": 162
+                },
+                {
+                  "path": "server-workspaces/BODIES/dependency/wording/plural.js",
+                  "sha256": "d263327901ef7f54011023f3245f2b050eb2394bd8e48216574584c07cce75f2",
+                  "bytes": 99
+                },
+                {
+                  "path": "server-workspaces/BODIES/loader",
+                  "sha256": "890784e4e75d046c7f8794832b8828d7f0451c1d3b7058ca55d054ab1e48b09d",
+                  "bytes": 9166
+                }
+              ]
+            },
+            {
+              "name": "PLANS",
+              "start_character": 153578,
+              "length_characters": 838349,
+              "original_literal_sha256": "8524f59b5e42cfd4915fc07330f7e3e102c08f975b02bac01ac17dbbac0c3b1f",
+              "files": [
+                {
+                  "path": "server-workspaces/cases.index.json",
+                  "sha256": "3f35616beb76f86b9c69cc022a7e62aed0b5c49f9d42da588bacd274f0944db8",
+                  "bytes": 10893
+                }
+              ]
+            }
+          ],
+          "readable_code": {
+            "path": "server-workspaces/generated_command.review.js",
+            "sha256": "d8ced66a11bc0743d398d5b8b0b3e4d792d348adac8c3e1202914cbe1cff740d",
+            "bytes": 5756
+          },
+          "all_executable_segments_preserved": true
+        },
+        {
+          "field": "build_command",
+          "argv": [
+            "node",
+            "--no-warnings",
+            "--experimental-vm-modules",
+            "--max-old-space-size=384",
+            "-e",
+            "<readable exported code>",
+            "--"
+          ],
+          "original_code_sha256": "b49b2868c22ca06ae435aa2534fe48280edb3f2ad014a5fe481789ff338c9f9f",
+          "layers": [
+            {
+              "encoded_code_sha256": "b49b2868c22ca06ae435aa2534fe48280edb3f2ad014a5fe481789ff338c9f9f",
+              "decompressed_sha256": "902cd99125b53c34c99c85f131b261e5950beec0360f08073ab76c30a80c271e"
+            }
+          ],
+          "fully_decoded_sha256": "84c3408506d425c9e04777f80457904b648d890c09f310b0cad089956a2e02b6",
+          "literals": [],
+          "readable_code": {
+            "path": "server-workspaces/build_command.review.js",
+            "sha256": "2bf77269d33eccdad673c9586fdfe914c6c308299ba791196b1a0646ebd63a44",
+            "bytes": 1637
+          },
+          "all_executable_segments_preserved": true
+        }
+      ]
+    }
+  ]
+}

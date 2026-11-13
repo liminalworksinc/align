@@ -3,12 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/native-libraries.mjs web",
     "dev": "next dev -H 127.0.0.1 -p 3100",
+    "prebuild": "node scripts/native-libraries.mjs web",
     "build": "next build",
+    "prepare:container": "node scripts/prepare-container.mjs",
     "start": "next start -H 127.0.0.1 -p 3100",
     "sign-in-link": "node scripts/sign-in-link.mjs",
     "admin": "node scripts/align-admin.mjs",
     "lint": "eslint",
+    "pretest": "node scripts/native-libraries.mjs web",
     "test": "bash scripts/test-all.sh ${ALIGN_TEST_PORT:-3600}"
   },
   "dependencies": {

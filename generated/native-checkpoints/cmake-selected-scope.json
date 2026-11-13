@@ -1,0 +1,34 @@
+{
+  "passed": true,
+  "records": [
+    {
+      "component": "storage-refresh-schema",
+      "source_sbom_sha256": "c67958cc1f0d10b8ad5656909296c621be8a967037de40745bfadbecf3e3fecc",
+      "selected_dependency_names": [
+        "flavor://literate-ai/lang-javascript",
+        "flavor://source-derived/node-storage-refresh-schema",
+        "flavor://literate-ai/os-macos",
+        "portable-application-implementation",
+        "portable-application",
+        "portable-specification-planning",
+        "javascript-portable-json-application"
+      ],
+      "cmake_skill_selected": false
+    },
+    {
+      "component": "trust-text-parser",
+      "source_sbom_sha256": "e3ca90567a9d4c8d0531fb0d54b2995db04e069e494af4bea494079ac96f640b",
+      "selected_dependency_names": [
+        "flavor://literate-ai/lang-javascript",
+        "flavor://source-derived/node-trust-text-parser",
+        "flavor://literate-ai/os-macos",
+        "portable-application-implementation",
+        "portable-application",
+        "portable-specification-planning",
+        "javascript-portable-json-application"
+      ],
+      "cmake_skill_selected": false
+    }
+  ],
+  "historical_skill_defects_not_fixed": true
+}

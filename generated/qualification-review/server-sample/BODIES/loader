@@ -1,0 +1,142 @@
+'use strict';
+// Private module conformance loader. Its VM guards are not a security boundary.
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),crypto=require('node:crypto');
+const CONTRACTS={workspaces:{capability:'server-workspaces.create-workspaces',module:'server_workspaces/create_workspaces',symbol:'create_workspaces'},sample:{capability:'server-sample.create-sample',module:'server_sample/create_sample',symbol:'create_sample'}};
+function moduleLoader(root, context, refused, onRead = () => {}) {
+  const common = new Map(), modules = new Map();
+  function inside(file) {
+    const relative = path.relative(root, file);
+    assert(relative && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative), 'Import escapes candidate root');
+    let current = root;
+    for (const part of relative.split(path.sep)) {
+      current = path.join(current, part);
+      assert(!fs.lstatSync(current).isSymbolicLink(), 'Candidate import symlink');
+    }
+    return file;
+  }
+  function resolve(specifier, parent) {
+    if (!(specifier.startsWith('./') || specifier.startsWith('../'))) return refused('import ' + specifier);
+    const stem = path.resolve(path.dirname(parent), specifier);
+    const file = [stem, stem + '.js', stem + '.mjs', stem + '.cjs', stem + '.json', path.join(stem, 'index.js')]
+      .find(name => fs.existsSync(name) && fs.statSync(name).isFile());
+    assert(file, 'Missing candidate module: ' + specifier);
+    return inside(file);
+  }
+  function esm(file, code) {
+    if (file.endsWith('.mjs')) return true;
+    if (file.endsWith('.cjs') || file.endsWith('.json')) return false;
+    for (let directory = path.dirname(file); ; directory = path.dirname(directory)) {
+      const manifest = path.join(directory, 'package.json');
+      if (fs.existsSync(manifest)) {
+        const type = JSON.parse(fs.readFileSync(manifest, 'utf8')).type;
+        if (type === 'module') return true;
+        if (type === 'commonjs') return false;
+      }
+      if (directory === root) break;
+    }
+    return /^\s*(?:import|export)\b/m.test(code);
+  }
+  function loadCommon(file) {
+    if (common.has(file)) return common.get(file).exports;
+    onRead(inside(file));
+    const code = fs.readFileSync(inside(file), 'utf8');
+    if (file.endsWith('.json')) {
+      const value = JSON.parse(code); common.set(file, { exports: value }); return value;
+    }
+    assert(!esm(file, code), 'Synchronous require of ESM is outside this target');
+    const module = { exports: {} }; common.set(file, module);
+    const wrapper = new vm.Script('(function(module,exports,require,__filename,__dirname){\n' + code + '\n})', {
+      filename: file, importModuleDynamically: () => refused('dynamic import'),
+    }).runInContext(context);
+    wrapper(module, module.exports, name => loadCommon(resolve(name, file)), file, path.dirname(file));
+    return module.exports;
+  }
+  function asModule(file) {
+    if (modules.has(file)) return modules.get(file);
+    onRead(inside(file));
+    const code = fs.readFileSync(inside(file), 'utf8');
+    let module;
+    if (esm(file, code)) module = new vm.SourceTextModule(code, { context, identifier: file,
+      importModuleDynamically: () => refused('dynamic import') });
+    else {
+      const values = loadCommon(file);
+      const names = file.endsWith('.json') ? ['default'] : [...new Set([...Object.keys(values), 'default'])];
+      module = new vm.SyntheticModule(names, function () {
+        for (const name of names) this.setExport(name, name === 'default' ? values : values[name]);
+      }, { context, identifier: file });
+    }
+    modules.set(file, module);
+    return module;
+  }
+  return async (entry, symbol) => {
+    const module = asModule(entry);
+    if (module.status === 'unlinked') await module.link((name, parent, extra) => {
+      const file = resolve(name, parent.identifier);
+      if (file.endsWith('.json')) assert.equal(extra?.attributes?.type ?? extra?.assert?.type, 'json');
+      return asModule(file);
+    });
+    if (module.status === 'linked') await module.evaluate();
+    const factory = module.namespace[symbol];
+    assert.equal(typeof factory, 'function', 'Missing named factory');
+    assert.equal(factory.name, symbol); assert.equal(factory.length, 1);
+    assert.equal(factory.constructor.name, 'Function');
+    return factory;
+  };
+}
+
+function guardedContext(refused) {
+  const context = vm.createContext({ __refuseWorkspaceEffect: refused, Error, TypeError, RangeError, SyntaxError }, { codeGeneration: { strings: false, wasm: false } });
+  // These are conformance guards, not a security sandbox.
+  vm.runInContext(`
+    Object.defineProperty(Math, 'random', {get(){return __refuseWorkspaceEffect('Math.random');},set(){return __refuseWorkspaceEffect('Math.random mutation');}});
+    for (const name of ['__alignV2Auth','URL','Request','Headers','Date','fetch','AbortSignal','URLSearchParams','console','process','performance','crypto','WebAssembly','Buffer','setTimeout','clearTimeout','setInterval','clearInterval','setImmediate','clearImmediate','queueMicrotask','WebSocket','eval','Function','global']) {
+      Object.defineProperty(globalThis,name,{get(){return __refuseWorkspaceEffect(name);},set(){return __refuseWorkspaceEffect(name+' assignment');}});
+    }
+  `, context);
+  return context;
+}
+
+
+function createCandidateAdapter(input,surface,kind,metadata,resourceNames){
+ const contract=CONTRACTS[kind];assert(contract);
+ const inputRoot=path.resolve(input);assert(fs.statSync(inputRoot).isDirectory()&&!fs.lstatSync(inputRoot).isSymbolicLink());
+ const roots=[inputRoot,path.join(inputRoot,'source')].filter(p=>fs.existsSync(p)&&fs.statSync(p).isDirectory());
+ const matches=roots.filter(root=>['.js','.cjs','.mjs'].some(ext=>fs.existsSync(path.join(root,contract.module+ext))));
+ assert.equal(matches.length,1);const root=matches[0];
+ assert(!fs.lstatSync(root).isSymbolicLink());
+ const entries=['.js','.cjs','.mjs'].map(ext=>path.join(root,contract.module+ext)).filter(p=>fs.existsSync(p));assert.equal(entries.length,1);
+ if(surface){const hits=surface.capabilities.filter(x=>x.capability===contract.capability);assert.equal(hits.length,1);assert.equal(hits[0].module,contract.module);assert.deepEqual(hits[0].symbols,[contract.symbol]);}
+ const audits=[];
+ const assetAudit=()=>{
+  if(kind!=='sample')return;
+  const file=path.join(root,'server_sample/sample-text.json');
+  assert(fs.lstatSync(path.dirname(file)).isDirectory()&&!fs.lstatSync(path.dirname(file)).isSymbolicLink());
+  assert(fs.lstatSync(file).isFile()&&!fs.lstatSync(file).isSymbolicLink());
+  assert.equal(crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'),'c502a40c1af1342250b646e8bbba9e0bb97e77b49c6b045db156b201be3008f3');
+ };
+ assetAudit();audits.push(assetAudit);
+ async function fresh(){
+  const effects=[],refused=name=>{effects.push(name);throw new Error('Undeclared workspace effect: '+name);};
+  const imported=[],context=guardedContext(refused),read=moduleLoader(root,context,refused,file=>imported.push(file)),factory=await read(entries[0],contract.symbol);
+  if(kind==='sample')assert(imported.includes(path.join(root,'server_sample/sample-text.json')),'Sample must load the declared immutable asset during module initialization');
+  const audit=()=>assert.deepEqual(effects,[],'Undeclared effects remain visible if caught');audit();audits.push(audit);
+  return {factory,audit};
+ }
+ function construct(factory,fixture,{readDate}={}){
+  const reads=[],values={...fixture.resources,readDate:readDate??(()=>fixture.Clock??Date)};
+  let constructing=true;
+  const services=Object.fromEntries(Object.entries(values).map(([name,value])=>[name,typeof value!=='function'||name==='V2Error'?value:function(...args){assert(!constructing,'Constructor-time service call: '+name);assert.equal(this,undefined,'Bare resource receiver: '+name);return Reflect.apply(value,undefined,args);} ]));
+  const resources=new Proxy(services,{get(target,key){reads.push(key);assert(resourceNames.includes(key),'Undeclared resource property');return target[key];},ownKeys(){assert.fail('Resource enumeration');}});
+  const api=factory(resources);constructing=false;
+  assert(api&&typeof api==='object'&&typeof api.then!=='function');assert.deepEqual(Object.keys(api).sort(),Object.keys(metadata).sort());
+  for(const [name,info]of Object.entries(metadata))if(Array.isArray(info)){
+   assert.equal(api[name].name,name);assert.equal(api[name].length,info[0]);assert.equal(api[name].constructor.name,info[1]);
+  }else assert.equal(typeof api[name],info);
+  const captureAudit=()=>assert.deepEqual(reads,resourceNames,'Capture each resource exactly once in order');captureAudit();audits.push(captureAudit);
+  return api;
+ }
+ async function load(fixture,options){const {factory}=await fresh();return construct(factory,fixture,options);}
+ async function sameModuleLoad(){const {factory}=await fresh();return async(fixture,options)=>construct(factory,fixture,options);}
+ return {load,fresh,construct,sameModuleLoad,audit(){for(const check of audits)check();}};
+}
+module.exports={CONTRACTS,moduleLoader,guardedContext,createCandidateAdapter};

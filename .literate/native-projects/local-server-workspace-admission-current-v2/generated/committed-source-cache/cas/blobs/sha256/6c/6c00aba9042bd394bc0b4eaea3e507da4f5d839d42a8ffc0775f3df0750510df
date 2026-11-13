@@ -1,0 +1,12 @@
+'use strict';
+const { runTests, smoke } = require('./tests/litai_test.js');
+async function main() {
+  if (process.argv.length !== 3) throw new Error('Expected one framework mode argument');
+  if (process.argv[2] === '--litai-test') return runTests();
+  if (process.argv[2] === '--litai-smoke') return smoke();
+  throw new Error('This artifact is an importable library');
+}
+main().then(result => process.stdout.write(JSON.stringify(result) + '\n')).catch(error => {
+  process.stderr.write(String(error && error.stack || error) + '\n');
+  process.exitCode = 1;
+});

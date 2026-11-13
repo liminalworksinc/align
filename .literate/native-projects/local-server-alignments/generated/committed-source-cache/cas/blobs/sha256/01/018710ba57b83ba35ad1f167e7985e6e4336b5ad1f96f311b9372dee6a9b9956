@@ -1,0 +1,164 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {create_alignments} = require('../server_alignments/create_alignments.js');
+
+const resourceNames = ['all','audit','get','run','tx','badRequest','conflict','forbidden','notFound','newId','nowIso','effectiveSet','goalCore','goalObj','goalRow','parentIds','reviewParents','visibleGoal','canBind','canReadGoal','writeDirective','holdNewlyBound','openEpoch','sessionRow','memberName','nameTo','need','assertRevisionReached','oneOf','optStr','revisionRead','strList'];
+function service(overrides = {}) {
+  const reads = [], calls = [];
+  const resources = {};
+  for (const name of resourceNames) {
+    const value = overrides[name] || function () { throw new Error(`Unexpected service call: ${name}`); };
+    Object.defineProperty(resources, name, {get() { reads.push(name); return function (...args) { assert.equal(this, undefined); calls.push([name, ...args]); return value(...args); }; }});
+  }
+  const api = create_alignments(resources);
+  assert.deepEqual(reads, resourceNames);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(Object.keys(api), ['ACTIONS','createAlignment','insertAlignment','actOnAlignment','endAlignmentsToClosedGoal','getAlignment','listAlignments','assertAction']);
+  for (const [name, length] of [['createAlignment',2],['insertAlignment',7],['actOnAlignment',4],['endAlignmentsToClosedGoal',4],['getAlignment',2],['listAlignments',1],['assertAction',1]]) {
+    assert.equal(api[name].name, name);
+    assert.equal(api[name].length, length);
+    assert.equal(api[name].constructor.name, name === 'createAlignment' || name === 'actOnAlignment' ? 'AsyncFunction' : 'Function');
+  }
+  return {api, calls};
+}
+function fixture() {
+  const requirementJson = '[{"for":"target","set":["u","z"],"approved_by":null},"z"]';
+  const revision = {revision: 1, choice: 'contribution', approvers_json: requirementJson, effects_json: '["contributes_to"]', author_id: 'u', note: null, created_at: 't0'};
+  const alignment = {id: 'al-generated', ws_id: 'w', requester_id: 'u', target_goal_id: 'target', source_goal_id: null, state: 'pending', revision: 1, created_at: 't0', updated_at: 't0'};
+  const target = {id: 'target', ws_id: 'w', title: 'Target', status: 'active'};
+  return service({
+    get(sql, ...args) {
+      if (sql === 'SELECT * FROM v2_alignments WHERE ws_id = ? AND id = ?') { assert.deepEqual(args, ['w','al-generated']); return alignment; }
+      if (sql === 'SELECT * FROM v2_alignment_revisions WHERE alignment_id = ? AND revision = ?') { assert.deepEqual(args, ['al-generated',1]); return revision; }
+      throw new Error(`Unexpected get: ${sql}`);
+    },
+    all(sql, ...args) {
+      if (sql === 'SELECT approvers_json FROM v2_alignment_revisions WHERE alignment_id = ?') { assert.deepEqual(args, ['al-generated']); return [{approvers_json: requirementJson}]; }
+      if (sql === 'SELECT user_id FROM v2_alignment_approvals WHERE alignment_id = ? AND revision = ? ORDER BY at, rowid' || sql === 'SELECT user_id FROM v2_alignment_approvals WHERE alignment_id = ? AND revision = ?') { assert.deepEqual(args, ['al-generated',1]); return [{user_id:'u'}]; }
+      if (sql === 'SELECT session_key FROM v2_alignment_sessions WHERE alignment_id = ? AND revision = ? ORDER BY session_key') { assert.deepEqual(args, ['al-generated',1]); return [{session_key:'a-missing'},{session_key:'zz-session123456'}]; }
+      if (sql === 'SELECT * FROM v2_alignment_revisions WHERE alignment_id = ? ORDER BY revision') { assert.deepEqual(args, ['al-generated']); return [revision]; }
+      throw new Error(`Unexpected all: ${sql}`);
+    },
+    need(pp, permission, object) { assert.equal(permission, 'alignment.read'); assert.deepEqual(object, {kind:'alignment',involved:['u','z']}); },
+    goalRow(ws, id) { assert.equal(ws, 'w'); assert.equal(id, 'target'); return target; },
+    goalObj(g) { assert.equal(g, target); return g; },
+    canReadGoal(pp, g) { assert.equal(g, target); return pp.userId === 'u'; },
+    sessionRow(ws, key) {
+      assert.equal(ws, 'w');
+      if (key === 'a-missing') return undefined;
+      assert.equal(key, 'zz-session123456');
+      return {session_key:key, ws_id:'w', user_id:'u', title:'Private', repo_alias:'repo', harness:'agent', started_at:'t0', state:'shared'};
+    },
+    openEpoch(ws, key) { assert.deepEqual([ws,key], ['w','zz-session123456']); return {goal_id:'target'}; },
+    memberName(id) { return id.toUpperCase(); }
+  });
+}
+function expectedView(reader) {
+  const own = reader === 'u';
+  const label = own ? {id:'target',title:'Target',visible:true} : {id:null,title:null,visible:false};
+  return {
+    id:'al-generated',state:'pending',revision:1,choice:'contribution',requester:{id:'u',name:'U'},target_goal:label,source_goal:null,
+    sessions:[{ref:1,session_key:own?'zz-session123456':null,owner:{id:'u',name:'U'},label:own?'Private':'repo (agent)',started_at:'t0',key_end:'123456',current_goal:{...label}}],
+    effects:[{kind:'contributes_to',text:own?'Records that this session contributes to "Target". No usage moves.':"Records that this session contributes to a goal you can't see. No usage moves."}],
+    requirements:[{for:own?'target':null,approvers:[{id:'u',name:'U'},{id:'z',name:'Z'}],approved_by:{id:'u',name:'U'}},{for:null,approvers:[{id:'z',name:'Z'}],approved_by:null}],
+    approvers:[{id:'u',name:'U',approved:true},{id:'z',name:'Z',approved:false}],note:null,
+    history:[{revision:1,choice:'contribution',author:{id:'u',name:'U'},note:null,created_at:'t0'}],
+    waiting_on_me:!own,can:{approve:!own,counter:!own,reject:!own,accept_counter:false,withdraw:own,revoke:false},
+    closed_by:null,closed_at:null,created_at:'t0',updated_at:'t0'
+  };
+}
+const cases = [
+  ['generated-action-approve',['approve'],'approve'],
+  ['generated-action-counter',['counter'],'counter'],
+  ['generated-action-accept',['accept_counter'],'accept_counter'],
+  ['generated-action-reject',['reject'],'reject'],
+  ['generated-action-withdraw',['withdraw'],'withdraw'],
+  ['generated-action-revoke',['revoke'],'revoke'],
+  ['generated-empty-member',[{wsId:'empty',userId:'u',wsRole:'member'}],{waiting_on_me:[],mine:[],others:[]}],
+  ['generated-empty-viewer',[{wsId:'empty',userId:'v',wsRole:'viewer'}],{waiting_on_me:[],mine:[],others:[]}],
+  ['generated-view-owner',[{wsId:'w',userId:'u',wsRole:'member'},'al-generated'],expectedView('u')],
+  ['generated-view-private',[{wsId:'w',userId:'z',wsRole:'member'},'al-generated'],expectedView('z')],
+  ['generated-insert-binding',[{wsId:'w',userId:'u',wsRole:'member'},{id:'target',ws_id:'w',status:'active'},null,'work_toward',[{session_key:'binding-key',ws_id:'w',user_id:'u',state:'shared'}],null,'t1'],'al-new']
+];
+function insertWithBinding(args) {
+  let revision, alignment;
+  const approvals = [], effects = [];
+  const core = {opaque:'core'};
+  let identityReads = 0;
+  const loaded = {get id() { return `loaded-${++identityReads}`; }};
+  const {api} = service({
+    newId(kind) { assert.equal(kind, 'al'); return 'al-new'; },
+    effectiveSet(g, requester) { assert.equal(g, args[1]); assert.equal(requester, 'u'); return ['u']; },
+    openEpoch(ws, key) { assert.deepEqual([ws,key], ['w','binding-key']); return undefined; },
+    run(sql, ...binds) {
+      if (sql.startsWith('INSERT INTO v2_alignments ')) {
+        assert.deepEqual(binds, ['al-new','w','u','target',null,'t1','t1']);
+        alignment = {id:'al-new',ws_id:'w',requester_id:'u',target_goal_id:'target',source_goal_id:null,state:'pending',revision:1};
+      } else if (sql.startsWith('INSERT INTO v2_alignment_revisions ')) {
+        assert.deepEqual(binds.slice(0,4), ['w','al-new',1,'work_toward']);
+        revision = {choice:binds[3],effects_json:binds[4],approvers_json:binds[5]};
+      } else if (sql.startsWith('INSERT INTO v2_alignment_sessions ')) assert.deepEqual(binds, ['w','al-new',1,'binding-key']);
+      else if (sql.startsWith('INSERT OR IGNORE INTO v2_alignment_approvals ')) { assert.deepEqual(binds, ['w','al-new',1,'u','t1']); approvals.push({user_id:'u'}); }
+      else if (sql.startsWith('UPDATE v2_alignment_revisions SET approvers_json')) { assert.deepEqual(binds.slice(1), ['al-new',1]); revision.approvers_json = binds[0]; }
+      else if (sql.startsWith('UPDATE v2_sessions SET governing_goal_id = ?')) { assert.deepEqual(binds, ['loaded-1','al-new','t1','w','binding-key']); effects.push('update'); }
+      else if (sql.startsWith("UPDATE v2_alignments SET state = 'approved'")) { assert.deepEqual(binds, ['t1','t1','al-new']); effects.push('approve'); }
+      else throw new Error(`Unexpected insertion SQL: ${sql}`);
+    },
+    get(sql, ...binds) {
+      if (sql.startsWith('SELECT * FROM v2_alignment_revisions ')) { assert.deepEqual(binds, ['al-new',1]); return revision; }
+      assert.equal(sql, 'SELECT * FROM v2_alignments WHERE ws_id = ? AND id = ?');
+      assert.deepEqual(binds, ['w','al-new']); return alignment;
+    },
+    all(sql, ...binds) {
+      assert.deepEqual(binds, ['al-new',1]);
+      if (sql.startsWith('SELECT user_id ')) return approvals;
+      assert.equal(sql, 'SELECT session_key FROM v2_alignment_sessions WHERE alignment_id = ? AND revision = ? ORDER BY session_key');
+      return [{session_key:'binding-key'}];
+    },
+    sessionRow(ws, key) { assert.deepEqual([ws,key], ['w','binding-key']); return args[4][0]; },
+    goalRow(ws, id) { assert.deepEqual([ws,id], ['w','target']); return loaded; },
+    goalCore(g) { assert.equal(g, loaded); return core; },
+    writeDirective(ws, kind, keys, g, binding) {
+      assert.deepEqual([ws,kind,keys], ['w','binding_changed',['binding-key']]); assert.equal(g, core);
+      assert.deepEqual(binding, {goal_id:'loaded-2',effective:'next_root_turn',cause:'alignment:al-new'}); effects.push('directive');
+    },
+    holdNewlyBound(ws, id, key) { assert.deepEqual([ws,id,key], ['w','loaded-3','binding-key']); effects.push('hold'); },
+    audit(ws, actor, action, id, time) { assert.deepEqual([ws,actor,id,time], ['w','u','al-new','t1']); effects.push(action); }
+  });
+  const result = api.insertAlignment(...args);
+  assert.equal(identityReads, 3);
+  assert.deepEqual(effects, ['alignment.requested','update','directive','hold','approve','alignment.approved']);
+  return result;
+}
+function invoke(args) {
+  if (args.length === 7) return insertWithBinding(args);
+  if (typeof args[0] === 'string') {
+    const sentinel = {};
+    const {api} = service({notFound() { return sentinel; }});
+    const other = service().api;
+    assert.notEqual(api.ACTIONS, other.ACTIONS);
+    assert.deepEqual(api.ACTIONS, ['approve','counter','accept_counter','reject','withdraw','revoke']);
+    assert.throws(() => api.assertAction('unknown'), e => e === sentinel);
+    api.ACTIONS.push('custom');
+    assert.equal(api.assertAction('custom'), 'custom');
+    assert.equal(other.ACTIONS.includes('custom'), false);
+    return api.assertAction(...args);
+  }
+  if (args.length === 1) {
+    const {api, calls} = service({all(sql, ws) { assert.equal(sql, 'SELECT * FROM v2_alignments WHERE ws_id = ? ORDER BY updated_at DESC'); assert.equal(ws, 'empty'); return []; }});
+    const result = api.listAlignments(...args);
+    assert.equal(calls.length, 1);
+    return result;
+  }
+  return fixture().api.getAlignment(...args);
+}
+function runTests() {
+  const results = [];
+  for (const [case_id, args, expected] of cases) {
+    assert.deepEqual(invoke(args), expected);
+    results.push({case_id,outcome:'passed'});
+  }
+  return {schema:'literate-ai/generated-test-results@1',cases:results};
+}
+function smoke() { return invoke(['approve']); }
+module.exports = {runTests, smoke};

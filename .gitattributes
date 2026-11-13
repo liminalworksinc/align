@@ -1,0 +1,4 @@
+# Review copies preserve accepted bytes, including existing final blank lines.
+# Hash checks reject edits. Other whitespace checks remain enabled.
+generated/native-review-source/** whitespace=-blank-at-eof
+generated/qualification-review/** whitespace=-blank-at-eof

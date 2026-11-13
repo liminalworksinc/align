@@ -1,0 +1,237 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { create_ready } = require('../server_readiness/create_ready.js');
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+async function rejected(promise, expected) {
+  let failed = false;
+  await promise.then(() => {}, (value) => {
+    failed = true;
+    assert.strictEqual(value, expected);
+  });
+  assert.equal(failed, true);
+}
+
+async function sequencing() {
+  const state = { untouched: 37 };
+  const events = [];
+  const gate = deferred();
+  const ignored = Object.defineProperty({}, 'then', {
+    get() { throw new Error('Ignored return was inspected'); }
+  });
+  function provider(label, result) {
+    return function () {
+      assert.equal(this, undefined);
+      assert.equal(arguments.length, 0);
+      events.push(label);
+      return result;
+    };
+  }
+  const resources = {
+    state, openDb: provider('open', ignored),
+    migrateAuth: provider('auth', gate.promise), migrate: provider('migrate', ignored)
+  };
+  const api = create_ready(resources);
+  assert.deepEqual(events, []);
+  assert.deepEqual(Object.keys(api), ['ready']);
+  assert.equal(create_ready.name, 'create_ready');
+  assert.equal(create_ready.length, 1);
+  assert.equal(api.ready.name, 'ready');
+  assert.equal(api.ready.length, 0);
+  assert.equal(api.ready.constructor, Function);
+  const { ready } = api;
+  resources.state = {};
+  resources.openDb = resources.migrateAuth = resources.migrate = () => assert.fail('Rebound');
+  const attempt = ready();
+  assert.deepEqual(events, ['open', 'auth']);
+  assert.strictEqual(state.__alignV2Ready, attempt);
+  const shared = create_ready({ state });
+  for (let i = 0; i < 103; i += 1) assert.strictEqual(shared.ready(), attempt);
+  gate.resolve();
+  assert.equal(await attempt, undefined);
+  assert.deepEqual(events, ['open', 'auth', 'migrate']);
+  assert.strictEqual(ready(), attempt);
+  assert.equal(state.untouched, 37);
+
+  const reads = [];
+  const captured = {};
+  for (const key of ['state', 'openDb', 'migrateAuth', 'migrate']) {
+    Object.defineProperty(captured, key, { get() { reads.push(key); return resources[key]; } });
+  }
+  create_ready(captured);
+  assert.deepEqual(reads, ['state', 'openDb', 'migrateAuth', 'migrate']);
+}
+
+async function failures() {
+  for (const stage of ['open', 'auth', 'migrate']) {
+    for (const reason of [undefined, null, Symbol('failure'), { failure: stage }]) {
+      const state = {};
+      const events = [];
+      let fail = true;
+      const invoke = (name) => {
+        events.push(name);
+        if (name === stage && fail) throw reason;
+      };
+      const { ready } = create_ready({ state,
+        openDb: () => invoke('open'), migrateAuth: () => invoke('auth'),
+        migrate: () => invoke('migrate') });
+      const first = ready();
+      assert.strictEqual(ready(), first);
+      await rejected(first, reason);
+      assert.equal(state.__alignV2Ready, undefined);
+      assert.deepEqual(events, ['open', 'auth', 'migrate'].slice(0,
+        ['open', 'auth', 'migrate'].indexOf(stage) + 1));
+      fail = false;
+      const retry = ready();
+      assert.notStrictEqual(retry, first);
+      assert.equal(await retry, undefined);
+      assert.strictEqual(state.__alignV2Ready, retry);
+    }
+  }
+  const clearError = {};
+  let cache;
+  const state = Object.defineProperty({}, '__alignV2Ready', {
+    get() { return cache; },
+    set(value) { if (value === undefined) throw clearError; cache = value; }
+  });
+  const { ready } = create_ready({ state, openDb() { throw null; } });
+  await rejected(ready(), clearError);
+}
+
+async function accessAndAwait() {
+  let calls = 0;
+  const failure = {};
+  const state = Object.defineProperty({}, '__alignV2Ready', {
+    get() { throw failure; }
+  });
+  const api = create_ready({ state, openDb() { calls += 1; } });
+  assert.equal(calls, 0);
+  assert.throws(() => api.ready(), (error) => error === failure);
+  assert.equal(calls, 0);
+
+  const finished = deferred();
+  const effects = [];
+  const rejectingSetter = Object.defineProperty({}, '__alignV2Ready', {
+    get() { effects.push('read'); return null; },
+    set() { effects.push('write'); throw failure; }
+  });
+  const bound = create_ready({ state: rejectingSetter,
+    openDb() { effects.push('open'); },
+    migrateAuth() { effects.push('auth'); return 4; },
+    migrate() { effects.push('migrate'); finished.resolve(); }
+  });
+  assert.throws(() => bound.ready(), (error) => error === failure);
+  assert.deepEqual(effects, ['read', 'open', 'auth', 'write']);
+  await finished.promise;
+  assert.deepEqual(effects, ['read', 'open', 'auth', 'write', 'migrate']);
+
+  for (const initial of [null, undefined]) {
+    const order = [];
+    const local = { __alignV2Ready: initial };
+    const thenable = { then(resolve) { order.push('then'); resolve(91); } };
+    const { ready } = create_ready({ state: local,
+      openDb() { order.push('open'); },
+      migrateAuth() { order.push('auth'); return thenable; },
+      migrate() { order.push('migrate'); }
+    });
+    const attempt = ready();
+    assert.deepEqual(order, ['open', 'auth']);
+    assert.equal(await attempt, undefined);
+    assert.deepEqual(order, ['open', 'auth', 'then', 'migrate']);
+  }
+}
+
+async function overlaps() {
+  const state = {};
+  const gates = [deferred(), deferred()];
+  let opens = 0;
+  let auth = 0;
+  let migrations = 0;
+  const { ready } = create_ready({ state,
+    openDb() { opens += 1; },
+    migrateAuth() { return gates[auth++].promise; },
+    migrate() { migrations += 1; }
+  });
+  const older = ready();
+  state.__alignV2Ready = undefined;
+  const newer = ready();
+  assert.notStrictEqual(older, newer);
+  assert.equal(opens, 2);
+  const reason = {};
+  gates[0].reject(reason);
+  await rejected(older, reason);
+  assert.equal(state.__alignV2Ready, undefined);
+  const replacement = {};
+  state.__alignV2Ready = replacement;
+  gates[1].resolve();
+  await newer;
+  assert.strictEqual(state.__alignV2Ready, replacement);
+  assert.equal(migrations, 1);
+
+  const other = {};
+  let separateCalls = 0;
+  const independent = create_ready({ state: other, openDb() { separateCalls += 1; },
+    migrateAuth() {}, migrate() {} });
+  await independent.ready();
+  assert.equal(separateCalls, 1);
+  assert.strictEqual(state.__alignV2Ready, replacement);
+
+  const reentrantState = {};
+  let entered = false;
+  let nested;
+  const trace = [];
+  const reentrant = create_ready({ state: reentrantState,
+    openDb() {
+      trace.push('open');
+      if (!entered) { entered = true; nested = reentrant.ready(); }
+    },
+    migrateAuth() { trace.push('auth'); },
+    migrate() { trace.push('migrate'); }
+  });
+  const outer = reentrant.ready();
+  assert.notStrictEqual(outer, nested);
+  assert.strictEqual(reentrantState.__alignV2Ready, outer);
+  assert.deepEqual(trace, ['open', 'open', 'auth', 'auth']);
+  await Promise.all([outer, nested]);
+  assert.deepEqual(trace, ['open', 'open', 'auth', 'auth', 'migrate', 'migrate']);
+}
+
+function cached(args, expected) {
+  const api = create_ready(...args);
+  const actual = api.ready();
+  assert.strictEqual(actual, args[0].state.__alignV2Ready);
+  assert.deepEqual(actual, expected);
+  return actual;
+}
+
+async function run() {
+  const cases = [];
+  cached([{ state: { __alignV2Ready: { retained: 'cache', values: [2, 7] } } }],
+    { retained: 'cache', values: [2, 7] });
+  await sequencing();
+  cases.push({ case_id: 'generated-cached-object', outcome: 'passed' });
+  cached([{ state: { __alignV2Ready: false } }], false);
+  await failures();
+  await accessAndAwait();
+  cases.push({ case_id: 'generated-cached-false', outcome: 'passed' });
+  cached([{ state: { __alignV2Ready: 0 } }], 0);
+  await overlaps();
+  cases.push({ case_id: 'generated-cached-zero', outcome: 'passed' });
+  cached([{ state: { __alignV2Ready: '' } }], '');
+  cases.push({ case_id: 'generated-cached-empty', outcome: 'passed' });
+  return { schema: 'literate-ai/generated-test-results@1', cases };
+}
+
+function smoke() {
+  return cached([{ state: { __alignV2Ready: { retained: 'cache', values: [2, 7] } } }],
+    { retained: 'cache', values: [2, 7] });
+}
+
+module.exports = { run, smoke };

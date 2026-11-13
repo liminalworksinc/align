@@ -1,0 +1,38 @@
+{
+  "schema": "align/review-only-historical-source@1",
+  "files": [
+    {
+      "path": "generated/native-review-history/7f619e1d9de4c5c69140d146a5fec8cf9928acd7.ts",
+      "git_blob": "7f619e1d9de4c5c69140d146a5fec8cf9928acd7",
+      "sha256": "f4e5e7aabe3fbd5893a10fb9c64133ad7667c7e1b2ba33a7c2c9b045944dee4b",
+      "original_revision": "4214c45f6d509e33c8153b4d66f5a7029f9b0c5a",
+      "original_path": "components/legacy-project-wrapper/implementation/lib/v2/goals.ts",
+      "review_only": true
+    },
+    {
+      "path": "generated/native-review-history/ac4e090a6b2012ad4fcf3e4a8b0ec8f110800c67.ts",
+      "git_blob": "ac4e090a6b2012ad4fcf3e4a8b0ec8f110800c67",
+      "sha256": "03c0d93cbeede40feaf9405d4449a65591b6544efeefea32936b65c927288bd1",
+      "original_revision": "c4b853866ff5e130fa294f8e70fe5c0530e87aa4",
+      "original_path": "components/legacy-project-wrapper/implementation/lib/v2/devices.ts",
+      "review_only": true
+    },
+    {
+      "path": "generated/native-review-history/8d7333bd89640399684236d0a71565cf24d87d27.ts",
+      "git_blob": "8d7333bd89640399684236d0a71565cf24d87d27",
+      "sha256": "b0b2c34d63ee085bed2cfae09fd3bad34ef0b265b6bc981017bc7be3b1bc0660",
+      "original_revision": "c4b853866ff5e130fa294f8e70fe5c0530e87aa4",
+      "original_path": "components/legacy-project-wrapper/implementation/lib/v2/directives.ts",
+      "review_only": true
+    },
+    {
+      "path": "generated/native-review-history/f2b131e2d916835bce4c9ec2905e2f256b5159e0.json",
+      "git_blob": "f2b131e2d916835bce4c9ec2905e2f256b5159e0",
+      "sha256": "9c2eb5b70cba55afc54b330e608167944700566c845634788e1dfdfb6865469c",
+      "original_revision": "54ecc585f3981f7a2ae45da8eca19386945c74af^",
+      "original_path": "components/legacy-project-wrapper/implementation/native/spend-meter.json",
+      "review_only": true
+    }
+  ],
+  "implementation_authority": false
+}

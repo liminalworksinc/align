@@ -1,17 +1,16 @@
-// Goal sessions authorization: the one place that decides what a signed-in person may do. Better Auth only says who
-// they are. Every v2 route calls authorize(principal, action, object) and maps the decision to HTTP:
-//   not visible to the caller -> 404 (never 403, so existence doesn't leak)
-//   visible but not allowed   -> 403 with a code
-// The rules are data (the tables below), so a test can walk role x visibility x action exhaustively.
-// A workspace owner does NOT read private goals: only a goal's owner does.
-// Teams are stored as pods (pod_id, visibility value "pod"); everything a person or agent sees says "team".
+// Typed consumer contract for the independently qualified authorization library.
+import {
+  authorize as nativeAuthorize,
+  can_bind as nativeCanBind,
+  can_read_goal as nativeCanReadGoal,
+  data as nativeData,
+} from "../native/.bindings/policy.js";
 
 export type WsRole = "owner" | "member" | "viewer";
+
 export type PodRole = "lead" | "member";
+
 export type Visibility = "private" | "pod" | "workspace";
-export const WS_ROLES: readonly WsRole[] = ["owner", "member", "viewer"];
-export const POD_ROLES: readonly PodRole[] = ["lead", "member"];
-export const VISIBILITIES: readonly Visibility[] = ["private", "pod", "workspace"];
 
 export interface PolicyPrincipal {
   userId: string;
@@ -38,7 +37,6 @@ export type PolicyObject =
   | { kind: "session"; ownerId: string }
   | { kind: "alignment"; involved: readonly string[] };
 
-/** Workspace-level actions and the roles that hold them. */
 export type WsAction =
   | "workspace.read"
   | "workspace.manage" // invites, teams, member roles and removal, rename, delete, the audit trail
@@ -48,25 +46,7 @@ export type WsAction =
   | "alignment.create"
   | "spend.read";
 
-export const WORKSPACE_ROLE_ACTIONS: Record<WsRole, readonly WsAction[]> = {
-  owner: ["workspace.read", "workspace.manage", "goal.create", "session.share", "session.stop_any", "alignment.create", "spend.read"],
-  member: ["workspace.read", "goal.create", "session.share", "alignment.create", "spend.read"],
-  viewer: ["workspace.read", "spend.read"],
-};
-
-/** Pod-level actions (on the caller's own pods). */
 export type PodAction = "pod.manage_members" | "goal.create_in_pod" | "goal.bind_pod_goal";
-export const POD_ROLE_ACTIONS: Record<PodRole, readonly PodAction[]> = {
-  lead: ["pod.manage_members", "goal.create_in_pod", "goal.bind_pod_goal"],
-  member: ["goal.create_in_pod", "goal.bind_pod_goal"],
-};
-
-/** Who reads a goal, by visibility. The owner always does. */
-export const GOAL_READERS: Record<Visibility, { wsRoles: readonly WsRole[]; podRoles: readonly PodRole[] }> = {
-  private: { wsRoles: [], podRoles: [] },
-  pod: { wsRoles: ["owner"], podRoles: ["lead", "member"] },
-  workspace: { wsRoles: ["owner", "member", "viewer"], podRoles: [] },
-};
 
 export type Action =
   | WsAction
@@ -80,89 +60,15 @@ export type Action =
 
 export type Decision = { ok: true } | { ok: false; status: 403 | 404; code: string; message: string };
 
-const ALLOW: Decision = { ok: true };
-const hidden = (): Decision => ({ ok: false, status: 404, code: "not_found", message: "Not found" });
-const deny = (code: string, message: string): Decision => ({ ok: false, status: 403, code, message });
-
-const wsCan = (p: PolicyPrincipal, a: WsAction) => !!p.wsRole && WORKSPACE_ROLE_ACTIONS[p.wsRole].includes(a);
-const podCan = (p: PolicyPrincipal, podId: string | null, a: PodAction) => {
-  const r = podId ? p.pods.get(podId) : undefined;
-  return !!r && POD_ROLE_ACTIONS[r].includes(a);
+export const {WS_ROLES, POD_ROLES, VISIBILITIES, WORKSPACE_ROLE_ACTIONS, POD_ROLE_ACTIONS, GOAL_READERS} = nativeData() as {
+  WS_ROLES: readonly WsRole[];
+  POD_ROLES: readonly PodRole[];
+  VISIBILITIES: readonly Visibility[];
+  WORKSPACE_ROLE_ACTIONS: Record<WsRole, readonly WsAction[]>;
+  POD_ROLE_ACTIONS: Record<PodRole, readonly PodAction[]>;
+  GOAL_READERS: Record<Visibility, {wsRoles: readonly WsRole[]; podRoles: readonly PodRole[]}>;
 };
 
-export function canReadGoal(p: PolicyPrincipal, g: GoalObject): boolean {
-  if (!p.wsRole) return false;
-  if (g.ownerId === p.userId) return true;
-  const rule = GOAL_READERS[g.visibility];
-  if (rule.wsRoles.includes(p.wsRole)) return true;
-  const podRole = g.podId ? p.pods.get(g.podId) : undefined;
-  return !!podRole && rule.podRoles.includes(podRole);
-}
-
-/** Bindable without a session in view: own goal, a goal of a pod the caller belongs to, or one they hold an
- *  approved allocation transfer to (`hasTransfer`). */
-export function canBind(p: PolicyPrincipal, g: GoalObject, hasTransfer: boolean): boolean {
-  return authorize(p, "goal.bind", { kind: "bind", goal: g, hasTransfer }).ok;
-}
-
-const roleDenied = (p: PolicyPrincipal): Decision =>
-  p.wsRole === "viewer" ? deny("read_only", "Viewers can look but not change anything.") : deny("owner_only", "Only a workspace owner can do this.");
-
-export function authorize(p: PolicyPrincipal, action: Action, obj: PolicyObject): Decision {
-  if (!p.wsRole) return hidden(); // not a member (or no device grant): the workspace and everything in it is hidden
-  switch (action) {
-    case "workspace.read":
-    case "workspace.manage":
-    case "session.share":
-    case "session.stop_any":
-    case "alignment.create":
-    case "spend.read":
-      return wsCan(p, action) ? ALLOW : roleDenied(p);
-
-    case "goal.create": {
-      if (!wsCan(p, "goal.create")) return roleDenied(p);
-      if (obj.kind !== "goal_draft") return hidden();
-      if (obj.podId && !podCan(p, obj.podId, "goal.create_in_pod")) return deny("not_in_team", "Only members of that team can add its goals.");
-      return ALLOW;
-    }
-
-    case "goal.read":
-      if (obj.kind !== "goal") return hidden();
-      return canReadGoal(p, obj) ? ALLOW : hidden();
-
-    case "goal.edit":
-      if (obj.kind !== "goal" || !canReadGoal(p, obj)) return hidden();
-      if (!wsCan(p, "goal.create")) return roleDenied(p);
-      return obj.ownerId === p.userId ? ALLOW : deny("not_goal_owner", "Only the goal's owner can change it.");
-
-    case "goal.bind": {
-      if (obj.kind !== "bind" || !canReadGoal(p, obj.goal)) return hidden();
-      if (!wsCan(p, "session.share")) return roleDenied(p);
-      if (obj.goal.ownerId === p.userId) return ALLOW;
-      if (podCan(p, obj.goal.podId, "goal.bind_pod_goal")) return ALLOW;
-      if (obj.hasTransfer) return ALLOW;
-      return deny("alignment_required", "Ask the goal's owner to approve working toward it first.");
-    }
-
-    case "pod.manage_members": {
-      if (obj.kind !== "pod") return hidden();
-      // A viewer changes nothing, whatever team role is stored for them: the workspace role is checked first.
-      if (p.wsRole === "viewer") return roleDenied(p);
-      if (wsCan(p, "workspace.manage") || podCan(p, obj.podId, "pod.manage_members")) return ALLOW;
-      return deny("not_team_lead", "Only a workspace owner or the team's lead can change its members.");
-    }
-
-    case "session.manage":
-      if (obj.kind !== "session") return hidden();
-      return obj.ownerId === p.userId ? ALLOW : hidden();
-
-    case "session.stop":
-      if (obj.kind !== "session") return hidden();
-      if (obj.ownerId === p.userId || wsCan(p, "session.stop_any")) return ALLOW;
-      return hidden();
-
-    case "alignment.read":
-      if (obj.kind !== "alignment") return hidden();
-      return obj.involved.includes(p.userId) ? ALLOW : hidden();
-  }
-}
+export const authorize = nativeAuthorize as (principal: PolicyPrincipal, action: Action, object: PolicyObject) => Decision;
+export const canReadGoal = nativeCanReadGoal as (principal: PolicyPrincipal, goal: GoalObject) => boolean;
+export const canBind = nativeCanBind as (principal: PolicyPrincipal, goal: GoalObject, hasTransfer: boolean) => boolean;

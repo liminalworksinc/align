@@ -1,0 +1,70 @@
+{
+  "schema": "align/b17-b28-published-functional-closure@1",
+  "passed": true,
+  "observed_utc": "2026-11-13T16:38:00.400773+00:00",
+  "source_checkpoint": "0eeddc0763db744e30ade0439de82412a4c858ba",
+  "source_tree": "d03c69e8acce6b1b742b0e08b3af3a9fbc8cab68",
+  "normal_review_enabled": true,
+  "review_bypass": false,
+  "exact_head_green_CI": [
+    {
+      "name": "verify",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "details_url": "https://github.com/liminalworksinc/align/actions/runs/43463475438/job/132016298564"
+    },
+    {
+      "name": "rebased-on-main",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "details_url": "https://github.com/liminalworksinc/align/actions/runs/43463475600/job/132016299165"
+    },
+    {
+      "name": "rebased-on-main",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "details_url": "https://github.com/liminalworksinc/align/actions/runs/43463845452/job/132017569267"
+    }
+  ],
+  "PR": "https://github.com/liminalworksinc/align/pull/58",
+  "draft": true,
+  "closed_native_boundaries": 16,
+  "closed_intentionally_retained_boundaries": 10,
+  "total_closed_boundaries": 26,
+  "remaining_boundaries": [
+    "B17",
+    "B18",
+    "B19",
+    "B22",
+    "B28"
+  ],
+  "libraries": 71,
+  "application_checks": 1917,
+  "image_checks": 42,
+  "additional_HTTP_SQLite_checks": 18,
+  "receipt": "sha256:846205aba5f1adb37e07f9b44410575eea26424dd995ff26b543db23075c03fa",
+  "source_identity": "sha256:29f6f3bd1e58b922daef50493920b433890980ca96685ca51b0b5a9879a20ca3",
+  "open_unique_findings": 41,
+  "high": 10,
+  "medium": 29,
+  "findings_accepted_or_dismissed": false,
+  "operator_security_acceptance": false,
+  "public_tester_deployed": false,
+  "documentation_followup_requires_normal_publication": true,
+  "closure_scope": "functional migration and publication only",
+  "closure_timing_finding": "f_3be779b6500e",
+  "operator_decision_on_closure_timing_pending": false,
+  "state": "functional acceptance and publication complete; authority-transfer closure deferred",
+  "authority_transfer_closure_pending": [
+    "B17",
+    "B28"
+  ],
+  "closure_timing_findings": [
+    "f_3be779b6500e",
+    "f_3c777d69c642"
+  ],
+  "low": 2,
+  "native_functionally_accepted_boundaries": 18,
+  "operator_decision": "Keep both pending security review",
+  "operator_security_review_pending": true
+}

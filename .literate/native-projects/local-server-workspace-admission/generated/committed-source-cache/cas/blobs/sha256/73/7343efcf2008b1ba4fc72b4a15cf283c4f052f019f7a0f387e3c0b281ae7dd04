@@ -1,0 +1,1 @@
+{"name":"server_workspace_admission","type":"commonjs","exports":{"./create_access":"./create_access.js","./create_creation":"./create_creation.js","./create_disposable":"./create_disposable.js"}}

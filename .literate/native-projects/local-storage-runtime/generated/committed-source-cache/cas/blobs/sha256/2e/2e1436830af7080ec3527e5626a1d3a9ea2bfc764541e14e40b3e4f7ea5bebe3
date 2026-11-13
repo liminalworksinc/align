@@ -1,0 +1,1 @@
+{"name":"storage_runtime","type":"commonjs","exports":{"./create_store":"./create_store.js"}}
