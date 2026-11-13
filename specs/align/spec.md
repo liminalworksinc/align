@@ -50,3 +50,4 @@ agent hooks and screens), not the framework, hosting, or language choices.
 - `metrics` — content-free product events, operator-recorded LOIs and the operator's metrics report
 - `local-agent` — the `align` CLI, its Claude Code and Codex hooks, the one-pass sync and local metering
 - `interface` — the web app under `/app` and the OAuth consent page
+- `work-record` — stamps tying agent commits, PRs and files to the plan version in force, and the work record of each shared session per plan version with its review (specified, not built)
