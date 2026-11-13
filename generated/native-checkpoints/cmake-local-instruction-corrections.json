@@ -114,6 +114,6 @@
   "normal_review_completed": false,
   "exact_head_CI_green": false,
   "published": false,
-  "all36_findings_undecided": true,
-  "independent_or_operator_security_accepted": false
+  "independent_or_operator_security_accepted": false,
+  "all37_findings_undecided": true
 }

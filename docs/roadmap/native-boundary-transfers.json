@@ -3740,7 +3740,7 @@
     "image_passed": 42,
     "additional_HTTP_SQLite_passed": 18,
     "libraries": 71,
-    "all36_findings_undecided": true,
-    "normal_review_publication_and_exact_head_CI_pending": true
+    "normal_review_publication_and_exact_head_CI_pending": true,
+    "all37_findings_undecided": true
   }
 }

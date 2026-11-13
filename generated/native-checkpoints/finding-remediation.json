@@ -78,7 +78,7 @@
   "combined_image_passed": 42,
   "combined_source_identity": "sha256:29f6f3bd1e58b922daef50493920b433890980ca96685ca51b0b5a9879a20ca3",
   "current_parent_receipt": "sha256:846205aba5f1adb37e07f9b44410575eea26424dd995ff26b543db23075c03fa",
-  "current_open_ledger_entries": 36,
+  "current_open_ledger_entries": 37,
   "current_finding_ids": [
     "f_c741821f2f4a",
     "f_b36c3d29ef7c",
@@ -115,7 +115,8 @@
     "f_2ed16557a584",
     "f_e011dbf27d3a",
     "f_e8e57827838b",
-    "f_08d59162f001"
+    "f_08d59162f001",
+    "f_1f3a15117968"
   ],
   "current_checkpoint": "generated/native-checkpoints/schema-version-guard.json",
   "combined_additional_HTTP_SQLite_passed": 18,
@@ -134,6 +135,6 @@
   "normal_review_completed": false,
   "exact_head_CI_green": false,
   "published": false,
-  "all36_findings_undecided": true,
-  "independent_or_operator_security_accepted": false
+  "independent_or_operator_security_accepted": false,
+  "all37_findings_undecided": true
 }

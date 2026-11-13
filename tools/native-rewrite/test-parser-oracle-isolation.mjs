@@ -52,6 +52,9 @@ try{
  rejected('wrong-parser',"function create_trust_text_parser(resources){return {parseInline:function parseInline(text,opts){return [];},parseMarkdown:function parseMarkdown(text,opts){return [];}};}module.exports={create_trust_text_parser};",'Historical observations differ');
  const needle='function create_trust_text_parser(';assert.equal(original.split(needle).length,2);
  rejected('current-only-option-mutation',original.replace(needle,'function base_parser(')+"\nfunction create_trust_text_parser(resources){const api=base_parser(resources),parse=api.parseInline;return {parseInline:function parseInline(text,opts){const value=parse(text,opts);if(opts?.prefix==='current')opts.ownedMutation=true;return value;},parseMarkdown:api.parseMarkdown};}\n",'Additional observations differ');
+ const helperPrefix="const helper=process.mainModule.require('/inputs/legacy-observations.cjs');\n";
+ rejected('observer-helper-truncation',original+'\n'+helperPrefix+"helper.emitBatch=()=>{};\n",'/inputs/judge.cjs');
+ rejected('observer-helper-fabrication',original+'\n'+helperPrefix+"helper.observe=()=>({owned:'fabricated observation'});helper.encode=()=>[];\n",'/inputs/judge.cjs');
  const hostMarker=path.join(work,'forbidden-host-execution');
  const unavailable=invoke("require('node:fs').writeFileSync("+JSON.stringify(hostMarker)+",'forbidden');",{...environment,PATH:''});
  assert.notEqual(unavailable.status,0);assert(unavailable.stderr.includes('Docker runtime unavailable'));assert(!fs.existsSync(hostMarker));

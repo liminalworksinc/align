@@ -4,7 +4,7 @@
 - **Owning queue item:** [ADOPT-002](active-work.md#adopt-002)
 - **Completion / archival evidence:** source navigation prepared for B01 through B17, B19 and B28; B18 and B22 remain pending
 
-The normal reviewer ledger has **36 open findings: ten HIGH and twenty-six MEDIUM**. Their history is preserved while the operator-requested [remediation](native-findings-remediation.md) proceeds. This file records locations and reading commands; it does not accept or dismiss a finding or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
+The normal reviewer ledger has **37 open findings: ten HIGH and twenty-seven MEDIUM**. Their history is preserved while the operator-requested [remediation](native-findings-remediation.md) proceeds. This file records locations and reading commands; it does not accept or dismiss a finding or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
 
 Within the earlier 26 findings, 23 have technical correction evidence in the
 [current remediation record](../../generated/native-checkpoints/finding-remediation.json).
@@ -2475,4 +2475,47 @@ No finding has been accepted or dismissed.
 
 ## Current local schema-guard acceptance
 
-The current schema-guard candidate passes 1,917 application checks with no failures or skips, 42 image checks and 18 additional owned HTTP/SQLite controls. Both installed readers verify all 71 qualified projections and the current parent receipt. The B28 current operator closure passes 29 controls across 35 actual Node commands on each host: a cold checkout on macOS and a prepared runtime on Linux. The six focused independent-version controls pass on both hosts. These are functional results. Normal review, publication and exact-head CI remain pending. All 36 findings remain undecided. No independent review or operator security acceptance is asserted.
+The current schema-guard candidate passes 1,917 application checks with no failures or skips, 42 image checks and 18 additional owned HTTP/SQLite controls. Both installed readers verify all 71 qualified projections and the current parent receipt. The B28 current operator closure passes 29 controls across 35 actual Node commands on each host: a cold checkout on macOS and a prepared runtime on Linux. The six focused independent-version controls pass on both hosts. These are functional results. Normal review, publication and exact-head CI remain pending. All 37 findings remain undecided. No independent review or operator security acceptance is asserted.
+
+## Observer-realm review finding
+
+Finding `f_1f3a15117968` is MEDIUM and remains undecided. Its reviewed file is
+`generated/native-evaluator-review/trust-text-parser-split-v3/observer/observer.cjs:14`.
+It concerns migration verification, with no corresponding application check on
+main. The original application parser remains at `lib/trust/markdown.mts:77`
+through 99 on main `4d95f5befa36e98012e8ca69933124a0508a4aaf`; its current
+materialized implementation is `generated/native-review-source/trust_text_parser/create_trust_text_parser.js:1`.
+
+The candidate does execute in the observer's realm and can modify its helpers.
+The enforced boundary is the separate container and private judge, rather than
+the blocked require callback. The canonical consumer wrapper is
+`components/legacy-project-wrapper/implementation/native/trust-text-parser-split-contained-v3.cjs:23`
+through 65. Observer inputs are written at line41; restricted container flags
+are at line51; candidate execution is at line56; private judge inputs and
+execution are at lines58 and59. The child wrapper uses the same bytes.
+
+Nine owned controls now pass. The new probes replace `h.emitBatch` to truncate
+observations and replace `h.observe` plus `h.encode` to fabricate records. Both
+reach rejection in `/inputs/judge.cjs` in the second container. The existing
+controls cover admitted-source parity, private-file reads, host environment,
+forged pass output, supplied digests, wrong parsing, current option mutations
+and unavailable runtime behavior. Private expected digests remain absent from
+failure diagnostics. The committed CI command runs all nine controls.
+
+Read the exact reviewed observer beside its current copy, then inspect the
+actual wrapper boundary and execute the controls:
+
+```sh
+P=generated/native-evaluator-review/trust-text-parser-split-v3/observer/observer.cjs
+diff -y -W 240 <(git show "bb27400e9a150d3889cb5de6b6f3aa362cb64484:$P" | nl -ba | sed -n '1,22p') <(nl -ba "$P" | sed -n '1,22p')
+nl -ba components/legacy-project-wrapper/implementation/native/trust-text-parser-split-contained-v3.cjs | sed -n '23,65p'
+python3 tools/native-rewrite/export-parser-evaluator-review.py --check
+node tools/native-rewrite/test-parser-oracle-isolation.mjs
+```
+
+These observations establish the tested private-judging boundary. They do not
+establish general observer integrity or complete source fidelity. The operator's
+review remains open. The canonical wrapper, generated library, private expected
+observations and current application inputs are unchanged. The current full
+application and image results remain recorded; normal publication and exact-head
+CI are pending. No finding is accepted or dismissed.

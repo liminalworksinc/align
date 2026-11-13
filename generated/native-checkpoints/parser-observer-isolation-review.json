@@ -1,0 +1,24 @@
+{
+  "schema": "align/parser-observer-review-controls@1",
+  "finding": "f_1f3a15117968",
+  "state": "owned-functional-controls-pass-operator-review-open",
+  "passed": true,
+  "controls": 9,
+  "new_controls": [
+    "observer-helper-truncation",
+    "observer-helper-fabrication"
+  ],
+  "new_controls_rejected_in_private_judge": true,
+  "canonical_wrapper_sha256": "403396699778c281bb9b11029a7b0e35b98f539b0a892b167c19ae7f01d4aa14",
+  "canonical_wrapper_unchanged": true,
+  "candidate_remains_in_observer_realm": true,
+  "candidate_execution_only_in_restricted_container": true,
+  "private_expectations_only_in_separate_judge": true,
+  "private_digests_absent_from_failure_diagnostics": true,
+  "observer_integrity_or_general_source_fidelity_not_claimed": true,
+  "check": "node tools/native-rewrite/test-parser-oracle-isolation.mjs",
+  "control_sha256": "02b40332f1187287d0c020ee3bcff71e220849b94454034757a114780edeacb2",
+  "application_inputs_unchanged": true,
+  "all37_findings_undecided": true,
+  "independent_or_operator_security_acceptance": false
+}

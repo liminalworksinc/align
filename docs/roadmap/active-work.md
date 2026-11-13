@@ -1390,3 +1390,5 @@ The findings ledger now contains 36 undecided entries. CLI identity qualificatio
 and separate cached-source admission pass; parent integration remains pending.
 
 Current ADOPT-002 checkpoint: the independent schema guard now passes six controls on each host, all 1,917 application checks, 42 image checks and 18 additional HTTP/SQLite checks. Both installed readers verify all 71 qualified projections and the current parent receipt. The B17 and B28 current functional candidates await normal review, publication and exact-head CI. The published closure baseline stays 26 of 31. Next action: publish this checkpoint through normal review. All 36 findings remain undecided.
+
+Normal review added undecided observer finding f_1f3a15117968 and the transport stopped before upload. Nine focused controls pass, including private-judge refusal after helper truncation and fabrication. Application inputs and the accepted receipt remain unchanged. The guide now covers all 37 findings. Next ADOPT-002 action remains normal checkpoint publication; operator security review stays open.
