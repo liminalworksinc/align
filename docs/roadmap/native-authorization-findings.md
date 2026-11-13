@@ -4,7 +4,7 @@
 - **Owning queue item:** [ADOPT-002](active-work.md#adopt-002)
 - **Completion / archival evidence:** source navigation prepared for B01 through B17, B19 and B28; B18 and B22 remain pending
 
-The normal reviewer ledger has **32 open findings: ten HIGH and twenty-two MEDIUM**. Their history is preserved while the operator-requested [remediation](native-findings-remediation.md) proceeds. This file records locations and reading commands; it does not accept or dismiss a finding or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
+The normal reviewer ledger has **35 open findings: ten HIGH and twenty-five MEDIUM**. Their history is preserved while the operator-requested [remediation](native-findings-remediation.md) proceeds. This file records locations and reading commands; it does not accept or dismiss a finding or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
 
 Within the earlier 26 findings, 23 have technical correction evidence in the
 [current remediation record](../../generated/native-checkpoints/finding-remediation.json).
@@ -2101,7 +2101,10 @@ The current placeholder expansion is at `lib/trust/markdown.mts:91` on main
 `trust_text_parser/create_trust_text_parser.js:22`. The unchanged URL
 policy, slug and plain-text helper owners remain in `trust_markdown`; their earlier
 source pairs remain exact. The parser preserves the prior admitted root-list
-indentation fix, all 27,682 historical parser observations, and 37 new controls.
+indentation fix, all 27,832 historical parser observations, and 37 new controls.
+The historical fixture's count label says 27,682, but its eight range lengths
+sum to 27,832. The raw-output measurement preserves the accepted hash and all
+range lengths; no observation was added or removed by this count correction.
 It adds no permission, validation or rate-limit authority. No finding is decided.
 
 Read the punctuation and list behavior from both implementations:
@@ -2262,3 +2265,123 @@ incorrect public alias signatures, so that candidate is held before admission.
 All32 findings remain undecided. This navigation and correction plan supplies no
 independent review, acceptance, dismissal or operator security approval. The
 application composition and its previously recorded acceptance remain unchanged.
+
+## Normal review of the accepted composition: third commit
+
+The normal review of `5eb639f7cc893276d4f2b1210282561ff5f67f71` completed
+135 complete-diff read passes and three verification calls. It sealed three
+additional MEDIUM findings. The push stopped before upload because those IDs
+needed this navigation. The two preceding commit reviews completed with no
+new findings. The ledger now has 35 undecided findings; earlier counts in this
+file remain historical snapshots. No review bypass or disposition is recorded.
+
+| Finding | Original on main | Current location and materialized application scope | Read side by side |
+| --- | --- | --- | --- |
+| `f_2ed16557a584`: repeated CMake builds can skip a new export path | Current main `4d95f5be` contains the same inherited build instruction at `skills/specification-to-source/cmake-build-system/SKILL.md:66` through81. This is a generation instruction, with no original application authorization check. | Reviewed locator `.literate/native-projects/local-storage-refresh-schema/skills/specification-to-source/cmake-build-system/SKILL.md:69`. No materialized application guard corresponds to this instruction. The actual selected JavaScript source has `storage_refresh_schema/extend_device_refresh_schema.js:1`; its source SBOM selects JavaScript/Node and the portable JavaScript skill, not CMake. The inherited defect remains unfixed. | Use the first command below; inspect the separately recorded selected dependency names. |
+| `f_e011dbf27d3a`: POST_BUILD does not rerun for an up-to-date target | The same main inherited skill at `skills/specification-to-source/cmake-build-system/SKILL.md:66` through81. There is no relocated application check to invent. | Reviewed locator `.literate/native-projects/local-trust-text-parser/skills/specification-to-source/cmake-build-system/SKILL.md:76`. Its selected source SBOM also uses JavaScript/Node and excludes CMake. The actual parser is `trust_text_parser/create_trust_text_parser.js:1`. The inherited instruction is preserved and this finding remains open. | Use the second command below. This comparison documents scope and does not adjudicate the finding. |
+| `f_e8e57827838b`: candidate code can read the private oracle | The private-oracle loader is authored migration verification, with no original main application security check. The original parser itself is `lib/trust/markdown.mts:77` through99 on main `4d95f5be`. | `components/legacy-project-wrapper/implementation/native/trust-text-parser-contained-v2.cjs:83` invokes candidate source with a host-realm Function constructor inside the container. The canonical child oracle selects the same contained evaluator. The materialized product parser remains `trust_text_parser/create_trust_text_parser.js:1`, independently readable below; the defect concerns its evaluator authority. | Read the exact reviewed loader with the third command, then compare original and generated parser code using `pair_current lib/trust/markdown.mts 77 99 trust_text_parser/create_trust_text_parser.js 1 90`. |
+
+```sh
+P=skills/specification-to-source/cmake-build-system/SKILL.md
+diff -y -W 240   <(git show "4d95f5befa36e98012e8ca69933124a0508a4aaf:$P" | nl -ba | sed -n '60,84p')   <(nl -ba ".literate/native-projects/local-storage-refresh-schema/$P" | sed -n '53,78p')
+diff -y -W 240   <(git show "4d95f5befa36e98012e8ca69933124a0508a4aaf:$P" | nl -ba | sed -n '60,84p')   <(nl -ba ".literate/native-projects/local-trust-text-parser/$P" | sed -n '60,84p')
+P=components/legacy-project-wrapper/implementation/native/trust-text-parser-contained-v2.cjs
+git show "5eb639f7cc893276d4f2b1210282561ff5f67f71:$P" | nl -ba | sed -n '74,90p'
+nl -ba generated/native-review-source/trust_text_parser/create_trust_text_parser.js | sed -n '1,90p'
+cat generated/native-checkpoints/cmake-selected-scope.json
+cat generated/native-checkpoints/private-oracle-read-control.json
+```
+
+The CMake behavior is also stated in the [official build-event contract](https://cmake.org/cmake/help/latest/command/add_custom_command.html#build-events):
+a POST_BUILD command participates in building its target and does not establish
+an always-run export action. Neither selected library uses that generation skill.
+Its inherited instruction remains unchanged because framework work is outside
+the operator's current scope. This is scope evidence, not a fix or dismissal.
+
+The owned negative control reproduced the oracle exposure with the exact current
+contained evaluator. The candidate read 159,434 bytes at `/inputs/oracle.cjs` and
+reported only a length, digest and verifier-marker Boolean. Its digest exactly
+matched the wrapper's pinned inner verifier. No private corpus was printed and
+no host file, credential, network or Docker socket was accessed. The candidate
+ran only inside the existing read-only, unprivileged container with unchanged
+limits. The control exited nonzero and records security_control_satisfied=false.
+Container isolation of host data therefore does not prove private-oracle
+isolation. A corrected authored evaluator and refreshed current acceptance are
+required before this correction can be claimed. Generated product code has not
+been patched, and no application exploit is asserted.
+
+The separate core correction passed its runtime qualification and six alias
+type checks. An expanded parameter and return comparison of all 24 functions found a remaining
+nullable soft-delete actor declaration mismatch. That admitted source is held
+from parent integration. Its corrected authored revision is prepared, but the
+next generation stopped before producing source because the coding CLI could
+not refresh its login token. The separate schema 24 guard is admitted and passes
+portable current acceptance. Neither is included in this unchanged application composition of 70 libraries yet.
+
+All 35 review findings remain undecided. The normal ledger history, earlier
+acceptance receipts and failed candidates are preserved. This file supplies no
+acceptance, dismissal, independent review or operator security approval.
+
+## Local correction of the parser private-oracle exposure
+
+The current consumer now selects
+`components/legacy-project-wrapper/implementation/native/trust-text-parser-split-contained-v3.cjs`.
+Candidate execution starts at line56. It receives only the observer, case inputs,
+three admitted helpers and the candidate package. The private judge is written
+to a separate directory at line58 and runs in a second container at line59,
+after candidate execution has ended. Each container has its own read-only bind
+mount. The existing image, user, network, memory, CPU, PID and output bounds are
+preserved, and both stages share one 50-second deadline. The compressed raw
+observations occupy 1,919,197 bytes within the existing 4 MiB transport cap.
+Decompression has a separate 64 MiB expansion bound. The judge hashes raw
+observation bytes and never evaluates candidate code or trusts a reported digest.
+
+Read the failed loader, the corrected boundary and both extracted stages:
+
+```sh
+git show 5eb639f7cc893276d4f2b1210282561ff5f67f71:components/legacy-project-wrapper/implementation/native/trust-text-parser-contained-v2.cjs | nl -ba | sed -n '74,90p'
+nl -ba components/legacy-project-wrapper/implementation/native/trust-text-parser-split-contained-v3.cjs | sed -n '23,65p'
+nl -ba generated/native-evaluator-review/trust-text-parser-split-v3/observer/observer.cjs
+nl -ba generated/native-evaluator-review/trust-text-parser-split-v3/judge.cjs
+python3 tools/native-rewrite/export-parser-evaluator-review.py --check
+node tools/native-rewrite/test-parser-oracle-isolation.mjs
+```
+
+Both the original-backed parser and exact admitted parser retain all eight
+historical hashes and the accepted 45-record aggregate. The actual historical
+range lengths sum to 27,832, followed by 37 current observations. The old
+fixture's metadata label undercounts those ranges by 150. This correction
+changes no range, observation or accepted hash. A separate pinned observation
+also checks the public surface and the 23 current option-mutation snapshots.
+
+The [initial split controls](../../generated/native-checkpoints/private-oracle-split-controls.json)
+reject private reads, forged pass output, supplied digests, missing, extra and
+duplicate records, truncation, unexpected objects and decompression expansion.
+The [semantic controls](../../generated/native-checkpoints/private-oracle-semantic-controls.json)
+reject an empty parser and a mutation limited to the newer cases. Candidate code
+still has access to its observer and inputs. This establishes private judging
+outside candidate execution and does not establish observer integrity or general
+source fidelity.
+
+Self-review also reproduced a private digest appearing in a failed comparison's
+diagnostics. Boolean comparisons now retain the failure label without printing
+private expected values. The
+[current seven controls](../../generated/native-checkpoints/private-oracle-current-controls.json)
+check parity, private-file isolation, forged output, supplied digests, wrong
+parser behavior, current-only option mutation and unavailable runtime behavior.
+Every rejection also checks that private digests are absent from diagnostics.
+CI runs this committed control script and checks the readable observer/judge
+copies. The earlier split proofs and diagnostics remain preserved as history.
+
+The [current child acceptance](../../generated/native-checkpoints/private-oracle-current-acceptance.json)
+reuses the same seven admitted source members, passes six generated tests and
+produces receipt `sha256:7c0a08c213d13dbd8ebbf1fc3852b17442f98eeba8db5c4aaf47ebd1425bb5ef`.
+The existing registered child keeps its definition, qualification evidence and
+source cache. Only authored acceptance inputs, documentation and its current
+receipt change. The other 69 consumer records remain byte-identical. The actual
+product materializer passes the corrected parser's acceptance case. Combined
+application/image acceptance, normal publication and exact-head CI remain
+pending; the earlier full-suite results do not attest this changed evaluator.
+The private-oracle read control and failed evaluator remain preserved. All 35
+findings, including this corrected finding and the two inherited CMake findings,
+remain undecided.

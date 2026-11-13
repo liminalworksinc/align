@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "controls": [
+    {
+      "control": "empty-parser",
+      "rejected": true,
+      "reason": "Historical observations differ"
+    },
+    {
+      "control": "current-only-option-mutation",
+      "rejected": true,
+      "reason": "Additional observations differ"
+    }
+  ],
+  "candidate_host_execution": false,
+  "generated_runtime_changed": false,
+  "original45_record_golden_unchanged": true
+}

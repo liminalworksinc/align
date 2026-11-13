@@ -1,7 +1,7 @@
 {
   "schema": "align/readable-native-source@1",
   "authority": "review-copy-only",
-  "library_manifest_sha256": "bccb949469ac0c981a8b611f6b51da48d79d0a7ffad0d8a02677be710cd3a225",
+  "library_manifest_sha256": "ddb94f5dc7e602d4f1c0d261d1c1bd523ad3f2953e51a204dc76bf9326346deb",
   "libraries": [
     {
       "component": "agent-envelope",

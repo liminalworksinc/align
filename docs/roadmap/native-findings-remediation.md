@@ -4,6 +4,50 @@
 - **Owning queue item:** [ADOPT-002](active-work.md#adopt-002)
 - **Completion / archival evidence:** pending implementation and normal review
 
+## Current evaluator and event corrections
+
+The latest normal review leaves 35 undecided findings. The
+[findings guide](native-authorization-findings.md) maps every entry. Its newest
+three concern two inherited, unselected CMake instructions and a demonstrated
+private-oracle read in the trust parser evaluator. The CMake instructions remain
+unfixed; the selected JavaScript builds do not use them. No framework source is
+changed and no finding is accepted or dismissed.
+
+Repair the parser evaluator before the next publication. Candidate execution
+must receive only case inputs, admitted helpers and a golden-free observer.
+Keep expected observations and the comparison outside the candidate container.
+The trusted comparison must hash the raw observations itself, rather than trust
+a candidate-supplied digest or pass report. Preserve the historical 27,832
+parser observations and 37 newer observations, aggregated into 45 records.
+The historical fixture's metadata undercounts the ranges by 150; the exact
+range lengths and unchanged accepted hash establish the actual count.
+Measure the raw output first, preserve the existing resource bounds, then prove
+old and new hash parity and reject owned read and forgery probes. Preserve the
+failed evaluator and its reproduction as evidence. The other library evaluators
+retain their existing evidence; this repair does not establish private-oracle
+isolation for them.
+
+The local parser correction now passes exact original and admitted-source parity,
+nine data and forgery rejection controls, two semantic regression controls and
+the actual product materializer. Ordinary cached rebuilding reuses all seven
+admitted source members, passes six generated tests, and produces a current
+receipt without a model call or repair. Expected results and the judge are
+outside the candidate container, and failed comparisons no longer print private
+expected digests. The existing registered child keeps its exact
+definition, qualification and source cache; its authored acceptance inputs are
+updated in place. The other 69 consumer records remain identical. Full combined
+application/image acceptance and normal publication remain pending. Read the
+extracted observer and judge with
+`python3 tools/native-rewrite/export-parser-evaluator-review.py --check`.
+
+The event correction also remains pending integration. The schema-24 child is
+admitted and portable. The previous core child is held because its nullable
+actor declaration differs from the actual caller. The corrected contract's
+qualification stopped before generation when the CLI could not refresh its
+login token. Resume that exact intent after authentication is restored, then
+require all 24 public function types and runtime controls before admission.
+Continue local CLI preparation while authentication is pending.
+
 The operator requested: "fix the open findings fully", followed by "then finish
 as many of the remaining boundaries as possible." This authorizes remediation
 within Align. Shruti's sign-off is not a build dependency. The earlier instruction
@@ -50,8 +94,9 @@ acceptance remains preserved. No receipt is patched or reattributed.
 
 The corrections below are implemented and have focused local evidence. Their
 normal publication and the combined checkpoint's full acceptance remain pending.
-The reviewer ledger preserves 26 undecided findings. The earlier 23-entry
-correction record is historical; the latest three are indexed below. Its API has only human
+The reviewer ledger now preserves 35 undecided findings. The earlier 23-entry
+and 26-entry correction records are historical; the original table is preserved
+below, and the findings guide maps all current entries. Its API has only human
 accept/dismiss overrides, so no override is written to represent a code fix.
 These entries remain available alongside the correction evidence. No finding
 is accepted or dismissed.

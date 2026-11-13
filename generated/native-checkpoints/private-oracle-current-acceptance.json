@@ -1,0 +1,26 @@
+{
+  "schema": "align/parser-split-current-acceptance@2",
+  "passed": true,
+  "observed_utc": "2026-11-13T01:50:55.834925+00:00",
+  "receipt_identity": "sha256:7c0a08c213d13dbd8ebbf1fc3852b17442f98eeba8db5c4aaf47ebd1425bb5ef",
+  "exact_admitted_source_members": 7,
+  "no_source_or_historical_qualification_change": true,
+  "model_calls_not_attempted": true,
+  "exact_source_bytes_verified_after_rebuild": true,
+  "repair_attempts": 0,
+  "source_generation": {
+    "sha256:01412d2df5bb05704f8d729b84cd491f34f8e79bda639283874256074cb1e82d": "reused"
+  },
+  "generated_tests": {
+    "failed": 0,
+    "passed": 6,
+    "skipped": 0,
+    "total": 6
+  },
+  "old_acceptance_preserved": true,
+  "private_goldens_mounted_in_candidate": false,
+  "private_expected_digests_removed_from_failure_diagnostics": true,
+  "normal_parent_registration_and_integrated_acceptance_pending": true,
+  "ROOT_and_framework_unchanged": true,
+  "operator_security_acceptance_claimed": false
+}

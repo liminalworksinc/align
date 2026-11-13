@@ -1,0 +1,21 @@
+{
+  "schema": "align/parser-current-isolation-controls@1",
+  "observed_utc": "2026-11-13T01:52:02.397952+00:00",
+  "passed": true,
+  "controls": 7,
+  "control_names": [
+    "admitted-source-parity",
+    "private-read",
+    "forged-pass",
+    "digest-is-not-observations",
+    "wrong-parser",
+    "current-only-option-mutation",
+    "runtime-unavailable-fails-closed"
+  ],
+  "wrapper_sha256": "403396699778c281bb9b11029a7b0e35b98f539b0a892b167c19ae7f01d4aa14",
+  "command": "node tools/native-rewrite/test-parser-oracle-isolation.mjs",
+  "private_expected_digests_absent_from_failure_diagnostics": true,
+  "candidate_host_execution": false,
+  "same_agent_observation": true,
+  "independent_or_operator_security_acceptance": false
+}

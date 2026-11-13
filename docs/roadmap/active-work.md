@@ -181,10 +181,18 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   [finding remediation plan](native-findings-remediation.md); preserve normal
   review and distinguish implemented fixes from operator security acceptance.
   Checkpoint `51dd7e5e4c8ead355655f865987da415750abfcd` completed normal
-  publication and review with 26 undecided findings. The three newest concern
+  publication and review with 26 undecided findings. At that checkpoint the three newest concerned
   staging authorization and two evaluator escapes. Their local corrections and
   limits are in the [findings guide](native-authorization-findings.md) and
   [containment record](../architecture/native-evaluator-containment.md).
+  Later normal reviews bring the current count to 35 undecided findings. The
+  parser evaluator now separates candidate observations from private expected
+  results, preserves the accepted hashes, rejects owned forgery and mutation
+  controls, and passes cached child acceptance without changing generated source.
+  Combined application/image acceptance and publication remain pending. The
+  corrected core qualification is waiting for the coding CLI login refresh;
+  the schema-24 child is admitted but has not been integrated. Two current-v2
+  CLI packages are promoted for qualification with 54 and 75 original controls.
 - **Next action:** Reconcile native providers with merged main
   `4d95f5befa36e98012e8ca69933124a0508a4aaf`, preserve the earlier goal-cap
   correction, complete current contained acceptance, then application/image

@@ -1,0 +1,21 @@
+{
+  "schema": "align/private-oracle-exposure-owned-control@1",
+  "observed_utc": "2026-11-13T00:55:16.495493+00:00",
+  "finding": "f_e8e57827838b",
+  "reproduced": true,
+  "security_control_satisfied": false,
+  "process": "Contained Linux candidate; existing wrapper, image and security/resource limits unchanged",
+  "observed": {
+    "bytes": 159434,
+    "sha256": "2ac875877fca45f12a45ddc5b01a8d2ff5f72bd14be88ad2d13e8d75830d8e77",
+    "privateVerifierMarkerPresent": true
+  },
+  "oracle_sha256": "a5218072ca6ead52453b228c407cb47f4cd003cc4254a10b6099b5ead321ef29",
+  "probe_exit_code": 1,
+  "private_data_printed": false,
+  "host_credentials_or_files_accessed": false,
+  "candidate_host_execution": false,
+  "application_or_generated_source_patched": false,
+  "source_authority_or_finding_disposition_changed": false,
+  "next": "Repair authored evaluator process isolation and re-establish exact current acceptance before publication; keep findings undecided."
+}

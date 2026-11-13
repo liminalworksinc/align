@@ -21,3 +21,7 @@ Release scope is declared in [release goals](release-goals.json).
 The consuming project's ADOPT-002/B21 owns the next integration step.
 The current receipt proves local cache consumption and acceptance when present
 and current. It does not attest the consuming application or operator review.
+
+## Current parser evaluator correction
+
+Use the separate-container observer and judge for current acceptance of the exact admitted parser. Historical qualification remains unchanged. All 27,832 historical observations and 37 current controls retain the accepted 45-record hash. The observer can be inspected or changed by candidate code; only private expected bytes and judging are isolated. Normal parent registration and integrated acceptance remain pending.

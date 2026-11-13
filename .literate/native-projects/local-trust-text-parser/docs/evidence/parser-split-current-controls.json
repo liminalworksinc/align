@@ -1,0 +1,57 @@
+{
+  "schema": "align/parser-split-evaluator-controls@1",
+  "observed_utc": "2026-11-13T01:17:57.724972+00:00",
+  "passed": true,
+  "positive": [
+    {
+      "source": "original",
+      "passed": true
+    },
+    {
+      "source": "admitted",
+      "passed": true
+    }
+  ],
+  "historical_records": 27832,
+  "current_records": 37,
+  "outer_records": 45,
+  "existing_outer_hash_preserved": true,
+  "additional_mutation_and_surface_observations": true,
+  "owned_private_read": {
+    "files": [
+      "current-documents.json",
+      "current-observations.cjs",
+      "historical-inputs.json",
+      "legacy-observations.cjs",
+      "observer.cjs",
+      "plain.js",
+      "safe_href.js",
+      "slug.js",
+      "source"
+    ],
+    "oldOracle": "ENOENT",
+    "judge": "ENOENT",
+    "hostCanary": null,
+    "uid": 65532,
+    "socket": "ENOENT"
+  },
+  "rejected_controls": [
+    "fake-pass-json",
+    "fake-digest",
+    "zero-exit-no-observations",
+    "judge-missing-record",
+    "judge-extra-record",
+    "judge-duplicate-record",
+    "judge-truncated-gzip",
+    "judge-untrusted-object",
+    "judge-expansion-bomb"
+  ],
+  "runtime_unavailable_fails_closed": true,
+  "candidate_host_execution": false,
+  "private_goldens_mounted_in_candidate": false,
+  "candidate_reports_or_digests_trusted": false,
+  "candidate_observer_integrity_claimed": false,
+  "generated_runtime_changed": false,
+  "wrapper_sha256": "8cc2103d7d70997d692a904573a83f55e3ffed3d41e14d383378fd6979979e24",
+  "normal_acceptance_refresh_and_review_pending": true
+}

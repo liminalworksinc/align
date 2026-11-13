@@ -27089,10 +27089,10 @@
         ]
       },
       "oracle": "trust-text-parser.json",
-      "verifier": "trust-text-parser-contained-v2.cjs",
+      "verifier": "trust-text-parser-split-contained-v3.cjs",
       "verification_files": {
-        "trust-text-parser.json": "6a9d1f5b8aad43b3e4d31e74aa4f62327dcb1e33379aaf0890258b11f16d3145",
-        "trust-text-parser-contained-v2.cjs": "a5218072ca6ead52453b228c407cb47f4cd003cc4254a10b6099b5ead321ef29"
+        "trust-text-parser.json": "ac1358c53cb5bed89c222a4b27c8ea1aadf0fcd1e6c24f27f11eed42e7a07077",
+        "trust-text-parser-split-contained-v3.cjs": "403396699778c281bb9b11029a7b0e35b98f539b0a892b167c19ae7f01d4aa14"
       }
     }
   ]

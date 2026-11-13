@@ -36,3 +36,5 @@ Initialize from an organization or product repository with
 executing repository code, then records exact commits and inherited catalog provenance.
 Use `litai update` to re-resolve that chain and `litai reparent URL|none` to review an
 explicit parent change.
+
+- [Current parser evaluator controls](evidence/parser-split-current-controls.json)
