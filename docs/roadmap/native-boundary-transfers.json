@@ -1,6 +1,6 @@
 {
   "schema": "align/native-boundary-transfer-review@4",
-  "observed_utc": "2026-11-11T20:50:32.499025+00:00",
+  "observed_utc": "2026-11-13T16:38:00.400773+00:00",
   "review_kind": "Same-agent full source, package and measured acceptance review under operator delegation. B13 confirmation remains recorded. No independent maintainer or deployed-tester security acceptance.",
   "accepted_classification_sha256": "236b77cbd13222ec77aac7f3fc9c1d8cccaa6a46b662352ca7a5f5fb7d8ddf87",
   "image_platform": "linux/arm64",
@@ -2779,7 +2779,7 @@
       "functional_acceptance_complete": true,
       "whole_boundary_closed": false,
       "publication_required_before_counting_closed": true,
-      "closure_state": "Current combined functional acceptance passes; normal review, publication, PR body and exact-head CI remain required before closure.",
+      "closure_state": "Current functional acceptance, source navigation, normal publication and exact-head CI pass. The operator directed this boundary to remain pending security review; authority transfer and whole-boundary closure remain false.",
       "required_acceptance_result": "Current candidate: 1917 application, 42 image and 18 additional HTTP/SQLite checks pass; both receipt readers verify 71 qualified projections. Existing original-backed boundary controls remain preserved.",
       "supporting_measured_records": [
         {
@@ -2879,7 +2879,13 @@
       "original_failed_candidates_and_negative_controls_preserved": true,
       "same_agent_review_only": true,
       "independent_maintainer_review_claimed": false,
-      "actual_operator_security_acceptance_claimed": false
+      "actual_operator_security_acceptance_claimed": false,
+      "source_authority_transferred": false,
+      "publication_source_checkpoint": "0eeddc0763db744e30ade0439de82412a4c858ba",
+      "publication_CI_record": "generated/native-checkpoints/b17-b28-publication-closure.json",
+      "publication_gates_satisfied": true,
+      "operator_closure_timing_decision_pending": false,
+      "operator_security_review_pending": true
     },
     {
       "boundary": "B19",
@@ -2962,16 +2968,47 @@
         "operator-shortcuts",
         "server-creation-compatibility"
       ],
-      "cold_caller_controls_each_host": 28,
-      "actual_Node_commands_each_host": 34,
-      "current_result": "generated/native-checkpoints/b19-b28.json",
+      "actual_Node_commands_each_host": 35,
+      "current_result": "generated/native-checkpoints/schema-version-guard.json",
+      "functional_acceptance_complete": true,
+      "whole_boundary_closed": false,
+      "source_authority_transferred": false,
+      "closure_state": "Current functional acceptance, source navigation, normal publication and exact-head CI pass. The operator directed this boundary to remain pending security review; authority transfer and whole-boundary closure remain false.",
+      "findings_navigation": "docs/roadmap/native-authorization-findings.md",
+      "operator_security_acceptance_claimed": false,
+      "required_acceptance_result": "Current candidate: 1917 application, 42 image and 18 additional HTTP/SQLite checks pass; both receipt readers verify 71 qualified projections. Existing original-backed boundary controls remain preserved. Current 13-package,77-file closure passes 29 controls and35 actual Node commands on both hosts: macOS cold checkout and Linux prepared runtime.",
+      "publication_source_checkpoint": "0eeddc0763db744e30ade0439de82412a4c858ba",
+      "publication_CI_record": "generated/native-checkpoints/b17-b28-publication-closure.json",
+      "publication_gates_satisfied": true,
+      "caller_controls_each_host": 29,
+      "cold_checkout_controls_macos": 29,
+      "prepared_runtime_controls_linux": 29,
+      "operator_packages": 13,
+      "operator_files": 77,
+      "operator_closure_timing_decision_pending": false,
+      "operator_security_review_pending": true
+    },
+    {
+      "boundary": "B18",
+      "name": "OAuth and MCP",
+      "closure_kind": "native",
       "functional_acceptance_complete": false,
       "whole_boundary_closed": false,
       "source_authority_transferred": false,
-      "closure_state": "Current combined functional acceptance passes; normal review, publication, PR body and exact-head CI remain required before closure.",
+      "closure_state": "Supporting qualification and admission are partial. Complete current source coverage, parent registration, actual caller integration, complete application and image acceptance, findings navigation and normal publication remain required.",
       "findings_navigation": "docs/roadmap/native-authorization-findings.md",
-      "operator_security_acceptance_claimed": false,
-      "required_acceptance_result": "Current candidate: 1917 application, 42 image and 18 additional HTTP/SQLite checks pass; both receipt readers verify 71 qualified projections. Existing original-backed boundary controls remain preserved. Current 13-package,77-file closure passes 29 controls and35 actual Node commands on both hosts: macOS cold checkout and Linux prepared runtime."
+      "operator_security_acceptance_claimed": false
+    },
+    {
+      "boundary": "B22",
+      "name": "Agent runtime, hooks, sync and CLI",
+      "closure_kind": "native",
+      "functional_acceptance_complete": false,
+      "whole_boundary_closed": false,
+      "source_authority_transferred": false,
+      "closure_state": "Supporting qualification and admission are partial. Complete current source coverage, parent registration, actual caller integration, complete application and image acceptance, findings navigation and normal publication remain required.",
+      "findings_navigation": "docs/roadmap/native-authorization-findings.md",
+      "operator_security_acceptance_claimed": false
     }
   ],
   "public_tester_deployed": false,
@@ -2985,9 +3022,47 @@
     "completed": true,
     "optout_used": false,
     "findings": [
+      "f_c741821f2f4a",
+      "f_b36c3d29ef7c",
+      "f_2f5c23666cec",
+      "f_e35fa336a9f8",
+      "f_5054419f9a29",
+      "f_745f52b800ff",
+      "f_84ce9f54c701",
       "f_4c9283b5ecab",
       "f_456d34de6a82",
-      "f_622b2d74e48e"
+      "f_622b2d74e48e",
+      "f_fcab81184174",
+      "f_202c48750557",
+      "f_2c1e50b9c263",
+      "f_2e78693505d1",
+      "f_09aa12209ec2",
+      "f_eacf8a5e6d43",
+      "f_3c2e305a94d7",
+      "f_4bd94fac41bd",
+      "f_5a0e064cc7ff",
+      "f_d943ad9dd8d1",
+      "f_a53163d0b124",
+      "f_dd723ad9bd62",
+      "f_5c5fc40549da",
+      "f_3ce9f2db2566",
+      "f_a9b7b0880de4",
+      "f_d0fca6e9a3f5",
+      "f_6e478fc0d9b7",
+      "f_efc456f72a8e",
+      "f_7f03bca85eb6",
+      "f_1b582b71e2ae",
+      "f_562447a5a6fb",
+      "f_b402a2b7e0c2",
+      "f_2ed16557a584",
+      "f_e011dbf27d3a",
+      "f_e8e57827838b",
+      "f_08d59162f001",
+      "f_1f3a15117968",
+      "f_3be779b6500e",
+      "f_3c777d69c642",
+      "f_eb5942375245",
+      "f_a78e393c7013"
     ],
     "findings_automatically_dismissed": false,
     "human_authentication_confirmation_before_merge": true,
@@ -3011,7 +3086,7 @@
     }
   },
   "boundaries_with_complete_functional_acceptance": 28,
-  "implementation_boundaries_remaining": 4,
+  "implementation_boundaries_remaining": 3,
   "human_confirmation_required_for_transfer_closure": [],
   "corrected_after_review": "f_fcab81184174",
   "prior_authentication_acceptance": {
@@ -3053,26 +3128,43 @@
     }
   ],
   "publication_record": {
-    "commit": "a902ae752ea9b45b1ea6283f9ff6c68da0d5798a",
+    "commit": "0eeddc0763db744e30ade0439de82412a4c858ba",
+    "tree": "d03c69e8acce6b1b742b0e08b3af3a9fbc8cab68",
     "normal_push_exit_code": 0,
     "review_bypass": false,
     "PR": "https://github.com/liminalworksinc/align/pull/58",
     "is_draft": true,
     "both_CI_checks_successful": true,
-    "source_identity": "sha256:779a0cbe67e7b90dc34646762dd68972f5c88f3a286010115f78c907e1aceb39",
-    "receipt": "sha256:9b0afc6c68863b56253f21f9c82cc8481aee602fdb00cd7002f25fe2f8624244",
-    "open_review_findings": 20,
+    "source_identity": "sha256:29f6f3bd1e58b922daef50493920b433890980ca96685ca51b0b5a9879a20ca3",
+    "receipt": "sha256:846205aba5f1adb37e07f9b44410575eea26424dd995ff26b543db23075c03fa",
+    "open_review_findings": 41,
     "public_qa_gates": 0,
     "operator_security_accepted": false,
-    "tree": "358707d266cd2b8c4e547cd7173f02ae433bc6f3",
     "native_accepted_boundaries": 16,
     "intentionally_retained_boundaries": 10,
     "total_closed_boundaries": 26,
-    "CI": {
-      "verify": "https://github.com/liminalworksinc/align/actions/runs/42759158017/job/129640501766",
-      "rebased-on-main": "https://github.com/liminalworksinc/align/actions/runs/42759158249/job/129640505518"
-    },
-    "source_checkpoint": "c4b853866ff5e130fa294f8e70fe5c0530e87aa4"
+    "CI": [
+      {
+        "name": "verify",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "details_url": "https://github.com/liminalworksinc/align/actions/runs/43463475438/job/132016298564"
+      },
+      {
+        "name": "rebased-on-main",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "details_url": "https://github.com/liminalworksinc/align/actions/runs/43463475600/job/132016299165"
+      },
+      {
+        "name": "rebased-on-main",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "details_url": "https://github.com/liminalworksinc/align/actions/runs/43463845452/job/132017569267"
+      }
+    ],
+    "source_checkpoint": "generated/native-checkpoints/b17-b28-publication-closure.json",
+    "review_findings_snapshot_postdates_publication": true
   },
   "retained_runtime_checkpoint_history": [
     {
@@ -3297,21 +3389,43 @@
       "open_review_findings": 7,
       "public_qa_gates": 0,
       "operator_security_accepted": false
+    },
+    {
+      "commit": "a902ae752ea9b45b1ea6283f9ff6c68da0d5798a",
+      "normal_push_exit_code": 0,
+      "review_bypass": false,
+      "PR": "https://github.com/liminalworksinc/align/pull/58",
+      "is_draft": true,
+      "both_CI_checks_successful": true,
+      "source_identity": "sha256:779a0cbe67e7b90dc34646762dd68972f5c88f3a286010115f78c907e1aceb39",
+      "receipt": "sha256:9b0afc6c68863b56253f21f9c82cc8481aee602fdb00cd7002f25fe2f8624244",
+      "open_review_findings": 20,
+      "public_qa_gates": 0,
+      "operator_security_accepted": false,
+      "tree": "358707d266cd2b8c4e547cd7173f02ae433bc6f3",
+      "native_accepted_boundaries": 16,
+      "intentionally_retained_boundaries": 10,
+      "total_closed_boundaries": 26,
+      "CI": {
+        "verify": "https://github.com/liminalworksinc/align/actions/runs/42759158017/job/129640501766",
+        "rebased-on-main": "https://github.com/liminalworksinc/align/actions/runs/42759158249/job/129640505518"
+      },
+      "source_checkpoint": "c4b853866ff5e130fa294f8e70fe5c0530e87aa4"
     }
   ],
-  "native_accepted_boundaries": 18,
+  "native_accepted_boundaries": 16,
   "intentionally_retained_boundaries": 10,
   "intentionally_retained_source_members": 280,
   "classified_members_in_closed_boundaries": 361,
   "candidate_closure_counts_apply_after_normal_publication": true,
   "current_findings_snapshot": {
-    "count": 26,
-    "high": 9,
-    "medium": 17,
-    "ledger_sha256": "54742c4259c83802c3dcd02ce2333a7d00f8badc36774873a255848fd49202ab",
+    "count": 41,
+    "high": 10,
+    "medium": 29,
+    "ledger_sha256": "3bac98fc0148252eaa93596e8309edbeec1f4c72bbaf5900bec9954b531662cb",
     "overrides": 0,
     "guide": "docs/roadmap/native-authorization-findings.md",
-    "guide_sha256": "fa258c7fb2b0f0578bb1c61064cca415b5d5ccc260b7cf0f5a1c9b83168ea2c9",
+    "guide_sha256": "4ffe5d075604d2c9f2782e756269f755a59f9ce21ff803767bfd6086782412d4",
     "findings": [
       {
         "id": "f_c741821f2f4a",
@@ -3520,10 +3634,131 @@
         "file": ".literate/native-projects/local-server-workspace-admin-routes/verification/acceptance/server-workspace-admin-routes-harness-v3.cjs",
         "line": null,
         "title": "Candidate code can escape the VM sandbox through host resources"
+      },
+      {
+        "id": "f_6e478fc0d9b7",
+        "severity": "medium",
+        "finding_class": "weakened-append-only",
+        "file": ".literate/native-projects/local-server-retention/verification/acceptance/server-retention-contained-v1.cjs",
+        "line": null,
+        "title": "Event attribution fields remain mutable"
+      },
+      {
+        "id": "f_efc456f72a8e",
+        "severity": "medium",
+        "finding_class": "weakened-validation",
+        "file": ".literate/native-projects/local-server-core/verification/acceptance/server-core-contained-v1.cjs",
+        "line": 4,
+        "title": "Unknown prototype names are accepted as events"
+      },
+      {
+        "id": "f_7f03bca85eb6",
+        "severity": "medium",
+        "finding_class": "destructive-partial-mutation",
+        "file": ".literate/native-projects/local-server-core/verification/acceptance/server-core-contained-v1.cjs",
+        "line": null,
+        "title": "Purge mutates data before malformed JSON aborts"
+      },
+      {
+        "id": "f_1b582b71e2ae",
+        "severity": "high",
+        "finding_class": "partial-destructive-purge",
+        "file": "components/legacy-project-wrapper/implementation/native/server-core-contained-v1.cjs",
+        "line": 16,
+        "title": "Malformed device request JSON leaves a partially purged workspace"
+      },
+      {
+        "id": "f_562447a5a6fb",
+        "severity": "medium",
+        "finding_class": "deleted-acceptance-oracle",
+        "file": "components/legacy-project-wrapper/implementation/native/spend-meter.json",
+        "line": null,
+        "title": "Spend meter acceptance oracle is deleted"
+      },
+      {
+        "id": "f_b402a2b7e0c2",
+        "severity": "medium",
+        "finding_class": "weakened-append-only-invariant",
+        "file": "components/legacy-project-wrapper/implementation/native/server-retention-contained-v1.cjs",
+        "line": 5143,
+        "title": "Event trigger allows workspace and actor changes"
+      },
+      {
+        "id": "f_2ed16557a584",
+        "severity": "medium",
+        "finding_class": "stale-artifact-output",
+        "file": ".literate/native-projects/local-storage-refresh-schema/skills/specification-to-source/cmake-build-system/SKILL.md",
+        "line": 69,
+        "title": "Repeated builds can skip copying to a new export path"
+      },
+      {
+        "id": "f_e011dbf27d3a",
+        "severity": "medium",
+        "finding_class": "stale-export-path",
+        "file": ".literate/native-projects/local-trust-text-parser/skills/specification-to-source/cmake-build-system/SKILL.md",
+        "line": 76,
+        "title": "POST_BUILD does not rerun for an up-to-date target"
+      },
+      {
+        "id": "f_e8e57827838b",
+        "severity": "medium",
+        "finding_class": "private-test-exposure",
+        "file": "components/legacy-project-wrapper/implementation/native/trust-text-parser-contained-v2.cjs",
+        "line": 83,
+        "title": "Candidate code can read the private oracle"
+      },
+      {
+        "id": "f_08d59162f001",
+        "severity": "medium",
+        "finding_class": "violated-invariant",
+        "file": "components/legacy-project-wrapper/implementation/lib/v2/core.mts",
+        "line": 133,
+        "title": "SCHEMA_VERSION guard is now derived and cast, and the native core type says 22"
+      },
+      {
+        "id": "f_1f3a15117968",
+        "severity": "medium",
+        "finding_class": "weak-sandbox",
+        "file": "generated/native-evaluator-review/trust-text-parser-split-v3/observer/observer.cjs",
+        "line": 14,
+        "title": "Generated code is evaluated in the observer's own realm with only require stubbed"
+      },
+      {
+        "id": "f_3be779b6500e",
+        "severity": "medium",
+        "finding_class": "premature-authority-transfer",
+        "file": "docs/roadmap/native-boundary-transfers.json",
+        "line": 2881,
+        "title": "B17/B28 marked closed with source authority transferred while 37 findings, 10 high, stay undecided"
+      },
+      {
+        "id": "f_3c777d69c642",
+        "severity": "medium",
+        "finding_class": "self-certified-authority-transfer",
+        "file": "docs/roadmap/native-boundary-transfers.json",
+        "line": 2881,
+        "title": "B17 and B28 source authority moved to generated code while high-severity findings stay undecided"
+      },
+      {
+        "id": "f_eb5942375245",
+        "severity": "low",
+        "finding_class": "violated-invariant",
+        "file": "docs/roadmap/native-boundary-transfers.json",
+        "line": 3139,
+        "title": "Publication record still says 18 native boundaries while the total drops to 26"
+      },
+      {
+        "id": "f_a78e393c7013",
+        "severity": "low",
+        "finding_class": "inconsistent-closure-metadata",
+        "file": "docs/roadmap/native-boundary-transfers.json",
+        "line": 3139,
+        "title": "Publication record still claims 18 native boundaries closed after total dropped to 26"
       }
     ],
     "all_undecided": true,
-    "finding_dispositions_changed": false
+    "finding_dispositions_changed": false,
+    "low": 2
   },
   "supporting_retention_checkpoint": {
     "source_checkpoint": "c4b853866ff5e130fa294f8e70fe5c0530e87aa4",
@@ -3578,7 +3813,7 @@
     "functionally_accepted": true,
     "published": true,
     "published_closed_boundaries_before_checkpoint": 26,
-    "closed_boundaries_after_normal_publication": 27,
+    "closed_boundaries_after_normal_publication": 26,
     "physical_web_libraries": 52,
     "web_private_batches": 1066,
     "operator_packages": 7,
@@ -3594,7 +3829,9 @@
     "no_full_suite_rerun_for_docs": true,
     "findings_guide_sha256": "0ccdc028f3f381e014030e01c45255d2beb70ab3c9122e4819652bc55590c216",
     "whole_boundary_closed": false,
-    "exact_head_green_CI_verified": false
+    "exact_head_green_CI_verified": true,
+    "operator_closure_timing_decision_pending": true,
+    "all41_findings_undecided": true
   },
   "closed_native_boundaries": 16,
   "closed_intentionally_retained_boundaries": 10,
@@ -3740,7 +3977,26 @@
     "image_passed": 42,
     "additional_HTTP_SQLite_passed": 18,
     "libraries": 71,
-    "normal_review_publication_and_exact_head_CI_pending": true,
-    "all37_findings_undecided": true
-  }
+    "normal_review_publication_and_exact_head_CI_pending": false,
+    "all41_findings_undecided": true
+  },
+  "boundary_closure_review": {
+    "finding": "f_3be779b6500e",
+    "state": "operator directed both boundaries to remain pending security review",
+    "closure_count_scope": "functional migration and publication only",
+    "operator_decision_requested_by_finding": "confirm intended closure timing while security findings remain undecided",
+    "operator_decision_received_for_this_finding": true,
+    "operator_security_accepted": false,
+    "application_source_or_provider_changed_by_this_metadata": false,
+    "findings": [
+      "f_3be779b6500e",
+      "f_3c777d69c642"
+    ],
+    "operator_decision": "Keep both pending security review"
+  },
+  "authority_transfer_closure_pending": [
+    "B17",
+    "B28"
+  ],
+  "native_functionally_accepted_boundaries": 18
 }

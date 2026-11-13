@@ -4,7 +4,7 @@
 - **Owning queue item:** [ADOPT-002](active-work.md#adopt-002)
 - **Completion / archival evidence:** source navigation prepared for B01 through B17, B19 and B28; B18 and B22 remain pending
 
-The normal reviewer ledger has **37 open findings: ten HIGH and twenty-seven MEDIUM**. Their history is preserved while the operator-requested [remediation](native-findings-remediation.md) proceeds. This file records locations and reading commands; it does not accept or dismiss a finding or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
+The normal reviewer ledger has **41 open findings: ten HIGH, twenty-nine MEDIUM and two LOW**. Their history is preserved while the operator-requested [remediation](native-findings-remediation.md) proceeds. This file records locations and reading commands; it does not accept or dismiss a finding or record independent review or operator security acceptance. Earlier counts of seven omitted older ledger entries.
 
 Within the earlier 26 findings, 23 have technical correction evidence in the
 [current remediation record](../../generated/native-checkpoints/finding-remediation.json).
@@ -1326,7 +1326,7 @@ The B13 disposable-domain table is an immutable input, not a generated security 
 | B14: Workspaces and sample | Native acceptance recorded | Native operations and relevant check locations indexed above. |
 | B15: Goals and decisions | Native acceptance recorded | Native operations and relevant check locations indexed above. |
 | B16: Sessions, devices and steering | Native acceptance recorded | Native operations and relevant check locations indexed above. |
-| B17: Metrics and retention | Source comparisons and current functional acceptance complete; published checkpoint awaits green exact-head CI | Exact main and separately admitted materialized locations are in the B17 appendix. |
+| B17: Metrics and retention | Current functional acceptance and publication pass on green checkpoint `0eeddc07`; closure awaits the operator decision requested by the normal reviewer | Exact main and separately admitted materialized locations are in the B17 appendix. |
 | B18: MCP, OAuth and stdio relay | Service migration pending | Original source remains authoritative. No generated enforcement counterpart is claimed. Update this file with exact pairs before closure. |
 | B19: HTTP API | Service migration pending | Original source remains authoritative. No generated enforcement counterpart is claimed. Update this file with exact pairs before closure. |
 | B20: Web UI | Approved retained closure, effective with normal supporting publication | Exact retained paths and hashes are in the approved retention list. No check has moved from those paths into a generated library. Retained security-relevant adapter locations are indexed below. |
@@ -1337,7 +1337,7 @@ The B13 disposable-domain table is an immutable input, not a generated security 
 | B25: Language, UI and npm packaging | Approved retained closure, effective with normal supporting publication | Exact retained paths and hashes are in the approved retention list. No check has moved from those paths into a generated library. Retained security-relevant adapter locations are indexed below. |
 | B26: Container and hosting target | Approved retained closure, effective with normal supporting publication | Exact retained paths and hashes are in the approved retention list. No check has moved from those paths into a generated library. Retained security-relevant adapter locations are indexed below. |
 | B27: Tests and independent verifiers | Approved retained closure, effective with normal supporting publication | Exact retained paths and hashes are in the approved retention list. No check has moved from those paths into a generated library. Retained security-relevant adapter locations are indexed below. |
-| B28: Operator commands | Current caller, application and image acceptance complete; published checkpoint awaits green exact-head CI | Exact original and generated checks appear in the B28 appendix. Operator security acceptance remains open. |
+| B28: Operator commands | Current functional acceptance and publication pass on green checkpoint `0eeddc07`; closure awaits the operator decision requested by the normal reviewer | Exact original and generated checks appear in the B28 appendix. Operator security acceptance remains open. |
 | B29: Documentation and wire contract | Approved retained closure, effective with normal supporting publication | Exact retained paths and hashes are in the approved retention list. No check has moved from those paths into a generated library. Retained security-relevant adapter locations are indexed below. |
 | B30: Repository metadata | Approved retained closure, effective with normal supporting publication | Exact retained paths and hashes are in the approved retention list. No check has moved from those paths into a generated library. Retained security-relevant adapter locations are indexed below. |
 | B31: Admission and operator assembly | Approved retained closure, effective with normal supporting publication | Exact retained paths and hashes are in the approved retention list. No check has moved from those paths into a generated library. Retained security-relevant adapter locations are indexed below. |
@@ -2475,7 +2475,7 @@ No finding has been accepted or dismissed.
 
 ## Current local schema-guard acceptance
 
-The current schema-guard candidate passes 1,917 application checks with no failures or skips, 42 image checks and 18 additional owned HTTP/SQLite controls. Both installed readers verify all 71 qualified projections and the current parent receipt. The B28 current operator closure passes 29 controls across 35 actual Node commands on each host: a cold checkout on macOS and a prepared runtime on Linux. The six focused independent-version controls pass on both hosts. These are functional results. Normal review, publication and exact-head CI remain pending. All 37 findings remain undecided. No independent review or operator security acceptance is asserted.
+The current schema-guard candidate passes 1,917 application checks with no failures or skips, 42 image checks and 18 additional owned HTTP/SQLite controls. Both installed readers verify all 71 qualified projections and the current parent receipt. The B28 current operator closure passes 29 controls across 35 actual Node commands on each host: a cold checkout on macOS and a prepared runtime on Linux. The six focused independent-version controls pass on both hosts. These are functional results. Normal review, publication and exact-head CI remain pending. All 41 findings remain undecided. No independent review or operator security acceptance is asserted.
 
 ## Observer-realm review finding
 
@@ -2519,3 +2519,97 @@ review remains open. The canonical wrapper, generated library, private expected
 observations and current application inputs are unchanged. The current full
 application and image results remain recorded; normal publication and exact-head
 CI are pending. No finding is accepted or dismissed.
+
+## Boundary closure review finding
+
+Finding `f_3be779b6500e` is MEDIUM and remains undecided. The reviewed location is
+`docs/roadmap/native-boundary-transfers.json:2881`, with the matching B28 transfer
+flag at line2971. It questions functional closure of B17 and B28 while review
+findings remain undecided and asks the operator to confirm that intended timing.
+This is new migration workflow metadata, with no original application check on
+main and no generated application guard counterpart. No application source or
+selected provider changes in this metadata checkpoint.
+
+Read the prior published transfer metadata beside this candidate, then read the
+referenced application findings and recorded correction controls. The original
+and generated source pairs for `f_1b582b71e2ae`, `f_b402a2b7e0c2` and
+`f_562447a5a6fb` remain in this guide, with their exact read commands. Those
+functional corrections do not decide either those findings or this new one.
+
+```sh
+P=docs/roadmap/native-boundary-transfers.json
+diff -y -W 240 <(git show "0eeddc0763db744e30ade0439de82412a4c858ba:$P" | nl -ba | sed -n '2810,3010p') <(nl -ba "$P" | sed -n '2810,3010p')
+rg -n 'f_1b582b71e2ae|f_b402a2b7e0c2|f_562447a5a6fb' docs/roadmap/native-authorization-findings.md
+cat generated/native-checkpoints/b17-b28-publication-closure.json
+cat generated/native-checkpoints/finding-remediation.json
+```
+
+The ledger's closure count describes functional migration and publication. It
+records the already-published, green source checkpoint and the existing full
+application and image acceptance. Independent review, finding decisions and
+operator security acceptance remain separate and open. The operator's decision
+requested by this finding is still pending. No finding is accepted or dismissed.
+
+
+Finding `f_3c777d69c642` is MEDIUM and remains undecided. Its original review
+location is also `docs/roadmap/native-boundary-transfers.json:2881`, and it asks
+for the same operator decision as `f_3be779b6500e`. It concerns newly authored
+migration authority metadata, with no corresponding check on main and no
+generated application check counterpart. The same side-by-side metadata command
+and the original/generated application pairs in the preceding section apply.
+The candidate now keeps both `source_authority_transferred` and
+`whole_boundary_closed` false for B17 and B28 while that operator decision is
+pending. The completed functional tests, published source checkpoint and green
+CI are preserved. This metadata correction does not decide either finding.
+
+The current closure baseline is 26 of 31. B17 and B28 have complete functional
+acceptance and published green CI; their authority-transfer closure remains
+pending the operator. B18, B19 and B22 still require implementation and combined
+acceptance. All 40 findings remain undecided, including ten HIGH, 29 MEDIUM and one LOW.
+
+
+## Publication count consistency finding
+
+Finding `f_eb5942375245` is LOW and remains undecided. Its reviewed location is
+`docs/roadmap/native-boundary-transfers.json:3139`: the publication record kept
+18 native accepted boundaries while its total reverted to 26. This is migration
+status metadata, with no application check on main and no generated guard
+counterpart. The corrected publication record counts 16 closed native plus 10
+retained boundaries, totaling 26. The 18 functionally accepted native boundaries
+are recorded separately from that closure count.
+
+```sh
+P=docs/roadmap/native-boundary-transfers.json
+nl -ba generated/native-review-history/closure-counts-50e6fa2e.txt | sed -n '1,26p'
+nl -ba "$P" | sed -n '3125,3150p'
+```
+
+The operator answered the closure question: "Keep both pending security review".
+B17 and B28 therefore remain functionally accepted and published, with their
+security review and authority-transfer closure pending. Their
+`whole_boundary_closed` and `source_authority_transferred` flags remain false.
+The operator's answer does not accept or dismiss any review finding.
+
+
+Finding `f_a78e393c7013` is LOW and remains undecided. Its reviewed location is
+`docs/roadmap/native-boundary-transfers.json:3139`, concerning the same historical
+publication-count mismatch as `f_eb5942375245`. It is workflow metadata, with no
+application check on main and no generated guard counterpart. Both remain in the
+review ledger. The current publication record counts 16 native plus 10 retained,
+for 26 closed boundaries; 18 functionally accepted native boundaries are separate.
+
+The unpublished correction history is preserved locally and these exact
+review-time excerpts are included in the PR. They are read-only history and
+confer no authority. The manifest records source commits, source line ranges and
+content hashes. Use them after consolidation to read the actual reviewed claims
+beside the current pending-security metadata:
+
+```sh
+cat generated/native-review-history/closure-review-excerpts.json
+diff -y -W 240 <(cat generated/native-review-history/closure-claims-542b3094.txt) <(sed -n '2810,3010p' docs/roadmap/native-boundary-transfers.json)
+diff -y -W 240 <(cat generated/native-review-history/closure-counts-50e6fa2e.txt) <(sed -n '3125,3150p' docs/roadmap/native-boundary-transfers.json)
+```
+
+The operator directed B17 and B28 to remain pending security review. Their
+completed functional acceptance and published green CI remain preserved. Neither
+finding is accepted or dismissed. All 41 findings remain undecided.
