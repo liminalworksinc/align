@@ -42,6 +42,8 @@ export function makeEnv(extra: NodeJS.ProcessEnv = {}): TestEnv {
     ALIGN_NO_AUTOSTART: "1",
     // The sandbox may run an older Node than the agent supports; the Node check has its own test.
     ALIGN_ALLOW_UNSUPPORTED_NODE: "1",
+    // Never the hosted server, which is the installed default (LIM-2504): a test that talks to a server names its own.
+    ALIGN_SERVER: "http://127.0.0.1:3100",
     ...extra,
   };
   return { root, env, home: env.ALIGN_HOME as string, claudeDir, codexHome, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };

@@ -9,10 +9,42 @@ reach the server. Wire contract: `docs/v2/WIRE.md`. Harness facts and sources: `
 
 Zero runtime dependencies (Node 24+: `node:sqlite`, `node:crypto`, `fetch`).
 
+## Install
+
+From a checkout: `npm ci && npm run build` here, then `align install` and `align login`. Once release
+`agent-v<version>` is published (and `AGENT_RELEASE` in `lib/paste-lines.ts` names it, which is what makes the Apps tab
+show it), a pinned tarball whose checksum is checked before npm installs it:
+
+```
+curl -fsSLO https://github.com/liminalworksinc/align/releases/download/agent-v<version>/liminal-align-agent-<version>.tgz && echo '<sha256>  liminal-align-agent-<version>.tgz' | shasum -a 256 -c && npm install -g ./liminal-align-agent-<version>.tgz && align install && align login
+```
+
+`align login` says which server it pairs with and why. It signs in to the hosted server
+(`https://align-pg-draft.fly.dev`) unless told otherwise: `align login --server <url>` for another one,
+`align login --dev` (or `ALIGN_DEV=1`) for the local dev server on 127.0.0.1:3100, and `ALIGN_SERVER=<url>` overrides
+both. A server saved by an earlier login is kept.
+
+### Publishing a release (founder only)
+
+1. Once, in the repo's settings: turn on **immutable releases** (Settings, General, Releases, "Enable release
+   immutability"), so a published release's assets and tag can't be changed or replaced afterwards.
+2. Actions, **agent-release**, Run workflow (on `main`). It typechecks, tests, runs `npm pack`, attests the tarball's
+   build provenance and uploads it with its `.sha256` as an artifact. It creates no tag or release and publishes nothing.
+3. Download the artifact and verify it. The attestation must come from this workflow, run on `main`; a build attested
+   from any other workflow or branch fails here:
+   ```
+   gh attestation verify liminal-align-agent-<version>.tgz --repo liminalworksinc/align \
+     --signer-workflow liminalworksinc/align/.github/workflows/agent-release.yml --source-ref refs/heads/main
+   shasum -a 256 -c liminal-align-agent-<version>.tgz.sha256
+   ```
+4. Create release `agent-v<version>` from that commit with the `.tgz` as its asset, then publish it.
+5. In a PR, set `AGENT_RELEASE` in `lib/paste-lines.ts` to `{ version, sha256 }` from the run's summary. Until then the
+   Apps tab keeps its current steps (no step 4), so it never shows a link that 404s.
+
 ## Commands
 
 ```
-align login [--server <url>] [--name <device name>]   device flow; key-bound tokens; names your other paired devices
+align login [--server <url> | --dev] [--name <name>] device flow; key-bound tokens; names your other paired devices
 align logout                                          revokes this device, wipes tokens and the device key; this
                                                       machine's shares stop (sessions stopped or held from the web
                                                       stay blocked: after `align login`, `::align share` shares one
