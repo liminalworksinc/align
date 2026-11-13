@@ -442,6 +442,20 @@ rejection_reason, decided_at }) } | null, asks: { waiting_on_me } | null, alignm
 "delivery_receipt"|"agent_reported"|"not_observed" } ] } | null }` (an app is a delivery receipt only with a
 `last_read_at`; one that only connected is not observed); each queue item has `next` and `waiting_on`; a section
 the server couldn't read is `null`; see `lib/v2/home.ts`),
+the workspace's live stream (`GET .../stream`, cookie only, members and viewers, Server-Sent Events: `hello` on connect
+`{ presence, views, resync }`, then `change` `{ views, presence }` when one of the reader's own views moves after a write
+(`views` from `home`, `changes`, `goals`, `sessions`, `alignments`, `presence`; never content: the page reads them again),
+`gone` `{ status }` when the reader is signed out or no longer a member (the stream ends); every `hello` and `change` has
+an id, an opaque random token of this reader's stream (never a counter), and a reconnect with `Last-Event-ID` (or
+`?last_event_id=`) gets in `hello` the views that moved since, or `resync: true` when that id is unknown; a keep-alive
+comment every 15 s and a re-check every 30 s; `presence` is, for members and owners, per readable active goal
+`[ { goal_id, working, paused, mine: [ { id, state: "working"|"paused", directive: { kind, at, delivery:
+"sent"|"received"|"applied"|"enforced" } | null } ] } ]`: everyone's shared sessions bound to the goal by their current
+epoch and heard from in the last 15 minutes as counts, and only the reader's own in `mine` (`id` is a stand-in, never a
+session key); for a viewer always `[]`; a non-member `404`, an `Authorization` header `403 bearer_not_allowed`; `429
+too_many_streams` for a person's fifth stream on one workspace, past the workspace's cap
+(`ALIGN_LIVE_STREAMS_PER_WORKSPACE`, default 50) or past the server's (`ALIGN_LIVE_STREAMS_TOTAL`, default 200, whose message says Align is busy); see
+`lib/v2/live.ts`),
 `GET /api/v2/device/requests/:code`,
 `POST /api/v2/device/approve` (`{ user_code, workspace_ids }` → `{ state: "approved", device_name, asked_as }`, the
 device's name decided at approval, "<name> (2)" when a live device of the person has the name; needs a sign-in from the

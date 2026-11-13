@@ -6,6 +6,8 @@ import GoalLines from "../../_ui/home/goal-lines";
 import { NeedsList } from "../../_ui/home/needs-list";
 import Since from "../../_ui/home/since";
 import { useRead } from "../../_ui/ds/read";
+import { LiveMark } from "../../_ui/home/presence";
+import { useLive, useLiveReload } from "../../_ui/live";
 import { Loading, Shell, useApi } from "../../_ui/kit";
 import { NotInWorkspace } from "../../_ui/missing";
 import { PROPOSED_EVENT } from "../../_ui/propose";
@@ -83,6 +85,15 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
     reloadChanges();
     setReloadToken((t) => t + 1);
   }, [reloadHome, reloadChanges]);
+  // Live (LIM-2503): when the workspace's stream says one of this person's views moved, the Home reads them again, so a
+  // decision made in another window shows here within about a second. Without the stream the page keeps the reads below.
+  const live = useLive(ws);
+  const { reload: reloadFeed } = feed;
+  const reloadLive = useCallback(() => {
+    reloadAll();
+    reloadFeed();
+  }, [reloadAll, reloadFeed]);
+  useLiveReload(ws, ["home", "changes", "goals", "alignments"], reloadLive);
   // "Since you last looked" reads again once a minute while Home stays open (specs/align/interface.md, Workspace Home),
   // and the Needs-you list with it, so its count never trails what Since shows (PR 68 audit Low 2).
   const refreshSince = reloadAll;
@@ -141,6 +152,7 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
           <h1 tabIndex={-1} className={`${PAGE_H1} min-w-0`} data-home-count={count.n ?? "reading"}>
             {homePending ? "Home" : noGoals && (count.n === 0 || count.n === null) && !count.partial ? "No goals here yet" : needsHeading(count.n, count.partial)}
           </h1>
+          <LiveMark status={live.status} />
         </header>
 
         {/* Only on what was read: an unread Home says nothing about goals or apps, so it can't choose a first-run card. */}
@@ -155,7 +167,7 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
         ) : noGoals ? null : (
           <>
             <Since ws={ws} me={me.id} changes={c.data ? allCrs : null} goals={h.goals} apps={h.apps?.items ?? null} onReview={(goal, id) => setReview({ goal, id })} onRefresh={refreshSince} />
-            <GoalLines ws={ws} goals={h.goals} changes={c.data ? allCrs : null} feed={feed.data?.goals ?? null} canCreate={role === "owner" || role === "member"} onReview={(goal, id) => setReview({ goal, id })} />
+            <GoalLines ws={ws} goals={h.goals} changes={c.data ? allCrs : null} feed={feed.data?.goals ?? null} presence={live.presence} canCreate={role === "owner" || role === "member"} onReview={(goal, id) => setReview({ goal, id })} />
           </>
         )}
 

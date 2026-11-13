@@ -2,6 +2,8 @@
 import Link from "next/link";
 import { EvidenceSummary, StatusPill } from "../ds";
 import { useApi } from "../kit";
+import type { GoalPresence } from "../live";
+import { GoalPresenceLine } from "./presence";
 import type { ChangeRequest, Goal } from "../types";
 import { crStatus } from "./cr-status";
 import { useValue } from "./value-cache";
@@ -36,7 +38,7 @@ export function latestApproved(changes: ChangeRequest[] | null, goal: string): C
   return on[0] ?? null;
 }
 
-function Line({ ws, g, latest, launch, fed, onReview }: { ws: string; g: GoalLine; latest: ChangeRequest | null; launch: ChangeRequest | null | undefined; fed: Goal | undefined; onReview?: (goal: string, id: string) => void }) {
+function Line({ ws, g, latest, launch, fed, onReview, presence }: { ws: string; g: GoalLine; latest: ChangeRequest | null; launch: ChangeRequest | null | undefined; fed: Goal | undefined; onReview?: (goal: string, id: string) => void; presence?: GoalPresence }) {
   // The newest launch comes from the Home's change-request read and its delivery from the shared value cache, so the
   // summary makes no read of its own. `launch` undefined (that read failed) lets the summary read for itself.
   const v = useValue(ws, g.id, launch ? launch.id : null);
@@ -96,6 +98,12 @@ function Line({ ws, g, latest, launch, fed, onReview }: { ws: string; g: GoalLin
       <Link href={`/app/w/${ws}/work?goal=${g.id}`} className="relative inline-flex min-h-[32px] items-center px-1 text-[13px] text-(--text-2) hover:text-(--text-1) hover:underline max-md:min-h-0 max-md:leading-5 max-md:before:absolute max-md:before:inset-x-0 max-md:before:top-1/2 max-md:before:h-[44px] max-md:before:-translate-y-1/2 max-md:before:content-['']" aria-label={`Work on ${g.title}`} data-goal-work>
         Work
       </Link>
+      {/* Live presence (LIM-2503): only with the stream open and sessions on this goal; a row of its own under the line. */}
+      {presence && (
+        <div className="order-4 col-span-full min-w-0 md:col-span-3">
+          <GoalPresenceLine p={presence} />
+        </div>
+      )}
     </li>
   );
 }
@@ -107,6 +115,7 @@ export default function GoalLines({
   onReview,
   feed,
   canCreate = false,
+  presence = null,
 }: {
   ws: string;
   /** Unused since lines stopped saying "yours" (an owner's every line said it); kept so callers need no change. */
@@ -121,6 +130,8 @@ export default function GoalLines({
   feed?: Goal[] | null;
   /** Whether the person may create a goal (anyone but a viewer); the empty list offers "Create a goal" only then. */
   canCreate?: boolean;
+  /** Live presence per goal from the workspace stream (app/app/_ui/live.ts); null without the stream. */
+  presence?: GoalPresence[] | null;
 }) {
   const own = useApi<{ goals: Goal[] }>(feed === undefined ? `/api/v2/workspaces/${ws}/goals` : null);
   const fedGoals = feed === undefined ? own.data?.goals : feed;
@@ -151,7 +162,7 @@ export default function GoalLines({
           {changes === null && <p className="text-[13px] text-(--text-2)">Align couldn&apos;t read change requests just now, so the plan state of each goal is unknown.</p>}
           <ul className="divide-y divide-(--line) overflow-hidden rounded-(--radius-m) border border-(--line) bg-(--bg-panel)">
             {goals.map((g) => (
-              <Line key={g.id} ws={ws} g={g} latest={latestApproved(changes, g.id)} launch={changes ? newestLaunch(changes, g.id) : undefined} fed={fedGoals?.find((x) => x.id === g.id)} onReview={onReview} />
+              <Line key={g.id} ws={ws} g={g} latest={latestApproved(changes, g.id)} launch={changes ? newestLaunch(changes, g.id) : undefined} fed={fedGoals?.find((x) => x.id === g.id)} onReview={onReview} presence={presence?.find((p) => p.goal_id === g.id)} />
             ))}
           </ul>
         </>
