@@ -1,0 +1,22 @@
+{
+  "schema": "align/characterized-native-CI-runtime@1",
+  "observed_utc": "2026-11-13T16:29:48.135184+00:00",
+  "failed_head": "124fce21f3a77859f1168432a034f204c5a68434",
+  "failed_GitHub_run": 43461138158,
+  "validator_matrix_passed_in_GitHub": true,
+  "failure": "device evaluator correctly refused the uncharacterized linux x64 runtime before returning cases",
+  "change": "run the existing verification steps on GitHub ubuntu-24.04-arm",
+  "characterized_runtime_key": "[\"linux\",\"arm64\",\"24.22.2\",\"13.6.233.17-node.63\",\"3.5.9\",\"3.53.4\",\"en-US\"]",
+  "reference_set_sha256": "ea5659def167f7d64b0cb2a1b7ced80a6453d698923617fb5ad04fa3e2b52016",
+  "workflow_before_sha256": "69b2a10c0438fa35dc0f640da1fbede3d215f67e89cb44181d39b41ab940ef38",
+  "workflow_after_sha256": "5b4ebbb7ae49e608a0e2c7f5f4607cce5a88cdcd7bb634a198c9b2e38f27d2b1",
+  "runner_documentation": "https://docs.github.com/en/actions/reference/runners/github-hosted-runners",
+  "exact_device_reference_and_accepted_harness_preserved": true,
+  "unknown_runtime_refusal_preserved": true,
+  "no_x64_device_acceptance_claimed": true,
+  "all9_guard_packages_214_batches_pass_locally_on_characterized_runtime": true,
+  "application_inputs_and_receipt_unchanged": true,
+  "normal_review_and_exact_head_CI_pending": true,
+  "open_unique_findings": 37,
+  "operator_security_acceptance": false
+}

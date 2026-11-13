@@ -10,7 +10,9 @@ permissions:
   contents: read
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # Device acceptance retains exact native-runtime observations.
+    # Use its characterized Linux architecture; uncharacterized runtimes still fail.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     env:
       # Exact verifier supports every qualified child and immutable asset record.
