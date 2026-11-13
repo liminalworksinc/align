@@ -19,7 +19,15 @@ for (const component of selected) {
   const oracle = JSON.parse(fs.readFileSync(path.join(app, "native", library.oracle), "utf8"));
   const verifier = require(path.join(app, "native", library.verifier));
   let actual;
-  if (typeof verifier.runSelected === "function") actual = await verifier.runSelected(source, library.surface, oracle.cases);
+  if (typeof verifier.runSelected === "function") {
+    actual = [];
+    // Keep the complete matrix, using bounded requests on two-core CI runners.
+    const requestSize = component === "field-validation" ? 4 : oracle.cases.length;
+    for (let offset = 0; offset < oracle.cases.length; offset += requestSize) {
+      actual.push(...await verifier.runSelected(source, library.surface,
+        oracle.cases.slice(offset, offset + requestSize)));
+    }
+  }
   else if (typeof verifier.runCases === "function") actual = await verifier.runCases(source, library.surface, oracle.cases);
   else {
     assert.equal(component, "migration-coordinator");
