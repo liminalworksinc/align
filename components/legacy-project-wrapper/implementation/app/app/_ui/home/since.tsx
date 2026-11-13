@@ -61,26 +61,44 @@ function remove(store: () => Storage, k: string) {
   }
 }
 
+/** True when this document was loaded by reloading the page now showing (Home), not by a link, a typed address or Back:
+ *  only then does the tab keep its comparison (interface.md, Workspace Home; Mini 0, LIM-2472 03c415a8). */
+function reloadedHere(): boolean {
+  try {
+    const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+    return nav?.type === "reload" && new URL(nav.name).pathname === window.location.pathname;
+  } catch {
+    return false;
+  }
+}
+
 /** The baseline: when this person last left this Home on this device (null for a first visit), read once per mount.
- *  This tab keeps it in sessionStorage, so a reload compares against the same time ("none" for a first visit). Leaving
- *  Home inside the app stores now and drops the tab's baseline; the page unloading (a reload or a closed tab) stores now
- *  for other tabs and later visits but keeps the tab's baseline, which a closed tab loses anyway. null until read after
- *  mount, so the server and first client render agree. */
+ *  This tab keeps it in sessionStorage, so a reload of Home compares against the same time ("none" for a first visit);
+ *  any other arrival (a link back from /trust, a typed address, Back) compares against when they left. Leaving Home
+ *  inside the app stores now and drops the tab's baseline; the page unloading stores now for other tabs and later
+ *  visits. Back from the browser's back-forward cache shows the page without a mount, so it resets to when they left
+ *  too. null until read after mount, so the server and first client render agree. */
 function useLastVisit(ws: string, me: string): { ready: boolean; since: string | null } {
   const [v, setV] = useState<{ ready: boolean; since: string | null }>({ ready: false, since: null });
   useEffect(() => {
     const k = key(ws, me);
-    const base = read(() => sessionStorage, k) ?? read(() => localStorage, k) ?? "none";
+    const since = (b: string) => (b === "none" || Number.isNaN(Date.parse(b)) ? null : b);
+    const base = (reloadedHere() ? read(() => sessionStorage, k) : null) ?? read(() => localStorage, k) ?? "none";
     write(() => sessionStorage, k, base);
-    const t = setTimeout(() => setV({ ready: true, since: base === "none" || Number.isNaN(Date.parse(base)) ? null : base }), 0);
+    const t = setTimeout(() => setV({ ready: true, since: since(base) }), 0);
     let unloading = false;
     const unload = () => {
       unloading = true;
       write(() => localStorage, k, new Date().toISOString());
     };
-    // Back from the browser's back-forward cache: the page is live again, so leaving it later is leaving Home.
-    const shown = () => {
+    // Back from the browser's back-forward cache: the page is live again, so leaving it later is leaving Home, and it
+    // now compares against when they left (stored on pagehide), as any other way back does.
+    const shown = (e: PageTransitionEvent) => {
       unloading = false;
+      if (!e.persisted) return;
+      const left = read(() => localStorage, k) ?? "none";
+      write(() => sessionStorage, k, left);
+      setV({ ready: true, since: since(left) });
     };
     window.addEventListener("pagehide", unload);
     window.addEventListener("pageshow", shown);

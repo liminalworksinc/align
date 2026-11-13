@@ -7093,6 +7093,40 @@ try {
           /Hugo Lead[\s\S]{0,60}created the goal/.test(sinceText) && /Hank Other[\s\S]{0,60}created the goal/.test(sinceText) && !/Hana Owner[\s\S]{0,60}created the goal/.test(sinceText) && !/You[\s\S]{0,20}created the goal/.test(sinceText) && !/Someone[\s\S]{0,20}created the goal/.test(sinceText),
           sinceText.slice(0, 900).replace(/\n/g, " / "),
         );
+        // Mini 0, LIM-2472 03c415a8 (LIM-2513): only a reload of Home keeps the tab's comparison. Hana's last visit is set
+        // long ago, so Since shows older goal creations (A). A reload keeps them; then she opens /trust in the same tab,
+        // Hank creates a goal (B), and she comes back to Home by its address: Since shows B and not A.
+        const pr = await browser.newPage();
+        await pr.setViewport({ width: 1440, height: 900 });
+        await pr.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        const lvKey = `align.lastVisit:${HW}:${HO.id}`;
+        await pr.goto(`${BASE}/trust`, { waitUntil: "domcontentloaded" });
+        await pr.evaluate((k) => {
+          localStorage.setItem(k, "2000-01-01T00:00:00.000Z");
+          sessionStorage.removeItem(k);
+        }, lvKey);
+        const sinceNow = async () => {
+          await pr.waitForFunction(() => { const s = document.querySelector("[data-since]"); return !!s && s.getAttribute("data-since") !== "reading"; }, { timeout: 15000 });
+          await pr.evaluate(() => [...document.querySelectorAll("[data-since] button")].find((b) => /^Show all \d+$/.test(b.textContent?.trim() ?? ""))?.click());
+          await sleep(300);
+          return pr.evaluate(() => document.querySelector("[data-since]")?.innerText ?? "");
+        };
+        await pr.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        const sA = await sinceNow();
+        await pr.reload({ waitUntil: "networkidle0" });
+        const sReload = await sinceNow();
+        await pr.goto(`${BASE}/trust`, { waitUntil: "networkidle0" });
+        await sleep(1100);
+        const GB = (await ha(HX, "POST", "/goals", { title: "Since check, made while Hana was away", visibility: "workspace" })).json;
+        await pr.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        const sBack = await sinceNow();
+        await pr.close();
+        const hasA = (t) => /Hugo Lead[\s\S]{0,60}created the goal/.test(t);
+        check(
+          "ui (Chrome, Mini 0 03c415a8, LIM-2513): \"Since you last looked\" keeps its list across a reload of Home, but after leaving for /trust by a full page load and coming back by Home's address it compares against when she left: it shows the goal Hank created meanwhile and none of the older creations",
+          hasA(sA) && hasA(sReload) && !!GB?.id && /Since check, made while Hana was away/.test(sBack) && !hasA(sBack),
+          JSON.stringify({ a: hasA(sA), reload: hasA(sReload), b: !!GB?.id, back: sBack.slice(0, 400).replace(/\n/g, " / ") }),
+        );
         // Mini 5's click walk, Nov 11: at 390 wide the review drawer's "More actions" menu opened below its footer, so
         // Decline, the last item, was off screen and only reachable by keyboard. Hugo asks Hank to change Hank's goal;
         // Hank opens it in the review drawer on a phone, opens More actions, and every item lies inside the screen and

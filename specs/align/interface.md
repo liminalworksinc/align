@@ -630,6 +630,8 @@ the device it SHALL say "First visit on this device, so nothing to compare yet."
 and is never sent to the server.
 A goal's creation line SHALL name its owner, who created it (Align never reassigns an owner), and a goal the reader
 created gets no line, like their other own actions; a later saved version's line still says "Someone".
+Only a reload of Home itself keeps the tab's comparison: coming back to Home after any other full page load in the tab
+(a link to `/trust` or another site, a typed address, the browser's Back) compares against when they left it.
 
 The read SHALL return, for a workspace member or viewer (cookie only: an `Authorization` header gets `403
 bearer_not_allowed`, a non-member `404`), `change_requests` (`waiting_on_me`, `waiting_on_others`, `declined`), `asks`
@@ -742,6 +744,11 @@ counted as a read. A workspace owner's read has every connected app and anyone e
 
 - **WHEN** another member creates a goal the person can read after the person's last visit, and later saves its version 2
 - **THEN** "Since you last looked" says "<owner> created the goal" and "Someone saved v2"; a goal the person created themselves gets no line
+
+#### Scenario: Leaving Home by a full page load
+
+- **WHEN** "Since you last looked" shows change A, the person reloads Home, then opens `/trust` in the same tab, someone else makes change B, and the person comes back to Home by its address
+- **THEN** after the reload the list still shows A; after coming back it shows B and not A
 
 ### Requirement: Live workspace
 
