@@ -9,6 +9,7 @@ import { DECISION_LINK, DecisionLinks } from "./decision-links";
 import { EvidenceLabel } from "./evidence-label";
 import { deliveryStatement, hasEvidence } from "./evidence-facts.mts";
 import { EvidenceSummary, useDelivery } from "./evidence-summary";
+import { FORESIGHT_CHOICES, ForesightPanel, type ForesightChoice } from "./foresight";
 import { StatusPill, type StatusKind } from "./status-pill";
 
 // A compact review of one change request (LIM-2472 workstream S), for both concepts in place of main's long decision
@@ -402,6 +403,12 @@ const ACTION: Record<Choice, string> = {
 };
 
 /** The body for a choice that needs no words from the person; null for one that does (Accept if, counter, decline). */
+/** What the preview of a choice sends: the decision's body without its note (a note changes nothing it would do, and
+ *  typing one shouldn't ask again), and a decline's reason, which the decision requires. */
+function foresightBody(cr: ChangeRequest, choice: Choice, reason: string): Record<string, unknown> {
+  return choice === "reject" ? { revision: cr.revision, reason: reason.trim() } : { revision: cr.revision };
+}
+
 export function defaultBody(cr: ChangeRequest, choice: Choice): Record<string, unknown> | null {
   switch (choice) {
     case "approve":
@@ -791,6 +798,7 @@ export function ReviewActions({
           )}
           {choice === "reject" && <p className="text-[14px] text-(--text-1)">Your reason: {reason.trim()}</p>}
           {choice === "accept_if" && <p className="text-[14px] text-(--text-1)">Accept if: {condition.trim()}</p>}
+          {FORESIGHT_CHOICES.includes(choice) && <ForesightPanel path={crPath(ws, cr)} choice={choice as ForesightChoice} body={foresightBody(cr, choice, reason)} />}
           {!oneRow && <p className="text-[13px] text-(--text-3)">Align reads the request again before sending. If it changed meanwhile, nothing is sent.</p>}
           <div className={`flex gap-2 ${oneRow ? "flex-nowrap [&>button]:min-w-0 [&>button:first-child]:flex-1" : "flex-wrap"}`}>
             <button type="button" className={PRIMARY} disabled={sending} onClick={() => void send()}>

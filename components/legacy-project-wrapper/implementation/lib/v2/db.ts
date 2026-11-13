@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import { config } from "../config";
+import { readChangeset, type CsChange, type CsRecord } from "./changeset.mts";
 import { SCHEMA_VERSION, type Sql } from "./core.mts";
 import { count } from "./plural.mts";
 
@@ -103,20 +104,26 @@ export const onWsChange = (l: TouchListener) => touches().onChange(l);
 export const holdTouches = (): TouchHold => touches().hold();
 
 let depth = 0;
-/** Run `fn` synchronously inside BEGIN IMMEDIATE ... COMMIT (ROLLBACK if it throws). A busy start is retried
- *  asynchronously for up to ~5 s. Nested calls join the outer transaction. */
-export async function tx<T>(fn: () => T): Promise<T> {
-  if (depth > 0) return fn();
-  const d = openDb().domain;
+
+/** BEGIN IMMEDIATE on the domain connection, retrying a busy start asynchronously for up to ~5 s. */
+async function begin(d: DatabaseSync) {
   for (let attempt = 0; ; attempt++) {
     try {
       d.exec("BEGIN IMMEDIATE");
-      break;
+      return;
     } catch (e) {
       if (!isBusy(e) || attempt >= 100) throw e;
       await new Promise((r) => setTimeout(r, 25 + Math.random() * 25));
     }
   }
+}
+
+/** Run `fn` synchronously inside BEGIN IMMEDIATE ... COMMIT (ROLLBACK if it throws). A busy start is retried
+ *  asynchronously for up to ~5 s. Nested calls join the outer transaction. */
+export async function tx<T>(fn: () => T): Promise<T> {
+  if (depth > 0) return fn();
+  const d = openDb().domain;
+  await begin(d);
   depth++;
   const held = holdTouches();
   try {
@@ -134,6 +141,131 @@ export async function tx<T>(fn: () => T): Promise<T> {
     held.discard();
     depth--;
   }
+}
+
+// ---- previews (lib/v2/foresight.ts) ----
+// previewTx runs a decision's real transaction body and always rolls it back: BEGIN IMMEDIATE, SAVEPOINT, the body,
+// then `observe` (still inside, so it reads the state the decision would leave), ROLLBACK TO and ROLLBACK. Every row the
+// body writes is read back from a node:sqlite session changeset, so the preview reports exactly what the decision does,
+// through the same code, with no second copy of it. While a preview runs, inPreview() is true: anything that would
+// leave the database (mail, lib/v2/mail.ts) is captured in the outbox instead of sent. The body is synchronous, like
+// every tx() body, so nothing else runs on this connection between BEGIN and ROLLBACK.
+
+export interface RowChange {
+  table: string;
+  op: "insert" | "update" | "delete";
+  /** The row before (update, delete) and after (insert, update), all columns. */
+  before: Row | null;
+  after: Row | null;
+}
+export interface Outbound {
+  kind: "event" | "mail";
+  what: string;
+}
+
+let previewing: Outbound[] | null = null;
+/** True while previewTx runs a decision: nothing may leave the database. */
+export const inPreview = () => previewing !== null;
+/** Record something a decision would send, instead of sending it (only while a preview runs). */
+export function captureOutbound(o: Outbound) {
+  previewing?.push(o);
+}
+
+const tableColumns = new Map<string, { names: string[]; pk: string[] }>();
+function columnsOf(table: string) {
+  let c = tableColumns.get(table);
+  if (!c) {
+    const info = all<{ name: string; pk: number; cid: number }>(`SELECT name, pk, cid FROM pragma_table_info(?) ORDER BY cid`, table);
+    c = { names: info.map((r) => r.name), pk: info.filter((r) => r.pk > 0).sort((a, b) => a.pk - b.pk).map((r) => r.name) };
+    tableColumns.set(table, c);
+  }
+  return c;
+}
+
+/** Tables without a declared primary key, which a session changeset does not record: their new rows are read by rowid. */
+const rowidTables = () =>
+  all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'v2\\_%' ESCAPE '\\' AND sql NOT LIKE '%PRIMARY KEY%' ORDER BY name").map((r) => r.name);
+
+export interface Preview<T, R> {
+  ok: boolean;
+  value?: T;
+  error?: unknown;
+  changes: RowChange[];
+  outbound: Outbound[];
+  observed?: R;
+}
+
+/** Run `fn` as tx() would, record what it changes and would send, run `observe` on the result, then roll everything
+ *  back. An error from `fn` is returned (ok false), never thrown, after the rollback. */
+export async function previewTx<T, R>(fn: () => T, observe?: (changes: RowChange[]) => R): Promise<Preview<T, R>> {
+  if (depth > 0 || previewing) throw new Error("previewTx can't run inside another transaction");
+  const d = openDb().domain;
+  await begin(d);
+  depth++;
+  previewing = [];
+  const session = d.createSession();
+  const out: Preview<T, R> = { ok: false, changes: [], outbound: [] };
+  try {
+    const plain = rowidTables();
+    const maxRow = new Map(plain.map((t) => [t, get<{ m: number | null }>(`SELECT MAX(rowid) AS m FROM "${t}"`)?.m ?? 0]));
+    d.exec("SAVEPOINT foresight");
+    try {
+      const v = fn();
+      if (v instanceof Promise) throw new Error("previewTx callbacks must be synchronous");
+      out.ok = true;
+      out.value = v;
+    } catch (e) {
+      out.error = e;
+    }
+    if (out.ok) {
+      out.changes = changesFrom(readChangeset(session.changeset()));
+      for (const t of plain) for (const r of all<Row>(`SELECT * FROM "${t}" WHERE rowid > ? ORDER BY rowid`, maxRow.get(t)!)) out.changes.push({ table: t, op: "insert", before: null, after: r });
+      out.outbound = [...previewing];
+      if (observe) out.observed = observe(out.changes);
+    }
+  } finally {
+    // Each step on its own, so none can stop the next: the rollback always runs and the module state is always reset.
+    try {
+      session.close();
+    } catch {}
+    try {
+      d.exec("ROLLBACK TO foresight");
+      d.exec("RELEASE foresight");
+    } catch {}
+    try {
+      d.exec("ROLLBACK");
+    } catch {}
+    previewing = null;
+    depth--;
+    // A connection still in a transaction here would make every later write fail (or commit the preview): replace it.
+    if (d.isTransaction) reopenDomain(d);
+  }
+  return out;
+}
+
+/** Close a domain connection left inside a transaction (rolling it back) and open a fresh one in its place. */
+function reopenDomain(d: DatabaseSync) {
+  const db = openDb();
+  try {
+    d.close();
+  } catch {}
+  db.domain = connect(db.file, 0);
+  db.stmts.clear();
+  console.error("Align: an approval preview left its connection in a transaction; it was rolled back and reopened");
+}
+
+/** Whole rows for a changeset's changes: an update's other columns are read from the row as the change leaves it. */
+function changesFrom(cs: CsChange[]): RowChange[] {
+  return cs.map((c) => {
+    const { names, pk } = columnsOf(c.table);
+    const rec = (r: CsRecord | null) => (r ? Object.fromEntries(names.map((n, i) => [n, r[i]]).filter(([, v]) => v !== undefined)) : null);
+    if (c.op !== "update") return { table: c.table, op: c.op, before: c.op === "delete" ? rec(c.old) : null, after: c.op === "insert" ? rec(c.new) : null };
+    const key = rec(c.old)!;
+    const now = get<Row>(`SELECT * FROM "${c.table}" WHERE ${pk.map((k) => `"${k}" = ?`).join(" AND ")}`, ...pk.map((k) => key[k] as SQLInputValue))!;
+    const changed = rec(c.new)!;
+    const old = rec(c.old)!;
+    return { table: c.table, op: "update", before: { ...now, ...old }, after: { ...now, ...changed } };
+  });
 }
 
 // ---- migrations (PRAGMA user_version; every table prefixed v2_) ----

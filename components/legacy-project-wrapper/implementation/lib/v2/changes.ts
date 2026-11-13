@@ -421,6 +421,14 @@ export async function createChangeRequest(pp: PolicyPrincipal, goalId: string, b
 }
 
 export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id: string, action: ChangeRequestAction, b: Body) {
+  await tx(changeRequestDecision(pp, goalId, id, action, b));
+  return requestView(pp, crRow(pp.wsId, id)!);
+}
+
+/** One decision on a change request: the checks that need no transaction (404 for a request the caller can't read, 403
+ *  for a viewer, 400 for a revision it never reached), then the body that tx() runs. The approval preview
+ *  (lib/v2/foresight.ts) runs the same body and rolls it back, so there is one copy of every decision. */
+export function changeRequestDecision(pp: PolicyPrincipal, goalId: string, id: string, action: ChangeRequestAction, b: Body): () => void {
   visibleRequest(pp, id, goalId);
   if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
   // A revision, when sent, is a whole number (400 in words otherwise, c11 W1) that the request has reached: one it never
@@ -428,7 +436,7 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
   const sent = revisionRead(b, true);
   const me = pp.userId;
   const at = nowIso();
-  await tx(() => {
+  return () => {
     const r = crRow(pp.wsId, id)!; // read inside the transaction
     assertRevisionReached("request", sent, r.revision);
     const g = goalRow(pp.wsId, r.goal_id)!;
@@ -646,8 +654,7 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         break;
       }
     }
-  });
-  return requestView(pp, crRow(pp.wsId, id)!);
+  };
 }
 
 // ---- evidence links ----

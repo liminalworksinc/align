@@ -110,9 +110,13 @@ export function Drawer({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex min-h-[44px] items-center gap-2 rounded-(--radius-s) border border-(--edge) px-3 text-[13px] text-(--text-2) hover:text-(--text-1)"
+            className="inline-flex min-h-[44px] shrink-0 items-center gap-2 rounded-(--radius-s) border border-(--edge) px-3 text-[13px] whitespace-nowrap text-(--text-2) hover:text-(--text-1)"
           >
-            Close <Kbd>Esc</Kbd>
+            {/* Never wrapped ("Clo / se" at 390); the Esc hint is for keyboards, so phones leave it out. */}
+            Close
+            <span className="max-sm:hidden">
+              <Kbd>Esc</Kbd>
+            </span>
           </button>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
