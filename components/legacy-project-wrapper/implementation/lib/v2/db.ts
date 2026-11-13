@@ -1,3 +1,4 @@
+import { createTouches, type TouchHold, type TouchListener, type Touches } from "./touch-core.mts";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
@@ -86,6 +87,21 @@ export function exec(sql: string) {
 
 const isBusy = (e: unknown) => /SQLITE_BUSY|database is locked/i.test(String((e as Error)?.message ?? e)) || (e as { errcode?: number })?.errcode === 5;
 
+// ---- live: which workspaces a write changed (lib/v2/live.ts streams it; the rules are lib/v2/touch-core.mts) ----
+// A write marks its workspace with touchWs(), usually through audit() or writeDirective(). Announced only once durable:
+// at once for an autocommitted write; after the outer COMMIT inside tx() (dropped on ROLLBACK); never for a write inside
+// a transaction someone else opened (a preview that rolls back) unless that caller holds touches with holdTouches().
+// Kept on globalThis, like the connections, so every route bundle shares one set of listeners.
+const gt = globalThis as unknown as { __alignV2Touches?: Touches };
+const touches = (): Touches => (gt.__alignV2Touches ??= createTouches(() => openDb().domain));
+/** Mark a workspace as changed by the current write. */
+export const touchWs = (ws: string | null | undefined) => touches().touch(ws);
+/** Hear of every committed write to a workspace. Returns the unsubscribe. */
+export const onWsChange = (l: TouchListener) => touches().onChange(l);
+/** For code that opens its own transaction (LIM-2422 previewTx): hold touches, then commit() after a real COMMIT or
+ *  discard() after a ROLLBACK. Without it, touches inside such a transaction are dropped. */
+export const holdTouches = (): TouchHold => touches().hold();
+
 let depth = 0;
 /** Run `fn` synchronously inside BEGIN IMMEDIATE ... COMMIT (ROLLBACK if it throws). A busy start is retried
  *  asynchronously for up to ~5 s. Nested calls join the outer transaction. */
@@ -102,10 +118,12 @@ export async function tx<T>(fn: () => T): Promise<T> {
     }
   }
   depth++;
+  const held = holdTouches();
   try {
     const out = fn();
     if (out instanceof Promise) throw new Error("tx() callbacks must be synchronous");
     d.exec("COMMIT");
+    held.commit();
     return out;
   } catch (e) {
     try {
@@ -113,6 +131,7 @@ export async function tx<T>(fn: () => T): Promise<T> {
     } catch {}
     throw e;
   } finally {
+    held.discard();
     depth--;
   }
 }
@@ -1143,4 +1162,5 @@ export const LIVE_WS = (ws: string) => `${ws} IN (SELECT id FROM v2_workspaces W
 
 export function audit(ws: string | null, actor: string | null, action: string, objectId: string | null, at: string) {
   run("INSERT INTO v2_audit (ws_id, actor_id, action, object_id, at) VALUES (?, ?, ?, ?, ?)", ws, actor, action, objectId, at);
+  touchWs(ws);
 }

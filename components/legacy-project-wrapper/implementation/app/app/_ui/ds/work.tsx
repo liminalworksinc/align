@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useCallback } from "react";
 import type { ChangeRequest, Evidence, Goal, MySession } from "../types";
 import { DecisionPanel, NoDecisionPanel } from "./decision-panel";
 import { EmptyState } from "./empty-state";
@@ -8,6 +9,8 @@ import { EvidenceLabel } from "./evidence-label";
 import { EvidenceSummary, useDelivery } from "./evidence-summary";
 import { Panel } from "./panel";
 import { useRead } from "./read";
+import { useLive, useLiveReload } from "../live";
+import { GoalPresenceLine } from "../home/presence";
 import { StatusPill } from "./status-pill";
 
 // Work (LIM-2472; round 2, founder ruling eaa5cf92: evidence serves a decision). Opened from a decision or a goal, never
@@ -67,10 +70,16 @@ function SessionsPanel({ ws, goal }: { ws: string; goal: Goal }) {
   const s = useRead<{ mine: MySession[] }>(`/api/v2/workspaces/${ws}/sessions`);
   const mine = (s.data?.mine ?? []).filter((x) => x.current_epoch?.goal?.id === goal.id || x.governing_goal?.id === goal.id);
   const d = a.data;
+  // Live (LIM-2503): a session pausing, resuming or confirming a directive shows here without a reload.
+  const { reload: ra } = a;
+  const { reload: rs } = s;
+  useLiveReload(ws, ["sessions", "presence"], useCallback(() => (ra(), rs()), [ra, rs]));
+  const presence = useLive(ws).presence?.find((p) => p.goal_id === goal.id);
   return (
     <Panel eyebrow="Sessions" title="Shared toward this goal" actions={<Link href={`/app/w/${ws}/sessions`} className={`${LINK} text-[14px]`}>Sessions</Link>}>
       {a.loading && <p className="text-[14px] text-(--text-2)">Loading…</p>}
       {a.status !== 0 && <p className="text-[14px] text-(--text-2)">{a.message}</p>}
+      {presence && <GoalPresenceLine p={presence} />}
       {d && (
         <div className="flex flex-col gap-3">
           <p className="flex flex-wrap items-center gap-2 text-[13px] text-(--text-2)">
@@ -175,6 +184,9 @@ function useLaunched(ws: string, goal: Goal) {
   const value = useRead<{ apps: { everyone: boolean; items: { id: string; name: string; connected_by: { id: string; name: string }; sent_at: string }[] } | null }>(
     cr ? `/api/v2/workspaces/${ws}/goals/${goal.id}/change-requests/${cr.id}/value` : null,
   );
+  const { reload: rc } = crs;
+  const { reload: rv } = value;
+  useLiveReload(ws, ["changes", "presence"], useCallback(() => (rc(), rv()), [rc, rv]));
   // A failed read says nothing about what was launched or sent: neither is the same as a read that found none.
   return { cr, sent: value.data?.apps ?? null, loading: crs.loading || (!!cr && value.loading), crsLoading: crs.loading, sentLoading: !!cr && value.loading, launchUnread: crs.status !== 0 && !cr, sentUnread: !!cr && value.status !== 0 };
 }
@@ -324,6 +336,9 @@ export function WorkPanels({ ws, goalId, crId, me = "" }: { ws: string; goalId?:
   const decision = named ?? (crId ? undefined : (open ?? latest));
   // Read once for the decision's delivery statement and its evidence summary.
   const delivery = useDelivery(ws, decision);
+  const { reload: rf } = feed;
+  const { reload: rc } = crs;
+  useLiveReload(goalId ? ws : null, ["changes", "goals"], useCallback(() => (rf(), rc()), [rf, rc]));
   if (!goalId) return <WorkIndex ws={ws} />;
 
   if (feed.loading || crs.loading) return <p className="text-[14px] text-(--text-2)">Loading…</p>;

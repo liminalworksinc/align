@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 // One decision as lanes: one lane per role, in order, with the states it can be in as cards. Lanes are columns, so the
 // map fits the review drawer. The caller says what connects to what; the map routes the lines, through the gutters and
@@ -31,6 +31,22 @@ export function LaneMap({ lanes, cards, links = [], caption }: { lanes: Lane[]; 
   const uid = useId();
   const box = useRef<HTMLDivElement>(null);
   const [lines, setLines] = useState<Line[]>([]);
+  // Live (LIM-2503): when the "now" card moves while the map is shown (a decision in another window, or here), the card
+  // it moved to lights up after the line it came along draws itself: cause, then effect. Reduced motion: no movement.
+  const nowId = cards.find((c) => c.state === "now")?.id ?? null;
+  const prevNow = useRef(nowId);
+  const [arrived, setArrived] = useState<{ from: string | null; to: string } | null>(null);
+  useEffect(() => {
+    const from = prevNow.current;
+    prevNow.current = nowId;
+    if (from === nowId || !nowId) return;
+    const on = setTimeout(() => setArrived({ from, to: nowId }), 0);
+    const off = setTimeout(() => setArrived(null), 2400);
+    return () => {
+      clearTimeout(on);
+      clearTimeout(off);
+    };
+  }, [nowId]);
 
   const measure = useCallback(() => {
     const root = box.current;
@@ -94,6 +110,9 @@ export function LaneMap({ lanes, cards, links = [], caption }: { lanes: Lane[]; 
     <div className="@container min-w-0">
       <div className="hidden @2xl:block">
         <p className="sr-only">{caption}</p>
+        <p className="sr-only" aria-live="polite">
+          {arrived ? `Moved just now: ${cards.find((c) => c.id === arrived.to)?.title ?? ""}.` : ""}
+        </p>
         <div ref={box} className="relative">
           <svg aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
             <defs>
@@ -104,7 +123,17 @@ export function LaneMap({ lanes, cards, links = [], caption }: { lanes: Lane[]; 
               ))}
             </defs>
             {lines.map((l) => (
-              <path key={l.key} data-link={l.kind} d={l.d} fill="none" stroke={STROKE[l.kind]} strokeWidth={l.kind === "live" ? 1.75 : 1} strokeDasharray={l.kind === "muted" ? "3 4" : undefined} strokeLinejoin="round" markerEnd={`url(#${uid}-${l.kind})`} />
+              <path
+                key={l.key}
+                data-link={l.kind}
+                d={l.d}
+                {...(arrived && l.key.startsWith(`${arrived.from}-${arrived.to}-`) ? { className: "al-draw", pathLength: 1 } : { strokeDasharray: l.kind === "muted" ? "3 4" : undefined })}
+                fill="none"
+                stroke={STROKE[l.kind]}
+                strokeWidth={l.kind === "live" ? 1.75 : 1}
+                strokeLinejoin="round"
+                markerEnd={`url(#${uid}-${l.kind})`}
+              />
             ))}
           </svg>
           <div className="relative grid gap-x-8 gap-y-6" style={columns}>
@@ -123,8 +152,9 @@ export function LaneMap({ lanes, cards, links = [], caption }: { lanes: Lane[]; 
                   key={c.id}
                   data-lane-card={c.id}
                   data-state={state}
+                  data-arrived={arrived?.to === c.id ? "1" : undefined}
                   aria-current={state === "now" ? "step" : undefined}
-                  className={`relative min-w-0 self-start rounded-(--radius-s) border p-2.5 ${CARD[state]}`}
+                  className={`relative min-w-0 self-start rounded-(--radius-s) border p-2.5 ${CARD[state]}${arrived?.to === c.id ? " al-arrive" : ""}`}
                   style={{ gridColumn: lanes.findIndex((l) => l.id === c.lane) + 1, gridRow: c.row + 2 }}
                 >
                   <div className="flex items-baseline justify-between gap-2">
