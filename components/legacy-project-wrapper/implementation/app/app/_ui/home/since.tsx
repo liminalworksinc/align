@@ -61,6 +61,15 @@ function remove(store: () => Storage, k: string) {
   }
 }
 
+/** How this document was loaded: "reload", "navigate", "back_forward" or "prerender" (undefined where unsupported). */
+function navigationType(): string | undefined {
+  try {
+    return (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The baseline: when this person last left this Home on this device (null for a first visit), read once per mount.
  *  This tab keeps it in sessionStorage, so a reload compares against the same time ("none" for a first visit). Leaving
  *  Home inside the app stores now and drops the tab's baseline; the page unloading (a reload or a closed tab) stores now
@@ -70,7 +79,10 @@ function useLastVisit(ws: string, me: string): { ready: boolean; since: string |
   const [v, setV] = useState<{ ready: boolean; since: string | null }>({ ready: false, since: null });
   useEffect(() => {
     const k = key(ws, me);
-    const base = read(() => sessionStorage, k) ?? read(() => localStorage, k) ?? "none";
+    // Only a reload keeps this tab's baseline. Any other full page load in the same tab (back from another site, a typed
+    // address, a link from elsewhere) is a new visit, so it compares with when this person last left (LIM-2515 L2).
+    const held = navigationType() === "reload" ? read(() => sessionStorage, k) : null;
+    const base = held ?? read(() => localStorage, k) ?? "none";
     write(() => sessionStorage, k, base);
     const t = setTimeout(() => setV({ ready: true, since: base === "none" || Number.isNaN(Date.parse(base)) ? null : base }), 0);
     let unloading = false;

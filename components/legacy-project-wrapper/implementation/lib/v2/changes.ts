@@ -755,6 +755,7 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
   const me = pp.userId;
   const isRequester = r.requester_id === me;
   const isApprover = approvers.includes(me);
+  const seesReason = isRequester || isApprover || r.rejected_by === me;
   const open = isOpen(r);
   const unlaunched = r.state === "approved" && (r.launch === "pending" || r.launch === "not_yet");
   const person = (id: string | null) => (id ? { id, name: memberName(id) } : null);
@@ -826,10 +827,11 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     launchers: launchers.map((id) => person(id)!),
     approved_by: person(r.approved_by),
     rejected_by: person(r.rejected_by),
-    /** The approver's note (approved) or the rejection reason (rejected). */
-    decision_note: r.decision_note,
+    /** The approver's note (approved) or the rejection reason (rejected). A rejection reason reaches only the requester,
+     *  the person who declined and the request's approvers; every other reader gets null (LIM-2515 L1, ruling A). */
+    decision_note: r.state === "rejected" && !seesReason ? null : r.decision_note,
     note: r.state === "approved" ? r.decision_note : null,
-    rejection_reason: r.state === "rejected" ? r.decision_note : null,
+    rejection_reason: r.state === "rejected" && seesReason ? r.decision_note : null,
     /** The goal version the launch created (null until launched). */
     version: r.version,
     /** pending (approved, no launch decision yet) | not_yet | launched | superseded (before launch) | null. */

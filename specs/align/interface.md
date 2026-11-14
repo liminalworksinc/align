@@ -623,7 +623,9 @@ now."
 
 Home's "Since you last looked" SHALL compare against the last time this person left this workspace's Home on this
 device, in any tab; coming back to Home in the same tab, without a reload, compares against when they left it, and a
-reload keeps the comparison the tab had. While
+reload keeps the comparison the tab had. Only a reload SHALL keep it: any other full page load in the same tab (back
+from another site, a typed address, a link from elsewhere) is a new visit and compares against when they last left
+(LIM-2515 L2). While
 Home stays open, it SHALL add new changes without a reload, checking at most once a minute, and the Needs-you list
 reads again with it, so its count never trails what Since shows. With no earlier visit on
 the device it SHALL say "First visit on this device, so nothing to compare yet." The time is kept in this browser only
