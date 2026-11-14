@@ -623,7 +623,9 @@ now."
 
 Home's "Since you last looked" SHALL compare against the last time this person left this workspace's Home on this
 device, in any tab; coming back to Home in the same tab, without a reload, compares against when they left it, and a
-reload keeps the comparison the tab had. While
+reload keeps the comparison the tab had. Only a reload of Home keeps it: leaving Home by any other full page load (a
+plain link such as /trust, a typed URL, another site, the browser's back button) is leaving Home, so coming back
+compares against when they left. While
 Home stays open, it SHALL add new changes without a reload, checking at most once a minute, and the Needs-you list
 reads again with it, so its count never trails what Since shows. With no earlier visit on
 the device it SHALL say "First visit on this device, so nothing to compare yet." The time is kept in this browser only
@@ -742,6 +744,11 @@ counted as a read. A workspace owner's read has every connected app and anyone e
 
 - **WHEN** another member creates a goal the person can read after the person's last visit, and later saves its version 2
 - **THEN** "Since you last looked" says "<owner> created the goal" and "Someone saved v2"; a goal the person created themselves gets no line
+
+#### Scenario: Leaving Home by a full page load
+
+- **WHEN** the person reads Home with lines in "Since you last looked", reloads it, then opens /trust in the same tab and comes back to Home by its URL
+- **THEN** the reload shows the same lines, and coming back shows "Nothing changed since your last visit." (it compares against when they left Home, not the tab's earlier comparison); a reload after that keeps the new comparison
 
 ### Requirement: Live workspace
 

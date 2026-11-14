@@ -7076,6 +7076,33 @@ try {
           /Hugo Lead[\s\S]{0,60}created the goal/.test(sinceText) && /Hank Other[\s\S]{0,60}created the goal/.test(sinceText) && !/Hana Owner[\s\S]{0,60}created the goal/.test(sinceText) && !/You[\s\S]{0,20}created the goal/.test(sinceText) && !/Someone[\s\S]{0,20}created the goal/.test(sinceText),
           sinceText.slice(0, 900).replace(/\n/g, " / "),
         );
+        // LIM-2513 item 1 (Mini 0's PR 68 audit Low, 03c415a8): a reload keeps the tab's comparison, but leaving Home by a
+        // full page load (a plain link to /trust, a typed URL) is leaving it, so coming back compares against that moment.
+        // Hana's last visit starts long ago; every count below is the section's own `data-since` (lines since the visit).
+        const pl = await browser.newPage();
+        await pl.setViewport({ width: 1440, height: 900 });
+        await pl.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        const sinceCount = async () => {
+          await pl.waitForFunction(() => { const s = document.querySelector("[data-since]"); return !!s && s.getAttribute("data-since") !== "reading"; }, { timeout: 15000 }).catch(() => undefined);
+          return pl.evaluate(() => document.querySelector("[data-since]")?.getAttribute("data-since") ?? null);
+        };
+        await pl.goto(`${BASE}/trust`, { waitUntil: "networkidle0" });
+        await pl.evaluate((k) => { localStorage.setItem(k, "2000-01-01T00:00:00.000Z"); sessionStorage.removeItem(k); }, `align.lastVisit:${HW}:${HO.id}`);
+        await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        const lFirst = await sinceCount();
+        await pl.reload({ waitUntil: "networkidle0" });
+        const lReload = await sinceCount();
+        await pl.goto(`${BASE}/trust`, { waitUntil: "networkidle0" });
+        await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        const lBack = await sinceCount();
+        await pl.reload({ waitUntil: "networkidle0" });
+        const lBackReload = await sinceCount();
+        await pl.close();
+        check(
+          "ui (Chrome, Since, LIM-2513): a reload keeps the tab's comparison (same lines), but leaving Home by a full page load to /trust and coming back by URL compares against when Home was left (no lines), and a reload after that keeps the new comparison",
+          Number(lFirst) > 0 && lReload === lFirst && lBack === "0" && lBackReload === "0",
+          JSON.stringify({ lFirst, lReload, lBack, lBackReload }),
+        );
         // Mini 5's click walk, Nov 11: at 390 wide the review drawer's "More actions" menu opened below its footer, so
         // Decline, the last item, was off screen and only reachable by keyboard. Hugo asks Hank to change Hank's goal;
         // Hank opens it in the review drawer on a phone, opens More actions, and every item lies inside the screen and
