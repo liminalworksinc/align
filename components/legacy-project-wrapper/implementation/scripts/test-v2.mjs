@@ -5230,9 +5230,16 @@ try {
         `${cardText} ${errors.join(" | ")}`,
       );
       const actClasses = await page.$$eval("#goal-activity [data-evidence-class]", (els) => els.map((e) => e.getAttribute("data-evidence-class")));
+      // LIM-2513 (one evidence wording): the class is the same label the Home and Apps use, with its icon and words.
+      const actLabels = await page.$$eval("#goal-activity [data-evidence-class] [data-evidence]", (els) => els.map((e) => [e.getAttribute("data-evidence"), !!e.querySelector("svg"), e.textContent?.trim()]));
       check(
-        "ui (Chrome, LIM-2455 §E2): the Agent activity card carries exactly one evidence class, \"agent reported\", and names the files as reported (\"Files these sessions reported working on\"), never \"Files agents are working on\"",
-        JSON.stringify(actClasses) === '["agent_reported"]' && cardText.includes("agent reported") && cardText.includes("Files these sessions reported working on") && !cardText.includes("Files agents are working on"),
+        "ui (Chrome, LIM-2513): the Agent activity card's class is the shared evidence label (data-evidence=\"reported\", an icon, \"Agent reported\"), not a lower-case pill",
+        JSON.stringify(actLabels) === '[["reported",true,"Agent reported"]]',
+        JSON.stringify(actLabels),
+      );
+      check(
+        "ui (Chrome, LIM-2455 §E2): the Agent activity card carries exactly one evidence class, \"Agent reported\", and names the files as reported (\"Files these sessions reported working on\"), never \"Files agents are working on\"",
+        JSON.stringify(actClasses) === '["agent_reported"]' && cardText.includes("Agent reported") && !cardText.includes("agent reported") && cardText.includes("Files these sessions reported working on") && !cardText.includes("Files agents are working on"),
         `${JSON.stringify(actClasses)} ${cardText.slice(0, 300)}`,
       );
       await page.goto(`${BASE}/app/w/${AK}/sessions`, { waitUntil: "networkidle0" });
@@ -5605,7 +5612,7 @@ try {
         const valueClasses = await page.$$eval(`[data-value-card="${crP.json?.id}"] [data-value-row="delivery"] [data-evidence-class]`, (els) => els.map((e) => e.getAttribute("data-evidence-class")));
         check(
           "ui (Chrome, LIM-2455 §E2): the value card's \"Agents on the new version\" line carries exactly one evidence class, a delivery receipt (the session's machine sent a receipt for the launched version)",
-          JSON.stringify(valueClasses) === '["delivery_receipt"]' && /delivery receipt/.test(card.text),
+          JSON.stringify(valueClasses) === '["delivery_receipt"]' && /Receipt/.test(card.text) && !/delivery receipt/i.test(card.text),
           JSON.stringify(valueClasses),
         );
         const appsRow = await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => {
@@ -6627,9 +6634,9 @@ try {
     const hc = await import(pathToFileURL(path.join(ROOT, "lib/v2/home-core.mts")).href);
     const P = (id, name) => ({ id, name });
     check(
-      "home rules: an app's goal read (last_read_at) is a delivery receipt and no goal read is not observed; the three classes read \"Delivery receipt\", \"Agent reported\", \"Not observed\"; a request answer is agent reported, but an auto_accepted one (delivered, not declined: E2E-AGENT G1) is a delivery receipt",
+      "home rules: an app's goal read (last_read_at) is a delivery receipt and no goal read is not observed; the three classes read \"Receipt\", \"Agent reported\", \"Not observed\" (LIM-2513: the words every screen uses); a request answer is agent reported, but an auto_accepted one (delivered, not declined: E2E-AGENT G1) is a delivery receipt",
       hc.appEvidence("2026-10-31T00:00:00Z") === "delivery_receipt" && hc.answerEvidence("accepted", true) === "delivery_receipt" && hc.answerEvidence("accepted") === "agent_reported" && hc.answerEvidence("declined") === "agent_reported" && hc.answerEvidence("received") === "delivery_receipt" && hc.appEvidence(null) === "not_observed" && hc.appEvidence(undefined) === "not_observed" && hc.appEvidence("") === "not_observed" &&
-        JSON.stringify(hc.EVIDENCE_CLASSES) === JSON.stringify(["delivery_receipt", "agent_reported", "not_observed"]) && Object.values(hc.EVIDENCE_WORDS).join("|") === "Delivery receipt|Agent reported|Not observed",
+        JSON.stringify(hc.EVIDENCE_CLASSES) === JSON.stringify(["delivery_receipt", "agent_reported", "not_observed"]) && Object.values(hc.EVIDENCE_WORDS).join("|") === "Receipt|Agent reported|Not observed",
       "",
     );
     const T = "2026-10-31T00:00:00Z";

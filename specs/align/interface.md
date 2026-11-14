@@ -801,22 +801,24 @@ Presence names no person, key or title. With reduced motion the states show with
 ### Requirement: Evidence class on every agent-status item
 
 Every item in the web app that says what agents or their sessions did, received or reported SHALL carry exactly one
-evidence class, and nothing SHALL be inferred past it (no working, stuck, blocked or diverged state). The Home's Needs
-list, the Apps tab, the Requests list, the review drawer and the Work page show it as a label with an icon: "Receipt",
-"Agent reported", "Self-reported" (a link a person added) or "Not observed" (dashed), `app/app/_ui/ds/evidence-label.tsx`.
-The items below show it as a plain pill in the words of `lib/v2/home-core.mts`, lower case ("delivery receipt", "agent
-reported", "not observed"): the goal page's Agent activity card ("agent reported" from
-the align CLI's bindings, usage and work signals, else "not observed"); each session's answer on the Agents on this goal
-card ("delivery receipt" for a request received and not answered, "agent reported" for an answer, "not observed"
-otherwise); the value card's "Agents on the new version" line ("delivery receipt" once any receipt for the launched
-version arrived, else "not observed") and its "Connected AI apps" row ("delivery receipt" when Align sent the launched
-version to an app the reader can see, else "not observed"); and the Sessions tab's stop or resume progress (the same rule). Where an MCP
+evidence class, and nothing SHALL be inferred past it (no working, stuck, blocked or diverged state). Every screen
+shows it the same way, as one label with an icon, in one set of words: "Receipt" (Align delivered something and
+recorded it), "Agent reported" (the agent's own words), "Self-reported" (a link a person added; Align does not check
+it) or "Not observed" (Align has nothing; dashed), `app/app/_ui/ds/evidence-label.tsx` (founder ruling, LIM-2513, Nov
+13: one evidence wording). That covers the Home's Needs list, the Apps tab, the Requests list, the review drawer, the
+Work page, the goal page's Agent activity card ("Agent reported" from the align CLI's bindings, usage and work signals,
+else "Not observed"), each session's answer on the Agents on this goal card ("Receipt" for a request received and not
+answered, "Agent reported" for an answer, "Not observed" otherwise), the value card's "Agents on the new version" line
+("Receipt" once any receipt for the launched version arrived, else "Not observed") and its "Connected AI apps" row
+("Receipt" when Align sent the launched version to an app the reader can see, else "Not observed"), and the Sessions
+tab's stop or resume progress (the same rule). Running text uses the same words in lower case ("shown as
+self-reported", "labelled agent reported"), never another name for a class. Where an MCP
 read returns the same item (`align_get_goal_activity`), it SHALL carry the same class as `evidence_class`.
 
 #### Scenario: One class per item
 
 - **WHEN** a goal has two bound sessions that reported activity, a checkpoint request one session's developer accepted and another declined, a launched change whose directive a session received, and a resumed session whose machine sent no receipt yet
-- **THEN** the Agent activity card shows "agent reported", each request answer "agent reported", the value card's delivery line "delivery receipt" and the Sessions tab's "Resume sent, not yet received" "not observed", one pill each
+- **THEN** the Agent activity card shows "Agent reported", each request answer "Agent reported", the value card's delivery line "Receipt" and the Sessions tab's "Resume sent, not yet received" "Not observed", one label each, the same label the Home and Apps use
 
 ### Requirement: Home first-run card
 
@@ -857,7 +859,7 @@ under "It can read, as you" what a connected agent can read, one line per read t
 `goals:read` token (`lib/mcp/read-tools.ts`, the activity line marked "(agent-reported, not observed by Align)"; in
 the app's words, "Decision records: who approved or declined a change, and why", never "rejected": `scripts/test-v2.mjs`
 "c9 W2: ..."), say that it can't propose, approve, launch or change anything here (and that, if allowed when
-connecting, it can add evidence links to change requests, labelled agent-reported), and link to the Apps tab ("Using
+connecting, it can add evidence links to change requests, labelled agent reported), and link to the Apps tab ("Using
 Codex or another app? See the Apps tab."). Its status line (a polite live region) SHALL say only what Align has seen:
 "No AI app is connected to this workspace yet." (to a workspace owner) or "You haven't connected an AI app to this
 workspace yet.", or for each app the person connected that is approved with no request "<app>: approved <time>, Align
@@ -1122,7 +1124,7 @@ and a closed "Details" disclosure.
 #### Scenario: Understand an open request
 
 - **WHEN** anyone who can read the goal opens a pending or countered request
-- **THEN** "Approved now · version <base>" (or, when the goal moved on, "Request made against version <base> · goal now at <n>") and "Proposed · revision <r>" show each changed field side by side (stacked below 640 px), with the facts Version ("Goal at version <n>", and the request's base when the goal moved on), Requested by, Decides (who can approve, or "Nobody can approve this yet") and State; "What would change", tagged "the request's own text, not evidence", says field by field what the request would change (a dependency the reader can't read as "a goal you can't see", never left out; after named ones as "<names> and 1 other goal you can't see" ("… and <n> other goals you can't see"), never "<name>, a goal you can't see", which reads as if the named goal were the hidden one; the same on both sides, in "Depends on would be" and in the goal tree), quotes the requester's reason "as written" and the latest counter's note ("Your note on revision <r>" when the reader wrote it, else "<name>'s note …"), and shows any "Accept if…" condition with "Not confirmed yet" until acknowledged; beside it "Evidence for revision <r>" shows Align's snapshot and the links (self-reported or agent-reported, never verified) or "No evidence attached."; "Details", closed, lists the request, goal, requester and approver ids, the state, revision and base version, the evidence ids and the times
+- **THEN** "Approved now · version <base>" (or, when the goal moved on, "Request made against version <base> · goal now at <n>") and "Proposed · revision <r>" show each changed field side by side (stacked below 640 px), with the facts Version ("Goal at version <n>", and the request's base when the goal moved on), Requested by, Decides (who can approve, or "Nobody can approve this yet") and State; "What would change", tagged "the request's own text, not evidence", says field by field what the request would change (a dependency the reader can't read as "a goal you can't see", never left out; after named ones as "<names> and 1 other goal you can't see" ("… and <n> other goals you can't see"), never "<name>, a goal you can't see", which reads as if the named goal were the hidden one; the same on both sides, in "Depends on would be" and in the goal tree), quotes the requester's reason "as written" and the latest counter's note ("Your note on revision <r>" when the reader wrote it, else "<name>'s note …"), and shows any "Accept if…" condition with "Not confirmed yet" until acknowledged; beside it "Evidence for revision <r>" shows Align's snapshot and the links (self-reported or agent reported, never verified) or "No evidence attached."; "Details", closed, lists the request, goal, requester and approver ids, the state, revision and base version, the evidence ids and the times
 
 #### Scenario: Choose a decision
 
@@ -1233,7 +1235,7 @@ when nothing is.
 ### Requirement: Evidence on change request cards
 
 Every change request card on the goal page SHALL show (the Requests tab lists requests as one Desk list and opens each in the review drawer, which has its own evidence summary; see "Workspace Requests tab"), under "Evidence for revision <n>"
-(or "No evidence attached." when the current revision has no links), the Align snapshot of the current revision as "Recorded by Align at revision <n>" (the goal's estimated spend in the last 30 days, by the money rule the MCP snapshot line uses (`lib/v2/money.mts`: rounded to four decimals first, then "$0.0010" under one cent, "under $0.0001" for a cost that is not zero but would round to "$0.0000", and two decimals from one cent, so 9,999 micro-dollars reads "$0.01" as 10,000 does; `scripts/test-v2.mjs` "C7-3: ..."), with its request count, "1 request" for one as in the MCP snapshot line (one count-and-noun helper, `lib/v2/plural.mts`, for both: `scripts/test-v2.mjs` "C5-4: ..."), and its models, or "Spend on this goal is hidden from you.", the sessions bound to it and its last activity), and each link on the current revision with its kind ("Pull request", "CI run", "Incident", "Dashboard", "Doc" or "Link"), its label as a link to its URL that opens in a new tab with `rel="noopener noreferrer"`, the URL's host, who added it ("you" for the person) and "self-reported" or "agent-reported". It SHALL never call a link verified. Links on earlier revisions SHALL be listed under "From revision <n>". When `can.add_evidence` is set, **Add evidence** SHALL open a form with a kind, an https link and "What it shows" (at most 120 characters) whose **Add link** posts `{kind, url, label, revision}` to `.../change-requests/<id>/evidence` (a 409, for a request declined, withdrawn, approved or countered meanwhile or a link already there, is refused like any decision: the form closes, the card shows a focused alert "Not recorded. <the server's message>", such as "Not recorded. This request was declined by <name>, so nothing changes.", and reloads to show the request as it is now: `scripts/test-v2.mjs` "C8-1 (ui): ..."); a link whose `can_remove` is set SHALL offer **Remove**, which sends `DELETE .../evidence/<evidence id>` (a 409, for a request declined, withdrawn or countered meanwhile, is refused as **Add link**'s is: a focused alert "Not recorded. <the server's message>", such as "Not recorded. This request was declined by <name>, so nothing changes.", and the card reloads to show the request as it is now: `scripts/test-v2.mjs` "c9 W1 (ui): ..."). Once approved, the card SHALL say "Approved without evidence on the approved revision (<r>)." (links on earlier revisions are still listed under "From revision <n>") or "Approved with <n> evidence link(s), none verified." An **Add link** for a link that can no longer become an `https://` one (`http://…`) SHALL stay disabled with the hint "Use an https:// link: Align keeps only https links."
+(or "No evidence attached." when the current revision has no links), the Align snapshot of the current revision as "Recorded by Align at revision <n>" (the goal's estimated spend in the last 30 days, by the money rule the MCP snapshot line uses (`lib/v2/money.mts`: rounded to four decimals first, then "$0.0010" under one cent, "under $0.0001" for a cost that is not zero but would round to "$0.0000", and two decimals from one cent, so 9,999 micro-dollars reads "$0.01" as 10,000 does; `scripts/test-v2.mjs` "C7-3: ..."), with its request count, "1 request" for one as in the MCP snapshot line (one count-and-noun helper, `lib/v2/plural.mts`, for both: `scripts/test-v2.mjs` "C5-4: ..."), and its models, or "Spend on this goal is hidden from you.", the sessions bound to it and its last activity), and each link on the current revision with its kind ("Pull request", "CI run", "Incident", "Dashboard", "Doc" or "Link"), its label as a link to its URL that opens in a new tab with `rel="noopener noreferrer"`, the URL's host, who added it ("you" for the person) and "Self-reported" or "Agent reported" (the evidence label). It SHALL never call a link verified. Links on earlier revisions SHALL be listed under "From revision <n>". When `can.add_evidence` is set, **Add evidence** SHALL open a form with a kind, an https link and "What it shows" (at most 120 characters) whose **Add link** posts `{kind, url, label, revision}` to `.../change-requests/<id>/evidence` (a 409, for a request declined, withdrawn, approved or countered meanwhile or a link already there, is refused like any decision: the form closes, the card shows a focused alert "Not recorded. <the server's message>", such as "Not recorded. This request was declined by <name>, so nothing changes.", and reloads to show the request as it is now: `scripts/test-v2.mjs` "C8-1 (ui): ..."); a link whose `can_remove` is set SHALL offer **Remove**, which sends `DELETE .../evidence/<evidence id>` (a 409, for a request declined, withdrawn or countered meanwhile, is refused as **Add link**'s is: a focused alert "Not recorded. <the server's message>", such as "Not recorded. This request was declined by <name>, so nothing changes.", and the card reloads to show the request as it is now: `scripts/test-v2.mjs` "c9 W1 (ui): ..."). Once approved, the card SHALL say "Approved without evidence on the approved revision (<r>)." (links on earlier revisions are still listed under "From revision <n>") or "Approved with <n> evidence link(s), none verified." An **Add link** for a link that can no longer become an `https://` one (`http://…`) SHALL stay disabled with the hint "Use an https:// link: Align keeps only https links."
 
 #### Scenario: Approve without evidence
 
@@ -1243,7 +1245,7 @@ Every change request card on the goal page SHALL show (the Requests tab lists re
 #### Scenario: A link is added
 
 - **WHEN** the requester adds a pull request link labelled "Pen-test vendor contract"
-- **THEN** the card lists "Pull request", "Pen-test vendor contract" linking to the URL in a new tab with `rel="noopener noreferrer"`, the URL's host, "by you" and "self-reported", and approving it afterwards shows "Approved with 1 evidence link, none verified."
+- **THEN** the card lists "Pull request", "Pen-test vendor contract" linking to the URL in a new tab with `rel="noopener noreferrer"`, the URL's host, "by you" and "Self-reported", and approving it afterwards shows "Approved with 1 evidence link, none verified."
 
 ### Requirement: Workspace Requests tab
 
@@ -1297,13 +1299,13 @@ evidence" when so), "Affected goals and
 teams" (the goal and its team, the readable goals it contributes to and the readable goals that depend on or contribute
 to it), "Agents on the new version" (before the launch "Not launched yet: agents stay on v<n> until launch."; after it,
 of the bound sessions the launch's `goal_version` directive reached: how many have it in context, received but not used
-yet, and not reached; "No shared sessions work toward this goal yet." when none; marked "delivery receipt" when any of
-those sessions' machines sent a receipt for it, else "not observed", as in "Evidence class on every agent-status
+yet, and not reached; "No shared sessions work toward this goal yet." when none; marked "Receipt" when any of
+those sessions' machines sent a receipt for it, else "Not observed", as in "Evidence class on every agent-status
 item"), once launched "Connected AI apps" (the apps the reader can see on the Apps tab, a workspace owner every one,
 that Align sent the version the launch made when they read the goals, the `mcp` part's "Goal versions Align sent an
 app are recorded": "<app> (connected by <person>): Align sent it version <n> on <time>", and that Align can't see what
 the app does next; with none, "Align hasn't sent version <n> to a connected app yet" ("an app you connected" for anyone
-but a workspace owner); marked "delivery receipt" when it lists any app, else "not observed"; main #56), "Measured in
+but a workspace owner); marked "Receipt" when it lists any app, else "Not observed"; main #56), "Measured in
 Align" (proposal to
 approval, approval to launch, and approval to the first `applied` receipt of the launch's directive, from server
 timestamps only; "not yet" while there is none), one optional question with a note, "What others said" (other
@@ -1327,7 +1329,7 @@ people's reports, when the read's `sees_all_reports` is set and there are any), 
 #### Scenario: Apps Align sent the launched version
 
 - **WHEN** a workspace owner approves a change that is launched as version 2, one member's app then reads the goals, and the owner's app last read them at version 1
-- **THEN** the owner's card shows "Connected AI apps" marked "delivery receipt" with "<member's app> (connected by <member>): Align sent it version 2 on <time>" and not the owner's own app; before the launch the row is not shown (`apps` is `null`), and once the member disconnects the app it is gone
+- **THEN** the owner's card shows "Connected AI apps" marked "Receipt" with "<member's app> (connected by <member>): Align sent it version 2 on <time>" and not the owner's own app; before the launch the row is not shown (`apps` is `null`), and once the member disconnects the app it is gone
 
 #### Scenario: Follow-up link
 
@@ -1412,7 +1414,7 @@ everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<w
 #### Scenario: Own sessions
 
 - **WHEN** a member opens the tab
-- **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared", "ended: device signed out" or "ended: left the workspace", the two ended states with no **Stop agent**, **Resume agent** or **Stop sharing**, only **Stop sharing for good** and **Delete shared history**, and "Stopped; can't be resumed from here" when its agent was stopped), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed") marked "delivery receipt" once the machine sent any receipt for it and "not observed" before, the goal it counts under and follows (for a session no longer shared, "Sharing stopped <time>, so nothing more counts" or "Sharing ended <time>, …" for an ended one, never "Counting under: no goal"), and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
+- **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared", "ended: device signed out" or "ended: left the workspace", the two ended states with no **Stop agent**, **Resume agent** or **Stop sharing**, only **Stop sharing for good** and **Delete shared history**, and "Stopped; can't be resumed from here" when its agent was stopped), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed") marked "Receipt" once the machine sent any receipt for it and "Not observed" before, the goal it counts under and follows (for a session no longer shared, "Sharing stopped <time>, so nothing more counts" or "Sharing ended <time>, …" for an ended one, never "Counting under: no goal"), and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
 
 #### Scenario: A session whose device signed out
 
@@ -1520,7 +1522,7 @@ form and workspace owners an import.
 ### Requirement: Agent activity on the goal page
 
 The goal page SHALL show an "Agent activity" card from `GET /api/v2/workspaces/<ws>/goals/<goal>/activity`, marked
-with the response's one evidence class ("agent reported", or "not observed" with nothing in the window) and saying
+with the response's one evidence class ("Agent reported", or "Not observed" with nothing in the window) and saying
 "Sessions people shared toward this goal, last 14 days. Counts come from bindings, not from what agents wrote.", with
 Sessions (and how many per harness, as "<n> Claude Code, <n> Codex"), "Reported activity, last 90 min" (what the align
 CLI reported in the last 90 minutes, never "active now") and "Last reported activity" ("None yet" when there is none),
@@ -1533,7 +1535,7 @@ card says what agents are doing: the files are what the sessions' align CLI repo
 #### Scenario: Activity card
 
 - **WHEN** a member of the goal's team opens a goal with two bound sessions, one active, and work signals with paths
-- **THEN** the card is marked "agent reported" and shows "Sessions 2 (1 Claude Code, 1 Codex)", "Reported activity, last 90 min 1", the paths and their own sessions; a reader without the detail sees only the counts, and with no sessions the card is marked "not observed" and says "No shared sessions worked toward this goal in the last 14 days."
+- **THEN** the card is marked "Agent reported" and shows "Sessions 2 (1 Claude Code, 1 Codex)", "Reported activity, last 90 min 1", the paths and their own sessions; a reader without the detail sees only the counts, and with no sessions the card is marked "Not observed" and says "No shared sessions worked toward this goal in the last 14 days."
 
 ### Requirement: Agents on this goal card
 
@@ -1560,9 +1562,9 @@ note, who cancelled it, the counts ("<n> accepted by the developer, <n> delivere
 session its name, "started <time> · …<the key's last 6 characters>" (so two sessions of one person in one repository
 can be told apart) and a pill: pending, accepted by the developer, "delivered, not declined" (an `auto_accepted` accept: the request
 reached the agent and the developer did not decline it by the end of that turn; it never says the agent did it),
-declined, expired, or for a session that ended before it answered "ended: device signed out" or "ended: left the workspace" (its row's `ended_reason`), each with one evidence class: "delivery receipt" for a request the session's machine received and
-has not answered and for one delivered and not declined, "agent reported" for the developer's answer (accepted or
-declined, sent from their machine), "not observed" for one sent with nothing back, expired or ended; with **Cancel** when its
+declined, expired, or for a session that ended before it answered "ended: device signed out" or "ended: left the workspace" (its row's `ended_reason`), each with one evidence class: "Receipt" for a request the session's machine received and
+has not answered and for one delivered and not declined, "Agent reported" for the developer's answer (accepted or
+declined, sent from their machine), "Not observed" for one sent with nothing back, expired or ended; with **Cancel** when its
 `can_cancel` is true.
 
 #### Scenario: A new goal version reloads the card in place
@@ -1583,7 +1585,7 @@ declined, sent from their machine), "not observed" for one sent with nothing bac
 #### Scenario: A checkpoint delivered and not declined
 
 - **WHEN** a checkpoint reached one session's agent and its developer did not decline it by the end of that turn, and another session's developer accepted it
-- **THEN** the request's sessions show "delivered, not declined" marked "delivery receipt" and "accepted by the developer" marked "agent reported"; nothing reads "done by the agent"
+- **THEN** the request's sessions show "delivered, not declined" marked "Receipt" and "accepted by the developer" marked "Agent reported"; nothing reads "done by the agent"
 
 ### Requirement: Hold banner
 
@@ -1660,7 +1662,7 @@ refuse requests it cannot trust without redirecting.
 #### Scenario: App asks to add evidence
 
 - **WHEN** the request's `scope` names `changes:evidence`
-- **THEN** "What it can do" has the same lines plus "It may also attach links to change requests you can act on, as evidence. Align labels them agent-reported.", and the button reads **Allow access** instead of **Allow read-only access**
+- **THEN** "What it can do" has the same lines plus "It may also attach links to change requests you can act on, as evidence. Align labels them agent reported.", and the button reads **Allow access** instead of **Allow read-only access**
 
 #### Scenario: Choose a workspace and allow
 

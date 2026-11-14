@@ -14,7 +14,7 @@ export type EvidenceClass = (typeof EVIDENCE_CLASSES)[number];
 
 /** The words the web app shows for each class. "Agent reported" never reads like an observation. */
 export const EVIDENCE_WORDS: Record<EvidenceClass, string> = {
-  delivery_receipt: "Delivery receipt",
+  delivery_receipt: "Receipt",
   agent_reported: "Agent reported",
   not_observed: "Not observed",
 };

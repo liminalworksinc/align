@@ -197,14 +197,14 @@ export default function FirstRun({
           {READ_TOOLS.map((t) => (
             <li key={t.name} data-tool={t.name}>
               {t.reads}
-              {t.agentReported ? " (agent-reported, not observed by Align)" : ""}
+              {t.agentReported ? " (agent reported, not observed by Align)" : ""}
             </li>
           ))}
         </ul>
       </div>
       <p className="text-(--text-2)">
         <span className="font-semibold text-(--text-1)">It can&apos;t</span> propose, approve, launch or change anything here. If you allow it when you connect, it can add evidence links to change
-        requests, labelled agent-reported.
+        requests, labelled agent reported.
       </p>
       <p
         role="status"
