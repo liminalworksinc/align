@@ -203,9 +203,14 @@ export async function previewTx<T, R>(fn: () => T, observe?: (changes: RowChange
   await begin(d);
   depth++;
   previewing = [];
-  const session = d.createSession();
+  // Whatever the decision would announce on the live stream (touchWs) is held here and discarded with the rollback.
+  const held = holdTouches();
   const out: Preview<T, R> = { ok: false, changes: [], outbound: [] };
+  // Inside the try, so a session that can't be made still reaches the finally: rolled back, the hold discarded, the
+  // module state reset.
+  let session: ReturnType<DatabaseSync["createSession"]> | null = null;
   try {
+    session = d.createSession();
     const plain = rowidTables();
     const maxRow = new Map(plain.map((t) => [t, get<{ m: number | null }>(`SELECT MAX(rowid) AS m FROM "${t}"`)?.m ?? 0]));
     d.exec("SAVEPOINT foresight");
@@ -226,7 +231,7 @@ export async function previewTx<T, R>(fn: () => T, observe?: (changes: RowChange
   } finally {
     // Each step on its own, so none can stop the next: the rollback always runs and the module state is always reset.
     try {
-      session.close();
+      session?.close();
     } catch {}
     try {
       d.exec("ROLLBACK TO foresight");
@@ -235,6 +240,7 @@ export async function previewTx<T, R>(fn: () => T, observe?: (changes: RowChange
     try {
       d.exec("ROLLBACK");
     } catch {}
+    held.discard();
     previewing = null;
     depth--;
     // A connection still in a transaction here would make every later write fail (or commit the preview): replace it.

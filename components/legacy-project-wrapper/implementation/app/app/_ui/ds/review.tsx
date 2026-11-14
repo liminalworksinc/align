@@ -681,7 +681,9 @@ export function ReviewActions({
 
   const [dominant, ...rest] = choices;
   return (
-    <div className="flex min-w-0 flex-col gap-3" data-review-actions={cr.id}>
+    // Full width: in the review drawer this is the footer, a right-aligned row, and the confirmation and its forecast
+    // shrank to their content there, a narrow box off to the right at 1440 (LIM-2514 S6).
+    <div className="flex w-full min-w-0 flex-col gap-3" data-review-actions={cr.id}>
       {notice && <NoticeLine n={notice} r={noticeRef} />}
         {notice?.kind === "done" && after}
       {shown !== "confirm" && (
@@ -798,7 +800,7 @@ export function ReviewActions({
           )}
           {choice === "reject" && <p className="text-[14px] text-(--text-1)">Your reason: {reason.trim()}</p>}
           {choice === "accept_if" && <p className="text-[14px] text-(--text-1)">Accept if: {condition.trim()}</p>}
-          {FORESIGHT_CHOICES.includes(choice) && <ForesightPanel path={crPath(ws, cr)} choice={choice as ForesightChoice} body={foresightBody(cr, choice, reason)} />}
+          {FORESIGHT_CHOICES.includes(choice) && <ForesightPanel ws={ws} path={crPath(ws, cr)} choice={choice as ForesightChoice} body={foresightBody(cr, choice, reason)} />}
           {!oneRow && <p className="text-[13px] text-(--text-3)">Align reads the request again before sending. If it changed meanwhile, nothing is sent.</p>}
           <div className={`flex gap-2 ${oneRow ? "flex-nowrap [&>button]:min-w-0 [&>button:first-child]:flex-1" : "flex-wrap"}`}>
             <button type="button" className={PRIMARY} disabled={sending} onClick={() => void send()}>

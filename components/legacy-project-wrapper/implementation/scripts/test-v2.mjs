@@ -11457,6 +11457,142 @@ try {
       firstLimited === 29 && burst.slice(0, 29).every((r) => r.status === 403) && burst.slice(29).every((r) => r.status === 429 && r.json?.error === "rate_limited") && sameDump(before7, dump()),
       `first 429 at ${firstLimited}: ${burst.map((r) => r.status).join(",")}`,
     );
+
+    // LIM-2514 S1: with the live workspace (LIM-2503) open, a preview through the real route announces nothing on the
+    // stream; the real decision right after it is announced. (Previews hold their touches and discard them.)
+    {
+      /** Fern's stream on FW: the events it got, and a wait for the next `change`. */
+      const stream = await new Promise((resolve, reject) => {
+        const req = http.request({ host: "127.0.0.1", port: PORT, method: "GET", path: `/api/v2/workspaces/${FW}/stream`, headers: { accept: "text/event-stream", cookie: FO.cookie } }, (res) => {
+          const s = { status: res.statusCode, events: [], close: () => req.destroy() };
+          let buf = "";
+          res.setEncoding("utf8");
+          res.on("data", (c) => {
+            buf += c;
+            let i;
+            while ((i = buf.indexOf("\n\n")) >= 0) {
+              const ev = /^event: (.+)$/m.exec(buf.slice(0, i))?.[1] ?? "message";
+              s.events.push({ at: Date.now(), ev });
+              buf = buf.slice(i + 2);
+            }
+          });
+          res.on("error", () => undefined);
+          resolve(s);
+        });
+        req.on("error", reject);
+        req.end();
+      });
+      const waitFor = async (pred, ms) => {
+        const end = Date.now() + ms;
+        while (Date.now() < end) {
+          if (pred()) return true;
+          await sleep(50);
+        }
+        return pred();
+      };
+      const hello = await waitFor(() => stream.events.some((e) => e.ev === "hello"), 5000);
+      await sleep(500);
+      // Femi's request above is still open, and a person has one open request per goal: withdraw it first.
+      const wd6 = await fa(FM, "POST", crPathF(FG?.id, cr6?.id, "withdraw"), { revision: 1 });
+      const crS = await propose("Cut onboarding to one day, stream check");
+      await sleep(1500);
+      const changesBefore = stream.events.filter((e) => e.ev === "change").length;
+      const pS = await fa(FO, "POST", `/goals/${FG?.id}/change-requests/${crS?.id}/preview`, { action: "reject", revision: 1, reason: "Stream check" });
+      await sleep(2500);
+      const afterPreview = stream.events.filter((e) => e.ev === "change").length;
+      const realS = await fa(FO, "POST", crPathF(FG?.id, crS?.id, "reject"), { revision: 1, reason: "Stream check" });
+      const heard = await waitFor(() => stream.events.filter((e) => e.ev === "change").length > afterPreview, 5000);
+      stream.close();
+      check(
+        "laneb foresight (LIM-2514 S1): with Fern's live stream open, her preview of a decline announces nothing on the stream; the real decline right after it is announced",
+        wd6.status === 200 && crS?.id && stream.status === 200 && hello && pS.status === 200 && afterPreview === changesBefore && realS.status === 200 && heard,
+        `withdraw ${wd6.status} cr ${!!crS?.id} stream ${stream.status} hello ${hello} preview ${pS.status} changes ${changesBefore}->${afterPreview} real ${realS.status} heard ${heard}`,
+      );
+    }
+
+    // LIM-2514 S2-S5, in Chrome: the forecast follows the workspace while the approver reads it. Fern opens Approve and
+    // launch on a new request (3 sessions on the goal). A fourth session joins the goal: the forecast reads again by
+    // itself, now says 4, says it was updated, and marks the changed line; the panel never blanks to "Working out…" in
+    // between. Then the next re-read fails (the browser drops it) when a fifth joins: the 4-session forecast stays, says
+    // it couldn't be updated, and offers Try again, which brings 5.
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const fBrowser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      const crU = await propose("Cut onboarding to one day, live forecast");
+      const bind = async (n) => {
+        const k = sessionKey(FD, FW, "claude-code", `foresight-live-${n}`);
+        await call("FO", "PUT", `/api/v2/workspaces/${FW}/sessions/${k}`, { bearer: FD.access, body: { harness: "claude-code", repo_key: repoKey(FD, FW, "/src/fern"), repo_alias: "fern-repo", started_at: fStart, title: `Fern live session ${n}` } });
+        return call("FO", "POST", `/api/v2/workspaces/${FW}/sessions/${k}/epochs`, { bearer: FD.access, body: { root_turn: null, cause: "manual", epoch_id: epochId(), goal_id: FG?.id, starts_at: new Date().toISOString() } });
+      };
+      const out = { blanked: false };
+      try {
+        const pg = await fBrowser.newPage();
+        await pg.setViewport({ width: 1440, height: 900 });
+        await pg.setCookie(...FO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await pg.setRequestInterception(true);
+        let dropPreview = false;
+        pg.on("request", (r) => {
+          if (dropPreview && r.method() === "POST" && new URL(r.url()).pathname.endsWith(`/change-requests/${crU?.id}/preview`)) {
+            dropPreview = false;
+            out.dropped = true;
+            void r.abort();
+          } else void r.continue();
+        });
+        await pg.goto(`${BASE}/app/w/${FW}?review=${FG?.id}.${crU?.id}`, { waitUntil: "networkidle0" });
+        const actions = `[data-review-actions="${crU?.id}"]`;
+        await pg.waitForSelector(`${actions} [data-decision="Approve and launch"]`, { visible: true, timeout: 15000 });
+        await pg.click(`${actions} [data-decision="Approve and launch"]`);
+        await pg.evaluate((sel) => [...document.querySelectorAll(`${sel} button`)].find((b) => b.textContent?.trim() === "Review this decision")?.click(), actions);
+        const agentsText = () => pg.evaluate(() => document.querySelector('[data-foresight-line="agents"]')?.textContent?.trim() ?? null);
+        await pg.waitForSelector('[data-foresight-line="agents"]', { visible: true, timeout: 15000 });
+        out.first = await agentsText();
+        out.updatedBefore = await pg.evaluate(() => !!document.querySelector("[data-foresight-updated]"));
+        // Watch for a blank: the lines gone, or "Working out…" shown, after the first answer.
+        await pg.evaluate(() => {
+          window.__fBlank = false;
+          const p = document.querySelector("[data-foresight]");
+          new MutationObserver(() => {
+            if (!p.querySelector("[data-foresight-lines]") || /Working out what this would do/.test(p.textContent ?? "")) window.__fBlank = true;
+          }).observe(p, { subtree: true, childList: true, characterData: true });
+        });
+        // The page's live stream must be up first: a write made while it connects is told by the next change, not
+        // the hello (LIM-2503). An approver takes longer than that to pick a decision; this test doesn't.
+        out.live = await pg.waitForSelector('[data-live-status="live"]', { timeout: 15000 }).then(() => true).catch(() => false);
+        out.bind4 = (await bind(4)).status;
+        out.second = await pg
+          .waitForFunction(() => /^4 agent sessions switch/.test(document.querySelector('[data-foresight-line="agents"]')?.textContent?.trim() ?? "") && !!document.querySelector("[data-foresight-updated]"), { timeout: 15000 })
+          .then(() => agentsText())
+          .catch(() => null);
+        out.updated = await pg.evaluate(() => document.querySelector("[data-foresight-updated]")?.textContent?.trim() ?? null);
+        out.marked = await pg.evaluate(() => [...document.querySelectorAll("[data-foresight-changed]")].map((e) => e.getAttribute("data-foresight-line")));
+        out.blanked = await pg.evaluate(() => window.__fBlank);
+        // The next re-read fails.
+        await sleep(5500);
+        dropPreview = true;
+        out.bind5 = (await bind(5)).status;
+        out.retryShown = await pg.waitForSelector("[data-foresight-retry]", { visible: true, timeout: 15000 }).then(() => true).catch(() => false);
+        out.kept = await agentsText();
+        out.stale = await pg.evaluate(() => document.querySelector("[data-foresight-stale]")?.textContent?.trim() ?? null);
+        await pg.click("[data-foresight-retry]");
+        out.third = await pg
+          .waitForFunction(() => /^5 agent sessions switch/.test(document.querySelector('[data-foresight-line="agents"]')?.textContent?.trim() ?? ""), { timeout: 15000 })
+          .then(() => agentsText())
+          .catch(() => null);
+        out.retryGone = await pg.evaluate(() => !document.querySelector("[data-foresight-retry]") && !document.querySelector("[data-foresight-stale]"));
+        await pg.close();
+      } catch (e) {
+        out.error = String(e?.stack ?? e).slice(0, 400);
+      } finally {
+        await fBrowser.close();
+      }
+      const wdU = await fa(FM, "POST", crPathF(FG?.id, crU?.id, "withdraw"), { revision: 1 });
+      check(
+        "laneb foresight (LIM-2514 S2-S5, Chrome 1440): with Approve and launch's confirmation open, a fourth session joining the goal makes the forecast read again by itself: \"4 agent sessions switch…\", an \"Updated\" note and the changed line marked, never blanking to \"Working out…\"; a failed re-read keeps the 4-session forecast, says it couldn't be updated and offers Try again, which brings 5",
+        /^3 agent sessions switch/.test(out.first ?? "") && out.updatedBefore === false && out.live && [200, 201].includes(out.bind4) && /^4 agent sessions switch/.test(out.second ?? "") && /^Updated/.test(out.updated ?? "") && out.marked?.includes("agents") && out.blanked === false &&
+          [200, 201].includes(out.bind5) && out.dropped === true && out.retryShown && /^4 agent sessions switch/.test(out.kept ?? "") && !!out.stale && /^5 agent sessions switch/.test(out.third ?? "") && out.retryGone && wdU.status === 200,
+        JSON.stringify({ ...out, withdraw: wdU.status }),
+      );
+    }
   }
   // ==== end laneb:foresight ====
 
