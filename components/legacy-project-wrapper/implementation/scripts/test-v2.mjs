@@ -5640,6 +5640,24 @@ try {
           /Connected AI apps/i.test(appsRow.text) && JSON.stringify(appsRow.classes) === '["delivery_receipt"]' && JSON.stringify(appsRow.apps) === '["gr_VALUEVALUEVALUE4"]' && /Claude Code \(connected by you\): Align sent it version 2 on \S/.test(appsRow.text) && !/Codex/.test(appsRow.text) && /can.t see what the app does next/.test(appsRow.text),
           JSON.stringify(appsRow),
         );
+        // LIM-2513 (one evidence wording; Mini 0's check of PR 86): while Align has sent the launched version to an app,
+        // no page says "delivery receipt": the goal page, the Work page's Connected apps panel (its "Align sent it vN"
+        // sentence is "a receipt"), Home, Apps and Sessions. API values (delivery_receipt) are unchanged.
+        const saysOld = {};
+        let workSentence = "";
+        for (const [k, u] of [["goal", `/app/w/${W}/goals/${GV.id}`], ["work", `/app/w/${W}/work?goal=${GV.id}&cr=${crP.json?.id}`], ["home", `/app/w/${W}`], ["apps", `/app/w/${W}/apps`], ["sessions", `/app/w/${W}/sessions`]]) {
+          await page.goto(`${BASE}${u}`, { waitUntil: "networkidle0" });
+          await page.waitForFunction(() => !/Loading|Reading/.test(document.body.innerText.slice(0, 3000)), { timeout: 10000 }).catch(() => undefined);
+          if (k === "work") await page.waitForFunction(() => /Align sent it v\d/.test(document.body.innerText), { timeout: 10000 }).catch(() => undefined);
+          const t = await page.evaluate(() => document.body.innerText);
+          saysOld[k] = /delivery receipt/i.test(t);
+          if (k === "work") workSentence = (t.match(/"Align sent it v\d+" is a [^:]+:/) ?? [""])[0];
+        }
+        check(
+          "ui (Chrome, LIM-2513): with a version sent to a connected app, no page says \"delivery receipt\" (goal, Work, Home, Apps, Sessions); the Work page says \"Align sent it v2\" is a receipt",
+          Object.values(saysOld).every((v) => v === false) && /is a receipt:$/.test(workSentence),
+          JSON.stringify({ saysOld, workSentence }),
+        );
         // value_card_viewed is once per person and only V3 can see this card, so a first view on the phone needs V3's
         // view above cleared. The two test apps go too.
         withDb((d) => {

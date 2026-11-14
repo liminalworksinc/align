@@ -680,7 +680,7 @@ Every agent-status item SHALL show exactly one evidence class, and the read SHAL
 `delivery_receipt` (a `received`, `applied` or `enforced` receipt, or a goal read Align served), `agent_reported` (the
 agent's own claim or evidence link) or `not_observed` (Align has nothing). Each connected app the read returns carries
 what the Apps tab has: its name, who connected it, when it was approved, `last_used_at` and `last_read_at` (the `mcp`
-part's goal read); only an app with a `last_read_at` is a delivery receipt. The Home lists no apps (the Apps tab does):
+part's goal read); only an app with a `last_read_at` is a receipt. The Home lists no apps (the Apps tab does):
 an app's goal read since the last visit is a line in "Since you last looked" ("<app> read the goals", with its evidence
 class), and an app with no goal read is the muted line under the Needs list. A connection SHALL never be shown or
 counted as a read. A workspace owner's read has every connected app and anyone else's their own, as on the Apps tab.

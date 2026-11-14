@@ -274,7 +274,7 @@ function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
             : cr && apps.data && !list.length
             ? `Launched v${cr.version} reaches an app when it reads the goals; ${everyone ? "none is connected" : known ? "none of yours is connected" : "none you can see is connected"}.`
             : cr
-            ? `"Align sent it v${cr.version}" is a delivery receipt: a goal read served this goal's launched version to that app. Align can't see what the app does with it.`
+            ? `"Align sent it v${cr.version}" is a receipt: a goal read served this goal's launched version to that app. Align can't see what the app does with it.`
             : "Nothing is launched on this goal yet, so Align has sent no version of it to an app. Goal reads are recorded for the workspace, not per goal."}
         </p>
       )}
