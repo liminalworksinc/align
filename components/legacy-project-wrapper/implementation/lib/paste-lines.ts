@@ -38,10 +38,14 @@ export interface AgentRelease {
   sha256: string;
 }
 
-/** THE SWITCH. null until a release `agent-v<version>` carrying `liminal-align-agent-<version>.tgz` exists; until then
- *  the Apps tab keeps its current steps (no step 4), never a link that 404s. Set it in the same change that follows the
- *  founder publishing the release (packages/align-agent/README.md, "Publishing a release"). */
-export const AGENT_RELEASE: AgentRelease | null = null;
+/** THE SWITCH. null means no release, and the Apps tab keeps its current steps (no step 4), never a link that 404s.
+ *  It names release agent-v0.2.0 (https://github.com/liminalworksinc/align/releases/tag/agent-v0.2.0, immutable), built
+ *  and attested by agent-release run 43529215918 from main d107963c65a6363480e07a31f4cefe561425884d. A new release
+ *  replaces both fields (packages/align-agent/README.md, "Publishing a release"). */
+export const AGENT_RELEASE: AgentRelease | null = {
+  version: "0.2.0",
+  sha256: "b36a1f0b358e13f9a406699310fa4407cddae79a33a60de3aabdeada2c4d4a74",
+};
 
 export const AGENT_REPO = "https://github.com/liminalworksinc/align";
 /** Where an installed `align` signs in by default (packages/align-agent/src/context.ts HOSTED_SERVER). */
