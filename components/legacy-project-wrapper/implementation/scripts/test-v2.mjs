@@ -7129,11 +7129,22 @@ try {
         const lBack = await sinceCount();
         await pl.reload({ waitUntil: "networkidle0" });
         const lBackReload = await sinceCount();
+        // The coordinator's review gap (PR 87): a reload of another workspace page, then Home through the app's own
+        // navigation, must not reuse the tab's old Home baseline (only a reload of Home itself does).
+        await pl.goto(`${BASE}/trust`, { waitUntil: "networkidle0" });
+        await pl.evaluate((k) => { localStorage.setItem(k, "2000-01-01T00:00:00.000Z"); sessionStorage.removeItem(k); }, `align.lastVisit:${HW}:${HO.id}`);
+        await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        const lOld = await sinceCount();
+        await pl.goto(`${BASE}/app/w/${HW}/goals`, { waitUntil: "networkidle0" });
+        await pl.reload({ waitUntil: "networkidle0" });
+        await pl.evaluate((ws) => [...document.querySelectorAll(`a[href="/app/w/${ws}"]`)].find((a) => a.offsetParent)?.click(), HW);
+        await pl.waitForFunction((ws) => location.pathname === `/app/w/${ws}`, { timeout: 15000 }, HW).catch(() => undefined);
+        const lInApp = await sinceCount();
         await pl.close();
         check(
-          "ui (Chrome, Since, LIM-2513): a reload keeps the tab's comparison (same lines), but leaving Home by a full page load to /trust and coming back by URL compares against when Home was left (no lines), and a reload after that keeps the new comparison",
-          Number(lFirst) > 0 && lReload === lFirst && lBack === "0" && lBackReload === "0",
-          JSON.stringify({ lFirst, lReload, lBack, lBackReload }),
+          "ui (Chrome, Since, LIM-2513): a reload keeps the tab's comparison (same lines), but leaving Home by a full page load to /trust and coming back by URL compares against when Home was left (no lines), and a reload after that keeps the new comparison; a reload of the Goals page, then Home through the app's navigation, doesn't reuse the tab's old Home comparison either",
+          Number(lFirst) > 0 && lReload === lFirst && lBack === "0" && lBackReload === "0" && Number(lOld) > 0 && lInApp === "0",
+          JSON.stringify({ lFirst, lReload, lBack, lBackReload, lOld, lInApp }),
         );
         // Mini 5's click walk, Nov 11: at 390 wide the review drawer's "More actions" menu opened below its footer, so
         // Decline, the last item, was off screen and only reachable by keyboard. Hugo asks Hank to change Hank's goal;
