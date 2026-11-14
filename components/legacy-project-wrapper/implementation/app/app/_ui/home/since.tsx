@@ -5,6 +5,7 @@ import { Timeline, type EvidenceKind, type TimelineEvent } from "../ds";
 import { api } from "../kit";
 import type { ChangeRequest } from "../types";
 import type { EvidenceClass } from "@/lib/v2/home-core.mts";
+import { when } from "@/lib/v2/when.mts";
 
 // Home, second section (LIM-2472 ruling 9b5b870f): "Since you last looked". What changed since this person's last visit
 // on this device, built only from reads that already respect what they may see: the change requests on goals they can
@@ -165,7 +166,7 @@ function useVersions(ws: string, goals: SinceGoal[] | null, on: boolean, tick = 
 }
 
 /** One time format with the record's timeline: "Nov 5, 12:28 PM", no seconds, no numeric date. */
-const stamp = (iso: string) => new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const stamp = (iso: string) => when(iso);
 const after = (iso: string | null | undefined, since: string) => !!iso && iso > since;
 const same = (a: string | null, b: string | null) => !!a && !!b && Math.abs(Date.parse(a) - Date.parse(b)) < 2000;
 

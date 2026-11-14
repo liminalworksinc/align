@@ -11,6 +11,7 @@ import { deliveryStatement, hasEvidence } from "./evidence-facts.mts";
 import { EvidenceSummary, useDelivery } from "./evidence-summary";
 import { FORESIGHT_CHOICES, ForesightPanel, type ForesightChoice } from "./foresight";
 import { StatusPill, type StatusKind } from "./status-pill";
+import { when } from "@/lib/v2/when.mts";
 
 // A compact review of one change request (LIM-2472 workstream S), for both concepts in place of main's long decision
 // card (_ui/decide.tsx, _ui/changes.tsx, which stay the concepts'). Same rules and words as those files:
@@ -32,7 +33,7 @@ const BTN = "inline-flex min-h-[36px] max-sm:min-h-[44px] items-center justify-c
 const PRIMARY = `${BTN} border-(--accent) bg-(--accent) text-(--text-on-accent) hover:bg-(--accent-hover)`;
 const SECONDARY = `${BTN} border-(--edge) bg-(--bg-raised) text-(--text-1) hover:bg-(--bg-overlay)`;
 const FIELD = "min-h-[36px] max-sm:min-h-[44px] w-full rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) px-2.5 py-2 text-[14px] text-(--text-1) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--focus)";
-const at = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
+const at = when;
 const blank = (s: string) => s.trim() === "";
 const crPath = (ws: string, cr: ChangeRequest) => `/api/v2/workspaces/${ws}/goals/${cr.goal.id}/change-requests/${cr.id}`;
 const who = (p: Person | null | undefined, me: string) => (!p ? "someone" : p.id === me ? "you" : p.name);
@@ -681,12 +682,12 @@ export function ReviewActions({
 
   const [dominant, ...rest] = choices;
   return (
-    <div className="flex min-w-0 flex-col gap-3" data-review-actions={cr.id}>
+    <div className={`flex min-w-0 flex-col gap-3 ${compact ? "max-sm:w-full" : ""}`} data-review-actions={cr.id}>
       {notice && <NoticeLine n={notice} r={noticeRef} />}
         {notice?.kind === "done" && after}
       {shown !== "confirm" && (
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" data-decision={TITLE[dominant]} aria-pressed={choice === dominant} className={dominant === "withdraw" || choice ? SECONDARY : PRIMARY} onClick={() => pick(dominant)}>
+          <button type="button" data-decision={TITLE[dominant]} aria-pressed={choice === dominant} className={`${dominant === "withdraw" || choice ? SECONDARY : PRIMARY} ${compact ? "max-sm:w-full" : ""}`} onClick={() => pick(dominant)}>
             {TITLE[dominant]}
           </button>
           {rest.map((c) => (
@@ -707,7 +708,7 @@ export function ReviewActions({
                 if (d.open) requestAnimationFrame(() => d.querySelector("[role=menu] > :last-child")?.scrollIntoView({ block: "nearest" }));
               }}
             >
-              <summary className={`${SECONDARY} list-none [&::-webkit-details-marker]:hidden`}>More actions</summary>
+              <summary className={`${SECONDARY} w-full list-none [&::-webkit-details-marker]:hidden`}>More actions</summary>
               <div role="menu" aria-label="More actions" className="mt-1 flex min-w-[12rem] flex-col gap-1 rounded-(--radius-m) border border-(--line-strong) bg-(--bg-overlay) p-1">
                 {rest.map((c) => (
                   <button

@@ -17,6 +17,11 @@ open it reads again at most once a minute (see "Workspace Home"). A page shows o
 set, and the `can` flags the server returns on alignments and change requests. "Pod" is stored data only: every
 screen says "team".
 
+Every time on a screen reads the same way, in the person's locale: month, day and minute ("Nov 13, 4:25 PM"), with the
+year only when it is not this year ("Oct 2, 2025, 9:05 AM"), never a numeric date and never seconds (LIM-2513 journey
+pass: the goal page, Requests and the value card said "11/13/2026, 4:25:49 PM" while Home and the review drawer said
+"Nov 13, 4:25 PM"). A duration ("18 seconds") is not a time and keeps its seconds.
+
 | Route | Screen | Who uses it | Purpose |
 | --- | --- | --- | --- |
 | `/` | (redirect) | Anyone | Redirects to `/app` |
@@ -997,6 +1002,12 @@ bind new sessions to it and people can no longer ask to change it, and that to b
 marked active; **Confirm: drop the goal** saves the next version with status `dropped` and every other field as it is
 (the same write as the New version form's Status), and **Cancel** closes it. The confirmation SHALL go away as soon as
 the drop is recorded, so a second confirm is never offered on the version it replaced.
+
+The goal page SHALL read top to bottom as the plan, then what is being decided about it, then the agents, then the
+editing form: the heading and its pills, **Drop this goal**, "Measures", "Limits", the goal tree, "Change requests"
+(with each approved one's "What this decision gave you"), "Agent activity", "Agents on this goal", then the two forms,
+"Align with this goal" and "New version", and "Versions". A person who comes to a goal to see what was asked or decided finds it right after
+the plan, not below the New version form (LIM-2513 journey pass).
 
 #### Scenario: Reading a goal
 

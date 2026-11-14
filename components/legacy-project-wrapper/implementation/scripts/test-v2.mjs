@@ -5587,6 +5587,10 @@ try {
         });
         await page.setCookie({ name: n3, value: v3.join("="), url: BASE });
         const before = eventsIn("value_card_viewed").length;
+        // A short window, so the card starts below the fold: since LIM-2513 the goal page puts Change requests (and this
+        // card) right after the plan, above the agents and the forms, so at 900 tall it can open already in view.
+        const vp0 = page.viewport();
+        await page.setViewport({ ...vp0, height: 420 });
         await page.goto(`${BASE}/app/w/${W}/goals/${GV.id}`, { waitUntil: "networkidle0" });
         await page.waitForSelector(`[data-value-card="${crP.json?.id}"]`, { timeout: 15000 });
         const card = await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => ({ top: el.getBoundingClientRect().top, vh: window.innerHeight, text: el.innerText }));
@@ -5608,6 +5612,18 @@ try {
           card.top > card.vh && /What this decision gave you/i.test(card.text) && /Who approved/i.test(card.text) && /1 of 1 shared session has it in context/.test(card.text) && /Proposal to approval/.test(card.text) && /What others said/i.test(card.text) && /Vic Two/.test(card.text) &&
             belowFold === before && seenAfter === before + 1 && errors.length === 0,
           `${JSON.stringify({ top: card.top, vh: card.vh, before, belowFold, seenAfter })} ${card.text.slice(0, 300)} ${errors.join(" | ")}`,
+        );
+        await page.setViewport(vp0);
+        // LIM-2513: the goal page reads plan, decisions, agents, then the forms: Change requests (with this card) comes
+        // before Agent activity, Agents on this goal and the New version form.
+        const order = await page.evaluate((id) => {
+          const y = (sel) => { const el = document.querySelector(sel); return el ? el.getBoundingClientRect().top + window.scrollY : null; };
+          return { cr: y("#change-requests"), card: y(`[data-value-card="${id}"]`), activity: y("#goal-activity"), form: y("#new-version") };
+        }, crP.json?.id);
+        check(
+          "ui (Chrome, LIM-2513): the goal page puts Change requests and its \"What this decision gave you\" card above Agent activity and the New version form",
+          order.cr !== null && order.card !== null && order.activity !== null && order.cr < order.card && order.card < order.activity && (order.form === null || order.activity < order.form),
+          JSON.stringify(order),
         );
         const valueClasses = await page.$$eval(`[data-value-card="${crP.json?.id}"] [data-value-row="delivery"] [data-evidence-class]`, (els) => els.map((e) => e.getAttribute("data-evidence-class")));
         check(
@@ -6638,6 +6654,15 @@ try {
       hc.appEvidence("2026-10-31T00:00:00Z") === "delivery_receipt" && hc.answerEvidence("accepted", true) === "delivery_receipt" && hc.answerEvidence("accepted") === "agent_reported" && hc.answerEvidence("declined") === "agent_reported" && hc.answerEvidence("received") === "delivery_receipt" && hc.appEvidence(null) === "not_observed" && hc.appEvidence(undefined) === "not_observed" && hc.appEvidence("") === "not_observed" &&
         JSON.stringify(hc.EVIDENCE_CLASSES) === JSON.stringify(["delivery_receipt", "agent_reported", "not_observed"]) && Object.values(hc.EVIDENCE_WORDS).join("|") === "Receipt|Agent reported|Not observed",
       "",
+    );
+    // LIM-2513: one time format on every screen: no numeric date, no seconds, the year only for another year.
+    const wh = await import(pathToFileURL(path.join(ROOT, "lib/v2/when.mts")).href);
+    const now = new Date("2026-11-13T12:00:00Z");
+    const wThis = wh.when("2026-11-13T16:25:49Z", now), wOld = wh.when("2025-10-02T16:05:00Z", now);
+    check(
+      "time format (LIM-2513): a time this year reads like \"Nov 13, 4:25 PM\" (month, day, minute; no year, no seconds, no numeric date) and another year's adds its year; no time is \"\" and an unparseable one is kept",
+      !/\d\/\d/.test(wThis) && !/:\d\d:\d\d/.test(wThis) && !/2026/.test(wThis) && /2025/.test(wOld) && !/:\d\d:\d\d/.test(wOld) && wh.when(null) === "" && wh.when("soon") === "soon",
+      JSON.stringify({ wThis, wOld }),
     );
     const T = "2026-10-31T00:00:00Z";
     const sw = (o) => hc.appStatusWords({ approved_at: "A", last_used_at: null, last_read_at: null, ...o }, (iso) => `@${iso}`);

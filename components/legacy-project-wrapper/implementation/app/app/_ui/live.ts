@@ -165,6 +165,9 @@ function release(h: Hub) {
 }
 
 const OFF = { status: "off" as LiveStatus, presence: null };
+// The server render and the first client render, before the stream opens: "Connecting", not "Updates when you act or
+// reload", so a page that is about to go live never first says it won't (LIM-2513 journey pass).
+const CONNECTING = { status: "connecting" as LiveStatus, presence: null };
 
 /** The live status and presence for a workspace; holds the stream open while mounted. `ws` null: nothing. */
 export function useLive(ws: string | null): { status: LiveStatus; presence: GoalPresence[] | null } {
@@ -182,7 +185,7 @@ export function useLive(ws: string | null): { status: LiveStatus; presence: Goal
       return () => h.watchers.delete(cb);
     },
     () => (ws ? hubFor(ws).snap : OFF),
-    () => OFF,
+    () => (ws ? CONNECTING : OFF),
   );
 }
 

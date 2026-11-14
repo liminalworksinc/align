@@ -12,6 +12,7 @@ import { useRead } from "./read";
 import { useLive, useLiveReload } from "../live";
 import { GoalPresenceLine } from "../home/presence";
 import { StatusPill } from "./status-pill";
+import { when } from "@/lib/v2/when.mts";
 
 // Work (LIM-2472; round 2, founder ruling eaa5cf92: evidence serves a decision). Opened from a decision or a goal, never
 // browsed as a feed: /work?goal=<g>&cr=<id> puts the decision at the top, then its evidence, what Align sent, the
@@ -28,7 +29,7 @@ import { StatusPill } from "./status-pill";
 // Body only: the shell wraps it.
 
 const HARNESS = { "claude-code": "Claude Code", codex: "Codex" } as const;
-const at = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
+const at = when;
 /** "12 min ago", "3 h ago", else the date: how long since something was reported, never "now". */
 const ago = (iso: string) => {
   const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
