@@ -99,9 +99,15 @@ const REL = { version: "0.2.0", sha256: createHash("sha256").update(BYTES).diges
 const PINNED = `${AGENT_REPO}/releases/download/agent-v0.2.0/liminal-align-agent-0.2.0.tgz`;
 const CURRENT_STEP3 = `Your app opens Align&apos;s approval page. Once you approve, it is listed under Connections below. For goal context inside Claude Code and Codex sessions, install the align CLI (
                     <code className="font-mono text-[13px]">align login</code>, <code className="font-mono text-[13px]">align install</code>).`;
+// The published release (immutable, https://github.com/liminalworksinc/align/releases/tag/agent-v0.2.0): its asset's
+// sha256 as checked against the downloaded asset and its build attestation.
+const PUBLISHED = { version: "0.2.0", sha256: "b36a1f0b358e13f9a406699310fa4407cddae79a33a60de3aabdeada2c4d4a74" };
 check(
-  "the align CLI switch is off in the committed file: no release, no line; the view keeps the current step 3 text when there is none, and shows step 4 only with a line",
-  AGENT_RELEASE === null && agentInstallLine(URL) === null && agentInstallLine(`${HOSTED_ORIGIN}/api/mcp`) === null &&
+  "the align CLI switch names the published release agent-v0.2.0: the Apps tab line pins its URL and checksum; the view keeps the current step 3 text when there is no line, and shows step 4 only with one",
+  JSON.stringify(AGENT_RELEASE) === JSON.stringify(PUBLISHED) &&
+    agentInstallLine(URL) === `curl -fsSLO ${AGENT_REPO}/releases/download/agent-v0.2.0/liminal-align-agent-0.2.0.tgz && echo '${PUBLISHED.sha256}  liminal-align-agent-0.2.0.tgz' | shasum -a 256 -c && npm install -g ./liminal-align-agent-0.2.0.tgz && align install && align login --server 'http://127.0.0.1:3331'` &&
+    agentInstallLine(`${HOSTED_ORIGIN}/api/mcp`)?.endsWith("&& align install && align login") === true &&
+    agentInstallLine(URL, null) === null &&
     view.includes(`{agentInstallLine(apps.data.url) === null ? (\n                  <p className="text-[14px] text-(--text-2)">\n                    ${CURRENT_STEP3}`) &&
     view.includes("{agentInstallLine(apps.data.url) !== null && (\n                  <Step n={4}") &&
     !/git clone|npm ci/.test(view),
