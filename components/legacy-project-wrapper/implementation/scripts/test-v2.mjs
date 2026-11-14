@@ -5230,9 +5230,16 @@ try {
         `${cardText} ${errors.join(" | ")}`,
       );
       const actClasses = await page.$$eval("#goal-activity [data-evidence-class]", (els) => els.map((e) => e.getAttribute("data-evidence-class")));
+      // LIM-2513 (one evidence wording): the class is the same label the Home and Apps use, with its icon and words.
+      const actLabels = await page.$$eval("#goal-activity [data-evidence-class] [data-evidence]", (els) => els.map((e) => [e.getAttribute("data-evidence"), !!e.querySelector("svg"), e.textContent?.trim()]));
       check(
-        "ui (Chrome, LIM-2455 §E2): the Agent activity card carries exactly one evidence class, \"agent reported\", and names the files as reported (\"Files these sessions reported working on\"), never \"Files agents are working on\"",
-        JSON.stringify(actClasses) === '["agent_reported"]' && cardText.includes("agent reported") && cardText.includes("Files these sessions reported working on") && !cardText.includes("Files agents are working on"),
+        "ui (Chrome, LIM-2513): the Agent activity card's class is the shared evidence label (data-evidence=\"reported\", an icon, \"Agent reported\"), not a lower-case pill",
+        JSON.stringify(actLabels) === '[["reported",true,"Agent reported"]]',
+        JSON.stringify(actLabels),
+      );
+      check(
+        "ui (Chrome, LIM-2455 §E2): the Agent activity card carries exactly one evidence class, \"Agent reported\", and names the files as reported (\"Files these sessions reported working on\"), never \"Files agents are working on\"",
+        JSON.stringify(actClasses) === '["agent_reported"]' && cardText.includes("Agent reported") && !cardText.includes("agent reported") && cardText.includes("Files these sessions reported working on") && !cardText.includes("Files agents are working on"),
         `${JSON.stringify(actClasses)} ${cardText.slice(0, 300)}`,
       );
       await page.goto(`${BASE}/app/w/${AK}/sessions`, { waitUntil: "networkidle0" });
@@ -5580,6 +5587,10 @@ try {
         });
         await page.setCookie({ name: n3, value: v3.join("="), url: BASE });
         const before = eventsIn("value_card_viewed").length;
+        // A short window, so the card starts below the fold: since LIM-2513 the goal page puts Change requests (and this
+        // card) right after the plan, above the agents and the forms, so at 900 tall it can open already in view.
+        const vp0 = page.viewport();
+        await page.setViewport({ ...vp0, height: 420 });
         await page.goto(`${BASE}/app/w/${W}/goals/${GV.id}`, { waitUntil: "networkidle0" });
         await page.waitForSelector(`[data-value-card="${crP.json?.id}"]`, { timeout: 15000 });
         const card = await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => ({ top: el.getBoundingClientRect().top, vh: window.innerHeight, text: el.innerText }));
@@ -5602,10 +5613,22 @@ try {
             belowFold === before && seenAfter === before + 1 && errors.length === 0,
           `${JSON.stringify({ top: card.top, vh: card.vh, before, belowFold, seenAfter })} ${card.text.slice(0, 300)} ${errors.join(" | ")}`,
         );
+        await page.setViewport(vp0);
+        // LIM-2513: the goal page reads plan, decisions, agents, then the forms: Change requests (with this card) comes
+        // before Agent activity, Agents on this goal and the New version form.
+        const order = await page.evaluate((id) => {
+          const y = (sel) => { const el = document.querySelector(sel); return el ? el.getBoundingClientRect().top + window.scrollY : null; };
+          return { cr: y("#change-requests"), card: y(`[data-value-card="${id}"]`), activity: y("#goal-activity"), form: y("#new-version") };
+        }, crP.json?.id);
+        check(
+          "ui (Chrome, LIM-2513): the goal page puts Change requests and its \"What this decision gave you\" card above Agent activity and the New version form",
+          order.cr !== null && order.card !== null && order.activity !== null && order.cr < order.card && order.card < order.activity && (order.form === null || order.activity < order.form),
+          JSON.stringify(order),
+        );
         const valueClasses = await page.$$eval(`[data-value-card="${crP.json?.id}"] [data-value-row="delivery"] [data-evidence-class]`, (els) => els.map((e) => e.getAttribute("data-evidence-class")));
         check(
           "ui (Chrome, LIM-2455 §E2): the value card's \"Agents on the new version\" line carries exactly one evidence class, a delivery receipt (the session's machine sent a receipt for the launched version)",
-          JSON.stringify(valueClasses) === '["delivery_receipt"]' && /delivery receipt/.test(card.text),
+          JSON.stringify(valueClasses) === '["delivery_receipt"]' && /Receipt/.test(card.text) && !/delivery receipt/i.test(card.text),
           JSON.stringify(valueClasses),
         );
         const appsRow = await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => {
@@ -5616,6 +5639,24 @@ try {
           "ui (Chrome, main #56): the launched request's value card has a \"Connected AI apps\" row with one evidence class (delivery receipt) naming the app Align sent version 2 (to the approver, who connected it: \"Claude Code (connected by you): Align sent it version 2 on <time>\"), not the app sent only version 1, and saying Align can't see what the app does next",
           /Connected AI apps/i.test(appsRow.text) && JSON.stringify(appsRow.classes) === '["delivery_receipt"]' && JSON.stringify(appsRow.apps) === '["gr_VALUEVALUEVALUE4"]' && /Claude Code \(connected by you\): Align sent it version 2 on \S/.test(appsRow.text) && !/Codex/.test(appsRow.text) && /can.t see what the app does next/.test(appsRow.text),
           JSON.stringify(appsRow),
+        );
+        // LIM-2513 (one evidence wording; Mini 0's check of PR 86): while Align has sent the launched version to an app,
+        // no page says "delivery receipt": the goal page, the Work page's Connected apps panel (its "Align sent it vN"
+        // sentence is "a receipt"), Home, Apps and Sessions. API values (delivery_receipt) are unchanged.
+        const saysOld = {};
+        let workSentence = "";
+        for (const [k, u] of [["goal", `/app/w/${W}/goals/${GV.id}`], ["work", `/app/w/${W}/work?goal=${GV.id}&cr=${crP.json?.id}`], ["home", `/app/w/${W}`], ["apps", `/app/w/${W}/apps`], ["sessions", `/app/w/${W}/sessions`]]) {
+          await page.goto(`${BASE}${u}`, { waitUntil: "networkidle0" });
+          await page.waitForFunction(() => !/Loading|Reading/.test(document.body.innerText.slice(0, 3000)), { timeout: 10000 }).catch(() => undefined);
+          if (k === "work") await page.waitForFunction(() => /Align sent it v\d/.test(document.body.innerText), { timeout: 10000 }).catch(() => undefined);
+          const t = await page.evaluate(() => document.body.innerText);
+          saysOld[k] = /delivery receipt/i.test(t);
+          if (k === "work") workSentence = (t.match(/"Align sent it v\d+" is a [^:]+:/) ?? [""])[0];
+        }
+        check(
+          "ui (Chrome, LIM-2513): with a version sent to a connected app, no page says \"delivery receipt\" (goal, Work, Home, Apps, Sessions); the Work page says \"Align sent it v2\" is a receipt",
+          Object.values(saysOld).every((v) => v === false) && /is a receipt:$/.test(workSentence),
+          JSON.stringify({ saysOld, workSentence }),
         );
         // value_card_viewed is once per person and only V3 can see this card, so a first view on the phone needs V3's
         // view above cleared. The two test apps go too.
@@ -6627,10 +6668,19 @@ try {
     const hc = await import(pathToFileURL(path.join(ROOT, "lib/v2/home-core.mts")).href);
     const P = (id, name) => ({ id, name });
     check(
-      "home rules: an app's goal read (last_read_at) is a delivery receipt and no goal read is not observed; the three classes read \"Delivery receipt\", \"Agent reported\", \"Not observed\"; a request answer is agent reported, but an auto_accepted one (delivered, not declined: E2E-AGENT G1) is a delivery receipt",
+      "home rules: an app's goal read (last_read_at) is a delivery receipt and no goal read is not observed; the three classes read \"Receipt\", \"Agent reported\", \"Not observed\" (LIM-2513: the words every screen uses); a request answer is agent reported, but an auto_accepted one (delivered, not declined: E2E-AGENT G1) is a delivery receipt",
       hc.appEvidence("2026-10-31T00:00:00Z") === "delivery_receipt" && hc.answerEvidence("accepted", true) === "delivery_receipt" && hc.answerEvidence("accepted") === "agent_reported" && hc.answerEvidence("declined") === "agent_reported" && hc.answerEvidence("received") === "delivery_receipt" && hc.appEvidence(null) === "not_observed" && hc.appEvidence(undefined) === "not_observed" && hc.appEvidence("") === "not_observed" &&
-        JSON.stringify(hc.EVIDENCE_CLASSES) === JSON.stringify(["delivery_receipt", "agent_reported", "not_observed"]) && Object.values(hc.EVIDENCE_WORDS).join("|") === "Delivery receipt|Agent reported|Not observed",
+        JSON.stringify(hc.EVIDENCE_CLASSES) === JSON.stringify(["delivery_receipt", "agent_reported", "not_observed"]) && Object.values(hc.EVIDENCE_WORDS).join("|") === "Receipt|Agent reported|Not observed",
       "",
+    );
+    // LIM-2513: one time format on every screen: no numeric date, no seconds, the year only for another year.
+    const wh = await import(pathToFileURL(path.join(ROOT, "lib/v2/when.mts")).href);
+    const now = new Date("2026-11-13T12:00:00Z");
+    const wThis = wh.when("2026-11-13T16:25:49Z", now), wOld = wh.when("2025-10-02T16:05:00Z", now);
+    check(
+      "time format (LIM-2513): a time this year reads like \"Nov 13, 4:25 PM\" (month, day, minute; no year, no seconds, no numeric date) and another year's adds its year; no time is \"\" and an unparseable one is kept",
+      !/\d\/\d/.test(wThis) && !/:\d\d:\d\d/.test(wThis) && !/2026/.test(wThis) && /2025/.test(wOld) && !/:\d\d:\d\d/.test(wOld) && wh.when(null) === "" && wh.when("soon") === "soon",
+      JSON.stringify({ wThis, wOld }),
     );
     const T = "2026-10-31T00:00:00Z";
     const sw = (o) => hc.appStatusWords({ approved_at: "A", last_used_at: null, last_read_at: null, ...o }, (iso) => `@${iso}`);
@@ -7075,6 +7125,44 @@ try {
           "ui (Chrome, Since): a goal's creation names its owner (\"Hugo Lead … created the goal\", \"Hank Other … created the goal\"); the reader's own goals (Hana's) get no line, and no creation reads \"Someone\"",
           /Hugo Lead[\s\S]{0,60}created the goal/.test(sinceText) && /Hank Other[\s\S]{0,60}created the goal/.test(sinceText) && !/Hana Owner[\s\S]{0,60}created the goal/.test(sinceText) && !/You[\s\S]{0,20}created the goal/.test(sinceText) && !/Someone[\s\S]{0,20}created the goal/.test(sinceText),
           sinceText.slice(0, 900).replace(/\n/g, " / "),
+        );
+        // LIM-2513 item 1 (Mini 0's PR 68 audit Low, 03c415a8): a reload keeps the tab's comparison, but leaving Home by a
+        // full page load (a plain link to /trust, a typed URL) is leaving it, so coming back compares against that moment.
+        // Hana's last visit starts long ago; every count below is the section's own `data-since` (lines since the visit).
+        const pl = await browser.newPage();
+        await pl.setViewport({ width: 1440, height: 900 });
+        await pl.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        const sinceCount = async () => {
+          await pl.waitForFunction(() => { const s = document.querySelector("[data-since]"); return !!s && s.getAttribute("data-since") !== "reading"; }, { timeout: 15000 }).catch(() => undefined);
+          return pl.evaluate(() => document.querySelector("[data-since]")?.getAttribute("data-since") ?? null);
+        };
+        await pl.goto(`${BASE}/trust`, { waitUntil: "networkidle0" });
+        await pl.evaluate((k) => { localStorage.setItem(k, "2000-01-01T00:00:00.000Z"); sessionStorage.removeItem(k); }, `align.lastVisit:${HW}:${HO.id}`);
+        await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        const lFirst = await sinceCount();
+        await pl.reload({ waitUntil: "networkidle0" });
+        const lReload = await sinceCount();
+        await pl.goto(`${BASE}/trust`, { waitUntil: "networkidle0" });
+        await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        const lBack = await sinceCount();
+        await pl.reload({ waitUntil: "networkidle0" });
+        const lBackReload = await sinceCount();
+        // The coordinator's review gap (PR 87): a reload of another workspace page, then Home through the app's own
+        // navigation, must not reuse the tab's old Home baseline (only a reload of Home itself does).
+        await pl.goto(`${BASE}/trust`, { waitUntil: "networkidle0" });
+        await pl.evaluate((k) => { localStorage.setItem(k, "2000-01-01T00:00:00.000Z"); sessionStorage.removeItem(k); }, `align.lastVisit:${HW}:${HO.id}`);
+        await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        const lOld = await sinceCount();
+        await pl.goto(`${BASE}/app/w/${HW}/goals`, { waitUntil: "networkidle0" });
+        await pl.reload({ waitUntil: "networkidle0" });
+        await pl.evaluate((ws) => [...document.querySelectorAll(`a[href="/app/w/${ws}"]`)].find((a) => a.offsetParent)?.click(), HW);
+        await pl.waitForFunction((ws) => location.pathname === `/app/w/${ws}`, { timeout: 15000 }, HW).catch(() => undefined);
+        const lInApp = await sinceCount();
+        await pl.close();
+        check(
+          "ui (Chrome, Since, LIM-2513): a reload keeps the tab's comparison (same lines), but leaving Home by a full page load to /trust and coming back by URL compares against when Home was left (no lines), and a reload after that keeps the new comparison; a reload of the Goals page, then Home through the app's navigation, doesn't reuse the tab's old Home comparison either",
+          Number(lFirst) > 0 && lReload === lFirst && lBack === "0" && lBackReload === "0" && Number(lOld) > 0 && lInApp === "0",
+          JSON.stringify({ lFirst, lReload, lBack, lBackReload, lOld, lInApp }),
         );
         // Mini 5's click walk, Nov 11: at 390 wide the review drawer's "More actions" menu opened below its footer, so
         // Decline, the last item, was off screen and only reachable by keyboard. Hugo asks Hank to change Hank's goal;

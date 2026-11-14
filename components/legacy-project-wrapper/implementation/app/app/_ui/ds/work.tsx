@@ -12,6 +12,7 @@ import { useRead } from "./read";
 import { useLive, useLiveReload } from "../live";
 import { GoalPresenceLine } from "../home/presence";
 import { StatusPill } from "./status-pill";
+import { when } from "@/lib/v2/when.mts";
 
 // Work (LIM-2472; round 2, founder ruling eaa5cf92: evidence serves a decision). Opened from a decision or a goal, never
 // browsed as a feed: /work?goal=<g>&cr=<id> puts the decision at the top, then its evidence, what Align sent, the
@@ -28,7 +29,7 @@ import { StatusPill } from "./status-pill";
 // Body only: the shell wraps it.
 
 const HARNESS = { "claude-code": "Claude Code", codex: "Codex" } as const;
-const at = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
+const at = when;
 /** "12 min ago", "3 h ago", else the date: how long since something was reported, never "now". */
 const ago = (iso: string) => {
   const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
@@ -273,7 +274,7 @@ function AppsPanel({ ws, goal }: { ws: string; goal: Goal }) {
             : cr && apps.data && !list.length
             ? `Launched v${cr.version} reaches an app when it reads the goals; ${everyone ? "none is connected" : known ? "none of yours is connected" : "none you can see is connected"}.`
             : cr
-            ? `"Align sent it v${cr.version}" is a delivery receipt: a goal read served this goal's launched version to that app. Align can't see what the app does with it.`
+            ? `"Align sent it v${cr.version}" is a receipt: a goal read served this goal's launched version to that app. Align can't see what the app does with it.`
             : "Nothing is launched on this goal yet, so Align has sent no version of it to an app. Goal reads are recorded for the workspace, not per goal."}
         </p>
       )}

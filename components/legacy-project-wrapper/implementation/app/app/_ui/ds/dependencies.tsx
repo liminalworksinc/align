@@ -6,6 +6,7 @@ import { VersionsCompare, type VersionRow } from "./compare";
 import { EmptyState } from "./empty-state";
 import { Panel } from "./panel";
 import { useRead } from "./read";
+import { when } from "@/lib/v2/when.mts";
 
 // Goal dependencies (LIM-2472 workstream S, P1): the goals the reader can read as an indented list, not a graph: each
 // goal under the goal it contributes to (contributes_to), with what it depends on (depends_on) said beside it. Select a
@@ -144,7 +145,7 @@ function Details({ ws, goal, byId }: { ws: string; goal: Goal; byId: Map<string,
                 <select className={SELECT} value={older.version} onChange={(e) => setA(Number(e.target.value))}>
                   {versions.map((v) => (
                     <option key={v.version} value={v.version}>
-                      v{v.version} · {new Date(v.created_at).toLocaleDateString()}
+                      v{v.version} · {when(v.created_at)}
                     </option>
                   ))}
                 </select>
@@ -154,7 +155,7 @@ function Details({ ws, goal, byId }: { ws: string; goal: Goal; byId: Map<string,
                 <select className={SELECT} value={newer.version} onChange={(e) => setB(Number(e.target.value))}>
                   {versions.map((v) => (
                     <option key={v.version} value={v.version}>
-                      v{v.version} · {new Date(v.created_at).toLocaleDateString()}
+                      v{v.version} · {when(v.created_at)}
                     </option>
                   ))}
                 </select>

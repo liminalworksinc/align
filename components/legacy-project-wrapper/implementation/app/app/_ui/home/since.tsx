@@ -5,6 +5,7 @@ import { Timeline, type EvidenceKind, type TimelineEvent } from "../ds";
 import { api } from "../kit";
 import type { ChangeRequest } from "../types";
 import type { EvidenceClass } from "@/lib/v2/home-core.mts";
+import { when } from "@/lib/v2/when.mts";
 
 // Home, second section (LIM-2472 ruling 9b5b870f): "Since you last looked". What changed since this person's last visit
 // on this device, built only from reads that already respect what they may see: the change requests on goals they can
@@ -16,7 +17,8 @@ import type { EvidenceClass } from "@/lib/v2/home-core.mts";
 // interface.md, Workspace Home; founder ruling, PR 68 pass 1 item 12). It is kept in this browser only (localStorage),
 // so the wording always says "on this device", and written when Home is left (unmounted, or the tab hidden for good),
 // so coming back to Home in the same tab compares with when they left it. A reload is not leaving: this tab's baseline
-// is held in sessionStorage, so a reload keeps the same list (founder ruling, PR 68 audit Low 1, option A). While Home stays open, the section asks Home
+// is held in sessionStorage, so a reload keeps the same list (founder ruling, PR 68 audit Low 1, option A). Only a reload
+// of Home counts: any other full page load away and back is leaving (LIM-2513, Mini 0's 03c415a8). While Home stays open, the section asks Home
 // to read again at most once a minute and adds what changed. With no earlier visit on this device, it says what the
 // list will show rather than inventing a history. Storage can be blocked: every access is guarded, and blocked storage
 // reads as a first visit.
@@ -61,26 +63,44 @@ function remove(store: () => Storage, k: string) {
   }
 }
 
+/** Whether this page load is a reload of this very Home: the document's navigation was a reload and its URL is this
+ *  page's. Any other full load (a link to /trust and back, a typed URL, back from another site) is not. */
+function reloadedHere(): boolean {
+  try {
+    const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+    return nav?.type === "reload" && new URL(nav.name).pathname === location.pathname;
+  } catch {
+    return false;
+  }
+}
+const asSince = (base: string) => (base === "none" || Number.isNaN(Date.parse(base)) ? null : base);
+
 /** The baseline: when this person last left this Home on this device (null for a first visit), read once per mount.
  *  This tab keeps it in sessionStorage, so a reload compares against the same time ("none" for a first visit). Leaving
- *  Home inside the app stores now and drops the tab's baseline; the page unloading (a reload or a closed tab) stores now
- *  for other tabs and later visits but keeps the tab's baseline, which a closed tab loses anyway. null until read after
- *  mount, so the server and first client render agree. */
+ *  Home inside the app stores now and drops the tab's baseline; the page unloading stores now for other tabs and later
+ *  visits but keeps the tab's baseline, which only a reload of this Home uses (LIM-2513: leaving by any other full page
+ *  load is leaving Home). null until read after mount, so the server and first client render agree. */
 function useLastVisit(ws: string, me: string): { ready: boolean; since: string | null } {
   const [v, setV] = useState<{ ready: boolean; since: string | null }>({ ready: false, since: null });
   useEffect(() => {
     const k = key(ws, me);
-    const base = read(() => sessionStorage, k) ?? read(() => localStorage, k) ?? "none";
+    const kept = reloadedHere() ? read(() => sessionStorage, k) : null;
+    const base = kept ?? read(() => localStorage, k) ?? "none";
     write(() => sessionStorage, k, base);
-    const t = setTimeout(() => setV({ ready: true, since: base === "none" || Number.isNaN(Date.parse(base)) ? null : base }), 0);
+    const t = setTimeout(() => setV({ ready: true, since: asSince(base) }), 0);
     let unloading = false;
     const unload = () => {
       unloading = true;
       write(() => localStorage, k, new Date().toISOString());
     };
-    // Back from the browser's back-forward cache: the page is live again, so leaving it later is leaving Home.
-    const shown = () => {
+    // Back from the browser's back-forward cache: the page is live again and Home was left, so it compares against when
+    // it was left (stored on pagehide), and leaving it later is leaving Home.
+    const shown = (e: PageTransitionEvent) => {
       unloading = false;
+      if (!e.persisted) return;
+      const left = read(() => localStorage, k) ?? "none";
+      write(() => sessionStorage, k, left);
+      setV({ ready: true, since: asSince(left) });
     };
     window.addEventListener("pagehide", unload);
     window.addEventListener("pageshow", shown);
@@ -146,7 +166,7 @@ function useVersions(ws: string, goals: SinceGoal[] | null, on: boolean, tick = 
 }
 
 /** One time format with the record's timeline: "Nov 5, 12:28 PM", no seconds, no numeric date. */
-const stamp = (iso: string) => new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const stamp = (iso: string) => when(iso);
 const after = (iso: string | null | undefined, since: string) => !!iso && iso > since;
 const same = (a: string | null, b: string | null) => !!a && !!b && Math.abs(Date.parse(a) - Date.parse(b)) < 2000;
 

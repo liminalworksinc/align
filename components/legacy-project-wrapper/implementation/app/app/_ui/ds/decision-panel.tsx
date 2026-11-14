@@ -7,6 +7,7 @@ import { deliveryStatement, type Delivery } from "./evidence-facts.mts";
 import { DECISION_LINK, DecisionLinks } from "./decision-links";
 import { Panel } from "./panel";
 import { StatusPill, type StatusKind } from "./status-pill";
+import { when } from "@/lib/v2/when.mts";
 
 // "The decision this belongs to" (LIM-2472 round 2, founder ruling eaa5cf92: evidence serves a decision): the top of
 // Work when it is opened for one goal. One request: its status, the change in one line, one sentence for where it
@@ -14,7 +15,7 @@ import { StatusPill, type StatusKind } from "./status-pill";
 // the request wasn't named in the link (the goal's open one, else its latest decided one). Times are absolute.
 
 type Person = { id: string; name: string };
-const at = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
+const at = when;
 const who = (p: Person | null | undefined, me: string) => (!p ? "Someone" : p.id === me ? "You" : p.name);
 const whoLower = (p: Person | null | undefined, me: string) => (!p ? "someone" : p.id === me ? "you" : p.name);
 const people = (ps: Person[], me: string) => (ps.length ? ps.map((p) => whoLower(p, me)).join(" or ") : "nobody yet");
