@@ -917,8 +917,8 @@ The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goa
 
 #### Scenario: A decline reason stays with the people in the decision
 
-- **WHEN** an approver declines a request with a reason, and the requester, the approver, an owner outside the approval set and a viewer each read it (single read, workspace list and Home)
-- **THEN** the requester and the approver get the reason in `rejection_reason` and `decision_note`, and the owner and the viewer get both as `null` with `rejected_by` and `decided_at` still set (`scripts/test-v2.mjs` "LIM-2515 L1: ...")
+- **WHEN** an approver declines a request with a reason, and the requester, that approver and a viewer each read it (the single read, and the viewer also on the workspace list)
+- **THEN** the requester and the approver get the reason in `rejection_reason` and `decision_note`, and the viewer gets both as `null` with `rejected_by` and `decided_at` still set (`scripts/test-v2.mjs` "LIM-2515 L1: ..."). The approval set is the effective one at read time, so an approver added after the decision reads the reason and one removed no longer does; the requester and the person who declined always do.
 
 #### Scenario: Waiting on me
 

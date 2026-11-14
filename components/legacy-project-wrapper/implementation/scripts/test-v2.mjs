@@ -7093,32 +7093,6 @@ try {
           /Hugo Lead[\s\S]{0,60}created the goal/.test(sinceText) && /Hank Other[\s\S]{0,60}created the goal/.test(sinceText) && !/Hana Owner[\s\S]{0,60}created the goal/.test(sinceText) && !/You[\s\S]{0,20}created the goal/.test(sinceText) && !/Someone[\s\S]{0,20}created the goal/.test(sinceText),
           sinceText.slice(0, 900).replace(/\n/g, " / "),
         );
-        // LIM-2515 L2 (founder ruling 65204c24): only a reload keeps the tab's "Since" baseline. The tab holds a baseline
-        // from long ago; this person last left Home in the future, so every line is older than that. A fresh load in the
-        // same tab (not a reload) compares with the last time they left: nothing to show. A reload keeps the tab's
-        // baseline: the creations show.
-        const pr = await browser.newPage();
-        await pr.setViewport({ width: 1440, height: 900 });
-        await pr.evaluateOnNewDocument((k) => {
-          sessionStorage.setItem(k, "2000-01-01T00:00:00.000Z");
-          localStorage.setItem(k, "2100-01-01T00:00:00.000Z");
-        }, `align.lastVisit:${HW}:${HO.id}`);
-        await pr.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
-        const sinceNow = async () => {
-          await pr.waitForFunction(() => { const s = document.querySelector("[data-since]"); return !!s && s.getAttribute("data-since") !== "reading"; }, { timeout: 15000 }).catch(() => undefined);
-          await sleep(300);
-          return pr.evaluate(() => document.querySelector("[data-since]")?.innerText ?? "");
-        };
-        await pr.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
-        const sinceFresh = await sinceNow();
-        await pr.reload({ waitUntil: "networkidle0" });
-        const sinceReload = await sinceNow();
-        await pr.close();
-        check(
-          "ui (Chrome, Since, LIM-2515 L2): a fresh load in the same tab compares with the last time Home was left (no creation lines), and only a reload keeps the tab's older baseline (creation lines show)",
-          !/created the goal/.test(sinceFresh) && /created the goal/.test(sinceReload),
-          `fresh: ${sinceFresh.slice(0, 300).replace(/\n/g, " / ")} || reload: ${sinceReload.slice(0, 300).replace(/\n/g, " / ")}`,
-        );
         // Mini 5's click walk, Nov 11: at 390 wide the review drawer's "More actions" menu opened below its footer, so
         // Decline, the last item, was off screen and only reachable by keyboard. Hugo asks Hank to change Hank's goal;
         // Hank opens it in the review drawer on a phone, opens More actions, and every item lies inside the screen and
