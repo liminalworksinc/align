@@ -6,9 +6,8 @@ import GoalLines from "../../_ui/home/goal-lines";
 import { NeedsList } from "../../_ui/home/needs-list";
 import Since from "../../_ui/home/since";
 import { useRead } from "../../_ui/ds/read";
-import { LiveMark } from "../../_ui/home/presence";
 import { useLive, useLiveReload } from "../../_ui/live";
-import { Loading, Shell, useApi } from "../../_ui/kit";
+import { Loading, Shell, useApi, waitingFromHome } from "../../_ui/kit";
 import { NotInWorkspace } from "../../_ui/missing";
 import { PROPOSED_EVENT } from "../../_ui/propose";
 import type { CreationOptions, Me } from "../../_ui/server";
@@ -89,7 +88,10 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
   // decision made in another window shows here within about a second. Without the stream the page keeps the reads below.
   const live = useLive(ws);
   const { reload: reloadFeed } = feed;
+  // A live re-read also bumps liveToken, so the Needs list marks what it adds or changes (LIM-2516 S6).
+  const [liveToken, setLiveToken] = useState(0);
   const reloadLive = useCallback(() => {
+    setLiveToken((t) => t + 1);
     reloadAll();
     reloadFeed();
   }, [reloadAll, reloadFeed]);
@@ -146,20 +148,20 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
   if (d.status === 404) return <NotInWorkspace me={me} />;
 
   return (
-    <Shell me={me} ws={ws} tab="Home">
+    // Home has read /home already: the frame's per-tab "waiting on you" counts come from this read (null until it lands).
+    <Shell me={me} ws={ws} tab="Home" waiting={waitingFromHome(d.data as Parameters<typeof waitingFromHome>[0]) ?? null}>
       <div className="flex flex-col gap-5">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <h1 tabIndex={-1} className={`${PAGE_H1} min-w-0`} data-home-count={count.n ?? "reading"}>
             {homePending ? "Home" : noGoals && (count.n === 0 || count.n === null) && !count.partial ? "No goals here yet" : needsHeading(count.n, count.partial)}
           </h1>
-          <LiveMark status={live.status} />
         </header>
 
         {/* Only on what was read: an unread Home says nothing about goals or apps, so it can't choose a first-run card. */}
         {h?.goals && h.apps && <FirstRun ws={ws} onSeen={reloadAll} me={me.id} hasGoals={h.goals.length > 0} creation={creation} />}
 
         <div className={quietList ? "hidden" : "contents"}>
-          <NeedsList ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} reloadToken={reloadToken} onItems={setItems} decided={decided} />
+          <NeedsList ws={ws} me={me.id} selected={review ? `cr:${review.id}` : null} heading={false} onCount={onCount} reloadToken={reloadToken} liveToken={liveToken} onItems={setItems} decided={decided} />
         </div>
 
         {!h ? (

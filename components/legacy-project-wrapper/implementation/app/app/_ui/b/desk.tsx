@@ -1,8 +1,10 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { DataTable, EmptyState, EvidenceSummary, hasEvidence, NeedAction, Segmented, sendChoice, StatusPill, type Column, type SendResult } from "../ds";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { DataTable, EmptyState, EvidenceSummary, FreshTag, hasEvidence, NeedAction, Segmented, sendChoice, StatusPill, type Column, type SendResult } from "../ds";
+import { freshSentence, useFresh } from "../fresh";
 import { useApi } from "../kit";
+import { useLiveReload } from "../live";
 import type { ChangeRequest } from "../types";
 import { needForChangeRequest } from "../home/needs";
 import { useNarrow, waited } from "../home/needs-list";
@@ -19,6 +21,9 @@ import { crStatus, nameList, oneLine, PHASE_WORDS, phaseOf, versions, waitsOn, t
 
 type Groups = { waiting_on_me: ChangeRequest[]; mine: ChangeRequest[]; others: ChangeRequest[] };
 type Filter = Phase | "all";
+
+/** Rows this person acted on from the desk (Approve only): never marked as changed by someone else. */
+const notesKeys = (m: ReadonlyMap<string, unknown>): ReadonlySet<string> => new Set(m.keys());
 
 /** "Mina Torres can decide": whose move an open request is, when it isn't this person's. */
 function whoCan(r: ChangeRequest, me: string): string {
@@ -64,6 +69,19 @@ export function Desk({
   const open = (r: ChangeRequest) => (onOpen ? onOpen(r) : router.push(`?review=${r.goal.id}.${r.id}`, { scroll: false }));
 
   const rows = useMemo(() => (feed.data ? [...feed.data.waiting_on_me, ...feed.data.mine, ...feed.data.others] : []), [feed.data]);
+  // Live (LIM-2516 S3, S6): the desk reads again when the workspace's stream says the change requests moved. What that
+  // read adds or changes is marked for a moment, and every row on screen when it came stays in view, in its new state,
+  // until the person changes the filter or the search, so nothing moves out from under a pointer or a screen reader.
+  const fresh = useFresh(feed.data ? rows : undefined, (r) => r.id, (r) => `${r.state}|${r.launch ?? ""}|${r.revision}|${phaseOf(r)}`, notesKeys(notes));
+  const [keep, setKeep] = useState<ReadonlySet<string>>(new Set());
+  const shownIds = useRef<string[]>([]);
+  const { arm } = fresh;
+  const liveReload = useCallback(() => {
+    arm();
+    setKeep((k) => new Set([...k, ...shownIds.current]));
+    reload();
+  }, [arm, reload]);
+  useLiveReload(ws, ["changes"], liveReload);
   const counts = useMemo(() => {
     const c: Record<Phase, number> = { on_me: 0, on_others: 0, decided: 0 };
     for (const r of rows) c[phaseOf(r)]++;
@@ -74,11 +92,14 @@ export function Desk({
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return rows.filter((r) => {
-      if (f !== "all" && phaseOf(r) !== f) return false;
+      if (f !== "all" && phaseOf(r) !== f && !keep.has(r.id)) return false;
       if (!needle) return true;
       return [r.goal.title, r.requester.name, r.reason, ...r.approvers.map((p) => p.name), crStatus(r).label].join(" ").toLowerCase().includes(needle);
     });
-  }, [rows, f, q]);
+  }, [rows, f, q, keep]);
+  useEffect(() => {
+    shownIds.current = shown.map((r) => r.id);
+  }, [shown]);
 
   const columns: Column<ChangeRequest>[] = [
     {
@@ -88,7 +109,10 @@ export function Desk({
       sortValue: (r) => r.goal.title.toLowerCase(),
       render: (r) => (
         <span className="flex min-w-0 flex-col gap-0.5" data-row={r.id}>
-          <span className="text-[14px] font-medium text-(--text-1)">{r.goal.title}</span>
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className="text-[14px] font-medium text-(--text-1)">{r.goal.title}</span>
+            {fresh.marks.get(r.id) && <FreshTag fresh={fresh.marks.get(r.id)!} />}
+          </span>
           <span className="text-[12px] font-normal text-(--text-3)">
             {oneLine(r)} · {r.requester.id === me ? "your request" : `${r.requester.name}'s request`}
           </span>
@@ -201,6 +225,18 @@ export function Desk({
 
   return (
     <div data-desk className="flex min-w-0 flex-col gap-3">
+      <p className="sr-only" aria-live="polite" data-desk-fresh>
+        {freshSentence(
+          new Map([...fresh.marks].filter(([id, v]) => v === "changed" || rows.find((r) => r.id === id && phaseOf(r) !== "on_me"))),
+          (n) => `${n} new ${n === 1 ? "request" : "requests"}.`,
+          (n) => `${n} ${n === 1 ? "request" : "requests"} changed just now.`,
+        )}{" "}
+        {freshSentence(
+          new Map([...fresh.marks].filter(([id, v]) => v === "new" && rows.find((r) => r.id === id && phaseOf(r) === "on_me"))),
+          (n) => `${n} new ${n === 1 ? "decision waits" : "decisions wait"} on you.`,
+          () => "",
+        )}
+      </p>
       <p className="text-[14px] text-(--text-2)" data-desk-summary>
         {loading
           ? "Reading the change requests…"
@@ -221,13 +257,26 @@ export function Desk({
       {!!rows.length && (
         <>
           <div className="flex flex-wrap items-end gap-3">
-            <Segmented label="Show" hideLabel size="s" options={filters} value={f} onChange={setFilter} />
+            <Segmented
+              label="Show"
+              hideLabel
+              size="s"
+              options={filters}
+              value={f}
+              onChange={(v) => {
+                setFilter(v);
+                setKeep(new Set());
+              }}
+            />
             <label className="ml-auto flex min-w-[220px] flex-1 flex-col gap-1 sm:max-w-[320px]">
               <span className="sr-only">Search change requests</span>
               <input
                 type="search"
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setKeep(new Set());
+                }}
                 placeholder="Search goal, person, reason"
                 className="min-h-[36px] rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) px-3 text-[14px] text-(--text-1) placeholder:text-(--text-3) max-sm:min-h-[44px]"
               />

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Children, type ReactNode } from "react";
+import { FRESH_WORD, type Fresh } from "../fresh";
 import { StatusPill, type StatusKind } from "./status-pill";
 
 // The rows of Home's "needs a human" list (LIM-2472 direction, 2026-11-05): judgment is the unit, agent work is its
@@ -10,9 +11,19 @@ import { StatusPill, type StatusKind } from "./status-pill";
 /** One row. The title is the row's link: its ::after stretches over the row, so the whole row is one target while
  *  `action` stays a separate control above it. Never a filled button: the one filled action in a view is the review's
  *  (use NeedAction). `tone` colours the kind with an existing pill; the kind's word is the caller's. */
+/** A row's "New" or "Changed just now" (LIM-2516 S6, _ui/fresh.ts): what a live re-read added or changed, for a moment. */
+export function FreshTag({ fresh }: { fresh: Fresh }) {
+  return (
+    <span data-fresh={fresh} className="al-fresh inline-flex items-center rounded-full border border-(--accent-text) px-1.5 font-mono text-[10px] uppercase leading-[16px] tracking-[0.08em] text-(--accent-text) whitespace-nowrap">
+      {FRESH_WORD[fresh]}
+    </span>
+  );
+}
+
 export function NeedRow({
   kind,
   tone = "draft",
+  fresh,
   title,
   sub,
   waited,
@@ -23,6 +34,8 @@ export function NeedRow({
 }: {
   kind: string;
   tone?: StatusKind;
+  /** Added or changed by a live re-read just now. */
+  fresh?: Fresh;
   title: ReactNode;
   sub?: ReactNode;
   waited?: string;
@@ -35,12 +48,13 @@ export function NeedRow({
   return (
     <li
       aria-current={selected ? "true" : undefined}
-      className={`group/need relative grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1.5 border-b border-(--line) px-3 py-3 last:border-b-0 @3xl:col-span-full @3xl:grid-cols-subgrid @3xl:items-center @3xl:gap-y-0 @3xl:py-1.5 ${selected ? "bg-(--accent-soft) shadow-[inset_2px_0_0_var(--accent-text)]" : href ? "hover:bg-(--bg-raised)" : ""}`}
+      className={`group/need relative grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1.5 border-b border-(--line) px-3 py-3 last:border-b-0 @3xl:col-span-full @3xl:grid-cols-subgrid @3xl:items-center @3xl:gap-y-0 @3xl:py-1.5 ${selected ? "bg-(--accent-soft) shadow-[inset_2px_0_0_var(--accent-text)]" : href ? "hover:bg-(--bg-raised)" : ""}${fresh && !selected ? " al-fresh-row" : ""}`}
     >
       {/* Stacked, the top line (kind, time) and the bottom line (evidence, action) size apart, so a long action can never
           squeeze the kind. Wide, the bottom wrapper dissolves and `order` puts all five cells in the subgrid's columns. */}
-      <div className="min-w-0 @3xl:order-1">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 @3xl:order-1">
         <StatusPill kind={tone} label={kind} size="s" />
+        {fresh && <FreshTag fresh={fresh} />}
       </div>
       <div className="whitespace-nowrap pt-0.5 text-right font-mono text-[12px] tabular-nums text-(--text-3) @3xl:order-4 @3xl:pt-0">
         {waited && (

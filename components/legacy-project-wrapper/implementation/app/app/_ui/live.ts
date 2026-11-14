@@ -1,13 +1,17 @@
 "use client";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import type { GoalPresence, LiveView } from "@/lib/v2/live";
-import { apiActivity } from "./kit";
 
 // The page's side of the live workspace (LIM-2503; the server is lib/v2/live.ts). One EventSource per workspace per tab,
 // shared by every component that asks for it, opened while one is mounted. The stream says which of this person's views
 // moved; each page reads its own views again (useLiveReload), so what it shows still comes from the reads it already
 // makes, scoped like them. When the stream can't be had (a refusal, five tabs, a proxy that drops it) the status is
 // "off" and the pages keep today's behaviour: they read when they open, after an action, and Home's Since check.
+
+/** Reads and writes in flight on the page (kit's api() and every window.fetch), and when the last one settled: the
+ *  stream opens once the page's own reads have gone quiet, so it never competes with them. Lives here, not in kit, so
+ *  kit's Shell can hold the stream without the two modules importing each other. */
+export const apiActivity = { inflight: 0, settledAt: 0 };
 
 export type LiveStatus = "connecting" | "live" | "reconnecting" | "off";
 export type { GoalPresence, LiveView };

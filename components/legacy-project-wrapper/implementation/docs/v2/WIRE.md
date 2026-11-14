@@ -444,7 +444,7 @@ rejection_reason, decided_at }) } | null, asks: { waiting_on_me } | null, alignm
 the server couldn't read is `null`; see `lib/v2/home.ts`),
 the workspace's live stream (`GET .../stream`, cookie only, members and viewers, Server-Sent Events: `hello` on connect
 `{ presence, views, resync }`, then `change` `{ views, presence }` when one of the reader's own views moves after a write
-(`views` from `home`, `changes`, `goals`, `sessions`, `alignments`, `presence`; never content: the page reads them again),
+(`views` from `home`, `changes`, `goals`, `sessions`, `alignments`, `asks`, `presence`; never content: the page reads them again),
 `gone` `{ status }` when the reader is signed out or no longer a member (the stream ends); every `hello` and `change` has
 an id, an opaque random token of this reader's stream (never a counter), and a reconnect with `Last-Event-ID` (or
 `?last_event_id=`) gets in `hello` the views that moved since, or `resync: true` when that id is unknown; a keep-alive

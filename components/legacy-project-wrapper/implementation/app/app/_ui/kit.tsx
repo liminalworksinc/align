@@ -3,6 +3,8 @@ import Link from "next/link";
 import { cloneElement, isValidElement, useCallback, useEffect, useId, useRef, useState, type ReactNode, type Ref } from "react";
 import { ThemeSettingCompact } from "./ds";
 import { ProposeControl } from "./propose";
+import { LiveMark } from "./home/presence";
+import { apiActivity, useLive, useLiveReload, type LiveStatus } from "./live";
 
 // Shared client pieces for the goal sessions web app: the API helper, a data hook, layout and form controls.
 
@@ -30,9 +32,6 @@ export function sentence(message: string): string {
   return /[.!?…]["”]?$/.test(s) ? s : `${s}.`;
 }
 
-/** Reads and writes in flight through api(), and when the last one settled: the live stream (_ui/live.ts) opens once
- *  the page's own reads have gone quiet, so it never competes with them. */
-export const apiActivity = { inflight: 0, settledAt: 0 };
 
 export async function api<T = unknown>(path: string, init?: { method?: string; body?: unknown; headers?: Record<string, string> }): Promise<T> {
   apiActivity.inflight++;
@@ -191,7 +190,32 @@ function WsSwitch({ ws, list }: { ws?: string; list: WsSummary[] }) {
   );
 }
 
-function NavBody({ ws, tab, list, me, current }: { ws?: string; tab?: string; list: WsSummary[] | null; me: { id?: string; name: string; email: string }; current?: WsSummary }) {
+/** What waits on the person, per tab (LIM-2516 S2), from the workspace's /home read: each tab's count is the same
+ *  "waiting on you" its own page filters by, so the two never disagree. null for a section Align couldn't read. */
+export type Waiting = { requests: number | null; asks: number | null; alignments: number | null };
+const WAITING_TAB: Record<string, keyof Waiting> = { Requests: "requests", Asks: "asks", Alignments: "alignments" };
+
+/** Waiting counts from a /home read, as Shell shows them. */
+export function waitingFromHome(h: { change_requests?: { waiting_on_me: unknown[] } | null; asks?: { waiting_on_me: unknown[] } | null; alignments?: { waiting_on_me: unknown[] } | null } | null | undefined): Waiting | null {
+  if (!h) return null;
+  const n = (x: { waiting_on_me: unknown[] } | null | undefined) => (x ? x.waiting_on_me.length : null);
+  return { requests: n(h.change_requests), asks: n(h.asks), alignments: n(h.alignments) };
+}
+
+function WaitingBadge({ n }: { n: number | null }) {
+  if (n === 0) return null;
+  return (
+    <span
+      data-waiting={n ?? "unknown"}
+      className={`ml-auto inline-flex min-w-[20px] items-center justify-center rounded-full px-1.5 font-mono text-[11px] leading-[18px] tabular-nums ${n === null ? "border border-(--line-strong) text-(--text-3)" : "bg-(--accent-text) text-(--bg-page)"}`}
+    >
+      <span aria-hidden="true">{n ?? "?"}</span>
+      <span className="sr-only">{n === null ? ", couldn't read what waits on you" : `, ${n} waiting on you`}</span>
+    </span>
+  );
+}
+
+function NavBody({ ws, tab, list, me, current, live, waiting }: { ws?: string; tab?: string; list: WsSummary[] | null; me: { id?: string; name: string; email: string }; current?: WsSummary; live?: LiveStatus; waiting?: Waiting | null }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       {/* One way to change the plan from anywhere (ruling eaa5cf92 item 10). People propose; viewers can't. */}
@@ -206,6 +230,12 @@ function NavBody({ ws, tab, list, me, current }: { ws?: string; tab?: string; li
         <div className="flex flex-col gap-1">
           <WsSwitch ws={ws} list={list} />
           {current && <p className="px-1 font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">You are {current.role === "owner" ? "an owner" : `a ${current.role}`}</p>}
+          {/* LIM-2516 S1: whether this page updates by itself, on every workspace page (one stream per tab, shared). */}
+          {ws && live && (
+            <div className="px-1">
+              <LiveMark status={live} />
+            </div>
+          )}
         </div>
       )}
       {ws && (
@@ -217,6 +247,7 @@ function NavBody({ ws, tab, list, me, current }: { ws?: string; tab?: string; li
               {[...g.items, ...(g.group === "Team" && current?.role === "owner" ? [{ href: "/record", label: "Record" }] : [])].map((t) => (
                 <Link key={t.href} href={`/app/w/${ws}${t.href}`} aria-current={tab === t.label ? "page" : undefined} className={navLink(tab === t.label)}>
                   {t.label}
+                  {waiting && WAITING_TAB[t.label] && <WaitingBadge n={waiting[WAITING_TAB[t.label]!]} />}
                 </Link>
               ))}
             </div>
@@ -247,9 +278,32 @@ function NavBody({ ws, tab, list, me, current }: { ws?: string; tab?: string; li
 /** Page frame (LIM-2472 concept A): a dense left rail at 1024px and up (workspace switcher, grouped navigation,
  *  devices, account, appearance); below that a top bar with a Menu button that opens the same navigation as a sheet.
  *  Every bar wraps and a word longer than its line breaks, so no /app page scrolls sideways at 390 or 320. */
-export function Shell({ me, ws, tab, children }: { me: { id?: string; name: string; email: string; passkeyPrompt?: boolean }; ws?: string; tab?: string; children: ReactNode }) {
+export function Shell({
+  me,
+  ws,
+  tab,
+  waiting: given,
+  children,
+}: {
+  me: { id?: string; name: string; email: string; passkeyPrompt?: boolean };
+  ws?: string;
+  tab?: string;
+  /** What waits on the person, when the page has already read /home (Home does): the frame then doesn't read it again. */
+  waiting?: Waiting | null;
+  children: ReactNode;
+}) {
   const list = useApi<{ workspaces: WsSummary[] }>("/api/v2/workspaces");
   const current = list.data?.workspaces.find((w) => w.id === ws);
+  const live = useLive(ws ?? null).status;
+  // LIM-2516 S2: what waits on the person follows them to every workspace page, live; the tab title leads with the total.
+  const home = useApi<Parameters<typeof waitingFromHome>[0]>(ws && given === undefined ? `/api/v2/workspaces/${ws}/home` : null);
+  useLiveReload(ws && given === undefined ? ws : null, ["home"], home.reload);
+  const waiting = given !== undefined ? given : waitingFromHome(home.data);
+  const total = waiting ? (waiting.requests ?? 0) + (waiting.asks ?? 0) + (waiting.alignments ?? 0) : 0;
+  useEffect(() => {
+    const base = document.title.replace(/^\(\d+\) /, "");
+    document.title = total > 0 ? `(${total}) ${base}` : base;
+  }, [total, tab]);
   const [menu, setMenu] = useState(false);
   const menuBtn = useRef<HTMLButtonElement>(null);
   const sheet = useRef<HTMLDivElement>(null);
@@ -271,7 +325,7 @@ export function Shell({ me, ws, tab, children }: { me: { id?: string; name: stri
         <Link href="/app" className="px-2 font-display text-[26px] leading-none text-(--text-1)">
           Align
         </Link>
-        <NavBody ws={ws} tab={tab} list={list.data?.workspaces ?? null} me={me} current={current} />
+        <NavBody ws={ws} tab={tab} list={list.data?.workspaces ?? null} me={me} current={current} live={live} waiting={waiting} />
       </aside>
       <div className="min-w-0 flex-1">
         <header className="flex items-center gap-3 border-b border-(--line) bg-(--bg-inset) px-4 py-2 lg:hidden">
@@ -279,6 +333,11 @@ export function Shell({ me, ws, tab, children }: { me: { id?: string; name: stri
             Align
           </Link>
           <span className="min-w-0 flex-1 truncate text-[14px] text-(--text-2)">{current?.name ?? ""}</span>
+          {ws && (
+            <span className="shrink-0" data-live-bar>
+              <LiveMark status={live} compact />
+            </span>
+          )}
           <button
             ref={menuBtn}
             type="button"
@@ -299,7 +358,8 @@ export function Shell({ me, ws, tab, children }: { me: { id?: string; name: stri
             className="flex flex-col border-b border-(--line) bg-(--bg-inset) px-3 py-3 lg:hidden"
             data-menu-sheet
           >
-            <NavBody ws={ws} tab={tab} list={list.data?.workspaces ?? null} me={me} current={current} />
+            {/* The top bar already shows the live mark on a phone; the sheet doesn't repeat it. */}
+            <NavBody ws={ws} tab={tab} list={list.data?.workspaces ?? null} me={me} current={current} waiting={waiting} />
           </div>
         )}
         {me.passkeyPrompt && <PasskeyPrompt />}

@@ -7363,6 +7363,20 @@ try {
       `${cr.status} ${ap.status} lag=${lag} ${JSON.stringify(sM.events.slice(mark)).slice(0, 400)}`,
     );
 
+    // -- LIM-2516 S5: asks are a live view: an ask recorded names "asks" on the owner's stream; a goal that touches no ask doesn't --
+    const LT = (await la(LO, "POST", "/teams", { name: "Floor team" })).json?.id;
+    const askMark = sO.events.length;
+    const askNew = await la(LM, "POST", "/asks", { team_id: LT, text: "Live: check the floor plan", source: { kind: "manual", date: "2026-11-13" } });
+    const oAsk = await sO.next((e) => e.event === "change" && e.data.views.includes("asks"), 3000, askMark);
+    const goalMark = sO.events.length;
+    await la(LO, "POST", "/goals", { title: "A goal no ask names", visibility: "workspace" });
+    const oGoal = await sO.next((e) => e.event === "change" && e.data.views.includes("goals"), 3000, goalMark);
+    check(
+      "live (LIM-2516 S5): asks are one of the stream's views: a member recording an ask names \"asks\" on the owner's stream (never the ask's words), and a new goal no ask names moves \"goals\" without \"asks\"",
+      !!LT && askNew.status === 201 && !!oAsk && !JSON.stringify(sO.events).includes("check the floor plan") && !!oGoal && !oGoal.data.views.includes("asks"),
+      `${LT} ${askNew.status} ${askNew.text?.slice(0, 160)} ${JSON.stringify(oAsk)} ${JSON.stringify(oGoal)}`,
+    );
+
     // -- another workspace's events never arrive; nor does a change the reader can't read --
     const s2 = await stream(LX, LW2);
     await s2.next((e) => e.event === "hello");
@@ -7561,6 +7575,131 @@ try {
           "live (web): an approval shows in the other windows within about a second: the decision page's lane map moves from Waiting for a decision to Approved, lights it and draws the line it came along; the request's row in the owner's other Home window moves from deciding to launching; the requester's Home says \"1 agent session is working toward this goal now (yours)\" on their goal; the Homes say Live",
           cr2.status === 201 && ap2.status === 200 && liveAll.every(Boolean) && !!deciding && arrivedA !== null && arrivedA < 2000 && !!drawn && !!rowBefore && seenC !== null && seenC < 2000 && rowAfter !== rowBefore && presenceB === "1 agent session is working toward this goal now (yours)",
           `${cr2.status} ${ap2.status} live=${liveAll} deciding=${!!deciding} A=${arrivedA} drawn=${!!drawn} C=${seenC} [${rowBefore?.slice(0, 80)}] -> [${rowAfter?.slice(0, 80)}] presence=${presenceB}`,
+        );
+
+        // -- LIM-2516 S1: every workspace page says whether it is live, once, in the frame; pages outside a workspace don't --
+        const visibleMarks = (pg) =>
+          pg.evaluate(() =>
+            [...document.querySelectorAll("[data-live-status]")]
+              .filter((el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden")
+              .map((el) => ({ status: el.getAttribute("data-live-status"), bar: !!el.closest("[data-live-bar]"), text: el.textContent })),
+          );
+        const s1 = {};
+        for (const tab of ["goals", "asks", "spend", "requests"]) {
+          await pB.goto(`${BASE}/app/w/${LW}/${tab}`, { waitUntil: "networkidle0" });
+          await pB.waitForSelector('[data-live-status="live"]', { timeout: 12000 }).catch(() => undefined);
+          s1[tab] = await visibleMarks(pB);
+        }
+        await pB.setViewport({ width: 390, height: 844 });
+        await pB.goto(`${BASE}/app/w/${LW}/requests`, { waitUntil: "networkidle0" });
+        await pB.waitForSelector('[data-live-bar] [data-live-status="live"]', { timeout: 12000 }).catch(() => undefined);
+        s1.phone = await visibleMarks(pB);
+        await pB.goto(`${BASE}/app/account`, { waitUntil: "networkidle0" });
+        s1.account = await visibleMarks(pB);
+        await pB.setViewport({ width: 1440, height: 900 });
+        check(
+          "live (LIM-2516 S1, web): Goals, Asks, Spend and Requests each show one visible live mark, \"Live\", in the workspace rail; at 390 it is one mark in the top bar; the account page, outside any workspace, shows none",
+          ["goals", "asks", "spend", "requests"].every((t) => s1[t].length === 1 && s1[t][0].status === "live" && !s1[t][0].bar && /Live/.test(s1[t][0].text)) &&
+            s1.phone.length === 1 && s1.phone[0].bar && s1.phone[0].status === "live" && s1.account.length === 0,
+          JSON.stringify(s1),
+        );
+
+        // -- LIM-2516 S3, S6: Requests is live: a request decided in another window stays in place, marked; a new one arrives marked --
+        const cr3 = await la(LM, "POST", `/goals/${LG.id}/change-requests`, { base_version: (await la(LO, "GET", `/goals/${LG.id}`)).json?.goal?.version, changes: { title: "Ship the live floor, desk edition" }, reason: "Desk: decide me elsewhere" });
+        await pC.goto(`${BASE}/app/w/${LW}/requests`, { waitUntil: "networkidle0" });
+        await pC.waitForSelector('[data-live-status="live"]', { timeout: 12000 }).catch(() => undefined);
+        await pC.waitForSelector(`[data-row="${cr3.json?.id}"]`, { timeout: 8000 }).catch(() => undefined);
+        await sleep(1500);
+        const deskRow = (id) => document.querySelector(`[data-row="${id}"]`)?.closest("tr, li, [role=row]")?.innerText ?? document.querySelector(`[data-row="${id}"]`)?.innerText ?? null;
+        const before3 = await pC.evaluate(deskRow, cr3.json?.id);
+        const ap3 = await la(LO, "POST", `/goals/${LG.id}/change-requests/${cr3.json?.id}/approve`, { revision: 1 });
+        const marked3 = await pC.waitForSelector(`[data-row="${cr3.json?.id}"] [data-fresh="changed"]`, { timeout: 5000 }).then(() => true).catch(() => false);
+        const after3 = await pC.evaluate(deskRow, cr3.json?.id);
+        const cr4 = await la(LM, "POST", `/goals/${LG.id}/change-requests`, { base_version: (await la(LO, "GET", `/goals/${LG.id}`)).json?.goal?.version, changes: { title: "Ship the live floor, another ask" }, reason: "Desk: a new one arrives" });
+        const marked4 = await pC.waitForSelector(`[data-row="${cr4.json?.id}"] [data-fresh="new"]`, { timeout: 5000 }).then(() => true).catch(() => false);
+        const said4 = await pC.$eval("[data-desk-fresh]", (el) => el.textContent?.trim() ?? "").catch(() => null);
+        await sleep(8600);
+        const gone4 = await pC.$(`[data-row="${cr4.json?.id}"] [data-fresh]`);
+        check(
+          "live (LIM-2516 S3, S6, web): on the owner's Requests desk, a request approved in another window changes in place and is marked \"Changed just now\"; a request sent meanwhile arrives marked \"New\" and is announced (\"1 new decision waits on you.\"); the marks are gone after about 8 s",
+          cr3.status === 201 && ap3.status === 200 && !!before3 && marked3 && !!after3 && after3 !== before3 && /Changed just now/i.test(after3) && cr4.status === 201 && marked4 && /1 new decision waits on you\./.test(said4 ?? "") && !gone4,
+          `${cr3.status} ${ap3.status} ${marked3} [${before3?.slice(0, 120)}] -> [${after3?.slice(0, 160)}] ${cr4.status} ${marked4} said=${said4} gone=${!gone4}`,
+        );
+
+        // -- LIM-2516 S4: the goal page is live, and a half-typed New version survives a version saved elsewhere --
+        await pA.goto(`${BASE}/app/w/${LW}/goals/${LG.id}`, { waitUntil: "networkidle0" });
+        await pA.waitForSelector('[data-live-status="live"]', { timeout: 12000 }).catch(() => undefined);
+        await pA.waitForSelector("#new-version input", { timeout: 8000 });
+        await sleep(1200);
+        const vNow = (await la(LO, "GET", `/goals/${LG.id}`)).json?.goal;
+        const typed = " (my half-typed edit)";
+        await pA.click("#new-version input");
+        await pA.keyboard.press("End");
+        await pA.keyboard.type(typed);
+        const saved = await la(LO, "POST", `/goals/${LG.id}/versions`, { version: vNow?.version, title: "Saved in another window", status: "active", measures: [], anchors: { repos: [], branch_patterns: [], issues: [] }, depends_on: [], limits: [] });
+        const behind = await pA.waitForSelector("[data-version-behind]", { timeout: 5000 }).then(() => true).catch(() => false);
+        const kept = await pA.$eval("#new-version input", (el) => el.value).catch(() => null);
+        const headed = await pA.$eval("h1", (el) => el.textContent).catch(() => null);
+        const saveOff = await pA.evaluate(() => [...document.querySelectorAll("#new-version button[type=submit]")].every((b) => b.disabled));
+        await pA.evaluate(() => [...document.querySelectorAll("[data-version-behind] button")][0]?.click());
+        await sleep(400);
+        const restarted = await pA.$eval("#new-version input", (el) => el.value).catch(() => null);
+        const noNotice = !(await pA.$("[data-version-behind]"));
+        check(
+          "live (LIM-2516 S4, web): the goal page reads a version saved in another window within about a second (its heading follows); a half-typed New version keeps its text, says the goal is now the newer version and won't save over it (Save disabled), and Start again opens the form on the newer version",
+          saved.status === 201 && behind && !!kept && kept.endsWith(typed) && headed === "Saved in another window" && saveOff && restarted === "Saved in another window" && noNotice,
+          `${saved.status} ${saved.text?.slice(0, 160)} behind=${behind} kept=${kept} h1=${headed} saveOff=${saveOff} restarted=${restarted} noNotice=${noNotice}`,
+        );
+
+        // -- LIM-2516 S5: the Asks tab is live --
+        // The owner watches (owners read every ask); the member, in no team, records one in another window.
+        await pC.goto(`${BASE}/app/w/${LW}/asks`, { waitUntil: "networkidle0" });
+        await pC.waitForSelector('[data-live-status="live"]', { timeout: 12000 }).catch(() => undefined);
+        await sleep(1200);
+        const askLive = await la(LM, "POST", "/asks", { team_id: LT, text: "Live: the asks tab hears this", source: { kind: "manual", date: "2026-11-13" } });
+        const askSeen = await pC.waitForFunction(() => document.body.innerText.includes("the asks tab hears this"), { timeout: 5000 }).then(() => true).catch(() => false);
+        check(
+          "live (LIM-2516 S5, web): an ask a member records in another window shows on the workspace owner's open Asks tab within about a second, without a reload",
+          askLive.status === 201 && askSeen,
+          `${askLive.status} ${askLive.text?.slice(0, 160)} seen=${askSeen}`,
+        );
+
+        // -- LIM-2516 S2: what waits on you follows you: the Requests link's count is the desk's own "waiting on you", live --
+        await pC.goto(`${BASE}/app/w/${LW}/goals`, { waitUntil: "networkidle0" });
+        await pC.waitForSelector('[data-live-status="live"]', { timeout: 12000 }).catch(() => undefined);
+        await pC.waitForSelector('aside a[href$="/requests"] [data-waiting]', { timeout: 8000 }).catch(() => undefined);
+        await sleep(1200);
+        const badge = () => pC.$eval('aside a[href$="/requests"] [data-waiting]', (el) => el.getAttribute("data-waiting")).catch(() => "0");
+        const onMeApi = async () => (await la(LO, "GET", "/change-requests")).json?.waiting_on_me?.length ?? -1;
+        const b0 = await badge();
+        const n0 = await onMeApi();
+        const cr5 = await la(LM, "POST", `/goals/${LG.id}/change-requests`, { base_version: (await la(LO, "GET", `/goals/${LG.id}`)).json?.goal?.version, changes: { title: "Ship the live floor, badge edition" }, reason: "Badge: count me" });
+        const b1 = await pC.waitForFunction((before) => document.querySelector('aside a[href$="/requests"] [data-waiting]')?.getAttribute("data-waiting") !== before, { timeout: 5000 }, b0).then(() => badge()).catch(() => b0);
+        const n1 = await onMeApi();
+        const title1 = await pC.title();
+        const otherBadges = await pC.evaluate(() => ["asks", "alignments"].reduce((n, t) => n + Number(document.querySelector(`aside a[href$="/${t}"] [data-waiting]`)?.getAttribute("data-waiting") ?? 0), 0));
+        check(
+          "live (LIM-2516 S2, web): on another tab (Goals) the owner's Requests link shows how many change requests wait on them, the same number as the desk's \"waiting on you\"; a request sent in another window raises it without a reload, and the tab title leads with the total \"(n)\"",
+          cr5.status === 201 && String(n0) === b0 && String(n1) === b1 && n1 === n0 + 1 && new RegExp(`^\\(${n1 + otherBadges}\\) `).test(title1),
+          `${cr5.status} badge ${b0}->${b1} api ${n0}->${n1} others=${otherBadges} title=${title1}`,
+        );
+
+        // -- LIM-2516 S6 on Home: a request that arrives while the owner's Home is open is marked "New" and announced --
+        await pC.goto(`${BASE}/app/w/${LW}`, { waitUntil: "networkidle0" });
+        await pC.waitForSelector('[data-live-status="live"]', { timeout: 12000 }).catch(() => undefined);
+        await pC.waitForSelector("[data-needs] li", { timeout: 8000 }).catch(() => undefined);
+        await sleep(1500);
+        const freshBefore = await pC.$("[data-needs] [data-fresh]");
+        const cr6 = await la(LM, "POST", `/goals/${LG.id}/change-requests`, { base_version: (await la(LO, "GET", `/goals/${LG.id}`)).json?.goal?.version, changes: { title: "Ship the live floor, Home edition" }, reason: "Home: mark me new" });
+        const homeMarked = await pC
+          .waitForFunction((id) => !!document.querySelector(`[data-needs] li a[href*=".${id}"]`)?.closest("li")?.querySelector('[data-fresh="new"]'), { timeout: 5000 }, cr6.json?.id)
+          .then(() => true)
+          .catch(() => false);
+        const homeSaid = await pC.$eval("[data-needs-fresh]", (el) => el.textContent?.trim() ?? "").catch(() => null);
+        check(
+          "live (LIM-2516 S6, web): on the owner's open Home, nothing is marked on the first read; a change request sent in another window arrives in Needs you marked \"New\", and the list announces \"1 new thing needs you.\"",
+          !freshBefore && cr6.status === 201 && homeMarked && /1 new thing needs you\./.test(homeSaid ?? ""),
+          `${!freshBefore} ${cr6.status} marked=${homeMarked} said=${homeSaid}`,
         );
       } finally {
         await browser.close();

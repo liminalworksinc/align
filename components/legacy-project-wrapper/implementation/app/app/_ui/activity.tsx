@@ -1,6 +1,7 @@
 "use client";
 import { EvidencePill } from "./evidence";
 import { Card, Note, Pill, useApi, when } from "./kit";
+import { useLiveReload } from "./live";
 import type { EvidenceClass } from "@/lib/v2/home-core.mts";
 import type { Me } from "./server";
 import type { Goal } from "./types";
@@ -30,6 +31,8 @@ const HARNESS = { "claude-code": "Claude Code", codex: "Codex" } as const;
 export function GoalActivityCard({ ws, goal, me }: { ws: string; goal: Goal; me: Me }) {
   void me;
   const d = useApi<Activity>(`/api/v2/workspaces/${ws}/goals/${goal.id}/activity`);
+  // Live (LIM-2516 S4): agent activity moves the sessions and presence views.
+  useLiveReload(ws, ["sessions", "presence"], d.reload);
   const a = d.data;
   if (!a) return null;
   const harnesses = (Object.keys(HARNESS) as (keyof typeof HARNESS)[]).filter((h) => a.by_harness[h] > 0).map((h) => `${a.by_harness[h]} ${HARNESS[h]}`);

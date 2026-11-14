@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, TextArea, useAction, useApi, when } from "../../../../_ui/kit";
 import { AnchorsEditor, LimitEditor, MeasuresEditor, TargetShareField, VISIBILITY_LABEL, anchorsDraft, anchorsOut, limitsDraft, limitsOut, measuresDraft, measuresOut, takenBy, targetOut, type LimitDraft } from "../../../../_ui/goalform";
 import type { Me } from "../../../../_ui/server";
+import { useLiveReload } from "../../../../_ui/live";
 import { ChangeRequestCard, ProposeChange, useGoalTitles } from "../../../../_ui/changes";
 import { hiddenGoals } from "../../../../_ui/crparts";
 import { dependsOnFull } from "@/lib/v2/change-words.mts";
@@ -94,7 +95,28 @@ function DropGoal({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () => 
   );
 }
 
-function NewVersion({ ws, goal, hiddenDeps, loops, onDone }: { ws: string; goal: Goal; hiddenDeps: number; loops: string[] | null; onDone: () => void }) {
+function NewVersion({
+  ws,
+  goal,
+  hiddenDeps,
+  loops,
+  onDone,
+  latest,
+  onDirty,
+  onRestart,
+}: {
+  ws: string;
+  goal: Goal;
+  hiddenDeps: number;
+  loops: string[] | null;
+  onDone: () => void;
+  /** The goal's version now (live): above `goal.version` when someone saved one while this form was open. */
+  latest: number;
+  /** Whether the form holds an edit (LIM-2516 S4): the page keeps an edited form on the version it started from. */
+  onDirty: (dirty: boolean) => void;
+  /** Throw the edit away and start again from the goal as it is now. */
+  onRestart: () => void;
+}) {
   const [title, setTitle] = useState(goal.title);
   const [status, setStatus] = useState(goal.status);
   const [measures, setMeasures] = useState(measuresDraft(goal));
@@ -112,10 +134,28 @@ function NewVersion({ ws, goal, hiddenDeps, loops, onDone }: { ws: string; goal:
   // At most 5 dependencies, the ones the owner can't see included: the rest can't be ticked (W4).
   const full = dependsOnFull(deps.length, hiddenDeps);
   const act = useAction();
+  // An edit is anything that differs from the version the form opened on.
+  const draft = JSON.stringify([title, status, measures, anchors, deps, limits, target]);
+  const [opened] = useState(draft);
+  const dirty = draft !== opened;
+  useEffect(() => {
+    onDirty(dirty);
+  }, [dirty, onDirty]);
+  const behind = latest > goal.version;
   return (
     <section id="new-version">
       <Card title="New version">
         <Note>Each change is a new version. Saving sends it to every session bound to this goal, for its agent to pick up at its next turn.</Note>
+        {behind && (
+          <div role="status" data-version-behind className="mb-3 rounded-(--radius-s) border border-(--st-retry)/50 bg-(--st-retry-soft) px-3 py-2 text-[14px] text-(--text-1)">
+            <p>
+              This goal is now version {latest}. Your edit started from version {goal.version}, so Align won&apos;t save it over the newer one. Your text stays here to copy.
+            </p>
+            <button type="button" onClick={onRestart} className="mt-1 inline-flex min-h-[44px] items-center font-medium text-(--accent-text) underline-offset-4 hover:underline sm:min-h-0">
+              Start again from version {latest}
+            </button>
+          </div>
+        )}
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -170,7 +210,7 @@ function NewVersion({ ws, goal, hiddenDeps, loops, onDone }: { ws: string; goal:
               )}
             </div>
           )}
-          <Btn type="submit" disabled={act.busy}>
+          <Btn type="submit" disabled={act.busy || behind}>
             Save version {goal.version + 1}
           </Btn>
           <Err>{act.error}</Err>
@@ -344,6 +384,7 @@ function ChangeRequests({
   onGoalChanged: () => void;
 }) {
   const list = useApi<{ change_requests: ChangeRequest[] }>(`/api/v2/workspaces/${ws}/goals/${goal.id}/change-requests`);
+  useLiveReload(ws, ["changes"], list.reload);
   const titles = useGoalTitles(ws);
   const { reload } = list;
   // After a decision: the list first, then the goal, once the list has answered.
@@ -413,6 +454,29 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
   const ws0 = useApi<{ role: string }>(`/api/v2/workspaces/${ws}`);
   const hold = useApi<HoldState>(`/api/v2/workspaces/${ws}/goals/${goal}/hold`);
   const g = d.data?.goal;
+  // Live (LIM-2516 S4): the goal, its hold and its cards read again when the workspace's stream says they moved. The
+  // reads keep what is on screen until they land, so nothing blanks.
+  const { reload: reloadHold } = hold;
+  const reloadLive = useCallback(() => {
+    reloadDetail();
+    reloadHold();
+  }, [reloadDetail, reloadHold]);
+  useLiveReload(ws, ["goals", "changes", "sessions"], reloadLive);
+  // The New version form, once it holds an edit, stays on the version it opened on (`pinned`): a version saved
+  // meanwhile (live) never remounts it, which would throw the edit away, and never slips under it, which would save the
+  // edit over the newer version. The form says so and offers to start again from the newer one.
+  const [pinned, setPinned] = useState<Goal | null>(null);
+  const gNow = useRef(g);
+  useEffect(() => {
+    gNow.current = g;
+  });
+  const formDirty = useCallback((dirty: boolean) => setPinned((p) => (dirty ? (p ?? gNow.current ?? null) : null)), []);
+  const formRestart = useCallback(() => setPinned(null), []);
+  const formDone = useCallback(() => {
+    setPinned(null);
+    reloadDetail();
+  }, [reloadDetail]);
+  const formGoal = pinned && g && pinned.id === g.id ? pinned : g;
   return (
     <Shell me={me} ws={ws} tab="Goals">
       {d.loading && <Loading />}
@@ -454,7 +518,19 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
           {/* Not keyed by the goal's version: a new version reloads the card in place (C3-4). Keyed, it shared its key with
               the New version form below, and a launch left a second card beside the first. */}
           <AgentsOnGoalCard ws={ws} goal={g} me={me} onHoldChanged={hold.reload} />
-          {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} hiddenDeps={d.data!.hidden_depends_on ?? 0} loops={d.data!.version_loops ?? null} onDone={d.reload} />}
+          {d.data!.can_edit && formGoal && (
+            <NewVersion
+              key={formGoal.version}
+              ws={ws}
+              goal={formGoal}
+              hiddenDeps={d.data!.hidden_depends_on ?? 0}
+              loops={d.data!.version_loops ?? null}
+              onDone={formDone}
+              latest={g.version}
+              onDirty={formDirty}
+              onRestart={formRestart}
+            />
+          )}
           {/* Keyed by limit proposals only (a new request to list): a goal version, a launch's included, reloads the list
               in place (C2 N3). */}
           <ChangeRequests

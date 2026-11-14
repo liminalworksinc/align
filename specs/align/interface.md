@@ -750,15 +750,32 @@ Server-Sent Events stream per workspace and tab, `GET /api/v2/workspaces/<ws>/st
 viewers; a non-member `404`, an `Authorization` header `403 bearer_not_allowed`; at most 4 streams of one person on one
 workspace, and a cap per workspace and per server well under what the server takes in all, so streams never crowd out
 ordinary requests; one more is `429 too_many_streams`). The stream SHALL carry no content of its own: after a write to the workspace
-it reads the person's own views again (the Home, the change requests, the goals feed, the sessions, the alignments and
-presence) and names the ones that moved for that person (`change`), and the page reads those again through the reads it
+it reads the person's own views again (the Home, the change requests, the goals feed, the sessions, the alignments, the asks
+and presence) and names the ones that moved for that person (`change`), and the page reads those again through the reads it
 already makes, so the stream shows nobody anything their reads would not. A write to another workspace, or one the
 person can't read, SHALL send them nothing, and no event id SHALL let them count such writes: an id is an opaque token
 of their own stream, never a counter. A browser that reconnects with `Last-Event-ID` SHALL be told what moved meanwhile,
 or to read everything again when the id is unknown (a restart). A keep-alive comment every
 15 seconds keeps proxies from closing it; every 30 seconds the stream checks the sign-in and membership again and ends
-with `gone` when either is lost. A page whose stream can't be opened or keeps failing SHALL say so in its header
-("Updates when you act or reload") and keep its reads as before; one with a stream says "Live".
+with `gone` when either is lost. Every workspace page SHALL say whether it is live, once, in the workspace frame (the
+rail under the person's role; on a phone, the top bar): "Live" with a stream, "Connecting", "Reconnecting", and, for a
+page whose stream can't be opened or keeps failing, "Updates when you act or reload" ("Not live" in a phone's top bar,
+the full sentence as its tooltip and for assistive tech), keeping its reads as before; a page outside a workspace says
+nothing. The frame's Requests, Asks and Alignments links SHALL carry how many of each wait on the person, from the
+workspace's `/home` read (the very "waiting on you" each tab filters by, so the two never disagree; "?" for a section
+Align couldn't read, nothing for none), read again when the stream says `home` moved, and the tab's title SHALL lead
+with their total ("(3) …"); the Home passes the counts from its own read instead of the frame reading again.
+
+The Requests tab, the goal page (the goal, its change requests, its agents and requests to them, its activity) and the
+Asks tab SHALL read again when their views move, as the Home does. A read never blanks what is on screen. On the
+Requests tab every row on screen when a live read lands stays in view, in its new state, until the person changes the
+filter or the search. On Home's Needs list and the Requests tab, a row that a live read added or changed SHALL be
+marked "New" or "Changed just now" for about 8 seconds (never on the first read, nor for what the person did on that
+page), with one polite announcement such as "1 new decision waits on you."; with reduced motion the mark shows without
+its fade. On the goal page, a New version form holding an edit SHALL stay on the version it opened on when a newer
+version lands: it says "This goal is now version <n>. Your edit started from version <m>, so Align won't save it over
+the newer one. Your text stays here to copy.", its Save is off, and **Start again from version <n>** opens it on the
+newer version; an untouched form simply follows the goal.
 
 An approval SHALL be seen travelling: on the review's lane map, the card the request moved to lights and the line it came
 along draws itself; on Home's goal lines and the Work page's sessions panel, the live presence line shows a member or
@@ -785,6 +802,21 @@ Presence names no person, key or title. With reduced motion the states show with
 
 - **WHEN** a stream drops and the browser reconnects with the last event id after a change it missed
 - **THEN** the new stream's `hello` names the views that moved; with an id the server doesn't know, `resync: true`
+
+#### Scenario: Decided in another window (`scripts/test-v2.mjs` "live (LIM-2516 S3, S6, web): ...")
+
+- **WHEN** an approver has the Requests tab open and a request on it is approved in another window, and another request is sent meanwhile
+- **THEN** the approved request's row stays where it was, in its new state, marked "Changed just now"; the new request arrives marked "New" and the tab announces "1 new decision waits on you."; the marks are gone after about 8 seconds
+
+#### Scenario: An edit and a newer version (`scripts/test-v2.mjs` "live (LIM-2516 S4, web): ...")
+
+- **WHEN** a goal's owner is typing a New version and a version of the goal is saved in another window
+- **THEN** the page's heading follows the newer version, the form keeps the typed text, says the goal is now the newer version, won't save over it, and **Start again** opens it on the newer version
+
+#### Scenario: What waits on you follows you (`scripts/test-v2.mjs` "live (LIM-2516 S2, web): ...")
+
+- **WHEN** an approver is on any workspace tab and a change request that waits on them is sent in another window
+- **THEN** the Requests link's count rises by one without a reload, matching the Requests tab's "waiting on you", and the tab's title leads with the total
 
 #### Scenario: A paused session
 

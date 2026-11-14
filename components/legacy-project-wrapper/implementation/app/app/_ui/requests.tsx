@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { useLiveReload } from "./live";
 import { api, Btn, Err, Field, Input, Loading, Note, Pill, Select, SignInAgain, TextArea, useAction, useApi, when } from "./kit";
 import { Panel } from "./ds";
 import type { Me } from "./server";
@@ -273,6 +274,8 @@ function RequestRow({ ws, r, me, onDone }: { ws: string; r: RequestView; me: str
  *  screen and anything typed meanwhile: never a remount and its "Loading…" (C3-4, as the change-request list, C2 N3). */
 export function AgentsOnGoalCard({ ws, goal, me, onHoldChanged }: { ws: string; goal: Goal; me: Me; onHoldChanged: () => void }) {
   const d = useApi<RequestsData>(`/api/v2/workspaces/${ws}/goals/${goal.id}/requests`);
+  // Live (LIM-2516 S4): requests to this goal's agents, the hold and the sessions read again when they move.
+  useLiveReload(ws, ["sessions", "goals"], d.reload);
   const data = d.data;
   const { reload: reloadList } = d;
   const seenVersion = useRef(goal.version);

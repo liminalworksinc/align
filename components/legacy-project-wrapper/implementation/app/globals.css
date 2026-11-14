@@ -366,6 +366,34 @@ body {
   .al-reach {
     animation: al-reach 0.7s ease-out both;
   }
+  /* A row a live re-read added or changed (LIM-2516 S6): its mark fades in, holds, and fades out as it is removed (8 s,
+     _ui/fresh.ts FRESH_MS); the row's own background warms and cools with it. Reduced motion: the mark, still. */
+  @keyframes al-fresh {
+    0% {
+      opacity: 0;
+    }
+    6%,
+    85% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+  .al-fresh {
+    animation: al-fresh 8s ease-out both;
+  }
+  @keyframes al-fresh-row {
+    0% {
+      background-color: var(--accent-soft);
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+  .al-fresh-row {
+    animation: al-fresh-row 3s ease-out both;
+  }
   /* The live dot breathes while the stream is open. */
   @keyframes al-breathe {
     50% {

@@ -100,8 +100,10 @@ export function GoalPresenceLine({ p }: { p: GoalPresence }) {
   );
 }
 
-/** A small mark for the page header: whether this page updates by itself. */
-export function LiveMark({ status }: { status: LiveStatus }) {
+/** Whether this page updates by itself: in the workspace frame's rail (LIM-2516 S1), and `compact` in a phone's top bar,
+ *  where "Updates when you act or reload" would crowd the workspace name: there it reads "Not live", with the full
+ *  sentence for assistive tech and as the tooltip. */
+export function LiveMark({ status, compact = false }: { status: LiveStatus; compact?: boolean }) {
   const word = status === "live" ? "Live" : status === "reconnecting" ? "Reconnecting" : status === "connecting" ? "Connecting" : "Updates when you act or reload";
   const tip =
     status === "live"
@@ -109,10 +111,18 @@ export function LiveMark({ status }: { status: LiveStatus }) {
       : status === "off"
         ? "Live updates aren't reaching this tab, so it reads when you act or reload, and Since you last looked checks once a minute."
         : "Live updates will resume in a moment.";
+  const short = compact && status === "off";
   return (
     <span className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)" title={tip} data-live-status={status}>
-      <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${status === "live" ? "al-breathe bg-(--ev-receipt)" : status === "off" ? "border border-(--text-3)" : "bg-(--st-pending)"}`} />
-      <span className={status === "off" ? "normal-case tracking-normal" : undefined}>{word}</span>
+      <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${status === "live" ? "al-breathe bg-(--ev-receipt)" : status === "off" ? "border border-(--text-3)" : "bg-(--st-pending)"}`} />
+      {short ? (
+        <>
+          <span aria-hidden="true">Not live</span>
+          <span className="sr-only">{word}</span>
+        </>
+      ) : (
+        <span className={status === "off" ? "normal-case tracking-normal" : undefined}>{word}</span>
+      )}
     </span>
   );
 }

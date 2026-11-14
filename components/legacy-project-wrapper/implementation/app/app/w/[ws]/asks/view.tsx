@@ -2,6 +2,7 @@
 import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useState } from "react";
+import { useLiveReload } from "../../../_ui/live";
 import { api, ApiError, Btn, Err, Field, Input, Loading, Note, Pill, Select, sentence, Shell, TextArea, useAction, useApi } from "../../../_ui/kit";
 import { Panel } from "../../../_ui/ds";
 import { NoticeBox, useNotice } from "../../../_ui/crparts";
@@ -279,6 +280,9 @@ function ImportAsks({ ws, teams, onDone }: { ws: string; teams: { id: string; na
 
 export default function Asks({ me, ws }: { me: Me; ws: string }) {
   const d = useApi<{ asks: Ask[] }>(`/api/v2/workspaces/${ws}/asks`);
+  // Live (LIM-2516 S5): the asks read again when the workspace's stream says this person's asks moved. A card is keyed by
+  // its ask's state and mentions, so an open form survives unless that ask itself changed.
+  useLiveReload(ws, ["asks"], d.reload);
   const w = useApi<WsDetail>(`/api/v2/workspaces/${ws}`);
   const goals = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
   const role = w.data?.role;

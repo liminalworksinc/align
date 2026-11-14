@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EvidenceLabel, EvidenceSummary, hasEvidence, NeedAction, NeedList, NeedRow, Segmented, type Delivery, type NextItem } from "../ds";
 import { api, useApi } from "../kit";
 import { readValue } from "./value-cache";
+import { freshSentence, useFresh } from "../fresh";
 import type { Alignment, ChangeRequest, Goal } from "../types";
 import { buildNeeds, inPhase, type Unknown, KIND_WORDS, latestLaunches, ORDER_LINE, ORDER_WHY, rankNote, REQ_GOALS_MAX, SENT_GOALS_MAX, type AppLite, type AskLite, type EvidenceCounts, type Need, type NeedPhase, type NeedsInput, type RequestLite } from "./needs";
 
@@ -185,6 +186,7 @@ export function NeedsList({
   reloadToken = 0,
   onItems,
   decided,
+  liveToken = 0,
 }: {
   ws: string;
   me: string;
@@ -203,6 +205,9 @@ export function NeedsList({
   onItems?: (items: NextItem[] | null | undefined) => void;
   /** Rows decided on this page (keys): when one leaves Needs you it stays in place, greyed, until the filter changes. */
   decided?: ReadonlySet<string>;
+  /** Bumped with `reloadToken` when the read is for a live change (the workspace's stream): the rows that read adds or
+   *  changes are marked "New" or "Changed just now" for a moment (LIM-2516 S6). */
+  liveToken?: number;
 }) {
   const W = `/api/v2/workspaces/${ws}`;
   const cr = useApi<Groups<ChangeRequest>>(`${W}/change-requests`);
@@ -310,6 +315,18 @@ export function NeedsList({
     if (unknown.length || cr.error) return null;
     return needsNow.map((n) => ({ key: n.key, kind: n.word, title: n.goal?.title ?? n.cause, waited: n.since ? waited(n.since.at) : undefined, href: needHref(ws, n, reviewBase), review: !!n.review, actionable: !!n.action }));
   }, [loading, reread, reqs.loading, sent.loading, unknown.length, cr.error, needsNow, ws, reviewBase]);
+  // What a live re-read added or changed: compared only once every read has landed, so a half-read list marks nothing.
+  const settled = !loading && reread && !reqs.loading && !sent.loading;
+  const fresh = useFresh(settled ? rows : undefined, (n) => n.key, (n) => `${n.phase}|${n.word}|${n.action?.label ?? ""}`, decided);
+  const { arm } = fresh;
+  useEffect(() => {
+    if (liveToken) arm();
+  }, [liveToken, arm]);
+  const freshSaid = useMemo(() => {
+    const needs = new Map([...fresh.marks].filter(([k, v]) => v === "new" && rows.some((r) => r.key === k && r.phase === "needs_you")));
+    const rest = new Map([...fresh.marks].filter(([k]) => !needs.has(k)));
+    return [freshSentence(needs, (n) => `${n} new ${n === 1 ? "thing needs" : "things need"} you.`, () => ""), freshSentence(rest, (n) => `${n} new here.`, (n) => `${n} changed just now.`)].filter(Boolean).join(" ");
+  }, [fresh.marks, rows]);
   const itemsCb = useRef(onItems);
   useEffect(() => {
     itemsCb.current = onItems;
@@ -340,6 +357,9 @@ export function NeedsList({
           Needs you
         </h2>
       )}
+      <p className="sr-only" aria-live="polite" data-needs-fresh>
+        {freshSaid}
+      </p>
       <div className="flex min-w-0 flex-wrap items-end gap-2">
         <Segmented
           label="Show"
@@ -418,6 +438,7 @@ export function NeedsList({
             <NeedRow
               key={n.key}
               kind={n.word}
+              fresh={fresh.marks.get(n.key)}
               tone={n.tone}
               title={n.goal?.title ?? n.cause}
               sub={n.goal ? (n.who ? `${n.cause} · ${n.who}` : n.cause) : (n.who ?? undefined)}

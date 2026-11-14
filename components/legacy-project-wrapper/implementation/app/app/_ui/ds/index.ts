@@ -7,7 +7,7 @@ export { Drawer } from "./drawer";
 export { EmptyState } from "./empty-state";
 export { EvidenceLabel, type EvidenceKind } from "./evidence-label";
 export { Kbd } from "./kbd";
-export { NeedAction, NeedList, NeedRow } from "./need";
+export { FreshTag, NeedAction, NeedList, NeedRow } from "./need";
 export { Panel } from "./panel";
 export { Segmented, type SegmentedOption } from "./segmented";
 export { StatusPill, type StatusKind } from "./status-pill";

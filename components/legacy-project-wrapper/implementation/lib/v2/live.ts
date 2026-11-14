@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { listAlignments } from "./alignments";
+import { listAsks } from "./asks";
 import { listChangeRequests } from "./changes";
 import { all, onWsChange } from "./db";
 import { V2Error } from "./errors";
@@ -52,7 +53,7 @@ export const streamsTotal = () => envInt("ALIGN_LIVE_STREAMS_TOTAL", 200);
 /** An event id: random, opaque, never derived from a counter. */
 const newEventId = () => randomBytes(12).toString("base64url");
 
-export const LIVE_VIEWS = ["home", "changes", "goals", "sessions", "alignments", "presence"] as const;
+export const LIVE_VIEWS = ["home", "changes", "goals", "sessions", "alignments", "asks", "presence"] as const;
 export type LiveView = (typeof LIVE_VIEWS)[number];
 
 interface LiveState {
@@ -158,6 +159,7 @@ function views(pp: PolicyPrincipal): { hashes: Record<LiveView, string>; presenc
     goals: h(() => goalsFeed(pp).version),
     sessions: h(() => listSessions(pp)),
     alignments: h(() => listAlignments(pp)),
+    asks: h(() => listAsks(pp)),
     presence: h(() => (presence = presenceFor(pp))),
   };
   return { hashes, presence };
