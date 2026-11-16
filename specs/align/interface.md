@@ -602,7 +602,7 @@ word ("Change suggested", "Needs an update", "Launched as v<n>", "Declined", "Wi
 "Ask done", and so on). A change request's row opens it in the review drawer over the Home (`?review=<goal>.<id>`),
 and closing the drawer returns to the same list; any other row opens the tab that holds it. A row's evidence SHALL be
 its change request's evidence summary (a decision with no links says "No evidence attached", an approval recorded
-without links "Approved without evidence"), or, for other kinds, chips by class ("Receipt", "Agent reported", "Not
+without links "Approved without evidence"), or, for other kinds, chips by class ("Delivery receipt", "Agent reported", "Not
 observed", "Self-reported"). With two rows or more a line names the order, "Ranked for someone who approves: launches
 and decisions first." or "Ranked for your own requests first.", with **How it's ranked**. A source that could not be
 read is named above the list: "Align couldn't read the <sources> just now, so this list may be missing items and its
@@ -801,22 +801,30 @@ Presence names no person, key or title. With reduced motion the states show with
 ### Requirement: Evidence class on every agent-status item
 
 Every item in the web app that says what agents or their sessions did, received or reported SHALL carry exactly one
-evidence class, and nothing SHALL be inferred past it (no working, stuck, blocked or diverged state). The Home's Needs
-list, the Apps tab, the Requests list, the review drawer and the Work page show it as a label with an icon: "Receipt",
-"Agent reported", "Self-reported" (a link a person added) or "Not observed" (dashed), `app/app/_ui/ds/evidence-label.tsx`.
-The items below show it as a plain pill in the words of `lib/v2/home-core.mts`, lower case ("delivery receipt", "agent
-reported", "not observed"): the goal page's Agent activity card ("agent reported" from
-the align CLI's bindings, usage and work signals, else "not observed"); each session's answer on the Agents on this goal
-card ("delivery receipt" for a request received and not answered, "agent reported" for an answer, "not observed"
-otherwise); the value card's "Agents on the new version" line ("delivery receipt" once any receipt for the launched
-version arrived, else "not observed") and its "Connected AI apps" row ("delivery receipt" when Align sent the launched
-version to an app the reader can see, else "not observed"); and the Sessions tab's stop or resume progress (the same rule). Where an MCP
-read returns the same item (`align_get_goal_activity`), it SHALL carry the same class as `evidence_class`.
+evidence class, and nothing SHALL be inferred past it (no working, stuck, blocked or diverged state). Every screen
+SHALL show it the same way, as one label with a word, an icon and a shape, so the class is never told by colour alone,
+in one set of words (founder ruling, Nov 16, LIM-2513): "Delivery receipt" (Align delivered something and recorded
+it), "Agent reported" (an agent's own account), "Self-reported" (a link a person added; Align doesn't check it) or
+"Not observed" (dashed: Align has nothing), `app/app/_ui/ds/evidence-label.tsx` with the words in
+`app/app/_ui/ds/evidence-facts.mts`. No screen SHALL say "Receipt" alone or use a lower-case form. This covers the
+Home's Needs list, the Apps tab, the Requests list, the review drawer and the Work page, and also: the goal page's
+Agent activity card ("Agent reported" from the align CLI's bindings, usage and work signals, else "Not observed");
+each session's answer on the Agents on this goal card ("Delivery receipt" for a request received and not answered,
+"Agent reported" for an answer, "Not observed" otherwise); the value card's "Agents on the new version" line
+("Delivery receipt" once any receipt for the launched version arrived, else "Not observed") and its "Connected AI
+apps" row ("Delivery receipt" when Align sent the launched version to an app the reader can see, else "Not
+observed"); and the Sessions tab's stop or resume progress (the same rule). Where an MCP read returns the same item
+(`align_get_goal_activity`), it SHALL carry the same class as `evidence_class`.
 
 #### Scenario: One class per item
 
 - **WHEN** a goal has two bound sessions that reported activity, a checkpoint request one session's developer accepted and another declined, a launched change whose directive a session received, and a resumed session whose machine sent no receipt yet
-- **THEN** the Agent activity card shows "agent reported", each request answer "agent reported", the value card's delivery line "delivery receipt" and the Sessions tab's "Resume sent, not yet received" "not observed", one pill each
+- **THEN** the Agent activity card shows "Agent reported", each request answer "Agent reported", the value card's delivery line "Delivery receipt" and the Sessions tab's "Resume sent, not yet received" "Not observed", one label each, each with its icon
+
+#### Scenario: One set of words
+
+- **WHEN** a person opens the Home, the Apps tab, a request in the review drawer, a goal page with a launched change, and the Sessions tab
+- **THEN** every evidence label reads "Delivery receipt", "Agent reported", "Self-reported" or "Not observed", in that case and with its icon, and none reads "Receipt" alone or "delivery receipt"
 
 ### Requirement: Home first-run card
 
@@ -1297,13 +1305,13 @@ evidence" when so), "Affected goals and
 teams" (the goal and its team, the readable goals it contributes to and the readable goals that depend on or contribute
 to it), "Agents on the new version" (before the launch "Not launched yet: agents stay on v<n> until launch."; after it,
 of the bound sessions the launch's `goal_version` directive reached: how many have it in context, received but not used
-yet, and not reached; "No shared sessions work toward this goal yet." when none; marked "delivery receipt" when any of
-those sessions' machines sent a receipt for it, else "not observed", as in "Evidence class on every agent-status
+yet, and not reached; "No shared sessions work toward this goal yet." when none; marked "Delivery receipt" when any of
+those sessions' machines sent a receipt for it, else "Not observed", as in "Evidence class on every agent-status
 item"), once launched "Connected AI apps" (the apps the reader can see on the Apps tab, a workspace owner every one,
 that Align sent the version the launch made when they read the goals, the `mcp` part's "Goal versions Align sent an
 app are recorded": "<app> (connected by <person>): Align sent it version <n> on <time>", and that Align can't see what
 the app does next; with none, "Align hasn't sent version <n> to a connected app yet" ("an app you connected" for anyone
-but a workspace owner); marked "delivery receipt" when it lists any app, else "not observed"; main #56), "Measured in
+but a workspace owner); marked "Delivery receipt" when it lists any app, else "Not observed"; main #56), "Measured in
 Align" (proposal to
 approval, approval to launch, and approval to the first `applied` receipt of the launch's directive, from server
 timestamps only; "not yet" while there is none), one optional question with a note, "What others said" (other
@@ -1327,7 +1335,7 @@ people's reports, when the read's `sees_all_reports` is set and there are any), 
 #### Scenario: Apps Align sent the launched version
 
 - **WHEN** a workspace owner approves a change that is launched as version 2, one member's app then reads the goals, and the owner's app last read them at version 1
-- **THEN** the owner's card shows "Connected AI apps" marked "delivery receipt" with "<member's app> (connected by <member>): Align sent it version 2 on <time>" and not the owner's own app; before the launch the row is not shown (`apps` is `null`), and once the member disconnects the app it is gone
+- **THEN** the owner's card shows "Connected AI apps" marked "Delivery receipt" with "<member's app> (connected by <member>): Align sent it version 2 on <time>" and not the owner's own app; before the launch the row is not shown (`apps` is `null`), and once the member disconnects the app it is gone
 
 #### Scenario: Follow-up link
 
@@ -1412,7 +1420,7 @@ everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<w
 #### Scenario: Own sessions
 
 - **WHEN** a member opens the tab
-- **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared", "ended: device signed out" or "ended: left the workspace", the two ended states with no **Stop agent**, **Resume agent** or **Stop sharing**, only **Stop sharing for good** and **Delete shared history**, and "Stopped; can't be resumed from here" when its agent was stopped), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed") marked "delivery receipt" once the machine sent any receipt for it and "not observed" before, the goal it counts under and follows (for a session no longer shared, "Sharing stopped <time>, so nothing more counts" or "Sharing ended <time>, …" for an ended one, never "Counting under: no goal"), and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
+- **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared", "ended: device signed out" or "ended: left the workspace", the two ended states with no **Stop agent**, **Resume agent** or **Stop sharing**, only **Stop sharing for good** and **Delete shared history**, and "Stopped; can't be resumed from here" when its agent was stopped), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed") marked "Delivery receipt" once the machine sent any receipt for it and "Not observed" before, the goal it counts under and follows (for a session no longer shared, "Sharing stopped <time>, so nothing more counts" or "Sharing ended <time>, …" for an ended one, never "Counting under: no goal"), and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
 
 #### Scenario: A session whose device signed out
 
@@ -1520,7 +1528,7 @@ form and workspace owners an import.
 ### Requirement: Agent activity on the goal page
 
 The goal page SHALL show an "Agent activity" card from `GET /api/v2/workspaces/<ws>/goals/<goal>/activity`, marked
-with the response's one evidence class ("agent reported", or "not observed" with nothing in the window) and saying
+with the response's one evidence class ("Agent reported", or "Not observed" with nothing in the window) and saying
 "Sessions people shared toward this goal, last 14 days. Counts come from bindings, not from what agents wrote.", with
 Sessions (and how many per harness, as "<n> Claude Code, <n> Codex"), "Reported activity, last 90 min" (what the align
 CLI reported in the last 90 minutes, never "active now") and "Last reported activity" ("None yet" when there is none),
@@ -1533,7 +1541,7 @@ card says what agents are doing: the files are what the sessions' align CLI repo
 #### Scenario: Activity card
 
 - **WHEN** a member of the goal's team opens a goal with two bound sessions, one active, and work signals with paths
-- **THEN** the card is marked "agent reported" and shows "Sessions 2 (1 Claude Code, 1 Codex)", "Reported activity, last 90 min 1", the paths and their own sessions; a reader without the detail sees only the counts, and with no sessions the card is marked "not observed" and says "No shared sessions worked toward this goal in the last 14 days."
+- **THEN** the card is marked "Agent reported" and shows "Sessions 2 (1 Claude Code, 1 Codex)", "Reported activity, last 90 min 1", the paths and their own sessions; a reader without the detail sees only the counts, and with no sessions the card is marked "Not observed" and says "No shared sessions worked toward this goal in the last 14 days."
 
 ### Requirement: Agents on this goal card
 
@@ -1560,9 +1568,9 @@ note, who cancelled it, the counts ("<n> accepted by the developer, <n> delivere
 session its name, "started <time> · …<the key's last 6 characters>" (so two sessions of one person in one repository
 can be told apart) and a pill: pending, accepted by the developer, "delivered, not declined" (an `auto_accepted` accept: the request
 reached the agent and the developer did not decline it by the end of that turn; it never says the agent did it),
-declined, expired, or for a session that ended before it answered "ended: device signed out" or "ended: left the workspace" (its row's `ended_reason`), each with one evidence class: "delivery receipt" for a request the session's machine received and
-has not answered and for one delivered and not declined, "agent reported" for the developer's answer (accepted or
-declined, sent from their machine), "not observed" for one sent with nothing back, expired or ended; with **Cancel** when its
+declined, expired, or for a session that ended before it answered "ended: device signed out" or "ended: left the workspace" (its row's `ended_reason`), each with one evidence class: "Delivery receipt" for a request the session's machine received and
+has not answered and for one delivered and not declined, "Agent reported" for the developer's answer (accepted or
+declined, sent from their machine), "Not observed" for one sent with nothing back, expired or ended; with **Cancel** when its
 `can_cancel` is true.
 
 #### Scenario: A new goal version reloads the card in place
@@ -1583,7 +1591,7 @@ declined, sent from their machine), "not observed" for one sent with nothing bac
 #### Scenario: A checkpoint delivered and not declined
 
 - **WHEN** a checkpoint reached one session's agent and its developer did not decline it by the end of that turn, and another session's developer accepted it
-- **THEN** the request's sessions show "delivered, not declined" marked "delivery receipt" and "accepted by the developer" marked "agent reported"; nothing reads "done by the agent"
+- **THEN** the request's sessions show "delivered, not declined" marked "Delivery receipt" and "accepted by the developer" marked "Agent reported"; nothing reads "done by the agent"
 
 ### Requirement: Hold banner
 
@@ -1629,7 +1637,7 @@ workspace owner sees everyone's.
 #### Scenario: Connected apps
 
 - **WHEN** a member opens the tab
-- **THEN** each connection shows the app's name with its evidence label, "Receipt" when it has read the goals and "Not observed" when it hasn't, and "Reads only" or, for a grant holding `changes:evidence`, "Reads, and adds evidence links", its redirect host, the person who connected it, when it was approved, **Last connected** (its last request to Align, `Never` when none) and **Last read the goals** (its last call that returned goals, "Not seen yet" when none), under a note that connecting and listing tools is not a read and that Align doesn't see which goal version an app has, with **Disconnect** on the person's own connections (an owner sees **Disconnect** on every connection), which calls `DELETE /api/v2/workspaces/<ws>/apps/<id>`; with none, "No AI apps are connected to this workspace." for a workspace owner and "None of your AI apps is connected." for anyone else. A "Connected is not the same as read" panel names **Last connected** (it says the app reached Align, not that it read anything), **Last read the goals**, labelled "Receipt" (Align served goals and recorded it), and "Never read", labelled "Not observed", and a panel counts the apps "Connected", "Have read the goals" and "Never read"
+- **THEN** each connection shows the app's name with its evidence label, "Delivery receipt" when it has read the goals and "Not observed" when it hasn't, and "Reads only" or, for a grant holding `changes:evidence`, "Reads, and adds evidence links", its redirect host, the person who connected it, when it was approved, **Last connected** (its last request to Align, `Never` when none) and **Last read the goals** (its last call that returned goals, "Not seen yet" when none), under a note that connecting and listing tools is not a read and that Align doesn't see which goal version an app has, with **Disconnect** on the person's own connections (an owner sees **Disconnect** on every connection), which calls `DELETE /api/v2/workspaces/<ws>/apps/<id>`; with none, "No AI apps are connected to this workspace." for a workspace owner and "None of your AI apps is connected." for anyone else. A "Connected is not the same as read" panel names **Last connected** (it says the app reached Align, not that it read anything), **Last read the goals**, labelled "Receipt" (Align served goals and recorded it), and "Never read", labelled "Not observed", and a panel counts the apps "Connected", "Have read the goals" and "Never read"
 
 #### Scenario: How to connect
 

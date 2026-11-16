@@ -4,10 +4,10 @@ import type { ChangeRequest, Goal } from "../types";
 // in the evidence classes' words. Pure: EvidenceSummary renders it on Home's rows, the goal lines and the review, and
 // design/prototypes/lim-2472/s/evidence-facts.check.mjs runs it on the seeded requests. Each fact says only what Align
 // sent, recorded or was told:
-//   Receipt         Align recorded it: a launch directive's received receipts, or a goal read that served the version;
-//   Agent reported  an agent's own account: evidence links added through a connected app, align CLI usage times;
-//   Self-reported   a person's own evidence links;
-//   Not observed    only for a launched version's delivery: no session on the goal and no app sent it, or no receipt.
+//   Delivery receipt  Align recorded it: a launch directive's received receipts, or a goal read that served the version;
+//   Agent reported    an agent's own account: evidence links added through a connected app, align CLI usage times;
+//   Self-reported     a person's own evidence links;
+//   Not observed      only for a launched version's delivery: no session on the goal and no app sent it, or no receipt.
 // An absence is never a fact of its own otherwise: no agent time and no links give no chip (no report is not an agent's
 // report; no links is a fact about the request, not an observation of work); `hasEvidence` lets a consumer say "No
 // evidence attached" in words. Never what an agent did with something, and never "verified": Align doesn't check links.
@@ -22,7 +22,9 @@ export interface Fact {
   long: string;
 }
 
-export const FACT_WORD: Record<FactKind, string> = { receipt: "Receipt", reported: "Agent reported", self: "Self-reported", unobserved: "Not observed" };
+/** The evidence classes' words, the one table every screen uses (founder ruling Nov 16, LIM-2513: "Delivery receipt"
+ *  says what Align holds, proof it delivered the plan; it replaced "Receipt" and the lower-case pill). */
+export const FACT_WORD: Record<FactKind, string> = { receipt: "Delivery receipt", reported: "Agent reported", self: "Self-reported", unobserved: "Not observed" };
 const RANK: Record<FactKind, number> = { receipt: 0, reported: 1, self: 2, unobserved: 3 };
 
 /** What GET …/change-requests/<id>/value says about a launch (lib/v2/value.ts ValueView: delivery, apps). */

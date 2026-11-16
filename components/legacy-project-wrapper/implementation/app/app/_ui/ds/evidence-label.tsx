@@ -1,12 +1,14 @@
+import { FACT_WORD } from "./evidence-facts.mts";
 import { Icon } from "./icons";
 
 export type EvidenceKind = "receipt" | "reported" | "self" | "unobserved";
 
-// The evidence classes (LIM-2454 3770c6c4). Words are exact: Receipt = Align delivered something and recorded it; Agent
-// reported = the agent's own words; Self-reported = a person added this in a web session and Align did not check it
-// (reported_as on an evidence item, lib/v2/evidence.ts); Not observed = Align has nothing. Never "verified", "live" or
-// "done". Self-reported is neutral on purpose: it ranks below Agent reported and has no colour of its own.
-const WORD: Record<EvidenceKind, string> = { receipt: "Receipt", reported: "Agent reported", self: "Self-reported", unobserved: "Not observed" };
+// The evidence classes (LIM-2454 3770c6c4), in the one word table every screen uses (FACT_WORD; founder ruling Nov 16,
+// LIM-2513): Delivery receipt = Align delivered something and recorded it; Agent reported = the agent's own words;
+// Self-reported = a person added this in a web session and Align did not check it (reported_as on an evidence item,
+// lib/v2/evidence.ts); Not observed = Align has nothing. Never "verified", "live" or "done". Self-reported is neutral on
+// purpose: it ranks below Agent reported and has no colour of its own.
+const WORD: Record<EvidenceKind, string> = FACT_WORD;
 
 const TONE: Record<EvidenceKind, string> = {
   receipt: "text-(--ev-receipt) bg-(--ev-receipt-soft) border-(--ev-receipt)/40",

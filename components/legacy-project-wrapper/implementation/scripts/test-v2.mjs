@@ -5249,7 +5249,7 @@ try {
       const actClasses = await page.$$eval("#goal-activity [data-evidence-class]", (els) => els.map((e) => e.getAttribute("data-evidence-class")));
       check(
         "ui (Chrome, LIM-2455 §E2): the Agent activity card carries exactly one evidence class, \"agent reported\", and names the files as reported (\"Files these sessions reported working on\"), never \"Files agents are working on\"",
-        JSON.stringify(actClasses) === '["agent_reported"]' && cardText.includes("agent reported") && cardText.includes("Files these sessions reported working on") && !cardText.includes("Files agents are working on"),
+        JSON.stringify(actClasses) === '["agent_reported"]' && cardText.includes("Agent reported") && cardText.includes("Files these sessions reported working on") && !cardText.includes("Files agents are working on"),
         `${JSON.stringify(actClasses)} ${cardText.slice(0, 300)}`,
       );
       await page.goto(`${BASE}/app/w/${AK}/sessions`, { waitUntil: "networkidle0" });
@@ -5622,7 +5622,7 @@ try {
         const valueClasses = await page.$$eval(`[data-value-card="${crP.json?.id}"] [data-value-row="delivery"] [data-evidence-class]`, (els) => els.map((e) => e.getAttribute("data-evidence-class")));
         check(
           "ui (Chrome, LIM-2455 §E2): the value card's \"Agents on the new version\" line carries exactly one evidence class, a delivery receipt (the session's machine sent a receipt for the launched version)",
-          JSON.stringify(valueClasses) === '["delivery_receipt"]' && /delivery receipt/.test(card.text),
+          JSON.stringify(valueClasses) === '["delivery_receipt"]' && /Delivery receipt/.test(card.text) && !/delivery receipt/.test(card.text),
           JSON.stringify(valueClasses),
         );
         const appsRow = await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => {
@@ -6837,8 +6837,8 @@ try {
           `${JSON.stringify(ap.heads)} ${JSON.stringify(ap.rows)} ${ap.note}`,
         );
         check(
-          "ui (Chrome, §E2, LIM-2472): on the Apps tab every connected app shows exactly one evidence class (Receipt for the app that read the goals, Hedy Member's; Not observed for the app that only connected) under \"Connected is not the same as read\"; Home keeps one line naming the app with no goal read; nothing says \"on the current plan\" or infers working, stuck, blocked or diverged",
-          JSON.stringify(claude?.evidence) === '["receipt"]' && /Hedy Member/.test(claude.text) && JSON.stringify(codex?.evidence) === '["unobserved"]' && /Connected is not the same as read/.test(ap.text) && /Align has recorded no goal read from Codex\./.test(o.notice) &&
+          "ui (Chrome, §E2, LIM-2472): on the Apps tab every connected app shows exactly one evidence class (Delivery receipt for the app that read the goals, Hedy Member's; Not observed for the app that only connected) under \"Connected is not the same as read\"; Home keeps one line naming the app with no goal read; nothing says \"on the current plan\" or infers working, stuck, blocked or diverged",
+          JSON.stringify(claude?.evidence) === '["receipt"]' && /Delivery receipt/.test(claude.text) && /Hedy Member/.test(claude.text) && JSON.stringify(codex?.evidence) === '["unobserved"]' && /Connected is not the same as read/.test(ap.text) && /Align has recorded no goal read from Codex\./.test(o.notice) &&
             !/\b(working|stuck|blocked|diverged)\b/i.test(`${ap.text} ${o.notice}`) && !/current plan/i.test(o.text) && errors.length === 0,
           `${JSON.stringify(ap.rows)} ${o.notice} ${errors.join(" | ")}`,
         );
