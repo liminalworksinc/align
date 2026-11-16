@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Server tests finish each readiness response before stopping a phase, preventing a previous server from satisfying
+  the next phase's readiness check.
 - Failed transaction and preview setup releases database state so later writes, previews and sign-in mail work.
 - Updated the web framework to 16.4.6 to remove the known cache disclosure advisory.
 - A tester keeps their v1 invite code on v2: `align-admin codes import` loads unused codes as single-use creation codes,
