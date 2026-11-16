@@ -2318,6 +2318,23 @@ try {
     crRbyReq.status === 403 && crRbyReq.json?.error === "not_an_approver" && crRrej.json?.state === "rejected" && crRrej.json.rejected_by?.id === U3.id && crRrej.json.rejection_reason === "Out of scope this quarter" && crRrej.json.decision_note === "Out of scope this quarter" && crWbyLead.status === 403 && crWbyLead.json?.error === "not_requester" && crWok.json?.state === "withdrawn",
     `${crRbyReq.text} ${crRrej.text.slice(0, 200)} ${crWbyLead.text} ${crWok.json?.state}`,
   );
+  // LIM-2515 L1 (ruling A): the decline reason reaches only the requester, the decider and the approvers. A viewer still
+  // sees who declined it and when, never the reason, on the single read and on the workspace list.
+  {
+    const asReq = await crGet(U1, GL.id, crR.json?.id);
+    const asDecider = await crGet(U3, GL.id, crR.json?.id);
+    const asViewer = await crGet(U4, GL.id, crR.json?.id);
+    const viewerList = await call("U4", "GET", `/api/v2/workspaces/${A}/change-requests?state=rejected`, { cookie: U4.cookie });
+    const inList = [...(viewerList.json?.waiting_on_me ?? []), ...(viewerList.json?.mine ?? []), ...(viewerList.json?.others ?? [])].find((c) => c.id === crR.json?.id);
+    check(
+      "LIM-2515 L1: a decline reason goes to the requester and the decider; a viewer gets rejected_by and decided_at with rejection_reason and decision_note null (single read and list)",
+      asReq.json?.rejection_reason === "Out of scope this quarter" && asReq.json.decision_note === "Out of scope this quarter" &&
+        asDecider.json?.rejection_reason === "Out of scope this quarter" &&
+        asViewer.status === 200 && asViewer.json?.rejection_reason === null && asViewer.json.decision_note === null && asViewer.json.rejected_by?.id === U3.id && typeof asViewer.json.decided_at === "string" &&
+        !!inList && inList.rejection_reason === null && inList.decision_note === null,
+      `${asReq.json?.rejection_reason} | ${asDecider.json?.rejection_reason} | ${asViewer.status} ${asViewer.json?.rejection_reason} ${asViewer.json?.decision_note} | list ${!!inList} ${inList?.rejection_reason}`,
+    );
+  }
   // The LIM-2455 checklist (§C, §A): the reason and note caps on reject and counter, an approver declining while a counter
   // waits on the requester, and decisions are cookie-only (a device token proposes and decides nothing).
   const crCap = await propose(U1, GL.id, { base_version: 2, changes: { title: "Pen-test the mobile app" }, reason: "Mobile too" });
