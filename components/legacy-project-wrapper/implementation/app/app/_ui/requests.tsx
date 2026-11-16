@@ -154,7 +154,8 @@ function HoldControls({ ws, goal, me, hold, quiet, onDone }: { ws: string; goal:
           // controls are one click away, folded, until a session is on it.
           return quiet ? (
             <details data-hold-folded>
-              <summary className="inline-flex min-h-[44px] cursor-pointer items-center text-[14px] text-(--text-2) hover:text-(--text-1)">Hold agents on this goal</summary>
+              {/* A list-item summary keeps the disclosure triangle, as Anchors has, so it reads as something that opens. */}
+              <summary className="min-h-[44px] cursor-pointer py-3 text-[14px] text-(--text-2) hover:text-(--text-1)">Hold agents on this goal</summary>
               <div className="pt-2">{controls}</div>
             </details>
           ) : (
