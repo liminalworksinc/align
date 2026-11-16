@@ -355,23 +355,26 @@ function alreadyJoinedWith(token: string, userId: string) {
  */
 export async function acceptInvite(token: string, user: { id: string; email: string }, emailVerified: boolean, deviceIds: string[] = [], requireRecent: () => void = () => undefined) {
   alreadyJoinedWith(token, user.id);
-  const r = inviteByToken(token);
+  let r = inviteByToken(token);
   if (r.email !== user.email.toLowerCase()) throw new V2Error(403, "email_mismatch", "This invite is for a different email address");
   // When hosted, the sign-in method (Google, GitHub or an email code) must have verified the address.
   if (config().hosted && !emailVerified) throw new V2Error(403, "email_unverified", "Your sign-in provider has not verified this email address");
   if (deviceIds.length) requireRecent();
-  const at = nowIso();
   let devices: string[] = [];
   await tx(() => {
+    alreadyJoinedWith(token, user.id);
+    r = inviteByToken(token);
+    if (r.email !== user.email.toLowerCase()) throw new V2Error(403, "email_mismatch", "This invite is for a different email address");
     if (get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", r.ws_id, user.id)) throw conflict("already_member", "You are already a member.");
     checkMemberCap(r.ws_id, false);
+    const at = nowIso();
+    if (run("UPDATE v2_invites SET accepted_at = ?, accepted_by = ? WHERE id = ? AND accepted_at IS NULL AND expires_at > ?", at, user.id, r.id, at) !== 1) throw notFound();
     run("INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES (?, ?, ?, ?)", r.ws_id, user.id, r.role, at);
     cancelDeparture(r.ws_id, user.id);
     // An invite that names a team joins that team too (a team removed meanwhile is simply skipped).
     if (r.team_id && get("SELECT 1 AS x FROM v2_pods WHERE ws_id = ? AND id = ?", r.ws_id, r.team_id)) {
       run("INSERT INTO v2_pod_members (ws_id, pod_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)", r.ws_id, r.team_id, user.id, r.team_role ?? "member", at);
     } else r.team_id = null;
-    run("UPDATE v2_invites SET accepted_at = ?, accepted_by = ? WHERE id = ?", at, user.id, r.id);
     audit(r.ws_id, user.id, "invite.accepted", r.id, at);
     devices = addWorkspaceToDevices(user.id, r.ws_id, deviceIds, at);
     event("invite_accepted", { ws: r.ws_id, user: user.id, props: { role: r.role }, at });

@@ -1,0 +1,63 @@
+name: app-tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: components/legacy-project-wrapper/implementation
+    env:
+      ALIGN_TEST_PORT: 3600
+      NEXT_TELEMETRY_DISABLED: 1
+      # test-v2 defaults to a macOS path. Use the hosted Ubuntu image's Chrome so every browser check runs.
+      CHROME_PATH: /usr/bin/google-chrome
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            components/legacy-project-wrapper/implementation/package-lock.json
+            components/legacy-project-wrapper/implementation/packages/align-agent/package-lock.json
+      - name: Prepare test prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends lsof procps openssl zsh libdigest-sha-perl
+          mkdir -p "$RUNNER_TEMP/app-tests"
+          echo "TMPDIR=$RUNNER_TEMP/app-tests" >> "$GITHUB_ENV"
+          test -x "$CHROME_PATH"
+          "$CHROME_PATH" --version
+          node --version
+          npm --version
+      - name: Install app dependencies
+        run: npm ci
+      - name: Install agent dependencies
+        run: npm ci --prefix packages/align-agent
+      - name: Run the full app test gate
+        # The gate builds the app and agent and starts isolated local servers. No Docker or external services are needed.
+        run: npm test
+      - name: Show test diagnostics on failure
+        if: failure()
+        run: |
+          for log in "$TMPDIR"/align-test-all.*/*.log; do
+            [ -f "$log" ] || continue
+            echo "::group::$(basename "$log")"
+            tail -n 100 "$log"
+            echo "::endgroup::"
+          done
