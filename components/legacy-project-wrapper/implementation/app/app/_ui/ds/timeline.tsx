@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { EvidenceLabel, type EvidenceKind } from "./evidence-label";
 import { Icon } from "./icons";
+import { when } from "@/lib/v2/when.mts";
 
 /** Where an event came from. person: recorded in Align against a person; system: Align itself. Align's audit log
  *  records no channel (browser, CLI or app), so person and system never claim one; `detail` can say so ("source not
@@ -26,10 +27,7 @@ export type TimelineEvent = {
   detail?: ReactNode;
 };
 
-const fmt = (iso: string) => {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-};
+const fmt = (iso: string) => when(iso);
 
 function SourceLabel({ source }: { source: TimelineSource }) {
   if (source.kind !== "person" && source.kind !== "system")

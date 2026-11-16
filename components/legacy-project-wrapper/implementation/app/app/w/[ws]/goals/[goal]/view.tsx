@@ -450,11 +450,9 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
           </Card>
           <GoalLimits ws={ws} goal={g} canEdit={d.data!.can_edit} onDone={limitsDone} />
           <Tree ws={ws} goal={g} canEdit={d.data!.can_edit} hiddenDeps={d.data!.hidden_depends_on ?? 0} onDone={d.reload} />
-          <GoalActivityCard ws={ws} goal={g} me={me} />
-          {/* Not keyed by the goal's version: a new version reloads the card in place (C3-4). Keyed, it shared its key with
-              the New version form below, and a launch left a second card beside the first. */}
-          <AgentsOnGoalCard ws={ws} goal={g} me={me} onHoldChanged={hold.reload} />
-          {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} hiddenDeps={d.data!.hidden_depends_on ?? 0} loops={d.data!.version_loops ?? null} onDone={d.reload} />}
+          {/* The plan, then what is being decided about it, then the agents, then the editing form (specs/align/interface.md,
+              "Goal page details and new version"; LIM-2513): an approved request's "What this decision gave you" sits
+              right after the plan, and the two forms (Align with this goal, New version) come last. */}
           {/* Keyed by limit proposals only (a new request to list): a goal version, a launch's included, reloads the list
               in place (C2 N3). */}
           <ChangeRequests
@@ -468,7 +466,12 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
             hiddenDeps={d.data!.hidden_depends_on ?? 0}
             onGoalChanged={d.reload}
           />
+          <GoalActivityCard ws={ws} goal={g} me={me} />
+          {/* Not keyed by the goal's version: a new version reloads the card in place (C3-4). Keyed, it shared its key with
+              the New version form below, and a launch left a second card beside the first. */}
+          <AgentsOnGoalCard ws={ws} goal={g} me={me} onHoldChanged={hold.reload} />
           {ws0.data && ws0.data.role !== "viewer" && g.owner.id !== me.id && <RequestAlignment ws={ws} goal={g} me={me} />}
+          {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} hiddenDeps={d.data!.hidden_depends_on ?? 0} loops={d.data!.version_loops ?? null} onDone={d.reload} />}
           <Card title="Versions">
             <ul className="text-[14px] text-zinc-600">
               {d.data!.versions.map((v) => (

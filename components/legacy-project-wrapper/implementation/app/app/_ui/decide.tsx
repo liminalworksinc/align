@@ -560,7 +560,7 @@ export function OpenRequest({
               </ul>
             </div>
           ))}
-          <p className="mt-1 text-[13px] text-zinc-500">Links are what people or agents say support the change, labelled self-reported or agent-reported. Align doesn&apos;t check them.</p>
+          <p className="mt-1 text-[13px] text-zinc-500">Links are what people or agents say support the change, labelled self-reported or agent reported. Align doesn&apos;t check them.</p>
           {cr.can.add_evidence && <AddEvidence path={path} revision={cr.revision} onDone={onDone} setNotice={setNotice} />}
         </section>
       </div>
