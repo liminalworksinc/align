@@ -1279,7 +1279,7 @@ see, from one read of `GET /api/v2/workspaces/<ws>/change-requests`, as one list
 "Waiting on me" when anything waits on the person and on "All" otherwise, and a search field ("Search goal, person,
 reason"). A line above it says "<n> decisions waiting on you. <m> waiting on others." ("1 decision …", or "Nothing is
 waiting on you. <m> waiting on others."). Each row SHALL show Request (the goal's title, then what the request changes
-in words, its first change and "and <n> more changes" when there are more, and "your request" or "<requester>'s
+in words, its first change and "and <n> more changes" when there are more, and "your request" ("your request, on your own goal" when the person may also decide it, on a goal they own) or "<requester>'s
 request"), State (the Home's word for it as a status pill), Versions ("Asks for v<n>", "Approved v<n>", "Launched v<n>"
 or "Not approved"), Evidence ("No evidence attached" when the current revision has no link, and the shared evidence
 summary) and Updated (how long ago). A row opens the request in the review drawer (`?review=<goal>.<id>`); its action

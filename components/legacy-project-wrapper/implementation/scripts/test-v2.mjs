@@ -8522,8 +8522,8 @@ try {
         const sampleReq = await text(pS);
         const sampleSummary = await text(pS, "[data-desk-summary]");
         check(
-          "B12 (LIM-2472): in the Northstar sample the Requests tab says one decision waits on the person and its row says it is their own request, never \"You have not proposed a change\" or \"No change requests yet\"",
-          sample.status === 201 && /^1 decision waiting on you\./.test(sampleSummary) && /your request/.test(sampleReq) && !sampleReq.includes("You have not proposed a change") && !sampleReq.includes("No change requests yet"),
+          "B12 (LIM-2472): in the Northstar sample the Requests tab says one decision waits on the person and its row says it is their own request on their own goal (\"your request, on your own goal\", so Decision beside it reads right, LIM-2513), never \"You have not proposed a change\" or \"No change requests yet\"",
+          sample.status === 201 && /^1 decision waiting on you\./.test(sampleSummary) && /your request, on your own goal/.test(sampleReq) && !sampleReq.includes("You have not proposed a change") && !sampleReq.includes("No change requests yet"),
           sampleReq.slice(0, 400),
         );
         // U9: restoring says connected apps don't come back.
@@ -9868,6 +9868,9 @@ try {
         // never a "Loading…" on the page, and the hold reason typed into it stays.
         await open(pO, `/app/w/${XW}/goals/${GL?.id}`);
         await pO.waitForFunction(() => !!document.querySelector("#agents-on-goal") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Launch version 2 to agents"), { timeout: 15000 }).catch(() => undefined);
+        // With no shared session on the goal the hold controls are folded (LIM-2513): open them as a person would.
+        const holdFolded = await pO.$("#agents-on-goal [data-hold-folded]:not([open]) summary");
+        if (holdFolded) await holdFolded.click();
         await pO.evaluate(() => {
           const f = [...document.querySelectorAll("#agents-on-goal label")].find((x) => x.querySelector("span")?.textContent?.trim() === "Reason (optional, shown to the developers)")?.querySelector("input");
           f?.setAttribute("data-typing", "1");
@@ -9881,7 +9884,7 @@ try {
           }).observe(document.body, { childList: true, subtree: true, characterData: true });
         });
         await press(pO, `[data-cr="${crL?.id}"]`, "Launch version 2 to agents");
-        await pO.waitForFunction(() => document.body.innerText.includes("Recorded: you launched version 2 to agents") && /version 2/.test(document.querySelector("h1")?.nextElementSibling?.textContent ?? ""), { timeout: 15000 }).catch(() => undefined);
+        await pO.waitForFunction(() => document.body.innerText.includes("Recorded: you launched version 2.") && /version 2/.test(document.querySelector("h1")?.nextElementSibling?.textContent ?? ""), { timeout: 15000 }).catch(() => undefined);
         await pO.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const c34 = await pO.evaluate(() => ({
           gone: window.__agentsGone,
