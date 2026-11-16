@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Failed transaction and preview setup releases database state so later writes, previews and sign-in mail work.
 - Updated the web framework to 16.4.6 to remove the known cache disclosure advisory.
 - A tester keeps their v1 invite code on v2: `align-admin codes import` loads unused codes as single-use creation codes,
   and hosted `/new` redirects to `/app`, where they sign in and enter it.

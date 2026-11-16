@@ -27,6 +27,26 @@ queue item or let `docs/roadmap/` become a plan archive.
 
 ## P0
 
+Check the parent only after every required subtask and evidence item passes. Add the
+release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
+
+### [x] TX-001: Recover from transaction and preview setup failures
+
+- **Owner:** components/legacy-project-wrapper/implementation/lib/v2/db.ts
+- **Direction:** Clean up every setup failure after a successful transaction start.
+- **Conclusion:** Protect touch and session setup with the existing cleanup paths.
+  Preview setup errors still throw; callback errors still return `ok: false`.
+- **Completion prerequisites:** none
+- **Outcome:** Setup cleanup and recovery regressions pass; the full local gate passes on the CI runtime.
+- **Implementation and evidence:**
+  - [x] Restore transaction depth and preview state, roll back, and close created sessions.
+  - [x] Add regressions to test-v2 proving later commits, rollbacks and previews work.
+    `node scripts/test-v2.mjs 3700 --tx-setup-only`: 2 passed, 0 failed;
+    the same tests against the original database module: 0 passed, 2 failed.
+  - [x] Run the regressions and `ALIGN_TEST_PORT=3700 npm test` with no failures.
+    Full gate on Node 24.22.3: 1,922 passed, 0 failed. Completed Node 26 gate runs failed only
+    the unchanged hook latency check; no test limits or dependency versions changed.
+
 ### [x] DEPS-001: Remove the known framework cache disclosure advisory
 
 - **Priority:** P0
@@ -40,9 +60,6 @@ queue item or let `docs/roadmap/` become a plan archive.
 - **Evidence:**
   - [x] Node 24.22.3: npm ci and npm ci --prefix packages/align-agent pass; ALIGN_TEST_PORT=3800 npm test passes, 1998 tests, 0 failures (including hook latency)
 - **Outcome:** next and its matching framework packages are pinned to 16.4.6; unrelated dependencies, tests and limits are unchanged.
-
-Check the parent only after every required subtask and evidence item passes. Add the
-release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
 <a id="adopt-002"></a>
 ### [ ] ADOPT-002 — Native Literate AI rewrite
