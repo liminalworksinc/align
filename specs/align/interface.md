@@ -1004,6 +1004,20 @@ marked active; **Confirm: drop the goal** saves the next version with status `dr
 (the same write as the New version form's Status), and **Cancel** closes it. The confirmation SHALL go away as soon as
 the drop is recorded, so a second confirm is never offered on the version it replaced.
 
+The page SHALL read in the order a person needs it (LIM-2513): what the goal is (measures, limits, the goal tree),
+whether agents are on it (Agent activity, Agents on this goal), its change requests, then the New version form and
+the versions. Under the title, a person who can edit an active goal SHALL get **Edit this goal**, which moves to the
+New version form and focuses its first field; nothing that drops or holds sits above the goal's content.
+**Drop this goal** SHALL sit at the foot of the New version form, after **Save version <n+1>**, under "Or end this
+goal". On the Agents on this goal card, while no shared session is on the goal and it isn't held, the hold controls
+SHALL be folded under a "Hold agents on this goal" disclosure rather than leading the card; once a session is on the
+goal, or the goal is held, they show as before.
+
+#### Scenario: What the goal page leads with
+
+- **WHEN** the owner opens an active goal that no shared session is on
+- **THEN** under the title the only action is **Edit this goal**, which moves to the New version form; the measures come first; the Agents on this goal card shows its hold controls folded under "Hold agents on this goal"; **Drop this goal** is under "Or end this goal" after **Save version <n+1>**
+
 #### Scenario: Reading a goal
 
 - **WHEN** a member opens a goal
@@ -1066,7 +1080,11 @@ whose page or `?goal=` they are on is chosen), marking a goal with "· your requ
 such a goal is chosen the drawer SHALL say so before any field, "You already have an open request on this goal." with
 "It is waiting for a decision." (or "An approver suggested a change to it; accept it or withdraw it.") and "Align takes
 one open request per person and goal: open yours to add to it or withdraw it, then ask again.", with **Open your
-request** (its review on the Home) and **Not now**, and SHALL offer no form. Otherwise "What should change" offers the
+request** (its review on the Home) and **Not now**, and SHALL offer no form. When the person owns every active goal they
+can read, there is nothing to propose: the drawer SHALL say "You own every active goal you can see here, so you change
+one directly: save a new version on its page." and list each such goal, linked to its New version form
+(`/app/w/<ws>/goals/<goal>#new-version`, which the goal page moves to and focuses once it is read), with "Edit v<n>"
+(LIM-2513). Otherwise "What should change" offers the
 title, each measure, "Add a measure" (under 10 measures), "Mark the goal achieved" and "Drop the goal", with "It should
 say" or "The new measure" (up to 300 characters) and an optional "Target" for a measure; it links to "the goal page's
 full change form" for limits and dependencies. "Why" is required (up to 2000 characters) and "A link" (an https link)

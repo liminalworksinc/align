@@ -94,6 +94,23 @@ function DropGoal({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () => 
   );
 }
 
+/** The editor's way in from under the title: moves to the New version form and focuses its first field. */
+function EditThisGoal() {
+  return (
+    <div className="mb-5">
+      <Btn
+        onClick={() => {
+          const form = document.getElementById("new-version");
+          form?.scrollIntoView({ behavior: "smooth", block: "start" });
+          form?.querySelector<HTMLElement>("input, select, textarea")?.focus({ preventScroll: true });
+        }}
+      >
+        Edit this goal
+      </Btn>
+    </div>
+  );
+}
+
 function NewVersion({ ws, goal, hiddenDeps, loops, onDone }: { ws: string; goal: Goal; hiddenDeps: number; loops: string[] | null; onDone: () => void }) {
   const [title, setTitle] = useState(goal.title);
   const [status, setStatus] = useState(goal.status);
@@ -112,8 +129,16 @@ function NewVersion({ ws, goal, hiddenDeps, loops, onDone }: { ws: string; goal:
   // At most 5 dependencies, the ones the owner can't see included: the rest can't be ticked (W4).
   const full = dependsOnFull(deps.length, hiddenDeps);
   const act = useAction();
+  // Arriving by …#new-version (the Propose drawer's Edit link), the form renders after the goal is read, too late for
+  // the browser's own jump: move here and focus the first field once it exists.
+  const here = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (window.location.hash !== "#new-version" || !here.current) return;
+    here.current.scrollIntoView({ block: "start" });
+    here.current.querySelector<HTMLElement>("input, select, textarea")?.focus({ preventScroll: true });
+  }, []);
   return (
-    <section id="new-version">
+    <section id="new-version" ref={here}>
       <Card title="New version">
         <Note>Each change is a new version. Saving sends it to every session bound to this goal, for its agent to pick up at its next turn.</Note>
         <form
@@ -175,6 +200,14 @@ function NewVersion({ ws, goal, hiddenDeps, loops, onDone }: { ws: string; goal:
           </Btn>
           <Err>{act.error}</Err>
         </form>
+        {/* Dropping is a version too, so it lives with the other way to make one, after Save, never above the goal's
+            content (LIM-2513 journey pass: it was the first control under the title). */}
+        {goal.status === "active" && (
+          <div className="mt-5 border-t border-(--line) pt-4">
+            <p className="mb-2 text-[14px] text-(--text-2)">Or end this goal</p>
+            <DropGoal ws={ws} goal={goal} onDone={onDone} />
+          </div>
+        )}
       </Card>
     </section>
   );
@@ -430,7 +463,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
             {g.target_share !== null && g.target_share !== undefined && <Pill tone="violet">target {g.target_share}% of agent time</Pill>}
             <span className="text-[14px] text-zinc-500">Owner: {g.owner.id === me.id ? "you" : g.owner.name}</span>
           </div>
-          {d.data!.can_edit && g.status === "active" && <DropGoal key={g.version} ws={ws} goal={g} onDone={d.reload} />}
+          {d.data!.can_edit && g.status === "active" && <EditThisGoal />}
           <Card title="Measures">
             {g.measures.length === 0 && <Note>No measures.</Note>}
             <ul className="list-disc pl-5 text-[15px]">
@@ -454,7 +487,6 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
           {/* Not keyed by the goal's version: a new version reloads the card in place (C3-4). Keyed, it shared its key with
               the New version form below, and a launch left a second card beside the first. */}
           <AgentsOnGoalCard ws={ws} goal={g} me={me} onHoldChanged={hold.reload} />
-          {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} hiddenDeps={d.data!.hidden_depends_on ?? 0} loops={d.data!.version_loops ?? null} onDone={d.reload} />}
           {/* Keyed by limit proposals only (a new request to list): a goal version, a launch's included, reloads the list
               in place (C2 N3). */}
           <ChangeRequests
@@ -469,6 +501,9 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
             onGoalChanged={d.reload}
           />
           {ws0.data && ws0.data.role !== "viewer" && g.owner.id !== me.id && <RequestAlignment ws={ws} goal={g} me={me} />}
+          {/* After what the goal is, whether agents are on it and its requests (LIM-2513): editing is a deliberate step,
+              reached from Edit this goal under the title. */}
+          {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} hiddenDeps={d.data!.hidden_depends_on ?? 0} loops={d.data!.version_loops ?? null} onDone={d.reload} />}
           <Card title="Versions">
             <ul className="text-[14px] text-zinc-600">
               {d.data!.versions.map((v) => (
