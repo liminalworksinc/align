@@ -27,6 +27,20 @@ queue item or let `docs/roadmap/` become a plan archive.
 
 ## P0
 
+### [x] DEPS-001: Remove the known framework cache disclosure advisory
+
+- **Priority:** P0
+- **Owner:** components/legacy-project-wrapper/implementation dependency pins
+- **Direction:** Update next from 16.4.2 to exactly 16.4.6 and matching pinned framework packages that exist.
+- **Conclusion:** Keep unrelated dependencies and all tests unchanged; review releases 16.4.3 through 16.4.6.
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Update the manifest and npm lockfile using Node 24
+  - [x] Read releases 16.4.3 through 16.4.6; npm audit falls from 8 to 7 moderate findings, with no next advisory
+- **Evidence:**
+  - [x] Node 24.22.3: npm ci and npm ci --prefix packages/align-agent pass; ALIGN_TEST_PORT=3800 npm test passes, 1998 tests, 0 failures (including hook latency)
+- **Outcome:** next and its matching framework packages are pinned to 16.4.6; unrelated dependencies, tests and limits are unchanged.
+
 Check the parent only after every required subtask and evidence item passes. Add the
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
