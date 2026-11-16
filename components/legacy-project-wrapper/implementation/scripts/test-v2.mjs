@@ -153,6 +153,8 @@ async function startServer(env) {
   for (let i = 0; i < 90 && !exited; i++) {
     try {
       const r = env.HOSTED === "1" ? await hosted("GET", "/api/v2/auth/get-session") : await fetch(`${BASE}/api/v2/auth/get-session`);
+      // Finish the response so a stopped phase cannot answer the next readiness probe on its still-active connection.
+      if (env.HOSTED !== "1") await r.arrayBuffer();
       last = r.status;
       if (r.status === 200) return { started: true, stderr: () => stderr, stdout: () => stdout, exited, last };
       if (r.status === 503) break; // up, but serving nothing (proxy.ts startupProblems)

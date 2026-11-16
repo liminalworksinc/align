@@ -47,6 +47,30 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
     Full gate on Node 24.22.3: 1,922 passed, 0 failed. Completed Node 26 gate runs failed only
     the unchanged hook latency check; no test limits or dependency versions changed.
 
+### [x] DEPS-001: Remove the known framework cache disclosure advisory
+
+- **Priority:** P0
+- **Owner:** components/legacy-project-wrapper/implementation dependency pins and test readiness
+- **Direction:** Update next from 16.4.2 to exactly 16.4.6 and matching pinned framework packages that exist.
+- **Conclusion:** Keep unrelated dependencies and every assertion unchanged; review releases 16.4.3 through 16.4.6.
+  Diagnose the subsequent CI startup failure before changing the test. A reproduced readiness response from a
+  previous server requires consuming the HTTP response body before a phase can stop its server.
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Update the manifest and npm lockfile using Node 24
+  - [x] Read releases 16.4.3 through 16.4.6; npm audit falls from 8 to 7 moderate findings, with no next advisory
+- **Evidence:**
+  - [x] Node 24.22.3: npm ci and npm ci --prefix packages/align-agent pass; ALIGN_TEST_PORT=3800 npm test passes, 1998 tests, 0 failures (including hook latency)
+  - [x] Compare startup code and repeat fresh starts: 30 on 16.4.2 and 60 on 16.4.6;
+    every first HTTP 200 follows storage creation. Reproduce the missing directory in the local-phase sequence.
+  - [x] Consume readiness responses and repeat the failing phase sequence without changing storage assertions.
+    Nineteen complete sequences pass 56 checks each with no stale response; diagnostic response headers had
+    identified the previous local server in 4 of 10 sequences before the fix.
+  - [x] Run the complete gate with Node 24 and ALIGN_TEST_PORT=3900 after both clean dependency installs.
+    Node 24.22.3: 2,000 passed, 0 failed, including v2 1,016/0, OAuth 187/0 and live agent 65/0.
+- **Outcome:** next and its matching framework packages are pinned to 16.4.6. Test readiness consumes the complete
+  auth response before a phase can stop its server; dependency pins, product startup, assertions and limits are unchanged.
+
 <a id="adopt-002"></a>
 ### [ ] ADOPT-002 — Native Literate AI rewrite
 
