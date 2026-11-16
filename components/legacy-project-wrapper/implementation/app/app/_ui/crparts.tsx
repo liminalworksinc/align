@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, Btn, Err, Field, Input, num, Pill, Select, sentence, TextArea, usd, useAction, useApi, when } from "./kit";
 import { LimitEditor, MeasuresEditor, limitsDraft, limitsOut, measuresDraft, measuresOut, sameLimits, type LimitDraft, type MeasureDraft } from "./goalform";
 import { LIMIT_WORDS } from "./limits";
+import { EvidenceLabel } from "./ds";
 import type { AlignSnapshot, ChangeFields, ChangeRequest, Evidence, EvidenceKind, Goal } from "./types";
 import { counterSameAsBase, counterSameAsRequest, dependsOnFull, hiddenGoals, withHidden } from "@/lib/v2/change-words.mts";
 import { count } from "@/lib/v2/plural.mts";
@@ -322,7 +323,10 @@ export function EvidenceItem({ e, me, busy, onRemove }: { e: Evidence; me: strin
         {e.label}
       </a>
       <span className="text-zinc-500">({hostOf(e.url)})</span>
-      <Pill tone={e.source === "agent" ? "amber" : "neutral"}>{e.reported_as}</Pill>
+      {/* The evidence label every screen uses (LIM-2513): "Agent reported" for an agent's link, "Self-reported" for a person's. */}
+      <span data-reported-as={e.reported_as} className="inline-flex">
+        <EvidenceLabel kind={e.reported_as === "agent-reported" ? "reported" : "self"} size="s" />
+      </span>
       <span className="text-zinc-500">
         by {e.added_by.id === me ? "you" : e.added_by.name}, {when(e.added_at)}
       </span>
