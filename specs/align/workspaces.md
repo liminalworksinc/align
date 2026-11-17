@@ -530,6 +530,11 @@ static assets.
 - **WHEN** a hosted request has `Host: other.example`, or lacks `X-Forwarded-Proto: https`, or lacks `Fly-Client-IP`
 - **THEN** the server responds 421 `Misdirected request: this server answers to its own host name only`, 403 `{"error":"Use https"}`, or 403 `{"error":"Use the public address"}` respectively
 
+#### Scenario: Health check
+
+- **WHEN** the platform's health check (`fly.toml`: every 30 s, with the allowlisted `Host`, `X-Forwarded-Proto: https` and a fixed `Fly-Client-IP`) calls `GET /api/v2/health`, without sign-in, 150 times in a row
+- **THEN** every call answers 200 `{"ok":true}` once the server is up and its database answers; no sign-in rate limit counts it (`/api/v2/auth/get-session`, the earlier path, is counted by Better Auth, whose counter resets only after 60 s with no request, so the check was refused every 101st call, every 50 minutes); a misconfigured server answers 503 there as on every path
+
 #### Scenario: No closing date
 
 - **WHEN** a hosted server starts with a past `ALIGN_DELETE_BY` left in its environment
