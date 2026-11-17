@@ -1652,7 +1652,17 @@ workspace owner sees everyone's.
 #### Scenario: Terminal lines
 
 - **WHEN** a member who is not a viewer opens the tab
-- **THEN** under "Paste into a sh, bash or zsh terminal" it shows a **Claude Code** line, `claude mcp add --transport http --scope user align '<url>'; claude mcp login align`, and a **Codex** line, `codex mcp add align --url '<url>'`, each with its own **Copy**, built by `lib/paste-lines.ts` from the URL alone (single-quoted, never a workspace, team or company name, no hooks and no agent instruction file), and says "For goal context inside Claude Code and Codex sessions, install the align CLI (`align login`, `align install`)."
+- **THEN** under "Paste into a sh, bash or zsh terminal" it shows a **Claude Code** line, `claude mcp add --transport http --scope user align '<url>'; claude mcp login align`, and a **Codex** line, `codex mcp add align --url '<url>'`, each with its own **Copy**, built by `lib/paste-lines.ts` from the URL alone (single-quoted, never a workspace, team or company name, no hooks and no agent instruction file); the align CLI comes after, as "The align CLI without administrator rights" says
+
+#### Scenario: Approve, then check that it worked
+
+- **WHEN** a member who is not a viewer opens the tab
+- **THEN** step 3, "Approve it in Align", says the app opens Align's page "Connect <app> to Align" in the browser, to sign in if it asks, choose this workspace and press **Allow access** (Claude Code asks for `changes:evidence` too; an app that only reads shows **Allow read-only access**), after which the app is listed under Connections; and step 4, "Check that it worked", says to ask Claude Code "Use align to list my goals.", that once Align has served them the connection shows **Last read the goals** with a time, labelled Receipt, and that if it still says "Not seen yet" or the app says Align needs signing in, to run `claude mcp login align` again (first-time tester report: a tester couldn't tell whether the connection worked)
+
+#### Scenario: The align CLI without administrator rights
+
+- **WHEN** `AGENT_RELEASE` names a published release and a member who is not a viewer opens the tab
+- **THEN** step 5 shows the align CLI line: it downloads the pinned tarball, checks its sha256 before anything is installed, installs it with `npm install --global --prefix "$HOME/.local" ./<tarball>` (the person's home folder, so no administrator rights or `sudo`; a plain `npm install -g` fails with EACCES where Node's global folder belongs to root), then runs `"$HOME/.local/bin/align" install` and `"$HOME/.local/bin/align" login` (with `--server '<origin>'` off the hosted server); the step says so, that the device page asks them to press **Look up**, check the code matches the terminal, tick the workspace and press **Approve**, to keep the terminal open until it says "Signed in as" them, and that `align` runs later as `~/.local/bin/align`. Without a release, step 4 ends "For goal context inside Claude Code and Codex sessions, install the align CLI (`align login`, `align install`)."
 
 #### Scenario: A URL Align couldn't have made
 

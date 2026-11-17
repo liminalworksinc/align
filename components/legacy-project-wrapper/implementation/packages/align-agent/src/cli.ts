@@ -377,11 +377,17 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   /** The device of this machine's earlier pairing that this login replaced, and its name as this machine cached it. */
   let replacedDevice: string | null = null;
   const earlierName = readJson<MeFile>(layout.me(ctx.home))?.device?.name ?? null;
-  out(`To connect this device, open ${verification_uri} and enter the code ${user_code}`);
+  // The device page fills its code from ?code= (app/app/device/page.tsx), so the link saves typing it; the code is
+  // still printed, to check against the page, and the line keeps its shape for scripts that read the code from it.
+  const link = `${verification_uri}?code=${encodeURIComponent(user_code)}`;
+  out(`To connect this device, open ${link} and enter the code ${user_code}`);
+  // What the page asks, in its own words, and that this window must stay open (first-time tester report: the device
+  // step was unclear and the tester couldn't tell when it had worked).
+  out(`On that page: press Look up, check the code matches ${user_code}, tick the workspaces this device may use, and press Approve. Keep this terminal open: it carries on by itself once you approve, and names you and this device once it is connected.`);
   // The page approves only with a recent sign-in: an older browser session sees a sign-in prompt there while this
   // command waits (E2E-AGENT cycle 14, section 5).
   out(`Approving needs a sign-in from the last 15 minutes in that browser: if the page asks you to sign in again, do so. This command waits until the device is approved (the code is good for ${Math.round(Number(a.json.expires_in || 600) / 60)} minutes).`);
-  if (!ctx.env.ALIGN_NO_BROWSER && process.platform === "darwin") execFile("open", [verification_uri], () => undefined);
+  if (!ctx.env.ALIGN_NO_BROWSER && process.platform === "darwin") execFile("open", [link], () => undefined);
   const scale = Number(ctx.env.ALIGN_DEVICE_POLL_SCALE_MS || 1000);
   for (;;) {
     if (Date.now() > expiresAt) throw new Error("the code expired; run `align login` again");
@@ -500,6 +506,8 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   if (endedLids.length) out(endedLine(ctx, endedLids));
   // After the workspace lines, which belong with "Signed in as" (cycle 6).
   await mentionOtherDevices(ctx, server, pairedAs!);
+  // The next step, so a first-time tester knows the connection worked and what to do with it.
+  if (me.workspaces.length) out(`Connected. Next: run \`align goals\` to see the goals this device can read, and in a Claude Code session type ::align share to give that session one.`);
 }
 
 /**
