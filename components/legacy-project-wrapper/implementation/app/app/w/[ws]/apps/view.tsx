@@ -114,21 +114,28 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
                   <PasteLine label="Claude Code" line={claudeCodeLine(apps.data.url)} />
                   <PasteLine label="Codex" line={codexLine(apps.data.url)} />
                 </Step>
+                {/* What the approval page asks and what success looks like, said before it happens (first-time tester
+                    reports: a tester couldn't tell whether the connection worked). */}
                 <Step n={3} title="Approve it in Align">
-                  {agentInstallLine(apps.data.url) === null ? (
-                  <p className="text-[14px] text-(--text-2)">
-                    Your app opens Align&apos;s approval page. Once you approve, it is listed under Connections below. For goal context inside Claude Code and Codex sessions, install the align CLI (
-                    <code className="font-mono text-[13px]">align login</code>, <code className="font-mono text-[13px]">align install</code>).
+                  <p className="text-[14px] text-(--text-2)" data-connect-approve>
+                    Your app opens Align&apos;s page &ldquo;Connect &lt;app&gt; to Align&rdquo; in your browser. Sign in if it asks, choose this workspace and press <strong>Allow read-only access</strong>. The app is then listed under Connections below.
                   </p>
-                  ) : (
-                    <p className="text-[14px] text-(--text-2)">Your app opens Align&apos;s approval page. Once you approve, it is listed under Connections below.</p>
+                </Step>
+                <Step n={4} title="Check that it worked">
+                  <p className="text-[14px] text-(--text-2)" data-connect-check>
+                    In Claude Code, ask: <code className="font-mono text-[13px]">Use align to list my goals.</code> Once Align has served them, the connection below shows <strong>Last read the goals</strong> with a time, labelled Receipt. If it still says &ldquo;Not seen yet&rdquo; or the app says Align needs signing in, run <code className="font-mono text-[13px]">claude mcp login align</code> again.
+                  </p>
+                  {agentInstallLine(apps.data.url) === null && (
+                    <p className="mt-2 text-[14px] text-(--text-2)">
+                      For goal context inside Claude Code and Codex sessions, install the align CLI (<code className="font-mono text-[13px]">align login</code>, <code className="font-mono text-[13px]">align install</code>).
+                    </p>
                   )}
                 </Step>
-                {/* Only once AGENT_RELEASE names a published release (lib/paste-lines.ts); until then step 3 above keeps the current text. */}
+                {/* Only once AGENT_RELEASE names a published release (lib/paste-lines.ts). */}
                 {agentInstallLine(apps.data.url) !== null && (
-                  <Step n={4} title="For goal context inside Claude Code and Codex sessions, install the align CLI">
-                    <p className="text-[14px] text-(--text-2)">
-                      Needs Node 24 or later. Paste into a terminal: it downloads the release, checks its checksum, installs <code className="font-mono text-[13px]">align</code>, adds its hooks, and prints a code to enter on Align&apos;s device page.
+                  <Step n={5} title="For goal context inside Claude Code and Codex sessions, install the align CLI">
+                    <p className="text-[14px] text-(--text-2)" data-connect-cli>
+                      Needs Node 24 or later, and no administrator rights: it installs <code className="font-mono text-[13px]">align</code> into <code className="font-mono text-[13px]">~/.local</code> in your home folder, after checking the release&apos;s checksum. It then opens Align&apos;s device page with a code: press <strong>Look up</strong>, check the code matches your terminal, tick this workspace and press <strong>Approve</strong>. Keep the terminal open; it says &ldquo;Signed in as&rdquo; you when the device is connected. Run it later as <code className="font-mono text-[13px]">~/.local/bin/align</code>.
                     </p>
                     <PasteLine label="align CLI" line={agentInstallLine(apps.data.url)} />
                   </Step>
