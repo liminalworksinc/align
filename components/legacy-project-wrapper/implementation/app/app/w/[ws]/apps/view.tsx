@@ -118,7 +118,7 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
                     reports: a tester couldn't tell whether the connection worked). */}
                 <Step n={3} title="Approve it in Align">
                   <p className="text-[14px] text-(--text-2)" data-connect-approve>
-                    Your app opens Align&apos;s page &ldquo;Connect &lt;app&gt; to Align&rdquo; in your browser. Sign in if it asks, choose this workspace and press <strong>Allow read-only access</strong>. The app is then listed under Connections below.
+                    Your app opens Align&apos;s page &ldquo;Connect &lt;app&gt; to Align&rdquo; in your browser. Sign in if it asks, choose this workspace and press <strong>Allow access</strong> (Claude Code also asks to add evidence links; an app that only reads shows <strong>Allow read-only access</strong>). The app is then listed under Connections below.
                   </p>
                 </Step>
                 <Step n={4} title="Check that it worked">

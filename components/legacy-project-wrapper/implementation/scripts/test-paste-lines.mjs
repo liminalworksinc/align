@@ -112,7 +112,7 @@ check(
     agentInstallLine(`${HOSTED_ORIGIN}/api/mcp`)?.endsWith(`&& "$HOME/.local/bin/align" install && "$HOME/.local/bin/align" login`) === true &&
     !/ -g |sudo/.test(agentInstallLine(URL) ?? "sudo") &&
     agentInstallLine(URL, null) === null &&
-    view.includes("Allow read-only access") && view.includes('<Step n={4} title="Check that it worked">') && view.includes("Use align to list my goals.") && view.includes("Last read the goals") &&
+    view.includes("press <strong>Allow access</strong> (Claude Code also asks to add evidence links") && view.includes('<Step n={4} title="Check that it worked">') && view.includes("Use align to list my goals.") && view.includes("Last read the goals") &&
     view.includes(`{agentInstallLine(apps.data.url) === null && (\n                    <p className="mt-2 text-[14px] text-(--text-2)">\n                      ${NO_RELEASE_CLI}`) &&
     view.includes("{agentInstallLine(apps.data.url) !== null && (\n                  <Step n={5}") &&
     !/git clone|npm ci/.test(view),

@@ -1657,7 +1657,7 @@ workspace owner sees everyone's.
 #### Scenario: Approve, then check that it worked
 
 - **WHEN** a member who is not a viewer opens the tab
-- **THEN** step 3, "Approve it in Align", says the app opens Align's page "Connect <app> to Align" in the browser, to sign in if it asks, choose this workspace and press **Allow read-only access**, after which the app is listed under Connections; and step 4, "Check that it worked", says to ask Claude Code "Use align to list my goals.", that once Align has served them the connection shows **Last read the goals** with a time, labelled Receipt, and that if it still says "Not seen yet" or the app says Align needs signing in, to run `claude mcp login align` again (first-time tester report: a tester couldn't tell whether the connection worked)
+- **THEN** step 3, "Approve it in Align", says the app opens Align's page "Connect <app> to Align" in the browser, to sign in if it asks, choose this workspace and press **Allow access** (Claude Code asks for `changes:evidence` too; an app that only reads shows **Allow read-only access**), after which the app is listed under Connections; and step 4, "Check that it worked", says to ask Claude Code "Use align to list my goals.", that once Align has served them the connection shows **Last read the goals** with a time, labelled Receipt, and that if it still says "Not seen yet" or the app says Align needs signing in, to run `claude mcp login align` again (first-time tester report: a tester couldn't tell whether the connection worked)
 
 #### Scenario: The align CLI without administrator rights
 
