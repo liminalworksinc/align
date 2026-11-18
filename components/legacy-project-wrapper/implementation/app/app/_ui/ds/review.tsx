@@ -1,4 +1,6 @@
 "use client";
+import type { ExpectationView } from "@/lib/v2/expectations";
+import { EMPTY_EXPECTATION, ExpectationFields, ExpectationRecord, expectationBody, expectationError, expectationValidationMessage } from "../expectations";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ApiError, api, sentence } from "../kit";
@@ -108,7 +110,7 @@ function Returned({ ws, cr, me }: { ws: string; cr: ChangeRequest; me: string })
 /** The request itself: everything a reviewer needs before choosing, nothing they don't. */
 /** `onDone`: called after an evidence link is added (or refused), to re-read the request; without it the Add evidence
  *  control isn't offered. */
-export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: string; cr: ChangeRequest; me: string; titleOf?: (id: string) => string; onDone?: () => void }) {
+export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: string; cr: ChangeRequest; me: string; titleOf?: (id: string) => string; onDone?: (report?: NonNullable<ExpectationView["outcome"]>) => void }) {
   // Add evidence's result lives here, outside the can.add_evidence gate: a refusal re-reads the request, and the new
   // read may no longer allow adding (declined meanwhile), which unmounts the form but must not take its statement along.
   const [evNotice, setEvNotice] = useOneNotice(cr.id, "body");
@@ -166,6 +168,7 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
         </p>
       )}
 
+      <ExpectationRecord ws={ws} cr={cr} me={me} onDone={onDone} />
       <Compare before={cr.diff.before} after={cr.diff.after} hidden={cr.diff.hidden_depends_on ?? null} beforeLabel={currentLabel} afterLabel={proposedLabel} titleOf={titleOf} />
       {cr.behind && <p className="text-[14px] text-(--st-pending)">The goal moved on to version {cr.goal.version} since this was asked against version {n}.</p>}
 
@@ -506,7 +509,9 @@ export async function sendChoice(ws: string, cr: ChangeRequest, choice: Choice, 
     const status = e instanceof ApiError ? e.status : 0;
     if (status === 403 || status === 404 || status === 409)
       return { kind: "refused", text: `Not recorded. ${sentence((e as Error).message)}${status === 409 ? " Here it is as it stands now." : " Nothing changed."}`, reread: true };
-    return { kind: "retry", text: `Not recorded yet. ${sentence((e as Error).message)} Nothing changed; try again.`, reread: false };
+    const message = (choice === "launch" || choice === "approve_and_launch") && e instanceof ApiError && e.code === "bad_request"
+      ? expectationValidationMessage(e.message) : (e as Error).message;
+    return { kind: "retry", text: `Not recorded yet. ${sentence(message)} Nothing changed; try again.`, reread: false };
   }
 }
 
@@ -582,9 +587,13 @@ export function ReviewActions({
   const setChoice = (c: Choice | null) => {
     setChoiceState(c);
     // Clearing a choice (Cancel, Back from a no-text confirmation, or after a decision) always returns to the choices.
-    if (c === null) setStep("input");
+    if (c === null) {
+      setStep("input");
+      setExpectation(EMPTY_EXPECTATION);
+    }
     onChoice?.(c);
   };
+  const [expectation, setExpectation] = useState(EMPTY_EXPECTATION);
   const [note, setNote] = useState("");
   const [condition, setCondition] = useState("");
   const [reason, setReason] = useState("");
@@ -610,6 +619,7 @@ export function ReviewActions({
   };
 
   function invalid(): string | null {
+    if (choice === "launch" || choice === "approve_and_launch") return expectationError(expectation);
     if (choice === "accept_if") {
       if (blank(condition)) return `Write the condition ${cr.requester.name} acknowledges.`;
       if (blank(note)) return `Write a note to ${cr.requester.name}: why you accept only on this condition.`;
@@ -626,7 +636,9 @@ export function ReviewActions({
     switch (choice) {
       case "approve":
       case "approve_and_launch":
-        return { revision: cr.revision, note: note.trim() || null };
+        return { revision: cr.revision, note: note.trim() || null, ...(choice === "approve_and_launch" ? expectationBody(expectation) : {}) };
+      case "launch":
+        return { revision: cr.revision, ...expectationBody(expectation) };
       case "accept_if":
         return { revision: cr.revision, changes: cr.changes, note: note.trim(), condition: condition.trim() };
       case "counter":
@@ -644,6 +656,9 @@ export function ReviewActions({
   const send = async () => {
     const body = request();
     if (!body || sending || !choice) return;
+    const error = invalid();
+    setErr(error);
+    if (error) return;
     setSending(true);
     try {
       const r = await sendChoice(ws, cr, choice, body);
@@ -739,6 +754,7 @@ export function ReviewActions({
               <textarea className={FIELD} rows={2} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
             </Labelled>
           )}
+          {choice === "approve_and_launch" && <ExpectationFields measures={cr.launch_measures} value={expectation} onChange={setExpectation} />}
           {choice === "accept_if" && (
             <>
               <Labelled label={`Accept if (${cr.requester.name} acknowledges this)`}>
@@ -797,6 +813,19 @@ export function ReviewActions({
               <textarea aria-label="Note (optional)" className={FIELD} rows={2} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
             </details>
           )}
+          {(choice === "launch" || (oneRow && choice === "approve_and_launch")) && (
+            <div className="max-h-[32dvh] overflow-y-auto">
+              <ExpectationFields measures={cr.launch_measures} value={expectation} onChange={setExpectation} />
+            </div>
+          )}
+          {!oneRow && choice === "approve_and_launch" && expectationBody(expectation).expectation && (
+            <div className="min-w-0 text-[14px] [overflow-wrap:anywhere]">
+              <p>{cr.launch_measures.find((m) => m.id === expectation.measure_id)?.text}</p>
+              <p>Expected: {expectation.expected} by {expectation.due_on}</p>
+              {!blank(expectation.evidence) && <p>Counts as evidence: {expectation.evidence}</p>}
+            </div>
+          )}
+          {err && <p role="alert" className="text-[14px] text-(--st-declined)">{err}</p>}
           {choice === "reject" && <p className="text-[14px] text-(--text-1)">Your reason: {reason.trim()}</p>}
           {choice === "accept_if" && <p className="text-[14px] text-(--text-1)">Accept if: {condition.trim()}</p>}
           {FORESIGHT_CHOICES.includes(choice) && <ForesightPanel path={crPath(ws, cr)} choice={choice as ForesightChoice} body={foresightBody(cr, choice, reason)} />}

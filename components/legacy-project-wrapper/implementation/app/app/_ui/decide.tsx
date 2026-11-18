@@ -1,4 +1,5 @@
 "use client";
+import { EMPTY_EXPECTATION, ExpectationFields, expectationBody, expectationError, expectationValidationMessage } from "./expectations";
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiError, Btn, Err, Field, Loading, Note, Pill, sentence, TextArea, useAction, useApi, when } from "./kit";
@@ -211,6 +212,7 @@ export function OpenRequest({
 
   const [choice, setChoice] = useState<Decision | null>(null);
   const [step, setStep] = useState<"input" | "confirm">("input");
+  const [expectation, setExpectation] = useState(EMPTY_EXPECTATION);
   const [note, setNote] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
   const [condition, setCondition] = useState("");
@@ -264,6 +266,7 @@ export function OpenRequest({
   };
 
   function validate(): string | null {
+    if (choice === "approve_and_launch") return expectationError(expectation);
     if (choice === "accept_if") {
       if (isBlankText(condition)) return `Write the condition ${cr.requester.name} acknowledges.`;
       if (isBlankText(ifNote)) return `Write a note to ${cr.requester.name}: why you accept only on this condition.`;
@@ -286,7 +289,7 @@ export function OpenRequest({
     switch (choice) {
       case "approve":
       case "approve_and_launch":
-        return { action: choice, body: { revision: cr.revision, note: note.trim() || null } };
+        return { action: choice, body: { revision: cr.revision, note: note.trim() || null, ...(choice === "approve_and_launch" ? expectationBody(expectation) : {}) } };
       case "accept_if":
         return { action: "counter", body: { revision: cr.revision, changes: cr.changes, note: ifNote.trim(), condition: condition.trim() } };
       case "counter":
@@ -348,7 +351,9 @@ export function OpenRequest({
       onDone();
     } catch (e) {
       const conflict = e instanceof ApiError && e.status === 409;
-      setNotice({ kind: "refused", text: `Not recorded. ${sentence((e as Error).message)}${conflict ? "" : " Nothing changed."}` });
+      const message = choice === "approve_and_launch" && e instanceof ApiError && e.code === "bad_request"
+        ? expectationValidationMessage(e.message) : (e as Error).message;
+      setNotice({ kind: "refused", text: `Not recorded. ${sentence(message)}${conflict ? "" : " Nothing changed."}` });
       if (conflict) {
         // The refusal is the answer: close the confirmation (a reload that leaves the request's revision and state as
         // they were keeps this card mounted) and show the request as it is now, with the decisions it now allows (C4-1).
@@ -419,6 +424,11 @@ export function OpenRequest({
     const rows: [string, ReactNode][] = [];
     if ((choice === "approve" || choice === "approve_and_launch") && noEvidence) rows.push(["Evidence", "None. The decision record and the audit log will say it was approved without evidence."]);
     if ((choice === "approve" || choice === "approve_and_launch") && !isBlankText(note)) rows.push(["Your note", note.trim()]);
+    if (choice === "approve_and_launch" && expectationBody(expectation).expectation) {
+      const measure = cr.launch_measures.find((m) => m.id === expectation.measure_id);
+      rows.push(["Measure", measure?.text], ["Expected value", expectation.expected], ["Due date", expectation.due_on]);
+      if (!isBlankText(expectation.evidence)) rows.push(["Counts as evidence", expectation.evidence]);
+    }
     if (choice === "accept_if") {
       rows.push(["Accept if", condition.trim()]);
       rows.push(["Your note", ifNote.trim()]);
@@ -620,6 +630,7 @@ export function OpenRequest({
                   )}
                 </>
               )}
+              {choice === "approve_and_launch" && <ExpectationFields measures={cr.launch_measures} value={expectation} onChange={setExpectation} />}
               {choice === "accept_if" && (
                 <>
                   <Field label={`Accept if… (the condition ${cr.requester.name} acknowledges)`} hint="Never sent to agents, and never a gate on approval or launch. 1 to 2000 characters.">

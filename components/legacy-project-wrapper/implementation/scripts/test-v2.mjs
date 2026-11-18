@@ -901,7 +901,7 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 24, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds, deleted-session markers and the goal versions sent to connected apps included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 24 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 25, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds, deleted-session markers and the goal versions sent to connected apps included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 25 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "v2_expectations", "v2_outcome_reports", "v2_measure_readings", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
@@ -12182,6 +12182,380 @@ try {
   }
   // ==== end fix:a1-web ====
 
+  // LIM-2520: launch expectations and readings follow the request and goal visibility.
+  try {
+    const owner = await signUp("XO", "Ximena", "expect-owner@example.test");
+    const lead = await signUp("XL", "Lena", "expect-lead@example.test");
+    const member = await signUp("XM", "Mateo", "expect-member@example.test");
+    const viewer = await signUp("XV", "Vic", "expect-viewer@example.test");
+    const W = (await call(owner.who, "POST", "/api/v2/workspaces", { cookie: owner.cookie, body: { name: "Launch outcomes" } })).json.id;
+    const w = `/api/v2/workspaces/${W}`;
+    const app = `${BASE}/app/w/${W}`;
+    const req = (u, method, suffix, body, headers) => call(u.who, method, w + suffix, { cookie: u.cookie, body, headers });
+    const get = (u, suffix) => req(u, "GET", suffix);
+    const post = (u, suffix, body) => req(u, "POST", suffix, body);
+    for (const [u, role] of [[lead, "member"], [member, "member"], [viewer, "viewer"]]) {
+      const invite = await post(owner, "/invites", { email: u.email, role });
+      const accepted = await call(u.who, "POST", `/api/v2/invites/${invite.json?.token}/accept`, { cookie: u.cookie, body: {} });
+      if (accepted.status !== 200) throw new Error(`LIM-2520 invite: ${accepted.text}`);
+    }
+    const team = (await post(owner, "/teams", { name: "Release" })).json.id;
+    await post(owner, `/teams/${team}/members`, { user_id: owner.id, role: "member" });
+    await post(owner, `/teams/${team}/members`, { user_id: lead.id, role: "lead" });
+    await post(owner, `/teams/${team}/members`, { user_id: member.id, role: "member" });
+    const created = (await post(owner, "/goals", { title: "Release readiness", team_id: team, visibility: "workspace", measures: [{ text: "Old measure" }] })).json;
+    const g = `/goals/${created.id}`;
+    const request = async (version, changes) => {
+      const res = await post(member, `${g}/change-requests`, { base_version: version, changes, reason: "Review the release plan" });
+      if (res.status !== 201) throw new Error(`LIM-2520 request: ${res.text}`);
+      return res.json;
+    };
+    const pathOf = (cr) => `${g}/change-requests/${cr.id}`;
+    const day = (n) => new Date(Date.now() + n * 86400_000).toISOString().slice(0, 10);
+    const proposed = await request(1, { measures: [{ text: "Release checks" }] });
+    const first = pathOf(proposed);
+    const measure = proposed.diff.after.measures[0].id;
+    const reading = `${g}/measures/${measure}/readings`;
+    const expect = { measure_id: measure, expected: "All checks pass", due_on: day(0), evidence: "Release run results" };
+    const counts = () => withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_expectations WHERE ws_id = ?").get(W).n);
+    const events = () => withDb((d) => d.prepare(
+      "SELECT name, props FROM v2_events WHERE ws_id = ? AND name IN ('first_expectation', 'first_reading', 'outcome_reported') ORDER BY id",
+    ).all(W)).map((r) => [r.name, JSON.parse(r.props)]);
+    const change = (u, p, action, expectation) => post(u, `${p}/${action}`, { revision: 1, ...(expectation ? { expectation } : {}) });
+    const invalid = await Promise.all([
+      { measure_id: created.measures[0].id }, { due_on: "2027-02-29" }, { due_on: day(-1) }, { due_on: day(367) },
+      { expected: "\u200b" }, { expected: "x".repeat(201) }, { evidence: "x".repeat(281) },
+    ].map((patch) => change(lead, first, "approve_and_launch", { ...expect, ...patch })));
+    const rolledBack = await get(owner, first);
+    check("expectations: invalid measures, dates and text roll back all of approve and launch",
+      invalid.every((r) => r.status === 400) && rolledBack.json?.state === "pending" && rolledBack.json?.goal.version === 1 && counts() === 0 && events().length === 0,
+      invalid.map((r) => r.text).join(" "));
+    const approved = await change(owner, first, "approve");
+    check("expectations: the launch choices are the approved version's measures, with no expectation until launch",
+      approved.json?.launch === "pending" && approved.json.expectation === null && approved.json.launch_measures[0]?.id === measure && counts() === 0, approved.text);
+
+    const device = insertDevice(owner.id, "Release laptop");
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(device.id, W));
+    const fromMcp = (name, args = {}) => mcpCall(owner.who, device, name, args);
+    const approvedMcp = await fromMcp("align_get_goal", { goal_id: created.id });
+    check("readings: approving a request does not expose its unlaunched measure through MCP",
+      approvedMcp.sc?.goal?.version === 1 && approvedMcp.sc.goal.measures[0].id === created.measures[0].id &&
+      approvedMcp.sc.goal.measures[0].latest_reading === null, JSON.stringify(approvedMcp));
+    for (const [title, approve] of [["A decision awaiting review", false], ["An approved change awaiting launch", true]]) {
+      const queuedGoal = await post(owner, "/goals", { title, team_id: team, visibility: "workspace" });
+      const base = `/goals/${queuedGoal.json.id}/change-requests`;
+      const queued = await post(member, base, { base_version: 1, changes: { title: title + " updated" }, reason: "Review the queue" });
+      if (approve) await change(owner, `${base}/${queued.json.id}`, "approve");
+    }
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const page = await browser.newPage();
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        await page.setViewport({ width: 390, height: 844 });
+        await page.setCookie(...lead.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        const click = async (scope, name) => {
+          const button = await page.waitForFunction((sel, label) => [...document.querySelectorAll(sel)].find(
+            (e) => e.textContent.trim() === label && e.getClientRects().length && !e.disabled,
+          ), { timeout: 15000 }, scope, name);
+          await button.asElement().click();
+        };
+        const fill = async (d, expected, due, evidence) => {
+          await page.waitForSelector(`${d} summary`, { visible: true });
+          const closed = await page.$eval(d, (e) => !e.open);
+          const widthFits = () => document.scrollingElement.scrollWidth <= innerWidth;
+          await page.click(`${d} summary`);
+          const select = await page.$eval(`${d} select`, (e) => ({ name: document.getElementById(e.getAttribute("aria-labelledby"))?.textContent, values: [...e.options].slice(1).map((o) => o.value) }));
+          await page.select(`${d} select`, measure);
+          await page.type(`${d} input[maxlength="200"]`, expected);
+          await page.$eval(`${d} input[type="date"]`, (input, value) => {
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, value);
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+          }, due);
+          if (evidence) await page.type(`${d} textarea`, evidence);
+          return closed && (await page.evaluate(widthFits)) && select.name === "Measure" && select.values.join() === measure;
+        };
+        const goalCard = `[data-cr="${proposed.id}"]`;
+        await page.goto(app + g, { waitUntil: "domcontentloaded" });
+        const goalFieldsOkay = await fill(`${goalCard} [data-expectation-fields]`, expect.expected, expect.due_on, expect.evidence);
+        await click(`${goalCard} button`, "Launch version 2 to agents");
+        await page.waitForSelector(`${goalCard} [data-expectation-record]`);
+        const modelHome = (await get(lead, "/home")).json.outcomes.waiting_on_me;
+        const notForOthers = (await get(owner, "/home")).json.outcomes.waiting_on_me;
+        const mcpBefore = await fromMcp("align_get_decision_record", { change_request_id: proposed.id });
+        check("expectations: goal launch stores the launched measure and UTC due date, and Home lists it only for the assignee",
+          goalFieldsOkay && modelHome.length === 1 && modelHome[0].days_due === 0 && modelHome[0].measure_text === "Release checks" &&
+          notForOthers.length === 0 &&
+          mcpBefore.sc?.record?.expectation?.outcome === null && mcpBefore.text.includes("Not answered yet"),
+          JSON.stringify({ goalFieldsOkay, modelHome, notForOthers, mcpBefore }));
+        const readAsViewer = (await get(viewer, first)).json.expectation;
+        const denied = await post(owner, `${first}/outcome`, { outcome: "met" });
+        const readOnly = await post(viewer, `${first}/outcome`, { outcome: "met" });
+        const invisible = await post(U4, `${first}/outcome`, { outcome: "met" });
+        check("expectations: viewers can read the expectation, only the current assignee can answer, and outsiders get 404",
+          readAsViewer?.assignee.id === lead.id && readAsViewer?.goal_version === 2 && readAsViewer?.evidence === expect.evidence &&
+          !readAsViewer.can_answer && denied.json?.error === "not_assignee" && readOnly.json?.error === "read_only" && invisible.status === 404,
+          JSON.stringify({ readAsViewer, denied: denied.text, readOnly: readOnly.text, invisible: invisible.status }));
+
+        await page.goto(app, { waitUntil: "domcontentloaded" });
+        await page.waitForSelector("[data-needs] [data-outcome-form]", { visible: true });
+        const due = await page.$eval("[data-needs] [data-outcome-form]", (e) => {
+          const row = e.closest("li");
+          const prior = Array.from(row.parentElement.children).slice(0, Array.from(row.parentElement.children).indexOf(row));
+          return {
+            text: row.innerText,
+            fits: document.scrollingElement.scrollWidth <= 390,
+            buttons: [...e.querySelectorAll("button")].every((b) => b.getBoundingClientRect().height >= 44),
+            ranked: prior.some((r) => r.innerText.includes("A decision awaiting review")) && prior.some((r) => r.innerText.includes("An approved change awaiting launch")),
+          };
+        });
+        // Model a UTC day passing while this Home stays open.
+        withDb((d) => d.prepare("UPDATE v2_expectations SET due_on = ? WHERE change_request_id = ?").run(day(-1), proposed.id));
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        await page.waitForFunction(() => document.querySelector("[data-needs] [data-outcome-form]")?.closest("li")?.innerText.includes("1 day overdue"), { timeout: 15000 });
+        const homeOutcome = "[data-needs] [data-outcome-form]";
+        const linkInput = `${homeOutcome} input[type=url]`;
+        const invalidLink = "http://example.test/results";
+        await page.click(`${homeOutcome} summary`);
+        await page.type(linkInput, invalidLink);
+        const refusal = page.waitForResponse((r) => r.url().endsWith(`${first}/outcome`) && r.request().method() === "POST");
+        await click(`${homeOutcome} button`, "Can't tell");
+        const refusedLink = await refusal;
+        await page.waitForSelector(`${homeOutcome} [role=alert]`, { visible: true });
+        const linkError = await page.$eval(linkInput, (e) => {
+          const message = document.getElementById(e.getAttribute("aria-describedby"));
+          return {
+            label: document.getElementById(e.getAttribute("aria-labelledby"))?.textContent,
+            message: message?.textContent,
+            besideField: e.closest("label").contains(message),
+            invalid: e.getAttribute("aria-invalid"),
+            value: e.value,
+            formText: e.closest("[data-outcome-form]").innerText,
+          };
+        });
+        check("outcomes: Home explains an HTTP link beside Evidence link (HTTPS) and keeps the outcome unanswered",
+          refusedLink.status() === 400 && (await refusedLink.json()).error === "bad_request" &&
+          linkError.label === "Evidence link (HTTPS)" && linkError.message === "Use an HTTPS link." && linkError.besideField &&
+          linkError.invalid === "true" && linkError.value === invalidLink && !linkError.formText.includes("evidence_url") &&
+          (await get(lead, first)).json.expectation.outcome === null, JSON.stringify(linkError));
+        const evidenceLink = "https://example.test/results";
+        await page.$eval(linkInput, (input) => { input.focus(); input.select(); });
+        await page.type(linkInput, evidenceLink);
+        await click("[data-needs] [data-outcome-form] button", "Can't tell");
+        await page.waitForFunction(() => [...document.querySelectorAll("[data-needs] li")].some((r) => r.innerText.includes("Outcome reported")), { timeout: 15000 });
+        const mcpAfter = await fromMcp("align_get_decision_record", { change_request_id: proposed.id });
+        check("expectations: due row ranks after decisions and launches, fits a phone, and greys after an answer, with can't tell distinct from unanswered",
+          due.fits && due.buttons && due.ranked && ["Release readiness", "Release checks", expect.expected, "Due today", "Self-reported"].every((t) => due.text.includes(t)) &&
+          !(await get(lead, "/home")).json.outcomes.waiting_on_me.length &&
+          mcpAfter.sc?.record?.expectation?.outcome?.outcome === "cant_tell" &&
+          (await get(lead, first)).json.expectation.outcome.evidence_url === evidenceLink &&
+          mcpAfter.sc.record.expectation.expected.untrusted_text === expect.expected &&
+          mcpAfter.text.includes("Reported can't tell"),
+          JSON.stringify({ due, mcpAfter }));
+
+        const second = await request(2, { title: "Readiness after rollout" });
+        const secondPath = pathOf(second);
+        const secondDue = day(366);
+        await page.goto(`${app}/requests?review=${created.id}.${second.id}`, { waitUntil: "domcontentloaded" });
+        await click("[role=dialog] button", "Approve and launch");
+        const drawerFieldsOkay = await fill('[role=dialog] [data-expectation-fields]', "No failed checks", secondDue, "");
+        await page.waitForSelector('[role=dialog] [data-foresight="approve_and_launch"][aria-busy="false"]');
+        await click("[role=dialog] button", "Confirm: Approve and launch");
+        await page.waitForSelector("[role=dialog] [data-expectation-record]");
+        const secondRead = (await get(owner, secondPath)).json;
+        check("expectations: the Requests drawer approves and launches with an expectation at the 366-day boundary",
+          drawerFieldsOkay && secondRead?.launch === "launched" && secondRead.expectation?.due_on === secondDue && secondRead.expectation?.assignee.id === lead.id &&
+          counts() === 2 && !(await get(lead, "/home")).json.outcomes.waiting_on_me.length, JSON.stringify({ drawerFieldsOkay, secondRead }));
+
+        const bad = [];
+        for (const patch of [{ evidence_url: "http://example.test" }, { evidence_url: "https://u:p@example.test/" }, { note: "x".repeat(281) }, { outcome: "unknown" }])
+          bad.push(await post(lead, `${secondPath}/outcome`, { outcome: "met", ...patch }));
+        const tooSoonToCorrect = await post(lead, `${secondPath}/outcome`, { outcome: "met", correction: true });
+        const firstAnswers = await Promise.all([1, 2].map(() => post(lead, `${secondPath}/outcome`, {
+          outcome: "met", note: "Clear\u200b results", evidence_url: "https://example.test/results",
+        })));
+        const early = firstAnswers.find((r) => r.status === 200);
+        const corrected = await post(lead, `${secondPath}/outcome`, { outcome: "not_met", correction: true });
+        const twice = await post(lead, `${secondPath}/outcome`, { outcome: "met", correction: true });
+        const otherCorrection = await post(owner, `${secondPath}/outcome`, { outcome: "met", correction: true });
+        const answers = withDb((d) => d.prepare("SELECT outcome FROM v2_outcome_reports WHERE change_request_id = ? ORDER BY answer").all(second.id)).map((r) => r.outcome);
+        check("outcomes: early reports are allowed, HTTPS and text use shared rules, and one concurrent answer plus one same-person correction are kept",
+          bad.every((r) => r.status === 400) && tooSoonToCorrect.json?.error === "no_outcome" && firstAnswers.filter((r) => r.status === 409).length === 1 &&
+          early?.json.expectation.outcome.note === "Clear results" && early.json.expectation.outcome.evidence_url === "https://example.test/results" &&
+          corrected.json?.expectation.outcome.outcome === "not_met" && !corrected.json.expectation.can_correct &&
+          twice.json?.error === "correction_closed" && otherCorrection.json?.error === "not_reporter" && answers.join() === "met,not_met",
+          JSON.stringify({ bad: bad.map((r) => r.text), firstAnswers: firstAnswers.map((r) => r.status), answers }));
+
+        await page.goto(app + g, { waitUntil: "domcontentloaded" });
+        const readingBox = `[data-measure-readings="${measure}"]`;
+        await page.waitForSelector(readingBox);
+        const empty = await page.$eval(readingBox, (e) => e.innerText.includes("No reading yet") && !e.querySelector("[data-reading-history]"));
+        await click(`${readingBox} button`, "Add reading");
+        const readingValue = "3.5";
+        await page.type(`${readingBox} input`, readingValue);
+        await click(`${readingBox} button`, "Save reading");
+        await page.waitForFunction((sel, value) => document.querySelector(sel)?.innerText.includes(`${value}, self-reported by you`), { timeout: 15000 }, readingBox, readingValue);
+        await click(`${readingBox} button`, "Reading history");
+        await page.waitForSelector(`${readingBox} [data-reading-history] li`);
+        const readingUI = await page.$eval(readingBox, (e) => ({
+          fits: document.scrollingElement.scrollWidth <= 390,
+          history: e.querySelector("[data-reading-history] li")?.innerText,
+        }));
+        check("readings: goal page adds a reading and loads history on demand at 390 pixels",
+          empty && readingUI.fits && readingUI.history.includes(readingValue + ", self-reported") && errors.length === 0, JSON.stringify({ readingUI, errors }));
+
+        const home = (await get(lead, "/home")).json;
+        await page.setRequestInterception(true);
+        page.on("request", (r) => r.url() === BASE + w + "/home"
+          ? void r.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ ...home, outcomes: null }) })
+          : void r.continue());
+        await page.goto(app, { waitUntil: "domcontentloaded" });
+        await page.waitForFunction(() => document.querySelector("[data-needs-partial]")?.innerText.includes("outcomes due"), { timeout: 15000 });
+        const partial = await page.$eval("h1[data-home-count]", (e) => e.innerText);
+        check("outcomes: a failed outcomes read makes the Home heading and counts partial",
+          /^At least \d+ things? needs? you$/.test(partial), partial);
+      } catch (e) {
+        check("expectations and readings: 390-pixel browser flow", false, e.stack ?? String(e));
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for expectations and readings", false, `no Chrome at ${CHROME}`);
+
+    // Keep testing the server if a browser control has failed.
+    if ((await get(owner, g)).json?.goal.version === 1) await change(lead, first, "launch", expect);
+    if ((await get(owner, g)).json?.goal.version === 2) {
+      const latest = (await get(member, `${g}/change-requests`)).json;
+      const pending = latest.change_requests.find((r) => r.state === "pending");
+      const second = pending ?? await request(2, { title: "Readiness after rollout" });
+      await change(lead, pathOf(second), "approve_and_launch", { ...expect, due_on: day(366) });
+    }
+    const before = await get(owner, g);
+    const feed = await get(owner, "/goals");
+    const dirs = await fromMcp("align_get_directives");
+    const wrongSource = await post(member, reading, { value_text: "5", source: "ci" });
+    const readOnly = await post(viewer, reading, { value_text: "5" });
+    const unknownMeasure = await post(viewer, `${g}/measures/${created.measures[0].id}/readings`, { value_text: "5" });
+    const hidden = await post(U4, reading, { value_text: "5" });
+    const tooLong = await post(member, reading, { value_text: "x".repeat(81) });
+    const blank = await post(member, reading, { value_text: "\u200b" });
+    const noTeam = (await post(owner, "/goals", { title: "Company measure", level: "company", measures: [{ text: "Company checks" }] })).json;
+    const noTeamRead = `/goals/${noTeam.id}/measures/${noTeam.measures[0].id}/readings`;
+    const nonRecorder = await post(member, noTeamRead, { value_text: "5" });
+    const companyRecorder = await post(owner, noTeamRead, { value_text: "5" });
+    check("readings: team members and company owners can record; other members, viewers, foreign workspaces, unknown measures and invalid values are refused",
+      [wrongSource, tooLong, blank].every((r) => r.status === 400) && readOnly.json?.error === "read_only" && [unknownMeasure, hidden].every((r) => r.status === 404) &&
+      nonRecorder.json?.error === "not_a_recorder" && companyRecorder.status === 201,
+      [wrongSource, readOnly, unknownMeasure, hidden, tooLong, blank, nonRecorder, companyRecorder].map((r) => r.status + " " + r.text).join(" "));
+    const companyCreatedAt = Date.parse((await get(owner, `/goals/${noTeam.id}`)).json.versions[0].created_at);
+    const future = await post(owner, noTeamRead, { value_text: "Future", observed_at: new Date(Date.now() + 600_000).toISOString() });
+    const preGoal = await post(owner, noTeamRead, { value_text: "Before creation", observed_at: new Date(companyCreatedAt - 1).toISOString() });
+    const companyHistory = (await get(owner, noTeamRead)).json.readings;
+    check("readings: an observation more than five minutes ahead returns clock_skew with server time and stays out of history",
+      future.status === 400 && future.json?.error === "clock_skew" && /observed_at is \d+ minutes ahead of the server/.test(future.json?.message ?? "") &&
+      Math.abs(Date.parse(future.json?.server_time) - Date.now()) < 60_000 && !companyHistory.some((r) => r.value_text === "Future"), future.text);
+    check("readings: an observation before the goal was created returns bad_request and stays out of history",
+      preGoal.status === 400 && preGoal.json?.error === "bad_request" && /observed_at is before the goal was created/.test(preGoal.json?.message ?? "") &&
+      !companyHistory.some((r) => r.value_text === "Before creation"), preGoal.text);
+    const nearFuture = new Date(Date.now() + 240_000).toISOString();
+    const withinSkew = await post(owner, noTeamRead, { value_text: "Within allowance", observed_at: nearFuture });
+    check("readings: an observation within the five-minute clock allowance keeps its timestamp",
+      withinSkew.status === 201 && withinSkew.json?.reading.observed_at === nearFuture, withinSkew.text);
+    // The company goal above changes the feed independently; compare the same feed immediately around recording.
+    const f = await get(owner, "/goals");
+    const value = "<done> checks";
+    const reported = await post(member, reading, { value_text: value, source: "self" });
+    const goalCreatedAt = Date.parse(before.json.versions.at(-1).created_at);
+    const oldObservations = await Promise.all(Array.from({ length: 21 }, (_, i) => post(member, reading, {
+      value_text: String(i), observed_at: new Date(goalCreatedAt + i).toISOString(),
+    })));
+    const after = await get(owner, g);
+    const etag = await req(owner, "GET", "/goals", undefined, { "if-none-match": f.headers.get("etag") });
+    const history = (await get(viewer, reading)).json.readings;
+    const oldMcp = await fromMcp("align_get_goal", { goal_id: created.id, version: 2 });
+    const brief = await fromMcp("align_get_brief");
+    const dirsAfter = await fromMcp("align_get_directives");
+    check("readings: history caps at 20 by observation date, numeric values are optional, and the version, hash, measures, feed ETag and directives are unchanged",
+      reported.status === 201 && reported.json.reading.value_num === null && history.length === 20 && history[0].value_text === value &&
+      oldObservations.every((r, i) => r.status === 201 && r.json.reading.value_num === i) && history.some((r) => r.value_text === "20") &&
+      history.every((r, i) => !i || history[i - 1].observed_at >= r.observed_at) &&
+      JSON.stringify(before.json.versions) === JSON.stringify(after.json.versions) && JSON.stringify(before.json.goal.measures) === JSON.stringify(after.json.goal.measures) &&
+      after.json.measure_readings[measure].value_text === value && etag.status === 304 &&
+      !feed.json.goals.some((goal) => goal.measures.some((m) => "latest_reading" in m)) && JSON.stringify(dirs.sc) === JSON.stringify(dirsAfter.sc),
+      JSON.stringify({ after: after.json.measure_readings, etag: etag.status, oldObservations: oldObservations.map((r) => r.status), dirsAfter }));
+    check("readings: MCP goal and brief carry untrusted self-reported values beside launched-version measures",
+      oldMcp.sc?.goal?.version === 2 && oldMcp.sc.goal.measures[0].latest_reading?.value?.untrusted_text === value &&
+      oldMcp.sc.goal.measures[0].latest_reading.source === "self" && oldMcp.text.includes("&lt;done&gt; checks") &&
+      brief.sc?.goals?.find((x) => x.id === created.id)?.measures[0].latest_reading?.observed_at === reported.json.reading.observed_at,
+      JSON.stringify({ oldMcp, brief }));
+
+    const third = await request(3, { measures: [{ id: measure, text: "Reworded measure" }] });
+    const thirdPath = pathOf(third);
+    const thirdLaunch = await change(lead, thirdPath, "approve_and_launch", { ...expect, due_on: day(1) });
+    const reworded = await get(owner, g);
+    const firstAuthor = (await get(owner, first)).json.expectation;
+    const removed = await req(owner, "DELETE", `/members/${lead.id}`);
+    const fallback = await post(owner, `${thirdPath}/outcome`, { outcome: "met" });
+    withDb((d) => d.prepare("UPDATE v2_outcome_reports SET reported_at = ? WHERE change_request_id = ?").run(`${day(-8)}T00:00:00.000Z`, third.id));
+    const lateCorrection = await post(owner, `${thirdPath}/outcome`, { outcome: "not_met", correction: true });
+    check("expectations: rewording keeps readings and prior launch text, and a current approver can answer after removal with the same correction deadline",
+      thirdLaunch.json?.expectation?.measure_text === "Reworded measure" && reworded.json.measure_readings[measure]?.value_text === value &&
+      firstAuthor?.measure_text === "Release checks" && removed.status === 204 && fallback.json?.expectation?.outcome?.reported_by.id === owner.id &&
+      lateCorrection.json?.error === "correction_closed", JSON.stringify({ thirdLaunch: thirdLaunch.text, removed: removed.text, fallback: fallback.text }));
+
+    const without = await request(4, { title: "Ready to ship" });
+    const withoutLaunch = await change(owner, pathOf(without), "approve_and_launch");
+    const superseded = await request(5, { title: "Ready to publish" });
+    const approvedSuperseded = await change(owner, pathOf(superseded), "approve");
+    await post(owner, `${g}/versions`, { version: 5, measures: [{ text: "Replacement measure" }] });
+    const goalAfter = await get(owner, g);
+    const gone = await change(owner, pathOf(superseded), "launch", expect);
+    const launchedWithout = withoutLaunch.json?.expectation === null && withoutLaunch.json.launch === "launched";
+    check("expectations: launching without an expectation succeeds, superseded requests never get one, and replacing a measure starts without a reading",
+      launchedWithout && counts() === 3 && approvedSuperseded.json?.expectation === null && gone.status === 409 &&
+      Object.values(goalAfter.json.measure_readings).join() === "" && Object.values(goalAfter.json.measure_readings).length === 1 &&
+      (await get(owner, reading)).status === 404, JSON.stringify({ withoutLaunch: withoutLaunch.text, gone: gone.text }));
+    const ev = events();
+    const audited = withDb((d) => d.prepare(
+      "SELECT action FROM v2_audit WHERE ws_id = ? AND action IN ('change_request.expectation_recorded','change_request.outcome_reported','change_request.outcome_corrected','measure.reading_recorded') ORDER BY seq",
+    ).all(W)).map((r) => r.action);
+    check("events: first expectation and reading are unique in the workspace, and reports carry only the outcome choice",
+      ev.filter(([name, props]) => name === "first_expectation" && !Object.keys(props).length).length === 1 &&
+      ev.filter(([name, props]) => name === "first_reading" && !Object.keys(props).length).length === 1 &&
+      JSON.stringify(ev.filter(([name]) => name === "outcome_reported").map(([, props]) => props)) ===
+        JSON.stringify([{ outcome: "cant_tell" }, { outcome: "met" }, { outcome: "not_met" }, { outcome: "met" }]) &&
+      audited.filter((a) => a === "change_request.expectation_recorded").length === 3 &&
+      audited.filter((a) => a === "change_request.outcome_corrected").length === 1 && audited.includes("measure.reading_recorded"),
+      JSON.stringify({ ev, audited }));
+    withDb((d) => d.prepare("DELETE FROM v2_events WHERE ws_id = ? AND name IN ('first_expectation', 'first_reading')").run(W));
+    const afterExpiry = await request(6, { title: "Readiness follow-up" });
+    const afterExpiryLaunch = await change(owner, pathOf(afterExpiry), "approve_and_launch", {
+      ...expect, measure_id: goalAfter.json.goal.measures[0].id,
+    });
+    const afterExpiryReading = await post(owner, noTeamRead, { value_text: "6" });
+    check("events: expiring first events does not restart the workspace's first expectation or reading",
+      afterExpiryLaunch.status === 200 && afterExpiryReading.status === 201 && !events().some(([name]) => name.startsWith("first_")),
+      JSON.stringify({ launch: afterExpiryLaunch.status, reading: afterExpiryReading.status, events: events() }));
+    const deleted = await call(lead.who, "DELETE", "/api/v2/me", { cookie: lead.cookie, body: { email: lead.email } });
+    const pseudonyms = withDb((d) => [
+      ...d.prepare("SELECT assignee_id AS who FROM v2_expectations WHERE ws_id = ?").all(W),
+      ...d.prepare("SELECT reported_by AS who FROM v2_outcome_reports WHERE ws_id = ?").all(W),
+      ...d.prepare("SELECT recorded_by AS who FROM v2_measure_readings WHERE ws_id = ?").all(W),
+    ]);
+    check("retention: deleting the launcher's account pseudonymises their expectation, both outcome answers and their reading",
+      deleted.status === 204 && pseudonyms.filter((r) => /^fm_\d+$/.test(r.who)).length === 7 && pseudonyms.every((r) => r.who !== lead.id),
+      `${deleted.status} ${JSON.stringify(pseudonyms)}`);
+    const purged = admin(["workspaces", "delete", W, "--purge", "--yes"], { ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1" });
+    const remaining = withDb((d) => ["v2_expectations", "v2_outcome_reports", "v2_measure_readings"].map(
+      (t) => d.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ws_id = ?`).get(W).n,
+    ));
+    check("retention: purging a workspace cascades to its expectations, answers and readings", purged.status === 0 && remaining.every((n) => n === 0), purged.err);
+  } catch (e) {
+    check("expectations and readings: packet setup and server flow", false, e.stack ?? String(e));
+  }
+
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));
   const ownerSaw = seen.some((s) => s.who === "U2" && s.text.includes(CANARY));
@@ -13129,6 +13503,7 @@ try {
       device_paired: ["workspaces"], first_session_captured: ["harness"], member_first_session_captured: ["harness"], first_session_bound: ["harness", "authority"], second_member_joined: [],
       first_change_request: [], first_approval: [], first_directive: ["kind"], first_mcp_read: ["client"], loi_sent: ["note_ref"], loi_signed: ["note_ref", "verified_original"],
       first_ask: [], first_limit: [], value_card_viewed: [], value_reported: ["estimate"], follow_up_clicked: [], first_request: ["type"], first_hold: [], first_launch: [],
+      first_expectation: [], outcome_reported: ["outcome"], first_reading: [],
     };
     const offList = q("SELECT name, props FROM v2_events").filter((r) => !ALLOWED[r.name] || Object.keys(JSON.parse(r.props)).some((k) => !ALLOWED[r.name].includes(k)));
     check(

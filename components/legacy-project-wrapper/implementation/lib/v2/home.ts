@@ -4,6 +4,7 @@ import { listAlignments } from "./alignments";
 import { listAsks } from "./asks";
 import { changeRequestGroups } from "./changes";
 import { all } from "./db";
+import { dueExpectations } from "./expectations";
 import { goalRow, visibleGoals } from "./goals";
 import { alignmentWaits, appEvidence, changeWaits, launchWaits, type EvidenceClass, type HomeNext, type HomePerson } from "./home-core.mts";
 import type { PolicyPrincipal } from "./policy";
@@ -230,7 +231,8 @@ export function workspaceHome(pp: PolicyPrincipal) {
     ),
   }));
 
-  return { me, change_requests, asks, alignments, goals: active_goals, apps };
+  const outcomes = section(() => ({ waiting_on_me: dueExpectations(pp) }));
+  return { me, change_requests, asks, alignments, goals: active_goals, apps, outcomes };
 }
 
 export type WorkspaceHome = ReturnType<typeof workspaceHome>;

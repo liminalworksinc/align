@@ -71,6 +71,7 @@ export interface ChangeDiff {
 }
 
 export interface ChangeRequestDetail extends ChangeRequestSummary {
+  expectation: ChangeRequestView["expectation"];
   /** The approver or rejecter, once decided. */
   decided_by: { id: string; name: string } | null;
   /** The approval note or the rejection reason. */
@@ -118,6 +119,7 @@ function detail(v: ChangeRequestView): ChangeRequestDetail {
   if (after.limits !== undefined) diff.limits = { before: before.limits ?? [], after: after.limits };
   return {
     ...summary(v),
+    expectation: v.expectation,
     decided_by: decided ? (v.approved_by ?? v.rejected_by) : null,
     decision_note: decided ? v.decision_note : null,
     diff,

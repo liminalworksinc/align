@@ -398,6 +398,42 @@ The server SHALL serve one goal on `GET /api/v2/workspaces/{ws}/goals/{goal}` (b
 - **WHEN** a member who is not a lead reads an active team goal whose approval set is its owner and one lead, and the owner and a viewer read the same goal
 - **THEN** the member's `deciders` names the owner and the lead, the same people a change request from the member would list as its approvers; the owner and the viewer get `deciders: []`
 
+### Requirement: Measure readings are separate from goal content
+
+`GET` and `POST /api/v2/workspaces/{ws}/goals/{goal}/measures/{measure}/readings` SHALL read history or append
+a reading for a measure on the current goal. A reading SHALL store `value_text` (1 to 80 characters under the
+rules for people's text), a numeric value when the text parses as a finite number, `source` fixed to `self`, and
+who recorded it and when. An optional ISO 8601 `observed_at` is the observation time and defaults to the recording
+time. The server SHALL reject an observation more than five minutes ahead of its clock with `400 clock_skew`, a
+message naming `observed_at`, and `server_time`. An observation earlier than the goal's creation SHALL get
+`400 bad_request` with a message explaining the lower bound. The history SHALL return up to 20 readings as
+`readings`, newest observation first, with later recordings first when times tie. Goal detail SHALL return
+`measure_readings` keyed by current measure id, with a null value where there is no reading, separately from
+the measure definition.
+The goal owner, members of the goal's team, and workspace owners for company goals may record a reading. A viewer
+gets `403 read_only` on a visible measure; an unreadable goal or unknown measure gives 404. The server SHALL audit
+each recording. Readings SHALL follow their measure id across versions, stay with the goal, and follow the
+workspace's person pseudonymisation and purge schedule.
+
+Server migration 25 SHALL add measure readings, launch expectations, and outcome history after the binding origin
+migration. Existing goals, change requests, and binding origins SHALL survive the upgrade. Existing records SHALL
+start with no readings or expectations.
+
+#### Scenario: Observation times outside the allowed range are refused
+
+- **WHEN** an eligible member submits one reading dated ten minutes ahead of the server and another dated just before the goal was created
+- **THEN** both requests return 400, the future date with `clock_skew` and `server_time` and the earlier date with `bad_request`, and neither reading is added to history
+
+#### Scenario: A reading keeps the goal's version and hash
+
+- **WHEN** a goal's team member records a reading
+- **THEN** the goal's version, content hash, serialized measures, goals feed ETag and directives stay the same, and the latest reading changes when it is the newest observation
+
+#### Scenario: A goal keeps or replaces a measure
+
+- **WHEN** a goal's new version rewords a measure with the same id or replaces it with a different id
+- **THEN** the first measure keeps its history, and the replacement starts with no readings
+
 ### Requirement: Parents come from approved alignments
 
 The server SHALL derive a goal's parents only from approved alignments whose source is that goal, and SHALL report each readable parent in `contributes_to` as `{id, title, version, reviewed_version, stale}`, where `reviewed_version` is the parent version the child's owner last reviewed the child against (null if never) and `stale` is true while `reviewed_version` is null or below the parent's current version. Approving an alignment with a source goal SHALL record the source as reviewed against the target's version at approval; saving a new version of the child SHALL record it as reviewed against every parent's current version. A parent that is revoked stops being a parent.
@@ -798,6 +834,53 @@ The server SHALL accept `POST .../change-requests/{id}/launch {revision?}` only 
 
 - **WHEN** someone launches a request that is already launched
 - **THEN** the response is 409 `wrong_state` and no second version or directive is written
+
+### Requirement: A launch can record one expectation
+
+The server SHALL accept an optional `expectation` on `launch` and `approve_and_launch` with `measure_id` from the
+version being launched, `expected` (1 to 200 characters), `due_on` (a real YYYY-MM-DD date from today through
+366 days ahead, inclusive, in UTC), and optional `evidence` (up to 280 characters). It SHALL apply the rules for
+people's text and write the expectation in the launch transaction, with the request id, launched version, measure
+text as it was at launch, launcher as assignee, and time. The expectation SHALL be immutable and follow request
+visibility. The change request read and decision record SHALL include the expectation or null, and its latest
+outcome or null. Launch without an expectation SHALL remain available with the same launch record as before.
+
+#### Scenario: The launch changes the measures
+
+- **WHEN** a launcher attaches an expectation for a measure added by this launch
+- **THEN** the record names the launched version and preserves the measure text even if that measure is renamed or removed later
+
+#### Scenario: A refused launch
+
+- **WHEN** a launch supplies a measure absent from its version, an invalid date or invalid text, or the approved request is superseded before launch
+- **THEN** no expectation is created, and invalid input also leaves the request and goal as they were before the action
+
+### Requirement: A launch outcome is self-reported
+
+`POST /api/v2/workspaces/{ws}/goals/{goal}/change-requests/{id}/outcome` SHALL accept one answer from the assignee
+before, on, or after the due date, with `outcome` equal to `met`, `not_met` or `cant_tell`, an optional `note`
+(up to 280 characters under the rules for people's text), and an optional `evidence_url` under the same HTTPS URL
+rules as evidence links. If the assignee no longer belongs to the workspace, a member of the goal's current approval
+set who can read the request may answer. The server SHALL record who answered and when, permit that same person
+one explicit correction (`correction: true`) within seven days of the first answer, and retain both answers in
+append-only history. It SHALL audit each answer and correction. The read SHALL distinguish null (unanswered) from
+`cant_tell`. The expectation and its answers SHALL be kept with the decision record and follow the workspace's
+person pseudonymisation and purge schedule.
+
+#### Scenario: An early answer and a correction
+
+- **WHEN** the assignee answers before the due date and corrects the answer within seven days
+- **THEN** readers see the latest answer, both are retained, and a second correction is refused
+
+#### Scenario: Someone else tries to answer
+
+- **WHEN** the assignee is still a workspace member and another approver tries to answer
+- **THEN** it is refused, and someone who cannot read the change request gets the same 404 as for an unknown request
+
+#### Scenario: The launcher leaves
+
+- **WHEN** the expectation is still unanswered and the launcher leaves the workspace
+- **THEN** a member of the current approval set who can read the request may answer
 
 ### Requirement: Not yet keeps agents on the launched version
 
@@ -1257,6 +1340,9 @@ The server SHALL write audit rows naming the actor for `request.sent`, `request.
 - **THEN** the workspace has exactly one `first_request` event, with props `{"type": "checkpoint"}`
 
 ## Open questions
+
+- Should the current approval set continue to answer an expectation after the launcher leaves the workspace?
+  The current rule lets a reader in that set answer.
 
 - When the requester is the only person who could approve a goal's requirement and no other workspace owner exists, the request stays open indefinitely; should it instead be refused up front?
 - A reallocation is superseded by any newer version of one of its goals, even one that leaves the target alone (a title edit), and the requester proposes again; a change request instead becomes `behind` and is rebased. Should reallocations get a rebase too, or is starting again right for a numbers-only proposal?

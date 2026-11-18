@@ -1,4 +1,5 @@
 "use client";
+import type { ExpectationView } from "@/lib/v2/expectations";
 import { useLiveReload } from "../../_ui/live";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -19,7 +20,9 @@ export { crStatus };
 
 const quiet = "inline-flex min-h-[44px] items-center text-[13px] text-(--accent-text) hover:underline";
 
-function Loaded({ ws, cr, me, choice, onClose, done, onPick, after }: { ws: string; cr: ChangeRequest; me: string; choice?: ReviewChoice; onClose: () => void; done: () => void; onPick?: (c: ReviewChoice) => void; after?: ReactNode }) {
+type OutcomeReport = NonNullable<ExpectationView["outcome"]>;
+
+function Loaded({ ws, cr, me, choice, onClose, done, onPick, after }: { ws: string; cr: ChangeRequest; me: string; choice?: ReviewChoice; onClose: () => void; done: (report?: OutcomeReport) => void; onPick?: (c: ReviewChoice) => void; after?: ReactNode }) {
   const titles = useGoalTitles(ws);
   return (
     <Drawer
@@ -73,7 +76,7 @@ export function useReview(): [ReviewTarget | null, (r: ReviewTarget | null) => v
  *  It is also how a shared link arrives (`?review=<goal>.<id>`, cold load included). The server answers 404 alike for a
  *  request that doesn't exist and one on a goal the reader can't see, so the not-found state says the same for both and
  *  names nothing from the link. Any other failure says Align couldn't read it and offers to try again. */
-export function ReviewDrawer({ ws, goal, id, me, choice, onClose, onChanged, onPick, after }: { ws: string; goal: string; id: string; me: string; choice?: ReviewChoice; onClose: () => void; onChanged: () => void; onPick?: (c: ReviewChoice) => void; after?: ReactNode }) {
+export function ReviewDrawer({ ws, goal, id, me, choice, onClose, onChanged, onPick, after }: { ws: string; goal: string; id: string; me: string; choice?: ReviewChoice; onClose: () => void; onChanged: (report?: OutcomeReport) => void; onPick?: (c: ReviewChoice) => void; after?: ReactNode }) {
   const [r, setR] = useState<{ cr: ChangeRequest | null; status: number | null; error: string | null }>({ cr: null, status: null, error: null });
   const [tick, setTick] = useState(0);
   const reload = useCallback(() => setTick((t) => t + 1), []);
@@ -126,9 +129,9 @@ export function ReviewDrawer({ ws, goal, id, me, choice, onClose, onChanged, onP
       onClose={onClose}
       onPick={onPick}
       after={after}
-      done={() => {
+      done={(report) => {
         reload();
-        onChanged();
+        onChanged(report);
       }}
     />
   );

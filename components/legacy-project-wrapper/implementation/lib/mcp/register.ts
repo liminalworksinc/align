@@ -4,13 +4,16 @@ import { effectiveSet, launchSet } from "../v2/approval";
 import { asksForBrief, readableAsks, type AskState, type AskView } from "../v2/asks";
 import { addEvidence, LAUNCH_STATES, requestCondition } from "../v2/changes";
 import { CHANGE_REQUEST_STATES, getChangeRequest, listChangeRequests, type ChangeDiff, type ChangeRequestSummary, type Condition, type EvidenceLink } from "../v2/changes-read";
-import { launchWords } from "../v2/launch-words";
+import { launchWords, OUTCOME_WORDS } from "../v2/launch-words";
 import { diffWords, type FieldDiff } from "../v2/change-words.mts";
 import { count } from "../v2/plural.mts";
 import { dropControls } from "../v2/text-core.mts";
 import { usd } from "../v2/money.mts";
 import { noteGoalsSent, noteGrantRead } from "../oauth/grants";
 import { EVIDENCE_SCOPE } from "../oauth/server";
+import { OUTCOMES } from "../v2/core.mts";
+import type { ExpectationView } from "../v2/expectations";
+import { latestMeasureReadings } from "../v2/readings";
 import { all, get } from "../v2/db";
 import type { DevicePrincipal } from "../v2/devices";
 import { noteFirstMcpRead } from "../v2/events";
@@ -127,6 +130,8 @@ const Person = z.object({ id: z.string(), name: UT });
 const Team = z.object({ id: z.string(), name: UT }).nullable();
 const WorkspaceOut = z.object({ id: z.string(), name: UT });
 const MeasureOut = z.object({ id: z.string(), text: UT, target: UT.nullable() });
+const ReadingOut = z.object({ value: UT, source: z.literal("self"), observed_at: z.string() });
+const MeasureWithReadingOut = MeasureOut.extend({ latest_reading: ReadingOut.nullable() });
 const Level = z.enum(["company", "team"]);
 const VisibilityOut = z.enum(["private", "team", "workspace"]);
 const StatusOut = z.enum(["active", "achieved", "dropped"]);
@@ -139,6 +144,17 @@ const teamOf = (podId: string | null) => {
   return t ? { id: t.id, name: ut(t.name) } : null;
 };
 const measuresOut = (ms: Measure[]) => ms.map((m) => ({ id: m.id, text: ut(m.text), target: m.target === null || m.target === undefined ? null : ut(m.target) }));
+function measuresWithReadings(g: GoalRow, ms: Measure[]): z.infer<typeof MeasureWithReadingOut>[] {
+  const readings = latestMeasureReadings(g.ws_id, g.id, ms);
+  return measuresOut(ms).map((measure) => {
+    const reading = readings[measure.id];
+    return { ...measure, latest_reading: reading ? { value: ut(reading.value_text), source: reading.source, observed_at: reading.observed_at } : null };
+  });
+}
+
+const readingLine = (r: z.infer<typeof ReadingOut>, clip = 80) =>
+  `${tag(clipped(r.value.untrusted_text, clip))}, self-reported, ${r.observed_at}`;
+
 const workspaceOf = (pp: PolicyPrincipal) => ({ id: pp.wsId, name: ut(get<{ name: string }>("SELECT name FROM v2_workspaces WHERE id = ?", pp.wsId)?.name ?? "") });
 /** Only goal ids this person can read. */
 const readableIds = (pp: PolicyPrincipal, ids: string[]) =>
@@ -248,7 +264,7 @@ const GetGoalOut = z.object({
     current_version: z.number(),
     title: UT,
     status: StatusOut,
-    measures: z.array(MeasureOut),
+    measures: z.array(MeasureWithReadingOut),
     depends_on: z.array(z.string()),
     limits: z.array(LimitOut).nullable(),
   }),
@@ -385,7 +401,52 @@ const DiffOut = z.object({
   depends_on: z.object({ before: z.array(z.string()), after: z.array(z.string()), hidden: z.object({ before: z.number(), after: z.number() }).nullable() }).optional(),
   status: z.object({ before: StatusOut, after: StatusOut }).optional(),
 });
+const ExpectationOut = z.object({
+  goal_version: z.number(),
+  measure_id: z.string(),
+  measure_text: UT,
+  expected: UT,
+  due_on: z.string(),
+  evidence: UT.nullable(),
+  assignee: Person,
+  created_at: z.string(),
+  outcome: z.object({
+    outcome: z.enum(OUTCOMES),
+    note: UT.nullable(),
+    evidence_url: UT.nullable(),
+    reported_by: Person,
+    reported_at: z.string(),
+  }).nullable(),
+});
+function expectationOut(e: ExpectationView): z.infer<typeof ExpectationOut> {
+  return {
+    goal_version: e.goal_version,
+    measure_id: e.measure_id,
+    measure_text: ut(e.measure_text),
+    expected: ut(e.expected),
+    due_on: e.due_on,
+    evidence: e.evidence === null ? null : ut(e.evidence),
+    assignee: person(e.assignee.id, e.assignee.name),
+    created_at: e.created_at,
+    outcome: e.outcome ? {
+      outcome: e.outcome.outcome,
+      note: e.outcome.note === null ? null : ut(e.outcome.note),
+      evidence_url: e.outcome.evidence_url === null ? null : ut(e.outcome.evidence_url),
+      reported_by: person(e.outcome.reported_by.id, e.outcome.reported_by.name),
+      reported_at: e.outcome.reported_at,
+    } : null,
+  };
+}
+function expectationLines(e: z.infer<typeof ExpectationOut>, me: string): string[] {
+  const o = e.outcome;
+  return [
+    `Expected ${tag(e.expected.untrusted_text)} by ${e.due_on} for ${tag(e.measure_text.untrusted_text)} (self-reported by ${who(e.assignee, me)}).`,
+    o ? `Reported ${OUTCOME_WORDS[o.outcome]} by ${who(o.reported_by, me)}, ${o.reported_at} (self-reported).` : "Not answered yet.",
+  ];
+}
+
 const RecordOut = ChangeRequestOut.omit({ revision: true, created_at: true, updated_at: true }).extend({
+  expectation: ExpectationOut.nullable(),
   decided_by: Person.nullable(),
   decision_note: UT.nullable(),
   diff: DiffOut,
@@ -645,7 +706,7 @@ const PendingOut = z.object({
   goal: z.object({ id: z.string(), title: UT }),
   waiting_on: z.array(Person),
 });
-const BriefGoalOut = z.object({ id: z.string(), title: UT, version: z.number(), level: Level, team: Team, measures: z.array(MeasureOut), limits: z.array(LimitOut).nullable() });
+const BriefGoalOut = z.object({ id: z.string(), title: UT, version: z.number(), level: Level, team: Team, measures: z.array(MeasureWithReadingOut), limits: z.array(LimitOut).nullable() });
 const BriefOut = z.object({ workspace: WorkspaceOut, goals: z.array(BriefGoalOut), pending: z.array(PendingOut), asks: z.array(AskOut), more_asks: z.number() });
 
 /** The person's own goals for the brief: active goals they own or of a team they are in, and for a workspace owner the
@@ -742,13 +803,13 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
           current_version: g.version,
           title: ut(v.title),
           status: v.status,
-          measures: measuresOut(JSON.parse(v.measures_json) as Measure[]),
+          measures: measuresWithReadings(g, JSON.parse(v.measures_json) as Measure[]),
           depends_on: readableIds(pp, JSON.parse(v.depends_on_json || "[]") as string[]),
           limits: limitsFor(pp, g, v),
         },
         versions: versions.map((x) => ({ version: x.version, title: ut(x.title), status: x.status, hash: x.content_hash })),
       };
-      const m = out.goal.measures.map((x) => `- ${tag(x.text.untrusted_text)}${x.target ? `, target ${tag(x.target.untrusted_text)}` : ""}`);
+      const m = out.goal.measures.map((x) => `- ${tag(x.text.untrusted_text)}${x.target ? `, target ${tag(x.target.untrusted_text)}` : ""}${x.latest_reading ? `; latest reading ${readingLine(x.latest_reading)}` : ""}`);
       const lines = [
         `Goal ${g.id} version ${v.version} of ${g.version} (${v.status}, ${goalKindWords(cur.level, cur.visibility)}): ${tag(v.title)}`,
         `Owner ${who(cur.owner, pp.userId)}${cur.team ? `, team ${tag(cur.team.name.untrusted_text)}` : ""}${cur.bindable ? ", bindable" : ""}.`,
@@ -813,6 +874,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
         base_version: base.base_version,
         reason: base.reason,
         condition: base.condition,
+        expectation: cr.expectation ? expectationOut(cr.expectation) : null,
         decided_by: cr.decided_by ? person(cr.decided_by.id, cr.decided_by.name) : null,
         decision_note: cr.decision_note === null ? null : ut(cr.decision_note),
         diff: diffOut(pp, cr.diff),
@@ -835,6 +897,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
         ...(cr.state === "superseded" ? [`Approved, then superseded before launch: it never reached agents. ${record.requested_by.id === pp.userId ? "You" : tag(cr.requested_by.name)} can propose it again.`] : []),
         ...(cr.state === "approved" ? [`${launchWords(cr.launch, cr.base_version, cr.resulting_version)}.${cr.launch === "not_yet" && record.launch_decided_by ? ` ${record.launch_decided_by.id === pp.userId ? "You" : tag(cr.launch_decided_by!.name)} decided not yet at ${cr.launch_decided_at}.` : ""}${cr.launch === "launched" && record.launch_decided_by ? ` Launched by ${who(record.launch_decided_by, pp.userId)} at ${cr.launch_decided_at}.` : ""}`] : []),
         ...(record.condition ? [conditionLine(record.condition, pp.userId, "")] : []),
+        ...(record.expectation ? expectationLines(record.expectation, pp.userId) : []),
         record.resulting_version !== null ? `Resulting goal version: ${record.resulting_version}.` : "No goal version was created.",
         record.approved_without_evidence ? "Approved without evidence." : `${count(record.evidence.length, "evidence link")} (self-reported or agent-reported, none verified):`,
         ...record.evidence.map(evidenceLine(pp.userId)),
@@ -1042,7 +1105,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
     async ({ workspace }, ctx) => {
       const pp = enter(ctx, workspace);
       const rows = briefGoals(pp);
-      const goals = rows.map((g) => ({ id: g.id, title: ut(g.title), version: g.version, level: g.level, team: teamOf(g.pod_id), measures: measuresOut(JSON.parse(g.measures_json) as Measure[]), limits: limitsFor(pp, g) }));
+      const goals = rows.map((g) => ({ id: g.id, title: ut(g.title), version: g.version, level: g.level, team: teamOf(g.pod_id), measures: measuresWithReadings(g, JSON.parse(g.measures_json) as Measure[]), limits: limitsFor(pp, g) }));
       const pending = pendingOn(pp, rows);
       const open = pending.filter((p) => p.state !== "approved");
       const unlaunched = pending.filter((p) => p.state === "approved");
@@ -1058,7 +1121,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
         "YOUR GOALS:",
         ...(goals.length
           ? goals.flatMap((g) => [
-              `- ${g.id} v${g.version} ${tag(clipped(g.title.untrusted_text, clip))}${privateIds.has(g.id) ? " (personal goal, visible only to you)" : g.team ? `, team ${tag(g.team.name.untrusted_text)}` : ` (${g.level} goal)`}${g.measures.length ? `. Measures: ${g.measures.map((m) => `${tag(clipped(m.text.untrusted_text, clip))}${m.target ? ` (target ${tag(clipped(m.target.untrusted_text, 40))})` : ""}`).join("; ")}` : ""}`,
+              `- ${g.id} v${g.version} ${tag(clipped(g.title.untrusted_text, clip))}${privateIds.has(g.id) ? " (personal goal, visible only to you)" : g.team ? `, team ${tag(g.team.name.untrusted_text)}` : ` (${g.level} goal)`}${g.measures.length ? `. Measures: ${g.measures.map((m) => `${tag(clipped(m.text.untrusted_text, clip))}${m.target ? ` (target ${tag(clipped(m.target.untrusted_text, 40))})` : ""}${m.latest_reading ? ` (latest reading ${readingLine(m.latest_reading, clip)})` : ""}`).join("; ")}` : ""}`,
               ...(g.limits ?? []).map((l) => `  - ${LIMIT_WORDS[l.type]}: ${tag(clipped(l.text.untrusted_text, clip))}`),
             ])
           : ["- none"]),

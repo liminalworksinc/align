@@ -1,7 +1,8 @@
 import { all, audit, get, run, tx } from "./db";
 import { badRequest, conflict, forbidden, notFound } from "./errors";
 import { newId, nowIso, sha256hex } from "./ids";
-import { canBind, canReadGoal, type GoalObject, type PolicyPrincipal, type Visibility } from "./policy";
+import { latestMeasureReadings, readingView } from "./readings";
+import { authorize, canBind, canReadGoal, type GoalObject, type PolicyPrincipal, type Visibility } from "./policy";
 import { goalVersionDirective } from "./directives";
 import { event } from "./events";
 import { limitsIn, limitsOf, type Limit } from "./goal-limits";
@@ -100,7 +101,7 @@ export interface ParentRef {
 }
 export type Goal = GoalCore & { bindable: boolean; contributes_to: ParentRef[] };
 
-export const goalObj = (g: GoalRow): GoalObject => ({ kind: "goal", ownerId: g.owner_id, visibility: g.visibility, podId: g.pod_id });
+export const goalObj = (g: GoalRow): GoalObject => ({ kind: "goal", ownerId: g.owner_id, visibility: g.visibility, podId: g.pod_id, level: g.level });
 
 export function goalRow(wsId: string, goalId: string): GoalRow | undefined {
   return get<GoalRow>("SELECT * FROM v2_goals WHERE ws_id = ? AND id = ?", wsId, goalId);
@@ -638,8 +639,12 @@ export function goalDetail(pp: PolicyPrincipal, goalId: string) {
       return s && canReadGoal(pp, goalObj(s)) ? { goal: { id: s.id, title: s.title } } : { goal: null };
     })
     .filter((c) => c.goal);
+  const goal = serializeGoal(pp, g);
+  const readings = latestMeasureReadings(pp.wsId, g.id, goal.measures);
   return {
-    goal: serializeGoal(pp, g),
+    goal,
+    measure_readings: Object.fromEntries(goal.measures.map(({ id }) => [id, readings[id] ? readingView(readings[id]) : null])),
+    can_record_readings: authorize(pp, "goal.record_reading", goalObj(g)).ok,
     /** How many of the goal's dependencies the reader can't see (never which): a new version keeps them. */
     hidden_depends_on: unreadableGoals(pp, JSON.parse(g.depends_on_json || "[]") as string[]).length,
     versions: versions.map((v) => ({ ...v, created_by: undefined })),

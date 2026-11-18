@@ -50,6 +50,28 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [x] Run both clean installs and the full test gate with Node 24.22.3.
     `ALIGN_TEST_PORT=4500 npm test` passed 2,019 checks with zero failures. The retained receipt is stale.
 
+### [x] LIM-2520: Record launch expectations, outcomes and measure readings
+
+- **Owner:** Align goals, change requests, Home and MCP contracts
+- **Direction:** Let a launcher state an expectation for a goal measure, report what
+  happened, and record self-reported measure readings independently of goal versions.
+  Show validation messages beside the affected outcome or reading field, using the form's labels.
+- **Conclusion:** Keep expectations with the launch decision and readings with the
+  measure id. A reading leaves goal content and agent delivery unchanged.
+- **Completion prerequisites:** PROVENANCE-001
+- **Implementation and evidence:**
+  - [x] Specify the launch, outcome, reading, visibility and retention rules.
+  - [x] Implement the records, app flows, MCP reads and product events in server schema 25.
+  - [x] Exercise both launch paths, access, correction, history, retention and mobile layout.
+    The packet checks passed in `scripts/test-v2.mjs`.
+  - [x] Verify the upgrade from schema 24 to 25 and a fresh schema 25 database.
+    Both SQLite checks passed. The upgrade preserved the stored goal version, change request and binding origin.
+  - [x] Show which field needs a correction when an outcome or reading is refused.
+    The Home browser regression reproduced the raw field name before the fix and passed with the inline message.
+  - [x] Run the full test gate on Node 24 and validate the specifications.
+    `ALIGN_TEST_PORT=4400 npm test` passed 2,054 checks on Node 24.22.3 with zero failures.
+    `litai spec validate specs/align --id-prefix align` passed for all eight documents.
+
 ### [x] TX-001: Recover from transaction and preview setup failures
 
 - **Owner:** components/legacy-project-wrapper/implementation/lib/v2/db.ts

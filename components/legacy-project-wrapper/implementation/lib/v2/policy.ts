@@ -27,6 +27,7 @@ export interface GoalObject {
   ownerId: string;
   visibility: Visibility;
   podId: string | null;
+  level?: "company" | "team";
 }
 
 export type PolicyObject =
@@ -72,6 +73,7 @@ export type Action =
   | WsAction
   | "goal.read"
   | "goal.edit"
+  | "goal.record_reading"
   | "goal.bind"
   | "pod.manage_members"
   | "session.manage" // the session's own owner: re-share, epochs, usage, stop sharing, delete
@@ -134,6 +136,12 @@ export function authorize(p: PolicyPrincipal, action: Action, obj: PolicyObject)
       if (obj.kind !== "goal" || !canReadGoal(p, obj)) return hidden();
       if (!wsCan(p, "goal.create")) return roleDenied(p);
       return obj.ownerId === p.userId ? ALLOW : deny("not_goal_owner", "Only the goal's owner can change it.");
+
+    case "goal.record_reading":
+      if (obj.kind !== "goal" || !canReadGoal(p, obj)) return hidden();
+      if (p.wsRole === "viewer") return roleDenied(p);
+      if (obj.ownerId === p.userId || (obj.podId && p.pods.has(obj.podId)) || (obj.level === "company" && p.wsRole === "owner")) return ALLOW;
+      return deny("not_a_recorder", "Only the goal owner, its team, or a workspace owner on a company goal can add a reading.");
 
     case "goal.bind": {
       if (obj.kind !== "bind" || !canReadGoal(p, obj.goal)) return hidden();
