@@ -417,7 +417,7 @@ await test("earlier live no-goal usage makes team burn incomplete and retention 
   assert.equal(b.remaining_bound, "upper"); assert.equal(b.forecast_bound, "lower"); assert.equal(b.runs_out_at, null);
   await runRetention(db.sql, db.tx, new Date("2032-01-01T00:00:00Z"), { secret: "test-secret" });
   assert.equal(db.get("SELECT team_attributed_requests FROM v2_spend_rollups WHERE goal_id = ''").team_attributed_requests, 0);
-  b = burn(); assert.equal(b.no_goal.attribution_unknown, true); assert.equal(b.estimated_spend_usd_micros, null); assert.equal(b.spend_bound, "unknown");
+  b = burn(); assert.equal(b.no_goal.attribution_unknown, true); assert.equal(b.estimated_spend_usd_micros, 20_000_000); assert.equal(b.spend_bound, "lower");
 });
 await test("former-member replacement covers every new actor column; workspace purge cascades all records", async () => {
   await budget(); const r = await ask(); await act("owner", r, "decline", { reason: "No" });

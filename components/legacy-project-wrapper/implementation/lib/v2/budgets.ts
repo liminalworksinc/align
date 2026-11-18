@@ -133,8 +133,8 @@ export function budgetBurn(pp: PolicyPrincipal, teamId: string, month?: string |
   const effective = e ? e.amount_usd_micros + grants.reduce((n, g) => n + g.approved_usd_micros, 0) : null;
   const complete = sums.unpriced === 0 && !attributionUnknown;
   const elapsed = asOf - m.start;
-  const attributed = !rolledAttributionUnknown && (!earlierUsage || sums.priced > 0);
-  const spendBound = !attributed ? "unknown" as const : sums.unpriced || earlierUsage ? "lower" as const : "exact" as const;
+  const attributed = !attributionUnknown || sums.priced > 0;
+  const spendBound = !attributed ? "unknown" as const : sums.unpriced || attributionUnknown ? "lower" as const : "exact" as const;
   const remaining = attributed && effective !== null ? effective - sums.priced : null;
   const forecast = attributed && elapsed > 0 ? (complete ? Math.round : Math.floor)(sums.priced * ((m.end - m.start) / elapsed)) : null;
   let runsOut: number | null = null;
@@ -167,12 +167,12 @@ export function budgetBurn(pp: PolicyPrincipal, teamId: string, month?: string |
     estimated_spend_usd_micros: attributed ? sums.priced : null, spend_bound: spendBound,
     remaining_usd_micros: remaining, remaining_bound: remaining === null ? null : complete ? "exact" as const : "upper" as const,
     forecast_bound: forecast === null ? null : complete ? "exact" as const : "lower" as const,
-    pricing_note: earlierUsage ? "Some earlier usage could not be attributed. Spend and forecast, when shown, are at least the priced estimates. Remaining, when shown, is at most its displayed estimate." : !attributed ? "Some earlier usage could not be attributed. Complete spend, remaining and forecast are unknown; the priced subtotal is only the known amount." : sums.unpriced ?
+    pricing_note: attributionUnknown && attributed ? "Some earlier usage could not be attributed. Spend and forecast, when shown, are at least the priced estimates. Remaining, when shown, is at most its displayed estimate." : !attributed ? "Some earlier usage could not be attributed. Complete spend, remaining and forecast are unknown; the priced subtotal is only the known amount." : sums.unpriced ?
       `${count(sums.unpriced, "unpriced request")} excluded. Spend and forecast are at least the priced estimates. Remaining, when shown, is at most its displayed estimate.` : "All requests in this total have prices.",
     forecast_usd_micros: forecast, runs_out_at: runsOut === null ? null : new Date(Math.ceil(runsOut)).toISOString(),
     unpriced_requests: attributionUnknown ? null : sums.unpriced, known_unpriced_requests: sums.unpriced,
-    no_goal: { priced_spend_usd_micros: sums.no_goal_priced, estimated_spend_usd_micros: attributed && (!earlierUsage || sums.no_goal_priced > 0) ? sums.no_goal_priced : null,
-      spend_bound: !attributed ? "unknown" as const : sums.no_goal_unpriced || earlierUsage ? "lower" as const : "exact" as const,
+    no_goal: { priced_spend_usd_micros: sums.no_goal_priced, estimated_spend_usd_micros: attributed && (!attributionUnknown || sums.no_goal_priced > 0) ? sums.no_goal_priced : null,
+      spend_bound: !attributed ? "unknown" as const : sums.no_goal_unpriced || attributionUnknown ? "lower" as const : "exact" as const,
       unpriced_requests: attributionUnknown ? null : sums.no_goal_unpriced, known_unpriced_requests: sums.no_goal_unpriced, share_percent: complete && sums.priced > 0 ? Math.round(sums.no_goal_priced / sums.priced * 1000) / 10 : null,
       attribution_unknown: attributionUnknown },
     history, can: { manage: m.month >= currentMonth(now) && authorize(pp, "team_budget.manage", { kind: "pod", podId: team.id }).ok,
