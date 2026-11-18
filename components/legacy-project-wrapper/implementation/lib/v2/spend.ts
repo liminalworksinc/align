@@ -3,6 +3,7 @@ import { badRequest } from "./errors";
 import { goalObj, type GoalRow } from "./goals";
 import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { need } from "./workspaces";
+import type { EpochOrigin } from "./epoch-origin.mts";
 
 // Spend: token sums by basis and estimated list cost, per goal, team or session. Each request counts under the
 // goal of the epoch it was uploaded with (history never moves); requests in epochs with no goal are unallocated.
@@ -30,6 +31,11 @@ interface Agg extends Record<Num, number> {
   basis: Basis;
 }
 
+export type OriginSpend = Pick<Agg, "requests" | "est_list_usd_micros" | "unpriced_requests"> & {
+  origin: EpochOrigin | null;
+  rolled_up: boolean;
+};
+
 function add(s: Sums, a: Agg) {
   const b = BASES.includes(a.basis) ? a.basis : "unknown";
   for (const k of NUMS) {
@@ -49,13 +55,14 @@ const SUM_COLUMNS = `COUNT(*) AS requests, SUM(u.input) AS input, SUM(u.output) 
 export function spend(pp: PolicyPrincipal, by: SpendBy, from: string | null, to: string | null) {
   need(pp, "spend.read");
   if (from && to && from >= to) throw badRequest("from must be before to");
-  const rows = all<Agg>(
-    `SELECT e.goal_id, u.session_key, s.user_id AS session_owner, u.basis, ${SUM_COLUMNS}
+  const originColumn = by === "goal" ? "e.origin" : "NULL";
+  const rows = all<Agg & { origin: EpochOrigin | null }>(
+    `SELECT e.goal_id, u.session_key, s.user_id AS session_owner, u.basis, ${originColumn} AS origin, ${SUM_COLUMNS}
      FROM v2_usage u
      JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id
      JOIN v2_sessions s ON s.ws_id = u.ws_id AND s.session_key = u.session_key
      WHERE u.ws_id = ? AND (? IS NULL OR u.ts >= ?) AND (? IS NULL OR u.ts < ?)
-     GROUP BY e.goal_id, u.session_key, u.basis`,
+     GROUP BY e.goal_id, u.session_key, u.basis, ${originColumn}`,
     pp.wsId,
     from,
     from,
@@ -75,7 +82,7 @@ export function spend(pp: PolicyPrincipal, by: SpendBy, from: string | null, to:
     from,
     to,
     to,
-  ).map((r) => ({ ...r, rolled: true }));
+  ).map((r) => ({ ...r, origin: null, rolled: true }));
   const goals = new Map(all<GoalRow>("SELECT * FROM v2_goals WHERE ws_id = ?", pp.wsId).map((g) => [g.id, g]));
   const pods = new Map(all<{ id: string; name: string }>("SELECT id, name FROM v2_pods WHERE ws_id = ?", pp.wsId).map((p) => [p.id, p.name]));
   const sessions = new Map(
@@ -84,6 +91,7 @@ export function spend(pp: PolicyPrincipal, by: SpendBy, from: string | null, to:
 
   const total = emptySums();
   const unallocated = emptySums();
+  const origins = new Map<string, Map<EpochOrigin | "rolled_up" | null, OriginSpend>>();
   const buckets = new Map<string, { key: string; kind: string; label: string; goal?: { id: string; title: string }; team?: { id: string; name: string } } & { sums: Sums }>();
   const bucket = (key: string, kind: string, label: string, extra: Record<string, unknown> = {}) => {
     let b = buckets.get(key);
@@ -91,7 +99,7 @@ export function spend(pp: PolicyPrincipal, by: SpendBy, from: string | null, to:
     return b.sums;
   };
 
-  for (const r of [...rows, ...rolled] as (Agg & { rolled?: boolean })[]) {
+  for (const r of [...rows, ...rolled] as (Agg & { origin: EpochOrigin | null; rolled?: boolean })[]) {
     add(total, r);
     if (!r.goal_id) {
       add(unallocated, r);
@@ -113,13 +121,26 @@ export function spend(pp: PolicyPrincipal, by: SpendBy, from: string | null, to:
       add(bucket("private", "private", "Private goals"), r);
       continue;
     }
-    if (by === "goal") add(bucket(`goal:${g.id}`, "goal", g.title, { goal: { id: g.id, title: g.title } }), r);
-    else if (g.pod_id) add(bucket(`team:${g.pod_id}`, "team", pods.get(g.pod_id) ?? "Team", { team: { id: g.pod_id, name: pods.get(g.pod_id) ?? "" } }), r);
+    if (by === "goal") {
+      const key = `goal:${g.id}`;
+      add(bucket(key, "goal", g.title, { goal: { id: g.id, title: g.title } }), r);
+      let split = origins.get(key);
+      if (!split) origins.set(key, (split = new Map()));
+      const source = r.rolled ? "rolled_up" : r.origin;
+      let part = split.get(source);
+      if (!part) split.set(source, (part = { origin: r.origin, rolled_up: !!r.rolled, requests: 0, est_list_usd_micros: 0, unpriced_requests: 0 }));
+      part.requests += r.requests;
+      part.est_list_usd_micros += r.est_list_usd_micros;
+      part.unpriced_requests += r.unpriced_requests;
+    } else if (g.pod_id) add(bucket(`team:${g.pod_id}`, "team", pods.get(g.pod_id) ?? "Team", { team: { id: g.pod_id, name: pods.get(g.pod_id) ?? "" } }), r);
     else add(bucket("no_team", "no_team", "Goals without a team"), r);
   }
 
   const out = [...buckets.values()]
-    .map(({ sums, ...rest }) => ({ ...rest, ...sums }))
+    .map(({ sums, ...rest }) => {
+      const split = origins.get(rest.key);
+      return { ...rest, ...sums, ...(split ? { by_origin: [...split.values()] } : {}) };
+    })
     .sort((a, b) => b.est_list_usd_micros - a.est_list_usd_micros || b.requests - a.requests || a.label.localeCompare(b.label));
   return {
     by,

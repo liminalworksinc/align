@@ -1,7 +1,14 @@
 // Local-only goal anchor matching. Repo and branch never leave the machine. Hook-safe: reads .git with node:fs only.
 import fs from "node:fs";
 import path from "node:path";
-import type { Goal } from "./types.ts";
+import { readJson } from "./fsx.ts";
+import { layout } from "./layout.ts";
+import type { Goal, InjectedState } from "./types.ts";
+
+export function manualShareOrigin(home: string, lid: string, workspaceId: string | undefined, goalId: string | undefined): "anchor_hint" | "hand" {
+  const hint = readJson<InjectedState>(layout.injected(home, lid))?.anchor_hint;
+  return hint && hint.workspace_id === workspaceId && hint.goal_id === goalId ? "anchor_hint" : "hand";
+}
 
 export interface GitInfo {
   toplevel: string;

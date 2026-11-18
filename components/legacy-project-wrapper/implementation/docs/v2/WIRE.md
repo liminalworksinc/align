@@ -107,10 +107,21 @@ Key owned by another user/device → 404. `started_at` more than 5 min ahead of 
 `{ "error": "clock_skew", "message", "server_time" }` (as a refresh gets).
 
 `POST /api/v2/workspaces/:ws/sessions/:session_key/epochs` (Bearer) — open a binding epoch
-→ req `{ "epoch_id": "ep_...", "goal_id": "g_..."|null, "starts_at": "<ISO>", "root_turn": string|null, "cause": "manual"|"directive:<dir_id>" }`
-→ 200 `Epoch = { "epoch_id", "goal_id", "goal_version_at_start", "starts_at", "ends_at": null }`
+→ req `{ "epoch_id": "ep_...", "goal_id": "g_..."|null, "starts_at": "<ISO>", "root_turn": string|null, "cause": "manual"|"directive:<dir_id>", "origin"?: Origin|null }`
+→ 200 `Epoch = { "epoch_id", "goal_id", "goal_version_at_start", "starts_at", "ends_at", "origin" }`
    (closes the previous open epoch at `starts_at`). 403 `{ "error": "alignment_required" }` if the goal isn't bindable.
    Epochs never overlap; a first share may open an epoch with `starts_at` = the session's start (counts from start).
+
+`Origin = "hand" | "folder_rule" | "anchor_hint" | "alignment" | "switch_request" | "past_import" | "suggested_agent" | "suggested_model"`.
+The server records `alignment` for the session's `binding_changed` directive for the goal, and `switch_request` for a
+`switch_goal` directive to the session and goal with an accepted developer receipt. It records other known origins
+with a `manual` cause. If a known origin cannot be confirmed, an otherwise valid epoch returns 200 with `origin: null`
+and can receive usage. An unknown origin is 400. Every cause must be `manual` or name a directive sent to this session.
+Omitted origin and legacy rows have null origin. The CLI does not send `suggested_agent` or `suggested_model`.
+`GET /api/v2/workspaces/:ws/sessions` (cookie) includes origin in each `mine[].current_epoch`. When there is no current
+epoch, `mine[].last_epoch` gives `{origin}` from the most recent closed epoch if one exists, or null otherwise.
+For workspace owners, `all[]` includes `origin` of the current or most recent closed epoch and `origin_scope` ("current",
+"last", or null when no epoch exists), without the binding's goal or directive.
 
 `POST /api/v2/workspaces/:ws/sessions/:session_key/usage` (Bearer) — idempotent batch, ≤500 rows, ≤256 KB
 → req `{ "rows": [ UsageRow ] }`
@@ -277,6 +288,9 @@ Additive fields; older agents ignore them. Spec: `goals-and-proposals`, `workspa
 Sessions older than 13 months are rolled up (docs/RETENTION.md): their usage still counts by goal and team, by its UTC
 day (a day counts when its start is in `[from, to)`), and `by=session` shows it as one `rolled_up` row,
 "Older sessions (rolled up)".
+Readable goal rows in `by=goal` include `by_origin: [{origin, rolled_up, requests, est_list_usd_micros, unpriced_requests}]`.
+Live usage uses the origin of its uploaded epoch. Rolled-up usage is a separate group with `origin: null` and
+`rolled_up: true`. The private bucket has no `by_origin` field.
 
 ## Alignment (web, cookie)
 `POST /api/v2/workspaces/:ws/alignments` → req `{ "target_goal_id", "source_goal_id": string|null, "choice": "contribution"|"work_toward", "session_keys": [string], "note": string|null }`
@@ -324,7 +338,16 @@ Sessions and epochs
   ended because its person left the workspace (`ended_reason: "member_removed"`), shared again by a device of theirs
   once they are a member again.
   So are epochs and usage. The same key with a different `harness` or `repo_key` is `409 session_conflict`.
-- Epochs: same `epoch_id` with the same values returns it (idempotent); with other values `409 epoch_conflict`.
+- For a valid epoch retry, a change to the normalized `goal_id`, `starts_at`, `root_turn` or `cause` returns
+  `409 epoch_conflict`. With those fields unchanged, the server returns the stored epoch if the sent origin matches
+  the stored origin, the stored origin is null, or the server would store null for the retry. The server would store
+  null for an omitted or explicit null origin or a known origin it cannot confirm. A different known origin that the
+  server can confirm conflicts with a stored non-null origin and returns `409 epoch_conflict`. An unknown origin is `400`.
+  Retries preserve the stored origin, authority, alignment, goal version and end time.
+  - If the developer's switch request acceptance is recorded after the epoch opens, the same request still returns
+    `200` with the stored null origin.
+  - If the server could confirm acceptance when the epoch opened and can no longer confirm it on retry, the same
+    request still returns `200` with the stored `switch_request` origin as long as the cause is still valid.
   `starts_at` before the open epoch's start or the last epoch's end is `409 epoch_overlap`; before the session's
   `started_at` is `400` (unless that start lies in the future on the server's clock: it came from a clock that ran
   ahead, and the epoch moves the session's start back to its own `starts_at`); more than 5 min in the future is

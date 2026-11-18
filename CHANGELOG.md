@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Sessions and in-session status show how a session came to count toward its goal. Spend can show each goal's
+  request counts and list-price estimates by sharing source, with older rolled-up usage identified separately.
+- Retrying a binding with changed details returns a conflict and leaves the original binding in place.
 - Server tests finish each readiness response before stopping a phase, preventing a previous server from satisfying
   the next phase's readiness check.
 - Failed transaction and preview setup releases database state so later writes, previews and sign-in mail work.

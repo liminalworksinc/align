@@ -173,8 +173,8 @@ function applySpool(ctx: Ctx, r: SpoolRecord): string | null {
         const exists = ctx.db.prepare("SELECT 1 FROM epochs WHERE epoch_id=?").get(r.epoch_id);
         if (exists) return;
         ctx.db
-          .prepare("INSERT INTO epochs(epoch_id, local_id, workspace_id, goal_id, starts_at, root_turn, cause, created_at) VALUES(?,?,?,?,?,?,?,?)")
-          .run(r.epoch_id, lid, share.workspace_id, r.goal_id, r.starts_at, r.root_turn, r.cause, nowIso());
+          .prepare("INSERT INTO epochs(epoch_id, local_id, workspace_id, goal_id, starts_at, root_turn, cause, origin, created_at) VALUES(?,?,?,?,?,?,?,?,?)")
+          .run(r.epoch_id, lid, share.workspace_id, r.goal_id, r.starts_at, r.root_turn, r.cause, r.origin ?? null, nowIso());
         // The goal comes from the binding the hook applied; a binding the hook recorded itself (InjectedState.local_binding)
         // may reach this pass before its command did, so otherwise the share's own goal only when it is the same one.
         let goalJson = pending && pending.id === r.pending_id ? pending.goal_json : share.binding_goal === r.goal_id ? share.goal_json : null;
@@ -190,7 +190,7 @@ function applySpool(ctx: Ctx, r: SpoolRecord): string | null {
         enqueue(ctx, lid, "post_epoch", {
           ws: share.workspace_id,
           session_key: share.session_key,
-          body: { epoch_id: r.epoch_id, goal_id: r.goal_id, starts_at: r.starts_at, root_turn: r.root_turn, cause: r.cause },
+          body: { epoch_id: r.epoch_id, goal_id: r.goal_id, starts_at: r.starts_at, root_turn: r.root_turn, cause: r.cause, origin: r.origin ?? null },
         });
       });
       return lid;
@@ -232,7 +232,7 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
       if (goal && !goal.bindable) throw new Error(`goal "${goal.title}" needs an approved alignment before it can be bound`);
       // The hook already applied this binding at a prompt (same id): don't queue it a second time, and drop a pending
       // binding recorded before this command, which the developer replaced (N1).
-      if (!r.pending_id || kvGet(ctx.db, `binding_consumed:${lid}`) !== r.pending_id) bind(ctx, lid, goal, "manual", null, r.pending_id);
+      if (!r.pending_id || kvGet(ctx.db, `binding_consumed:${lid}`) !== r.pending_id) bind(ctx, lid, goal, r.origin ?? null, r.pending_id);
       else ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=? AND id<>? AND created_at<?").run(lid, r.pending_id, r.ts);
       // A hook that recorded the binding itself already told the user; an older record is confirmed here.
       if (!r.pending_id) say(`Align: from your next prompt this session counts toward ${goal ? `"${goal.title}"` : "no goal (unallocated)"}.`);
@@ -279,7 +279,7 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
       if (stopOutlivesShare(ctx, lid)) throw new Error(STOP_HOLDS_NO_SHARE);
       // Shared before (its history deleted since, too): this share counts from now (C6-1).
       const before = sharedBefore(ctx, lid);
-      applyShare(ctx, planShare(ctx, lid, ws, goal, null, before ? "now" : "start", r.epoch_id));
+      applyShare(ctx, planShare(ctx, lid, ws, goal, null, before ? "now" : "start", r.origin ?? null, r.epoch_id));
       if (!r.rule_dir) {
         const text = `Align: sharing this session with ${ws.name}${goal ? ` for "${goal.title}"` : ""}, counting from ${before ? "now" : "session start"}.`;
         addShareNotice(ctx, lid, `share_started_${r.ts}`, { e: "started", ws: ws.name, goal: goal?.title ?? null, text });
@@ -472,7 +472,10 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
       let r = await api(ctx, "POST", `${base}/epochs`, { body: await wireBody(ctx, item, p, "starts_at") });
       if (await learnClock(ctx, r, p)) r = await api(ctx, "POST", `${base}/epochs`, { body: await wireBody(ctx, item, p, "starts_at", true) });
       if (r.status === 200) {
-        ctx.db.prepare("UPDATE epochs SET synced=1, goal_version_at_start=?, wire_offset=? WHERE epoch_id=?").run(r.json?.goal_version_at_start ?? null, Number(p.wire_offset) || 0, p.body.epoch_id);
+        const origin = r.json?.origin ?? null;
+        ctx.db.prepare("UPDATE epochs SET synced=1, goal_version_at_start=?, wire_offset=?, origin=? WHERE epoch_id=?")
+          .run(r.json?.goal_version_at_start ?? null, Number(p.wire_offset) || 0, origin, p.body.epoch_id);
+        if (origin !== (p.body.origin ?? null)) renderHot(ctx, lid);
         return;
       }
       if (r.status === 403 || r.status === 404 || r.status === 409 || r.status === 400) {

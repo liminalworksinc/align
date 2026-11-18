@@ -1457,6 +1457,11 @@ everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<w
 - **WHEN** a workspace owner opens the tab
 - **THEN** an "Everyone's shared sessions (workspace owners)" card lists each session's owner, repo alias and harness, and "started <time> · …<the key's last 6 characters>" so two sessions of one person in one repository can be told apart (`scripts/test-v2.mjs` "W3 (ui): each row of the owner's Everyone list ..."), with **Stop agent** or **Resume agent** (`POST .../sessions/<key>/stop` or `/resume`), never titles or usage; a suspended own session shows "The alignment this session counted under was revoked. Pick a goal for it on your machine to resume uploads."
 
+#### Scenario: How the session was bound
+
+- **WHEN** a session is shown in either list
+- **THEN** its current binding reads "Shared by hand", "Folder rule", "After a repo hint", "Alignment", "Switch request accepted", "Past sessions import", "Suggested by an agent" or "Suggested by a model", as recorded. With no current binding, both lists show "Last binding: <origin label>" for the most recent binding. A binding with null origin reads "Not recorded". A session with no binding history shows no origin label. The owner's list shows the origin label without the binding's goal or directive.
+
 ### Requirement: Workspace Alignments tab
 
 The Alignments tab SHALL show the alignment requests the person is part of, from
@@ -1622,6 +1627,11 @@ sessions.
 
 - **WHEN** a member (viewers included) opens the tab
 - **THEN** a table shows, per row, requests, input, output, cache read, cache write and estimated list cost (by the money rule of the change request snapshot, `lib/v2/money.mts`), with the billing basis per row, then "Not bound to a goal" and "Total", the server's note, "Goals you can't see are grouped without names. There is no per-person view.", and a count of unpriced requests when there are any; by my sessions, usage of rolled-up sessions older than 13 months is one "Older sessions (rolled up)" row
+
+#### Scenario: Expand a goal's usage by origin
+
+- **WHEN** a person expands "By sharing source" on a goal row in By goal
+- **THEN** the row shows the number of requests and estimated list cost per origin with the same labels as Sessions. Priced amounts use the goal total's display precision and add up to its rounded value. Round each amount down to that precision, then give one unit each to the largest remainders until they reach the rounded total, in display order when remainders tie. All-unpriced groups show "Unknown" for cost and partial estimates say how many requests were unpriced. Rolled-up days have their own "Not recorded (rolled up)" line. Private goals remain grouped without a breakdown. The expanded rows fit at 390 pixels wide.
 
 #### Scenario: Agent time against targets
 

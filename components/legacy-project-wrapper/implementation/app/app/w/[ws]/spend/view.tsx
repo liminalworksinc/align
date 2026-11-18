@@ -7,6 +7,9 @@ import type { Me } from "../../../_ui/server";
 import type { WsDetail } from "../../../_ui/types";
 import { AllocationCard } from "./allocation";
 import { count } from "@/lib/v2/plural.mts";
+import type { OriginSpend } from "@/lib/v2/spend";
+import { epochOriginLabel } from "@/lib/v2/epoch-origin.mts";
+import { splitUsd } from "@/lib/v2/money.mts";
 
 type Nums = { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number };
 type Sums = Nums & { by_basis: Record<string, Nums> };
@@ -15,7 +18,7 @@ interface Spend {
   total: Sums;
   unallocated: Sums;
   unpriced_requests: number;
-  rows: (Sums & { key: string; kind: string; label: string })[];
+  rows: (Sums & { key: string; kind: string; label: string; by_origin?: OriginSpend[] })[];
 }
 
 const BASIS_LABEL: Record<string, string> = {
@@ -28,16 +31,33 @@ const BASIS_LABEL: Record<string, string> = {
 
 const cacheWrite = (s: Nums) => s.cache_write_5m + s.cache_write_1h + s.cache_write_unsplit;
 
-function Row({ label, s, strong }: { label: string; s: Sums; strong?: boolean }) {
+function Row({ label, s, strong, origins }: { label: string; s: Sums; strong?: boolean; origins?: OriginSpend[] }) {
   const bases = Object.entries(s.by_basis).filter(([, v]) => v.requests > 0);
+  const originCosts = origins ? splitUsd(s.est_list_usd_micros, origins.map((part) => part.est_list_usd_micros)) : [];
   return (
     <tr className={`border-t border-(--line) align-top ${PHONE_TABLE.row} ${strong ? "font-semibold text-(--text-1)" : ""}`}>
       <td className={`py-2 pr-3 ${PHONE_TABLE.whole}`}>
-        {label}
+        <span className="[overflow-wrap:anywhere]">{label}</span>
         {bases.length > 0 && (
           <div className="text-[13px] font-normal text-(--text-3)">
             {bases.map(([b, v]) => `${BASIS_LABEL[b] ?? b}: ${count(v.requests, "request", undefined, num)}`).join(", ")}
           </div>
+        )}
+        {origins && (
+          <details className="mt-1 text-[14px] font-normal">
+            <summary className="min-h-11 cursor-pointer py-3 text-(--accent-text)">By sharing source</summary>
+            <dl className="space-y-2 pb-2">
+              {origins.map((part, index) => (
+                <div key={part.rolled_up ? "rolled_up" : part.origin ?? "unknown"}>
+                  <dt className="font-medium">{epochOriginLabel(part.origin)}{part.rolled_up && " (rolled up)"}</dt>
+                  <dd className="text-(--text-2)">
+                    {count(part.requests, "request", undefined, num)} · {part.unpriced_requests === part.requests ? "Unknown" : originCosts[index]}
+                    {part.unpriced_requests > 0 && part.unpriced_requests < part.requests && ` (${count(part.unpriced_requests, "unpriced request", undefined, num)})`}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </details>
         )}
       </td>
       <td data-label="Requests" className={`py-2 pr-3 text-right ${PHONE_TABLE.cell}`}>{num(s.requests)}</td>
@@ -94,7 +114,7 @@ export default function SpendPage({ me, ws }: { me: Me; ws: string }) {
                 </thead>
                 <tbody className={PHONE_TABLE.body}>
                   {d.data.rows.map((r) => (
-                    <Row key={r.key} label={r.label} s={r} />
+                    <Row key={r.key} label={r.label} s={r} origins={r.by_origin} />
                   ))}
                   <Row label="Not bound to a goal" s={d.data.unallocated} />
                   <Row label="Total" s={d.data.total} strong />

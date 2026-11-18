@@ -14,7 +14,8 @@ import { need } from "./workspaces";
 import { expireStoppedSessionTargets, holdNewlyBound } from "./requests";
 import { personName } from "./retention";
 import { shareAgainText, shareAgainWords, sharingStoppedText } from "./share-again.mts";
-import { b64url, iso, nonNegInt, oneOf, optInt, optStr, str, type Body } from "./validate";
+import { b64url, iso, nonNegInt, oneOf, optInt, optOneOf, optStr, str, type Body } from "./validate";
+import { EPOCH_ORIGINS, type EpochOrigin } from "./epoch-origin.mts";
 
 // Shared sessions, binding epochs and usage. docs/v2/WIRE.md "Shared sessions".
 // A session belongs to the device (and user) that shared it: any other caller gets 404 for its key, except that any
@@ -55,6 +56,7 @@ interface EpochRow {
   ends_at: string | null;
   root_turn: string | null;
   cause: string;
+  origin: EpochOrigin | null;
   authority: "none" | "own" | "pod" | "alignment";
   alignment_id: string | null;
 }
@@ -102,7 +104,7 @@ function clockSkew(field: string, sent: string) {
   return new V2Error(400, "clock_skew", `${field} is ${minutes} minutes ahead of the server's clock; this device's clock is off`, { server_time: nowIso() });
 }
 
-const epochOut = (e: EpochRow) => ({ epoch_id: e.epoch_id, goal_id: e.goal_id, goal_version_at_start: e.goal_version_at_start, starts_at: e.starts_at, ends_at: e.ends_at });
+const epochOut = (e: EpochRow) => ({ epoch_id: e.epoch_id, goal_id: e.goal_id, goal_version_at_start: e.goal_version_at_start, starts_at: e.starts_at, ends_at: e.ends_at, origin: e.origin });
 
 export const sessionRow = (ws: string, key: string) => get<SessionRow>("SELECT * FROM v2_sessions WHERE ws_id = ? AND session_key = ?", ws, key);
 export const openEpoch = (ws: string, key: string) => get<EpochRow>("SELECT * FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL", ws, key);
@@ -190,7 +192,33 @@ export async function putSession(pp: PolicyPrincipal, dev: DevicePrincipal, key:
 const EPOCH_ID = /^ep_[A-Za-z0-9_-]{22,64}$/;
 const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
-export async function openBindingEpoch(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {
+function recordedEpochOrigin(ws: string, key: string, cause: string, origin: EpochOrigin | null, goalId: string | null): EpochOrigin | null {
+  const directiveOrigin = origin === "alignment" || origin === "switch_request";
+  if (cause === "manual") return directiveOrigin ? null : origin;
+  if (!/^directive:dir_[a-z2-7]{24}$/.test(cause)) throw badRequest('cause must be "manual" or "directive:<dir_id>"');
+  const id = cause.slice(10);
+  const directive = get<{ kind: string | null; goal_id: string | null }>(
+    `SELECT d.kind, d.goal_id FROM v2_directive_targets t LEFT JOIN v2_directives d ON d.ws_id = t.ws_id AND d.id = t.directive_id
+     WHERE t.ws_id = ? AND t.directive_id = ? AND t.session_key = ?`, ws, id, key,
+  );
+  if (!directive) throw badRequest("cause names a directive that was not sent to this session");
+  if (!directiveOrigin) return null;
+  if (origin === "alignment") {
+    return directive.kind === "binding_changed" && goalId && directive.goal_id === goalId ? origin : null;
+  }
+  const accepted = directive.kind === "request" && get(
+    `SELECT 1 FROM v2_requests r JOIN v2_request_targets t ON t.ws_id = r.ws_id AND t.request_id = r.id
+     WHERE r.ws_id = ? AND r.directive_id = ? AND r.type = 'switch_goal' AND r.target_goal_id = ?
+       AND t.session_key = ? AND t.state = 'accepted' AND t.auto_accepted = 0`, ws, id, goalId, key,
+  );
+  return accepted ? origin : null;
+}
+
+export function openBindingEpoch(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {
+  return tx(() => recordBindingEpoch(pp, dev, key, b));
+}
+
+function recordBindingEpoch(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {
   const s = ownSession(pp, dev, key);
   if (s.state === "stopped") throw sharingStopped(s);
   const epochId = str(b, "epoch_id", 70);
@@ -199,22 +227,20 @@ export async function openBindingEpoch(pp: PolicyPrincipal, dev: DevicePrincipal
   const startsAt = iso(b, "starts_at");
   const rootTurn = optStr(b, "root_turn", 200);
   const cause = str(b, "cause", 80);
-  if (cause !== "manual" && !/^directive:dir_[a-z2-7]{24}$/.test(cause)) throw badRequest('cause must be "manual" or "directive:<dir_id>"');
-  if (cause !== "manual" && !get("SELECT 1 AS x FROM v2_directive_targets WHERE ws_id = ? AND directive_id = ? AND session_key = ?", pp.wsId, cause.slice(10), key)) {
-    throw badRequest("cause names a directive that was not sent to this session");
+  const origin = recordedEpochOrigin(pp.wsId, key, cause, optOneOf(b, "origin", EPOCH_ORIGINS), goalId);
+
+  const same = get<EpochRow>("SELECT * FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", pp.wsId, key, epochId);
+  if (same) {
+    const originConflict = same.origin !== null && origin !== null && same.origin !== origin;
+    if (same.goal_id === goalId && same.starts_at === startsAt && same.root_turn === rootTurn && same.cause === cause && !originConflict) return epochOut(same);
+    throw conflict("epoch_conflict", "This epoch id was already used with different values");
   }
+
   if (Date.parse(startsAt) > Date.now() + FUTURE_SKEW_MS) throw clockSkew("starts_at", startsAt);
   // A start stored in the future came from a clock that ran ahead: an epoch from the corrected clock moves it back
   // (below, in the transaction) instead of waiting for real time to catch up.
   const futureStart = Date.parse(s.started_at) > Date.now();
   if (Date.parse(startsAt) < Date.parse(s.started_at) && !futureStart) throw badRequest("starts_at is before the session started");
-
-  // Idempotent: the same epoch again returns it; the same id with other values is a conflict.
-  const same = get<EpochRow>("SELECT * FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", pp.wsId, key, epochId);
-  if (same) {
-    if (same.goal_id === goalId && same.starts_at === startsAt) return epochOut(same);
-    throw conflict("epoch_conflict", "This epoch id was already used with different values");
-  }
 
   // Authority for the binding: own goal, pod goal, or an approved allocation transfer for this session.
   let authority: EpochRow["authority"] = "none";
@@ -233,47 +259,45 @@ export async function openBindingEpoch(pp: PolicyPrincipal, dev: DevicePrincipal
   }
 
   const at = nowIso();
-  const out = await tx(() => {
-    touchWs(pp.wsId);
-    const open = openEpoch(pp.wsId, key);
-    const lastEnd = get<{ m: string | null }>("SELECT MAX(ends_at) AS m FROM v2_epochs WHERE ws_id = ? AND session_key = ?", pp.wsId, key)?.m ?? null;
-    if (open && startsAt < open.starts_at) throw conflict("epoch_overlap", "starts_at is before the current epoch started");
-    if (lastEnd && startsAt < lastEnd) throw conflict("epoch_overlap", "starts_at is before the last epoch ended");
-    if (open) run("UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", startsAt, pp.wsId, key, open.epoch_id);
-    if (startsAt < s.started_at) run("UPDATE v2_sessions SET started_at = ? WHERE ws_id = ? AND session_key = ?", startsAt, pp.wsId, key);
-    run(
-      `INSERT INTO v2_epochs (ws_id, session_key, epoch_id, goal_id, goal_version_at_start, starts_at, root_turn, cause, authority, alignment_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      pp.wsId,
-      key,
-      epochId,
-      goalId,
-      version,
-      startsAt,
-      rootTurn,
-      cause,
-      authority,
-      alignmentId,
-      at,
-    );
-    // Picking a goal ends a suspension. A manual binding to another goal ends any governing goal.
-    const cur = sessionRow(pp.wsId, key)!;
-    const keepGoverning = cur.governing_goal_id !== null && cur.governing_goal_id === goalId;
-    run(
-      "UPDATE v2_sessions SET state = 'shared', governing_goal_id = ?, governing_alignment_id = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?",
-      keepGoverning ? cur.governing_goal_id : null,
-      keepGoverning ? cur.governing_alignment_id : null,
-      at,
-      pp.wsId,
-      key,
-    );
-    // A held goal holds this session too.
-    if (goalId) holdNewlyBound(pp.wsId, goalId, key);
-    // First value: the first time a session in this workspace is bound to a goal.
-    if (goalId && authority !== "none") event("first_session_bound", { ws: pp.wsId, user: pp.userId, props: { harness: cur.harness, authority }, at });
-    return epochOut(get<EpochRow>("SELECT * FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", pp.wsId, key, epochId)!);
-  });
-  return out;
+  touchWs(pp.wsId);
+  const open = openEpoch(pp.wsId, key);
+  const lastEnd = get<{ m: string | null }>("SELECT MAX(ends_at) AS m FROM v2_epochs WHERE ws_id = ? AND session_key = ?", pp.wsId, key)?.m ?? null;
+  if (open && startsAt < open.starts_at) throw conflict("epoch_overlap", "starts_at is before the current epoch started");
+  if (lastEnd && startsAt < lastEnd) throw conflict("epoch_overlap", "starts_at is before the last epoch ended");
+  if (open) run("UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", startsAt, pp.wsId, key, open.epoch_id);
+  if (startsAt < s.started_at) run("UPDATE v2_sessions SET started_at = ? WHERE ws_id = ? AND session_key = ?", startsAt, pp.wsId, key);
+  run(
+    `INSERT INTO v2_epochs (ws_id, session_key, epoch_id, goal_id, goal_version_at_start, starts_at, root_turn, cause, origin, authority, alignment_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    pp.wsId,
+    key,
+    epochId,
+    goalId,
+    version,
+    startsAt,
+    rootTurn,
+    cause,
+    origin,
+    authority,
+    alignmentId,
+    at,
+  );
+  // Picking a goal ends a suspension. A manual binding to another goal ends any governing goal.
+  const cur = sessionRow(pp.wsId, key)!;
+  const keepGoverning = cur.governing_goal_id !== null && cur.governing_goal_id === goalId;
+  run(
+    "UPDATE v2_sessions SET state = 'shared', governing_goal_id = ?, governing_alignment_id = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?",
+    keepGoverning ? cur.governing_goal_id : null,
+    keepGoverning ? cur.governing_alignment_id : null,
+    at,
+    pp.wsId,
+    key,
+  );
+  // A held goal holds this session too.
+  if (goalId) holdNewlyBound(pp.wsId, goalId, key);
+  // First value: the first time a session in this workspace is bound to a goal.
+  if (goalId && authority !== "none") event("first_session_bound", { ws: pp.wsId, user: pp.userId, props: { harness: cur.harness, authority }, at });
+  return epochOut(get<EpochRow>("SELECT * FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", pp.wsId, key, epochId)!);
 }
 
 const QUERY_SOURCES = ["main", "subagent", "auxiliary", "unknown"] as const;
@@ -497,13 +521,21 @@ function sharedFrom(wsId: string, deviceId: string | null) {
 /** The sessions page: the caller's own shared sessions in full; for workspace owners, every shared session's
  *  alias, owner, start and state (for stop/resume), never its title or usage. */
 export function listSessions(pp: PolicyPrincipal) {
+  // Epochs can share a start time. Prefer the one recorded last.
+  const binding = (key: string) =>
+    openEpoch(pp.wsId, key) ??
+    get<EpochRow>(
+      "SELECT * FROM v2_epochs WHERE ws_id = ? AND session_key = ? ORDER BY starts_at DESC, rowid DESC LIMIT 1",
+      pp.wsId,
+      key,
+    );
   const goalLabel = (id: string | null) => {
     if (!id) return null;
     const g = goalRow(pp.wsId, id);
     return g && canReadGoal(pp, goalObj(g)) ? { id: g.id, title: g.title, version: g.version } : { id: null, title: null, private: true };
   };
   const mine = all<SessionRow>("SELECT * FROM v2_sessions WHERE ws_id = ? AND user_id = ? ORDER BY started_at DESC", pp.wsId, pp.userId).map((s) => {
-    const e = openEpoch(pp.wsId, s.session_key);
+    const e = binding(s.session_key);
     const tokens = get<{ requests: number; input: number; output: number }>(
       "SELECT COUNT(*) AS requests, COALESCE(SUM(input), 0) AS input, COALESCE(SUM(output), 0) AS output FROM v2_usage WHERE ws_id = ? AND session_key = ?",
       pp.wsId,
@@ -519,7 +551,8 @@ export function listSessions(pp: PolicyPrincipal) {
       stopped_at: s.stopped_at,
       ended_reason: s.ended_reason,
       device: sharedFrom(pp.wsId, s.device_id),
-      current_epoch: e ? { ...epochOut(e), goal: goalLabel(e.goal_id) } : null,
+      current_epoch: e?.ends_at === null ? { ...epochOut(e), goal: goalLabel(e.goal_id) } : null,
+      last_epoch: e && e.ends_at !== null ? { origin: e.origin } : null,
       governing_goal: goalLabel(s.governing_goal_id),
       agent_stopped: !!s.agent_stopped,
       stop_status: stopStatus(pp.wsId, s.session_key),
@@ -530,19 +563,25 @@ export function listSessions(pp: PolicyPrincipal) {
   const everyone =
     pp.wsRole === "owner"
       ? all<SessionRow & { owner_name: string | null }>(
-          "SELECT s.*, u.name AS owner_name FROM v2_sessions s LEFT JOIN ba_user u ON u.id = s.user_id WHERE s.ws_id = ? AND s.state <> 'stopped' ORDER BY s.started_at DESC",
+          `SELECT s.*, u.name AS owner_name FROM v2_sessions s LEFT JOIN ba_user u ON u.id = s.user_id
+           WHERE s.ws_id = ? AND s.state <> 'stopped' ORDER BY s.started_at DESC`,
           pp.wsId,
-        ).map((s) => ({
-          session_key: s.session_key,
-          owner: { id: s.user_id, name: personName(s.user_id, s.owner_name) },
-          repo_alias: s.repo_alias,
-          harness: s.harness,
-          // When it started: with the key's end, it tells one person's sessions in one repository apart (W3).
-          started_at: s.started_at,
-          state: s.state,
-          agent_stopped: !!s.agent_stopped,
-          stop_status: stopStatus(pp.wsId, s.session_key),
-        }))
+        ).map((s) => {
+          const e = binding(s.session_key);
+          return {
+            session_key: s.session_key,
+            owner: { id: s.user_id, name: personName(s.user_id, s.owner_name) },
+            repo_alias: s.repo_alias,
+            harness: s.harness,
+            // When it started: with the key's end, it tells one person's sessions in one repository apart (W3).
+            started_at: s.started_at,
+            origin: e?.origin ?? null,
+            origin_scope: e ? (e.ends_at === null ? "current" : "last") : null,
+            state: s.state,
+            agent_stopped: !!s.agent_stopped,
+            stop_status: stopStatus(pp.wsId, s.session_key),
+          };
+        })
       : null;
   return { mine, all: everyone };
 }

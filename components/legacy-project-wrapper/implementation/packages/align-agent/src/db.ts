@@ -222,6 +222,8 @@ const ADDED_COLUMNS: [table: string, column: string, type: string][] = [
   ["epochs", "ends_at", "TEXT"],
   // What happened to a share (`ShareFacts`), for a notice worded when it is shown, from the state then (cycle 11).
   ["notices", "facts", "TEXT"],
+  ["epochs", "origin", "TEXT"],
+  ["pending_bindings", "origin", "TEXT"],
 ];
 
 function addColumns(db: Db): void {

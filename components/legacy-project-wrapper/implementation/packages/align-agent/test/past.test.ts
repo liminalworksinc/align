@@ -112,6 +112,7 @@ describe("align share --dir --past", () => {
     const epochOf = (k: string) => [...fake.epochs.values()].filter((e) => e.session_key === k);
     assert.equal(epochOf(k2)[0].starts_at, s2, "from the session's own start");
     assert.equal(epochOf(kx)[0].starts_at, x1);
+    assert.deepEqual([epochOf(k2)[0].origin, epochOf(kx)[0].origin], ["past_import", "past_import"]);
     assert.equal(fake.sessions.get(k2)!.body.started_at, s2);
     assert.equal(epochOf(k1).length, 1, "the live share's epoch only");
     assert.ok(epochOf(k1)[0].starts_at > s1, "c1 keeps its later start on the server");

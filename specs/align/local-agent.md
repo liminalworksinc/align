@@ -984,6 +984,29 @@ the user and wait for instructions.`, so neither hears of the hold first from a 
 - **WHEN** the user runs the same command without `--yes`, then starts a `fork` session, then runs `align unshare --dir <repo>`
 - **THEN** the first prints `Not changed. Run again with --yes to confirm.` and stores nothing, the fork gets no `additionalContext`, and the last prints `New sessions in <repo> are private again. ...` after which new sessions there are not shared
 
+### Requirement: Record how each binding started
+
+The CLI and hooks SHALL send an origin whenever they open a new binding epoch and keep it through the local ledger,
+hook spool and retries. After a successful epoch upload, the CLI SHALL record the origin returned by the server and
+continue uploading usage for that epoch even if the returned origin is null. Old epochs and queued epoch uploads with
+no origin keep it unknown. The local repo-anchor hint's existing once-per-session record SHALL remember which workspace
+and goal the hint named. The CLI sends neither of the reserved origins `suggested_agent` and `suggested_model`.
+
+#### Scenario: The developer shares or binds a session
+
+- **WHEN** the developer shares or binds a session from the terminal or with `::align share` or `::align bind`
+- **THEN** the epoch has origin `hand`, or `anchor_hint` when the action shares that session toward the same workspace and goal the repo hint named in that session. The current session shared by `::align share --dir ... confirm` counts as a developer share.
+
+#### Scenario: Other ways a binding opens
+
+- **WHEN** a folder rule shares a new session at its start, an approved `work_toward` changes its binding, the developer accepts a switch request, or `align share --dir --past` imports a session
+- **THEN** the new epoch has origin `folder_rule`, `alignment`, `switch_request` or `past_import`, respectively. Use the existing directive cause for alignment and switch request and `manual` for the other two.
+
+#### Scenario: Inspect a session's current binding
+
+- **WHEN** the developer types `::align status` in a session with a current binding
+- **THEN** the local status shows its origin using the Sessions tab's words. It shows "Not recorded" when no origin is available, including after the server returns null. A binding that has taken effect at a prompt is shown even before the sync records it.
+
 ### Requirement: Sharing past sessions of a folder
 
 The `align share --dir <folder> --past <days>` command SHALL accept 1 to 14 days, and besides the folder rule SHALL

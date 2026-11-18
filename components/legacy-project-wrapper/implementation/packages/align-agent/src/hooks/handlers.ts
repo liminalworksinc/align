@@ -3,7 +3,8 @@
 // credentials. The one transcript read is the Stop hook's local drift check (D5), which keeps no reply text.
 import fs from "node:fs";
 import path from "node:path";
-import { gitInfo, matchAnchors } from "../shared/anchors.ts";
+import { gitInfo, manualShareOrigin, matchAnchors } from "../shared/anchors.ts";
+import { epochOriginLabel } from "../shared/epoch-origin.ts";
 import {
   boundLimits,
   clean,
@@ -420,6 +421,7 @@ function autoShare(home: string, harness: Harness, sid: string, cwd: string | nu
     workspace: rule.workspace_id,
     rule_dir: rule.dir,
     epoch_id: epochId,
+    origin: "folder_rule",
     ts: new Date().toISOString(),
   });
   inj.notices_shown.push("anchor");
@@ -618,6 +620,7 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
           if (hits.length) {
             messages.push(`Align: this repo matches goal "${hits[0].title}" in ${f.workspace_name}. Type \`::align share ${hits[0].title}\` to share this session toward it.`);
             inj.notices_shown.push("anchor");
+            inj.anchor_hint = { workspace_id: f.workspace_id, goal_id: hits[0].id };
             break;
           }
         }
@@ -864,7 +867,7 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   if ((hot.share.state === "shared" || hot.share.state === "suspended") && pending) {
     if (inj.consumed_binding !== pending.id) {
       const epochId = randomId("ep_");
-      if (pending.goal || !pending.goal_id) inj.opened_epoch = { epoch_id: epochId, goal: pending.goal, at: ts, ...(hot.share.state === "suspended" ? { resumed: true } : {}) };
+      if (pending.goal || !pending.goal_id) inj.opened_epoch = { epoch_id: epochId, goal: pending.goal, origin: pending.origin, at: ts, ...(hot.share.state === "suspended" ? { resumed: true } : {}) };
       else delete inj.opened_epoch;
       spoolWrite(home, {
         type: "epoch_open",
@@ -876,6 +879,7 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
         starts_at: ts,
         root_turn: rootTurn,
         cause: pending.cause,
+        origin: pending.origin ?? null,
         pending_id: pending.id,
         directive_id: pending.directive_id,
         ts,
@@ -1567,20 +1571,28 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       // the goal the model already has, never "private" and "none" next to "In context: goal" (cycle 10, section 5).
       const coming = !hot?.share && inj.rule_share && Date.now() - Date.parse(inj.rule_share.at) < 10 * 60_000 ? inj.rule_share : null;
       const comingGoal = coming?.goal_id ? feedGoal(home, coming.workspace_id, coming.goal_id) : null;
+      const opened = inj.opened_epoch;
+      const current = hot?.share?.state === "shared" || hot?.share?.state === "pending";
+      const opening = opened && (hot?.share?.state === "shared" || (hot?.share?.state === "suspended" && opened.resumed)) &&
+        !hot?.epochs_seen?.includes(opened.epoch_id) && Date.now() - Date.parse(opened.at) <= 10 * 60_000 ? opened : null;
+      const goal = opening ? opening.goal : hot?.goal;
       const lines = [
         `Align status (this message stays local; the model does not see it)`,
         `  Sharing:  ${hot?.share ? `${hot.share.state} with ${hot.share.workspace_name}` : coming ? `pending with ${coming.workspace_name} (folder rule; the next sync shares it)` : "private"}`,
         `  Goal:     ${
-          hot?.share?.state === "suspended"
+          hot?.share?.state === "suspended" && !opening
             ? "none (the alignment that set it no longer applies; `::align bind <goal>` picks one)"
-            : hot?.goal
-              ? `${hot.goal.title} (v${hot.goal.version}, ${hot.goal.status})`
+            : goal
+              ? `${goal.title} (v${goal.version}, ${goal.status})`
               : comingGoal
                 ? `${comingGoal.title} (v${comingGoal.version}, ${comingGoal.status})`
                 : coming?.goal_title
                   ? coming.goal_title
                   : "none"
         }`,
+        opening || (current && hot?.binding) || coming
+          ? `  Sharing source: ${epochOriginLabel(opening ? opening.origin : coming ? "folder_rule" : hot?.binding?.origin)}`
+          : "",
         (() => {
           const next = nextBinding(hot, inj);
           return next && inj.consumed_binding !== next.id ? `  Next prompt switches to: ${next.goal ? next.goal.title : "no goal"}` : "";
@@ -1655,7 +1667,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         if (cached && (!cached.bindable || cached.status !== "active")) return `Align: goal "${clean(cached.title, 100)}" can no longer be bound; \`::align decline ${requestShortId(r.id)}\` instead.`;
         if (cached && r.directive_id) {
           pendingId = randomId("pb_");
-          chooseBinding(hot, inj, { id: pendingId, goal_id: cached.id, goal: snapshot(cached), cause: `directive:${r.directive_id}`, directive_id: null });
+          chooseBinding(hot, inj, { id: pendingId, goal_id: cached.id, goal: snapshot(cached), cause: `directive:${r.directive_id}`, directive_id: null, origin: "switch_request" });
         } else later = true;
       }
       spoolWrite(home, { type: "request_answer", local_id: lid, request_id: r.id, answer, auto: false, ...(pendingId ? { pending_id: pendingId } : {}), ts });
@@ -1779,7 +1791,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         const kept = !already && !!hot?.prior_share?.stopped;
         // Its share ended, and whether its person stopped it on the web is not read yet: not asked for (C12-3).
         const waits = !already && !kept && endedUnread(hot);
-        if (!already && !kept && !waits) spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed.workspace_id, rule_dir: dir, ts });
+        if (!already && !kept && !waits) spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed.workspace_id, rule_dir: dir, origin: manualShareOrigin(home, lid, feed.workspace_id, goal?.id), ts });
         const self = already ? "" : kept ? " This session stays private: its sharing was stopped (or its history deleted)." : waits ? ` ${DIR_UNREAD}` : goal ? " This session too; your next prompt carries the goal." : " This session too, with no goal (its usage counts as unallocated).";
         return `Align: new sessions in ${dir} are now shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : ""}.${replaces ? ` This replaces the current rule (${replaces}).` : ""}${self}${goal ? heldNote(goal) : ""} \`::align unshare --dir\` turns it off.`;
       }
@@ -1798,7 +1810,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       }
       // The workspace whose goals it read (the one the session had, or the default): a device with two workspaces and
       // no default would otherwise not know which (C3-6).
-      spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed?.workspace_id, ts });
+      spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed?.workspace_id, origin: manualShareOrigin(home, lid, feed?.workspace_id, goal?.id), ts });
       return goal
         ? `Align: sharing requested toward "${goal.title}". The next sync asks the Align server for it (within a few seconds); once it is shared, your next prompt carries the goal.${heldNote(goal)}`
         : "Align: sharing requested with no goal (its usage counts as unallocated; `::align bind <goal>` picks one). The next sync asks the Align server for it (within a few seconds).";
@@ -1834,9 +1846,9 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       // Recorded here, so the very next prompt opens the epoch even before a sync runs (as `align bind` does).
       const inj = readInjected(home, lid);
       const id = randomId("pb_");
-      chooseBinding(hot, inj, { id, goal_id: goal.id, goal: snapshot(goal), cause: "manual", directive_id: null });
+      chooseBinding(hot, inj, { id, goal_id: goal.id, goal: snapshot(goal), cause: "manual", directive_id: null, origin: "hand" });
       writeInjected(home, lid, inj);
-      spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "bind", arg: goal.id, pending_id: id, ts });
+      spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "bind", arg: goal.id, pending_id: id, origin: "hand", ts });
       const h = readJsonStrict<HoldLatch>(layout.hold(home, lid));
       const kept = h.state === "ok" && Array.isArray(h.value?.holds) ? h.value.holds.filter((x) => x.goal_id !== goal.id).map((x) => x.goal_title) : [];
       return `${endSentence(`Align: from your next prompt this session counts toward "${goal.title}"`)}${heldNote(goal)}${keptHoldsNote(kept)}`;

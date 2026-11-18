@@ -1259,6 +1259,11 @@ const MIGRATIONS: string[] = [
   ALTER TABLE v2_device_tokens ADD COLUMN rotated_ts TEXT;
   ALTER TABLE v2_device_tokens ADD COLUMN used_at TEXT;
   `,
+  `
+  ALTER TABLE v2_epochs ADD COLUMN origin TEXT CHECK (origin IN (
+    'hand', 'folder_rule', 'anchor_hint', 'alignment', 'switch_request', 'past_import', 'suggested_agent', 'suggested_model'
+  ));
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).
