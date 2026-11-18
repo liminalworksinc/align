@@ -163,32 +163,20 @@ export function spendTeamExport(pp: PolicyPrincipal, from: string, to: string | 
   const report = spend(pp, "team", from, to);
   const teams = new Map(all<{ id: string; name: string }>("SELECT id, name FROM v2_pods WHERE ws_id = ?", pp.wsId).map((t) => [t.id, t.name]));
   const unallocated = structuredClone(report.unallocated);
-  const hidden = emptySums();
   const noGoal: ({ label: string } & Sums)[] = [];
   for (const r of noGoalTeamTotals(pp.wsId, from, to)) {
-    for (const k of NUMS) {
-      unallocated[k] -= r[k];
-      for (const b of BASES) unallocated.by_basis[b][k] -= r.by_basis[b][k];
-    }
     const { team_id: teamId, ...sums } = r;
     const name = teams.get(teamId);
     if (name !== undefined && (pp.wsRole === "owner" || pp.pods.has(teamId))) {
-      noGoal.push({ label: `${name}: spend in no goal`, ...sums });
-    } else {
       for (const k of NUMS) {
-        hidden[k] += r[k];
-        for (const b of BASES) hidden.by_basis[b][k] += r.by_basis[b][k];
+        unallocated[k] -= r[k];
+        for (const b of BASES) unallocated.by_basis[b][k] -= r.by_basis[b][k];
       }
+      noGoal.push({ label: `${name}: spend in no goal`, ...sums });
     }
   }
   noGoal.sort((a, b) => a.label.localeCompare(b.label));
-  const rows = report.rows.filter((r) => {
-    if (r.kind !== "private" && (!r.team || pp.wsRole === "owner" || pp.pods.has(r.team.id))) return true;
-    for (const k of NUMS) { hidden[k] += r[k]; for (const b of BASES) hidden.by_basis[b][k] += r.by_basis[b][k]; }
-    return false;
-  });
-  if (hidden.requests) rows.push({ key: "private", kind: "private", label: "Private goals", ...hidden });
-  return { ...report, rows, unallocated, no_goal: noGoal };
+  return { ...report, unallocated, no_goal: noGoal };
 }
 
 /** One goal's usage in [from, to): the total and one row per model, summed exactly as spend() sums a goal's row (every

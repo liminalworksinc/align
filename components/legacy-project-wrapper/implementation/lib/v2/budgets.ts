@@ -1,5 +1,5 @@
 import { all, audit, get, run, tx } from "./db";
-import { badRequest, conflict, notFound } from "./errors";
+import { badRequest, conflict, notFound, V2Error } from "./errors";
 import { goalObj, visibleGoal } from "./goals";
 import { newId, nowIso } from "./ids";
 import { authorize, canReadGoal, type PolicyObject, type PolicyPrincipal } from "./policy";
@@ -15,6 +15,12 @@ import { count } from "./plural.mts";
 export const BUDGET_NOTE = "All amounts and forecasts are estimates at list price. Work continues when the budget is reached.";
 const currentMonth = (now = Date.now()) => new Date(now).toISOString().slice(0, 7);
 
+
+export function budgetTeams(pp: PolicyPrincipal) {
+  need(pp, "spend.read");
+  return { teams: all<{ id: string; name: string }>("SELECT id, name FROM v2_pods WHERE ws_id = ? ORDER BY name, id", pp.wsId)
+    .filter((t) => pp.wsRole === "owner" || pp.pods.has(t.id)) };
+}
 
 function teamOf(pp: PolicyPrincipal, team: string) {
   need(pp, "workspace.read");
@@ -105,20 +111,20 @@ export function budgetBurn(pp: PolicyPrincipal, teamId: string, month?: string |
   const m = spendMonth(month ?? currentMonth(now));
   const asOf = Math.max(m.start, Math.min(now, m.end));
   const sums = teamSums(pp.wsId, team.id, m.from, new Date(asOf).toISOString());
-  const unattributed = get<{ n: number; unpriced: number }>(
-    `SELECT COALESCE(SUM(requests - team_attributed_requests), 0) AS n,
-       COALESCE(SUM(unpriced_requests - team_attributed_unpriced_requests), 0) AS unpriced FROM v2_spend_rollups
-     WHERE ws_id = ? AND goal_id = '' AND day || 'T00:00:00.000Z' >= ? AND day || 'T00:00:00.000Z' < ?`, pp.wsId, m.from, new Date(asOf).toISOString(),
-  )!;
+  const attributionUnknown = !!get<{ incomplete: number }>(
+    `SELECT EXISTS(SELECT 1 FROM v2_spend_rollups
+     WHERE ws_id = ? AND goal_id = '' AND requests > team_attributed_requests
+       AND day || 'T00:00:00.000Z' >= ? AND day || 'T00:00:00.000Z' < ?) AS incomplete`, pp.wsId, m.from, new Date(asOf).toISOString(),
+  )!.incomplete;
   const e = budgetOf(pp.wsId, team.id, m.month);
   const usedAllowance = allowanceGranted(pp.wsId, team.id, m.month);
   const grants = all<{ approved_usd_micros: number; expires_at: string }>(
     "SELECT approved_usd_micros, expires_at FROM v2_budget_requests WHERE ws_id = ? AND pod_id = ? AND month = ? AND state = 'granted' AND expires_at > ? ORDER BY expires_at", pp.wsId, team.id, m.month, new Date(now).toISOString(),
   );
   const effective = e ? e.amount_usd_micros + grants.reduce((n, g) => n + g.approved_usd_micros, 0) : null;
-  const complete = sums.unpriced === 0 && unattributed.n === 0;
+  const complete = sums.unpriced === 0 && !attributionUnknown;
   const elapsed = asOf - m.start;
-  const attributed = unattributed.n === 0;
+  const attributed = !attributionUnknown;
   const spendBound = !attributed ? "unknown" as const : sums.unpriced ? "lower" as const : "exact" as const;
   const remaining = attributed && effective !== null ? effective - sums.priced : null;
   const forecast = attributed && elapsed > 0 ? (complete ? Math.round : Math.floor)(sums.priced * ((m.end - m.start) / elapsed)) : null;
@@ -155,11 +161,11 @@ export function budgetBurn(pp: PolicyPrincipal, teamId: string, month?: string |
     pricing_note: !attributed ? "Team attribution is incomplete. Complete spend, remaining and forecast are unknown; the priced subtotal is only the known amount." : sums.unpriced ?
       `${count(sums.unpriced, "unpriced request")} excluded. Spend and forecast are at least the priced estimates. Remaining, when shown, is at most its displayed estimate.` : "All requests in this total have prices.",
     forecast_usd_micros: forecast, runs_out_at: runsOut === null ? null : new Date(Math.ceil(runsOut)).toISOString(),
-    unpriced_requests: unattributed.n ? null : sums.unpriced, known_unpriced_requests: sums.unpriced,
+    unpriced_requests: attributionUnknown ? null : sums.unpriced, known_unpriced_requests: sums.unpriced,
     no_goal: { priced_spend_usd_micros: sums.no_goal_priced, estimated_spend_usd_micros: attributed ? sums.no_goal_priced : null,
       spend_bound: !attributed ? "unknown" as const : sums.no_goal_unpriced ? "lower" as const : "exact" as const,
-      unpriced_requests: unattributed.n ? null : sums.no_goal_unpriced, known_unpriced_requests: sums.no_goal_unpriced, share_percent: complete && sums.priced > 0 ? Math.round(sums.no_goal_priced / sums.priced * 1000) / 10 : null,
-      attribution_unknown: unattributed.n > 0, unattributed_rolled_up_requests: unattributed.n, unattributed_rolled_up_unpriced_requests: unattributed.unpriced },
+      unpriced_requests: attributionUnknown ? null : sums.no_goal_unpriced, known_unpriced_requests: sums.no_goal_unpriced, share_percent: complete && sums.priced > 0 ? Math.round(sums.no_goal_priced / sums.priced * 1000) / 10 : null,
+      attribution_unknown: attributionUnknown },
     history, can: { manage: m.month >= currentMonth(now) && authorize(pp, "team_budget.manage", { kind: "pod", podId: team.id }).ok,
       request: !!e && m.month === currentMonth(now) && authorize(pp, "budget_request.create", { kind: "pod", podId: team.id }).ok },
   };
@@ -190,6 +196,19 @@ function stateRefusal(r: RequestRow, reader: string, decisions = decisionsOf(r.i
     case "declined": return d?.actor_id === reader ? "You declined this request, so nothing changes." : `This request was declined${by}, so nothing changes.`;
     case "withdrawn": return r.requester_id === reader ? "You withdrew this request, so nothing changes." : `This request was withdrawn by ${name(r.requester_id)}, so nothing changes.`;
     case "expired": return r.state === "granted" ? "The grant on this request expired, so it adds nothing to the budget." : "This request expired at the end of its month without a grant.";
+  }
+}
+
+/** A record states its status directly; refusal wording belongs only to refused actions. */
+function stateSentence(r: RequestRow, reader: string, decisions: DecisionRow[], name: (id: string) => string): string {
+  const d = decisions.at(-1), actor = d ? d.actor_id === reader ? "you" : name(d.actor_id) : "an approver";
+  const until = r.expires_at ? new Date(r.expires_at).toLocaleString("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }) : "the end of this month";
+  switch (stateOf(r)) {
+    case "waiting": return r.second_look ? "This request is waiting for a second look by another workspace owner." : "This request is waiting for a decision.";
+    case "granted": return r.authority === "allowance" ? `This request was recorded under the team's allowance until ${until}.` : `This request was granted by ${actor} until ${until}.`;
+    case "declined": return `This request was declined by ${actor}.`;
+    case "withdrawn": return "This request was withdrawn.";
+    case "expired": return r.state === "granted" ? "This grant expired." : "This request expired at the end of its month without a grant.";
   }
 }
 
@@ -226,7 +245,7 @@ function requestView(pp: PolicyPrincipal, r: RequestRow, refs = requestRefs(pp, 
   const approvers = eligibleApprovers(r, !!r.second_look, refs);
   const secondLookReason = r.second_look ? "This request already had its second look." : r.month !== currentMonth() ? "This month has ended, so a second look is unavailable." : state === "declined" && !eligibleApprovers(r, true, refs).length ? NO_SECOND_OWNER : null;
   return {
-    id: r.id, team: refs.teams.get(r.pod_id)!, month: r.month, revision: r.revision, state, state_note: stateRefusal(r, pp.userId, decisions, (id) => refs.person(id).name),
+    id: r.id, team: refs.teams.get(r.pod_id)!, month: r.month, revision: r.revision, state, state_note: stateSentence(r, pp.userId, decisions, (id) => refs.person(id).name),
     requester: refs.person(r.requester_id), filed_from: r.filed_from, amount_usd_micros: r.amount_usd_micros, reason: r.reason,
     goal: readable ? { id: goal.id, title: goal.title } : null, goal_hidden: !!r.goal_id && !readable,
     session_count: r.requested_session_count, session_keys: r.requester_id === pp.userId ? refs.sessions.filter((s) => s.request_id === r.id).map((s) => s.session_key) : [],
@@ -257,7 +276,7 @@ export function listBudgetRequests(pp: PolicyPrincipal, team?: string, month?: s
   const cursor = options.cursor ? requestOf(pp.wsId, options.cursor) : null;
   if (options.cursor && (!cursor || cursor.month !== m || team && cursor.pod_id !== team || !visible(cursor))) throw badRequest("This page link is invalid. Start from the first page.");
   const teams = [...pp.pods.keys()], marks = teams.map(() => "?").join(",") || "NULL";
-  const selected = all<RequestRow>(`SELECT * FROM v2_budget_requests WHERE ws_id = ? AND month = ? AND (? IS NULL OR pod_id = ?) AND (? = 'owner' OR requester_id = ? OR pod_id IN (${marks})) AND (? IS NULL OR updated_at < ? OR (updated_at = ? AND id < ?)) ORDER BY updated_at DESC, id DESC LIMIT ?`, pp.wsId, m, team ?? null, team ?? null, pp.wsRole, pp.userId, ...teams, cursor?.id ?? null, cursor?.updated_at ?? null, cursor?.updated_at ?? null, cursor?.id ?? null, limit + 1);
+  const selected = all<RequestRow>(`SELECT * FROM v2_budget_requests WHERE ws_id = ? AND month = ? AND (? IS NULL OR pod_id = ?) AND (? = 'owner' OR requester_id = ? OR pod_id IN (${marks})) AND (? IS NULL OR created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT ?`, pp.wsId, m, team ?? null, team ?? null, pp.wsRole, pp.userId, ...teams, cursor?.id ?? null, cursor?.created_at ?? null, cursor?.created_at ?? null, cursor?.id ?? null, limit + 1);
   const page = selected.slice(0, limit), rows = requestViews(pp, page);
   return { waiting_on_me: rows.filter((r) => r.waiting_on_me), mine: rows.filter((r) => r.requester.id === pp.userId), others: rows.filter((r) => !r.waiting_on_me && r.requester.id !== pp.userId), next_cursor: selected.length > limit ? page.at(-1)!.id : null };
 }
@@ -307,6 +326,8 @@ export async function createBudgetRequest(pp: PolicyPrincipal, team: string, b: 
     const m = spendMonth(currentMonth());
     const e = budgetOf(pp.wsId, team, m.month);
     if (!e) throw conflict("budget_missing", "This team has no budget for this month.");
+    const created = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_budget_requests WHERE ws_id = ? AND created_at > ?", pp.wsId, new Date(Date.now() - 3600_000).toISOString())!.n;
+    if (created >= 60) throw new V2Error(429, "rate_limited", "Too many budget requests were recorded in the last hour. Try again later.");
     const granted = filedFrom === "browser" && e.allowance_usd_micros !== null && amount <= e.allowance_usd_micros &&
       e.allowance_ceiling_usd_micros !== null && allowanceGranted(pp.wsId, team, m.month) + amount <= e.allowance_ceiling_usd_micros;
     if (!granted) waitingRoom(pp, team, m.month);

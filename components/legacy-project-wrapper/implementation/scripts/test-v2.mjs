@@ -1722,22 +1722,13 @@ try {
         const report = (await call(u.who, "GET", `/api/v2/workspaces/${A}/spend?by=team&from=2024-02-01T00:00:00.000Z&to=2024-03-01T00:00:00.000Z`, { cookie: u.cookie })).json;
         const noGoalRows = data.filter((r) => /: spend in no goal$/.test(r[1]));
         const unallocated = data.find((r) => r[1] === "Not bound to a goal");
-        const memberTeams = (await call(u.who, "GET", "/api/v2/workspaces", { cookie: u.cookie })).json.workspaces.find((w) => w.id === A);
-        const privateTotals = Array(9).fill(0n), hiddenNoGoal = Array(9).fill(0n), visibleRows = [];
-        const attributed = withDb((d) => d.prepare(`SELECT e.spend_team_id, COUNT(*) AS requests, COALESCE(SUM(u.est_list_usd_micros), 0) AS est_list_usd_micros, SUM(u.est_list_usd_micros IS NULL) AS unpriced_requests, SUM(u.input) AS input, SUM(u.output) AS output, SUM(u.cache_read) AS cache_read, SUM(u.cache_write_5m) AS cache_write_5m, SUM(u.cache_write_1h) AS cache_write_1h, SUM(u.cache_write_unsplit) AS cache_write_unsplit FROM v2_usage u JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id WHERE u.ws_id = ? AND e.goal_id IS NULL AND e.spend_team_id IS NOT NULL AND u.ts >= '2024-02-01T00:00:00.000Z' AND u.ts < '2024-03-01T00:00:00.000Z' GROUP BY e.spend_team_id`).all(A));
-        for (const row of attributed) if (memberTeams.role !== "owner" && !memberTeams.teams.some((t) => t.id === row.spend_team_id)) sums(row).forEach((n, i) => { hiddenNoGoal[i] += n; privateTotals[i] += n; });
-        for (const row of report.rows) {
-          if (row.kind === "private" || row.team && memberTeams.role !== "owner" && !memberTeams.teams.some((t) => t.id === row.team.id)) sums(row).forEach((n, i) => privateTotals[i] += n);
-          else visibleRows.push([row.label, sums(row)]);
-        }
-        if (privateTotals[0]) visibleRows.push(["Private goals", privateTotals]);
-        const expected = [...visibleRows, ["Total", sums(report.total)]];
-        const noGoalMatches = nums(unallocated).every((n, i) => n + noGoalRows.reduce((v, r) => v + nums(r)[i], 0n) + hiddenNoGoal[i] === sums(report.unallocated)[i]);
+        const expected = [...report.rows.map((row) => [row.label, sums(row)]), ["Total", sums(report.total)]];
+        const noGoalMatches = nums(unallocated).every((n, i) => n + noGoalRows.reduce((v, r) => v + nums(r)[i], 0n) === sums(report.unallocated)[i]);
         const matches = expected.every(([label, values]) => {
           const row = data.find((r) => r[1] === label);
           return row && nums(row).every((n, i) => n === values[i]);
         });
-        check(`spend export: ${u.who} applies member-or-owner privacy with unnamed-row folding and additive home-team no-goal rows`,
+        check(`spend export: ${u.who} matches named goal-bound team rows in the on-screen report with member-or-owner home-team visibility`,
           csv.status === 200 && JSON.stringify(records[4]) === JSON.stringify(columns) && data.length === expected.length + noGoalRows.length + 1 && noGoalMatches && data.every((r) => r.length === columns.length && r[0] === "2024-02") && matches &&
           total[1] === "Total" && nums(total).every((n, i) => n === data.slice(0, -1).reduce((sum, r) => sum + nums(r)[i], 0n)) &&
           !csv.text.includes(CANARY) && !csv.text.includes(GP.id) && !users.some((p) => csv.text.includes(p.email) || csv.text.includes(p.name)) && !csv.text.includes(S3a), csv.text);
@@ -1756,9 +1747,14 @@ try {
         const data = parseCsv(csv.text).slice(5);
         const safeName = /^[=+\-@\t\r]/.test(name) ? `'${name}` : name;
         const hiddenCsv = await csvOf(U4);
-        check(`spend export: quotes and neutralizes ${JSON.stringify(name)}; a viewer never receives the hidden team's name`,
+        // U4 is a viewer in no team. Their CSV names exactly the teams their on-screen team report names, and no team's no-goal spend.
+        const hiddenRows = parseCsv(hiddenCsv.text).slice(5);
+        const hiddenReport = (await call(U4.who, "GET", `/api/v2/workspaces/${A}/spend?by=team&from=2024-02-01T00:00:00.000Z&to=2024-03-01T00:00:00.000Z`, { cookie: U4.cookie })).json;
+        check(`spend export: quotes and neutralizes ${JSON.stringify(name)}; a viewer receives the same goal-bound team name as the on-screen report`,
           csv.status === 200 && data.some((r) => r[1] === safeName && r.length === columns.length) && !data.some((r) => /^[=+\-@\t\r]/.test(r[1])) &&
-          !hiddenCsv.text.includes(name) && !hiddenCsv.text.includes(safeName) && parseCsv(hiddenCsv.text).slice(5).filter((r) => r[1] === "Private goals").length === 1, csv.text);
+          hiddenRows.every((r) => !/^[=+\-@\t\r]/.test(r[1])) && !hiddenRows.some((r) => /: spend in no goal$/.test(r[1])) &&
+          hiddenReport.rows.every((row) => hiddenRows.some((r) => r[1] === (/^[=+\-@\t\r]/.test(row.label) ? `'${row.label}` : row.label))) &&
+          hiddenRows.some((r) => r[1] === safeName) === hiddenReport.rows.some((row) => row.label === name), `${csv.text}\n${hiddenCsv.text}`);
       }
       withDb((d) => d.prepare("UPDATE v2_pods SET name = ? WHERE id = ?").run(original.team, P1));
       for (const month of ["2024-12", "2025-01", "0099-02", "9999-12"]) {
@@ -7945,7 +7941,7 @@ try {
   }
   // ==== end live:stream ====
 
-  // ======== spend exceptions: server acceptance (stages B and C) ========
+  // ======== team budgets: server acceptance (stages B and C) ========
   {
     const people = {};
     for (const [who, name] of [["SO", "Spend Owner"], ["SO2", "Second Owner"], ["SL", "Spend Lead"], ["SL2", "Other Lead"], ["SM", "Spend Member"], ["SV", "Spend Viewer"], ["SX", "Other Team Member"]])
@@ -7970,16 +7966,16 @@ try {
     const auditCount = () => withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE ws_id = ? AND (action LIKE 'team_budget.%' OR action LIKE 'budget_request.%')").get(W).n);
     const empty = await req(SM, "GET", env);
     const noEnv = await request(SM);
-    check("spend exceptions: no budget is an honest null with zero known usage and no change to work; asking without one is 409", empty.json.budget === null && empty.json.estimated_spend_usd_micros === 0 && empty.json.effective_budget_usd_micros === null && noEnv.status === 409 && noEnv.json.error === "budget_missing", noEnv.text);
+    check("team budgets: no budget is an honest null with zero known usage and no change to work; asking without one is 409", empty.json.budget === null && empty.json.estimated_spend_usd_micros === 0 && empty.json.effective_budget_usd_micros === null && noEnv.status === 409 && noEnv.json.error === "budget_missing", noEnv.text);
     const set = await req(SL, "PUT", env, { amount_usd: 100, allowance_usd: 5 });
     const setHistory = set.json.history;
-    check("spend exceptions: a lead sets one monthly budget and allowance with recorded actor, time and audit", set.status === 200 && set.json.budget.amount_usd_micros === 100_000_000 && set.json.budget.allowance_usd_micros === 5_000_000 && setHistory.length === 1 && setHistory[0].actor.id === SL.id && setHistory[0].action === "set" && auditCount() === 1, set.text);
+    check("team budgets: a lead sets one monthly budget and allowance with recorded actor, time and audit", set.status === 200 && set.json.budget.amount_usd_micros === 100_000_000 && set.json.budget.allowance_usd_micros === 5_000_000 && setHistory.length === 1 && setHistory[0].actor.id === SL.id && setHistory[0].action === "set" && auditCount() === 1, set.text);
     const badSets = await Promise.all([-1, 0.001, "100", 1_000_001].map((amount_usd) => req(SO, "PUT", env, { amount_usd })));
     const badMonth = await req(SO, "GET", `${env}?month=2026-13`);
     const past = await req(SO, "PUT", `${env}?month=2000-01`, { amount_usd: 1 });
     const foreign = await call(SO.who, "PUT", `/api/v2/workspaces/${A}/teams/${T}/budget`, { cookie: SO.cookie, body: { amount_usd: 1 } });
     const rejected = await Promise.all([req(SM, "PUT", env, { amount_usd: 1 }), req(SV, "DELETE", env), req(SL, "PUT", `/teams/${T2}/budget`, { amount_usd: 1 }), req(U1, "GET", env), req(SO, "PUT", env, { amount_usd: 1 }, { origin: "http://evil.example" })]);
-    check("spend exceptions: bad money/month, past writes, member/viewer/other-team writes, cross-workspace and cross-site requests fail without writes", badSets.every((r) => r.status === 400) && badMonth.status === 400 && past.status === 409 && foreign.status === 404 && rejected.map((r) => r.status).join() === "403,403,403,404,403" && rejected[1].json.error === "read_only" && auditCount() === 1, JSON.stringify([badSets.map((r) => r.status), rejected.map((r) => [r.status, r.json?.error])]));
+    check("team budgets: bad money/month, past writes, member/viewer/other-team writes, cross-workspace and cross-site requests fail without writes", badSets.every((r) => r.status === 400) && badMonth.status === 400 && past.status === 409 && foreign.status === 404 && rejected.map((r) => r.status).join() === "403,403,403,404,403" && rejected[1].json.error === "read_only" && auditCount() === 1, JSON.stringify([badSets.map((r) => r.status), rejected.map((r) => [r.status, r.json?.error])]));
 
     const privateTitle = `SPEND-PRIVATE-${randomBytes(6).toString("hex")}`;
     const goal = (await req(SM, "POST", "/goals", { title: "Finish build", team_id: T, visibility: "workspace" })).json;
@@ -7995,7 +7991,7 @@ try {
       const s = await device("PUT", `/sessions/${key}`, { harness: "claude-code", repo_key: repoKey(D, W, `/src/${native}`), started_at: started, title: null });
       const e = await device("POST", `/sessions/${key}/epochs`, { epoch_id: ep, goal_id: g, starts_at: started, cause: "manual", root_turn: null });
       const u = await device("POST", `/sessions/${key}/usage`, { rows: [usageRow(D, native, ep, { ts: started, est_list_usd_micros: price })] });
-      check(`spend exceptions setup: ${native} shared, bound and metered`, s.status === 200 && e.status === 200 && u.json?.accepted === 1, `${s.status} ${e.text} ${u.text}`);
+      check(`team budgets setup: ${native} shared, bound and metered`, s.status === 200 && e.status === 200 && u.json?.accepted === 1, `${s.status} ${e.text} ${u.text}`);
       return { key, ep };
     };
     const own = await share("spend-visible", goal.id, 20_000_000);
@@ -8004,19 +8000,22 @@ try {
     const outsiderBudget = await req(SO2, "GET", env);
     check("budgets: workspace owners read another team budget", outsiderBudget.status === 200);
     const burns = await Promise.all([SO, SM, SV].map((u) => req(u, "GET", env)));
-    check("spend exceptions: team burn includes readable, private and no-goal work, with no named goal/session/person spend; viewer sees the same totals", burns.every((r) => r.status === 200 && r.json.estimated_spend_usd_micros === 40_000_000 && r.json.remaining_usd_micros === 60_000_000 && r.json.no_goal.share_percent === 25 && r.json.forecast_usd_micros >= 40_000_000 && !r.text.includes(hidden.id) && !r.text.includes(privateTitle) && !r.text.includes(own.key)), burns[0].text);
+    check("team budgets: team burn includes readable, private and no-goal work, with no named goal/session/person spend; viewer sees the same totals", burns.every((r) => r.status === 200 && r.json.estimated_spend_usd_micros === 40_000_000 && r.json.remaining_usd_micros === 60_000_000 && r.json.no_goal.share_percent === 25 && r.json.forecast_usd_micros >= 40_000_000 && !r.text.includes(hidden.id) && !r.text.includes(privateTitle) && !r.text.includes(own.key)), burns[0].text);
     const privateBudget = await req(SX, "GET", env), privateCsv = await req(SX, "GET", `/spend/export?month=${m}`);
-    check("budgets and spend export: member-or-owner rule and unnamed-row folding include public-goal and no-goal spend", privateBudget.status === 404 && !privateCsv.text.includes("Build") && privateCsv.text.includes('"Private goals","3","40.000000"') && !privateCsv.text.includes("Private teams"), privateCsv.text);
+    check("budgets and spend export: readable goal-bound team spend matches the on-screen report while home-team spend stays unallocated", privateBudget.status === 404 && privateCsv.text.includes('"Build","1","20.000000"') && privateCsv.text.includes('"Private goals","1","10.000000"') && privateCsv.text.includes('"Not bound to a goal","1","10.000000"') && !privateCsv.text.includes("Build: spend in no goal") && !privateCsv.text.includes("Private teams"), privateCsv.text);
     await req(SO, "DELETE", `/teams/${T}/members/${SM.id}`);
     const afterLeave = await req(SO, "GET", env);
     await req(SO, "POST", `/teams/${T}/members`, { user_id: SM.id, role: "member" });
-    check("spend exceptions: no-goal attribution survives a later membership change", afterLeave.json.no_goal.priced_spend_usd_micros === 10_000_000 && afterLeave.json.estimated_spend_usd_micros === 40_000_000, afterLeave.text);
+    check("team budgets: no-goal attribution survives a later membership change", afterLeave.json.no_goal.priced_spend_usd_micros === 10_000_000 && afterLeave.json.estimated_spend_usd_micros === 40_000_000, afterLeave.text);
     await req(SO, "POST", `/teams/${T2}/members`, { user_id: SM.id, role: "member" });
     const defaultHome = await device("GET", "/spend/home-team");
     const chosenHome = await req(SM, "PUT", "/spend/home-team", { team_id: T2 });
     const notMyTeam = await req(SO, "PUT", "/spend/home-team", { team_id: T });
     const bearerChoice = await device("PUT", "/spend/home-team", { team_id: T });
     const unchangedBurn = await req(SO, "GET", env);
+    const terminalTeams = await device("GET", "/spend/teams");
+    const ownerTeams = await req(SO, "GET", "/spend/teams");
+    check("budget choices: device members get named member teams and workspace owners get every team", terminalTeams.status === 200 && terminalTeams.json.teams.some((t) => t.id === T && t.name === "Build") && terminalTeams.json.teams.some((t) => t.id === T2) && terminalTeams.json.teams.length === 2 && ownerTeams.status === 200 && ownerTeams.json.teams.some((t) => t.id === T2), terminalTeams.text);
     const capturedBudget = await device("GET", `/sessions/${unbound.key}/budget`);
     const otherSessionReader = await req(SL, "GET", `/sessions/${unbound.key}/budget`);
     check("session budget: only its person/sharing device reads the captured team, and a later home choice does not move it",
@@ -8030,26 +8029,26 @@ try {
     check("spend home: leaving the chosen team clears the preference", (await req(SM, "GET", "/spend/home-team")).json.team.id === T);
     const devRead = await device("GET", env);
     const devWrite = await device("PUT", env, { amount_usd: 999 });
-    check("spend exceptions: granted devices read burn but cannot set an budget", devRead.status === 200 && devWrite.status === 403 && devWrite.json.error === "bearer_not_allowed", devWrite.text);
+    check("team budgets: granted devices read burn but cannot set a budget", devRead.status === 200 && devWrite.status === 403 && devWrite.json.error === "bearer_not_allowed", devWrite.text);
 
     const low = await request(SM, { amount_usd: 5, goal_id: hidden.id, session_keys: [own.key] });
     const waiting = await request(SM, { goal_id: hidden.id, session_keys: [own.key] });
     const mine = await read(SM, waiting.json), ownerView = await read(SO, waiting.json);
-    check("spend exceptions: allowance grant has no approver and exact authority label; larger request waits; private goal and attached sessions are redacted for the owner", low.status === 201 && low.json.state === "granted" && low.json.authority === "allowance" && low.json.authority_label === "This request was recorded under the team's allowance." && low.json.decisions.length === 0 && low.json.expires_at === monthEnd && waiting.status === 201 && waiting.json.state === "waiting" && mine.json.goal.id === hidden.id && mine.json.session_keys[0] === own.key && ownerView.json.goal === null && ownerView.json.goal_hidden && ownerView.json.session_count === 1 && ownerView.json.session_keys.length === 0 && !ownerView.text.includes(hidden.id) && !ownerView.text.includes(own.key), ownerView.text);
+    check("team budgets: allowance grant has no approver and exact authority label; larger request waits; private goal and attached sessions are redacted for the owner", low.status === 201 && low.json.state === "granted" && low.json.authority === "allowance" && low.json.authority_label === "This request was recorded under the team's allowance." && low.json.decisions.length === 0 && low.json.expires_at === monthEnd && waiting.status === 201 && waiting.json.state === "waiting" && mine.json.goal.id === hidden.id && mine.json.session_keys[0] === own.key && ownerView.json.goal === null && ownerView.json.goal_hidden && ownerView.json.session_count === 1 && ownerView.json.session_keys.length === 0 && !ownerView.text.includes(hidden.id) && !ownerView.text.includes(own.key), ownerView.text);
     const badRequests = await Promise.all([request(SV), request(SO), request(SM, { amount_usd: 0 }), request(SM, { reason: " " }), request(SL, { goal_id: hidden.id }), request(SL, { session_keys: [own.key] }), request(SM, { session_keys: [own.key, own.key] }), request(SM, { reason: "x".repeat(17_000) })]);
-    check("spend exceptions: viewer/non-team requester, zero amount, blank reason, unreadable goal, another person's sessions, duplicate sessions and oversized body fail", badRequests.map((r) => r.status).join() === "403,403,400,400,404,404,400,413", JSON.stringify(badRequests.map((r) => [r.status, r.json?.error])));
+    check("team budgets: viewer/non-team requester, zero amount, blank reason, unreadable goal, another person's sessions, duplicate sessions and oversized body fail", badRequests.map((r) => r.status).join() === "403,403,400,400,404,404,400,413", JSON.stringify(badRequests.map((r) => [r.status, r.json?.error])));
     const exhausted = await request(SM, { amount_usd: 1 });
     const exhaustedBurn = (await req(SO, "GET", env)).json;
-    check("spend exceptions: omitted ceiling defaults to allowance and a second grant waits after exhaustion", exhausted.json.state === "waiting" && exhaustedBurn.budget.allowance_ceiling_usd_micros === 5_000_000 && exhaustedBurn.allowance_remaining_usd_micros === 0, exhausted.text);
+    check("team budgets: omitted ceiling defaults to allowance and a second grant waits after exhaustion", exhausted.json.state === "waiting" && exhaustedBurn.budget.allowance_ceiling_usd_micros === 5_000_000 && exhaustedBurn.allowance_remaining_usd_micros === 0, exhausted.text);
     const raisedCeiling = await req(SL, "PUT", env, { amount_usd: 100, allowance_usd: 5, allowance_ceiling_usd: 6 });
-    check("spend exceptions: a lead changes the ceiling, preserving grants and recording its history", raisedCeiling.json.allowance_granted_usd_micros === 5_000_000 && raisedCeiling.json.allowance_remaining_usd_micros === 1_000_000 && raisedCeiling.json.history.at(-1).allowance_ceiling_usd_micros === 6_000_000, raisedCeiling.text);
+    check("team budgets: a lead changes the ceiling, preserving grants and recording its history", raisedCeiling.json.allowance_granted_usd_micros === 5_000_000 && raisedCeiling.json.allowance_remaining_usd_micros === 1_000_000 && raisedCeiling.json.history.at(-1).allowance_ceiling_usd_micros === 6_000_000, raisedCeiling.text);
     const deviceAsk = await device("POST", asks, { amount_usd: 1, reason: "Terminal request" });
     check("budgets: terminal requests always wait for a person under the allowance", deviceAsk.status === 201 && deviceAsk.json.authority === null && deviceAsk.json.state === "waiting" && deviceAsk.json.filed_from === "terminal", deviceAsk.text);
     const first = waiting.json;
     const beforeDecisions = auditCount();
     const missingRevision = await req(SL, "POST", `/budget-requests/${first.id}/approve`, { amount_usd: 1, expires_at: monthEnd });
     const invalidDecisions = await Promise.all([act(SM, first, "approve", { amount_usd: 20, expires_at: monthEnd }), act(SV, first, "decline", { reason: "No" }), act(SL, first, "approve", { amount_usd: 21, expires_at: monthEnd }), act(SL, first, "approve", { amount_usd: 1, expires_at: "2000-01-01T00:00:00Z" }), act(SL, first, "approve", { amount_usd: 1, expires_at: "2099-01-01T00:00:00Z" }), act(SL, first, "decline", { reason: " " }), act(SL, first, "decline", { revision: 99, reason: "x".repeat(1001) })]);
-    check("spend exceptions: self-decision, viewer, amount above ask, expired/next-month expiry, blank decline and missing/future revisions are refused atomically", missingRevision.status === 400 && invalidDecisions.map((r) => r.status).join() === "403,403,400,400,400,400,400" && invalidDecisions[6].json.error === "unknown_revision" && auditCount() === beforeDecisions, JSON.stringify(invalidDecisions.map((r) => [r.status, r.json?.error])));
+    check("team budgets: self-decision, viewer, amount above ask, expired/next-month expiry, blank decline and missing/future revisions are refused atomically", missingRevision.status === 400 && invalidDecisions.map((r) => r.status).join() === "403,403,400,400,400,400,400" && invalidDecisions[6].json.error === "unknown_revision" && auditCount() === beforeDecisions, JSON.stringify(invalidDecisions.map((r) => [r.status, r.json?.error])));
     const decline = await act(SO, first, "decline", { reason: "Keep the scope smaller" });
     const referral = await act(SM, decline.json, "second-look");
     const repeatedReferral = await act(SM, referral.json, "second-look");
@@ -8057,30 +8056,30 @@ try {
     const leadSecond = await act(SL, referral.json, "approve", { amount_usd: 12, expires_at: monthEnd });
     const staleFirst = await act(SO2, first, "approve", { amount_usd: 12, expires_at: monthEnd });
     const grant = await act(SO2, referral.json, "approve", { amount_usd: 12, expires_at: monthEnd, note: "Finish this part" });
-    check("spend exceptions: one second look, different owner only, stale first decision refused, partial approval preserves both decisions", decline.json.state === "declined" && referral.json.state === "waiting" && referral.json.second_look && repeatedReferral.status === 409 && sameOwner.status === 403 && leadSecond.status === 403 && staleFirst.status === 409 && staleFirst.json.error === "stale_revision" && grant.status === 200 && grant.json.state === "granted" && grant.json.approved_usd_micros === 12_000_000 && grant.json.decisions.map((d) => d.decision).join() === "declined,granted" && grant.json.decisions[0].actor.id === SO.id && grant.json.decisions[1].actor.id === SO2.id, grant.text);
+    check("team budgets: one second look, different owner only, stale first decision refused, partial approval preserves both decisions", decline.json.state === "declined" && referral.json.state === "waiting" && referral.json.second_look && repeatedReferral.status === 409 && sameOwner.status === 403 && leadSecond.status === 403 && staleFirst.status === 409 && staleFirst.json.error === "stale_revision" && grant.status === 200 && grant.json.state === "granted" && grant.json.approved_usd_micros === 12_000_000 && grant.json.decisions.map((d) => d.decision).join() === "declined,granted" && grant.json.decisions[0].actor.id === SO.id && grant.json.decisions[1].actor.id === SO2.id, grant.text);
     const burnGranted = (await req(SO, "GET", env)).json;
-    check("spend exceptions: active allowance and approved grants raise the monthly effective budget and remaining estimate", burnGranted.effective_budget_usd_micros === 117_000_000 && burnGranted.remaining_usd_micros === 77_000_000, JSON.stringify(burnGranted));
+    check("team budgets: active allowance and approved grants raise the monthly effective budget and remaining estimate", burnGranted.effective_budget_usd_micros === 117_000_000 && burnGranted.remaining_usd_micros === 77_000_000, JSON.stringify(burnGranted));
     const twice = (await request(SM)).json;
     const d1 = await act(SL, twice, "decline", { reason: "No" });
     const s2 = await act(SM, d1.json, "second-look");
     const d2 = await act(SO, s2.json, "decline", { reason: "Still no" });
     const s3 = await act(SM, d2.json, "second-look");
-    check("spend exceptions: two declines remain in the record and a second referral is refused", d2.json.decisions.length === 2 && s3.status === 409 && !d2.json.can.second_look, s3.text);
+    check("team budgets: two declines remain in the record and a second referral is refused", d2.json.decisions.length === 2 && s3.status === 409 && !d2.json.can.second_look, s3.text);
     const withdrawMe = (await request(SL)).json;
     const selfLead = await act(SL, withdrawMe, "approve", { amount_usd: 1, expires_at: monthEnd });
     const wrongWithdraw = await act(SO, withdrawMe, "withdraw");
     const withdrew = await act(SL, withdrawMe, "withdraw");
     const afterWithdraw = await act(SO, withdrawMe, "approve", { amount_usd: 1, expires_at: monthEnd });
-    check("spend exceptions: a requesting lead cannot approve themselves; only requester withdraws; a decision after withdrawal fails", selfLead.status === 403 && wrongWithdraw.status === 403 && withdrew.json.state === "withdrawn" && afterWithdraw.status === 409, `${selfLead.status} ${wrongWithdraw.status} ${withdrew.text}`);
+    check("team budgets: a requesting lead cannot approve themselves; only requester withdraws; a decision after withdrawal fails", selfLead.status === 403 && wrongWithdraw.status === 403 && withdrew.json.state === "withdrawn" && afterWithdraw.status === 409, `${selfLead.status} ${wrongWithdraw.status} ${withdrew.text}`);
     const racing = (await request(SM)).json;
     const raced = await Promise.all([act(SL, racing, "approve", { amount_usd: 2, expires_at: monthEnd }), act(SL2, racing, "decline", { reason: "No" })]);
     const raceRecord = (await read(SM, racing)).json;
-    check("spend exceptions: racing decisions produce one transition and one immutable decision", raced.map((r) => r.status).sort().join() === "200,409" && raceRecord.decisions.length === 1, JSON.stringify(raced.map((r) => [r.status, r.json?.error])));
+    check("team budgets: racing decisions produce one transition and one immutable decision", raced.map((r) => r.status).sort().join() === "200,409" && raceRecord.decisions.length === 1, JSON.stringify(raced.map((r) => [r.status, r.json?.error])));
     const privateRead = await read(U1, first);
     const waitingHome = (await request(SM)).json;
     const ownerHome = await req(SO, "GET", "/home"), requesterHome = await req(SM, "GET", "/home");
     const listing = (await req(SL, "GET", "/budget-requests")).json;
-    check("spend exceptions: eligible deciders see waiting requests on Home, requester sees every own state, outsiders cannot read, and lists do not leak private goals", ownerHome.json.budget_requests.waiting_on_me.some((r) => r.id === waitingHome.id) && requesterHome.json.budget_requests.mine.some((r) => r.id === first.id && r.state === "granted") && listing.waiting_on_me.some((r) => r.id === waitingHome.id) && privateRead.status === 404 && !ownerHome.text.includes(hidden.id) && !ownerHome.text.includes(privateTitle), ownerHome.text.slice(-1000));
+    check("team budgets: eligible deciders see waiting requests on Home, requester sees every own state, outsiders cannot read, and lists do not leak private goals", ownerHome.json.budget_requests.waiting_on_me.some((r) => r.id === waitingHome.id) && requesterHome.json.budget_requests.mine.some((r) => r.id === first.id && r.state === "granted") && listing.waiting_on_me.some((r) => r.id === waitingHome.id) && privateRead.status === 404 && !ownerHome.text.includes(hidden.id) && !ownerHome.text.includes(privateTitle), ownerHome.text.slice(-1000));
     // Home excludes irrelevant history before loading records, while the full list retains it.
     const oldHome = (await request(SM)).json;
     withDb((d) => d.prepare("UPDATE v2_budget_requests SET month = '2000-01' WHERE id = ?").run(oldHome.id));
@@ -8105,7 +8104,7 @@ try {
       const stranded = await req(SO, "POST", `/teams/${solo}/budget-requests`, { amount_usd: 20, reason: "Finish work" });
       const self = await act(SO, stranded.json, "approve", { amount_usd: 20, expires_at: monthEnd });
       const strandedList = (await req(SO, "GET", `/teams/${solo}/budget-requests`)).json;
-      check("spend requests: sole lead and sole owner creates successfully, record and list explain no eligible decider, self-approval stays forbidden",
+      check("budget requests: sole lead and sole owner creates successfully, record and list explain no eligible decider, self-approval stays forbidden",
         stranded.status === 201 && stranded.json.state === "waiting" && stranded.json.approvers.length === 0 && stranded.json.decision_unavailable_reason.includes("Nobody is eligible") &&
         strandedList.mine.some((r) => r.id === stranded.json.id && r.decision_unavailable_reason) && self.status === 403, stranded.text);
       const pendingSecond = await req(SM, "POST", `/teams/${solo}/budget-requests`, { amount_usd: 20, reason: "Finish work" });
@@ -8113,24 +8112,24 @@ try {
       const before = auditCount();
       const noSecond = await act(SM, no.json, "second-look");
       const after = await read(SM, no.json);
-      check("spend requests: no eligible different owner means no second look is offered, a reason is shown and a referral records nothing",
+      check("budget requests: no eligible different owner means no second look is offered, a reason is shown and a referral records nothing",
         !after.json.can.second_look && after.json.second_look_unavailable_reason.includes("No other workspace owner") && noSecond.status === 409 && noSecond.json.error === "no_eligible_approver" && after.json.revision === no.json.revision && auditCount() === before, noSecond.text);
     } finally {
       withDb((d) => d.prepare("UPDATE v2_members SET role = 'owner' WHERE ws_id = ? AND user_id = ?").run(W, SO2.id));
     }
     const beforeRead = auditCount();
     await req(SO, "GET", env); await req(SO, "GET", "/budget-requests");
-    check("spend exceptions: reading and derived expiry write no audit or decisions", auditCount() === beforeRead);
+    check("team budgets: reading and derived expiry write no audit or decisions", auditCount() === beforeRead);
     withDb((d) => d.prepare("UPDATE v2_budget_requests SET expires_at = ? WHERE id = ?").run("2000-01-01T00:00:00.000Z", grant.json.id));
     const expired = await read(SM, grant.json), afterExpiry = await req(SO, "GET", env);
-    check("spend exceptions: expired grant is distinct and contributes nothing; decision history survives", expired.json.state === "expired" && expired.json.authority === "approver" && expired.json.decisions.length === 2 && afterExpiry.json.effective_budget_usd_micros === burnGranted.effective_budget_usd_micros - 12_000_000 + (raceRecord.state === "granted" ? 2_000_000 : 0), afterExpiry.text);
+    check("team budgets: expired grant is distinct and contributes nothing; decision history survives", expired.json.state === "expired" && expired.json.authority === "approver" && expired.json.decisions.length === 2 && afterExpiry.json.effective_budget_usd_micros === burnGranted.effective_budget_usd_micros - 12_000_000 + (raceRecord.state === "granted" ? 2_000_000 : 0), afterExpiry.text);
     const unknown = await device("POST", `/sessions/${unbound.key}/usage`, { rows: [usageRow(D, "spend-unknown", unbound.ep, { ts: started, est_list_usd_micros: null })] });
     const withUnknown = await req(SV, "GET", env);
-    check("spend exceptions: unpriced work is counted with explicit spend/forecast lower bounds and remaining upper bound; share and crossing stay absent", unknown.json.accepted === 1 && withUnknown.json.unpriced_requests === 1 && withUnknown.json.priced_spend_usd_micros === 40_000_000 && withUnknown.json.estimated_spend_usd_micros === 40_000_000 && withUnknown.json.spend_bound === "lower" && withUnknown.json.remaining_bound === "upper" && withUnknown.json.remaining_usd_micros === afterExpiry.json.effective_budget_usd_micros - 40_000_000 && withUnknown.json.forecast_bound === "lower" && withUnknown.json.forecast_usd_micros >= 40_000_000 && withUnknown.json.runs_out_at === null && withUnknown.json.no_goal.share_percent === null && withUnknown.json.no_goal.estimated_spend_usd_micros === 10_000_000 && withUnknown.json.no_goal.spend_bound === "lower" && withUnknown.json.pricing_note.includes("1 unpriced request"), withUnknown.text);
+    check("team budgets: unpriced work is counted with explicit spend/forecast lower bounds and remaining upper bound; share and crossing stay absent", unknown.json.accepted === 1 && withUnknown.json.unpriced_requests === 1 && withUnknown.json.priced_spend_usd_micros === 40_000_000 && withUnknown.json.estimated_spend_usd_micros === 40_000_000 && withUnknown.json.spend_bound === "lower" && withUnknown.json.remaining_bound === "upper" && withUnknown.json.remaining_usd_micros === afterExpiry.json.effective_budget_usd_micros - 40_000_000 && withUnknown.json.forecast_bound === "lower" && withUnknown.json.forecast_usd_micros >= 40_000_000 && withUnknown.json.runs_out_at === null && withUnknown.json.no_goal.share_percent === null && withUnknown.json.no_goal.estimated_spend_usd_micros === 10_000_000 && withUnknown.json.no_goal.spend_bound === "lower" && withUnknown.json.pricing_note.includes("1 unpriced request"), withUnknown.text);
     const changed = await req(SO, "PUT", env, { amount_usd: 120 });
     const removed = await req(SL, "DELETE", env);
     const removedAgain = await req(SL, "DELETE", env);
-    check("spend exceptions: changing clears omitted allowance; removal preserves immutable budget history and grants; repeated removal changes nothing", changed.json.budget.allowance_usd_micros === null && removed.json.budget === null && removed.json.effective_budget_usd_micros === null && removed.json.history.map((h) => h.action).join() === "set,changed,changed,removed" && removedAgain.json.history.length === 4 && (await read(SM, low.json)).json.authority === "allowance", removed.text);
+    check("team budgets: changing clears omitted allowance; removal preserves immutable budget history and grants; repeated removal changes nothing", changed.json.budget.allowance_usd_micros === null && removed.json.budget === null && removed.json.effective_budget_usd_micros === null && removed.json.history.map((h) => h.action).join() === "set,changed,changed,removed" && removedAgain.json.history.length === 4 && (await read(SM, low.json)).json.authority === "allowance", removed.text);
 
     if (existsSync(CHROME)) {
       const { default: puppeteer } = await import("puppeteer-core");
@@ -8165,17 +8164,36 @@ try {
         await pL.waitForFunction(() => document.querySelector('[data-budget-form] [role="status"]')?.textContent.includes("Budget saved."));
         check("budget screens: saving a budget leaves a confirmation after reload", await pL.$eval('[data-budget-form] [role="status"]', (e) => e.textContent.includes("Budget saved.")));
 
+        const months = () => pL.$$eval('input[type="month"]', (els) => els.map((e) => ({ label: e.closest("label")?.textContent, value: e.value })));
+        const initialMonths = await months();
+        const monthControl = (label) => pL.$(`input[type="month"][aria-labelledby]`).then(async () => {
+          const handles = await pL.$$('input[type="month"]');
+          for (const h of handles) if (await h.evaluate((e, word) => (e.getAttribute("aria-label") ?? document.getElementById(e.getAttribute("aria-labelledby"))?.textContent ?? [...(e.labels ?? [])].map((l) => l.textContent).join(" ")).includes(word), label)) return h;
+          throw new Error(`Month control missing: ${label}`);
+        });
+        const csvMonth = await monthControl("Export month");
+        await csvMonth.evaluate((e) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(e, "2024-02"); e.dispatchEvent(new Event("input", { bubbles: true })); e.dispatchEvent(new Event("change", { bubbles: true })); });
+        const afterCsv = await months();
+        check("budget screens: changing the CSV month preserves the budget month", afterCsv[0].value === "2024-02" && afterCsv[1].value === initialMonths[1].value, JSON.stringify(afterCsv));
+        const budgetMonth = await monthControl("Budget month");
+        await budgetMonth.evaluate((e) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(e, "2024-03"); e.dispatchEvent(new Event("input", { bubbles: true })); e.dispatchEvent(new Event("change", { bubbles: true })); });
+        const afterBudget = await months();
+        check("budget screens: changing the budget month preserves the CSV month", afterBudget[0].value === "2024-02" && afterBudget[1].value === "2024-03", JSON.stringify(afterBudget));
+        await open(pL, `/app/w/${W}/spend?team=${T}`); await pL.waitForSelector("[data-budget-request-form]");
         const uiBudget = (await req(SO, "GET", env)).json;
-        check("spend screens: lead sets base, per-request allowance and monthly ceiling with named fields, bounds and remaining allowance", uiBudget.budget.amount_usd_micros === 100_000_000 && uiBudget.budget.allowance_ceiling_usd_micros === 10_000_000 && (await text(pL, "[data-burn]")).includes("At least") && (await text(pL, "[data-burn]")).includes("At most"), await text(pL, "[data-team-spending]"));
+        check("budget screens: lead sets base, per-request allowance and monthly ceiling with named fields, bounds and remaining allowance", uiBudget.budget.amount_usd_micros === 100_000_000 && uiBudget.budget.allowance_ceiling_usd_micros === 10_000_000 && (await text(pL, "[data-burn]")).includes("At least") && (await text(pL, "[data-burn]")).includes("At most"), await text(pL, "[data-team-spending]"));
         await open(pM, `/app/w/${W}/spend?team=${T}`);
         await pM.waitForSelector('select[name="team_id"]');
         await pM.select('select[name="team_id"]', solo);
         await pM.$eval('select[name="team_id"]', (e) => e.closest("form").querySelector("button").click());
-        await pM.waitForFunction(() => document.querySelector("main")?.textContent.includes("New spending periods in no goal draw from Solo"));
-        check("spend screens: a person with several teams changes only their home team for future spending periods", (await req(SM, "GET", "/spend/home-team")).json.team.id === solo && (await req(SO, "GET", env)).json.priced_spend_usd_micros === 40_000_000);
+        await pM.waitForFunction(() => document.querySelector("main")?.textContent.includes("Your home team is Solo"));
+        check("budget screens: a person with several teams changes only their home team for future spending periods", (await req(SM, "GET", "/spend/home-team")).json.team.id === solo && (await req(SO, "GET", env)).json.priced_spend_usd_micros === 40_000_000);
         await pM.select('select[name="team_id"]', T);
         await pM.$eval('select[name="team_id"]', (e) => e.closest("form").querySelector("button").click());
-        await pM.waitForFunction(() => document.querySelector("main")?.textContent.includes("New spending periods in no goal draw from Build"));
+        await pM.waitForFunction(() => document.querySelector("main")?.textContent.includes("Your home team is Build"));
+        await pM.reload({ waitUntil: "networkidle0" });
+        await pM.waitForFunction(() => document.querySelector("main")?.textContent.includes("Home team saved."));
+        check("budget screens: home-team confirmation survives reload and names the saved outcome", (await text(pM)).includes("Home team saved. This choice applies to future spending periods."));
         await fill(pM, '[data-budget-request-form] [name="amount"]', 20);
         await fill(pM, '[data-budget-request-form] [name="reason"]', "Browser budget request");
         await pM.select('[data-budget-request-form] [name="goal"]', hidden.id);
@@ -8184,50 +8202,62 @@ try {
         await pM.waitForFunction(() => document.querySelector("[data-budget-request-form]")?.textContent.includes("Recorded."));
         check("budget screens: a successful request clears required draft fields", await pM.$eval('[data-budget-request-form]', (f) => f.elements.amount.value === "" && f.elements.reason.value === ""));
         const browserRequest = (await req(SM, "GET", "/budget-requests")).json.mine.find((r) => r.reason === "Browser budget request");
-        check("spend screens: member requests with a readable goal and their own session; home-team rule is visible", (await req(SM, "GET", "/budget-requests")).json.mine.filter((r) => r.reason === "Browser budget request").length === 1 && browserRequest?.state === "waiting" && browserRequest.session_count === 1 && browserRequest.goal.id === hidden.id && (await text(pM)).includes("home team when its spending period began"), JSON.stringify(browserRequest));
+        check("budget screens: member requests with a readable goal and their own session; home-team rule is visible", (await req(SM, "GET", "/budget-requests")).json.mine.filter((r) => r.reason === "Browser budget request").length === 1 && browserRequest?.state === "waiting" && browserRequest.session_count === 1 && browserRequest.goal.id === hidden.id && (await text(pM)).includes("home team's budget recorded when its spending period opened"), JSON.stringify(browserRequest));
         await open(pM, link(browserRequest)); await pM.waitForSelector("[data-budget-request]");
         await pM.waitForFunction(() => document.querySelector("[data-budget-request]")?.textContent.includes("Withdraw budget request"));
-        check("spend screens: requester can withdraw but is never offered self-approval or self-decline", !(await pM.$("[data-budget-approve]")) && !(await pM.$("[data-budget-decline]")), await text(pM, "[data-budget-request]"));
+        check("budget screens: requester can withdraw but is never offered self-approval or self-decline", !(await pM.$("[data-budget-approve]")) && !(await pM.$("[data-budget-decline]")), await text(pM, "[data-budget-request]"));
         await open(pL, link(browserRequest)); await pL.waitForSelector("[data-budget-approve]");
         await fill(pL, '[data-budget-approve] [name="amount"]', 12);
         await act(SO, browserRequest, "decline", { reason: "Review the scope" });
         await pL.click('[data-budget-approve] button[type="submit"]');
         await pL.waitForFunction(() => document.querySelector("[data-budget-request]")?.textContent.includes("Not recorded. This request changed after you read it") && !document.querySelector("[data-budget-approve]"));
-        check("spend screens: stale decision is refused visibly, takes focus and reloads the record", await pL.$eval('[data-budget-request] [role="status"]', (e) => document.activeElement === e), await text(pL, "[data-budget-request]"));
+        check("budget screens: stale decision is refused visibly, takes focus and reloads the record", await pL.$eval('[data-budget-request] [role="alert"]', (e) => document.activeElement === e), await text(pL, "[data-budget-request]"));
         await open(pM, link(browserRequest));
         await pM.waitForFunction(() => [...document.querySelectorAll("[data-budget-request] button")].some((b) => b.textContent === "Ask for a second look"));
         await pM.$eval("[data-budget-request]", (e) => [...e.querySelectorAll("button")].find((b) => b.textContent === "Ask for a second look").click());
-        await pM.waitForFunction(() => document.querySelector("[data-budget-request]")?.textContent.includes("already waits for a second look"));
+        await pM.waitForFunction(() => document.querySelector("[data-budget-request]")?.textContent.includes("waiting for a second look"));
         await open(pO, link(browserRequest)); await pO.waitForSelector("[data-budget-approve]");
-        check("spend screens: approval amount, UTC expiry, note and decline reason fit 390 pixels", await pO.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        check("budget screens: approval amount, UTC expiry, note and decline reason fit 390 pixels", await pO.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
         await fill(pO, '[data-budget-approve] [name="amount"]', 12);
         await fill(pO, '[data-budget-approve] [name="note"]', "Finish this part");
         await pO.click('[data-budget-approve] button[type="submit"]');
         await pO.waitForFunction(() => document.querySelector("[data-budget-request]")?.textContent.includes("This request was granted by an approver."));
         const recordText = await text(pO, "[data-budget-request]");
-        check("spend screens: second owner approves an amount and expiry with note; both decisions and authority survive; hidden goal and sessions stay unnamed", recordText.includes("declined this request as an approver") && recordText.includes("granted this request as an approver") && recordText.includes("Finish this part") && !recordText.includes(privateTitle) && !recordText.includes(own.key) && !(await pO.$(`[data-budget-request] a[href*="${hidden.id}"]`)), recordText);
+        check("budget screens: second owner approves an amount and expiry with note; both decisions and authority survive; hidden goal and sessions stay unnamed", recordText.includes("declined this request as an approver") && recordText.includes("granted this request as an approver") && recordText.includes("Finish this part") && !recordText.includes(privateTitle) && !recordText.includes(own.key) && !(await pO.$(`[data-budget-request] a[href*="${hidden.id}"]`)), recordText);
         await pO.waitForSelector("[data-budget-form]");
         const phone = await pO.evaluate(() => ({ overflow: document.documentElement.scrollWidth > innerWidth, short: [...document.querySelectorAll("[data-team-spending] button, [data-team-spending] select, [data-team-spending] input:not([type=checkbox])")].filter((e) => e.getBoundingClientRect().height < 44).length }));
         await pO.screenshot({ path: path.join(ROOT, ".next/spend-budgets-phone.png"), fullPage: true });
-        check("spend screens: budget, requests and decisions fit 390 pixels with 44-pixel controls", !phone.overflow && phone.short === 0, JSON.stringify(phone));
+        check("budget screens: budget, requests and decisions fit 390 pixels with 44-pixel controls", !phone.overflow && phone.short === 0, JSON.stringify(phone));
         await open(pV, link(browserRequest)); await pV.waitForSelector("[data-budget-decisions]");
-        check("spend screens: viewers read records and estimates without management, request or decision forms", !(await pV.$("[data-budget-form]")) && !(await pV.$("[data-budget-request-form]")) && !(await pV.$("[data-budget-approve]")) && !(await pV.$("[data-budget-decline]")), await text(pV, "[data-team-spending]"));
+        check("budget screens: viewers read records and estimates without management, request or decision forms", !(await pV.$("[data-budget-form]")) && !(await pV.$("[data-budget-request-form]")) && !(await pV.$("[data-budget-approve]")) && !(await pV.$("[data-budget-decline]")), await text(pV, "[data-team-spending]"));
+        check("budget screens: team picker contains only teams whose budget the viewer may read", await pV.$$eval("select", (els) => { const e = els.find((s) => [...(s.labels ?? [])].some((l) => l.textContent.includes("Budget team"))); return !!e && [...e.options].map((o) => o.textContent).includes("Build") && ![...e.options].some((o) => o.textContent === "Other"); }));
         await req(SO, "POST", `/teams/${T2}/members`, { user_id: SV.id, role: "member" });
         await open(pV, `/app/w/${W}/spend?team=${T2}`);
         await pV.waitForFunction(() => document.querySelector("[data-team-spending]")?.textContent.includes("No team budget for this month"));
-        check("spend screens: empty team has honest absence, no invented requests and no phone overflow", (await text(pV, "[data-team-spending]")).includes("No budget requests for this month") && await pV.evaluate(() => document.documentElement.scrollWidth <= innerWidth), await text(pV, "[data-team-spending]"));
+        check("budget screens: empty team has honest absence, no invented requests and no phone overflow", (await text(pV, "[data-team-spending]")).includes("No budget requests for this month") && await pV.evaluate(() => document.documentElement.scrollWidth <= innerWidth), await text(pV, "[data-team-spending]"));
         const homeRequest = (await request(SM)).json;
         await open(pO, `/app/w/${W}`); await pO.waitForSelector(`a[href*="request=${homeRequest.id}"]`);
-        check("spend screens: Home what needs you links to the same record and contributes to its headline", Number(await pO.$eval("[data-home-count]", (e) => e.getAttribute("data-home-count"))) > 0 && await pO.$(`[data-needs] a[href*="request=${homeRequest.id}"]`) !== null);
+        check("budget screens: Home what needs you links to the same record and contributes to its headline", Number(await pO.$eval("[data-home-count]", (e) => e.getAttribute("data-home-count"))) > 0 && await pO.$(`[data-needs] a[href*="request=${homeRequest.id}"]`) !== null);
         await open(pO, `/app/w/${W}/requests`); await pO.waitForSelector(`a[href*="request=${homeRequest.id}"]`);
-        check("spend screens: Requests links to the same Spend record", await pO.$eval(`a[href*="request=${homeRequest.id}"]`, (e, expected) => e.getAttribute("href") === expected, link(homeRequest)));
-        check("spend screens: no page errors", errors.length === 0, errors.join(" | "));
-      } catch (e) { check("spend screens (Chrome) run", false, e?.stack ?? e); }
+        check("budget screens: Requests links to the same Spend record", await pO.$eval(`a[href*="request=${homeRequest.id}"]`, (e, expected) => e.getAttribute("href") === expected, link(homeRequest)));
+        await open(pL, `/app/w/${W}/spend?team=${T}`); await pL.waitForSelector("[data-budget-form]");
+        await pL.$eval("[data-budget-form]", (f) => [...f.querySelectorAll("button")].find((b) => b.textContent === "Remove budget").click());
+        await pL.waitForFunction(() => document.querySelector("[data-budget-form]")?.textContent.includes("Budget removed."));
+        await pL.reload({ waitUntil: "networkidle0" });
+        await pL.waitForFunction(() => document.querySelector("[data-budget-form]")?.textContent.includes("Budget removed."));
+        check("budget screens: removing a budget leaves the removal confirmation after reload", (await req(SO, "GET", env)).json.budget === null && (await text(pL, "[data-budget-form]")).includes("Budget removed."));
+        await pO.setRequestInterception(true);
+        pO.on("request", (r) => r.url().endsWith(`/api/v2/workspaces/${W}/change-requests`) ? r.respond({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "server_error", message: "Could not read requests." }) }) : r.continue());
+        await open(pO, `/app/w/${W}`);
+        await pO.waitForSelector('[data-live-status="live"]');
+        check("budget screens: Home goes live even when a change-request read fails", await pO.$('[data-live-status="live"]') !== null);
+        check("budget screens: no page errors", errors.length === 0, errors.join(" | "));
+      } catch (e) { check("budget screens (Chrome) run", false, e?.stack ?? e); }
       finally { await browser.close(); }
     } else check("ui (Chrome) available for spending screens", false, `no Chrome at ${CHROME}`);
-    check("spend exceptions: schema retains all references", withDb((d) => d.prepare("PRAGMA foreign_key_check").all()).length === 0);
+    check("team budgets: schema retains all references", withDb((d) => d.prepare("PRAGMA foreign_key_check").all()).length === 0);
   }
-  // ======== end spend exceptions: server acceptance ========
+  // ======== end team budgets: server acceptance ========
 
   // ==== port29:allocation ====
   // Goal sessions: agent time follows priorities (main #29), on a workspace of its own. AO owns it; team Core has a

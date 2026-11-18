@@ -300,22 +300,24 @@ line on stderr, exit 1) and the hooks do nothing but keep stop latches and goal 
 
 ## Team budgets
 
-`align budget [--team <id>] [--workspace <name|id>]` reads this folder's goal team or sole team and shows
+`align budget [--team <name>] [--workspace <name|id>]` reads this folder's goal team or sole team and shows
 this UTC month's budget, spend, forecast and allowance left. Amounts are list-price estimates. Lower bounds
 say "at least" and upper bounds say "at most". Unpriced requests are counted. No budget is stated plainly.
 
-`align budget request --amount <USD> --reason <text> [--goal <ref>] [--team <id>] [--session <ref> ...]`
+`align budget request --amount <USD> --reason <text> [--goal <ref>] [--team <name>] [--session <ref> ...]`
 files a request for this month, using the folder's goal by default. `--workspace` selects a workspace when
-needed. An ambiguous team needs `--team`. Attached sessions must be your shared sessions in that workspace.
+needed. Teams are listed by name. An ambiguous team needs `--team <name>`. Attached sessions must be your shared sessions in that workspace.
 Every terminal request waits for a person in Align, including amounts within the allowance. Its record says
 it was filed from the terminal. These commands never decide a request or grant authority.
 
 The existing one-pass sync refreshes at most 100 shared sessions at a time, with rotation. It briefly reuses
-matching session attribution and reads each workspace/team/month budget only once within a pass. Local
+matching session attribution, including nothing-to-report answers, and each workspace/team/month budget for five minutes across passes. It makes at most 120 budget reads and waits at most two seconds per pass. Local
 snapshots live in `budgets-cache/`, outside goal feeds; persistent dedupe markers live in `budget-shown/`.
-Uninstall removes both directories. Hooks use only local files, with no network or lock wait. At the next
+Uninstall removes these directories and the attribution cache. Stopping sharing, removal and sign-out remove session caches; old-month markers are pruned. Hooks use only local files, with no network or lock wait. At the next
 turn they may deliver one `[Align]` note at 80 percent and one at 100 percent per session and UTC month.
 A fresh known priced subtotal can cross a threshold even when it is a lower bound. An unpriced request alone
-cannot cross; unknown totals, stale or future observations and session mismatches give no note. Notes state
-what was reached, that work continues, that they grant no authority and that the person can ask for more in
+cannot cross; unknown totals, future observations and session mismatches give no new crossing. Once a sync observes a crossing, it remains due at the next turn however long the pause within the same UTC month and team. Notes state
+what was reached, when the estimate was read, that work continues, that they grant no authority and that the person can ask for more in
 Align. They contain no runnable command or instruction. There is no daemon.
+
+Budget, burn, forecast, history and spend in no goal are visible only to that team's members and workspace owners. The monthly CSV names the same goal-bound team rows as the on-screen report. Hidden goals remain unnamed and other teams' spend in no goal remains unallocated.

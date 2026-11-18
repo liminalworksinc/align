@@ -173,7 +173,7 @@ export function authorize(p: PolicyPrincipal, action: Action, obj: PolicyObject)
       if (obj.kind !== "pod") return hidden();
       if (p.wsRole === "viewer") return roleDenied(p);
       if (action === "budget_request.create") return p.pods.has(obj.podId) ? ALLOW : deny("not_in_team", "Only members of this team can ask for more.");
-      return p.wsRole === "owner" || p.pods.get(obj.podId) === "lead" ? ALLOW : deny("not_team_lead", "Only a team lead or workspace owner can change its spending envelope.");
+      return p.wsRole === "owner" || p.pods.get(obj.podId) === "lead" ? ALLOW : deny("not_team_lead", "Only a team lead or workspace owner can change its team budget.");
     }
     case "budget_request.read":
     case "budget_request.decide":
@@ -182,6 +182,7 @@ export function authorize(p: PolicyPrincipal, action: Action, obj: PolicyObject)
       if (obj.kind !== "budget_request") return hidden();
       if (obj.requesterId !== p.userId && p.wsRole !== "owner" && !p.pods.has(obj.podId)) return hidden();
       if (action === "budget_request.read") return ALLOW;
+      if (action === "budget_request.withdraw" && obj.requesterId === p.userId) return ALLOW;
       if (p.wsRole === "viewer") return roleDenied(p);
       if (action === "budget_request.withdraw" || action === "budget_request.second_look") return obj.requesterId === p.userId ? ALLOW : deny("not_requester", "Only the requester can do this.");
       const eligible = obj.secondLook ? p.wsRole === "owner" && p.userId !== obj.firstDeciderId : p.wsRole === "owner" || p.pods.get(obj.podId) === "lead";

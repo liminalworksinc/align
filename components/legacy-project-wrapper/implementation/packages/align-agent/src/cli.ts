@@ -93,8 +93,8 @@ const HELP = `align ${VERSION}: Align local agent
   align latch status           stop latches and goal holds
   align allocation [--workspace <name|id>] [--week YYYY-MM-DD] [--refresh] [--json]   agent time per goal against its target
   align steering status [--workspace <name|id>]
-  align budget [--team <id>] [--workspace <name|id>]   this folder's monthly team envelope and estimates
-  align budget request --amount <USD> --reason <text> [--team <id>] [--goal <ref>] [--session <ref> ...] [--workspace <name|id>]
+  align budget [--team <name>] [--workspace <name|id>]   this folder's monthly team budget and estimates
+  align budget request --amount <USD> --reason <text> [--team <name>] [--goal <ref>] [--session <ref> ...] [--workspace <name|id>]
   align install [--claude] [--codex] [--dry-run]
   align uninstall [--purge]
   align sync                   (hooks also run this in the background, one pass each)
@@ -1659,21 +1659,24 @@ async function cmdSteering(ctx: Ctx, argv: string[]): Promise<void> {
   out(`${queued} ${queued === 1 ? "line" : "lines"} waiting to be reported by the next sync.`);
 }
 
-// ---------- spending ----------
+// ---------- team budgets ----------
 async function cmdBudget(ctx: Ctx, argv: string[], request: boolean): Promise<void> {
   const { values } = parseArgs({ args: argv, options: { team: { type: "string" }, workspace: { type: "string" },
     ...(request ? { amount: { type: "string" as const }, reason: { type: "string" as const }, goal: { type: "string" as const }, session: { type: "string" as const, multiple: true } } : {}) } });
   const requestedAmount = request ? requestAmount(values.amount as string | undefined) : null;
   if (request && (!(values.reason as string | undefined)?.trim() || String(values.reason).trim().length > 1000)) throw new UsageError("--reason is required, at most 1000 characters.");
-  const me = await refreshMe(ctx);
+  await refreshMe(ctx);
   const rule = matchRule(readRules(ctx.home), process.cwd()) ?? (values.workspace && (values.team || values.goal) ? null : budgetFolder(ctx, process.cwd()));
   const ws = resolveWorkspace(ctx.home, values.workspace || rule?.workspace_id);
   if (!ws) throw new UsageError("No single workspace applies. Pass --workspace <name|id>.");
   await refreshFeed(ctx, ws.id);
   const goalRef = values.goal as string | undefined ?? (rule?.workspace_id === ws.id ? rule.goal_id : null);
   const goal = goalRef ? resolveGoal(loadFeed(ctx.home, ws.id), goalRef) : null;
-  const memberships = me.workspaces.find((w) => w.id === ws.id);
-  const team = budgetTeam(goal, values.team, memberships?.teams ?? memberships?.pods ?? []);
+  const detail = await api(ctx, "GET", `/api/v2/workspaces/${encodeURIComponent(ws.id)}/spend/teams`);
+  if (detail.status !== 200) throw new Error("The teams could not be read. Try again.");
+  const teams = detail.json.teams as { id: string; name: string }[];
+  out(teams.length ? `Teams you can choose: ${teams.map((t) => clean(t.name, 80)).join(", ")}. Use --team with a team name.` : "No team budgets are available to you.");
+  const team = budgetTeam(goal, values.team, teams);
   if (request) {
     const sessionKeys = ((values.session as string[] | undefined) ?? []).map((ref) => {
       const local = resolveSession(ctx, ref), s = getShare(ctx, local.local_id);
@@ -1684,7 +1687,7 @@ async function cmdBudget(ctx: Ctx, argv: string[], request: boolean): Promise<vo
       body: { amount_usd: requestedAmount, reason: values.reason, goal_id: goal?.id ?? null, session_keys: sessionKeys },
     });
     if (r.status !== 201) throw new Error(r.json?.message ?? `Request failed (${r.status}).`);
-    out(`Budget request ${r.json.id}: ${r.json.state}. Requested team budget: ${clean(r.json.team.name, 80)}. All amounts are estimates at list price.`);
+    out(`Budget request recorded for ${clean(r.json.team.name, 80)}. All amounts are estimates at list price.`);
     out("This terminal request waits for a person to decide in Align. The request grants no authority.");
     if (r.json.decision_unavailable_reason) out(r.json.decision_unavailable_reason);
     return;
@@ -1698,7 +1701,7 @@ async function cmdBudget(ctx: Ctx, argv: string[], request: boolean): Promise<vo
   out(`Spend: ${money(b.estimated_spend_usd_micros, b.spend_bound)}. Remaining: ${b.budget ? money(b.remaining_usd_micros, b.remaining_bound) : "no team budget"}. Month-end forecast: ${b.budget ? money(b.forecast_usd_micros, b.forecast_bound) : "no team budget"}.`);
   out(`Remaining monthly allowance: ${b.allowance_remaining_usd_micros === null ? "no allowance" : money(b.allowance_remaining_usd_micros)}. Unpriced requests: ${b.unpriced_requests ?? "unknown"}.`);
   out(b.pricing_note);
-  out("Goal-bound spend draws from the goal's team. Spend in no goal draws from the session owner's home team when its spending period began. Work continues.");
+  out("Goal-bound spend counts toward the goal team's budget. Spend in no goal counts toward the home team's budget recorded when its spending period began. Work continues.");
 }
 
 // ---------- main ----------

@@ -1133,7 +1133,7 @@ members, invites, teams, goals, alignments, change requests, reallocations, asks
 deletion, agent stop and resume), with actor null only for system actions and the row that records an account
 deletion, show a former member as `{id:"fm_<n>", name:"Former member #<n>"}`, and serve the newest 200 rows of that
 workspace to workspace owners only on `GET /api/v2/workspaces/{ws}/audit`. Device uploads (sharing a session, opening an
-epoch, usage, activity and steering reports) write no audit row. A device-filed budget request is a recorded request by its person and writes `budget_request.requested` with that person as actor; it never writes an allowance grant. Budget writes use `team_budget.set`, `.changed` and `.removed`; browser-filed allowance grants and decisions use `budget_request.requested`, `.allowance_granted`, `.approved`, `.declined`, `.withdrawn` and `.second_look`. Pairing and revocation are handled separately, and device pairing and revocation, passkeys added and deleted, and
+epoch, usage, activity and steering reports) write no audit row. A device-filed budget request is a recorded request by its person and writes `budget_request.requested` with that person as actor; it never writes an allowance grant. Budget writes use `team_budget.set`, `.changed` and `.removed`; browser-filed allowance grants and decisions use `budget_request.requested`, `.allowance_granted`, `.approved`, `.declined`, `.withdrawn` and `.second_look`. Device pairing and revocation, passkeys added and deleted, and
 signing out everywhere are recorded without a workspace, so they never appear in a workspace's audit; giving a paired
 device a workspace at an invite (`device.workspace_added`) is recorded in that workspace's audit.
 
@@ -1519,12 +1519,12 @@ the caller may not see.
 ### Requirement: Monthly team spend CSV
 
 The server SHALL export one UTC calendar month through browser-only `GET /api/v2/workspaces/{ws}/spend/export?month=YYYY-MM`. It SHALL use the shared month validator, require exactly one month from 0001-01 through 9999-12, preserve request timestamps in the half-open month and retained UTC-day totals, and return a UTF-8 CSV attachment named `align-spend-YYYY-MM.csv` with `Cache-Control: private, no-store` and `X-Content-Type-Options: nosniff`.
-The first rows SHALL give the estimate disclaimer, UTC month and UTC generation time, then a blank row and columns `month`, `team`, `requests`, `estimated_list_cost_usd`, `unpriced_requests`, `input`, `output`, `cache_read`, `cache_write_5m`, `cache_write_1h`, `cache_write_unsplit`. Costs SHALL use six decimal places. Only team members and workspace owners may receive named team and `<team>: spend in no goal` rows. All other team spend and hidden goal spend SHALL fold into the report's single unnamed `Private goals` row, with no separate private-team row. Readability of a goal alone grants no team-spend visibility. `Goals without a team` and the remainder `Not bound to a goal` SHALL always exist, including as zero rows. Periods opened before migration 24 have no home team, so their no-goal usage SHALL stay in that remainder. `Total` SHALL equal all preceding data rows for every numeric column. The on-screen report SHALL preserve its existing behavior and totals.
+The first rows SHALL give the estimate disclaimer, UTC month and UTC generation time, then a blank row and columns `month`, `team`, `requests`, `estimated_list_cost_usd`, `unpriced_requests`, `input`, `output`, `cache_read`, `cache_write_5m`, `cache_write_1h`, `cache_write_unsplit`. Costs SHALL use six decimal places. For goal-bound spend the CSV SHALL name exactly the team rows the on-screen team report names for that reader, with the same amounts. Hidden goal spend SHALL remain in its single unnamed `Private goals` row. Only team members and workspace owners may receive `<team>: spend in no goal` rows; other teams' no-goal spend SHALL remain unallocated. This same member-or-owner rule protects a team's budget, burn, forecast and budget history. `Goals without a team` and the remainder `Not bound to a goal` SHALL always exist, including as zero rows. Periods opened before home-team attribution was introduced have no home team, so their no-goal usage SHALL stay in that remainder. `Total` SHALL equal all preceding data rows for every numeric column. The on-screen report SHALL preserve its existing behavior and totals.
 
 #### Scenario: Monthly team spend CSV
 
 - **WHEN** a signed-in workspace member, viewers included, exports a valid month
-- **THEN** the attachment has the specified header and numeric columns, member-or-owner team visibility, one unnamed row for other team spend, an unallocated remainder and an additive total, without any person's name or unreadable goal or team identifiers
+- **THEN** the attachment has the specified header and numeric columns, the same named goal-bound team rows as the on-screen report, member-or-owner visibility for spend in no goal, one unnamed row for hidden goals, an unallocated remainder and an additive total, without any person's name or unreadable goal or team identifiers
 
 #### Scenario: Export authorization and invalid month
 
@@ -1872,6 +1872,11 @@ per-path limits apply only when hosted, since Mode L turns off its IP tracking, 
 
 - **WHEN** a hosted client exceeds 3 requests per minute to `/api/v2/auth/email-otp/send-verification-otp`, 10 to `/sign-in/email-otp`, `/sign-in/email` or `/sign-up/email`, 20 to `/sign-in/social`, or 100 per minute elsewhere under `/api/v2/auth`, including across a server restart
 - **THEN** Better Auth refuses the request with 429; a Mode L server applies none of these, only the email-code send limits and the v2 limits
+
+#### Scenario: Budget request creation limits
+
+- **WHEN** a workspace would receive its 61st budget request within an hour, including withdrawn requests, allowance grants and requests made with a device token, across server restarts
+- **THEN** creation is refused with 429 `rate_limited`, without a new request, decision or audit row; after requests leave the hour window, creation is available again
 
 #### Scenario: v2 limits
 

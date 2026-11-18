@@ -195,15 +195,18 @@ function rollUpSession(db: Sql, wsId: string, key: string): number {
      WHERE u.ws_id = ? AND u.session_key = ? AND e.goal_id IS NULL AND e.spend_team_id IS NOT NULL GROUP BY 1, 2, 3, 4
      ON CONFLICT (ws_id, pod_id, day, basis) DO UPDATE SET ${ROLLUP_SUMS.map((k) => `${k} = ${k} + excluded.${k}`).join(", ")}`, wsId, key,
   );
-  // Increment the coverage count once per no-goal request, including epochs with no home team.
-  db.run(
-    `UPDATE v2_spend_rollups AS r SET team_attributed_requests = team_attributed_requests +
-       (SELECT COUNT(*) FROM v2_usage u JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id
-        WHERE u.ws_id = ? AND u.session_key = ? AND e.goal_id IS NULL AND substr(u.ts, 1, 10) = r.day AND u.model = r.model AND u.basis = r.basis),
-       team_attributed_unpriced_requests = team_attributed_unpriced_requests +
-       (SELECT COUNT(*) FROM v2_usage u JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id
-        WHERE u.ws_id = ? AND u.session_key = ? AND e.goal_id IS NULL AND u.est_list_usd_micros IS NULL AND substr(u.ts, 1, 10) = r.day AND u.model = r.model AND u.basis = r.basis)
-     WHERE r.ws_id = ? AND r.goal_id = ''`, wsId, key, wsId, key, wsId,
+  // Aggregate coverage once for this session, including periods without a home team, then touch only matching rows.
+  const coverage = db.all<{ day: string; model: string; basis: string; requests: number; unpriced: number }>(
+    `SELECT substr(u.ts, 1, 10) AS day, u.model, u.basis, COUNT(*) AS requests,
+       SUM(u.est_list_usd_micros IS NULL) AS unpriced
+     FROM v2_usage u JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id
+     WHERE u.ws_id = ? AND u.session_key = ? AND e.goal_id IS NULL GROUP BY 1, 2, 3`, wsId, key,
+  );
+  for (const c of coverage) db.run(
+    `UPDATE v2_spend_rollups SET team_attributed_requests = team_attributed_requests + ?,
+       team_attributed_unpriced_requests = team_attributed_unpriced_requests + ?
+     WHERE ws_id = ? AND goal_id = '' AND day = ? AND model = ? AND basis = ?`,
+    c.requests, c.unpriced, wsId, c.day, c.model, c.basis,
   );
   db.run("DELETE FROM v2_sessions WHERE ws_id = ? AND session_key = ?", wsId, key);
   return rows;

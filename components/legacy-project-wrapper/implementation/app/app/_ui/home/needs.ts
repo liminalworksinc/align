@@ -47,9 +47,9 @@ export const ORDER_LINE: Record<RankOrder, string> = { approver: "Ranked for som
 /** The full sentence, behind "How it's ranked". */
 export const ORDER_SENTENCE: Record<RankOrder, string> = {
   approver:
-    "Ranked for someone who approves on a goal here: approved changes waiting to launch, then decisions waiting on you, then your requests that came back, then requests an agent declined, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.",
+    "Ranked for someone who approves on a goal here: approved changes waiting to launch, then decisions waiting on you, then budget requests, then your requests that came back, then requests an agent declined, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.",
   requester:
-    "Ranked for your own requests first: your requests that came back, then requests an agent declined, then any decision or launch that is yours, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.",
+    "Ranked for your own requests first: your requests that came back, then requests an agent declined, then any decision that is yours, then budget requests, then launches, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.",
 };
 /** Why this order: the rule, in words, behind "How it's ranked". */
 export const ORDER_WHY: Record<RankOrder, string> = {
@@ -481,11 +481,11 @@ export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[
   if (input.sends === null) unknown.push("deliveries to apps");
   if (input.budgets === null) unknown.push("budget requests");
   for (const r of input.budgets ?? []) {
-    const mine = r.requester.id === me, needs = r.waiting_on_me || mine && r.state === "declined";
+    const mine = r.requester.id === me, needs = r.waiting_on_me || mine && r.state === "declined" && r.can.second_look;
     rows.push({ key: `budget:${r.id}`, kind: "budget_request", phase: needs ? "needs_you" : r.state === "waiting" ? "waiting_on_others" : "done", goal: r.goal,
       cause: `${r.team.name}: ${mine ? "you" : r.requester.name} asked for more team budget`, quote: r.reason,
-      since: { at: r.updated_at, field: "updated_at" }, evidence: none(), action: { label: "Review budget request", opens: "budget" },
-      who: r.state_note, review: null, tone: r.state === "declined" ? "declined" : r.state === "granted" ? "approved" : "pending", word: r.state === "waiting" ? "Budget request" : r.state === "granted" ? "Granted" : r.state === "declined" ? "Declined" : r.state === "withdrawn" ? "Withdrawn" : "Expired",
+      since: { at: r.updated_at, field: "updated_at" }, evidence: none(), action: needs ? { label: r.state === "declined" ? "Ask for a second look" : "Review budget request", opens: "budget" } : null,
+      who: r.state_note, review: null, tone: r.state === "declined" ? "declined" : r.state === "granted" ? "approved" : "pending", word: r.state === "waiting" ? "Budget request" : r.state === "granted" ? "Budget granted" : r.state === "declined" ? "Budget declined" : r.state === "withdrawn" ? "Budget withdrawn" : "Budget expired",
       href: `/app/w/${input.ws}/spend?team=${encodeURIComponent(r.team.id)}&month=${r.month}&request=${encodeURIComponent(r.id)}` });
   }
   const { order, fallback } = rankOrder(me, input.approver, input.crs);

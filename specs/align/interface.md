@@ -600,11 +600,11 @@ its evidence, and at most one outlined action. The kinds are "Approved, not laun
 (**Review**, its line leading with what the request changes, then "<requester>'s request"), "Your request came back"
 (**See the change**, **See the condition** or **Update to v<n>**), "Declined" (**Propose again**), "Agent declined" (a
 request to agents that a session declined, **Open the requests**), "Team ask" (**Accept or decline** or **Mark
-done**), "Alignment" (**Review** or **Accept the change**) and "Launched, not sent" ("Align has not sent v<n> to the
+done**), "Budget request" (**Review budget request** for a decision, **Ask for a second look** for an eligible declined own request), "Alignment" (**Review** or **Accept the change**) and "Launched, not sent" ("Align has not sent v<n> to the
 app <app>.", for a connected app the person can see that has read the goals but was not sent the goal's latest
 launched version, with **See apps** when the person connected it); a row waiting on others or done carries its own
 word ("Change suggested", "Needs an update", "Launched as v<n>", "Declined", "Withdrawn", "Superseded", "Approved",
-"Ask done", and so on). A change request's row opens it in the review drawer over the Home (`?review=<goal>.<id>`),
+"Ask done", "Budget granted", "Budget declined", "Budget withdrawn", "Budget expired", and so on). Done rows SHALL carry no action. Budget requests SHALL rank after decisions and before returned requests in the approver order, and after decisions and before launches in the requester order. A change request's row opens it in the review drawer over the Home (`?review=<goal>.<id>`),
 and closing the drawer returns to the same list; any other row opens the tab that holds it. A row's evidence SHALL be
 its change request's evidence summary (a decision with no links says "No evidence attached", an approval recorded
 without links "Approved without evidence"), or, for other kinds, chips by class ("Receipt", "Agent reported", "Not
@@ -685,17 +685,17 @@ an app's goal read since the last visit is a line in "Since you last looked" ("<
 class), and an app with no goal read is the muted line under the Needs list. A connection SHALL never be shown or
 counted as a read. A workspace owner's read has every connected app and anyone else's their own, as on the Apps tab.
 
-The existing Needs list SHALL also use `home.budget_requests` (`waiting_on_me`, `mine`, `next_cursor`). It SHALL deduplicate request ids and use the same rows for its heading and filter counts. Requests waiting on the person and their own declined requests belong in Needs you; own waiting requests belong in Waiting on others; granted, withdrawn and expired requests belong in Done. It SHALL show no separate budget panel. A null budget source is unknown; a non-null `next_cursor` links to Requests for more. Rows link to their record on Spend.
+The existing Needs list SHALL also use `home.budget_requests` (`waiting_on_me`, `mine`, `next_cursor`). It SHALL deduplicate request ids and use the same rows for its heading and filter counts. Requests waiting on the person and their own declined requests for which `can.second_look` is true belong in Needs you; their other declined requests belong in Done; own waiting requests belong in Waiting on others; granted, withdrawn and expired requests belong in Done. It SHALL show no separate budget panel. A null budget source is unknown; a non-null `next_cursor` links to Requests for more. Rows link to their record on Spend.
 
 #### Scenario: Budget requests in the one Needs list
 
 - **WHEN** a budget request waits on the reader and another of their own was declined
 - **THEN** both appear as rows in the existing Needs you filter and count, with links to the Spend record and no separate panel
 
-#### Scenario: Home finishes its initial load
+#### Scenario: A declined budget request no longer needs you
 
-- **WHEN** a person opens Home while its initial and dependent reads are still outstanding
-- **THEN** those reads settle before the live stream opens, and the initial page can finish loading without waiting for a stream to close
+- **WHEN** a person's declined budget request can no longer receive a second look, including after the month closes or after its second decision
+- **THEN** it leaves Needs you and appears in Done without an action
 
 #### Scenario: Needs you and waiting on others
 

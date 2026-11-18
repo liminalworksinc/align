@@ -89,14 +89,13 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
   }, [reloadHome, reloadChanges]);
   // Live (LIM-2503): when the workspace's stream says one of this person's views moved, the Home reads them again, so a
   // decision made in another window shows here within about a second. Without the stream the page keeps the reads below.
-  const liveWorkspace = h && count.n !== null && c.data && feed.data ? ws : null;
-  const live = useLive(liveWorkspace);
+  const live = useLive(ws);
   const { reload: reloadFeed } = feed;
   const reloadLive = useCallback(() => {
     reloadAll();
     reloadFeed();
   }, [reloadAll, reloadFeed]);
-  useLiveReload(liveWorkspace, ["home", "changes", "goals", "alignments"], reloadLive);
+  useLiveReload(ws, ["home", "changes", "goals", "alignments"], reloadLive);
   // "Since you last looked" reads again once a minute while Home stays open (specs/align/interface.md, Workspace Home),
   // and the Needs-you list with it, so its count never trails what Since shows (PR 68 audit Low 2).
   const refreshSince = reloadAll;

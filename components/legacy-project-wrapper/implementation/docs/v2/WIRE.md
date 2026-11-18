@@ -502,10 +502,10 @@ passkeys and their dismissal of the passkey prompt.
 
 `GET /api/v2/workspaces/{ws}/teams/{team}/budget?month=YYYY-MM` accepts browser sessions and granted device tokens.
 The month defaults to the current UTC month. Only team members and workspace owners can read the budget,
-team spend, no-goal subtotal and history; other readers get 404. The response fields and nested records are
+burn, forecast, no-goal subtotal and history; other readers get 404. The response fields and nested records are
 listed in `specs/align/budgets.md`. Amounts are integer USD microdollars representing list-price estimates.
 Unpriced work gives spend and forecast lower bounds and a remaining upper bound; unknown attribution gives
-null complete totals. No budget is `budget: null`. Reads do not create audit records or decisions.
+null complete totals and an attribution-incomplete flag, without workspace-wide unattributed counts. No budget is `budget: null`. Reads do not create audit records or decisions.
 
 Browser-only `PUT {amount_usd, allowance_usd?, allowance_ceiling_usd?}` and `DELETE` require a team lead or
 workspace owner. Amounts are whole cents, 0 through 1,000,000 dollars. An omitted or null ceiling defaults to
@@ -516,18 +516,20 @@ periods opened before it get no home team and their no-goal spend stays unalloca
 and returns 201 with the request. Only non-viewer team members file requests. A device request records
 `filed_from: "terminal"` and always waits for a person. Cookie requests record `filed_from: "browser"` and may
 be recorded under the allowance within its per-request and monthly ceilings. Input cannot override that source.
-Five waiting requests per person/team/month is the maximum; a sixth is 409 `too_many_waiting_requests`.
+Creation is limited to 60 budget requests per workspace per hour, including withdrawn requests and allowance grants, across restarts (429 `rate_limited`). Five waiting requests per person/team/month is the maximum; a sixth is 409 `too_many_waiting_requests`.
 
 `GET .../teams/{team}/budget-requests` and `GET .../budget-requests` accept `month`, `limit` (1 to 100, default 50)
-and `cursor` (the last request id). They default to this UTC month and return
+and `cursor` (the last request id). Creation order is stable when decisions change between pages. They default to this UTC month and return
 `{waiting_on_me, mine, others, next_cursor}`. `GET .../budget-requests/{id}` reads one record. Requesters,
 team members and workspace owners can read it. Unreadable goals are null and only the requester sees attached
 session keys. The record includes `filed_from`, full authority sentences, immutable decisions and action flags.
 
 Browser-only `POST .../budget-requests/{id}/{approve|decline|withdraw|second-look}` requires `{revision}`.
 Approve also takes `{amount_usd, expires_at, note?}`; decline takes `{reason}`. A requester never decides their
-own request. A second look needs a different eligible owner. Stale input is 409 `stale_revision`; future input
+own request. Requesters who later become viewers may still withdraw their own waiting request. A second look needs a different eligible owner. Stale input is 409 `stale_revision`; future input
 is 400 `unknown_revision`; an ineligible state is 409 `wrong_state`. Grants expire by next UTC month's start.
+
+`GET .../spend/teams` returns `{teams: [{id, name}]}` to browser sessions and granted device tokens, listing only teams whose budgets the reader may read.
 
 `GET .../spend/home-team` returns the caller's `{team, teams, can_choose}` to browsers and granted devices.
 Browser `PUT {team_id}` changes only that person's preference, including for viewers. A team they do not belong
@@ -547,7 +549,6 @@ team has a budget this month. Other people's rows omit the field.
 `GET /api/v2/workspaces/{ws}/spend/export?month=YYYY-MM` is browser-only and requires exactly one valid month.
 It returns `align-spend-YYYY-MM.csv` with private, no-store headers. Columns are `month`, `team`, `requests`,
 `estimated_list_cost_usd`, `unpriced_requests`, `input`, `output`, `cache_read`, `cache_write_5m`, `cache_write_1h`,
-`cache_write_unsplit`. List-price amounts retain six decimals. Only members and workspace owners receive named
-team and team no-goal rows. Other teams fold into the existing single unnamed `Private goals` row. The no-team
+`cache_write_unsplit`. List-price amounts retain six decimals. Goal-bound team rows match the on-screen team report exactly for that reader. Hidden goals remain in its single unnamed `Private goals` row. Only team members and workspace owners receive team no-goal rows; other teams' no-goal amounts stay unallocated. The no-team
 row, unallocated remainder and total preserve all numeric sums. Cells are quoted and formula-like prefixes are
 neutralized. The export uses the same UTC month validator as budgets.

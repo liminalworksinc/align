@@ -219,17 +219,17 @@ recorded under that allowance. A terminal request always waits for a different e
 names where it was filed and preserves both decision rounds. At most five requests per person, team and month
 can wait at once. Lists default to this month and have bounded pages. Reaching a budget never stops work.
 
-Only a team's members and workspace owners read its budget, spend and history. No-goal work draws from the
+Only a team's members and workspace owners read its budget, burn, forecast, history and spend in no goal. No-goal spend counts toward the budget of the
 home team recorded when the spending period opened. Earlier periods have no home team and stay unallocated.
 The person can choose a different home team for future periods. The monthly team CSV preserves exact totals
-and folds other teams into the report's single unnamed row.
+and names the same goal-bound team rows as the on-screen report. Hidden goals remain unnamed; other teams' spend in no goal remains unallocated.
 
 Budget requests appear in Home's single Needs list and in a month-filtered section on Requests. Spend has
 budget forms, estimate bounds, the request record and CSV export. Own sessions have a budget label only when
 that team has a budget this month. `align budget` shows the folder's team budget and `align budget request`
 files a request that waits for a person. The existing one-pass sync reads bounded session attribution and
-caches team budgets once per team and month within a pass. Hooks read only local files and deliver an
-informational `[Align]` note at 80 and 100 percent from fresh priced known spend, including a lower bound.
+reuses positive and empty attribution answers and team budgets for five minutes across passes, with read and time bounds. Hooks read only local files and deliver an
+informational `[Align]` note at 80 and 100 percent once a sync observes a priced known crossing, including a lower bound. The note remains due at the next turn in the same month and team however long the pause, and states when the figure was read.
 Notes have no commands and grant no authority. The goal context envelope and MCP are unchanged.
 
 ## Where things are

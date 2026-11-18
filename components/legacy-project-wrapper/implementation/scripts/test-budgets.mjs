@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Spend exceptions: real domain modules, migrations and SQLite transactions without a Next build or listener.
+// Team budgets: real domain modules, migrations and SQLite transactions without a Next build or listener.
 // The HTTP coverage remains in the clearly marked budgets section of test-v2.mjs.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -226,10 +226,10 @@ await test("wrong-state refusals say what happened and name the actor as you to 
   const declined = await act("lead", await ask(), "decline", { reason: "Scope" });
   for (const [who, message] of [["lead", "You declined this request, so nothing changes."], ["owner", "This request was declined by lead, so nothing changes."]]) {
     await assert.rejects(() => act(who, declined, "approve", {}), (e) => e.code === "wrong_state" && e.message === message);
-    assert.equal(spend.getBudgetRequest(pp(who), declined.id).state_note, message);
+    assert.equal(spend.getBudgetRequest(pp(who), declined.id).state_note, `This request was declined by ${who === "lead" ? "you" : "lead"}.`);
   }
   const withdrawn = await act("member", await ask(), "withdraw");
-  assert.equal(withdrawn.state_note, "You withdrew this request, so nothing changes.");
+  assert.equal(withdrawn.state_note, "This request was withdrawn.");
   const granted = await act("lead", await ask(), "approve", { amount_usd: 1, expires_at: end });
   await assert.rejects(() => act("lead", granted, "approve", {}), (e) => e.message === "You already granted this request.");
 });
@@ -388,7 +388,7 @@ await test("retention roll-ups preserve team/no-goal totals and cover multi-team
 });
 await test("pre-feature unattributable no-goal roll-ups report unknown rather than zero", async () => {
   await budget(); db.run("INSERT INTO v2_spend_rollups (ws_id, goal_id, day, model, basis, requests, input, output, cache_read, cache_write_5m, cache_write_1h, cache_write_unsplit, est_list_usd_micros, unpriced_requests) VALUES (?, '', '2030-01-02', 'old', 'unknown', 2, 1, 1, 0, 0, 0, 0, 10, 1)", W);
-  const b = burn(); assert.equal(b.no_goal.attribution_unknown, true); assert.equal(b.no_goal.unattributed_rolled_up_requests, 2); assert.equal(b.no_goal.unattributed_rolled_up_unpriced_requests, 1); assert.equal(b.unpriced_requests, null); assert.equal(b.known_unpriced_requests, 0); assert.equal(b.estimated_spend_usd_micros, null); assert.equal(b.remaining_usd_micros, null); assert.equal(b.no_goal.share_percent, null);
+  const b = burn(); assert.equal(b.no_goal.attribution_unknown, true); assert.ok(!("unattributed_rolled_up_requests" in b.no_goal)); assert.ok(!("unattributed_rolled_up_unpriced_requests" in b.no_goal)); assert.equal(b.unpriced_requests, null); assert.equal(b.known_unpriced_requests, 0); assert.equal(b.estimated_spend_usd_micros, null); assert.equal(b.remaining_usd_micros, null); assert.equal(b.no_goal.share_percent, null);
 });
 await test("former-member replacement covers every new actor column; workspace purge cascades all records", async () => {
   await budget(); const r = await ask(); await act("owner", r, "decline", { reason: "No" });
@@ -454,6 +454,7 @@ await test("CSV and burn share home attribution; every numeric and basis total s
   const before = [read("owner"), read("other")];
   for (const who of ["owner", "viewer", "other"]) {
     const r = read(who), old = report(pp(who), "team", range.from, range.to);
+    assert.deepEqual(r.rows, old.rows);
     assert.equal(r.total.requests, old.total.requests);
     for (const k of Object.keys(r.total).filter((k) => k !== "by_basis")) {
       assert.equal(r.total[k], [...r.rows, ...r.no_goal, r.unallocated].reduce((n, s) => n + s[k], 0), k);
@@ -463,12 +464,12 @@ await test("CSV and burn share home attribution; every numeric and basis total s
     if (who !== "other") assert.equal(r.no_goal[0].est_list_usd_micros, burn().no_goal.priced_spend_usd_micros);
     assert.equal(r.unallocated.unpriced_requests, 1);
     const csv = spendCsv(pp(who), range);
-    assert.ok(csv.includes(who === "other" ? '"30.123456"' : '"10.123456"')); assert.ok(!csv.includes("g_private")); assert.ok(!csv.includes("a".repeat(43)));
+    assert.ok(csv.includes('"10.123456"')); assert.ok(!csv.includes("g_private")); assert.ok(!csv.includes("a".repeat(43)));
   }
   assert.equal(read("owner").no_goal[0].label, "Build: spend in no goal");
   assert.equal(read("other").no_goal.length, 0);
   assert.equal(read("other").rows.filter((r) => r.kind === "private").length, 1);
-  assert.equal(read("other").rows.find((r) => r.kind === "private").est_list_usd_micros, 30_123_456);
+  assert.equal(read("other").rows.find((r) => r.kind === "private").est_list_usd_micros, 20_000_000);
   assert.ok(!spendCsv(pp("other"), range).includes("Build"));
   db.run("UPDATE v2_pods SET name = ? WHERE id = ?", '=1+1,\n"quoted"', T);
   assert.ok(spendCsv(pp("owner"), range).includes('"\'=1+1,\n""quoted"": spend in no goal"'));
@@ -479,13 +480,15 @@ await test("CSV and burn share home attribution; every numeric and basis total s
 });
 
 
-await test("member-or-owner budget privacy and unnamed-row folding", async () => {
+await test("member-or-owner budget privacy and CSV parity with readable goal-bound team rows", async () => {
   await budget(); goal("g_public"); await usage(session(), "g_public", 20_000_000); await usage(session("b".repeat(43)), null, 10_000_000);
   for (const who of ["member", "viewer", "owner"]) assert.equal(burn(who).estimated_spend_usd_micros, 30_000_000);
   assert.throws(() => burn("other"), (e) => e.status === 404);
   const { spendTeamExport } = await import("../lib/v2/spend.ts"), hidden = spendTeamExport(pp("other"), "2030-01-01T00:00:00Z", end);
-  assert.ok(!JSON.stringify(hidden).includes("Build")); assert.equal(hidden.no_goal.length, 0);
-  assert.equal(hidden.rows.filter((r) => r.kind === "private").length, 1); assert.equal(hidden.rows[0].est_list_usd_micros, 30_000_000);
+  const { spend } = await import("../lib/v2/spend.ts");
+  assert.deepEqual(hidden.rows, spend(pp("other"), "team", "2030-01-01T00:00:00Z", end).rows);
+  assert.equal(hidden.no_goal.length, 0); assert.equal(hidden.rows[0].team.name, "Build");
+  assert.equal(hidden.rows[0].est_list_usd_micros, 20_000_000); assert.equal(hidden.unallocated.est_list_usd_micros, 10_000_000);
 });
 await test("terminal source cannot receive an allowance and five waiting requests is the limit", async () => {
   await budget({ amount_usd: 100, allowance_usd: 5, allowance_ceiling_usd: 100 });
@@ -509,11 +512,105 @@ await test("Home budget requests use the one Needs list, its counts, phases and 
   assert.equal(inPhase(owner.rows, "needs_you").length, 1); assert.equal(owner.rows[0].key, `budget:${r.id}`);
   assert.ok(owner.rows[0].href.includes(`request=${r.id}`)); assert.equal(owner.unknown.length, 0);
   assert.equal(inPhase(view("member", [r]).rows, "waiting_on_others").length, 1);
-  const declined = await act("lead", r, "decline", { reason: "Scope" });
+  await act("lead", r, "decline", { reason: "Scope" });
+  const declined = spend.getBudgetRequest(pp("member"), r.id);
   assert.equal(inPhase(view("member", [declined]).rows, "needs_you").length, 1);
+  const { rankNeeds, ORDERS } = await import("../app/app/_ui/home/needs.ts");
+  for (const order of ["approver", "requester"]) {
+    const rows = ORDERS[order].map((kind) => ({ ...owner.rows[0], key: kind, kind }));
+    assert.deepEqual(rankNeeds(rows.reverse(), order).map((r) => r.kind), ORDERS[order]);
+    assert.equal(ORDERS[order].indexOf("budget_request"), ORDERS[order].indexOf("decide") + 1);
+  }
+  assert.equal(view("member", [declined]).rows[0].action.label, "Ask for a second look");
+  const referred = await act("member", declined, "second-look");
+  const finalDecline = await act("owner", referred, "decline", { reason: "Still out of scope" });
+  const done = view("member", [finalDecline]);
+  assert.equal(inPhase(done.rows, "needs_you").length, 0); assert.equal(inPhase(done.rows, "done").length, 1); assert.equal(done.rows[0].action, null);
   const withdrawn = await act("member", await ask(), "withdraw");
   assert.equal(inPhase(view("member", [withdrawn]).rows, "done").length, 1);
   assert.ok(view("owner", null).unknown.includes("budget requests"));
+});
+
+await test("every budget action records its audit name and acting person; terminal requests record no allowance grant", async () => {
+  const expectAudit = (events) => assert.deepEqual(db.all("SELECT action, actor_id FROM v2_audit ORDER BY rowid").map((r) => [r.action, r.actor_id]), events);
+  await budget({ amount_usd: 100, allowance_usd: 5, allowance_ceiling_usd: 10 });
+  await spend.writeBudget(pp("owner"), T, null, { amount_usd: 120, allowance_usd: 5, allowance_ceiling_usd: 10 });
+  const allowance = await spend.createBudgetRequest(pp("member"), T, { amount_usd: 5, reason: "Finish work" }, "browser");
+  const terminal = await spend.createBudgetRequest(pp("member"), T, { amount_usd: 5, reason: "Finish work" }, "terminal");
+  const declined = await act("lead", terminal, "decline", { reason: "Scope" });
+  const second = await act("member", declined, "second-look");
+  await act("owner", second, "approve", { amount_usd: 3, expires_at: end });
+  const withdrawn = await act("member", await ask(), "withdraw");
+  await spend.writeBudget(pp("lead"), T, null, null);
+  expectAudit([["team_budget.set", "lead"], ["team_budget.changed", "owner"],
+    ["budget_request.requested", "member"], ["budget_request.allowance_granted", "member"],
+    ["budget_request.requested", "member"], ["budget_request.declined", "lead"], ["budget_request.second_look", "member"],
+    ["budget_request.approved", "owner"], ["budget_request.requested", "member"], ["budget_request.withdrawn", "member"], ["team_budget.removed", "lead"]]);
+  assert.deepEqual(db.all("SELECT action FROM v2_audit WHERE object_id = ? ORDER BY rowid", terminal.id).map((r) => r.action), ["budget_request.requested", "budget_request.declined", "budget_request.second_look", "budget_request.approved"]);
+  assert.equal(allowance.authority, "allowance"); assert.equal(withdrawn.state, "withdrawn");
+});
+
+await test("a requester promoted to viewer can still withdraw their waiting request", async () => {
+  await budget(); const r = await ask();
+  db.run("UPDATE v2_members SET role = 'viewer' WHERE ws_id = ? AND user_id = 'member'", W);
+  const read = spend.getBudgetRequest(pp("member"), r.id);
+  assert.equal(read.can.withdraw, true); assert.equal(read.can.approve, false); assert.equal(read.can.second_look, false);
+  assert.equal((await act("member", read, "withdraw")).state, "withdrawn");
+});
+
+await test("only a session's person sees its budget label, and a month without a budget omits it", async () => {
+  await budget(); const key = session(); await usage(key, null, 1_000_000);
+  assert.match(listSessions(pp("member")).mine.find((s) => s.session_key === key).team_budget_label, /spend counts toward Build's team budget/);
+  const owner = listSessions(pp("owner"));
+  assert.ok(!("team_budget_label" in owner.all.find((s) => s.session_key === key)));
+  assert.ok(!JSON.stringify(owner).includes("team budget this month"));
+  now = Date.parse(end);
+  assert.equal(listSessions(pp("member")).mine.find((s) => s.session_key === key).team_budget_label, null);
+});
+
+await test("creation rate limit survives withdrawal and rejects without audit, including across a connection restart", async () => {
+  await budget();
+  for (let n = 0; n < 60; n++) await act("member", await ask(), "withdraw");
+  const before = snapshot();
+  await reject(() => ask(), 429, "rate_limited"); assert.equal(snapshot(), before);
+  globalThis.__alignV2Db.domain.close(); globalThis.__alignV2Db.auth.close(); delete globalThis.__alignV2Db;
+  await reject(() => ask(), 429, "rate_limited"); assert.equal(snapshot(), before);
+  now += 3600_001; assert.equal((await ask()).state, "waiting");
+});
+
+await test("changing the cursor row or an unread row between pages never skips or repeats a request", async () => {
+  await budget();
+  const all = [];
+  for (let n = 0; n < 5; n++) { now += 1000; all.push(await ask()); }
+  const one = spend.listBudgetRequests(pp("member"), T, null, { limit: "2" });
+  now += 1000; await act("lead", one.mine[1], "decline", { reason: "Scope" });
+  now += 1000; await act("lead", all[1], "approve", { amount_usd: 10, expires_at: end });
+  const two = spend.listBudgetRequests(pp("member"), T, null, { limit: "2", cursor: one.next_cursor });
+  const three = spend.listBudgetRequests(pp("member"), T, null, { limit: "2", cursor: two.next_cursor });
+  assert.deepEqual([...one.mine, ...two.mine, ...three.mine].map((r) => r.id), all.reverse().map((r) => r.id));
+  assert.equal(three.next_cursor, null);
+});
+
+await test("retention updates only the matching day, model and basis coverage", async () => {
+  const key = session(); await usage(key, null, 1_000_000);
+  const epoch = db.get("SELECT epoch_id FROM v2_epochs WHERE session_key = ?", key).epoch_id;
+  db.run(`INSERT INTO v2_usage (ws_id, session_key, request_key, epoch_id, ts, model, query_source, input, output, cache_read, cache_write_5m, cache_write_1h, cache_write_unsplit, basis, est_list_usd_micros, price_table_version, source, received_at)
+    VALUES (?, ?, ?, ?, '2030-01-11T00:00:00.000Z', 'second-model', 'main', 1, 1, 0, 0, 0, 0, 'unknown', NULL, 'test', 'otel', ?)`, W, key, "z".repeat(43), epoch, new Date().toISOString());
+  for (const [day, model, basis] of [["2030-01-09", "test-model", "estimated_list_usd"], ["2030-01-10", "other-model", "estimated_list_usd"], ["2030-01-10", "test-model", "unknown"]]) db.run(`INSERT INTO v2_spend_rollups
+    (ws_id, goal_id, day, model, basis, requests, input, output, cache_read, cache_write_5m, cache_write_1h, cache_write_unsplit, est_list_usd_micros, unpriced_requests, team_attributed_requests, team_attributed_unpriced_requests)
+    VALUES (?, '', ?, ?, ?, 7, 1, 1, 0, 0, 0, 0, 1, 3, 2, 1)`, W, day, model, basis);
+  const old = db.all("SELECT * FROM v2_spend_rollups ORDER BY day, model, basis");
+  await runRetention(db.sql, db.tx, new Date("2032-01-01T00:00:00Z"), { secret: "test-secret" });
+  for (const row of old) assert.deepEqual(db.get("SELECT * FROM v2_spend_rollups WHERE ws_id = ? AND goal_id = '' AND day = ? AND model = ? AND basis = ?", W, row.day, row.model, row.basis), row);
+  const coverage = db.all("SELECT team_attributed_requests AS n, team_attributed_unpriced_requests AS unpriced FROM v2_spend_rollups WHERE requests = 1 ORDER BY day");
+  assert.deepEqual(coverage.map((r) => [r.n, r.unpriced]), [[1, 0], [1, 1]]);
+});
+
+await test("budget team choices name exactly the reader's authorized teams, including an owner's non-member teams", async () => {
+  assert.deepEqual(spend.budgetTeams(pp("member")).teams.map((t) => t.name), ["Build"]);
+  assert.deepEqual(spend.budgetTeams(pp("viewer")).teams.map((t) => t.name), ["Build"]);
+  assert.deepEqual(spend.budgetTeams(pp("other")).teams.map((t) => t.name), ["Other"]);
+  assert.deepEqual(spend.budgetTeams(pp("owner")).teams.map((t) => t.name), ["Build", "Other"]);
 });
 
 console.log(`test-budgets: ${passed} passed, ${failed} failed`);

@@ -54,8 +54,8 @@ seconds (always at the end of a turn) a hook starts a detached `align sync --hoo
 | `align latch status` | List stop latches and goal holds | no |
 | `align allocation [--workspace <name\|id>] [--week YYYY-MM-DD] [--refresh] [--json]` | Agent time per goal against its target (cached feed; `--week` asks the server) and this machine's unshared share | for `--refresh` and `--week` |
 | `align steering status [--workspace <name\|id>]` | The steering switch, lines shown this week, lines waiting to be reported | no |
-| `align budget [--team <id>] [--workspace <name\|id>]` | Read the folder team budget and spend estimates | yes |
-| `align budget request --amount <USD> --reason <text> [--goal <ref>] [--team <id>] [--session <ref> ...] [--workspace <name\|id>]` | File a budget request that always waits for a person | yes |
+| `align budget [--team <name>] [--workspace <name\|id>]` | Read the folder team budget and spend estimates | yes |
+| `align budget request --amount <USD> --reason <text> [--goal <ref>] [--team <name>] [--session <ref> ...] [--workspace <name\|id>]` | File a budget request that always waits for a person | yes |
 | `align install [--claude] [--codex] [--dry-run]` | Install hooks (both harnesses when no flag is given) | no |
 | `align uninstall [--purge]` | Remove Align's hooks; `--purge` also deletes `ALIGN_HOME` | no |
 | `align sync [--hook] [--settle <ms>]` | One pass: spool, transcripts, outbox, directives, usage, feeds, activity | uploads need it |
@@ -79,7 +79,7 @@ sent), `align.db` (SQLite, WAL), `rules.json` (folder rules), `me.json`, `instal
 another ingester waits up to 3 seconds for and takes over after 60, so a record is applied once and in order),
 `activity/<lid>.jsonl` (team activity), `feeds/<ws>.json`
 (goal feeds), `feeds/activity-<ws>.json` (other machines' activity), `feeds/asks-<ws>.json` (asks between teams),
-`budgets-cache/<lid>.json` (session attribution and observed monthly budget), `budgets-cache/cursor.json` (bounded sync rotation), `budget-shown/<lid>/<month>-<threshold>` (persistent note dedupe),
+`budgets-cache/<lid>.json` (observed monthly budget and due crossings), `budget-attribution/<lid>.json` (positive or empty attribution), `budgets-cache/teams.json` (five-minute team reads), `budgets-cache/cursor.json` (bounded sync rotation), `budget-shown/<lid>/<month>-<threshold>` (persistent note dedupe),
 `drift/<lid>.json` (a drift notice waiting for the next prompt: limit ids and sentence digests), `steering/` (steering lines shown, waiting to be
 reported), `unshared-digest.json` and `unshared-shown.json` (this machine's agent time outside shared sessions and the
 week its note was shown; never sent), `logs/align.log`, `logs/sync.log`, and

@@ -526,7 +526,7 @@ export function listSessions(pp: PolicyPrincipal) {
      JOIN v2_pods p ON p.ws_id = e.ws_id AND p.id = CASE WHEN e.goal_id IS NULL THEN e.spend_team_id ELSE g.pod_id END
      JOIN v2_team_budgets b ON b.ws_id = p.ws_id AND b.pod_id = p.id AND b.month = ?
      WHERE s.ws_id = ? AND s.user_id = ? AND (? = 'owner' OR EXISTS (SELECT 1 FROM v2_pod_members pm WHERE pm.ws_id = p.ws_id AND pm.pod_id = p.id AND pm.user_id = ?))`, new Date().toISOString().slice(0, 7), pp.wsId, pp.userId, pp.wsRole, pp.userId,
-  ).filter((r) => !r.goal_id || canReadGoal(pp, { kind: "goal", ownerId: r.owner_id, visibility: r.visibility, podId: r.pod_id })).map((r) => [r.session_key, `This session draws from ${r.name}'s team budget this month.`]));
+  ).filter((r) => !r.goal_id || canReadGoal(pp, { kind: "goal", ownerId: r.owner_id, visibility: r.visibility, podId: r.pod_id })).map((r) => [r.session_key, `This session's spend counts toward ${r.name}'s team budget this month.`]));
   const goalLabel = (id: string | null) => {
     if (!id) return null;
     const g = goalRow(pp.wsId, id);

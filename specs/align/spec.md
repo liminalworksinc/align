@@ -45,11 +45,11 @@ agent hooks and screens), not the framework, hosting, or language choices.
 
 ## Parts
 
-- `goals-and-proposals` — goals and their versions, approval sets, alignments, change requests and their evidence, and the sample workspace
-- `directives` — directives to running agents, receipts, and stopping and resuming an agent
-- `mcp` — the read-only MCP server (with an opt-in scope for adding evidence links), its OAuth authorization server and the `align-connect` stdio relay
-- `workspaces` — identity and sign-in, workspaces, members, teams, invites, devices, shared sessions, usage and spend, activity, and hosted mode
-- `budgets` - monthly team budgets, estimated team spend and recorded requests for more
-- `metrics` — content-free product events, operator-recorded LOIs and the operator's metrics report
-- `local-agent` — the `align` CLI, its Claude Code and Codex hooks, the one-pass sync and local metering
-- `interface` — the web app under `/app` and the OAuth consent page
+- `goals-and-proposals`: goals and their versions, approval sets, alignments, change requests and their evidence, and the sample workspace
+- `directives`: directives to running agents, receipts, and stopping and resuming an agent
+- `mcp`: the read-only MCP server (with an opt-in scope for adding evidence links), its OAuth authorization server and the `align-connect` stdio relay
+- `workspaces`: identity and sign-in, workspaces, members, teams, invites, devices, shared sessions, usage and spend, activity, and hosted mode
+- `budgets`: monthly team budgets, estimated team spend and recorded requests for more
+- `metrics`: content-free product events, operator-recorded LOIs and the operator's metrics report
+- `local-agent`: the `align` CLI, its Claude Code and Codex hooks, the one-pass sync and local metering
+- `interface`: the web app under `/app` and the OAuth consent page
