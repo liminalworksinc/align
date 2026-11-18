@@ -74,7 +74,7 @@ In a session the user can type `::align status`, `::align goals`, `::align share
 `credentials.json` (0600), `device_key` (Ed25519 PKCS#8 PEM, 0600), `device_secret` (32 random bytes, 0600, never
 sent), `align.db` (SQLite, WAL), `rules.json` (folder rules), `me.json`, `install.json`, `last-sync.json`,
 `hot/<lid>.json` and `injected/<lid>.json` (per-session state for hooks), `latch/<lid>.json` (stop latches),
-`latch/<lid>.hold.json` (goal holds),
+`latch/<lid>.hold.json` (goal holds), `context-cost/<lid>.jsonl` (append-only returned-text counts),
 `spool/` (hook records waiting for the next sync, ingested by one process at a time under `spool/.ingest.lock`, which
 another ingester waits up to 3 seconds for and takes over after 60, so a record is applied once and in order),
 `activity/<lid>.jsonl` (team activity), `feeds/<ws>.json`
@@ -1224,7 +1224,7 @@ what it was, its layout and indentation included), delete the `settings.json.ali
 installing (...)`), delete Codex `hooks.json` when Align created it and it is now empty, delete Claude Code's `skills/`
 folder when Align's first install created it (recorded in `install.json`; a reinstall keeps what the first install
 found) and it is empty once the plugin is gone (printing `Removed <folder>, which Align's install created and is empty
-now.`), delete `budgets-cache/`, `budget-shown/`, `~/.align/bin/` and `install.json`, and keep the rest of `ALIGN_HOME` (ledger and keys) unless
+now.`), delete `context-cost/`, `budgets-cache/`, `budget-shown/`, `~/.align/bin/` and `install.json`, and keep the rest of `ALIGN_HOME` (ledger and keys) unless
 `--purge` is given, which deletes `ALIGN_HOME` entirely. Because that deletes the device key and tokens, `--purge` SHALL
 first revoke this machine's device (`DELETE /api/v2/devices/self`, printing `Revoked this device (<id>) on <server>;
 its shared sessions stopped sharing there.`) and every revoke a past logout or login left waiting, naming each one it
@@ -1498,14 +1498,15 @@ are set, never their values).
 
 ### Requirement: Show how much context Align adds
 
-For every session with a known session reference, hooks SHALL keep two separate running totals in that session's
-existing `injected/<lid>.json`: text returned to the model and text shown only to the person. Each total holds
+For every session with a known session reference, hooks SHALL record returned text separately in
+`context-cost/<lid>.jsonl`, outside the shared `injected/<lid>.json` hook state. Commands SHALL sum the records
+for two audiences: text returned to the model and text shown only to the person. Each total holds
 characters, the number of nonempty additions, the last addition's time and whether it came at session start, a
 prompt or a tool call. An addition is one hook return for that audience, including all its text and joining newlines.
 Count the returned strings' lengths, using the same character measure as the existing context budgets, after
 rendering and clipping; exclude JSON encoding, field names and text belonging only to the other audience. Never
-estimate tokens or money from these totals. Older state with no totals starts at zero; earlier additions are not
-reconstructed.
+estimate tokens or money from these totals. A missing counter file starts at zero; earlier additions and counters
+from unshipped builds in the shared hook state are not reconstructed or migrated.
 
 Model text includes the complete `additionalContext` and any `permissionDecisionReason` returned by a tool denial:
 startup, clear, compact and resume envelopes with limits, accepted asks and related goals; goal, binding, limit,
@@ -1516,16 +1517,22 @@ and prompts. Person-only `systemMessage` and blocked `::align` command replies a
 drift, sharing, request, withdrawal, weekly unshared-work and unsupported-runtime notices, and person-only budget
 messages at session start, prompts and tool calls. An unidentifiable session cannot receive a per-session total.
 
-Accounting SHALL preserve existing hook text, budget delivery and state-write behavior. A hook SHALL return exactly
-the same text, including no text when an explicit choice keeps the same goal. Existing hook-state writes,
-including those on unchanged prompts and when processing a choice whose details are not cached, SHALL still happen
-at the same points. Counters SHALL be included inside those writes, using state already read by the handler and
-counting only nonempty returned strings. Where a path returns text without an existing hook-state write, it SHALL
-add only one accounting write on that text-returning path, in the same per-session file. Accounting adds no separate
-file, network call, file scan, lock wait or state reread. Unchanged prompts SHALL leave both audiences' recorded
-character totals, addition counts, last-addition times and last-addition events unchanged, and return exactly zero
-bytes. The state file's normal timestamp and other existing bookkeeping may still change. Root turns still spool
-as before. Stop and post-tool hooks that return nothing add nothing.
+Accounting SHALL preserve every existing shared hook-state read and write, its timing and its fields, exactly as
+before this feature. Counters SHALL never be stored in shared hook state. After a hook decides its final output,
+it SHALL append one short line per nonempty audience addition, holding the audience, character count, time and
+hook event. Both audiences' lines SHALL be written together in one append call with append mode, so parallel hooks
+cannot overwrite each other's records. Accounting SHALL add no read, network call, directory scan, lock or lock
+wait to a hook. A hook returning nothing SHALL touch no counter file. Its other existing bookkeeping and root-turn
+spool records remain unchanged. Stop and post-tool hooks returning nothing add nothing.
+
+Commands SHALL sum valid complete lines, ignoring a torn or malformed last line, to obtain characters, addition
+counts and the latest addition's time and event for each audience. The file SHALL be append-only and never
+rewritten or rotated while the session exists.
+Replacing it could lose an append already opened by a parallel hook.
+The file SHALL follow the lifetime of the session's local hook files and be removed with them and on uninstall.
+Unsharing and sign-out retain sessions and their hook files, so they retain the counts too.
+Unchanged prompts SHALL return exactly zero bytes and leave both audiences' totals, addition counts and last times
+and events unchanged.
 
 `align status` SHALL show one plain line for the most recently active session whose working folder is the current
 folder, resolving filesystem aliases, when one exists. `align sessions` SHALL show that line beneath each session.
@@ -1547,12 +1554,22 @@ time and event when absent. These figures stay local.
 #### Scenario: Preserve existing hook output
 
 - **WHEN** the existing hook tests exercise the hooks and their returns are compared with the base before accounting from the same local state and time
-- **THEN** every return has the same text, the existing hook tests pass unmodified, and existing non-counter state writes still occur as before; a counter-only write is added only on a text-returning path with no original state write
+- **THEN** every return has the same text, the existing hook tests pass unmodified, and complete shared hook state and every shared state read and write match the baseline, with no excluded fields
 
 #### Scenario: Exact totals with budgets
 
 - **WHEN** a scripted session returns a budget context line and a person-only budget message, including combined context and person-only output, and then continues through unchanged prompts
 - **THEN** each audience total equals exactly the sum of its returned strings, combined returns count once per audience, and budget delivery markers and silent returns match the base before accounting
+
+#### Scenario: Parallel hooks keep counts and shared state intact
+
+- **WHEN** many processes for the same session return sibling notes and denials in parallel, including a hook losing the delta lock and a hook delivering a changed goal
+- **THEN** no counter line is lost, totals equal exactly the returned strings, and complete shared hook state is byte-identical to the same scheduled run before accounting, preserving delivered-delta markers and stop and hold bookkeeping; a later hook does not deliver the goal delta again
+
+#### Scenario: Command reads and cleanup
+
+- **WHEN** a command reads a counter log ending in a torn or malformed line, then the session's local files are removed or the agent is uninstalled
+- **THEN** valid additions are summed without rewriting the file, and cleanup removes counter storage
 
 ### Requirement: Prompt-time goal deltas and silence when unchanged
 

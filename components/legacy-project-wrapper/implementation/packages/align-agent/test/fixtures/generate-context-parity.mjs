@@ -1,4 +1,4 @@
-// Regenerate from the package directory: node test/fixtures/generate-context-parity.mjs $(git merge-base HEAD origin/agent/budget-notes-timing)
+// Regenerate from the package directory: node test/fixtures/generate-context-parity.mjs HEAD~1
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";

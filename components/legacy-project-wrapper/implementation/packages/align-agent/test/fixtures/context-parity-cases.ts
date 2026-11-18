@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { EventEmitter } from "node:events";
+import { readContextCost } from "../../src/shared/context-cost.ts";
 import { renderHot } from "../../src/hot.ts";
 import { nowIso } from "../../src/db.ts";
 import { type BudgetSnapshot } from "../../src/shared/budget-notes.ts";
@@ -191,7 +192,7 @@ function setup(harness: Harness = "claude-code") {
   const sid = "context-cost-session";
   const lid = shareSession(ctx, harness, sid);
   const file = layout.injected(t.home, lid);
-  const state = () => readJson<InjectedState>(file)!;
+  const state = () => readContextCost(t.home, lid);
   const budget = (spent: number) => {
     const hot = readJson<HotState>(layout.hot(t.home, lid))!;
     const at = new Date().toISOString();
@@ -220,7 +221,7 @@ for (const harness of ["claude-code", "codex"] as const) {
         const notice = (out?.systemMessage || "") + (out?.decision === "block" ? out.reason : "");
         if (text) { model += text.length; modelAdds++; }
         if (notice) { person += notice.length; personAdds++; }
-        assert.equal(writes, writesExpected, "only the existing or one accounting state write");
+        assert.equal(writes, writesExpected, "only baseline shared-state writes");
         assert.equal(state()?.context_added?.characters || 0, model);
         assert.equal(state()?.context_added?.additions || 0, modelAdds);
         assert.equal(state()?.notices_added?.characters || 0, person);
@@ -245,10 +246,9 @@ for (const harness of ["claude-code", "codex"] as const) {
       fs.mkdirSync(file + ".lock");
       try { assert.equal(checked(() => tool(), "PreToolUse", 0), null); }
       finally { fs.rmdirSync(file + ".lock"); }
-      const beforeTool = state();
-      const message = checked(() => tool(), "PreToolUse", harness === "claude-code" ? 1 : 0);
-      const withoutCounters = ({ context_added, notices_added, ...fields }: InjectedState) => fields;
-      assert.deepEqual(withoutCounters(state()), withoutCounters(beforeTool), "a message-only tool return preserves normal hook state");
+      const beforeTool = fs.readFileSync(file, "utf8");
+      const message = checked(() => tool(), "PreToolUse", 0);
+      assert.equal(fs.readFileSync(file, "utf8"), beforeTool, "a message-only tool return preserves complete hook state byte for byte");
       if (harness === "claude-code") {
         assert.match(message.systemMessage, /100% of its team budget/);
         assert.equal(message.hookSpecificOutput, undefined);
@@ -297,24 +297,27 @@ for (const harness of ["claude-code", "codex"] as const) {
   });
 }
 
-test("final output counts both audiences separately, with one state write and no accounting reread", () => {
+test("final output counts both audiences separately, with one append and no accounting reread", () => {
   const { t, sid, lid, file, state } = setup();
   let model = 0, person = 0, modelAdds = 0, personAdds = 0;
-  const checked = (run: () => HookOutput, event: string, modelPattern?: RegExp, personPattern?: RegExp) => {
-    let writes = 0, reads = 0;
-    const rename = fs.renameSync, read = fs.readFileSync;
+  const checked = (run: () => HookOutput, event: string, modelPattern?: RegExp, personPattern?: RegExp, expectedWrites = 1) => {
+    let writes = 0, reads = 0, appends = 0, counterReads = 0;
+    const rename = fs.renameSync, read = fs.readFileSync, append = fs.appendFileSync;
+    fs.appendFileSync = (...args) => { if (args[0] === layout.contextCost(t.home, lid)) appends++; return append(...args); };
     fs.renameSync = (...args) => { if (args[1] === file) writes++; return rename(...args); };
-    fs.readFileSync = ((...args: Parameters<typeof fs.readFileSync>) => { if (args[0] === file) reads++; return read(...args); }) as typeof fs.readFileSync;
+    fs.readFileSync = ((...args: Parameters<typeof fs.readFileSync>) => { if (args[0] === file) reads++; if (args[0] === layout.contextCost(t.home, lid)) counterReads++; return read(...args); }) as typeof fs.readFileSync;
     let out: any;
-    try { out = run(); } finally { fs.renameSync = rename; fs.readFileSync = read; }
+    try { out = run(); } finally { fs.renameSync = rename; fs.readFileSync = read; fs.appendFileSync = append; }
     const text = [out?.hookSpecificOutput?.additionalContext, out?.hookSpecificOutput?.permissionDecisionReason].filter(Boolean).join("\n");
     const notice = [out?.systemMessage, out?.decision === "block" ? out.reason : null].filter(Boolean).join("\n");
     if (modelPattern) assert.match(text, modelPattern);
     if (personPattern) assert.match(notice, personPattern);
     if (text) { model += text.length; modelAdds++; }
     if (notice) { person += notice.length; personAdds++; }
-    assert.equal(writes, text || notice ? 1 : 0, "one shared state write for the whole return");
-    // Existing feed-hold checks also read state; accounting must reuse the handler's state.
+    assert.equal(writes, expectedWrites, "baseline shared-state write count");
+    assert.equal(appends, text || notice ? 1 : 0, "one append for the complete return");
+    assert.equal(counterReads, 0, "accounting never reads its file in a hook");
+    // Shared-state reads remain exactly those of the baseline handler.
     if (event === "SessionStart" || out?.decision === "block") assert.equal(reads, 1);
     assert.equal(state().context_added?.characters || 0, model);
     assert.equal(state().context_added?.additions || 0, modelAdds);
@@ -332,7 +335,7 @@ test("final output counts both audiences separately, with one state write and no
   writeJsonAtomic(hotFile, hot);
   const prompt = (text = "continue") => userPromptSubmit(t.home, "claude-code", { session_id: sid, prompt: text });
   checked(() => prompt(), "UserPromptSubmit", /request from/, /Kim/);
-  checked(() => prompt("::align decline context"), "UserPromptSubmit", undefined, /you declined/);
+  checked(() => prompt("::align decline context"), "UserPromptSubmit", undefined, /you declined/, 1);
   checked(() => prompt(), "UserPromptSubmit", /developer declined/);
   checked(() => sessionStart(t.home, "claude-code", { session_id: sid, source: "compact" }, t.env), "SessionStart", /Align goal context/);
   hot.goal = { ...SHARE_GOAL, version: 5 };
@@ -341,8 +344,8 @@ test("final output counts both audiences separately, with one state write and no
   checked(tool, "PreToolUse", /v5/);
   writeJsonAtomic(layout.latch(t.home, lid), { stopped: true });
   checked(tool, "PreToolUse", /stopped/);
-  checked(tool, "PreToolUse", /stopped/);
-  checked(() => failureDeny(t.home, "claude-code", sid), "PreToolUse", /stopped/);
+  checked(tool, "PreToolUse", /stopped/, undefined, 0);
+  checked(() => failureDeny(t.home, "claude-code", sid), "PreToolUse", /stopped/, undefined, 0);
   fs.unlinkSync(layout.latch(t.home, lid));
   hot.resumed = "resume-one";
   writeJsonAtomic(hotFile, hot);
@@ -400,7 +403,7 @@ test("an explicit same-goal choice stays silent, is saved once and does not chan
   const before = { context: state().context_added, person: state().notices_added };
   fs.utimesSync(file, new Date(0), new Date(0));
   assert.equal(userPromptSubmit(t.home, "claude-code", { session_id: sid, prompt: "go", prompt_id: "choice" }), null);
-  assert.equal(state().consumed_binding, "pb_explicit");
+  assert.equal(readJson<InjectedState>(file)!.consumed_binding, "pb_explicit");
   assert.notEqual(fs.statSync(file).mtimeMs, 0, "the base's normal bookkeeping write still happens");
   for (let i = 0; i < 3; i++) assert.equal(userPromptSubmit(t.home, "claude-code", { session_id: sid, prompt: "continue", prompt_id: `after-${i}` }), null);
   assert.deepEqual({ context: state().context_added, person: state().notices_added }, before);
@@ -408,16 +411,15 @@ test("an explicit same-goal choice stays silent, is saved once and does not chan
   assert.equal(epochs.length, 1);
 });
 
-test("an added accounting-only write preserves all existing hook-state fields", () => {
-  const { t, sid, state } = setup();
+test("a local status reply appends its count and preserves the entire shared hook state", () => {
+  const { t, sid, file, state } = setup();
   sessionStart(t.home, "claude-code", { session_id: sid }, t.env);
-  const before = state();
+  const before = fs.readFileSync(file, "utf8");
   const out = userPromptSubmit(t.home, "claude-code", { session_id: sid, prompt: "::align status" }) as any;
   assert.equal(out.decision, "block");
   const after = state();
   assert.equal(after.notices_added?.characters, out.reason.length);
-  const withoutCounters = ({ context_added, notices_added, ...fields }: InjectedState) => fields;
-  assert.deepEqual(withoutCounters(after), withoutCounters(before));
+  assert.equal(fs.readFileSync(file, "utf8"), before);
 });
 
   }

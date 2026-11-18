@@ -5,12 +5,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import childProcess from "node:child_process";
+import { readContextCost } from "../../src/shared/context-cost.ts";
 import { fileURLToPath } from "node:url";
 
 const NativeDate = Date;
 const native = Object.fromEntries(Object.keys(fs).filter((key) => Object.getOwnPropertyDescriptor(fs, key)?.writable).map((key) => [key, fs[key]]));
 const pkg = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export function withoutCounters({ context_added, notices_added, ...fields }) { return fields; }
+
 const json = (value) => JSON.parse(JSON.stringify(value));
 const encoded = (value) => value === undefined ? { $type: "undefined" } : json(value);
 
@@ -61,7 +62,7 @@ function normalize(value, home, sandbox) {
 
 function observe(implementation, args, sandbox, id) {
   const entry = Object.fromEntries(Object.keys(fs).filter((key) => Object.getOwnPropertyDescriptor(fs, key)?.writable).map((key) => [key, fs[key]])), random = crypto.randomBytes, fetch = globalThis.fetch;
-  const states = [], budgetWrites = [], escaped = [], network = [], unsupported = [], checked = new Set();
+  const states = [], sharedIO = [], counterAppends = [], budgetWrites = [], escaped = [], network = [], unsupported = [], checked = new Set();
   const home = args[0], sid = typeof args[2] === "string" ? args[2] : args[2]?.session_id;
   const lid = sid ? crypto.createHash("sha256").update(`align-local\0${args[1]}\0${sid}`).digest("base64url").slice(0, 22) : null;
   const stateFile = lid ? path.join(home, "injected", `${lid}.json`) : null;
@@ -81,7 +82,12 @@ function observe(implementation, args, sandbox, id) {
     checked.add(target);
   };
   inside(home);
-  const before = readState();
+  const costState = () => {
+    const read = fs.readFileSync;
+    fs.readFileSync = native.readFileSync;
+    try { return lid ? readContextCost(home, lid) : null; } finally { fs.readFileSync = read; }
+  };
+  const before = readState(), beforeCost = costState();
   const methods = ["readFileSync", "statSync", "lstatSync", "existsSync", "readdirSync", "realpathSync", "accessSync", "mkdirSync", "openSync", "writeFileSync", "appendFileSync", "unlinkSync", "rmSync", "rmdirSync", "renameSync"];
   for (const method of Object.keys(entry).filter((key) => typeof entry[key] === "function" && /^[a-z]/.test(key) && !methods.includes(key) && !["readSync", "writeSync", "closeSync", "fsyncSync"].includes(key))) {
     fs[method] = () => { unsupported.push(method); throw new Error(`unsupported hook I/O: ${method}`); };
@@ -90,6 +96,8 @@ function observe(implementation, args, sandbox, id) {
     fs[method] = (...values) => {
       inside(values[0]); if (method === "renameSync") inside(values[1]);
       const result = entry[method](...values);
+      if (values[0] === stateFile || (method === "renameSync" && values[1] === stateFile)) sharedIO.push(method);
+      if (method === "appendFileSync" && values[0] === path.join(home, "context-cost", `${lid}.jsonl`)) counterAppends.push(values[1]);
       if (method === "renameSync" && values[1] === stateFile) states.push(readState());
       if (/[/\\]budget-shown[/\\]/.test(String(values[0]))) budgetWrites.push([method, ...values]);
       return result;
@@ -108,22 +116,22 @@ function observe(implementation, args, sandbox, id) {
   assert.deepEqual(escaped, [], `${id}: hook I/O escaped its sandbox`);
   assert.deepEqual(network, [], `${id}: hook attempted networking`);
   assert.deepEqual(unsupported, [], `${id}: hook used unsupported I/O`);
-  return { output, error, states, budgetWrites, before, sid, now: Date.now() };
+  return { output, error, states, sharedIO, counterAppends, budgetWrites, before, beforeCost, afterCost: costState(), sid, now: Date.now() };
 }
 
 function assertCounters(actual, name, id) {
   const out = actual.output;
-  const model = typeof out === "string" ? out.length : (out?.hookSpecificOutput?.additionalContext?.length || 0) + (out?.hookSpecificOutput?.permissionDecisionReason?.length || 0);
-  const person = (out?.systemMessage?.length || 0) + (out?.decision === "block" ? out.reason?.length || 0 : 0);
+  const model = typeof out === "string" ? 0 : (out?.hookSpecificOutput?.additionalContext?.length || 0) + (out?.hookSpecificOutput?.permissionDecisionReason?.length || 0);
+  const person = (typeof out === "string" ? out.length : 0) + (out?.systemMessage?.length || 0) + (out?.decision === "block" ? out.reason?.length || 0 : 0);
   if (actual.sid) {
     const event = name === "sessionStart" ? "SessionStart" : ["userPromptSubmit", "command"].includes(name) ? "UserPromptSubmit" : "PreToolUse";
     for (const [key, length] of [["context_added", model], ["notices_added", person]]) {
-      const previous = actual.before[key];
+      const previous = actual.beforeCost[key];
       const expected = length ? { characters: (previous?.characters || 0) + length, additions: (previous?.additions || 0) + 1, last_at: new Date(actual.now).toISOString(), last_event: event } : previous;
-      if (actual.states.length) assert.deepEqual(actual.states.at(-1)[key], expected, `${id}: ${key} must count the exact returned length`);
-      else assert.equal(length, 0, `${id}: returned text was not counted`);
+      assert.deepEqual(actual.afterCost[key], expected, `${id}: ${key} must count the exact returned length`);
     }
   }
+  assert.equal(actual.counterAppends.length, (model || person) && actual.sid ? 1 : 0, `${id}: exactly one append for returned text`);
   return { model, person };
 }
 
@@ -169,25 +177,25 @@ export async function runParity(golden, reference) {
           assert.deepEqual(actual.output, original.output, `${id}: current output differs from the selected parent`);
           assert.deepEqual(actual.error, original.error, `${id}: current error differs from the selected parent`);
           assert.deepEqual(actual.budgetWrites, original.budgetWrites, `${id}: changed budget delivery marker writes`);
-          expected = { id, name, output: encoded(original.output), error: original.error, states: original.states.map(withoutCounters) };
+          assert.deepEqual(actual.sharedIO, original.sharedIO, `${id}: changed shared-state read/write order`);
+          expected = { id, name, output: encoded(original.output), error: original.error, states: original.states };
         } finally {
           native.rmSync(home, { recursive: true, force: true });
           if (native.existsSync(after)) native.renameSync(after, home);
           native.rmSync(saved, { recursive: true, force: true });
         }
       }
-      const contract = normalize({ id, name, output: encoded(actual.output), error: actual.error, states: actual.states.map(withoutCounters) }, home, sandbox);
+      const contract = normalize({ id, name, output: encoded(actual.output), error: actual.error, states: actual.states }, home, sandbox);
       expected = normalize(expected, home, sandbox);
       assert.ok(expected, `${id}: unrecorded scripted hook call`);
       assert.equal(contract.id, expected.id, "scripted case list changed; regenerate the fixture");
       assert.equal(contract.name, expected.name, `${id}: scripted handler changed`);
       assert.deepEqual(contract.output, expected.output, `${id}: returned text or decision changed`);
       assert.deepEqual(contract.error, expected.error, `${id}: hook error`);
-      const { model, person } = assertCounters(actual, name, id);
+      assertCounters(actual, name, id);
       const expectedWrites = expected.states.length;
-      assert.equal(actual.states.length, expectedWrites || ((model || person) && actual.sid ? 1 : 0), `${id}: changed when hook state is written`);
-      if (expectedWrites) assert.deepEqual(contract.states, expected.states, `${id}: changed non-counter state writes`);
-      if (!expectedWrites && actual.states.length && Object.keys(actual.before).length) assert.deepEqual(actual.states.map(withoutCounters), [withoutCounters(actual.before)], `${id}: accounting-only save changed existing state`);
+      assert.equal(actual.states.length, expectedWrites, `${id}: changed when shared hook state is written`);
+      assert.deepEqual(contract.states, expected.states, `${id}: changed complete shared hook-state writes`);
       cases.push(expected);
       returns.push({ name, actualWrites: actual.states.length, originalWrites: expectedWrites,
         budgetContext: /reached \d+% of its team budget/.test(actual.output?.hookSpecificOutput?.additionalContext || ""),
@@ -201,7 +209,7 @@ export async function runParity(golden, reference) {
     assert.ok(returns.length >= 150, `only ${returns.length} hook returns were compared`);
     for (const name of ["sessionStart", "userPromptSubmit", "preToolUse", "failureDeny", "stop"]) assert.ok(returns.some((row) => row.name === name), `no comparison for ${name}`);
     assert.ok(returns.some((row) => row.originalWrites > 0), "existing state writes were compared");
-    assert.ok(returns.some((row) => row.actualWrites > row.originalWrites), "text paths with new accounting writes were compared");
+    assert.ok(returns.every((row) => row.actualWrites === row.originalWrites), "no additional shared-state writes");
     for (const name of ["sessionStart", "userPromptSubmit"]) assert.ok(returns.some((row) => row.name === name && row.budgetContext), `no budget context comparison for ${name}`);
     for (const name of ["sessionStart", "userPromptSubmit", "preToolUse"]) assert.ok(returns.some((row) => row.name === name && row.budgetMessage), `no budget message comparison for ${name}`);
     return cases;

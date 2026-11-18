@@ -4,9 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { after, test } from "node:test";
 import { renderHot } from "../src/hot.ts";
+import { uninstall } from "../src/install.ts";
+import { resolvePaths } from "../src/paths.ts";
 import { record } from "../src/hooks/siblings.ts";
-import { failureDeny, preToolUse, sessionStart, userPromptSubmit, type HookOutput } from "../src/hooks/handlers.ts";
-import { contextAddedLine, emptyAddedText } from "../src/shared/context-cost.ts";
+import { failureDeny, preToolUse, recordStandaloneOutput, sessionStart, userPromptSubmit, type HookOutput } from "../src/hooks/handlers.ts";
+import { contextAddedLine, countOutput, emptyAddedText, readContextCost } from "../src/shared/context-cost.ts";
 import type { BudgetSnapshot } from "../src/shared/budget-notes.ts";
 import { readJson, writeJsonAtomic } from "../src/shared/fsx.ts";
 import { layout, listSpool } from "../src/shared/layout.ts";
@@ -23,7 +25,7 @@ function setup(harness: Harness = "claude-code") {
   const sid = "context-cost-session";
   const lid = shareSession(ctx, harness, sid);
   const file = layout.injected(t.home, lid);
-  const state = () => readJson<InjectedState>(file)!;
+  const state = () => readContextCost(t.home, lid);
   const budget = (spent: number) => {
     const hot = readJson<HotState>(layout.hot(t.home, lid))!;
     const at = new Date().toISOString();
@@ -52,7 +54,7 @@ for (const harness of ["claude-code", "codex"] as const) {
         const notice = (out?.systemMessage || "") + (out?.decision === "block" ? out.reason : "");
         if (text) { model += text.length; modelAdds++; }
         if (notice) { person += notice.length; personAdds++; }
-        assert.equal(writes, writesExpected, "only the existing or one accounting state write");
+        assert.equal(writes, writesExpected, "only baseline shared-state writes");
         assert.equal(state()?.context_added?.characters || 0, model);
         assert.equal(state()?.context_added?.additions || 0, modelAdds);
         assert.equal(state()?.notices_added?.characters || 0, person);
@@ -77,10 +79,9 @@ for (const harness of ["claude-code", "codex"] as const) {
       fs.mkdirSync(file + ".lock");
       try { assert.equal(checked(() => tool(), "PreToolUse", 0), null); }
       finally { fs.rmdirSync(file + ".lock"); }
-      const beforeTool = state();
-      const message = checked(() => tool(), "PreToolUse", harness === "claude-code" ? 1 : 0);
-      const withoutCounters = ({ context_added, notices_added, ...fields }: InjectedState) => fields;
-      assert.deepEqual(withoutCounters(state()), withoutCounters(beforeTool), "a message-only tool return preserves normal hook state");
+      const beforeTool = fs.readFileSync(file, "utf8");
+      const message = checked(() => tool(), "PreToolUse", 0);
+      assert.equal(fs.readFileSync(file, "utf8"), beforeTool, "a message-only tool return preserves complete hook state byte for byte");
       if (harness === "claude-code") {
         assert.match(message.systemMessage, /100% of its team budget/);
         assert.equal(message.hookSpecificOutput, undefined);
@@ -107,11 +108,15 @@ for (const harness of ["claude-code", "codex"] as const) {
     assert.equal(state().context_added?.last_event, "SessionStart");
     const unchanged = () => {
       const before = { context: state().context_added, person: state().notices_added };
+      const log = layout.contextCost(t.home, lid);
+      const bytes = fs.readFileSync(log, "utf8"), mtime = fs.statSync(log).mtimeMs;
       for (let i = 0; i < 8; i++) {
         const r = runHook(t, provider, "UserPromptSubmit", { session_id: sid, prompt: "continue", prompt_id: `p${i}`, turn_id: `p${i}` }, {}, BLOCK_NET);
         assert.equal(r.code, 0, r.stderr);
         assert.equal(r.stdout, "");
         assert.deepEqual({ context: state().context_added, person: state().notices_added }, before);
+        assert.equal(fs.readFileSync(log, "utf8"), bytes);
+        assert.equal(fs.statSync(log).mtimeMs, mtime, "silent hooks never touch the counter file");
       }
     };
     unchanged();
@@ -129,24 +134,27 @@ for (const harness of ["claude-code", "codex"] as const) {
   });
 }
 
-test("final output counts both audiences separately, with one state write and no accounting reread", () => {
+test("final output counts both audiences separately, with one append and no accounting reread", () => {
   const { t, sid, lid, file, state } = setup();
   let model = 0, person = 0, modelAdds = 0, personAdds = 0;
-  const checked = (run: () => HookOutput, event: string, modelPattern?: RegExp, personPattern?: RegExp) => {
-    let writes = 0, reads = 0;
-    const rename = fs.renameSync, read = fs.readFileSync;
+  const checked = (run: () => HookOutput, event: string, modelPattern?: RegExp, personPattern?: RegExp, expectedWrites = 1) => {
+    let writes = 0, reads = 0, appends = 0, counterReads = 0;
+    const rename = fs.renameSync, read = fs.readFileSync, append = fs.appendFileSync;
+    fs.appendFileSync = (...args) => { if (args[0] === layout.contextCost(t.home, lid)) appends++; return append(...args); };
     fs.renameSync = (...args) => { if (args[1] === file) writes++; return rename(...args); };
-    fs.readFileSync = ((...args: Parameters<typeof fs.readFileSync>) => { if (args[0] === file) reads++; return read(...args); }) as typeof fs.readFileSync;
+    fs.readFileSync = ((...args: Parameters<typeof fs.readFileSync>) => { if (args[0] === file) reads++; if (args[0] === layout.contextCost(t.home, lid)) counterReads++; return read(...args); }) as typeof fs.readFileSync;
     let out: any;
-    try { out = run(); } finally { fs.renameSync = rename; fs.readFileSync = read; }
+    try { out = run(); } finally { fs.renameSync = rename; fs.readFileSync = read; fs.appendFileSync = append; }
     const text = [out?.hookSpecificOutput?.additionalContext, out?.hookSpecificOutput?.permissionDecisionReason].filter(Boolean).join("\n");
     const notice = [out?.systemMessage, out?.decision === "block" ? out.reason : null].filter(Boolean).join("\n");
     if (modelPattern) assert.match(text, modelPattern);
     if (personPattern) assert.match(notice, personPattern);
     if (text) { model += text.length; modelAdds++; }
     if (notice) { person += notice.length; personAdds++; }
-    assert.equal(writes, text || notice ? 1 : 0, "one shared state write for the whole return");
-    // Existing feed-hold checks also read state; accounting must reuse the handler's state.
+    assert.equal(writes, expectedWrites, "baseline shared-state write count");
+    assert.equal(appends, text || notice ? 1 : 0, "one append for the complete return");
+    assert.equal(counterReads, 0, "accounting never reads its file in a hook");
+    // Shared-state reads remain exactly those of the baseline handler.
     if (event === "SessionStart" || out?.decision === "block") assert.equal(reads, 1);
     assert.equal(state().context_added?.characters || 0, model);
     assert.equal(state().context_added?.additions || 0, modelAdds);
@@ -164,7 +172,7 @@ test("final output counts both audiences separately, with one state write and no
   writeJsonAtomic(hotFile, hot);
   const prompt = (text = "continue") => userPromptSubmit(t.home, "claude-code", { session_id: sid, prompt: text });
   checked(() => prompt(), "UserPromptSubmit", /request from/, /Kim/);
-  checked(() => prompt("::align decline context"), "UserPromptSubmit", undefined, /you declined/);
+  checked(() => prompt("::align decline context"), "UserPromptSubmit", undefined, /you declined/, 1);
   checked(() => prompt(), "UserPromptSubmit", /developer declined/);
   checked(() => sessionStart(t.home, "claude-code", { session_id: sid, source: "compact" }, t.env), "SessionStart", /Align goal context/);
   hot.goal = { ...SHARE_GOAL, version: 5 };
@@ -173,8 +181,8 @@ test("final output counts both audiences separately, with one state write and no
   checked(tool, "PreToolUse", /v5/);
   writeJsonAtomic(layout.latch(t.home, lid), { stopped: true });
   checked(tool, "PreToolUse", /stopped/);
-  checked(tool, "PreToolUse", /stopped/);
-  checked(() => failureDeny(t.home, "claude-code", sid), "PreToolUse", /stopped/);
+  checked(tool, "PreToolUse", /stopped/, undefined, 0);
+  checked(() => failureDeny(t.home, "claude-code", sid), "PreToolUse", /stopped/, undefined, 0);
   fs.unlinkSync(layout.latch(t.home, lid));
   hot.resumed = "resume-one";
   writeJsonAtomic(hotFile, hot);
@@ -253,7 +261,7 @@ test("an explicit same-goal choice stays silent, is saved once and does not chan
   const before = { context: state().context_added, person: state().notices_added };
   fs.utimesSync(file, new Date(0), new Date(0));
   assert.equal(userPromptSubmit(t.home, "claude-code", { session_id: sid, prompt: "go", prompt_id: "choice" }), null);
-  assert.equal(state().consumed_binding, "pb_explicit");
+  assert.equal(readJson<InjectedState>(file)!.consumed_binding, "pb_explicit");
   assert.notEqual(fs.statSync(file).mtimeMs, 0, "the base's normal bookkeeping write still happens");
   for (let i = 0; i < 3; i++) assert.equal(userPromptSubmit(t.home, "claude-code", { session_id: sid, prompt: "continue", prompt_id: `after-${i}` }), null);
   assert.deepEqual({ context: state().context_added, person: state().notices_added }, before);
@@ -261,14 +269,91 @@ test("an explicit same-goal choice stays silent, is saved once and does not chan
   assert.equal(epochs.length, 1);
 });
 
-test("an added accounting-only write preserves all existing hook-state fields", () => {
-  const { t, sid, state } = setup();
+test("a local status reply appends its count and preserves the entire shared hook state", () => {
+  const { t, sid, file, state } = setup();
   sessionStart(t.home, "claude-code", { session_id: sid }, t.env);
-  const before = state();
+  const before = fs.readFileSync(file, "utf8");
   const out = userPromptSubmit(t.home, "claude-code", { session_id: sid, prompt: "::align status" }) as any;
   assert.equal(out.decision, "block");
   const after = state();
   assert.equal(after.notices_added?.characters, out.reason.length);
-  const withoutCounters = ({ context_added, notices_added, ...fields }: InjectedState) => fields;
-  assert.deepEqual(withoutCounters(after), withoutCounters(before));
+  assert.equal(fs.readFileSync(file, "utf8"), before);
 });
+
+test("complete records survive a torn or malformed tail, later appends and out-of-order times", async () => {
+  const { t, lid, state } = setup();
+  const file = layout.contextCost(t.home, lid);
+  fs.mkdirSync(layout.contextCostDir(t.home), { recursive: true });
+  const first = ["model", 7, "2026-11-18T10:00:00.000Z", "SessionStart"];
+  const older = ["model", 3, "2026-11-18T09:00:00.000Z", "PreToolUse"];
+  const person = ["person", 5, "2026-11-18T11:00:00.000Z", "UserPromptSubmit"];
+  const invalid = [["model", -3, first[2], first[3]], ["person", 0, first[2], first[3]], ["other", 8, first[2], first[3]],
+    ["model", 8, "invalid", first[3]], ["model", 8, first[2], "Stop"], {}, ["model", 8.5, first[2], first[3]]];
+  const valid = [first, older, person].map((row) => JSON.stringify(row)).join("\n") + "\n";
+  for (const tail of ['["model",9', 'invalid\n', JSON.stringify(["model", 99, first[2], first[3]])]) {
+    fs.writeFileSync(file, valid + invalid.map((row) => JSON.stringify(row)).join("\n") + "\n" + tail);
+    const before = fs.readFileSync(file, "utf8");
+    assert.deepEqual(state(), {
+      context_added: { characters: 10, additions: 2, last_at: first[2], last_event: "SessionStart" },
+      notices_added: { characters: 5, additions: 1, last_at: person[2], last_event: "UserPromptSubmit" },
+    });
+    const result = await runCli(t, ["sessions", "--json"]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout).find((row: any) => row.local_id === lid).context_added, state().context_added);
+    assert.equal(fs.readFileSync(file, "utf8"), before, "commands never rewrite the file");
+  }
+  fs.writeFileSync(file, valid + '["model",9');
+  countOutput(t.home, lid, { hookSpecificOutput: { additionalContext: "next" } }, "PreToolUse");
+  assert.equal(state().context_added.characters, 14, "a new append starts after the torn line");
+  assert.equal(state().context_added.additions, 3);
+});
+
+test("silent or unidentified returns touch no counter file; standalone notices never read shared state", () => {
+  const { t, sid, lid } = setup();
+  const paths: string[] = [];
+  const read = fs.readFileSync, append = fs.appendFileSync, mkdir = fs.mkdirSync;
+  fs.readFileSync = ((...args: Parameters<typeof fs.readFileSync>) => { paths.push(String(args[0])); return read(...args); }) as typeof fs.readFileSync;
+  fs.appendFileSync = (...args) => { paths.push(String(args[0])); return append(...args); };
+  fs.mkdirSync = (...args: any[]) => { paths.push(String(args[0])); return (mkdir as any)(...args); };
+  try {
+    recordStandaloneOutput(t.home, "claude-code", sid, null, "SessionStart");
+    recordStandaloneOutput(t.home, "claude-code", sid, {}, "SessionStart");
+    recordStandaloneOutput(t.home, "claude-code", undefined, { systemMessage: "notice" }, "SessionStart");
+    assert.deepEqual(paths, []);
+    recordStandaloneOutput(t.home, "claude-code", sid, { systemMessage: "notice" }, "SessionStart");
+    assert.deepEqual(paths, [layout.contextCostDir(t.home), layout.contextCost(t.home, lid)]);
+  } finally { fs.readFileSync = read; fs.appendFileSync = append; fs.mkdirSync = mkdir; }
+  assert.equal(readContextCost(t.home, lid).notices_added.characters, "notice".length);
+  assert.equal(fs.existsSync(layout.injected(t.home, lid)), false);
+  assert.equal(fs.statSync(layout.contextCost(t.home, lid)).mode & 0o777, 0o600);
+});
+
+test("failed counter appends preserve returned denials and baseline bookkeeping", () => {
+  const { t, sid, lid, file, state } = setup();
+  sessionStart(t.home, "claude-code", { session_id: sid }, t.env);
+  const before = state();
+  writeJsonAtomic(layout.latch(t.home, lid), { stopped: true });
+  const append = fs.appendFileSync;
+  fs.appendFileSync = (...args) => {
+    if (args[0] === layout.contextCost(t.home, lid)) throw new Error("counter append refused");
+    return append(...args);
+  };
+  try {
+    const out = preToolUse(t.home, "claude-code", { session_id: sid, tool_name: "Bash" }) as any;
+    assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+    assert.match(out.hookSpecificOutput.permissionDecisionReason, /stopped/);
+    assert.equal(readJson<InjectedState>(file)!.stop_told, true);
+  } finally { fs.appendFileSync = append; }
+  assert.deepEqual(state(), before);
+});
+
+for (const purge of [false, true]) {
+  test(`uninstall removes all session counter files (purge=${purge})`, () => {
+    const { t, sid, lid, file } = setup();
+    sessionStart(t.home, "claude-code", { session_id: sid }, t.env);
+    assert.ok(fs.existsSync(layout.contextCost(t.home, lid)));
+    uninstall(resolvePaths(t.env), { purge });
+    assert.equal(fs.existsSync(layout.contextCostDir(t.home)), false);
+    assert.equal(fs.existsSync(file), !purge, "the existing session-file retention rule is preserved");
+  });
+}

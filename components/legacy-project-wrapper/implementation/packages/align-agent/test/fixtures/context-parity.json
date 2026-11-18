@@ -2387,7 +2387,7 @@
       ]
     },
     {
-      "id": "context-cost.test.ts: final output counts both audiences separately, with one state write and no accounting reread #1: sessionStart",
+      "id": "context-cost.test.ts: final output counts both audiences separately, with one append and no accounting reread #1: sessionStart",
       "name": "sessionStart",
       "output": {
         "hookSpecificOutput": {
@@ -2415,7 +2415,7 @@
       ]
     },
     {
-      "id": "context-cost.test.ts: final output counts both audiences separately, with one state write and no accounting reread #2: userPromptSubmit",
+      "id": "context-cost.test.ts: final output counts both audiences separately, with one append and no accounting reread #2: userPromptSubmit",
       "name": "userPromptSubmit",
       "output": {
         "hookSpecificOutput": {
@@ -2449,7 +2449,7 @@
       ]
     },
     {
-      "id": "context-cost.test.ts: final output counts both audiences separately, with one state write and no accounting reread #3: userPromptSubmit",
+      "id": "context-cost.test.ts: final output counts both audiences separately, with one append and no accounting reread #3: userPromptSubmit",
       "name": "userPromptSubmit",
       "output": {
         "decision": "block",
@@ -2481,7 +2481,7 @@
       ]
     },
     {
-      "id": "context-cost.test.ts: final output counts both audiences separately, with one state write and no accounting reread #4: userPromptSubmit",
+      "id": "context-cost.test.ts: final output counts both audiences separately, with one append and no accounting reread #4: userPromptSubmit",
       "name": "userPromptSubmit",
       "output": {
         "hookSpecificOutput": {
@@ -2516,7 +2516,7 @@
       ]
     },
     {
-      "id": "context-cost.test.ts: final output counts both audiences separately, with one state write and no accounting reread #5: sessionStart",
+      "id": "context-cost.test.ts: final output counts both audiences separately, with one append and no accounting reread #5: sessionStart",
       "name": "sessionStart",
       "output": {
         "hookSpecificOutput": {
@@ -2551,7 +2551,7 @@
       ]
     },
     {
-      "id": "context-cost.test.ts: final output counts both audiences separately, with one state write and no accounting reread #6: preToolUse",
+      "id": "context-cost.test.ts: final output counts both audiences separately, with one append and no accounting reread #6: preToolUse",
       "name": "preToolUse",
       "output": {
         "hookSpecificOutput": {
@@ -2586,7 +2586,7 @@
       ]
     },
     {
-      "id": "context-cost.test.ts: final output counts both audiences separately, with one state write and no accounting reread #7: preToolUse",
+      "id": "context-cost.test.ts: final output counts both audiences separately, with one append and no accounting reread #7: preToolUse",
       "name": "preToolUse",
       "output": {
         "hookSpecificOutput": {
@@ -2625,7 +2625,7 @@
       ]
     },
     {
-      "id": "context-cost.test.ts: final output counts both audiences separately, with one state write and no accounting reread #8: preToolUse",
+      "id": "context-cost.test.ts: final output counts both audiences separately, with one append and no accounting reread #8: preToolUse",
       "name": "preToolUse",
       "output": {
         "hookSpecificOutput": {
@@ -2638,7 +2638,7 @@
       "states": []
     },
     {
-      "id": "context-cost.test.ts: final output counts both audiences separately, with one state write and no accounting reread #9: failureDeny",
+      "id": "context-cost.test.ts: final output counts both audiences separately, with one append and no accounting reread #9: failureDeny",
       "name": "failureDeny",
       "output": {
         "hookSpecificOutput": {
@@ -2651,7 +2651,7 @@
       "states": []
     },
     {
-      "id": "context-cost.test.ts: final output counts both audiences separately, with one state write and no accounting reread #10: userPromptSubmit",
+      "id": "context-cost.test.ts: final output counts both audiences separately, with one append and no accounting reread #10: userPromptSubmit",
       "name": "userPromptSubmit",
       "output": {
         "hookSpecificOutput": {
@@ -2689,7 +2689,7 @@
       ]
     },
     {
-      "id": "context-cost.test.ts: final output counts both audiences separately, with one state write and no accounting reread #11: preToolUse",
+      "id": "context-cost.test.ts: final output counts both audiences separately, with one append and no accounting reread #11: preToolUse",
       "name": "preToolUse",
       "output": {
         "hookSpecificOutput": {
@@ -2732,7 +2732,7 @@
       ]
     },
     {
-      "id": "context-cost.test.ts: final output counts both audiences separately, with one state write and no accounting reread #12: userPromptSubmit",
+      "id": "context-cost.test.ts: final output counts both audiences separately, with one append and no accounting reread #12: userPromptSubmit",
       "name": "userPromptSubmit",
       "output": {
         "hookSpecificOutput": {
@@ -3085,7 +3085,7 @@
       ]
     },
     {
-      "id": "context-cost.test.ts: an added accounting-only write preserves all existing hook-state fields #1: sessionStart",
+      "id": "context-cost.test.ts: a local status reply appends its count and preserves the entire shared hook state #1: sessionStart",
       "name": "sessionStart",
       "output": {
         "hookSpecificOutput": {
@@ -3113,7 +3113,7 @@
       ]
     },
     {
-      "id": "context-cost.test.ts: an added accounting-only write preserves all existing hook-state fields #2: userPromptSubmit",
+      "id": "context-cost.test.ts: a local status reply appends its count and preserves the entire shared hook state #2: userPromptSubmit",
       "name": "userPromptSubmit",
       "output": {
         "decision": "block",

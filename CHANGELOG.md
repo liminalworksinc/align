@@ -5,8 +5,10 @@
 - The local agent records the characters Align adds to each session's context, with addition counts and last times.
   `align status` shows the current folder's session total and `align sessions` shows each session's total.
   Budget context lines count toward model context; person-only budget messages and notices count separately.
-  Hooks keep their existing text and state-write behavior; unchanged prompts return zero bytes and leave the
-  recorded character totals, addition counts and last-addition times unchanged.
+  Counters use a separate append-only file per session, with one append per text return, so parallel hooks keep
+  every addition without changing shared hook-state reads, writes or fields. Commands sum valid complete lines
+  and tolerate a torn last line. The file is never rewritten or rotated and is removed with session files and on
+  uninstall. Unchanged prompts return zero bytes and leave totals, addition counts and last times unchanged.
 - Budget pass tests use a controlled clock so machine load cannot shorten their expected batches; a separate
   regression checks the unchanged time cutoff and continuation with unfinished sessions.
 

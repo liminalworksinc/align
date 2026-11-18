@@ -44,10 +44,10 @@ import { applyShare, bind, deleteHistory, deleteRefused, ENDED_UNREAD, endedUnre
 import { askLineForPeople, askOrder, myTeams, readAsks } from "./shared/asks.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson } from "./shared/fsx.ts";
-import { contextAddedLine, emptyAddedText } from "./shared/context-cost.ts";
+import { contextAddedLine, readContextCost } from "./shared/context-cost.ts";
 import { matchRule, readRules, realDir, removeRule, setRule } from "./shared/rules.ts";
 import { layout } from "./shared/layout.ts";
-import type { Ask, Goal, InjectedState, MeFile } from "./shared/types.ts";
+import type { Ask, Goal, MeFile } from "./shared/types.ts";
 import { flushOutbox, ingestSpool, outboxDepth, syncOnce, uploadUsage, type LastSync } from "./sync.ts";
 import { tailAll } from "./tailer.ts";
 import { VERSION } from "./version.ts";
@@ -804,7 +804,7 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
   const folder = realDir(process.cwd());
   const here = (ctx.db.prepare("SELECT local_id, cwd FROM sessions ORDER BY COALESCE(last_active, created_at) DESC").all() as { local_id: string; cwd: string | null }[])
     .find((s) => s.cwd && realDir(s.cwd) === folder);
-  if (here) out(contextAddedLine(readJson<InjectedState>(layout.injected(ctx.home, here.local_id))?.context_added));
+  if (here) out(contextAddedLine(readContextCost(ctx.home, here.local_id).context_added));
 }
 
 async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
@@ -859,9 +859,8 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
             : "; no access to the workspace"
           : "") +
       (refused ? `; history deletion refused (${refused})` : deleting ? "; history deletion queued" : "");
-    const inj = readJson<InjectedState>(layout.injected(ctx.home, s.local_id));
     return { ...s, repo: repoLabel(ctx, s, share?.workspace_id ?? null), usage: agg, shared: share ? `${share.state} (${share.workspace_name}${why})` : "private",
-      context_added: inj?.context_added || emptyAddedText(), notices_added: inj?.notices_added || emptyAddedText() };
+      ...readContextCost(ctx.home, s.local_id) };
   });
   if (values.json) return out(JSON.stringify(rows, null, 2));
   if (!rows.length) return out("No sessions seen in the last 7 days. Use --all for older ones.");

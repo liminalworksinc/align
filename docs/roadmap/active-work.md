@@ -34,39 +34,41 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
 - **Owner:** specs/align/local-agent.md and the local agent package
 - **Direction:** Record exact returned character totals, addition counts and last times per session, and show them in status and sessions.
-- **Conclusion:** Preserve the team-budget base's hook text, delivery markers and state writes. Count final model text
-  and person-only text separately inside existing writes; add one accounting write only where text previously
-  returned without a hook-state write. Budget context lines and person-only messages belong to their own audience.
+- **Conclusion:** Restore every shared hook-state read and write to baseline 7807a718, including its timing and fields.
+  Record final returned text in a separate append-only per-session file with one append per hook return.
+  Commands sum the records. The file is never rewritten or rotated while the session exists because replacement
+  can lose a concurrent append.
 - **Completion prerequisites:** none
 - **Implementation and evidence:**
-  - [x] Amend the specification first and port the local counters, status and sessions output, README and changelog.
-  - [x] Preserve the base's hook text and normal writes, including silent prompts and choices. Local command saves
-    remain at their existing points. Combined tool deltas, sibling notes and budget messages count once per audience.
-  - [x] Bring over accounting tests and extend them through budget startup, resume, prompts and tool calls for both
-    harnesses, including subagents, busy locks, message-only state preservation and later context-only delivery.
-    All 13 accounting cases pass. No existing test was modified.
-  - [x] Compare against HEAD 11521efb9f50b044882c6ee22466297a332be1c1, rather than origin/main.
-    All 356 recorded hook returns match. Existing write counts, saved non-counter fields and budget marker writes
-    match, allowing one accounting write only where text returned without a save. The nested 59 cases pass,
-    including the unchanged 24 hook tests and 22 budget tests.
-  - [x] Node 26.3.0 on macOS arm64: lint, application and agent typechecks, syntax and agent build pass.
-    No-server suites: paste-lines 33/0, admin 62/0, invite-races 10/0, budgets 48/0.
-    Seven listener-free agent files pass 317/0 without overlapping suites; binding regressions pass 3/0.
-    Both existing 50-prompt zero-byte checks pass unchanged. Serial hook latency passes 1/0 with networking
-    blocked at the unchanged 150 ms p95 limit. Copy review and `git diff --check` pass.
+  - [x] Specify the storage and concurrency correction before changing implementation.
+  - [x] Restore baseline shared state, implement append-only counters, command totals and uninstall cleanup.
+    Session hook files are retained through unshare and sign-out; the package has no separate session eviction path.
+    Both ordinary uninstall and purge remove counters. Accounting tests retain all prior behaviors and add torn-line,
+    append-failure, silent-file-access and uninstall checks (18 passed).
+  - [x] Compare complete shared state against baseline 7807a718 without excluded fields. All 356 hook returns,
+    saved state snapshots, budget marker writes and shared-state I/O order match during fixture generation.
+    The kept script regenerates a portable 312,801-byte fixture. A source equality test also proves every baseline
+    handler body and the entire shared-state interface are unchanged, apart from private wrapper names.
+  - [x] Twenty consecutive concurrency runs pass. Each implementation runs two batches of 16 parallel hook
+    processes plus control calls for one session, forcing stale sibling snapshots, hooks that lose the delta lock, collision
+    denials and repeated stop and hold denials past newer locked writes. All 36 returned additions survive;
+    complete shared-state bytes match the baseline, delivery markers and stop and hold fields survive, and neither
+    delta repeats. The same test against the original broken top commit fails on a repeated v5 delta.
+  - [x] Node 26.3.0: lint, application and agent typechecks, syntax and agent build pass. All 337 listener-free
+    agent tests pass with files scheduled serially. Both original 50-prompt zero-byte assertions pass unmodified.
+    The serial latency test passes at its unchanged p95 limit below 150 ms, with networking blocked.
+    No-server application suites: paste-lines 33/0, admin 62/0, invite-races 10/0, budgets 48/0.
+    Register lint is CLEAN and `git diff --check` passes. No existing test outside accounting and parity fixtures,
+    assertion threshold, timeout, begin() implementation or usage metering code changed.
   - [ ] Run listener-dependent server, browser and live-agent suites in a listener-capable environment.
-- **Outcome:** The local port is implemented and uncommitted. Both sides' budget and context entries are retained.
-  The parent remains unchecked under the P0 rule because listener-dependent evidence is UNKNOWN.
-- **Failed checks, resolved:** Initial comparison runs failed on new fixture bookkeeping for write spies, generated
-  IDs and nested marker writes. These fixture errors were corrected. The first listener-free run was 303/1 because
-  Next.js's CommonJS setting reached copied hooks in the in-worktree temporary directory. Giving that temporary
-  test root its own module setting resolved the setup error. Overlapping runs then failed the unchanged budget
-  read expectation at 96/100 and 98/100 within its fixed time cap; isolated runs pass. No limit, deadline or existing
-  assertion changed. The added comparison runner now schedules files serially; existing test commands are unchanged.
-- **Verification boundary:** Listener-dependent and live-server suites, an actual unsupported runtime and simultaneous
-  non-delta counter writes remain UNKNOWN. The installed `litai` command is unavailable (guidance and verify exit 127), so
-  queue recording is edited directly and formal verification and the peer-work survey are UNKNOWN.
-  No branch changes or outbound actions are authorized.
+- **Outcome:** The concurrency correction is implemented and uncommitted. Hook bodies and shared-state fields
+  match the baseline, counters use one separate append-only file per session, and all permitted local checks pass.
+  The P0 parent stays unchecked because listener-dependent evidence is still UNKNOWN.
+- **Next action:** Review the uncommitted fix and run the listener-dependent suites where ports are available.
+  No commit, branch change or outbound action is authorized.
+- **Verification boundary:** Listener-dependent server, browser and live-agent suites, plus execution under an
+  actual unsupported runtime, remain UNKNOWN. `litai doctor`, guidance and verify exit 127 because the CLI is not
+  installed, so formal specification verification and the workflow peer survey remain UNKNOWN.
 
 ### [ ] SPEND-004: Current budgets and crossing information
 

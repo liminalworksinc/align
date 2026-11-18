@@ -120,14 +120,21 @@ goal and ask changes, requests and answers, steering, activity notes, tool denia
 run again. Budget context lines count toward model context, and person-only budget messages at session start,
 prompts and tool calls count toward the separate person-only total. Clear, compact and resume blocks count when
 returned again. Ordinary unchanged prompts add nothing and leave the recorded totals, addition counts and
-last-addition times unchanged. Hooks keep their existing text and
-state-write behavior, including silent prompts and silent choices that keep the same goal. Counters are included in
-existing state writes; a path that returns text without saving state adds one accounting write in that same file.
+last-addition times unchanged. Hooks preserve every existing shared-state read and write, including silent prompts
+and choices that keep the same goal.
 
-The counters live only in the session's existing local hook state. Person-only notices and local command replies
-have their own separate total, excluded from model context. `align sessions --json` includes `context_added` and
-`notices_added`, each with `characters`, `additions`, `last_at` and `last_event`. State from before this feature starts
-at zero; Align cannot reconstruct earlier additions. A hook with no session reference cannot update a session total.
+Counters live in `~/.align/context-cost/<lid>.jsonl`, separate from shared hook state. Each nonempty audience
+addition appends one short line with its audience, character count, time and hook event. A return with both
+audiences writes both lines in one append call. A silent hook touches no counter file. Accounting reads no file,
+takes no lock and adds no network request or directory scan to a hook. The file is append-only and never rewritten
+or rotated while the session exists because replacement could lose a concurrent append.
+
+`align status` and `align sessions` sum complete valid lines, ignoring a torn or malformed last line. Person-only
+notices and local command replies have their own total, excluded from model context. `align sessions --json`
+includes `context_added` and `notices_added`, each with `characters`, `additions`, `last_at` and `last_event`.
+A missing file starts at zero; Align cannot reconstruct earlier additions. Counters from earlier unshipped builds
+in shared hook state are not migrated. A hook with no session reference cannot update a session total. Counters
+follow the session's local files and are removed on uninstall, including uninstall without `--purge`.
 
 ## Requests and goal holds
 

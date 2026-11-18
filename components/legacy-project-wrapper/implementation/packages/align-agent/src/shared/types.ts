@@ -186,9 +186,6 @@ export interface AddedText {
 }
 
 export interface InjectedState {
-  /** Returned model text and person-only text, counted separately without retaining either text. */
-  context_added?: AddedText;
-  notices_added?: AddedText;
   v: 1;
   goal_id: string | null;
   goal_version: number | null;
