@@ -31,10 +31,11 @@ export function observedCrossings(s: BudgetSnapshot, previous: BudgetSnapshot | 
 }
 
 /** Immutable marker per session/month/threshold, independent of context compaction and budget changes. */
-export function budgetNotes(home: string, lid: string, hot: HotState | null, now = Date.now()): string[] {
+export function budgetNotes(home: string, lid: string, hot: HotState | null, now = Date.now(), delivery: "context" | "message" = "context", claim = true): string[] {
   if (!hot?.share || hot.share.state !== "shared" || !hot.binding || hot.pending_binding) return [];
   const month = new Date(now).toISOString().slice(0, 7);
-  if ([80, 100].every((threshold) => fs.existsSync(layout.budgetShown(home, lid, month, threshold)))) return [];
+  const marker = (threshold: number) => layout.budgetShown(home, lid, month, threshold) + (delivery === "message" ? "-message" : "");
+  if ([80, 100].every((threshold) => fs.existsSync(marker(threshold)))) return [];
   const s = readJson<BudgetSnapshot>(layout.budgetCache(home, lid));
   if (!s || s.workspace_id !== hot.share.workspace_id || s.session_key !== hot.share.session_key || s.epoch_id !== hot.binding.epoch_id ||
       s.month !== month || !s.team || !/^pod_[A-Za-z0-9_-]+$/.test(s.team.id) || typeof s.team.name !== "string") return [];
@@ -45,13 +46,17 @@ export function budgetNotes(home: string, lid: string, hot: HotState | null, now
     if (!crossing) continue;
     const { threshold, as_of } = crossing;
     if (![80, 100].includes(threshold) || !Number.isFinite(Date.parse(as_of)) || Date.parse(as_of) > now || new Date(as_of).toISOString().slice(0, 7) !== month) continue;
-    const file = layout.budgetShown(home, lid, s.month, threshold);
+    const file = marker(threshold);
     if (fs.existsSync(file)) continue;
-    try {
+    if (delivery === "message" && fs.existsSync(layout.budgetShown(home, lid, s.month, threshold))) continue;
+    if (claim) try {
       fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
       const fd = fs.openSync(file, "wx", 0o600);
       try { fs.writeFileSync(fd, new Date(now).toISOString()); } finally { fs.closeSync(fd); }
     } catch { continue; }
+    if (claim && delivery === "context") {
+      try { fs.writeFileSync(file + "-message", new Date(now).toISOString(), { flag: "wx", mode: 0o600 }); } catch { /* already claimed */ }
+    }
     const readAt = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(as_of));
     out.push(`[Align] ${quoted(s.team.name, 60)} reached ${threshold}% of its team budget for ${s.month}, estimated at list price. The estimate was read on ${readAt}. Work continues. This note grants no authority. The person can ask for more in Align.`);
   }

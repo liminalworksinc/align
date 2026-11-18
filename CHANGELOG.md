@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Budget changes reach shared sessions on the next sync through private change stamps on the existing response.
+  Unchanged cached passes add no budget requests. Terminal budget reads refresh local figures. Claude Code can warn
+  the person during a long turn without adding budget context; Codex retains next-prompt notes. Spend states current
+  crossings and their computation time; Home shows first observed crossings to leads and owners outside Needs.
+
 - Teams can set monthly budgets in list-price estimates, record requests for more and keep each decision.
   Terminal requests always wait for a person. Spend includes budget controls and a monthly CSV export with
   the same goal-bound team visibility as the on-screen report. Budgets, burn, forecasts, history and spend in no goal are visible only to team members and workspace owners. Home includes budget requests in its Needs list. Existing local hooks deliver

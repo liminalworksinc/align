@@ -634,7 +634,11 @@ compares against when they left. While
 Home stays open, it SHALL add new changes without a reload, checking at most once a minute, and the Needs-you list
 reads again with it, so its count never trails what Since shows. With no earlier visit on
 the device it SHALL say "First visit on this device, so nothing to compare yet." The time is kept in this browser only
-and is never sent to the server.
+and is never sent to the server. Home SHALL receive `budget_crossings`, null on failure or a bounded list of
+`{team: {id, name}, month, threshold, observed_at, as_of}` for first observed monthly crossings, only for current team
+leads and workspace owners. Since you last looked SHALL apply its existing visit and display rules, naming the team,
+threshold, list-price estimate and computation time. Crossings SHALL NOT enter Needs or its count. An absent budget
+SHALL create no new crossing. Spend SHALL state current crossings with computation time. No polling is added.
 A goal's creation line SHALL name its owner, who created it (Align never reassigns an owner), and a goal the reader
 created gets no line, like their other own actions; a later saved version's line still says "Someone".
 
@@ -1904,3 +1908,8 @@ pills with their own colors: "accepted by the developer" green, "declined" red a
 - `lib/v2/config.ts`
 - `lib/v2/changes.ts`
 - `lib/v2/mail.ts`
+
+#### Scenario: Budget crossings inform the reader
+
+- **WHEN** a budget reader opens Spend and a team lead returns to Home after a first crossing
+- **THEN** Spend states current thresholds and computation time, Home follows Since you last looked's rules, and Needs and its count remain unchanged

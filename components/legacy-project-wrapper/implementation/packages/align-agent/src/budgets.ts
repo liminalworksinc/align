@@ -45,9 +45,72 @@ const WINDOW_MS = 5 * 60_000;
 type ObservedBudget = Pick<BudgetSnapshot, "team" | "month" | "as_of" | "effective_budget_usd_micros" | "estimated_spend_usd_micros" | "spend_bound" | "unpriced_requests">;
 type Share = { local_id: string; workspace_id: string; session_key: string; binding_epoch: string | null };
 type Attribution = { workspace_id: string; session_key: string; epoch_id: string | null; month: string; at: number; team: BudgetSnapshot["team"] | null };
-type TeamRead = { at: number; budget: ObservedBudget | null };
+type TeamRead = { at: number; stamp?: string | null; budget: ObservedBudget | null };
 function entries(dir: string): fs.Dirent[] { try { return fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; } }
 const attributionFile = (home: string, lid: string) => path.join(home, "budget-attribution", `${lid}.json`);
+
+/** Unknown additive fields are ignored. An absent field preserves older-server behavior. */
+export function receiveBudgetStamps(ctx: Ctx, value: unknown): void {
+  if (!Array.isArray(value)) { ctx.budgetStamps = undefined; return; }
+  const month = new Date().toISOString().slice(0, 7);
+  ctx.budgetStamps = new Map(value.flatMap((v) => v && typeof v.ws === "string" && /^ws_[A-Za-z0-9_-]+$/.test(v.ws) &&
+    typeof v.team === "string" && /^pod_[A-Za-z0-9_-]+$/.test(v.team) && v.month === month && typeof v.stamp === "string" && /^[a-f0-9]{64}$/.test(v.stamp) ?
+    [[`${v.ws}:${v.team}:${month}`, v.stamp] as [string, string]] : []));
+}
+
+/** Both terminal reads and sync accept the same current, correctly attributed figures. */
+function validatedBudget(value: unknown, team: string, month: string, now: number): ObservedBudget | null {
+  if (!value || typeof value !== "object") return null;
+  const b = value as ObservedBudget;
+  const numberOrNull = (n: unknown) => n === null || typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+  if (b.team?.id !== team || typeof b.team.name !== "string" || b.month !== month || typeof b.as_of !== "string" ||
+    !Number.isFinite(Date.parse(b.as_of)) || Date.parse(b.as_of) > now || b.as_of.slice(0, 7) !== month ||
+    !numberOrNull(b.effective_budget_usd_micros) || !numberOrNull(b.estimated_spend_usd_micros) ||
+    !numberOrNull(b.unpriced_requests) || !["exact", "lower", "unknown"].includes(b.spend_bound)) return null;
+  return b;
+}
+function applyFigure(ctx: Ctx, s: Share, attr: Attribution, read: TeamRead, now: number): void {
+  const file = layout.budgetCache(ctx.home, s.local_id), b = read.budget;
+  const live = ctx.db.prepare("SELECT state, workspace_id, session_key, binding_epoch FROM shares WHERE local_id=?").get(s.local_id) as Share & { state: string } | undefined;
+  if (!live || live.state !== "shared" || live.workspace_id !== s.workspace_id || live.session_key !== s.session_key ||
+    live.binding_epoch !== s.binding_epoch || !s.binding_epoch || !boundTo(ctx, loadCredentials(ctx.home))) { removeFile(file); return; }
+  if (!b || b.effective_budget_usd_micros === null) { removeFile(file); return; }
+  const cached = readJson<BudgetSnapshot>(file);
+  const snapshot: BudgetSnapshot = { workspace_id: s.workspace_id, session_key: s.session_key, epoch_id: s.binding_epoch,
+    fetched_at: new Date(read.at).toISOString(), attribution_at: new Date(attr.at).toISOString(), as_of: b.as_of,
+    month: b.month, team: b.team, effective_budget_usd_micros: b.effective_budget_usd_micros,
+    estimated_spend_usd_micros: b.estimated_spend_usd_micros, spend_bound: b.spend_bound, unpriced_requests: b.unpriced_requests };
+  snapshot.crossings = observedCrossings(snapshot, cached, now);
+  writeJsonAtomic(file, snapshot);
+}
+
+/** A confirmed removal also clears sessions outside this pass's rotating attribution batch. */
+function clearTeamSnapshots(ctx: Ctx, workspace: string, team: string, month: string): void {
+  const dir = path.join(ctx.home, "budgets-cache");
+  for (const entry of entries(dir)) {
+    if (!entry.isFile() || entry.name === "teams.json" || entry.name === "cursor.json") continue;
+    const file = path.join(dir, entry.name), cached = readJson<BudgetSnapshot>(file);
+    if (cached?.workspace_id === workspace && cached.month === month && cached.team?.id === team) removeFile(file);
+  }
+}
+
+export function cacheBudgetRead(ctx: Ctx, workspace: string, team: string, value: unknown, now = Date.now()): void {
+  const month = new Date(now).toISOString().slice(0, 7), b = validatedBudget(value, team, month, now);
+  if (!b) return;
+  const stamp = (value as { budget_stamp?: unknown }).budget_stamp;
+  const read: TeamRead = { at: now, budget: b, ...(typeof stamp === "string" || stamp === null ? { stamp } : {}) };
+  const file = path.join(ctx.home, "budgets-cache", "teams.json");
+  const teams = readJson<Record<string, TeamRead>>(file) ?? {};
+  teams[`${workspace}:${team}:${month}`] = read;
+  writeJsonAtomic(file, teams);
+  if (b.effective_budget_usd_micros === null) clearTeamSnapshots(ctx, workspace, team, month);
+  const shared = ctx.db.prepare("SELECT local_id, workspace_id, session_key, binding_epoch FROM shares WHERE state='shared' AND workspace_id=?").all(workspace) as Share[];
+  for (const s of shared) {
+    const attr = readJson<Attribution>(attributionFile(ctx.home, s.local_id));
+    if (attr && attr.workspace_id === workspace && attr.session_key === s.session_key && attr.epoch_id === s.binding_epoch &&
+      attr.month === month && attr.team?.id === team && attr.at <= now && now - attr.at < WINDOW_MS) applyFigure(ctx, s, attr, read, now);
+  }
+}
 
 export async function refreshSessionBudgets(ctx: Ctx): Promise<void> {
   const now = Date.now(), deadline = now + BUDGET_PASS_MS, month = new Date(now).toISOString().slice(0, 7);
@@ -76,6 +139,7 @@ export async function refreshSessionBudgets(ctx: Ctx): Promise<void> {
   const teamsFile = path.join(ctx.home, "budgets-cache", "teams.json");
   const teams = Object.fromEntries(Object.entries(readJson<Record<string, TeamRead>>(teamsFile) ?? {}).filter(([k, v]) => k.endsWith(`:${month}`) && fresh(v.at)));
   let reads = 0, last: string | null = null;
+  const refreshed = new Set<string>();
   const read = async (route: string) => {
     const remaining = deadline - Date.now(), c = loadCredentials(ctx.home);
     if (remaining <= 0 || reads >= BUDGET_READS_MAX || !c || c.signed_out || !c.access_token || Date.parse(c.access_expires_at ?? "") <= Date.now() || !boundTo(ctx, c)) return undefined;
@@ -87,7 +151,6 @@ export async function refreshSessionBudgets(ctx: Ctx): Promise<void> {
     last = s.local_id;
     const file = layout.budgetCache(ctx.home, s.local_id), af = attributionFile(ctx.home, s.local_id);
     try {
-      const cached = readJson<BudgetSnapshot>(file);
       let attr = readJson<Attribution>(af);
       if (!attr || attr.workspace_id !== s.workspace_id || attr.session_key !== s.session_key || attr.epoch_id !== s.binding_epoch || attr.month !== month || !fresh(attr.at)) {
         const r = await read(`/api/v2/workspaces/${encodeURIComponent(s.workspace_id)}/sessions/${encodeURIComponent(s.session_key)}/budget?attribution=1`);
@@ -98,22 +161,17 @@ export async function refreshSessionBudgets(ctx: Ctx): Promise<void> {
         writeJsonAtomic(af, attr);
       }
       if (!attr.team) { removeFile(file); continue; }
-      if (cached && (cached.workspace_id !== s.workspace_id || cached.session_key !== s.session_key || cached.month !== month || cached.team?.id !== attr.team.id)) removeFile(file);
       const key = `${s.workspace_id}:${attr.team.id}:${month}`;
-      if (!teams[key]) {
+      const stamp = ctx.budgetStamps?.get(key) ?? null;
+      if (!refreshed.has(key) && (!teams[key] || ctx.budgetStamps && (teams[key].stamp ?? null) !== stamp)) {
         const r = await read(`/api/v2/workspaces/${encodeURIComponent(s.workspace_id)}/teams/${encodeURIComponent(attr.team.id)}/budget?month=${month}`);
         if (!r) { last = shares[shares.indexOf(s) - 1]?.local_id ?? cursor; break; }
         if (r.status !== 200 && r.status !== 404) { if (r.status < 500) removeFile(file); continue; }
-        teams[key] = { at: now, budget: r.status === 200 && r.json?.month === month && r.json?.team?.id === attr.team.id ? r.json : null };
+        teams[key] = { at: now, stamp: typeof r.json?.budget_stamp === "string" ? r.json.budget_stamp : stamp, budget: r.status === 200 ? validatedBudget(r.json, attr.team.id, month, Date.now()) : null };
+        refreshed.add(key);
+        if (!teams[key].budget || teams[key].budget.effective_budget_usd_micros === null) clearTeamSnapshots(ctx, s.workspace_id, attr.team.id, month);
       }
-      const b = teams[key].budget;
-      const live = ctx.db.prepare("SELECT state, workspace_id, session_key, binding_epoch FROM shares WHERE local_id=?").get(s.local_id) as Share & { state: string } | undefined;
-      if (!b) { removeFile(file); continue; }
-      if (!live || live.state !== "shared" || live.workspace_id !== s.workspace_id || live.session_key !== s.session_key || live.binding_epoch !== s.binding_epoch || !boundTo(ctx, loadCredentials(ctx.home))) { removeFile(file); removeFile(af); continue; }
-      const snapshot: BudgetSnapshot = { workspace_id: s.workspace_id, session_key: s.session_key, epoch_id: s.binding_epoch!, fetched_at: new Date(teams[key].at).toISOString(), attribution_at: new Date(attr.at).toISOString(), as_of: b.as_of,
-        month: b.month, team: b.team, effective_budget_usd_micros: b.effective_budget_usd_micros, estimated_spend_usd_micros: b.estimated_spend_usd_micros, spend_bound: b.spend_bound, unpriced_requests: b.unpriced_requests };
-      snapshot.crossings = observedCrossings(snapshot, cached, Date.now());
-      writeJsonAtomic(file, snapshot);
+      applyFigure(ctx, s, attr, teams[key], Date.now());
     } catch (e) { if (!(e instanceof NetworkError)) removeFile(file); }
   }
   const current = loadCredentials(ctx.home);

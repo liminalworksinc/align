@@ -163,6 +163,13 @@ plus `request` on kind `request` and `hold` on kinds `hold` and `release` (absen
 - `release`: `"hold": { "goal": { "id", "title"|null }, "released_by": { "id", "name" }, "at" }`: lift that goal's hold.
 
 `GET /api/v2/directives?cursor=<seq>` (Bearer) → `{ "directives": [Directive], "next_cursor": "<seq>", "workspaces": [ "<ws id>" ], "ended_sessions": [ { "ws", "session_key", "ended_reason": null | "member_removed", "stopped_at" } ] }` (≤100, this device's sessions only; `workspaces`: the ids, sorted, of the workspaces this device reaches now, so it re-reads `/me` when they changed; `ended_sessions`: this device's sessions in those workspaces whose share ended in the last 30 days, newest first, at most 200, so a share stopped on the web ends on the device at its next pass, not at the session's next usage upload).
+The directive response also carries additive `budget_stamps: [{ws, team, month, stamp}]` for this UTC month's
+budget history in granted workspaces, only for teams whose budgets the person may read. Stamps contain no names,
+amounts, people, goals or sessions. The opaque stamp changes on a set, change, removal, grant or grant expiry,
+even when writes have the same time. Old agents ignore it; old servers may omit it. The same stamp is returned as
+`budget_stamp` on team and session attribution reads. Sync compares it with the cached team read and refreshes a
+changed team in the same pass. Unchanged cached passes add zero budget requests; five-minute reuse, 120 reads,
+100 sessions and two seconds remain the bounds. A 404 or an unknown additive field never stops a pass.
 The device moves its cursor to `next_cursor` after each page, also past directives it had already stored.
 There is no push channel: the local agent has no daemon, and each hook-started sync pass fetches by cursor.
 `POST /api/v2/directives/:id/receipts` (Bearer) → req `{ "session_key", "state": "received"|"applied"|"enforced"|"accepted"|"declined", "at", "auto_accepted"?: bool }` → 200 `{ "fresh": bool }`, plus `"request_state": "sent"|"received"|"accepted"|"declined"|"expired"` on a `request` directive (idempotent, ≤2 KB).
@@ -542,7 +549,7 @@ teams are read in batches.
 
 `GET .../sessions/{key}/budget` is readable only by the session's owner and, for a device, its sharing device.
 It returns `{epoch_id}` plus the budget-read fields for the open shared period, or null with no open shared
-period, readable team or readable goal. `?attribution=1` returns only `{epoch_id, team, month}`. A different
+period, readable team or readable goal. `?attribution=1` returns only `{epoch_id, team, month, budget_stamp}`. A different
 person's session is 404. Session listings add nullable `team_budget_label` only to own rows and only while the
 team has a budget this month. Other people's rows omit the field.
 
@@ -552,3 +559,18 @@ It returns `align-spend-YYYY-MM.csv` with private, no-store headers. Columns are
 `cache_write_unsplit`. List-price amounts retain six decimals. Goal-bound team rows match the on-screen team report exactly for that reader. Hidden goals remain in its single unnamed `Private goals` row. Only team members and workspace owners receive team no-goal rows; other teams' no-goal amounts stay unallocated. The no-team
 row, unallocated remainder and total preserve all numeric sums. Cells are quoted and formula-like prefixes are
 neutralized. The export uses the same UTC month validator as budgets.
+
+Budget reads add `budget_stamp` and `reached_thresholds: [80 | 100]`. Thresholds use a positive effective budget and
+known priced totals, including lower bounds; absent budgets and unknown totals return an empty list. First observed
+crossings are stored once per workspace, team, UTC month and threshold with `observed_at` and the figure's `as_of`.
+They create no decision, audit or product event. Home returns at most 100 `budget_crossings` records as
+`{team: {id, name}, month, threshold, observed_at, as_of}`, only to current team leads and workspace owners, or null
+on a failed source. They appear in Since you last looked, outside Needs, and are hidden while the budget is absent.
+Home reads these records without computing new team burn. Spend states current thresholds and computation time.
+No polling is added. Migration 25 adds only the crossing records, preserving existing budgets and attribution.
+
+A successful `align budget` read updates the team cache and matching locally confirmed session snapshots through the
+sync figure validation path. During a turn only synchronous Claude Code PreToolUse emits a budget `systemMessage`,
+with no budget `additionalContext`. Codex tool-call user-only messages are not verified and retain next-prompt notes.
+Message and context markers persist independently per session, UTC month and threshold; prompt-first delivery
+consumes both opportunities. Hooks skip subagents and never wait on the existing delivery lock.

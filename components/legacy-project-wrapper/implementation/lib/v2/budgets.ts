@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { all, audit, get, run, tx } from "./db";
 import { badRequest, conflict, notFound, V2Error } from "./errors";
 import { goalObj, visibleGoal } from "./goals";
@@ -9,6 +10,7 @@ import { noGoalTeamTotals } from "./spend";
 import { spendMonth } from "./spend-month";
 import { personName } from "./retention-core.mts";
 import type { GoalRow } from "./goals";
+import type { DevicePrincipal } from "./devices";
 import { count } from "./plural.mts";
 
 // Monthly planning amounts at list price. No code in this module stops, holds or launches work.
@@ -104,6 +106,50 @@ function teamSums(ws: string, team: string, from: string, to: string): BurnSum {
     no_goal_priced: noGoal?.est_list_usd_micros ?? 0, no_goal_unpriced: noGoal?.unpriced_requests ?? 0 };
 }
 
+/** No spend aggregation: history order distinguishes writes even when their timestamps tie. */
+function stampRows(where: string, args: (string | number)[], now: number) {
+  return all<{ ws: string; team: string; month: string; change_id: string; grants: string }>(
+    `SELECT h.ws_id AS ws, h.pod_id AS team, h.month, h.id AS change_id,
+       (SELECT json_array(COUNT(*), COALESCE(SUM(r.revision), 0), COALESCE(SUM(r.expires_at <= ?), 0))
+        FROM v2_budget_requests r WHERE r.ws_id = h.ws_id AND r.pod_id = h.pod_id AND r.month = h.month AND r.state = 'granted') AS grants
+     FROM v2_team_budget_history h WHERE ${where}
+     AND h.rowid = (SELECT MAX(latest.rowid) FROM v2_team_budget_history latest
+       WHERE latest.ws_id = h.ws_id AND latest.pod_id = h.pod_id AND latest.month = h.month)
+     ORDER BY h.ws_id, h.pod_id`, new Date(now).toISOString(), ...args,
+  ).map(({ ws, team, month, ...parts }) => ({ ws, team, month, stamp: createHash("sha256").update(JSON.stringify(parts)).digest("hex") }));
+}
+export function budgetStamp(ws: string, team: string, month: string, now = Date.now()): string | null {
+  return stampRows("h.ws_id = ? AND h.pod_id = ? AND h.month = ?", [ws, team, month], now)[0]?.stamp ?? null;
+}
+
+/** The existing directive response carries only metadata the device's person is entitled to read. */
+export function deviceBudgetStamps(dev: DevicePrincipal, now = Date.now()) {
+  const workspaces = [...dev.grants];
+  if (!workspaces.length) return [];
+  return stampRows(`h.month = ? AND h.ws_id IN (${workspaces.map(() => "?").join(",")}) AND EXISTS
+    (SELECT 1 FROM v2_members m WHERE m.ws_id = h.ws_id AND m.user_id = ? AND
+      (m.role = 'owner' OR EXISTS (SELECT 1 FROM v2_pod_members pm WHERE pm.ws_id = h.ws_id AND pm.pod_id = h.pod_id AND pm.user_id = m.user_id)))`,
+    [currentMonth(now), ...workspaces, dev.user.id], now);
+}
+
+/** Repeated observations never change the first time; no usage path or background process writes these. */
+function observeCrossings(ws: string, team: string, month: string, thresholds: number[], asOf: string, now: number) {
+  if (month !== currentMonth(now)) return;
+  for (const threshold of thresholds) run(`INSERT OR IGNORE INTO v2_budget_crossings
+    (ws_id, pod_id, month, threshold, observed_at, as_of) VALUES (?, ?, ?, ?, ?, ?)`, ws, team, month, threshold, new Date(now).toISOString(), asOf);
+}
+
+export function homeBudgetCrossings(pp: PolicyPrincipal) {
+  need(pp, "workspace.read");
+  return all<{ team_id: string; name: string; month: string; threshold: number; observed_at: string; as_of: string }>(
+    `SELECT c.pod_id AS team_id, p.name, c.month, c.threshold, c.observed_at, c.as_of FROM v2_budget_crossings c
+     JOIN v2_pods p ON p.ws_id = c.ws_id AND p.id = c.pod_id
+     JOIN v2_team_budgets b ON b.ws_id = c.ws_id AND b.pod_id = c.pod_id AND b.month = c.month WHERE c.ws_id = ? AND c.month = ? AND
+     (? = 'owner' OR EXISTS (SELECT 1 FROM v2_pod_members pm WHERE pm.ws_id = c.ws_id AND pm.pod_id = c.pod_id AND pm.user_id = ? AND pm.role = 'lead'))
+     ORDER BY c.observed_at DESC, c.pod_id, c.threshold DESC LIMIT 100`, pp.wsId, currentMonth(), pp.wsRole, pp.userId,
+  ).map(({ team_id, name, ...c }) => ({ team: { id: team_id, name }, ...c }));
+}
+
 export function budgetBurn(pp: PolicyPrincipal, teamId: string, month?: string | null, now = Date.now()) {
   need(pp, "spend.read");
   const team = teamOf(pp, teamId);
@@ -149,7 +195,10 @@ export function budgetBurn(pp: PolicyPrincipal, teamId: string, month?: string |
   const history = all<{ id: string; action: string; amount_usd_micros: number | null; allowance_usd_micros: number | null; allowance_ceiling_usd_micros: number | null; actor_id: string; at: string }>(
     "SELECT id, action, amount_usd_micros, allowance_usd_micros, allowance_ceiling_usd_micros, actor_id, at FROM v2_team_budget_history WHERE ws_id = ? AND pod_id = ? AND month = ? ORDER BY at, rowid", pp.wsId, team.id, m.month,
   ).map(({ actor_id, ...h }) => ({ ...h, actor: person(actor_id) }));
+  const reached = effective !== null && effective > 0 && attributed ? [80, 100].filter((t) => sums.priced * 100 >= effective * t) : [];
+  observeCrossings(pp.wsId, team.id, m.month, reached, new Date(asOf).toISOString(), now);
   return {
+    budget_stamp: history.length ? budgetStamp(pp.wsId, team.id, m.month, now) : null, reached_thresholds: reached,
     team, month: m.month, from: m.from, to: m.to, as_of: new Date(asOf).toISOString(), note: BUDGET_NOTE,
     budget: e ? { amount_usd_micros: e.amount_usd_micros, allowance_usd_micros: e.allowance_usd_micros, allowance_ceiling_usd_micros: e.allowance_ceiling_usd_micros, updated_by: person(e.updated_by), updated_at: e.updated_at } : null,
     allowance_granted_usd_micros: usedAllowance,

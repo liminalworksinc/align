@@ -79,7 +79,7 @@ sent), `align.db` (SQLite, WAL), `rules.json` (folder rules), `me.json`, `instal
 another ingester waits up to 3 seconds for and takes over after 60, so a record is applied once and in order),
 `activity/<lid>.jsonl` (team activity), `feeds/<ws>.json`
 (goal feeds), `feeds/activity-<ws>.json` (other machines' activity), `feeds/asks-<ws>.json` (asks between teams),
-`budgets-cache/<lid>.json` (observed monthly budget and due crossings), `budget-attribution/<lid>.json` (positive or empty attribution), `budgets-cache/teams.json` (five-minute team reads), `budgets-cache/cursor.json` (bounded sync rotation), `budget-shown/<lid>/<month>-<threshold>` (persistent note dedupe),
+`budgets-cache/<lid>.json` (observed monthly budget and due crossings), `budget-attribution/<lid>.json` (positive or empty attribution), `budgets-cache/teams.json` (five-minute team reads), `budgets-cache/cursor.json` (bounded sync rotation), `budget-shown/<lid>/<month>-<threshold>` (persistent context dedupe), `budget-shown/<lid>/<month>-<threshold>-message` (persistent message dedupe),
 `drift/<lid>.json` (a drift notice waiting for the next prompt: limit ids and sentence digests), `steering/` (steering lines shown, waiting to be
 reported), `unshared-digest.json` and `unshared-shown.json` (this machine's agent time outside shared sessions and the
 week its note was shown; never sent), `logs/align.log`, `logs/sync.log`, and
@@ -1396,7 +1396,29 @@ in `last-sync.json` (it keeps what the pass before it recorded).
 
 ### Requirement: Informational team budget notes
 
-The budget commands and next-turn notes SHALL follow `budgets`. Terminal requests SHALL always wait for a person. Hooks SHALL read only `budgets-cache/<lid>.json` and their local dedupe markers, without network or lock waits. A fresh known priced subtotal reaching 80 or 100 percent of this month's team budget SHALL produce one `[Align] ...` informational note per threshold per session and UTC month, including when that subtotal is a lower bound. An unpriced request alone, an unknown total, stale or future data, or a share or spending period mismatch SHALL produce none. The note SHALL state the team and threshold, list-price estimates, that work continues, that the note grants no authority and that the person can ask for more in Align. It SHALL contain no runnable command or instruction. No daemon is added.
+The budget commands, next-turn notes and verified user-only tool warnings SHALL follow `budgets`. Successful terminal reads SHALL refresh matching local figures and session snapshots under sync validity rules. Directive budget stamps SHALL invalidate changed team reads in the same pass without new requests on unchanged passes. Missing stamp support, unknown fields and a 404 budget route SHALL never stop sync. Terminal requests SHALL always wait for a person. Hooks SHALL read only `budgets-cache/<lid>.json` and their local dedupe markers, without network or lock waits. A fresh known priced subtotal reaching 80 or 100 percent of this month's team budget SHALL produce one `[Align] ...` informational note per threshold per session and UTC month, including when that subtotal is a lower bound. An unpriced request alone, an unknown total, stale or future data, or a share or spending period mismatch SHALL produce none. The note SHALL state the team and threshold, list-price estimates, that work continues, that the note grants no authority and that the person can ask for more in Align. It SHALL contain no runnable command or instruction. No daemon is added.
+
+Claude Code synchronous tool calls SHALL show a due budget warning only through a user-visible field outside model
+context, without a lock wait. Subagent calls SHALL be skipped. Each threshold SHALL
+have one persistent user-message opportunity and one persistent context-line opportunity per session and UTC month
+across starts, prompts, tool calls and restarts; prompt-first delivery consumes the message opportunity too. The next
+prompt SHALL receive its context line even if a tool warning was shown. Codex user-only tool-call messages are not
+verified and SHALL keep next-prompt delivery. No budget context SHALL enter a turn at a tool call.
+
+#### Scenario: A terminal read leaves the next prompt current
+
+- **WHEN** a person reads the current team's budget with `align budget` successfully
+- **THEN** the local team figure and matching confirmed session snapshot reflect that read under sync validation and bounds
+
+#### Scenario: A tool call after a crossing
+
+- **WHEN** a main-session Claude Code tool call follows a sync-observed crossing during a long turn
+- **THEN** the person receives one warning outside model context and the next prompt still receives its context line once
+
+#### Scenario: An unverified harness stays on next-prompt delivery
+
+- **WHEN** a Codex tool call follows a sync-observed crossing
+- **THEN** no budget message or context enters that tool call and the crossing remains due at the next prompt
 
 #### Scenario: Next-turn budget information
 

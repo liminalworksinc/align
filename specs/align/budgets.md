@@ -47,7 +47,7 @@ in the same transaction. Removing an absent budget changes nothing. A team witho
 
 A budget read SHALL return `{team, month, from, to, as_of, note, budget, effective_budget_usd_micros,
 estimated_spend_usd_micros, remaining_usd_micros, forecast_usd_micros, runs_out_at, unpriced_requests, known_unpriced_requests,
-priced_spend_usd_micros, spend_bound, remaining_bound, forecast_bound, pricing_note,
+priced_spend_usd_micros, spend_bound, remaining_bound, forecast_bound, pricing_note, budget_stamp, reached_thresholds,
 allowance_granted_usd_micros, allowance_remaining_usd_micros, no_goal, history, can}`. `budget` is null or
 `{amount_usd_micros, allowance_usd_micros, allowance_ceiling_usd_micros, updated_by, updated_at}`. The effective amount is the base plus
 unexpired granted requests for that month, or null without a base budget. Remaining is effective minus estimated
@@ -89,7 +89,7 @@ The linear forecast SHALL use priced spend divided by elapsed milliseconds from 
 and no elapsed time yields a null forecast. `runs_out_at` is the projected crossing date within that month, or null
 when there is no budget, no positive spend rate, incomplete data or no projected crossing. Future expiries SHALL
 reduce the effective budget at their recorded instant when finding the crossing. A past crossing estimate may
-precede `as_of`; it is not a measured crossing. Reads SHALL not create decisions or audit entries.
+precede `as_of`; it is not a measured crossing. Reads SHALL not create decisions or audit entries. Budget reads SHALL report an opaque `budget_stamp` (null without budget history) and `reached_thresholds`, the subset of 80 and 100 reached by a known priced estimate against a positive effective budget. Unknown totals and absent budgets SHALL report no threshold. Lower bounds may cross.
 
 #### Scenario: Home team and history
 
@@ -273,17 +273,17 @@ only team when unambiguous), this UTC month's budget and burn with estimate labe
 `align budget request --amount <USD> --reason <text> [--goal <ref>] [--team <name>] [--session <ref> ...]`
 SHALL file a request with the same server rules, defaulting the goal from the folder. An optional `--workspace` SHALL follow the existing workspace resolver. Folder rules SHALL supply the default
 workspace and goal; without a team on that goal, only a sole current team may be selected implicitly. Ambiguous team selection
-SHALL list eligible teams by name and ask the person to pass `--team <name>` rather than guessing. Successful reads SHALL also list the teams the person can choose by name. Messages SHALL use plain sentences without raw identifiers or stored state values. Terminal commands SHALL never decide a request.
+SHALL list eligible teams by name and ask the person to pass `--team <name>` rather than guessing. Successful reads SHALL also list eligible teams by name and leave the local team figure and matching current session snapshot current under the same attribution and figure validity rules as sync. Messages SHALL use plain sentences without raw identifiers or stored state values. Terminal commands SHALL never decide a request.
 
 At a shared session's next turn after its team's priced known spend reaches 80 and then 100 percent of the effective
 budget, it SHALL receive one short informational note per threshold per UTC month per session. Dedupe SHALL survive
 hooks, sync and restarts; a leap past both thresholds may deliver both at the same turn. A changed budget SHALL
 not reset dedupe, even when the session changes teams. An unknown total, no budget, private sessions, and teams the person cannot read SHALL produce no
-threshold claim. A priced lower bound crossing a threshold SHALL cause a note even when some requests are unpriced; an unpriced request alone SHALL NOT. A crossing observed by a sync pass SHALL remain due at the session's next turn however long the pause, while it is the same UTC month and the session still counts toward the same team. A later budget change or temporary read failure SHALL NOT erase an observed crossing. A new spending period confirmed to count toward the same team SHALL retain that due note; an unconfirmed period mismatch SHALL NOT deliver it. Each note SHALL state when the estimate was read, in plain words, because the budget may have changed. Future-dated, previous-month or mismatched observations SHALL NOT cause a note. A sync pass SHALL accept a new crossing only from a figure read within the last five minutes. The one-pass sync SHALL refresh session attribution and its budget through
+threshold claim. A priced lower bound crossing a threshold SHALL cause a note even when some requests are unpriced; an unpriced request alone SHALL NOT. A crossing observed by a sync pass SHALL remain due at the session's next turn however long the pause, while it is the same UTC month and the session still counts toward the same team. A later budget amount change or temporary read failure SHALL NOT erase an observed crossing. Removing the budget SHALL clear due notes from the next successful sync pass. A new spending period confirmed to count toward the same team SHALL retain that due note; an unconfirmed period mismatch SHALL NOT deliver it. Each note SHALL state when the estimate was read, in plain words, because the budget may have changed. Future-dated, previous-month or mismatched observations SHALL NOT cause a note. A sync pass SHALL accept a new crossing only from a figure read within the last five minutes. The one-pass sync SHALL refresh session attribution and its budget through
 `GET .../sessions/{key}/budget`, readable only by the person who owns that session (and its sharing device for
-device reads). With `attribution=1` the read SHALL return only `{epoch_id, team, month}` for the sync pass; the normal read SHALL return `{epoch_id}` plus the budget-read fields. It SHALL return null when there is no open shared spending period, no team, or an unreadable goal. The hook SHALL read only its local snapshot and dedupe files, without a network read, sync wait or lock wait, within the existing p95 latency budget. Spending snapshots SHALL live outside the goal-feed directory. Hooks SHALL
+device reads). With `attribution=1` the read SHALL return only `{epoch_id, team, month, budget_stamp}` for the sync pass; the normal read SHALL return `{epoch_id}` plus the budget-read fields. It SHALL return null when there is no open shared spending period, no team, or an unreadable goal. The hook SHALL read only its local snapshot and dedupe files, without a network read, sync wait or lock wait, within the existing p95 latency budget. Spending snapshots SHALL live outside the goal-feed directory. Hooks SHALL
 match the cached workspace, session key and spending period before delivering information through their existing context path.
-The sync pass SHALL refresh at most 100 shared sessions per pass, with rotation. Positive and nothing-to-report answers for matching session attribution SHALL be reused for at most five minutes. Team budget answers, including absent or unreadable budgets, SHALL be reused for the same five-minute window across passes. One pass SHALL make at most 120 budget-related reads and spend at most two seconds waiting for them. It SHALL stop when either bound is reached, without waiting for sign-in refresh or another lock, and continue with later sessions on the next pass. Cache files for sessions no longer shared SHALL be removed on stop-sharing, removal or sign-out. Markers from earlier UTC months SHALL be pruned. With no shares, no cursor file SHALL be written. Each note SHALL use the `[Align] ...` form, name the team and threshold, label list-price estimates, state that work continues and that the note grants no authority, and say the person can ask for more in Align. It SHALL contain no runnable command or instruction. These reads and notes SHALL add no daemon, decision, hold or stop. No acknowledgement or automatic approval SHALL be inferred from a note.
+The sync pass SHALL refresh at most 100 shared sessions per pass, with rotation. Positive and nothing-to-report answers for matching session attribution SHALL be reused for at most five minutes. Team budget answers, including absent or unreadable budgets, SHALL be reused for the same five-minute window across passes only while their change stamp is unchanged. A set, change, removal, grant or grant expiry SHALL invalidate reuse at the next sync through the existing directive response. An unchanged cached pass SHALL make zero budget requests. Missing stamp support, unknown additive fields and absent budget routes SHALL leave the pass working without a budget error. One pass SHALL make at most 120 budget-related reads and spend at most two seconds waiting for them. It SHALL stop when either bound is reached, without waiting for sign-in refresh or another lock, and continue with later sessions on the next pass. Cache files for sessions no longer shared SHALL be removed on stop-sharing, removal or sign-out. Markers from earlier UTC months SHALL be pruned. With no shares, no cursor file SHALL be written. Each note SHALL use the `[Align] ...` form, name the team and threshold, label list-price estimates, state that work continues and that the note grants no authority, and say the person can ask for more in Align. It SHALL contain no runnable command or instruction. These reads and notes SHALL add no daemon, decision, hold or stop. No acknowledgement or automatic approval SHALL be inferred from a note.
 
 #### Scenario: Repeated turns and a new month
 
@@ -324,3 +324,42 @@ no product-event names or properties.
 
 - **WHEN** a request's attached session is retained as aggregate totals after 13 months and its requester becomes a former member
 - **THEN** the request keeps its reason, original session count and decisions, its session key is gone, and its actor reads as "Former member #n"
+
+### Requirement: Crossing information during a turn and in the browser
+
+A supported harness SHALL show a short person-visible warning at the next main-session tool call after sync observes
+an undelivered crossing. It SHALL use a verified user-visible field that does not enter model context. Claude Code
+synchronous PreToolUse supports systemMessage. Codex tool-call user-only messages are not verified and SHALL retain
+next-prompt delivery only. Subagent calls SHALL receive no budget message. The next prompt SHALL still receive the
+existing context line. Each threshold SHALL have at most one person-visible message and one context line per session
+and UTC month across delivery points and restarts. A prompt delivering context before a tool warning SHALL consume
+that threshold's message opportunity too. No budget information SHALL enter model context during a turn. Hooks
+SHALL never wait for a lock.
+
+Spend SHALL state each currently reached threshold with the figure's computation time for authorized budget readers. A selected past month SHALL be named rather than called this month.
+Home SHALL show the team's first observed crossing of each threshold this UTC month to current team leads and
+workspace owners under Since you last looked's baseline, first-visit, reload, ordering and bounded display rules.
+The record SHALL retain its first observation and computation times across later budget changes, removal and repeated
+reads, but Home SHALL show no crossing row while the budget is absent, with no goal, person or session references. Crossings SHALL NOT enter Needs or change its count. An absent
+budget SHALL cause no new observation, message, row or burn computation. Existing refreshes SHALL suffice without
+new polling.
+
+#### Scenario: Changed budget in a cached pass
+
+- **WHEN** a budget is set, changed, removed, raised by a grant or reduced by a grant expiring during the reuse window
+- **THEN** the next sync invalidates the old figure within existing read and time caps, and removal leaves no due note
+
+#### Scenario: A long turn reaches a threshold
+
+- **WHEN** sync observes 80 percent during a Claude Code turn and main-session tool calls precede the next prompt
+- **THEN** one tool call shows a user-only warning and the next prompt delivers context once, with neither repeating after restart
+
+#### Scenario: No budget and mixed release versions
+
+- **WHEN** a session's team has no budget or either release predates budget support
+- **THEN** ordinary work and sync continue without new budget notes or rows, and an unchanged cached pass makes zero budget requests
+
+#### Scenario: A lead returns after a crossing
+
+- **WHEN** a lead or workspace owner returns to Home after the team's first observed crossing this month
+- **THEN** Since you last looked shows it under existing visit rules and Spend states current crossings with computation time, without changing Needs or exposing it to other teams

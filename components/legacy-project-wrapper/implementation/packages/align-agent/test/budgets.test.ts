@@ -5,13 +5,14 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { budgetNotes, observedCrossings, BUDGET_FRESH_MS, type BudgetSnapshot } from "../src/shared/budget-notes.ts";
-import { refreshSessionBudgets, requestAmount, budgetTeam } from "../src/budgets.ts";
-import { writeJsonAtomic } from "../src/shared/fsx.ts";
+import { cacheBudgetRead, receiveBudgetStamps, refreshSessionBudgets, requestAmount, budgetTeam } from "../src/budgets.ts";
+import { readJson, writeJsonAtomic } from "../src/shared/fsx.ts";
 import { layout, localId } from "../src/shared/layout.ts";
 import type { HotState } from "../src/shared/types.ts";
+import { pollDirectives } from "../src/directives.ts";
 import { saveCredentials } from "../src/api.ts";
 import { ctxFor, makeEnv, shareSession } from "./helpers.ts";
-import { userPromptSubmit } from "../src/hooks/handlers.ts";
+import { preToolUse, userPromptSubmit } from "../src/hooks/handlers.ts";
 
 function fixture() {
   const home = fs.mkdtempSync(path.join(process.cwd(), ".spending-test-")), sid = "spending-session", lid = localId("claude-code", sid);
@@ -264,4 +265,198 @@ test("a matching older snapshot read fresh at the time retains its crossing afte
     const newer = { ...f.snapshot, effective_budget_usd_micros: 200_000_000, fetched_at: new Date(next).toISOString(), as_of: new Date(next).toISOString() };
     assert.equal(observedCrossings(newer, f.snapshot, next)[0].threshold, 80);
   } finally { f.cleanup(); }
+});
+
+test("tool warnings stay user-only, skip subagents and a busy lock, and share durable delivery limits with prompts", () => {
+  const f = fixture();
+  try {
+    writeJsonAtomic(layout.hot(f.home, f.lid), f.hot);
+    const input = { session_id: f.sid, tool_name: "Read", tool_input: {} };
+    assert.equal(preToolUse(f.home, "claude-code", { ...input, agent_id: "child" }), null);
+    const lock = layout.injected(f.home, f.lid) + ".lock";
+    fs.mkdirSync(lock, { recursive: true });
+    assert.equal(preToolUse(f.home, "claude-code", input), null);
+    fs.rmdirSync(lock);
+    const warned = preToolUse(f.home, "claude-code", input) as any;
+    assert.match(warned.systemMessage, /80%/);
+    assert.equal(warned.hookSpecificOutput, undefined, "a budget crossing adds zero model context mid-turn");
+    assert.equal(preToolUse(f.home, "claude-code", input), null);
+    const prompt = userPromptSubmit(f.home, "claude-code", { session_id: f.sid, prompt: "Continue", prompt_id: "next" }) as any;
+    assert.match(prompt.hookSpecificOutput.additionalContext, /80%/);
+    assert.ok(!prompt.systemMessage?.includes("80%"));
+    fs.rmSync(layout.injected(f.home, f.lid), { force: true });
+    assert.doesNotMatch(JSON.stringify(userPromptSubmit(f.home, "claude-code", { session_id: f.sid, prompt: "Continue", prompt_id: "restart" })), /80%/);
+    assert.equal(preToolUse(f.home, "claude-code", input), null);
+  } finally { f.cleanup(); }
+});
+
+test("a prompt-first crossing consumes the user warning too; unsupported harness tool calls consume neither marker", () => {
+  const f = fixture();
+  try {
+    writeJsonAtomic(layout.hot(f.home, f.lid), f.hot);
+    // Use Codex's actual local id and hot file; no user-only tool message has been verified for it.
+    const codex = localId("codex", f.sid), hot = { ...f.hot, local_id: codex, harness: "codex" as const };
+    writeJsonAtomic(layout.hot(f.home, codex), hot);
+    writeJsonAtomic(layout.budgetCache(f.home, codex), f.snapshot);
+    assert.equal(preToolUse(f.home, "codex", { session_id: f.sid, tool_name: "shell" }), null);
+    assert.equal(fs.existsSync(layout.budgetShown(f.home, codex, f.snapshot.month, 80)), false);
+    const prompt = userPromptSubmit(f.home, "codex", { session_id: f.sid, prompt: "Continue", turn_id: "first" }) as any;
+    assert.match(prompt.hookSpecificOutput.additionalContext, /80%/);
+    assert.match(prompt.systemMessage, /80%/);
+    assert.equal(preToolUse(f.home, "codex", { session_id: f.sid, tool_name: "shell" }), null);
+  } finally { f.cleanup(); }
+});
+
+test("directive stamps invalidate only changed team reads, including removal, without extra attribution or unchanged-pass reads", async () => {
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch;
+  const lid = shareSession(ctx, "claude-code", "stamp-session"), at = new Date().toISOString(), month = at.slice(0, 7);
+  const calls: string[] = [];
+  let amount: number | null = 100, stamp = "a".repeat(64);
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
+  globalThis.fetch = async (input) => {
+    const url = String(input); calls.push(url);
+    if (url.includes("/directives?")) return Response.json({ directives: [], next_cursor: "0", budget_stamps: [{ ws: "ws_1", team: "pod_build", month, stamp }], unknown_future_field: true });
+    if (url.includes("/sessions/")) return Response.json({ epoch_id: "ep_1", team: { id: "pod_build", name: "Build" }, month, budget_stamp: stamp });
+    return Response.json({ team: { id: "pod_build", name: "Build" }, month, as_of: at, budget_stamp: stamp,
+      effective_budget_usd_micros: amount, estimated_spend_usd_micros: 80, spend_bound: "exact", unpriced_requests: 0 });
+  };
+  try {
+    const pass = async () => { await pollDirectives(ctx, () => undefined); await refreshSessionBudgets(ctx); };
+    await pass(); assert.equal(calls.length, 3);
+    calls.length = 0; await pass(); assert.equal(calls.length, 1); assert.match(calls[0], /directives\?/);
+    for (const [nextStamp, nextAmount] of [["b", 200], ["c", 50], ["d", null], ["e", 100]] as const) {
+      stamp = nextStamp.repeat(64); amount = nextAmount; calls.length = 0; await pass();
+      assert.equal(calls.length, 2); assert.equal(calls.filter((u) => u.includes("/teams/")).length, 1);
+      assert.equal(calls.filter((u) => u.includes("/sessions/")).length, 0);
+      const cached = readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid));
+      if (amount === null) assert.equal(cached, null, "removal erases even an observed undelivered crossing");
+      else assert.equal(cached?.effective_budget_usd_micros, amount);
+      calls.length = 0; await pass(); assert.equal(calls.length, 1);
+    }
+    receiveBudgetStamps(ctx, undefined); calls.length = 0; await refreshSessionBudgets(ctx); assert.equal(calls.length, 0);
+  } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
+});
+
+test("terminal and sync cache updates share figure validation and match only confirmed session attribution", async () => {
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch;
+  const lid = shareSession(ctx, "claude-code", "terminal-read"), at = new Date().toISOString(), month = at.slice(0, 7);
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
+  const figure = { team: { id: "pod_build", name: "Build" }, month, as_of: at, effective_budget_usd_micros: 100, estimated_spend_usd_micros: 10, spend_bound: "exact", unpriced_requests: 0 };
+  globalThis.fetch = async (input) => String(input).includes("/sessions/") ? Response.json({ epoch_id: "ep_1", team: figure.team, month }) : Response.json(figure);
+  try {
+    await refreshSessionBudgets(ctx);
+    globalThis.fetch = async () => { throw new Error("no network expected"); };
+    cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure, estimated_spend_usd_micros: 80 });
+    assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.estimated_spend_usd_micros, 80);
+    for (const patch of [{ month: "2000-01" }, { as_of: "invalid" }, { as_of: new Date(Date.now() + 60000).toISOString() }, { team: { id: "pod_other", name: "Other" } }, { estimated_spend_usd_micros: "100" }]) {
+      cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure, ...patch });
+      assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.estimated_spend_usd_micros, 80);
+    }
+    cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure, effective_budget_usd_micros: null });
+    assert.equal(readJson(layout.budgetCache(t.home, lid)), null);
+    assert.deepEqual(budgetNotes(t.home, lid, readJson(layout.hot(t.home, lid))), []);
+  } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
+});
+
+test("404 budget routes and unknown additive stamp fields never stop a pass or create a note", async () => {
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch;
+  const lid = shareSession(ctx, "claude-code", "old-server");
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
+  let reads = 0;
+  globalThis.fetch = async () => { reads++; return Response.json({ error: "not_found", future: true }, { status: 404 }); };
+  try {
+    receiveBudgetStamps(ctx, { future: true });
+    await refreshSessionBudgets(ctx); assert.equal(reads, 1);
+    await refreshSessionBudgets(ctx); assert.equal(reads, 1);
+    assert.equal(readJson(layout.budgetCache(t.home, lid)), null);
+    assert.deepEqual(budgetNotes(t.home, lid, readJson(layout.hot(t.home, lid))), []);
+  } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
+});
+
+test("the committed base agent's directive intake ignores budget stamps and still applies a stop", async () => {
+  const { budgetBaseIntake } = await import("./fixtures/budget-base-intake.mjs");
+  const { handleDirective, cursor } = await import("../src/directives.ts");
+  const { kvSet } = await import("../src/db.ts");
+  const { api, HttpError } = await import("../src/api.ts");
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch;
+  const lid = shareSession(ctx, "claude-code", "old-intake"), share = ctx.db.prepare("SELECT session_key FROM shares WHERE local_id=?").get(lid) as any;
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
+  globalThis.fetch = async () => Response.json({ directives: [{ id: "dir_legacy_stop", seq: 1, ws: "ws_1", kind: "stop", session_keys: [share.session_key], goal: null, binding: null, created_at: new Date().toISOString() }], next_cursor: "1", workspaces: ["ws_1"], budget_stamps: [{ ws: "ws_1", team: "pod_build", month: new Date().toISOString().slice(0, 7), stamp: "a".repeat(64) }] });
+  try {
+    const legacy = budgetBaseIntake({ api, HttpError, cursor, handleDirective,
+      advanceCursor: (c: typeof ctx, n: number) => kvSet(c.db, "directive_cursor", String(n)),
+      endSharesEndedOnServer: () => { throw new Error("not exercised"); }, validEnded: () => false, endedRead: () => undefined });
+    assert.equal(await legacy(ctx, () => undefined), 1);
+    assert.equal(cursor(ctx), 1); assert.ok(fs.existsSync(layout.latch(t.home, lid)));
+    assert.equal(ctx.budgetStamps, undefined, "the base intake has no budget stamp support");
+  } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
+});
+
+test("a figure computed after the pass began is accepted, and terminal refresh confirms stale attribution within base caps", async () => {
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch, realNow = Date.now;
+  const lid = shareSession(ctx, "claude-code", "during-read");
+  let clock = realNow(); const month = new Date(clock).toISOString().slice(0, 7);
+  let reads = 0;
+  const figure = () => ({ team: { id: "pod_build", name: "Build" }, month, as_of: new Date(clock).toISOString(), effective_budget_usd_micros: 100, estimated_spend_usd_micros: 80, spend_bound: "exact", unpriced_requests: 0 });
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(clock + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
+  globalThis.fetch = async (input) => {
+    reads++; clock += 10;
+    return String(input).includes("/sessions/") ? Response.json({ epoch_id: "ep_1", team: { id: "pod_build", name: "Build" }, month }) : Response.json(figure());
+  };
+  try {
+    Date.now = () => clock;
+    await refreshSessionBudgets(ctx);
+    assert.equal(reads, 2); assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.estimated_spend_usd_micros, 80);
+    clock += BUDGET_FRESH_MS + 1000;
+    reads = 0;
+    cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure(), estimated_spend_usd_micros: 100 });
+    await refreshSessionBudgets(ctx); // The terminal's same bounded attribution refresh, with no repeated team read.
+    assert.equal(reads, 1);
+    assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.estimated_spend_usd_micros, 100);
+  } finally { Date.now = realNow; globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
+});
+
+test("a legacy cached absent budget gets no new read, snapshot, context or message when stamps are empty", async () => {
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch;
+  const lid = shareSession(ctx, "claude-code", "absent-budget"), at = new Date().toISOString(), month = at.slice(0, 7);
+  userPromptSubmit(t.home, "claude-code", { session_id: "absent-budget", prompt: "Start", prompt_id: "baseline" });
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
+  let reads = 0;
+  globalThis.fetch = async (input) => {
+    reads++;
+    return String(input).includes("/sessions/") ? Response.json({ epoch_id: "ep_1", team: { id: "pod_build", name: "Build" }, month }) : Response.json({ team: { id: "pod_build", name: "Build" }, month, as_of: at, effective_budget_usd_micros: null, estimated_spend_usd_micros: 100, spend_bound: "exact", unpriced_requests: 0 });
+  };
+  try {
+    await refreshSessionBudgets(ctx); assert.equal(reads, 2);
+    const file = path.join(t.home, "budgets-cache", "teams.json"), teams = readJson<Record<string, any>>(file)!;
+    delete teams[`ws_1:pod_build:${month}`].stamp; writeJsonAtomic(file, teams); // The exact cache shape before stamps.
+    receiveBudgetStamps(ctx, []);
+    reads = 0; await refreshSessionBudgets(ctx); assert.equal(reads, 0);
+    assert.equal(readJson(layout.budgetCache(t.home, lid)), null);
+    const input = { session_id: "absent-budget", tool_name: "Read" };
+    assert.equal(preToolUse(t.home, "claude-code", input), null);
+    assert.equal(userPromptSubmit(t.home, "claude-code", { session_id: "absent-budget", prompt: "Continue", prompt_id: "nothing-new" }), null);
+  } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
+});
+
+test("a confirmed removal clears due notes even outside the rotating session batch, with one team read", async () => {
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch, month = new Date().toISOString().slice(0, 7);
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
+  const lids = Array.from({ length: 101 }, (_, n) => shareSession(ctx, "claude-code", `remove-batch-${n}`));
+  let removed = false, reads = 0;
+  globalThis.fetch = async (input) => {
+    reads++;
+    return String(input).includes("/sessions/") ? Response.json({ epoch_id: "ep_1", team: { id: "pod_build", name: "Build" }, month }) : Response.json({ team: { id: "pod_build", name: "Build" }, month, as_of: new Date().toISOString(), budget_stamp: (removed ? "b" : "a").repeat(64), effective_budget_usd_micros: removed ? null : 100, estimated_spend_usd_micros: 100, spend_bound: "exact", unpriced_requests: 0 });
+  };
+  try {
+    await refreshSessionBudgets(ctx); await refreshSessionBudgets(ctx);
+    assert.equal(lids.filter((lid) => fs.existsSync(layout.budgetCache(t.home, lid))).length, 101);
+    removed = true; reads = 0;
+    receiveBudgetStamps(ctx, [{ ws: "ws_1", team: "pod_build", month, stamp: "b".repeat(64) }]);
+    await refreshSessionBudgets(ctx); assert.equal(reads, 1);
+    for (const lid of lids) {
+      assert.equal(fs.existsSync(layout.budgetCache(t.home, lid)), false);
+      assert.deepEqual(budgetNotes(t.home, lid, readJson(layout.hot(t.home, lid))), []);
+    }
+  } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
 });

@@ -1362,6 +1362,19 @@ const MIGRATIONS: string[] = [
   ALTER TABLE v2_spend_rollups ADD COLUMN team_attributed_unpriced_requests INTEGER NOT NULL DEFAULT 0;
   CREATE INDEX v2_budget_requests_home ON v2_budget_requests(ws_id, month, requester_id, updated_at);
   `,
+  // First observed budget crossings are information for Home, never decisions or product events.
+  `
+  CREATE TABLE v2_budget_crossings (
+    ws_id TEXT NOT NULL,
+    pod_id TEXT NOT NULL,
+    month TEXT NOT NULL,
+    threshold INTEGER NOT NULL CHECK (threshold IN (80,100)),
+    observed_at TEXT NOT NULL,
+    as_of TEXT NOT NULL,
+    PRIMARY KEY (ws_id, pod_id, month, threshold),
+    FOREIGN KEY (ws_id, pod_id) REFERENCES v2_pods(ws_id, id) ON DELETE CASCADE
+  );
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

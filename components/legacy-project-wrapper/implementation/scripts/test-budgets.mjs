@@ -399,7 +399,7 @@ await test("former-member replacement covers every new actor column; workspace p
 });
 await test("migration 24 leaves every pre-feature period without a home team and preserves unallocated spend", async () => {
   const migrations = runInNewContext(/const MIGRATIONS: string\[\] = (\[[\s\S]*?\n\]);/.exec(readFileSync(path.join(ROOT, "lib/v2/db.ts"), "utf8"))[1]);
-  assert.equal(migrations.length, 24);
+  assert.equal(migrations.length, 25);
   const old = new DatabaseSync(":memory:");
   try {
     old.exec("CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY)");
@@ -611,6 +611,93 @@ await test("budget team choices name exactly the reader's authorized teams, incl
   assert.deepEqual(spend.budgetTeams(pp("viewer")).teams.map((t) => t.name), ["Build"]);
   assert.deepEqual(spend.budgetTeams(pp("other")).teams.map((t) => t.name), ["Other"]);
   assert.deepEqual(spend.budgetTeams(pp("owner")).teams.map((t) => t.name), ["Build", "Other"]);
+});
+
+await test("change stamps distinguish tied writes, allowance grants, decisions, expiry and removal without leaking other teams", async () => {
+  const device = (who, grants = [W]) => ({ user: { id: who }, deviceId: "dv_spend", grants: new Set(grants) });
+  assert.deepEqual(spend.deviceBudgetStamps(device("member")), []);
+  assert.equal(spend.budgetStamp(W, T, "2030-01"), null);
+  const first = await budget();
+  const second = await budget({ amount_usd: 101, allowance_usd: 5 });
+  assert.notEqual(first.budget_stamp, second.budget_stamp, "writes in the same millisecond must invalidate reuse");
+  const allowance = await ask("member", { amount_usd: 5 });
+  const granted = burn().budget_stamp; assert.notEqual(granted, second.budget_stamp);
+  const request = await ask();
+  assert.equal(burn().budget_stamp, granted, "waiting requests do not change a budget");
+  const expiry = new Date(now + 1000).toISOString();
+  await act("owner", request, "approve", { amount_usd: 10, expires_at: expiry });
+  const approved = burn().budget_stamp; assert.notEqual(approved, granted);
+  now += 1000;
+  const expired = burn().budget_stamp; assert.notEqual(expired, approved);
+  assert.equal(burn().effective_budget_usd_micros, 106_000_000);
+  const rows = spend.deviceBudgetStamps(device("member"));
+  assert.deepEqual(Object.keys(rows[0]).sort(), ["month", "stamp", "team", "ws"]);
+  assert.equal(rows[0].stamp, expired); assert.match(rows[0].stamp, /^[a-f0-9]{64}$/);
+  assert.deepEqual(spend.deviceBudgetStamps(device("other")), []);
+  assert.deepEqual(spend.deviceBudgetStamps(device("member", [])), []);
+  await spend.writeBudget(pp("other"), T2, null, { amount_usd: 3 });
+  assert.equal(spend.deviceBudgetStamps(device("member")).length, 1);
+  assert.equal(spend.deviceBudgetStamps(device("owner")).length, 2);
+  const removed = await budget(null); assert.notEqual(removed.budget_stamp, expired);
+  assert.equal(removed.effective_budget_usd_micros, null);
+  assert.equal(spend.getBudgetRequest(pp("member"), allowance.id).state, "granted");
+});
+
+await test("Home observes each threshold once for leads and owners, outside Needs, and removal hides rows", async () => {
+  goal("g_budget_private", "private"); await usage(session(), "g_budget_private", 80_000_000);
+  const needs = JSON.stringify(spend.homeBudgetRequests(pp("owner")));
+  assert.deepEqual(spend.homeBudgetCrossings(pp("owner")), []);
+  assert.deepEqual(db.all("SELECT * FROM v2_budget_crossings"), []);
+  const b = await budget(); assert.deepEqual(b.reached_thresholds, [80]);
+  const first = spend.homeBudgetCrossings(pp("lead"));
+  assert.equal(first.length, 1); assert.equal(first[0].threshold, 80);
+  assert.equal(first[0].as_of, b.as_of); assert.equal(first[0].observed_at, new Date(now).toISOString());
+  assert.deepEqual(spend.homeBudgetCrossings(pp("owner")), first);
+  assert.deepEqual(spend.homeBudgetCrossings(pp("member")), []);
+  assert.deepEqual(spend.homeBudgetCrossings(pp("other")), []);
+  assert.ok(!JSON.stringify(first).includes("g_budget_private"));
+  assert.ok(!JSON.stringify(first).includes("a".repeat(43)));
+  now += 1000;
+  await budget({ amount_usd: 80 });
+  const both = spend.homeBudgetCrossings(pp("owner"));
+  assert.deepEqual(both.map((c) => c.threshold), [100, 80]);
+  assert.deepEqual(both.find((c) => c.threshold === 80), first[0]);
+  assert.equal(JSON.stringify(spend.homeBudgetRequests(pp("owner"))), needs);
+  const audit = db.all("SELECT * FROM v2_audit"); burn(); spend.homeBudgetCrossings(pp("owner"));
+  assert.deepEqual(db.all("SELECT * FROM v2_audit"), audit);
+  await budget(null); assert.deepEqual(spend.homeBudgetCrossings(pp("owner")), []);
+  assert.equal(db.all("SELECT * FROM v2_budget_crossings").length, 2);
+  await budget({ amount_usd: 100 });
+  assert.equal(spend.homeBudgetCrossings(pp("owner")).find((c) => c.threshold === 80).observed_at, first[0].observed_at);
+  await db.tx(() => purgeWorkspace(db.sql, W));
+  assert.deepEqual(db.all("SELECT * FROM v2_budget_crossings"), []);
+});
+
+await test("unknown totals and zero or absent budgets create no crossing; lower bounds may cross", async () => {
+  await usage(session(), null, 80_000_000);
+  assert.deepEqual(burn().reached_thresholds, []);
+  await budget({ amount_usd: 0 }); assert.deepEqual(burn().reached_thresholds, []);
+  await budget();
+  db.run("UPDATE v2_usage SET est_list_usd_micros = NULL");
+  assert.deepEqual(burn().reached_thresholds, []);
+  await usage(session("b".repeat(43)), null, 80_000_000, "s".repeat(43));
+  const lower = burn(); assert.equal(lower.spend_bound, "lower"); assert.deepEqual(lower.reached_thresholds, [80]);
+  assert.equal(currentSessionBudget(pp("member"), "a".repeat(43), true).budget_stamp, lower.budget_stamp);
+});
+
+await test("migration 25 preserves existing budget history and adds only empty crossing records", async () => {
+  const migrations = runInNewContext(/const MIGRATIONS: string\[\] = (\[[\s\S]*?\n\]);/.exec(readFileSync(path.join(ROOT, "lib/v2/db.ts"), "utf8"))[1]);
+  const old = new DatabaseSync(":memory:");
+  try {
+    old.exec("PRAGMA foreign_keys = ON; CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY)");
+    migrations.slice(0, 24).forEach((m) => old.exec(m));
+    old.exec("INSERT INTO ba_user VALUES ('m'); INSERT INTO v2_workspaces (id,name,created_by,created_at) VALUES ('w','Workspace','m','x'); INSERT INTO v2_pods VALUES ('p','w','Team','x'); INSERT INTO v2_team_budgets VALUES ('w','p','2030-01',100,NULL,NULL,'m','x')");
+    const before = old.prepare("SELECT * FROM v2_team_budgets").all();
+    old.exec(migrations[24]);
+    assert.deepEqual(old.prepare("SELECT * FROM v2_team_budgets").all(), before);
+    assert.deepEqual(old.prepare("SELECT * FROM v2_budget_crossings").all(), []);
+    assert.deepEqual(old.prepare("PRAGMA foreign_key_check").all(), []);
+  } finally { old.close(); }
 });
 
 console.log(`test-budgets: ${passed} passed, ${failed} failed`);

@@ -30,6 +30,36 @@ queue item or let `docs/roadmap/` become a plan archive.
 Check the parent only after every required subtask and evidence item passes. Add the
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
+### [ ] SPEND-004: Current budgets and crossing information
+
+- **Owner:** specs/align/budgets.md, local-agent.md, interface.md, directives.md and retained implementation
+- **Direction:** Refresh changed budgets on the next sync without new unchanged-pass requests; refresh local figures
+  after terminal reads; warn people during supported long turns; show crossings on Spend and Home.
+- **Conclusion:** Carry private stamps on the existing directive response. Preserve five-minute reuse, read and time
+  caps, local-only hooks, separate message/context markers, existing refreshes and unchanged Needs counts.
+- **Completion prerequisites:** none
+- **Implementation and evidence:**
+  - [x] Amend specifications first, then implementation, tests and supporting documents.
+  - [x] Verify zero unchanged-pass budget reads, privacy, mixed releases and bounded sync. The original zero-read
+    regression remains unchanged. Domain and agent tests cover grants, expiry, removal, legacy empty caches and
+    removal outside the rotating batch. A frozen pre-budget directive intake still applies a stop.
+  - [x] Verify local terminal refresh, user-only hook output, separate delivery markers and Home domain privacy,
+    first observations and unchanged Needs data. Browser and real CLI execution remain UNKNOWN below.
+  - [x] Node 26.3.0: lint, app typecheck, agent typecheck, syntax and agent build pass. No-server suites:
+    paste-lines 33/0, admin 62/0, invite-races 10/0, budgets 48/0. Six listener-free agent files: 304/0.
+    Serial network-blocked hook latency: 1/0 under the unchanged 150 ms p95 limit. Register review is clean.
+  - [ ] Server, browser and live-agent suites pass in a listener-capable environment (UNKNOWN here). New cases
+    cover HTTP stamps and privacy, browser crossings/reload/counts and real CLI/tool delivery; live-agent budget
+    cleanup restores usage, removes the budget, clears its reused team read and syncs in finally.
+- **Outcome:** Implemented locally and uncommitted. Migration 25 preserves existing records and adds first-observed
+  crossings. No daemon, polling, usage upload changes, timeout increase or change to begin().
+- **Failed checks, resolved:** The initial budget run was 43/1 because its exact migration count still expected 24;
+  it now expects exactly 25 and retains migration 24's preservation checks, with a separate migration 25 regression.
+  A concurrent lint run failed on a temporary test directory removed during its scan; quiet reruns pass unchanged.
+- **Next action:** Run the server, browser and live-agent suites in a listener-capable environment. The `litai` CLI
+  is unavailable (guidance exits 127), so its workflow and formal specification verification are UNKNOWN.
+  This parent remains unchecked under the P0 rule. No outbound action is authorized.
+
 ### [x] SPEND-003: Team budgets and budget requests
 
 - **Owner:** specs/align/budgets.md and the retained implementation

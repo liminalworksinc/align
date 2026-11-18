@@ -630,6 +630,8 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
     if (again.length) context = [context, ...again].filter(Boolean).join("\n");
   }
   const notices = takeNotices(hot, inj, () => blockingHolds(home, lid, cwd), () => stoppedNow(home, lid));
+  const spendingMessages = !inj.opened_epoch && (source === "startup" || source === "resume") ? budgetNotes(home, lid, hot, Date.now(), "message") : [];
+  messages.push(...spendingMessages);
   const spending = !inj.opened_epoch && (source === "startup" || source === "resume") ? budgetNotes(home, lid, hot) : [];
   if (spending.length) context = [context, ...spending].filter(Boolean).join("\n");
   if (notices) messages.push(notices);
@@ -963,13 +965,15 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   if (resumed) context = [context, resumed].filter(Boolean).join("\n");
   const notices = [takeNotices(hot, inj, () => held, () => stoppedNow(home, lid)), ...req.notices, ...lifted.notices, takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
   // A just-opened epoch waits for the server's captured attribution before any threshold can be claimed.
+  const spendingMessages = inj.opened_epoch ? [] : budgetNotes(home, lid, hot, Date.now(), "message");
   const spending = inj.opened_epoch ? [] : budgetNotes(home, lid, hot);
   if (spending.length) context = [context, ...spending].filter(Boolean).join("\n");
   writeInjected(home, lid, inj);
   if (!context && !notices) return null;
   const out: Record<string, unknown> = {};
   if (context) out.hookSpecificOutput = { hookEventName: "UserPromptSubmit", additionalContext: context };
-  if (notices) out.systemMessage = notices;
+  const userMessages = [notices, ...spendingMessages].filter(Boolean).join("\n");
+  if (userMessages) out.systemMessage = userMessages;
   return out;
 }
 
@@ -1122,10 +1126,10 @@ export function preToolUse(home: string, harness: Harness, input: HookInput, opt
   const sib = siblingEdits(home, harness, lid, input, opts);
   if (sib.held) return sib.held;
   // Context from a subagent's tool call reaches only that subagent, so the delta waits for the main agent.
-  const delta = input.agent_id ? null : midTurnDelta(home, lid);
+  const delta = input.agent_id ? null : midTurnDelta(home, lid, harness);
   if (!sib.note) return delta;
   const prev = (delta?.hookSpecificOutput as { additionalContext?: string } | undefined)?.additionalContext;
-  return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: prev ? `${prev}\n${sib.note}` : sib.note } };
+  return { ...delta, hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: prev ? `${prev}\n${sib.note}` : sib.note } };
 }
 
 /**
@@ -1365,12 +1369,13 @@ function contextChanged(hot: HotState, inj: InjectedState): boolean {
   return (hot.context_goals || []).some((c) => seen[c.goal.id] !== undefined && seen[c.goal.id] !== c.goal.version);
 }
 
-function midTurnDelta(home: string, lid: string): HookOutput {
+function midTurnDelta(home: string, lid: string, harness: Harness): HookOutput {
   const hot = readHot(home, lid);
   if (!hot?.share) return null;
   const pre = readInjected(home, lid);
   const own = deltaKind(hot, pre);
-  if (!own && !(hot.share.state === "shared" && contextChanged(hot, pre))) return null;
+  const messageDue = harness === "claude-code" && budgetNotes(home, lid, hot, Date.now(), "message", false).length > 0;
+  if (!own && !messageDue && !(hot.share.state === "shared" && contextChanged(hot, pre))) return null;
   const release = claimDelta(home, lid);
   if (!release) return null;
   try {
@@ -1384,9 +1389,11 @@ function midTurnDelta(home: string, lid: string): HookOutput {
       reportApplied(home, lid, inj, hot.pending_directives);
     }
     if (hot.share.state === "shared") parts.push(...contextNotes(inj, hot.context_goals));
-    if (!parts.length) return null;
-    writeInjected(home, lid, inj);
-    return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: parts.join("\n") } };
+    const spending = harness === "claude-code" ? budgetNotes(home, lid, hot, Date.now(), "message") : [];
+    if (!parts.length && !spending.length) return null;
+    if (parts.length) writeInjected(home, lid, inj);
+    return { ...(parts.length ? { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: parts.join("\n") } } : {}),
+      ...(spending.length ? { systemMessage: spending.join("\n") } : {}) };
   } finally {
     release();
   }
