@@ -26,8 +26,8 @@ export interface Credentials {
   clock_offset_ms?: number;
 }
 
-/** Offsets under a minute count as the clocks agreeing (the server allows 5 minutes either way). */
-export const CLOCK_TOLERANCE_MS = 60_000;
+import { CLOCK_TOLERANCE_MS } from "./shared/clock.ts";
+export { CLOCK_TOLERANCE_MS } from "./shared/clock.ts";
 /** A measured offset replaces the saved one only when they differ by more than this, so the offset stays stable. */
 const CLOCK_DRIFT_MS = 30_000;
 
@@ -263,7 +263,7 @@ export function markSignedOut(home: string, reason: string, deviceId?: string): 
   // next `align login` writes a fresh one.
   const me = readJson<MeFile>(layout.me(home));
   if (me && !me.signed_out) writeJsonAtomic(layout.me(home), { ...me, signed_out: true });
-  for (const dir of ["budgets-cache", "budget-attribution"]) {
+  for (const dir of ["budgets-cache", "budget-attribution", "budget-shown"]) {
     try { fs.rmSync(path.join(home, dir), { recursive: true, force: true }); } catch { /* cache cleanup cannot prevent sign-out */ }
   }
 }

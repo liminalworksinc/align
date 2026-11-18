@@ -308,7 +308,7 @@ say "at least" and upper bounds say "at most". Unpriced requests are counted. No
 files a request for this month, using the folder's goal by default. `--workspace` selects a workspace when
 needed. Teams are listed by name. An ambiguous team needs `--team <name>`. Attached sessions must be your shared sessions in that workspace.
 Every terminal request waits for a person in Align, including amounts within the allowance. Its record says
-it was filed from the terminal. These commands never decide a request or grant authority.
+the device it was filed from and that Align cannot tell whether the person or an agent on that device ran the command. These commands never decide a request or grant authority.
 
 The existing one-pass sync refreshes at most 100 shared sessions at a time, with rotation. It briefly reuses
 matching session attribution, including nothing-to-report answers, and each workspace/team/month budget for five minutes across passes. It makes at most 120 budget reads and waits at most two seconds per pass. Local
@@ -316,8 +316,22 @@ snapshots live in `budgets-cache/`, outside goal feeds; persistent dedupe marker
 Uninstall removes these directories and the attribution cache. Stopping sharing, removal and sign-out remove session caches; old-month markers are pruned. Hooks use only local files, with no network or lock wait. At the next
 turn they may deliver one `[Align]` note at 80 percent and one at 100 percent per session and UTC month.
 A fresh known priced subtotal can cross a threshold even when it is a lower bound. An unpriced request alone
-cannot cross; unknown totals, future observations and session mismatches give no new crossing. Once a sync observes a crossing, it remains due at the next turn however long the pause within the same UTC month and team. Notes state
+cannot cross; unknown totals, future observations and session mismatches give no new crossing. Once a sync observes a crossing, it remains due at the next turn however long the pause within the same UTC month and team, unless a newer accepted read shows a removed budget or changed effective amount. Notes state
 what was reached, when the estimate was read, that work continues, that they grant no authority and that the person can ask for more in
-Align. They contain no runnable command or instruction. There is no daemon.
+Align. Model-context notes contain no runnable command or instruction. The separate person-only message addresses the person and names Spend and the request command. There is no daemon.
 
 Budget, burn, forecast, history and spend in no goal are visible only to that team's members and workspace owners. The monthly CSV names the same goal-bound team rows as the on-screen report. Hidden goals remain unnamed and other teams' spend in no goal remains unallocated.
+
+Team budgets have no minimum team size. Align offers no per-person spend view; totals for a team with fewer
+than three members can reveal one person's spend. Earlier no-goal usage without a recorded home team stays
+unallocated and prevents an exact team total. Closed-month budget reads include grants that applied in that month.
+Requests name their authenticated filing source. Terminal records name the device and say Align cannot tell
+whether the person or an agent on that device ran the command. Terminal requests always wait for a person.
+Creation limits apply per requester, with a larger workspace ceiling.
+
+Running sessions can act on a figure up to five minutes old. `align budget` refreshes this device's cached figure.
+Budget reads run last in a sync pass. Local snapshots include the non-secret server clock offset, preserve pending
+crossings through rejected figures and temporary refusals, and store only needed fields. A newer accepted budget
+removal or effective-amount change replaces earlier figures. Hooks deliver separate model-context and person-only
+messages; only the person's message may name the request command. Sign-out removes budget delivery markers;
+stop-sharing keeps them so sharing again in the same month does not repeat a note.

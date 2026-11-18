@@ -30,7 +30,7 @@ queue item or let `docs/roadmap/` become a plan archive.
 Check the parent only after every required subtask and evidence item passes. Add the
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
-### [x] SPEND-003: Team budgets and budget requests
+### [ ] SPEND-003: Team budgets and budget requests
 
 - **Owner:** specs/align/budgets.md and the retained implementation
 - **Direction:** Let a team set a monthly budget in list-price estimates, see how fast it is used, and record a
@@ -39,19 +39,23 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   A request filed from a terminal always waits for a person; only a browser request can be recorded under the
   team's allowance, up to its monthly ceiling. The requester never decides their own request. Spend in no goal
   counts against the person's one home team, recorded when a session's spending period begins; usage from before
-  this change is not attributed to a team. Budgets, burn, forecasts, history and spend in no goal are visible only to team members and workspace owners. The CSV names the same goal-bound team rows as the on-screen report. Read-only MCP exposure of budgets and budget requests is not built. The committed test receipt is stale on main and is not refreshed here.
+  this change is not attributed to a team. Budgets, burn, forecasts, history and spend in no goal are visible only to team members and workspace owners. The CSV names the same goal-bound team rows as the on-screen report. Read-only MCP exposure of budgets and budget requests is not built.
+- **Review repair:** Address the numbered standalone-branch findings in order: clock and sync defects, owner decisions, then specification and document corrections. Preserve all existing assertions and limits. Leave edits uncommitted.
+- **Next action:** Run the server, browser and live-agent acceptance suites in a listener-capable environment and resolve the hook latency gate before closing this item.
+- **Review evidence:** Budget domain, all no-server suites, listener-free agent unit tests, typecheck and syntax checks pass. The unchanged whole-hook latency gate fails on this host, including the below-threshold case. Server, browser and live-agent execution needs a listener-capable environment.
 - **Completion prerequisites:** none
 - **Outcome:** Specified in budgets.md, with the interface, local-agent and workspace parts amended to match. The
   no-server suites and listener-free agent unit tests cover the fixes. Server and browser execution requires a listener-capable environment.
 - **Implementation and evidence:**
-  - [x] One schema migration (version 24) for budgets, their history, budget requests, decisions and home teams.
+  - [x] Schema version 24 for budgets, history, requests, decisions and home teams, plus version 25 to record the terminal filing device without rewriting existing records.
   - [x] Budget, burn, forecast, request, decision, second-look, withdrawal and home-team routes, with audit rows.
   - [x] Spend, Requests, Sessions and Home screens; budget requests are rows in Home's single Needs list.
   - [x] `align budget` and `align budget request`; 80 and 100 percent notes delivered by the existing hooks from
     local files, once per session, month and threshold.
   - [x] The budget domain suite covers authorization, decision audit, paging, rate limits, attribution and retention.
-  - [x] Agent unit tests cover threshold delivery, bounded sync and terminal wording. The server and browser suites
-    cover routes, screens, independent month controls and request decisions; their current execution is unverified here.
+  - [x] Listener-free agent tests cover clock offsets, pending crossings, deterministic pass limits, terminal cache refresh, temporary refusals, cleanup, sync order and terminal wording.
+  - [ ] The unchanged serial hook latency gate passes for delivered thresholds and budgets below 80 percent.
+  - [ ] Server, browser and live-agent suites execute successfully in a listener-capable environment. Coverage includes routes, filing sources, small-team privacy, independent month controls and request decisions.
 
 ### [x] SPEND-002: Export monthly team spend
 

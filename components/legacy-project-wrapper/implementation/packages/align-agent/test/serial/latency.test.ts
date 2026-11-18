@@ -45,4 +45,30 @@ describe("claude hooks", () => {
     const p95 = times[Math.ceil(times.length * 0.95) - 1];
     assert.ok(p95 < 150, `p95 ${p95.toFixed(1)} ms`);
   });
+  test("p95 latency under 150 ms with a budget below 80 percent and networking blocked", () => {
+    const { t, ctx } = setup();
+    const sid = "sess-latency-below";
+    const lid = shareSession(ctx, "claude-code", sid);
+    const at = new Date().toISOString();
+    writeJsonAtomic(layout.budgetCache(t.home, lid), {
+      workspace_id: "ws_1", session_key: `key-${sid}`, epoch_id: "ep_1", fetched_at: at, as_of: at,
+      month: at.slice(0, 7), team: { id: "pod_latency", name: "Build" }, effective_budget_usd_micros: 100,
+      estimated_spend_usd_micros: 79, spend_bound: "exact", unpriced_requests: 0,
+    });
+    const times: number[] = [];
+    const events: [string, object][] = [
+      ["SessionStart", { session_id: sid, source: "startup" }],
+      ["UserPromptSubmit", { session_id: sid, prompt_id: "p", prompt: "x" }],
+      ["PreToolUse", { session_id: sid, tool_name: "Bash" }],
+    ];
+    for (let i = 0; i < 30; i++) {
+      const [ev, input] = events[i % 3];
+      const r = runHook(t, "claude", ev, input, {}, BLOCK_NET);
+      assert.equal(r.code, 0, r.stderr);
+      times.push(r.ms);
+    }
+    times.sort((a, b) => a - b);
+    const p95 = times[Math.ceil(times.length * 0.95) - 1];
+    assert.ok(p95 < 150, `p95 ${p95.toFixed(1)} ms`);
+  });
 });

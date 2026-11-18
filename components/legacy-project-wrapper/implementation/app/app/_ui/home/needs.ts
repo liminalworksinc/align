@@ -485,7 +485,7 @@ export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[
     rows.push({ key: `budget:${r.id}`, kind: "budget_request", phase: needs ? "needs_you" : r.state === "waiting" ? "waiting_on_others" : "done", goal: r.goal,
       cause: `${r.team.name}: ${mine ? "you" : r.requester.name} asked for more team budget`, quote: r.reason,
       since: { at: r.updated_at, field: "updated_at" }, evidence: none(), action: needs ? { label: r.state === "declined" ? "Ask for a second look" : "Review budget request", opens: "budget" } : null,
-      who: r.state_note, review: null, tone: r.state === "declined" ? "declined" : r.state === "granted" ? "approved" : "pending", word: r.state === "waiting" ? "Budget request" : r.state === "granted" ? "Budget granted" : r.state === "declined" ? "Budget declined" : r.state === "withdrawn" ? "Budget withdrawn" : "Budget expired",
+      who: `${r.state_note} ${r.filing_note}`, review: null, tone: r.state === "declined" ? "declined" : r.state === "granted" ? "approved" : "pending", word: r.state === "waiting" ? "Budget request" : r.state === "granted" ? "Budget granted" : r.state === "declined" ? "Budget declined" : r.state === "withdrawn" ? "Budget withdrawn" : "Budget expired",
       href: `/app/w/${input.ws}/spend?team=${encodeURIComponent(r.team.id)}&month=${r.month}&request=${encodeURIComponent(r.id)}` });
   }
   const { order, fallback } = rankOrder(me, input.approver, input.crs);

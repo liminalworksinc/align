@@ -1362,6 +1362,11 @@ const MIGRATIONS: string[] = [
   ALTER TABLE v2_spend_rollups ADD COLUMN team_attributed_unpriced_requests INTEGER NOT NULL DEFAULT 0;
   CREATE INDEX v2_budget_requests_home ON v2_budget_requests(ws_id, month, requester_id, updated_at);
   `,
+  // Filing source for terminal budget requests. Existing records make no claim about an unknown device.
+  `
+  ALTER TABLE v2_budget_requests ADD COLUMN source_device_id TEXT REFERENCES v2_devices(id) ON DELETE SET NULL;
+  ALTER TABLE v2_budget_requests ADD COLUMN source_device_name TEXT;
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

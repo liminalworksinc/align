@@ -12,84 +12,127 @@ This version deliberately has no hard stop: reaching a budget never blocks work,
 or grants permission to spend. Threshold notes are information and confer no authority.
 The existing spend, goal visibility, authentication, audit and former-member rules in `workspaces` apply.
 
+The terminal commands are `align budget [--team <name>] [--workspace <name|id>]` and
+`align budget request --amount <USD> --reason <text> [--goal <ref>] [--team <name>] [--session <ref> ...]`.
+
+## Wire representation
+
+All team and request routes below are under `/api/v2/workspaces/{ws}`. This representation is part of the
+observable contract; the implementation's `docs/v2/WIRE.md` mirrors it.
+
+| Route | Read or write |
+| --- | --- |
+| `GET /teams/{team}/budget?month=YYYY-MM` | Budget and burn; current UTC month by default |
+| `PUT /teams/{team}/budget?month=YYYY-MM` | Browser only; `{amount_usd, allowance_usd?, allowance_ceiling_usd?}` |
+| `DELETE /teams/{team}/budget?month=YYYY-MM` | Browser only; remove the base budget |
+| `POST /teams/{team}/budget-requests` | `{amount_usd, reason, goal_id?, session_keys?}`; 201 with the request |
+| `GET /teams/{team}/budget-requests?month=YYYY-MM&limit=50&cursor=<id>` | Team request groups and continuation |
+| `GET /budget-requests?month=YYYY-MM&limit=50&cursor=<id>` | Workspace request groups and continuation |
+| `GET /budget-requests/{id}` | One request |
+| `POST /budget-requests/{id}/{approve\|decline\|withdraw\|second-look}` | Browser only; `{revision}`; approval adds `{amount_usd, expires_at, note?}`, decline adds `{reason}` |
+| `GET /spend/teams` | `{teams: [{id, name}]}` in name order, for readable budgets only |
+| `GET /spend/home-team` | The caller's `{team, teams, can_choose}` |
+| `PUT /spend/home-team` | Browser only; `{team_id}`; the caller's updated home-team choices |
+| `GET /sessions/{key}/budget` | `{epoch_id}` plus budget fields, or null without an open readable shared spending period |
+| `GET /sessions/{key}/budget?attribution=1` | Only `{epoch_id, team, month}`, or null |
+
+Budget responses have exactly `{team, team_member_count, month, from, to, as_of, note, budget,
+effective_budget_usd_micros, estimated_spend_usd_micros, remaining_usd_micros, forecast_usd_micros,
+runs_out_at, unpriced_requests, known_unpriced_requests, priced_spend_usd_micros, spend_bound,
+remaining_bound, forecast_bound, pricing_note, allowance_granted_usd_micros,
+allowance_remaining_usd_micros, no_goal, history, can}`. `budget` is null or
+`{amount_usd_micros, allowance_usd_micros, allowance_ceiling_usd_micros, updated_by, updated_at}`.
+`history` entries have `{id, action, amount_usd_micros, allowance_usd_micros,
+allowance_ceiling_usd_micros, actor, at}`. `can` is `{manage, request}`.
+`no_goal` has `{priced_spend_usd_micros, estimated_spend_usd_micros, spend_bound,
+unpriced_requests, known_unpriced_requests, share_percent, attribution_unknown}`.
+A `team` is `{id, name}` and a person is `{id, name}`. Bounds are `exact`, `lower`, `upper`, `unknown`,
+or null for absent amounts. Monetary fields use integer USD microdollars; instants use ISO UTC on the wire.
+
+Request lists have exactly `{waiting_on_me, mine, others, next_cursor}`. Each request has exactly
+`{id, team, month, revision, state, state_note, requester, filed_from, filing_note, amount_usd_micros,
+reason, goal, goal_hidden, session_count, session_keys, approved_usd_micros, authority, authority_label,
+expires_at, second_look, decisions, approvers, waiting_on_me, decision_unavailable_reason,
+second_look_unavailable_reason, can, created_at, updated_at}`. `goal` is null or `{id, title}`.
+A decision has `{round, decision, actor, amount_usd_micros, expires_at, note, at}`. Request actions are exactly
+`{approve, decline, withdraw, second_look}`. `authority_label` is null, "This request was recorded under
+the team's allowance." or "This request was granted by an approver.". The filing note is the plain source
+sentence specified below; the stored device reference is not returned. Home has `budget_requests` as null
+or `{waiting_on_me, mine, next_cursor}`.
+
+| Refusal | Wire status and code |
+| --- | --- |
+| Unknown or unreadable workspace, team, request, goal or attached session | 404 `not_found` |
+| Malformed month, amount, reason, session list, revision, expiry or page cursor | 400 `bad_request` |
+| Viewer write | 403 `read_only` |
+| Budget write by someone other than a lead or owner | 403 `not_team_lead` |
+| Non-team requester, including an owner | 403 `not_in_team` |
+| Self-decision or otherwise ineligible decider | 403 `not_an_approver` |
+| Device attempting a browser-only write | 403 `bearer_not_allowed` |
+| Past-month budget write | 409 `month_closed` |
+| No current budget for request creation | 409 `budget_missing` |
+| Five requests already waiting for that requester, team and month | 409 `too_many_waiting_requests` |
+| Older revision | 409 `stale_revision` |
+| Future revision | 400 `unknown_revision` |
+| Action in an ineligible state | 409 `wrong_state` |
+| Second look with no eligible different owner | 409 `no_eligible_approver` |
+| Requester or workspace hourly creation limit | 429 `rate_limited` |
+
 ## Requirements
 
 ### Requirement: One monthly budget per team
 
-The server SHALL expose `GET /api/v2/workspaces/{ws}/teams/{team}/budget?month=YYYY-MM` to browser sessions and
-granted device tokens, defaulting to the current UTC month. Only members of that team, including viewers, and workspace owners may read it. Everyone else gets 404.
-A workspace or team outside that workspace is 404. A malformed month is 400. Team leads and workspace owners,
-except viewers, SHALL set or change the budget with browser-only `PUT` on the same path
-`{amount_usd, allowance_usd?, allowance_ceiling_usd?}` and remove it with `DELETE`. Writes to past months are 409 `month_closed`.
-Amounts SHALL be finite JSON numbers in whole cents, from 0 to 1,000,000 US dollars; an omitted or null allowance
-means no allowance. `allowance_ceiling_usd` is the monthly maximum total granted under the allowance for this team,
-with the same amount validation. With an allowance and an omitted or null ceiling it defaults to that allowance.
-Without an allowance a non-null ceiling is 400. An allowance or ceiling of zero grants no positive request. Every set, change and removal SHALL preserve
-an immutable history row with the amounts, actor and time and audit `team_budget.set`, `.changed` or `.removed`
-in the same transaction. Removing an absent budget changes nothing. A team without a budget behaves as before.
+A team SHALL have at most one budget for each UTC calendar month. Browser and granted-device reads SHALL default to the current month. Only team members, including viewers, and workspace owners may read a budget; other people or a team outside the workspace receive not found. Invalid months SHALL be refused. Team leads and workspace owners, excluding viewers, SHALL set, change or remove a budget only through a browser sign-in. Past-month writes SHALL be refused without changing history.
+
+Amounts SHALL be finite whole-cent US dollar amounts from zero to 1,000,000. An omitted or empty allowance means none. A monthly allowance ceiling defaults to the per-request allowance when omitted, requires an allowance, and accepts the same amount range. Zero grants no positive request. Every set, change and removal SHALL atomically preserve immutable history and an audit entry naming the amount, allowance, ceiling, person and time. Removing an absent budget SHALL change nothing. No budget SHALL leave work unchanged.
+
+The budget including grants SHALL be the base plus grants currently in force, or absent without a base. For a closed month it SHALL include every granted request in force at some time during that month, including grants that have since expired. Remaining and reached thresholds SHALL use that historical amount. Allowance used SHALL include all grants recorded under the allowance that month, including expired ones; allowance left SHALL be the nonnegative ceiling less those grants. Changing, removing or restoring the budget SHALL never reset that total.
 
 #### Scenario: Setting, changing and removing
 
 - **WHEN** a team lead sets 100 US dollars with a 5 dollar allowance, an owner changes it to 120 without an allowance, and the lead removes it
-- **THEN** one current budget is replaced twice, three history rows and audit rows name who and when, and the next read has `budget: null`
+- **THEN** one current budget is replaced twice, three history rows and audit rows name who and when, and the next read has no current budget
 
 #### Scenario: Unauthorized or cross-workspace change
 
 - **WHEN** a member, a viewer stored as a lead, a lead of another team, or a person outside the workspace writes a budget
-- **THEN** the first three get 403 (`read_only` for the viewer, `not_team_lead` otherwise), the last gets 404, and nothing is written; a device token cannot change a budget
+- **THEN** the first three get 403 (a read-only refusal for the viewer, a team-lead refusal otherwise), the last gets 404, and nothing is written; a device token cannot change a budget
+
+#### Scenario: Read grants in a closed month
+
+- **WHEN** a grant was in force during a past month and the month is read after the grant expires
+- **THEN** that month's budget including grants, remaining amount and reached thresholds still include the grant
 
 #### Scenario: A closed month
 
 - **WHEN** a lead tries to change or remove a budget for a past UTC month
-- **THEN** the server returns 409 `month_closed` and preserves its amounts, history and audit
+- **THEN** the server returns 409 a closed-month refusal and preserves its amounts, history and audit
 
 ### Requirement: Estimated team burn and privacy
 
-A budget read SHALL return `{team, month, from, to, as_of, note, budget, effective_budget_usd_micros,
-estimated_spend_usd_micros, remaining_usd_micros, forecast_usd_micros, runs_out_at, unpriced_requests, known_unpriced_requests,
-priced_spend_usd_micros, spend_bound, remaining_bound, forecast_bound, pricing_note,
-allowance_granted_usd_micros, allowance_remaining_usd_micros, no_goal, history, can}`. `budget` is null or
-`{amount_usd_micros, allowance_usd_micros, allowance_ceiling_usd_micros, updated_by, updated_at}`. The effective amount is the base plus
-unexpired granted requests for that month, or null without a base budget. Remaining is effective minus estimated
-spend, including a negative result. History lists each recorded budget change, oldest first, as `{id, action, amount_usd_micros, allowance_usd_micros, allowance_ceiling_usd_micros, actor, at}`. `team` is `{id, name}` and each person (`actor`, `requester`, `updated_by` and approver) is `{id, name}`.
-`allowance_granted_usd_micros` SHALL be the total granted under the allowance in the month, including expired grants;
-`allowance_remaining_usd_micros` SHALL be the nonnegative ceiling minus that total, or null without an allowance.
-Changing or removing and restoring a budget SHALL NOT reset the monthly granted total. History SHALL retain
-the ceiling with each set or change. `can` has `manage` and `request` flags that match server authorization.
+Budget reads SHALL report the team, member count, month and window, read time, estimate disclaimer, base and effective budget, spend, remaining, forecast, projected crossing, pricing bounds, known priced subtotal, unpriced counts, allowance used and left, no-goal subtotal and share, history, and the actions the reader may take. History SHALL list changes oldest first with their actor and time. Team and person references SHALL include a name and a stable reference. Reads SHALL create no decisions or audit entries.
 
-Team usage SHALL include usage whose spending period goal belongs to that team, including private goals without naming them,
-and usage in spending periods in no goal attributed to that team. Each person SHALL have at most one home team per workspace.
-With exactly one team it is that team; with several it defaults to the team joined first (join order, with a consistent choice when join times match), and the person may choose any of their current teams. With no teams it is null and their
-no-goal spend stays unallocated. Browser and granted device GET `.../spend/home-team` SHALL return
-`{team, teams, can_choose}` for the caller only; browser PUT `{team_id}` SHALL change only the caller's choice,
-including for viewers. A team the caller does not belong to is 404. The write rechecks membership transactionally.
-Removal from a chosen team clears that preference; the next spending period uses the earliest remaining membership.
+Usage SHALL count toward the goal's team, including private goals without naming them, or toward the home team captured when a spending period in no goal opened. A person SHALL have at most one home team in each workspace: their sole team, otherwise the earliest joined current team with a consistent tie choice, or none with no membership. Only the person SHALL read their preference and choices, through a browser or granted device. Only a browser sign-in SHALL change that preference, including for viewers. Membership SHALL be checked again in the transaction. A team the person does not belong to SHALL be refused as not found. Leaving a chosen team SHALL clear the preference for future spending periods. Later membership or preference changes SHALL never move earlier usage.
 
-A spending period in no goal SHALL capture that single home team in its team attribution when it opens. Later choice and membership
-changes SHALL NOT move that usage. Periods bound to a goal use the goal's team. Periods opened before this feature SHALL have no home team; their no-goal spend SHALL remain unallocated. No historical usage SHALL be assigned to a team. Team totals plus unallocated usage SHALL be additive. Retention SHALL preserve no-goal totals by team, UTC day and billing basis with no person or session, including every token and request count and the priced subtotal. Periods with no home team stay in the unallocated total. Pre-feature totals lacking attribution SHALL remain unallocated. If any such or pre-feature older aggregate totals occur in the window, `no_goal.attribution_unknown` SHALL be true, and complete team totals SHALL remain unknown rather than invented.
+Spending periods opened before home-team attribution SHALL retain no home team. Their no-goal usage SHALL remain unallocated and SHALL never be assigned retrospectively. Team totals plus unallocated usage SHALL be additive. Retention SHALL preserve no-goal totals by team, UTC day and billing basis, including every token and request count and the priced subtotal, without person or session references. Only usage with a recorded home team SHALL count as attributed in retained totals.
 
-`no_goal` SHALL be `{priced_spend_usd_micros, estimated_spend_usd_micros, spend_bound, unpriced_requests, share_percent,
-known_unpriced_requests, attribution_unknown}`. When older aggregate totals lack attribution, complete `unpriced_requests` counts SHALL be null, with `known_unpriced_requests` retaining the
-attributed count. The response SHALL report only whether attribution is incomplete for the window, never workspace-wide unattributed counts. The share is no-goal spend divided by team spend, in percent,
-or null with no spend or incomplete pricing or attribution. `priced_spend_usd_micros` is always the known priced
-subtotal, labelled as such. With unpriced requests and complete attribution, `estimated_spend_usd_micros` SHALL return the priced subtotal,
-`spend_bound` SHALL be `lower`, and the amount SHALL be labelled "at least" with `unpriced_requests` giving the count.
-Remaining SHALL be effective minus priced spend, with `remaining_bound: "upper"` and the label "at most".
-Forecast SHALL use the priced rate with `forecast_bound: "lower"` and "at least". Exact priced totals use
-`spend_bound`, `remaining_bound` and `forecast_bound` of `exact` when the respective amount exists; absent amounts
-have a null bound. With unknown attribution, complete amounts stay null and `spend_bound` is `unknown`.
-`no_goal.spend_bound` follows the same lower, exact or unknown rule for that subtotal. `pricing_note` SHALL explain
-the applicable bounds and unpriced count. A projected crossing date and no-goal share SHALL be absent with
-incomplete data because neither has a reliable bound. Unknown never reads as zero. All monetary figures and forecasts
-SHALL be labelled estimates at list price. No per-person spend view, session list, or unreadable goal id or name
-SHALL be returned. Budget history may identify who changed the budget, never their spend.
+When the window contains earlier no-goal usage without a home team from someone now in the team, the known positive priced total SHALL be a lower bound and the panel SHALL say some earlier usage could not be attributed. With no known priced amount the complete total SHALL be unknown, never zero. Older aggregate totals with missing attribution SHALL leave complete spend, remaining and forecast unknown. Unknown attribution SHALL be flagged for the window without exposing workspace-wide unattributed counts. Complete unpriced counts SHALL be absent when unknown, with known counts retained separately.
 
-The linear forecast SHALL use priced spend divided by elapsed milliseconds from month start through
-`as_of`, multiplied by the month's duration. Past months use the whole month, future months have no elapsed time,
-and no elapsed time yields a null forecast. `runs_out_at` is the projected crossing date within that month, or null
-when there is no budget, no positive spend rate, incomplete data or no projected crossing. Future expiries SHALL
-reduce the effective budget at their recorded instant when finding the crossing. A past crossing estimate may
-precede `as_of`; it is not a measured crossing. Reads SHALL not create decisions or audit entries.
+With unpriced work and complete attribution, spend and forecast SHALL be lower bounds labelled "at least" and remaining SHALL be an upper bound labelled "at most". The same bounds SHALL apply to a positive known subtotal with incomplete live attribution. Fully priced and attributed amounts SHALL be exact. Absent amounts SHALL have no bound; unknown SHALL never read as zero. The no-goal subtotal SHALL follow the same rules. The no-goal share SHALL be its percentage of team spend, absent with no spend or incomplete data. Projected crossings SHALL be absent with incomplete data. The pricing explanation SHALL give the applicable bounds without repeating the displayed unpriced count. All monetary figures and forecasts SHALL be labelled estimates at list price.
+
+Forecast SHALL be priced spend divided by elapsed time since month start, multiplied by the month's duration. Past months SHALL use the whole month, future months no elapsed time, and no elapsed time SHALL give no forecast. Remaining SHALL be effective budget less spend, including negative amounts. A projected crossing SHALL lie in that month and account for future grant expiries, or be absent without a budget, positive spend rate or projected crossing. A past projected date SHALL remain labelled a projection.
+
+Align SHALL offer no per-person spend view. Team totals can reveal one person's spend when the team has fewer than three members. Teams of one or two SHALL still be able to have a budget. The team budget panel SHALL show that risk in one plain sentence when the team has fewer than three members. Budget reads SHALL expose no session list or unreadable goal reference or name. History may name who changed a budget, never their spend. The monthly CSV SHALL name the same goal-bound team rows and amounts as the on-screen report. Only team members and workspace owners SHALL read home-team spend in no goal; other teams' amounts SHALL remain unallocated. Hidden goals SHALL stay unnamed.
+
+#### Scenario: Earlier no-goal usage before and after retention
+
+- **WHEN** a current team member has usage from a spending period opened without a home team before this feature
+- **THEN** the live team total is a lower bound or unknown, the panel explains the missing attribution, and retaining the session does not turn that usage into attributed or exact team spend
+
+#### Scenario: A team with one or two members
+
+- **WHEN** a team with one member sets a budget and later adds a second member
+- **THEN** its budget remains available and the panel warns that team totals can reveal one person's spend, while no per-person spend view is offered
 
 #### Scenario: Home team and history
 
@@ -104,86 +147,70 @@ precede `as_of`; it is not a measured crossing. Reads SHALL not create decisions
 #### Scenario: Unpriced work
 
 - **WHEN** one team request is unpriced and its priced requests total 40 dollars
-- **THEN** `priced_spend_usd_micros` is 40000000, `unpriced_requests` is 1, spend says at least 40 estimated dollars, remaining says at most its priced remainder, forecast is labelled at least its priced projection, and the count of one unpriced request is shown; no-goal share and crossing date are absent
+- **THEN** the known priced subtotal is 40 dollars and there is one unpriced request, spend says at least 40 estimated dollars, remaining says at most its priced remainder, forecast is labelled at least its priced projection, and the count of one unpriced request is shown; no-goal share and crossing date are absent
 
 #### Scenario: A person chooses a home team
 
-- **WHEN** a person reads `GET .../spend/home-team` and uses browser `PUT {team_id}` with one of their teams
-- **THEN** both return exactly `{team, teams, can_choose}`, only their own preference changes, and a team they do not belong to is 404
+- **WHEN** a person reads their home-team preference and uses the browser to choose one of their teams with one of their teams
+- **THEN** both return the chosen team, eligible teams and whether a choice is available, only their own preference changes, and a team they do not belong to is 404
 
 #### Scenario: A session budget read
 
-- **WHEN** a session's owner or sharing device reads its current budget, with and without `attribution=1`
-- **THEN** the response is `{epoch_id, team, month}` for attribution alone or `{epoch_id}` plus the budget-read fields otherwise, null for no open shared period, no readable team or an unreadable goal, and a different person's read is 404
+- **WHEN** a session's owner or sharing device reads its current budget, with and without attribution-only selection
+- **THEN** the response is the spending period, team and month for attribution alone or the spending period plus the budget details otherwise, null for no open shared period, no readable team or an unreadable goal, and a different person's read is 404
 
 #### Scenario: Only team members and owners read a team budget and burn
 
 - **WHEN** an ordinary member of another team reads this team's budget, even with a readable goal in this team
 - **THEN** the read is 404 and returns no team burn, no-goal subtotal or budget history
 
-Goal-bound team spend in the monthly CSV SHALL have exactly the same named team rows and amounts as the on-screen team report for that reader. The member-or-owner restriction above applies to budgets, burn, forecasts, history and home-team spend in no goal. Other teams' home-team amounts SHALL remain unallocated. Hidden goals SHALL remain unnamed.
-
 ### Requirement: Asking for more
 
-Any non-viewer member of the team SHALL create a request for the current UTC month with browser or device
-`POST /api/v2/workspaces/{ws}/teams/{team}/budget-requests {amount_usd, reason, goal_id?, session_keys?}`.
-An amount SHALL be positive, at most 1,000,000 dollars, in whole cents; reason is required, at most 1000 characters.
-The optional goal SHALL be readable by the requester (404 otherwise). It may be outside the team; requesting
-does not change that goal. At most 50 distinct session keys may be attached, each an existing shared session owned
-by the requester in this workspace (404 otherwise). Malformed input is 400. A non-team workspace member gets 403
-`not_in_team`, even an owner; a viewer gets 403 `read_only`. With no current budget, creation is 409
-`budget_missing`. The workspace creation limit in `workspaces` SHALL count every budget request, including withdrawn requests and allowance grants. All writes use bodies of at most 16 KB and the existing same-site protections for cookies.
+Any non-viewer team member SHALL file a budget request for the current UTC month from a browser or granted device. A positive whole-cent amount up to 1,000,000 US dollars and a reason of 1 to 1000 characters SHALL be required. A linked goal SHALL be readable and may belong to another team without changing it. At most 50 distinct sessions SHALL be attached, each shared in this workspace and owned by the requester. Unreadable references SHALL receive not found. Invalid input, non-team requesters including owners, viewers, and requests without a current budget SHALL be refused. Write bodies SHALL be bounded at 16 KB and cookie writes SHALL use the existing same-site protections.
 
-Every request SHALL record `filed_from` as `browser` for cookie authentication or `terminal` for device authentication; input SHALL NOT override it. A device request SHALL always wait for a person, even under the allowance.
-At most five waiting requests per person, team and current UTC month SHALL exist. Creating a sixth waiting request or referring a declined request when five already wait SHALL return 409 `too_many_waiting_requests` with a plain explanation, in the same transaction.
+Authentication SHALL determine the filing source; input SHALL never override it. Device requests SHALL record the authenticated device and its name at filing, and SHALL always wait for a person. Records, lists and Home rows SHALL say "Filed from a terminal on the device <device name>. Align cannot tell whether <person> or an agent on that device ran the command." Browser requests SHALL say "Filed in the browser by <person>." Older terminal records without a recorded name SHALL say so.
 
-Only for a request made with a web sign-in, as opposed to a device token, if the amount is within the per-request allowance set at creation and adding it to the month's total allowance grants
-would not exceed the monthly ceiling, the request SHALL be `granted` immediately with authority
-`allowance`, no approver, the exact label "This request was recorded under the team's allowance.", and expiry at next month's start.
-Otherwise it SHALL be `waiting`, with the usual decision path. The allowance and ceiling SHALL be checked in the
-same transaction as creation, so concurrent requests cannot exceed the ceiling. A later allowance change SHALL not alter an existing grant. Creation SHALL return 201 and audit
-`budget_request.requested` and, for an allowance grant, `budget_request.allowance_granted`.
+Only browser requests within both the per-request allowance and remaining monthly ceiling SHALL be granted under the allowance. The record SHALL say "This request was recorded under the team's allowance.", have no approver or decision row, expire at next month's start and raise the effective budget until expiry. All other requests SHALL wait for a person. Allowance checks, request creation, attached sessions and audit entries SHALL be atomic. Creation and allowance grants SHALL each have their audit entry.
+
+At most five requests per person, team and month SHALL wait at once. Creating a sixth or referring a declined request when five already wait SHALL be refused transactionally with a plain explanation. Creation SHALL be limited to 60 requests per requester per workspace in a rolling hour, plus a workspace ceiling of 600. Browser and device requests by the same requester, withdrawals and allowance grants SHALL count toward both limits across restarts. Refusals SHALL record no request or audit entry.
 
 #### Scenario: Allowance or waiting
 
 - **WHEN** a person using a web sign-in asks for 5 dollars under a 5 dollar allowance with no ceiling given and then asks for 1
 - **THEN** the ceiling defaults to 5, the first is granted under the team's allowance without an approver, the remaining allowance is zero, and the second waits for a decision; the grant raises the effective budget by 5 until expiry
 
+#### Scenario: Honest terminal and browser sources
+
+- **WHEN** a request is filed with a device token and another is filed with a web sign-in
+- **THEN** the terminal record preserves its device name and uncertainty about who ran the command, the browser record names the signed-in person, and records, lists and Home show the same source
+
 #### Scenario: Terminal requests wait for a person
 
 - **WHEN** a device files a request that fits the allowance
 - **THEN** the request waits for a person and records terminal as its filing source
 
+#### Scenario: One requester exhausts their hourly allowance
+
+- **WHEN** a requester records 60 requests in an hour and another member files a request while the workspace is below its ceiling
+- **THEN** the first requester is refused and the other member can still file, with allowance grants counted in both limits
+
 #### Scenario: Five requests already wait
 
 - **WHEN** a person has five waiting requests for one team this month and files another above the allowance
-- **THEN** the sixth request is refused with `too_many_waiting_requests` and no new record or audit entry
+- **THEN** the sixth request is refused with a too-many-waiting-requests explanation and no new record or audit entry
 
 ### Requirement: Decisions, withdrawal and expiry
 
-Browser-only `POST /api/v2/workspaces/{ws}/budget-requests/{id}/{approve|decline|withdraw|second-look}` SHALL return
-the updated request. Every action SHALL carry `{revision}` for the version read. Missing or invalid revision is
-400, a future revision is 400 `unknown_revision`, an older one is 409 `stale_revision`, checked before decision
-fields. Every successful action increments the revision, so a stale first decision cannot decide a second look.
-Team leads and workspace owners, except viewers and always excluding the requester, SHALL decide a waiting
-request. Approve requires `{amount_usd, expires_at, note?}`: a positive amount no greater than asked, an ISO instant
-after now and at or before next UTC month's start, and an optional note of at most 1000 characters. Decline requires
-`{reason}` with 1 to 1000 characters. Approval SHALL record authority `approver`, approver, approved amount, expiry,
-note and time. Decline SHALL record decider, reason and time. Only the requester may withdraw a waiting request, including a requester whose workspace role later became viewer.
-No acknowledgement is an approval. Every decision SHALL be an immutable row in `decisions`; both rounds survive.
+Only browser sign-ins SHALL approve, decline, withdraw or refer a request. Every action SHALL carry the revision the person read. Missing, invalid or future revisions SHALL be refused as bad input; an older revision SHALL be refused as stale before decision fields are checked. Every successful transition SHALL increment the revision. A stale first decision SHALL never decide a second look.
 
-Each decision, withdrawal and second look SHALL be transactional and audit `budget_request.approved`, `.declined`,
-`.withdrawn` or `.second_look`. At month end a waiting request becomes effectively `expired`; a granted request
-becomes effectively `expired` at its expiry. Expired grants add nothing. Declined and withdrawn records keep those
-states. Derived expiry requires no background write or audit. Any action in an ineligible state is 409 `wrong_state`.
-Its message SHALL say what happened, name the actor when one exists ("you" to that actor), and use the app's
-words, including "declined". It SHALL NOT interpolate a stored state into "This request is ...".
-Removing a budget preserves grants and history but leaves no effective budget until one is set for that month.
+Team leads and workspace owners, excluding viewers and the requester, SHALL decide waiting requests. Approval SHALL name the approver, amount no greater than requested, expiry after now and no later than next UTC month's start, and an optional note of at most 1000 characters. Decline SHALL require a reason of 1 to 1000 characters. Only the requester SHALL withdraw a waiting request, including after becoming a viewer. Every decision SHALL be an immutable record preserving both rounds. Every transition SHALL be transactional and audited with the acting person. No acknowledgement SHALL imply approval.
+
+Waiting requests SHALL expire at month end and granted requests at grant expiry, without background writes or audit entries. Expired grants SHALL add nothing to the current effective budget. Declined and withdrawn records SHALL retain those states. Ineligible actions SHALL be refused with a plain sentence saying what happened, naming the actor when known and using "you" for that actor. Refusals SHALL never interpolate a stored state. Removing a budget SHALL preserve grants and history but leave no effective budget until one is set again.
 
 #### Scenario: Partial approval and no self-approval
 
 - **WHEN** a lead requests 20 dollars and tries to approve it, then another lead grants 12 until a date this month
-- **THEN** self-approval is 403 `not_an_approver`, the other decision is granted with authority `approver`, and the effective budget grows by 12 until that instant; an approval after month end or above 20 dollars is 400
+- **THEN** self-approval is 403 an approver refusal, the other decision is granted with authority `approver`, and the effective budget grows by 12 until that instant; an approval after month end or above 20 dollars is 400
 
 #### Scenario: Racing decisions and withdrawal
 
@@ -192,19 +219,14 @@ Removing a budget preserves grants and history but leaves no effective budget un
 
 ### Requirement: One second look by a different owner
 
-Only a declined request's requester, while the month is still current, SHALL send it once for a second look.
-It becomes `waiting` with `second_look: true`. Only a current workspace owner who is neither the requester nor the
-first decider may decide it. No second referral is permitted, including after a second decline. Both decisions
-SHALL remain visible. A first decider who becomes an owner still cannot make the second decision. When no eligible
-owner exists, `can.second_look` SHALL be false and `second_look_unavailable_reason` SHALL say that no other owner
-can decide it, excluding the requester and first decider. Attempting referral then SHALL be 409
-`no_eligible_approver` without a revision change, audit or referral. Eligibility SHALL be rechecked transactionally.
-A second look already waiting when its last eligible owner leaves SHALL remain waiting and say nobody is eligible.
+Only the requester of a declined request SHALL send it once for a second look during its current month. It SHALL return to waiting, keeping the first decision. Only a current workspace owner who is neither the requester nor first decider SHALL decide it. A first decider promoted to owner SHALL remain ineligible. A second referral SHALL be refused, including after a second decline.
+
+With no eligible different owner, the second-look action SHALL be unavailable with an explanation, and an attempted referral SHALL record no revision, audit or referral. Eligibility SHALL be rechecked transactionally. A second look already waiting when its last eligible owner leaves SHALL remain waiting and explain that nobody is eligible. A request with nobody eligible to decide SHALL still be created and SHALL never be granted automatically.
 
 #### Scenario: Different owner and preserved first decision
 
 - **WHEN** a lead declines, the requester asks for a second look, that lead tries again as an owner, and another owner grants less than asked
-- **THEN** the lead's action is 403 `not_an_approver`, the other owner can grant, the first decline and second grant both remain, and another second look is 409 `wrong_state`
+- **THEN** the lead's action is 403 an approver refusal, the other owner can grant, the first decline and second grant both remain, and another second look is 409 an ineligible-state refusal
 
 #### Scenario: Nobody can decide
 
@@ -218,14 +240,11 @@ A second look already waiting when its last eligible owner leaves SHALL remain w
 
 ### Requirement: Reading requests and what needs you
 
-Browser and granted device reads SHALL list `GET .../teams/{team}/budget-requests?month=YYYY-MM` and workspace
-`GET .../budget-requests?month=YYYY-MM&limit=50&cursor=<id>` as `{waiting_on_me, mine, others, next_cursor}` (newest first by creation time, with a stable tie order). Both lists SHALL default to the current UTC month, accept limit 1 to 100 (default 50), and use the last id as an opaque cursor within the selected month, returning 400 for an invalid cursor. Changes to request state or decisions between pages SHALL neither skip unread rows nor repeat previously returned rows. Readers SHALL read one at
-`GET .../budget-requests/{id}`. A request is readable by its requester, current team members and workspace owners;
-others get 404. Each request SHALL return exactly `{id, team, month, revision, state, state_note, requester, filed_from, amount_usd_micros, reason, goal, goal_hidden, session_count, session_keys, approved_usd_micros, authority, authority_label, expires_at, second_look, decisions, approvers, waiting_on_me, decision_unavailable_reason, second_look_unavailable_reason, can, created_at, updated_at}`. `goal` is null or `{id, title}`. Each decision is `{round, decision, actor, amount_usd_micros, expires_at, note, at}`. `can` contains exactly `{approve, decline, withdraw, second_look}`. `authority_label` is null, "This request was recorded under the team's allowance." or "This request was granted by an approver.". A waiting request with nobody eligible SHALL carry
-`decision_unavailable_reason` explaining who is needed and that the requester cannot decide it. Creation SHALL
-still succeed with 201 and the same warning in the record and lists; no automatic grant is inferred. A linked unreadable goal SHALL be null, with `goal_hidden: true`,
-including in Home. Attached sessions SHALL be identified only to their owner; others see a count.
-Home SHALL return `budget_requests` as null or `{waiting_on_me, mine, next_cursor}`. The Home SHALL put requests waiting on the reader and the reader's own current and previous UTC month requests in the existing single Needs list and its filters; the heading count SHALL count those same rows. A failed source is unknown. Home SHALL return only these relevant records, at most 100, with `next_cursor` when more exist. Unrelated history SHALL NOT crowd out relevant requests. The Requests tab SHALL have a clearly labelled Budget requests section, a month filter defaulting to the current UTC month and paginated reads. Lists and Home SHALL remain bounded as request history or workspace membership grows. A requester SHALL see every state, including declined, withdrawn and expired.
+Browser and granted-device reads SHALL list team or workspace requests, defaulting to the current UTC month, with newest creation first and a stable tie order. Page size SHALL be 1 to 100, default 50. An opaque continuation reference SHALL apply only within the selected month; an invalid one SHALL be refused. Changes in decisions or states between pages SHALL neither skip unread rows nor repeat rows. Lists SHALL group requests waiting on the reader, their own requests and others, and indicate when another page exists.
+
+A request SHALL be readable by its requester, current team members and workspace owners; others SHALL receive not found. Each record SHALL include its team, month, revision, state and plain status, requester, filing source, requested amount and reason, readable goal or hidden-goal flag, original attached-session count, approved amount, authority and expiry, second-look state, immutable decisions, eligible approvers, available actions, unavailable-action explanations and creation and update times. Attached sessions SHALL be identified only to their owner; others SHALL see a count. An unreadable linked goal SHALL remain unnamed and unidentified, including in Home. Allowance and approver authority SHALL have distinct full sentences. Decisions SHALL retain their round, actor, decision, amount, expiry, note and time.
+
+Home SHALL put requests waiting on the reader and their own current and previous UTC month requests in its existing single Needs list and filters. The heading SHALL count the same rows. Home SHALL return only relevant records, at most 100 with continuation when needed; unrelated history SHALL not crowd them out. Failed reads SHALL be unknown. Requesters SHALL see every state. The Requests tab SHALL have a clearly labelled Budget requests section, a current-month default filter and pagination. Lists and Home SHALL remain bounded as history and membership grow.
 
 #### Scenario: An owner deciding for a private goal
 
@@ -235,24 +254,17 @@ Home SHALL return `budget_requests` as null or `{waiting_on_me, mine, next_curso
 #### Scenario: Lists stay within the selected month and page
 
 - **WHEN** a person lists requests without a month and follows the returned cursor with limit 50
-- **THEN** both pages contain only this month's readable records, each has at most 50 records, no record repeats, and `next_cursor` is null on the final page
+- **THEN** both pages contain only this month's readable records, each has at most 50 records, no record repeats, and the next-page reference is null on the final page
 
 ### Requirement: Screens fit the existing app
 
-The existing Spend tab SHALL offer a team and UTC month picker, budget and burn, a form for authorized budget
-changes, an honest "No team budget for this month" state, and a request form for team members. The form SHALL
-encourage a readable goal and allow choosing the requester's own shared sessions. Request cards SHALL show waiting,
-granted with authority, declined, withdrawn and expired distinctly, both decisions, and only actions the server
-allows. An approval form SHALL collect amount and expiry, a decline a required reason. Second look and withdrawal
-SHALL carry the displayed revision. Home and Requests SHALL link to the same record on Spend using `?team=<id>&month=<YYYY-MM>&request=<id>`.
-The request record SHALL name the team whose budget is requested. Its status SHALL be a plain sentence for each state: waiting for a decision, granted by the named approver until the recorded expiry, recorded under the team's allowance until expiry, declined by the named decider, withdrawn, or expired. Status text SHALL NOT reuse refusal sentences or say "so nothing changes" above an available second look.
-The attribution rule SHALL appear once on the Spend tab, with no shared workspace footer: goal-bound spend counts toward the goal team's budget, and spend in no goal counts toward the home team's budget recorded when the spending period opened. The team picker SHALL list only teams whose budget the reader may read. Browser and granted device `GET .../spend/teams` SHALL return `{teams: [{id, name}]}` for exactly those teams, ordered by name, so the terminal can offer the same choices without exposing budgets.
-The Sessions screen SHALL show a budget attribution label only for the reader's own sessions whose team has a budget this month. Other people's sessions SHALL have no label, including when read by a workspace owner. A month without a team budget SHALL have no label. A hidden goal SHALL stay unnamed. Forms SHALL have
-named labels, direct English, visible errors, no emoji or internal field names in copy, and fit 390 CSS pixels
-without page overflow. Incomplete totals and forecasts SHALL label bounds or say unknown, and count unpriced requests. Nothing is
-populated with mock, seed or demo data.
+Spend SHALL offer team and UTC month controls, budget and burn, authorized budget changes, an honest "No team budget for this month" state and a request form for team members. The team choices SHALL list only readable budgets, ordered by name, matching terminal choices. The form SHALL encourage a readable goal and offer the requester's own shared sessions. Request cards SHALL distinguish waiting, granted with authority, declined, withdrawn and expired; show both decisions; and offer only authorized actions. Approval SHALL collect amount and expiry, decline a required reason. Withdrawal and second look SHALL carry the displayed revision. Home and Requests SHALL link to the same record on Spend with its team and month selected.
 
-The budget amount SHALL be required and validated before sending. A blank amount SHALL never become zero; zero is allowed only when typed explicitly. Field errors SHALL be plain sentences beside the relevant fields, with no raw server messages or field names. A successful request SHALL clear its form, and every write form SHALL prevent duplicate submissions while a write is outstanding. Saving a home team or removing a budget SHALL show a specific confirmation that survives the follow-up read and page reload while that saved choice or removal remains current. Saving a budget SHALL show a confirmation that survives the follow-up read and page reload for the same saved budget. With no budget, the amount and remaining display SHALL say there is no budget. Required fields SHALL be marked through their labels and control semantics.
+The record SHALL name the requested team and state plainly who granted or declined, whether a grant used the allowance, its expiry, or that the request waits, was withdrawn or expired. Status text SHALL not reuse refusal sentences or say "so nothing changes" above an available second look. The filing source SHALL appear in records, lists and Home rows.
+
+The attribution rule SHALL appear once on Spend with no shared workspace footer: goal-bound spend follows the goal's team and spend in no goal follows the home team captured when its spending period opened. Only the reader's own sessions SHALL have budget labels, only when the team has a budget this month. Other people's sessions, including those read by owners, SHALL have no label. Hidden goals SHALL stay unnamed.
+
+Forms SHALL have named labels, required-field semantics, direct English, visible errors, no emoji, internal field names or raw server messages, and fit 390 CSS pixels without overflow. Incomplete amounts SHALL show bounds or unknown and the known unpriced count. No mock, seed or demo data SHALL populate this feature. Blank budget amounts SHALL be refused before sending and never become zero; zero SHALL be accepted only when explicitly typed. Successful requests SHALL clear their form. Every write form SHALL prevent duplicate submissions while pending. Saving a budget or home team or removing a budget SHALL show a specific confirmation surviving reads and reloads while the saved state remains current. Without a budget both amount and remaining SHALL say so. CSV and budget month controls SHALL be independent and preserve each other's selection.
 
 #### Scenario: A phone and an empty team
 
@@ -264,26 +276,44 @@ The budget amount SHALL be required and validated before sending. A blank amount
 - **WHEN** a person submits a blank budget amount, saves an explicit zero, then files a valid request twice before its first response
 - **THEN** the blank amount is refused beside its field without a request, zero can be saved explicitly with a confirmation retained on reload, and only one request is filed with its form cleared on success
 
-The CSV month control and the budget month control SHALL be independent. Changing either SHALL preserve the other's selected month.
-
 ### Requirement: Terminal commands and threshold notes
 
-`align budget [--team <name>]` SHALL report the current folder goal's team (or the explicit team, or the folder's
-only team when unambiguous), this UTC month's budget and burn with estimate labels and unknown counts.
-`align budget request --amount <USD> --reason <text> [--goal <ref>] [--team <name>] [--session <ref> ...]`
-SHALL file a request with the same server rules, defaulting the goal from the folder. An optional `--workspace` SHALL follow the existing workspace resolver. Folder rules SHALL supply the default
-workspace and goal; without a team on that goal, only a sole current team may be selected implicitly. Ambiguous team selection
-SHALL list eligible teams by name and ask the person to pass `--team <name>` rather than guessing. Successful reads SHALL also list the teams the person can choose by name. Messages SHALL use plain sentences without raw identifiers or stored state values. Terminal commands SHALL never decide a request.
+The budget command SHALL report this UTC month's team budget and burn, with estimate bounds and unknown counts, for the folder goal's team, an explicit team, or the sole current team. Folder rules SHALL supply workspace and goal defaults; normal workspace selection SHALL still apply. An ambiguous team SHALL never be guessed: eligible teams SHALL be listed by name and the person asked to choose. Successful reads SHALL list those choices and refresh this device's cached figure for that team and its matching snapshots. The request command SHALL file under the same rules, defaulting to the folder goal and accepting optional goal, team and own-session references. Terminal commands SHALL never decide requests. Errors SHALL be mapped to plain sentences, never printed from server messages verbatim. No raw identifier, stored state, raw timestamp or bare numeric month SHALL appear in these messages. Dates SHALL use a readable month and UTC read time. The word "read" SHALL describe the time a figure was computed throughout the feature.
 
-At a shared session's next turn after its team's priced known spend reaches 80 and then 100 percent of the effective
-budget, it SHALL receive one short informational note per threshold per UTC month per session. Dedupe SHALL survive
-hooks, sync and restarts; a leap past both thresholds may deliver both at the same turn. A changed budget SHALL
-not reset dedupe, even when the session changes teams. An unknown total, no budget, private sessions, and teams the person cannot read SHALL produce no
-threshold claim. A priced lower bound crossing a threshold SHALL cause a note even when some requests are unpriced; an unpriced request alone SHALL NOT. A crossing observed by a sync pass SHALL remain due at the session's next turn however long the pause, while it is the same UTC month and the session still counts toward the same team. A later budget change or temporary read failure SHALL NOT erase an observed crossing. A new spending period confirmed to count toward the same team SHALL retain that due note; an unconfirmed period mismatch SHALL NOT deliver it. Each note SHALL state when the estimate was read, in plain words, because the budget may have changed. Future-dated, previous-month or mismatched observations SHALL NOT cause a note. A sync pass SHALL accept a new crossing only from a figure read within the last five minutes. The one-pass sync SHALL refresh session attribution and its budget through
-`GET .../sessions/{key}/budget`, readable only by the person who owns that session (and its sharing device for
-device reads). With `attribution=1` the read SHALL return only `{epoch_id, team, month}` for the sync pass; the normal read SHALL return `{epoch_id}` plus the budget-read fields. It SHALL return null when there is no open shared spending period, no team, or an unreadable goal. The hook SHALL read only its local snapshot and dedupe files, without a network read, sync wait or lock wait, within the existing p95 latency budget. Spending snapshots SHALL live outside the goal-feed directory. Hooks SHALL
-match the cached workspace, session key and spending period before delivering information through their existing context path.
-The sync pass SHALL refresh at most 100 shared sessions per pass, with rotation. Positive and nothing-to-report answers for matching session attribution SHALL be reused for at most five minutes. Team budget answers, including absent or unreadable budgets, SHALL be reused for the same five-minute window across passes. One pass SHALL make at most 120 budget-related reads and spend at most two seconds waiting for them. It SHALL stop when either bound is reached, without waiting for sign-in refresh or another lock, and continue with later sessions on the next pass. Cache files for sessions no longer shared SHALL be removed on stop-sharing, removal or sign-out. Markers from earlier UTC months SHALL be pruned. With no shares, no cursor file SHALL be written. Each note SHALL use the `[Align] ...` form, name the team and threshold, label list-price estimates, state that work continues and that the note grants no authority, and say the person can ask for more in Align. It SHALL contain no runnable command or instruction. These reads and notes SHALL add no daemon, decision, hold or stop. No acknowledgement or automatic approval SHALL be inferred from a note.
+A shared session SHALL receive one informational note at each of 80 and 100 percent of its effective team budget per UTC month. A leap past both SHALL permit both at once. Delivery markers SHALL survive hooks, sync and restarts and SHALL not reset on budget or team changes. A priced known lower bound SHALL cross a threshold; an unpriced request alone, unknown amount, absent budget, private session or unreadable team SHALL not. A crossing observed while fresh SHALL remain due however long the pause within that month and team. A confirmed new spending period in the same team SHALL retain it; an unconfirmed mismatch SHALL not deliver it. Temporary failures and rejected figures SHALL preserve observations and pending crossings. Once a newer accepted read shows a removed budget or changed effective amount, no note SHALL come from a figure read before that change.
+
+Each model-context line SHALL start with the Align marker, name the team and threshold, label list-price estimates, state when the figure was read, say work continues, grant no authority and say the person can ask for more in Align. It SHALL contain no command or instruction. The separate person-only message SHALL address the person directly and may name Spend and the terminal request command. A claimed person-only message SHALL be returned even without other context or notices. No note SHALL repeat an unpriced count or imply acknowledgement, approval, a hold or a stop.
+
+Hooks SHALL answer only from local snapshots and delivery files, with no network, credential read, network-client import, directory scan, sync wait or lock wait. Snapshots SHALL live outside goal feeds and match the workspace, session and spending period. The existing 150 millisecond p95 whole-hook latency limit SHALL apply both after delivery and with a set budget below 80 percent, when every turn reads its snapshot. Server text in any hook note SHALL have control and invisible Unicode characters removed, including tags, zero-width and bidirectional characters, and Align markers neutralized.
+
+Budget work SHALL run last in each sync pass, after directives, stops, holds, usage, activity and steering. It SHALL refresh at most 100 shared sessions with rotation, reuse positive and empty attribution and team-budget reads for at most five minutes, and start at most 120 reads within a two-second time cap. It SHALL stop at either cap without sign-in refresh or another lock wait, save completed work and its position and continue unfinished work next pass. A running session SHALL be described as able to act on a figure up to five minutes old. A new crossing SHALL require a figure read within five minutes. Server-computed times SHALL use the offset in non-secret local files and the shared one-minute tolerance; device-written times SHALL retain strict device-clock checks. Far-future, mismatched or previous-month observations SHALL be rejected. Brief server/device month disagreement SHALL preserve pending notes and allow the server month's delivery.
+
+Responses other than success or not found SHALL preserve snapshots and pending crossings and be remembered for thirty seconds. Cleanup SHALL guard each marker directory separately, including unreadable directories and concurrent file creation. Local budget files SHALL store only fields used by hooks and commands. Stop-sharing and removal SHALL delete session caches but retain delivery markers; sharing again in the same month SHALL not repeat a note. Sign-out and uninstall SHALL remove budget caches and delivery markers. Old-month markers SHALL be pruned with boundary tolerance. With no shares no cursor SHALL be written. No daemon SHALL be added.
+
+#### Scenario: Cleanup and temporary refusal preserve progress
+
+- **WHEN** one marker directory cannot be cleaned and a budget route temporarily refuses a read
+- **THEN** other directories and sessions are still processed, previous snapshots and pending crossings remain, and the refused route is not retried during the next thirty seconds
+
+#### Scenario: Share again or sign out
+
+- **WHEN** a session stops sharing and is shared again that month, then the device signs out
+- **THEN** its delivered thresholds do not repeat on sharing again and sign-out removes its delivery markers
+
+#### Scenario: A budget pass reaches its time cap
+
+- **WHEN** budget reads consume the pass's two-second allowance before all selected sessions have been refreshed
+- **THEN** the pass saves completed observations and its position, starts no further read, and continues unfinished work on the next pass
+
+#### Scenario: Server clock ahead or behind
+
+- **WHEN** the server is seconds or minutes ahead of the device, or the device is ahead with a known offset
+- **THEN** a current figure can produce a note using the saved offset, while a figure beyond the tolerance is rejected without erasing a pending crossing
+
+#### Scenario: Different clocks at the month boundary
+
+- **WHEN** the server has entered a new UTC month while the device is briefly still in the previous month
+- **THEN** the server month's observed crossing remains pending and can be delivered with local read times checked on the device clock
 
 #### Scenario: Repeated turns and a new month
 
@@ -293,8 +323,12 @@ The sync pass SHALL refresh at most 100 shared sessions per pass, with rotation.
 #### Scenario: A long pause after a crossing
 
 - **WHEN** a sync pass observes 80 percent and the person next prompts two days later in the same UTC month with the session still counting toward that team
-- **THEN** that turn receives the note once, stating when the estimate was read, even if a later budget read falls below 80 percent
-- **AND** a different month or changed session attribution receives no note from that observation
+- **THEN** that turn receives the note once, stating when the estimate was read, even if a later spend read falls below 80 percent while the effective budget stays the same; a different month or changed session attribution receives no note from that observation
+
+#### Scenario: A terminal read refreshes a changed budget
+
+- **WHEN** the budget is removed or its effective amount changes and the terminal reads the newer figure before the cache expires
+- **THEN** the device uses the newer figure and no subsequent note comes from a figure read before that change
 
 #### Scenario: Read a budget from the terminal
 
@@ -306,6 +340,16 @@ The sync pass SHALL refresh at most 100 shared sessions per pass, with rotation.
 - **WHEN** a person runs `align budget request --amount 5 --reason "Finish work"` in that folder under an allowance of 5 dollars
 - **THEN** the record says it was filed from the terminal, waits for a person, and the terminal says that waiting for a person grants no authority
 
+#### Scenario: Model context and the person's message differ
+
+- **WHEN** a budget threshold is delivered at the next turn
+- **THEN** the model receives an informational line without a command and the person receives a separate message saying their work continues and where they can ask for more
+
+#### Scenario: A budget message is the only claimed output
+
+- **WHEN** a hook claims a budget message while there is no other context or notice
+- **THEN** its response includes the person-only message and a subsequent hook does not claim it again
+
 #### Scenario: A priced lower bound crosses a threshold
 
 - **WHEN** priced spend reaches 80 percent while another request is unpriced
@@ -313,14 +357,50 @@ The sync pass SHALL refresh at most 100 shared sessions per pass, with rotation.
 
 ### Requirement: Record retention
 
-Budgets, their history, budget requests and both decision rounds SHALL be kept for the workspace's lifetime,
-as decision records. Each actor SHALL follow the existing former-member replacement schedule. Attached session keys
-SHALL disappear when their session is deleted or retained as aggregate totals, with the original attached-session count retained on
-the request. No-goal team older aggregate totals SHALL retain only team, UTC day and aggregate request and estimate counts.
-Retaining older session totals SHALL count each request once under its UTC day, model and billing basis; retaining a session SHALL leave other days, models and bases unchanged. Purging a workspace SHALL remove all these records. Product events SHALL remain content-free; this feature adds
-no product-event names or properties.
+Budgets, history, requests and both decision rounds SHALL remain for the workspace lifetime. Actors SHALL follow former-member replacement; a terminal request's identifying device reference and name SHALL be removed with its requester identity. Attached session references SHALL disappear on deletion or retention as aggregate totals, with the original attachment count retained. No-goal team aggregates SHALL contain only team, UTC day, billing basis, request and token counts and estimates. Retention SHALL count each request once under its day, model and basis and leave other groups unchanged. Purging a workspace SHALL remove all budget records. Product events SHALL remain content-free with no new event names or properties.
 
 #### Scenario: A session is retained as aggregate totals and a member leaves
 
 - **WHEN** a request's attached session is retained as aggregate totals after 13 months and its requester becomes a former member
 - **THEN** the request keeps its reason, original session count and decisions, its session key is gone, and its actor reads as "Former member #n"
+
+## Open questions
+
+- Budget exposure through read-only MCP remains outside this feature.
+
+## Sources
+
+- `lib/v2/budgets.ts`
+- `lib/v2/spend.ts`
+- `lib/v2/spend-home.ts`
+- `lib/v2/spend-month.ts`
+- `lib/v2/spend-export.ts`
+- `lib/v2/sessions.ts`
+- `lib/v2/db.ts`
+- `lib/v2/core.mts`
+- `lib/v2/retention-core.mts`
+- `lib/v2/policy.ts`
+- `lib/v2/home.ts`
+- `app/app/w/[ws]/spend/budgets.tsx`
+- `app/app/w/[ws]/spend/view.tsx`
+- `app/app/_ui/home/needs.ts`
+- `packages/align-agent/src/budgets.ts`
+- `packages/align-agent/src/shared/budget-notes.ts`
+- `packages/align-agent/src/shared/clock.ts`
+- `packages/align-agent/src/shared/envelope.ts`
+- `packages/align-agent/src/hooks/handlers.ts`
+- `packages/align-agent/src/api.ts`
+- `packages/align-agent/src/sync.ts`
+- `scripts/test-budgets.mjs`
+- `scripts/test-v2.mjs`
+- `scripts/test-agent-live.mjs`
+- `packages/align-agent/test/budgets.test.ts`
+- `packages/align-agent/test/serial/latency.test.ts`
+- `app/api/v2/workspaces/[ws]/sessions/[key]/budget/route.ts`
+- `app/api/v2/workspaces/[ws]/budget-requests/route.ts`
+- `app/api/v2/workspaces/[ws]/budget-requests/[id]/route.ts`
+- `app/api/v2/workspaces/[ws]/budget-requests/[id]/[action]/route.ts`
+- `app/api/v2/workspaces/[ws]/teams/[team]/budget-requests/route.ts`
+- `app/api/v2/workspaces/[ws]/teams/[team]/budget/route.ts`
+- `app/api/v2/workspaces/[ws]/spend/teams/route.ts`
+- `app/api/v2/workspaces/[ws]/spend/home-team/route.ts`
