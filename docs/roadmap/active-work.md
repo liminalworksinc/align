@@ -33,32 +33,38 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 ### [ ] SPEND-004: Current budgets and crossing information
 
 - **Owner:** specs/align/budgets.md, local-agent.md, interface.md, directives.md and retained implementation
-- **Direction:** Refresh changed budgets on the next sync without new unchanged-pass requests; refresh local figures
-  after terminal reads; warn people during supported long turns; show crossings on Spend and Home.
-- **Conclusion:** Carry private stamps on the existing directive response. Preserve five-minute reuse, read and time
-  caps, local-only hooks, separate message/context markers, existing refreshes and unchanged Needs counts.
+- **Direction:** Refresh changed budgets on the next sync, refresh local figures after terminal reads, warn people
+  during supported long turns, and show crossings on Spend and Home. Review fixes address clock differences,
+  rejected figures and terminal cache failures or races.
+- **Conclusion:** Private change stamps use the existing directive response. Unchanged cached passes add no budget
+  reads. The existing reuse window, read and time caps, local-only hooks, separate message/context markers and
+  Needs counts are preserved.
 - **Completion prerequisites:** none
+- **Outcome:** Changed budgets reach session snapshots on sync. Claude Code can show a user-only tool warning;
+  Codex retains next-prompt delivery. Spend states current crossings and Home retains first observations for
+  leads and owners outside Needs. Server times use the API client's saved offset and clock tolerance; rejected
+  figures preserve snapshots and pending crossings for retry. Terminal reads print figures before a best-effort
+  update restricted to the selected team, using the sync lock without waiting and at most one current-folder
+  attribution read. No daemon, polling, usage metering change, timeout increase or change to begin().
 - **Implementation and evidence:**
-  - [x] Amend specifications first, then implementation, tests and supporting documents.
-  - [x] Verify zero unchanged-pass budget reads, privacy, mixed releases and bounded sync. The original zero-read
-    regression remains unchanged. Domain and agent tests cover grants, expiry, removal, legacy empty caches and
-    removal outside the rotating batch. A frozen pre-budget directive intake still applies a stop.
-  - [x] Verify local terminal refresh, user-only hook output, separate delivery markers and Home domain privacy,
-    first observations and unchanged Needs data. Browser and real CLI execution remain UNKNOWN below.
-  - [x] Node 26.3.0: lint, app typecheck, agent typecheck, syntax and agent build pass. No-server suites:
-    paste-lines 33/0, admin 62/0, invite-races 10/0, budgets 48/0. Six listener-free agent files: 304/0.
-    Serial network-blocked hook latency: 1/0 under the unchanged 150 ms p95 limit. Register review is clean.
-  - [ ] Server, browser and live-agent suites pass in a listener-capable environment (UNKNOWN here). New cases
-    cover HTTP stamps and privacy, browser crossings/reload/counts and real CLI/tool delivery; live-agent budget
-    cleanup restores usage, removes the budget, clears its reused team read and syncs in finally.
-- **Outcome:** Implemented locally and uncommitted. Migration 25 preserves existing records and adds first-observed
-  crossings. No daemon, polling, usage upload changes, timeout increase or change to begin().
-- **Failed checks, resolved:** The initial budget run was 43/1 because its exact migration count still expected 24;
-  it now expects exactly 25 and retains migration 24's preservation checks, with a separate migration 25 regression.
-  A concurrent lint run failed on a temporary test directory removed during its scan; quiet reruns pass unchanged.
-- **Next action:** Run the server, browser and live-agent suites in a listener-capable environment. The `litai` CLI
-  is unavailable (guidance exits 127), so its workflow and formal specification verification are UNKNOWN.
-  This parent remains unchecked under the P0 rule. No outbound action is authorized.
+  - [x] Specifications amended before implementation; the agent README and changelog describe the resulting behavior.
+  - [x] The budget domain suite covers change stamps, grants, expiry, removal, Home privacy, retained observations,
+    unchanged Needs data and migration preservation. Listener-free agent tests cover cached passes, mixed releases,
+    bounded sync, removal outside the rotating batch, persistent crossings and user-only hook delivery.
+  - [x] The pre-review server, browser and live-agent suites passed in a listener-capable environment, as reported
+    by the operator. They cover HTTP stamps and privacy, browser crossings, reloads and counts, and real CLI/tool
+    delivery. This is prior evidence for the existing feature, not a run of the clock and terminal review fixes.
+  - [x] New listener-free regressions cover server clocks ahead by seconds or saved minutes, strict local times,
+    far-future rejection, preservation across the rotating batch, and retry after a rejected figure. Real CLI
+    subprocesses with mocked transport cover unwritable caches, a held sync lock, printed figures before local
+    refresh and the single current-folder attribution read. Database and credential failures remain best effort.
+  - [x] Node 26.3.0: lint, app and agent typechecks, syntax, agent build, all no-server suites and listener-free agent
+    units pass. The separate network-blocked serial hook latency test passes under its unchanged p95 limit.
+  - [ ] Fresh server, browser and live-agent verification of the review fixes requires a listener-capable environment.
+- **Next action:** Review the uncommitted fixes, then run the listener-based suites for their exact state where ports
+  are available. Those fresh results remain UNKNOWN here. The `litai` guidance command fails with exit 127 because
+  the CLI is not installed; its workflow survey and formal specification verification remain UNKNOWN. The parent
+  stays unchecked until the remaining evidence is recorded. No outbound action is authorized.
 
 ### [x] SPEND-003: Team budgets and budget requests
 

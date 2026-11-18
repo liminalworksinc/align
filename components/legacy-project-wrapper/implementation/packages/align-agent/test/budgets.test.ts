@@ -10,7 +10,7 @@ import { readJson, writeJsonAtomic } from "../src/shared/fsx.ts";
 import { layout, localId } from "../src/shared/layout.ts";
 import type { HotState } from "../src/shared/types.ts";
 import { pollDirectives } from "../src/directives.ts";
-import { saveCredentials } from "../src/api.ts";
+import { CLOCK_TOLERANCE_MS, saveCredentials } from "../src/api.ts";
 import { ctxFor, makeEnv, shareSession } from "./helpers.ts";
 import { preToolUse, userPromptSubmit } from "../src/hooks/handlers.ts";
 
@@ -176,7 +176,7 @@ test("an observed crossing survives a long pause and a later budget change, with
     fs.rmSync(layout.budgetShown(f.home, f.lid, f.snapshot.month, 80));
     f.snapshot.epoch_id = "ep_changed"; f.save();
     assert.deepEqual(budgetNotes(f.home, f.lid, f.hot, next), []);
-    f.snapshot.epoch_id = "ep_new"; f.snapshot.crossings[0].as_of = new Date(next + 1000).toISOString(); f.save();
+    f.snapshot.epoch_id = "ep_new"; f.snapshot.crossings[0].as_of = new Date(next + CLOCK_TOLERANCE_MS + 1000).toISOString(); f.save();
     assert.deepEqual(budgetNotes(f.home, f.lid, f.hot, next), []);
   } finally { f.cleanup(); }
 });
@@ -348,7 +348,7 @@ test("terminal and sync cache updates share figure validation and match only con
     globalThis.fetch = async () => { throw new Error("no network expected"); };
     cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure, estimated_spend_usd_micros: 80 });
     assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.estimated_spend_usd_micros, 80);
-    for (const patch of [{ month: "2000-01" }, { as_of: "invalid" }, { as_of: new Date(Date.now() + 60000).toISOString() }, { team: { id: "pod_other", name: "Other" } }, { estimated_spend_usd_micros: "100" }]) {
+    for (const patch of [{ month: "2000-01" }, { as_of: "invalid" }, { as_of: new Date(Date.now() + CLOCK_TOLERANCE_MS + 1000).toISOString() }, { team: { id: "pod_other", name: "Other" } }, { estimated_spend_usd_micros: "100" }]) {
       cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure, ...patch });
       assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.estimated_spend_usd_micros, 80);
     }
@@ -392,7 +392,7 @@ test("the committed base agent's directive intake ignores budget stamps and stil
   } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
 });
 
-test("a figure computed after the pass began is accepted, and terminal refresh confirms stale attribution within base caps", async () => {
+test("a figure computed after the pass began is accepted, and sync confirms stale attribution within base caps", async () => {
   const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch, realNow = Date.now;
   const lid = shareSession(ctx, "claude-code", "during-read");
   let clock = realNow(); const month = new Date(clock).toISOString().slice(0, 7);
@@ -410,7 +410,7 @@ test("a figure computed after the pass began is accepted, and terminal refresh c
     clock += BUDGET_FRESH_MS + 1000;
     reads = 0;
     cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure(), estimated_spend_usd_micros: 100 });
-    await refreshSessionBudgets(ctx); // The terminal's same bounded attribution refresh, with no repeated team read.
+    await refreshSessionBudgets(ctx); // Sync confirms stale attribution with no repeated team read.
     assert.equal(reads, 1);
     assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.estimated_spend_usd_micros, 100);
   } finally { Date.now = realNow; globalThis.fetch = before; ctx.db.close(); t.cleanup(); }

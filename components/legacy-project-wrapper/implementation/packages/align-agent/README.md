@@ -302,7 +302,7 @@ line on stderr, exit 1) and the hooks do nothing but keep stop latches and goal 
 
 `align budget [--team <name>] [--workspace <name|id>]` reads this folder's goal team or sole team and shows
 this UTC month's budget, spend, forecast and allowance left. Amounts are list-price estimates. Lower bounds
-say "at least" and upper bounds say "at most". Unpriced requests are counted. No budget is stated plainly. A successful read also refreshes the local team figure and matching confirmed session snapshots, so the next prompt can use it.
+say "at least" and upper bounds say "at most". Unpriced requests are counted. No budget is stated plainly. After printing its figures, a successful read makes a best-effort update to that team's local figure and matching confirmed session snapshots. It skips the update while sync holds its lock and confirms only the current folder's latest shared session when attribution is stale. A local update failure does not fail the read.
 
 `align budget request --amount <USD> --reason <text> [--goal <ref>] [--team <name>] [--session <ref> ...]`
 files a request for this month, using the folder's goal by default. `--workspace` selects a workspace when

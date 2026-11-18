@@ -3,7 +3,9 @@
 ## Unreleased
 
 - Budget changes reach shared sessions on the next sync through private change stamps on the existing response.
-  Unchanged cached passes add no budget requests. Terminal budget reads refresh local figures. Claude Code can warn
+  Unchanged cached passes add no budget requests. Budget notes use the saved server clock difference and preserve
+  pending crossings when a figure is rejected. Terminal budget reads print figures before a best-effort local update,
+  skip that update while sync holds its lock, and confirm at most the current folder's session. Claude Code can warn
   the person during a long turn without adding budget context; Codex retains next-prompt notes. Spend states current
   crossings and their computation time; Home shows first observed crossings to leads and owners outside Needs.
 

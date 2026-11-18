@@ -59,7 +59,7 @@ import { feedHold } from "./shared/feedhold.ts";
 import type { RequestState, WireRequest } from "./shared/types.ts";
 import { computeUnsharedDigest } from "./allocation.ts";
 import { listSteering, weekKey } from "./shared/steering.ts";
-import { cacheBudgetRead, refreshSessionBudgets, requestAmount, budgetTeam, budgetFolder } from "./budgets.ts";
+import { cacheTerminalBudget, requestAmount, budgetTeam, budgetFolder } from "./budgets.ts";
 
 const out = (s = ""): void => {
   process.stdout.write(s + "\n");
@@ -1695,8 +1695,6 @@ async function cmdBudget(ctx: Ctx, argv: string[], request: boolean): Promise<vo
   const r = await api(ctx, "GET", `/api/v2/workspaces/${encodeURIComponent(ws.id)}/teams/${encodeURIComponent(team)}/budget`);
   if (r.status !== 200) throw new Error(r.json?.message ?? `Budget read failed (${r.status}).`);
   const b = r.json;
-  cacheBudgetRead(ctx, ws.id, team, b);
-  await refreshSessionBudgets(ctx);
   const money = (v: number | null, bound?: string) => v === null ? "unknown" : `${bound === "lower" ? "at least " : bound === "upper" ? "at most " : ""}$${(v / 1_000_000).toFixed(2)}`;
   out(`${clean(b.team.name, 80)}, ${b.month} UTC. All amounts are estimates at list price. Observed ${b.as_of}.`);
   out(b.budget ? `Base budget: ${money(b.budget.amount_usd_micros)}. Budget including grants: ${money(b.effective_budget_usd_micros)}.` : "No team budget for this month.");
@@ -1704,6 +1702,7 @@ async function cmdBudget(ctx: Ctx, argv: string[], request: boolean): Promise<vo
   out(`Remaining monthly allowance: ${b.allowance_remaining_usd_micros === null ? "no allowance" : money(b.allowance_remaining_usd_micros)}. Unpriced requests: ${b.unpriced_requests ?? "unknown"}.`);
   out(b.pricing_note);
   out("Goal-bound spend counts toward the goal team's budget. Spend in no goal counts toward the home team's budget recorded when its spending period began. Work continues.");
+  await cacheTerminalBudget(ctx, ws.id, team, b, process.cwd());
 }
 
 // ---------- main ----------
