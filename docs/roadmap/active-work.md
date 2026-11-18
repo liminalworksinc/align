@@ -72,6 +72,28 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
     `ALIGN_TEST_PORT=4400 npm test` passed 2,054 checks on Node 24.22.3 with zero failures.
     `litai spec validate specs/align --id-prefix align` passed for all eight documents.
 
+### [ ] LIM-2522: Show earlier decisions on the same goal items
+
+- **Priority:** P0
+- **Owner:** Align change requests, their web review controls and decision records
+- **Direction:** Show people earlier decisions on the items they are proposing to change or deciding on.
+- **Conclusion:** Match stored revisions by element ID on the same goal and use the existing request read policy.
+- **Completion prerequisites:** none
+- **Implementation and evidence:**
+  - [x] Specify revision indexing, precedent reads, visibility, presentation and event recording.
+    The spec validation command accepted all eight documents.
+  - [x] Index existing and new revisions, and expose earlier decisions to the app and connected clients.
+    Server migration 26 follows the expectations migration and backfills from the base versions, counting missing bases.
+  - [x] Test migration, matching, visibility, event recording and proposal and review controls at 390 px.
+    The 14 packet server and browser checks passed on Node 24.22.3.
+  - [x] Keep the backfill attached to the migration when its schema version changes, and test the runner with a shifted version.
+    The regression covers the direct upgrade from schema 25 to 26 and a simulated migration at a later version.
+    Both paths passed all six upgrade checks. `test-admin` reported 68 passed and 0 failed.
+  - [x] Pass the full local test gate and spec validation. Record the outcome in the changelog.
+    `ALIGN_TEST_PORT=4600 npm test` on Node 24.22.3 reported 2,074 passed and 0 failed.
+    `litai spec validate specs/align --id-prefix align` accepted all eight documents.
+    The retained test receipt is stale.
+
 ### [x] TX-001: Recover from transaction and preview setup failures
 
 - **Owner:** components/legacy-project-wrapper/implementation/lib/v2/db.ts

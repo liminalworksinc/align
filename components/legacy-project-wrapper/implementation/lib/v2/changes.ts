@@ -1,7 +1,7 @@
 import { expectationInput, expectationView, recordExpectation, recordOutcome } from "./expectations";
 import { all, audit, get, run, tx } from "./db";
 import { V2Error, badRequest, conflict, forbidden, notFound } from "./errors";
-import { event } from "./events";
+import { event, noteFirstPrecedentShown } from "./events";
 import { newId, nowIso } from "./ids";
 import { effectiveSet, launchSet } from "./approval";
 import { contentOf, dependencyCycle, goalObj, goalRow, goalsDependingOn, nextContent, sameContent, unreadableGoals, versionContentOf, visibleGoal, writeGoalVersion, type GoalContent, type GoalRow } from "./goals";
@@ -10,6 +10,8 @@ import { memberName, memberPrincipal, nameTo } from "./workspaces";
 import { assertRevisionReached, nonNegInt, optStr, revisionRead, str, type Body } from "./validate";
 import { EVIDENCE_PER_REVISION, evidenceCount, evidenceInput, evidenceRows, evidenceView, recordSnapshot, snapshotView, type EvidenceSource } from "./evidence";
 import { counterNoChange, counterSameAsRequest } from "./change-words.mts";
+import { changedElements, INSERT_CHANGE_ELEMENT, type ChangeElement } from "./change-elements.mts";
+import { takeAll } from "./limits";
 
 // Change requests: a member proposes a new version of a goal they can read but don't own (owners just publish a
 // version). The goal's approval set decides, under the requester rule (lib/v2/approval.ts): one approval is enough.
@@ -107,6 +109,23 @@ interface RevisionRow {
   condition: string | null;
   acknowledged_by: string | null;
   acknowledged_at: string | null;
+}
+
+export const PRECEDENT_STATES = ["approved", "rejected", "superseded"] as const;
+type PrecedentState = (typeof PRECEDENT_STATES)[number];
+
+export interface Precedent {
+  id: string;
+  state: PrecedentState;
+  launch: LaunchState | null;
+  base_version: number;
+  resulting_version: number | null;
+  decided_at: string | null;
+  decided_by: { id: string; name: string } | null;
+  shared_elements: (ChangeElement & { label: string | null })[];
+  decision_note: string | null;
+  rejection_reason: string | null;
+  outcome: "never_assessed";
 }
 
 const sortedIds = (ids: string[]) => [...ids].sort().join(",");
@@ -387,6 +406,11 @@ function writeRevision(ws: string, goalId: string, id: string, revision: number,
     recordSnapshot(ws, goalId, at),
     condition,
   );
+  const base = versionContentOf(ws, goalId, baseVersion);
+  if (!base) throw new Error("The change request revision has no base version");
+  for (const item of changedElements(base, changes)) {
+    run(INSERT_CHANGE_ELEMENT, ws, goalId, id, revision, item.kind, item.element_key, item.change);
+  }
 }
 
 const revisionRows = (id: string) => all<RevisionRow>("SELECT * FROM v2_change_request_revisions WHERE change_request_id = ? ORDER BY revision", id);
@@ -738,13 +762,14 @@ export async function removeEvidence(pp: PolicyPrincipal, goalId: string | undef
 
 // ---- reading (the same object for a list item, one request and a decision record) ----
 
-function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
+function readableDependency(pp: PolicyPrincipal, id: string): GoalRow | undefined {
+  const goal = goalRow(pp.wsId, id);
+  return goal && canReadGoal(pp, goalObj(goal)) ? goal : undefined;
+}
+
+function requestView(pp: PolicyPrincipal, r: ChangeRequestRow, privateDecisionNote = false) {
   const g = goalRow(r.ws_id, r.goal_id)!;
-  const readable = (ids: string[]) =>
-    ids.filter((id) => {
-      const d = goalRow(r.ws_id, id);
-      return !!d && canReadGoal(pp, goalObj(d));
-    });
+  const readable = (ids: string[]) => ids.filter((id) => readableDependency(pp, id));
   const shown = (c: Changes): Changes => (c.depends_on ? { ...c, depends_on: readable(c.depends_on) } : c);
   const hiddenOf = (ids: string[]) => ids.length - readable(ids).length;
   const changes = JSON.parse(r.changes_json) as Changes;
@@ -832,7 +857,7 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     rejected_by: person(r.rejected_by),
     /** The approver's note (approved) or the rejection reason (rejected). A rejection reason reaches only the requester,
      *  the person who declined and the request's approvers; every other reader gets null (LIM-2515 L1, ruling A). */
-    decision_note: r.state === "rejected" && !seesReason ? null : r.decision_note,
+    decision_note: (r.state === "rejected" || privateDecisionNote) && !seesReason ? null : r.decision_note,
     note: r.state === "approved" ? r.decision_note : null,
     rejection_reason: r.state === "rejected" && seesReason ? r.decision_note : null,
     /** The goal version the launch created (null until launched). */
@@ -872,6 +897,89 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
 }
 
 export type ChangeRequestView = ReturnType<typeof requestView>;
+
+function readPrecedents(pp: PolicyPrincipal, goalId: string, elements: ChangeElement[], beforeId: string | null, eligible: boolean): Precedent[] {
+  // Filter first so an unreadable dependency can neither introduce a match nor change its rank.
+  const keys = elements.filter((item) => item.kind !== "dependency" || readableDependency(pp, item.element_key));
+  if (!keys.length) return [];
+  const rows = all<ChangeRequestRow & { state: PrecedentState; shared_json: string; decision_at: string | null }>(
+    `SELECT r.*, json_group_array(json_object('kind', e.kind, 'element_key', e.element_key, 'change', e.change)
+        ORDER BY e.kind, e.element_key) AS shared_json,
+      CASE WHEN r.state = 'superseded' THEN r.updated_at ELSE r.decided_at END AS decision_at
+      FROM json_each(?) k
+      JOIN v2_change_request_elements e ON e.kind = json_extract(k.value, '$.kind')
+        AND e.element_key = json_extract(k.value, '$.element_key')
+      JOIN v2_change_requests r ON r.id = e.change_request_id AND r.revision = e.revision
+        AND r.ws_id = e.ws_id AND r.goal_id = e.goal_id
+      WHERE e.ws_id = ? AND e.goal_id = ? AND r.state IN ('approved', 'rejected', 'superseded')
+        AND (? IS NULL OR (r.created_at, r.rowid) < (SELECT created_at, rowid FROM v2_change_requests WHERE id = ?))
+      GROUP BY r.id
+      ORDER BY count(*) DESC, decision_at DESC, r.rowid DESC
+      LIMIT 5`,
+    JSON.stringify(keys), pp.wsId, goalId, beforeId, beforeId,
+  );
+  const precedents = rows.map((row): Precedent => {
+    const view = requestView(pp, row, true);
+    const supersededBy = row.state === "superseded"
+      ? get<{ actor_id: string | null }>(
+        "SELECT actor_id FROM v2_audit WHERE ws_id = ? AND object_id = ? AND action = 'change_request.superseded' AND at = ?",
+        pp.wsId, row.id, row.decision_at,
+      )?.actor_id
+      : null;
+    const shared = JSON.parse(row.shared_json) as ChangeElement[];
+    return {
+      id: view.id,
+      state: row.state,
+      launch: view.launch,
+      base_version: view.base_version,
+      resulting_version: view.version,
+      decided_at: row.decision_at,
+      decided_by: row.state === "superseded"
+        ? (supersededBy ? { id: supersededBy, name: memberName(supersededBy) } : null)
+        : view.rejected_by ?? view.approved_by,
+      shared_elements: shared.map((item) => {
+        const side = item.change === "removed" ? view.diff.before : view.diff.after;
+        const label = item.kind === "limit" ? side.limits?.find((limit) => limit.id === item.element_key)?.text
+          : item.kind === "measure" ? side.measures?.find((measure) => measure.id === item.element_key)?.text
+          : item.kind === "dependency" ? readableDependency(pp, item.element_key)?.title
+          : null;
+        return { ...item, label: label ?? null };
+      }),
+      decision_note: view.decision_note,
+      rejection_reason: view.rejection_reason,
+      outcome: "never_assessed",
+    };
+  });
+  if (precedents.length && eligible) noteFirstPrecedentShown(pp.wsId, pp.userId);
+  return precedents;
+}
+
+export function changeRequestPrecedents(pp: PolicyPrincipal, id: string, goalId?: string): Precedent[] {
+  const request = visibleRequest(pp, id, goalId);
+  const elements = all<ChangeElement>(
+    "SELECT kind, element_key, change FROM v2_change_request_elements WHERE change_request_id = ? AND revision = ?",
+    id, request.revision,
+  );
+  if (!elements.length) return [];
+  const g = goalRow(pp.wsId, request.goal_id)!;
+  const canDecide = pp.wsRole !== "viewer" && (effectiveSet(g, request.requester_id).includes(pp.userId) ||
+    (request.state === "approved" && (request.launch === "pending" || request.launch === "not_yet") &&
+      launchSet(g, request.requester_id).includes(pp.userId)));
+  return readPrecedents(pp, g.id, elements, id, canDecide || request.requester_id === pp.userId);
+}
+
+export function draftChangeRequestPrecedents(pp: PolicyPrincipal, goalId: string, b: Body): Precedent[] {
+  const g = visibleGoal(pp, goalId);
+  if (!takeAll([
+    { key: `precedents:${pp.userId}`, max: 20, windowMs: 60_000 },
+    { key: `precedents-ws:${pp.wsId}`, max: 120, windowMs: 3_600_000 },
+  ])) throw new V2Error(429, "rate_limited", "Too many requests, try again later");
+  if (nonNegInt(b, "base_version") !== g.version) throw conflict("stale_version", `This goal changed while you were editing. Reload to start from version ${g.version}.`);
+  const base = contentOf(g);
+  const changes = changesIn(pp, g.id, base, b.changes);
+  const eligible = pp.wsRole !== "viewer" && g.status === "active" && g.owner_id !== pp.userId;
+  return readPrecedents(pp, g.id, changedElements(base, changes), null, eligible);
+}
 
 function stateFilter(state: string | null | undefined): ChangeRequestState | null {
   if (state === undefined || state === null || state === "") return null;

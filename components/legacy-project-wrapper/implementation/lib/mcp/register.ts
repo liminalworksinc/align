@@ -2,7 +2,7 @@ import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { effectiveSet, launchSet } from "../v2/approval";
 import { asksForBrief, readableAsks, type AskState, type AskView } from "../v2/asks";
-import { addEvidence, LAUNCH_STATES, requestCondition } from "../v2/changes";
+import { addEvidence, changeRequestPrecedents, LAUNCH_STATES, PRECEDENT_STATES, requestCondition } from "../v2/changes";
 import { CHANGE_REQUEST_STATES, getChangeRequest, listChangeRequests, type ChangeDiff, type ChangeRequestSummary, type Condition, type EvidenceLink } from "../v2/changes-read";
 import { launchWords, OUTCOME_WORDS } from "../v2/launch-words";
 import { diffWords, type FieldDiff } from "../v2/change-words.mts";
@@ -445,6 +445,24 @@ function expectationLines(e: z.infer<typeof ExpectationOut>, me: string): string
   ];
 }
 
+const PrecedentOut = z.object({
+  id: z.string(),
+  state: z.enum(PRECEDENT_STATES),
+  launch: z.enum(LAUNCH_STATES).nullable(),
+  base_version: z.number(),
+  resulting_version: z.number().nullable(),
+  decided_at: z.string().nullable(),
+  decided_by: Person.nullable(),
+  shared_elements: z.array(z.object({
+    kind: z.enum(["limit", "dependency", "measure", "field"]),
+    element_key: z.string(),
+    change: z.enum(["added", "removed", "changed"]),
+    label: UT.nullable(),
+  })),
+  decision_note: UT.nullable(),
+  rejection_reason: UT.nullable(),
+  outcome: z.literal("never_assessed"),
+});
 const RecordOut = ChangeRequestOut.omit({ revision: true, created_at: true, updated_at: true }).extend({
   expectation: ExpectationOut.nullable(),
   decided_by: Person.nullable(),
@@ -455,6 +473,7 @@ const RecordOut = ChangeRequestOut.omit({ revision: true, created_at: true, upda
   launch_decided_at: z.string().nullable(),
   approved_without_evidence: z.boolean().nullable(),
   decided_at: z.string().nullable(),
+  precedents: z.array(PrecedentOut).max(5),
 });
 const DecisionOut = z.object({ found: z.boolean(), decided: z.boolean(), record: RecordOut.nullable() });
 
@@ -853,7 +872,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
     "align_get_decision_record",
     {
       title: "Get a decision record",
-      description: "A decided change request: who asked, who approved or declined it, the reason, the before and after of each changed field, whether an approved change is launched to agents yet and the goal version its launch created, its \"Accept if\" condition and acknowledgement, its evidence links, whether it was approved without evidence, and the snapshot Align recorded at the decided revision.",
+      description: "A decided change request: who asked, who approved or declined it, the reason, what changed, launch and resulting version, its condition, evidence and snapshot, and earlier decisions on the same items.",
       inputSchema: z.object({ change_request_id: z.string().max(64), ...wsInput }),
       outputSchema: DecisionOut,
       annotations: READ_ONLY,
@@ -885,6 +904,13 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
         launch_decided_at: cr.launch_decided_at,
         approved_without_evidence: cr.approved_without_evidence,
         decided_at: cr.decided_at,
+        precedents: changeRequestPrecedents(pp, cr.id, cr.goal.id).map((earlier) => ({
+          ...earlier,
+          decided_by: earlier.decided_by ? person(earlier.decided_by.id, earlier.decided_by.name) : null,
+          shared_elements: earlier.shared_elements.map((item) => ({ ...item, label: item.label === null ? null : ut(item.label) })),
+          decision_note: earlier.decision_note === null ? null : ut(earlier.decision_note),
+          rejection_reason: earlier.rejection_reason === null ? null : ut(earlier.rejection_reason),
+        })),
       };
       const lines = [
         // "declined", the app's word for a rejected request (its state stays "rejected" in the record); the person the

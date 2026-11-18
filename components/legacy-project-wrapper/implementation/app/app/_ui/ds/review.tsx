@@ -4,6 +4,7 @@ import { EMPTY_EXPECTATION, ExpectationFields, ExpectationRecord, expectationBod
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ApiError, api, sentence } from "../kit";
+import { RequestPrecedents } from "../precedents";
 import type { ChangeFields, ChangeRequest, Goal } from "../types";
 import { changeWaits, launchWaits } from "@/lib/v2/home-core.mts";
 import { Compare } from "./compare";
@@ -170,6 +171,7 @@ export function ReviewBody({ ws, cr, me, titleOf = (id) => id, onDone }: { ws: s
 
       <ExpectationRecord ws={ws} cr={cr} me={me} onDone={onDone} />
       <Compare before={cr.diff.before} after={cr.diff.after} hidden={cr.diff.hidden_depends_on ?? null} beforeLabel={currentLabel} afterLabel={proposedLabel} titleOf={titleOf} />
+      <RequestPrecedents ws={ws} cr={cr} />
       {cr.behind && <p className="text-[14px] text-(--st-pending)">The goal moved on to version {cr.goal.version} since this was asked against version {n}.</p>}
 
       <section aria-label="Evidence" className="flex flex-col gap-2">

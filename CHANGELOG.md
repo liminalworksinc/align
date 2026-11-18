@@ -9,6 +9,9 @@
   The goal page shows self-reported measure readings and their history. MCP includes these readings on goal
   and brief reads, and includes expectations and outcomes in decision records. Server migration 25 adds these records.
 - The outcome form shows how to fix an invalid evidence link beside the field.
+- When proposing or reviewing a goal change, open Earlier decisions to see up to five past decisions on the same items,
+  with reasons where you have access and links to the records. Connected clients can read the same history on decision records.
+  Server migration 26 indexes changed items on existing request revisions.
 - Server tests finish each readiness response before stopping a phase, preventing a previous server from satisfying
   the next phase's readiness check.
 - Failed transaction and preview setup releases database state so later writes, previews and sign-in mail work.

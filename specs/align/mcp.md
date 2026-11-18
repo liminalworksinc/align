@@ -339,10 +339,20 @@ The outcome SHALL carry its choice, reporter, time, optional note and evidence U
 The summary SHALL label the expectation and outcome self-reported and distinguish an unanswered expectation from
 a report of "can't tell". People's text SHALL use the usual untrusted-text marking.
 
+The decision record SHALL also include `precedents`, the same earlier decisions returned by the change request's
+precedent read in the `goals-and-proposals` part, with the same workspace scope, visibility and dependency
+redaction. The closed output schema SHALL mark names, shared-item labels, decision notes and rejection reasons
+as `untrusted_text`.
+
 #### Scenario: An outcome through MCP
 
 - **WHEN** a request reader calls `align_get_decision_record` before and after the launcher reports `cant_tell`
 - **THEN** the first record has a null outcome and the second has a self-reported outcome of `cant_tell`
+
+#### Scenario: Earlier decisions through a connected app
+
+- **WHEN** the person reads a decision record through MCP and an earlier decline matches
+- **THEN** the record contains the same precedent as the web read, with the name and any readable reason wrapped as untrusted text
 
 #### Scenario: A target change in words
 

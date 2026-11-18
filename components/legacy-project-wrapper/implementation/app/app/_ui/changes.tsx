@@ -7,6 +7,7 @@ import { ChangesForm, ConditionBox, CR_STATE_WORDS, crTone, Diff, EvidenceItem, 
 import { OpenRequest } from "./decide";
 import type { ChangeRequest, Goal } from "./types";
 import { ValueCard } from "./value";
+import { RequestPrecedents } from "./precedents";
 import { launchWords } from "@/lib/v2/launch-words";
 
 // Change requests in the web app: the proposal form and one request's card. An open request is understood, then
@@ -57,6 +58,7 @@ export function ProposeChange({
         hiddenDeps={hiddenDeps}
         noteLabel="Why this change"
         noteRequired
+        showDraftPrecedents
         sendLabel="Send for approval"
         busy={act.busy}
         onSend={(changes, reason) => {
@@ -190,6 +192,7 @@ function RequestRecord({
       </div>
       <p className="text-[15px] text-zinc-700">Why: {cr.reason}</p>
       <Diff cr={cr} titles={titles} />
+      <RequestPrecedents ws={ws} cr={cr} />
       {cr.state === "superseded" && cr.launch !== "superseded" && <Note>Closed because the goal was marked achieved or dropped.</Note>}
       {cr.state === "superseded" && cr.launch === "superseded" && (
         <Note>

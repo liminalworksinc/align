@@ -901,7 +901,17 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 25, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds, deleted-session markers and the goal versions sent to connected apps included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 25 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "v2_expectations", "v2_outcome_reports", "v2_measure_readings", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  const requiredTables = [
+    "v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions",
+    "v2_change_request_evidence", "v2_change_request_elements", "v2_spend_rollups", "v2_former_members",
+    "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits",
+    "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets",
+    "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "v2_expectations", "v2_outcome_reports",
+    "v2_measure_readings", "ba_user", "ba_passkey",
+  ];
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 26, lib/v2/core.mts SCHEMA_VERSION), v2 tables and Better Auth tables, limits on goals and goal versions`,
+    SCHEMA_VERSION === 26 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION &&
+    requiredTables.every((table) => pragmas.tables.includes(table)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
@@ -2508,6 +2518,206 @@ try {
         !!inList && inList.rejection_reason === null && inList.decision_note === null,
       `${asReq.json?.rejection_reason} | ${asDecider.json?.rejection_reason} | ${asViewer.status} ${asViewer.json?.rejection_reason} ${asViewer.json?.decision_note} | list ${!!inList} ${inList?.rejection_reason}`,
     );
+  }
+  // LIM-2522: earlier decisions are matched by readable item IDs, against the current revision of each request.
+  {
+    const goal = (await mkGoal(U3, {
+      title: "Cut over the ledger", team_id: P1, limits: [{ type: "must", text: "Keep the ledger online." }],
+      measures: [{ text: "Cutover minutes", target: "5" }, { text: "Ledger availability" }],
+    })).json;
+    const teamGoal = (await mkGoal(U3, { title: "Team dependency canary", team_id: P1, visibility: "team" })).json;
+    const limit = goal.limits[0];
+    const revisedLimit = { ...limit, text: "Cut over the ledger without downtime." };
+    const make = (u, base_version, changes) => propose(u, goal.id, { base_version, changes, reason: "Ledger cutover work" });
+    const act = (u, r, action, body) => crAct(u, goal.id, r.json.id, action, { revision: 1, ...body });
+    const read = (u, r, g = goal.id) => call(u.who, "GET", `${crPath(g)}/${r.json.id}/precedents`, { cookie: u.cookie });
+    const draft = (u, g, changes) => call(u.who, "POST", `${crPath(g)}/precedents`, { cookie: u.cookie, body: { base_version: 2, changes, reason: "Draft reason" } });
+    const eventRows = () => withDb((d) => d.prepare("SELECT actor, props FROM v2_events WHERE ws_id = ? AND name = 'first_precedent_shown'").all(A));
+    const approved = await make(U1, 1, { title: "Ledger cutover", limits: [revisedLimit], depends_on: [teamGoal.id] });
+    const launched = await act(U3, approved, "approve_and_launch", { note: "Use the cutover window" });
+    const empty = await read(U1, approved);
+    const declined = await make(U1, 2, { title: "Move the ledger first" });
+    const refused = "The old schedule was full";
+    await act(U3, declined, "reject", { reason: refused });
+    const teamOnly = await make(U1, 2, { depends_on: [] });
+    await act(U3, teamOnly, "reject", { reason: "Keep the dependency" });
+    const withdrawn = await make(U1, 2, { title: "Another cutover", limits: [] });
+    await act(U1, withdrawn, "withdraw", {});
+    const current = await make(U2, 2, { title: "Move the ledger in stages", limits: [], depends_on: [] });
+    const newer = await make(U1, 2, { title: "Move the ledger after peak hours" });
+    await act(U3, newer, "reject", { reason: "Later proposal" });
+
+    const viewer = await read(U4, current);
+    const vp = viewer.json?.precedents ?? [];
+    check("LIM-2522: same goal and earlier eligible states only, ranked by visible shared keys, with private notes and dependencies out of a viewer's result",
+      launched.json?.launch === "launched" && viewer.status === 200 && vp.map((p) => p.id).join() === [approved.json.id, declined.json.id].join() &&
+        vp[0].shared_elements.length === 2 && vp[0].shared_elements.some((e) => e.kind === "limit" && e.element_key === limit.id && e.change === "changed" && e.label === revisedLimit.text) &&
+        vp[0].resulting_version === 2 && vp[0].decision_note === null &&
+        vp[1].decided_by?.id === U3.id && typeof vp[1].decided_at === "string" && vp[1].rejection_reason === null && vp[1].decision_note === null &&
+        vp.every((p) => p.outcome === "never_assessed") && !viewer.text.includes(teamGoal.id) && !viewer.text.includes(teamGoal.title), viewer.text);
+    check("LIM-2522: empty reads and matches read by a viewer record nothing",
+      empty.status === 200 && empty.json?.precedents.length === 0 && eventRows().length === 0, JSON.stringify(eventRows()));
+    const requester = await read(U2, current);
+    const earlierRequester = await read(U1, current);
+    const decider = await read(U3, current);
+    const ev = eventRows();
+    check("LIM-2522: the earlier requester, rejecter and current approvers see the earlier reason; a matched eligible read records one event without props",
+      [requester, earlierRequester, decider].every((r) => r.json?.precedents.find((p) => p.id === declined.json.id)?.rejection_reason === refused) &&
+        decider.json?.precedents[0]?.shared_elements.some((e) => e.kind === "dependency" && e.element_key === teamGoal.id && e.change === "added") &&
+        decider.json?.precedents.some((p) => p.id === teamOnly.json.id) && ev.length === 1 && ev[0].props === "{}" && ev[0].actor && ev[0].actor !== U2.id,
+      `${requester.text} ${JSON.stringify(ev)}`);
+    const currentRole = withDb((d) => d.prepare("SELECT role FROM v2_pod_members WHERE pod_id = ? AND user_id = ?").get(P1, U2.id)?.role);
+    try {
+      withDb((d) => d.prepare("UPDATE v2_pod_members SET role = 'member' WHERE pod_id = ? AND user_id = ?").run(P1, U2.id));
+      const oldApprover = await read(U2, current);
+      check("LIM-2522: an approver who leaves the earlier approval set loses the earlier reason", currentRole === "lead" &&
+        oldApprover.json?.precedents.find((p) => p.id === declined.json.id)?.rejection_reason === null, oldApprover.text);
+    } finally {
+      withDb((d) => d.prepare("UPDATE v2_pod_members SET role = ? WHERE pod_id = ? AND user_id = ?").run(currentRole, P1, U2.id));
+    }
+    const requestCount = () => withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_change_requests WHERE goal_id = ?").get(goal.id).n);
+    const beforeDraft = requestCount();
+    const draftResult = await draft(U4, goal.id, { title: "Cut over next quarter", limits: [] });
+    const wrongGoal = await read(U4, current, GL.id);
+    const hiddenGoal = await draft(U4, GP.id, { title: "Private goal" });
+    const missing = await read(U4, { json: { id: "cr_aaaaaaaaaaaaaaaaaaaaaaaa" } });
+    check("LIM-2522: viewers can preview a draft without writing a request; an unreadable goal, wrong goal and missing request are 404",
+      draftResult.status === 200 && draftResult.json?.precedents[0]?.id === approved.json.id && requestCount() === beforeDraft &&
+        [wrongGoal, hiddenGoal, missing].every((r) => r.status === 404), `${draftResult.text} ${wrongGoal.status} ${hiddenGoal.status} ${missing.status}`);
+
+    const possible = [];
+    for (let i = 0; i < 5; i++) {
+      const p = await make(U1, 2, { title: `Candidate time ${i + 1}` });
+      await act(U3, p, "reject", { reason: "No time available" });
+      possible.push(p.json.id);
+    }
+    const capped = await draft(U4, goal.id, { title: "New cutover", limits: [] });
+    check("LIM-2522: a draft gets at most five matches, ordered by decision time within a shared-key count",
+      capped.json?.precedents.map((p) => p.id).join() === [approved.json.id, ...possible.slice(-4).reverse()].join(), capped.text);
+    const hits = [];
+    for (let i = 0; i < 19; i++) hits.push((await draft(U4, goal.id, { title: "Later cutover" })).status);
+    check("LIM-2522: draft reads are rate limited per person", hits.slice(0, 18).every((code) => code === 200) && hits[18] === 429, hits.join());
+
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
+      try {
+        const page = await browser.newPage();
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        await page.setViewport({ width: 390, height: 844 });
+        const signIn = (u) => page.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        const show = async (selector) => {
+          const details = await page.waitForSelector(selector, { timeout: 15000 });
+          const collapsed = await details.evaluate((e) => !e.open);
+          await details.$eval("summary", (e) => e.click());
+          return details.evaluate((e, collapsed) => ({
+            collapsed, text: e.innerText, fits: document.scrollingElement.scrollWidth <= innerWidth,
+            links: [...e.querySelectorAll("a")].map((a) => a.getAttribute("href")),
+          }), collapsed);
+        };
+        const capture = async (name, selector) => {
+          await page.$eval(`${selector} summary`, (e) => e.scrollIntoView({ block: "start" }));
+          await page.screenshot({ path: path.join(tmpRoot, `precedents-${name}.png`), fullPage: true });
+          const session = await page.createCDPSession();
+          try {
+            const tree = await session.send("Accessibility.getFullAXTree");
+            writeFileSync(path.join(tmpRoot, `precedents-${name}-ax.json`), JSON.stringify(tree));
+          } finally {
+            await session.detach();
+          }
+        };
+        const goalPage = `${BASE}/app/w/${A}/goals/${goal.id}`;
+        await signIn(U3);
+        await page.goto(goalPage, { waitUntil: "networkidle0" });
+        const card = await show(`[data-cr="${current.json.id}"] [data-precedents]`);
+        await page.goto(`${BASE}/app/w/${A}/requests?review=${goal.id}.${current.json.id}`, { waitUntil: "networkidle0" });
+        const drawer = await show(`[data-review="${current.json.id}"] [data-precedents]`);
+        check("LIM-2522 (390 px): the goal and Requests drawer show collapsed earlier decisions with readable labels, launch and decision links",
+          [card, drawer].every((s) => s.collapsed && s.fits && s.text.includes("Earlier decisions on the same items (3)") &&
+            s.text.includes("v1: Approved") && s.text.includes("Launched as v2") && s.text.includes(revisedLimit.text) &&
+            s.text.includes(refused) && s.text.includes("Circumstances may have changed since.") &&
+            s.links.includes(`/app/w/${A}/record?cr=${approved.json.id}#record`)), JSON.stringify([card, drawer]));
+        await signIn(U1);
+        await page.goto(goalPage, { waitUntil: "networkidle0" });
+        await page.click('button[aria-controls="ca-menu"]');
+        await page.waitForSelector("[data-menu-sheet] [data-propose-open]", { visible: true });
+        await page.click("[data-menu-sheet] [data-propose-open]");
+        await page.waitForSelector('[data-propose-field="part"]');
+        const proposed = '[data-propose="form"] [data-precedents]';
+        const absent = !(await page.$(proposed));
+        await page.select('[data-propose-field="part"]', "title");
+        await page.type('[data-propose-field="text"]', " revisited");
+        const proposal = await show(proposed);
+        await capture("proposal-phone", proposed);
+        await page.select('[data-propose-field="part"]', "achieved");
+        await page.waitForSelector(proposed, { hidden: true });
+        check("LIM-2522 (390 px): the propose drawer has no section without matches, then shows the matching earlier decisions before send",
+          absent && proposal.collapsed && proposal.fits && proposal.text.includes("v2: Declined") &&
+            proposal.text.includes("Circumstances may have changed since.") && errors.length === 0, JSON.stringify({ proposal, errors }));
+        await page.setViewport({ width: 1440, height: 900 });
+        await page.goto(`${BASE}/app/w/${A}/requests?review=${goal.id}.${current.json.id}`, { waitUntil: "networkidle0" });
+        const review = `[data-review="${current.json.id}"] [data-precedents]`;
+        const desktop = await show(review);
+        await capture("review-desktop", review);
+        await page.click(`${review} a`);
+        await page.waitForSelector(`[data-arrival="review"] [data-cr="${approved.json.id}"]`, { timeout: 15000 });
+        check("LIM-2522 (desktop): an earlier decision link opens the named decision's record",
+          desktop.collapsed && desktop.fits && page.url().endsWith(`/record?cr=${approved.json.id}#record`) && errors.length === 0,
+          JSON.stringify({ desktop, errors, url: page.url() }));
+        await signIn(U3);
+        await page.setRequestInterception(true);
+        page.on("request", (r) => {
+          if (r.url().endsWith(`/${current.json.id}/precedents`)) void r.respond({ status: 503 });
+          else void r.continue();
+        });
+        await page.goto(`${BASE}/app/w/${A}/requests?review=${goal.id}.${current.json.id}`, { waitUntil: "networkidle0" });
+        const readError = await page.$eval(`[data-review="${current.json.id}"]`, (e) => e.innerText);
+        const controls = await page.$eval(`[data-review-actions="${current.json.id}"]`, (e) => e.innerText);
+        check("LIM-2522: a failed precedent read is unknown and leaves the review controls available",
+          readError.includes("Earlier decisions are unknown.") && !(await page.$(review)) && controls.includes("Approve"),
+          `${readError}\n${controls}`);
+      } catch (e) {
+        check("LIM-2522: browser review and draft", false, e.stack);
+      } finally {
+        await browser.close();
+      }
+    }
+
+    await act(U3, current, "reject", { reason: "New request declined" });
+    const viewMcp = await mcpCall("U4", D4, "align_get_decision_record", { change_request_id: current.json.id, workspace: A });
+    const reqMcp = await mcpCall("U1", D1, "align_get_decision_record", { change_request_id: current.json.id, workspace: A });
+    const m = viewMcp.sc?.record?.precedents;
+    check("LIM-2522: MCP keeps the same matches and visibility and marks names, labels and permitted reasons as untrusted text",
+      m?.map((p) => p.id).join() === vp.map((p) => p.id).join() && m[0].shared_elements.find((e) => e.kind === "limit")?.label?.untrusted_text === revisedLimit.text &&
+        m[1].decided_by?.name?.untrusted_text === U3.name && m[1].rejection_reason === null &&
+        reqMcp.sc?.record?.precedents.find((p) => p.id === declined.json.id)?.rejection_reason?.untrusted_text === refused,
+      JSON.stringify([viewMcp.sc, reqMcp.sc]));
+
+    const waiting = await make(U2, 2, { limits: [] });
+    await act(U3, waiting, "approve", { note: "Wait for a launch window" });
+    const [kept, replaced] = goal.measures;
+    const revised = await make(U1, 2, { measures: [{ ...kept, target: "4" }, { text: replaced.text }] });
+    const nextTitle = "Ledger cutover during business hours";
+    const countered = await act(U3, revised, "counter", { changes: { title: nextTitle }, note: "Change the title" });
+    await act(U1, revised, "accept_counter", { revision: 2 });
+    const updated = await call(U3.who, "POST", `/api/v2/workspaces/${A}/goals/${goal.id}/versions`, {
+      cookie: U3.cookie, body: { version: 2, title: nextTitle },
+    });
+    const rebased = await act(U1, revised, "rebase", { revision: 2, base_version: 3, changes: { title: nextTitle, limits: [] } });
+    const keys = withDb((d) => d.prepare("SELECT revision, kind, element_key, change FROM v2_change_request_elements WHERE change_request_id = ? ORDER BY revision, change").all(revised.json.id));
+    check("LIM-2522: create indexes added, removed and changed measure IDs, counter indexes its fields, and rebase compares against the new base",
+      countered.json?.revision === 2 && updated.json?.version === 3 && rebased.json?.revision === 3 &&
+        keys.map((k) => [k.revision, k.kind, k.change].join(":")).join() ===
+          "1:measure:added,1:measure:changed,1:measure:removed,2:field:changed,3:limit:removed" &&
+        keys[0].element_key !== replaced.id && keys[1].element_key === kept.id && keys[2].element_key === replaced.id && keys[4].element_key === limit.id,
+      JSON.stringify({ keys, counter: countered.status, version: updated.status, rebase: rebased.text }));
+    const afterRebase = await read(U4, revised);
+    const superseded = afterRebase.json?.precedents.find((p) => p.id === waiting.json.id);
+    check("LIM-2522: a rebase reads only its current revision keys; a superseded request names the supersession actor and time",
+      afterRebase.json?.precedents.map((p) => p.id).join() === [waiting.json.id, current.json.id, approved.json.id].join() &&
+        superseded?.state === "superseded" && superseded.launch === "superseded" && superseded.decided_by?.id === U3.id &&
+        typeof superseded.decided_at === "string" && superseded.shared_elements.every((e) => e.kind === "limit"), afterRebase.text);
   }
   // The LIM-2455 checklist (§C, §A): the reason and note caps on reject and counter, an approver declining while a counter
   // waits on the requester, and decisions are cookie-only (a device token proposes and decides nothing).
@@ -13503,7 +13713,7 @@ try {
       device_paired: ["workspaces"], first_session_captured: ["harness"], member_first_session_captured: ["harness"], first_session_bound: ["harness", "authority"], second_member_joined: [],
       first_change_request: [], first_approval: [], first_directive: ["kind"], first_mcp_read: ["client"], loi_sent: ["note_ref"], loi_signed: ["note_ref", "verified_original"],
       first_ask: [], first_limit: [], value_card_viewed: [], value_reported: ["estimate"], follow_up_clicked: [], first_request: ["type"], first_hold: [], first_launch: [],
-      first_expectation: [], outcome_reported: ["outcome"], first_reading: [],
+      first_expectation: [], outcome_reported: ["outcome"], first_reading: [], first_precedent_shown: [],
     };
     const offList = q("SELECT name, props FROM v2_events").filter((r) => !ALLOWED[r.name] || Object.keys(JSON.parse(r.props)).some((k) => !ALLOWED[r.name].includes(k)));
     check(

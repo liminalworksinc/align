@@ -23,3 +23,8 @@ export function noteFirstMcpRead(wsId: string, userId: string, client: "app" | "
   if (get("SELECT 1 AS x FROM v2_events WHERE name = 'first_mcp_read' AND ws_id = ?", wsId)) return;
   void tx(() => event("first_mcp_read", { ws: wsId, user: userId, props: { client } })).catch(() => undefined);
 }
+
+export function noteFirstPrecedentShown(wsId: string, userId: string) {
+  if (get("SELECT 1 AS x FROM v2_events WHERE name = 'first_precedent_shown' AND ws_id = ?", wsId)) return;
+  void tx(() => event("first_precedent_shown", { ws: wsId, user: userId })).catch(() => undefined);
+}

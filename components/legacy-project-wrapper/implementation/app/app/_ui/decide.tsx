@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiError, Btn, Err, Field, Loading, Note, Pill, sentence, TextArea, useAction, useApi, when } from "./kit";
 import { AddEvidence, ChangesForm, ConditionBox, CR_STATE_WORDS, crTone, EvidenceItem, FIELD_LABEL, FieldValue, NoticeBox, removeEvidence, Revisions, SnapshotBox, STATUS_WORD, withHidden, type Notice } from "./crparts";
 import { LIMIT_WORDS } from "./limits";
+import { RequestPrecedents } from "./precedents";
 import type { ChangeFields, ChangeRequest, Goal, Limit } from "./types";
 import { isBlankText } from "@/lib/v2/text-core.mts";
 
@@ -512,6 +513,7 @@ export function OpenRequest({
           <Fact k="State">{stateWord}</Fact>
         </dl>
       </section>
+      <RequestPrecedents ws={ws} cr={cr} />
       {cr.behind && !mine && <Note>The goal changed after this request was made. {cr.requester.name} needs to update it before it can be approved.</Note>}
       {cr.behind && cr.can.rebase && (
         <div className="my-2 flex flex-wrap items-center gap-2">

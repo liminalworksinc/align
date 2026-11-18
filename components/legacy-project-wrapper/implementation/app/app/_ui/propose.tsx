@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useCallback, useRef, useState } from "react";
 import { Drawer, FormField, FormSummary, SelectInput, TextArea, TextInput } from "./ds";
 import { api, ApiError, useApi } from "./kit";
+import { DraftPrecedents } from "./precedents";
 import type { ChangeRequest, Goal } from "./types";
 
 // "I want to change the plan" (LIM-2472 round 2, rulings eaa5cf92 items 10 and 11): one "Propose a change" control in
@@ -185,6 +186,7 @@ function Form({ ws, me, goals, openBy, start, onClose }: { ws: string; me?: stri
   };
 
   const evidence = link.trim() ? "1 link, from you (Self-reported)" : "None yet";
+  const draft = g && (!needsText || text.trim()) ? changesFor(g, part, text, target) : null;
   return (
     <form
       className="flex flex-col gap-4"
@@ -288,6 +290,7 @@ function Form({ ws, me, goals, openBy, start, onClose }: { ws: string; me?: stri
         </FormField>
       )}
       {!needsText && errors.text && <p className="text-[13px] font-medium text-(--st-declined)">{errors.text}</p>}
+      {g && draft && <DraftPrecedents ws={ws} goal={g.id} version={g.version} changes={draft} onFollow={onClose} />}
       <FormField label="Why" error={errors.why} count={{ value: why.length, max: WHY_MAX }}>
         <TextArea ref={whyRef} data-propose-field="why" value={why} onChange={(ev) => setWhy(ev.target.value)} placeholder="Say why this should change." />
       </FormField>
