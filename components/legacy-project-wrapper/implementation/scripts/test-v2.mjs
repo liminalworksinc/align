@@ -13191,6 +13191,22 @@ try {
     hAsks.status === 401 && hAsks.json?.error === "unauthorized" && !(hSuggest.status === 404 && hSuggest.json?.error === "Not found"),
     `${hAsks.status} ${hAsks.text.slice(0, 100)} ${hSuggest.status} ${hSuggest.text.slice(0, 100)}`,
   );
+  // The platform health check (fly.toml) calls /api/v2/health, which no sign-in rate limit counts. Its earlier path,
+  // Better Auth's get-session, is counted per client, and the check's Fly-Client-IP never changes: live, every 101st
+  // check (every 50 minutes) was refused. Here, one client: 150 health calls are all 200; get-session is refused past 100.
+  {
+    const hc = { "fly-client-ip": "fly-health-check" };
+    const health = [];
+    for (let i = 0; i < 150; i++) health.push(await hosted("GET", "/api/v2/health", { headers: hc }));
+    const sess = [];
+    for (let i = 0; i < 101; i++) sess.push(await hosted("GET", "/api/v2/auth/get-session", { headers: hc }));
+    check(
+      "hosted: the health check's route (/api/v2/health, fly.toml) answers 200 {ok:true} to 150 calls in a row from one client, while Better Auth's get-session, its earlier path, refuses that client its 101st call (429): the check is no longer rate-limited",
+      /^\s*path = "\/api\/v2\/health"$/m.test(readFileSync(path.join(ROOT, "fly.toml"), "utf8")) &&
+        health.every((r) => r.status === 200 && r.json?.ok === true) && sess.slice(0, 100).every((r) => r.status === 200) && sess[100].status === 429,
+      JSON.stringify({ health: [...new Set(health.map((r) => r.status))], sess100: sess[99]?.status, sess101: sess[100]?.status }),
+    );
+  }
   check("hosted: v2 routes are served (/api/v2/me 401, /app/sign-in 200, Better Auth answers)", hMe.status === 401 && hSignIn.status === 200 && hSession.status === 200, `${hMe.status} ${hSignIn.status} ${hSession.status}`);
   check("hosted: the sign-in page offers Google and GitHub, never the test sign-in; without email settings, no email code", hSignIn.text.includes("Continue with Google") && hSignIn.text.includes("Continue with GitHub") && !hSignIn.text.includes("Test sign-in") && !hSignIn.text.includes("Send code"), "");
   check("hosted: the sign-in page links to /privacy and /trust", hSignIn.text.includes('href="/privacy"') && hSignIn.text.includes('href="/trust"'), "");
