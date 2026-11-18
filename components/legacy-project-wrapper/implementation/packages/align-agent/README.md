@@ -297,3 +297,25 @@ Every location is overridable for tests and dry runs: `HOME`, `ALIGN_HOME`, `CLA
 `ALIGN_SERVER`. `ALIGN_NO_AUTOSTART=1` stops hooks from starting syncs. Below Node 24 the CLI refuses to run (one
 line on stderr, exit 1) and the hooks do nothing but keep stop latches and goal holds closed;
 `ALIGN_ALLOW_UNSUPPORTED_NODE=1` skips that check (the tests set it, since a test machine may run an older Node).
+
+## Team budgets
+
+`align budget [--team <id>] [--workspace <name|id>]` reads this folder's goal team or sole team and shows
+this UTC month's budget, spend, forecast and allowance left. Amounts are list-price estimates. Lower bounds
+say "at least" and upper bounds say "at most". Unpriced requests are counted. No budget is stated plainly.
+
+`align budget request --amount <USD> --reason <text> [--goal <ref>] [--team <id>] [--session <ref> ...]`
+files a request for this month, using the folder's goal by default. `--workspace` selects a workspace when
+needed. An ambiguous team needs `--team`. Attached sessions must be your shared sessions in that workspace.
+Every terminal request waits for a person in Align, including amounts within the allowance. Its record says
+it was filed from the terminal. These commands never decide a request or grant authority.
+
+The existing one-pass sync refreshes at most 100 shared sessions at a time, with rotation. It briefly reuses
+matching session attribution and reads each workspace/team/month budget only once within a pass. Local
+snapshots live in `budgets-cache/`, outside goal feeds; persistent dedupe markers live in `budget-shown/`.
+Uninstall removes both directories. Hooks use only local files, with no network or lock wait. At the next
+turn they may deliver one `[Align]` note at 80 percent and one at 100 percent per session and UTC month.
+A fresh known priced subtotal can cross a threshold even when it is a lower bound. An unpriced request alone
+cannot cross; unknown totals, stale or future observations and session mismatches give no note. Notes state
+what was reached, that work continues, that they grant no authority and that the person can ask for more in
+Align. They contain no runnable command or instruction. There is no daemon.

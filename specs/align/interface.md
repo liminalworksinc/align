@@ -583,7 +583,7 @@ unknown, never zero, and nothing on the page SHALL infer what an agent is doing 
 versions it sent an app, never which one the app uses; the decision value card names the apps Align sent a launched
 version). The page reads when it opens and again after a decision in the review drawer or a request sent from the
 "Propose a change" drawer, and again when the workspace's live stream says one of the person's views moved (Requirement:
-Live workspace); it does not poll (only its first-run card checks the apps while it is shown, and its "Since you last
+Live workspace). The Home SHALL finish its initial reads, including the Needs list's dependent reads, before opening its long-lived stream; the stream SHALL NOT prevent the initial page load from settling. It does not poll (only its first-run card checks the apps while it is shown, and its "Since you last
 looked" section checks for new changes as below, the Needs-you list reading again with it).
 
 The heading SHALL read "<n> things need you" ("1 thing needs you"), or "Nothing needs you"; when a source could not be
@@ -684,6 +684,18 @@ part's goal read); only an app with a `last_read_at` is a receipt. The Home list
 an app's goal read since the last visit is a line in "Since you last looked" ("<app> read the goals", with its evidence
 class), and an app with no goal read is the muted line under the Needs list. A connection SHALL never be shown or
 counted as a read. A workspace owner's read has every connected app and anyone else's their own, as on the Apps tab.
+
+The existing Needs list SHALL also use `home.budget_requests` (`waiting_on_me`, `mine`, `next_cursor`). It SHALL deduplicate request ids and use the same rows for its heading and filter counts. Requests waiting on the person and their own declined requests belong in Needs you; own waiting requests belong in Waiting on others; granted, withdrawn and expired requests belong in Done. It SHALL show no separate budget panel. A null budget source is unknown; a non-null `next_cursor` links to Requests for more. Rows link to their record on Spend.
+
+#### Scenario: Budget requests in the one Needs list
+
+- **WHEN** a budget request waits on the reader and another of their own was declined
+- **THEN** both appear as rows in the existing Needs you filter and count, with links to the Spend record and no separate panel
+
+#### Scenario: Home finishes its initial load
+
+- **WHEN** a person opens Home while its initial and dependent reads are still outstanding
+- **THEN** those reads settle before the live stream opens, and the initial page can finish loading without waiting for a stream to close
 
 #### Scenario: Needs you and waiting on others
 
@@ -925,6 +937,13 @@ SHALL be the browser's own select, listing only the person's workspaces, so its 
 The Apps tab SHALL read the connected apps once, through `GET .../apps`, and SHALL not poll; the Home reads them
 through `GET .../home` twice when it opens (its own read and its Needs list's) and again at most once a minute while it
 stays open, and its first-run card checks `GET .../apps` as "Home first-run card" says.
+
+Budget team and month controls, the CSV export month and download, all budget forms and request actions SHALL fit the same 390 pixel rule and have controls at least 44 pixels tall. Each panel SHALL have its own accessible labels so selecting the export month never changes the budget month.
+
+#### Scenario: Two month controls on a phone
+
+- **WHEN** a person uses the budget panel and the export panel at 390 pixels
+- **THEN** each panel fits the page, every action control is at least 44 pixels tall and changing either month leaves the other selected month unchanged
 
 #### Scenario: Compact phone chrome
 
@@ -1278,6 +1297,13 @@ sends the approval through the review's own path, reading the request again firs
 its evidence was removed meanwhile, and the row then says "Recorded: you approved revision <r>. Not launched yet." (or
 "Not recorded. …"). A row never launches.
 
+Below the existing change-request list, the tab SHALL show a clearly labelled Budget requests section, with a UTC month filter defaulting to this month. It SHALL read `GET .../budget-requests?month=YYYY-MM&limit=50&cursor=<id>`, show only that month's returned records and provide Next page and First page controls when applicable. Each row links to the same record on Spend and names where it was filed. It SHALL never read all months by default.
+
+#### Scenario: Budget requests by month
+
+- **WHEN** a person opens Requests and chooses another month in Budget requests
+- **THEN** the section reads that month only, pages through at most 50 records at a time and opens each record on Spend
+
 #### Scenario: Filters
 
 - **WHEN** a member opens the tab
@@ -1421,6 +1447,13 @@ teams, and let owners and team leads manage team members, with lead changes rese
 
 The Sessions tab SHALL list the person's own shared sessions with their usage and controls, and for workspace owners
 everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<ws>/sessions`.
+
+Own session rows SHALL include nullable `team_budget_label`: a sentence naming the team budget only while the reader can read that team and it has a budget this UTC month. Other people's rows SHALL omit this field and label. A hidden goal stays unnamed.
+
+#### Scenario: A budget label belongs to the session's person
+
+- **WHEN** a person and a different workspace owner read the same session and its team has a budget this month
+- **THEN** only that person's own row has the budget label, and a month without a budget shows no label
 
 #### Scenario: Own sessions
 
@@ -1617,6 +1650,13 @@ top of the goal page (from `GET …/goals/<goal>/hold`), and on the Sessions tab
 The Spend tab SHALL show token usage and estimated list cost from
 `GET /api/v2/workspaces/<ws>/spend?by=goal|team|session` with a "Group by" choice of By goal, By team and By my
 sessions.
+
+The tab SHALL offer the monthly team CSV export and the team-budget screens specified in `budgets`. The team picker SHALL default to the reader's home team. A budget not set SHALL read "No team budget for this month." The attribution rule SHALL appear once here: goal-bound work counts under the goal's team and work in no goal under the home team recorded when that spending period opened. No shared workspace footer SHALL repeat it. Budget request records SHALL say whether they were filed from the browser or terminal, show the full authority sentence and the preserved decisions, and link using `?team=<id>&month=<YYYY-MM>&request=<id>`.
+
+#### Scenario: Spend combines budget and export controls
+
+- **WHEN** a person opens Spend with no budget for their default team
+- **THEN** the tab says there is no team budget, offers the selected month's team CSV export and exposes only authorized budget forms
 
 #### Scenario: Usage table
 

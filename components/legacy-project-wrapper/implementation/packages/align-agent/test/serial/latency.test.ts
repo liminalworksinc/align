@@ -4,6 +4,8 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import { after, describe, test } from "node:test";
+import { writeJsonAtomic } from "../../src/shared/fsx.ts";
+import { layout } from "../../src/shared/layout.ts";
 import { ctxFor, makeEnv, PKG, runHook, shareSession, type TestEnv } from "../helpers.ts";
 
 const BLOCK_NET = ["--import", path.join(PKG, "test", "fixtures", "block-net.mjs")];
@@ -20,7 +22,13 @@ describe("claude hooks", () => {
   test("p95 latency under 150 ms with networking blocked", () => {
     const { t, ctx } = setup();
     const sid = "sess-latency";
-    shareSession(ctx, "claude-code", sid);
+    const lid = shareSession(ctx, "claude-code", sid);
+    const at = new Date().toISOString();
+    writeJsonAtomic(layout.budgetCache(t.home, lid), {
+      workspace_id: "ws_1", session_key: `key-${sid}`, epoch_id: "ep_1", fetched_at: at, as_of: at,
+      month: at.slice(0, 7), team: { id: "pod_latency", name: "Build" }, effective_budget_usd_micros: 100,
+      estimated_spend_usd_micros: 100, spend_bound: "exact", unpriced_requests: 0,
+    });
     const times: number[] = [];
     const events: [string, object][] = [
       ["SessionStart", { session_id: sid, source: "startup" }],

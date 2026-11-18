@@ -1129,11 +1129,11 @@ owners see and revoke every grant and other members only their own.
 ### Requirement: Workspace audit trail
 
 The server SHALL write an audit row naming its actor for every change a person makes to a workspace's settings,
-members, invites, teams, goals, alignments, change requests, reallocations, asks, connected-app revocations and session controls (stop sharing, history
+members, invites, teams, goals, alignments, change requests, reallocations, asks, team budgets and budget requests, connected-app revocations and session controls (stop sharing, history
 deletion, agent stop and resume), with actor null only for system actions and the row that records an account
 deletion, show a former member as `{id:"fm_<n>", name:"Former member #<n>"}`, and serve the newest 200 rows of that
 workspace to workspace owners only on `GET /api/v2/workspaces/{ws}/audit`. Device uploads (sharing a session, opening an
-epoch, usage, activity and steering reports) write no audit row, and device pairing and revocation, passkeys added and deleted, and
+epoch, usage, activity and steering reports) write no audit row. A device-filed budget request is a recorded request by its person and writes `budget_request.requested` with that person as actor; it never writes an allowance grant. Budget writes use `team_budget.set`, `.changed` and `.removed`; browser-filed allowance grants and decisions use `budget_request.requested`, `.allowance_granted`, `.approved`, `.declined`, `.withdrawn` and `.second_look`. Pairing and revocation are handled separately, and device pairing and revocation, passkeys added and deleted, and
 signing out everywhere are recorded without a workspace, so they never appear in a workspace's audit; giving a paired
 device a workspace at an invite (`device.workspace_added`) is recorded in that workspace's audit.
 
@@ -1151,6 +1151,11 @@ device a workspace at an invite (`device.workspace_added`) is recorded in that w
 
 - **WHEN** a person records, imports, accepts, declines, finishes, reopens, withdraws or mentions an ask
 - **THEN** the workspace's audit gets `ask.created`, `ask.imported` (object: the number created and merged), `ask.accepted`, `ask.declined`, `ask.done`, `ask.reopened`, `ask.withdrawn` or `ask.mentioned` with that person as actor and the ask as object; a refused action writes nothing
+
+#### Scenario: Budget actions name the person
+
+- **WHEN** a device files a budget request and a signed-in person decides it in the browser
+- **THEN** the workspace audit contains `budget_request.requested` and the resulting decision with each person's actor, and the device request has no allowance-grant event
 
 ### Requirement: Device pairing flow
 
@@ -1510,6 +1515,31 @@ the caller may not see.
 
 - **WHEN** the workspace has sessions the retention job rolled up
 - **THEN** their usage counts in `total`, `unallocated` and the goal, team and private rows exactly as before, filtered by `from` and `to` by its UTC day (a day counts when its start is at or after `from` and before `to`), and `by=session` shows it as one `{kind:"rolled_up", label:"Older sessions (rolled up)"}` row; the invariant `total = rows + unallocated` still holds
+
+### Requirement: Monthly team spend CSV
+
+The server SHALL export one UTC calendar month through browser-only `GET /api/v2/workspaces/{ws}/spend/export?month=YYYY-MM`. It SHALL use the shared month validator, require exactly one month from 0001-01 through 9999-12, preserve request timestamps in the half-open month and retained UTC-day totals, and return a UTF-8 CSV attachment named `align-spend-YYYY-MM.csv` with `Cache-Control: private, no-store` and `X-Content-Type-Options: nosniff`.
+The first rows SHALL give the estimate disclaimer, UTC month and UTC generation time, then a blank row and columns `month`, `team`, `requests`, `estimated_list_cost_usd`, `unpriced_requests`, `input`, `output`, `cache_read`, `cache_write_5m`, `cache_write_1h`, `cache_write_unsplit`. Costs SHALL use six decimal places. Only team members and workspace owners may receive named team and `<team>: spend in no goal` rows. All other team spend and hidden goal spend SHALL fold into the report's single unnamed `Private goals` row, with no separate private-team row. Readability of a goal alone grants no team-spend visibility. `Goals without a team` and the remainder `Not bound to a goal` SHALL always exist, including as zero rows. Periods opened before migration 24 have no home team, so their no-goal usage SHALL stay in that remainder. `Total` SHALL equal all preceding data rows for every numeric column. The on-screen report SHALL preserve its existing behavior and totals.
+
+#### Scenario: Monthly team spend CSV
+
+- **WHEN** a signed-in workspace member, viewers included, exports a valid month
+- **THEN** the attachment has the specified header and numeric columns, member-or-owner team visibility, one unnamed row for other team spend, an unallocated remainder and an additive total, without any person's name or unreadable goal or team identifiers
+
+#### Scenario: Export authorization and invalid month
+
+- **WHEN** an export request has no sign-in, comes from a non-member, uses a device token, or has a missing, repeated or invalid `month` (including a day, time or month outside 01 through 12)
+- **THEN** the response is respectively 401, 404, 403 or 400, matching the spend report's authorization checks before validating the month, and no CSV is returned
+
+#### Scenario: Spreadsheet-safe team names
+
+- **WHEN** a CSV cell begins with `=`, `+`, `-`, `@`, a tab or a carriage return, or a team name contains commas, quotes or newlines
+- **THEN** a leading apostrophe neutralizes each formula-like value, every cell is quoted with embedded quotes doubled, and records end in CRLF so parsing preserves each team name as one cell
+
+#### Scenario: Download from Spend on a phone
+
+- **WHEN** a member or viewer opens the Spend tab and selects a month in the labelled `Export month (UTC)` control, initially the current UTC month
+- **THEN** `Download team CSV` downloads that month's team report regardless of the screen's group choice, says amounts are estimates at list price and not a bill, shows a failed download as an alert on the page, and has controls at least 44 px tall with no sideways scrolling at 390 px
 
 ### Requirement: Agent time against targets
 

@@ -496,3 +496,58 @@ the last 15 minutes is needed (else `403 reauth_required`) to approve a device o
 role, remove another member, invite an owner, delete a workspace or restore a deleted one, to delete one's account, to
 add or delete a passkey, to link a provider and to sign out everywhere. Account deletion also deletes the person's
 passkeys and their dismissal of the passkey prompt.
+
+
+## Team budgets and requests
+
+`GET /api/v2/workspaces/{ws}/teams/{team}/budget?month=YYYY-MM` accepts browser sessions and granted device tokens.
+The month defaults to the current UTC month. Only team members and workspace owners can read the budget,
+team spend, no-goal subtotal and history; other readers get 404. The response fields and nested records are
+listed in `specs/align/budgets.md`. Amounts are integer USD microdollars representing list-price estimates.
+Unpriced work gives spend and forecast lower bounds and a remaining upper bound; unknown attribution gives
+null complete totals. No budget is `budget: null`. Reads do not create audit records or decisions.
+
+Browser-only `PUT {amount_usd, allowance_usd?, allowance_ceiling_usd?}` and `DELETE` require a team lead or
+workspace owner. Amounts are whole cents, 0 through 1,000,000 dollars. An omitted or null ceiling defaults to
+the allowance. Past-month writes are 409 `month_closed`. The single feature migration is schema version 24;
+periods opened before it get no home team and their no-goal spend stays unallocated.
+
+`POST .../teams/{team}/budget-requests {amount_usd, reason, goal_id?, session_keys?}` accepts browsers and devices
+and returns 201 with the request. Only non-viewer team members file requests. A device request records
+`filed_from: "terminal"` and always waits for a person. Cookie requests record `filed_from: "browser"` and may
+be recorded under the allowance within its per-request and monthly ceilings. Input cannot override that source.
+Five waiting requests per person/team/month is the maximum; a sixth is 409 `too_many_waiting_requests`.
+
+`GET .../teams/{team}/budget-requests` and `GET .../budget-requests` accept `month`, `limit` (1 to 100, default 50)
+and `cursor` (the last request id). They default to this UTC month and return
+`{waiting_on_me, mine, others, next_cursor}`. `GET .../budget-requests/{id}` reads one record. Requesters,
+team members and workspace owners can read it. Unreadable goals are null and only the requester sees attached
+session keys. The record includes `filed_from`, full authority sentences, immutable decisions and action flags.
+
+Browser-only `POST .../budget-requests/{id}/{approve|decline|withdraw|second-look}` requires `{revision}`.
+Approve also takes `{amount_usd, expires_at, note?}`; decline takes `{reason}`. A requester never decides their
+own request. A second look needs a different eligible owner. Stale input is 409 `stale_revision`; future input
+is 400 `unknown_revision`; an ineligible state is 409 `wrong_state`. Grants expire by next UTC month's start.
+
+`GET .../spend/home-team` returns the caller's `{team, teams, can_choose}` to browsers and granted devices.
+Browser `PUT {team_id}` changes only that person's preference, including for viewers. A team they do not belong
+to is 404. The default is the earliest joined current team; leaving the chosen team clears the preference.
+
+Home returns `budget_requests: {waiting_on_me, mine, next_cursor}` or null for an unread source. It selects
+current/previous-month own requests and this month's requests waiting on the reader before hydration, up to 100.
+The browser places those records in the single Needs list. Decisions, people, approvers, sessions, goals and
+teams are read in batches.
+
+`GET .../sessions/{key}/budget` is readable only by the session's owner and, for a device, its sharing device.
+It returns `{epoch_id}` plus the budget-read fields for the open shared period, or null with no open shared
+period, readable team or readable goal. `?attribution=1` returns only `{epoch_id, team, month}`. A different
+person's session is 404. Session listings add nullable `team_budget_label` only to own rows and only while the
+team has a budget this month. Other people's rows omit the field.
+
+`GET /api/v2/workspaces/{ws}/spend/export?month=YYYY-MM` is browser-only and requires exactly one valid month.
+It returns `align-spend-YYYY-MM.csv` with private, no-store headers. Columns are `month`, `team`, `requests`,
+`estimated_list_cost_usd`, `unpriced_requests`, `input`, `output`, `cache_read`, `cache_write_5m`, `cache_write_1h`,
+`cache_write_unsplit`. List-price amounts retain six decimals. Only members and workspace owners receive named
+team and team no-goal rows. Other teams fold into the existing single unnamed `Private goals` row. The no-team
+row, unallocated remainder and total preserve all numeric sums. Cells are quoted and formula-like prefixes are
+neutralized. The export uses the same UTC month validator as budgets.

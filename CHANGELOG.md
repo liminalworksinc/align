@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Teams can set monthly budgets in list-price estimates, record requests for more and keep each decision.
+  Terminal requests always wait for a person. Spend includes budget controls and a monthly CSV export with
+  member-or-owner privacy. Home includes budget requests in its Needs list. Existing local hooks deliver
+  informational budget notes from cached known spend, including priced lower bounds, without stopping work.
+
 - Server tests finish each readiness response before stopping a phase, preventing a previous server from satisfying
   the next phase's readiness check.
 - Failed transaction and preview setup releases database state so later writes, previews and sign-in mail work.

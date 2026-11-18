@@ -29,6 +29,7 @@ import { bumpGap, nowIso, tx } from "./db.ts";
 import { endEpochs, ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
 import { addNotice, addShareNotice, catchUpOtherBuilds, getShare, renderHot, snapshot, stopOutlivesShare } from "./hot.ts";
 import { clean, otherWorkspaceWords, outOfReachWords, requestShortId } from "./shared/envelope.ts";
+import { refreshSessionBudgets } from "./budgets.ts";
 import { applyShare, bind, endedUnread, endShareRemoved, endShareSignedOutByServer, endShareStoppedByPerson, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, SHARE_UNREAD_WORDS, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
 import { cancelledBinding, pauseNotice, pollDirectives } from "./directives.ts";
@@ -918,6 +919,7 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     for (const ws of refresh) await refreshFeed(ctx, ws).catch(() => undefined);
     // Asks between teams (a 304 when nothing changed): read by `align asks`, `align team` and the envelope.
     for (const ws of refresh) await fetchAsks(ctx, ws).catch(() => false);
+    await refreshSessionBudgets(ctx).catch(() => undefined);
     guard();
     // Team activity: this machine's in-flight work up, other machines' down (a few hundred bytes when quiet).
     try {

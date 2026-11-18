@@ -50,6 +50,7 @@ import { layout, localId, spoolWrite } from "../shared/layout.ts";
 import { isShareStateNotice, noticeKind, resumedButHeld } from "../shared/notices.ts";
 import { matchRule, readRules, realDir, removeRule, setRule } from "../shared/rules.ts";
 import { queueSteering, steeringLine, unsharedNote } from "../shared/steering.ts";
+import { budgetNotes } from "../shared/budget-notes.ts";
 import type { DriftFile, FeedFile, Goal, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
 import { CLAIM_MS, collisions, commitSubject, crossOverlap, display, editedPaths, liveGoalId, podReport, rawActs, readPaths, record, shellWrites, siblingChanges, siblingNews, activityHot, type Act, type StartingShare } from "./siblings.ts";
 import { changedSince, COMMIT, commitMade, expectations, explainer, reflogMark, settle, shows, type SettleBy } from "./evidence.ts";
@@ -629,6 +630,8 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
     if (again.length) context = [context, ...again].filter(Boolean).join("\n");
   }
   const notices = takeNotices(hot, inj, () => blockingHolds(home, lid, cwd), () => stoppedNow(home, lid));
+  const spending = !inj.opened_epoch && (source === "startup" || source === "resume") ? budgetNotes(home, lid, hot) : [];
+  if (spending.length) context = [context, ...spending].filter(Boolean).join("\n");
   if (notices) messages.push(notices);
   if (source === "startup") {
     const note = unsharedNote(home);
@@ -959,6 +962,9 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   const resumed = resumeLine(hot, inj, held);
   if (resumed) context = [context, resumed].filter(Boolean).join("\n");
   const notices = [takeNotices(hot, inj, () => held, () => stoppedNow(home, lid)), ...req.notices, ...lifted.notices, takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
+  // A just-opened epoch waits for the server's captured attribution before any threshold can be claimed.
+  const spending = inj.opened_epoch ? [] : budgetNotes(home, lid, hot);
+  if (spending.length) context = [context, ...spending].filter(Boolean).join("\n");
   writeInjected(home, lid, inj);
   if (!context && !notices) return null;
   const out: Record<string, unknown> = {};

@@ -97,6 +97,10 @@ export const PERSON_COLUMNS: readonly (readonly [table: string, column: string])
   ["v2_requests", "sender_id"],
   ["v2_requests", "cancelled_by"],
   ["v2_goal_holds", "held_by"],
+  ["v2_team_budgets", "updated_by"],
+  ["v2_team_budget_history", "actor_id"],
+  ["v2_budget_requests", "requester_id"],
+  ["v2_budget_request_decisions", "actor_id"],
   ["v2_reallocations", "requester_id"],
   ["v2_reallocations", "launch_by"],
   ["v2_reallocations", "decided_by"],
@@ -181,6 +185,25 @@ function rollUpSession(db: Sql, wsId: string, key: string): number {
      ON CONFLICT (ws_id, goal_id, day, model, basis) DO UPDATE SET ${ROLLUP_SUMS.map((k) => `${k} = ${k} + excluded.${k}`).join(", ")}`,
     wsId,
     key,
+  );
+  db.run(
+    `INSERT INTO v2_team_no_goal_rollups (ws_id, pod_id, day, basis, ${ROLLUP_SUMS.join(", ")})
+     SELECT u.ws_id, e.spend_team_id, substr(u.ts, 1, 10), u.basis,
+            COUNT(*), SUM(u.input), SUM(u.output), SUM(u.cache_read), SUM(u.cache_write_5m), SUM(u.cache_write_1h), SUM(u.cache_write_unsplit),
+            COALESCE(SUM(u.est_list_usd_micros), 0), SUM(CASE WHEN u.est_list_usd_micros IS NULL THEN 1 ELSE 0 END)
+     FROM v2_usage u JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id
+     WHERE u.ws_id = ? AND u.session_key = ? AND e.goal_id IS NULL AND e.spend_team_id IS NOT NULL GROUP BY 1, 2, 3, 4
+     ON CONFLICT (ws_id, pod_id, day, basis) DO UPDATE SET ${ROLLUP_SUMS.map((k) => `${k} = ${k} + excluded.${k}`).join(", ")}`, wsId, key,
+  );
+  // Increment the coverage count once per no-goal request, including epochs with no home team.
+  db.run(
+    `UPDATE v2_spend_rollups AS r SET team_attributed_requests = team_attributed_requests +
+       (SELECT COUNT(*) FROM v2_usage u JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id
+        WHERE u.ws_id = ? AND u.session_key = ? AND e.goal_id IS NULL AND substr(u.ts, 1, 10) = r.day AND u.model = r.model AND u.basis = r.basis),
+       team_attributed_unpriced_requests = team_attributed_unpriced_requests +
+       (SELECT COUNT(*) FROM v2_usage u JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id
+        WHERE u.ws_id = ? AND u.session_key = ? AND e.goal_id IS NULL AND u.est_list_usd_micros IS NULL AND substr(u.ts, 1, 10) = r.day AND u.model = r.model AND u.basis = r.basis)
+     WHERE r.ws_id = ? AND r.goal_id = ''`, wsId, key, wsId, key, wsId,
   );
   db.run("DELETE FROM v2_sessions WHERE ws_id = ? AND session_key = ?", wsId, key);
   return rows;

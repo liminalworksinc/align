@@ -59,6 +59,7 @@ import { feedHold } from "./shared/feedhold.ts";
 import type { RequestState, WireRequest } from "./shared/types.ts";
 import { computeUnsharedDigest } from "./allocation.ts";
 import { listSteering, weekKey } from "./shared/steering.ts";
+import { requestAmount, budgetTeam, budgetFolder } from "./budgets.ts";
 
 const out = (s = ""): void => {
   process.stdout.write(s + "\n");
@@ -92,6 +93,8 @@ const HELP = `align ${VERSION}: Align local agent
   align latch status           stop latches and goal holds
   align allocation [--workspace <name|id>] [--week YYYY-MM-DD] [--refresh] [--json]   agent time per goal against its target
   align steering status [--workspace <name|id>]
+  align budget [--team <id>] [--workspace <name|id>]   this folder's monthly team envelope and estimates
+  align budget request --amount <USD> --reason <text> [--team <id>] [--goal <ref>] [--session <ref> ...] [--workspace <name|id>]
   align install [--claude] [--codex] [--dry-run]
   align uninstall [--purge]
   align sync                   (hooks also run this in the background, one pass each)
@@ -1656,6 +1659,48 @@ async function cmdSteering(ctx: Ctx, argv: string[]): Promise<void> {
   out(`${queued} ${queued === 1 ? "line" : "lines"} waiting to be reported by the next sync.`);
 }
 
+// ---------- spending ----------
+async function cmdBudget(ctx: Ctx, argv: string[], request: boolean): Promise<void> {
+  const { values } = parseArgs({ args: argv, options: { team: { type: "string" }, workspace: { type: "string" },
+    ...(request ? { amount: { type: "string" as const }, reason: { type: "string" as const }, goal: { type: "string" as const }, session: { type: "string" as const, multiple: true } } : {}) } });
+  const requestedAmount = request ? requestAmount(values.amount as string | undefined) : null;
+  if (request && (!(values.reason as string | undefined)?.trim() || String(values.reason).trim().length > 1000)) throw new UsageError("--reason is required, at most 1000 characters.");
+  const me = await refreshMe(ctx);
+  const rule = matchRule(readRules(ctx.home), process.cwd()) ?? (values.workspace && (values.team || values.goal) ? null : budgetFolder(ctx, process.cwd()));
+  const ws = resolveWorkspace(ctx.home, values.workspace || rule?.workspace_id);
+  if (!ws) throw new UsageError("No single workspace applies. Pass --workspace <name|id>.");
+  await refreshFeed(ctx, ws.id);
+  const goalRef = values.goal as string | undefined ?? (rule?.workspace_id === ws.id ? rule.goal_id : null);
+  const goal = goalRef ? resolveGoal(loadFeed(ctx.home, ws.id), goalRef) : null;
+  const memberships = me.workspaces.find((w) => w.id === ws.id);
+  const team = budgetTeam(goal, values.team, memberships?.teams ?? memberships?.pods ?? []);
+  if (request) {
+    const sessionKeys = ((values.session as string[] | undefined) ?? []).map((ref) => {
+      const local = resolveSession(ctx, ref), s = getShare(ctx, local.local_id);
+      if (!s || s.workspace_id !== ws.id || s.state !== "shared") throw new UsageError("Every attached session must be shared in this workspace.");
+      return s.session_key;
+    });
+    const r = await api(ctx, "POST", `/api/v2/workspaces/${encodeURIComponent(ws.id)}/teams/${encodeURIComponent(team)}/budget-requests`, {
+      body: { amount_usd: requestedAmount, reason: values.reason, goal_id: goal?.id ?? null, session_keys: sessionKeys },
+    });
+    if (r.status !== 201) throw new Error(r.json?.message ?? `Request failed (${r.status}).`);
+    out(`Budget request ${r.json.id}: ${r.json.state}. Requested team budget: ${clean(r.json.team.name, 80)}. All amounts are estimates at list price.`);
+    out("This terminal request waits for a person to decide in Align. The request grants no authority.");
+    if (r.json.decision_unavailable_reason) out(r.json.decision_unavailable_reason);
+    return;
+  }
+  const r = await api(ctx, "GET", `/api/v2/workspaces/${encodeURIComponent(ws.id)}/teams/${encodeURIComponent(team)}/budget`);
+  if (r.status !== 200) throw new Error(r.json?.message ?? `Budget read failed (${r.status}).`);
+  const b = r.json;
+  const money = (v: number | null, bound?: string) => v === null ? "unknown" : `${bound === "lower" ? "at least " : bound === "upper" ? "at most " : ""}$${(v / 1_000_000).toFixed(2)}`;
+  out(`${clean(b.team.name, 80)}, ${b.month} UTC. All amounts are estimates at list price. Observed ${b.as_of}.`);
+  out(b.budget ? `Base budget: ${money(b.budget.amount_usd_micros)}. Budget including grants: ${money(b.effective_budget_usd_micros)}.` : "No team budget for this month.");
+  out(`Spend: ${money(b.estimated_spend_usd_micros, b.spend_bound)}. Remaining: ${b.budget ? money(b.remaining_usd_micros, b.remaining_bound) : "no team budget"}. Month-end forecast: ${b.budget ? money(b.forecast_usd_micros, b.forecast_bound) : "no team budget"}.`);
+  out(`Remaining monthly allowance: ${b.allowance_remaining_usd_micros === null ? "no allowance" : money(b.allowance_remaining_usd_micros)}. Unpriced requests: ${b.unpriced_requests ?? "unknown"}.`);
+  out(b.pricing_note);
+  out("Goal-bound spend draws from the goal's team. Spend in no goal draws from the session owner's home team when its spending period began. Work continues.");
+}
+
 // ---------- main ----------
 export async function main(argv: string[]): Promise<void> {
   const [cmd, ...rest] = argv;
@@ -1729,6 +1774,8 @@ export async function main(argv: string[]): Promise<void> {
         return await cmdAllocation(ctx, rest);
       case "steering":
         return await cmdSteering(ctx, rest);
+      case "budget":
+        return await cmdBudget(ctx, rest[0] === "request" ? rest.slice(1) : rest, rest[0] === "request");
       case "requests":
         return await cmdRequests(ctx, rest);
       case "install":

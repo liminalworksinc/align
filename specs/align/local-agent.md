@@ -54,6 +54,8 @@ seconds (always at the end of a turn) a hook starts a detached `align sync --hoo
 | `align latch status` | List stop latches and goal holds | no |
 | `align allocation [--workspace <name\|id>] [--week YYYY-MM-DD] [--refresh] [--json]` | Agent time per goal against its target (cached feed; `--week` asks the server) and this machine's unshared share | for `--refresh` and `--week` |
 | `align steering status [--workspace <name\|id>]` | The steering switch, lines shown this week, lines waiting to be reported | no |
+| `align budget [--team <id>] [--workspace <name\|id>]` | Read the folder team budget and spend estimates | yes |
+| `align budget request --amount <USD> --reason <text> [--goal <ref>] [--team <id>] [--session <ref> ...] [--workspace <name\|id>]` | File a budget request that always waits for a person | yes |
 | `align install [--claude] [--codex] [--dry-run]` | Install hooks (both harnesses when no flag is given) | no |
 | `align uninstall [--purge]` | Remove Align's hooks; `--purge` also deletes `ALIGN_HOME` | no |
 | `align sync [--hook] [--settle <ms>]` | One pass: spool, transcripts, outbox, directives, usage, feeds, activity | uploads need it |
@@ -77,6 +79,7 @@ sent), `align.db` (SQLite, WAL), `rules.json` (folder rules), `me.json`, `instal
 another ingester waits up to 3 seconds for and takes over after 60, so a record is applied once and in order),
 `activity/<lid>.jsonl` (team activity), `feeds/<ws>.json`
 (goal feeds), `feeds/activity-<ws>.json` (other machines' activity), `feeds/asks-<ws>.json` (asks between teams),
+`budgets-cache/<lid>.json` (session attribution and observed monthly budget), `budgets-cache/cursor.json` (bounded sync rotation), `budget-shown/<lid>/<month>-<threshold>` (persistent note dedupe),
 `drift/<lid>.json` (a drift notice waiting for the next prompt: limit ids and sentence digests), `steering/` (steering lines shown, waiting to be
 reported), `unshared-digest.json` and `unshared-shown.json` (this machine's agent time outside shared sessions and the
 week its note was shown; never sent), `logs/align.log`, `logs/sync.log`, and
@@ -97,7 +100,7 @@ never an `Origin` header, and time out after 15 s. Endpoints used: `POST /api/v2
 `auto_accepted: true` on an `accepted` receipt the agent posted for a safe request),
 `POST /api/v2/workspaces/:ws/activity`, `GET /api/v2/workspaces/:ws/activity?after=<seq>`,
 `GET /api/v2/workspaces/:ws/asks`, `POST /api/v2/workspaces/:ws/steering` and
-`GET /api/v2/workspaces/:ws/allocation`. The agent never
+`GET /api/v2/workspaces/:ws/allocation`, `GET .../spend/home-team`, `GET .../teams/:team/budget`, `POST .../teams/:team/budget-requests` and `GET .../sessions/:key/budget?attribution=1`. The agent never
 calls the v1 routes (`/api/sessions*`, `/api/directives*`), which no longer exist.
 
 Every device is paired by a person signed in to the web app with their own account; no shared secret, passcode or
@@ -1221,7 +1224,7 @@ what it was, its layout and indentation included), delete the `settings.json.ali
 installing (...)`), delete Codex `hooks.json` when Align created it and it is now empty, delete Claude Code's `skills/`
 folder when Align's first install created it (recorded in `install.json`; a reinstall keeps what the first install
 found) and it is empty once the plugin is gone (printing `Removed <folder>, which Align's install created and is empty
-now.`), delete `~/.align/bin/` and `install.json`, and keep the rest of `ALIGN_HOME` (ledger and keys) unless
+now.`), delete `budgets-cache/`, `budget-shown/`, `~/.align/bin/` and `install.json`, and keep the rest of `ALIGN_HOME` (ledger and keys) unless
 `--purge` is given, which deletes `ALIGN_HOME` entirely. Because that deletes the device key and tokens, `--purge` SHALL
 first revoke this machine's device (`DELETE /api/v2/devices/self`, printing `Revoked this device (<id>) on <server>;
 its shared sessions stopped sharing there.`) and every revoke a past logout or login left waiting, naming each one it
@@ -1335,7 +1338,7 @@ they recorded, then the accepted asks of a team the person is not in whose goal 
 toward (an approved alignment; the server marks such asks `via_alignment: {goal_id}`, which is kept, and an ask so
 marked is kept even when no cached goal names its team; E2E acycle1 A1-cross-2), at most 200 with the person's own first, then open and
 accepted, without the server's `can` flags; when those followed teams changed since the cached answer, the asks feed
-SHALL be read again without `If-None-Match`; any failure leaves the cached file as it was), detect git edits, upload activity, fetch team activity and report queued steering lines; and,
+SHALL be read again without `If-None-Match`; any failure leaves the cached file as it was), refresh budgets for at most 100 shared sessions per pass with rotation, reusing matching attribution for at most five minutes through `GET .../sessions/<key>/budget?attribution=1` and reading each workspace/team/month once through `GET .../teams/<team>/budget`, erase a refused budget cache, detect git edits, upload activity, fetch team activity and report queued steering lines; and,
 signed in or not, recompute the local unshared-time digest at most every 6 hours. It SHALL record `{at, ms, pid}` in `~/.align/last-sync.json`,
 plus `error` (the first `could not reach the Align server at <url> (<why>)` or `the Align server at <url> answered
 HTTP <5xx>` of the pass) and `error_since` while passes fail to reach the server, and write that line to
@@ -1390,6 +1393,20 @@ in `last-sync.json` (it keeps what the pass before it recorded).
 
 - **WHEN** a goal is edited on the server while sessions are syncing (test `e2e` "folder rule: CLI share --dir ...")
 - **THEN** the next pass revalidates `feeds/<ws>.json`, and a session started afterwards under the folder rule gets the new title in its `SessionStart` envelope
+
+### Requirement: Informational team budget notes
+
+The budget commands and next-turn notes SHALL follow `budgets`. Terminal requests SHALL always wait for a person. Hooks SHALL read only `budgets-cache/<lid>.json` and their local dedupe markers, without network or lock waits. A fresh known priced subtotal reaching 80 or 100 percent of this month's team budget SHALL produce one `[Align] ...` informational note per threshold per session and UTC month, including when that subtotal is a lower bound. An unpriced request alone, an unknown total, stale or future data, or a share or spending period mismatch SHALL produce none. The note SHALL state the team and threshold, list-price estimates, that work continues, that the note grants no authority and that the person can ask for more in Align. It SHALL contain no runnable command or instruction. No daemon is added.
+
+#### Scenario: Next-turn budget information
+
+- **WHEN** sync observes a priced lower bound reaching 80 percent and the shared session runs its next turn with networking blocked
+- **THEN** the local hook delivers the informational note once within its existing latency budget, without a network read, command or decision
+
+#### Scenario: Uninstall removes budget note state
+
+- **WHEN** the person runs `align uninstall` with cached budget information and delivered-note markers
+- **THEN** both budget directories are removed while the retained ledger and keys follow the normal uninstall rule
 
 ### Requirement: Goal envelope at session start
 

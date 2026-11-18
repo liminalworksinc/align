@@ -27,8 +27,48 @@ queue item or let `docs/roadmap/` become a plan archive.
 
 ## P0
 
-Check the parent only after every required subtask and evidence item passes. Add the
-release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
+### [x] SPEND-003: Team budgets and budget requests
+
+- **Priority:** P1
+- **Owner:** specs/align/budgets.md and the retained implementation
+- **Direction:** Let a team set a monthly budget in list-price estimates, see how fast it is used, and record a
+  request for more with the decision of an accountable person.
+- **Conclusion:** Budgets are per team and per UTC month. Nothing is stopped or held when a budget is reached.
+  A request filed from a terminal always waits for a person; only a browser request can be recorded under the
+  team's allowance, up to its monthly ceiling. The requester never decides their own request. Spend in no goal
+  counts against the person's one home team, recorded when a session's spending period begins; usage from before
+  this change is not attributed to a team. Team burn and named team rows are shown to that team's members and
+  workspace owners only. MCP is unchanged.
+- **Completion prerequisites:** none
+- **Outcome:** Specified in budgets.md, with the interface, local-agent and workspace parts amended to match. The
+  full local gate passes.
+- **Implementation and evidence:**
+  - [x] One schema migration (version 24) for budgets, their history, budget requests, decisions and home teams.
+  - [x] Budget, burn, forecast, request, decision, second-look, withdrawal and home-team routes, with audit rows.
+  - [x] Spend, Requests, Sessions and Home screens; budget requests are rows in Home's single Needs list.
+  - [x] `align budget` and `align budget request`; 80 and 100 percent notes delivered by the existing hooks from
+    local files, once per session, month and threshold.
+  - [x] `ALIGN_TEST_PORT=3640 npm test` on Node 26.3: 2,122 passed, 0 failed (budgets 37, test-v2 1,090,
+    test-oauth 187, test-agent-live 68). The hook latency check passes at its unchanged 150 ms limit.
+  - [ ] Read-only MCP exposure of budgets and budget requests is not built.
+  - [ ] The committed test receipt is stale on main and is not refreshed here.
+
+### [x] SPEND-002: Export monthly team spend
+
+- **Priority:** P1
+- **Owner:** specs/align/workspaces.md and the retained spend implementation
+- **Direction:** Download one UTC calendar month as a team CSV for charging estimated cost back to teams.
+- **Conclusion:** Preserve exact workspace totals, split no-goal usage by its recorded home team and keep an
+  unallocated remainder. Name team rows only for members and workspace owners; fold other teams into the report's
+  single unnamed row. Keep estimates distinct from a bill and neutralize spreadsheet formulas.
+- **Completion prerequisites:** none
+- **Outcome:** The export route and the Spend download control ship with SPEND-003 and pass the same gate.
+- **Implementation and evidence:**
+  - [x] Specify the route, CSV fields, privacy and phone controls before implementation.
+  - [x] Implement the export route, shared month validation, exact numeric totals, hidden-team folding and the
+    Spend export form.
+  - [x] HTTP authorization, the browser download and the 390 pixel controls are covered in test-v2 and pass in the
+    gate run recorded under SPEND-003.
 
 ### [x] TX-001: Recover from transaction and preview setup failures
 

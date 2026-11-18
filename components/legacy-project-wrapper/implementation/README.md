@@ -193,6 +193,7 @@ npm run lint
 npx next typegen && npx tsc --noEmit
 node scripts/test-v2.mjs <port>       # the server: sign-in, workspaces, goals, change requests, devices, sessions,
                                       # directives, spend, the web UI (needs Chrome: CHROME_PATH), the edge, hosted mode
+node scripts/test-budgets.mjs # spending domain, migrations, races and retention (no server)
 node scripts/test-oauth.mjs <port>    # connected AI apps: the OAuth server, consent, grants, /api/mcp, align-connect
 node scripts/test-agent-live.mjs <port>
                                       # the real align CLI and hooks against a real Mode L server: limits and accepted
@@ -209,6 +210,27 @@ in use.
 `npm test` runs `scripts/test-all.sh` on port `$ALIGN_TEST_PORT` (default 3600) and ends with one node:test-style total
 (`ℹ tests`, `ℹ pass`, `ℹ fail`) over every step, which is what the literate-ai test receipt records. Running as root
 (for example in a container), point `CHROME_PATH` at a Chrome wrapper that adds `--no-sandbox`.
+
+## Team budgets and requests
+
+Team leads and workspace owners set a team's budget and optional allowance for a UTC month on Spend.
+Amounts are estimates at list price. A browser request within the allowance and its monthly ceiling can be
+recorded under that allowance. A terminal request always waits for a different eligible person. The record
+names where it was filed and preserves both decision rounds. At most five requests per person, team and month
+can wait at once. Lists default to this month and have bounded pages. Reaching a budget never stops work.
+
+Only a team's members and workspace owners read its budget, spend and history. No-goal work draws from the
+home team recorded when the spending period opened. Earlier periods have no home team and stay unallocated.
+The person can choose a different home team for future periods. The monthly team CSV preserves exact totals
+and folds other teams into the report's single unnamed row.
+
+Budget requests appear in Home's single Needs list and in a month-filtered section on Requests. Spend has
+budget forms, estimate bounds, the request record and CSV export. Own sessions have a budget label only when
+that team has a budget this month. `align budget` shows the folder's team budget and `align budget request`
+files a request that waits for a person. The existing one-pass sync reads bounded session attribution and
+caches team budgets once per team and month within a pass. Hooks read only local files and deliver an
+informational `[Align]` note at 80 and 100 percent from fresh priced known spend, including a lower bound.
+Notes have no commands and grant no authority. The goal context envelope and MCP are unchanged.
 
 ## Where things are
 

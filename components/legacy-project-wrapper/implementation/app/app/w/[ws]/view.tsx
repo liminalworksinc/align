@@ -14,6 +14,7 @@ import { PROPOSED_EVENT } from "../../_ui/propose";
 import type { CreationOptions, Me } from "../../_ui/server";
 import type { ChangeRequest, Goal } from "../../_ui/types";
 import FirstRun from "./first-run";
+import type { HomeBudgets } from "./spend/budgets";
 import { ReviewDrawer, useReview } from "./review-drawer";
 import type { EvidenceClass, HomePerson } from "@/lib/v2/home-core.mts";
 
@@ -44,6 +45,7 @@ interface App {
   evidence_class: EvidenceClass;
 }
 interface HomeData {
+  budget_requests: HomeBudgets | null;
   goals: HomeGoal[] | null;
   apps: { everyone: boolean; items: App[] } | null;
 }
@@ -52,7 +54,7 @@ interface Groups {
   mine: ChangeRequest[];
   others: ChangeRequest[];
 }
-const UNREAD: HomeData = { goals: null, apps: null };
+const UNREAD: HomeData = { goals: null, apps: null, budget_requests: null };
 /** The page's heading, from NeedsList: its Needs-you count (null while reading, or when nothing is readable); `partial`
  *  when some source couldn't be read, so the count is a lower bound and zero is never claimed. */
 function needsHeading(n: number | null, partial: boolean) {
@@ -87,13 +89,14 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
   }, [reloadHome, reloadChanges]);
   // Live (LIM-2503): when the workspace's stream says one of this person's views moved, the Home reads them again, so a
   // decision made in another window shows here within about a second. Without the stream the page keeps the reads below.
-  const live = useLive(ws);
+  const liveWorkspace = h && count.n !== null && c.data && feed.data ? ws : null;
+  const live = useLive(liveWorkspace);
   const { reload: reloadFeed } = feed;
   const reloadLive = useCallback(() => {
     reloadAll();
     reloadFeed();
   }, [reloadAll, reloadFeed]);
-  useLiveReload(ws, ["home", "changes", "goals", "alignments"], reloadLive);
+  useLiveReload(liveWorkspace, ["home", "changes", "goals", "alignments"], reloadLive);
   // "Since you last looked" reads again once a minute while Home stays open (specs/align/interface.md, Workspace Home),
   // and the Needs-you list with it, so its count never trails what Since shows (PR 68 audit Low 2).
   const refreshSince = reloadAll;

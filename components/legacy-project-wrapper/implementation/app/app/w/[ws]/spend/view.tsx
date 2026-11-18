@@ -1,6 +1,8 @@
 "use client";
 import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useState } from "react";
+import { SpendExport } from "./export";
+import { TeamBudgets } from "./budgets";
 import { Err, Loading, Note, PHONE_TABLE, Select, Shell, num, usd, useApi } from "../../../_ui/kit";
 import { Panel } from "../../../_ui/ds";
 import type { Me } from "../../../_ui/server";
@@ -55,6 +57,7 @@ function Row({ label, s, strong }: { label: string; s: Sums; strong?: boolean })
   );
 }
 
+
 export default function SpendPage({ me, ws }: { me: Me; ws: string }) {
   const [by, setBy] = useState<"goal" | "team" | "session">("goal");
   const d = useApi<Spend>(`/api/v2/workspaces/${ws}/spend?by=${by}`);
@@ -63,6 +66,8 @@ export default function SpendPage({ me, ws }: { me: Me; ws: string }) {
     <Shell me={me} ws={ws} tab="Spend">
       <h1 className={`${PAGE_H1} mb-2`}>Usage by goal</h1>
       <p className="mb-5 max-w-prose text-[15px] text-(--text-2)">Tokens from shared sessions, counted under the goal each session was bound to when the work happened.</p>
+      <SpendExport ws={ws} />
+      <TeamBudgets ws={ws} detail={detail.data} />
       <AllocationCard ws={ws} detail={detail.data} />
       <Panel className="mb-4"
         actions={
