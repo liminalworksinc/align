@@ -202,10 +202,13 @@ export async function previewTx<T, R>(fn: () => T, observe?: (changes: RowChange
   if (depth > 0 || previewing) throw new Error("previewTx can't run inside another transaction");
   const d = openDb().domain;
   let session: ReturnType<DatabaseSync["createSession"]> | undefined;
+  let held: TouchHold | undefined;
   await begin(d);
   depth++;
   try {
     previewing = [];
+    // Whatever the decision would announce on the live stream (touchWs) is held here and discarded with the rollback.
+    held = holdTouches();
     session = d.createSession();
     const out: Preview<T, R> = { ok: false, changes: [], outbound: [] };
     const plain = rowidTables();
@@ -238,6 +241,7 @@ export async function previewTx<T, R>(fn: () => T, observe?: (changes: RowChange
     try {
       d.exec("ROLLBACK");
     } catch {}
+    held?.discard();
     previewing = null;
     depth--;
     // A closed connection or one still in a transaction would break later writes (or commit the preview): replace it.
