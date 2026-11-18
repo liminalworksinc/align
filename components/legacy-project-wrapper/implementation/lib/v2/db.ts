@@ -123,10 +123,11 @@ async function begin(d: DatabaseSync) {
 export async function tx<T>(fn: () => T): Promise<T> {
   if (depth > 0) return fn();
   const d = openDb().domain;
+  let held: TouchHold | undefined;
   await begin(d);
   depth++;
-  const held = holdTouches();
   try {
+    held = holdTouches();
     const out = fn();
     if (out instanceof Promise) throw new Error("tx() callbacks must be synchronous");
     d.exec("COMMIT");
@@ -138,7 +139,7 @@ export async function tx<T>(fn: () => T): Promise<T> {
     } catch {}
     throw e;
   } finally {
-    held.discard();
+    held?.discard();
     depth--;
   }
 }
@@ -196,21 +197,20 @@ export interface Preview<T, R> {
 }
 
 /** Run `fn` as tx() would, record what it changes and would send, run `observe` on the result, then roll everything
- *  back. An error from `fn` is returned (ok false), never thrown, after the rollback. */
+ *  back. An error from `fn` is returned (ok false), never thrown, after the rollback. Setup errors throw after cleanup. */
 export async function previewTx<T, R>(fn: () => T, observe?: (changes: RowChange[]) => R): Promise<Preview<T, R>> {
   if (depth > 0 || previewing) throw new Error("previewTx can't run inside another transaction");
   const d = openDb().domain;
+  let session: ReturnType<DatabaseSync["createSession"]> | undefined;
+  let held: TouchHold | undefined;
   await begin(d);
   depth++;
-  previewing = [];
-  // Whatever the decision would announce on the live stream (touchWs) is held here and discarded with the rollback.
-  const held = holdTouches();
-  const out: Preview<T, R> = { ok: false, changes: [], outbound: [] };
-  // Inside the try, so a session that can't be made still reaches the finally: rolled back, the hold discarded, the
-  // module state reset.
-  let session: ReturnType<DatabaseSync["createSession"]> | null = null;
   try {
+    previewing = [];
+    // Whatever the decision would announce on the live stream (touchWs) is held here and discarded with the rollback.
+    held = holdTouches();
     session = d.createSession();
+    const out: Preview<T, R> = { ok: false, changes: [], outbound: [] };
     const plain = rowidTables();
     const maxRow = new Map(plain.map((t) => [t, get<{ m: number | null }>(`SELECT MAX(rowid) AS m FROM "${t}"`)?.m ?? 0]));
     d.exec("SAVEPOINT foresight");
@@ -228,6 +228,7 @@ export async function previewTx<T, R>(fn: () => T, observe?: (changes: RowChange
       out.outbound = [...previewing];
       if (observe) out.observed = observe(out.changes);
     }
+    return out;
   } finally {
     // Each step on its own, so none can stop the next: the rollback always runs and the module state is always reset.
     try {
@@ -240,13 +241,12 @@ export async function previewTx<T, R>(fn: () => T, observe?: (changes: RowChange
     try {
       d.exec("ROLLBACK");
     } catch {}
-    held.discard();
+    held?.discard();
     previewing = null;
     depth--;
-    // A connection still in a transaction here would make every later write fail (or commit the preview): replace it.
-    if (d.isTransaction) reopenDomain(d);
+    // A closed connection or one still in a transaction would break later writes (or commit the preview): replace it.
+    if (!d.isOpen || d.isTransaction) reopenDomain(d);
   }
-  return out;
 }
 
 /** Close a domain connection left inside a transaction (rolling it back) and open a fresh one in its place. */

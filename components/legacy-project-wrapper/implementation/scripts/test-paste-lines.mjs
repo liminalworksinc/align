@@ -97,19 +97,30 @@ check(
 const BYTES = "pretend tarball bytes\n";
 const REL = { version: "0.2.0", sha256: createHash("sha256").update(BYTES).digest("hex") };
 const PINNED = `${AGENT_REPO}/releases/download/agent-v0.2.0/liminal-align-agent-0.2.0.tgz`;
-const CURRENT_STEP3 = `Your app opens Align&apos;s approval page. Once you approve, it is listed under Connections below. For goal context inside Claude Code and Codex sessions, install the align CLI (
-                    <code className="font-mono text-[13px]">align login</code>, <code className="font-mono text-[13px]">align install</code>).`;
+// Without a release, step 4 ("Check that it worked") ends with this pointer to the align CLI; with one, step 5 shows the line.
+const NO_RELEASE_CLI = `For goal context inside Claude Code and Codex sessions, install the align CLI (<code className="font-mono text-[13px]">align login</code>, <code className="font-mono text-[13px]">align install</code>).`;
+// The no-administrator install (first-time tester report: `npm install -g` failed with EACCES): into ~/.local, then
+// align by its full path.
+const LOCAL = `npm install --global --prefix "$HOME/.local" ./liminal-align-agent-0.2.0.tgz && "$HOME/.local/bin/align" install && "$HOME/.local/bin/align" login`;
+// The published release (immutable, https://github.com/liminalworksinc/align/releases/tag/agent-v0.2.0): its asset's
+// sha256 as checked against the downloaded asset and its build attestation.
+const PUBLISHED = { version: "0.2.0", sha256: "b36a1f0b358e13f9a406699310fa4407cddae79a33a60de3aabdeada2c4d4a74" };
 check(
-  "the align CLI switch is off in the committed file: no release, no line; the view keeps the current step 3 text when there is none, and shows step 4 only with a line",
-  AGENT_RELEASE === null && agentInstallLine(URL) === null && agentInstallLine(`${HOSTED_ORIGIN}/api/mcp`) === null &&
-    view.includes(`{agentInstallLine(apps.data.url) === null ? (\n                  <p className="text-[14px] text-(--text-2)">\n                    ${CURRENT_STEP3}`) &&
-    view.includes("{agentInstallLine(apps.data.url) !== null && (\n                  <Step n={4}") &&
+  "the align CLI switch names the published release agent-v0.2.0: the Apps tab line pins its URL and checksum and installs into ~/.local (no administrator rights); the view says what the approval page asks and how to check it worked, points at the align CLI when there is no line, and shows step 5 only with one",
+  JSON.stringify(AGENT_RELEASE) === JSON.stringify(PUBLISHED) &&
+    agentInstallLine(URL) === `curl -fsSLO ${AGENT_REPO}/releases/download/agent-v0.2.0/liminal-align-agent-0.2.0.tgz && echo '${PUBLISHED.sha256}  liminal-align-agent-0.2.0.tgz' | shasum -a 256 -c && ${LOCAL} --server 'http://127.0.0.1:3331'` &&
+    agentInstallLine(`${HOSTED_ORIGIN}/api/mcp`)?.endsWith(`&& "$HOME/.local/bin/align" install && "$HOME/.local/bin/align" login`) === true &&
+    !/ -g |sudo/.test(agentInstallLine(URL) ?? "sudo") &&
+    agentInstallLine(URL, null) === null &&
+    view.includes("press <strong>Allow access</strong> (Claude Code also asks to add evidence links") && view.includes('<Step n={4} title="Check that it worked">') && view.includes("Use align to list my goals.") && view.includes("Last read the goals") &&
+    view.includes(`{agentInstallLine(apps.data.url) === null && (\n                    <p className="mt-2 text-[14px] text-(--text-2)">\n                      ${NO_RELEASE_CLI}`) &&
+    view.includes("{agentInstallLine(apps.data.url) !== null && (\n                  <Step n={5}") &&
     !/git clone|npm ci/.test(view),
 );
 const rel = agentInstallLine(URL, REL);
 check(
   "with a release: the pinned versioned URL, a sha256 check that runs before npm, npm installs the checked file, and never `latest`",
-  rel === `curl -fsSLO ${PINNED} && echo '${REL.sha256}  liminal-align-agent-0.2.0.tgz' | shasum -a 256 -c && npm install -g ./liminal-align-agent-0.2.0.tgz && align install && align login --server 'http://127.0.0.1:3331'` &&
+  rel === `curl -fsSLO ${PINNED} && echo '${REL.sha256}  liminal-align-agent-0.2.0.tgz' | shasum -a 256 -c && ${LOCAL} --server 'http://127.0.0.1:3331'` &&
     !/latest/.test(rel) && agentTarball(REL)?.url === PINNED,
   rel,
 );
@@ -119,7 +130,7 @@ check(
 );
 check(
   "with a release on the hosted server the line ends with a plain align login; a bad URL gives no line",
-  agentInstallLine(`${HOSTED_ORIGIN}/api/mcp`, REL)?.endsWith("&& align install && align login") === true && agentInstallLine("http://evil.test/api/mcp; touch x", REL) === null,
+  agentInstallLine(`${HOSTED_ORIGIN}/api/mcp`, REL)?.endsWith(`&& "$HOME/.local/bin/align" install && "$HOME/.local/bin/align" login`) === true && agentInstallLine("http://evil.test/api/mcp; touch x", REL) === null,
 );
 check("the lines carry no hooks, settings file or agent instruction file", ![claudeCodeLine(URL), codexLine(URL)].some((l) => /AGENTS|hooks|settings|node -e|printf|>>/.test(l)), claudeCodeLine(URL));
 
@@ -158,11 +169,14 @@ for (const shell of SHELLS) {
   for (const [label, sha, expectInstall] of [["matching checksum", REL.sha256, true], ["tampered tarball (checksum differs)", createHash("sha256").update("other bytes").digest("hex"), false]]) {
     const box = sandbox();
     try {
-      for (const name of ["npm", "align"]) {
-        const f = path.join(box.bin, name);
-        writeFileSync(f, `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a"; done >> "${box.bin}/${name}.args"\necho --- >> "${box.bin}/${name}.args"\n`);
-        chmodSync(f, 0o755);
-      }
+      // npm records its arguments and, as a real install into --prefix does, puts an align stub in <prefix>/bin; align
+      // is never on PATH, so the line must call it by its full path under $HOME/.local.
+      const alignStub = `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a"; done >> "${box.bin}/align.args"\necho --- >> "${box.bin}/align.args"\n`;
+      writeFileSync(
+        path.join(box.bin, "npm"),
+        `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a"; done >> "${box.bin}/npm.args"\necho --- >> "${box.bin}/npm.args"\nmkdir -p "$HOME/.local/bin"\nprintf '%s' ${shq(alignStub)} > "$HOME/.local/bin/align"\nchmod 755 "$HOME/.local/bin/align"\n`,
+      );
+      chmodSync(path.join(box.bin, "npm"), 0o755);
       // curl -fsSLO <url>: writes the URL's last segment into the current folder.
       writeFileSync(path.join(box.bin, "curl"), `#!/bin/sh\nfor a in "$@"; do u="$a"; done\nprintf '%s' ${shq(BYTES)} > "\${u##*/}"\n`);
       chmodSync(path.join(box.bin, "curl"), 0o755);
@@ -176,9 +190,9 @@ for (const shell of SHELLS) {
       const npm = argsOf(box, "npm");
       const al = argsOf(box, "align");
       check(
-        `${path.basename(shell)}: release line with a ${label}: ${expectInstall ? "npm installs ./liminal-align-agent-0.2.0.tgz, then align install and align login --server" : "the line stops at shasum; npm and align never run"}`,
+        `${path.basename(shell)}: release line with a ${label}: ${expectInstall ? "npm installs ./liminal-align-agent-0.2.0.tgz into $HOME/.local (no administrator rights), then $HOME/.local/bin/align install and login --server" : "the line stops at shasum; npm and align never run"}`,
         expectInstall
-          ? !failedLine && JSON.stringify(npm) === JSON.stringify([["install", "-g", "./liminal-align-agent-0.2.0.tgz"]]) && JSON.stringify(al) === JSON.stringify([["install"], ["login", "--server", "http://127.0.0.1:3331"]])
+          ? !failedLine && JSON.stringify(npm) === JSON.stringify([["install", "--global", "--prefix", path.join(box.root, ".local"), "./liminal-align-agent-0.2.0.tgz"]]) && JSON.stringify(al) === JSON.stringify([["install"], ["login", "--server", "http://127.0.0.1:3331"]])
           : failedLine && npm.length === 0 && al.length === 0,
         `failed=${failedLine} npm=${JSON.stringify(npm)} align=${JSON.stringify(al)}`,
       );

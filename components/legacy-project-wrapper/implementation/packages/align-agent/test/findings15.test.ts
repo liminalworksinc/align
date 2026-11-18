@@ -436,6 +436,18 @@ describe("cycle 14, section 5: works, but would confuse a developer", () => {
     assert.doesNotMatch((await login(t)).stdout, /This login replaced/);
   });
 
+  test("`align login` gives a first-time tester the device page with its code filled in, what to press there, and the next step once connected", async () => {
+    const { t } = await world();
+    const l = await login(t);
+    const code = /enter the code (\S+)/.exec(l.stdout)?.[1] ?? "";
+    assert.ok(code, l.stdout);
+    // The link fills the page's code (?code=), and the line keeps "enter the code <code>" for scripts that read it.
+    assert.match(l.stdout, new RegExp(`^To connect this device, open \\S+/app/device\\?code=${encodeURIComponent(code).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} and enter the code ${code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"), l.stdout);
+    assert.match(l.stdout, /^On that page: press Look up, check the code matches \S+, tick the workspaces this device may use, and press Approve\. Keep this terminal open: it carries on by itself once you approve, and names you and this device once it is connected\.$/m);
+    assert.match(l.stdout, /^Signed in as .+$/m);
+    assert.match(l.stdout, /^Connected\. Next: run `align goals` to see the goals this device can read, and in a Claude Code session type ::align share to give that session one\.$/m);
+  });
+
   test("a stopped or held session whose share ended says the web lifts the stop or hold only if it is still in place", async () => {
     const { fake, t } = await world();
     const H = await shared(t);

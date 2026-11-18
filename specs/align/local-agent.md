@@ -182,16 +182,19 @@ when `ALIGN_HOME` is a symlink, not a directory, or owned by another user. Secre
 ### Requirement: Device login
 
 The `align login` command SHALL generate a fresh Ed25519 device key, call `POST /api/v2/device/authorize` with the
-device name and public key, print `To connect this device, open <verification_uri> and enter the code
-<user_code>` and `Approving needs a sign-in from the last 15 minutes in that browser: if the page asks you to sign in
-again, do so. This command waits until the device is approved (the code is good for <n> minutes).` (the page approves
-only with a recent sign-in, so a stalled approval is explained where the developer waits; E2E-AGENT cycle 14, section
-5), poll `POST /api/v2/device/token` every `interval` seconds (adding 5 s on `slow_down`), and on success
+device name and public key, print `To connect this device, open <verification_uri>?code=<user_code> and enter the code
+<user_code>` (the device page fills its code from `?code=`; the line keeps its shape for scripts that read the code
+from it), then `On that page: press Look up, check the code matches <user_code>, tick the workspaces this device may
+use, and press Approve. Keep this terminal open: it carries on by itself once you approve, and names you and this device once it is
+connected.` (first-time tester report: the device step was unclear), and `Approving needs a sign-in from the last 15 minutes
+in that browser: if the page asks you to sign in again, do so. This command waits until the device is approved (the
+code is good for <n> minutes).` (the page approves only with a recent sign-in, so a stalled approval is explained where
+the developer waits; E2E-AGENT cycle 14, section 5); on macOS it opens that same link. It SHALL poll `POST /api/v2/device/token` every `interval` seconds (adding 5 s on `slow_down`), and on success
 save `credentials.json`, persist `--server` as `server_url` in `config.json`, fetch `GET /api/v2/me`, print
 `Signed in as <name> <<email>> on device <device name>.` (after a login that replaced this machine's live pairing and
 kept its device's name, then `This login replaced this machine's earlier device, so it keeps that device's name (the approval page may have shown it
 with a number added).`, as the page named it before the poll said which device it replaces) plus one `workspace <name> (<id>), role <role>` line per
-workspace, and cache each workspace's goal feed. Its token polls SHALL name, as `replaces`, the device of the
+workspace, cache each workspace's goal feed and, when the person has a workspace, end with ``Connected. Next: run `align goals` to see the goals this device can read, and in a Claude Code session type ::align share to give that session one.`` (the next step, so a first-time tester knows it worked). Its token polls SHALL name, as `replaces`, the device of the
 credentials this machine holds for the same server (signed in or not), read again at each poll, so the server keeps the
 new device's plain name rather than adding `(2)` for the device this login replaces; when another `align login` on this
 machine finished while this one waited, the poll names the device that one paired (the one this login now replaces),

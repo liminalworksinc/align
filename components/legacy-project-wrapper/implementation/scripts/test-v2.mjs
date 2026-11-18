@@ -153,6 +153,8 @@ async function startServer(env) {
   for (let i = 0; i < 90 && !exited; i++) {
     try {
       const r = env.HOSTED === "1" ? await hosted("GET", "/api/v2/auth/get-session") : await fetch(`${BASE}/api/v2/auth/get-session`);
+      // Finish the response so a stopped phase cannot answer the next readiness probe on its still-active connection.
+      if (env.HOSTED !== "1") await r.arrayBuffer();
       last = r.status;
       if (r.status === 200) return { started: true, stderr: () => stderr, stdout: () => stdout, exited, last };
       if (r.status === 503) break; // up, but serving nothing (proxy.ts startupProblems)
@@ -359,6 +361,111 @@ function invariantHolds(s) {
 }
 
 const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "align-v2-"));
+// Run the real db.ts in isolated processes: its extensionless imports need Node's resolver to add .ts.
+// Isolation also contains the one-shot Set allocation failure used to exercise the real touch hold.
+for (const setup of ["touch", "session"]) {
+  const regression = spawnSync(process.execPath, ["--input-type=module", "-e", String.raw`
+    import assert from "node:assert/strict";
+    import { registerHooks } from "node:module";
+    import path from "node:path";
+    import { pathToFileURL } from "node:url";
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        return nextResolve(specifier.startsWith(".") && !path.extname(specifier) ? specifier + ".ts" : specifier, context);
+      },
+    });
+    const { openDb, exec, get, tx, previewTx, inPreview, onWsChange, touchWs, captureOutbound } =
+      await import(pathToFileURL(path.join(process.cwd(), "lib/v2/db.ts")).href);
+    const db = openDb();
+    exec("CREATE TABLE v2_setup_test (id TEXT PRIMARY KEY)");
+    const events = [];
+    const stop = onWsChange((ws) => events.push(ws)); // Initialize the real touches before failing its hold allocation.
+    const setup = process.argv[1];
+    let called = false;
+    try {
+      if (setup === "touch") {
+        const originalSet = globalThis.Set;
+        const fault = new Error("touch hold allocation failed");
+        let pending;
+        try {
+          pending = tx(() => { called = true; }); // BEGIN succeeds before tx awaits its continuation.
+          assert.equal(db.domain.isTransaction, true);
+          globalThis.Set = function FailingSet() { throw fault; };
+          await assert.rejects(pending, (error) => error === fault);
+        } finally {
+          globalThis.Set = originalSet;
+        }
+      } else {
+        const closed = db.domain;
+        const pending = previewTx(() => { called = true; });
+        assert.equal(closed.isTransaction, true);
+        // A real lifecycle failure: close after BEGIN and before native createSession, without replacing any db method.
+        closed.close();
+        await assert.rejects(pending, (error) => error.code === "ERR_INVALID_STATE" && /database is not open/.test(error.message));
+        assert.equal(inPreview(), false);
+        assert.notEqual(db.domain, closed); // The safety net replaced the closed connection and cleared statements.
+      }
+      assert.equal(called, false);
+      assert.equal(inPreview(), false);
+      assert.equal(db.domain.isTransaction, false);
+      db.auth.exec("BEGIN IMMEDIATE; ROLLBACK"); // No writer lock is left on the real shared database.
+
+      assert.equal(await tx(() => {
+        assert.equal(db.domain.isTransaction, true);
+        exec("INSERT INTO v2_setup_test VALUES ('committed')");
+        touchWs("committed");
+        return 42;
+      }), 42);
+      assert.equal(db.auth.prepare("SELECT id FROM v2_setup_test WHERE id = 'committed'").get().id, "committed");
+      const fault = new Error("callback failed");
+      await assert.rejects(tx(() => {
+        assert.equal(db.domain.isTransaction, true);
+        exec("INSERT INTO v2_setup_test VALUES ('rolled-back')");
+        touchWs("rolled-back");
+        throw fault;
+      }), (error) => error === fault);
+      assert.equal(get("SELECT id FROM v2_setup_test WHERE id = 'rolled-back'"), undefined);
+
+      const preview = await previewTx(() => {
+        assert.equal(inPreview(), true);
+        assert.equal(db.domain.isTransaction, true);
+        exec("INSERT INTO v2_setup_test VALUES ('previewed')");
+        touchWs("previewed");
+        captureOutbound({ kind: "mail", what: "preview mail" });
+        return 7;
+      }, () => get("SELECT id FROM v2_setup_test WHERE id = 'previewed'").id);
+      assert.equal(preview.ok, true);
+      assert.equal(preview.value, 7);
+      assert.equal(preview.observed, "previewed");
+      assert.equal(preview.changes.length, 1);
+      assert.equal(preview.changes[0].after.id, "previewed");
+      assert.deepEqual(preview.outbound, [{ kind: "mail", what: "preview mail" }]);
+      assert.equal(get("SELECT id FROM v2_setup_test WHERE id = 'previewed'"), undefined);
+      const failed = await previewTx(() => {
+        exec("INSERT INTO v2_setup_test VALUES ('failed-preview')");
+        throw fault;
+      });
+      assert.equal(failed.ok, false);
+      assert.equal(failed.error, fault);
+      assert.deepEqual(failed.changes, []);
+      assert.equal(get("SELECT id FROM v2_setup_test WHERE id = 'failed-preview'"), undefined);
+      assert.equal(inPreview(), false);
+      assert.equal(db.domain.isTransaction, false);
+      assert.deepEqual(events, ["committed"]);
+      console.log(setup + " setup: cleanup, later commit/rollback, preview and callback errors passed");
+    } finally {
+      stop();
+      if (db.domain.isOpen) db.domain.close();
+      db.auth.close();
+    }
+  `, setup], { cwd: ROOT, encoding: "utf8", env: { ...process.env, ALIGN_DATA_DIR: path.join(tmpRoot, `setup-${setup}`) } });
+  check(`storage: ${setup} setup failure cleans up; later tx commits and rolls back, previews work and inPreview resets`, regression.status === 0, regression.stdout + regression.stderr);
+}
+if (process.argv.includes("--tx-setup-only")) {
+  rmSync(tmpRoot, { recursive: true, force: true });
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+}
 const build = spawnSync("npx", ["next", "build"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, HOSTED: "", ALIGN_DATA_DIR: "" } });
 if (build.status !== 0) {
   console.log(`FAIL  next build\n${(build.stdout + build.stderr).slice(-1500)}`);
@@ -2318,6 +2425,23 @@ try {
     crRbyReq.status === 403 && crRbyReq.json?.error === "not_an_approver" && crRrej.json?.state === "rejected" && crRrej.json.rejected_by?.id === U3.id && crRrej.json.rejection_reason === "Out of scope this quarter" && crRrej.json.decision_note === "Out of scope this quarter" && crWbyLead.status === 403 && crWbyLead.json?.error === "not_requester" && crWok.json?.state === "withdrawn",
     `${crRbyReq.text} ${crRrej.text.slice(0, 200)} ${crWbyLead.text} ${crWok.json?.state}`,
   );
+  // LIM-2515 L1 (ruling A): the decline reason reaches only the requester, the decider and the approvers. A viewer still
+  // sees who declined it and when, never the reason, on the single read and on the workspace list.
+  {
+    const asReq = await crGet(U1, GL.id, crR.json?.id);
+    const asDecider = await crGet(U3, GL.id, crR.json?.id);
+    const asViewer = await crGet(U4, GL.id, crR.json?.id);
+    const viewerList = await call("U4", "GET", `/api/v2/workspaces/${A}/change-requests?state=rejected`, { cookie: U4.cookie });
+    const inList = [...(viewerList.json?.waiting_on_me ?? []), ...(viewerList.json?.mine ?? []), ...(viewerList.json?.others ?? [])].find((c) => c.id === crR.json?.id);
+    check(
+      "LIM-2515 L1: a decline reason goes to the requester and the decider; a viewer gets rejected_by and decided_at with rejection_reason and decision_note null (single read and list)",
+      asReq.json?.rejection_reason === "Out of scope this quarter" && asReq.json.decision_note === "Out of scope this quarter" &&
+        asDecider.json?.rejection_reason === "Out of scope this quarter" &&
+        asViewer.status === 200 && asViewer.json?.rejection_reason === null && asViewer.json.decision_note === null && asViewer.json.rejected_by?.id === U3.id && typeof asViewer.json.decided_at === "string" &&
+        !!inList && inList.rejection_reason === null && inList.decision_note === null,
+      `${asReq.json?.rejection_reason} | ${asDecider.json?.rejection_reason} | ${asViewer.status} ${asViewer.json?.rejection_reason} ${asViewer.json?.decision_note} | list ${!!inList} ${inList?.rejection_reason}`,
+    );
+  }
   // The LIM-2455 checklist (§C, §A): the reason and note caps on reject and counter, an approver declining while a counter
   // waits on the requester, and decisions are cookie-only (a device token proposes and decides nothing).
   const crCap = await propose(U1, GL.id, { base_version: 2, changes: { title: "Pen-test the mobile app" }, reason: "Mobile too" });
@@ -5230,9 +5354,16 @@ try {
         `${cardText} ${errors.join(" | ")}`,
       );
       const actClasses = await page.$$eval("#goal-activity [data-evidence-class]", (els) => els.map((e) => e.getAttribute("data-evidence-class")));
+      // LIM-2513 (one evidence wording): the class is the same label the Home and Apps use, with its icon and words.
+      const actLabels = await page.$$eval("#goal-activity [data-evidence-class] [data-evidence]", (els) => els.map((e) => [e.getAttribute("data-evidence"), !!e.querySelector("svg"), e.textContent?.trim()]));
       check(
-        "ui (Chrome, LIM-2455 §E2): the Agent activity card carries exactly one evidence class, \"agent reported\", and names the files as reported (\"Files these sessions reported working on\"), never \"Files agents are working on\"",
-        JSON.stringify(actClasses) === '["agent_reported"]' && cardText.includes("agent reported") && cardText.includes("Files these sessions reported working on") && !cardText.includes("Files agents are working on"),
+        "ui (Chrome, LIM-2513): the Agent activity card's class is the shared evidence label (data-evidence=\"reported\", an icon, \"Agent reported\"), not a lower-case pill",
+        JSON.stringify(actLabels) === '[["reported",true,"Agent reported"]]',
+        JSON.stringify(actLabels),
+      );
+      check(
+        "ui (Chrome, LIM-2455 §E2): the Agent activity card carries exactly one evidence class, \"Agent reported\", and names the files as reported (\"Files these sessions reported working on\"), never \"Files agents are working on\"",
+        JSON.stringify(actClasses) === '["agent_reported"]' && cardText.includes("Agent reported") && !cardText.includes("agent reported") && cardText.includes("Files these sessions reported working on") && !cardText.includes("Files agents are working on"),
         `${JSON.stringify(actClasses)} ${cardText.slice(0, 300)}`,
       );
       await page.goto(`${BASE}/app/w/${AK}/sessions`, { waitUntil: "networkidle0" });
@@ -5580,6 +5711,10 @@ try {
         });
         await page.setCookie({ name: n3, value: v3.join("="), url: BASE });
         const before = eventsIn("value_card_viewed").length;
+        // A short window, so the card starts below the fold: since LIM-2513 the goal page puts Change requests (and this
+        // card) right after the plan, above the agents and the forms, so at 900 tall it can open already in view.
+        const vp0 = page.viewport();
+        await page.setViewport({ ...vp0, height: 420 });
         await page.goto(`${BASE}/app/w/${W}/goals/${GV.id}`, { waitUntil: "networkidle0" });
         await page.waitForSelector(`[data-value-card="${crP.json?.id}"]`, { timeout: 15000 });
         const card = await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => ({ top: el.getBoundingClientRect().top, vh: window.innerHeight, text: el.innerText }));
@@ -5602,10 +5737,22 @@ try {
             belowFold === before && seenAfter === before + 1 && errors.length === 0,
           `${JSON.stringify({ top: card.top, vh: card.vh, before, belowFold, seenAfter })} ${card.text.slice(0, 300)} ${errors.join(" | ")}`,
         );
+        await page.setViewport(vp0);
+        // LIM-2513: the goal page reads plan, decisions, agents, then the forms: Change requests (with this card) comes
+        // before Agent activity, Agents on this goal and the New version form.
+        const order = await page.evaluate((id) => {
+          const y = (sel) => { const el = document.querySelector(sel); return el ? el.getBoundingClientRect().top + window.scrollY : null; };
+          return { cr: y("#change-requests"), card: y(`[data-value-card="${id}"]`), activity: y("#goal-activity"), form: y("#new-version") };
+        }, crP.json?.id);
+        check(
+          "ui (Chrome, LIM-2513): the goal page puts Change requests and its \"What this decision gave you\" card above Agent activity and the New version form",
+          order.cr !== null && order.card !== null && order.activity !== null && order.cr < order.card && order.card < order.activity && (order.form === null || order.activity < order.form),
+          JSON.stringify(order),
+        );
         const valueClasses = await page.$$eval(`[data-value-card="${crP.json?.id}"] [data-value-row="delivery"] [data-evidence-class]`, (els) => els.map((e) => e.getAttribute("data-evidence-class")));
         check(
           "ui (Chrome, LIM-2455 §E2): the value card's \"Agents on the new version\" line carries exactly one evidence class, a delivery receipt (the session's machine sent a receipt for the launched version)",
-          JSON.stringify(valueClasses) === '["delivery_receipt"]' && /delivery receipt/.test(card.text),
+          JSON.stringify(valueClasses) === '["delivery_receipt"]' && /Receipt/.test(card.text) && !/delivery receipt/i.test(card.text),
           JSON.stringify(valueClasses),
         );
         const appsRow = await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => {
@@ -5616,6 +5763,24 @@ try {
           "ui (Chrome, main #56): the launched request's value card has a \"Connected AI apps\" row with one evidence class (delivery receipt) naming the app Align sent version 2 (to the approver, who connected it: \"Claude Code (connected by you): Align sent it version 2 on <time>\"), not the app sent only version 1, and saying Align can't see what the app does next",
           /Connected AI apps/i.test(appsRow.text) && JSON.stringify(appsRow.classes) === '["delivery_receipt"]' && JSON.stringify(appsRow.apps) === '["gr_VALUEVALUEVALUE4"]' && /Claude Code \(connected by you\): Align sent it version 2 on \S/.test(appsRow.text) && !/Codex/.test(appsRow.text) && /can.t see what the app does next/.test(appsRow.text),
           JSON.stringify(appsRow),
+        );
+        // LIM-2513 (one evidence wording; Mini 0's check of PR 86): while Align has sent the launched version to an app,
+        // no page says "delivery receipt": the goal page, the Work page's Connected apps panel (its "Align sent it vN"
+        // sentence is "a receipt"), Home, Apps and Sessions. API values (delivery_receipt) are unchanged.
+        const saysOld = {};
+        let workSentence = "";
+        for (const [k, u] of [["goal", `/app/w/${W}/goals/${GV.id}`], ["work", `/app/w/${W}/work?goal=${GV.id}&cr=${crP.json?.id}`], ["home", `/app/w/${W}`], ["apps", `/app/w/${W}/apps`], ["sessions", `/app/w/${W}/sessions`]]) {
+          await page.goto(`${BASE}${u}`, { waitUntil: "networkidle0" });
+          await page.waitForFunction(() => !/Loading|Reading/.test(document.body.innerText.slice(0, 3000)), { timeout: 10000 }).catch(() => undefined);
+          if (k === "work") await page.waitForFunction(() => /Align sent it v\d/.test(document.body.innerText), { timeout: 10000 }).catch(() => undefined);
+          const t = await page.evaluate(() => document.body.innerText);
+          saysOld[k] = /delivery receipt/i.test(t);
+          if (k === "work") workSentence = (t.match(/"Align sent it v\d+" is a [^:]+:/) ?? [""])[0];
+        }
+        check(
+          "ui (Chrome, LIM-2513): with a version sent to a connected app, no page says \"delivery receipt\" (goal, Work, Home, Apps, Sessions); the Work page says \"Align sent it v2\" is a receipt",
+          Object.values(saysOld).every((v) => v === false) && /is a receipt:$/.test(workSentence),
+          JSON.stringify({ saysOld, workSentence }),
         );
         // value_card_viewed is once per person and only V3 can see this card, so a first view on the phone needs V3's
         // view above cleared. The two test apps go too.
@@ -6627,10 +6792,19 @@ try {
     const hc = await import(pathToFileURL(path.join(ROOT, "lib/v2/home-core.mts")).href);
     const P = (id, name) => ({ id, name });
     check(
-      "home rules: an app's goal read (last_read_at) is a delivery receipt and no goal read is not observed; the three classes read \"Delivery receipt\", \"Agent reported\", \"Not observed\"; a request answer is agent reported, but an auto_accepted one (delivered, not declined: E2E-AGENT G1) is a delivery receipt",
+      "home rules: an app's goal read (last_read_at) is a delivery receipt and no goal read is not observed; the three classes read \"Receipt\", \"Agent reported\", \"Not observed\" (LIM-2513: the words every screen uses); a request answer is agent reported, but an auto_accepted one (delivered, not declined: E2E-AGENT G1) is a delivery receipt",
       hc.appEvidence("2026-10-31T00:00:00Z") === "delivery_receipt" && hc.answerEvidence("accepted", true) === "delivery_receipt" && hc.answerEvidence("accepted") === "agent_reported" && hc.answerEvidence("declined") === "agent_reported" && hc.answerEvidence("received") === "delivery_receipt" && hc.appEvidence(null) === "not_observed" && hc.appEvidence(undefined) === "not_observed" && hc.appEvidence("") === "not_observed" &&
-        JSON.stringify(hc.EVIDENCE_CLASSES) === JSON.stringify(["delivery_receipt", "agent_reported", "not_observed"]) && Object.values(hc.EVIDENCE_WORDS).join("|") === "Delivery receipt|Agent reported|Not observed",
+        JSON.stringify(hc.EVIDENCE_CLASSES) === JSON.stringify(["delivery_receipt", "agent_reported", "not_observed"]) && Object.values(hc.EVIDENCE_WORDS).join("|") === "Receipt|Agent reported|Not observed",
       "",
+    );
+    // LIM-2513: one time format on every screen: no numeric date, no seconds, the year only for another year.
+    const wh = await import(pathToFileURL(path.join(ROOT, "lib/v2/when.mts")).href);
+    const now = new Date("2026-11-13T12:00:00Z");
+    const wThis = wh.when("2026-11-13T16:25:49Z", now), wOld = wh.when("2025-10-02T16:05:00Z", now);
+    check(
+      "time format (LIM-2513): a time this year reads like \"Nov 13, 4:25 PM\" (month, day, minute; no year, no seconds, no numeric date) and another year's adds its year; no time is \"\" and an unparseable one is kept",
+      !/\d\/\d/.test(wThis) && !/:\d\d:\d\d/.test(wThis) && !/2026/.test(wThis) && /2025/.test(wOld) && !/:\d\d:\d\d/.test(wOld) && wh.when(null) === "" && wh.when("soon") === "soon",
+      JSON.stringify({ wThis, wOld }),
     );
     const T = "2026-10-31T00:00:00Z";
     const sw = (o) => hc.appStatusWords({ approved_at: "A", last_used_at: null, last_read_at: null, ...o }, (iso) => `@${iso}`);
@@ -7075,6 +7249,44 @@ try {
           "ui (Chrome, Since): a goal's creation names its owner (\"Hugo Lead … created the goal\", \"Hank Other … created the goal\"); the reader's own goals (Hana's) get no line, and no creation reads \"Someone\"",
           /Hugo Lead[\s\S]{0,60}created the goal/.test(sinceText) && /Hank Other[\s\S]{0,60}created the goal/.test(sinceText) && !/Hana Owner[\s\S]{0,60}created the goal/.test(sinceText) && !/You[\s\S]{0,20}created the goal/.test(sinceText) && !/Someone[\s\S]{0,20}created the goal/.test(sinceText),
           sinceText.slice(0, 900).replace(/\n/g, " / "),
+        );
+        // LIM-2513 item 1 (Mini 0's PR 68 audit Low, 03c415a8): a reload keeps the tab's comparison, but leaving Home by a
+        // full page load (a plain link to /trust, a typed URL) is leaving it, so coming back compares against that moment.
+        // Hana's last visit starts long ago; every count below is the section's own `data-since` (lines since the visit).
+        const pl = await browser.newPage();
+        await pl.setViewport({ width: 1440, height: 900 });
+        await pl.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        const sinceCount = async () => {
+          await pl.waitForFunction(() => { const s = document.querySelector("[data-since]"); return !!s && s.getAttribute("data-since") !== "reading"; }, { timeout: 15000 }).catch(() => undefined);
+          return pl.evaluate(() => document.querySelector("[data-since]")?.getAttribute("data-since") ?? null);
+        };
+        await pl.goto(`${BASE}/trust`, { waitUntil: "networkidle0" });
+        await pl.evaluate((k) => { localStorage.setItem(k, "2000-01-01T00:00:00.000Z"); sessionStorage.removeItem(k); }, `align.lastVisit:${HW}:${HO.id}`);
+        await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        const lFirst = await sinceCount();
+        await pl.reload({ waitUntil: "networkidle0" });
+        const lReload = await sinceCount();
+        await pl.goto(`${BASE}/trust`, { waitUntil: "networkidle0" });
+        await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        const lBack = await sinceCount();
+        await pl.reload({ waitUntil: "networkidle0" });
+        const lBackReload = await sinceCount();
+        // The coordinator's review gap (PR 87): a reload of another workspace page, then Home through the app's own
+        // navigation, must not reuse the tab's old Home baseline (only a reload of Home itself does).
+        await pl.goto(`${BASE}/trust`, { waitUntil: "networkidle0" });
+        await pl.evaluate((k) => { localStorage.setItem(k, "2000-01-01T00:00:00.000Z"); sessionStorage.removeItem(k); }, `align.lastVisit:${HW}:${HO.id}`);
+        await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        const lOld = await sinceCount();
+        await pl.goto(`${BASE}/app/w/${HW}/goals`, { waitUntil: "networkidle0" });
+        await pl.reload({ waitUntil: "networkidle0" });
+        await pl.evaluate((ws) => [...document.querySelectorAll(`a[href="/app/w/${ws}"]`)].find((a) => a.offsetParent)?.click(), HW);
+        await pl.waitForFunction((ws) => location.pathname === `/app/w/${ws}`, { timeout: 15000 }, HW).catch(() => undefined);
+        const lInApp = await sinceCount();
+        await pl.close();
+        check(
+          "ui (Chrome, Since, LIM-2513): a reload keeps the tab's comparison (same lines), but leaving Home by a full page load to /trust and coming back by URL compares against when Home was left (no lines), and a reload after that keeps the new comparison; a reload of the Goals page, then Home through the app's navigation, doesn't reuse the tab's old Home comparison either",
+          Number(lFirst) > 0 && lReload === lFirst && lBack === "0" && lBackReload === "0" && Number(lOld) > 0 && lInApp === "0",
+          JSON.stringify({ lFirst, lReload, lBack, lBackReload, lOld, lInApp }),
         );
         // Mini 5's click walk, Nov 11: at 390 wide the review drawer's "More actions" menu opened below its footer, so
         // Decline, the last item, was off screen and only reachable by keyboard. Hugo asks Hank to change Hank's goal;
@@ -13115,6 +13327,22 @@ try {
     hAsks.status === 401 && hAsks.json?.error === "unauthorized" && !(hSuggest.status === 404 && hSuggest.json?.error === "Not found"),
     `${hAsks.status} ${hAsks.text.slice(0, 100)} ${hSuggest.status} ${hSuggest.text.slice(0, 100)}`,
   );
+  // The platform health check (fly.toml) calls /api/v2/health, which no sign-in rate limit counts. Its earlier path,
+  // Better Auth's get-session, is counted per client, and the check's Fly-Client-IP never changes: live, every 101st
+  // check (every 50 minutes) was refused. Here, one client: 150 health calls are all 200; get-session is refused past 100.
+  {
+    const hc = { "fly-client-ip": "fly-health-check" };
+    const health = [];
+    for (let i = 0; i < 150; i++) health.push(await hosted("GET", "/api/v2/health", { headers: hc }));
+    const sess = [];
+    for (let i = 0; i < 101; i++) sess.push(await hosted("GET", "/api/v2/auth/get-session", { headers: hc }));
+    check(
+      "hosted: the health check's route (/api/v2/health, fly.toml) answers 200 {ok:true} to 150 calls in a row from one client, while Better Auth's get-session, its earlier path, refuses that client its 101st call (429): the check is no longer rate-limited",
+      /^\s*path = "\/api\/v2\/health"$/m.test(readFileSync(path.join(ROOT, "fly.toml"), "utf8")) &&
+        health.every((r) => r.status === 200 && r.json?.ok === true) && sess.slice(0, 100).every((r) => r.status === 200) && sess[100].status === 429,
+      JSON.stringify({ health: [...new Set(health.map((r) => r.status))], sess100: sess[99]?.status, sess101: sess[100]?.status }),
+    );
+  }
   check("hosted: v2 routes are served (/api/v2/me 401, /app/sign-in 200, Better Auth answers)", hMe.status === 401 && hSignIn.status === 200 && hSession.status === 200, `${hMe.status} ${hSignIn.status} ${hSession.status}`);
   check("hosted: the sign-in page offers Google and GitHub, never the test sign-in; without email settings, no email code", hSignIn.text.includes("Continue with Google") && hSignIn.text.includes("Continue with GitHub") && !hSignIn.text.includes("Test sign-in") && !hSignIn.text.includes("Send code"), "");
   check("hosted: the sign-in page links to /privacy and /trust", hSignIn.text.includes('href="/privacy"') && hSignIn.text.includes('href="/trust"'), "");
