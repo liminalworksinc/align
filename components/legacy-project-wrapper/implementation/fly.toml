@@ -42,13 +42,14 @@ primary_region = "sjc"
     hard_limit = 300
 
   # The health check comes from inside Fly's network, so it sends what Fly's edge would: the allowlisted Host,
-  # forwarded https and a Fly-Client-IP. Without them proxy.ts answers 421 or 403 and the check would fail.
+  # forwarded https and a Fly-Client-IP. Without them proxy.ts answers 421 or 403 and the check would fail. It calls
+  # /api/v2/health, which no sign-in rate limit counts (get-session, the earlier path, refused every 101st check).
   [[http_service.checks]]
     grace_period = "20s"
     interval = "30s"
     timeout = "5s"
     method = "GET"
-    path = "/api/v2/auth/get-session"
+    path = "/api/v2/health"
     [http_service.checks.headers]
       Host = "align-pg-draft.fly.dev"
       X-Forwarded-Proto = "https"

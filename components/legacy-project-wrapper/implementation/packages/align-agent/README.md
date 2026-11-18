@@ -13,11 +13,18 @@ Zero runtime dependencies (Node 24+: `node:sqlite`, `node:crypto`, `fetch`).
 
 From a checkout: `npm ci && npm run build` here, then `align install` and `align login`. Once release
 `agent-v<version>` is published (and `AGENT_RELEASE` in `lib/paste-lines.ts` names it, which is what makes the Apps tab
-show it), a pinned tarball whose checksum is checked before npm installs it:
+show it), a pinned tarball whose checksum is checked before npm installs it, into `~/.local` in your home folder, so no
+administrator rights or `sudo` are needed (a plain `npm install -g` fails with EACCES where Node's global folder belongs
+to root, as with Node's official installer):
 
 ```
-curl -fsSLO https://github.com/liminalworksinc/align/releases/download/agent-v<version>/liminal-align-agent-<version>.tgz && echo '<sha256>  liminal-align-agent-<version>.tgz' | shasum -a 256 -c && npm install -g ./liminal-align-agent-<version>.tgz && align install && align login
+curl -fsSLO https://github.com/liminalworksinc/align/releases/download/agent-v<version>/liminal-align-agent-<version>.tgz && echo '<sha256>  liminal-align-agent-<version>.tgz' | shasum -a 256 -c && npm install --global --prefix "$HOME/.local" ./liminal-align-agent-<version>.tgz && "$HOME/.local/bin/align" install && "$HOME/.local/bin/align" login
 ```
+
+`align login` prints a link to Align's device page with its code filled in: press **Look up**, check the code matches,
+tick the workspaces and press **Approve**, and keep the terminal open until it says "Signed in as" you. Run `align`
+later as `~/.local/bin/align`, or add `~/.local/bin` to your PATH. The hooks `align install` adds don't need it on PATH:
+they run the copy it keeps in `~/.align/bin/current`.
 
 `align login` says which server it pairs with and why. It signs in to the hosted server
 (`https://align-pg-draft.fly.dev`) unless told otherwise: `align login --server <url>` for another one,

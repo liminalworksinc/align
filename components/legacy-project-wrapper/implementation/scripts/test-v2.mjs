@@ -153,6 +153,8 @@ async function startServer(env) {
   for (let i = 0; i < 90 && !exited; i++) {
     try {
       const r = env.HOSTED === "1" ? await hosted("GET", "/api/v2/auth/get-session") : await fetch(`${BASE}/api/v2/auth/get-session`);
+      // Finish the response so a stopped phase cannot answer the next readiness probe on its still-active connection.
+      if (env.HOSTED !== "1") await r.arrayBuffer();
       last = r.status;
       if (r.status === 200) return { started: true, stderr: () => stderr, stdout: () => stdout, exited, last };
       if (r.status === 503) break; // up, but serving nothing (proxy.ts startupProblems)
@@ -359,6 +361,111 @@ function invariantHolds(s) {
 }
 
 const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "align-v2-"));
+// Run the real db.ts in isolated processes: its extensionless imports need Node's resolver to add .ts.
+// Isolation also contains the one-shot Set allocation failure used to exercise the real touch hold.
+for (const setup of ["touch", "session"]) {
+  const regression = spawnSync(process.execPath, ["--input-type=module", "-e", String.raw`
+    import assert from "node:assert/strict";
+    import { registerHooks } from "node:module";
+    import path from "node:path";
+    import { pathToFileURL } from "node:url";
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        return nextResolve(specifier.startsWith(".") && !path.extname(specifier) ? specifier + ".ts" : specifier, context);
+      },
+    });
+    const { openDb, exec, get, tx, previewTx, inPreview, onWsChange, touchWs, captureOutbound } =
+      await import(pathToFileURL(path.join(process.cwd(), "lib/v2/db.ts")).href);
+    const db = openDb();
+    exec("CREATE TABLE v2_setup_test (id TEXT PRIMARY KEY)");
+    const events = [];
+    const stop = onWsChange((ws) => events.push(ws)); // Initialize the real touches before failing its hold allocation.
+    const setup = process.argv[1];
+    let called = false;
+    try {
+      if (setup === "touch") {
+        const originalSet = globalThis.Set;
+        const fault = new Error("touch hold allocation failed");
+        let pending;
+        try {
+          pending = tx(() => { called = true; }); // BEGIN succeeds before tx awaits its continuation.
+          assert.equal(db.domain.isTransaction, true);
+          globalThis.Set = function FailingSet() { throw fault; };
+          await assert.rejects(pending, (error) => error === fault);
+        } finally {
+          globalThis.Set = originalSet;
+        }
+      } else {
+        const closed = db.domain;
+        const pending = previewTx(() => { called = true; });
+        assert.equal(closed.isTransaction, true);
+        // A real lifecycle failure: close after BEGIN and before native createSession, without replacing any db method.
+        closed.close();
+        await assert.rejects(pending, (error) => error.code === "ERR_INVALID_STATE" && /database is not open/.test(error.message));
+        assert.equal(inPreview(), false);
+        assert.notEqual(db.domain, closed); // The safety net replaced the closed connection and cleared statements.
+      }
+      assert.equal(called, false);
+      assert.equal(inPreview(), false);
+      assert.equal(db.domain.isTransaction, false);
+      db.auth.exec("BEGIN IMMEDIATE; ROLLBACK"); // No writer lock is left on the real shared database.
+
+      assert.equal(await tx(() => {
+        assert.equal(db.domain.isTransaction, true);
+        exec("INSERT INTO v2_setup_test VALUES ('committed')");
+        touchWs("committed");
+        return 42;
+      }), 42);
+      assert.equal(db.auth.prepare("SELECT id FROM v2_setup_test WHERE id = 'committed'").get().id, "committed");
+      const fault = new Error("callback failed");
+      await assert.rejects(tx(() => {
+        assert.equal(db.domain.isTransaction, true);
+        exec("INSERT INTO v2_setup_test VALUES ('rolled-back')");
+        touchWs("rolled-back");
+        throw fault;
+      }), (error) => error === fault);
+      assert.equal(get("SELECT id FROM v2_setup_test WHERE id = 'rolled-back'"), undefined);
+
+      const preview = await previewTx(() => {
+        assert.equal(inPreview(), true);
+        assert.equal(db.domain.isTransaction, true);
+        exec("INSERT INTO v2_setup_test VALUES ('previewed')");
+        touchWs("previewed");
+        captureOutbound({ kind: "mail", what: "preview mail" });
+        return 7;
+      }, () => get("SELECT id FROM v2_setup_test WHERE id = 'previewed'").id);
+      assert.equal(preview.ok, true);
+      assert.equal(preview.value, 7);
+      assert.equal(preview.observed, "previewed");
+      assert.equal(preview.changes.length, 1);
+      assert.equal(preview.changes[0].after.id, "previewed");
+      assert.deepEqual(preview.outbound, [{ kind: "mail", what: "preview mail" }]);
+      assert.equal(get("SELECT id FROM v2_setup_test WHERE id = 'previewed'"), undefined);
+      const failed = await previewTx(() => {
+        exec("INSERT INTO v2_setup_test VALUES ('failed-preview')");
+        throw fault;
+      });
+      assert.equal(failed.ok, false);
+      assert.equal(failed.error, fault);
+      assert.deepEqual(failed.changes, []);
+      assert.equal(get("SELECT id FROM v2_setup_test WHERE id = 'failed-preview'"), undefined);
+      assert.equal(inPreview(), false);
+      assert.equal(db.domain.isTransaction, false);
+      assert.deepEqual(events, ["committed"]);
+      console.log(setup + " setup: cleanup, later commit/rollback, preview and callback errors passed");
+    } finally {
+      stop();
+      if (db.domain.isOpen) db.domain.close();
+      db.auth.close();
+    }
+  `, setup], { cwd: ROOT, encoding: "utf8", env: { ...process.env, ALIGN_DATA_DIR: path.join(tmpRoot, `setup-${setup}`) } });
+  check(`storage: ${setup} setup failure cleans up; later tx commits and rolls back, previews work and inPreview resets`, regression.status === 0, regression.stdout + regression.stderr);
+}
+if (process.argv.includes("--tx-setup-only")) {
+  rmSync(tmpRoot, { recursive: true, force: true });
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+}
 const build = spawnSync("npx", ["next", "build"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, HOSTED: "", ALIGN_DATA_DIR: "" } });
 if (build.status !== 0) {
   console.log(`FAIL  next build\n${(build.stdout + build.stderr).slice(-1500)}`);
@@ -13147,6 +13254,22 @@ try {
     hAsks.status === 401 && hAsks.json?.error === "unauthorized" && !(hSuggest.status === 404 && hSuggest.json?.error === "Not found"),
     `${hAsks.status} ${hAsks.text.slice(0, 100)} ${hSuggest.status} ${hSuggest.text.slice(0, 100)}`,
   );
+  // The platform health check (fly.toml) calls /api/v2/health, which no sign-in rate limit counts. Its earlier path,
+  // Better Auth's get-session, is counted per client, and the check's Fly-Client-IP never changes: live, every 101st
+  // check (every 50 minutes) was refused. Here, one client: 150 health calls are all 200; get-session is refused past 100.
+  {
+    const hc = { "fly-client-ip": "fly-health-check" };
+    const health = [];
+    for (let i = 0; i < 150; i++) health.push(await hosted("GET", "/api/v2/health", { headers: hc }));
+    const sess = [];
+    for (let i = 0; i < 101; i++) sess.push(await hosted("GET", "/api/v2/auth/get-session", { headers: hc }));
+    check(
+      "hosted: the health check's route (/api/v2/health, fly.toml) answers 200 {ok:true} to 150 calls in a row from one client, while Better Auth's get-session, its earlier path, refuses that client its 101st call (429): the check is no longer rate-limited",
+      /^\s*path = "\/api\/v2\/health"$/m.test(readFileSync(path.join(ROOT, "fly.toml"), "utf8")) &&
+        health.every((r) => r.status === 200 && r.json?.ok === true) && sess.slice(0, 100).every((r) => r.status === 200) && sess[100].status === 429,
+      JSON.stringify({ health: [...new Set(health.map((r) => r.status))], sess100: sess[99]?.status, sess101: sess[100]?.status }),
+    );
+  }
   check("hosted: v2 routes are served (/api/v2/me 401, /app/sign-in 200, Better Auth answers)", hMe.status === 401 && hSignIn.status === 200 && hSession.status === 200, `${hMe.status} ${hSignIn.status} ${hSession.status}`);
   check("hosted: the sign-in page offers Google and GitHub, never the test sign-in; without email settings, no email code", hSignIn.text.includes("Continue with Google") && hSignIn.text.includes("Continue with GitHub") && !hSignIn.text.includes("Test sign-in") && !hSignIn.text.includes("Send code"), "");
   check("hosted: the sign-in page links to /privacy and /trust", hSignIn.text.includes('href="/privacy"') && hSignIn.text.includes('href="/trust"'), "");
