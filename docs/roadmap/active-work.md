@@ -39,14 +39,20 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Conclusion:** Private change stamps use the existing directive response. Unchanged cached passes add no budget
   reads. The existing reuse window, read and time caps, local-only hooks, separate message/context markers and
   Needs counts are preserved.
+- **Merge review repair:** Integrate the reviewed budget base and this branch's delivery and browser information.
+  Preserve filing-source migration 25; add crossings and indexed change stamps in migration 26. Keep hook reads
+  local, guard mid-turn spending periods, preserve temporary refusals and both latency cases. Leave the index and
+  history untouched. Required evidence is lint, typecheck, budget domain and agent tests, plus review of the
+  listener-dependent tests for the merged code. Fresh listener-dependent execution remains for the operator.
 - **Completion prerequisites:** none
 - **Outcome:** Changed budgets reach session snapshots on sync. Claude Code can show a user-only tool warning;
   Codex retains next-prompt delivery. Spend states current crossings and Home retains first observations for
-  leads and owners outside Needs. Server times use the API client's saved offset and clock tolerance; rejected
+  leads and owners outside Needs. Sync saves the clock offset in each snapshot for hooks to read with the shared tolerance; rejected
   figures preserve snapshots and pending crossings for retry. Terminal reads print figures before a best-effort
   update restricted to the selected team, using the sync lock without waiting and at most one current-folder
   attribution read. No daemon, polling, usage metering change, timeout increase or change to begin().
 - **Implementation and evidence:**
+  The following checked entries are prior branch evidence. Current merged verification is recorded separately below.
   - [x] Budget pass tests use an injected clock with unchanged production defaults and every existing assertion
     retained. A separate test verifies exactly two reads before the time cutoff and continuation next pass.
     Node 26.3.0: twenty consecutive budget-file runs pass (23 tests each); 315 listener-free agent units, lint,
@@ -65,13 +71,24 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
     refresh and the single current-folder attribution read. Database and credential failures remain best effort.
   - [x] Node 26.3.0: lint, app and agent typechecks, syntax, agent build, all no-server suites and listener-free agent
     units pass. The separate network-blocked serial hook latency test passes under its unchanged p95 limit.
+  - [x] Current merge on Node 26.3.0: budget domain 55/0, listener-free agent checks 393/0, focused budget checks 48/0,
+    agent build and app typecheck pass. Lint passes after a temporary test-directory cleanup race on its first run.
+    Static checks confirm both storage literals are 26, requirements and named scenarios precede Sources, and no
+    conflict markers remain. The index hash is unchanged and all sixteen unmerged entries remain for the operator.
+  - [ ] Current whole-hook latency remains unresolved at the unchanged 150 ms p95 limit. The first full-agent run
+    passes at 79.3/76.2 ms (after delivery/below 80 percent). A later serial run is 105.2/177.3 ms; its single retry is
+    184.6/169.2 ms. An interleaved comparison is 126.5/195.7 ms for the untouched base and 127.9/247.4 ms for the merge.
+    Both builds fail the below-threshold comparison, so these observations cannot isolate a code regression.
+  - [ ] Full agent execution includes 279 listener failures, all listen EPERM on 127.0.0.1; 391 concurrent checks and
+    its two initial serial checks pass. The server, browser and live-agent suites were not launched. Both touched
+    server scripts pass syntax checks and were reviewed for schema literals, counts, exact copy and merged behavior.
   - [ ] Fresh server, browser and live-agent verification of the review fixes requires a listener-capable environment.
-- **Next action:** Review the uncommitted fixes, then run the listener-based suites for their exact state where ports
-  are available. Those fresh results remain UNKNOWN here. The `litai` guidance command fails with exit 127 because
+- **Next action:** Review the uncommitted fixes, investigate the whole-hook latency on a quiet host, then run the
+  listener-based suites for this exact state where ports are available. Those fresh results remain UNKNOWN here. The `litai` guidance command fails with exit 127 because
   the CLI is not installed; its workflow survey and formal specification verification remain UNKNOWN. The parent
   stays unchecked until the remaining evidence is recorded. No outbound action is authorized.
 
-### [x] SPEND-003: Team budgets and budget requests
+### [ ] SPEND-003: Team budgets and budget requests
 
 - **Owner:** specs/align/budgets.md and the retained implementation
 - **Direction:** Let a team set a monthly budget in list-price estimates, see how fast it is used, and record a
@@ -80,19 +97,23 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   A request filed from a terminal always waits for a person; only a browser request can be recorded under the
   team's allowance, up to its monthly ceiling. The requester never decides their own request. Spend in no goal
   counts against the person's one home team, recorded when a session's spending period begins; usage from before
-  this change is not attributed to a team. Budgets, burn, forecasts, history and spend in no goal are visible only to team members and workspace owners. The CSV names the same goal-bound team rows as the on-screen report. Read-only MCP exposure of budgets and budget requests is not built. The committed test receipt is stale on main and is not refreshed here.
+  this change is not attributed to a team. Budgets, burn, forecasts, history and spend in no goal are visible only to team members and workspace owners. The CSV names the same goal-bound team rows as the on-screen report. Read-only MCP exposure of budgets and budget requests is not built.
+- **Review repair:** Address the numbered standalone-branch findings in order: clock and sync defects, owner decisions, then specification and document corrections. Preserve all existing assertions and limits. Leave edits uncommitted.
+- **Next action:** Run the server, browser and live-agent acceptance suites in a listener-capable environment and resolve the hook latency gate before closing this item.
+- **Prior branch review evidence:** Budget domain, all no-server suites, listener-free agent unit tests, typecheck and syntax checks pass. The unchanged whole-hook latency gate fails on this host, including the below-threshold case. Server, browser and live-agent execution needs a listener-capable environment.
 - **Completion prerequisites:** none
 - **Outcome:** Specified in budgets.md, with the interface, local-agent and workspace parts amended to match. The
   no-server suites and listener-free agent unit tests cover the fixes. Server and browser execution requires a listener-capable environment.
 - **Implementation and evidence:**
-  - [x] One schema migration (version 24) for budgets, their history, budget requests, decisions and home teams.
+  - [x] Schema version 24 for budgets, history, requests, decisions and home teams, plus version 25 to record the terminal filing device without rewriting existing records.
   - [x] Budget, burn, forecast, request, decision, second-look, withdrawal and home-team routes, with audit rows.
   - [x] Spend, Requests, Sessions and Home screens; budget requests are rows in Home's single Needs list.
   - [x] `align budget` and `align budget request`; 80 and 100 percent notes delivered by the existing hooks from
     local files, once per session, month and threshold.
   - [x] The budget domain suite covers authorization, decision audit, paging, rate limits, attribution and retention.
-  - [x] Agent unit tests cover threshold delivery, bounded sync and terminal wording. The server and browser suites
-    cover routes, screens, independent month controls and request decisions; their current execution is unverified here.
+  - [x] Listener-free agent tests cover clock offsets, pending crossings, deterministic pass limits, terminal cache refresh, temporary refusals, cleanup, sync order and terminal wording.
+  - [ ] The unchanged serial hook latency gate passes for delivered thresholds and budgets below 80 percent.
+  - [ ] Server, browser and live-agent suites execute successfully in a listener-capable environment. Coverage includes routes, filing sources, small-team privacy, independent month controls and request decisions.
 
 ### [x] SPEND-002: Export monthly team spend
 

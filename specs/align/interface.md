@@ -17,7 +17,7 @@ open it reads again at most once a minute (see "Workspace Home"). A page shows o
 set, and the `can` flags the server returns on alignments and change requests. "Pod" is stored data only: every
 screen says "team".
 
-Every time on a screen reads the same way, in the person's locale: month, day and minute ("Nov 13, 4:25 PM"), with the
+Budget figures and records use readable UTC dates and read times as specified in `budgets`. Other screen times read the same way, in the person's locale: month, day and minute ("Nov 13, 4:25 PM"), with the
 year only when it is not this year ("Oct 2, 2025, 9:05 AM"), never a numeric date and never seconds (LIM-2513 journey
 pass: the goal page, Requests and the value card said "11/13/2026, 4:25:49 PM" while Home and the review drawer said
 "Nov 13, 4:25 PM"). A duration ("18 seconds") is not a time and keeps its seconds.
@@ -583,7 +583,7 @@ unknown, never zero, and nothing on the page SHALL infer what an agent is doing 
 versions it sent an app, never which one the app uses; the decision value card names the apps Align sent a launched
 version). The page reads when it opens and again after a decision in the review drawer or a request sent from the
 "Propose a change" drawer, and again when the workspace's live stream says one of the person's views moved (Requirement:
-Live workspace). The Home SHALL finish its initial reads, including the Needs list's dependent reads, before opening its long-lived stream; the stream SHALL NOT prevent the initial page load from settling. It does not poll (only its first-run card checks the apps while it is shown, and its "Since you last
+Live workspace). It does not poll (only its first-run card checks the apps while it is shown, and its "Since you last
 looked" section checks for new changes as below, the Needs-you list reading again with it).
 
 The heading SHALL read "<n> things need you" ("1 thing needs you"), or "Nothing needs you"; when a source could not be
@@ -1655,7 +1655,12 @@ The Spend tab SHALL show token usage and estimated list cost from
 `GET /api/v2/workspaces/<ws>/spend?by=goal|team|session` with a "Group by" choice of By goal, By team and By my
 sessions.
 
-The tab SHALL offer the monthly team CSV export and the team-budget screens specified in `budgets`. The team picker SHALL default to the reader's home team. A budget not set SHALL read "No team budget for this month." The attribution rule SHALL appear once here: goal-bound work counts under the goal's team and work in no goal under the home team recorded when that spending period opened. No shared workspace footer SHALL repeat it. Budget request records SHALL say whether they were filed from the browser or terminal, show the full authority sentence and the preserved decisions, and link using `?team=<id>&month=<YYYY-MM>&request=<id>`.
+The tab SHALL offer the monthly team CSV export and the team-budget screens specified in `budgets`. The team picker SHALL default to the reader's home team. A budget not set SHALL read "No team budget for this month." The attribution rule SHALL appear once here: goal-bound work counts under the goal's team and work in no goal under the home team recorded when that spending period opened. No shared workspace footer SHALL repeat it. Budget request records, lists and Home rows SHALL show the authenticated filing source specified in `budgets`, including the recorded terminal device and uncertainty about who ran its command, show the full authority sentence and the preserved decisions, and link using `?team=<id>&month=<YYYY-MM>&request=<id>`.
+
+#### Scenario: Budget crossings inform the reader
+
+- **WHEN** a budget reader opens Spend and a team lead returns to Home after a first crossing (`scripts/test-v2.mjs`, "budget screens: Since shows crossings and Needs contains no crossing row")
+- **THEN** Spend states current thresholds and computation time, Home follows Since you last looked's rules, and Needs and its count remain unchanged
 
 #### Scenario: Spend combines budget and export controls
 
@@ -1909,7 +1914,9 @@ pills with their own colors: "accepted by the developer" green, "declined" red a
 - `lib/v2/changes.ts`
 - `lib/v2/mail.ts`
 
-#### Scenario: Budget crossings inform the reader
 
-- **WHEN** a budget reader opens Spend and a team lead returns to Home after a first crossing
-- **THEN** Spend states current thresholds and computation time, Home follows Since you last looked's rules, and Needs and its count remain unchanged
+- `app/app/w/[ws]/spend/budgets.tsx`
+- `app/app/_ui/home/needs.ts`
+- `app/app/_ui/home/since.tsx`
+- `app/app/_ui/home/needs-list.tsx`
+- `scripts/test-budgets.mjs`

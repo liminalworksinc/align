@@ -15,6 +15,7 @@
 // told at its next prompt, and a hold, its release and a hold again with no prompt between (C14-2: no release notice
 // while held again). A fixed set of seeds runs every time, plus random ones (printed, so a failure can be run again with
 // ALIGN_PROP_SEEDS=<seed>).
+import { credentialsFile } from "../src/api.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -155,7 +156,7 @@ test(`share-state notices agree with the deny and the status views, whatever the
     const sync = () => runCli(t, ["sync"]);
     const live = () => ss.filter((s) => fake.sessions.get(s.key)?.state === "shared");
     const signedIn = () => {
-      const c = readJson<{ signed_out?: boolean }>(layout.credentials(t.home));
+      const c = readJson<{ signed_out?: boolean }>(credentialsFile(t.home));
       return !!c && !c.signed_out;
     };
     const events: Record<string, () => Promise<unknown>> = {
@@ -226,7 +227,7 @@ test(`share-state notices agree with the deny and the status views, whatever the
       },
       // C12-2: the device revoked on the Devices page, heard by the next pass, which ends the shares there and then.
       "device revoked on the web, then a sync": async () => {
-        const c = readJson<{ device_id: string; signed_out?: boolean }>(layout.credentials(t.home));
+        const c = readJson<{ device_id: string; signed_out?: boolean }>(credentialsFile(t.home));
         if (c && !c.signed_out) fake.revokeOnWeb(c.device_id);
         await sync();
       },

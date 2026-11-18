@@ -9,9 +9,9 @@ import { memberName, memberPrincipal, need } from "./workspaces";
 import { noGoalTeamTotals } from "./spend";
 import { spendMonth } from "./spend-month";
 import { personName } from "./retention-core.mts";
-import type { GoalRow } from "./goals";
 import type { DevicePrincipal } from "./devices";
 import { count } from "./plural.mts";
+import type { GoalRow } from "./goals";
 
 // Monthly planning amounts at list price. No code in this module stops, holds or launches work.
 export const BUDGET_NOTE = "All amounts and forecasts are estimates at list price. Work continues when the budget is reached.";
@@ -106,29 +106,27 @@ function teamSums(ws: string, team: string, from: string, to: string): BurnSum {
     no_goal_priced: noGoal?.est_list_usd_micros ?? 0, no_goal_unpriced: noGoal?.unpriced_requests ?? 0 };
 }
 
-/** No spend aggregation: history order distinguishes writes even when their timestamps tie. */
+/** Stored revisions avoid rereading history. The covering indexes are verified by EXPLAIN QUERY PLAN. */
+const STAMP_ROWS = `SELECT s.ws_id AS ws, s.pod_id AS team, s.month, s.revision,
+  (SELECT MAX(r.expires_at) FROM v2_budget_requests r
+   WHERE r.ws_id = s.ws_id AND r.pod_id = s.pod_id AND r.month = s.month AND r.state = 'granted' AND r.expires_at <= ?) AS expired_at
+  FROM v2_budget_stamps s WHERE `;
 function stampRows(where: string, args: (string | number)[], now: number) {
-  return all<{ ws: string; team: string; month: string; change_id: string; grants: string }>(
-    `SELECT h.ws_id AS ws, h.pod_id AS team, h.month, h.id AS change_id,
-       (SELECT json_array(COUNT(*), COALESCE(SUM(r.revision), 0), COALESCE(SUM(r.expires_at <= ?), 0))
-        FROM v2_budget_requests r WHERE r.ws_id = h.ws_id AND r.pod_id = h.pod_id AND r.month = h.month AND r.state = 'granted') AS grants
-     FROM v2_team_budget_history h WHERE ${where}
-     AND h.rowid = (SELECT MAX(latest.rowid) FROM v2_team_budget_history latest
-       WHERE latest.ws_id = h.ws_id AND latest.pod_id = h.pod_id AND latest.month = h.month)
-     ORDER BY h.ws_id, h.pod_id`, new Date(now).toISOString(), ...args,
+  return all<{ ws: string; team: string; month: string; revision: number; expired_at: string | null }>(
+    STAMP_ROWS + where + " ORDER BY s.ws_id, s.pod_id", new Date(now).toISOString(), ...args,
   ).map(({ ws, team, month, ...parts }) => ({ ws, team, month, stamp: createHash("sha256").update(JSON.stringify(parts)).digest("hex") }));
 }
 export function budgetStamp(ws: string, team: string, month: string, now = Date.now()): string | null {
-  return stampRows("h.ws_id = ? AND h.pod_id = ? AND h.month = ?", [ws, team, month], now)[0]?.stamp ?? null;
+  return stampRows("s.ws_id = ? AND s.pod_id = ? AND s.month = ?", [ws, team, month], now)[0]?.stamp ?? null;
 }
 
 /** The existing directive response carries only metadata the device's person is entitled to read. */
 export function deviceBudgetStamps(dev: DevicePrincipal, now = Date.now()) {
   const workspaces = [...dev.grants];
   if (!workspaces.length) return [];
-  return stampRows(`h.month = ? AND h.ws_id IN (${workspaces.map(() => "?").join(",")}) AND EXISTS
-    (SELECT 1 FROM v2_members m WHERE m.ws_id = h.ws_id AND m.user_id = ? AND
-      (m.role = 'owner' OR EXISTS (SELECT 1 FROM v2_pod_members pm WHERE pm.ws_id = h.ws_id AND pm.pod_id = h.pod_id AND pm.user_id = m.user_id)))`,
+  return stampRows(`s.month = ? AND s.ws_id IN (${workspaces.map(() => "?").join(",")}) AND EXISTS
+    (SELECT 1 FROM v2_members m WHERE m.ws_id = s.ws_id AND m.user_id = ? AND
+      (m.role = 'owner' OR EXISTS (SELECT 1 FROM v2_pod_members pm WHERE pm.ws_id = s.ws_id AND pm.pod_id = s.pod_id AND pm.user_id = m.user_id)))`,
     [currentMonth(now), ...workspaces, dev.user.id], now);
 }
 
@@ -151,27 +149,40 @@ export function homeBudgetCrossings(pp: PolicyPrincipal) {
 }
 
 export function budgetBurn(pp: PolicyPrincipal, teamId: string, month?: string | null, now = Date.now()) {
+  return tx(() => readBudgetBurn(memberPrincipal(pp.wsId, pp.userId), teamId, month, now));
+}
+
+function readBudgetBurn(pp: PolicyPrincipal, teamId: string, month: string | null | undefined, now: number) {
   need(pp, "spend.read");
   const team = teamOf(pp, teamId);
   if (pp.wsRole !== "owner" && !pp.pods.has(teamId)) throw notFound();
   const m = spendMonth(month ?? currentMonth(now));
   const asOf = Math.max(m.start, Math.min(now, m.end));
   const sums = teamSums(pp.wsId, team.id, m.from, new Date(asOf).toISOString());
-  const attributionUnknown = !!get<{ incomplete: number }>(
+  const rolledAttributionUnknown = !!get<{ incomplete: number }>(
     `SELECT EXISTS(SELECT 1 FROM v2_spend_rollups
      WHERE ws_id = ? AND goal_id = '' AND requests > team_attributed_requests
        AND day || 'T00:00:00.000Z' >= ? AND day || 'T00:00:00.000Z' < ?) AS incomplete`, pp.wsId, m.from, new Date(asOf).toISOString(),
   )!.incomplete;
+  const earlierUsage = !!get<{ incomplete: number }>(
+    `SELECT EXISTS(SELECT 1 FROM v2_usage u
+     JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id
+     JOIN v2_sessions s ON s.ws_id = e.ws_id AND s.session_key = e.session_key
+     JOIN v2_pod_members pm ON pm.ws_id = s.ws_id AND pm.user_id = s.user_id AND pm.pod_id = ?
+     WHERE u.ws_id = ? AND e.goal_id IS NULL AND e.spend_team_id IS NULL AND u.ts >= ? AND u.ts < ?) AS incomplete`,
+    team.id, pp.wsId, m.from, new Date(asOf).toISOString(),
+  )!.incomplete;
+  const attributionUnknown = rolledAttributionUnknown || earlierUsage;
   const e = budgetOf(pp.wsId, team.id, m.month);
   const usedAllowance = allowanceGranted(pp.wsId, team.id, m.month);
   const grants = all<{ approved_usd_micros: number; expires_at: string }>(
-    "SELECT approved_usd_micros, expires_at FROM v2_budget_requests WHERE ws_id = ? AND pod_id = ? AND month = ? AND state = 'granted' AND expires_at > ? ORDER BY expires_at", pp.wsId, team.id, m.month, new Date(now).toISOString(),
+    "SELECT approved_usd_micros, expires_at FROM v2_budget_requests WHERE ws_id = ? AND pod_id = ? AND month = ? AND state = 'granted' AND expires_at > ? AND updated_at < ? ORDER BY expires_at", pp.wsId, team.id, m.month, now >= m.end ? m.from : new Date(now).toISOString(), m.to,
   );
   const effective = e ? e.amount_usd_micros + grants.reduce((n, g) => n + g.approved_usd_micros, 0) : null;
   const complete = sums.unpriced === 0 && !attributionUnknown;
   const elapsed = asOf - m.start;
-  const attributed = !attributionUnknown;
-  const spendBound = !attributed ? "unknown" as const : sums.unpriced ? "lower" as const : "exact" as const;
+  const attributed = !attributionUnknown || sums.priced > 0;
+  const spendBound = !attributed ? "unknown" as const : sums.unpriced || attributionUnknown ? "lower" as const : "exact" as const;
   const remaining = attributed && effective !== null ? effective - sums.priced : null;
   const forecast = attributed && elapsed > 0 ? (complete ? Math.round : Math.floor)(sums.priced * ((m.end - m.start) / elapsed)) : null;
   let runsOut: number | null = null;
@@ -199,7 +210,7 @@ export function budgetBurn(pp: PolicyPrincipal, teamId: string, month?: string |
   observeCrossings(pp.wsId, team.id, m.month, reached, new Date(asOf).toISOString(), now);
   return {
     budget_stamp: history.length ? budgetStamp(pp.wsId, team.id, m.month, now) : null, reached_thresholds: reached,
-    team, month: m.month, from: m.from, to: m.to, as_of: new Date(asOf).toISOString(), note: BUDGET_NOTE,
+    team, team_member_count: get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_pod_members WHERE ws_id = ? AND pod_id = ?", pp.wsId, team.id)!.n, month: m.month, from: m.from, to: m.to, as_of: new Date(asOf).toISOString(), note: BUDGET_NOTE,
     budget: e ? { amount_usd_micros: e.amount_usd_micros, allowance_usd_micros: e.allowance_usd_micros, allowance_ceiling_usd_micros: e.allowance_ceiling_usd_micros, updated_by: person(e.updated_by), updated_at: e.updated_at } : null,
     allowance_granted_usd_micros: usedAllowance,
     allowance_remaining_usd_micros: e?.allowance_ceiling_usd_micros == null ? null : Math.max(0, e.allowance_ceiling_usd_micros - usedAllowance),
@@ -207,22 +218,23 @@ export function budgetBurn(pp: PolicyPrincipal, teamId: string, month?: string |
     estimated_spend_usd_micros: attributed ? sums.priced : null, spend_bound: spendBound,
     remaining_usd_micros: remaining, remaining_bound: remaining === null ? null : complete ? "exact" as const : "upper" as const,
     forecast_bound: forecast === null ? null : complete ? "exact" as const : "lower" as const,
-    pricing_note: !attributed ? "Team attribution is incomplete. Complete spend, remaining and forecast are unknown; the priced subtotal is only the known amount." : sums.unpriced ?
+    pricing_note: attributionUnknown && attributed ? "Some earlier usage could not be attributed. Spend and forecast, when shown, are at least the priced estimates. Remaining, when shown, is at most its displayed estimate." : !attributed ? "Some earlier usage could not be attributed. Complete spend, remaining and forecast are unknown; the priced subtotal is only the known amount." : sums.unpriced ?
       `${count(sums.unpriced, "unpriced request")} excluded. Spend and forecast are at least the priced estimates. Remaining, when shown, is at most its displayed estimate.` : "All requests in this total have prices.",
     forecast_usd_micros: forecast, runs_out_at: runsOut === null ? null : new Date(Math.ceil(runsOut)).toISOString(),
     unpriced_requests: attributionUnknown ? null : sums.unpriced, known_unpriced_requests: sums.unpriced,
-    no_goal: { priced_spend_usd_micros: sums.no_goal_priced, estimated_spend_usd_micros: attributed ? sums.no_goal_priced : null,
-      spend_bound: !attributed ? "unknown" as const : sums.no_goal_unpriced ? "lower" as const : "exact" as const,
+    no_goal: { priced_spend_usd_micros: sums.no_goal_priced, estimated_spend_usd_micros: attributed && (!attributionUnknown || sums.no_goal_priced > 0) ? sums.no_goal_priced : null,
+      spend_bound: !attributed ? "unknown" as const : sums.no_goal_unpriced || attributionUnknown ? "lower" as const : "exact" as const,
       unpriced_requests: attributionUnknown ? null : sums.no_goal_unpriced, known_unpriced_requests: sums.no_goal_unpriced, share_percent: complete && sums.priced > 0 ? Math.round(sums.no_goal_priced / sums.priced * 1000) / 10 : null,
       attribution_unknown: attributionUnknown },
     history, can: { manage: m.month >= currentMonth(now) && authorize(pp, "team_budget.manage", { kind: "pod", podId: team.id }).ok,
       request: !!e && m.month === currentMonth(now) && authorize(pp, "budget_request.create", { kind: "pod", podId: team.id }).ok },
   };
 }
-export type BudgetBurn = ReturnType<typeof budgetBurn>;
+export type BudgetBurn = Awaited<ReturnType<typeof budgetBurn>>;
 
 interface RequestRow {
   id: string; ws_id: string; pod_id: string; month: string; requester_id: string; filed_from: "browser" | "terminal";
+  source_device_name: string | null;
   state: "waiting" | "granted" | "declined" | "withdrawn"; revision: number;
   amount_usd_micros: number; reason: string; goal_id: string | null;
   approved_usd_micros: number | null; authority: "allowance" | "approver" | null; expires_at: string | null;
@@ -295,7 +307,9 @@ function requestView(pp: PolicyPrincipal, r: RequestRow, refs = requestRefs(pp, 
   const secondLookReason = r.second_look ? "This request already had its second look." : r.month !== currentMonth() ? "This month has ended, so a second look is unavailable." : state === "declined" && !eligibleApprovers(r, true, refs).length ? NO_SECOND_OWNER : null;
   return {
     id: r.id, team: refs.teams.get(r.pod_id)!, month: r.month, revision: r.revision, state, state_note: stateSentence(r, pp.userId, decisions, (id) => refs.person(id).name),
-    requester: refs.person(r.requester_id), filed_from: r.filed_from, amount_usd_micros: r.amount_usd_micros, reason: r.reason,
+    requester: refs.person(r.requester_id), filed_from: r.filed_from,
+    filing_note: r.filed_from === "browser" ? `Filed in the browser by ${refs.person(r.requester_id).name}.` :
+      `${r.source_device_name ? `Filed from a terminal on the device ${r.source_device_name}.` : "Filed from a terminal on a device whose name was not recorded."} Align cannot tell whether ${refs.person(r.requester_id).name} or an agent on that device ran the command.`, amount_usd_micros: r.amount_usd_micros, reason: r.reason,
     goal: readable ? { id: goal.id, title: goal.title } : null, goal_hidden: !!r.goal_id && !readable,
     session_count: r.requested_session_count, session_keys: r.requester_id === pp.userId ? refs.sessions.filter((s) => s.request_id === r.id).map((s) => s.session_key) : [],
     approved_usd_micros: r.approved_usd_micros, authority: r.authority,
@@ -356,7 +370,7 @@ function waitingRoom(pp: PolicyPrincipal, team: string, month: string) {
   if (n >= 5) throw conflict("too_many_waiting_requests", "You already have five budget requests waiting for this team this month. Wait for a decision or withdraw one before asking again.");
 }
 
-export async function createBudgetRequest(pp: PolicyPrincipal, team: string, b: Body, filedFrom: "browser" | "terminal") {
+export async function createBudgetRequest(pp: PolicyPrincipal, team: string, b: Body, filedFrom: "browser" | "terminal", deviceId?: string) {
   teamOf(pp, team);
   need(pp, "budget_request.create", { kind: "pod", podId: team });
   const amount = dollars(b, "amount_usd", true);
@@ -375,15 +389,19 @@ export async function createBudgetRequest(pp: PolicyPrincipal, team: string, b: 
     const m = spendMonth(currentMonth());
     const e = budgetOf(pp.wsId, team, m.month);
     if (!e) throw conflict("budget_missing", "This team has no budget for this month.");
-    const created = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_budget_requests WHERE ws_id = ? AND created_at > ?", pp.wsId, new Date(Date.now() - 3600_000).toISOString())!.n;
-    if (created >= 60) throw new V2Error(429, "rate_limited", "Too many budget requests were recorded in the last hour. Try again later.");
+    const since = new Date(Date.now() - 3600_000).toISOString();
+    const created = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_budget_requests WHERE ws_id = ? AND requester_id = ? AND created_at > ?", pp.wsId, pp.userId, since)!.n;
+    const workspaceCreated = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_budget_requests WHERE ws_id = ? AND created_at > ?", pp.wsId, since)!.n;
+    if (created >= 60 || workspaceCreated >= 600) throw new V2Error(429, "rate_limited", "Too many budget requests were recorded in the last hour. Try again later.");
+    const device = filedFrom === "terminal" ? get<{ id: string; name: string }>("SELECT id, name FROM v2_devices WHERE id = ? AND user_id = ?", deviceId ?? "", pp.userId) : null;
+    if (filedFrom === "terminal" && !device) throw notFound();
     const granted = filedFrom === "browser" && e.allowance_usd_micros !== null && amount <= e.allowance_usd_micros &&
       e.allowance_ceiling_usd_micros !== null && allowanceGranted(pp.wsId, team, m.month) + amount <= e.allowance_ceiling_usd_micros;
     if (!granted) waitingRoom(pp, team, m.month);
     run(`INSERT INTO v2_budget_requests (id, ws_id, pod_id, month, requester_id, filed_from, state, amount_usd_micros, reason, goal_id,
-      approved_usd_micros, authority, expires_at, created_at, updated_at, requested_session_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      approved_usd_micros, authority, expires_at, created_at, updated_at, requested_session_count, source_device_id, source_device_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id, pp.wsId, team, m.month, pp.userId, filedFrom, granted ? "granted" : "waiting", amount, reason, goalId,
-      granted ? amount : null, granted ? "allowance" : null, granted ? m.to : null, at, at, keys.length);
+      granted ? amount : null, granted ? "allowance" : null, granted ? m.to : null, at, at, keys.length, device?.id ?? null, device?.name ?? null);
     for (const key of keys) run("INSERT INTO v2_budget_request_sessions (ws_id, request_id, session_key) VALUES (?, ?, ?)", pp.wsId, id, key);
     audit(pp.wsId, pp.userId, "budget_request.requested", id, at);
     if (granted) audit(pp.wsId, pp.userId, "budget_request.allowance_granted", id, at);

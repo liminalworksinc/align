@@ -1362,6 +1362,11 @@ const MIGRATIONS: string[] = [
   ALTER TABLE v2_spend_rollups ADD COLUMN team_attributed_unpriced_requests INTEGER NOT NULL DEFAULT 0;
   CREATE INDEX v2_budget_requests_home ON v2_budget_requests(ws_id, month, requester_id, updated_at);
   `,
+  // Filing source for terminal budget requests. Existing records make no claim about an unknown device.
+  `
+  ALTER TABLE v2_budget_requests ADD COLUMN source_device_id TEXT REFERENCES v2_devices(id) ON DELETE SET NULL;
+  ALTER TABLE v2_budget_requests ADD COLUMN source_device_name TEXT;
+  `,
   // First observed budget crossings are information for Home, never decisions or product events.
   `
   CREATE TABLE v2_budget_crossings (
@@ -1374,6 +1379,35 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (ws_id, pod_id, month, threshold),
     FOREIGN KEY (ws_id, pod_id) REFERENCES v2_pods(ws_id, id) ON DELETE CASCADE
   );
+
+  CREATE TABLE v2_budget_stamps (
+    ws_id TEXT NOT NULL,
+    pod_id TEXT NOT NULL,
+    month TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    PRIMARY KEY (ws_id, pod_id, month),
+    FOREIGN KEY (ws_id, pod_id) REFERENCES v2_pods(ws_id, id) ON DELETE CASCADE
+  );
+  INSERT INTO v2_budget_stamps (ws_id, pod_id, month, revision)
+    SELECT ws_id, pod_id, month, COUNT(*) FROM v2_team_budget_history GROUP BY ws_id, pod_id, month;
+  CREATE INDEX v2_budget_stamps_month ON v2_budget_stamps(ws_id, month, pod_id, revision);
+  CREATE INDEX v2_budget_requests_expiry ON v2_budget_requests(ws_id, pod_id, month, state, expires_at);
+  CREATE TRIGGER v2_budget_stamp_history AFTER INSERT ON v2_team_budget_history BEGIN
+    INSERT INTO v2_budget_stamps (ws_id, pod_id, month, revision) VALUES (NEW.ws_id, NEW.pod_id, NEW.month, 1)
+      ON CONFLICT (ws_id, pod_id, month) DO UPDATE SET revision = revision + 1;
+  END;
+  CREATE TRIGGER v2_budget_stamp_grant_insert AFTER INSERT ON v2_budget_requests WHEN NEW.state = 'granted' BEGIN
+    INSERT INTO v2_budget_stamps (ws_id, pod_id, month, revision) VALUES (NEW.ws_id, NEW.pod_id, NEW.month, 1)
+      ON CONFLICT (ws_id, pod_id, month) DO UPDATE SET revision = revision + 1;
+  END;
+  CREATE TRIGGER v2_budget_stamp_grant_update AFTER UPDATE ON v2_budget_requests WHEN NEW.state = 'granted' OR OLD.state = 'granted' BEGIN
+    INSERT INTO v2_budget_stamps (ws_id, pod_id, month, revision) VALUES (NEW.ws_id, NEW.pod_id, NEW.month, 1)
+      ON CONFLICT (ws_id, pod_id, month) DO UPDATE SET revision = revision + 1;
+  END;
+  CREATE TRIGGER v2_budget_stamp_crossing AFTER INSERT ON v2_budget_crossings BEGIN
+    INSERT INTO v2_budget_stamps (ws_id, pod_id, month, revision) VALUES (NEW.ws_id, NEW.pod_id, NEW.month, 1)
+      ON CONFLICT (ws_id, pod_id, month) DO UPDATE SET revision = revision + 1;
+  END;
   `,
 ];
 

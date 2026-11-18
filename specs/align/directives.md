@@ -483,6 +483,26 @@ The server SHALL serve directives only through `/api/v2/directives`, `/api/v2/di
 - **WHEN** a client calls `GET /api/directives/stream?session=claude-code:x`
 - **THEN** the response is HTTP 404
 
+### Requirement: Private budget change stamps
+
+The existing directive response SHALL include additive `budget_stamps` as `[{ws, team, month, stamp}]` for this UTC
+month's teams whose budget the device's person may read in a granted workspace and whose budget has history. The opaque stamp SHALL change on set, change, removal, grant, grant expiry and first observed crossing, including changes recorded
+at the same instant. Entries SHALL contain no amounts, names, people, goals or sessions. A team without budget history
+SHALL add no entry or burn computation. The stamp SHALL also accompany session attribution and team budget reads.
+Directive fetch SHALL use stored revisions and indexed expiry lookups with no table scan or history aggregation. Older agents SHALL continue processing directives while ignoring this unknown field. Agents SHALL accept its absence
+from older servers without stopping sync.
+
+#### Scenario: Stamps reveal only readable teams
+
+- **WHEN** a granted device fetches directives after changes to its own and another team's budgets (`scripts/test-budgets.mjs`, "change stamps distinguish tied writes, allowance grants, decisions, expiry and removal without leaking other teams"; `test/budgets.test.ts`, "the committed base agent's directive intake ignores budget stamps and still applies a stop")
+- **THEN** only readable teams have stamps, no amounts or names appear, and an older agent still applies ordinary directives
+
+#### Scenario: Directive stamps use indexed reads
+
+- **WHEN** the directive stamp queries are explained with accumulated budget history (`scripts/test-budgets.mjs`, "directive budget stamps use indexed revisions and expiry lookups without table scans")
+- **THEN** each table access is an indexed search and the query never reads budget history
+
+
 ## Open questions
 
 - Waking idle agents is out of scope (Owner decision 2026-10-30 keeps it open): a stop or a new goal version takes effect only when the session's next hook starts a sync, so an idle agent learns nothing until someone uses it again, and the Sessions tab shows "Stop sent, not yet received" until then.
@@ -521,18 +541,3 @@ The server SHALL serve directives only through `/api/v2/directives`, `/api/v2/di
 - packages/align-agent/src/hot.ts
 - packages/align-agent/src/hooks/handlers.ts
 - proxy.ts
-
-### Requirement: Private budget change stamps
-
-The existing directive response SHALL include additive `budget_stamps` as `[{ws, team, month, stamp}]` for this UTC
-month's teams whose budget the device's person may read in a granted workspace and whose budget or grants have
-changed. The opaque stamp SHALL change on set, change, removal, grant and grant expiry, including changes recorded
-at the same instant. Entries SHALL contain no amounts, names, people, goals or sessions. A team without budget history
-SHALL add no entry or burn computation. The stamp SHALL also accompany session attribution and team budget reads.
-Older agents SHALL continue processing directives while ignoring this unknown field. Agents SHALL accept its absence
-from older servers without stopping sync.
-
-#### Scenario: Stamps reveal only readable teams
-
-- **WHEN** a granted device fetches directives after changes to its own and another team's budgets
-- **THEN** only readable teams have stamps, no amounts or names appear, and an older agent still applies ordinary directives

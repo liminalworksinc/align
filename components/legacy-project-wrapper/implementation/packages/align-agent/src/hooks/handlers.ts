@@ -50,7 +50,7 @@ import { layout, localId, spoolWrite } from "../shared/layout.ts";
 import { isShareStateNotice, noticeKind, resumedButHeld } from "../shared/notices.ts";
 import { matchRule, readRules, realDir, removeRule, setRule } from "../shared/rules.ts";
 import { queueSteering, steeringLine, unsharedNote } from "../shared/steering.ts";
-import { budgetNotes } from "../shared/budget-notes.ts";
+import { budgetNotes, claimBudgetNotes } from "../shared/budget-notes.ts";
 import type { DriftFile, FeedFile, Goal, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
 import { CLAIM_MS, collisions, commitSubject, crossOverlap, display, editedPaths, liveGoalId, podReport, rawActs, readPaths, record, shellWrites, siblingChanges, siblingNews, activityHot, type Act, type StartingShare } from "./siblings.ts";
 import { changedSince, COMMIT, commitMade, expectations, explainer, reflogMark, settle, shows, type SettleBy } from "./evidence.ts";
@@ -630,10 +630,9 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
     if (again.length) context = [context, ...again].filter(Boolean).join("\n");
   }
   const notices = takeNotices(hot, inj, () => blockingHolds(home, lid, cwd), () => stoppedNow(home, lid));
-  const spendingMessages = !inj.opened_epoch && (source === "startup" || source === "resume") ? budgetNotes(home, lid, hot, Date.now(), "message") : [];
-  messages.push(...spendingMessages);
-  const spending = !inj.opened_epoch && (source === "startup" || source === "resume") ? budgetNotes(home, lid, hot) : [];
-  if (spending.length) context = [context, ...spending].filter(Boolean).join("\n");
+  const spending = !inj.opened_epoch && (source === "startup" || source === "resume") ? claimBudgetNotes(home, lid, hot) : { context: [], messages: [] };
+  if (spending.context.length) context = [context, ...spending.context].filter(Boolean).join("\n");
+  messages.push(...spending.messages);
   if (notices) messages.push(notices);
   if (source === "startup") {
     const note = unsharedNote(home);
@@ -965,15 +964,14 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   if (resumed) context = [context, resumed].filter(Boolean).join("\n");
   const notices = [takeNotices(hot, inj, () => held, () => stoppedNow(home, lid)), ...req.notices, ...lifted.notices, takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
   // A just-opened epoch waits for the server's captured attribution before any threshold can be claimed.
-  const spendingMessages = inj.opened_epoch ? [] : budgetNotes(home, lid, hot, Date.now(), "message");
-  const spending = inj.opened_epoch ? [] : budgetNotes(home, lid, hot);
-  if (spending.length) context = [context, ...spending].filter(Boolean).join("\n");
+  const spending = inj.opened_epoch ? { context: [], messages: [] } : claimBudgetNotes(home, lid, hot);
+  if (spending.context.length) context = [context, ...spending.context].filter(Boolean).join("\n");
   writeInjected(home, lid, inj);
-  if (!context && !notices) return null;
+  const messages = [notices, ...spending.messages].filter(Boolean).join("\n");
+  if (!context && !messages) return null;
   const out: Record<string, unknown> = {};
   if (context) out.hookSpecificOutput = { hookEventName: "UserPromptSubmit", additionalContext: context };
-  const userMessages = [notices, ...spendingMessages].filter(Boolean).join("\n");
-  if (userMessages) out.systemMessage = userMessages;
+  if (messages) out.systemMessage = messages;
   return out;
 }
 
@@ -1374,7 +1372,7 @@ function midTurnDelta(home: string, lid: string, harness: Harness): HookOutput {
   if (!hot?.share) return null;
   const pre = readInjected(home, lid);
   const own = deltaKind(hot, pre);
-  const messageDue = harness === "claude-code" && budgetNotes(home, lid, hot, Date.now(), "message", false).length > 0;
+  const messageDue = harness === "claude-code" && (!pre.opened_epoch || pre.opened_epoch.epoch_id === hot.binding?.epoch_id) && budgetNotes(home, lid, hot, Date.now(), "message", false).length > 0;
   if (!own && !messageDue && !(hot.share.state === "shared" && contextChanged(hot, pre))) return null;
   const release = claimDelta(home, lid);
   if (!release) return null;
@@ -1389,7 +1387,7 @@ function midTurnDelta(home: string, lid: string, harness: Harness): HookOutput {
       reportApplied(home, lid, inj, hot.pending_directives);
     }
     if (hot.share.state === "shared") parts.push(...contextNotes(inj, hot.context_goals));
-    const spending = harness === "claude-code" ? budgetNotes(home, lid, hot, Date.now(), "message") : [];
+    const spending = harness === "claude-code" && (!inj.opened_epoch || inj.opened_epoch.epoch_id === hot.binding?.epoch_id) ? budgetNotes(home, lid, hot, Date.now(), "message") : [];
     if (!parts.length && !spending.length) return null;
     if (parts.length) writeInjected(home, lid, inj);
     return { ...(parts.length ? { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: parts.join("\n") } } : {}),

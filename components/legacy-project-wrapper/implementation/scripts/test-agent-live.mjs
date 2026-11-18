@@ -405,6 +405,8 @@ try {
     sync(); // Observe 100 percent without delivering it.
     await ws(L, "DELETE", `/teams/${PLATFORM}/budget`);
     sync(); // The removal's stamp must clear the due note without deleting the reused team read by hand.
+    const removedRead = cli(["budget"], agentEnv, repo);
+    check("budget: a terminal read refreshes a removed budget without deleting the cache by hand", removedRead.code === 0 && removedRead.stdout.includes("No team budget for this month."), removedRead.stdout + removedRead.stderr);
     const afterRemoval = hook("UserPromptSubmit", { session_id: SID, prompt_id: "budget-removed", prompt: "Continue", cwd: repo });
     check("budget: the next pass after removal clears an undelivered crossing", !existsSync(budgetCacheFile) && !afterRemoval.stdout.includes("100%"), afterRemoval.stdout);
   } finally {
