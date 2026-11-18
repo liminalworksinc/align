@@ -7,17 +7,24 @@
   Budget context lines count toward model context; person-only budget messages and notices count separately.
   Counters use a separate append-only file per session, with one append per text return, so parallel hooks keep
   every addition without changing shared hook-state reads, writes or fields. Commands sum valid complete lines
-  and tolerate a torn last line. The file is never rewritten or rotated and is removed with session files and on
-  uninstall. Unchanged prompts return zero bytes and leave totals, addition counts and last times unchanged.
+  and tolerate a torn last line. Sync removes logs after 30 days without an addition, with a 10 millisecond scan
+  budget and at most 100 removals per pass. Later additions start a new total. Uninstall removes all counters.
+  Unchanged prompts return zero bytes and leave totals, addition counts and last times unchanged.
 - Budget pass tests use a controlled clock so machine load cannot shorten their expected batches; a separate
   regression checks the unchanged time cutoff and continuation with unfinished sessions.
 
 - Budget changes reach shared sessions on the next sync through private change stamps on the existing response.
-  Unchanged cached passes add no budget requests. Budget notes use the saved server clock difference and preserve
-  pending crossings when a figure is rejected. Terminal budget reads print figures before a best-effort local update,
+  Unchanged cached passes add no budget requests. Indexed change stamps avoid rereading history, and concurrent
+  crossing reads retain one first observation. Terminal budget reads print figures before a best-effort local update,
   skip that update while sync holds its lock, and confirm at most the current folder's session. Claude Code can warn
   the person during a long turn without adding budget context; Codex retains next-prompt notes. Spend states current
   crossings and their computation time; Home shows first observed crossings to leads and owners outside Needs.
+
+- Team budget notes use the clock offset in their local snapshot, preserve state through rejected figures and
+  temporary refusals, and run after other sync work. Notes distinguish model
+  context from the person's message. Budget records name the authenticated filing source and terminal device.
+  Small teams see the spend privacy limit. Earlier unattributed usage prevents exact totals, closed months retain
+  their applicable grants, and request rate limits apply per requester with a separate workspace ceiling.
 
 - Teams can set monthly budgets in list-price estimates, record requests for more and keep each decision.
   Terminal requests always wait for a person. Spend includes budget controls and a monthly CSV export with

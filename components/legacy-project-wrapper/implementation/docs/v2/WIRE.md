@@ -165,8 +165,8 @@ plus `request` on kind `request` and `hold` on kinds `hold` and `release` (absen
 `GET /api/v2/directives?cursor=<seq>` (Bearer) → `{ "directives": [Directive], "next_cursor": "<seq>", "workspaces": [ "<ws id>" ], "ended_sessions": [ { "ws", "session_key", "ended_reason": null | "member_removed", "stopped_at" } ] }` (≤100, this device's sessions only; `workspaces`: the ids, sorted, of the workspaces this device reaches now, so it re-reads `/me` when they changed; `ended_sessions`: this device's sessions in those workspaces whose share ended in the last 30 days, newest first, at most 200, so a share stopped on the web ends on the device at its next pass, not at the session's next usage upload).
 The directive response also carries additive `budget_stamps: [{ws, team, month, stamp}]` for this UTC month's
 budget history in granted workspaces, only for teams whose budgets the person may read. Stamps contain no names,
-amounts, people, goals or sessions. The opaque stamp changes on a set, change, removal, grant or grant expiry,
-even when writes have the same time. Old agents ignore it; old servers may omit it. The same stamp is returned as
+amounts, people, goals or sessions. The opaque stamp changes on a set, change, removal, grant, grant expiry or first observed crossing,
+even when writes have the same time. Stored revisions and indexed expiry lookups avoid reading history on directive fetch. Old agents ignore it; old servers may omit it. The same stamp is returned as
 `budget_stamp` on team and session attribution reads. Sync compares it with the cached team read and refreshes a
 changed team in the same pass. Unchanged cached passes add zero budget requests; five-minute reuse, 120 reads,
 100 sessions and two seconds remain the bounds. A 404 or an unknown additive field never stops a pass.
@@ -509,27 +509,41 @@ passkeys and their dismissal of the passkey prompt.
 
 `GET /api/v2/workspaces/{ws}/teams/{team}/budget?month=YYYY-MM` accepts browser sessions and granted device tokens.
 The month defaults to the current UTC month. Only team members and workspace owners can read the budget,
-burn, forecast, no-goal subtotal and history; other readers get 404. The response fields and nested records are
-listed in `specs/align/budgets.md`. Amounts are integer USD microdollars representing list-price estimates.
-Unpriced work gives spend and forecast lower bounds and a remaining upper bound; unknown attribution gives
-null complete totals and an attribution-incomplete flag, without workspace-wide unattributed counts. No budget is `budget: null`. Reads do not create audit records or decisions.
+burn, forecast, no-goal subtotal and history; other readers get 404. The response is `{team, team_member_count, month, from, to, as_of, note, budget, effective_budget_usd_micros,
+estimated_spend_usd_micros, remaining_usd_micros, forecast_usd_micros, runs_out_at, unpriced_requests,
+known_unpriced_requests, priced_spend_usd_micros, spend_bound, remaining_bound, forecast_bound, pricing_note,
+budget_stamp, reached_thresholds, allowance_granted_usd_micros, allowance_remaining_usd_micros, no_goal, history, can}`.
+`team` is `{id, name}`. `budget` is null or `{amount_usd_micros, allowance_usd_micros,
+allowance_ceiling_usd_micros, updated_by, updated_at}`. People are `{id, name}`. `can` is `{manage, request}`.
+History is ordered oldest first and has `{id, action, amount_usd_micros, allowance_usd_micros,
+allowance_ceiling_usd_micros, actor, at}`. `no_goal` has `{priced_spend_usd_micros, estimated_spend_usd_micros,
+spend_bound, unpriced_requests, known_unpriced_requests, share_percent, attribution_unknown}`.
+Bounds are `exact`, `lower`, `upper`, `unknown` or null for absent amounts. Amounts are integer USD microdollars representing list-price estimates.
+Unpriced work and earlier live no-goal usage without a home team give spend and forecast lower bounds and a remaining upper bound. With no positive known subtotal, earlier unattributed usage gives unknown amounts. Missing attribution in retained aggregates also gives a lower bound for a known positive subtotal and unknown amounts otherwise, with an attribution-incomplete flag, without workspace-wide unattributed counts. No budget is `budget: null`. Reads do not create audit records or decisions.
 
 Browser-only `PUT {amount_usd, allowance_usd?, allowance_ceiling_usd?}` and `DELETE` require a team lead or
 workspace owner. Amounts are whole cents, 0 through 1,000,000 dollars. An omitted or null ceiling defaults to
-the allowance. Past-month writes are 409 `month_closed`. The single feature migration is schema version 24;
-periods opened before it get no home team and their no-goal spend stays unallocated.
+the allowance. Past-month writes are 409 `month_closed`. Schema version 24 adds budgets and home teams; version 25 adds the terminal device reference and recorded name.
+Periods opened before version 24 get no home team and their no-goal spend stays unallocated.
 
 `POST .../teams/{team}/budget-requests {amount_usd, reason, goal_id?, session_keys?}` accepts browsers and devices
 and returns 201 with the request. Only non-viewer team members file requests. A device request records
-`filed_from: "terminal"` and always waits for a person. Cookie requests record `filed_from: "browser"` and may
+`filed_from: "terminal"`, stores `source_device_id` and `source_device_name` from the authenticated device, and always waits for a person. Cookie requests record `filed_from: "browser"` and may
 be recorded under the allowance within its per-request and monthly ceilings. Input cannot override that source.
-Creation is limited to 60 budget requests per workspace per hour, including withdrawn requests and allowance grants, across restarts (429 `rate_limited`). Five waiting requests per person/team/month is the maximum; a sixth is 409 `too_many_waiting_requests`.
+Creation is limited to 60 budget requests per requester per workspace per hour, with a separate workspace ceiling of 600, including withdrawn requests and allowance grants, across restarts (429 `rate_limited`). Five waiting requests per person/team/month is the maximum; a sixth is 409 `too_many_waiting_requests`.
 
 `GET .../teams/{team}/budget-requests` and `GET .../budget-requests` accept `month`, `limit` (1 to 100, default 50)
 and `cursor` (the last request id). Creation order is stable when decisions change between pages. They default to this UTC month and return
 `{waiting_on_me, mine, others, next_cursor}`. `GET .../budget-requests/{id}` reads one record. Requesters,
 team members and workspace owners can read it. Unreadable goals are null and only the requester sees attached
-session keys. The record includes `filed_from`, full authority sentences, immutable decisions and action flags.
+session keys. The record is `{id, team, month, revision, state, state_note, requester, filed_from, filing_note,
+amount_usd_micros, reason, goal, goal_hidden, session_count, session_keys, approved_usd_micros, authority,
+authority_label, expires_at, second_look, decisions, approvers, waiting_on_me, decision_unavailable_reason,
+second_look_unavailable_reason, can, created_at, updated_at}`. `goal` is null or `{id, title}`.
+Decisions have `{round, decision, actor, amount_usd_micros, expires_at, note, at}`; actions are
+`{approve, decline, withdraw, second_look}`. `filing_note` names the recorded terminal device and states that
+Align cannot tell whether the person or an agent ran the command, or names the person who filed in the browser.
+The stored device id is never returned. Older terminal records say their device name was not recorded.
 
 Browser-only `POST .../budget-requests/{id}/{approve|decline|withdraw|second-look}` requires `{revision}`.
 Approve also takes `{amount_usd, expires_at, note?}`; decline takes `{reason}`. A requester never decides their
@@ -567,10 +581,24 @@ They create no decision, audit or product event. Home returns at most 100 `budge
 `{team: {id, name}, month, threshold, observed_at, as_of}`, only to current team leads and workspace owners, or null
 on a failed source. They appear in Since you last looked, outside Needs, and are hidden while the budget is absent.
 Home reads these records without computing new team burn. Spend states current thresholds and computation time.
-No polling is added. Migration 25 adds only the crossing records, preserving existing budgets and attribution.
+No polling is added. Migration 25 records the terminal filing source. Migration 26 adds crossing records and indexed change stamps, preserving existing budgets and attribution.
 
 A successful `align budget` read updates the team cache and matching locally confirmed session snapshots through the
 sync figure validation path. During a turn only synchronous Claude Code PreToolUse emits a budget `systemMessage`,
 with no budget `additionalContext`. Codex tool-call user-only messages are not verified and retain next-prompt notes.
 Message and context markers persist independently per session, UTC month and threshold; prompt-first delivery
 consumes both opportunities. Hooks skip subagents and never wait on the existing delivery lock.
+
+Closed-month effective budgets include every granted request in force at some time in that month, even after expiry.
+Align offers no per-person spend view. Team totals can reveal one person's spend when a team has fewer than three members.
+Such teams can still have budgets; the panel states that privacy limit.
+
+The one-pass agent does budget work last, with at most 100 sessions, 120 reads and two seconds per pass.
+Attribution and team reads are reused for five minutes. A running session can act on a figure up to five minutes old.
+A successful `align budget` read refreshes this device's team cache and matching snapshots. A newer accepted removal
+or effective-amount change prevents notes from an older figure. Refusals other than 404 preserve pending observations
+and are remembered for thirty seconds. Local budget files allowlist fields and include the non-secret server clock
+offset. Server figure times use it with a one-minute tolerance; local read times keep strict device-clock checks.
+Hooks read no credentials and import no network client. Model context has no command; the separate person message
+may name `align budget request`. Both use readable months and UTC read times. Sign-out removes caches and delivery
+markers; stop-sharing keeps delivery markers so re-sharing that month does not repeat a threshold.

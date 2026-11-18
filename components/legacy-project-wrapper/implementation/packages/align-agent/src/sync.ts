@@ -1,6 +1,7 @@
 // Spool ingest, outbox flush, epoch assignment, usage upload and the one-pass sync that hooks start in the background.
 // Only shared sessions ever reach the server.
 import fs from "node:fs";
+import { pruneContextCost } from "./context-cost-retention.ts";
 import path from "node:path";
 import type { Ctx } from "./context.ts";
 import {
@@ -871,6 +872,7 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
   // The whole pass is one device's (C4-2): if `align login` or `align logout` commits while it runs, its next call to
   // the server refuses to go on as the new pairing (or none), and the pass stops there.
   const unbind = bindDevice(ctx);
+  let localViewsFinished = false;
   /** Stop the pass when the pairing changed under it: steps that swallow their own errors would otherwise go on. */
   const guard = () => {
     if (!stillBound(ctx)) throw new DeviceChanged("pairing changed during the pass");
@@ -878,6 +880,7 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
   try {
     // A device this machine signed out of while the server was unreachable is revoked before anything else.
     res.revoked = await revokePending(ctx).catch(() => ({ revoked: [], already: [], pending: [] }));
+    pruneContextCost(ctx.home);
     res.spooled += ingestSpool(ctx);
     res.tail = tailAll(ctx, opts.tailBudgetMs);
     res.spooled += ingestSpool(ctx);
@@ -919,7 +922,6 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     for (const ws of refresh) await refreshFeed(ctx, ws).catch(() => undefined);
     // Asks between teams (a 304 when nothing changed): read by `align asks`, `align team` and the envelope.
     for (const ws of refresh) await fetchAsks(ctx, ws).catch(() => false);
-    await refreshSessionBudgets(ctx).catch(() => undefined);
     guard();
     // Team activity: this machine's in-flight work up, other machines' down (a few hundred bytes when quiet).
     try {
@@ -933,6 +935,10 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     for (const ws of refresh) await fetchPod(ctx, ws).catch(() => 0);
     res.steering = await uploadSteering(ctx).catch(() => 0);
     guard();
+    try { catchUpOtherBuilds(ctx, true); }
+    catch (e) { ctx.log(`sync: catching up with another build failed: ${(e as Error).message}`); }
+    localViewsFinished = true;
+    await refreshSessionBudgets(ctx).catch(() => undefined);
     return res;
   } catch (e) {
     if (!(e instanceof DeviceChanged)) throw e;
@@ -954,7 +960,7 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     // Another build that wrote here since (an older `align` on PATH, the hooks' older copy): every session re-rendered
     // from the state now, an older build's notices read as "changed" (E2E-AGENT cycle 14).
     try {
-      catchUpOtherBuilds(ctx, true);
+      if (!localViewsFinished) catchUpOtherBuilds(ctx, true);
     } catch (e) {
       ctx.log(`sync: catching up with another build failed: ${(e as Error).message}`);
     }

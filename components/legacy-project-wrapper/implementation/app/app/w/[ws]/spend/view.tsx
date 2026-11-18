@@ -83,7 +83,7 @@ export default function SpendPage({ me, ws }: { me: Me; ws: string }) {
         <Err>{d.error}</Err>
         {d.data && (
           <>
-            <Note>{d.data.note} Goals you can&apos;t see are grouped without names. There is no per-person view.</Note>
+            <Note>{d.data.note} Goals you can&apos;t see are grouped without names. Align offers no per-person spend view. Team totals can reveal one person&apos;s spend when the team has fewer than three members.</Note>
             <div className="overflow-x-auto">
               <table className={`w-full text-[15px] ${PHONE_TABLE.table}`}>
                 <thead className={PHONE_TABLE.head}>

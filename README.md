@@ -44,3 +44,17 @@ Only these GitHub logins may change the release state, cut a release line or pub
 
 - `allsmog`
 - `liminalshruti`
+
+Team budgets have no minimum team size. Align offers no per-person spend view; totals for a team with fewer
+than three members can reveal one person's spend. Earlier no-goal usage without a recorded home team stays
+unallocated and prevents an exact team total. Closed-month budget reads include grants that applied in that month.
+Requests name their authenticated filing source. Terminal records name the device and say Align cannot tell
+whether the person or an agent on that device ran the command. Terminal requests always wait for a person.
+Creation limits apply per requester, with a larger workspace ceiling.
+
+Running sessions can act on a figure up to five minutes old. `align budget` refreshes this device's cached figure.
+Budget reads run last in a sync pass. Local snapshots include the non-secret server clock offset, preserve pending
+crossings through rejected figures and temporary refusals, and store only needed fields. A newer accepted budget
+removal or effective-amount change replaces earlier figures. Hooks deliver separate model-context and person-only
+messages; only the person's message may name the request command. Sign-out removes budget delivery markers;
+stop-sharing keeps them so sharing again in the same month does not repeat a note.

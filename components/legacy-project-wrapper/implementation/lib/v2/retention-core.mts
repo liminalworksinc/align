@@ -145,6 +145,7 @@ export function pseudonymise(db: Sql, wsId: string, userId: string, at: string, 
   db.run("DELETE FROM v2_invites WHERE ws_id = ? AND (accepted_by = ? OR (? IS NOT NULL AND lower(email) = ?))", wsId, userId, email, email);
   db.run("UPDATE v2_sessions SET device_id = NULL WHERE ws_id = ? AND user_id = ?", wsId, userId);
   db.run("UPDATE v2_events SET actor = NULL WHERE ws_id = ? AND actor = ?", wsId, eventActor(secret, userId));
+  db.run("UPDATE v2_budget_requests SET source_device_id = NULL, source_device_name = CASE WHEN filed_from = 'terminal' THEN 'Former member device' ELSE NULL END WHERE ws_id = ? AND requester_id = ?", wsId, userId);
   for (const [t, c] of PERSON_COLUMNS) db.run(`UPDATE ${t} SET ${c} = ? WHERE ws_id = ? AND ${c} = ?`, pid, wsId, userId);
   db.run("UPDATE v2_workspaces SET created_by = ? WHERE id = ? AND created_by = ?", pid, wsId, userId);
   // Approval requirements (sets, approved_by, "sessions:<user id>") hold ids inside JSON; ids are 24 random
@@ -195,12 +196,12 @@ function rollUpSession(db: Sql, wsId: string, key: string): number {
      WHERE u.ws_id = ? AND u.session_key = ? AND e.goal_id IS NULL AND e.spend_team_id IS NOT NULL GROUP BY 1, 2, 3, 4
      ON CONFLICT (ws_id, pod_id, day, basis) DO UPDATE SET ${ROLLUP_SUMS.map((k) => `${k} = ${k} + excluded.${k}`).join(", ")}`, wsId, key,
   );
-  // Aggregate coverage once for this session, including periods without a home team, then touch only matching rows.
+  // Count only usage with a recorded home team as attributed, then touch only matching rows.
   const coverage = db.all<{ day: string; model: string; basis: string; requests: number; unpriced: number }>(
     `SELECT substr(u.ts, 1, 10) AS day, u.model, u.basis, COUNT(*) AS requests,
        SUM(u.est_list_usd_micros IS NULL) AS unpriced
      FROM v2_usage u JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id
-     WHERE u.ws_id = ? AND u.session_key = ? AND e.goal_id IS NULL GROUP BY 1, 2, 3`, wsId, key,
+     WHERE u.ws_id = ? AND u.session_key = ? AND e.goal_id IS NULL AND e.spend_team_id IS NOT NULL GROUP BY 1, 2, 3`, wsId, key,
   );
   for (const c of coverage) db.run(
     `UPDATE v2_spend_rollups SET team_attributed_requests = team_attributed_requests + ?,

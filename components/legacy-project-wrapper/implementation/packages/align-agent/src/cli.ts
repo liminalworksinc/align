@@ -13,9 +13,11 @@ import {
   commitPairing,
   loadCredentials,
   bindDevice,
+  credentialsFile,
   loadPendingRevokes,
   logoutLocked,
   NetworkError,
+  HttpError,
   rawRequest,
   revokePending,
   SignedOut,
@@ -60,7 +62,7 @@ import { feedHold } from "./shared/feedhold.ts";
 import type { RequestState, WireRequest } from "./shared/types.ts";
 import { computeUnsharedDigest } from "./allocation.ts";
 import { listSteering, weekKey } from "./shared/steering.ts";
-import { cacheTerminalBudget, requestAmount, budgetTeam, budgetFolder } from "./budgets.ts";
+import { budgetFailure, budgetMonthLabel, budgetReadLabel, cacheTerminalBudget, requestAmount, budgetTeam, budgetFolder } from "./budgets.ts";
 
 const out = (s = ""): void => {
   process.stdout.write(s + "\n");
@@ -1523,7 +1525,7 @@ async function cmdDoctor(ctx: Ctx): Promise<void> {
   add("node", major >= MIN_NODE ? "OK" : "FAIL", `${process.version} at ${process.execPath}`);
   const st = fs.statSync(ctx.home);
   add("align home", (st.mode & 0o077) === 0 ? "OK" : "FAIL", `${ctx.home} mode ${(st.mode & 0o777).toString(8)}`);
-  for (const f of [layout.deviceSecret(ctx.home), layout.credentials(ctx.home), layout.deviceKey(ctx.home)]) {
+  for (const f of [layout.deviceSecret(ctx.home), credentialsFile(ctx.home), layout.deviceKey(ctx.home)]) {
     if (!fs.existsSync(f)) continue;
     const m = fs.statSync(f).mode & 0o777;
     add(path.basename(f), m === 0o600 ? "OK" : "FAIL", `mode ${m.toString(8)}`);
@@ -1672,11 +1674,12 @@ async function cmdBudget(ctx: Ctx, argv: string[], request: boolean): Promise<vo
     ...(request ? { amount: { type: "string" as const }, reason: { type: "string" as const }, goal: { type: "string" as const }, session: { type: "string" as const, multiple: true } } : {}) } });
   const requestedAmount = request ? requestAmount(values.amount as string | undefined) : null;
   if (request && (!(values.reason as string | undefined)?.trim() || String(values.reason).trim().length > 1000)) throw new UsageError("--reason is required, at most 1000 characters.");
-  await refreshMe(ctx);
+  const explainReadFailure = (e: unknown): never => { throw new Error(budgetFailure(e instanceof SignedOut ? 401 : e instanceof HttpError ? e.status : 500, e instanceof HttpError ? e.code ?? undefined : undefined)); };
+  await refreshMe(ctx).catch(explainReadFailure);
   const rule = matchRule(readRules(ctx.home), process.cwd()) ?? (values.workspace && (values.team || values.goal) ? null : budgetFolder(ctx, process.cwd()));
   const ws = resolveWorkspace(ctx.home, values.workspace || rule?.workspace_id);
   if (!ws) throw new UsageError("No single workspace applies. Pass --workspace <name|id>.");
-  await refreshFeed(ctx, ws.id);
+  await refreshFeed(ctx, ws.id).catch(explainReadFailure);
   const goalRef = values.goal as string | undefined ?? (rule?.workspace_id === ws.id ? rule.goal_id : null);
   const goal = goalRef ? resolveGoal(loadFeed(ctx.home, ws.id), goalRef) : null;
   const detail = await api(ctx, "GET", `/api/v2/workspaces/${encodeURIComponent(ws.id)}/spend/teams`);
@@ -1693,21 +1696,21 @@ async function cmdBudget(ctx: Ctx, argv: string[], request: boolean): Promise<vo
     const r = await api(ctx, "POST", `/api/v2/workspaces/${encodeURIComponent(ws.id)}/teams/${encodeURIComponent(team)}/budget-requests`, {
       body: { amount_usd: requestedAmount, reason: values.reason, goal_id: goal?.id ?? null, session_keys: sessionKeys },
     });
-    if (r.status !== 201) throw new Error(r.json?.message ?? `Request failed (${r.status}).`);
+    if (r.status !== 201) throw new Error(budgetFailure(r.status, r.json?.error));
     out(`Budget request recorded for ${clean(r.json.team.name, 80)}. All amounts are estimates at list price.`);
     out("This terminal request waits for a person to decide in Align. The request grants no authority.");
-    if (r.json.decision_unavailable_reason) out(r.json.decision_unavailable_reason);
+    if (r.json.decision_unavailable_reason) out("Nobody else is eligible to decide this request. A different team lead or workspace owner is needed.");
     return;
   }
   const r = await api(ctx, "GET", `/api/v2/workspaces/${encodeURIComponent(ws.id)}/teams/${encodeURIComponent(team)}/budget`);
-  if (r.status !== 200) throw new Error(r.json?.message ?? `Budget read failed (${r.status}).`);
+  if (r.status !== 200) throw new Error(budgetFailure(r.status, r.json?.error));
   const b = r.json;
   const money = (v: number | null, bound?: string) => v === null ? "unknown" : `${bound === "lower" ? "at least " : bound === "upper" ? "at most " : ""}$${(v / 1_000_000).toFixed(2)}`;
-  out(`${clean(b.team.name, 80)}, ${b.month} UTC. All amounts are estimates at list price. Observed ${b.as_of}.`);
+  out(`${clean(b.team.name, 80)}, ${budgetMonthLabel(b.month)} UTC. All amounts are estimates at list price. Read on ${budgetReadLabel(b.as_of)}.`);
   out(b.budget ? `Base budget: ${money(b.budget.amount_usd_micros)}. Budget including grants: ${money(b.effective_budget_usd_micros)}.` : "No team budget for this month.");
   out(`Spend: ${money(b.estimated_spend_usd_micros, b.spend_bound)}. Remaining: ${b.budget ? money(b.remaining_usd_micros, b.remaining_bound) : "no team budget"}. Month-end forecast: ${b.budget ? money(b.forecast_usd_micros, b.forecast_bound) : "no team budget"}.`);
   out(`Remaining monthly allowance: ${b.allowance_remaining_usd_micros === null ? "no allowance" : money(b.allowance_remaining_usd_micros)}. Unpriced requests: ${b.unpriced_requests ?? "unknown"}.`);
-  out(b.pricing_note);
+  out(b.no_goal?.attribution_unknown ? "Some earlier usage could not be attributed. The displayed bounds show only known spend." : b.unpriced_requests ? "Some requests have no price. Spend and forecast are at least the priced estimates, and remaining is at most its estimate." : "All requests in this total have prices.");
   out("Goal-bound spend counts toward the goal team's budget. Spend in no goal counts toward the home team's budget recorded when its spending period began. Work continues.");
   await cacheTerminalBudget(ctx, ws.id, team, b, process.cwd());
 }

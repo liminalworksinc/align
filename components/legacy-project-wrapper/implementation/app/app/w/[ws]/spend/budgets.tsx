@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useRef, useState, type FormEvent } from "react";
 import { FormField, Panel, SelectInput, TextArea, TextInput } from "../../../_ui/ds";
-import { ApiError, api, Btn, usd, useApi, when } from "../../../_ui/kit";
+import { ApiError, api, Btn, usd, useApi } from "../../../_ui/kit";
 import { NoticeBox, useNotice, type Notice } from "../../../_ui/crparts";
 import { Err, Loading, Note } from "../sessions/parts";
 import type { Goal, MySession, WsDetail } from "../../../_ui/types";
@@ -14,6 +14,8 @@ import type { BudgetBurn, BudgetRequestView } from "@/lib/v2/budgets";
 type Groups = { waiting_on_me: BudgetRequestView[]; mine: BudgetRequestView[]; others: BudgetRequestView[]; next_cursor: string | null };
 export type HomeBudgets = Pick<Groups, "waiting_on_me" | "mine" | "next_cursor">;
 type HomeTeam = { team: { id: string; name: string } | null; teams: { id: string; name: string }[]; can_choose: boolean };
+const monthLabel = (month: string) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "long", year: "numeric" }).format(new Date(`${month}-01T00:00:00Z`));
+const when = (at: string) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(at));
 const base = (ws: string) => `/api/v2/workspaces/${ws}`;
 const dollars = (v: number | null | undefined) => v == null ? "" : v / 1_000_000;
 const amount = (v: number | null, bound?: string | null) => v === null ? "Unknown" : `${bound === "lower" ? "At least " : bound === "upper" ? "At most " : ""}${usd(v)}`;
@@ -44,8 +46,8 @@ function BudgetLinks({ ws, rows }: { ws: string; rows: BudgetRequestView[] }) {
   return <ul className="divide-y divide-(--line)">{rows.map((r) => <li key={r.id} className="py-2 text-[14px] [overflow-wrap:anywhere]">
     <Link className="inline-flex min-h-[44px] items-center text-(--accent-text) underline" href={budgetHref(ws, r)}>Review budget request for {r.team.name}</Link>
     <p>{r.requester.name} asked for {usd(r.amount_usd_micros)} estimated at list price. {r.state_note}</p>
-    <p>Filed from the {r.filed_from === "browser" ? "browser" : "terminal"}.</p>
-    <p className="text-(--text-2)">Requested budget: {r.team.name}, {r.month} UTC.</p>
+    <p>{r.filing_note}</p>
+    <p className="text-(--text-2)">Requested budget: {r.team.name}, {monthLabel(r.month)} UTC.</p>
     {r.decision_unavailable_reason && <p>{r.decision_unavailable_reason}</p>}
     {r.second_look_unavailable_reason && r.state === "declined" && <p>{r.second_look_unavailable_reason}</p>}
   </li>)}</ul>;
@@ -92,7 +94,7 @@ export function TeamBudgets({ ws, detail }: { ws: string; detail: WsDetail | nul
   return <div data-team-spending className="min-w-0 [overflow-wrap:anywhere]">
     <HomeTeamChoice ws={ws} />
     <Panel title="Team budget" className="mb-4">
-      <p className="mb-3 text-[14px] text-(--text-2)">Goal-bound spend counts toward the goal team&apos;s budget. Spend in no goal counts toward the home team&apos;s budget recorded when its spending period opened. All amounts are estimates at list price. Work continues when a budget is reached.</p>
+      <p className="mb-3 text-[14px] text-(--text-2)">Goal-bound spend counts toward the goal team&apos;s budget. Spend in no goal counts toward the home team&apos;s budget recorded when its spending period opened. All amounts are estimates at list price. Work continues when a budget is reached. A running session can act on a figure up to five minutes old.</p>
       {!detail ? <Loading /> : teams.length === 0 ? <p>No team budgets are available to you.</p> : <div className="grid min-w-0 gap-3 sm:grid-cols-2">
         <FormField label="Budget team"><SelectInput value={team} onChange={(e) => setTeam(e.target.value)}><option value="">Choose a team</option>{teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</SelectInput></FormField>
         <FormField label="Budget month (UTC)"><TextInput type="month" value={month} onChange={(e) => setMonth(e.target.value)} min="0001-01" max="9999-12" /></FormField>
@@ -111,20 +113,20 @@ function TeamMonth({ ws, team, month }: { ws: string; team: string; month: strin
   const r = !d.error ? d.data : null;
   const rows = requests.data ? [...new Map([...requests.data.waiting_on_me, ...requests.data.mine, ...requests.data.others].map((r) => [r.id, r])).values()] : [];
   return <>
-    <Panel title={r ? `${r.team.name}, ${month} UTC` : "Budget and estimates"} className="mb-4">
+    <Panel title={r ? `${r.team.name}, ${monthLabel(month)} UTC` : "Budget and estimates"} className="mb-4">
       {d.loading && <Loading />}<Err>{d.error}</Err>
       {r && <>
+        {r.team_member_count < 3 && <p>Team totals can reveal one person&apos;s spend when the team has fewer than three members.</p>}
         {!r.budget && <p>No team budget for this month.</p>}
         {(r.reached_thresholds ?? []).map((threshold) => <p key={threshold} data-budget-threshold={threshold} className="my-2 text-[14px]">
-          {r.team.name} has reached {threshold}% of its budget {r.month === new Date().toISOString().slice(0, 7) ? "this month" : `for ${r.month} UTC`}, estimated at list price. Computed {when(r.as_of)}.
+          {r.team.name} has reached {threshold}% of its budget {r.month === new Date().toISOString().slice(0, 7) ? "this month" : `for ${monthLabel(r.month)} UTC`}, estimated at list price. Read on {when(r.as_of)}.
         </p>)}
         <dl className="my-3 grid grid-cols-1 gap-3 sm:grid-cols-2" data-burn>
           {[["Base budget", r.budget ? usd(r.budget.amount_usd_micros) : "Not set"], ["Budget including grants", r.budget ? amount(r.effective_budget_usd_micros) : "No budget"], ["Spend estimate at list price", amount(r.estimated_spend_usd_micros, r.spend_bound)], ["Remaining estimate", r.budget ? amount(r.remaining_usd_micros, r.remaining_bound) : "No team budget"], ["Month-end forecast estimate", r.budget ? amount(r.forecast_usd_micros, r.forecast_bound) : "No team budget"], ["Allowance left this month", r.allowance_remaining_usd_micros === null ? "No allowance" : usd(r.allowance_remaining_usd_micros)], ["Spend in no goal, estimate", amount(r.no_goal.estimated_spend_usd_micros, r.no_goal.spend_bound)]].map(([label, value]) => <div key={label}><dt className="text-[13px] text-(--text-2)">{label}</dt><dd className="font-medium text-(--text-1)">{value}</dd></div>)}
         </dl>
-        {r.no_goal.attribution_unknown && <Note>Team attribution is incomplete for this month. Complete amounts are unknown.</Note>}
-        <Note>{r.pricing_note} {r.unpriced_requests === null ? `The complete unpriced count is unknown; ${r.known_unpriced_requests} known.` : `${r.unpriced_requests} unpriced ${r.unpriced_requests === 1 ? "request" : "requests"}.`}</Note>
+        <Note>{r.pricing_note} {r.unpriced_requests === null ? `The complete unpriced count is unknown; ${r.known_unpriced_requests} known.` : r.unpriced_requests === 0 ? "0 unpriced requests." : null}</Note>
         {r.runs_out_at && <p className="text-[14px]">Estimated date the budget is reached: {when(r.runs_out_at)}. This is an estimate.</p>}
-        <p className="text-[13px] text-(--text-3)">Observed {when(r.as_of)}.</p>
+        <p className="text-[13px] text-(--text-3)">Read on {when(r.as_of)}.</p>
         {r.can.manage && <BudgetForm key={r.budget?.updated_at ?? "absent"} ws={ws} r={r} after={refresh} />}
         {r.history.length > 0 && <details className="mt-3"><summary className="min-h-[44px] cursor-pointer">Budget history</summary><ul>{r.history.map((h) => <li key={h.id} className="py-2 text-[14px]">{h.actor.name} {h.action} the budget {when(h.at)}. {h.amount_usd_micros !== null && <>Estimated amount {usd(h.amount_usd_micros)}; allowance {h.allowance_usd_micros === null ? "none" : usd(h.allowance_usd_micros)}; monthly ceiling {h.allowance_ceiling_usd_micros === null ? "none" : usd(h.allowance_ceiling_usd_micros)}.</>}</li>)}</ul></details>}
       </>}
@@ -210,8 +212,8 @@ export function BudgetRequestRecord({ ws, id, onChanged }: { ws: string; id: str
     {d.loading && <Loading />}<Err>{d.error}</Err>{action.notice && <NoticeBox notice={action.notice} />}
     {r && <>
       <h3 className="font-medium">{r.requester.name} asked for {usd(r.amount_usd_micros)}, estimated at list price.</h3>
-      <Note>Requested team budget: {r.team.name}, {r.month} UTC.</Note>
-      <p>Filed from the {r.filed_from === "browser" ? "browser" : "terminal"}.</p>
+      <Note>Requested team budget: {r.team.name}, {monthLabel(r.month)} UTC.</Note>
+      <p>{r.filing_note}</p>
       <p>{r.state_note}</p><p className="my-3 whitespace-pre-wrap">{r.reason}</p>
       {r.goal && <Link className="text-(--accent-text) underline" href={`/app/w/${ws}/goals/${r.goal.id}`}>Linked goal: {r.goal.title}</Link>}
       {r.goal_hidden && <p>The linked goal is not visible to you.</p>}

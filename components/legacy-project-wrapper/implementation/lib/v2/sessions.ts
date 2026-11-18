@@ -125,7 +125,7 @@ const shareOut = (s: SessionRow) => {
 };
 
 /** Current captured attribution for the owner's hook. No current-home guess can rewrite an existing epoch. */
-export function currentSessionBudget(pp: PolicyPrincipal, key: string, attribution = false) {
+export async function currentSessionBudget(pp: PolicyPrincipal, key: string, attribution = false) {
   const s = sessionRow(pp.wsId, key);
   if (!s) throw notFound();
   need(pp, "session.manage", { kind: "session", ownerId: s.user_id });
@@ -140,7 +140,7 @@ export function currentSessionBudget(pp: PolicyPrincipal, key: string, attributi
     const month = new Date().toISOString().slice(0, 7);
     return t ? { epoch_id: e.epoch_id, team: t, month, budget_stamp: budgetStamp(pp.wsId, team, month) } : null;
   }
-  return { epoch_id: e.epoch_id, ...budgetBurn(pp, team) };
+  return { epoch_id: e.epoch_id, ...await budgetBurn(pp, team) };
 }
 
 export async function putSession(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {

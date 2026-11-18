@@ -51,7 +51,7 @@ import { layout, localId, spoolWrite } from "../shared/layout.ts";
 import { isShareStateNotice, noticeKind, resumedButHeld } from "../shared/notices.ts";
 import { matchRule, readRules, realDir, removeRule, setRule } from "../shared/rules.ts";
 import { queueSteering, steeringLine, unsharedNote } from "../shared/steering.ts";
-import { budgetNotes } from "../shared/budget-notes.ts";
+import { budgetNotes, claimBudgetNotes } from "../shared/budget-notes.ts";
 import type { DriftFile, FeedFile, Goal, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
 import { CLAIM_MS, collisions, commitSubject, crossOverlap, display, editedPaths, liveGoalId, podReport, rawActs, readPaths, record, shellWrites, siblingChanges, siblingNews, activityHot, type Act, type StartingShare } from "./siblings.ts";
 import { changedSince, COMMIT, commitMade, expectations, explainer, reflogMark, settle, shows, type SettleBy } from "./evidence.ts";
@@ -537,7 +537,7 @@ function autoAccept(home: string, lid: string, hot: HotState | null): void {
 }
 
 // ---------- SessionStart ----------
-function sessionStartUncounted(home: string, harness: Harness, input: HookInput, env: NodeJS.ProcessEnv): HookOutput {
+export function sessionStartUncounted(home: string, harness: Harness, input: HookInput, env: NodeJS.ProcessEnv): HookOutput {
   const sid = input.session_id;
   if (!sid) return null;
   const source = input.source || "startup";
@@ -631,10 +631,9 @@ function sessionStartUncounted(home: string, harness: Harness, input: HookInput,
     if (again.length) context = [context, ...again].filter(Boolean).join("\n");
   }
   const notices = takeNotices(hot, inj, () => blockingHolds(home, lid, cwd), () => stoppedNow(home, lid));
-  const spendingMessages = !inj.opened_epoch && (source === "startup" || source === "resume") ? budgetNotes(home, lid, hot, Date.now(), "message") : [];
-  messages.push(...spendingMessages);
-  const spending = !inj.opened_epoch && (source === "startup" || source === "resume") ? budgetNotes(home, lid, hot) : [];
-  if (spending.length) context = [context, ...spending].filter(Boolean).join("\n");
+  const spending = !inj.opened_epoch && (source === "startup" || source === "resume") ? claimBudgetNotes(home, lid, hot) : { context: [], messages: [] };
+  if (spending.context.length) context = [context, ...spending.context].filter(Boolean).join("\n");
+  messages.push(...spending.messages);
   if (notices) messages.push(notices);
   if (source === "startup") {
     const note = unsharedNote(home);
@@ -829,7 +828,7 @@ function noteBlockTold(home: string, lid: string, block: { stop?: boolean; goals
   }
 }
 
-function userPromptSubmitUncounted(home: string, harness: Harness, input: HookInput): HookOutput {
+export function userPromptSubmitUncounted(home: string, harness: Harness, input: HookInput): HookOutput {
   const sid = input.session_id;
   if (!sid) return null;
   const prompt = typeof input.prompt === "string" ? input.prompt : "";
@@ -966,15 +965,14 @@ function userPromptSubmitUncounted(home: string, harness: Harness, input: HookIn
   if (resumed) context = [context, resumed].filter(Boolean).join("\n");
   const notices = [takeNotices(hot, inj, () => held, () => stoppedNow(home, lid)), ...req.notices, ...lifted.notices, takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
   // A just-opened epoch waits for the server's captured attribution before any threshold can be claimed.
-  const spendingMessages = inj.opened_epoch ? [] : budgetNotes(home, lid, hot, Date.now(), "message");
-  const spending = inj.opened_epoch ? [] : budgetNotes(home, lid, hot);
-  if (spending.length) context = [context, ...spending].filter(Boolean).join("\n");
+  const spending = inj.opened_epoch ? { context: [], messages: [] } : claimBudgetNotes(home, lid, hot);
+  if (spending.context.length) context = [context, ...spending.context].filter(Boolean).join("\n");
   writeInjected(home, lid, inj);
-  if (!context && !notices) return null;
+  const messages = [notices, ...spending.messages].filter(Boolean).join("\n");
+  if (!context && !messages) return null;
   const out: Record<string, unknown> = {};
   if (context) out.hookSpecificOutput = { hookEventName: "UserPromptSubmit", additionalContext: context };
-  const userMessages = [notices, ...spendingMessages].filter(Boolean).join("\n");
-  if (userMessages) out.systemMessage = userMessages;
+  if (messages) out.systemMessage = messages;
   return out;
 }
 
@@ -1101,7 +1099,7 @@ function holdDeny(home: string, lid: string): HookOutput {
 }
 
 /** The deny a crashed PreToolUse emits: the stop wording unless only a goal hold is known for this session. */
-function failureDenyUncounted(home: string, harness: Harness, sessionId: string | null): Record<string, unknown> {
+export function failureDenyUncounted(home: string, harness: Harness, sessionId: string | null): Record<string, unknown> {
   if (!sessionId) return denyOutput();
   const lid = localId(harness, sessionId);
   if (!fs.existsSync(layout.latch(home, lid)) && fs.existsSync(layout.hold(home, lid))) return denyOutput(holdDenyReason(readJson<HoldLatch>(layout.hold(home, lid)), lid));
@@ -1118,7 +1116,7 @@ export interface ToolHookOpts {
  * Fail closed: a latch file that exists but cannot be read denies. The stop latch and the goal-hold latch are
  * independent; a tool runs only when neither blocks it. Otherwise, deliver a pending goal change.
  */
-function preToolUseUncounted(home: string, harness: Harness, input: HookInput, opts: ToolHookOpts = {}): HookOutput {
+export function preToolUseUncounted(home: string, harness: Harness, input: HookInput, opts: ToolHookOpts = {}): HookOutput {
   const sid = input.session_id;
   if (!sid) return anyLatch(home) ? denyOutput() : null;
   const lid = localId(harness, sid);
@@ -1138,7 +1136,7 @@ function preToolUseUncounted(home: string, harness: Harness, input: HookInput, o
  * not; a latch file that can't be read denies. Also what the hooks enforce on an unsupported Node, so a stopped
  * session behaves the same there.
  */
-function latchDenyUncounted(home: string, harness: Harness, input: HookInput): HookOutput {
+export function latchDenyUncounted(home: string, harness: Harness, input: HookInput): HookOutput {
   const sid = input.session_id;
   if (!sid) return anyLatch(home) ? denyOutput() : null;
   const lid = localId(harness, sid);
@@ -1375,7 +1373,7 @@ function midTurnDelta(home: string, lid: string, harness: Harness): HookOutput {
   if (!hot?.share) return null;
   const pre = readInjected(home, lid);
   const own = deltaKind(hot, pre);
-  const messageDue = harness === "claude-code" && budgetNotes(home, lid, hot, Date.now(), "message", false).length > 0;
+  const messageDue = harness === "claude-code" && (!pre.opened_epoch || pre.opened_epoch.epoch_id === hot.binding?.epoch_id) && budgetNotes(home, lid, hot, Date.now(), "message", false).length > 0;
   if (!own && !messageDue && !(hot.share.state === "shared" && contextChanged(hot, pre))) return null;
   const release = claimDelta(home, lid);
   if (!release) return null;
@@ -1390,7 +1388,7 @@ function midTurnDelta(home: string, lid: string, harness: Harness): HookOutput {
       reportApplied(home, lid, inj, hot.pending_directives);
     }
     if (hot.share.state === "shared") parts.push(...contextNotes(inj, hot.context_goals));
-    const spending = harness === "claude-code" ? budgetNotes(home, lid, hot, Date.now(), "message") : [];
+    const spending = harness === "claude-code" && (!inj.opened_epoch || inj.opened_epoch.epoch_id === hot.binding?.epoch_id) ? budgetNotes(home, lid, hot, Date.now(), "message") : [];
     if (!parts.length && !spending.length) return null;
     if (parts.length) writeInjected(home, lid, inj);
     return { ...(parts.length ? { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: parts.join("\n") } } : {}),
@@ -1563,7 +1561,7 @@ function replacedRule(home: string, dir: string): string | null {
   return `${clean(prev.workspace_name, 80)}, ${title ? `"${clean(title, 100)}"` : "no goal"}`;
 }
 
-function commandUncounted(home: string, harness: Harness, sid: string, cwd: string | null, line: string): string {
+export function commandUncounted(home: string, harness: Harness, sid: string, cwd: string | null, line: string): string {
   const lid = localId(harness, sid);
   const hot = readHot(home, lid);
   const parts = line.replace(/^\s*::align\s*/i, "").trim();
@@ -1880,7 +1878,7 @@ function commandUncounted(home: string, harness: Harness, sid: string, cwd: stri
   }
 }
 
-// Account only after the baseline handler has decided its complete return. No shared hook state is read or saved here.
+// Account only after the uncounted handler has decided its complete return. No shared hook state is read or saved here.
 export function recordStandaloneOutput(home: string, harness: Harness, sid: string | null | undefined, out: HookOutput, event: "SessionStart" | "UserPromptSubmit" | "PreToolUse"): HookOutput {
   if (sid && out) countOutput(home, localId(harness, sid), out, event);
   return out;

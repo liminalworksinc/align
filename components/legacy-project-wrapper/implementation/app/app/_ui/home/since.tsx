@@ -171,6 +171,7 @@ function useVersions(ws: string, goals: SinceGoal[] | null, on: boolean, tick = 
 
 /** One time format with the record's timeline: "Nov 5, 12:28 PM", no seconds, no numeric date. */
 const stamp = (iso: string) => when(iso);
+const budgetReadTime = (iso: string) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(iso));
 const after = (iso: string | null | undefined, since: string) => !!iso && iso > since;
 const same = (a: string | null, b: string | null) => !!a && !!b && Math.abs(Date.parse(a) - Date.parse(b)) < 2000;
 
@@ -273,7 +274,7 @@ export default function Since({
     for (const c of budgetCrossings ?? []) {
       if (!after(c.observed_at, since)) continue;
       out.push({ id: `budget:${c.team.id}:${c.month}:${c.threshold}`, who: c.team.name,
-        what: `reached ${c.threshold}% of its budget this month, estimated at list price. Computed ${stamp(c.as_of)}.`,
+        what: `reached ${c.threshold}% of its budget this month, estimated at list price. Read on ${budgetReadTime(c.as_of)}.`,
         when: c.observed_at, source: { kind: "system" }, object: <Link href={`/app/w/${ws}/spend?team=${encodeURIComponent(c.team.id)}&month=${c.month}`} className="text-(--text-1) underline-offset-2 hover:underline">Team budget</Link> });
     }
     for (const a of apps ?? []) {

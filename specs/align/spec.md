@@ -35,6 +35,13 @@ agent hooks and screens), not the framework, hosting, or language choices.
 | Approval set | The people any one of whom may approve on a goal's behalf: its owner, its team's leads, and for a company goal the workspace owners |
 | Alignment | A consented link that makes a goal contribute to another goal, or makes chosen sessions work toward a goal |
 | Team budget | A monthly planning amount in estimated list-price US dollars for a team; reaching it never stops work or grants authority |
+| Home team | The person's one current team chosen for future spending periods in no goal, defaulting to their earliest joined team |
+| Spending period | The portion of a shared session from one goal binding or no-goal binding until its next binding or sharing ends; its captured team determines where usage counts |
+| Allowance | The amount a browser request may receive under a team's recorded budget rule without an individual approver, subject to its monthly ceiling |
+| Monthly allowance ceiling | The total that can be granted under a team's allowance in that UTC month, including grants that later expire |
+| Effective budget | The month's base budget including applicable grants; an absent base means no effective budget |
+| Second look | One referral of a declined budget request for a decision by a different eligible workspace owner |
+| Known priced subtotal | The sum of requests with list-price estimates; incomplete pricing or attribution can make it only a lower bound |
 | Budget request | A recorded request for more team budget; a device request always waits for a person |
 | Change request | A proposed new version of someone else's goal, approved or rejected by the goal's approval set |
 | Session | A coding-agent session (Claude Code or Codex) that its owner shared toward a goal, identified by a keyed `session_key` |
