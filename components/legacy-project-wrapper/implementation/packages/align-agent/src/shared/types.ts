@@ -178,7 +178,17 @@ export interface HoldLatch {
   holds: { goal_id: string; goal_title: string; by: string; reason: string | null; directive_id: string; seq: number; at: string }[];
 }
 
+export interface AddedText {
+  characters: number;
+  additions: number;
+  last_at: string | null;
+  last_event: "SessionStart" | "UserPromptSubmit" | "PreToolUse" | null;
+}
+
 export interface InjectedState {
+  /** Returned model text and person-only text, counted separately without retaining either text. */
+  context_added?: AddedText;
+  notices_added?: AddedText;
   v: 1;
   goal_id: string | null;
   goal_version: number | null;

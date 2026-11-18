@@ -30,6 +30,44 @@ queue item or let `docs/roadmap/` become a plan archive.
 Check the parent only after every required subtask and evidence item passes. Add the
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
+### [ ] CONTEXT-001: Show the context Align adds to each session
+
+- **Owner:** specs/align/local-agent.md and the local agent package
+- **Direction:** Record exact returned character totals, addition counts and last times per session, and show them in status and sessions.
+- **Conclusion:** Preserve the team-budget base's hook text, delivery markers and state writes. Count final model text
+  and person-only text separately inside existing writes; add one accounting write only where text previously
+  returned without a hook-state write. Budget context lines and person-only messages belong to their own audience.
+- **Completion prerequisites:** none
+- **Implementation and evidence:**
+  - [x] Amend the specification first and port the local counters, status and sessions output, README and changelog.
+  - [x] Preserve the base's hook text and normal writes, including silent prompts and choices. Local command saves
+    remain at their existing points. Combined tool deltas, sibling notes and budget messages count once per audience.
+  - [x] Bring over accounting tests and extend them through budget startup, resume, prompts and tool calls for both
+    harnesses, including subagents, busy locks, message-only state preservation and later context-only delivery.
+    All 13 accounting cases pass. No existing test was modified.
+  - [x] Compare against HEAD 11521efb9f50b044882c6ee22466297a332be1c1, rather than origin/main.
+    All 356 recorded hook returns match. Existing write counts, saved non-counter fields and budget marker writes
+    match, allowing one accounting write only where text returned without a save. The nested 59 cases pass,
+    including the unchanged 24 hook tests and 22 budget tests.
+  - [x] Node 26.3.0 on macOS arm64: lint, application and agent typechecks, syntax and agent build pass.
+    No-server suites: paste-lines 33/0, admin 62/0, invite-races 10/0, budgets 48/0.
+    Seven listener-free agent files pass 317/0 without overlapping suites; binding regressions pass 3/0.
+    Both existing 50-prompt zero-byte checks pass unchanged. Serial hook latency passes 1/0 with networking
+    blocked at the unchanged 150 ms p95 limit. Copy review and `git diff --check` pass.
+  - [ ] Run listener-dependent server, browser and live-agent suites in a listener-capable environment.
+- **Outcome:** The local port is implemented and uncommitted. Both sides' budget and context entries are retained.
+  The parent remains unchecked under the P0 rule because listener-dependent evidence is UNKNOWN.
+- **Failed checks, resolved:** Initial comparison runs failed on new fixture bookkeeping for write spies, generated
+  IDs and nested marker writes. These fixture errors were corrected. The first listener-free run was 303/1 because
+  Next.js's CommonJS setting reached copied hooks in the in-worktree temporary directory. Giving that temporary
+  test root its own module setting resolved the setup error. Overlapping runs then failed the unchanged budget
+  read expectation at 96/100 and 98/100 within its fixed time cap; isolated runs pass. No limit, deadline or existing
+  assertion changed. The added comparison runner now schedules files serially; existing test commands are unchanged.
+- **Verification boundary:** Listener-dependent and live-server suites, an actual unsupported runtime and simultaneous
+  non-delta counter writes remain UNKNOWN. The installed `litai` command is unavailable (guidance and verify exit 127), so
+  queue recording is edited directly and formal verification and the peer-work survey are UNKNOWN.
+  No branch changes or outbound actions are authorized.
+
 ### [ ] SPEND-004: Current budgets and crossing information
 
 - **Owner:** specs/align/budgets.md, local-agent.md, interface.md, directives.md and retained implementation
