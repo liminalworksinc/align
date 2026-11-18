@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Budget pass tests use a controlled clock so machine load cannot shorten their expected batches; a separate
+  regression checks the unchanged time cutoff and continuation with unfinished sessions.
+
 - Budget changes reach shared sessions on the next sync through private change stamps on the existing response.
   Unchanged cached passes add no budget requests. Budget notes use the saved server clock difference and preserve
   pending crossings when a figure is rejected. Terminal budget reads print figures before a best-effort local update,

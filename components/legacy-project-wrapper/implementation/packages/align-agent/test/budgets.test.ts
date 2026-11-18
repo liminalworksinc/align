@@ -5,7 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { budgetNotes, observedCrossings, BUDGET_FRESH_MS, type BudgetSnapshot } from "../src/shared/budget-notes.ts";
-import { cacheBudgetRead, receiveBudgetStamps, refreshSessionBudgets, requestAmount, budgetTeam } from "../src/budgets.ts";
+import { BUDGET_PASS_MS, cacheBudgetRead, receiveBudgetStamps, refreshSessionBudgets, requestAmount, budgetTeam } from "../src/budgets.ts";
 import { readJson, writeJsonAtomic } from "../src/shared/fsx.ts";
 import { layout, localId } from "../src/shared/layout.ts";
 import type { HotState } from "../src/shared/types.ts";
@@ -125,8 +125,8 @@ test("priced lower bounds cross thresholds while an unpriced request alone does 
 });
 
 test("sync bounds attribution reads, rotates sessions, reads each team/month once and erases refused caches", async () => {
-  const t = makeEnv(), ctx = ctxFor(t), originalFetch = globalThis.fetch;
-  const calls: string[] = [], at = new Date().toISOString();
+  const t = makeEnv(), ctx = ctxFor(t), originalFetch = globalThis.fetch, now = Date.now();
+  const calls: string[] = [], at = new Date(now).toISOString();
   saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
   for (let n = 0; n < 101; n++) shareSession(ctx, "claude-code", `budget-${n}`);
   const rows = ctx.db.prepare("SELECT local_id FROM shares ORDER BY local_id").all() as { local_id: string }[];
@@ -138,20 +138,44 @@ test("sync bounds attribution reads, rotates sessions, reads each team/month onc
     throw new Error(`Unexpected request ${url}`);
   };
   try {
-    await refreshSessionBudgets(ctx);
+    await refreshSessionBudgets(ctx, () => now);
     assert.equal(calls.filter((p) => p.includes("/sessions/")).length, 100);
     assert.equal(calls.filter((p) => p.includes("/teams/")).length, 1);
     assert.ok(fs.existsSync(layout.budgetCache(t.home, rows[0].local_id)));
     assert.ok(!fs.existsSync(layout.budgetCache(t.home, rows[100].local_id)));
-    calls.length = 0; await refreshSessionBudgets(ctx);
+    calls.length = 0; await refreshSessionBudgets(ctx, () => now);
     assert.equal(calls.length, 1); assert.ok(fs.existsSync(layout.budgetCache(t.home, rows[100].local_id)));
-    calls.length = 0; await refreshSessionBudgets(ctx); assert.equal(calls.length, 0);
+    calls.length = 0; await refreshSessionBudgets(ctx, () => now); assert.equal(calls.length, 0);
     fs.rmSync(path.join(t.home, "budgets-cache", "teams.json"));
-    calls.length = 0; refused = true; await refreshSessionBudgets(ctx);
+    calls.length = 0; refused = true; await refreshSessionBudgets(ctx, () => now);
     assert.equal(calls.filter((p) => p.includes("/sessions/")).length, 0);
     assert.equal(calls.filter((p) => p.includes("/teams/")).length, 1);
     assert.ok(!fs.existsSync(layout.budgetCache(t.home, rows[0].local_id)));
   } finally { globalThis.fetch = originalFetch; ctx.db.close(); t.cleanup(); }
+});
+
+test("a budget pass stops after two reads when its injected clock passes the time cap", async () => {
+  const t = makeEnv(), ctx = ctxFor(t), fetchBefore = globalThis.fetch, start = Date.now();
+  let clock = start, reads = 0;
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(start + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
+  for (let n = 0; n < 3; n++) shareSession(ctx, "claude-code", `time-cap-${n}`);
+  const rows = ctx.db.prepare("SELECT local_id FROM shares ORDER BY local_id").all() as { local_id: string }[];
+  globalThis.fetch = async () => {
+    reads++;
+    // One read finishes just before the deadline; the next finishes just after it.
+    clock = start + (reads === 1 ? BUDGET_PASS_MS - 1 : BUDGET_PASS_MS + 1);
+    return Response.json(null);
+  };
+  try {
+    await refreshSessionBudgets(ctx, () => clock);
+    assert.equal(reads, 2);
+    assert.deepEqual(readJson(path.join(t.home, "budgets-cache", "cursor.json")), { local_id: rows[1].local_id });
+    for (const [i, row] of rows.entries()) {
+      assert.equal(fs.existsSync(path.join(t.home, "budget-attribution", `${row.local_id}.json`)), i < 2);
+    }
+    await refreshSessionBudgets(ctx, () => clock);
+    assert.equal(reads, 3, "the next pass resumes with the unfinished session");
+  } finally { globalThis.fetch = fetchBefore; ctx.db.close(); t.cleanup(); }
 });
 
 
@@ -183,21 +207,21 @@ test("an observed crossing survives a long pause and a later budget change, with
 
 
 test("nothing-to-report answers are reused, ended shares are cleaned, old markers pruned and empty passes write no cursor", async () => {
-  const t = makeEnv(), ctx = ctxFor(t), fetchBefore = globalThis.fetch;
+  const t = makeEnv(), ctx = ctxFor(t), fetchBefore = globalThis.fetch, now = Date.now();
   saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
   let reads = 0;
   globalThis.fetch = async () => { reads++; return Response.json(null); };
   try {
     for (const name of ["no-team", "unbound", "unreadable", "closed"]) shareSession(ctx, "claude-code", name);
-    await refreshSessionBudgets(ctx); assert.equal(reads, 4);
-    await refreshSessionBudgets(ctx); assert.equal(reads, 4);
+    await refreshSessionBudgets(ctx, () => now); assert.equal(reads, 4);
+    await refreshSessionBudgets(ctx, () => now); assert.equal(reads, 4);
     const lid = (ctx.db.prepare("SELECT local_id FROM shares LIMIT 1").get() as any).local_id;
     writeJsonAtomic(layout.budgetCache(t.home, lid), { private: "remove" });
     const { stopSharing } = await import("../src/share.ts"); stopSharing(ctx, lid);
     assert.ok(!fs.existsSync(layout.budgetCache(t.home, lid)));
     assert.ok(!fs.existsSync(path.join(t.home, "budget-attribution", `${lid}.json`)));
     writeJsonAtomic(layout.budgetShown(t.home, lid, "2000-01", 80), {});
-    ctx.db.prepare("DELETE FROM shares").run(); await refreshSessionBudgets(ctx);
+    ctx.db.prepare("DELETE FROM shares").run(); await refreshSessionBudgets(ctx, () => now);
     assert.ok(!fs.existsSync(layout.budgetShown(t.home, lid, "2000-01", 80)));
     assert.ok(!fs.existsSync(path.join(t.home, "budgets-cache", "cursor.json")));
     assert.equal(fs.readdirSync(path.join(t.home, "budget-attribution")).length, 0);
@@ -208,11 +232,11 @@ test("nothing-to-report answers are reused, ended shares are cleaned, old marker
 });
 
 test("budget passes stop at the total read and time bounds and rotate beyond unfinished sessions", async () => {
-  const t = makeEnv(), ctx = ctxFor(t), fetchBefore = globalThis.fetch, realNow = Date.now;
-  const { BUDGET_READS_MAX, BUDGET_PASS_MS } = await import("../src/budgets.ts");
+  const t = makeEnv(), ctx = ctxFor(t), fetchBefore = globalThis.fetch;
+  const { BUDGET_READS_MAX } = await import("../src/budgets.ts");
   saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
   for (let n = 0; n < 101; n++) shareSession(ctx, "claude-code", `bounded-${n}`);
-  let reads = 0, clock = realNow(), slow = false;
+  let reads = 0, clock = Date.now(), slow = false;
   const at = new Date(clock).toISOString();
   globalThis.fetch = async (url) => {
     reads++; if (slow) clock += BUDGET_PASS_MS;
@@ -220,14 +244,13 @@ test("budget passes stop at the total read and time bounds and rotate beyond unf
     return String(url).includes("/sessions/") ? Response.json({ epoch_id: "ep_1", team, month: at.slice(0, 7) }) : Response.json(null, { status: 404 });
   };
   try {
-    Date.now = () => clock;
-    await refreshSessionBudgets(ctx); assert.equal(reads, BUDGET_READS_MAX);
+    await refreshSessionBudgets(ctx, () => clock); assert.equal(reads, BUDGET_READS_MAX);
     const first = fs.readFileSync(path.join(t.home, "budgets-cache", "cursor.json"), "utf8");
-    reads = 0; await refreshSessionBudgets(ctx); assert.ok(reads > 0 && reads <= BUDGET_READS_MAX);
+    reads = 0; await refreshSessionBudgets(ctx, () => clock); assert.ok(reads > 0 && reads <= BUDGET_READS_MAX);
     assert.notEqual(fs.readFileSync(path.join(t.home, "budgets-cache", "cursor.json"), "utf8"), first);
     fs.rmSync(path.join(t.home, "budget-attribution"), { recursive: true, force: true });
-    slow = true; reads = 0; await refreshSessionBudgets(ctx); assert.equal(reads, 1);
-  } finally { Date.now = realNow; globalThis.fetch = fetchBefore; ctx.db.close(); t.cleanup(); }
+    slow = true; reads = 0; await refreshSessionBudgets(ctx, () => clock); assert.equal(reads, 1);
+  } finally { globalThis.fetch = fetchBefore; ctx.db.close(); t.cleanup(); }
 });
 
 
@@ -240,11 +263,11 @@ test("a sync-observed crossing reaches the real next prompt after two days in th
   globalThis.fetch = async (url) => String(url).includes("/sessions/") ? Response.json({ epoch_id: "ep_1", team: { id: "pod_build", name: "Build" }, month: at.slice(0, 7) }) : Response.json({ team: { id: "pod_build", name: "Build" }, month: at.slice(0, 7), as_of: at, effective_budget_usd_micros: 100, estimated_spend_usd_micros: 80, spend_bound: "exact", unpriced_requests: 0 });
   try {
     Date.now = () => clock;
-    await refreshSessionBudgets(ctx);
+    await refreshSessionBudgets(ctx, () => clock);
     assert.ok(fs.existsSync(layout.budgetCache(t.home, lid)));
     fs.rmSync(path.join(t.home, "budgets-cache", "teams.json"));
     globalThis.fetch = async () => { throw new Error("Temporarily unavailable"); };
-    await refreshSessionBudgets(ctx);
+    await refreshSessionBudgets(ctx, () => clock);
     assert.ok(fs.existsSync(layout.budgetCache(t.home, lid)), "a failed refresh preserves a due crossing");
     clock += 2 * 24 * 3600000;
     const result = userPromptSubmit(t.home, "claude-code", { session_id: sid, prompt: "Continue", prompt_id: "after-pause" });
@@ -308,8 +331,8 @@ test("a prompt-first crossing consumes the user warning too; unsupported harness
 });
 
 test("directive stamps invalidate only changed team reads, including removal, without extra attribution or unchanged-pass reads", async () => {
-  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch;
-  const lid = shareSession(ctx, "claude-code", "stamp-session"), at = new Date().toISOString(), month = at.slice(0, 7);
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch, now = Date.now();
+  const lid = shareSession(ctx, "claude-code", "stamp-session"), at = new Date(now).toISOString(), month = at.slice(0, 7);
   const calls: string[] = [];
   let amount: number | null = 100, stamp = "a".repeat(64);
   saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
@@ -321,7 +344,7 @@ test("directive stamps invalidate only changed team reads, including removal, wi
       effective_budget_usd_micros: amount, estimated_spend_usd_micros: 80, spend_bound: "exact", unpriced_requests: 0 });
   };
   try {
-    const pass = async () => { await pollDirectives(ctx, () => undefined); await refreshSessionBudgets(ctx); };
+    const pass = async () => { await pollDirectives(ctx, () => undefined); await refreshSessionBudgets(ctx, () => now); };
     await pass(); assert.equal(calls.length, 3);
     calls.length = 0; await pass(); assert.equal(calls.length, 1); assert.match(calls[0], /directives\?/);
     for (const [nextStamp, nextAmount] of [["b", 200], ["c", 50], ["d", null], ["e", 100]] as const) {
@@ -333,41 +356,41 @@ test("directive stamps invalidate only changed team reads, including removal, wi
       else assert.equal(cached?.effective_budget_usd_micros, amount);
       calls.length = 0; await pass(); assert.equal(calls.length, 1);
     }
-    receiveBudgetStamps(ctx, undefined); calls.length = 0; await refreshSessionBudgets(ctx); assert.equal(calls.length, 0);
+    receiveBudgetStamps(ctx, undefined); calls.length = 0; await refreshSessionBudgets(ctx, () => now); assert.equal(calls.length, 0);
   } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
 });
 
 test("terminal and sync cache updates share figure validation and match only confirmed session attribution", async () => {
-  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch;
-  const lid = shareSession(ctx, "claude-code", "terminal-read"), at = new Date().toISOString(), month = at.slice(0, 7);
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch, now = Date.now();
+  const lid = shareSession(ctx, "claude-code", "terminal-read"), at = new Date(now).toISOString(), month = at.slice(0, 7);
   saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
   const figure = { team: { id: "pod_build", name: "Build" }, month, as_of: at, effective_budget_usd_micros: 100, estimated_spend_usd_micros: 10, spend_bound: "exact", unpriced_requests: 0 };
   globalThis.fetch = async (input) => String(input).includes("/sessions/") ? Response.json({ epoch_id: "ep_1", team: figure.team, month }) : Response.json(figure);
   try {
-    await refreshSessionBudgets(ctx);
+    await refreshSessionBudgets(ctx, () => now);
     globalThis.fetch = async () => { throw new Error("no network expected"); };
-    cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure, estimated_spend_usd_micros: 80 });
+    cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure, estimated_spend_usd_micros: 80 }, now);
     assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.estimated_spend_usd_micros, 80);
-    for (const patch of [{ month: "2000-01" }, { as_of: "invalid" }, { as_of: new Date(Date.now() + CLOCK_TOLERANCE_MS + 1000).toISOString() }, { team: { id: "pod_other", name: "Other" } }, { estimated_spend_usd_micros: "100" }]) {
-      cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure, ...patch });
+    for (const patch of [{ month: "2000-01" }, { as_of: "invalid" }, { as_of: new Date(now + CLOCK_TOLERANCE_MS + 1000).toISOString() }, { team: { id: "pod_other", name: "Other" } }, { estimated_spend_usd_micros: "100" }]) {
+      cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure, ...patch }, now);
       assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.estimated_spend_usd_micros, 80);
     }
-    cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure, effective_budget_usd_micros: null });
+    cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure, effective_budget_usd_micros: null }, now);
     assert.equal(readJson(layout.budgetCache(t.home, lid)), null);
     assert.deepEqual(budgetNotes(t.home, lid, readJson(layout.hot(t.home, lid))), []);
   } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
 });
 
 test("404 budget routes and unknown additive stamp fields never stop a pass or create a note", async () => {
-  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch;
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch, now = Date.now();
   const lid = shareSession(ctx, "claude-code", "old-server");
   saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
   let reads = 0;
   globalThis.fetch = async () => { reads++; return Response.json({ error: "not_found", future: true }, { status: 404 }); };
   try {
     receiveBudgetStamps(ctx, { future: true });
-    await refreshSessionBudgets(ctx); assert.equal(reads, 1);
-    await refreshSessionBudgets(ctx); assert.equal(reads, 1);
+    await refreshSessionBudgets(ctx, () => now); assert.equal(reads, 1);
+    await refreshSessionBudgets(ctx, () => now); assert.equal(reads, 1);
     assert.equal(readJson(layout.budgetCache(t.home, lid)), null);
     assert.deepEqual(budgetNotes(t.home, lid, readJson(layout.hot(t.home, lid))), []);
   } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
@@ -405,20 +428,20 @@ test("a figure computed after the pass began is accepted, and sync confirms stal
   };
   try {
     Date.now = () => clock;
-    await refreshSessionBudgets(ctx);
+    await refreshSessionBudgets(ctx, () => clock);
     assert.equal(reads, 2); assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.estimated_spend_usd_micros, 80);
     clock += BUDGET_FRESH_MS + 1000;
     reads = 0;
     cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure(), estimated_spend_usd_micros: 100 });
-    await refreshSessionBudgets(ctx); // Sync confirms stale attribution with no repeated team read.
+    await refreshSessionBudgets(ctx, () => clock); // Sync confirms stale attribution with no repeated team read.
     assert.equal(reads, 1);
     assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.estimated_spend_usd_micros, 100);
   } finally { Date.now = realNow; globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
 });
 
 test("a legacy cached absent budget gets no new read, snapshot, context or message when stamps are empty", async () => {
-  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch;
-  const lid = shareSession(ctx, "claude-code", "absent-budget"), at = new Date().toISOString(), month = at.slice(0, 7);
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch, now = Date.now();
+  const lid = shareSession(ctx, "claude-code", "absent-budget"), at = new Date(now).toISOString(), month = at.slice(0, 7);
   userPromptSubmit(t.home, "claude-code", { session_id: "absent-budget", prompt: "Start", prompt_id: "baseline" });
   saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
   let reads = 0;
@@ -427,11 +450,11 @@ test("a legacy cached absent budget gets no new read, snapshot, context or messa
     return String(input).includes("/sessions/") ? Response.json({ epoch_id: "ep_1", team: { id: "pod_build", name: "Build" }, month }) : Response.json({ team: { id: "pod_build", name: "Build" }, month, as_of: at, effective_budget_usd_micros: null, estimated_spend_usd_micros: 100, spend_bound: "exact", unpriced_requests: 0 });
   };
   try {
-    await refreshSessionBudgets(ctx); assert.equal(reads, 2);
+    await refreshSessionBudgets(ctx, () => now); assert.equal(reads, 2);
     const file = path.join(t.home, "budgets-cache", "teams.json"), teams = readJson<Record<string, any>>(file)!;
     delete teams[`ws_1:pod_build:${month}`].stamp; writeJsonAtomic(file, teams); // The exact cache shape before stamps.
     receiveBudgetStamps(ctx, []);
-    reads = 0; await refreshSessionBudgets(ctx); assert.equal(reads, 0);
+    reads = 0; await refreshSessionBudgets(ctx, () => now); assert.equal(reads, 0);
     assert.equal(readJson(layout.budgetCache(t.home, lid)), null);
     const input = { session_id: "absent-budget", tool_name: "Read" };
     assert.equal(preToolUse(t.home, "claude-code", input), null);
@@ -440,20 +463,20 @@ test("a legacy cached absent budget gets no new read, snapshot, context or messa
 });
 
 test("a confirmed removal clears due notes even outside the rotating session batch, with one team read", async () => {
-  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch, month = new Date().toISOString().slice(0, 7);
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch, now = Date.now(), at = new Date(now).toISOString(), month = at.slice(0, 7);
   saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
   const lids = Array.from({ length: 101 }, (_, n) => shareSession(ctx, "claude-code", `remove-batch-${n}`));
   let removed = false, reads = 0;
   globalThis.fetch = async (input) => {
     reads++;
-    return String(input).includes("/sessions/") ? Response.json({ epoch_id: "ep_1", team: { id: "pod_build", name: "Build" }, month }) : Response.json({ team: { id: "pod_build", name: "Build" }, month, as_of: new Date().toISOString(), budget_stamp: (removed ? "b" : "a").repeat(64), effective_budget_usd_micros: removed ? null : 100, estimated_spend_usd_micros: 100, spend_bound: "exact", unpriced_requests: 0 });
+    return String(input).includes("/sessions/") ? Response.json({ epoch_id: "ep_1", team: { id: "pod_build", name: "Build" }, month }) : Response.json({ team: { id: "pod_build", name: "Build" }, month, as_of: at, budget_stamp: (removed ? "b" : "a").repeat(64), effective_budget_usd_micros: removed ? null : 100, estimated_spend_usd_micros: 100, spend_bound: "exact", unpriced_requests: 0 });
   };
   try {
-    await refreshSessionBudgets(ctx); await refreshSessionBudgets(ctx);
+    await refreshSessionBudgets(ctx, () => now); await refreshSessionBudgets(ctx, () => now);
     assert.equal(lids.filter((lid) => fs.existsSync(layout.budgetCache(t.home, lid))).length, 101);
     removed = true; reads = 0;
     receiveBudgetStamps(ctx, [{ ws: "ws_1", team: "pod_build", month, stamp: "b".repeat(64) }]);
-    await refreshSessionBudgets(ctx); assert.equal(reads, 1);
+    await refreshSessionBudgets(ctx, () => now); assert.equal(reads, 1);
     for (const lid of lids) {
       assert.equal(fs.existsSync(layout.budgetCache(t.home, lid)), false);
       assert.deepEqual(budgetNotes(t.home, lid, readJson(layout.hot(t.home, lid))), []);

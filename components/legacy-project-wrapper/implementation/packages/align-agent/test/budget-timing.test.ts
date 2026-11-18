@@ -32,7 +32,7 @@ for (const [ahead, offset] of [[5_000, 0], [3 * 60_000, 3 * 60_000], [-3 * 60_00
     try {
       Date.now = () => NOW; credentials(t.home, offset);
       globalThis.fetch = async (url) => String(url).includes("/sessions/") ? Response.json({ epoch_id: "ep_1", team, month }) : Response.json(value);
-      await refreshSessionBudgets(ctx);
+      await refreshSessionBudgets(ctx, () => NOW);
       const file = layout.budgetCache(t.home, lid), first = readJson<BudgetSnapshot>(file)!;
       assert.deepEqual(first.crossings, [{ threshold: 80, as_of: value.as_of }]);
       const hot = readJson<HotState>(layout.hot(t.home, lid));
@@ -92,14 +92,14 @@ test("rejected figures preserve every snapshot and pending crossing, and retry n
       if (String(url).includes("/sessions/")) return Response.json({ epoch_id: "ep_1", team, month });
       reads++; return Response.json(value);
     };
-    await refreshSessionBudgets(ctx); await refreshSessionBudgets(ctx);
+    await refreshSessionBudgets(ctx, () => NOW); await refreshSessionBudgets(ctx, () => NOW);
     const snapshots = lids.map((lid) => fs.readFileSync(layout.budgetCache(t.home, lid), "utf8"));
     const teamsFile = path.join(t.home, "budgets-cache", "teams.json"), cachedTeams = fs.readFileSync(teamsFile, "utf8");
     ctx.budgetStamps = new Map([[`ws_1:${team.id}:${month}`, "b".repeat(64)]]);
     const patches = [null, { ...figure(NOW + offset + CLOCK_TOLERANCE_MS + 1) }, { ...figure(), as_of: "invalid" },
       { ...figure(), month: "2000-01" }, { ...figure(), team: { id: "pod_other", name: "Other" } }, { ...figure(), estimated_spend_usd_micros: "80" }];
     for (value of patches) {
-      reads = 0; await refreshSessionBudgets(ctx);
+      reads = 0; await refreshSessionBudgets(ctx, () => NOW);
       assert.equal(reads, 1, "a rejected team figure is read once per pass");
       assert.deepEqual(lids.map((lid) => fs.readFileSync(layout.budgetCache(t.home, lid), "utf8")), snapshots);
       assert.equal(fs.readFileSync(teamsFile, "utf8"), cachedTeams);
@@ -108,8 +108,8 @@ test("rejected figures preserve every snapshot and pending crossing, and retry n
       assert.equal(fs.readFileSync(teamsFile, "utf8"), cachedTeams);
     }
     value = { ...figure(NOW + offset), estimated_spend_usd_micros: 100, budget_stamp: "b".repeat(64) };
-    reads = 0; await refreshSessionBudgets(ctx); assert.equal(reads, 1, "a valid next pass can retry");
-    await refreshSessionBudgets(ctx); assert.equal(reads, 1, "the valid figure is reused for the remaining session");
+    reads = 0; await refreshSessionBudgets(ctx, () => NOW); assert.equal(reads, 1, "a valid next pass can retry");
+    await refreshSessionBudgets(ctx, () => NOW); assert.equal(reads, 1, "the valid figure is reused for the remaining session");
     assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lids[0]))?.crossings?.length, 2);
     assert.equal(budgetNotes(t.home, lids[0], readJson(layout.hot(t.home, lids[0])), NOW).length, 2);
   } finally { Date.now = realNow; globalThis.fetch = fetchBefore; ctx.db.close(); t.cleanup(); }

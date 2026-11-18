@@ -47,6 +47,11 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   update restricted to the selected team, using the sync lock without waiting and at most one current-folder
   attribution read. No daemon, polling, usage metering change, timeout increase or change to begin().
 - **Implementation and evidence:**
+  - [x] Budget pass tests use an injected clock with unchanged production defaults and every existing assertion
+    retained. A separate test verifies exactly two reads before the time cutoff and continuation next pass.
+    Node 26.3.0: twenty consecutive budget-file runs pass (23 tests each); 315 listener-free agent units, lint,
+    app and agent typechecks, syntax and the agent build pass. The unchanged serial hook latency check initially
+    misses its 150 ms limit at p95 152.2 ms; one isolated retry passes. The initial miss remains recorded.
   - [x] Specifications amended before implementation; the agent README and changelog describe the resulting behavior.
   - [x] The budget domain suite covers change stamps, grants, expiry, removal, Home privacy, retained observations,
     unchanged Needs data and migration preservation. Listener-free agent tests cover cached passes, mixed releases,

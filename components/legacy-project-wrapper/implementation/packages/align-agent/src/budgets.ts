@@ -142,8 +142,8 @@ export async function cacheTerminalBudget(ctx: Ctx, workspace: string, team: str
   finally { removeFile(lock); }
 }
 
-export async function refreshSessionBudgets(ctx: Ctx): Promise<void> {
-  const now = Date.now(), deadline = now + BUDGET_PASS_MS, month = new Date(now).toISOString().slice(0, 7);
+export async function refreshSessionBudgets(ctx: Ctx, clock: () => number = Date.now): Promise<void> {
+  const now = clock(), deadline = now + BUDGET_PASS_MS, month = new Date(now).toISOString().slice(0, 7);
   const fresh = (at: number) => Number.isFinite(at) && at <= now && now - at < WINDOW_MS;
   const shared = ctx.db.prepare("SELECT local_id, workspace_id, session_key, binding_epoch FROM shares WHERE state='shared' ORDER BY local_id").all() as Share[];
   const active = new Set(shared.map((s) => `${s.local_id}.json`));
@@ -172,13 +172,13 @@ export async function refreshSessionBudgets(ctx: Ctx): Promise<void> {
   const refreshed = new Set<string>();
   const rejected = new Set<string>();
   const read = async (route: string) => {
-    const remaining = deadline - Date.now(), c = loadCredentials(ctx.home);
-    if (remaining <= 0 || reads >= BUDGET_READS_MAX || !c || c.signed_out || !c.access_token || Date.parse(c.access_expires_at ?? "") <= Date.now() || !boundTo(ctx, c)) return undefined;
+    const remaining = deadline - clock(), c = loadCredentials(ctx.home);
+    if (remaining <= 0 || reads >= BUDGET_READS_MAX || !c || c.signed_out || !c.access_token || Date.parse(c.access_expires_at ?? "") <= clock() || !boundTo(ctx, c)) return undefined;
     reads++;
     return rawRequest(c.server_url, "GET", route, { headers: { authorization: `Bearer ${c.access_token}` }, timeoutMs: Math.max(1, Math.min(1000, remaining)) });
   };
   for (const s of shares) {
-    if (reads >= BUDGET_READS_MAX || Date.now() >= deadline) break;
+    if (reads >= BUDGET_READS_MAX || clock() >= deadline) break;
     last = s.local_id;
     const file = layout.budgetCache(ctx.home, s.local_id), af = attributionFile(ctx.home, s.local_id);
     try {
@@ -199,13 +199,13 @@ export async function refreshSessionBudgets(ctx: Ctx): Promise<void> {
         const r = await read(`/api/v2/workspaces/${encodeURIComponent(s.workspace_id)}/teams/${encodeURIComponent(attr.team.id)}/budget?month=${month}`);
         if (!r) { last = shares[shares.indexOf(s) - 1]?.local_id ?? cursor; break; }
         if (r.status !== 200 && r.status !== 404) { if (r.status < 500) removeFile(file); continue; }
-        const budget = r.status === 200 ? validatedBudget(r.json, attr.team.id, month, Date.now(), clockOffset(ctx.home)) : null;
+        const budget = r.status === 200 ? validatedBudget(r.json, attr.team.id, month, clock(), clockOffset(ctx.home)) : null;
         if (r.status === 200 && !budget) { rejected.add(key); continue; }
         teams[key] = { at: now, stamp: typeof r.json?.budget_stamp === "string" ? r.json.budget_stamp : stamp, budget };
         refreshed.add(key);
         if (!teams[key].budget || teams[key].budget.effective_budget_usd_micros === null) clearTeamSnapshots(ctx, s.workspace_id, attr.team.id, month);
       }
-      applyFigure(ctx, s, attr, teams[key], Date.now());
+      applyFigure(ctx, s, attr, teams[key], clock());
     } catch (e) { if (!(e instanceof NetworkError)) removeFile(file); }
   }
   const current = loadCredentials(ctx.home);
