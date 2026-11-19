@@ -7186,6 +7186,66 @@ try {
         // PR 68 item 13 (founder review of e780d842): Drop this goal → Confirm drops it (next version, status dropped) and the
         // confirmation goes away at once, with no second Confirm on the replaced version and no reload needed.
         const GD = (await ha(HO, "POST", "/goals", { title: "Hana's goal to drop", visibility: "workspace", measures: [{ text: "Kept on drop", target: "1" }] })).json;
+        // LIM-2513 journey pass: the goal page leads with what the goal is. Under the title the owner's one action is Edit
+        // this goal (it moves to the New version form and focuses its first field); with no shared session on the goal
+        // the hold controls are folded; Drop this goal sits at the foot of the New version form, after Save.
+        {
+          const pg = await browser.newPage();
+          await pg.setViewport({ width: 1440, height: 900 });
+          await pg.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          await pg.goto(`${BASE}/app/w/${HW}/goals/${GD?.id}`, { waitUntil: "networkidle0" });
+          await pg.waitForSelector("#new-version", { timeout: 15000 });
+          const lay = await pg.evaluate(() => {
+            const h1 = document.querySelector("main h1");
+            const measures = [...document.querySelectorAll("main h2, main h3")].find((h) => h.textContent?.trim() === "Measures");
+            const before = (el) => !!el && !!measures && !!(el.compareDocumentPosition(measures) & Node.DOCUMENT_POSITION_FOLLOWING);
+            const buttons = [...document.querySelectorAll("main button")];
+            const edit = buttons.find((b) => b.textContent?.trim() === "Edit this goal");
+            const drop = buttons.find((b) => b.textContent?.trim() === "Drop this goal");
+            const save = buttons.find((b) => /^Save version \d+$/.test(b.textContent?.trim() ?? ""));
+            const aboveMeasures = buttons.filter((b) => before(b) && !!h1 && !!(h1.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)).map((b) => b.textContent?.trim());
+            const folded = document.querySelector("#agents-on-goal [data-hold-folded]");
+            return {
+              aboveMeasures,
+              dropInForm: !!drop && !!drop.closest("#new-version") && !!save && !!(save.compareDocumentPosition(drop) & Node.DOCUMENT_POSITION_FOLLOWING),
+              folded: !!folded && !folded.hasAttribute("open") && /Hold agents on this goal/.test(folded.querySelector("summary")?.textContent ?? ""),
+              editFirst: !!edit,
+            };
+          });
+          await pg.evaluate(() => [...document.querySelectorAll("main button")].find((b) => b.textContent?.trim() === "Edit this goal")?.click());
+          await sleep(600);
+          const focusIn = await pg.evaluate(() => !!document.activeElement?.closest("#new-version") && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? ""));
+          await pg.close();
+          check(
+            "ui (Chrome, LIM-2513): the owner's goal page leads with the goal: under the title the only action is Edit this goal, which focuses the New version form; with no shared session the hold controls are folded under \"Hold agents on this goal\"; Drop this goal is in the New version form after Save",
+            lay.editFirst && JSON.stringify(lay.aboveMeasures) === '["Edit this goal"]' && lay.folded && lay.dropInForm && focusIn,
+            JSON.stringify({ ...lay, focusIn }),
+          );
+        }
+        // LIM-2513 journey pass: a person who owns every active goal gets, in the Propose a change drawer, each goal linked
+        // to its New version form instead of a dead end; following one lands on the form with its first field focused.
+        {
+          const wsO = await call(HO.who, "POST", "/api/v2/workspaces", { cookie: HO.cookie, body: { name: "Hana solo" } });
+          const gO = await call(HO.who, "POST", `/api/v2/workspaces/${wsO.json?.id}/goals`, { cookie: HO.cookie, body: { title: "Hana's only goal", visibility: "workspace" } });
+          const po = await browser.newPage();
+          await po.setViewport({ width: 390, height: 844 });
+          await po.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          await po.goto(`${BASE}/app/w/${wsO.json?.id}`, { waitUntil: "networkidle0" });
+          await po.evaluate(() => document.querySelector("[data-propose-open]")?.click());
+          await po.waitForSelector(`[data-propose-edit="${gO.json?.id}"]`, { timeout: 15000 }).catch(() => undefined);
+          const drawerO = await po.evaluate(() => document.querySelector('[data-propose="none"]')?.innerText ?? "");
+          await po.evaluate((id) => document.querySelector(`[data-propose-edit="${id}"]`)?.click(), gO.json?.id);
+          await po.waitForSelector("#new-version", { timeout: 15000 }).catch(() => undefined);
+          await sleep(800);
+          const landed = await po.evaluate(() => ({ path: location.pathname + location.hash, focus: !!document.activeElement?.closest("#new-version") }));
+          await po.close();
+          check(
+            "ui (Chrome, 390, LIM-2513): owning every active goal, the Propose a change drawer names each goal with \"Edit v1\", linked to its New version form; following it lands on that form with its first field focused",
+            wsO.status === 201 && gO.status === 201 && /You own every active goal you can see here, so you change one directly/.test(drawerO) && /Hana's only goal/.test(drawerO) && /Edit v1/.test(drawerO) &&
+              landed.path === `/app/w/${wsO.json?.id}/goals/${gO.json?.id}#new-version` && landed.focus,
+            JSON.stringify({ ws: wsO.status, goal: gO.status, drawerO, landed }),
+          );
+        }
         const pd = await browser.newPage();
         await pd.setViewport({ width: 390, height: 844 });
         await pd.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
@@ -8623,8 +8683,8 @@ try {
         const sampleReq = await text(pS);
         const sampleSummary = await text(pS, "[data-desk-summary]");
         check(
-          "B12 (LIM-2472): in the Northstar sample the Requests tab says one decision waits on the person and its row says it is their own request, never \"You have not proposed a change\" or \"No change requests yet\"",
-          sample.status === 201 && /^1 decision waiting on you\./.test(sampleSummary) && /your request/.test(sampleReq) && !sampleReq.includes("You have not proposed a change") && !sampleReq.includes("No change requests yet"),
+          "B12 (LIM-2472): in the Northstar sample the Requests tab says one decision waits on the person and its row says it is their own request on their own goal (\"your request, on your own goal\", so Decision beside it reads right, LIM-2513), never \"You have not proposed a change\" or \"No change requests yet\"",
+          sample.status === 201 && /^1 decision waiting on you\./.test(sampleSummary) && /your request, on your own goal/.test(sampleReq) && !sampleReq.includes("You have not proposed a change") && !sampleReq.includes("No change requests yet"),
           sampleReq.slice(0, 400),
         );
         // U9: restoring says connected apps don't come back.
@@ -9969,6 +10029,9 @@ try {
         // never a "Loading…" on the page, and the hold reason typed into it stays.
         await open(pO, `/app/w/${XW}/goals/${GL?.id}`);
         await pO.waitForFunction(() => !!document.querySelector("#agents-on-goal") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Launch version 2 to agents"), { timeout: 15000 }).catch(() => undefined);
+        // With no shared session on the goal the hold controls are folded (LIM-2513): open them as a person would.
+        const holdFolded = await pO.$("#agents-on-goal [data-hold-folded]:not([open]) summary");
+        if (holdFolded) await holdFolded.click();
         await pO.evaluate(() => {
           const f = [...document.querySelectorAll("#agents-on-goal label")].find((x) => x.querySelector("span")?.textContent?.trim() === "Reason (optional, shown to the developers)")?.querySelector("input");
           f?.setAttribute("data-typing", "1");
@@ -9982,7 +10045,7 @@ try {
           }).observe(document.body, { childList: true, subtree: true, characterData: true });
         });
         await press(pO, `[data-cr="${crL?.id}"]`, "Launch version 2 to agents");
-        await pO.waitForFunction(() => document.body.innerText.includes("Recorded: you launched version 2 to agents") && /version 2/.test(document.querySelector("h1")?.nextElementSibling?.textContent ?? ""), { timeout: 15000 }).catch(() => undefined);
+        await pO.waitForFunction(() => document.body.innerText.includes("Recorded: you launched version 2.") && /version 2/.test(document.querySelector("h1")?.nextElementSibling?.textContent ?? ""), { timeout: 15000 }).catch(() => undefined);
         await pO.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const c34 = await pO.evaluate(() => ({
           gone: window.__agentsGone,
@@ -13191,6 +13254,22 @@ try {
     hAsks.status === 401 && hAsks.json?.error === "unauthorized" && !(hSuggest.status === 404 && hSuggest.json?.error === "Not found"),
     `${hAsks.status} ${hAsks.text.slice(0, 100)} ${hSuggest.status} ${hSuggest.text.slice(0, 100)}`,
   );
+  // The platform health check (fly.toml) calls /api/v2/health, which no sign-in rate limit counts. Its earlier path,
+  // Better Auth's get-session, is counted per client, and the check's Fly-Client-IP never changes: live, every 101st
+  // check (every 50 minutes) was refused. Here, one client: 150 health calls are all 200; get-session is refused past 100.
+  {
+    const hc = { "fly-client-ip": "fly-health-check" };
+    const health = [];
+    for (let i = 0; i < 150; i++) health.push(await hosted("GET", "/api/v2/health", { headers: hc }));
+    const sess = [];
+    for (let i = 0; i < 101; i++) sess.push(await hosted("GET", "/api/v2/auth/get-session", { headers: hc }));
+    check(
+      "hosted: the health check's route (/api/v2/health, fly.toml) answers 200 {ok:true} to 150 calls in a row from one client, while Better Auth's get-session, its earlier path, refuses that client its 101st call (429): the check is no longer rate-limited",
+      /^\s*path = "\/api\/v2\/health"$/m.test(readFileSync(path.join(ROOT, "fly.toml"), "utf8")) &&
+        health.every((r) => r.status === 200 && r.json?.ok === true) && sess.slice(0, 100).every((r) => r.status === 200) && sess[100].status === 429,
+      JSON.stringify({ health: [...new Set(health.map((r) => r.status))], sess100: sess[99]?.status, sess101: sess[100]?.status }),
+    );
+  }
   check("hosted: v2 routes are served (/api/v2/me 401, /app/sign-in 200, Better Auth answers)", hMe.status === 401 && hSignIn.status === 200 && hSession.status === 200, `${hMe.status} ${hSignIn.status} ${hSession.status}`);
   check("hosted: the sign-in page offers Google and GitHub, never the test sign-in; without email settings, no email code", hSignIn.text.includes("Continue with Google") && hSignIn.text.includes("Continue with GitHub") && !hSignIn.text.includes("Test sign-in") && !hSignIn.text.includes("Send code"), "");
   check("hosted: the sign-in page links to /privacy and /trust", hSignIn.text.includes('href="/privacy"') && hSignIn.text.includes('href="/trust"'), "");

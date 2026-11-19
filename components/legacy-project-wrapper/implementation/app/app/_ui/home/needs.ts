@@ -238,7 +238,9 @@ const goalOf = (cr: ChangeRequest) => ({ id: cr.goal.id, title: cr.goal.title })
 /** One change request as at most one row (CR read). */
 function crNeed(cr: ChangeRequest, me: string, returning?: Set<string>): Need | null {
   const base = { key: `cr:${cr.id}`, goal: goalOf(cr), quote: cr.reason, evidence: crEvidence(cr), review: reviewOf(cr), cr, word: "" };
-  const asker = cr.requester.id === me ? "Your request" : `${cr.requester.name}'s request`;
+  // Asking on a goal they own, the requester can decide it too (the server's approval set): say why it is theirs to
+  // decide, so "Decision" beside "Your request" doesn't read as a mistake (LIM-2513 journey pass).
+  const asker = cr.requester.id === me ? (cr.can.approve ? "Your request, on your own goal" : "Your request") : `${cr.requester.name}'s request`;
   const c = cr.can;
   const next = cr.version ?? cr.base_version + 1;
 

@@ -61,17 +61,25 @@ export function agentTarball(r: AgentRelease | null): { file: string; url: strin
   return { file, url: `${AGENT_REPO}/releases/download/agent-v${r.version}/${file}` };
 }
 
+/** Where the line installs `align`: the person's own home folder, so no administrator rights or sudo are needed (a
+ *  plain `npm install -g` writes to Node's global folder, which the official installer leaves owned by root: EACCES,
+ *  first-time tester report). The hooks `align install` writes don't depend on it: they run the copy it makes in
+ *  ~/.align/bin/current by absolute path (packages/align-agent/src/install.ts). */
+export const AGENT_PREFIX = '"$HOME/.local"';
+const ALIGN_BIN = '"$HOME/.local/bin/align"';
+
 /**
- * The Apps tab's step 4 line, or null: no release set (or one that isn't well formed), or a URL Align couldn't have
- * made. Fetch the pinned tarball, check its sha256 (shasum stops the line on a mismatch, before npm runs), install
- * that file, add the hooks, pair: a plain `align login` on the hosted server, `--server '<origin>'` (from the checked
- * MCP URL, single-quoted) elsewhere.
+ * The Apps tab's align CLI line, or null: no release set (or one that isn't well formed), or a URL Align couldn't
+ * have made. Fetch the pinned tarball, check its sha256 (shasum stops the line on a mismatch, before npm runs),
+ * install that file into ~/.local, add the hooks, pair: a plain `align login` on the hosted server,
+ * `--server '<origin>'` (from the checked MCP URL, single-quoted) elsewhere. `align` is called by its full path, so
+ * the line works whether or not ~/.local/bin is on PATH.
  */
 export function agentInstallLine(url: string, release: AgentRelease | null = AGENT_RELEASE): string | null {
   const u = safeMcpUrl(url);
   const t = agentTarball(release);
   if (!u || !t || !release) return null;
   const origin = u.slice(0, -"/api/mcp".length);
-  const login = `align install && align login${origin === HOSTED_ORIGIN ? "" : ` --server ${shq(origin)}`}`;
-  return `curl -fsSLO ${t.url} && echo '${release.sha256}  ${t.file}' | shasum -a 256 -c && npm install -g ./${t.file} && ${login}`;
+  const login = `${ALIGN_BIN} install && ${ALIGN_BIN} login${origin === HOSTED_ORIGIN ? "" : ` --server ${shq(origin)}`}`;
+  return `curl -fsSLO ${t.url} && echo '${release.sha256}  ${t.file}' | shasum -a 256 -c && npm install --global --prefix ${AGENT_PREFIX} ./${t.file} && ${login}`;
 }
