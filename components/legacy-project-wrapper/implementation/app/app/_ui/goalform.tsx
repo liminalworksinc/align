@@ -1,5 +1,6 @@
 "use client";
-import { Btn, Field, Input, TextArea, listOf } from "./kit";
+import { useId } from "react";
+import { Btn, Field, Input, Select, TextArea, listOf } from "./kit";
 import type { Goal } from "./types";
 import { isBlankText } from "@/lib/v2/text-core.mts";
 
@@ -7,47 +8,110 @@ import { isBlankText } from "@/lib/v2/text-core.mts";
 // re-exported here with them.
 export { LimitEditor, limitsDraft, limitsOut, sameLimits, type LimitDraft } from "./limits";
 
-export type MeasureDraft = { id?: string; text: string; target: string };
+import type { MeasureSource } from "@/lib/v2/measure-sources";
+
+export type MeasureDraft = { id?: string; text: string; target: string; source?: MeasureSource | null };
 export type AnchorDraft = { repos: string; branch_patterns: string; issues: string };
 
-export const measuresDraft = (g?: Goal): MeasureDraft[] => (g ? g.measures.map((m) => ({ id: m.id, text: m.text, target: m.target ?? "" })) : [{ text: "", target: "" }]);
+export const measuresDraft = (g?: Goal): MeasureDraft[] => (g ? g.measures.map((m) => ({ id: m.id, text: m.text, target: m.target ?? "", source: m.source })) : [{ text: "", target: "" }]);
 export const anchorsDraft = (g?: Goal): AnchorDraft => ({
   repos: g?.anchors.repos.join("\n") ?? "",
   branch_patterns: g?.anchors.branch_patterns.join("\n") ?? "",
   issues: g?.anchors.issues.join("\n") ?? "",
 });
 
-/** The measures to send: a row with nothing a person can read (spaces, or only invisible characters: E2E-WEB cycle 14
- *  C14-2) left out, as the server would refuse it; a blank target is none. */
-export const measuresOut = (m: MeasureDraft[]) =>
-  m.filter((x) => !isBlankText(x.text)).map((x) => ({ ...(x.id ? { id: x.id } : {}), text: x.text.trim(), target: isBlankText(x.target) ? null : x.target.trim() }));
+const missingMeasureLabel = (m: MeasureDraft) => !!m.source && isBlankText(m.text);
+export const hasUnlabelledSource = (measures: MeasureDraft[]) => measures.some(missingMeasureLabel);
+
+/** Blank optional rows are omitted. Keep an automated source attached to its measure for server validation. */
+export const measuresOut = (m: MeasureDraft[], configureSource = false) =>
+  m.filter((x) => (configureSource && x.source) || !isBlankText(x.text)).map((x) => ({ ...(x.id ? { id: x.id } : {}), text: x.text.trim(), target: isBlankText(x.target) ? null : x.target.trim(),
+    ...(configureSource && x.source !== undefined ? { source: x.source } : {}),
+  }));
 export const anchorsOut = (a: AnchorDraft) => ({ repos: listOf(a.repos), branch_patterns: listOf(a.branch_patterns), issues: listOf(a.issues) });
 
 /** `keepOne`: the New goal form never offers to remove its only measure row (founder ruling, PR 68 pass 1 item 19). */
-export function MeasuresEditor({ value, onChange, keepOne = false }: { value: MeasureDraft[]; onChange: (v: MeasureDraft[]) => void; keepOne?: boolean }) {
+export function MeasuresEditor({ value, onChange, keepOne = false, configureSource = false, showLabelErrors = false }: {
+  value: MeasureDraft[]; onChange: (v: MeasureDraft[]) => void; keepOne?: boolean; configureSource?: boolean; showLabelErrors?: boolean;
+}) {
   const removable = !keepOne || value.length > 1;
+  const errorId = useId();
   return (
     <div className="mb-3">
       <span className="mb-1 block text-[14px] text-(--text-2)">Measures</span>
-      {value.map((m, i) => (
-        // Below 640px (sm) the measure takes its own line and the target and Remove share the next, so the row fits a
-        // 320px phone (the measure never collapses, nothing scrolls sideways).
-        <div key={i} className="mb-2 grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,1fr)_180px_auto] [&>*:first-child]:max-sm:col-span-2">
-          <Input aria-label={`Measure ${i + 1}`} placeholder="What you will measure" value={m.text} maxLength={300} onChange={(e) => onChange(value.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))} />
-          <Input aria-label={`Target ${i + 1}`} placeholder="Target (optional)" value={m.target} maxLength={100} onChange={(e) => onChange(value.map((x, j) => (j === i ? { ...x, target: e.target.value } : x)))} />
-          {removable ? (
-            <Btn kind="secondary" onClick={() => onChange(value.filter((_, j) => j !== i))}>
-              Remove
-            </Btn>
-          ) : (
-            <span aria-hidden />
-          )}
-        </div>
-      ))}
+      {value.map((m, i) => {
+        const label = `Measure ${i + 1}`;
+        const error = configureSource && showLabelErrors && missingMeasureLabel(m);
+        return (
+          // Below 640px (sm) the measure takes its own line and the target and Remove share the next, so the row fits a
+          // 320px phone (the measure never collapses, nothing scrolls sideways).
+          <div key={i} className="mb-2 grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,1fr)_180px_auto] [&>*:first-child]:max-sm:col-span-2">
+            <div>
+              <Input aria-label={label} aria-invalid={error || undefined} aria-describedby={error ? `${errorId}-${i}` : undefined}
+                placeholder="What you will measure" value={m.text} maxLength={300} onChange={(e) => onChange(value.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))} />
+              {error && <p id={`${errorId}-${i}`} role="alert" className="mt-1 text-[14px] text-red-700">Enter a label for {label}.</p>}
+            </div>
+            <Input aria-label={`Target ${i + 1}`} placeholder="Target (optional)" value={m.target} maxLength={100} onChange={(e) => onChange(value.map((x, j) => (j === i ? { ...x, target: e.target.value } : x)))} />
+            {removable ? (
+              <Btn kind="secondary" onClick={() => onChange(value.filter((_, j) => j !== i))}>
+                Remove
+              </Btn>
+            ) : (
+              <span aria-hidden />
+            )}
+            {configureSource && <MeasureSourceFields source={m.source} onChange={(source) => onChange(value.map((x, j) => j === i ? { ...x, source } : x))} />}
+          </div>
+        );
+      })}
       {value.length < 10 && (
         <Btn kind="secondary" onClick={() => onChange([...value, { text: "", target: "" }])}>
           Add a measure
         </Btn>
+      )}
+    </div>
+  );
+}
+
+function MeasureSourceFields({ source, onChange }: { source?: MeasureSource | null; onChange: (value: MeasureSource | null) => void }) {
+  return (
+    <div className="col-span-full min-w-0">
+      <Field label="Reading source">
+        <Select value={source?.kind ?? "self"} onChange={(e) => {
+          const kind = e.target.value;
+          onChange(kind === "ci" ? { kind, repository: "", branch: "", check: "" }
+            : kind === "command" ? { kind, device_id: "", executable: "", args: [] } : null);
+        }}>
+          <option value="self">By hand</option>
+          <option value="ci">CI result</option>
+          <option value="command">Command on a machine</option>
+        </Select>
+      </Field>
+      {source && (
+        <Field label="Stale after (days, optional)">
+          <Input type="number" min={1} max={366} step={1} value={source.stale_after_days ?? ""}
+            onChange={(e) => onChange({ ...source, stale_after_days: e.target.value === "" ? undefined : Number(e.target.value) })} />
+        </Field>
+      )}
+      {source?.kind === "ci" && (
+        <>
+          <Field label="Repository (owner/name)"><Input value={source.repository} required maxLength={201} onChange={(e) => onChange({ ...source, repository: e.target.value })} /></Field>
+          <Field label="Branch"><Input value={source.branch} required maxLength={180} onChange={(e) => onChange({ ...source, branch: e.target.value })} /></Field>
+          <Field label="CI check name"><Input value={source.check} required maxLength={120} onChange={(e) => onChange({ ...source, check: e.target.value })} /></Field>
+        </>
+      )}
+      {source?.kind === "command" && (
+        <>
+          <p className="mb-2 text-[14px] text-(--text-2)">Ask the person using the machine to run <code>align measure device</code> for its ID. They will need to allow this exact command on that machine.</p>
+          <Field label="Machine ID"><Input value={source.device_id} required maxLength={68} onChange={(e) => onChange({ ...source, device_id: e.target.value })} /></Field>
+          <Field label="Executable path"><Input value={source.executable} required maxLength={400} placeholder="/absolute/path" onChange={(e) => onChange({ ...source, executable: e.target.value })} /></Field>
+          {source.args.map((arg, index) => (
+            <div className="flex min-w-0 flex-wrap items-center gap-2" key={index}>
+              <Field label={`Argument ${index + 1}`}><Input maxLength={300} value={arg} onChange={(e) => onChange({ ...source, args: source.args.map((a, i) => i === index ? e.target.value : a) })} /></Field>
+              <Btn kind="secondary" aria-label={`Remove argument ${index + 1}`} onClick={() => onChange({ ...source, args: source.args.filter((_, i) => i !== index) })}>Remove</Btn>
+            </div>
+          ))}
+          {source.args.length < 20 && <Btn kind="secondary" onClick={() => onChange({ ...source, args: [...source.args, ""] })}>Add argument</Btn>}
+        </>
       )}
     </div>
   );

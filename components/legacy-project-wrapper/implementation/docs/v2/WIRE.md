@@ -519,3 +519,74 @@ the last 15 minutes is needed (else `403 reauth_required`) to approve a device o
 role, remove another member, invite an owner, delete a workspace or restore a deleted one, to delete one's account, to
 add or delete a passkey, to link a provider and to sign out everywhere. Account deletion also deletes the person's
 passkeys and their dismissal of the passkey prompt.
+
+## Send a CI measure reading
+
+The goal owner selects **CI result** on the measure and enters the repository, branch and check name.
+A workspace owner opens **Apps**, creates a CI reading credential and saves the secret in that job's
+secret store as `ALIGN_CI_READING_TOKEN`. The credential only submits readings in that workspace.
+Revoke it from Apps when the job stops using it or to rotate it. Align describes these values as reported
+with a CI credential.
+
+Run this step after the check has written one plain decimal to `measure-value.txt`. Set the workspace,
+goal and measure IDs in the job's environment. The workspace and goal IDs are in the goal page URL.
+The goal read, `GET /api/v2/workspaces/{ws}/goals/{goal}`, lists the measure IDs under `goal.measures`.
+Use a branch and job that can safely access repository
+secrets. This example uses a push job on a trusted branch.
+
+```yaml
+- name: Send the release check reading to Align
+  if: github.event_name == 'push' && github.ref_type == 'branch'
+  env:
+    ALIGN_CI_READING_TOKEN: ${{ secrets.ALIGN_CI_READING_TOKEN }}
+    ALIGN_URL: ${{ vars.ALIGN_URL }}
+    ALIGN_WORKSPACE_ID: ${{ vars.ALIGN_WORKSPACE_ID }}
+    ALIGN_GOAL_ID: ${{ vars.ALIGN_GOAL_ID }}
+    ALIGN_MEASURE_ID: ${{ vars.ALIGN_MEASURE_ID }}
+  shell: bash
+  run: |
+    set -euo pipefail
+    value=$(<measure-value.txt)
+    if [[ ! "$value" =~ ^[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)$ ]] || [[ ${#value} -gt 80 ]]; then
+      value=
+    fi
+    jq -n --arg repository "$GITHUB_REPOSITORY" --arg branch "$GITHUB_REF_NAME" \
+      --arg check 'Release checks' --arg run "${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}" \
+      --arg commit "$GITHUB_SHA" --arg value "$value" \
+      '{repository:$repository,branch:$branch,check:$check,run:$run,commit:$commit,value:(if $value == "" then null else $value end)}' |
+      curl --fail --silent --show-error --request POST \
+        --header "Authorization: Bearer $ALIGN_CI_READING_TOKEN" \
+        --header 'Content-Type: application/json' --data-binary @- \
+        "$ALIGN_URL/api/v2/workspaces/$ALIGN_WORKSPACE_ID/goals/$ALIGN_GOAL_ID/measures/$ALIGN_MEASURE_ID/ci-reading"
+```
+
+The body accepts only these six fields. A JSON null reading represents an unknown value. The server
+records the time it accepts the result. Retrying the same run and commit with the same value returns its
+reading ID. Reusing that run and commit with a different value returns 409. This path uses the job's
+credential and requires no installed repository app.
+
+## Send a reading from one machine
+
+The person using the paired machine runs `align measure device` and gives the goal owner its ID.
+The goal owner selects **Command on a machine**, enters that ID, and sets an absolute executable path and
+its arguments. The machine must be paired with access to the workspace, and its operator must be able to
+read the goal and have a role that can submit command readings. Use a command that prints one plain decimal
+on success. Pick a command and arguments that
+are safe to store in the goal version. Keep secrets in the job or on the machine.
+
+On the chosen macOS or Linux machine, from the working directory for the command, the person runs:
+
+```sh
+align measure allow <workspace-id> <goal-id> <measure-id> -- /absolute/executable arg1 arg2
+align measure run <workspace-id> <goal-id> <measure-id>
+```
+
+The CLI fetches the current command on an authenticated device route, checks the exact local permission and
+runs it under the current unprivileged account. The lookup and submission stay at the paired server
+origin and refuse redirects. The submission contains only `goal_version`, `run_id` (one UUID per run),
+`value` (the exact plain decimal as a JSON string, or null) and `exit_status` (an integer or null).
+If the server's confirmation is lost, the CLI retries the same result and run ID without running the
+command again. The server returns the original reading ID on an exact retry for the current version.
+Align gives the process ten seconds and reads up to 4 KiB of standard output.
+Standard error stays local and Align discards it. `align measure revoke <workspace-id> <goal-id> <measure-id>`
+removes permission. If the command or its arguments change, each machine must explicitly allow the new command.

@@ -5,8 +5,9 @@ import { enter } from "@/lib/v2/workspaces";
 
 // GET (Bearer or cookie): the goals feed, with ETag / If-None-Match -> 304.
 export const GET = route<{ ws: string }>(async (req, params) => {
-  const pp = enter(await eitherAuth(req), idParam(params.ws, ID_RE));
-  const feed = goalsFeed(pp);
+  const principal = await eitherAuth(req);
+  const pp = enter(principal, idParam(params.ws, ID_RE));
+  const feed = goalsFeed(pp, principal.kind === "device");
   const etag = `"${feed.version}"`;
   const headers = { etag, "cache-control": "private, no-cache" };
   const inm = (req.headers.get("if-none-match") || "").split(",").map((t) => t.trim().replace(/^W\//, ""));

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Goal owners can opt measures into CI readings or a command on a chosen machine. CI credentials can be
+  revoked, and the machine runs a command only after its operator allows the exact executable and arguments.
+  Readings show their source and time. Server migration 27 keeps existing hand readings.
+- Command readings stay at the paired server, preserve exact decimals and retry without adding a duplicate.
+  Goal forms keep source settings while asking for a missing measure label, and CI readings say they were
+  reported with a CI credential. Briefs keep approved changes visible when many outcomes are due.
+  Shared sessions show the measure's name from launch even after it has been replaced.
+- Reported changes show readings and estimated spend from launch through the first report. Briefs also
+  list unanswered expectations that are due, with a note in shared sessions on the affected goal.
 - Sessions and in-session status show how a session came to count toward its goal. Spend can show each goal's
   request counts and list-price estimates by sharing source, with older rolled-up usage identified separately.
 - Retrying a binding with changed details returns a conflict and leaves the original binding in place.

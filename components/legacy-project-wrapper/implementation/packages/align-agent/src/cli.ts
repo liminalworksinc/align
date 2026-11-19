@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // `align` CLI. Works offline for local metering; server features need `align login`.
+import { measureCommand } from "./measure.ts";
 import { execFile, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -82,6 +83,10 @@ const HELP = `align ${VERSION}: Align local agent
   align unshare --dir [<folder>]
   align rules
   align team [--cwd <dir>]      work in flight toward this folder's goal and related ones (alias: align pod)
+  align measure device                               show this paired machine's ID
+  align measure allow <workspace-id> <goal-id> <measure-id> -- <executable> [args...]
+  align measure run <workspace-id> <goal-id> <measure-id>
+  align measure revoke <workspace-id> <goal-id> <measure-id>
   align asks [--workspace <name|id>] [--all] [--json]   what other teams asked of your teams, and your own asks (offline)
   align config [drift on|off]  local settings; drift: a user-only note when a reply may conflict with a goal's limit
   align stop-sharing <session>
@@ -1720,6 +1725,8 @@ export async function main(argv: string[]): Promise<void> {
       case "team":
       case "pod":
         return await cmdTeam(ctx, rest);
+      case "measure":
+        return out(await measureCommand(ctx, rest));
       case "asks":
         return await cmdAsks(ctx, rest);
       case "config":

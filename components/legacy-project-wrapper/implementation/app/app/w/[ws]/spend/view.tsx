@@ -1,4 +1,5 @@
 "use client";
+import { OutcomePeriods } from "../../../_ui/outcome-periods";
 import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useState } from "react";
 import { Err, Loading, Note, PHONE_TABLE, Select, Shell, num, usd, useApi } from "../../../_ui/kit";
@@ -125,6 +126,7 @@ export default function SpendPage({ me, ws }: { me: Me; ws: string }) {
           </>
         )}
       </Panel>
+      {by === "goal" && <OutcomePeriods ws={ws} me={me.id} />}
     </Shell>
   );
 }

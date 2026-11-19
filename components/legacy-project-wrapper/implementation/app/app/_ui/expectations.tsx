@@ -1,5 +1,6 @@
 "use client";
 
+import { OutcomePeriods } from "./outcome-periods";
 import { useEffect, useRef, useState } from "react";
 import type { ExpectationView } from "@/lib/v2/expectations";
 import { OUTCOME_WORDS } from "@/lib/v2/launch-words";
@@ -152,6 +153,7 @@ export function ExpectationRecord({ ws, cr, me, onDone }: { ws: string; cr: Chan
           {outcome.evidence_url && (
             <a className="inline-flex min-h-[44px] items-center underline" href={outcome.evidence_url} target="_blank" rel="noopener noreferrer">Outcome evidence</a>
           )}
+          <OutcomePeriods ws={ws} me={me} request={cr.id} />
           {onDone && e.can_correct && (
             <div>
               <Btn kind="secondary" onClick={() => setCorrecting(!correcting)} aria-expanded={correcting}>{correcting ? "Cancel correction" : "Correct outcome"}</Btn>

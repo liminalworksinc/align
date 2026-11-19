@@ -402,8 +402,10 @@ The server SHALL serve one goal on `GET /api/v2/workspaces/{ws}/goals/{goal}` (b
 
 `GET` and `POST /api/v2/workspaces/{ws}/goals/{goal}/measures/{measure}/readings` SHALL read history or append
 a reading for a measure on the current goal. A reading SHALL store `value_text` (1 to 80 characters under the
-rules for people's text), a numeric value when the text parses as a finite number, `source` fixed to `self`, and
-who recorded it and when. An optional ISO 8601 `observed_at` is the observation time and defaults to the recording
+rules for people's text), a numeric value only when the text is a finite plain decimal, `source` fixed to `self`
+on the hand-entry route, and who recorded it and when. Plain decimals may have a sign and a decimal point.
+Text such as `0x10` or `1e3` SHALL remain text with a null numeric value. New readings SHALL also record the
+goal version current at acceptance. An optional ISO 8601 `observed_at` is the observation time and defaults to the recording
 time. The server SHALL reject an observation more than five minutes ahead of its clock with `400 clock_skew`, a
 message naming `observed_at`, and `server_time`. An observation earlier than the goal's creation SHALL get
 `400 bad_request` with a message explaining the lower bound. The history SHALL return up to 20 readings as
@@ -433,6 +435,97 @@ start with no readings or expectations.
 
 - **WHEN** a goal's new version rewords a measure with the same id or replaces it with a different id
 - **THEN** the first measure keeps its history, and the replacement starts with no readings
+
+### Requirement: A goal owner can opt a measure into an automated source
+
+Proposed decision 8, pending ratification. The goal owner SHALL configure an automated source when creating or
+editing the goal. A change request SHALL keep the source on a retained measure and SHALL refuse a different
+source on that measure or a source on a new measure. Removing a measure stops collection for that measure.
+The configuration SHALL be part of immutable goal content and its hash. Leaving a source out SHALL preserve
+the previous source on a retained measure. A null source SHALL turn collection off. Measures without an
+automated source SHALL retain their existing serialized shape. Hand entry remains available and self-reported.
+
+A CI source SHALL name a repository, branch and check. A command source SHALL name one paired device by id and
+store a fixed absolute executable and an ordered list of arguments. Either source MAY set a whole number of
+days after which its readings are stale, from 1 through 366. A reading SHALL retain the expiry computed when
+it was recorded, and the app SHALL label it stale after that time. Only that device, with a workspace grant
+and a current non-viewer member who can read the goal, SHALL be able to fetch the command configuration or
+submit the reading using its device credential. When creating or changing a command source, the goal owner
+SHALL choose a machine whose current device grant and operator satisfy those same conditions for that goal.
+Existing source settings may be kept when editing other fields. Command routes SHALL check access again on
+each request and return 404 when the target is unavailable to the caller. Goal change requests, the general
+device goals feed, directives and session context SHALL omit command arguments and executable paths. Configuring a source
+SHALL never run it. Machine-owner consent is a separate local action.
+
+Server migration 27 SHALL preserve existing reading history and add source details, the goal version at
+acceptance, command run IDs and hashed CI credentials. Each accepted reading SHALL be audited. Automated readings SHALL store
+only a finite plain decimal or unknown, responsible identity, source details and times. CI details SHALL name
+repository, branch, check, run, and commit. Command details SHALL name the chosen device and its exit status
+when the process exited normally. A failure SHALL stay unknown and SHALL never use zero as a fallback.
+Automated routes SHALL accept values as plain decimal strings of at most 80 characters or null for unknown.
+A reading SHALL preserve the exact decimal for display. Its optional numeric projection is populated only
+when it round-trips as a plain decimal. A command submission SHALL include a version 4 UUID as its run ID. For the same goal,
+measure and current version, an authorized exact retry with the same run ID SHALL return 200 and the original
+reading ID without adding a reading, audit row or event. Changed results under that run ID SHALL return 409.
+New run IDs SHALL record separate readings, including when their values match.
+
+#### Scenario: A new goal or measure has no automated collection
+
+- **WHEN** a goal owner adds a measure without selecting a source
+- **THEN** its serialized shape is unchanged and neither CI nor a device can submit an automated reading
+
+#### Scenario: The source changes while a command is running
+
+- **WHEN** the chosen device submits a reading for an earlier goal version, or has lost access
+- **THEN** the server refuses the submission and creates no reading
+
+#### Scenario: The owner chooses a machine that cannot submit a reading
+
+- **WHEN** the owner creates or changes a command source using a viewer's machine or a machine whose operator cannot read the goal
+- **THEN** the save is refused with a Machine ID message and the source is unchanged
+
+#### Scenario: A command result is resubmitted after a lost reply
+
+- **WHEN** the same authorized device submits the same run ID, decimal and exit status for the same current goal version
+- **THEN** the first request creates one reading and the retry returns its ID, even if the requests overlap
+
+### Requirement: CI credentials only submit readings
+
+Proposed decision 8, pending ratification. A workspace owner SHALL create and revoke credentials at
+`/api/v2/workspaces/{ws}/reading-credentials`. Creation SHALL require a recent sign-in. The server SHALL
+show the secret once, store only its hash and audit creation and revocation. A credential SHALL authorize only
+`POST /api/v2/workspaces/{ws}/goals/{goal}/measures/{measure}/ci-reading`. The route SHALL refuse browser
+credentials and require the configured repository, branch and check to match. Its closed payload SHALL contain
+only the source identifiers, run, commit, and reading. An exact retry SHALL return the original reading ID.
+An unavailable or mismatched target SHALL return 404. A credential SHALL submit no readings after revocation. Align SHALL provide an example CI step using the team
+secret and the named check's parsed result.
+
+#### Scenario: CI opts in for one workspace and measure
+
+- **WHEN** a CI job presents that workspace's active reading credential and matches the measure's CI source
+- **THEN** the reading is appended with its run and commit while other workspaces, non-CI measures and other
+  API routes remain outside the credential's scope
+
+### Requirement: Reported changes show spend during the outcome period
+
+The goal page, change record and Spend by goal SHALL use `GET /api/v2/workspaces/{ws}/outcome-periods`.
+The optional `goal` and `request` parameters scope the read to one goal or change request. A collection SHALL
+show up to 20 reported changes, newest report first. Each change SHALL show up to 20 readings and say when
+more are available. Show readings for the expected measure observed from
+launch through the first outcome report, with estimated list-price spend during that period. Correcting the
+outcome SHALL keep the first report's endpoint. Spend SHALL include usage at or after launch and before
+the first report, using the goal attributed to each usage row. It SHALL include daily roll-ups where their whole UTC day fits in the period. If a retained daily roll-up overlaps only
+part of the period, its spend for that period is unknown. With no recorded usage, or with unpriced requests,
+the total estimate is unknown; the app may identify priced usage as a partial estimate. Display spend and
+readings together without calculating a ratio or attributing spend to the outcome. Existing revision snapshots
+SHALL count daily roll-ups by the same UTC day-start rule as the Spend tab. Access to the period SHALL require
+access to the change record, and spend SHALL further require the workspace spend permission.
+
+#### Scenario: The result is corrected after another week of usage
+
+- **WHEN** the reporter corrects the answer
+- **THEN** the readings and spend window still end at the first report, and the figures describe the period
+  alongside the readings
 
 ### Requirement: Parents come from approved alignments
 

@@ -4,10 +4,9 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
-const ROOT = fileURLToPath(new URL("../", import.meta.url));
 // Keep credentials and the unused captcha dependency out of this isolated test process.
 const fixtures = new Map([
   [new URL("../lib/secret.ts", import.meta.url).href, 'export const secret = () => "invite-race-test-data"; export const signPayload = () => { throw new Error("unused test fixture"); };'],
@@ -43,7 +42,7 @@ let pass = 0;
 let fail = 0;
 
 async function test(name, fn) {
-  const dir = mkdtempSync(path.join(ROOT, ".invite-races-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "align-invite-races-"));
   const previous = { HOSTED: process.env.HOSTED, ALIGN_DATA_DIR: process.env.ALIGN_DATA_DIR, ALIGN_MAX_MEMBERS: process.env.ALIGN_MAX_MEMBERS };
   process.env.HOSTED = "1";
   process.env.ALIGN_DATA_DIR = dir;

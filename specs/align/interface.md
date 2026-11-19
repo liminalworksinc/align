@@ -1326,7 +1326,16 @@ leave the outcome unrecorded and the entered values available to edit.
 
 ### Requirement: Measure readings on the goal page
 
-Each measure SHALL show its latest reading as "<value>, self-reported by <name>, <time>" or "No reading yet".
+Each measure SHALL show its latest reading or "No reading yet". Hand readings SHALL say "self-reported by"
+with the person's name. CI readings SHALL say "reported with a CI credential" and name the repository,
+branch and check, with run and commit in the reading details. Command readings SHALL say "reported from" with the device name and show the exit status when available. Each
+reading SHALL show its observation time, and a failed automated reading SHALL show "Unknown".
+The create and edit forms SHALL offer an explicit source choice, defaulting to hand entry for new measures.
+Selecting an automated source SHALL require a measure label in that row before save. A blank label SHALL
+show a message beside the measure field using its name and preserve the other entries.
+The Apps page SHALL let workspace owners create and revoke CI reading credentials and show a new secret once.
+The goal page, change record and Spend by goal SHALL label each reported period "Spend during the period"
+and identify the measure, launch and first report time.
 Readers SHALL be able to open the last 20 readings on demand. People allowed to record a reading SHALL see a
 labelled input and save control. On a failed read the value or history SHALL show an error, with the value
 unknown. A validation error for the reading value SHALL appear beside the Reading value input and be associated
@@ -1336,6 +1345,11 @@ with it. The controls SHALL fit a 390 pixel screen.
 
 - **WHEN** a goal's team member enters a value for a measure with no reading yet
 - **THEN** the latest reading shows that value, who reported it and when, and opening history includes it
+
+#### Scenario: A configured source has no measure label
+
+- **WHEN** a goal owner enters a CI or command source and tries to save with a blank measure label
+- **THEN** the form asks for that measure's label, keeps the source fields and saves nothing
 
 ### Requirement: Workspace Requests tab
 

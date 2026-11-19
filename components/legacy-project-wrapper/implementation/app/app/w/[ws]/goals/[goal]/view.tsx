@@ -1,9 +1,10 @@
 "use client";
+import { OutcomePeriods } from "../../../../_ui/outcome-periods";
 import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, TextArea, useAction, useApi, when } from "../../../../_ui/kit";
-import { AnchorsEditor, LimitEditor, MeasuresEditor, TargetShareField, VISIBILITY_LABEL, anchorsDraft, anchorsOut, limitsDraft, limitsOut, measuresDraft, measuresOut, takenBy, targetOut, type LimitDraft } from "../../../../_ui/goalform";
+import { AnchorsEditor, LimitEditor, MeasuresEditor, TargetShareField, VISIBILITY_LABEL, anchorsDraft, anchorsOut, hasUnlabelledSource, limitsDraft, limitsOut, measuresDraft, measuresOut, takenBy, targetOut, type LimitDraft } from "../../../../_ui/goalform";
 import type { Me } from "../../../../_ui/server";
 import { ChangeRequestCard, ProposeChange, useGoalTitles } from "../../../../_ui/changes";
 import { hiddenGoals } from "../../../../_ui/crparts";
@@ -102,6 +103,7 @@ function NewVersion({ ws, goal, hiddenDeps, loops, onDone }: { ws: string; goal:
   const [title, setTitle] = useState(goal.title);
   const [status, setStatus] = useState(goal.status);
   const [measures, setMeasures] = useState(measuresDraft(goal));
+  const [showMeasureLabelErrors, setShowMeasureLabelErrors] = useState(false);
   const [anchors, setAnchors] = useState(anchorsDraft(goal));
   const [deps, setDeps] = useState<string[]>(goal.depends_on ?? []);
   const [limits, setLimits] = useState<LimitDraft[]>(limitsDraft(goal.limits));
@@ -123,8 +125,12 @@ function NewVersion({ ws, goal, hiddenDeps, loops, onDone }: { ws: string; goal:
         <form
           onSubmit={(e) => {
             e.preventDefault();
+            if (hasUnlabelledSource(measures)) {
+              setShowMeasureLabelErrors(true);
+              return;
+            }
             void act.run(
-              () => api(`/api/v2/workspaces/${ws}/goals/${goal.id}/versions`, { body: { version: goal.version, title, status, measures: measuresOut(measures), anchors: anchorsOut(anchors), depends_on: deps, limits: limitsOut(limits), target_share: targetOut(target) } }),
+              () => api(`/api/v2/workspaces/${ws}/goals/${goal.id}/versions`, { body: { version: goal.version, title, status, measures: measuresOut(measures, true), anchors: anchorsOut(anchors), depends_on: deps, limits: limitsOut(limits), target_share: targetOut(target) } }),
               onDone,
             );
           }}
@@ -132,7 +138,7 @@ function NewVersion({ ws, goal, hiddenDeps, loops, onDone }: { ws: string; goal:
           <Field label="Goal">
             <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required />
           </Field>
-          <MeasuresEditor value={measures} onChange={setMeasures} />
+          <MeasuresEditor value={measures} onChange={setMeasures} configureSource showLabelErrors={showMeasureLabelErrors} />
           <LimitEditor value={limits} onChange={setLimits} />
           <Field label="Status">
             <Select value={status} onChange={(e) => setStatus(e.target.value as Goal["status"])}>
@@ -454,6 +460,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
             )}
             {d.data!.contributions.length > 0 && <p className="mt-3 text-[14px] text-zinc-500">Contributing goals: {d.data!.contributions.map((c) => c.goal!.title).join(", ")}</p>}
           </Card>
+          <OutcomePeriods ws={ws} me={me.id} goal={g.id} />
           <GoalLimits ws={ws} goal={g} canEdit={d.data!.can_edit} onDone={limitsDone} />
           <Tree ws={ws} goal={g} canEdit={d.data!.can_edit} hiddenDeps={d.data!.hidden_depends_on ?? 0} onDone={d.reload} />
           {/* The plan, then what is being decided about it, then the agents, then the editing form (specs/align/interface.md,

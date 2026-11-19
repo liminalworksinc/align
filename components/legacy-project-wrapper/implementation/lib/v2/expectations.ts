@@ -159,3 +159,18 @@ export function dueExpectations(pp: PolicyPrincipal) {
   });
 }
 export type DueExpectation = ReturnType<typeof dueExpectations>[number];
+
+/** Unlike Home's waiting-on-me list, the brief covers every readable goal. */
+export function readableDueExpectations(pp: PolicyPrincipal) {
+  const today = nowIso().slice(0, 10);
+  const rows = all<Pick<ExpectationRow, "change_request_id" | "goal_id" | "measure_id" | "measure_text" | "expected" | "due_on">>(
+    `SELECT e.change_request_id, e.goal_id, e.measure_id, e.measure_text, e.expected, e.due_on
+     FROM v2_expectations e WHERE e.ws_id = ? AND e.due_on <= ?
+       AND NOT EXISTS (SELECT 1 FROM v2_outcome_reports o WHERE o.change_request_id = e.change_request_id)
+     ORDER BY e.due_on, e.change_request_id`, pp.wsId, today,
+  );
+  return rows.flatMap((row) => {
+    const goal = goalRow(pp.wsId, row.goal_id);
+    return goal && canReadGoal(pp, goalObj(goal)) ? [{ ...row, goal_title: goal.title }] : [];
+  });
+}

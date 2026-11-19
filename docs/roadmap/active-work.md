@@ -569,3 +569,30 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [ ] Resolve ownership and record an upstream issue before changing parent authority if applicable
 - **Evidence:**
   - [ ] A fixture reports the complete aggregate and still rejects a failure in any stage
+
+### [x] LIM-2524 - Read measures from CI and a chosen machine
+
+- **Priority:** P0
+- **Owner:** Align measures, local agent and spend
+- **Direction:** Accept opted-in CI and command readings, show spend during the outcome period, and surface due expectations.
+- **Conclusion:** Build on the readings and expectations from LIM-2520. Version source settings with each measure. Keep readings separate and use a scoped credential or an exact local command approval. Compare recorded readings with estimated spend over the launch period.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Specify source, access, payload and period rules before code. The source and disclosure choices are proposed in decision 0004.
+  - [x] Implement both reading sources, period displays and due expectations. Migration 27 preserves prior
+    readings. The application suite passed all 15 packet checks, including the new views at 390 pixels.
+  - [x] Fixed the eight review findings covering command origin, exact values, retries and machine eligibility,
+    brief overflow, launch-time labels in session notes, source form validation and CI provenance wording.
+  - [x] Seed 1488526920 failed on origin/main at bf583fdf. The stand-in's self-revoke left old sessions shared.
+    Its self-revoke now ends sessions as the real server does. The pinned seed and the focused older-build
+    enforcement tests passed under Node 24.22.3.
+- **Evidence:**
+  - [x] The review regressions passed, including both 390-pixel goal forms and the pinned share-state seed.
+    The v2 suite reported 1,110 passed, and the standalone agent package run reported 639 passed.
+  - [x] `ALIGN_TEST_PORT=4700 npm test` on Node 24.22.3 passed all 2,119 checks, including the hook latency
+    limit. The retained receipt is stale.
+  - [x] Specification validation accepted all eight updated Align documents.
+  - [x] Rebased on LIM-2522. The schema 26 database upgraded to 27 with its readings intact, and a fresh
+    schema 27 database passed. The isolated Node 24.22.3 gate passed 2,121 checks at port 4700, including
+    the hook latency check. All eight specification documents passed.

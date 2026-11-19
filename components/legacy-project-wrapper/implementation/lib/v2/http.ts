@@ -49,7 +49,7 @@ export function route<P extends Params = Params>(fn: Handler<P>) {
 
 export const noContent = () => new Response(null, { status: 204 });
 
-const bearerOf = (req: Request) => {
+export const bearerOf = (req: Request) => {
   const h = req.headers.get("authorization");
   if (!h) return null;
   const m = /^Bearer\s+(\S+)$/i.exec(h.trim());

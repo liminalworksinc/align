@@ -36,7 +36,7 @@ after(async () => {
   for (const c of cleanups.reverse()) await c();
 });
 
-const FIXED = [1, 2, 3, 5, 8, 13, 21];
+const FIXED = [1, 2, 3, 5, 8, 13, 21, 1488526920];
 const SEEDS = process.env.ALIGN_PROP_SEEDS
   ? process.env.ALIGN_PROP_SEEDS.split(",").map(Number)
   : [...FIXED, ...Array.from({ length: 2 }, () => Math.floor(Math.random() * 2 ** 31))];
@@ -304,6 +304,10 @@ test(`share-state notices agree with the deny and the status views, whatever the
       trail.push(name);
       await events[name]();
       const where = `seed ${seed}, after ${trail.join(" > ")}`;
+      for (const session of live()) {
+        const deviceId = fake.sessions.get(session.key)!.device;
+        assert.equal(fake.devices.get(deviceId)?.revoked, false, `${where}: test server kept a revoked device's session live`);
+      }
       // Signed out (a revocation a pass heard included): no share stays live here (C12-2).
       if (!signedIn()) {
         const ctx = ctxFor(t);
