@@ -804,8 +804,13 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
   const pending = (ctx.db.prepare("SELECT COUNT(*) AS n FROM goal_requests WHERE state='pending'").get() as { n: number }).n;
   if (pending) out(`  Requests:   ${pending} waiting for your answer; see \`align requests\``);
   const folder = realDir(process.cwd());
+  const folders = new Map<string, string>([[process.cwd(), folder], [folder, folder]]);
+  const resolved = (cwd: string) => {
+    if (!folders.has(cwd)) folders.set(cwd, realDir(cwd));
+    return folders.get(cwd)!;
+  };
   const here = (ctx.db.prepare("SELECT local_id, cwd FROM sessions ORDER BY COALESCE(last_active, created_at) DESC").all() as { local_id: string; cwd: string | null }[])
-    .find((s) => s.cwd && realDir(s.cwd) === folder);
+    .find((s) => s.cwd && resolved(s.cwd) === folder);
   if (here) out(contextAddedLine(readContextCost(ctx.home, here.local_id).context_added));
 }
 

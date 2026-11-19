@@ -1090,11 +1090,11 @@ function holdDenyReason(h: HoldLatch | null, lid: string): string {
 }
 
 /** The goal-hold latch: a hold file that names a hold, or one that can't be read, blocks every tool (read-only ones too). */
-function holdDeny(home: string, lid: string): HookOutput {
+function holdDeny(home: string, lid: string, record = true): HookOutput {
   const h = readJsonStrict<HoldLatch>(layout.hold(home, lid));
   if (h.state === "absent") return null;
   if (h.state === "ok" && h.value && Array.isArray(h.value.holds) && !h.value.holds.length) return null;
-  if (h.state === "ok" && h.value && Array.isArray(h.value.holds)) noteBlockTold(home, lid, { goals: h.value.holds.map((x) => x.goal_id), titles: Object.fromEntries(h.value.holds.map((x) => [x.goal_id, x.goal_title])) });
+  if (record && h.state === "ok" && h.value && Array.isArray(h.value.holds)) noteBlockTold(home, lid, { goals: h.value.holds.map((x) => x.goal_id), titles: Object.fromEntries(h.value.holds.map((x) => [x.goal_id, x.goal_title])) });
   return denyOutput(holdDenyReason(h.state === "ok" ? h.value : null, lid));
 }
 
@@ -1136,7 +1136,7 @@ export function preToolUseUncounted(home: string, harness: Harness, input: HookI
  * not; a latch file that can't be read denies. Also what the hooks enforce on an unsupported Node, so a stopped
  * session behaves the same there.
  */
-export function latchDenyUncounted(home: string, harness: Harness, input: HookInput): HookOutput {
+export function latchDenyUncounted(home: string, harness: Harness, input: HookInput, opts: { record?: boolean } = {}): HookOutput {
   const sid = input.session_id;
   if (!sid) return anyLatch(home) ? denyOutput() : null;
   const lid = localId(harness, sid);
@@ -1146,17 +1146,17 @@ export function latchDenyUncounted(home: string, harness: Harness, input: HookIn
     (latch.state === "ok" && latch.value && latch.value.stopped !== true) ||
     (latch.state === "ok" && !!input.tool_name && READ_ONLY[harness].has(input.tool_name));
   if (!allowed) {
-    noteBlockTold(home, lid, { stop: true });
+    if (opts.record !== false) noteBlockTold(home, lid, { stop: true });
     return denyOutput(latch.state === "ok" ? stopReason(latch.value, lid) : DENY_REASON);
   }
-  return holdDeny(home, lid) || feedHoldDeny(home, lid, input.cwd || null);
+  return holdDeny(home, lid, opts.record) || feedHoldDeny(home, lid, input.cwd || null, opts.record);
 }
 
 /** A goal hold that has not reached this session yet, from the cached feed (`shared/feedhold.ts`): every tool is denied
  *  as a hold, fail closed (cycle 6). */
-function feedHoldDeny(home: string, lid: string, cwd: string | null): HookOutput {
+function feedHoldDeny(home: string, lid: string, cwd: string | null, record = true): HookOutput {
   const h = feedHold(home, lid, cwd);
-  if (h) noteBlockTold(home, lid, { goals: [h.goal_id], titles: { [h.goal_id]: h.goal_title } });
+  if (h && record) noteBlockTold(home, lid, { goals: [h.goal_id], titles: { [h.goal_id]: h.goal_title } });
   return h ? denyOutput(`${feedHoldReason(h.goal_title, clean)} ${TELL_USER}`) : null;
 }
 

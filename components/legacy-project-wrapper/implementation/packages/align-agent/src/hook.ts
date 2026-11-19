@@ -6,7 +6,7 @@ import fs from "node:fs";
 import { alignHomeForHook, layout, localId } from "./shared/layout.ts";
 import type { Harness } from "./shared/types.ts";
 import { kickSync } from "./hooks/autostart.ts";
-import { denyOutput, failureDeny, latchDeny, latchedOnFailure, postToolUse, preToolUse, recordStandaloneOutput, sessionStart, settleTurn, stop, userPromptSubmit, type HookInput, type HookOutput } from "./hooks/handlers.ts";
+import { denyOutput, failureDeny, failureDenyUncounted, latchDenyUncounted, latchedOnFailure, postToolUse, preToolUse, sessionStart, settleTurn, stop, userPromptSubmit, type HookInput, type HookOutput } from "./hooks/handlers.ts";
 import { MIN_NODE, unsupportedNode } from "./node-version.ts";
 
 const DEADLINE_MS = Number(process.env.ALIGN_HOOK_DEADLINE_MS || 300);
@@ -49,7 +49,7 @@ function failure(): never {
     if (latched) {
       let out: HookOutput = null;
       try {
-        out = harness ? failureDeny(home, harness, sessionId) : null;
+        out = harness ? (unsupportedNode(process.env) ? failureDenyUncounted : failureDeny)(home, harness, sessionId) : null;
       } catch {
         /* the stop wording below */
       }
@@ -165,13 +165,13 @@ function startedShare(input: HookInput): boolean {
  */
 function oldNode(why: string, input: HookInput): HookOutput {
   const fix = `Install Node ${MIN_NODE} or later and run \`align install\` with it.`;
-  if (event === "SessionStart" && harness) return recordStandaloneOutput(home, harness, input.session_id, { systemMessage: `Align: ${why}, so Align is off in this session (a stop or goal hold still blocks tools). ${fix}` }, "SessionStart");
-  if (event === "UserPromptSubmit" && harness && typeof input.prompt === "string" && /^\s*::align\b/i.test(input.prompt)) return recordStandaloneOutput(home, harness, input.session_id, { decision: "block", reason: `Align: ${why}. ${fix}` }, "UserPromptSubmit");
+  if (event === "SessionStart" && harness) return { systemMessage: `Align: ${why}, so Align is off in this session (a stop or goal hold still blocks tools). ${fix}` };
+  if (event === "UserPromptSubmit" && harness && typeof input.prompt === "string" && /^\s*::align\b/i.test(input.prompt)) return { decision: "block", reason: `Align: ${why}. ${fix}` };
   if (event === "PreToolUse" && harness) {
     sessionId = typeof input.session_id === "string" && input.session_id ? input.session_id : null;
     // The same latch rules as on a supported Node (a stopped session may still read; a held one may not), so the
     // session behaves the same; anything that can't be read still denies (failure()).
-    if (latchedOnFailure(home, harness, sessionId)) return latchDeny(home, harness, input);
+    if (latchedOnFailure(home, harness, sessionId)) return latchDenyUncounted(home, harness, input, { record: false });
   }
   return null;
 }

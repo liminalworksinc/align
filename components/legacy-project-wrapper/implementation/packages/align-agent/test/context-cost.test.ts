@@ -8,7 +8,7 @@ import { uninstall } from "../src/install.ts";
 import { resolvePaths } from "../src/paths.ts";
 import { record } from "../src/hooks/siblings.ts";
 import { failureDeny, preToolUse, recordStandaloneOutput, sessionStart, userPromptSubmit, type HookOutput } from "../src/hooks/handlers.ts";
-import { contextAddedLine, countOutput, emptyAddedText, readContextCost } from "../src/shared/context-cost.ts";
+import { CONTEXT_READ_BYTES, contextAddedLine, countOutput, emptyAddedText, readContextCost } from "../src/shared/context-cost.ts";
 import type { BudgetSnapshot } from "../src/shared/budget-notes.ts";
 import { readJson, writeJsonAtomic } from "../src/shared/fsx.ts";
 import { layout, listSpool } from "../src/shared/layout.ts";
@@ -139,12 +139,14 @@ test("final output counts both audiences separately, with one append and no acco
   let model = 0, person = 0, modelAdds = 0, personAdds = 0;
   const checked = (run: () => HookOutput, event: string, modelPattern?: RegExp, personPattern?: RegExp, expectedWrites = 1) => {
     let writes = 0, reads = 0, appends = 0, counterReads = 0;
-    const rename = fs.renameSync, read = fs.readFileSync, append = fs.appendFileSync;
-    fs.appendFileSync = (...args) => { if (args[0] === layout.contextCost(t.home, lid)) appends++; return append(...args); };
+    const rename = fs.renameSync, read = fs.readFileSync, append = fs.appendFileSync, open = fs.openSync;
+    let counterFd: number | undefined;
+    fs.openSync = (...args) => { const fd = open(...args); if (args[0] === layout.contextCost(t.home, lid)) counterFd = fd; return fd; };
+    fs.appendFileSync = (...args) => { if (args[0] === counterFd) appends++; return append(...args); };
     fs.renameSync = (...args) => { if (args[1] === file) writes++; return rename(...args); };
     fs.readFileSync = ((...args: Parameters<typeof fs.readFileSync>) => { if (args[0] === file) reads++; if (args[0] === layout.contextCost(t.home, lid)) counterReads++; return read(...args); }) as typeof fs.readFileSync;
     let out: any;
-    try { out = run(); } finally { fs.renameSync = rename; fs.readFileSync = read; fs.appendFileSync = append; }
+    try { out = run(); } finally { fs.renameSync = rename; fs.readFileSync = read; fs.appendFileSync = append; fs.openSync = open; }
     const text = [out?.hookSpecificOutput?.additionalContext, out?.hookSpecificOutput?.permissionDecisionReason].filter(Boolean).join("\n");
     const notice = [out?.systemMessage, out?.decision === "block" ? out.reason : null].filter(Boolean).join("\n");
     if (modelPattern) assert.match(text, modelPattern);
@@ -311,9 +313,9 @@ test("complete records survive a torn or malformed tail, later appends and out-o
 test("silent or unidentified returns touch no counter file; standalone notices never read shared state", () => {
   const { t, sid, lid } = setup();
   const paths: string[] = [];
-  const read = fs.readFileSync, append = fs.appendFileSync, mkdir = fs.mkdirSync;
+  const read = fs.readFileSync, open = fs.openSync, mkdir = fs.mkdirSync;
   fs.readFileSync = ((...args: Parameters<typeof fs.readFileSync>) => { paths.push(String(args[0])); return read(...args); }) as typeof fs.readFileSync;
-  fs.appendFileSync = (...args) => { paths.push(String(args[0])); return append(...args); };
+  fs.openSync = (...args) => { paths.push(String(args[0])); return open(...args); };
   fs.mkdirSync = (...args: any[]) => { paths.push(String(args[0])); return (mkdir as any)(...args); };
   try {
     recordStandaloneOutput(t.home, "claude-code", sid, null, "SessionStart");
@@ -322,7 +324,7 @@ test("silent or unidentified returns touch no counter file; standalone notices n
     assert.deepEqual(paths, []);
     recordStandaloneOutput(t.home, "claude-code", sid, { systemMessage: "notice" }, "SessionStart");
     assert.deepEqual(paths, [layout.contextCostDir(t.home), layout.contextCost(t.home, lid)]);
-  } finally { fs.readFileSync = read; fs.appendFileSync = append; fs.mkdirSync = mkdir; }
+  } finally { fs.readFileSync = read; fs.openSync = open; fs.mkdirSync = mkdir; }
   assert.equal(readContextCost(t.home, lid).notices_added.characters, "notice".length);
   assert.equal(fs.existsSync(layout.injected(t.home, lid)), false);
   assert.equal(fs.statSync(layout.contextCost(t.home, lid)).mode & 0o777, 0o600);
@@ -333,9 +335,11 @@ test("failed counter appends preserve returned denials and baseline bookkeeping"
   sessionStart(t.home, "claude-code", { session_id: sid }, t.env);
   const before = state();
   writeJsonAtomic(layout.latch(t.home, lid), { stopped: true });
-  const append = fs.appendFileSync;
+  const append = fs.appendFileSync, open = fs.openSync;
+  let counterFd: number | undefined;
+  fs.openSync = (...args) => { const fd = open(...args); if (args[0] === layout.contextCost(t.home, lid)) counterFd = fd; return fd; };
   fs.appendFileSync = (...args) => {
-    if (args[0] === layout.contextCost(t.home, lid)) throw new Error("counter append refused");
+    if (args[0] === counterFd) throw new Error("counter append refused");
     return append(...args);
   };
   try {
@@ -343,7 +347,7 @@ test("failed counter appends preserve returned denials and baseline bookkeeping"
     assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
     assert.match(out.hookSpecificOutput.permissionDecisionReason, /stopped/);
     assert.equal(readJson<InjectedState>(file)!.stop_told, true);
-  } finally { fs.appendFileSync = append; }
+  } finally { fs.appendFileSync = append; fs.openSync = open; }
   assert.deepEqual(state(), before);
 });
 
@@ -357,3 +361,57 @@ for (const purge of [false, true]) {
     assert.equal(fs.existsSync(file), !purge, "the existing session-file retention rule is preserved");
   });
 }
+
+
+test("oversized logs read at most the final 1 MiB and expose both totals as lower bounds", async (tc) => {
+  const { t, ctx, lid, state } = setup();
+  ctx.db.prepare("UPDATE sessions SET cwd=? WHERE local_id=?").run(PKG, lid);
+  const file = layout.contextCost(t.home, lid), at = "2026-11-18T12:00:00.000Z";
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const rows = [["model", 7, at, "SessionStart"], ["person", 9, at, "PreToolUse"]];
+  const tail = rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+  fs.writeFileSync(file, JSON.stringify(["model", 1000, at, "SessionStart"]) + "\n" + "x".repeat(CONTEXT_READ_BYTES) + "\n" + tail + '["model",99');
+  let bytes = 0;
+  const read = fs.readSync;
+  const mock = tc.mock.method(fs, "readSync", (...args: Parameters<typeof fs.readSync>) => {
+    // Short reads exercise the bounded fill loop as well as the normal filesystem path.
+    const n = read(args[0], args[1], args[2], Math.min(Number(args[3]), 65536), args[4]); bytes += n; return n;
+  });
+  const totals = state();
+  mock.mock.restore();
+  assert.equal(bytes, CONTEXT_READ_BYTES);
+  assert.deepEqual(totals.context_added, { characters: 7, additions: 1, last_at: at, last_event: "SessionStart", lower_bound: true });
+  assert.deepEqual(totals.notices_added, { characters: 9, additions: 1, last_at: at, last_event: "PreToolUse", lower_bound: true });
+  assert.match(contextAddedLine(totals.context_added), /at least 7 characters.*at least 1 addition/);
+  const sessions = await runCli(t, ["sessions", "--json"]);
+  assert.equal(sessions.code, 0, sessions.stderr);
+  assert.deepEqual(JSON.parse(sessions.stdout).find((r: any) => r.local_id === lid).context_added, totals.context_added);
+  const status = spawnSync(process.execPath, [CLI, "status"], { cwd: PKG, env: t.env, encoding: "utf8" });
+  assert.equal(status.status, 0, status.stderr);
+  assert.match(status.stdout, /at least 7 characters/);
+  fs.writeFileSync(file, "x".repeat(CONTEXT_READ_BYTES + 1));
+  assert.equal(state().context_added.lower_bound, true);
+  assert.match(contextAddedLine(state().context_added), /at least 0 characters.*read limit/);
+  assert.doesNotMatch(contextAddedLine(state().context_added), /no characters/);
+});
+
+test("status resolves each distinct session folder once", () => {
+  const { t, ctx } = setup();
+  const elsewhere = path.join(t.root, "elsewhere"); fs.mkdirSync(elsewhere);
+  for (let i = 0; i < 20; i++) shareSession(ctx, "codex", `repeat-folder-${i}`);
+  ctx.db.prepare("UPDATE sessions SET cwd=?").run(elsewhere);
+  const script = `
+    import fs from 'node:fs';
+    const { main } = await import(${JSON.stringify(CLI)});
+    let resolutions = 0;
+    const real = fs.realpathSync;
+    fs.realpathSync = (...args) => { if (args[0] === process.env.ALIGN_TEST_FOLDER) resolutions++; return real(...args); };
+    await main(['status']);
+    fs.writeSync(1, 'resolutions=' + resolutions);
+  `;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: PKG, env: { ...t.env, ALIGN_TEST_FOLDER: elsewhere }, encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /resolutions=1$/);
+});

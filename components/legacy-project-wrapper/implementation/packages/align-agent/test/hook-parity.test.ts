@@ -10,11 +10,11 @@ import { readContextCost } from "../src/shared/context-cost.ts";
 import { readJson, writeJsonAtomic } from "../src/shared/fsx.ts";
 import { layout, localId } from "../src/shared/layout.ts";
 import type { Harness, HotState } from "../src/shared/types.ts";
-import { makeEnv, PKG, runHook, SHARE_GOAL } from "./helpers.ts";
+import { makeEnv, PKG, runHook, SHARE_GOAL, type TestEnv } from "./helpers.ts";
 
 const AT = "2026-11-18T12:00:00.000Z";
 const SID = "paired-context";
-const names = ["sessionStart", "userPromptSubmit", "preToolUse", "latchDeny", "failureDeny", "command"] as const;
+const names = ["sessionStart", "userPromptSubmit", "preToolUse", "latchDeny", "failureDeny", "command", "goalHoldDeny", "stopLatchDeny", "collisionDeny", "missingSession"] as const;
 type Name = typeof names[number];
 
 // Identical time and ids make all shared files comparable, including spool names and records.
@@ -77,6 +77,10 @@ function assertCount(home: string, lid: string, name: Name, out: any) {
   const model = (out?.hookSpecificOutput?.additionalContext || "").length + (out?.hookSpecificOutput?.permissionDecisionReason || "").length;
   const person = typeof out === "string" ? out.length : (out?.systemMessage || "").length + (out?.decision === "block" ? out.reason.length : 0);
   const totals = readContextCost(home, lid);
+  if (name === "missingSession") {
+    assert.equal(fs.existsSync(layout.contextCostDir(home)), false);
+    return;
+  }
   const event = name === "sessionStart" ? "SessionStart" : ["command", "userPromptSubmit"].includes(name) ? "UserPromptSubmit" : "PreToolUse";
   for (const [key, length] of [["context_added", model], ["notices_added", person]] as const) {
     assert.deepEqual(totals[key], { characters: length, additions: length ? 1 : 0, last_at: length ? AT : null, last_event: length ? event : null });
@@ -94,7 +98,7 @@ for (const harness of ["claude-code", "codex"] as const) {
       try {
         const cwd = path.join(t.root, "work"); fs.mkdirSync(cwd);
         const lid = seed(t.home, harness, cwd, name !== "sessionStart");
-        if (name === "preToolUse") {
+        if (name === "preToolUse" || name === "collisionDeny") {
           const other = localId("codex", "paired_sibling");
           const hot = readJson<HotState>(layout.hot(t.home, lid))!;
           writeJsonAtomic(layout.hot(t.home, other), { ...hot, local_id: other, harness: "codex", native_session_id: "paired_sibling" });
@@ -102,7 +106,8 @@ for (const harness of ["claude-code", "codex"] as const) {
           record(t.home, lid, [{ t: "read", at: "2026-11-18T11:59:58.000Z", p: file, g: SHARE_GOAL.id }]);
           record(t.home, other, [{ t: "edit", at: "2026-11-18T11:59:59.500Z", p: file, g: SHARE_GOAL.id }]);
         }
-        if (name === "latchDeny" || name === "failureDeny") writeJsonAtomic(layout.latch(t.home, lid), { stopped: true });
+        if (["latchDeny", "failureDeny", "stopLatchDeny", "missingSession"].includes(name)) writeJsonAtomic(layout.latch(t.home, lid), { stopped: true });
+        if (name === "goalHoldDeny") writeJsonAtomic(layout.hold(t.home, lid), { holds: [{ goal_id: SHARE_GOAL.id, goal_title: SHARE_GOAL.title, by: "Kim" }] });
         const plain = path.join(t.root, "plain"), counted = path.join(t.root, "counted");
         fs.cpSync(t.home, plain, { recursive: true }); fs.cpSync(t.home, counted, { recursive: true });
         assert.deepEqual(files(counted), files(plain), "identical initial homes");
@@ -120,41 +125,136 @@ for (const harness of ["claude-code", "codex"] as const) {
         }
         if (name === "userPromptSubmit") { assert.match(text, /A request from Kim/); assert.match(text, /80%/); }
         if (name === "preToolUse") { assert.match(text, /now v4/); assert.match(text, /after this session last read it/); }
-        if (name === "latchDeny" || name === "failureDeny") assert.equal(actual.hookSpecificOutput.permissionDecision, "deny");
+        if (["latchDeny", "failureDeny", "goalHoldDeny", "stopLatchDeny", "collisionDeny", "missingSession"].includes(name)) assert.equal(actual.hookSpecificOutput.permissionDecision, "deny");
+        if (name === "goalHoldDeny") assert.match(text, /paused all agents on goal/);
+        if (name === "stopLatchDeny") assert.match(text, /stopped/);
+        if (name === "collisionDeny") assert.match(text, /work.txt/);
       } finally { t.cleanup(); }
     });
   }
 }
 
-for (const broken of ["directory-is-file", "read-only"] as const) {
+// Measure the hook's internal deadline; whole-process startup latency has its unchanged serial gate.
+function timedHook(t: TestEnv, event: string, input: unknown, env: NodeJS.ProcessEnv = {}) {
+  const timing = path.join(t.root, `hook-timing-${crypto.randomBytes(8).toString("hex")}.json`);
+  try {
+    const run = runHook(t, "claude", event, input, { ...env, ALIGN_TEST_HOOK_TIMING: timing }, [
+      "--import", path.join(PKG, "test/fixtures/block-net.mjs"), "--import", path.join(PKG, "test/fixtures/hook-paths.mjs"),
+    ]);
+    assert.equal(run.code, 0, run.stderr);
+    assert.equal(run.stderr, "");
+    const measured = JSON.parse(fs.readFileSync(timing, "utf8"));
+    assert.ok(typeof measured.ms === "number" && measured.ms < 300, `hook exceeded its internal deadline: ${measured.ms} ms (process ${run.ms} ms)`);
+    return { ...run, timing: measured };
+  } finally { fs.rmSync(timing, { force: true }); }
+}
+
+for (const broken of ["directory-is-file", "read-only", "symlink", "fifo", "counter-is-directory"] as const) {
   test(`counter ${broken} leaves hook output and exit contract unchanged`, { timeout: 30_000 }, () => {
     const t = makeEnv();
+    let fifoReader: number | undefined;
     try {
       const lid = seed(t.home, "claude-code", t.root, false);
       const clean = path.join(t.root, "clean"); fs.cpSync(t.home, clean, { recursive: true });
       const dir = layout.contextCostDir(t.home);
       if (broken === "directory-is-file") fs.writeFileSync(dir, "blocked");
-      else { fs.mkdirSync(dir); fs.chmodSync(dir, 0o500); }
-      const blockNet = ["--import", path.join(PKG, "test/fixtures/block-net.mjs")];
+      else {
+        fs.mkdirSync(dir);
+        if (broken === "read-only") fs.chmodSync(dir, 0o500);
+        else if (broken === "counter-is-directory") fs.mkdirSync(layout.contextCost(t.home, lid));
+        else if (broken === "symlink") {
+          fs.writeFileSync(path.join(t.root, "outside.txt"), "unchanged\n");
+          fs.symlinkSync(path.join(t.root, "outside.txt"), layout.contextCost(t.home, lid));
+        } else {
+          const fifo = spawnSync("mkfifo", [layout.contextCost(t.home, lid)], { encoding: "utf8" });
+          assert.equal(fifo.status, 0, fifo.stderr);
+        }
+      }
       const input = { session_id: SID, source: "startup" };
-      const expected = runHook({ ...t, home: clean, env: { ...t.env, ALIGN_HOME: clean } }, "claude", "SessionStart", input, {}, blockNet);
-      const actual = runHook(t, "claude", "SessionStart", input, {}, blockNet);
+      const expected = timedHook({ ...t, home: clean, env: { ...t.env, ALIGN_HOME: clean } }, "SessionStart", input);
+      const actual = timedHook(t, "SessionStart", input);
       assert.equal(expected.code, 0, expected.stderr); assert.equal(actual.code, 0, actual.stderr);
       assert.deepEqual(JSON.parse(actual.stdout), JSON.parse(expected.stdout));
-      assert.ok(actual.ms < 5000, `hook exited in ${actual.ms} ms`);
-      assert.equal(fs.existsSync(layout.contextCost(t.home, lid)), false);
+      if (["directory-is-file", "read-only"].includes(broken)) assert.equal(fs.existsSync(layout.contextCost(t.home, lid)), false);
+      // The first FIFO open had no reader. This one succeeds, so fstat must reject the opened FIFO.
+      if (broken === "fifo") fifoReader = fs.openSync(layout.contextCost(t.home, lid), fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
       writeJsonAtomic(layout.latch(t.home, lid), { stopped: true });
       writeJsonAtomic(layout.latch(clean, lid), { stopped: true });
       const deny = { session_id: SID, tool_name: "Bash" };
-      const expectedDeny = runHook({ ...t, home: clean, env: { ...t.env, ALIGN_HOME: clean } }, "claude", "PreToolUse", deny, {}, blockNet);
-      const actualDeny = runHook(t, "claude", "PreToolUse", deny, {}, blockNet);
+      const expectedDeny = timedHook({ ...t, home: clean, env: { ...t.env, ALIGN_HOME: clean } }, "PreToolUse", deny);
+      const actualDeny = timedHook(t, "PreToolUse", deny);
       assert.equal(expectedDeny.code, 0, expectedDeny.stderr); assert.equal(actualDeny.code, 0, actualDeny.stderr);
       assert.deepEqual(JSON.parse(actualDeny.stdout), JSON.parse(expectedDeny.stdout));
       assert.equal(JSON.parse(actualDeny.stdout).hookSpecificOutput.permissionDecision, "deny");
-      assert.ok(actualDeny.ms < 5000, `deny exited in ${actualDeny.ms} ms`);
+      if (fifoReader !== undefined) assert.equal(fs.readSync(fifoReader, Buffer.alloc(1024), 0, 1024, null), 0, "no counter bytes written to an opened FIFO");
+      if (broken === "symlink") assert.equal(fs.readFileSync(path.join(t.root, "outside.txt"), "utf8"), "unchanged\n");
     } finally {
+      if (fifoReader !== undefined) fs.closeSync(fifoReader);
       if (broken === "read-only") fs.chmodSync(layout.contextCostDir(t.home), 0o700);
       t.cleanup();
     }
   });
 }
+
+for (const mode of ["deadline", "failure"] as const) {
+  test(`real hook ${mode} preserves the deny when counting works or fails`, () => {
+    const t = makeEnv();
+    try {
+      const lid = seed(t.home, "claude-code", t.root, true);
+      writeJsonAtomic(layout.latch(t.home, lid), { stopped: true });
+      const broken = path.join(t.root, "broken"); fs.cpSync(t.home, broken, { recursive: true });
+      fs.writeFileSync(layout.contextCostDir(broken), "blocked");
+      // Trigger the actual deadline early and require completion inside the normal internal 300 ms contract.
+      const env = { ALIGN_TEST_HOOK_PATH: mode, ALIGN_HOOK_DEADLINE_MS: "30" };
+      const input = { session_id: SID, tool_name: "Bash" };
+      const working = timedHook(t, "PreToolUse", input, env);
+      const failed = timedHook({ ...t, home: broken, env: { ...t.env, ALIGN_HOME: broken } }, "PreToolUse", input, env);
+      for (const run of [working, failed]) {
+        assert.equal(run.code, 0, run.stderr);
+        assert.equal(run.stderr, "");
+        assert.equal(run.timing.deadline, mode === "deadline", "the intended real entry-point path ran");
+      }
+      assert.equal(failed.stdout, working.stdout);
+      const out = JSON.parse(working.stdout);
+      assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+      assert.match(out.hookSpecificOutput.permissionDecisionReason, /stopped/);
+      assert.deepEqual(files(t.home), files(broken));
+      assert.equal(readContextCost(t.home, lid).context_added.characters, out.hookSpecificOutput.permissionDecisionReason.length);
+      assert.equal(readContextCost(t.home, lid).context_added.additions, 1);
+      assert.equal(fs.existsSync(layout.contextCost(broken, lid)), false);
+    } finally { t.cleanup(); }
+  });
+}
+
+test("unsupported runtime returns notices and denials without creating or changing files", () => {
+  const t = makeEnv();
+  try {
+    const args = ["--import", path.join(PKG, "test/fixtures/block-net.mjs"), "--import", path.join(PKG, "test/fixtures/hook-paths.mjs")];
+    const env = { ALIGN_TEST_HOOK_PATH: "unsupported", ALIGN_ALLOW_UNSUPPORTED_NODE: "" };
+    const start = runHook(t, "claude", "SessionStart", { session_id: SID }, env, args);
+    assert.equal(start.code, 0, start.stderr);
+    assert.match(JSON.parse(start.stdout).systemMessage, /Align is off/);
+    assert.equal(fs.existsSync(t.home), false, "even the home stays absent");
+    const lid = localId("claude-code", SID);
+    writeJsonAtomic(layout.latch(t.home, lid), { stopped: true });
+    writeJsonAtomic(layout.hold(t.home, lid), { holds: [{ goal_id: SHARE_GOAL.id, goal_title: SHARE_GOAL.title, by: "Kim" }] });
+    const before = files(t.home);
+    for (const [event, input] of [
+      ["SessionStart", { session_id: SID }],
+      ["UserPromptSubmit", { session_id: SID, prompt: "::align status" }],
+      ["PreToolUse", { session_id: SID, tool_name: "Bash" }],
+      ["PreToolUse", { session_id: SID, tool_name: "Read" }],
+    ] as const) {
+      const run = runHook(t, "claude", event, input, env, args);
+      assert.equal(run.code, 0, run.stderr);
+      const out = JSON.parse(run.stdout);
+      if (event === "UserPromptSubmit") assert.equal(out.decision, "block");
+      if (event === "PreToolUse") {
+        assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+        assert.match(out.hookSpecificOutput.permissionDecisionReason, input.tool_name === "Read" ? /paused all agents on goal/ : /stopped/);
+      }
+      assert.deepEqual(files(t.home), before);
+      assert.equal(fs.existsSync(layout.contextCostDir(t.home)), false);
+    }
+  } finally { t.cleanup(); }
+});

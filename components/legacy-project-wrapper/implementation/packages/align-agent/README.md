@@ -126,19 +126,23 @@ and choices that keep the same goal.
 
 Counters live in `~/.align/context-cost/<lid>.jsonl`, separate from shared hook state. Each nonempty audience
 addition appends one short line with its audience, character count, time and hook event. A return with both
-audiences writes both lines in one append call. A silent hook touches no counter file. Accounting reads no file,
+audiences writes both lines in one append call. Counter writes refuse symlinks and special files. A silent hook
+touches no counter file. Accounting reads no file,
 takes no lock and adds no network request or directory scan to a hook. The file is append-only until expiry or
 uninstall. It is never rewritten or rotated because replacement could lose a concurrent append.
 
 `align status` and `align sessions` sum complete valid lines, ignoring malformed lines and an incomplete final
-line. Person-only notices and local command replies have their own total, excluded from model context. `align sessions --json`
+line. Commands read at most the last 1 MiB of each log. Larger logs show `at least` for characters and additions,
+and both JSON totals include `lower_bound: true`. Person-only notices and local command replies have their own total, excluded from model context. `align sessions --json`
 includes `context_added` and `notices_added`, each with `characters`, `additions`, `last_at` and `last_event`.
 A missing file starts at zero; Align cannot reconstruct earlier additions. Counters from earlier unshipped builds
 in shared hook state are not migrated. A hook with no session reference cannot update a session total.
+On an unsupported runtime, hooks leave all storage untouched, including counters and shared hook state.
 
 Unsharing and sign-out retain counters. During sync, a log expires after 30 days without an addition, using its
-modification time. Each pass streams entries with a 10 millisecond scan budget and at most 100 removals;
-remaining expired files wait for later passes. Hooks and ordinary command reads never run
+modification time. Each pass lists and sorts names once, resumes after the saved last examined name, examines
+at most 500 paths with `lstat` and removes at most 100 files. Listing names is outside the 10 millisecond
+examination budget. The saved position wraps after the last name; remaining expired files wait for later passes. Hooks and ordinary command reads never run
 cleanup. Expired additions cannot be reconstructed; a later addition starts a new total. Ongoing additions keep
 a log alive, without a size cap. Uninstall removes counters, including without `--purge`.
 

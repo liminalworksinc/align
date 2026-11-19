@@ -7,8 +7,11 @@
   Budget context lines count toward model context; person-only budget messages and notices count separately.
   Counters use a separate append-only file per session, with one append per text return, so parallel hooks keep
   every addition without changing shared hook-state reads, writes or fields. Commands sum valid complete lines
-  and tolerate a torn last line. Sync removes logs after 30 days without an addition, with a 10 millisecond scan
-  budget and at most 100 removals per pass. Later additions start a new total. Uninstall removes all counters.
+  and tolerate a torn last line. Sync expires logs after 30 days without an addition. Each pass lists and sorts
+  names once, resumes after its saved name, examines at most 500 paths, and removes at most 100 files, with a
+  10 millisecond budget on examinations. Counter writes refuse symlinks and special files. Commands read at most
+  the last 1 MiB per counter log and label capped totals as lower bounds. Unsupported runtimes leave counter and
+  hook-state storage untouched. Later additions start a new total. Uninstall removes all counters.
   Unchanged prompts return zero bytes and leave totals, addition counts and last times unchanged.
 - Budget pass tests use a controlled clock so machine load cannot shorten their expected batches; a separate
   regression checks the unchanged time cutoff and continuation with unfinished sessions.

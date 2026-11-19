@@ -35,40 +35,47 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Owner:** specs/align/local-agent.md and the local agent package
 - **Direction:** Record exact returned character totals, addition counts and last times per session, and show them in status and sessions.
 - **Conclusion:** Compare counted hooks with the current uncounted handlers using identical copied local homes.
-  Counter storage stays outside shared hook state. Expire logs after 30 days without an addition, only in sync,
-  with bounded work per pass. There is no separate local session deletion path; unshare and sign-out retain files.
+  Counter storage stays outside shared hook state. Expire logs after 30 days without an addition, only in sync.
+  Per the operator's review correction, list and sort names once outside the time budget, examine at most 500 paths
+  and remove at most 100 files per pass, and resume after the saved last examined name. There is no persistent
+  scanner process. Unshare and sign-out retain counter files; there is no separate local session deletion path.
 - **Completion prerequisites:** none
 - **Implementation and evidence:**
-  - [x] Replace commit-dependent comparisons and generated fixtures. Eighteen paired cases cover all six counted
-    handlers across both harnesses and four start sources. Outputs deep-equal, and every shared file name and byte
-    matches across copied homes, excluding only `context-cost/`. No comparison needs git or a commit id. The paired
-    and concurrency files also pass with git unavailable on PATH (21 passed, 0 failed).
+  - [x] Complete the six review repairs: bounded resumable retention, denial parity, safe counter opens, dead fixture
+    removal, unsupported-runtime storage silence, and bounded command reads with visible lower bounds. Add 20
+    regression cases. Whole-directory listing is outside the 10 millisecond lstat/unlink loop budget.
+  - [x] Twenty-six paired cases cover all six counted handlers across both harnesses, four start sources, goal holds,
+    stop latches, sibling collisions and a missing session reference. Outputs and shared file bytes match, excluding
+    only `context-cost/`. The real hook's deadline and failure paths also preserve denials with broken counters.
+    Test-only timing observes the production timer's installation and exit without changing its duration; the
+    internal 300 millisecond limit stays separate from whole-process startup, which the serial suite measures.
   - [x] Keep the worker-based concurrency schedule. Two batches of 16 processes preserve all 36 model additions,
     delivered goal changes, stop and hold bookkeeping. Exact emitted lengths match raw counter records.
-    Two real-hook failure cases cover read-only counter storage and a file occupying its directory.
-  - [x] Add four retention regressions with an injected clock for the 30-day boundary and bounded work, recent
-    additions, absent or inaccessible storage, signed-out sync, a held sync lock and ordinary command reads.
-    Existing uninstall checks cover ordinary uninstall and purge.
-  - [x] Reconcile the counter specification, README and changelog with the merged code: UTF-16 string lengths,
-    returned separators, audience fields, command wording and sync-only expiry. All new rules precede Sources.
-  - [x] Node 26.3.0: application typecheck and agent build pass; budget domain 55/0; all 11 listener-free agent files
-    pass with concurrency 4 (373/0). Lint passes on rerun after its first run raced budget-test directory cleanup.
-    Register lint and whitespace checks pass. The staged diff summary is unchanged and the resolved conflict stays
-    unstaged, but the index byte hash differs from the starting snapshot. A `git status` read likely refreshed its
-    stat cache. No staging or history command was run; later reads disable optional index refresh.
-  - [ ] Serial latency remains failing with the existing bare-Node allowance and all thresholds unchanged. First
-    run: 1 passed, 1 failed, delivered hook p95 165.5 ms against 209.2 ms allowed; below 80 percent 278.8 against 246.4 ms.
-    Isolated retry: 0 passed, 2 failed, delivered 800.9 against 511.4 ms; below 80 percent 262.4 against 227.2 ms.
-    Bare Node p95 values are 119.2/156.4 ms initially and 421.4/137.2 ms on retry. A separate 12-hook diagnostic
-    measures at most 12.1 ms in counter file operations while whole-process p95 is 359.5 ms; this does not isolate
-    a regression. No latency test, limit or production hook body was changed by these repairs.
+    Five real-hook storage cases cover read-only storage, a file occupying its directory, symlinks, FIFOs with and
+    without a reader, and a directory occupying the counter path. All seven remaining fixtures have references.
+  - [x] Eight retention checks preserve the injected-clock expiry and loop-budget cases, recent additions, absent or
+    inaccessible storage, signed-out sync, a held sync lock and ordinary command reads. Fresh processes using the
+    real elapsed clock remove all 50 late expired files among both 6,000 and 20,000 live logs. Separate checks prove
+    one names-only listing, at most 500 lstat calls, saved-name deletion, wrapping and symlink preservation.
+  - [x] Counter reads consume at most the last 1 MiB, handle short reads and torn records, and mark both JSON totals
+    as lower bounds when capped. Text says `at least`, including when the capped tail has no complete addition.
+    Status resolves each distinct folder once. Unsupported-runtime notices and denials change no storage and do
+    not create an absent home. The specification, README and changelog describe the same behavior.
+  - [x] Node 26.3.0: package `npm run build` and `npm run typecheck` pass. All 11 listener-free files pass with
+    concurrency 4 (393 passed, 0 failed). App `npm run lint` passes. Copy lint and whitespace checks pass.
+  - [ ] Whole-process serial latency remains open, with the tests and thresholds unchanged. An early run passed
+    2/2 (hook p95 128.0/122.9 ms). The final rerun passed 1/2: 184.5 ms against 178.4 allowed, then 200.1 against
+    212.4 ms. Its isolated retry passed 0/2: 430.4 against 251.3 ms and 252.0 against 209.9 ms. Retry bare-Node p95
+    values were 161.3/119.9 ms. These results do not isolate counting overhead from host load.
   - [ ] Run listener-dependent server, browser and live-agent suites in a listener-capable environment.
-- **Outcome:** File-only review repairs are complete, with 373 listener-free checks passing. The serial latency
-  gate remains open, so this item is unchecked. No staging, commit, history or outbound action was made; the index
-  stat-cache issue is recorded above.
-- **Next action:** Run latency on a quiet host and the listener-dependent suites before staging and committing.
-- **Verification boundary:** Listener-dependent execution is unavailable in this sandbox. The `litai` guidance
-  command exits 127 because the CLI is absent, so its peer survey and formal specification verification remain unknown.
+- **Outcome:** All six review findings are addressed, with 393 listener-free checks passing. The serial latency
+  gate remains open, so this broader item stays unchecked. No staging, commit, history mutation or outbound action
+  was made. All edits stay in the authorized package, specification, changelog and active-work file.
+- **Next action:** Recheck whole-process latency on a quiet host and run the listener-dependent suites in their
+  authorized environment. Keep the serial thresholds unchanged.
+- **Verification boundary:** No ports were opened. The unsupported-version branch was exercised by a test preload
+  on Node 26.3.0, rather than a separate older runtime. The `litai` CLI is absent, so its peer survey and formal
+  specification verification remain unknown.
 
 ### [ ] SPEND-004: Current budgets and crossing information
 

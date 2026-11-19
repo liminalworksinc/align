@@ -10,9 +10,16 @@ Object.defineProperty(process, "pid", { value: 1 });
 let sequence = 0;
 crypto.randomBytes = (size) => crypto.createHash("sha256").update(String(sequence++)).digest().subarray(0, size);
 const handlers = await import("../../src/hooks/handlers.ts");
-const fn = handlers[counted ? name : `${name}Uncounted`];
+const handler = ["goalHoldDeny", "stopLatchDeny", "collisionDeny", "missingSession"].includes(name) ? "preToolUse" : name;
+const fn = handlers[counted ? handler : `${handler}Uncounted`];
 const sid = "paired-context";
 const input = { session_id: sid, cwd, source, prompt: "continue", prompt_id: "paired_prompt", turn_id: "paired_prompt", tool_name: "Bash", tool_input: { command: "true" } };
+if (name === "missingSession") delete input.session_id;
+if (name === "goalHoldDeny") input.tool_name = "Read";
+if (name === "collisionDeny") {
+  input.tool_name = harness === "claude-code" ? "Edit" : "apply_patch";
+  input.tool_input = { file_path: cwd + "/work.txt", old_string: "changed", new_string: "next", command: "*** Update File: work.txt" };
+}
 const output = name === "failureDeny" ? fn(home, harness, sid)
   : name === "command" ? fn(home, harness, sid, cwd, "::align status")
   : fn(home, harness, input, ...(name === "sessionStart" ? [{}] : []));

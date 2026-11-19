@@ -179,6 +179,7 @@ export interface HoldLatch {
 }
 
 export interface AddedText {
+  lower_bound?: boolean;
   characters: number;
   additions: number;
   last_at: string | null;

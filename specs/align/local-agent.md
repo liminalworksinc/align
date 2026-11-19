@@ -1267,7 +1267,8 @@ at <server>/app/devices.` on stderr, so no device is left paired with no machine
 Below Node 24 the `align` CLI SHALL run no command except `help` and `version`: it SHALL print the one line `align:
 Align needs Node 24 or later, and <node path> is Node <version>. Install Node 24 or later, then run \`align install\`
 with it so the hooks use it too.` on stderr and exit 1, before `node:sqlite` is loaded. The `align` hook on such a
-Node SHALL do nothing else (no context, spool or sync) except what already fails closed: `SessionStart` returns the
+Node SHALL do nothing else (no context, spool, sync, counter or hook-state writes, or creation of `ALIGN_HOME`)
+except what already fails closed: `SessionStart` returns the
 `systemMessage` `Align: Align needs Node 24 or later, ..., so Align is off in this session (a stop or goal hold still
 blocks tools). ...`, an `::align` prompt is still blocked from the model with that reason, and `PreToolUse` still
 applies the session's stop latch and goal hold by the same rules as on a supported Node (a stopped session may still
@@ -1526,22 +1527,30 @@ parent and dependency changes; accepted-ask additions, closures and ended-follow
 answers and restoration after clear or compact; steering; sibling activity, file changes and overlap notes; stop,
 hold, collision and failure denials; release, lifted-hold and resume lines; and budget context lines at fresh
 startup, resume and prompts. Person-only `systemMessage` and blocked `::align` command replies are counted
-separately, including drift, sharing, request, withdrawal, weekly unshared-work and unsupported-runtime notices,
+separately, including drift, sharing, request, withdrawal and weekly unshared-work notices,
 and person-only budget
 messages at fresh startup, resume, prompts and supported tool calls. An unidentifiable session cannot receive
-a per-session total.
+a per-session total. Unsupported-runtime returns SHALL never be counted, including startup notices, blocked local
+commands and fail-closed tool denials; the older unsupported-runtime requirement takes precedence.
 
 Accounting SHALL preserve the uncounted handler's output and all shared hook-state reads, writes and fields.
 It SHALL run only after the uncounted handler returns. Counters SHALL never be stored in shared hook state. After
 a hook decides its final output, it SHALL append one short line per nonempty audience addition, holding the
 audience, character count, time and hook event. Both audiences' lines SHALL be written together in one append call with append mode, so parallel hooks
-cannot overwrite each other's records. Accounting SHALL add no read, network call, directory scan, lock or lock
+cannot overwrite each other's records. The append SHALL open with `O_APPEND | O_CREAT | O_WRONLY | O_NOFOLLOW | O_NONBLOCK`,
+check the opened descriptor is a regular file, and close it even on failure. Symlinks and special files SHALL receive
+no counter write. Accounting SHALL add no content read, network call, directory scan, lock or lock
 wait to a hook. A hook returning nothing SHALL touch no counter file. Its other existing bookkeeping and root-turn
 spool records remain unchanged. Stop and post-tool hooks returning nothing add nothing.
 
 Commands SHALL sum valid complete lines, ignoring malformed lines and an incomplete final line, to obtain
 characters, addition counts and the latest addition's time and event for each audience. The file SHALL be
 append-only until it expires under the retention requirement below or uninstall removes it; commands SHALL never rewrite or rotate it.
+Commands SHALL read at most the last 1,048,576 bytes of each log. For a larger file they SHALL discard any partial
+first record and mark both audience totals with `lower_bound: true` in JSON. The displayed character and addition
+counts SHALL each say `at least`; a capped tail with no complete valid addition SHALL say `Align has added at least
+0 characters to this session's context; the counter file exceeds the read limit.`, never claim no characters were added.
+Uncapped totals retain the exact wording and fields below.
 Replacing a file could lose an append already opened by a parallel hook.
 Unsharing and sign-out SHALL retain counter files, subject to the same expiry. Ordinary uninstall SHALL remove
 `context-cost/`; purge SHALL remove all of `ALIGN_HOME`. There is no separate local session deletion path.
@@ -1549,7 +1558,8 @@ Unchanged prompts SHALL return exactly zero bytes and leave both audiences' tota
 and events unchanged.
 
 `align status` SHALL show one plain line for the most recently active session whose working folder is the current
-folder, resolving filesystem aliases, when one exists. `align sessions` SHALL show that line beneath each session.
+folder, resolving filesystem aliases, when one exists. It SHALL resolve each distinct working-folder path at most
+once per command. `align sessions` SHALL show that line beneath each session.
 The line SHALL read `Align has added <characters> characters to this session's context in <additions> additions, last at session start (<time>).`,
 using `1 addition` for one addition and `a prompt` or `a tool call` for the other events. A zero total reads `Align has added no characters to
 this session's context.` The JSON session output SHALL include both audience totals, with zero counts and null last
@@ -1585,6 +1595,26 @@ time and event when absent. These figures stay local.
 - **WHEN** a command reads a counter log ending in a torn or malformed line, then the agent is uninstalled with or without purge
 - **THEN** valid additions are summed without rewriting the file, and cleanup removes counter storage
 
+#### Scenario: Counter paths cannot redirect or block writes
+
+- **WHEN** a symlink points from the counter path to a file outside counter storage, or a FIFO or directory occupies that path
+- **THEN** the external target stays unchanged, the hook output matches a working counter, and the process exits within the hook's deadline
+
+#### Scenario: Unsupported runtime leaves storage untouched
+
+- **WHEN** an unsupported runtime returns a startup notice, a blocked local command, a stop denial or a goal-hold denial
+- **THEN** no counter or shared hook-state file changes, and an absent `ALIGN_HOME` stays absent
+
+#### Scenario: Oversized counter log
+
+- **WHEN** a counter log exceeds 1,048,576 bytes and ends with complete additions followed by a torn record
+- **THEN** commands sum valid complete records from the capped tail, discard the partial first and final records, mark both JSON totals as lower bounds, and say `at least` in status and session text
+
+#### Scenario: Real deadline and failure parity
+
+- **WHEN** the real hook process reaches its deadline after deciding a denial, or fails before deciding one for a known stopped session, with working and broken counter storage
+- **THEN** both runs emit the same denial and exit within the hook's deadline contract
+
 #### Scenario: Counter write failure
 
 - **WHEN** counter storage is read-only or a regular file occupies `context-cost/`
@@ -1594,10 +1624,15 @@ time and event when absent. These figures stay local.
 
 The sync pass SHALL remove counter logs after 30 days without an addition, using the file's modification time.
 Cleanup SHALL run only in a sync pass that acquired its normal sync lock, including signed-out passes, never in a
-hook or an ordinary command read. A pass SHALL stream directory entries with a 10 millisecond scan budget and
-remove at most 100 expired files. It SHALL start no new iteration once that budget expires. Remaining expired
-files wait for later passes. No cleanup runs
-while sync is stopped. Ongoing additions keep a log alive, without a size cap.
+hook or an ordinary command read. A pass SHALL list directory names once without requesting entry types or
+metadata, sort the counter filenames, and resume strictly after the last examined name saved in
+`context-cost/.retention.json`, wrapping to the beginning at the end. Listing and sorting names SHALL be outside
+the elapsed-time budget. The examination loop SHALL call `lstat` on at most 500 paths and remove at most 100
+expired regular files per pass. It SHALL start no new examination after its 10 millisecond loop budget expires.
+The saved position SHALL advance even when the examined file was removed, inaccessible or not regular.
+`lstat` SHALL determine file types, so unknown directory entry types need no special support and symlinks are
+never expired as regular logs. Remaining expired files wait for later passes. No persistent scanner process SHALL
+be started. No cleanup runs while sync is stopped. Ongoing additions keep a log alive, without a size cap.
 A later addition after expiry SHALL start a new total; previously expired additions cannot be reconstructed.
 Cleanup SHALL leave other local session files intact and SHALL tolerate absent or inaccessible counter storage.
 
@@ -1609,7 +1644,12 @@ Cleanup SHALL leave other local session files intact and SHALL tolerate absent o
 #### Scenario: Bounded cleanup and recent additions
 
 - **WHEN** more than 100 logs have expired alongside a recently appended log and sync cleanup runs in successive passes
-- **THEN** each pass removes at most 100 expired logs within its scan budget, recent additions survive, and later passes remove the remaining expired logs
+- **THEN** each pass examines at most 500 paths with `lstat`, removes at most 100 expired logs, and starts no examination after its 10 millisecond loop budget; recent additions survive, and later passes remove the remaining expired logs
+
+#### Scenario: Large live prefix cannot starve expiry
+
+- **WHEN** thousands of live counter logs precede expired logs in sorted filename order and successive fresh sync processes run with the real elapsed clock
+- **THEN** each pass lists names once outside the time budget, examines at most 500 paths with `lstat`, removes at most 100 files, and saves its last examined name; repeated passes remove every expired log, preserve every live log, and wrap after reaching the end
 
 ### Requirement: Prompt-time goal deltas and silence when unchanged
 
