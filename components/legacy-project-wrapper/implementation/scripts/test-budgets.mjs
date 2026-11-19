@@ -133,41 +133,45 @@ await test("teams of one or two can keep a budget and report the small-team disc
   db.run("INSERT INTO v2_pod_members VALUES (?, ?, 'member', 'member', ?)", W, T, new Date().toISOString());
   assert.equal(burn().team_member_count, 2); assert.equal(burn().budget.amount_usd_micros, 100_000_000);
 });
-await test("no-goal contributor count follows distinct people and captured monthly attribution", async () => {
+await test("no-goal spend from fewer than three people is flagged without a count", async () => {
   await budget(); goal("g_public");
   const add = async (who, letter, amount = 1_000_000) => {
     const key = session(letter.repeat(43), who);
     await usage(key, null, amount, "r".repeat(43), who);
     return key;
   };
-  assert.ok(burn().team_member_count >= 3); assert.equal(burn().no_goal.contributor_count, 0);
+  assert.ok(burn().team_member_count >= 3); assert.equal(burn().no_goal.few_contributors, false);
   await usage(session("g".repeat(43)), "g_public", 9_000_000);
   await add("other", "o");
   const beforeMonth = await add("lead", "b"), afterRead = await add("lead", "f"), unattributed = await add("lead", "h");
   db.run("UPDATE v2_usage SET ts = '2029-12-31T23:59:59.999Z' WHERE session_key = ?", beforeMonth);
   db.run("UPDATE v2_usage SET ts = ? WHERE session_key = ?", new Date(now).toISOString(), afterRead);
   db.run("UPDATE v2_epochs SET spend_team_id = NULL WHERE session_key = ?", unattributed);
-  assert.equal(burn().no_goal.contributor_count, 0);
+  assert.equal(burn().no_goal.few_contributors, false);
   const first = await add("member", "a");
   await usage(first, null, 2_000_000, "s".repeat(43));
   await add("member", "c");
-  assert.equal(burn().no_goal.contributor_count, 1);
-  assert.equal(burn("viewer").no_goal.contributor_count, 1);
+  assert.equal(burn().no_goal.few_contributors, true);
+  assert.equal(burn("viewer").no_goal.few_contributors, true);
   await add("lead", "d", null);
-  assert.equal(burn().no_goal.contributor_count, 2);
-  // A later home-team choice cannot change the captured attribution or its contributor count.
+  assert.equal(burn().no_goal.few_contributors, true);
+  // A later home-team choice cannot change the captured attribution or who counts as a contributor.
   db.run("INSERT INTO v2_pod_members VALUES (?, ?, 'member', 'member', ?)", W, T2, new Date().toISOString());
   await chooseSpendHomeTeam(pp("member"), { team_id: T2 });
   await add("member", "j");
   db.run("DELETE FROM v2_pod_members WHERE ws_id = ? AND pod_id = ? AND user_id = 'member'", W, T);
-  assert.equal(burn().team_member_count, 3); assert.equal(burn().no_goal.contributor_count, 2);
+  assert.equal(burn().team_member_count, 3); assert.equal(burn().no_goal.few_contributors, true);
   await add("lead2", "e");
-  assert.equal(burn().no_goal.contributor_count, 3);
-  assert.equal(burn("owner", "2030-02").no_goal.contributor_count, 0);
+  assert.equal(burn().no_goal.few_contributors, false);
+  assert.equal(burn("owner", "2030-02").no_goal.few_contributors, false);
+  assert.ok(!("contributor_count" in burn().no_goal));
   const { spendCsv } = await import("../lib/v2/spend-export.ts");
   const csv = spendCsv(pp("owner"), spendMonth("2030-01"));
   assert.ok(!/contributor|person|people|member|lead/.test(csv));
   assert.equal(csv.split("\r\n")[4], '"month","team","requests","estimated_list_cost_usd","unpriced_requests","input","output","cache_read","cache_write_5m","cache_write_1h","cache_write_unsplit"');
+  // Retained usage keeps no identities: with three known contributors rolled away, the figure may be one person's.
+  await runRetention(db.sql, db.tx, new Date("2032-01-01T00:00:00Z"), { secret: "test-secret" });
+  assert.equal(burn("owner", "2030-01").no_goal.few_contributors, true);
 });
 await test("set/change/remove are immutable audited history; no-op removal is idempotent", async () => {
   await budget(); await spend.writeBudget(pp("owner"), T, null, { amount_usd: 120 }); await budget(null); await budget(null);

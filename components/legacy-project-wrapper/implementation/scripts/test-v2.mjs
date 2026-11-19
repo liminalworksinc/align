@@ -8248,9 +8248,9 @@ try {
         await open(pL, `/app/w/${W}/spend?team=${T}`); await pL.waitForSelector("[data-budget-request-form]");
         const uiBudget = (await req(SO, "GET", env)).json;
         check("budget screens: lead sets base, per-request allowance and monthly ceiling with named fields, bounds and remaining allowance", uiBudget.budget.amount_usd_micros === 100_000_000 && uiBudget.budget.allowance_ceiling_usd_micros === 10_000_000 && (await text(pL, "[data-burn]")).includes("At least") && (await text(pL, "[data-burn]")).includes("At most"), await text(pL, "[data-team-spending]"));
-        const noGoalRisk = "Spend in no goal comes from fewer than three people this month, so it can reveal one person's spend.";
+        const noGoalRisk = "Spend in no goal may come from fewer than three people this month, so it can reveal one person's spend.";
         const noGoalFigure = await pL.$eval("[data-burn]", (el) => [...el.querySelectorAll("div")].find((row) => row.querySelector("dt")?.textContent === "Spend in no goal, estimate")?.querySelector("dd")?.textContent ?? "");
-        check("budget screens: a larger team warns beside no-goal spend from fewer than three people without showing the count", uiBudget.team_member_count >= 3 && uiBudget.no_goal.contributor_count === 1 && noGoalFigure.includes(noGoalRisk) && !/contributor|1 person/.test(noGoalFigure) && !(await text(pL, "[data-team-spending]")).includes("Team totals can reveal one person's spend when the team has fewer than three members."), noGoalFigure);
+        check("budget screens: a larger team warns beside no-goal spend from fewer than three people without showing the count", uiBudget.team_member_count >= 3 && uiBudget.no_goal.few_contributors === true && !("contributor_count" in uiBudget.no_goal) && noGoalFigure.includes(noGoalRisk) && !/contributor|1 person/.test(noGoalFigure) && !(await text(pL, "[data-team-spending]")).includes("Team totals can reveal one person's spend when the team has fewer than three members."), noGoalFigure);
         await open(pM, `/app/w/${W}/spend?team=${T}`);
         await pM.waitForSelector('select[name="team_id"]');
         await pM.select('select[name="team_id"]', solo);
@@ -8307,7 +8307,7 @@ try {
         const smallBudget = await req(SO, "PUT", `/teams/${T2}/budget`, { amount_usd: 1 });
         await pV.reload({ waitUntil: "networkidle0" });
         await pV.waitForFunction(() => document.querySelector("[data-team-spending]")?.textContent.includes("Team totals can reveal one person's spend when the team has fewer than three members."));
-        check("budget screens: a small team keeps its budget and sees the privacy sentence and cache age", smallBudget.status === 200 && smallBudget.json.team_member_count < 3 && smallBudget.json.no_goal.contributor_count === 0 && !(await text(pV, "[data-team-spending]")).includes(noGoalRisk) && (await text(pV, "[data-team-spending]")).includes("five minutes old"), await text(pV, "[data-team-spending]"));
+        check("budget screens: a small team keeps its budget and sees the privacy sentence and cache age", smallBudget.status === 200 && smallBudget.json.team_member_count < 3 && smallBudget.json.no_goal.few_contributors === false && !(await text(pV, "[data-team-spending]")).includes(noGoalRisk) && (await text(pV, "[data-team-spending]")).includes("five minutes old"), await text(pV, "[data-team-spending]"));
         await open(pO, link(deviceAsk.json)); await pO.waitForSelector(`[data-budget-request="${deviceAsk.json.id}"]`);
         check("budget screens: terminal source and readable dates appear on the record", (await text(pO, `[data-budget-request="${deviceAsk.json.id}"]`)).includes(deviceAsk.json.filing_note) && !(await text(pO, `[data-budget-request="${deviceAsk.json.id}"]`)).includes(`${m} UTC`));
         const homeRequest = (await request(SM)).json;

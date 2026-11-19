@@ -118,6 +118,14 @@ export function budgetBurn(pp: PolicyPrincipal, teamId: string, month?: string |
      WHERE u.ws_id = ? AND e.goal_id IS NULL AND e.spend_team_id = ? AND u.ts >= ? AND u.ts < ?`,
     pp.wsId, team.id, m.from, new Date(asOf).toISOString(),
   )!.n;
+  // Retained no-goal usage keeps no identities, so its contributors cannot be counted. Fewer than three known
+  // contributors plus any retained amount means the figure may still come from one or two people.
+  const rolledNoGoal = !!get<{ rolled: number }>(
+    `SELECT EXISTS(SELECT 1 FROM v2_team_no_goal_rollups WHERE ws_id = ? AND pod_id = ?
+       AND day || 'T00:00:00.000Z' >= ? AND day || 'T00:00:00.000Z' < ?) AS rolled`,
+    pp.wsId, team.id, m.from, new Date(asOf).toISOString(),
+  )!.rolled;
+  const fewContributors = noGoalContributors < 3 && (noGoalContributors > 0 || rolledNoGoal);
   const rolledAttributionUnknown = !!get<{ incomplete: number }>(
     `SELECT EXISTS(SELECT 1 FROM v2_spend_rollups
      WHERE ws_id = ? AND goal_id = '' AND requests > team_attributed_requests
@@ -181,7 +189,7 @@ export function budgetBurn(pp: PolicyPrincipal, teamId: string, month?: string |
     no_goal: { priced_spend_usd_micros: sums.no_goal_priced, estimated_spend_usd_micros: attributed && (!attributionUnknown || sums.no_goal_priced > 0) ? sums.no_goal_priced : null,
       spend_bound: !attributed ? "unknown" as const : sums.no_goal_unpriced || attributionUnknown ? "lower" as const : "exact" as const,
       unpriced_requests: attributionUnknown ? null : sums.no_goal_unpriced, known_unpriced_requests: sums.no_goal_unpriced, share_percent: complete && sums.priced > 0 ? Math.round(sums.no_goal_priced / sums.priced * 1000) / 10 : null,
-      attribution_unknown: attributionUnknown, contributor_count: noGoalContributors },
+      attribution_unknown: attributionUnknown, few_contributors: fewContributors },
     history, can: { manage: m.month >= currentMonth(now) && authorize(pp, "team_budget.manage", { kind: "pod", podId: team.id }).ok,
       request: !!e && m.month === currentMonth(now) && authorize(pp, "budget_request.create", { kind: "pod", podId: team.id }).ok },
   };

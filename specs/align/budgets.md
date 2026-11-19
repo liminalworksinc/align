@@ -45,7 +45,7 @@ allowance_remaining_usd_micros, no_goal, history, can}`. `budget` is null or
 `history` entries have `{id, action, amount_usd_micros, allowance_usd_micros,
 allowance_ceiling_usd_micros, actor, at}`. `can` is `{manage, request}`.
 `no_goal` has `{priced_spend_usd_micros, estimated_spend_usd_micros, spend_bound,
-unpriced_requests, known_unpriced_requests, share_percent, attribution_unknown, contributor_count}`.
+unpriced_requests, known_unpriced_requests, share_percent, attribution_unknown, few_contributors}`.
 A `team` is `{id, name}` and a person is `{id, name}`. Bounds are `exact`, `lower`, `upper`, `unknown`,
 or null for absent amounts. Monetary fields use integer USD microdollars; instants use ISO UTC on the wire.
 
@@ -124,12 +124,12 @@ Forecast SHALL be priced spend divided by elapsed time since month start, multip
 
 Align SHALL offer no per-person spend view. Team totals can reveal one person's spend when the team has fewer than three members. Teams of one or two SHALL still be able to have a budget. The team budget panel SHALL show that risk in one plain sentence when the team has fewer than three members. Budget reads SHALL expose no session list or unreadable goal reference or name. History may name who changed a budget, never their spend. Only team members and workspace owners SHALL read home-team spend in no goal through budget reads. Hidden goals SHALL stay unnamed.
 
-Budget reads SHALL return only a count of distinct people with recorded no-goal usage attributed to the team's captured home team in the month's read window, without naming them. When that count is one or two, the panel SHALL show beside the no-goal figure: "Spend in no goal comes from fewer than three people this month, so it can reveal one person's spend." The panel and CSV SHALL omit the count itself. This sentence SHALL apply regardless of team size, without withholding figures or imposing a minimum size.
+Budget reads SHALL return only a yes or no saying whether the no-goal figure may come from fewer than three people: yes when one or two distinct people have recorded no-goal usage attributed to the team's captured home team in the month's read window, and yes when fewer than three are known and retained usage, which keeps no identities, is part of the figure. No count or name SHALL be returned. When it is yes, the panel SHALL show beside the no-goal figure: "Spend in no goal may come from fewer than three people this month, so it can reveal one person's spend." The CSV SHALL carry neither. This sentence SHALL apply regardless of team size, without withholding figures or imposing a minimum size.
 
 #### Scenario: No-goal contributors in a larger team
 
-- **WHEN** the port-free test `scripts/test-budgets.mjs`, "no-goal contributor count follows distinct people and captured monthly attribution", reads a team of at least three members with no-goal usage from zero, one, two and three people
-- **THEN** the count reflects only distinct people with attributed usage in the month's read window, the panel's disclosure condition holds for one or two contributors regardless of team size, and neither names nor the count appear in the CSV
+- **WHEN** the port-free test `scripts/test-budgets.mjs`, "no-goal spend from fewer than three people is flagged without a count", reads a team of at least three members with no-goal usage from zero, one, two and three people, and again after that usage is retained
+- **THEN** the read returns only a yes or no: yes for one or two distinct people with attributed usage in the month's read window, yes when fewer than three are known and retained usage is part of the figure, no otherwise; the panel's disclosure follows it regardless of team size, and no count or name appears in the read or the CSV
 
 #### Scenario: Earlier no-goal usage before and after retention
 
