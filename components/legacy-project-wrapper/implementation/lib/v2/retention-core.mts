@@ -97,6 +97,7 @@ export const PERSON_COLUMNS: readonly (readonly [table: string, column: string])
   ["v2_expectations", "assignee_id"],
   ["v2_outcome_reports", "reported_by"],
   ["v2_measure_readings", "recorded_by"],
+  ["v2_reading_credentials", "created_by"],
   ["v2_requests", "sender_id"],
   ["v2_requests", "cancelled_by"],
   ["v2_goal_holds", "held_by"],

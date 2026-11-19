@@ -74,6 +74,7 @@ export type Action =
   | "goal.read"
   | "goal.edit"
   | "goal.record_reading"
+  | "goal.record_command_reading"
   | "goal.bind"
   | "pod.manage_members"
   | "session.manage" // the session's own owner: re-share, epochs, usage, stop sharing, delete
@@ -136,6 +137,10 @@ export function authorize(p: PolicyPrincipal, action: Action, obj: PolicyObject)
       if (obj.kind !== "goal" || !canReadGoal(p, obj)) return hidden();
       if (!wsCan(p, "goal.create")) return roleDenied(p);
       return obj.ownerId === p.userId ? ALLOW : deny("not_goal_owner", "Only the goal's owner can change it.");
+
+    case "goal.record_command_reading":
+      if (obj.kind !== "goal" || !canReadGoal(p, obj) || p.wsRole === "viewer") return hidden();
+      return ALLOW;
 
     case "goal.record_reading":
       if (obj.kind !== "goal" || !canReadGoal(p, obj)) return hidden();

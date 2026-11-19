@@ -71,6 +71,46 @@ describe("claude hooks", () => {
     assert.equal((ctx.db.prepare("SELECT COUNT(*) AS n FROM root_turns WHERE local_id=?").get(localId("claude-code", sid)) as any).n, 50);
   });
 
+  test("due expectations are noted only for a shared session's readable bound goal", () => {
+    const { t, ctx } = setup();
+    const sid = "sess-reading-due";
+    shareSession(ctx, "claude-code", sid);
+    writeJsonAtomic(layout.feed(t.home, "ws_1"), {
+      goals: [{ ...GOAL, status: "active" }],
+      due_expectations: [
+        { goal_id: GOAL.id, measure_id: GOAL.measures[0].id, due_on: "2026-11-18" },
+        { goal_id: "g_hidden", measure_id: "m_hidden", due_on: "1999-01-01", expected: "private expectation canary" },
+      ],
+    });
+    const start = runHook(t, "claude", "SessionStart", { session_id: sid, source: "startup" }, {}, BLOCK_NET);
+    const note = JSON.parse(start.stdout).hookSpecificOutput.additionalContext;
+    assert.match(note, /Outcomes due for this goal/);
+    assert.match(note, /due 2026-11-18/);
+    assert.doesNotMatch(note, /1999-01-01|private expectation canary/);
+    assert.equal(runHook(t, "claude", "SessionStart", { session_id: "private-due", source: "startup" }, {}, BLOCK_NET).stdout, "");
+    ctx.db.close();
+  });
+
+  test("resuming a shared session names due measures as they were at launch", () => {
+    const { t, ctx } = setup();
+    const sid = "sess-retired-measure";
+    shareSession(ctx, "claude-code", sid);
+    runHook(t, "claude", "SessionStart", { session_id: sid, source: "startup" }, {}, BLOCK_NET);
+    writeJsonAtomic(layout.feed(t.home, "ws_1"), {
+      goals: [{ ...GOAL, status: "active", measures: [{ ...GOAL.measures[0], text: "Renamed measure" }] }],
+      due_expectations: [
+        { goal_id: GOAL.id, measure_id: "m_replaced", measure_text: "Original lag measure", due_on: "2026-11-17" },
+        { goal_id: GOAL.id, measure_id: GOAL.measures[0].id, measure_text: "Original check name", due_on: "2026-11-18" },
+      ],
+    });
+    const resume = runHook(t, "claude", "SessionStart", { session_id: sid, source: "resume" }, {}, BLOCK_NET);
+    const note = JSON.parse(resume.stdout).hookSpecificOutput.additionalContext;
+    assert.match(note, /"Original lag measure", due 2026-11-17/);
+    assert.match(note, /"Original check name", due 2026-11-18/);
+    assert.doesNotMatch(note, /Renamed measure|Measure from an earlier version/);
+    ctx.db.close();
+  });
+
   test("resume injects only when the current version is not already in context", () => {
     const { t, ctx } = setup();
     const sid = "sess-resume";

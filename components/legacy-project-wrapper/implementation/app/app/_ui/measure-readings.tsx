@@ -5,8 +5,19 @@ import type { MeasureReading } from "@/lib/v2/readings";
 import { isBlankText } from "@/lib/v2/text-core.mts";
 import { api, Btn, Err, Field, Input, labelledFieldError, Loading, useAction, useApi, when } from "./kit";
 
-function readingWords(r: MeasureReading, me: string) {
-  return `${r.value_text}, self-reported by ${r.recorded_by.id === me ? "you" : r.recorded_by.name}, ${when(r.observed_at)}`;
+export function readingWords(r: MeasureReading, me: string) {
+  const value = `${r.value_text ?? "Unknown"}${r.stale ? " (stale)" : ""}`;
+  const time = when(r.observed_at);
+  if (r.source === "ci") {
+    const d = r.details;
+    return `${value}, reported with a CI credential, ${d.check} on ${d.repository} (${d.branch}), ${time}. Run ${d.run}, commit ${d.commit}.`;
+  }
+  if (r.source === "command") {
+    const d = r.details;
+    const status = d.exit_status === null ? "Exit status unknown" : `Exit status ${d.exit_status}`;
+    return `${value}, reported from ${d.device_name ?? "an unknown machine"}, ${time}. ${status}.`;
+  }
+  return `${value}, self-reported by ${r.recorded_by.id === me ? "you" : r.recorded_by.name}, ${when(r.observed_at)}`;
 }
 
 export function MeasureReadings({ ws, goal, measure, latest, canRecord, onDone, me }: {

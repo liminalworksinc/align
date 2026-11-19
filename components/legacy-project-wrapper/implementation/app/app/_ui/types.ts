@@ -16,7 +16,7 @@ export interface Goal {
   id: string;
   version: number;
   title: string;
-  measures: { id: string; text: string; target: string | null }[];
+  measures: { id: string; text: string; target: string | null; source?: import("@/lib/v2/measure-sources").MeasureSource }[];
   status: "active" | "achieved" | "dropped";
   level: "company" | "team";
   visibility: "private" | "team" | "workspace";

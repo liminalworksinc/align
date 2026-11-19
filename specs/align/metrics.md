@@ -54,7 +54,8 @@ The events, where they are recorded and what they may carry:
 | `first_launch` | the workspace's first launch of an approved change request (alone or in an approve and launch) | the workspace, the launcher | none |
 | `first_expectation` | the workspace's first expectation recorded at launch | the workspace, the launcher | none |
 | `outcome_reported` | an expectation answer or correction is recorded | the workspace, the reporter | `outcome`: `met`, `not_met` or `cant_tell` |
-| `first_reading` | the workspace's first self-reported measure reading | the workspace, the person | none |
+| `first_reading` | the workspace's first measure reading | the workspace, the responsible person | none |
+| `measure_source_reading` | an automated measure reading is recorded | the workspace, the responsible person | `source`: `ci` or `command` |
 | `first_precedent_shown` | a precedent read first returns at least one item to the requester or a person who can decide, including a draft read by its proposer | the workspace, the person | none |
 | `first_directive` | the workspace's first directive that reached a session | the workspace, none | `kind` |
 | `first_mcp_read` | the workspace's first MCP tool call | the workspace, the person | `client`: `app` or `device` |

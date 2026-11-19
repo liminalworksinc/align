@@ -65,6 +65,71 @@ function admin(args, dir, { script = "align-admin.mjs", preload } = {}) {
   return { status: r.status, out: r.stdout ?? "", err: r.stderr ?? "", error: r.error };
 }
 
+function migrateFixture(dir, shift = 0) {
+  const upgrade = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import path from "node:path";
+    import { registerHooks } from "node:module";
+    const shifted = process.argv[1] === "1";
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        return nextResolve(specifier.startsWith(".") && !path.extname(specifier) ? specifier + ".ts" : specifier, context);
+      },
+      load(url, context, nextLoad) {
+        const result = nextLoad(url, context);
+        if (shifted && url.endsWith("/lib/v2/db.ts")) {
+          return { ...result, source: String(result.source).replace("const MIGRATIONS: string[] = [", '$& "SELECT 1",') };
+        }
+        if (shifted && url.endsWith("/lib/v2/core.mts")) {
+          return { ...result, source: String(result.source).replace(/export const SCHEMA_VERSION = (\\d+)/,
+            (_, version) => "export const SCHEMA_VERSION = " + (Number(version) + 1)) };
+        }
+        return result;
+      },
+    });
+    const { migrate } = await import("./lib/v2/db.ts");
+    migrate();
+  `, String(shift)], { cwd: ROOT, env: { ...process.env, ALIGN_DATA_DIR: dir }, encoding: "utf8" });
+  if (upgrade.status !== 0) throw new Error(upgrade.error?.message ?? upgrade.stderr);
+  return upgrade;
+}
+
+function testReadingUpgrade() {
+  const dir = path.join(testDir, "schema 27 to 28");
+  mkdirSync(path.join(dir, "v2"), { recursive: true });
+  const d = new DatabaseSync(path.join(dir, "v2/align.sqlite"));
+  try {
+    d.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY);");
+    for (const sql of migrations.slice(0, 27)) d.exec(sql);
+    d.exec(`
+      INSERT INTO ba_user (id) VALUES ('u_reader');
+      INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES ('ws_read', 'Reading test data', 'u_reader', '${OLD}');
+      INSERT INTO v2_goals (id, ws_id, owner_id, visibility, version, title, measures_json, anchors_json, status, created_at, updated_at)
+        VALUES ('g_read', 'ws_read', 'u_reader', 'workspace', 1, 'Old goal', '[]', '{}', 'active', '${OLD}', '${OLD}');
+      INSERT INTO v2_measure_readings (id, ws_id, goal_id, measure_id, value_text, value_num, source, observed_at, recorded_by, recorded_at)
+        VALUES ('mr_one', 'ws_read', 'g_read', 'm_one', '1', 1, 'self', '${OLD}', 'u_reader', '${OLD}'),
+               ('mr_later', 'ws_read', 'g_read', 'm_one', '2', 2, 'self', '${OLD}', 'u_reader', '${OLD}');
+      INSERT INTO v2_data_restrictions (ws_id, tier) VALUES ('ws_read', 2);
+      PRAGMA user_version = 27;
+    `);
+    migrateFixture(dir);
+    d.exec("PRAGMA foreign_keys = ON;");
+    const rows = d.prepare("SELECT id, value_num, source, source_ref, goal_version FROM v2_measure_readings ORDER BY rowid DESC").all();
+    const version = d.prepare("PRAGMA user_version").get().user_version;
+    const restriction = d.prepare("SELECT tier FROM v2_data_restrictions WHERE ws_id = 'ws_read'").get();
+    check("LIM-2524: a schema 27 database upgrades to 28 and keeps its sharing restrictions",
+      version === 28 && restriction?.tier === 2, JSON.stringify({ version, restriction }));
+    check("LIM-2524: migration 28 preserves legacy reading order and keeps unknown source details and version",
+      rows.map((r) => r.id).join() === "mr_later,mr_one" && rows[0].value_num === 2 &&
+      rows.every((r) => r.source === "self" && r.source_ref === null && r.goal_version === null) &&
+      d.prepare("PRAGMA foreign_key_check").all().length === 0, JSON.stringify(rows));
+    d.exec("DELETE FROM v2_workspaces WHERE id = 'ws_read';");
+    check("LIM-2524: upgraded reading rows still follow workspace deletion",
+      d.prepare("SELECT COUNT(*) AS n FROM v2_measure_readings").get().n === 0);
+  } finally {
+    d.close();
+  }
+}
+
 function testChangeElementUpgrade(name, shift) {
   const legacyDir = path.join(testDir, name);
   mkdirSync(path.join(legacyDir, "v2"), { recursive: true });
@@ -91,30 +156,7 @@ function testChangeElementUpgrade(name, shift) {
       PRAGMA user_version = ${elementMigration + shift};
     `);
     // Prepend an inert migration to simulate an earlier branch landing first.
-    const upgrade = spawnSync(process.execPath, ["--input-type=module", "-e", `
-      import path from "node:path";
-      import { registerHooks } from "node:module";
-      const shifted = process.argv[1] === "1";
-      registerHooks({
-        resolve(specifier, context, nextResolve) {
-          return nextResolve(specifier.startsWith(".") && !path.extname(specifier) ? specifier + ".ts" : specifier, context);
-        },
-        load(url, context, nextLoad) {
-          const result = nextLoad(url, context);
-          if (shifted && url.endsWith("/lib/v2/db.ts")) {
-            return { ...result, source: String(result.source).replace("const MIGRATIONS: string[] = [", '$& "SELECT 1",') };
-          }
-          if (shifted && url.endsWith("/lib/v2/core.mts")) {
-            return { ...result, source: String(result.source).replace(/export const SCHEMA_VERSION = (\\d+)/,
-              (_, version) => "export const SCHEMA_VERSION = " + (Number(version) + 1)) };
-          }
-          return result;
-        },
-      });
-      const { migrate } = await import("./lib/v2/db.ts");
-      migrate();
-    `, String(shift)], { cwd: ROOT, env: { ...process.env, ALIGN_DATA_DIR: legacyDir }, encoding: "utf8" });
-    if (upgrade.status !== 0) throw new Error(upgrade.error?.message ?? upgrade.stderr);
+    const upgrade = migrateFixture(legacyDir, shift);
     legacy.exec("PRAGMA foreign_keys = ON;");
     const version = legacy.prepare("PRAGMA user_version").get().user_version;
     const keys = legacy.prepare("SELECT ws_id, goal_id, revision, kind, element_key, change FROM v2_change_request_elements ORDER BY revision, element_key").all();
@@ -136,6 +178,7 @@ function testChangeElementUpgrade(name, shift) {
 }
 
 try {
+  testReadingUpgrade();
   testChangeElementUpgrade("schema 25 to 26", 0);
   testChangeElementUpgrade("shifted migration", 1);
   for (const [name, args] of [

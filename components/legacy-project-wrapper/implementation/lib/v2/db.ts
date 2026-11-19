@@ -1365,6 +1365,48 @@ const MIGRATIONS: string[] = [
   CREATE INDEX v2_analysis_expiry ON v2_analysis_findings(turn_started_at);
   CREATE INDEX v2_analysis_receipt_expiry ON v2_analysis_findings(received_at);
   `,
+  // Migration 28: keep existing readings and add automated source detail, command run IDs and CI credentials.
+  `
+  CREATE TABLE v2_measure_readings_next (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    measure_id TEXT NOT NULL,
+    value_text TEXT,
+    value_num REAL,
+    source TEXT NOT NULL CHECK (source IN ('self', 'ci', 'command')),
+    source_ref TEXT,
+    goal_version INTEGER,
+    command_run_id TEXT,
+    stale_after TEXT,
+    observed_at TEXT NOT NULL,
+    recorded_by TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id) ON DELETE CASCADE
+  );
+  INSERT INTO v2_measure_readings_next
+    (id, ws_id, goal_id, measure_id, value_text, value_num, source, observed_at, recorded_by, recorded_at)
+    SELECT id, ws_id, goal_id, measure_id, value_text, value_num, source, observed_at, recorded_by, recorded_at
+    FROM v2_measure_readings ORDER BY rowid;
+  DROP TABLE v2_measure_readings;
+  ALTER TABLE v2_measure_readings_next RENAME TO v2_measure_readings;
+  CREATE INDEX v2_measure_readings_history
+    ON v2_measure_readings(ws_id, goal_id, measure_id, observed_at DESC, recorded_at DESC);
+  CREATE UNIQUE INDEX v2_measure_readings_ci_run
+    ON v2_measure_readings(ws_id, goal_id, measure_id, source_ref) WHERE source = 'ci';
+  CREATE UNIQUE INDEX v2_measure_readings_command_run
+    ON v2_measure_readings(ws_id, goal_id, measure_id, goal_version, command_run_id) WHERE source = 'command';
+  CREATE TABLE v2_reading_credentials (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    label TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    revoked_at TEXT
+  );
+  CREATE INDEX v2_reading_credentials_ws ON v2_reading_credentials(ws_id, created_at);
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

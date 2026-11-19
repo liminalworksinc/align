@@ -1,7 +1,7 @@
 "use client";
 import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useState } from "react";
-import { api, Shell, useAction, useApi, when } from "../../../_ui/kit";
+import { api, Btn, Err, Field, Input, Shell, SignInAgain, useAction, useApi, when } from "../../../_ui/kit";
 import { EmptyState, EvidenceLabel, Panel } from "../../../_ui/ds";
 import type { Me } from "../../../_ui/server";
 import { agentInstallLine, claudeCodeLine, codexLine } from "@/lib/paste-lines";
@@ -73,6 +73,56 @@ interface App {
   last_read_at: string | null;
   /** "goals:read", plus "changes:evidence" when the person let it add evidence links. */
   scopes: string[];
+}
+
+function ReadingCredentials({ ws, me }: { ws: string; me: Me }) {
+  const path = `/api/v2/workspaces/${ws}/reading-credentials`;
+  const list = useApi<{ credentials: { id: string; label: string; created_at: string }[] }>(path);
+  const act = useAction();
+  const [label, setLabel] = useState("");
+  const [secret, setSecret] = useState<{ id: string; value: string } | null>(null);
+  return (
+    <Panel title="CI reading credentials">
+      <p className="mb-2 text-[14px] text-(--text-2)">Create a credential for a CI job to send readings to measures configured for CI in this workspace.</p>
+      <form onSubmit={(e) => {
+        e.preventDefault();
+        if (act.busy) return;
+        void act.run(async () => {
+          const credential = await api<{ id: string; secret: string }>(path, { body: { label } });
+          setSecret({ id: credential.id, value: credential.secret });
+          setLabel("");
+        }, list.reload);
+      }}>
+        <Field label="Label">
+          <Input value={label} maxLength={80} required onChange={(e) => setLabel(e.target.value)} />
+        </Field>
+        <Btn type="submit" disabled={act.busy}>Create CI credential</Btn>
+      </form>
+      {act.reauth && <SignInAgain me={me} next={`/app/w/${ws}/apps`}>{act.reauth}</SignInAgain>}
+      <Err>{act.error ?? list.error}</Err>
+      {secret && (
+        <div className="mt-3 space-y-1">
+          <p className="text-[14px]">Copy this into your CI secret store. Align shows it once.</p>
+          <CopyRow text={secret.value} label="CI reading credential" />
+          <Btn kind="secondary" onClick={() => setSecret(null)}>Hide credential</Btn>
+        </div>
+      )}
+      <ul className="mt-3 space-y-2">
+        {list.data?.credentials.map((credential) => (
+          <li key={credential.id} className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="[overflow-wrap:anywhere]">{credential.label}</span>
+            <Btn kind="secondary" disabled={act.busy} onClick={() => void act.run(
+              () => api(`${path}/${credential.id}`, { method: "DELETE" }),
+              () => {
+                if (secret?.id === credential.id) setSecret(null);
+                list.reload();
+              },
+            )}>Revoke</Btn>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  );
 }
 
 export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
@@ -264,6 +314,7 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
             )}
           </div>
         </Panel>
+        {role === "owner" && <ReadingCredentials ws={ws} me={me} />}
       </div>
     </Shell>
   );

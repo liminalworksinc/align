@@ -4,7 +4,7 @@ import { V2Error, badRequest, conflict, forbidden, notFound } from "./errors";
 import { event, noteFirstPrecedentShown } from "./events";
 import { newId, nowIso } from "./ids";
 import { effectiveSet, launchSet } from "./approval";
-import { contentOf, dependencyCycle, goalObj, goalRow, goalsDependingOn, nextContent, sameContent, unreadableGoals, versionContentOf, visibleGoal, writeGoalVersion, type GoalContent, type GoalRow } from "./goals";
+import { contentOf, dependencyCycle, goalObj, goalRow, goalsDependingOn, nextContent, publicMeasures, sameContent, unreadableGoals, versionContentOf, visibleGoal, writeGoalVersion, type GoalContent, type GoalRow } from "./goals";
 import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { memberName, memberPrincipal, nameTo } from "./workspaces";
 import { assertRevisionReached, nonNegInt, optStr, revisionRead, str, type Body } from "./validate";
@@ -346,7 +346,7 @@ export function counterBase(pp: PolicyPrincipal, goalId: string, counterOf?: str
   if (!dependencyReaders(pp, g, counterOf)) return null;
   const base = versionContentOf(pp.wsId, g.id, crRow(pp.wsId, counterOf)!.base_version)!;
   const hidden = unreadableGoals(pp, base.depends_on);
-  return { title: base.title, measures: base.measures, depends_on: base.depends_on.filter((id) => !hidden.includes(id)), status: base.status, limits: base.limits };
+  return { title: base.title, measures: publicMeasures(base.measures), depends_on: base.depends_on.filter((id) => !hidden.includes(id)), status: base.status, limits: base.limits };
 }
 
 /** The goals the New version form leaves out of Depends on because they already depend on `goalId` (saving one would
@@ -666,7 +666,8 @@ export function changeRequestDecision(pp: PolicyPrincipal, goalId: string, id: s
         // moves to this version and waits, as any request that would loop does, on its deciders to suggest a change
         // without that dependency or decline it. Changes sent are checked like a proposal (409 cycle).
         const own = b.changes === undefined;
-        const rebased = changesIn(pp, g.id, contentOf(g), own ? changes : b.changes, contentOf(g).depends_on, own);
+        const previous = changes.measures ? { ...changes, measures: publicMeasures(changes.measures) } : changes;
+        const rebased = changesIn(pp, g.id, contentOf(g), own ? previous : b.changes, contentOf(g).depends_on, own);
         const hidden = hiddenAddedDependency(pp.wsId, contentOf(g).depends_on, rebased, effectiveSet(g, r.requester_id));
         if (hidden) {
           // The request's own changes, kept: the dependency may have come from an approver's counter, accepted before
@@ -770,7 +771,11 @@ function readableDependency(pp: PolicyPrincipal, id: string): GoalRow | undefine
 function requestView(pp: PolicyPrincipal, r: ChangeRequestRow, privateDecisionNote = false) {
   const g = goalRow(r.ws_id, r.goal_id)!;
   const readable = (ids: string[]) => ids.filter((id) => readableDependency(pp, id));
-  const shown = (c: Changes): Changes => (c.depends_on ? { ...c, depends_on: readable(c.depends_on) } : c);
+  const shown = (c: Changes): Changes => ({
+    ...c,
+    ...(c.depends_on ? { depends_on: readable(c.depends_on) } : {}),
+    ...(c.measures ? { measures: publicMeasures(c.measures) } : {}),
+  });
   const hiddenOf = (ids: string[]) => ids.length - readable(ids).length;
   const changes = JSON.parse(r.changes_json) as Changes;
   const fields = CHANGE_KEYS.filter((k) => k in changes);
@@ -868,7 +873,7 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow, privateDecisionNo
     launch_decided_by: person(r.launch_by),
     launch_decided_at: r.launch_at,
     condition,
-    launch_measures: can.launch || can.approve_and_launch ? after.measures : [],
+    launch_measures: can.launch || can.approve_and_launch ? publicMeasures(after.measures) : [],
     expectation: r.launch === "launched" ? expectationView(pp, g, r.id) : null,
     /** Links on the current revision (the one an approval decides). */
     evidence_count: evidence.filter((e) => e.revision === r.revision).length,

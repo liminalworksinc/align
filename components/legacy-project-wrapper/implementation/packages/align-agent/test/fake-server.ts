@@ -357,10 +357,14 @@ export class FakeServer {
   /** As lib/v2/devices.ts when a device is revoked on the Devices page: it is refused from then on, and its live sessions
    *  end (`device_signed_out`) with their open request targets expired. */
   revokeOnWeb(deviceId: string): void {
+    this.revoke(deviceId, "revoked_on_web");
+  }
+
+  private revoke(deviceId: string, reason: string): void {
     const d = this.devices.get(deviceId);
     if (!d) return;
     d.revoked = true;
-    d.revokedReason = "revoked_on_web";
+    d.revokedReason = reason;
     const at = new Date().toISOString();
     for (const [k, s] of this.sessions) {
       if (s.device !== deviceId || s.state === "stopped") continue;
@@ -503,8 +507,7 @@ export class FakeServer {
       if (!dev) return send(401, { error: "unauthorized" });
       entry.device = dev.id;
       if (req.method === "DELETE" && p === "/api/v2/devices/self") {
-        dev.revoked = true;
-        dev.revokedReason = "logout";
+        this.revoke(dev.id, "logout");
         // As lib/v2/devices.ts passNameOn: the device that replaced it on this machine takes its name when it got
         // "<name> (n)" only because this one was live.
         const next = this.devices.get(url.searchParams.get("replaced_by") ?? "");

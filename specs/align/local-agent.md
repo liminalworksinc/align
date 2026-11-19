@@ -2755,6 +2755,10 @@ choice and a successful policy read. The server SHALL enforce the workspace proh
 independently of the client. The CLI SHALL use the preflight to keep findings local when uploads are unavailable
 and say that hosted Align cannot receive them. It SHALL accept no model input, excerpts or transcripts in this phase.
 
+Explicit automated measure readings SHALL follow the source consent and access rules in Goals and Proposals.
+Session sharing choices and workspace restrictions on optional session data tiers SHALL leave those rules in effect
+in Mode L and hosted Align.
+
 #### Scenario: Canary text
 
 - **WHEN** a shared session's transcript contains the text `CANARY-TRANSCRIPT` and its usage is uploaded (test `e2e` "login, share, usage, ...")
@@ -3580,3 +3584,51 @@ next to a session shared in the same folder in the last 24 hours, `Align: this f
 - `packages/align-agent/test/fixtures/envelope-golden.json`
 - `packages/align-agent/test/helpers.ts`
 - `packages/align-agent/test/fake-server.ts`
+
+
+### Requirement: Run a measure command only with local consent
+
+Proposed decision 8, pending ratification. `align measure allow <workspace-id> <goal-id> <measure-id> -- <absolute-executable> [args...]`
+SHALL record local consent for that server, paired device, measure and exact argument list.
+`align measure revoke <workspace-id> <goal-id> <measure-id>` SHALL remove the consent.
+`align measure run <workspace-id> <goal-id> <measure-id>` SHALL make no request without local consent.
+It SHALL fetch the current source using the selected device's credential and require an exact match before
+running. Only the explicit run command SHALL execute it, in the working directory where the owner allowed it. It SHALL refuse elevated execution, use no shell,
+pass a minimal environment, bound output and stop the process on timeout. It SHALL parse standard output
+as one finite plain decimal on success, and SHALL send only its exact decimal string or null, the exit
+status when available, the goal version obtained before execution and one generated ID for that run. Retrying a
+lost or incomplete submission response SHALL reuse the same ID and result without running the command again.
+The command's authenticated requests SHALL refuse all redirects and accept responses only from the paired origin.
+If a machine cannot access a source, the CLI SHALL direct its operator to check the IDs and ask the goal owner
+to choose this machine. Raw output SHALL never be sent or printed by Align.
+
+A shared, active, bound session SHALL receive a context note for due expectations on its readable bound goal,
+at session start or resume. The device goals feed SHALL carry `due_expectations` when nonempty, with only the
+goal id, measure id, measure label at launch and due date for each readable due expectation. The note SHALL
+show up to three launch-time measure labels and dates for the bound goal, including after a measure was
+renamed or replaced. The note SHALL contain no reading, expected result, outcome text or command details.
+
+#### Scenario: A device's consent no longer matches the goal
+
+- **WHEN** the goal owner changes an argument after the device owner allowed the original command
+- **THEN** the device runs neither command and sends no reading until the local owner allows the changed command
+
+#### Scenario: The command prints extra text or exits unsuccessfully
+
+- **WHEN** the device runs the exact allowed command and cannot parse one finite plain decimal on success
+- **THEN** the submitted reading is unknown and carries the exit status if available, with no process output
+
+#### Scenario: A paired server redirects a reading request
+
+- **WHEN** the paired server redirects the command lookup or the submission
+- **THEN** the CLI refuses and sends nothing to the redirect destination
+
+#### Scenario: A command returns a decimal beyond machine integer precision
+
+- **WHEN** an allowed command prints a plain decimal such as 9007199254740993
+- **THEN** the CLI sends and displays the exact value
+
+#### Scenario: A measure was replaced before a session resumes
+
+- **WHEN** a shared session resumes on a readable goal with an unanswered due expectation for a replaced measure
+- **THEN** its note shows the measure label recorded at launch and the due date

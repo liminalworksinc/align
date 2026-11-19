@@ -35,7 +35,7 @@
 //                                           also uses <port>+1 for the second-server check)
 
 import { spawn, spawnSync } from "node:child_process";
-import { createHash, createHmac, generateKeyPairSync, randomBytes, sign } from "node:crypto";
+import { createHash, createHmac, generateKeyPairSync, randomBytes, randomUUID, sign } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
@@ -80,7 +80,8 @@ function check(name, ok, detail = "") {
 // ---- HTTP: every response is kept per caller, so the private-goal canary can be checked across all of them ----
 const seen = []; // { who, text }
 async function call(who, method, p, { body, raw, cookie, bearer, headers = {} } = {}) {
-  const h = { ...headers };
+  // Synchronous operator commands can block this process past the server's keep-alive timeout.
+  const h = { connection: "close", ...headers };
   if ((body !== undefined || raw !== undefined) && !h["content-type"]) h["content-type"] = "application/json";
   if (cookie) h.cookie = cookie;
   if (bearer) h.authorization = `Bearer ${bearer}`;
@@ -907,10 +908,11 @@ try {
     "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits",
     "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets",
     "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "v2_expectations", "v2_outcome_reports",
-    "v2_measure_readings", "v2_data_restrictions", "v2_device_result_consent", "v2_analysis_findings", "ba_user", "ba_passkey",
+    "v2_measure_readings", "v2_data_restrictions", "v2_device_result_consent", "v2_analysis_findings",
+    "v2_reading_credentials", "ba_user", "ba_passkey",
   ];
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 27, lib/v2/core.mts SCHEMA_VERSION), v2 tables and Better Auth tables, limits on goals and goal versions`,
-    SCHEMA_VERSION === 27 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION &&
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 28, lib/v2/core.mts SCHEMA_VERSION), v2 tables and Better Auth tables, limits on goals and goal versions`,
+    SCHEMA_VERSION === 28 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION &&
     requiredTables.every((table) => pragmas.tables.includes(table)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
@@ -12972,6 +12974,408 @@ try {
     check("expectations and readings: packet setup and server flow", false, e.stack ?? String(e));
   }
 
+  // LIM-2524: both data paths use explicit opt-in and closed payloads.
+  try {
+    const owner = await signUp("RO", "Riley", "reading-owner@example.test");
+    const member = await signUp("RM", "Morgan", "reading-member@example.test");
+    const viewer = await signUp("RV", "Vera", "reading-viewer@example.test");
+    const submission = (goal_version, value, exit_status = 0) => ({
+      goal_version, value, exit_status, run_id: randomUUID(),
+    });
+    const W = (await call(owner.who, "POST", "/api/v2/workspaces", { cookie: owner.cookie, body: { name: "Reading sources" } })).json.id;
+    const blockedSignals = await restrictSharing(owner, W, 1, true);
+    const blockedResults = await restrictSharing(owner, W, 2, true);
+    check("LIM-2524: the reading workspace forbids both optional session upload tiers",
+      blockedSignals.status === 200 && blockedResults.status === 200 && blockedResults.json?.blocked?.join() === "1,2",
+      `${blockedSignals.status} ${blockedResults.text}`);
+    const prefix = `/api/v2/workspaces/${W}`;
+    const web = (u, method, suffix, body) => call(u.who, method, prefix + suffix, { cookie: u.cookie, body });
+    const post = (suffix, body) => web(owner, "POST", suffix, body);
+    const get = (suffix) => web(owner, "GET", suffix);
+    const invite = await post("/invites", { email: member.email, role: "member" });
+    await call(member.who, "POST", `/api/v2/invites/${invite.json.token}/accept`, { cookie: member.cookie, body: {} });
+    const viewerInvite = await post("/invites", { email: viewer.email, role: "viewer" });
+    await call(viewer.who, "POST", `/api/v2/invites/${viewerInvite.json.token}/accept`, { cookie: viewer.cookie, body: {} });
+    const device = insertDevice(owner.id, "Reporting laptop");
+    const viewerDevice = insertDevice(viewer.id, "Viewer laptop");
+    const outOfWorkspace = insertDevice(owner.id, "Laptop without a grant");
+    const another = insertDevice(member.id, "Other laptop");
+    withDb((d) => {
+      for (const dev of [device, another, viewerDevice]) d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(dev.id, W);
+    });
+    const asDevice = (dev, method, suffix, body) => call("reading-device", method, prefix + suffix, { bearer: dev.access, body });
+    ageSession(owner.cookie, 20);
+    const staleCredential = await post("/reading-credentials", { label: "Stale sign-in" });
+    ageSession(owner.cookie, 0);
+    const issued = await post("/reading-credentials", { label: "Release job" });
+    if (issued.status !== 201) throw new Error(`CI credential setup failed with ${issued.status}`);
+    const { secret, id: credentialId } = issued.json;
+    const asCi = (suffix, body, headers) => call("CI fixture", "POST", prefix + suffix, { bearer: secret, body, headers });
+    const credentialList = await get("/reading-credentials");
+    const storedHash = withDb((d) => d.prepare("SELECT token_hash FROM v2_reading_credentials WHERE id = ?").get(credentialId).token_hash);
+    const memberCredential = await web(member, "POST", "/reading-credentials", { label: "Another job" });
+    check("LIM-2524: a workspace owner sees the CI secret once, and only its hash is stored",
+      storedHash === sha256hex(secret) && !credentialList.text.includes(secret) && issued.headers.get("cache-control").includes("no-store") &&
+        credentialList.json.credentials.length === 1 && credentialList.json.credentials[0].id === credentialId &&
+        memberCredential.status === 403 && staleCredential.json?.error === "reauth_required",
+      `${memberCredential.status} ${staleCredential.status}`);
+
+    const created = (await post("/goals", { title: "Release measurements", level: "company", measures: [{ text: "Release checks" }, { text: "Checks on the laptop" }] })).json;
+    const g = `/goals/${created.id}`;
+    const [ciMeasure, commandMeasure] = created.measures;
+    const ciPath = `${g}/measures/${ciMeasure.id}/ci-reading`;
+    const commandPath = `${g}/measures/${commandMeasure.id}/command-reading`;
+    const ciSource = { kind: "ci", repository: "team/release", branch: "main", check: "Release checks", stale_after_days: 1 };
+    const { repository, branch, check: checkName } = ciSource;
+    const ciBody = { repository, branch, check: checkName, run: "402.1", commit: "1".repeat(40), value: "12.5" };
+    const privateOutput = "LIM2524_PRIVATE_OUTPUT_CANARY";
+    const privateCommand = "LIM2524_PRIVATE_COMMAND_CANARY";
+    const before = [
+      await asCi(ciPath, ciBody),
+      await asDevice(device, "GET", commandPath),
+      await asDevice(device, "POST", commandPath, submission(1, "1")),
+    ];
+    check("LIM-2524 canary: all automated sources are off until the goal owner selects a source",
+      before.every((r) => r.status === 404) && created.measures.every((m) => !("source" in m)) &&
+      (await get(g)).json.measure_readings[ciMeasure.id] === null, before.map((r) => r.status).join(", "));
+
+    const commandSource = { kind: "command", device_id: device.id, executable: "/usr/bin/printf", args: [privateCommand] };
+    const privateLabel = "LIM2524_PRIVATE_EXPECTATION_LABEL";
+    const hiddenSource = await post("/goals", { title: "Private timings", visibility: "private", measures: [
+      { text: privateLabel, source: { ...commandSource, device_id: another.id } },
+    ] });
+    const viewerSource = await post(`${g}/versions`, { version: 1, measures: [
+      ciMeasure, { ...commandMeasure, source: { ...commandSource, device_id: viewerDevice.id } },
+    ] });
+    const noGrant = await post("/goals", { title: "No machine grant", measures: [
+      { text: "Timing", source: { ...commandSource, device_id: outOfWorkspace.id } },
+    ] });
+    check("LIM-2524: creation and editing refuse a machine whose operator cannot read or submit to the goal",
+      [hiddenSource, viewerSource, noGrant].every((r) => r.status === 400 && r.json?.message.includes("Machine ID")),
+      [hiddenSource, viewerSource, noGrant].map((r) => r.status).join(", "));
+    const blankSource = await post("/goals", { title: "Blank label API", measures: [{ text: "  ", source: ciSource }] });
+    check("LIM-2524: a direct save with a blank automated measure reports the labelled field",
+      blankSource.status === 400 && blankSource.json?.message.includes("Measure 1"), blankSource.text);
+
+    // Start the remaining flow at a known version even if the invalid source was accepted.
+    const baseVersion = (await get(g)).json.goal.version;
+    const configured = await post(`${g}/versions`, { version: baseVersion, measures: [{ ...ciMeasure, source: ciSource }, { ...commandMeasure, source: commandSource }] });
+    const renamed = await post(`${g}/versions`, { version: configured.json.version, measures: [{ ...ciMeasure, text: "Release checks run" }, commandMeasure] });
+    const detail = await get(g);
+    const noAccess = await asDevice(another, "GET", commandPath);
+    const chosen = await asDevice(device, "GET", commandPath);
+    const generalFeed = await asDevice(device, "GET", "/goals");
+    const memberView = await web(member, "GET", g);
+    check("LIM-2524: source edits change the version and hash, omission preserves them, and only the chosen device fetches the command",
+      configured.status === 201 && renamed.status === 201 && detail.json.versions[0].content_hash !== detail.json.versions.at(-1).content_hash &&
+        detail.json.goal.measures[0].source.kind === "ci" && chosen.json.goal_version === renamed.json.version && chosen.json.args[0] === privateCommand &&
+        noAccess.status === 404 && !generalFeed.text.includes(privateCommand) && !memberView.text.includes(privateCommand),
+      JSON.stringify({ configured: configured.status, renamed: renamed.status, chosen: chosen.status, noAccess: noAccess.status }));
+    const attempt = await web(member, "POST", `${g}/change-requests`, { base_version: renamed.json.version, reason: "Change the check", changes: {
+      measures: [{ ...ciMeasure, source: null }, commandMeasure],
+    } });
+    const wrong = await asCi(ciPath, { ...ciBody, branch: "other" });
+    const browserCall = await asCi(ciPath, ciBody, { origin: BASE });
+    const wrongRoute = await call("CI fixture", "GET", prefix + g, { bearer: secret });
+    const wrongWorkspace = await call("CI fixture", "POST", `/api/v2/workspaces/ws_other_readings${ciPath}`, { bearer: secret, body: ciBody });
+    const extraCI = await asCi(ciPath, { ...ciBody, stdout: privateOutput });
+    const notationCI = await asCi(ciPath, { ...ciBody, value: "1e3" });
+    check("LIM-2524 canary: CI refuses other scopes, unknown fields, exponent text and source edits through requests",
+      attempt.status === 400 && wrong.status === 404 && browserCall.status === 403 && wrongRoute.status >= 400 &&
+        wrongWorkspace.status === 404 && extraCI.status === 400 && !extraCI.text.includes(privateOutput) && notationCI.status === 400,
+      [attempt, wrong, browserCall, wrongRoute, wrongWorkspace, extraCI, notationCI].map((r) => r.status).join(", "));
+    const ci = await asCi(ciPath, ciBody);
+    const retry = await asCi(ciPath, ciBody);
+    const conflict = await asCi(ciPath, { ...ciBody, value: "8" });
+    const stale = await asDevice(device, "POST", commandPath, submission(configured.json.version, "2"));
+    const extraCommand = await asDevice(device, "POST", commandPath, { ...submission(renamed.json.version, "2"), stdout: privateOutput });
+    const commandRun = submission(renamed.json.version, null, 4);
+    const duplicate = await Promise.all([asDevice(device, "POST", commandPath, commandRun), asDevice(device, "POST", commandPath, commandRun)]);
+    const failedCommand = duplicate.find((r) => r.status === 201) ?? duplicate[0];
+    const commandConflict = await asDevice(device, "POST", commandPath, { ...commandRun, exit_status: 5 });
+    check("LIM-2524: concurrent command retries return one reading ID and changed results conflict",
+      duplicate.map((r) => r.status).sort().join(",") === "200,201" && duplicate[0].json.id === duplicate[1].json.id &&
+        commandConflict.status === 409, JSON.stringify({ duplicate: duplicate.map((r) => r.status), conflict: commandConflict.status }));
+    const refusedMachines = await Promise.all([another, viewerDevice, outOfWorkspace].flatMap((dev) => [
+      asDevice(dev, "GET", commandPath), asDevice(dev, "POST", commandPath, commandRun),
+    ]));
+    check("LIM-2524: both command routes hide the source from unselected or ungranted machines",
+      refusedMachines.every((r) => r.status === 404 && !r.text.includes(privateCommand)), refusedMachines.map((r) => r.status).join(", "));
+    const reported = (await get(g)).json.measure_readings;
+    check("LIM-2524 canary: both sources work with optional session tiers blocked, store only run metadata and readings, and keep failures unknown",
+      ci.status === 201 && retry.status === 200 && retry.json.id === ci.json.id && conflict.status === 409 && stale.status === 409 &&
+        extraCommand.status === 400 && failedCommand.status === 201 && reported[ciMeasure.id].value_num === 12.5 &&
+        reported[ciMeasure.id].details.commit === ciBody.commit && reported[ciMeasure.id].details.run === "402.1" &&
+        reported[commandMeasure.id].details.device_name === "Reporting laptop" && reported[commandMeasure.id].details.exit_status === 4 &&
+        reported[commandMeasure.id].value_text === null && !JSON.stringify(reported).includes(privateOutput) && !JSON.stringify(reported).includes(privateCommand),
+      JSON.stringify({ ci: ci.status, retry: retry.status, conflict: conflict.status, stale: stale.status, command: failedCommand.status }));
+    withDb((d) => d.prepare("UPDATE v2_measure_readings SET stale_after = observed_at WHERE id = ?").run(ci.json.id));
+    check("LIM-2524: readings retain their expiry and show when stale", (await get(g)).json.measure_readings[ciMeasure.id].stale === true);
+    const ciGoal = await mcpCall(owner.who, device, "align_get_goal", { goal_id: created.id });
+    check("LIM-2524: MCP describes CI reading provenance as a credential submission",
+      ciGoal.text.includes("reported with a CI credential") && !ciGoal.text.includes("measured by CI"), ciGoal.text);
+    const revoked = await web(owner, "DELETE", `/reading-credentials/${credentialId}`);
+    const refused = await asCi(ciPath, { ...ciBody, run: "403" });
+    check("LIM-2524: revocation stops CI writes immediately", revoked.status === 204 && refused.status === 401, refused.text);
+
+    const hand = `${g}/measures/${commandMeasure.id}/readings`;
+    const tricky = await Promise.all(["0x10", "1e3", " +.25 "].map((value_text) => post(hand, { value_text })));
+    check("LIM-2524: hand entries keep nondecimal text without a numeric value",
+      tricky.every((r) => r.status === 201) && tricky[0].json.reading.value_num === null && tricky[1].json.reading.value_num === null &&
+        tricky[2].json.reading.value_num === 0.25 && tricky[2].json.reading.source === "self", tricky.map((r) => r.text).join(" "));
+    const officeDate = (n) => new Date(Date.now() + n * 86400_000).toISOString().slice(0, 10);
+    const roll = (day, micros) => withDb((d) => d.prepare(
+      `INSERT INTO v2_spend_rollups (ws_id, goal_id, day, model, basis, requests, input, output, cache_read,
+        cache_write_5m, cache_write_1h, cache_write_unsplit, est_list_usd_micros, unpriced_requests)
+       VALUES (?, ?, ?, 'test-price', 'api_usd', 1, 0, 0, 0, 0, 0, 0, ?, 0)`,
+    ).run(W, created.id, day, micros));
+    roll(officeDate(-1), 1_200_000);
+    const requestBase = `${g}/change-requests`;
+    const change = await web(member, "POST", requestBase, { base_version: renamed.json.version, reason: "Observe the result", changes: { title: "Release after changes" } });
+    const req = `${requestBase}/${change.json.id}`;
+    const launched = await post(`${req}/approve_and_launch`, { revision: 1, expectation: {
+      measure_id: commandMeasure.id, expected: "More checks pass", due_on: officeDate(0),
+    } });
+    const memberBrief = await mcpCall(member.who, another, "align_get_brief", {});
+    const memberFeed = await asDevice(another, "GET", "/goals");
+    check("LIM-2524: a visible due expectation carries its launch label but omits results and command details from the device feed",
+      launched.status === 200 && memberBrief.sc?.due_expectations?.some((e) => e.change_request_id === change.json.id &&
+        e.expected.untrusted_text === "More checks pass") && memberBrief.text.includes("EXPECTATIONS DUE") &&
+        memberFeed.json.due_expectations?.some((e) => e.goal_id === created.id && e.measure_id === commandMeasure.id &&
+          e.measure_text === commandMeasure.text && Object.keys(e).sort().join(",") === "due_on,goal_id,measure_id,measure_text") &&
+        !memberFeed.text.includes(privateCommand) && !memberFeed.text.includes("More checks pass") && change.json.revisions[0].snapshot.spend.total.est_list_usd_micros === 1_200_000,
+      JSON.stringify({ launched: launched.status, brief: memberBrief.sc, feed: memberFeed.json.due_expectations }));
+    withDb((d) => d.prepare("UPDATE v2_expectations SET created_at = ? WHERE change_request_id = ?").run(officeDate(-2) + "T12:00:00.000Z", change.json.id));
+    const currentVersion = (await get(g)).json.goal.version;
+    const observed = await asDevice(device, "POST", commandPath, submission(currentVersion, "14"));
+    const preciseValue = "9007199254740993";
+    const exact = await asDevice(device, "POST", commandPath, submission(currentVersion, preciseValue));
+    const repeatedValue = submission(currentVersion, preciseValue);
+    const separate = await asDevice(device, "POST", commandPath, repeatedValue);
+    const changedDecimal = await asDevice(device, "POST", commandPath, { ...repeatedValue, value: "9007199254740992" });
+    const exactHistory = (await get(hand)).json.readings ?? [];
+    check("LIM-2524: two runs may report the same exact decimal without a rounded numeric projection",
+      exact.status === 201 && separate.status === 201 && exact.json.id !== separate.json.id && changedDecimal.status === 409 &&
+        [exact, separate].every((r) => exactHistory.some((h) => h.id === r.json.id && h.value_text === preciseValue && h.value_num === null)),
+      [exact.status, separate.status, ...exactHistory.slice(0, 2).map((r) => r.value_text)].join(", "));
+    await sleep(5);
+    const answer = await post(`${req}/outcome`, { outcome: "met" });
+    const corrected = await post(`${req}/outcome`, { outcome: "not_met", correction: true });
+    const periodPath = `/outcome-periods?request=${change.json.id}`;
+    const period = (await get(periodPath)).json.periods[0];
+    check("LIM-2524: the period uses retained spend and readings, and a correction keeps the first report's window",
+      observed.status === 201 && answer.status === 200 && corrected.status === 200 && period.to_at === answer.json.expectation.outcome.reported_at &&
+        period.spend.estimate === 1_200_000 && period.readings.some((r) => r.value_num === 14),
+      JSON.stringify({ observed: observed.status, answer: answer.status, corrected: corrected.status, period }));
+    roll(officeDate(-2), 3_400_000);
+    const partial = (await get(periodPath)).json.periods[0].spend;
+    const afterBrief = await mcpCall(member.who, another, "align_get_brief", {});
+    const hiddenPeriod = await web(U4, "GET", periodPath);
+    check("LIM-2524: partial days stay unknown, answered expectations leave the brief and outsiders get 404",
+      partial.estimate === null && partial.partial_estimate === 1_200_000 &&
+        afterBrief.sc?.due_expectations?.length === 0 && hiddenPeriod.status === 404, JSON.stringify(partial));
+    const eventRows = withDb((d) => d.prepare("SELECT props FROM v2_events WHERE ws_id = ? AND name = 'measure_source_reading' ORDER BY id").all(W));
+    const auditRows = withDb((d) => d.prepare("SELECT action FROM v2_audit WHERE ws_id = ? AND action LIKE 'measure.%'").all(W));
+    check("LIM-2524: source events carry only the source enum and credential actions are audited",
+      JSON.stringify(eventRows.map((r) => JSON.parse(r.props))) === JSON.stringify([{ source: "ci" }, ...Array.from({ length: 4 }, () => ({ source: "command" }))]) &&
+        ["measure.ci_credential_created", "measure.ci_credential_revoked"].every((action) => auditRows.some((r) => r.action === action)) &&
+        auditRows.filter((r) => r.action === "measure.reading_recorded").length === 8,
+      JSON.stringify(eventRows));
+
+    const approved = await web(member, "POST", requestBase, {
+      base_version: currentVersion, reason: "Prepare an approved follow-up", changes: { title: "One more step" },
+    });
+    const approval = await post(`${requestBase}/${approved.json.id}/approve`, { revision: 1 });
+    const overflowGoal = (await post("/goals", {
+      title: "Measurements awaiting outcomes", level: "company", measures: [{ text: "Open checks" }],
+    })).json;
+    for (let index = 1; index <= 22; index++) {
+      const pending = await web(member, "POST", `/goals/${overflowGoal.id}/change-requests`, {
+        base_version: index, reason: "Record an expectation", changes: { title: `Measurements awaiting outcomes ${index}` },
+      });
+      const opened = await post(`/goals/${overflowGoal.id}/change-requests/${pending.json.id}/approve_and_launch`, {
+        revision: 1, expectation: { measure_id: overflowGoal.measures[0].id, expected: "Check passes", due_on: officeDate(0) },
+      });
+      if (opened.status !== 200) throw new Error(`Could not arrange due list: ${opened.text}`);
+    }
+    const crowded = await mcpCall(owner.who, device, "align_get_brief", {});
+    const crowdedSize = crowded.sc?.due_expectations?.length;
+    const shown = crowded.text.split("\n").filter((line) => line.startsWith("- ") && line.includes(`due ${officeDate(0)}`)).length;
+    check("LIM-2524: the 1,800 character brief preserves its goal and approved sections and counts the due overflow",
+      approval.status === 200 && crowdedSize === 22 && shown > 0 && shown < crowdedSize && crowded.text.length <= 1800 &&
+        crowded.text.includes("YOUR GOALS:") && crowded.text.includes("NOT AGREED YET:") && crowded.text.includes("ASKED OF YOUR TEAMS:") &&
+        crowded.text.includes("APPROVED, NOT LAUNCHED:") && crowded.text.includes(approved.json.id) &&
+        crowded.text.includes(`agents still on v${currentVersion} until launch`) && crowded.text.includes(`latest reading <untrusted-text>${preciseValue}</untrusted-text>`) &&
+        crowded.text.includes(`${crowdedSize - shown} more due expectation`),
+      crowded.text);
+
+    const team = (await post("/teams", { name: "Reporting team" })).json.id;
+    await post(`/teams/${team}/members`, { user_id: owner.id, role: "lead" });
+    await post(`/teams/${team}/members`, { user_id: member.id, role: "member" });
+    const hiddenGoal = (await post("/goals", {
+      title: "Team reporting", visibility: "team", team_id: team, measures: [{ text: privateLabel }],
+    })).json;
+    const hiddenBase = `/goals/${hiddenGoal.id}/change-requests`;
+    const hiddenRequest = await web(member, "POST", hiddenBase, {
+      base_version: 1, reason: "Check a team result", changes: { title: "Team reporting update" },
+    });
+    const hiddenLaunch = await post(`${hiddenBase}/${hiddenRequest.json.id}/approve_and_launch`, { revision: 1, expectation: {
+      measure_id: hiddenGoal.measures[0].id, expected: "Private result", due_on: officeDate(0),
+    } });
+    const hiddenOwnerFeed = await asDevice(device, "GET", "/goals");
+    const hiddenViewerFeed = await asDevice(viewerDevice, "GET", "/goals");
+    const crowdedViewer = await mcpCall(viewer.who, viewerDevice, "align_get_brief", {});
+    check("LIM-2524 canary: a restricted expectation adds neither a label nor a count for a workspace viewer outside the team",
+      hiddenLaunch.status === 200 && hiddenOwnerFeed.json.due_expectations?.some((e) => e.measure_text === privateLabel) &&
+        hiddenViewerFeed.json.due_expectations?.length === 22 && crowdedViewer.sc?.due_expectations?.length === 22 &&
+        !hiddenViewerFeed.text.includes(privateLabel) && !crowdedViewer.text.includes(privateLabel), hiddenLaunch.text);
+
+    const hiddenResult = await post(`${hiddenBase}/${hiddenRequest.json.id}/outcome`, { outcome: "cant_tell" });
+    const privatePeriodPath = `/outcome-periods?request=${hiddenRequest.json.id}`;
+    const hiddenRead = (await get(privatePeriodPath)).json.periods?.[0];
+    const hiddenRefused = await web(viewer, "GET", privatePeriodPath);
+    const visiblePeriods = await web(viewer, "GET", "/outcome-periods");
+    check("LIM-2524: an empty period has unknown spend and private periods are omitted from other readers' results",
+      hiddenResult.status === 200 && hiddenRead?.spend.estimate === null && hiddenRead.readings.length === 0 &&
+        hiddenRefused.status === 404 && visiblePeriods.json.periods?.length === 1 && !visiblePeriods.text.includes(privateLabel),
+      `${hiddenResult.status} ${hiddenRefused.status}`);
+
+    if (!existsSync(CHROME)) throw new Error("Chrome is required for the reading source and spend layout check.");
+    const { default: puppeteer } = await import("puppeteer-core");
+    const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+    try {
+      const page = await browser.newPage();
+      await page.setViewport({ width: 390, height: 844 });
+      await page.setCookie(...owner.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+      const measureLabel = 'input[aria-label="Measure 1"]';
+      const labelMessage = (selector) => page.$eval(selector, (input) => ({
+        value: input.value, error: document.getElementById(input.getAttribute("aria-describedby"))?.textContent,
+        fits: document.scrollingElement.scrollWidth <= innerWidth,
+      }));
+      const clickButton = (label) => page.evaluate((word) =>
+        [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === word)?.click(), label);
+      const repoInput = 'input[maxlength="201"]';
+      await page.goto(`${BASE}/app/w/${W}/goals`, { waitUntil: "networkidle0" });
+      await page.type("main form input:not([aria-label])", "Configured source needs a label");
+      const sourceSelect = await page.waitForSelector('select:has(option[value="ci"])');
+      await sourceSelect.select("ci");
+      await page.type(repoInput, "team/release");
+      await page.type('input[maxlength="180"]', "main");
+      await page.type('input[maxlength="120"]', "Release checks");
+      await clickButton("Create goal");
+      const newLabel = await labelMessage(measureLabel);
+      const repoKept = await page.$eval(repoInput, (input) => input.value).catch(() => null);
+      const blankGoal = withDb((d) => d.prepare("SELECT id FROM v2_goals WHERE ws_id = ? AND title = ?").get(W, "Configured source needs a label"));
+      check("LIM-2524 (Chrome 390px): create shows the measure label error and keeps the configured source",
+        newLabel.error?.includes("Measure 1") && !newLabel.value && newLabel.fits && repoKept === "team/release" && !blankGoal, JSON.stringify(newLabel));
+
+      await page.goto(`${BASE}/app/w/${W}${g}`, { waitUntil: "networkidle0" });
+      const editLabel = `#new-version ${measureLabel}`;
+      await page.waitForSelector(editLabel);
+      await page.locator(editLabel).fill("  ");
+      await clickButton(`Save version ${currentVersion + 1}`);
+      const changedLabel = await labelMessage(editLabel);
+      const editRepoKept = await page.$eval(`#new-version ${repoInput}`, (input) => input.value).catch(() => null);
+      const latestVersion = (await get(g)).json.goal.version;
+      check("LIM-2524 (Chrome 390px): editing refuses whitespace-only measure labels without dropping a source",
+        changedLabel.error?.includes("Measure 1") && changedLabel.fits && editRepoKept === "team/release" && latestVersion === currentVersion,
+        JSON.stringify({ changedLabel, latestVersion }));
+
+      const surfaces = [
+        [g, "[data-measure-readings]", ["reported with a CI credential", "stale", "reported from Reporting laptop", preciseValue]],
+        ["/spend", "[data-outcome-periods]", ["Spend during the period", "Unknown", "$1.20", "14"]],
+        ["/apps", "body", ["CI reading credentials", "Create CI credential"]],
+      ];
+      for (const [suffix, selector, words] of surfaces) {
+        await page.goto(`${BASE}/app/w/${W}${suffix}`, { waitUntil: "domcontentloaded" });
+        await page.waitForFunction((sel, copy) => document.querySelector(sel) && copy.every((word) => document.body.innerText.includes(word)),
+          { timeout: 15000 }, selector, words);
+        check(`LIM-2524 (Chrome 390px): ${suffix} shows its controls and source labels without horizontal scrolling`,
+          await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth));
+      }
+    } finally {
+      await browser.close();
+    }
+
+    const sessionName = "LIM2524_PRIVATE_SESSION_TITLE";
+    const session = randomBytes(32).toString("base64url");
+    const repo = randomBytes(32).toString("base64url");
+    const epoch = randomUUID();
+    const from = Date.parse(period.from_at);
+    const to = Date.parse(period.to_at);
+    const atTime = (ms) => new Date(ms).toISOString();
+    const readingBoundaries = withDb((d) => {
+      d.prepare(`INSERT INTO v2_sessions
+        (ws_id, session_key, user_id, device_id, harness, repo_key, title, started_at, state, created_at, updated_at)
+        SELECT ?, ?, ?, ?, harness, ?, ?, ?, 'shared', ?, ? FROM v2_sessions LIMIT 1`)
+        .run(W, session, member.id, another.id, repo, sessionName, atTime(from - 2), atTime(from - 2), atTime(from - 2));
+      d.prepare(`INSERT INTO v2_epochs
+        (ws_id, session_key, epoch_id, goal_id, goal_version_at_start, starts_at, cause, authority, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'manual', 'own', ?)`)
+        .run(W, session, epoch, created.id, currentVersion, atTime(from - 2), atTime(from - 2));
+      const usage = d.prepare(`INSERT INTO v2_usage
+        (ws_id, session_key, request_key, epoch_id, ts, model, query_source, input, output, cache_read,
+         cache_write_5m, cache_write_1h, cache_write_unsplit, basis, est_list_usd_micros, source, received_at)
+        VALUES (?, ?, ?, ?, ?, 'test-price', 'main', 1, 1, 0, 0, 0, 0, 'api_usd', ?, 'otel', ?)`);
+      for (const [time, price] of [[from - 1, 99], [from, 10_000], [to - 1, 20_000], [to, 99_999], [to - 2, null]]) {
+        usage.run(W, session, randomBytes(32).toString("base64url"), epoch, atTime(time), price, atTime(to));
+      }
+      const reading = d.prepare(`INSERT INTO v2_measure_readings
+        (id, ws_id, goal_id, measure_id, value_text, source, goal_version, observed_at, recorded_by, recorded_at)
+        VALUES (?, ?, ?, ?, '1', 'self', ?, ?, ?, ?)`);
+      const add = (time) => {
+        const id = `mr_${randomUUID()}`;
+        reading.run(id, W, created.id, commandMeasure.id, currentVersion, atTime(time), owner.id, atTime(to));
+        return id;
+      };
+      for (let index = 1; index <= 20; index++) add(from + index);
+      return { atReport: add(to), before: add(from - 1), after: add(to + 1) };
+    });
+    const cappedPeriod = await web(viewer, "GET", periodPath);
+    const cappedRead = cappedPeriod.json.periods?.[0];
+    check("LIM-2524: period caps readings, includes its report timestamp for readings and excludes it for spend",
+      cappedRead?.readings.length === 20 && cappedRead.more_readings && cappedRead.readings[0].id === readingBoundaries.atReport &&
+        [readingBoundaries.before, readingBoundaries.after].every((id) => !cappedPeriod.text.includes(id)) &&
+        cappedRead.spend.estimate === null && cappedRead.spend.partial_estimate === 1_230_000 &&
+        !cappedPeriod.text.includes(sessionName), cappedPeriod.text);
+    const timeless = await get(`/outcome-periods?goal=${overflowGoal.id}`);
+    check("LIM-2524: a goal with unanswered expectations has no reported periods", timeless.json?.periods?.length === 0, timeless.text);
+
+    const memberGoal = (await post("/goals", { title: "Readings from another member's machine", measures: [
+      { text: "Member readings", source: { ...commandSource, device_id: another.id } },
+    ] })).json;
+    const memberCommandPath = `/goals/${memberGoal.id}/measures/${memberGoal.measures[0].id}/command-reading`;
+    const usableBefore = await asDevice(another, "GET", memberCommandPath);
+    withDb((d) => d.prepare("UPDATE v2_members SET role = 'viewer' WHERE ws_id = ? AND user_id = ?").run(W, member.id));
+    const unavailableAfter = [
+      await asDevice(another, "GET", memberCommandPath),
+      await asDevice(another, "POST", memberCommandPath, submission(memberGoal.version, "9")),
+    ];
+    withDb((d) => d.prepare("UPDATE v2_members SET role = 'member' WHERE ws_id = ? AND user_id = ?").run(W, member.id));
+    check("LIM-2524: a selected machine loses access as soon as its operator becomes a viewer",
+      usableBefore.status === 200 && unavailableAfter.every((r) => r.status === 404 && !r.text.includes(privateCommand)), unavailableAfter.map((r) => r.status).join(", "));
+
+    const newCredential = await post("/reading-credentials", { label: "Replacement credential" });
+    const liveCi = (body) => call("CI fixture", "POST", prefix + ciPath, { bearer: newCredential.json.secret, body });
+    const unknownReading = await liveCi({ ...ciBody, run: "404.1", value: null });
+    const unknown = (await get(g)).json.measure_readings[ciMeasure.id];
+    const disabled = await post(`${g}/versions`, { version: currentVersion, measures: [{ ...ciMeasure, source: null }, { ...commandMeasure, source: null }] });
+    const afterDisable = await liveCi({ ...ciBody, run: "405.1" });
+    const commandDisabled = await asDevice(device, "GET", commandPath);
+    const historyAfterDisable = (await get(`${g}/measures/${ciMeasure.id}/readings`)).json.readings;
+    check("LIM-2524: CI can report unknown and turning sources off stops collection while keeping history",
+      unknownReading.status === 201 && unknown.value_text === null && unknown.value_num === null &&
+        disabled.status === 201 && afterDisable.status === 404 && commandDisabled.status === 404 &&
+        historyAfterDisable?.some((r) => r.id === ci.json.id) && historyAfterDisable?.some((r) => r.id === unknownReading.json.id),
+      `${unknownReading.status} ${disabled.status} ${afterDisable.status} ${commandDisabled.status}`);
+    const unpaired = await call(owner.who, "DELETE", "/api/v2/devices/self", { bearer: device.access });
+    const revokedMachine = await asDevice(device, "POST", commandPath, submission(currentVersion, "3"));
+    check("LIM-2524: revoked device credentials cannot submit command readings",
+      unpaired.status === 204 && revokedMachine.status === 401, `${unpaired.status} ${revokedMachine.status}`);
+  } catch (e) {
+    check("LIM-2524: automated readings, due expectations and spend period flow", false, e.stack ?? String(e));
+  }
+
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));
   const ownerSaw = seen.some((s) => s.who === "U2" && s.text.includes(CANARY));
@@ -13919,7 +14323,7 @@ try {
       device_paired: ["workspaces"], first_session_captured: ["harness"], member_first_session_captured: ["harness"], first_session_bound: ["harness", "authority"], second_member_joined: [],
       first_change_request: [], first_approval: [], first_directive: ["kind"], first_mcp_read: ["client"], loi_sent: ["note_ref"], loi_signed: ["note_ref", "verified_original"],
       first_ask: [], first_limit: [], value_card_viewed: [], value_reported: ["estimate"], follow_up_clicked: [], first_request: ["type"], first_hold: [], first_launch: [],
-      first_expectation: [], outcome_reported: ["outcome"], first_reading: [], first_precedent_shown: [],
+      first_expectation: [], outcome_reported: ["outcome"], first_reading: [], first_precedent_shown: [], measure_source_reading: ["source"],
     };
     const offList = q("SELECT name, props FROM v2_events").filter((r) => !ALLOWED[r.name] || Object.keys(JSON.parse(r.props)).some((k) => !ALLOWED[r.name].includes(k)));
     check(
@@ -14840,6 +15244,29 @@ try {
       && hostedStatus.json?.enabled === false && hostedStatus.json?.available === false
       && hostedFinding.status === 403 && hostedFinding.json?.error === "results_unavailable",
     [hostedConsent, hostedStatus, hostedFinding].map((r) => r.text).join(" | "));
+  const hostedGoals = `/api/v2/workspaces/${W1id}/goals`;
+  const hostedCiSource = { repository: "team/release", branch: "main", check: "Build" };
+  const hostedReadingGoal = await gPost(hostedGoals, { title: "Hosted readings", measures: [
+    { text: "CI result", source: { kind: "ci", ...hostedCiSource } },
+    { text: "Laptop result", source: { kind: "command", device_id: gTok.json?.device_id, executable: "/usr/bin/printf", args: ["2"] } },
+  ] }, OPSG);
+  const hostedCredential = await gPost(`/api/v2/workspaces/${W1id}/reading-credentials`, { label: "Release job" }, OPSG);
+  const readingGoal = hostedReadingGoal.json;
+  const hostedMeasure = (index, source) =>
+    `${hostedGoals}/${readingGoal?.id}/measures/${readingGoal?.measures?.[index]?.id}/${source}-reading`;
+  const hostedCi = await hosted("POST", hostedMeasure(0, "ci"), {
+    headers: { authorization: `Bearer ${hostedCredential.json?.secret}` },
+    body: { ...hostedCiSource, run: "1", commit: "1".repeat(40), value: "1" },
+  });
+  const hostedCommand = await hosted("GET", hostedMeasure(1, "command"), { headers: hostedHeaders });
+  const hostedReading = await hosted("POST", hostedMeasure(1, "command"), {
+    headers: hostedHeaders,
+    body: { goal_version: hostedCommand.json?.goal_version, run_id: randomUUID(), value: "2", exit_status: 0 },
+  });
+  check("LIM-2524: hosted Align accepts configured CI and command readings while refusing derived findings",
+    hostedReadingGoal.status === 201 && hostedCredential.status === 201 && hostedCi.status === 201 &&
+      hostedCommand.status === 200 && hostedReading.status === 201,
+    [hostedReadingGoal, hostedCredential, hostedCi, hostedCommand, hostedReading].map((r) => r.status).join(", "));
   // -- durable limits: per-address code sends (5 an hour, hosted) and Better Auth's per-client limit survive a restart --
   const rl = [];
   for (let i = 0; i < 4; i++) rl.push(await gSend("rl@example.test"));
