@@ -1934,6 +1934,26 @@ Deleting session history removes the findings. A deletion request from an author
 history deletion marker SHALL acknowledge that removal. Audit changes to consent, bans, and deletion without recording private data, and keep findings out of
 product analytics. A caller with no right to see the session or workspace SHALL get 404.
 
+Named activity and derived finding uploads SHALL also use a short workspace dispatch window. If named activity
+loses that window, the agent SHALL withhold names and keep eligible metadata. The server SHALL acknowledge
+a readable identical finding during a workspace upload ban when the device still has its own active consent
+and its sharing role. A repeated save SHALL observe the same outstanding dispatch wait as the first save. A workspace restriction,
+recipient change, loss of sharing access or session stop SHALL end affected dispatch permission and invalidate
+any outstanding answer. Waiting for dispatch windows SHALL measure elapsed time independently of wall-clock
+steps. A device SHALL abandon a window when its clock changes enough to make expiry uncertain.
+
+Derived-result permission for a finding SHALL include access to its recorded goal and binding. History already
+removed by the person SHALL be acknowledged to an authorized pairing of that person. Each change to the
+deletion cutoff SHALL be audited even when no stored finding matched. An unchanged retry SHALL preserve the
+cutoff and SHALL NOT write another audit. Expired findings and excerpts SHALL be removed as soon as their
+cutoff is processed, including on access after waiting for another writer. Excerpt expiry SHALL remove its grants
+and write an audit entry.
+
+#### Scenario: Permission changes while a request is waiting
+
+- **WHEN** an owner repeats a save while an earlier dispatch window is open, stops a session from sharing or removes a device's sharing role
+- **THEN** the saved change ends dispatch permission and outstanding answers are discarded
+
 #### Scenario: An owner forbids model suggestions
 
 - **WHEN** a workspace owner blocks model-based goal suggestions and a device reads the restriction
@@ -1965,13 +1985,16 @@ An owner SHALL be able to set, replace or clear the workspace decision service a
 Use HTTPS, with HTTP on loopback allowed in Mode L. Reject credentials, query strings and fragments in the address.
 Align SHALL store only the address and a revision for this setting. Clearing the setting or purging the workspace
 SHALL remove the record. A change SHALL be audited without the address.
-The workspace policy read SHALL return the current address and revision to a caller entitled to read the workspace.
-For dispatch, require a current device grant with permission to share sessions in the workspace. Dispatch
-checks SHALL grant short send windows atomically with the current policy read. Goal suggestions and limit
-checks SHALL each have their own block and windows. The block takes effect immediately for new grants and its
-save SHALL wait out the affected windows. An address change SHALL wait out both kinds of existing windows.
-An address
-write SHALL recheck workspace ownership in the same transaction as the write.
+The workspace policy read SHALL return the current address and revision to a caller entitled to read the workspace
+only if the address passes the same rules as a new save in the current mode.
+For dispatch, require a current device grant with permission to share sessions in the workspace. The final
+suggestion authorization SHALL include the current active bindable goal ids and titles. When granting a short
+dispatch window, Align SHALL keep the checked authorization current until the window expires. Goal suggestions
+and limit checks SHALL have independent workspace blocks. A saved block SHALL prevent further sends and invalidate
+outstanding answers, even if later cleared. Answer checks SHALL recheck the pairing, block, recipient and relevant
+workspace access without granting another dispatch window. An address write SHALL recheck workspace ownership in the
+same transaction as the write. A change SHALL invalidate both kinds of outstanding answers. Schema migration 32
+SHALL preserve the saved address, blocks and explicit consent choices and expire older dispatch windows.
 A member or viewer gets 403 on writes. A caller outside the workspace gets 404.
 
 #### Scenario: A configured recipient changes
@@ -1979,11 +2002,22 @@ A member or viewer gets 403 on writes. A caller outside the workspace gets 404.
 - **WHEN** the owner replaces or clears the address
 - **THEN** a device's next policy read cannot authorize dispatch under consent to the old address revision. The person can explicitly choose a newly configured address on their machine.
 
+#### Scenario: A retained address is invalid in hosted mode
+
+- **WHEN** hosted Align opens data that contains a loopback HTTP decision service saved in local mode
+- **THEN** policy and dispatch treat the address as unavailable and neither returns it
+
+#### Scenario: A team membership changes as the goal list is loaded
+
+- **WHEN** a team membership is removed before the final dispatch grant or while that grant is outstanding
+- **THEN** subsequent grants omit any goals the person lost, and a completed removal leaves no usable prior grant for those goals
+
 ### Requirement: Deliberate excerpts with named readers
 
 Under the proposed rule in [ADR 0008](../../docs/decisions/0008-limit-checks-and-excerpts.md), only a current,
 opted-in sharing device whose person owns a live shared session SHALL be able to upload an excerpt from it.
-The workspace tier 4 prohibition applies at upload time. An excerpt SHALL have exact plain text of 1 to 4,000
+The workspace tier 4 prohibition applies to dispatch grants and at upload time. Align SHALL wait for outstanding
+excerpt dispatch grants to expire before saving a tier 4 block. An excerpt SHALL have exact plain text of 1 to 4,000
 UTF-8 bytes, a stated purpose of at most 160 characters, one to five distinct current workspace readers other
 than the sharer, and an explicit lifetime of 1 to 168 whole hours from acceptance. The server SHALL accept only
 those fields and a client-generated share id used for idempotent retries. An accepted id SHALL never create a new

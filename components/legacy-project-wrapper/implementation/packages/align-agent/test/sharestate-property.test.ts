@@ -211,12 +211,14 @@ test(`share-state notices agree with the deny and the status views, whatever the
       "align stop-sharing": () => runCli(t, ["stop-sharing", pick(ss).lid.slice(0, 8)]),
       "::align share": async () => {
         const s = pick(ss);
+        runHook(t, "claude", "UserPromptSubmit", { session_id: s.sid, prompt_id: "share-preview", prompt: "::align share", cwd: s.cwd });
         runHook(t, "claude", "UserPromptSubmit", { session_id: s.sid, prompt_id: `p${rand()}`, prompt: "::align share confirm", cwd: s.cwd });
         await sync();
       },
       // C12-3: the folder form shares the session too, and the terminal form; neither while the ended shares are unread.
       "::align share --dir": async () => {
         const s = pick(ss);
+        runHook(t, "claude", "UserPromptSubmit", { session_id: s.sid, prompt_id: "share-preview", prompt: "::align share --dir", cwd: s.cwd });
         runHook(t, "claude", "UserPromptSubmit", { session_id: s.sid, prompt_id: `p${rand()}`, prompt: "::align share --dir confirm", cwd: s.cwd });
         if (rand() < 0.5) await sync();
       },

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { api, bindDevice, loadCredentials, signedIn } from "./api.ts";
 import { excerptSource } from "./analysis.ts";
+import { decisionWindow, decisionWindowStart } from "./decision-model.ts";
 import type { Ctx } from "./context.ts";
 import { kvGet, kvSet, tx } from "./db.ts";
 import { getShare } from "./hot.ts";
@@ -58,26 +59,31 @@ function sessionDestination(ctx: Ctx, lid: string) {
     device: device.device_id,
     server: device.server_url,
     ws: share.workspace_id,
+    goal: share.binding_goal,
+    revision: Number(kvGet(ctx.db, `excerpt_sharing_revision:${device.device_id}`) ?? 0),
     url: `/api/v2/workspaces/${encodeURIComponent(share.workspace_id)}/sessions/${encodeURIComponent(share.session_key)}/excerpts`,
   };
 }
 
 type Reader = { id: string; name: string };
 
-async function readersAt(ctx: Ctx, url: string): Promise<Reader[]> {
-  const reply = await api(ctx, "GET", url, { redirect: "error" });
+async function readersAt(ctx: Ctx, url: string, phase?: string) {
+  const reply = await api(ctx, "GET", phase ? url + "?phase=" + phase : url, { redirect: "error" });
   if (reply.status === 404) throw new Error("This shared session is unavailable.");
   if (reply.status !== 200 || reply.json?.enabled !== true || !Array.isArray(reply.json.readers)) {
     throw new Error("This session cannot share excerpts. Check the workspace's sharing settings.");
   }
-  return reply.json.readers;
+  return { readers: reply.json.readers as Reader[], duration: decisionWindow(reply), revision: reply.json.revision };
 }
 
 export async function excerptReadersOnMachine(ctx: Ctx, lid: string): Promise<Reader[]> {
-  const { device, url } = sessionDestination(ctx, lid);
-  const unbind = bindDevice(ctx, device);
+  const before = sessionDestination(ctx, lid);
+  const unbind = bindDevice(ctx, before.device);
   try {
-    return await readersAt(ctx, url);
+    const { readers } = await readersAt(ctx, before.url);
+    const current = sessionDestination(ctx, lid);
+    if (JSON.stringify(before) !== JSON.stringify(current)) throw new Error("The session's sharing changed. Request the readers again.");
+    return readers;
   } finally {
     unbind();
   }
@@ -96,22 +102,22 @@ function loadExactText(file: string) {
         length += n;
       }
       const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes.subarray(0, length));
-      if (!text.trim() || length > 4000 || BIDI_OR_CONTROL.test(text)) throw new Error();
+      if (!length || length > 4000 || BIDI_OR_CONTROL.test(text)) throw new Error();
       return text;
     } finally {
       fs.closeSync(fd);
     }
   } catch {
-    throw new Error("The excerpt file must contain plain text up to 4,000 bytes with no hidden controls.");
+    throw new Error("Choose a plain text excerpt of 1 to 4,000 bytes with no prohibited controls.");
   }
 }
 
 export type ExcerptChoice = { turn: string; file: string; purpose: string; readerIds: string[]; hours: number };
 
 export async function prepareExcerpt(ctx: Ctx, lid: string, choice: ExcerptChoice, code?: string) {
-  const { url, device, server, ws } = sessionDestination(ctx, lid);
+  const { url, device, server, ws, goal, revision } = sessionDestination(ctx, lid);
   const { turn, file, purpose, readerIds, hours } = choice;
-  if (!purpose.trim() || purpose.length > 160 || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(purpose) || BIDI_OR_CONTROL.test(purpose)) {
+  if (!purpose.trim() || !purpose.isWellFormed() || [...purpose].length > 160 || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(purpose) || BIDI_OR_CONTROL.test(purpose)) {
     throw new Error("Enter a purpose on one line, up to 160 characters.");
   }
   if (!Number.isInteger(hours) || hours < 1 || hours > 168) throw new Error("Choose an expiry from 1 to 168 whole hours.");
@@ -119,28 +125,48 @@ export async function prepareExcerpt(ctx: Ctx, lid: string, choice: ExcerptChoic
     throw new Error("Choose one to five different readers.");
   }
   const text = loadExactText(file);
-  const source = excerptSource(ctx, lid, turn);
-  if (!source || ![source.prompt, ...source.replies, source.finalReply].some((part) => part?.includes(text))) {
+  const sourceMatches = () => {
+    const source = excerptSource(ctx, lid, turn);
+    return source && [source.prompt, ...source.replies, source.finalReply].some((part) => part?.includes(text));
+  };
+  if (!sourceMatches()) {
     throw new Error("The excerpt must exactly match part of a prompt or reply in the selected completed turn.");
   }
   const readers = [...readerIds].sort();
-  const scope = ["session excerpt", server, url, device, lid, turn, text, purpose, readers, hours];
+  const scope = ["session excerpt", server, url, device, revision, goal, lid, turn, text, purpose, readers, hours];
   if (code !== undefined && !confirmedPreview(ctx.secret, scope, code)) {
     throw new Error("The preview changed or expired. Preview the excerpt again before sharing.");
   }
   const unbind = bindDevice(ctx, device);
   try {
-    const roster = await readersAt(ctx, url);
+    const remaining = decisionWindowStart();
+    const { readers: roster, duration, revision: grant } = await readersAt(ctx, url, code === undefined ? undefined : "dispatch");
     const selected = readers.map((id) => roster.find((reader) => reader.id === id));
     if (selected.some((reader) => !reader)) throw new Error("Choose readers from this workspace. Run align excerpt readers.");
     if (code === undefined) return { text, purpose, readers: selected as Reader[], hours, server, ws, code: previewCode(ctx.secret, scope) };
-    if (!excerptSharingOn(ctx) || sessionDestination(ctx, lid).device !== device || sessionDestination(ctx, lid).url !== url) {
-      throw new Error("The session's sharing changed. Preview the excerpt again.");
-    }
+    if (typeof grant !== "string" || !/^[a-f0-9]{32}$/.test(grant)) throw new Error("Align could not confirm permission to share this excerpt.");
     const id = `ex_${code.slice(14)}`;
-    const reply = await api(ctx, "POST", url, { body: { id, text, purpose, readers, hours }, redirect: "error" });
+    const sameSelection = () => {
+      if (!sourceMatches()) return false;
+      const current = sessionDestination(ctx, lid);
+      return current.device === device && current.server === server && current.url === url && current.goal === goal
+        && current.revision === revision && confirmedPreview(ctx.secret, scope, code);
+    };
+    const reply = await api(ctx, "POST", url, {
+      body: { id, text, purpose, readers, hours }, headers: { "if-match": `"${revision}"` }, redirect: "error",
+      dispatch: (send) => tx(ctx.db, () => {
+        if (!sameSelection() || !duration || remaining(duration) <= 0) {
+          throw new Error("The session's sharing changed. Preview the excerpt again.");
+        }
+        return send();
+      }),
+    });
     if (reply.status !== 200 || reply.json?.id !== id || typeof reply.json?.expires_at !== "string") {
       throw new Error(reply.json?.message ?? "Align did not confirm the excerpt was shared.");
+    }
+    const afterwards = await readersAt(ctx, url, `answer&revision=${grant}`);
+    if (!sameSelection() || remaining(Number.MAX_SAFE_INTEGER) <= 0 || readers.some((id) => !afterwards.readers.some((reader) => reader.id === id))) {
+      throw new Error("Sharing changed before Align confirmed the excerpt. Check the session's excerpts.");
     }
     return { id, expiresAt: reply.json.expires_at as string, server, ws };
   } finally {
@@ -149,7 +175,7 @@ export async function prepareExcerpt(ctx: Ctx, lid: string, choice: ExcerptChoic
 }
 
 export function terminalText(text: string) {
-  return JSON.stringify(text).replace(/[\p{Cc}\p{Cf}\p{Z}\p{M}\p{Default_Ignorable_Code_Point}]/gu, (char) => {
+  return JSON.stringify(text).replace(/[\p{C}\p{Z}\p{M}\p{Default_Ignorable_Code_Point}\u2800\u3164\uFFA0]/gu, (char) => {
     if (char === " ") return char;
     return Array.from({ length: char.length }, (_, i) => `\\u${char.charCodeAt(i).toString(16).padStart(4, "0")}`).join("");
   });

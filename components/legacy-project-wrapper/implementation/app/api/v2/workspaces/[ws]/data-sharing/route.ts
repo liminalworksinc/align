@@ -6,9 +6,10 @@ import { enter, need } from "@/lib/v2/workspaces";
 export const GET = route<{ ws: string }>(async (req, { ws }) => {
   const principal = await eitherAuth(req);
   const pp = enter(principal, idParam(ws, ID_RE));
-  if (new URL(req.url).searchParams.get("for") === "model-suggestion") {
+  const query = new URL(req.url).searchParams;
+  if (query.get("for") === "model-suggestion") {
     if (principal.kind === "device") {
-      return Response.json(await suggestionSendWindow(pp, principal), { headers: { "Cache-Control": "private, no-store" } });
+      return Response.json(await suggestionSendWindow(pp, principal, query.get("phase"), query.get("revision"), query.get("recipient") === "workspace"), { headers: { "Cache-Control": "private, no-store" } });
     }
     need(pp, "session.share");
   }

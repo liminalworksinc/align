@@ -17,3 +17,9 @@ baseline and keeps raw transcript content in its source files.
 | Metadata default | Keep tier 0 as the session-sharing default. Each available higher tier requires separate consent on the machine. | Keep the current boundary permanently or change the default after a separate decision. |
 
 Unbound-time aggregation, expectation responsibility and reading-source permissions belong to their own packets.
+
+The proposed derived-result option keeps sharing off until an active sign-in gives explicit consent. An offline
+opt-out takes effect on the machine immediately and is delivered before a later opt-in. A repeated history
+deletion retains the recorded cutoff, and a replacement pairing can confirm history already removed by that
+person. Alternatives are to discard undelivered choices, require the old pairing for every acknowledgement,
+or delete all findings up to the time the server receives a retry.

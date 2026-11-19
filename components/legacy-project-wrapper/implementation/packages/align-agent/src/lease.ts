@@ -14,7 +14,7 @@ function alive(pid: number): boolean {
 }
 
 /** Acquisition and stale-file replacement are serialized by a short local transaction. Work runs outside it. */
-export function takeLease(ctx: Ctx, name: "sync" | "analysis"): (() => void) | null {
+export function takeLease(ctx: Ctx, name: "sync" | "analysis" | "analysis-decision"): (() => void) | null {
   const file = path.join(ctx.home, `${name}.lock`);
   const owner = `${process.pid} ${randomId("")}`;
   const owns = () => {

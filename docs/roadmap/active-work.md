@@ -693,6 +693,24 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Evidence:**
   - [x] Node 24.22.3 on port 5010 reported 2,117 passed and 0 failed, including 1,093 server and browser checks and 646 local agent checks. All eight Align specifications validated. The retained test receipt remains in place.
 
+### [x] ALIGN-002: Close the second review of model suggestions and sharing
+
+- **Priority:** P0
+- **Owner:** Align local agent, workspace sharing policy, People, Trust and Spend
+- **Direction:** Resolve the second review on the stacked goal suggestions, model limits and excerpts work.
+- **Conclusion:** Authorize the exact inputs immediately before sending, discard stale answers, and keep confirmations, notices and deletion tied to the state the person acted on.
+- **Completion prerequisites:** none
+- **Implementation and evidence:**
+  - [x] Specify the revised boundaries and review the proposed decisions.
+    Specification validation accepted all eight documents.
+  - [x] Check the regressions for the confirmed findings and the two coverage gaps in the full local gate.
+    The focused suggestion suite passed 24 checks. The prior excerpt client failed the delayed dispatch test,
+    and the updated client passed. The server and browser suite passed 1,200 checks.
+  - [x] Record the complete Node 24 gate with both clean installs and leave the implementation staged.
+    On Node 24.22.3 both clean installs exited successfully. `ALIGN_TEST_PORT=5400 npm test` passed
+    2,266 checks with zero failures. Schema 32 preserved consent and restrictions and expired the old dispatch
+    windows. The retained test receipt is stale.
+
 ### [ ] LIM-2528: Check limits with a decision model and share selected excerpts
 
 - **Priority:** P0
@@ -718,3 +736,23 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [x] After the restack, `ALIGN_TEST_PORT=5100 npm test` on Node 24.22.3 passed 2,251 checks with zero failures.
     The short-screen expectations drawer and its dependent checks passed. Both decision send vetoes, the populated
     schema 30 upgrade, and fresh schema 31 initialization passed. The retained test receipt is stale.
+
+### [ ] ALIGN-003: Preserve consent and turn evidence through sync and upgrades
+
+- **Priority:** P0
+- **Owner:** Align local agent, workspace session sharing and limits
+- **Direction:** Address the independent reviews of data sharing, local analysis, model limit checks and excerpts in the existing staged worktree.
+- **Conclusion:** Use the recorded turn for attribution and recheck current permission at dispatch and response. Preserve choices, deletion scope and supported prior records across upgrades.
+- **Depends on:** ALIGN-002
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Compare both reviews with the staged work and update the owning specifications. All eight Align documents validate.
+  - [x] Repair dispatch, attribution, upgrades, grants, counts, cleanup and reader-facing wording. Add CLI,
+    server and 390-pixel browser checks for the implemented paths.
+  - [ ] Exercise a full older-client downgrade, expiry of a second excerpt during a held writer, and stale revoke
+    through the browser. The current suite covers isolated queue storage, access-time expiry and stale revoke
+    through the API. The goal link in local inspection supports taking a dispute to the owner directly.
+- **Evidence:**
+  - [x] Both clean installs succeeded. On Node 24.22.3, `ALIGN_TEST_PORT=5400 npm test` passed 2,291 checks
+    with zero failures, including 1,214 server and browser checks, 187 OAuth checks, 78 live CLI checks and
+    680 agent checks. Specification validation passed all eight documents. The retained test receipt is stale.

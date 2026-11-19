@@ -3,7 +3,7 @@ import { badRequest } from "./errors";
 import { nowIso } from "./ids";
 import { goalObj, goalRow } from "./goals";
 import { canReadGoal, type PolicyPrincipal } from "./policy";
-import { openEpoch, sessionRow } from "./sessions";
+import { sessionRow } from "./sessions";
 import type { DevicePrincipal } from "./devices";
 import { need } from "./workspaces";
 import { currentDeviceWorkspace, tierBlocked } from "./data-sharing";
@@ -65,7 +65,8 @@ export async function ingestActivity(pp: PolicyPrincipal, dev: DevicePrincipal, 
   let accepted = 0;
   const refused: { index: number; reason: "clock_skew" | "too_old" | "not_shared" | "work_signals_off" | "Update Align to keep sharing paths and labels" }[] = [];
   await tx(() => {
-    need(currentDeviceWorkspace(pp, dev), "session.share");
+    const current = currentDeviceWorkspace(pp, dev);
+    need(current, "session.share");
     touchWs(pp.wsId);
     const legacy = b.work_signals_version === undefined;
     const wasPaired = legacy && !!get("SELECT 1 FROM v2_devices WHERE id = ? AND legacy_work_signals = 1", dev.deviceId);
@@ -96,8 +97,16 @@ export async function ingestActivity(pp: PolicyPrincipal, dev: DevicePrincipal, 
         refused.push({ index, reason: "not_shared" });
         continue;
       }
+      const atIso = new Date(at).toISOString();
+      const epoch = b.work_signals_version === 2 && typeof it.epoch_id !== "string" ? undefined : get<{ goal_id: string | null }>(`
+        SELECT goal_id FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND starts_at <= ?
+          AND (ends_at IS NULL OR ends_at > ?) AND (? IS NULL OR epoch_id = ?)
+        ORDER BY starts_at DESC LIMIT 1`, pp.wsId, key, atIso, atIso,
+      b.work_signals_version === 2 ? String(it.epoch_id) : null, b.work_signals_version === 2 ? String(it.epoch_id) : null);
       const allowed = s.work_signals === 1 || (s.work_signals === null && wasPaired);
-      if ((path !== null || text !== null) && (blocked || !allowed)) {
+      const named = path !== null || text !== null;
+      const goal = named && epoch?.goal_id ? goalRow(pp.wsId, epoch.goal_id) : null;
+      if (named && (blocked || !allowed || !epoch || (epoch.goal_id && (!goal || !canReadGoal(current, goalObj(goal)))))) {
         const reason = legacy && !blocked && s.work_signals === null ? "Update Align to keep sharing paths and labels" : "work_signals_off";
         refused.push({ index, reason });
         continue;
@@ -109,7 +118,7 @@ export async function ingestActivity(pp: PolicyPrincipal, dev: DevicePrincipal, 
         pp.wsId,
         key,
         s.user_id,
-        openEpoch(pp.wsId, key)?.goal_id ?? null,
+        epoch?.goal_id ?? null,
         it.repo_id,
         kind,
         pathHash,

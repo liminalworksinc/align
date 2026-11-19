@@ -221,6 +221,41 @@ function testExcerptUpgrade() {
   }
 }
 
+function testDecisionDispatchUpgrade() {
+  const dir = path.join(testDir, "decision-dispatch");
+  mkdirSync(path.join(dir, "v2"), { recursive: true });
+  const legacy = new DatabaseSync(path.join(dir, "v2/align.sqlite"));
+  try {
+    const dispatchMigration = migrations.findIndex((sql) => /capability IN \('suggestion', 'limit_check', 'excerpt'\)/.test(sql));
+    legacy.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY);");
+    for (const sql of migrations.slice(0, dispatchMigration)) legacy.exec(sql);
+    legacy.exec(`
+      INSERT INTO ba_user VALUES ('u_old');
+      INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES ('ws_old', 'Old workspace', 'u_old', '${OLD}');
+      INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES ('ws_old', 'u_old', 'owner', '${OLD}');
+      INSERT INTO v2_devices (id,user_id,name,public_key,created_at) VALUES ('dev_old','u_old','Laptop','key','${OLD}');
+      INSERT INTO v2_device_excerpt_consent VALUES ('dev_old', 1, 4);
+      INSERT INTO v2_data_restrictions VALUES ('ws_old', 3);
+      INSERT INTO v2_model_check_blocks VALUES ('ws_old');
+      INSERT INTO v2_workspace_decision_services VALUES ('ws_old', 'https://decision.example.test/', 'old-revision');
+      INSERT INTO v2_model_send_windows VALUES ('ws_old', 'suggestion', ${Date.now() + 60_000});
+      PRAGMA user_version = ${dispatchMigration};
+      PRAGMA foreign_keys = ON;
+    `);
+    const preserve = ["v2_device_excerpt_consent", "v2_data_restrictions", "v2_model_check_blocks", "v2_workspace_decision_services"];
+    const choices = () => JSON.stringify(preserve.map((table) => legacy.prepare(`SELECT * FROM ${table}`).all()));
+    const before = choices();
+    migrateFixture(dir);
+    check("LIM-2527: schema 32 expires earlier dispatch windows and preserves sharing choices",
+      dispatchMigration === 31 && choices() === before && !legacy.prepare("SELECT 1 FROM v2_model_send_windows").get()
+      && legacy.prepare("PRAGMA user_version").get().user_version === SCHEMA_VERSION
+      && legacy.prepare("PRAGMA foreign_key_check").all().length === 0
+      && legacy.prepare("PRAGMA integrity_check").get().integrity_check === "ok");
+  } finally {
+    legacy.close();
+  }
+}
+
 function testChangeElementUpgrade(name, shift) {
   const legacyDir = path.join(testDir, name);
   mkdirSync(path.join(legacyDir, "v2"), { recursive: true });
@@ -393,6 +428,7 @@ try {
   }
   testSuggestionOriginUpgrade();
   testExcerptUpgrade();
+  testDecisionDispatchUpgrade();
   for (const [name, args] of [
     ["retention typo", ["retention", "run", "--dryrun", "true"]],
     ["purge dry-run", ["workspaces", "delete", WS, "--purge", "--yes", "--dry-run"]],

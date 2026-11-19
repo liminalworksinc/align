@@ -6,10 +6,12 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import { DECISION_PROVIDERS, decideGoal, forkGoal, type DecisionProvider } from "../src/decision-model.ts";
+import { loadCredentials } from "../src/api.ts";
 import { inspectAnalysis, runAnalysis } from "../src/analysis.ts";
 import { ruleChoices } from "../src/goal-suggestions.ts";
 import { realDir } from "../src/shared/rules.ts";
 import { sessionKey } from "../src/keys.ts";
+import { enqueue } from "../src/share.ts";
 import { localId } from "../src/shared/layout.ts";
 import { ingestSpool, syncOnce } from "../src/sync.ts";
 import { FakeServer } from "./fake-server.ts";
@@ -24,11 +26,13 @@ const KEY = "CANARY-DECISION-KEY";
 async function decisionStandIn(t: TestContext) {
   const requests: { url: string; headers: http.IncomingHttpHeaders; body: Record<string, any> }[] = [];
   let outcome = "fit";
+  let beforeAnswer = async (_response: http.ServerResponse) => {};
   const server = http.createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     requests.push({ url: req.url ?? "", headers: req.headers, body });
+    await beforeAnswer(res);
     if (outcome === "timeout") return;
     if (outcome === "redirect") {
       res.writeHead(307, { location: "/redirect-target" }).end();
@@ -46,12 +50,18 @@ async function decisionStandIn(t: TestContext) {
       }]
       : { fit: { noul: confidence }, goal };
     res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ answers }));
+    if (outcome === "duplicate" && Array.isArray(answers)) {
+      res.end(JSON.stringify({ answers: [...answers, { name: "goal", type: "refusal" }] }));
+    } else if (outcome === "duplicate-key") {
+      res.end('{"answers":{"fit":{"noul":0.95},"goal":{"type":"refusal"},"\u0067oal":' + JSON.stringify(goal) + '}}');
+    } else {
+      res.end(JSON.stringify({ answers }));
+    }
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => { server.closeAllConnections(); server.close(); });
   const address = server.address() as { port: number };
-  return { requests, url: `http://127.0.0.1:${address.port}`, set: (value: string) => { outcome = value; } };
+  return { requests, url: `http://127.0.0.1:${address.port}`, set: (value: string) => { outcome = value; }, hold: (callback: (response: http.ServerResponse) => Promise<void>) => { beforeAnswer = callback; } };
 }
 
 async function setup(t: TestContext) {
@@ -132,6 +142,7 @@ test("a rule suggestion waits for the next turn and only a confirmed share sends
     w.turn(other);
     await w.sync();
     assert.match(w.prompt(other, "second turn").systemMessage, /looks like work/);
+    if (expected === "changed") assert.match(w.prompt(other, "::align share g_perf").reason, /Goal: Cut hook latency/);
     w.prompt(other, answer);
     await w.sync();
     assert.deepEqual(w.inspect(other).suggestion_feedback.map((row) => row.reply), [expected]);
@@ -200,6 +211,15 @@ test("a decision provider gets only the opted-in fields and a current bindable g
   assert.doesNotMatch(JSON.stringify(sent.body), /PRIVATE-REPLY|ABSOLUTE-PATH|CANARY-REMOTE|g_theirs/);
   assert.equal(w.fake.sessions.size, 0);
   assert.match(w.prompt(sid, "second turn").systemMessage, /looks like work toward "Ship/);
+  for (const command of ["::align share --signals g_ship confirm", "::align share --dir g_ship --yes"]) {
+    assert.match(w.prompt(sid, command).reason, /preview/i);
+  }
+  const terminal = await runCli(w.env, ["share", sid, "--goal", "g_ship", "--signals", "--yes"]);
+  assert.notEqual(terminal.code, 0);
+  assert.match(terminal.stderr, /preview/i);
+  await w.sync();
+  assert.equal(w.epoch(sid), undefined);
+  assert.match(w.prompt(sid, "::align share g_ship").reason, /Goal: Ship/);
   w.prompt(sid, "::align share g_ship confirm");
   await w.sync();
   assert.equal(w.epoch(sid)?.origin, "suggested_model");
@@ -222,10 +242,12 @@ test("the three vendor wire formats use the same fit, choice and abstention rule
     assert.deepEqual(JSON.parse(body.input ?? body.state), input);
     assert.equal(provider === "google" ? headers["x-goog-api-key"] : headers.authorization, provider === "google" ? KEY : `Bearer ${KEY}`);
   }
-  for (const failure of ["tie", "no-fit", "unknown", "refusal", "wrong-type", "redirect", "timeout", "array", "object", "number"]) {
+  for (const failure of ["tie", "no-fit", "unknown", "refusal", "wrong-type", "redirect", "timeout", "array", "object", "number", "duplicate"]) {
     service.set(failure);
     assert.equal(await decideGoal({ provider: "openai" }, KEY, input, 75, send), null, failure);
   }
+  service.set("duplicate-key");
+  assert.equal(await decideGoal({ provider: "typesafe" }, KEY, input, 2000, send), null);
   assert.equal(service.requests.some(({ url }) => url === "/redirect-target"), false);
 });
 
@@ -300,6 +322,7 @@ test("a shared session hears a move only after three completed turns and this re
   await w.cli("goals", "--refresh");
   const sid = randomUUID();
   w.start(sid);
+  assert.match(w.prompt(sid, "::align share g_perf").reason, /Goal:/);
   w.prompt(sid, "::align share g_perf confirm");
   await w.sync();
   for (let i = 0; i < 3; i++) {
@@ -310,7 +333,9 @@ test("a shared session hears a move only after three completed turns and this re
   assert.match(offer.systemMessage, /looks like work toward "Ship.*::align bind/);
   assert.doesNotMatch(JSON.stringify(offer.hookSpecificOutput ?? {}), /looks like work/);
   assert.equal(w.epoch(sid)?.goal_id, "g_perf");
-  w.prompt(sid, "::align bind g_ship");
+  assert.match(w.prompt(sid, "::align bind g_ship confirm").reason, /preview/i);
+  assert.match(w.prompt(sid, "::align bind g_ship").reason, /Ship.* in Acme.*confirm/);
+  w.prompt(sid, "::align bind g_ship confirm");
   w.prompt(sid, "use the new goal");
   await w.sync();
   assert.ok([...w.fake.epochs.values()].some((e) => e.goal_id === "g_ship" && e.origin === "suggested_rule"));
@@ -335,6 +360,7 @@ test("the weekly local note only offers a unanimous rule match and leaves unknow
   assert.ok(past && past.expires_at > now);
   assert.deepEqual({ ...past, expires_at: undefined }, {
     folder: w.cwd, workspace: "ws_acme", goal: "g_ship", sessions: 2, micros: null, expires_at: undefined,
+    local_ids: sessions.map((sid) => localId("claude-code", sid)),
   });
   writeJsonAtomic(layout.unsharedDigest(w.env.home), {
     computed_at: new Date(now).toISOString(), total_tokens: 300, unshared_tokens: 300, share: 100, top: [{ dir: w.cwd, tokens: 300 }], past_goal: past, past_offer_change: null,
@@ -361,6 +387,7 @@ test("two rule choices require a clear pick before sharing", async (t) => {
   assert.match(w.prompt(sid, "::align share Ship confirm").reason, /more than one goal matches that name/);
   await w.sync();
   assert.equal(w.epoch(sid), undefined);
+  assert.match(w.prompt(sid, "::align share g_perf").reason, /Goal:/);
   w.prompt(sid, "::align share g_perf confirm");
   await w.sync();
   assert.equal(w.epoch(sid)?.goal_id, "g_perf");
@@ -532,9 +559,18 @@ test("feedback, changing import eligibility and aging out each remove a cached w
   const now = Date.now();
   const digest = computeUnsharedDigest(w.ctx, now, true);
   assert.equal(digest?.past_goal?.sessions, 3);
+  const fresh = randomUUID();
+  const freshStart = runHook(w.env, "claude", "SessionStart", { session_id: fresh, cwd: w.cwd, source: "startup" });
+  assert.doesNotMatch(freshStart.stdout, /private sessions.*look like work toward/);
+  fs.rmSync(layout.unsharedShown(w.env.home), { force: true });
+  ingestSpool(w.ctx);
+  assert.equal(pastSessions(w.ctx, realDir(w.cwd), 7).take.length, 4);
+  w.ctx.db.prepare("DELETE FROM sessions WHERE local_id=?").run(localId("claude-code", fresh));
+  computeUnsharedDigest(w.ctx, now, true);
   const weeklyFile = layout.unsharedShown(w.env.home);
   assert.doesNotMatch(unsharedNote(w.env.home, digest!.past_goal!.expires_at + 1) ?? "", /private sessions.*look like work toward/);
   fs.rmSync(weeklyFile, { force: true });
+  assert.match(w.prompt(sessions[2], "::align share g_ship").reason, /Goal: Ship/);
   w.prompt(sessions[2], "::align share g_ship confirm");
   assert.doesNotMatch(unsharedNote(w.env.home, now) ?? "", /private sessions.*look like work toward/);
   fs.rmSync(weeklyFile, { force: true });
@@ -607,6 +643,7 @@ test("changing the owner's address requires new consent even if the old address 
   const replacement = await decisionStandIn(t);
   assert.match(await w.enableDecision(original.url), /Workspace decision service at http:\/\/127\.0\.0\.1:/);
   w.configure(replacement.url);
+  assert.match(await w.cli("data-sharing"), /expired/i);
   const submit = async () => {
     const sid = randomUUID();
     w.start(sid);
@@ -655,4 +692,125 @@ test("a terminal confirmation also expires when a visible suggestion is dismisse
   assert.match(error, /new preview/i);
   assert.equal(w.epoch(sid), undefined);
   assert.equal(w.fake.sessions.size, 0);
+});
+
+
+test("a repeated prompt start cannot give a pre-consent turn permission", async (t) => {
+  const w = await setup(t);
+  const service = await decisionStandIn(t);
+  const sid = randomUUID();
+  const id = randomUUID();
+  const file = path.join(w.env.root, "repeated-turn.jsonl");
+  const at = new Date().toISOString();
+  writeLines(file, [claudeUser(sid, id, at, { message: { role: "user", content: PROMPT } }),
+    claudeAssistant(sid, id, at, usage(10, 5))]);
+  w.prompt(sid, PROMPT, id, file);
+  await w.sync();
+  await w.enableDecision(service.url);
+  w.prompt(sid, PROMPT, id, file);
+  runHook(w.env, "claude", "Stop", { session_id: sid, cwd: w.cwd, prompt_id: id, transcript_path: file });
+  await w.sync();
+  assert.equal(service.requests.length, 0);
+  assert.deepEqual(w.inspect(sid).suggestions, []);
+});
+
+test("deleting the analysis of earlier bindings removes them from suggestion history", async (t) => {
+  const w = await setup(t);
+  for (let i = 0; i < 2; i++) {
+    const sid = randomUUID();
+    w.start(sid);
+    w.turn(sid);
+    await w.sync();
+    await w.cli("share", sid, "--goal", "g_ship", "--yes");
+    w.turn(sid);
+    await w.sync();
+    await w.cli("analysis", "delete", sid);
+  }
+  const sid = randomUUID();
+  w.turn(sid);
+  await w.sync();
+  assert.deepEqual(w.inspect(sid).suggestions, []);
+});
+
+test("an unseen workspace suggestion stays hidden after sign-out", async (t) => {
+  const w = await setup(t);
+  w.fake.bumpGoal("ws_acme", "g_ship", { anchors: { repos: [], branch_patterns: [BRANCH], issues: [] } });
+  await w.cli("goals", "--refresh");
+  const sid = randomUUID();
+  w.turn(sid);
+  await w.sync();
+  assert.equal(w.inspect(sid).suggestions.length, 1);
+  await w.cli("logout");
+  assert.doesNotMatch(w.prompt(sid, "after sign-out").systemMessage ?? "", /looks like work toward/);
+  assert.doesNotMatch(await w.cli("analysis", "show", sid), /Ship the v2/);
+});
+
+
+test("a late model answer is discarded and cannot delay findings or analysis deletion", async (t) => {
+  const w = await setup(t);
+  const service = await decisionStandIn(t);
+  await w.enableDecision(service.url);
+  const shared = randomUUID();
+  w.start(shared);
+  await w.sync();
+  await w.cli("share", shared, "--goal", "g_ship", "--yes");
+  const epoch = w.epoch(shared);
+  assert.ok(epoch);
+  const lid = localId("claude-code", shared);
+  const scope = { ws: "ws_acme", key: epoch.session_key, device: loadCredentials(w.ctx.home)!.device_id };
+  await w.cli("data-sharing", "results", "on");
+  const wire = {
+    id: "f".repeat(32), epoch_id: epoch.epoch_id, goal_version: 1, limit_id: "lim_aaaaaaaaaaaa",
+    evidence: "file", digest: "d".repeat(32), turn_started_at: new Date(Date.now() + 1).toISOString(),
+  };
+  enqueue(w.ctx, lid, "analysis_put", { scope, wire });
+  const sent = Promise.withResolvers<void>();
+  const answer = Promise.withResolvers<void>();
+  t.after(answer.resolve);
+  const disconnected = Promise.withResolvers<void>();
+  service.hold((response) => {
+    response.once("close", () => disconnected.resolve());
+    sent.resolve();
+    return answer.promise;
+  });
+  const sid = randomUUID();
+  w.turn(sid);
+  ingestSpool(w.ctx);
+  const work = runAnalysis(w.ctx);
+  await sent.promise;
+  try {
+    assert.deepEqual(w.fake.findings.get(scope.key), [wire]);
+    w.fake.blockedModelWorkspaces.add("ws_acme");
+    const deletion = w.cli("analysis", "delete", shared);
+    assert.equal(await Promise.race([deletion.then(() => "deleted"), disconnected.promise.then(() => "decision ended")]), "deleted");
+    assert.ok(w.fake.log.some(({ method, path }) => method === "DELETE" && path.endsWith("/analysis")));
+  } finally {
+    answer.resolve();
+    await work;
+  }
+  assert.deepEqual(w.inspect(sid).suggestions, []);
+});
+
+
+test("a stale goals response contributes no private title to the dispatch grant", async (t) => {
+  const w = await setup(t);
+  const service = await decisionStandIn(t);
+  await w.enableDecision(service.url);
+  const stale = Promise.withResolvers<void>();
+  w.fake.beforeReply = async (_, url, status) => {
+    if (url.endsWith("/goals") && status === 200 && !staleSettled) {
+      staleSettled = true;
+      w.fake.bumpGoal("ws_acme", "g_perf", { bindable: false });
+      stale.resolve();
+    }
+  };
+  let staleSettled = false;
+  w.turn(randomUUID());
+  ingestSpool(w.ctx);
+  const work = runAnalysis(w.ctx);
+  await stale.promise;
+  await work;
+  assert.equal(service.requests.length, 1);
+  assert.deepEqual(JSON.parse(service.requests[0].body.state).goals,
+    [{ id: "g_ship", title: "Ship the v2 onboarding flow" }]);
 });

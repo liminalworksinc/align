@@ -148,7 +148,8 @@ function SharingRestrictions({ ws }: { ws: string }) {
   const blockedTiers = settings.data?.blocked;
   return (
     <Panel title="Sharing restrictions">
-      <p className="mb-2 text-[14px] text-(--text-2)">People choose what to share from their machines. Blocking an option applies to the whole workspace.</p>
+      <p className="mb-2 text-[14px] text-(--text-2)">Shared sessions send metadata by default. Work signals add repo-relative file paths, branch names, commit subjects and task or claim labels. A workspace block applies to everyone.</p>
+      <p className="mb-2 text-[14px] text-(--text-2)">A local Align server can receive finding, binding and limit IDs, goal versions, evidence labels, keyed digests and turn start times. Each excerpt sends only the text, named readers, purpose and expiry you confirm. Both choices are off by default.</p>
       {settings.loading && <Loading />}
       <Err>{settings.error}</Err>
       <Err>{change.error}</Err>
@@ -177,11 +178,11 @@ function SharingRestrictions({ ws }: { ws: string }) {
           event.preventDefault();
           const decision_service_url = address?.trim() || null;
           void addressChange.run(async () => {
-            const saved = await api<{ decision_service: { url: string } | null }>(url, { method: "PATCH", body: { decision_service_url } });
-            setAddress(saved.decision_service?.url ?? "");
+            await api(url, { method: "PATCH", body: { decision_service_url } });
+            setAddress(null);
           }, settings.reload);
         }}>
-          <Field label="Decision service address" hint="People can separately allow goal suggestions and limit checks to use this address from their machine. Leave it blank to remove the service."
+          <Field label="Decision service address" hint="Both choices are off by default. Goal suggestions send the first prompt, branch, saved repository alias and eligible goal ids and titles. Limit checks send the final reply and the types and wording of applicable limits. Leave this blank to remove the address."
             error={addressChange.error}>
             <Input type="url" maxLength={2048} disabled={addressChange.busy} value={address ?? savedAddress} onChange={(event) => {
               setAddress(event.target.value);

@@ -33,6 +33,8 @@ const HARD_BYTES = 4 * 1024 * 1024;
 export interface Act {
   t: "edit" | "read" | "commit" | "task" | "claim" | "warned" | "noted" | "ran" | "failed";
   at: string;
+  root?: string;
+  epoch?: string;
   /** Absolute path for edit, read, claim and warned. */
   p?: string;
   /** Commit subject or task label. */

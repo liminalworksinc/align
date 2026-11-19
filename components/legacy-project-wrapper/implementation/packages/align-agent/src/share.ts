@@ -3,7 +3,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import type { Ctx } from "./context.ts";
-import { kvGet, kvSet, nowIso, tx } from "./db.ts";
+import { kvGet, kvSet, LEGACY_OUTBOX_KINDS, nowIso, tx } from "./db.ts";
 import { repoKey, sessionKey } from "./keys.ts";
 import path from "node:path";
 import { endEpochs, getSession, sessionCwds, type SessionRow } from "./ledger.ts";
@@ -22,7 +22,8 @@ import type { PodFeed } from "./hooks/siblings.ts";
 import type { EpochOrigin } from "./shared/epoch-origin.ts";
 
 export function enqueue(ctx: Ctx, lid: string, kind: string, payload: unknown): void {
-  ctx.db.prepare("INSERT INTO outbox(local_id, kind, payload, created_at) VALUES(?,?,?,?)").run(lid, kind, JSON.stringify(payload), nowIso());
+  const queue = LEGACY_OUTBOX_KINDS.includes(kind) ? "outbox" : "sharing_outbox";
+  ctx.db.prepare(`INSERT INTO ${queue}(local_id, kind, payload, created_at) VALUES(?,?,?,?)`).run(lid, kind, JSON.stringify(payload), nowIso());
 }
 
 export function repoRoot(cwd: string | null): string | null {
@@ -106,13 +107,10 @@ export function renderPreview(p: SharePlan): string {
     `  Session:    ${p.session.harness} ${p.session.native_id.slice(0, 8)}, started ${p.session.started_at || "unknown"}`,
     `  Counting:   ${p.from === "start" ? "from session start" : "from now"} (${p.starts_at})`,
     "",
-    "These fields will be sent:",
-    `  session  harness=${p.put_body.harness} repo_key=${p.repo_key} (keyed hash, not the path)`,
-    `           repo_alias=${p.put_body.repo_alias ?? "none"} started_at=${p.put_body.started_at} title=none`,
-    `  epoch    epoch_id=${p.epoch_body.epoch_id} goal_id=${p.epoch_body.goal_id ?? "none"} starts_at=${p.starts_at} root_turn=none cause=manual origin=${p.epoch_body.origin ?? "unknown"}`,
-    `  usage    ${p.rows_now} finalized request rows now, more as the session continues. Each row: request_key (keyed hash),`,
-    "           ts, epoch_id, model, query_source, input, output, cache_read, cache_write_5m, cache_write_1h,",
-    "           cache_write_unsplit, basis, est_list_usd_micros (an estimate), price_table_version, source",
+    "Align receives session metadata and usage estimates.",
+    `  Repository key (a hash), alias: ${p.put_body.repo_alias ?? "none"}`,
+    `  Goal binding recorded from ${p.starts_at}.`,
+    `  Usage includes the model, token counts and estimated cost for ${p.rows_now} completed requests, plus new requests as they finish.`,
     "Never sent: prompts, responses, tool input or output, absolute repo path, file contents, transcript text.",
     p.unfinalized_now ? `${p.unfinalized_now} unfinished request rows stay local until they finish.` : "",
   ]

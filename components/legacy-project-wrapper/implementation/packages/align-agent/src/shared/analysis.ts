@@ -43,6 +43,7 @@ export interface AnalysisNotice {
   title: string;
   limit: Pick<Limit, "id" | "text" | "type">;
   digest: string;
+  repeat?: string;
   evidence: Evidence;
 }
 
@@ -60,5 +61,5 @@ export const RESULTS_PREVIEW = "Derived findings stay on this machine with hoste
 export function signalsPreview(enabled: boolean): string {
   return enabled
     ? "Work signals ON: repo-relative paths of edited files, commit subjects, task labels and the branch name, plus claim labels, go to Align and people who can read the goal if the workspace allows it. Run `align data-sharing signals <session> off` to turn it off for a session."
-    : "Work signals OFF: only hashes of edited files are sent. Add --signals to share paths and labels with people who can read the goal.";
+    : "Work signals OFF: Align can receive file hashes for edits and claims. Add --signals to share paths and labels with people who can read the goal.";
 }

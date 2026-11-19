@@ -222,7 +222,10 @@ function writeRow(ctx: Ctx, key: string, lid: string, ev: UsageEvent, priorRoot:
 export function recordRootTurn(db: Db, harness: Harness, nativeId: string, rootTurn: string, ts: string, cwd?: string | null, authoritative = false): string {
   const lid = ensureSession(db, harness, nativeId, { ts, cwd: cwd ?? null });
   if (authoritative) {
-    db.prepare("INSERT INTO root_turns(local_id, root_turn, ts) VALUES(?,?,?) ON CONFLICT(local_id, root_turn) DO UPDATE SET ts=excluded.ts").run(lid, rootTurn, ts);
+    db.prepare(`INSERT INTO root_turns(local_id, root_turn, ts, first_hook_at) VALUES(?,?,?,?)
+      ON CONFLICT(local_id, root_turn) DO UPDATE SET ts=excluded.ts,
+      first_hook_at=COALESCE(root_turns.first_hook_at, min(root_turns.ts, excluded.first_hook_at))`)
+      .run(lid, rootTurn, ts, ts);
   } else {
     db.prepare("INSERT OR IGNORE INTO root_turns(local_id, root_turn, ts) VALUES(?,?,?)").run(lid, rootTurn, ts);
   }

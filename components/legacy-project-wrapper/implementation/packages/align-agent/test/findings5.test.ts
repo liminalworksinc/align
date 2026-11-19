@@ -136,6 +136,7 @@ describe("C5-1: turns made while a session's share had ended stay on this machin
     turn(t, A, "req_c51_l_gap", 0);
     await sleep(50);
     assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
+    prompt(t, A.sid, "::align share", A.cwd);
     assert.equal(prompt(t, A.sid, "::align share confirm", A.cwd).reason, 'Align: sharing requested toward "Ship the v2 onboarding flow". The next sync asks the Align server for it (within a few seconds); once it is shared, your next prompt carries the goal.');
     assert.equal((await runCli(t, ["sync"])).code, 0);
     assert.equal((await runCli(t, ["sync"])).code, 0);
