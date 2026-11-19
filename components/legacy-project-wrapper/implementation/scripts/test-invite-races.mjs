@@ -4,10 +4,9 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
 import path from "node:path";
+import os from "node:os";
 
-const ROOT = fileURLToPath(new URL("../", import.meta.url));
 // Keep credentials and the unused captcha dependency out of this isolated test process.
 const fixtures = new Map([
   [new URL("../lib/secret.ts", import.meta.url).href, 'export const secret = () => "invite-race-test-data"; export const signPayload = () => { throw new Error("unused test fixture"); };'],
@@ -35,7 +34,8 @@ registerHooks({
 });
 
 const db = await import("../lib/v2/db.ts");
-const { acceptInvite } = await import("../lib/v2/workspaces.ts");
+const { acceptInvite, memberPrincipal } = await import("../lib/v2/workspaces.ts");
+const { setDataRestriction } = await import("../lib/v2/data-sharing.ts");
 const { sha256hex } = await import("../lib/v2/ids.ts");
 const RealDate = Date;
 const realSetTimeout = globalThis.setTimeout;
@@ -43,7 +43,7 @@ let pass = 0;
 let fail = 0;
 
 async function test(name, fn) {
-  const dir = mkdtempSync(path.join(ROOT, ".invite-races-"));
+  const dir = mkdtempSync(path.join(os.tmpdir(), "align-write-races-"));
   const previous = { HOSTED: process.env.HOSTED, ALIGN_DATA_DIR: process.env.ALIGN_DATA_DIR, ALIGN_MAX_MEMBERS: process.env.ALIGN_MAX_MEMBERS };
   process.env.HOSTED = "1";
   process.env.ALIGN_DATA_DIR = dir;
@@ -72,20 +72,21 @@ async function test(name, fn) {
     holder = new DatabaseSync(db.dbFile(), { timeout: 0 });
     holder.exec("PRAGMA foreign_keys = ON; BEGIN IMMEDIATE");
     globalThis.setTimeout = (resume) => { waiting.push(resume); return 0; };
-    const start = (deviceId = "test-device") => {
+    const startWrite = (write) => {
       const before = waiting.length;
-      const result = acceptInvite(token, user, true, [deviceId]).then(value => ({ value }), error => ({ error }));
+      const result = write().then(value => ({ value }), error => ({ error }));
       pending.push(result);
-      assert.equal(waiting.length, before + 1, "acceptance must reach the busy retry timer");
+      assert.equal(waiting.length, before + 1, "the request must reach the busy retry timer");
       return result;
     };
+    const start = (deviceId = "test-device") => startWrite(() => acceptInvite(token, user, true, [deviceId]));
     const effects = () => Object.fromEntries(["v2_members", "v2_pod_members", "v2_device_grants", "v2_audit", "v2_events"].map(table => [table, db.all(`SELECT * FROM ${table} ORDER BY rowid`)]));
     const release = async (result) => {
       assert.ok(waiting.length, "acceptance is waiting for the write lock");
       waiting.shift()();
       return await result;
     };
-    await fn({ start, effects, release, holder, user, token, expires, expire: () => { now = RealDate.parse(expires); } });
+    await fn({ start, startWrite, effects, release, holder, user, token, expires, expire: () => { now = RealDate.parse(expires); } });
     pass++;
     console.log(`PASS  ${name}`);
   } catch (e) {
@@ -249,6 +250,17 @@ await test("invites: a failed device grant rolls back invite consumption and eve
   assert.deepEqual(f.effects(), before);
   refused(outcome, 404, "not_found");
   assert.equal(db.get("SELECT accepted_at FROM v2_invites").accepted_at, null);
+});
+
+await test("LIM-2526: a restriction write checks owner permission after waiting for the write lock", async f => {
+  const previous = memberPrincipal("test-ws", "test-owner");
+  assert.equal(previous.wsRole, "owner");
+  const result = f.startWrite(() => setDataRestriction(previous, { tier: 2, blocked: true }));
+  f.holder.exec("UPDATE v2_members SET role = 'member' WHERE user_id = 'test-owner'; COMMIT");
+  const before = f.effects();
+  refused(await f.release(result), 403, "owner_only");
+  assert.deepEqual(f.effects(), before);
+  assert.equal(db.get("SELECT 1 FROM v2_data_restrictions"), undefined);
 });
 
 console.log(`\ntest-invite-races: ${pass} passed, ${fail} failed`);

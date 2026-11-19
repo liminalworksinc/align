@@ -42,10 +42,21 @@ what people say to their agents: the server stores no prompt text, tool output, 
 | Account: email, name, profile picture address from Google or GitHub, linked sign-in methods, passkeys (public keys) | Passwords (there are none) |
 | Workspace: members and roles, teams, invites, goals and their versions, alignments, change requests and decisions, directives | Prompt text, tool output, messages, code, file contents |
 | Shared sessions: harness, a hashed repository key, an optional repository alias, times, state, goal binding, token usage and estimated cost | A session title: the `align` agent sends none <!-- docs/RETENTION.md --> |
-| Work signals for 24 hours: keyed hashes of files touched; file paths and short text only if the person turns on "share work signals" | Anything from a session the person did not choose to share |
+| Work signals for 24 hours: hashes of files touched; file paths and short text only if the person turns on "share work signals" | Anything from a session the person did not choose to share |
 | Change request evidence: typed links (pull request, CI run, incident, dashboard, document or other) labelled self-reported or agent-reported, and a goal snapshot Align computes itself | Any claim that evidence is verified: Align labels it, it does not check it |
 | Product events: an event name, the workspace, a keyed hash of the person, the time and a few allowlisted properties | Emails, names, titles, URLs or tokens in those events |
 | Audit log: who did what to which object, and when | The content of goals or requests in the audit log |
+
+## Proposed session sharing choices
+
+Metadata is the default for a shared session. Work signals are a separate choice for a session or folder.
+With hosted Align, derived findings stay on the machine. The proposed option to send them is off by default
+and only works with a local Align server. When a person turns it on, the local server can receive finding,
+binding and limit ids, the goal version, the turn start time, an evidence label and a keyed digest for new
+turns. The person can inspect and delete these records from that machine. Workspace owners can block the option.
+
+Questions that use a model and excerpts that people choose are proposed for later. Hosted workspaces cannot receive
+full transcripts. A local installation reads the original transcript files, which stay on the machine.
 
 ## Signing in
 

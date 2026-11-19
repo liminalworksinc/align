@@ -12,6 +12,10 @@ interface LimitLike {
   id: string;
   type: string;
   text: string;
+  source?: { kind: "meeting" | "manual"; title: string; date: string } | null;
+  path_anchors?: string[];
+  example_crossing?: string;
+  example_within?: string;
 }
 export interface FieldDiff {
   before: unknown;
@@ -78,8 +82,19 @@ export function keyedChanges<T>(
 export const measureChanged = (before: MeasureLike, after: MeasureLike) =>
   before.text !== after.text || (before.target ?? null) !== (after.target ?? null);
 
+export function limitDetails(limit?: LimitLike): [string, string[]][] {
+  const source = limit?.source;
+  return [
+    ["File path anchors", limit?.path_anchors ?? []],
+    ["Example that crosses the limit", limit?.example_crossing ? [limit.example_crossing] : []],
+    ["Example within the limit", limit?.example_within ? [limit.example_within] : []],
+    ["Source", source ? [source.kind === "manual" ? "Written by hand" : source.title, source.date] : []],
+  ];
+}
+
 export const limitChanged = (before: LimitLike, after: LimitLike) =>
-  before.text !== after.text || before.type !== after.type;
+  before.text !== after.text || before.type !== after.type
+  || JSON.stringify(limitDetails(before)) !== JSON.stringify(limitDetails(after));
 
 /** One line per change in one field of a diff (title, measures, depends_on, status, limits). */
 export function changeWords(field: string, d: FieldDiff, o: ChangeWordsOptions = {}): string[] {
@@ -108,7 +123,16 @@ export function changeWords(field: string, d: FieldDiff, o: ChangeWordsOptions =
     for (const { before: was, after: l } of keyedChanges(b, a, (x) => x.id, limitChanged)) {
       if (!l) out.push(`Removed limit ${w(was!)}`);
       else if (!was) out.push(`Added limit ${w(l)}`);
-      else out.push(`Limit ${w(was)} became ${w(l)}`);
+      else {
+        if (was.text !== l.text || was.type !== l.type) out.push(`Limit ${w(was)} became ${w(l)}`);
+        const previous = limitDetails(was);
+        for (const [index, [label, values]] of limitDetails(l).entries()) {
+          const oldValues = previous[index][1];
+          if (JSON.stringify(oldValues) === JSON.stringify(values)) continue;
+          const display = (parts: string[]) => parts.length ? parts.map(q).join(", ") : "none";
+          out.push(`${label} for ${w(l)} changed from ${display(oldValues)} to ${display(values)}`);
+        }
+      }
     }
     return out.length ? out : ["Limits reordered"];
   }

@@ -159,7 +159,7 @@ describe("A2-cross-1: a drift notice latches the crossing sentence, never the wh
     assert.equal(turn('- Must not: "Drop the old ledger cluster before the cutover."\n- Must: "Keep the old ledger cluster readable until the cutover is verified."\n- Out of scope: "Rewriting the billing service."\n- Must: "Cut over the ledger without downtime."'), "");
     // M6: the real violation is told.
     const first = turn("We will drop the old ledger cluster tonight, before the cutover finishes.");
-    assert.match(first, /may conflict with a limit on goal "Cut over the ledger database": Must not "Drop the old ledger cluster before the cutover\." This is a word check/);
+    assert.match(first, /may conflict with a limit on goal "Cut over the ledger database": Must not "Drop the old ledger cluster before the cutover\." \(lim_drop\)\. The reply check ran on this machine/);
     // The same sentence again is not told twice.
     assert.equal(turn("We will drop the old ledger cluster tonight, before the cutover finishes."), "");
     // A later, different crossing of the same limit is told (before E2E acycle2 the limit stayed "noticed" for the session).
@@ -189,7 +189,7 @@ describe("A2-cross-4: a notice covering several limits names each, and latches o
     const told = turn("We will cut over the ledger with two hours of downtime. There is no reason to wait, so we will drop the old ledger cluster before the cutover. I will also start rewriting the billing service while I am here.");
     assert.equal(
       told,
-      'Align: the agent\'s last reply may conflict with 3 limits on goal "Cut over the ledger database": Must not "Drop the old ledger cluster before the cutover."; Out of scope "Rewriting the billing service."; Must "Cut over the ledger without downtime." This is a word check on this machine only; nothing was sent or added to the agent\'s context. `align config drift off` turns it off.',
+      'Align: the agent\'s last reply may conflict with 3 limits on goal "Cut over the ledger database": Must not "Drop the old ledger cluster before the cutover." (lim_drop); Out of scope "Rewriting the billing service." (lim_billing); Must "Cut over the ledger without downtime." (lim_downtime). The reply check ran on this machine. The reply stays here. Type `::align drift wrong` to mark this notice as a false alarm, or add a limit id to mark one. `align config drift off` turns it off.',
     );
     assert.doesNotMatch(told, /Keep the old ledger cluster readable|more of its limits/);
     const inj = readJson<InjectedState>(layout.injected(t.home, lid))!;

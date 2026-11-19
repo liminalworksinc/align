@@ -477,6 +477,26 @@ export function crossings(l: Pick<Limit, "text" | "type">, reply: string, known:
     .map((sen) => norm(sen).trim());
 }
 
+/** Examples supplement the word rule only for clear, matching first-person statements. */
+export function exampleCrossings(l: Limit, reply: string, known: DriftKnown): { sentence: string; example: boolean }[] {
+  const within = norm(l.example_within ?? "");
+  const example = l.example_crossing?.trim();
+  const unsaid = example?.replace(/^(?:I|we)(?: will|'ll| shall| am going to| are going to)\s+/i, "");
+  const shape = unsaid && unsaid !== example ? shapeOf({ text: unsaid, type: "must_not" }) : null;
+  const regular = crossings(l, reply, known).filter((s) => norm(s) !== within).map((sentence) => ({ sentence, example: false }));
+  if (!shape || !example) return regular;
+  const expected = norm(example);
+  const texts = [l.text, ...(known.texts ?? [])];
+  for (const candidate of sentences(prose(reply)).slice(-SENTENCES_MAX)) {
+    if (candidate.endsWith("?") || norm(candidate) !== expected || expected === within || lists(candidate, texts)) continue;
+    const statement = withoutRestated(withoutTitles(candidate, known.titles ?? []), texts);
+    if (crossesSentence(shape, statement) && !regular.some((x) => x.sentence === expected.trim())) {
+      regular.push({ sentence: expected.trim(), example: true });
+    }
+  }
+  return regular;
+}
+
 /** Whether a reply may cross a limit (see `crossings`). */
 export function crossing(l: Pick<Limit, "text" | "type">, reply: string, known: string[] | DriftKnown = []): boolean {
   return crossings(l, reply, known).length > 0;

@@ -200,6 +200,7 @@ export interface RetentionCounts {
   codes_deleted: number;
   sign_in_sessions_deleted: number;
   activity_deleted: number;
+  analysis_findings_deleted: number;
   invites_deleted: number;
   access_requests_deleted: number;
   events_deleted: number;
@@ -272,6 +273,8 @@ const STEPS: ((db: Sql, now: Date, c: RetentionCounts, o: StepOptions) => void)[
     const at = now.toISOString();
     if (tableExists(db, "ba_verification")) c.codes_deleted += db.run("DELETE FROM ba_verification WHERE expiresAt < ?", at);
     if (tableExists(db, "ba_session")) c.sign_in_sessions_deleted += db.run("DELETE FROM ba_session WHERE expiresAt < ? OR createdAt < ?", at, daysBefore(now, sessionMaxDays(env)));
+    const findingsCutoff = daysBefore(now, 30);
+    c.analysis_findings_deleted += db.run("DELETE FROM v2_analysis_findings WHERE turn_started_at <= ? OR received_at <= ?", findingsCutoff, findingsCutoff);
     c.activity_deleted += db.run("DELETE FROM v2_activity WHERE expires_at < ?", at);
     c.invites_deleted += db.run("DELETE FROM v2_invites WHERE accepted_at IS NULL AND expires_at < ?", daysBefore(now, INVITE_GRACE_DAYS));
   },
@@ -329,6 +332,7 @@ export async function runRetention(
     codes_deleted: 0,
     sign_in_sessions_deleted: 0,
     activity_deleted: 0,
+    analysis_findings_deleted: 0,
     invites_deleted: 0,
     access_requests_deleted: 0,
     events_deleted: 0,

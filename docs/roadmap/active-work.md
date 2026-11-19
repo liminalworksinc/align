@@ -569,3 +569,33 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [ ] Resolve ownership and record an upstream issue before changing parent authority if applicable
 - **Evidence:**
   - [ ] A fixture reports the complete aggregate and still rejects a failure in any stage
+
+### [ ] LIM-2526: Keep session analysis on the machine by default
+
+- **Priority:** P0
+- **Owner:** Align local agent, workspace sharing policy and trust copy
+- **Direction:** Specify proposed data tiers and build local session analysis and limit checks in the LIM-2526 worktree.
+- **Conclusion:** Retain metadata-only sharing by default. Run bounded local analysis after sync releases its lock. Require explicit device consent and workspace permission before derived findings leave.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Specify the data boundary, local processing, and limit evidence and feedback before code. All eight specifications validated.
+  - [x] Add schema 27, sharing controls, local processing, previews and privacy tests. The targeted transport and signed-out processing tests passed.
+- **Evidence:**
+  - [x] Run the full Node 24 test gate and validate the Align specifications.
+    `ALIGN_TEST_PORT=4900 npm test` passed 2,090 checks with zero failures on Node 24.22.3.
+    Specification validation passed for all eight documents. The retained test receipt is stale.
+- **Outcome:** Metadata remains the default. Schema 27 adds controls for sharing and retention. A person can
+  inspect and delete their findings and mark false alarms or misses from the session.
+- **Review follow-up:** The independent review found ten defects in sharing, approvals and local analysis.
+  The operator confirmed that hosted Align must refuse derived results. Keep prior devices' named activity
+  working under their existing explicit local choice while applying workspace bans.
+  - [x] Specify and test the review findings, then fix the server, app and CLI.
+    Server, browser and live CLI checks exercised the new sharing boundaries, approval values and feedback.
+    The previous CLI still sent usage, hashes and opted-in named activity after upgrading from schema 26.
+  - [x] Run both clean installs, the full Node 24 gate and specification validation.
+    Both installs succeeded on Node 24.22.3. The final `ALIGN_TEST_PORT=4900 npm test` passed 2,105 checks
+    with zero failures, including the 150 ms hook latency check. All eight specification documents passed.
+    The retained receipt is stale. The project verification command also stops at a stale documentation authority review.
+- **Remaining integration:** This stack has no owner-question route or work-record implementation for these
+  findings. Connect their stable ids when those routes are available.

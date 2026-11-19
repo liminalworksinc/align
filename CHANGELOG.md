@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Session analysis runs locally after sync and shows possible limit crossings from recorded activity or reply wording.
+  Developers can inspect and delete findings and record false alarms or missed checks. Metadata remains the sharing
+  default. Schema 27 adds workspace sharing restrictions and a proposed, default-off choice for sending derived findings
+  to a local Align server. Hosted Align keeps findings on the machine. Consent applies to new turns only, and retrying an
+  upload cannot restore a deleted or expired finding.
+- Request reviews show the old and proposed limit anchors and examples. The CLI labels incomplete counts, shows how to
+  inspect acknowledged records, and accepts feedback on reply-only notices.
+
 - Sessions and in-session status show how a session came to count toward its goal. Spend can show each goal's
   request counts and list-price estimates by sharing source, with older rolled-up usage identified separately.
 - Retrying a binding with changed details returns a conflict and leaves the original binding in place.

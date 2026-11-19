@@ -907,10 +907,10 @@ try {
     "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits",
     "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets",
     "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "v2_expectations", "v2_outcome_reports",
-    "v2_measure_readings", "ba_user", "ba_passkey",
+    "v2_measure_readings", "v2_data_restrictions", "v2_device_result_consent", "v2_analysis_findings", "ba_user", "ba_passkey",
   ];
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 26, lib/v2/core.mts SCHEMA_VERSION), v2 tables and Better Auth tables, limits on goals and goal versions`,
-    SCHEMA_VERSION === 26 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION &&
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 27, lib/v2/core.mts SCHEMA_VERSION), v2 tables and Better Auth tables, limits on goals and goal versions`,
+    SCHEMA_VERSION === 27 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION &&
     requiredTables.every((table) => pragmas.tables.includes(table)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
@@ -1848,6 +1848,48 @@ try {
     { session_key: S2a, kind: "edit", at: nowAt, repo_id: RID, path_hash: "d".repeat(32) },
     { session_key: S3a, kind: "edit", at: new Date(Date.now() - 25 * 3600 * 1000).toISOString(), repo_id: RID, path_hash: "e".repeat(32) },
   ];
+  const optSignals = (dev, ws, key, enabled) => call(dev.who, "PUT", `/api/v2/workspaces/${ws}/sessions/${key}/work-signals`, {
+    bearer: dev.access, body: { enabled },
+  });
+  const restrictSharing = (user, ws, tier, blocked) => call(user.who, "PATCH", `/api/v2/workspaces/${ws}/data-sharing`, {
+    cookie: user.cookie, body: { tier, blocked },
+  });
+  const signalsByDefault = await actPost(D3, [okItems[0]], { body: { items: [okItems[0]], work_signals_version: 1 } });
+  const signalsOther = await optSignals(D1, A, S3a, true);
+  const signalsAsMember = await restrictSharing(U3, A, 1, true);
+  await restrictSharing(U1, A, 1, true);
+  const blockedOpt = await optSignals(D3, A, S3a, true);
+  const signalsBlocked = await actPost(D3, [okItems[0]], { body: { items: [okItems[0]], work_signals_version: 1 } });
+  await restrictSharing(U1, A, 1, false);
+  const signalsStillOff = await actPost(D3, [okItems[0]], { body: { items: [okItems[0]], work_signals_version: 1 } });
+  const optOwn = await optSignals(D3, A, S3a, true);
+  check("LIM-2526: work signals need device consent, a workspace ban wins, and removing a ban gives no consent",
+    [signalsByDefault, signalsBlocked, signalsStillOff].every((r) => r.json?.refused?.[0]?.reason === "work_signals_off")
+      && signalsOther.status === 404 && signalsAsMember.status === 403 && blockedOpt.json?.enabled === false && optOwn.json?.enabled === true,
+    JSON.stringify({ signalsByDefault, signalsBlocked, signalsStillOff, optOwn }));
+  // A device carried over from schema 26 can still use the old activity request for an explicit local choice.
+  const legacyKey = S2a;
+  const legacyLabel = { ...okItems[1], session_key: legacyKey, text: "Legacy client branch label" };
+  const oldMetadata = await actPost(D2, [{ ...legacyLabel, text: null }]);
+  const upgradeAdvice = await actPost(D2, [legacyLabel]);
+  withDb((d) => {
+    if (d.prepare("PRAGMA table_info(v2_devices)").all().some((column) => column.name === "legacy_work_signals")) {
+      d.prepare("UPDATE v2_devices SET legacy_work_signals = 1 WHERE id = ?").run(D2.id);
+    }
+  });
+  const oldNamed = await actPost(D2, [legacyLabel]);
+  const modernWithoutConsent = await actPost(D2, [legacyLabel], { body: { items: [legacyLabel], work_signals_version: 1 } });
+  await restrictSharing(U1, A, 1, true);
+  const blockedLegacy = await actPost(D2, [legacyLabel]);
+  await restrictSharing(U1, A, 1, false);
+  await optSignals(D2, A, legacyKey, false);
+  const optedOutLegacy = await actPost(D2, [legacyLabel]);
+  check("LIM-2526: an older paired device keeps metadata and opted-in named activity, subject to a ban and explicit opt-out",
+    oldMetadata.json?.accepted === 1 && /Update Align/.test(upgradeAdvice.json?.refused?.[0]?.reason)
+      && oldNamed.json?.accepted === 1 && modernWithoutConsent.json?.accepted === 0
+      && blockedLegacy.json?.accepted === 0 && optedOutLegacy.json?.accepted === 0,
+    [oldMetadata, upgradeAdvice, oldNamed, modernWithoutConsent, blockedLegacy, optedOutLegacy].map((r) => r.text).join(" | "));
+  withDb((d) => d.prepare("DELETE FROM v2_activity WHERE session_key = ? AND repo_id = ?").run(legacyKey, RID));
   const ap = await actPost(D3, okItems);
   check("activity: a device posts its own sessions' items; another device's session and items older than 24 h are skipped", ap.status === 200 && ap.json.accepted === 3, ap.text);
   const apAhead = await actPost(D3, [{ ...okItems[1], at: new Date(Date.now() + 10 * 60_000).toISOString() }]);
@@ -2633,6 +2675,27 @@ try {
         const card = await show(`[data-cr="${current.json.id}"] [data-precedents]`);
         await page.goto(`${BASE}/app/w/${A}/requests?review=${goal.id}.${current.json.id}`, { waitUntil: "networkidle0" });
         const drawer = await show(`[data-review="${current.json.id}"] [data-precedents]`);
+        const limitGoal = (await mkGoal(U3, { title: "Keep ledger data stable", team_id: P1, limits: [{
+          type: "must_not", text: "Rewrite ledger data.", path_anchors: ["ledger/old/**"],
+          example_crossing: "I will replace the existing ledger.", example_within: "I will read the current ledger.",
+        }] })).json;
+        const requested = await propose(U1, limitGoal.id, { base_version: 1, changes: { limits: [{
+          ...limitGoal.limits[0], path_anchors: ["ledger/new/**"], example_crossing: "I will replace stored transactions.", example_within: "",
+        }] }, reason: "Clarify the data boundary" });
+        await page.goto(`${BASE}/app/w/${A}/requests?review=${limitGoal.id}.${requested.json?.id}`, { waitUntil: "networkidle0" });
+        const changedLimit = await page.$eval(`[data-review="${requested.json?.id}"] [data-compare] [data-field="limits"]`, (field) => ({
+          before: field.children[1].textContent, after: field.children[2].textContent,
+          marked: !!field.children[2].querySelector('[data-mark="changed"]'),
+          fits: document.scrollingElement.scrollWidth <= innerWidth && field.scrollWidth <= field.clientWidth,
+        })).catch(() => ({}));
+        check("LIM-2526 (390 px): the approval drawer shows both values of changed limit fields and shows when an example was removed",
+          changedLimit.before?.includes("ledger/old/**") && changedLimit.before.includes("replace the existing ledger")
+            && changedLimit.before.includes("read the current ledger") && changedLimit.after?.includes("ledger/new/**")
+            && changedLimit.after.includes("replace stored transactions") && changedLimit.after.includes("Example within the limit")
+            && changedLimit.after.includes("None") && changedLimit.marked && changedLimit.fits, JSON.stringify(changedLimit));
+        await page.goto(`${BASE}/app/w/${A}/requests?review=${goal.id}.${current.json.id}`, { waitUntil: "networkidle0" });
+        await show(`[data-review="${current.json.id}"] [data-precedents]`);
+
         check("LIM-2522 (390 px): the goal and Requests drawer show collapsed earlier decisions with readable labels, launch and decision links",
           [card, drawer].every((s) => s.collapsed && s.fits && s.text.includes("Earlier decisions on the same items (3)") &&
             s.text.includes("v1: Approved") && s.text.includes("Launched as v2") && s.text.includes(revisedLimit.text) &&
@@ -4285,6 +4348,14 @@ try {
         wide.length === 0 && /Sends you back to/.test(appsRow) && /Last connected/.test(appsRow) && /Last read the goals/.test(appsRow) && errors.length === 0,
         `${wide.join(" | ")} ${errors.join(" | ")}`,
       );
+      await page.goto(`${BASE}/app/w/${A}/people`, { waitUntil: "networkidle0" });
+      const restrictions = await page.waitForSelector('input[name="restrict-tier-2"]');
+      await restrictions.click();
+      await page.waitForFunction(() => [...document.querySelectorAll("label")].some((l) => l.innerText === "Block Derived results (proposed)" && l.querySelector("input")?.checked));
+      const phoneRestrictions = await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth);
+      await page.click('input[name="restrict-tier-2"]');
+      await page.waitForFunction(() => [...document.querySelectorAll("label")].some((l) => l.innerText === "Block Derived results (proposed)" && l.querySelector("input:not(:checked)")));
+      check("LIM-2526 (Chrome 390px): a workspace owner can toggle sharing restrictions without horizontal scrolling", phoneRestrictions, page.url());
       for (const width of [390, 1280]) {
         await page.setViewport({ width, height: 844 });
         await page.goto(`${BASE}/app/w/${A}/sessions`, { waitUntil: "networkidle0" });
@@ -5278,6 +5349,22 @@ try {
         await Promise.all([pc.waitForNavigation({ waitUntil: "networkidle0" }), click(pc, "Add to a new version")]);
         await pc.waitForFunction(() => [...document.querySelectorAll("input")].some((i) => i.value === "Invoice exports are out of scope for the billing dashboard."), { timeout: 15000 });
         const onGoalPage = new URL(pc.url()).pathname === `/app/w/${LW}/goals/${GB.id}`;
+        await pc.setViewport({ width: 390, height: 844 });
+        const form = await pc.evaluate(() => {
+          const details = [...document.querySelectorAll("details")].filter((d) => d.querySelector("summary")?.innerText === "Examples and file paths");
+          details.at(-1).open = true;
+          const anchor = [...details.at(-1).querySelectorAll("label")].find((l) => l.innerText.startsWith("File path anchors")).querySelector("textarea");
+          anchor.dataset.anchorTest = "yes";
+          return { labels: details.at(-1).innerText, fits: document.scrollingElement.scrollWidth <= innerWidth };
+        });
+        await pc.type("textarea[data-anchor-test]", "/private");
+        await click(pc, `Save version ${gbVersion + 1}`);
+        await pc.waitForFunction(() => document.body.innerText.includes("Use up to five repo-relative patterns in File path anchors"));
+        const retained = await pc.$eval("textarea[data-anchor-test]", (field) => field.value);
+        await pc.$eval("textarea[data-anchor-test]", (field) => field.setSelectionRange(0, field.value.length));
+        await pc.type("textarea[data-anchor-test]", "services/invoices/**");
+        check("LIM-2526 (Chrome 390px): the limit editor fits with its examples open and reports an invalid path using the visible label",
+          form.fits && form.labels.includes("Example that crosses the limit") && form.labels.includes("Example within the limit") && retained === "/private", JSON.stringify(form));
         await click(pc, `Save version ${gbVersion + 1}`);
         await pc.waitForFunction((v) => document.body.innerText.includes(`version ${v}`) && document.body.innerText.includes("Limits"), { timeout: 15000 }, gbVersion + 1);
         const gbNow = (await lw(LC, "GET", `/goals/${GB.id}`)).json.goal;
@@ -5586,7 +5673,9 @@ try {
   // ==== port:activity ====
   // Goal activity (PORT-003) on the asks workspace: Kai (Product lead) and Kim (Product member) share sessions toward
   // Kai's workspace-visible Product goal; one of Kai's sessions worked on it only 20 to 15 days ago.
-  const GW = (await ka(KL, "POST", "/goals", { title: "Faculty sign-on", visibility: "workspace", team_id: TP })).json;
+  const GW = (await ka(KL, "POST", "/goals", { title: "Faculty sign-on", visibility: "workspace", team_id: TP,
+    limits: [{ type: "out_of_scope", text: "Leave billing alone.", path_anchors: ["services/billing/**"],
+      example_crossing: "I will alter the invoice route.", example_within: "I will leave the invoice route alone." }] })).json;
   const DKL = kDevice(KL);
   const DKM = kDevice(KM);
   const hAgo = (h) => new Date(Date.now() - h * 3600 * 1000).toISOString();
@@ -5600,13 +5689,130 @@ try {
       await call(dev.who, "POST", `/api/v2/workspaces/${AK}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: id, goal_id: goalId, starts_at: hAgo(h), root_turn: null, cause: "manual" } });
     }
     const up = await call(dev.who, "POST", `/api/v2/workspaces/${AK}/sessions/${key}/usage`, { bearer: dev.access, body: { rows: usage.map(([i, h]) => usageRow(dev, `${native}-${i}`, ids[0], { ts: hAgo(h) })) } });
-    return { key, accepted: up.json?.accepted };
+    return { key, epoch: ids[0], accepted: up.json?.accepted };
   };
   const kSA = await kShare(DKL, "claude-code", "act-a", 4, [[GW.id, 4]], [[1, 0.5]]);
   const kSB = await kShare(DKM, "codex", "act-b", 4, [[GW.id, 4]], [[1, 3]]);
   const kSC = await kShare(DKL, "claude-code", "act-c", 20 * 24, [[GW.id, 20 * 24], [null, 15 * 24]], [[1, 19 * 24]]);
   const ACT_CANARY = `ACT-CANARY-${randomBytes(4).toString("hex")}`;
+  const racePath = `/api/v2/workspaces/${AK}/data-sharing`;
+  withDb((d) => d.prepare("UPDATE v2_members SET role = 'owner' WHERE ws_id = ? AND user_id = ?").run(AK, KL.id));
+  let finishRestriction;
+  const restriction = new Promise((resolve, reject) => {
+    const req = http.request(BASE + racePath, {
+      method: "PATCH", headers: { cookie: KL.cookie, "content-type": "application/json" },
+    }, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode));
+    });
+    req.on("error", reject);
+    req.write('{"tier":3,');
+    finishRestriction = () => req.end('"blocked":true}');
+  });
+  await sleep(250);
+  withDb((d) => d.prepare("UPDATE v2_members SET role = 'member' WHERE ws_id = ? AND user_id = ?").run(AK, KL.id));
+  finishRestriction();
+  const restrictionStatus = await restriction;
+  const blockedAfterRace = (await call(KO.who, "GET", racePath, { cookie: KO.cookie })).json?.blocked;
+  check("LIM-2526: demotion during an unfinished restriction request takes effect at the write",
+    restrictionStatus === 403 && !blockedAfterRace?.includes(3), `${restrictionStatus} ${blockedAfterRace}`);
   const sigAt = new Date().toISOString();
+  await optSignals(DKL, AK, kSA.key, true);
+  const resultsUrl = `/api/v2/workspaces/${AK}/sessions/${kSA.key}/analysis`;
+  const resultConsent = (enabled) => call(DKL.who, "PUT", "/api/v2/devices/self/data-sharing", { bearer: DKL.access, body: { enabled } });
+  const beforeConsent = { id: "b".repeat(32), epoch_id: kSA.epoch, goal_version: 1, limit_id: GW.limits[0].id,
+    evidence: "example", digest: "f".repeat(32), turn_started_at: new Date().toISOString() };
+  const sendFinding = (body) => call(DKL.who, "POST", resultsUrl, { bearer: DKL.access, body });
+  const getFinding = (dev) => call(dev.who, "GET", resultsUrl, { bearer: dev.access });
+  const defaultOff = await sendFinding(beforeConsent);
+  const consentOn = await resultConsent(true);
+  const retrospective = await sendFinding(beforeConsent);
+  const finding = { ...beforeConsent, id: "c".repeat(32), turn_started_at: new Date().toISOString() };
+  await resultConsent(true);
+  check("LIM-2526: the same record from before device consent is refused after opt-in", retrospective.status === 403, retrospective.text);
+  const rawExtra = await sendFinding({ ...finding, reply: "REPLY-PRIVATE-CANARY" });
+  const wrongLimit = await sendFinding({ ...finding, limit_id: "lim_aaaaaaaaaaaa" });
+  const acceptedFinding = await sendFinding(finding);
+  const retriedFinding = await sendFinding(finding);
+  const changedFinding = await sendFinding({ ...finding, digest: "a".repeat(32) });
+  const ownFindings = await getFinding(DKL);
+  withDb((d) => d.prepare("UPDATE v2_members SET role = 'viewer' WHERE ws_id = ? AND user_id = ?").run(AK, KL.id));
+  const viewerPreflight = await call(DKL.who, "GET", resultsUrl + "?status=1", { bearer: DKL.access });
+  const viewerWrite = await sendFinding(finding);
+  withDb((d) => d.prepare("UPDATE v2_members SET role = 'member' WHERE ws_id = ? AND user_id = ?").run(AK, KL.id));
+  check("LIM-2526: demoting a sharing member to viewer disables their preflight and prevents writes",
+    viewerPreflight.status === 200 && viewerPreflight.json?.enabled === false && viewerWrite.status === 403,
+    `${viewerPreflight.text} ${viewerWrite.text}`);
+  const otherFindings = await getFinding(DKM);
+  const dataOwner = await call(KO.who, "GET", resultsUrl, { cookie: KO.cookie });
+  await restrictSharing(KO, AK, 2, true);
+  const findingsBlocked = await sendFinding({ ...finding, id: "a".repeat(32) });
+  const blockedRead = await getFinding(DKL);
+  const deleteOther = await call(DKM.who, "DELETE", resultsUrl, { bearer: DKM.access });
+  const deleteMine = await call(DKL.who, "DELETE", resultsUrl, { bearer: DKL.access });
+  await restrictSharing(KO, AK, 2, false);
+  const deletedRetry = await sendFinding(finding);
+  check("LIM-2526: a finding retry stays deleted even after a workspace restriction is lifted",
+    deletedRetry.status === 410 && (await getFinding(DKL)).json?.findings?.length === 0, deletedRetry.text);
+  await resultConsent(false);
+  const afterOff = await sendFinding(finding);
+  check("LIM-2526: proposed tier 2 is independent of work signals, validates closed fields and requires its own consent",
+    defaultOff.status === 403 && consentOn.json?.enabled === true && rawExtra.status === 400 && wrongLimit.status === 404
+      && acceptedFinding.status === 200 && retriedFinding.status === 200 && changedFinding.status === 409
+      && ownFindings.json?.findings?.length === 1 && Object.entries(finding).every(([k, v]) => ownFindings.json.findings[0][k] === v)
+      && afterOff.status === 403,
+    [defaultOff, consentOn, rawExtra, wrongLimit, acceptedFinding, retriedFinding, changedFinding, ownFindings, afterOff].map((r) => r.text).join(" | "));
+  check("LIM-2526: proposed tier 2 findings are private to their sending device and deletable under a workspace ban",
+    otherFindings.status === 404 && dataOwner.status === 404 && findingsBlocked.status === 403 && blockedRead.json?.findings?.length === 1
+      && deleteOther.status === 404 && deleteMine.status === 204 && (await getFinding(DKL)).json?.findings?.length === 0,
+    [otherFindings, dataOwner, findingsBlocked, blockedRead, deleteOther, deleteMine].map((r) => r.status).join());
+  const retention = await import(pathToFileURL(path.join(ROOT, "lib/v2/retention-core.mts")).href);
+  await resultConsent(true);
+  const priorConsentRetry = await sendFinding(finding);
+  await sleep(5);
+  const freshFinding = { ...finding, id: "d".repeat(32), turn_started_at: new Date().toISOString() };
+  const freshWrite = await sendFinding(freshFinding);
+  check("LIM-2526: turning consent off and on cannot authorize a turn from the earlier consent period",
+    priorConsentRetry.status === 403 && freshWrite.status === 200, `${priorConsentRetry.text} ${freshWrite.text}`);
+  const oldResult = new Date(Date.now() - 31 * 86_400_000).toISOString();
+  withDb((d) => d.prepare("UPDATE v2_analysis_findings SET received_at = ? WHERE id = ?").run(oldResult, freshFinding.id));
+  const expiredRetry = await sendFinding(freshFinding);
+  const expiredFindings = await getFinding(DKL);
+  const retentionFile = path.join(onDir, "analysis-retention.sqlite");
+  withDb((d) => d.prepare("VACUUM INTO ?").run(retentionFile));
+  const retentionDb = new DatabaseSync(retentionFile);
+  let removedFinding;
+  try {
+    retentionDb.exec("PRAGMA foreign_keys = ON");
+    const sql = {
+      get: (q, ...args) => retentionDb.prepare(q).get(...args),
+      all: (q, ...args) => retentionDb.prepare(q).all(...args),
+      run: (q, ...args) => Number(retentionDb.prepare(q).run(...args).changes),
+    };
+    await retention.runRetention(sql, (fn) => fn(), new Date(), { secret: "test-only" });
+    removedFinding = retentionDb.prepare("SELECT 1 FROM v2_analysis_findings WHERE id = ?").get(freshFinding.id);
+  } finally {
+    retentionDb.close();
+    rmSync(retentionFile, { force: true });
+  }
+  await call(DKL.who, "DELETE", resultsUrl, { bearer: DKL.access });
+  await resultConsent(false);
+  check("LIM-2526: derived findings are unavailable at 30 days and removed by retention",
+    expiredRetry.status === 410 && expiredFindings.status === 200 && expiredFindings.json?.findings?.length === 0 && !removedFinding,
+    `${expiredRetry.text} ${expiredFindings.text}`);
+  const expiredTurn = { ...finding, id: "e".repeat(32), turn_started_at: oldResult };
+  await resultConsent(true);
+  const oldTurn = await sendFinding(expiredTurn);
+  await resultConsent(false);
+  check("LIM-2526: an expired turn stays refused when its finding row is absent", oldTurn.status === 410, oldTurn.text);
+  const invalidAnchor = await ka(KL, "POST", `/goals/${GW.id}/versions`, {
+    limits: [{ ...GW.limits[0], path_anchors: ["/private"] }],
+  });
+  check("LIM-2526: limit examples and repo-relative anchors survive a read and invalid paths name the field people see",
+    GW.limits[0].path_anchors?.join() === "services/billing/**" && GW.limits[0].example_crossing === "I will alter the invoice route."
+      && GW.limits[0].example_within === "I will leave the invoice route alone."
+      && invalidAnchor.status === 400 && invalidAnchor.json?.message?.includes("File path anchors"),
+    invalidAnchor.text);
   const sig = await call("KL", "POST", `/api/v2/workspaces/${AK}/activity`, {
     bearer: DKL.access,
     body: {
@@ -14622,6 +14828,18 @@ try {
     gTok.status === 200 && gAppr.status === 200 && shares[0].status === 200 && shares[1].status === 200 && shares[2].status === 403 && shares[2].json?.error === "session_cap" && /Contact the operator/.test(shares[2].json?.message) && shares[3].status === 200,
     `${gAppr.status} ${gTok.status} ${shares.map((r) => `${r.status} ${r.text.slice(0, 80)}`).join(" | ")}`,
   );
+  const hostedHeaders = { authorization: `Bearer ${gTok.json?.access_token}` };
+  const hostedAnalysis = `/api/v2/workspaces/${W1id}/sessions/${sessionKey(gDev, W1id, "claude-code", "s1")}/analysis`;
+  const hostedConsent = await hosted("PUT", "/api/v2/devices/self/data-sharing", { headers: hostedHeaders, body: { enabled: true } });
+  const hostedStatus = await hosted("GET", hostedAnalysis + "?status=1", { headers: hostedHeaders });
+  const hostedFinding = await hosted("POST", hostedAnalysis, { headers: hostedHeaders, body: {
+    ...finding, turn_started_at: new Date().toISOString(),
+  } });
+  check("LIM-2526: hosted Align refuses derived-result consent and writes, and tells clients the tier is unavailable",
+    hostedConsent.status === 403 && hostedConsent.json?.error === "results_unavailable"
+      && hostedStatus.json?.enabled === false && hostedStatus.json?.available === false
+      && hostedFinding.status === 403 && hostedFinding.json?.error === "results_unavailable",
+    [hostedConsent, hostedStatus, hostedFinding].map((r) => r.text).join(" | "));
   // -- durable limits: per-address code sends (5 an hour, hosted) and Better Auth's per-client limit survive a restart --
   const rl = [];
   for (let i = 0; i < 4; i++) rl.push(await gSend("rl@example.test"));

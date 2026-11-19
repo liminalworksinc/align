@@ -1,3 +1,5 @@
+import { RESULTS_PREVIEW, signalsPreview } from "../shared/analysis.ts";
+import { analysisNoticeCounts, driftFeedback, finishTurn, queueTurn, rememberNotice, rememberTurn, takeAnalysisNotice } from "./analysis.ts";
 // Hook handlers for Claude Code and Codex. Hook-safe: imports only node:fs, node:path, node:crypto (via shared/*).
 // They read local files only (hot/, injected/, latch/, feeds/, drift/, me.json, config.json), never the network or
 // credentials. The one transcript read is the Stop hook's local drift check (D5), which keeps no reply text.
@@ -185,21 +187,32 @@ function takeDrift(home: string, lid: string, hot: HotState | null, inj: Injecte
   if (!hot?.goal || hot.goal.id !== file.goal_id || !Array.isArray(file.items)) return null;
   const count = inj.drift_count || {};
   const seen = new Set(inj.drift_seen || []);
-  const items = file.items.filter((i) => (count[i.limit_id] || 0) < DRIFT_PER_LIMIT && (i.digests || []).some((d) => !seen.has(`${i.limit_id}:${d}`)));
+  const analysisCounts = analysisNoticeCounts(home, lid);
+  const items = file.items.filter((i) => (count[i.limit_id] || 0) + (analysisCounts[i.limit_id] || 0) < DRIFT_PER_LIMIT && (i.digests || []).some((d) => !seen.has(`${i.limit_id}:${d}`)));
   if (!items.length) return null;
   const named = items.slice(0, DRIFT_PER_PROMPT);
   const later = items.slice(DRIFT_PER_PROMPT);
   if (later.length) writeJsonAtomic(layout.drift(home, lid), { ...file, items: later });
-  for (const i of named) {
+  const notice = named.flatMap((i) => {
     count[i.limit_id] = (count[i.limit_id] || 0) + 1;
-    for (const d of i.digests || []) seen.add(`${i.limit_id}:${d}`);
-  }
+    return (i.digests || []).flatMap((digest) => {
+      const key = `${i.limit_id}:${digest}`;
+      const fresh = !seen.has(key);
+      seen.add(key);
+      const turn = i.turns?.[digest];
+      if (!fresh || !turn) return [];
+      const id = crossingDigest(i.limit_id, JSON.stringify([lid, turn.root, turn.version, digest]));
+      return [{ id, ...turn, limit: i.limit_id, digest }];
+    });
+  });
+  rememberNotice(home, lid, notice);
   inj.drift_count = count;
   inj.drift_seen = [...seen].slice(-200);
   delete inj.drift_shown;
-  const quote = (i: DriftFile["items"][number]) => `${LIMIT_WORDS[i.type] ?? "Must"} "${clean(i.text, 160)}"`;
+  const quote = (i: DriftFile["items"][number]) => `${LIMIT_WORDS[i.type] ?? "Must"} "${clean(i.text, 160)}" (${i.limit_id})`;
   const what = named.length === 1 ? `a limit on goal "${clean(file.goal_title, 80)}": ${quote(named[0])}` : `${named.length} limits on goal "${clean(file.goal_title, 80)}": ${named.map(quote).join("; ")}`;
-  return `${endSentence(`Align: the agent's last reply may conflict with ${what}`)} This is a word check on this machine only; nothing was sent or added to the agent's context. \`align config drift off\` turns it off.`;
+  const feedback = notice.length ? " Type `::align drift wrong` to mark this notice as a false alarm, or add a limit id to mark one." : "";
+  return `${endSentence(`Align: the agent's last reply may conflict with ${what}`)} The reply check ran on this machine. The reply stays here.${feedback} \`align config drift off\` turns it off.`;
 }
 
 function sameAsInjected(inj: InjectedState, goal: GoalSnapshot | null, shareState: string): boolean {
@@ -420,6 +433,7 @@ function autoShare(home: string, harness: Harness, sid: string, cwd: string | nu
     arg: rule.goal_id,
     workspace: rule.workspace_id,
     rule_dir: rule.dir,
+    signals: rule.signals === true,
     epoch_id: epochId,
     origin: "folder_rule",
     ts: new Date().toISOString(),
@@ -839,6 +853,7 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   spoolWrite(home, { type: "root_turn", harness, native_id: sid, root_turn: rootTurn, cwd: input.cwd || null, ts });
   const hot = readHot(home, lid);
   if (!hot || !hot.share) {
+    if (input.transcript_path) rememberTurn(home, lid, { root: rootTurn, at: ts, transcript: input.transcript_path, cwd: input.cwd || null, binding: null });
     // A session whose share failed (or ended) still hears the sync's notices at its next prompt (N5); and one a folder
     // rule is sharing that saw the cached feed's hold, that the hold is gone (C9-3).
     const inj = readInjected(home, lid);
@@ -896,6 +911,17 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   // session is on that goal from this turn, so the model hears it now and never reads as unbound meanwhile.
   const resuming = hot.share.state === "suspended" && ((!!pending && (!!pending.goal || !pending.goal_id)) || !!inj.opened_epoch?.resumed);
   const shareState = resuming ? "shared" : hot.share.state;
+  if (input.transcript_path || (shareState === "shared" && goal?.limits?.length)) {
+    const epoch = inj.opened_epoch?.epoch_id ?? hot.binding?.epoch_id;
+    const binding = shareState === "shared" && goal && epoch ? {
+      workspace: hot.share.workspace_id,
+      key: hot.share.session_key,
+      epoch,
+      origin: inj.opened_epoch ? inj.opened_epoch.origin ?? null : hot.binding?.origin ?? null,
+      goal,
+    } : null;
+    rememberTurn(home, lid, { root: rootTurn, at: ts, transcript: input.transcript_path || null, cwd: input.cwd || hot.cwd, binding });
+  }
   let kind: DeltaKind | null = null;
   if (shareState === "shared") {
     if (!goal) kind = inj.goal_id ? "unbound" : null;
@@ -962,7 +988,7 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   const held = blockingHolds(home, lid, input.cwd || hot.cwd);
   const resumed = resumeLine(hot, inj, held);
   if (resumed) context = [context, resumed].filter(Boolean).join("\n");
-  const notices = [takeNotices(hot, inj, () => held, () => stoppedNow(home, lid)), ...req.notices, ...lifted.notices, takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
+  const notices = [takeNotices(hot, inj, () => held, () => stoppedNow(home, lid)), ...req.notices, ...lifted.notices, takeAnalysisNotice(home, lid, inj, DRIFT_PER_PROMPT, DRIFT_PER_LIMIT) || takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
   writeInjected(home, lid, inj);
   if (!context && !notices) return null;
   const out: Record<string, unknown> = {};
@@ -985,12 +1011,20 @@ export function stop(home: string, harness: Harness, input: HookInput): void {
   const lid = localId(harness, sid);
   const hot = readHot(home, lid);
   autoAccept(home, lid, hot);
+  const root = (harness === "claude-code" ? input.prompt_id : input.turn_id) || input.prompt_id || input.turn_id;
+  const completion = queueTurn(home, lid, harness, sid, root, input.transcript_path || null);
+  if (completion.queued) return;
   if (hot?.share?.state !== "shared" || !hot.goal) return;
-  const limits = Array.isArray(hot.goal.limits) ? hot.goal.limits : [];
+  const inj = readInjected(home, lid);
+  const goal = completion.turn?.binding?.goal
+    ?? (inj.opened_epoch && !(hot.epochs_seen ?? []).includes(inj.opened_epoch.epoch_id) ? inj.opened_epoch.goal : hot.goal);
+  if (!goal) return;
+  const turn = { root: completion.turn?.root ?? root ?? `ts:${new Date().toISOString()}`, version: goal.version };
+  if (!completion.turn?.binding) finishTurn(home, lid, turn.root, turn.version);
+  const limits = Array.isArray(goal.limits) ? goal.limits : [];
   if (!limits.length || !driftOn(home)) return;
   const pending = readJson<DriftFile>(layout.drift(home, lid));
-  const keep = pending && pending.goal_id === hot.goal.id && Array.isArray(pending.items) ? pending.items : [];
-  const inj = readInjected(home, lid);
+  const keep = pending && pending.goal_id === goal.id && Array.isArray(pending.items) ? pending.items : [];
   const count = inj.drift_count || {};
   const seen = new Set(inj.drift_seen || []);
   const open = limits.filter((l) => (count[l.id] || 0) < DRIFT_PER_LIMIT);
@@ -998,7 +1032,7 @@ export function stop(home: string, harness: Harness, input: HookInput): void {
   const reply = lastReply(input);
   if (!reply) return;
   const known = { titles: goalTitles(home, hot), texts: limits.map((l) => l.text) };
-  const items = keep.map((i) => ({ ...i, digests: [...(i.digests || [])] }));
+  const items = keep.map((i) => ({ ...i, digests: [...(i.digests || [])], turns: { ...i.turns } }));
   let added = false;
   for (const l of open) {
     // Each crossing sentence once per session: one already told (or waiting) is not told again.
@@ -1007,11 +1041,16 @@ export function stop(home: string, harness: Harness, input: HookInput): void {
       .filter((d) => !seen.has(`${l.id}:${d}`));
     if (!fresh.length) continue;
     let item = items.find((i) => i.limit_id === l.id);
-    if (!item) items.push((item = { limit_id: l.id, type: l.type, text: l.text, digests: [] }));
-    for (const d of fresh) if (!item.digests.includes(d)) (item.digests.push(d), (added = true));
+    if (!item) items.push((item = { limit_id: l.id, type: l.type, text: l.text, digests: [], turns: {} }));
+    for (const digest of fresh) {
+      if (item.digests.includes(digest)) continue;
+      item.digests.push(digest);
+      item.turns[digest] = turn;
+      added = true;
+    }
   }
   if (!added) return;
-  const file: DriftFile = { v: 1, goal_id: hot.goal.id, goal_title: hot.goal.title, items, at: new Date().toISOString() };
+  const file: DriftFile = { v: 1, goal_id: goal.id, goal_title: goal.title, items, at: new Date().toISOString() };
   writeJsonAtomic(layout.drift(home, lid), file);
 }
 
@@ -1300,7 +1339,7 @@ export function postToolUse(home: string, harness: Harness, input: HookInput, fa
   const at = new Date().toISOString();
   const acts: Act[] = [];
   // An edit tool reports its own outcome.
-  if (editedPaths(harness, input.tool_name, input.tool_input, cwd).length) acts.push({ t: failed ? "failed" : "ran", at, u });
+  if (editedPaths(harness, input.tool_name, input.tool_input, cwd).length) acts.push({ t: failed ? "failed" : "ran", at, u, tool_verdict: 1 });
   // A shell command's exit status says nothing about which of its parts ran (A3-local-1, 6): each file it was to write
   // counts when its content (or existence) now differs from what it was at PreToolUse and nothing else explains that,
   // and its commit when HEAD's reflog has it after the call's mark.
@@ -1564,6 +1603,8 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
   const spool = (command: "share" | "unshare" | "bind", a: string | null) =>
     spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command, arg: a, ts });
   switch (verb) {
+    case "drift":
+      return driftFeedback(home, lid, arg, ts);
     case "status": {
       const inj = readInjected(home, lid);
       const latch = readJsonStrict<Latch>(layout.latch(home, lid));
@@ -1777,9 +1818,9 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
             replaces ? `  This replaces the current rule (${replaces}).` : "",
             `  ${already ? "This session is already shared." : hot?.prior_share?.stopped ? "This session stays private: its sharing was stopped (or its history deleted)." : endedUnread(hot) ? DIR_UNREAD : "This session is shared too."} Forks stay private. \`::align unshare\` keeps one session private.`,
             `  Sent per session: harness, a keyed repo hash, start time, an epoch, and per-request token counts with model, basis and estimated list cost.`,
-            signals
-              ? `  Work signals on: repo-relative paths of edited files, commit subjects, task labels and the branch name go to people who can read the goal, kept 24 hours. Never sent: prompts, responses, tool output, file contents.`
-              : `  Never sent: prompts, responses, tool input or output, paths, branch names. (Add --signals to share file paths and task labels with the team.)`,
+            `  ${signalsPreview(signals)}`,
+            `  ${RESULTS_PREVIEW}`,
+            `  Prompts, replies, tool input and output, and file contents stay on this machine.`,
             `Type \`::align share --dir ${signals ? "--signals " : ""}${noGoal ? "none " : arg ? `${arg} ` : ""}confirm\` to turn it on.`,
           ]
             .filter(Boolean)
@@ -1791,7 +1832,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         const kept = !already && !!hot?.prior_share?.stopped;
         // Its share ended, and whether its person stopped it on the web is not read yet: not asked for (C12-3).
         const waits = !already && !kept && endedUnread(hot);
-        if (!already && !kept && !waits) spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed.workspace_id, rule_dir: dir, origin: manualShareOrigin(home, lid, feed.workspace_id, goal?.id), ts });
+        if (!already && !kept && !waits) spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed.workspace_id, rule_dir: dir, signals, origin: manualShareOrigin(home, lid, feed.workspace_id, goal?.id), ts });
         const self = already ? "" : kept ? " This session stays private: its sharing was stopped (or its history deleted)." : waits ? ` ${DIR_UNREAD}` : goal ? " This session too; your next prompt carries the goal." : " This session too, with no goal (its usage counts as unallocated).";
         return `Align: new sessions in ${dir} are now shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : ""}.${replaces ? ` This replaces the current rule (${replaces}).` : ""}${self}${goal ? heldNote(goal) : ""} \`::align unshare --dir\` turns it off.`;
       }
@@ -1804,13 +1845,15 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
           `  Workspace: ${feed?.workspace_name || "your default workspace"}`,
           `  Goal: ${goal ? `${goal.title}${before ? " (the goal it had before)" : goal === ruleGoal ? " (this folder's rule's goal)" : ""}` : "none (unallocated)"}; counts from ${from}.${goal ? heldNote(goal) : ""}`,
           `  Sent: harness, a keyed repo hash, start time, an epoch, and per-request token counts with model, basis and estimated list cost.`,
-          `  Never sent: prompts, responses, tool input or output, paths, branch names.`,
-          `Type \`::align share ${arg ? `${arg} ` : ""}confirm\` to share.`,
+          `  ${signalsPreview(signals)}`,
+          `  ${RESULTS_PREVIEW}`,
+          `  Prompts, replies, tool input and output, and file contents stay on this machine.`,
+          `Type \`::align share ${signals ? "--signals " : ""}${arg ? `${arg} ` : ""}confirm\` to share.`,
         ].join("\n");
       }
       // The workspace whose goals it read (the one the session had, or the default): a device with two workspaces and
       // no default would otherwise not know which (C3-6).
-      spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed?.workspace_id, origin: manualShareOrigin(home, lid, feed?.workspace_id, goal?.id), ts });
+      spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed?.workspace_id, signals, origin: manualShareOrigin(home, lid, feed?.workspace_id, goal?.id), ts });
       return goal
         ? `Align: sharing requested toward "${goal.title}". The next sync asks the Align server for it (within a few seconds); once it is shared, your next prompt carries the goal.${heldNote(goal)}`
         : "Align: sharing requested with no goal (its usage counts as unallocated; `::align bind <goal>` picks one). The next sync asks the Align server for it (within a few seconds).";

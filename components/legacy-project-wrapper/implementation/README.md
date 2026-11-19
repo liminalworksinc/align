@@ -115,6 +115,14 @@ spend bound to goals, and LOIs. LOIs are only ever recorded by the operator: `np
 --workspace ws_… [--note-ref <ref>]`, and `loi_signed` only with `--verified-original`. The definitions are in
 `specs/align/metrics.md`. There are no settings.
 
+## Session privacy
+
+Sharing a session sends metadata by default. Choose `--signals` to share repo-relative paths and
+labels for a session or folder. The proposed derived-results option is off by default and can send a limited
+finding record only to a local Align server. Findings stay on the machine with hosted Align. Workspace owners can
+block either option. Run `align data-sharing` to review your choices and `align analysis show <session>` to inspect
+local results. Add `--json` to see the exact records Align acknowledged. Transcript content remains in its original files.
+
 ## Hosted (HOSTED=1)
 
 One server behind an HTTPS edge (Fly.io), for one public origin. Only `/app*`, `/api/v2/*`, `/api/mcp`, `/oauth/*`,

@@ -1,3 +1,5 @@
+import { recordAnalysis, runAnalysis } from "./analysis.ts";
+import { takeLease } from "./lease.ts";
 // Spool ingest, outbox flush, epoch assignment, usage upload and the one-pass sync that hooks start in the background.
 // Only shared sessions ever reach the server.
 import fs from "node:fs";
@@ -142,6 +144,10 @@ function dropStartingShares(ctx: Ctx, before: number): void {
 
 function applySpool(ctx: Ctx, r: SpoolRecord): string | null {
   switch (r.type) {
+    case "analysis_turn":
+    case "drift_feedback":
+      recordAnalysis(ctx, r);
+      return null;
     case "session_start": {
       const lid = ensureSession(ctx.db, r.harness, r.native_id, { cwd: r.cwd, ts: r.ts });
       ctx.db
@@ -280,6 +286,7 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
       // Shared before (its history deleted since, too): this share counts from now (C6-1).
       const before = sharedBefore(ctx, lid);
       applyShare(ctx, planShare(ctx, lid, ws, goal, null, before ? "now" : "start", r.origin ?? null, r.epoch_id));
+      kvSet(ctx.db, `signals:${lid}`, r.signals === true ? "1" : "0");
       if (!r.rule_dir) {
         const text = `Align: sharing this session with ${ws.name}${goal ? ` for "${goal.title}"` : ""}, counting from ${before ? "now" : "session start"}.`;
         addShareNotice(ctx, lid, `share_started_${r.ts}`, { e: "started", ws: ws.name, goal: goal?.title ?? null, text });
@@ -326,10 +333,10 @@ export async function flushOutbox(ctx: Ctx): Promise<{ sent: number; deferred: n
   // follow-up). Only then, so a flush with no share to send makes no directives call; every caller (a pass, a command's
   // own flush) reads first.
   if (ctx.db.prepare("SELECT 1 FROM outbox WHERE kind='put_session' AND next_at<=? LIMIT 1").get(Date.now())) await pollDirectives(ctx, () => undefined).catch(() => 0);
-  const sessions = ctx.db.prepare("SELECT local_id, MIN(id) AS first FROM outbox GROUP BY local_id ORDER BY first").all() as { local_id: string }[];
+  const sessions = ctx.db.prepare("SELECT local_id, MIN(id) AS first FROM outbox WHERE kind NOT IN ('analysis_put','analysis_delete') GROUP BY local_id ORDER BY first").all() as { local_id: string }[];
   for (const { local_id } of sessions) {
     for (;;) {
-      const item = ctx.db.prepare("SELECT * FROM outbox WHERE local_id=? ORDER BY id LIMIT 1").get(local_id) as unknown as OutboxRow | undefined;
+      const item = ctx.db.prepare("SELECT * FROM outbox WHERE local_id=? AND kind NOT IN ('analysis_put','analysis_delete') ORDER BY id LIMIT 1").get(local_id) as unknown as OutboxRow | undefined;
       if (!item) break;
       if (item.next_at > Date.now()) {
         res.deferred++;
@@ -423,6 +430,12 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
   const lid = item.local_id;
   const base = p.ws ? `/api/v2/workspaces/${enc(p.ws)}/sessions/${enc(p.session_key)}` : "";
   switch (item.kind) {
+    case "work_signals_off": {
+      if (kvGet(ctx.db, `signals:${lid}`) === "1") return;
+      const r = await api(ctx, "PUT", `${base}/work-signals`, { body: { enabled: false } });
+      if (r.status !== 200 && r.status !== 404) throw new HttpError(r.status, r.json?.error ?? null, r.json);
+      return;
+    }
     case "put_session": {
       let r = await api(ctx, "PUT", base, { body: await wireBody(ctx, item, p, "started_at") });
       if (await learnClock(ctx, r, p)) r = await api(ctx, "PUT", base, { body: await wireBody(ctx, item, p, "started_at", true) });
@@ -845,27 +858,12 @@ export interface LastSync {
  */
 export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFeeds?: boolean; waitForLockMs?: number }): Promise<SyncResult> {
   const res: SyncResult = { skipped: false, spooled: 0, tail: { files: 0, bytes: 0, rewrites: 0, events: 0 }, sent: 0, uploaded: 0, directives: 0 };
-  const lock = path.join(ctx.home, "sync.lock");
   const waitUntil = Date.now() + (opts.waitForLockMs ?? 0);
-  for (;;) {
-    try {
-      fs.writeFileSync(lock, String(process.pid), { flag: "wx", mode: 0o600 });
-      break;
-    } catch {
-      let age = Infinity;
-      try {
-        age = Date.now() - fs.statSync(lock).mtimeMs;
-      } catch {
-        continue; // released between the two calls
-      }
-      if (age >= 120_000) {
-        fs.writeFileSync(lock, String(process.pid), { mode: 0o600 }); // stale lock from a killed pass
-        break;
-      }
-      // An end-of-turn pass waits for the running one, so the turn's last usage is never skipped.
-      if (Date.now() >= waitUntil) return { ...res, skipped: true };
-      await new Promise((r) => setTimeout(r, 200));
-    }
+  let unlock = takeLease(ctx, "sync");
+  while (!unlock) {
+    if (Date.now() >= waitUntil) return { ...res, skipped: true };
+    await new Promise((r) => setTimeout(r, 200));
+    unlock = takeLease(ctx, "sync");
   }
   const t0 = Date.now();
   ctx.passStartedAt = t0;
@@ -976,9 +974,11 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
         rec.error_since = prev.error_since || prev.at;
       } else if (prev?.error) ctx.log("sync: the server is reachable again");
       writeJsonAtomic(layout.lastSync(ctx.home), rec);
-      fs.unlinkSync(lock);
     } catch {
-      /* ignore */
+      /* The analysis pass can still run. */
+    } finally {
+      unlock();
     }
+    if (!res.aborted) await runAnalysis(ctx).catch(() => ctx.log("Local analysis will retry at the next sync."));
   }
 }

@@ -635,7 +635,7 @@ describe("local drift notice (D5)", () => {
     assert.equal(out.hookSpecificOutput, undefined, "never model context");
     assert.equal(
       out.systemMessage,
-      'Align: the agent\'s last reply may conflict with a limit on goal "Ship the v2 onboarding flow": Must not "The migration cutover must never run during month-end close." This is a word check on this machine only; nothing was sent or added to the agent\'s context. `align config drift off` turns it off.',
+      'Align: the agent\'s last reply may conflict with a limit on goal "Ship the v2 onboarding flow": Must not "The migration cutover must never run during month-end close." (lim_close). The reply check ran on this machine. The reply stays here. Type `::align drift wrong` to mark this notice as a false alarm, or add a limit id to mark one. `align config drift off` turns it off.',
     );
     assert.equal(fs.existsSync(layout.drift(t.home, lid)), false);
     assert.equal(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "p3", prompt: "ok" }).stdout, "", "shown once");
