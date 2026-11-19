@@ -896,6 +896,14 @@ try {
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
   check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 25, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds, deleted-session markers and the goal versions sent to connected apps included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 25 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_spend_home_teams", "v2_team_budgets", "v2_team_budget_history", "v2_budget_requests", "v2_budget_request_decisions", "v2_budget_request_sessions", "v2_team_no_goal_rollups", "v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
+  const budgetIndexes = withDb((d) => [
+    ["v2_budget_requests_requester_created", ["ws_id", "requester_id", "created_at"]],
+    ["v2_budget_requests_created", ["ws_id", "created_at"]],
+    ["v2_budget_requests_goal", ["ws_id", "goal_id"]],
+    ["v2_budget_request_sessions_session", ["ws_id", "session_key"]],
+    ["v2_budget_requests_source_device", ["source_device_id"]],
+  ].every(([name, columns]) => JSON.stringify(d.prepare(`PRAGMA index_info(${name})`).all().map((c) => c.name)) === JSON.stringify(columns)));
+  check("storage: budget request hourly limits and foreign-key child lookups have ordered indexes", budgetIndexes);
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
   check("storage (PORT2-001): migration 14 adds last_read_at to connected-app grants, beside last_used_at (connected, not read)", grantCols.includes("last_read_at") && grantCols.includes("last_used_at"), grantCols.join());
@@ -8240,6 +8248,9 @@ try {
         await open(pL, `/app/w/${W}/spend?team=${T}`); await pL.waitForSelector("[data-budget-request-form]");
         const uiBudget = (await req(SO, "GET", env)).json;
         check("budget screens: lead sets base, per-request allowance and monthly ceiling with named fields, bounds and remaining allowance", uiBudget.budget.amount_usd_micros === 100_000_000 && uiBudget.budget.allowance_ceiling_usd_micros === 10_000_000 && (await text(pL, "[data-burn]")).includes("At least") && (await text(pL, "[data-burn]")).includes("At most"), await text(pL, "[data-team-spending]"));
+        const noGoalRisk = "Spend in no goal comes from fewer than three people this month, so it can reveal one person's spend.";
+        const noGoalFigure = await pL.$eval("[data-burn]", (el) => [...el.querySelectorAll("div")].find((row) => row.querySelector("dt")?.textContent === "Spend in no goal, estimate")?.querySelector("dd")?.textContent ?? "");
+        check("budget screens: a larger team warns beside no-goal spend from fewer than three people without showing the count", uiBudget.team_member_count >= 3 && uiBudget.no_goal.contributor_count === 1 && noGoalFigure.includes(noGoalRisk) && !/contributor|1 person/.test(noGoalFigure) && !(await text(pL, "[data-team-spending]")).includes("Team totals can reveal one person's spend when the team has fewer than three members."), noGoalFigure);
         await open(pM, `/app/w/${W}/spend?team=${T}`);
         await pM.waitForSelector('select[name="team_id"]');
         await pM.select('select[name="team_id"]', solo);
@@ -8296,7 +8307,7 @@ try {
         const smallBudget = await req(SO, "PUT", `/teams/${T2}/budget`, { amount_usd: 1 });
         await pV.reload({ waitUntil: "networkidle0" });
         await pV.waitForFunction(() => document.querySelector("[data-team-spending]")?.textContent.includes("Team totals can reveal one person's spend when the team has fewer than three members."));
-        check("budget screens: a small team keeps its budget and sees the privacy sentence and cache age", smallBudget.status === 200 && smallBudget.json.team_member_count < 3 && (await text(pV, "[data-team-spending]")).includes("five minutes old"), await text(pV, "[data-team-spending]"));
+        check("budget screens: a small team keeps its budget and sees the privacy sentence and cache age", smallBudget.status === 200 && smallBudget.json.team_member_count < 3 && smallBudget.json.no_goal.contributor_count === 0 && !(await text(pV, "[data-team-spending]")).includes(noGoalRisk) && (await text(pV, "[data-team-spending]")).includes("five minutes old"), await text(pV, "[data-team-spending]"));
         await open(pO, link(deviceAsk.json)); await pO.waitForSelector(`[data-budget-request="${deviceAsk.json.id}"]`);
         check("budget screens: terminal source and readable dates appear on the record", (await text(pO, `[data-budget-request="${deviceAsk.json.id}"]`)).includes(deviceAsk.json.filing_note) && !(await text(pO, `[data-budget-request="${deviceAsk.json.id}"]`)).includes(`${m} UTC`));
         const homeRequest = (await request(SM)).json;

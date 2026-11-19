@@ -83,7 +83,7 @@ const allowanceGranted = (ws: string, team: string, month: string) => get<{ amou
 
 interface BurnSum { priced: number; unpriced: number; no_goal_priced: number; no_goal_unpriced: number }
 
-/** The only team usage read. It returns aggregates, never any goal, person or session identifier. */
+/** Team spend aggregates, never any goal, person or session identifier. */
 function teamSums(ws: string, team: string, from: string, to: string): BurnSum {
   const live = get<BurnSum>(
     `SELECT COALESCE(SUM(u.est_list_usd_micros), 0) AS priced,
@@ -111,6 +111,13 @@ export function budgetBurn(pp: PolicyPrincipal, teamId: string, month?: string |
   const m = spendMonth(month ?? currentMonth(now));
   const asOf = Math.max(m.start, Math.min(now, m.end));
   const sums = teamSums(pp.wsId, team.id, m.from, new Date(asOf).toISOString());
+  const noGoalContributors = get<{ n: number }>(
+    `SELECT COUNT(DISTINCT s.user_id) AS n FROM v2_usage u
+     JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id
+     JOIN v2_sessions s ON s.ws_id = e.ws_id AND s.session_key = e.session_key
+     WHERE u.ws_id = ? AND e.goal_id IS NULL AND e.spend_team_id = ? AND u.ts >= ? AND u.ts < ?`,
+    pp.wsId, team.id, m.from, new Date(asOf).toISOString(),
+  )!.n;
   const rolledAttributionUnknown = !!get<{ incomplete: number }>(
     `SELECT EXISTS(SELECT 1 FROM v2_spend_rollups
      WHERE ws_id = ? AND goal_id = '' AND requests > team_attributed_requests
@@ -174,7 +181,7 @@ export function budgetBurn(pp: PolicyPrincipal, teamId: string, month?: string |
     no_goal: { priced_spend_usd_micros: sums.no_goal_priced, estimated_spend_usd_micros: attributed && (!attributionUnknown || sums.no_goal_priced > 0) ? sums.no_goal_priced : null,
       spend_bound: !attributed ? "unknown" as const : sums.no_goal_unpriced || attributionUnknown ? "lower" as const : "exact" as const,
       unpriced_requests: attributionUnknown ? null : sums.no_goal_unpriced, known_unpriced_requests: sums.no_goal_unpriced, share_percent: complete && sums.priced > 0 ? Math.round(sums.no_goal_priced / sums.priced * 1000) / 10 : null,
-      attribution_unknown: attributionUnknown },
+      attribution_unknown: attributionUnknown, contributor_count: noGoalContributors },
     history, can: { manage: m.month >= currentMonth(now) && authorize(pp, "team_budget.manage", { kind: "pod", podId: team.id }).ok,
       request: !!e && m.month === currentMonth(now) && authorize(pp, "budget_request.create", { kind: "pod", podId: team.id }).ok },
   };

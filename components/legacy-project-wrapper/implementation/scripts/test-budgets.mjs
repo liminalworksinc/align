@@ -100,10 +100,10 @@ function session(key = "a".repeat(43), who = "member") {
   db.run("INSERT INTO v2_sessions (ws_id, session_key, user_id, device_id, harness, repo_key, started_at, state, created_at, updated_at) VALUES (?, ?, ?, 'dv_spend', 'codex', 'test-repo', ?, 'shared', ?, ?)", W, key, who, at, at, at);
   return key;
 }
-async function usage(key, goalId, amount, requestKey = "r".repeat(43)) {
-  const dev = { deviceId: "dv_spend", user: { id: "member" } };
+async function usage(key, goalId, amount, requestKey = "r".repeat(43), who = "member") {
+  const dev = { deviceId: "dv_spend", user: { id: who } };
   const epoch = `ep_${key.slice(0, 22)}`;
-  await openBindingEpoch(pp("member"), dev, key, { epoch_id: epoch, goal_id: goalId, starts_at: "2030-01-01T00:00:00.000Z", cause: "manual" });
+  await openBindingEpoch(pp(who), dev, key, { epoch_id: epoch, goal_id: goalId, starts_at: "2030-01-01T00:00:00.000Z", cause: "manual" });
   db.run("INSERT INTO v2_usage (ws_id, session_key, request_key, epoch_id, ts, model, query_source, input, output, cache_read, cache_write_5m, cache_write_1h, cache_write_unsplit, basis, est_list_usd_micros, price_table_version, source, received_at) VALUES (?, ?, ?, ?, ?, 'test-model', 'main', 10, 10, 0, 0, 0, 0, 'estimated_list_usd', ?, 'test', 'otel', ?)", W, key, requestKey, epoch, "2030-01-10T00:00:00.000Z", amount, new Date().toISOString());
 }
 
@@ -132,6 +132,42 @@ await test("teams of one or two can keep a budget and report the small-team disc
   await budget(); assert.equal(burn().team_member_count, 1); assert.equal(burn().budget.amount_usd_micros, 100_000_000);
   db.run("INSERT INTO v2_pod_members VALUES (?, ?, 'member', 'member', ?)", W, T, new Date().toISOString());
   assert.equal(burn().team_member_count, 2); assert.equal(burn().budget.amount_usd_micros, 100_000_000);
+});
+await test("no-goal contributor count follows distinct people and captured monthly attribution", async () => {
+  await budget(); goal("g_public");
+  const add = async (who, letter, amount = 1_000_000) => {
+    const key = session(letter.repeat(43), who);
+    await usage(key, null, amount, "r".repeat(43), who);
+    return key;
+  };
+  assert.ok(burn().team_member_count >= 3); assert.equal(burn().no_goal.contributor_count, 0);
+  await usage(session("g".repeat(43)), "g_public", 9_000_000);
+  await add("other", "o");
+  const beforeMonth = await add("lead", "b"), afterRead = await add("lead", "f"), unattributed = await add("lead", "h");
+  db.run("UPDATE v2_usage SET ts = '2029-12-31T23:59:59.999Z' WHERE session_key = ?", beforeMonth);
+  db.run("UPDATE v2_usage SET ts = ? WHERE session_key = ?", new Date(now).toISOString(), afterRead);
+  db.run("UPDATE v2_epochs SET spend_team_id = NULL WHERE session_key = ?", unattributed);
+  assert.equal(burn().no_goal.contributor_count, 0);
+  const first = await add("member", "a");
+  await usage(first, null, 2_000_000, "s".repeat(43));
+  await add("member", "c");
+  assert.equal(burn().no_goal.contributor_count, 1);
+  assert.equal(burn("viewer").no_goal.contributor_count, 1);
+  await add("lead", "d", null);
+  assert.equal(burn().no_goal.contributor_count, 2);
+  // A later home-team choice cannot change the captured attribution or its contributor count.
+  db.run("INSERT INTO v2_pod_members VALUES (?, ?, 'member', 'member', ?)", W, T2, new Date().toISOString());
+  await chooseSpendHomeTeam(pp("member"), { team_id: T2 });
+  await add("member", "j");
+  db.run("DELETE FROM v2_pod_members WHERE ws_id = ? AND pod_id = ? AND user_id = 'member'", W, T);
+  assert.equal(burn().team_member_count, 3); assert.equal(burn().no_goal.contributor_count, 2);
+  await add("lead2", "e");
+  assert.equal(burn().no_goal.contributor_count, 3);
+  assert.equal(burn("owner", "2030-02").no_goal.contributor_count, 0);
+  const { spendCsv } = await import("../lib/v2/spend-export.ts");
+  const csv = spendCsv(pp("owner"), spendMonth("2030-01"));
+  assert.ok(!/contributor|person|people|member|lead/.test(csv));
+  assert.equal(csv.split("\r\n")[4], '"month","team","requests","estimated_list_cost_usd","unpriced_requests","input","output","cache_read","cache_write_5m","cache_write_1h","cache_write_unsplit"');
 });
 await test("set/change/remove are immutable audited history; no-op removal is idempotent", async () => {
   await budget(); await spend.writeBudget(pp("owner"), T, null, { amount_usd: 120 }); await budget(null); await budget(null);
@@ -723,6 +759,31 @@ await test("creation rate limit survives withdrawal and rejects without audit, i
   globalThis.__alignV2Db.domain.close(); globalThis.__alignV2Db.auth.close(); delete globalThis.__alignV2Db;
   await reject(() => ask(), 429, "rate_limited"); assert.equal(snapshot(), before);
   now += 3600_001; assert.equal((await ask()).state, "waiting");
+});
+await test("hourly request counts use covering index ranges without scanning request history", async () => {
+  await budget(); await ask();
+  const queries = [...globalThis.__alignV2Db.stmts.keys()].filter((sql) => sql.startsWith("SELECT COUNT(*) AS n FROM v2_budget_requests WHERE ws_id = ?") && sql.includes("created_at > ?"));
+  assert.equal(queries.length, 2);
+  const since = new Date(now - 3600_000).toISOString();
+  for (const sql of queries) {
+    const requester = sql.includes("requester_id = ?");
+    const plan = db.all(`EXPLAIN QUERY PLAN ${sql}`, ...(requester ? [W, "member", since] : [W, since])).map((r) => r.detail).join("\n");
+    assert.doesNotMatch(plan, /\bSCAN\b/);
+    assert.match(plan, new RegExp(`SEARCH v2_budget_requests USING COVERING INDEX ${requester ? "v2_budget_requests_requester_created" : "v2_budget_requests_created"}\\b`));
+    assert.ok(plan.includes(requester ? "(ws_id=? AND requester_id=? AND created_at>?)" : "(ws_id=? AND created_at>?)"), plan);
+  }
+});
+await test("budget request foreign-key child lookups use covering indexes", async () => {
+  for (const [table, columns, index, params] of [
+    ["v2_budget_request_sessions", ["ws_id", "session_key"], "v2_budget_request_sessions_session", [W, "a".repeat(43)]],
+    ["v2_budget_requests", ["ws_id", "goal_id"], "v2_budget_requests_goal", [W, "g_public"]],
+    ["v2_budget_requests", ["source_device_id"], "v2_budget_requests_source_device", ["dv_spend"]],
+  ]) {
+    assert.deepEqual(db.all(`PRAGMA index_info(${index})`).map((r) => r.name), columns);
+    const plan = db.all(`EXPLAIN QUERY PLAN SELECT rowid FROM ${table} WHERE ${columns.map((c) => `${c} = ?`).join(" AND ")}`, ...params).map((r) => r.detail).join("\n");
+    assert.doesNotMatch(plan, /\bSCAN\b/);
+    assert.match(plan, new RegExp(`SEARCH ${table} USING COVERING INDEX ${index}\\b`));
+  }
 });
 
 await test("one requester's allowance grants consume their hourly limit without blocking another person", async () => {
