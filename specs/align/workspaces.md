@@ -594,6 +594,27 @@ when `BETTER_AUTH_SECRET` is unset, migrate the database before serving, and run
 - **WHEN** a request reaches an `/api/v2` route before the database has been opened and migrated
 - **THEN** the route waits for the migration to finish and never runs against an unmigrated file
 
+### Requirement: Serialize transaction starts on the shared connection
+
+The server SHALL wait asynchronously for an open domain transaction to finish before starting another `tx()` or
+`previewTx()` on the shared connection, including between a successful `BEGIN IMMEDIATE` and its caller's continuation.
+The wait SHALL use the existing bound of 100 retry delays (up to approximately five seconds) and fail with a clear
+transaction-wait timeout if the connection stays occupied. A busy database SHALL retain its bounded retries, and a
+non-busy start error SHALL be rethrown unchanged. Nested `tx()` calls SHALL join their synchronous outer body;
+`previewTx()` SHALL still refuse nesting, capture outbound actions and roll back preview writes. A thrown body SHALL
+release the transaction for later callers, and callers waiting through preview cleanup SHALL use the replacement
+connection if cleanup reopens it.
+
+#### Scenario: Concurrent writes and previews
+
+- **WHEN** 64 callers start transactions together on one connection, with writes only or with previews mixed in and either kind starting first (`scripts/test-v2.mjs --storage-only`, tests "storage: concurrent tx calls commit each write once" and "storage: concurrent tx and preview calls commit only real writes once")
+- **THEN** every caller succeeds, each real write commits exactly once, every preview write rolls back, preview outbound actions stay captured, and only committed writes announce workspace changes
+
+#### Scenario: Bounded waits and cleanup
+
+- **WHEN** transaction starts encounter nested calls, a throwing body, a busy database, an occupied connection, a non-busy error or preview cleanup that reopens the connection (`scripts/test-v2.mjs --storage-only`, tests "storage: transaction wait preserves ... behavior and allows later writes")
+- **THEN** nested writes join the outer transaction, nested previews are refused, a throwing body rolls back, occupied or busy starts stop after 100 retry delays, non-busy errors retain their identity, and later writes succeed after the lock is released or the connection is reopened
+
 ### Requirement: Workspace creation
 
 The server SHALL let a signed-in person create a workspace on `POST /api/v2/workspaces {name, creation_code?}` (name

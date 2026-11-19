@@ -105,16 +105,22 @@ export const holdTouches = (): TouchHold => touches().hold();
 
 let depth = 0;
 
-/** BEGIN IMMEDIATE on the domain connection, retrying a busy start asynchronously for up to ~5 s. */
-async function begin(d: DatabaseSync) {
+/** Wait for the domain connection and BEGIN IMMEDIATE, retrying a busy start for up to ~5 s. */
+async function begin() {
   for (let attempt = 0; ; attempt++) {
-    try {
-      d.exec("BEGIN IMMEDIATE");
-      return;
-    } catch (e) {
-      if (!isBusy(e) || attempt >= 100) throw e;
-      await new Promise((r) => setTimeout(r, 25 + Math.random() * 25));
+    // Another caller may have begun before its await continuation sets depth. Preview cleanup can replace d.
+    const d = openDb().domain;
+    if (d.isTransaction) {
+      if (attempt >= 100) throw new Error("Timed out waiting for the domain transaction to finish");
+    } else {
+      try {
+        d.exec("BEGIN IMMEDIATE");
+        return d;
+      } catch (e) {
+        if (!isBusy(e) || attempt >= 100) throw e;
+      }
     }
+    await new Promise((r) => setTimeout(r, 25 + Math.random() * 25));
   }
 }
 
@@ -122,9 +128,8 @@ async function begin(d: DatabaseSync) {
  *  asynchronously for up to ~5 s. Nested calls join the outer transaction. */
 export async function tx<T>(fn: () => T): Promise<T> {
   if (depth > 0) return fn();
-  const d = openDb().domain;
   let held: TouchHold | undefined;
-  await begin(d);
+  const d = await begin();
   depth++;
   try {
     held = holdTouches();
@@ -200,9 +205,8 @@ export interface Preview<T, R> {
  *  back. An error from `fn` is returned (ok false), never thrown, after the rollback. Setup errors throw after cleanup. */
 export async function previewTx<T, R>(fn: () => T, observe?: (changes: RowChange[]) => R): Promise<Preview<T, R>> {
   if (depth > 0 || previewing) throw new Error("previewTx can't run inside another transaction");
-  const d = openDb().domain;
   let session: ReturnType<DatabaseSync["createSession"]> | undefined;
-  await begin(d);
+  const d = await begin();
   depth++;
   try {
     previewing = [];

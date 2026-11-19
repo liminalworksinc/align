@@ -33,6 +33,7 @@
 //                                         is open when hosted
 // Usage: node scripts/test-v2.mjs <port>   (from a worktree root; refuses 3100, the main checkout and a busy port;
 //                                           also uses <port>+1 for the second-server check)
+//        node scripts/test-v2.mjs --storage-only   (in-process storage regressions, no server or port)
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, createHmac, generateKeyPairSync, randomBytes, sign } from "node:crypto";
@@ -44,8 +45,9 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
+const STORAGE_ONLY = process.argv.includes("--storage-only");
 const PORT = Number(process.argv[2]);
-if (!Number.isInteger(PORT) || PORT === 3100) {
+if (!STORAGE_ONLY && (!Number.isInteger(PORT) || PORT === 3100)) {
   console.error("usage: node scripts/test-v2.mjs <port> (not 3100)");
   process.exit(2);
 }
@@ -55,7 +57,7 @@ if (path.resolve(ROOT) === path.join(os.homedir(), "liminal/align")) {
   console.error(`test-v2: refusing the main checkout ${ROOT}; run from a worktree`);
   process.exit(2);
 }
-if (spawnSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]).status === 0) {
+if (!STORAGE_ONLY && spawnSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]).status === 0) {
   console.error(`test-v2: port ${PORT} is already in use`);
   process.exit(2);
 }
@@ -399,11 +401,13 @@ for (const setup of ["touch", "session"]) {
         const closed = db.domain;
         const pending = previewTx(() => { called = true; });
         assert.equal(closed.isTransaction, true);
+        const queued = tx(() => 42);
         // A real lifecycle failure: close after BEGIN and before native createSession, without replacing any db method.
         closed.close();
         await assert.rejects(pending, (error) => error.code === "ERR_INVALID_STATE" && /database is not open/.test(error.message));
         assert.equal(inPreview(), false);
         assert.notEqual(db.domain, closed); // The safety net replaced the closed connection and cleared statements.
+        assert.equal(await queued, 42); // A waiter must pick up the replacement connection.
       }
       assert.equal(called, false);
       assert.equal(inPreview(), false);
@@ -461,7 +465,163 @@ for (const setup of ["touch", "session"]) {
   `, setup], { cwd: ROOT, encoding: "utf8", env: { ...process.env, ALIGN_DATA_DIR: path.join(tmpRoot, `setup-${setup}`) } });
   check(`storage: ${setup} setup failure cleans up; later tx commits and rolls back, previews work and inPreview resets`, regression.status === 0, regression.stdout + regression.stderr);
 }
-if (process.argv.includes("--tx-setup-only")) {
+for (const first of ["tx", "mixed", "preview"]) {
+  const regression = spawnSync(process.execPath, ["--input-type=module", "-e", String.raw`
+    import assert from "node:assert/strict";
+    import { registerHooks } from "node:module";
+    import path from "node:path";
+    import { pathToFileURL } from "node:url";
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        return nextResolve(specifier.startsWith(".") && !path.extname(specifier) ? specifier + ".ts" : specifier, context);
+      },
+    });
+    const { openDb, exec, all, run, tx, previewTx, inPreview, onWsChange, touchWs, captureOutbound } =
+      await import(pathToFileURL(path.join(process.cwd(), "lib/v2/db.ts")).href);
+    const db = openDb();
+    exec("CREATE TABLE v2_concurrent_test (id TEXT PRIMARY KEY)");
+    const first = process.argv[1];
+    const events = [];
+    const stop = onWsChange((ws) => events.push(ws));
+    try {
+      const ids = Array.from({ length: 64 }, (_, i) => String(i));
+      const previewIds = new Set(first === "tx" ? [] : ids.filter((_, i) => i % 3 === (first === "preview" ? 0 : 1)));
+      const outcomes = await Promise.allSettled(ids.map(id => {
+        const body = () => {
+          assert.equal(db.domain.isTransaction, true);
+          assert.equal(inPreview(), previewIds.has(id));
+          run("INSERT INTO v2_concurrent_test VALUES (?)", id);
+          touchWs(id);
+          if (previewIds.has(id)) captureOutbound({ kind: "mail", what: id });
+          return id;
+        };
+        return previewIds.has(id) ? previewTx(body) : tx(body);
+      }));
+      const failures = outcomes.filter(r => r.status === "rejected");
+      assert.equal(failures.length, 0, failures.length + " starts failed: " + failures[0]?.reason);
+      for (let i = 0; i < ids.length; i++) {
+        const result = outcomes[i].value;
+        if (previewIds.has(ids[i])) {
+          assert.equal(result.ok, true);
+          assert.equal(result.value, ids[i]);
+          assert.equal(result.changes.length, 1);
+          assert.equal(result.changes[0].after.id, ids[i]);
+          assert.deepEqual(result.outbound, [{ kind: "mail", what: ids[i] }]);
+        } else assert.equal(result, ids[i]);
+      }
+      const committed = ids.filter(id => !previewIds.has(id)).sort();
+      assert.deepEqual(all("SELECT id FROM v2_concurrent_test ORDER BY id").map(r => r.id), committed);
+      assert.deepEqual(events.sort(), committed);
+      assert.equal(inPreview(), false);
+      assert.equal(db.domain.isTransaction, false);
+    } finally {
+      stop();
+      db.domain.close();
+      db.auth.close();
+    }
+  `, first], { cwd: ROOT, encoding: "utf8", timeout: 15_000, env: { ...process.env, ALIGN_DATA_DIR: path.join(tmpRoot, `concurrent-${first}`) } });
+  check(`storage: concurrent ${first === "tx" ? "tx calls commit each write once" : `tx and preview calls commit only real writes once (${first === "preview" ? "preview" : "tx"} first)`}`, regression.status === 0, regression.stdout + regression.stderr);
+}
+for (const rule of ["nested", "rollback", "busy", "wait", "nonbusy", "reopen"]) {
+  const regression = spawnSync(process.execPath, ["--input-type=module", "-e", String.raw`
+    import assert from "node:assert/strict";
+    import { registerHooks } from "node:module";
+    import path from "node:path";
+    import { pathToFileURL } from "node:url";
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        return nextResolve(specifier.startsWith(".") && !path.extname(specifier) ? specifier + ".ts" : specifier, context);
+      },
+    });
+    const { openDb, exec, all, run, tx, previewTx, inPreview } =
+      await import(pathToFileURL(path.join(process.cwd(), "lib/v2/db.ts")).href);
+    const db = openDb();
+    exec("CREATE TABLE v2_wait_test (id TEXT PRIMARY KEY)");
+    const insert = id => run("INSERT INTO v2_wait_test VALUES (?)", id);
+    const fault = new Error("test transaction failure");
+    const realSetTimeout = globalThis.setTimeout;
+    try {
+      const rule = process.argv[1];
+      if (rule === "nested") {
+        let nested, refused;
+        await tx(() => {
+          nested = tx(() => insert("nested"));
+          refused = assert.rejects(previewTx(() => assert.fail("nested preview ran")), /inside another transaction/);
+        });
+        await Promise.all([nested, refused]);
+        assert.deepEqual(all("SELECT id FROM v2_wait_test").map(r => r.id), ["nested"]);
+        const preview = await previewTx(() => {
+          assert.equal(inPreview(), true);
+          nested = tx(() => insert("preview-nested"));
+          refused = assert.rejects(previewTx(() => assert.fail("nested preview ran")), /inside another transaction/);
+        });
+        await Promise.all([nested, refused]);
+        assert.equal(preview.ok, true);
+        assert.equal(preview.changes[0].after.id, "preview-nested");
+      } else if (rule === "rollback") {
+        let nested;
+        const failed = assert.rejects(tx(() => {
+          nested = tx(() => insert("rolled-back"));
+          throw fault;
+        }), e => e === fault);
+        const queued = tx(() => insert("after-throw"));
+        await Promise.all([failed, queued]);
+        await nested;
+        assert.deepEqual(all("SELECT id FROM v2_wait_test").map(r => r.id), ["after-throw"]);
+      } else if (rule === "busy" || rule === "wait") {
+        let waits = 0;
+        globalThis.setTimeout = resume => { waits++; queueMicrotask(resume); return 0; };
+        const holder = rule === "busy" ? db.auth : db.domain;
+        for (const start of [tx, previewTx]) {
+          holder.exec("BEGIN IMMEDIATE");
+          waits = 0;
+          await assert.rejects(start(() => assert.fail("body ran before lock release")), rule === "busy" ? /database is locked/ : /Timed out waiting for the domain transaction to finish/);
+          assert.equal(waits, 100);
+          assert.equal(holder.isTransaction, true);
+          holder.exec("ROLLBACK");
+        }
+        if (rule === "busy") {
+          db.auth.exec("BEGIN IMMEDIATE");
+          const pending = tx(() => insert("after-busy"));
+          db.auth.exec("ROLLBACK");
+          await pending;
+        }
+      } else if (rule === "nonbusy") {
+        const original = db.domain.exec;
+        db.domain.exec = () => { throw fault; };
+        try {
+          for (const start of [tx, previewTx]) await assert.rejects(start(() => assert.fail("body ran after BEGIN error")), e => e === fault);
+        } finally {
+          db.domain.exec = original;
+        }
+      } else if (rule === "reopen") {
+        const old = db.domain;
+        const original = old.exec;
+        old.exec = function(sql) {
+          if (sql.startsWith("ROLLBACK")) throw fault;
+          return original.call(this, sql);
+        };
+        const preview = previewTx(() => insert("rolled-back-on-close"));
+        const queued = tx(() => insert("after-reopen"));
+        assert.equal((await preview).ok, true);
+        assert.notEqual(db.domain, old);
+        await queued;
+        assert.deepEqual(all("SELECT id FROM v2_wait_test").map(r => r.id), ["after-reopen"]);
+      }
+      assert.equal(inPreview(), false);
+      assert.equal(db.domain.isTransaction, false);
+      await tx(() => insert("later-write"));
+      assert.equal(all("SELECT id FROM v2_wait_test WHERE id = 'later-write'").length, 1);
+      assert.equal(all("SELECT id FROM v2_wait_test WHERE id = 'preview-nested'").length, 0);
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      if (db.domain.isOpen) db.domain.close();
+      db.auth.close();
+    }
+  `, rule], { cwd: ROOT, encoding: "utf8", timeout: 15_000, env: { ...process.env, ALIGN_DATA_DIR: path.join(tmpRoot, `wait-${rule}`) } });
+  check(`storage: transaction wait preserves ${rule} behavior and allows later writes`, regression.status === 0, regression.stdout + regression.stderr);
+}
+if (STORAGE_ONLY || process.argv.includes("--tx-setup-only")) {
   rmSync(tmpRoot, { recursive: true, force: true });
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
