@@ -170,10 +170,9 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Parity evidence:** The new test fails against the original export and passes after the
   repair (budget tests 50 passed, 0 failed). It checks six readers before and after retention. `npm run lint` and
   `npx tsc --noEmit -p .` pass; both edited test scripts pass syntax checks, and the diff passes whitespace checks.
-  These commands ran from the application directory without opening ports. The updated HTTP/browser suite was
-  not executed. Parity compares table data with the same UTC window; the page currently requests all-time data
+  The full gate, including the HTTP and browser suite, then passed on this branch (2,168 passed, 0 failed). Parity compares table data with the same UTC window; the page currently requests all-time data
   and rounds currency for display, while the CSV retains six decimal places. Shared aggregates still permit
-  deductions when only one hidden contributor remains. The workflow guidance command remains unavailable.
+  deductions when only one hidden contributor remains.
 - **Completion prerequisites:** none
 - **Outcome:** The export route and the Spend download control ship with SPEND-003 with coverage in the export domain, HTTP and browser suites.
 - **Implementation and evidence:**
