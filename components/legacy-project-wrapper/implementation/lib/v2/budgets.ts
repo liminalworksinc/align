@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { all, audit, get, run, tx } from "./db";
+import { all, audit, get, isBusy, run, tx } from "./db";
 import { badRequest, conflict, notFound, V2Error } from "./errors";
 import { goalObj, visibleGoal } from "./goals";
 import { newId, nowIso } from "./ids";
@@ -85,7 +85,7 @@ const allowanceGranted = (ws: string, team: string, month: string) => get<{ amou
 
 interface BurnSum { priced: number; unpriced: number; no_goal_priced: number; no_goal_unpriced: number }
 
-/** The only team usage read. It returns aggregates, never any goal, person or session identifier. */
+/** Team spend aggregates, never any goal, person or session identifier. */
 function teamSums(ws: string, team: string, from: string, to: string): BurnSum {
   const live = get<BurnSum>(
     `SELECT COALESCE(SUM(u.est_list_usd_micros), 0) AS priced,
@@ -148,8 +148,25 @@ export function homeBudgetCrossings(pp: PolicyPrincipal) {
   ).map(({ team_id, name, ...c }) => ({ team: { id: team_id, name }, ...c }));
 }
 
-export function budgetBurn(pp: PolicyPrincipal, teamId: string, month?: string | null, now = Date.now()) {
-  return tx(() => readBudgetBurn(memberPrincipal(pp.wsId, pp.userId), teamId, month, now));
+export async function budgetBurn(pp: PolicyPrincipal, teamId: string, month?: string | null, now = Date.now()) {
+  const figures = readBudgetBurn(memberPrincipal(pp.wsId, pp.userId), teamId, month, now);
+  if (figures.month !== currentMonth(now) || !figures.reached_thresholds.some((threshold) => !get(
+    "SELECT 1 FROM v2_budget_crossings WHERE ws_id = ? AND pod_id = ? AND month = ? AND threshold = ?",
+    pp.wsId, teamId, figures.month, threshold,
+  ))) return figures;
+  let started = false;
+  try {
+    return await tx(() => {
+      started = true;
+      const current = readBudgetBurn(memberPrincipal(pp.wsId, pp.userId), teamId, month, now);
+      observeCrossings(pp.wsId, teamId, current.month, current.reached_thresholds, current.as_of, now);
+      return { ...current, budget_stamp: current.history.length ? budgetStamp(pp.wsId, teamId, current.month, now) : null };
+    });
+  } catch (error) {
+    // A busy start must not fail the read. A later read can record this crossing.
+    if (!started && isBusy(error)) return figures;
+    throw error;
+  }
 }
 
 function readBudgetBurn(pp: PolicyPrincipal, teamId: string, month: string | null | undefined, now: number) {
@@ -159,6 +176,21 @@ function readBudgetBurn(pp: PolicyPrincipal, teamId: string, month: string | nul
   const m = spendMonth(month ?? currentMonth(now));
   const asOf = Math.max(m.start, Math.min(now, m.end));
   const sums = teamSums(pp.wsId, team.id, m.from, new Date(asOf).toISOString());
+  const noGoalContributors = get<{ n: number }>(
+    `SELECT COUNT(DISTINCT s.user_id) AS n FROM v2_usage u
+     JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id
+     JOIN v2_sessions s ON s.ws_id = e.ws_id AND s.session_key = e.session_key
+     WHERE u.ws_id = ? AND e.goal_id IS NULL AND e.spend_team_id = ? AND u.ts >= ? AND u.ts < ?`,
+    pp.wsId, team.id, m.from, new Date(asOf).toISOString(),
+  )!.n;
+  // Retained no-goal usage keeps no identities, so its contributors cannot be counted. Fewer than three known
+  // contributors plus any retained amount means the figure may still come from one or two people.
+  const rolledNoGoal = !!get<{ rolled: number }>(
+    `SELECT EXISTS(SELECT 1 FROM v2_team_no_goal_rollups WHERE ws_id = ? AND pod_id = ?
+       AND day || 'T00:00:00.000Z' >= ? AND day || 'T00:00:00.000Z' < ?) AS rolled`,
+    pp.wsId, team.id, m.from, new Date(asOf).toISOString(),
+  )!.rolled;
+  const fewContributors = noGoalContributors < 3 && (noGoalContributors > 0 || rolledNoGoal);
   const rolledAttributionUnknown = !!get<{ incomplete: number }>(
     `SELECT EXISTS(SELECT 1 FROM v2_spend_rollups
      WHERE ws_id = ? AND goal_id = '' AND requests > team_attributed_requests
@@ -207,7 +239,6 @@ function readBudgetBurn(pp: PolicyPrincipal, teamId: string, month: string | nul
     "SELECT id, action, amount_usd_micros, allowance_usd_micros, allowance_ceiling_usd_micros, actor_id, at FROM v2_team_budget_history WHERE ws_id = ? AND pod_id = ? AND month = ? ORDER BY at, rowid", pp.wsId, team.id, m.month,
   ).map(({ actor_id, ...h }) => ({ ...h, actor: person(actor_id) }));
   const reached = effective !== null && effective > 0 && attributed ? [80, 100].filter((t) => sums.priced * 100 >= effective * t) : [];
-  observeCrossings(pp.wsId, team.id, m.month, reached, new Date(asOf).toISOString(), now);
   return {
     budget_stamp: history.length ? budgetStamp(pp.wsId, team.id, m.month, now) : null, reached_thresholds: reached,
     team, team_member_count: get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_pod_members WHERE ws_id = ? AND pod_id = ?", pp.wsId, team.id)!.n, month: m.month, from: m.from, to: m.to, as_of: new Date(asOf).toISOString(), note: BUDGET_NOTE,
@@ -225,7 +256,7 @@ function readBudgetBurn(pp: PolicyPrincipal, teamId: string, month: string | nul
     no_goal: { priced_spend_usd_micros: sums.no_goal_priced, estimated_spend_usd_micros: attributed && (!attributionUnknown || sums.no_goal_priced > 0) ? sums.no_goal_priced : null,
       spend_bound: !attributed ? "unknown" as const : sums.no_goal_unpriced || attributionUnknown ? "lower" as const : "exact" as const,
       unpriced_requests: attributionUnknown ? null : sums.no_goal_unpriced, known_unpriced_requests: sums.no_goal_unpriced, share_percent: complete && sums.priced > 0 ? Math.round(sums.no_goal_priced / sums.priced * 1000) / 10 : null,
-      attribution_unknown: attributionUnknown },
+      attribution_unknown: attributionUnknown, few_contributors: fewContributors },
     history, can: { manage: m.month >= currentMonth(now) && authorize(pp, "team_budget.manage", { kind: "pod", podId: team.id }).ok,
       request: !!e && m.month === currentMonth(now) && authorize(pp, "budget_request.create", { kind: "pod", podId: team.id }).ok },
   };

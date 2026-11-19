@@ -25,7 +25,7 @@ export function validBudgetFigure(s: Pick<BudgetSnapshot, "as_of" | "month" | "c
     serverNow - at <= BUDGET_FRESH_MS && monthOf(at) === s.month && budgetMonths(now, s.clock_offset_ms).includes(s.month);
 }
 
-/** Retain observed crossings until delivery, while later reads keep the effective budget unchanged. */
+/** Retain observed crossings until delivery; callers drop them when the effective budget changes. */
 export function observedCrossings(s: BudgetSnapshot, previous: BudgetSnapshot | null, now: number): NonNullable<BudgetSnapshot["crossings"]> {
   const prior = previous && previous.workspace_id === s.workspace_id && previous.session_key === s.session_key &&
     previous.team.id === s.team.id && previous.month === s.month && Date.parse(previous.fetched_at) <= now ?

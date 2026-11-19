@@ -86,7 +86,7 @@ export function exec(sql: string) {
   openDb().domain.exec(sql);
 }
 
-const isBusy = (e: unknown) => /SQLITE_BUSY|database is locked/i.test(String((e as Error)?.message ?? e)) || (e as { errcode?: number })?.errcode === 5;
+export const isBusy = (e: unknown) => /SQLITE_BUSY|database is locked/i.test(String((e as Error)?.message ?? e)) || (e as { errcode?: number })?.errcode === 5;
 
 // ---- live: which workspaces a write changed (lib/v2/live.ts streams it; the rules are lib/v2/touch-core.mts) ----
 // A write marks its workspace with touchWs(), usually through audit() or writeDirective(). Announced only once durable:
@@ -1311,6 +1311,9 @@ const MIGRATIONS: string[] = [
     FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id)
   );
   CREATE INDEX v2_budget_requests_team ON v2_budget_requests(ws_id, pod_id, month, updated_at);
+  CREATE INDEX v2_budget_requests_requester_created ON v2_budget_requests(ws_id, requester_id, created_at);
+  CREATE INDEX v2_budget_requests_created ON v2_budget_requests(ws_id, created_at);
+  CREATE INDEX v2_budget_requests_goal ON v2_budget_requests(ws_id, goal_id);
   CREATE TABLE v2_budget_request_decisions (
     ws_id TEXT NOT NULL,
     request_id TEXT NOT NULL,
@@ -1332,6 +1335,7 @@ const MIGRATIONS: string[] = [
     FOREIGN KEY (ws_id, request_id) REFERENCES v2_budget_requests(ws_id, id) ON DELETE CASCADE,
     FOREIGN KEY (ws_id, session_key) REFERENCES v2_sessions(ws_id, session_key) ON DELETE CASCADE
   );
+  CREATE INDEX v2_budget_request_sessions_session ON v2_budget_request_sessions(ws_id, session_key);
   CREATE UNIQUE INDEX v2_pod_members_workspace_person ON v2_pod_members(ws_id, pod_id, user_id);
   CREATE TABLE v2_spend_home_teams (
     ws_id TEXT NOT NULL,
@@ -1366,6 +1370,7 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE v2_budget_requests ADD COLUMN source_device_id TEXT REFERENCES v2_devices(id) ON DELETE SET NULL;
   ALTER TABLE v2_budget_requests ADD COLUMN source_device_name TEXT;
+  CREATE INDEX v2_budget_requests_source_device ON v2_budget_requests(source_device_id);
   `,
   // First observed budget crossings are information for Home, never decisions or product events.
   `

@@ -517,7 +517,8 @@ budget_stamp, reached_thresholds, allowance_granted_usd_micros, allowance_remain
 allowance_ceiling_usd_micros, updated_by, updated_at}`. People are `{id, name}`. `can` is `{manage, request}`.
 History is ordered oldest first and has `{id, action, amount_usd_micros, allowance_usd_micros,
 allowance_ceiling_usd_micros, actor, at}`. `no_goal` has `{priced_spend_usd_micros, estimated_spend_usd_micros,
-spend_bound, unpriced_requests, known_unpriced_requests, share_percent, attribution_unknown}`.
+spend_bound, unpriced_requests, known_unpriced_requests, share_percent, attribution_unknown, few_contributors}`.
+`few_contributors` is true when one or two distinct people have recorded no-goal usage in the month's read window under this team's captured home-team attribution, or when fewer than three are known and retained usage, which keeps no identities, is part of the figure. No count is returned. The panel warns when it is true; the CSV carries neither.
 Bounds are `exact`, `lower`, `upper`, `unknown` or null for absent amounts. Amounts are integer USD microdollars representing list-price estimates.
 Unpriced work and earlier live no-goal usage without a home team give spend and forecast lower bounds and a remaining upper bound. With no positive known subtotal, earlier unattributed usage gives unknown amounts. Missing attribution in retained aggregates also gives a lower bound for a known positive subtotal and unknown amounts otherwise, with an attribution-incomplete flag, without workspace-wide unattributed counts. No budget is `budget: null`. Reads do not create audit records or decisions.
 

@@ -1310,7 +1310,7 @@ Unknown harness arguments and unknown events SHALL produce no output.
 #### Scenario: Latency with networking blocked
 
 - **WHEN** 30 hook runs alternate `SessionStart`, `UserPromptSubmit` and `PreToolUse` for a shared session with all network access blocked (test `hooks` "p95 latency under 150 ms with networking blocked")
-- **THEN** every run exits 0 and the 95th-percentile duration is under 150 ms, where a bare Node process timed between the hook runs has a 95th percentile of at most 60 ms; above that the machine is busy and only the measured excess over 60 ms is added to the limit
+- **THEN** every run exits 0 and the 95th-percentile duration is under 150 ms, where a bare Node process timed between the hook runs has a 95th percentile of at most 60 ms; above that the machine is busy and the limit grows by the factor bare Node slowed by (150 ms times its 95th percentile over 60 ms), and past a bare 95th percentile of 160 ms the run is reported as skipped with its numbers, never as passed
 
 ### Requirement: Hooks start a short background sync
 
