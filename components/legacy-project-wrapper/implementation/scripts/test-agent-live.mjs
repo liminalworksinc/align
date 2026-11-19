@@ -376,18 +376,26 @@ try {
 
   // ======== team budgets: real terminal authority, sync attribution and next-turn information ========
   const savedEstimate = sdb((d) => d.prepare("SELECT request_key, est_list_usd_micros FROM v2_usage WHERE ws_id = ? AND session_key = ?").get(W, SKEY));
+  // Spend moves before the budget exists, so no read of the budget, from the terminal or from a sync a hook started in
+  // the background, can see the earlier amount.
+  sdb((d) => d.prepare("UPDATE v2_usage SET est_list_usd_micros = 8000 WHERE ws_id = ? AND request_key = ?").run(W, savedEstimate.request_key));
   const beforeBudgetSync = hook("UserPromptSubmit", { session_id: SID, prompt_id: "budget-before", prompt: "Continue", cwd: repo });
   const budgetSet = await ws(L, "PUT", `/teams/${PLATFORM}/budget`, { amount_usd: 0.01, allowance_usd: 0.05 });
-  // Spend moves before the terminal read, so the figures that read stores for running sessions are the ones the sync reuses.
-  sdb((d) => d.prepare("UPDATE v2_usage SET est_list_usd_micros = 8000 WHERE ws_id = ? AND request_key = ?").run(W, savedEstimate.request_key));
   const budgetRead = cli(["budget"], agentEnv, repo);
   const budgetAsk = cli(["budget", "request", "--amount", "0.01", "--reason", "Finish this work"], agentEnv, repo);
   const budgetRecord = sdb((d) => d.prepare("SELECT state, authority, filed_from FROM v2_budget_requests WHERE ws_id = ? AND requester_id = ? ORDER BY created_at DESC LIMIT 1").get(W, M.id));
   check("budget: align budget reads the folder goal's team and align budget request always waits for a person under the allowance", budgetSet.status === 200 && budgetRead.code === 0 && budgetRead.stdout.includes("Teams you can choose: Platform") && budgetRead.stdout.includes("estimates at list price") && budgetAsk.code === 0 && budgetAsk.stdout.includes("waits for a person") && !/br_[A-Za-z0-9_-]+|: waiting\b/.test(budgetAsk.stdout) && budgetRecord?.state === "waiting" && budgetRecord?.filed_from === "terminal" && budgetRecord?.authority === null, budgetRead.stdout + budgetAsk.stdout + budgetAsk.stderr);
-  const budgetSync = sync();
   const localBudgetId = withDb(path.join(alignHome, "align.db"), (d) => d.prepare("SELECT local_id FROM shares WHERE workspace_id = ? AND session_key = ?").get(W, SKEY).local_id);
   const budgetCacheFile = path.join(alignHome, "budgets-cache", `${localBudgetId}.json`);
-  const budgetSnapshot = existsSync(budgetCacheFile) ? JSON.parse(readFileSync(budgetCacheFile, "utf8")) : null;
+  // A team figure is reused for up to five minutes, and a sync a hook started in the background can store one read
+  // before the budget was set. A terminal read replaces it, so read and sync again until the snapshot is current.
+  let budgetSync = sync();
+  let budgetSnapshot = existsSync(budgetCacheFile) ? JSON.parse(readFileSync(budgetCacheFile, "utf8")) : null;
+  for (let i = 0; i < 5 && budgetSnapshot?.effective_budget_usd_micros !== 10000; i++) {
+    cli(["budget"], agentEnv, repo);
+    budgetSync = sync();
+    budgetSnapshot = existsSync(budgetCacheFile) ? JSON.parse(readFileSync(budgetCacheFile, "utf8")) : null;
+  }
   check("budget: the existing sync reads session attribution and the monthly team budget into its separate local cache", budgetSync.code === 0 && budgetSnapshot?.team.id === PLATFORM && budgetSnapshot?.estimated_spend_usd_micros === 8000 && budgetSnapshot?.epoch_id && !beforeBudgetSync.stdout.includes("80%"), budgetSync.stderr + JSON.stringify(budgetSnapshot));
   const budgetNote = hook("UserPromptSubmit", { session_id: SID, prompt_id: "budget-next", prompt: "Continue", cwd: repo });
   const budgetAgain = hook("UserPromptSubmit", { session_id: SID, prompt_id: "budget-again", prompt: "Continue", cwd: repo });
