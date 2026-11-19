@@ -541,7 +541,11 @@ export function listSessions(pp: PolicyPrincipal) {
     return g && canReadGoal(pp, goalObj(g)) ? { id: g.id, title: g.title, version: g.version } : { id: null, title: null, private: true };
   };
   const mine = all<SessionRow>("SELECT * FROM v2_sessions WHERE ws_id = ? AND user_id = ? ORDER BY started_at DESC", pp.wsId, pp.userId).map((s) => {
-    const e = binding(s.session_key);
+    const earlier = all<EpochRow & { ends_at: string }>(
+      "SELECT * FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND ends_at IS NOT NULL ORDER BY starts_at DESC, rowid DESC",
+      pp.wsId, s.session_key,
+    );
+    const e = openEpoch(pp.wsId, s.session_key);
     const tokens = get<{ requests: number; input: number; output: number }>(
       "SELECT COUNT(*) AS requests, COALESCE(SUM(input), 0) AS input, COALESCE(SUM(output), 0) AS output FROM v2_usage WHERE ws_id = ? AND session_key = ?",
       pp.wsId,
@@ -557,8 +561,11 @@ export function listSessions(pp: PolicyPrincipal) {
       stopped_at: s.stopped_at,
       ended_reason: s.ended_reason,
       device: sharedFrom(pp.wsId, s.device_id),
-      current_epoch: e?.ends_at === null ? { ...epochOut(e), goal: goalLabel(e.goal_id) } : null,
-      last_epoch: e && e.ends_at !== null ? { origin: e.origin } : null,
+      current_epoch: e ? { ...epochOut(e), goal: goalLabel(e.goal_id) } : null,
+      last_epoch: !e && earlier[0] ? { origin: earlier[0].origin } : null,
+      earlier_bindings: earlier.map((b) => ({
+        goal: goalLabel(b.goal_id), origin: b.origin, starts_at: b.starts_at, ends_at: b.ends_at,
+      })),
       governing_goal: goalLabel(s.governing_goal_id),
       agent_stopped: !!s.agent_stopped,
       stop_status: stopStatus(pp.wsId, s.session_key),

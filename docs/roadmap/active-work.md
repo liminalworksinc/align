@@ -625,3 +625,30 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [x] Specification validation accepted all eight updated Align documents.
   - [x] Restacked on LIM-2526, the same Node 24 gate passed all 2,153 checks. The schema 27 upgrade, fresh
     schema 28 database and all eight specification documents passed.
+
+### [x] LIM-2525: Help workspace owners review the goal list
+
+- **Priority:** P0
+- **Owner:** Align goals, Home, Sessions and product metrics
+- **Direction:** Review the goal list periodically from existing workspace records and show earlier bindings on the Sessions page.
+- **Conclusion:** Use readable records, a workspace aggregate when the proposed minimum is met, and the existing goal action flows. Review actions record an owner decision without changing any goal.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Specify review signals, visibility, state and binding history before changing code.
+  - [x] Implement owner review and binding history with migration 29 and the existing action flows.
+  - [x] Address the independent review's findings on aggregate privacy, target comparisons, write protection, legacy samples and goal page flows.
+- **Evidence:**
+  - [x] Cover review signals, privacy, lifecycle, migration and narrow browser layouts.
+    The 17 packet checks passed in the production-server suite, including Chrome at 390 and 1280 pixels.
+    The admin suite passed its migration and renumbering cases.
+  - [x] Run both clean installs, the full Node 24 gate and spec validation. Record the outcome in the changelog.
+    Both clean installs succeeded. `ALIGN_TEST_PORT=4800 npm test` on Node 24.22.3 passed 2,095 checks with zero failures.
+    `litai spec validate specs/align --id-prefix align` accepted all eight documents. The retained test receipt is stale.
+  - [x] Reproduce the review findings with regression tests, rerun the Node 24 gate and validate the revised spec.
+    The fix pass added browser, API and migration regressions. On Node 24.22.3, both clean installs succeeded and
+    `ALIGN_TEST_PORT=4800 npm test` passed 2,116 checks with zero failures. The spec validator accepted all eight
+    documents. The retained test receipt is stale.
+  - [x] Restack on LIM-2524 and verify the schema 28 upgrade and fresh schema 29 database.
+    On Node 24.22.3, `ALIGN_TEST_PORT=4800 npm test` passed 2,199 checks with zero failures after
+    synchronizing the browser tests. Specification validation accepted all eight documents.

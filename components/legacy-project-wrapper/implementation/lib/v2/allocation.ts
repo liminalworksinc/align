@@ -15,7 +15,7 @@ import { need } from "./workspaces";
 
 const DAY = 86_400_000;
 /** Fresh tokens of a row (`p` is the table's alias and a dot, or nothing). */
-const fresh = (p = "") => `(${p}input + ${p}output + ${p}cache_write_5m + ${p}cache_write_1h + ${p}cache_write_unsplit)`;
+export const freshTokensSql = (p = "") => `(${p}input + ${p}output + ${p}cache_write_5m + ${p}cache_write_1h + ${p}cache_write_unsplit)`;
 
 interface GoalAgg {
   goal_id: string | null;
@@ -28,7 +28,7 @@ interface GoalAgg {
 /** Fresh tokens, list price, unpriced requests and sessions per goal (null: no goal) in [from, to). */
 function sums(wsId: string, from: string | null, to: string | null): GoalAgg[] {
   const live = all<GoalAgg>(
-    `SELECT e.goal_id, SUM(${fresh("u.")}) AS fresh,
+    `SELECT e.goal_id, SUM(${freshTokensSql("u.")}) AS fresh,
             COALESCE(SUM(u.est_list_usd_micros), 0) AS est,
             SUM(CASE WHEN u.est_list_usd_micros IS NULL THEN 1 ELSE 0 END) AS unpriced, COUNT(DISTINCT u.session_key) AS sessions
      FROM v2_usage u
@@ -42,7 +42,7 @@ function sums(wsId: string, from: string | null, to: string | null): GoalAgg[] {
     to,
   );
   const rolled = all<GoalAgg>(
-    `SELECT NULLIF(goal_id, '') AS goal_id, SUM(${fresh()}) AS fresh, SUM(est_list_usd_micros) AS est, SUM(unpriced_requests) AS unpriced, 0 AS sessions
+    `SELECT NULLIF(goal_id, '') AS goal_id, SUM(${freshTokensSql()}) AS fresh, SUM(est_list_usd_micros) AS est, SUM(unpriced_requests) AS unpriced, 0 AS sessions
      FROM v2_spend_rollups
      WHERE ws_id = ? AND (? IS NULL OR day || 'T00:00:00.000Z' >= ?) AND (? IS NULL OR day || 'T00:00:00.000Z' < ?)
      GROUP BY goal_id`,

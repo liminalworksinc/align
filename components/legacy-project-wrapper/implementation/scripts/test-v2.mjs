@@ -909,10 +909,11 @@ try {
     "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets",
     "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "v2_expectations", "v2_outcome_reports",
     "v2_measure_readings", "v2_data_restrictions", "v2_device_result_consent", "v2_analysis_findings",
-    "v2_reading_credentials", "ba_user", "ba_passkey",
+    "v2_reading_credentials", "v2_goal_list_reviews", "v2_goal_list_snoozes", "v2_goal_review_releases",
+    "ba_user", "ba_passkey",
   ];
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 28, lib/v2/core.mts SCHEMA_VERSION), v2 tables and Better Auth tables, limits on goals and goal versions`,
-    SCHEMA_VERSION === 28 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION &&
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 29, lib/v2/core.mts SCHEMA_VERSION), v2 tables and Better Auth tables, limits on goals and goal versions`,
+    SCHEMA_VERSION === 29 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION &&
     requiredTables.every((table) => pragmas.tables.includes(table)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
@@ -12684,7 +12685,8 @@ try {
           await page.waitForSelector(`${d} summary`, { visible: true });
           const closed = await page.$eval(d, (e) => !e.open);
           const widthFits = () => document.scrollingElement.scrollWidth <= innerWidth;
-          await page.click(`${d} summary`);
+          await page.locator(`${d} summary`).setTimeout(15000).click();
+          await page.waitForSelector(`${d}[open] input[maxlength="200"]`, { visible: true, timeout: 15000 });
           const select = await page.$eval(`${d} select`, (e) => ({ name: document.getElementById(e.getAttribute("aria-labelledby"))?.textContent, values: [...e.options].slice(1).map((o) => o.value) }));
           await page.select(`${d} select`, measure);
           await page.type(`${d} input[maxlength="200"]`, expected);
@@ -12779,8 +12781,8 @@ try {
         const secondDue = day(366);
         await page.goto(`${app}/requests?review=${created.id}.${second.id}`, { waitUntil: "domcontentloaded" });
         await click("[role=dialog] button", "Approve and launch");
-        const drawerFieldsOkay = await fill('[role=dialog] [data-expectation-fields]', "No failed checks", secondDue, "");
         await page.waitForSelector('[role=dialog] [data-foresight="approve_and_launch"][aria-busy="false"]');
+        const drawerFieldsOkay = await fill('[role=dialog] [data-expectation-fields]', "No failed checks", secondDue, "");
         await click("[role=dialog] button", "Confirm: Approve and launch");
         await page.waitForSelector("[role=dialog] [data-expectation-record]");
         const secondRead = (await get(owner, secondPath)).json;
@@ -13376,6 +13378,461 @@ try {
     check("LIM-2524: automated readings, due expectations and spend period flow", false, e.stack ?? String(e));
   }
 
+  // LIM-2525: a workspace review uses only readable goal records and a sufficiently large unbound group.
+  try {
+    const owner = await signUp("RO", "Review Owner", "review-owner@example.test");
+    const other = await signUp("RC", "Review Co-owner", "review-coowner@example.test");
+    const member = await signUp("RM", "Review Member", "review-member@example.test");
+    const outsider = await signUp("RX", "Review Outsider", "review-outsider@example.test");
+    const W = (await call(owner.who, "POST", "/api/v2/workspaces", { cookie: owner.cookie, body: { name: "Goals under review" } })).json.id;
+    const base = `/api/v2/workspaces/${W}`;
+    const app = `${BASE}/app/w/${W}`;
+    const w = (u, suffix, body) => call(u.who, body ? "POST" : "GET", base + suffix, { cookie: u.cookie, body });
+    const reviewPath = "/goal-list-review";
+    const read = (u = owner) => w(u, reviewPath);
+    const now = new Date();
+    const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+    const from = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1);
+    const day = 86_400_000;
+    const monthDay = (n) => new Date(from + n * day).toISOString();
+    const daysAgo = (n) => new Date(+now - n * day).toISOString();
+    const period_end = to.slice(0, 10);
+    const act = (action, goal_id, u = owner) => w(u, reviewPath, { action, period_end, goal_id });
+    withDb((d) => {
+      const join = d.prepare("INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES (?, ?, ?, ?)");
+      for (const [u, role] of [[other, "owner"], [member, "member"], [U3, "member"], [U9, "member"], [U4, "viewer"]]) {
+        join.run(W, u.id, role, monthDay(-1));
+      }
+    });
+    const hiddenText = "private-review-goal-canary";
+    const sessionText = "private-review-session-canary";
+    const memberSessionText = "private-review-member-session-canary";
+    const goal = async (u, title, fields = {}) => {
+      const res = await w(u, "/goals", { title, visibility: "workspace", ...fields });
+      if (res.status !== 201) throw new Error(res.text);
+      return res.json;
+    };
+    const g = await goal(owner, "Improve release quality", { target_share: 40, measures: [
+      { text: "Missing result" }, { text: "Text result" }, { text: "Same result" }, { text: "Old result" }, { text: "Moving result" },
+    ] });
+    const sourced = await goal(owner, "Review recorded metrics", { measures: [
+      { text: "Expired CI result" }, { text: "Failed command result" },
+      { text: "Stable exact decimal" }, { text: "Changed exact decimal" },
+    ] });
+    const peerGoal = await goal(other, "Review deployment process", { measures: [{ text: "Deployment duration" }] });
+    const idle = await goal(owner, "Await new capacity", { target_share: 10, measures: [{ text: "Time to resupply" }] });
+    const aged = await goal(owner, "Keep last quarter's work", { target_share: 10 });
+    const hidden = await goal(other, hiddenText, { visibility: "private", target_share: 5, measures: [{ text: hiddenText }] });
+    const team = (await w(other, "/teams", { name: "Release team" })).json.id;
+    await w(other, `/teams/${team}/members`, { user_id: other.id, role: "lead" });
+    const teamGoal = await goal(other, "Improve team checks", { visibility: "team", team_id: team });
+    let goalVersion = 1;
+    async function expect(outcome, due_on) {
+      const p = `/goals/${g.id}/change-requests`;
+      const request = await w(member, p, { base_version: goalVersion, changes: { title: `Improve release quality v${goalVersion + 1}` }, reason: "Update the goal title" });
+      if (request.status !== 201) throw new Error(request.text);
+      const item = `${p}/${request.json.id}`;
+      const launched = await w(owner, `${item}/approve_and_launch`, { revision: 1, expectation: { measure_id: g.measures[0].id, expected: "Record a release result", due_on } });
+      if (launched.status !== 200) throw new Error(launched.text);
+      goalVersion++;
+      if (outcome) {
+        const answer = await w(owner, `${item}/outcome`, { outcome, note: "private-review-answer-canary" });
+        if (answer.status !== 200) throw new Error(answer.text);
+      }
+      return { item, id: request.json.id };
+    }
+    const today = now.toISOString().slice(0, 10);
+    const missed = await expect("not_met", today);
+    const unanswered = await expect(null, today);
+    await expect(null, daysAgo(-4).slice(0, 10));
+    await expect("cant_tell", today);
+    const { EVENT_PROPS } = await import(path.join(ROOT, "lib/v2/core.mts"));
+    const harness = EVENT_PROPS.first_session_captured.harness[0];
+    const addUsage = (person, key, goalId, value, ts = monthDay(20), ws = W) => withDb((d) => {
+      d.prepare(`INSERT INTO v2_sessions (ws_id, session_key, user_id, harness, repo_key, title, started_at, state, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'test-repo', ?, ?, 'shared', ?, ?)`)
+        .run(ws, key, person.id, harness, person.id === member.id ? memberSessionText : sessionText, ts, ts, ts);
+      d.prepare(`INSERT INTO v2_epochs (ws_id, session_key, epoch_id, goal_id, starts_at, cause, authority, created_at)
+        VALUES (?, ?, 'ep_test', ?, ?, 'manual', ?, ?)`).run(ws, key, goalId, ts, goalId ? "own" : "none", ts);
+      d.prepare(`INSERT INTO v2_usage (ws_id, session_key, request_key, epoch_id, ts, model, query_source, input, output, cache_read, cache_write_5m,
+        cache_write_1h, cache_write_unsplit, basis, source, received_at)
+        VALUES (?, ?, 'request', 'ep_test', ?, 'test-model', 'cli', ?, 0, 50000, 0, 0, 0, 'subscription', 'agent', ?)`).run(ws, key, ts, value, ts);
+    });
+    withDb((d) => {
+      const setAge = d.prepare("UPDATE v2_goals SET created_at = ? WHERE id = ?");
+      for (const x of [g, peerGoal, idle, aged, hidden, teamGoal]) setAge.run(monthDay(-60), x.id);
+      const ins = d.prepare(`INSERT INTO v2_measure_readings (id, ws_id, goal_id, measure_id, value_text, value_num, source, observed_at, recorded_at, recorded_by)
+        VALUES (?, ?, ?, ?, ?, ?, 'self', ?, ?, ?)`);
+      for (const [i, [measure, value, date]] of [[1, "Pending", 1], [2, 7, 30], [2, 7, 1], [3, 2, 31], [4, 4, 23], [4, 8, 1]].entries()) {
+        ins.run(`mr_review_${i}`, W, g.id, g.measures[measure].id, String(value), typeof value === "number" ? value : null, daysAgo(date), daysAgo(date), member.id);
+      }
+      const addReading = d.prepare(`INSERT INTO v2_measure_readings
+        (id, ws_id, goal_id, measure_id, value_text, source, source_ref, stale_after, observed_at, recorded_at, recorded_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      const ciDetails = JSON.stringify({ repository: "private-review-repository-canary", run: "3" });
+      const commandDetails = JSON.stringify({ device_id: "private-review-device-canary", exit_status: 7 });
+      const rows = [
+        [0, "1", "ci", ciDetails, daysAgo(1), 2],
+        [1, null, "command", commandDetails, null, 1],
+        [2, "+09007199254740993.00", "self", null, null, 28],
+        [2, "9007199254740993", "ci", ciDetails, null, 8],
+        [2, "9007199254740993", "command", commandDetails, null, 1],
+        [3, "9007199254740993", "self", null, null, 28],
+        [3, "9007199254740994", "ci", ciDetails, null, 1],
+      ];
+      for (const [i, [measure, value, source, details, expiry, date]] of rows.entries()) {
+        addReading.run(`mr_review_source_${i}`, W, sourced.id, sourced.measures[measure].id, value,
+          source, details, expiry, daysAgo(date), daysAgo(date), member.id);
+      }
+    });
+    const boundKey = randomBytes(32).toString("base64url");
+    const earlierKey = randomBytes(32).toString("base64url");
+    addUsage(owner, boundKey, g.id, 300);
+    addUsage(owner, "review-old", aged.id, 200, monthDay(-5));
+    withDb((d) => {
+      const rollup = d.prepare(`INSERT INTO v2_spend_rollups (ws_id, goal_id, day, model, basis, requests, input, output, cache_read,
+        cache_write_5m, cache_write_1h, cache_write_unsplit, est_list_usd_micros, unpriced_requests)
+        VALUES (?, ?, ?, 'test-model', 'subscription', 1, ?, 0, 0, 0, 0, 0, 0, 0)`);
+      rollup.run(W, peerGoal.id, monthDay(20).slice(0, 10), 100);
+      rollup.run(W, aged.id, monthDay(-4).slice(0, 10), 100);
+      rollup.run(W, "", monthDay(20).slice(0, 10), 9000);
+    });
+    for (const [i, u] of [owner, other, member, U3, U3].entries()) addUsage(u, u === member ? earlierKey : `review-u${i}`, null, 20);
+    addUsage(U9, "review-cache-only", null, 0);
+    addUsage(U9, "review-current-month", null, 20, to);
+    const four = await read();
+    addUsage(other, "review-hidden", hidden.id, 800);
+    const stillFour = await read();
+    check("LIM-2525: four contributors are unknown and hidden usage leaves the entire owner's response identical",
+      four.status === 200 && four.json?.unbound_share === null && four.text === stillFour.text &&
+      !four.text.includes(hidden.id) && !four.text.includes(hiddenText) && !four.text.includes(sessionText), stillFour.text);
+    addUsage(U9, "review-fifth", null, 20);
+    const five = await read();
+    addUsage(other, "review-team", teamGoal.id, 200);
+    const withTeam = await read();
+    check("LIM-2525: five contributors unlock one workspace aggregate; team, hidden, out-of-period, cache-only and rolled-up unbound usage do not count",
+      five.json?.unbound_share === 23.1 && withTeam.json?.unbound_share === 23.1 && (await read(other)).json?.unbound_share === 23.1 &&
+      !withTeam.text.includes("review-fifth") && !withTeam.text.includes(owner.id) && !withTeam.text.includes(member.id), withTeam.text);
+    const questions = five.json?.questions ?? [];
+    const main = questions.find((q) => q.goal.id === g.id);
+    check("LIM-2525: goal questions distinguish unknown, unchanged, stale and moving readings",
+      main?.inactivity === null &&
+      main.measures.map((m) => m.kind).join() === "missing,no_number,unchanged,no_recent_reading" &&
+      questions.find((q) => q.goal.id === idle.id)?.inactivity?.last_at === null &&
+      questions.find((q) => q.goal.id === aged.id)?.inactivity?.last_at === monthDay(-4), JSON.stringify(questions));
+    const sources = questions.find((q) => q.goal.id === sourced.id)?.measures ?? [];
+    check("LIM-2525: the review uses stored expiry, unknowns and exact decimals across reading sources",
+      sources.map((m) => `${m.id}:${m.kind}:${m.source}`).join() === [
+        `${sourced.measures[0].id}:stale:ci`, `${sourced.measures[1].id}:no_number:command`,
+        `${sourced.measures[2].id}:unchanged:command`,
+      ].join() && !five.text.includes("private-review-repository-canary") && !five.text.includes("private-review-device-canary") &&
+      !five.text.includes("9007199254740993"), JSON.stringify(sources));
+    const resultDevice = insertDevice(owner.id, "Finding test machine");
+    const findingId = "private-review-finding-canary";
+    withDb((d) => d.prepare(`INSERT INTO v2_analysis_findings
+      (ws_id, session_key, epoch_id, device_id, id, goal_version, limit_id, evidence, digest, turn_started_at, received_at)
+      VALUES (?, ?, 'ep_test', ?, ?, 1, 'lim_test', 'wording', ?, ?, ?)`
+    ).run(W, boundKey, resultDevice.id, findingId, "a".repeat(64), daysAgo(1), daysAgo(1)));
+    const withFinding = await read();
+    check("LIM-2525: a stored derived finding makes no difference to the owner's review",
+      withFinding.text === withTeam.text && !withFinding.text.includes(findingId), withFinding.text);
+    check("LIM-2525: unanswered and self-reported not met outcomes are distinguished without answer content",
+      main?.outcomes.length === 2 && main.outcomes.find((o) => o.change_request_id === missed.id)?.outcome === "not_met" &&
+      main.outcomes.find((o) => o.change_request_id === unanswered.id)?.outcome === null && !five.text.includes("private-review-answer-canary"), five.text);
+    const corrected = await w(owner, `${missed.item}/outcome`, { outcome: "met", correction: true });
+    const afterCorrection = await read();
+    check("LIM-2525: the latest correction supersedes the earlier answer", corrected.status === 200 &&
+      afterCorrection.json?.questions.find((q) => q.goal.id === g.id)?.outcomes.map((o) => o.change_request_id).join() === unanswered.id);
+    const sample = await call(U9.who, "GET", `/api/v2/workspaces/${u9sample.json.id}${reviewPath}`, { cookie: U9.cookie });
+    const denied = await Promise.all([read(outsider), read(member), read(U4), act("reviewed", undefined, member),
+      act("reviewed", undefined, outsider), act("reviewed", undefined, U4),
+      call(U9.who, "POST", `/api/v2/workspaces/${u9sample.json.id}${reviewPath}`, { cookie: U9.cookie, body: { action: "reviewed", period_end } }),
+      call(member.who, "POST", base + reviewPath, { cookie: member.cookie, raw: "{" }),
+      act("snooze", hidden.id), act("snooze", "g_missing")]);
+    const stale = await w(owner, reviewPath, { action: "reviewed", period_end: "2020-01-01" });
+    const invalid = await act("bad-action");
+    check("LIM-2525: inaccessible reviews and snooze goals are 404, stale periods and invalid actions have plain messages",
+      sample.status === 404 && denied.every((r) => r.status === 404) && stale.status === 409 &&
+      invalid.status === 400 && invalid.json?.message === "Choose a review action.", [...denied, sample, stale, invalid].map((r) => r.status).join());
+    const activeSnooze = await act("snooze", g.id);
+    check("LIM-2525: a goal with current activity cannot be snoozed and returns a plain message",
+      activeSnooze.status === 409 && activeSnooze.json?.message === "This goal no longer has an inactivity question.");
+    const crossSite = await Promise.all([
+      { origin: `${BASE}1` },
+      { origin: BASE, "sec-fetch-site": "cross-site" },
+    ].map((headers) => call(owner.who, "POST", base + reviewPath, { cookie: owner.cookie, body: { action: "bad-action" }, headers })));
+    check("LIM-2525: the cookie write rejects cross-origin requests before action validation",
+      crossSite.every((r) => r.status === 403 && r.json?.error === "cross_site"), crossSite.map((r) => r.text).join(" | "));
+    const ownerDevice = insertDevice(owner.id, "Review device");
+    const deviceReviews = (device) => Promise.all(["GET", "POST"].map((method) =>
+      call(owner.who, method, base + reviewPath, { bearer: device.access, body: method === "POST" ? { action: "reviewed", period_end } : undefined })));
+    const ungrantedDevice = await deviceReviews(ownerDevice);
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(ownerDevice.id, W));
+    const liveDevice = await deviceReviews(ownerDevice);
+    withDb((d) => d.prepare("UPDATE v2_devices SET revoked_at = ? WHERE id = ?").run(now.toISOString(), ownerDevice.id));
+    const revokedDevice = await deviceReviews(ownerDevice);
+    const anonymous = await Promise.all(["GET", "POST"].map((method) => call("anon", method, base + reviewPath)));
+    check("LIM-2525: review routes require a browser sign-in; live and revoked devices cannot use them",
+      anonymous.every((r) => r.status === 401) && [...ungrantedDevice, ...liveDevice, ...revokedDevice].every((r) => r.status === 403));
+
+    const privacyWs = (await call(owner.who, "POST", "/api/v2/workspaces", { cookie: owner.cookie, body: { name: "Review privacy" } })).json.id;
+    const privacyPath = `/api/v2/workspaces/${privacyWs}`;
+    const privacyRead = (u = owner) => call(u.who, "GET", privacyPath + reviewPath, { cookie: u.cookie });
+    const joinPrivacy = (u, role = "member") => withDb((d) => d.prepare(
+      "INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES (?, ?, ?, ?)",
+    ).run(privacyWs, u.id, role, monthDay(0)));
+    for (const u of [member, U3, U4, U9]) joinPrivacy(u);
+    joinPrivacy(other, "owner");
+    const empty = await privacyRead();
+    check("LIM-2525: the empty owner review shows unknown with no questions",
+      empty.status === 200 && empty.json?.unbound_share === null && empty.json?.questions.length === 0);
+    const targetGoal = (await call(owner.who, "POST", privacyPath + "/goals",
+      { cookie: owner.cookie, body: { title: "Meet a workspace target", visibility: "workspace", target_share: 30 } })).json.id;
+    const privacyUsage = (u, key, value, goal = null) => addUsage(u, key, goal, value, monthDay(0), privacyWs);
+    privacyUsage(owner, "review-target", 300, targetGoal);
+    privacyUsage(owner, "review-owner-unbound", 700);
+    const atTarget = await privacyRead();
+    const allocation = await call(owner.who, "GET", `${privacyPath}/allocation?from=${monthDay(0)}&to=${to}`, { cookie: owner.cookie });
+    check("LIM-2525: 300 goal tokens out of 1,000 shared tokens meet the 30% target without a misleading review question",
+      allocation.json?.window.rows.find((r) => r.goal?.id === targetGoal)?.share === 30 &&
+      atTarget.json?.unbound_share === null && !atTarget.json?.questions.some((q) => q.goal.id === targetGoal && q.share),
+      `${allocation.text} | ${atTarget.text}`);
+    privacyUsage(other, "review-coowner-unbound", 20);
+    privacyUsage(member, "review-member-unbound", 20);
+    privacyUsage(U3, "review-former-unbound", 20);
+    const { pseudonymise } = await import(path.join(ROOT, "lib/v2/retention-core.mts"));
+    withDb((d) => {
+      d.prepare("DELETE FROM v2_members WHERE ws_id = ? AND user_id = ?").run(privacyWs, U3.id);
+      pseudonymise({
+        get: (sql, ...args) => d.prepare(sql).get(...args),
+        run: (sql, ...args) => Number(d.prepare(sql).run(...args).changes),
+      }, privacyWs, U3.id, now.toISOString(), "test-only-review");
+    });
+    joinPrivacy(U3);
+    privacyUsage(U3, "review-rejoined-unbound", 20);
+    const returnedContributor = await privacyRead();
+    check("LIM-2525: a former member's pseudonym and their rejoined account cannot establish five people",
+      returnedContributor.status === 200 && returnedContributor.json?.unbound_share === null, returnedContributor.text);
+    privacyUsage(U4, "review-fourth-member-unbound", 20);
+    const deletedKey = randomBytes(32).toString("base64url");
+    privacyUsage(U9, deletedKey, 2000);
+    const [released, otherRelease] = await Promise.all([privacyRead(), privacyRead(other)]);
+    const deletedHistory = await call(U9.who, "DELETE", privacyPath + "/sessions/" + deletedKey, { cookie: U9.cookie });
+    const [afterDelete, afterDeleteOther] = await Promise.all([privacyRead(), privacyRead(other)]);
+    privacyUsage(U3, "review-after-deletion", 10);
+    const afterUpload = await privacyRead();
+    check("LIM-2525: deletion removes the records and both owners see unknown even above the minimum and after more usage arrives",
+      released.json?.unbound_share === 90.3 && otherRelease.json?.unbound_share === released.json?.unbound_share &&
+      deletedHistory.status === 204 && withDb((d) => !d.prepare("SELECT 1 FROM v2_usage WHERE ws_id = ? AND session_key = ?").get(privacyWs, deletedKey)) &&
+      [afterDelete, afterDeleteOther, afterUpload].every((r) => r.status === 200 && r.json?.unbound_share === null),
+      [released, otherRelease, deletedHistory, afterDelete, afterDeleteOther, afterUpload].map((r) => r.text).join(" | "));
+
+    withDb((d) => {
+      const add = d.prepare(`INSERT INTO v2_epochs (ws_id, session_key, epoch_id, goal_id, starts_at, ends_at, cause, origin, authority, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'manual', ?, ?, ?)`);
+      add.run(W, earlierKey, "ep_earlier_public", g.id, monthDay(5), monthDay(10), "hand", "alignment", monthDay(5));
+      add.run(W, earlierKey, "ep_earlier_private", hidden.id, monthDay(10), monthDay(15), "folder_rule", "alignment", monthDay(10));
+      add.run(W, earlierKey, "ep_earlier_unbound", null, monthDay(15), monthDay(20), null, "none", monthDay(15));
+    });
+    const ownSessions = await w(member, "/sessions");
+    const othersSessions = await w(owner, "/sessions");
+    const session = ownSessions.json?.mine.find((s) => s.session_key === earlierKey);
+    const earlier = session?.earlier_bindings ?? [];
+    check("LIM-2525: earlier bindings are ordered, include a redacted goal and an unbound interval, and never reach the workspace owner's list",
+      session?.current_epoch?.starts_at === monthDay(20) && earlier.length === 3 && earlier[0].goal === null && earlier[0].origin === null &&
+      earlier[1].goal?.private && earlier[1].goal.id === null && earlier[1].origin === "folder_rule" &&
+      earlier[2].goal?.id === g.id && earlier[2].origin === "hand" && earlier[2].starts_at === monthDay(5) && earlier[2].ends_at === monthDay(10) &&
+      !ownSessions.text.includes(hidden.id) && othersSessions.json?.all.some((s) => s.session_key === earlierKey && !("earlier_bindings" in s)) &&
+      !othersSessions.text.includes(memberSessionText), ownSessions.text);
+
+    const state = () => withDb((d) => Object.fromEntries(["v2_goal_versions", "v2_change_requests", "v2_measure_readings", "v2_epochs", "v2_directives"].map(
+      (table) => [table, d.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ws_id = ?`).get(W).n],
+    )));
+    const before = state();
+    let deferredSnapshot;
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.emulateTimezone("America/Los_Angeles");
+        const errors = [];
+        const writes = [];
+        const external = [];
+        page.on("pageerror", (err) => errors.push(err.message));
+        page.on("request", (req) => {
+          if (/^https?:/.test(req.url()) && new URL(req.url()).origin !== BASE) external.push(req.url());
+          if (req.method() === "POST" && req.url().endsWith(reviewPath)) writes.push(JSON.parse(req.postData()));
+        });
+        const signIn = async (u) => {
+          await page.goto("about:blank");
+          await page.deleteCookie(...await page.cookies(BASE));
+          await page.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        };
+        const find = (sel, label) => page.waitForFunction((sel, label) => [...document.querySelectorAll(sel)].find(
+          (e) => e.textContent.trim() === label && e.getClientRects().length && !e.disabled,
+        ), { timeout: 15000 }, sel, label);
+        const click = async (sel, label) => (await find(sel, label)).asElement().click();
+        const fits = () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+        const text = (sel) => page.$eval(sel, (e) => e.innerText);
+        const review = "#goal-list-review";
+        const openReview = async () => {
+          await page.goto(`${app}/goals?review=1#goal-list-review`, { waitUntil: "domcontentloaded" });
+          await page.waitForSelector(`[data-goal-review-question="${g.id}"]`, { visible: true });
+        };
+        await signIn(owner);
+        for (const width of [1280, 390]) {
+          await page.setViewport({ width, height: 844 });
+          await page.goto(app, { waitUntil: "domcontentloaded" });
+          await click("a", "Review the goal list");
+          await page.waitForFunction(() => new URL(location.href).searchParams.get("review") === "1" && location.hash === "#goal-list-review");
+          await page.waitForSelector(`[data-goal-review-question="${g.id}"]`, { visible: true });
+          const words = await text(review);
+          check(`LIM-2525 (${width}px): Home opens a readable review with questions, a scoped aggregate and goal action links`,
+            await fits() && words.includes("About 23.1% of recorded usage") && words.includes("Reading unknown") &&
+            words.includes("Propose a change") && words.includes("Save a new version") && words.includes("Hold agents") &&
+            words.includes("Drop this goal") && !words.includes(hiddenText), words);
+          await page.screenshot({ path: path.join(tmpRoot, `goal-list-review-${width}.png`), fullPage: true });
+        }
+        const dateLabel = await page.evaluate((date) => new Date(date).toLocaleDateString(undefined, {
+          month: "short", day: "numeric", timeZone: "UTC",
+        }), today);
+        const reviewWords = await text(review);
+        check("LIM-2525 (390px): the review uses the source labels and shows an expired CI reading as stale",
+          reviewWords.includes("self-reported") && reviewWords.includes("reported with a CI credential") &&
+          reviewWords.includes("reported from a machine") && reviewWords.includes("is stale") &&
+          !reviewWords.includes("private-review-repository-canary") && !reviewWords.includes(findingId), reviewWords);
+        check("LIM-2525 (390px): the unanswered outcome uses a readable date and keeps the UTC calendar day",
+          reviewWords.includes(`was due ${dateLabel} and has no answer`) && !reviewWords.includes(today), reviewWords);
+        await click(`${review} a`, "Add a goal");
+        await page.waitForFunction(() => location.hash === "#new-goal");
+        await page.waitForSelector("#new-goal input", { visible: true });
+        check("LIM-2525 (390px): Add a goal opens the workspace's new goal form", await fits(), page.url());
+        await openReview();
+        for (const [label, dest, control] of [
+          ["Save a new version", "#new-version", "#new-version input"],
+          ["Hold agents", "#agents-on-goal", "#agents-on-goal button"],
+          ["Open measures", "#goal-measures", "#goal-measures button"],
+        ]) {
+          await click(`[data-goal-review-question="${g.id}"] a`, label);
+          const inView = await page.waitForFunction((dest, control) => {
+            const rect = document.querySelector(control)?.getBoundingClientRect();
+            return location.hash === dest && rect && rect.top >= 0 && rect.bottom <= innerHeight;
+          }, { timeout: 15000 }, dest, control).catch(() => null);
+          check(`LIM-2525 (390px): ${label} brings its control into view after loading`, !!inView && await fits(), page.url());
+          await openReview();
+        }
+        await click(`[data-goal-review-question="${g.id}"] a`, "Open decision record");
+        await page.waitForFunction((id) => location.pathname.endsWith("/" + id), {}, unanswered.id);
+        check("LIM-2525 (390px): the expectation links to its decision record", await fits() && page.url().endsWith(unanswered.id));
+        await openReview();
+        await click(`[data-goal-review-question="${peerGoal.id}"] a`, "Propose a change");
+        await page.waitForSelector("#change-requests button", { visible: true });
+        check("LIM-2525 (390px): Propose a change opens the other owner's goal at its change requests",
+          new URL(page.url()).hash === "#change-requests" && await fits());
+        await openReview();
+        await click(`[data-goal-review-question="${idle.id}"] a`, "Drop this goal");
+        await click("#drop-goal button", "Drop this goal");
+        check("LIM-2525 (390px): the existing drop confirmation opens without a goal write",
+          (await text("#drop-goal")).includes("Confirm: drop the goal") && await fits());
+        await page.goto(`${app}/goals?review=1#goal-list-review`, { waitUntil: "domcontentloaded" });
+        await click(`[data-goal-review-question="${idle.id}"] button`, "Snooze for a week");
+        await page.waitForFunction((id) => !document.querySelector(`[data-goal-review-question="${id}"] button`), {}, idle.id);
+        await click(`${review} button`, "Remind me in a week");
+        await page.waitForFunction((sel) => document.querySelector(sel)?.innerText.includes("The Home link returns"), {}, review);
+        await page.goto(app, { waitUntil: "domcontentloaded" });
+        await page.waitForSelector("[data-goal-line]");
+        check("LIM-2525 (390px): deferring clears the Home link; browser writes only review choices and scoped identifiers",
+          !(await page.$('a[href*="review=1#goal-list-review"]')) && writes.length === 2 &&
+          writes.every((b) => Object.keys(b).every((k) => ["action", "period_end", "goal_id"].includes(k))) && errors.length === 0, JSON.stringify({ writes, errors }));
+        deferredSnapshot = await read();
+        await page.goto(`${app}/goals?review=1#goal-list-review`, { waitUntil: "domcontentloaded" });
+        await click(`${review} button`, "Mark reviewed");
+        await page.waitForFunction((sel) => document.querySelector(sel)?.innerText.includes("You reviewed this on"), {}, review);
+        const reviewedWords = await text(review);
+        check("LIM-2525 (390px): marking a deferred review complete records the date and removes the review actions",
+          await fits() && !reviewedWords.includes("Mark reviewed") && !reviewedWords.includes("Remind me in a week"));
+        await signIn(member);
+        await page.goto(`${app}/sessions`, { waitUntil: "domcontentloaded" });
+        await click("summary", "Earlier bindings");
+        const history = await text("details[open]:has(> summary)");
+        check("LIM-2525 (390px): a session owner can expand dates, known origins and redacted earlier bindings",
+          await fits() && history.includes("Folder rule") && history.includes("Origin unknown") && history.includes("Started") &&
+          history.includes("Ended") && !history.includes(hiddenText), history);
+
+        await signIn(other);
+        await page.goto(`${BASE}/app/w/${privacyWs}/goals/${targetGoal}#change-requests`, { waitUntil: "domcontentloaded" });
+        await click("#change-requests button", "Full change form");
+        await click("#change-requests button", "Add a measure");
+        await page.type('#change-requests [aria-label="Measure 1"]', "Release checks completed");
+        const guidance = await text("#change-requests form");
+        await page.type("#change-requests textarea", "Track completed release checks");
+        const changesPath = privacyPath + `/goals/${targetGoal}/change-requests`;
+        await Promise.all([
+          page.waitForResponse((r) => r.url().endsWith(changesPath) && r.request().method() === "POST"),
+          click("#change-requests button", "Send for approval"),
+        ]);
+        const pending = await call(other.who, "GET", changesPath, { cookie: other.cookie });
+        const proposal = pending.json?.change_requests.find((r) => r.state === "pending" && r.changes.measures?.[0]?.text === "Release checks completed");
+        const noMeasure = await text("#goal-measures");
+        const launch = proposal && await call(owner.who, "POST", changesPath + `/${proposal.id}/approve_and_launch`,
+          { cookie: owner.cookie, body: { revision: 1 } });
+        await signIn(owner);
+        await page.goto(`${BASE}/app/w/${privacyWs}/goals/${targetGoal}`, { waitUntil: "domcontentloaded" });
+        await page.waitForSelector("#goal-measures", { visible: true });
+        const launchedMeasures = await text("#goal-measures");
+        check("LIM-2525 (390px): the proposal makes launch timing clear and Add reading becomes available on the live goal after launch",
+          guidance.includes("New measures become available after launch.") && !guidance.includes("after saving") &&
+          !noMeasure.includes("Release checks completed") && launch?.status === 200 &&
+          launchedMeasures.includes("Release checks completed") && launchedMeasures.includes("Add reading") && await fits(),
+          `${guidance} | ${pending.text} | ${launch?.text} | ${launchedMeasures}`);
+        check("LIM-2525 (390px): review and goal actions stay on the local server", external.length === 0 && errors.length === 0,
+          JSON.stringify({ external, errors }));
+      } finally {
+        await browser.close();
+      }
+    } else check("LIM-2525: review and earlier bindings browser coverage", false, `no Chrome at ${CHROME}`);
+    const deferred = deferredSnapshot ?? await act("defer");
+    const completed = await act("reviewed");
+    const repeated = await act("reviewed");
+    const otherReview = await read(other);
+    const ownerHome = await w(owner, "/home");
+    const events = withDb((d) => d.prepare(`SELECT props, actor FROM v2_events WHERE name = 'goal_list_reviewed' AND ws_id = ?`).all(W));
+    const audit = withDb((d) => d.prepare(`SELECT action, actor_id, at, object_id FROM v2_audit WHERE ws_id = ? AND action LIKE 'goal_list_review.%' ORDER BY seq`).all(W));
+    check("LIM-2525: snoozing and deferring are personal, and one completion records actor, time and one empty-props event",
+      deferred.json?.deferred_until && !deferred.json.due && completed.json?.reviewed_at && repeated.text === completed.text &&
+      ownerHome.json?.goal_list_review_due === false && otherReview.json?.due && otherReview.json.questions.some((q) => q.goal.id === idle.id && q.inactivity) &&
+      audit.map((a) => a.action).join() === "goal_list_review.snoozed,goal_list_review.deferred,goal_list_review.reviewed" &&
+      audit.every((a) => a.actor_id === owner.id && a.at && a.object_id === W) &&
+      events.length === 1 && events[0].props === "{}" && events[0].actor && events[0].actor !== owner.id &&
+      JSON.stringify(state()) === JSON.stringify(before), JSON.stringify({ deferred: deferred.json, audit, events }));
+    withDb((d) => {
+      d.prepare("UPDATE v2_goal_list_reviews SET period_end = '2020-01-01' WHERE ws_id = ?").run(W);
+      d.prepare("UPDATE v2_goal_list_snoozes SET until_at = ? WHERE ws_id = ?").run(monthDay(-1), W);
+    });
+    const returned = await read();
+    check("LIM-2525: snoozed questions return after expiry and the next month is due again",
+      returned.json?.due && returned.json.reviewed_at === null && returned.json.questions.some((q) => q.goal.id === idle.id && q.inactivity));
+    const deleteBound = await call(owner.who, "DELETE", base + "/sessions/" + boundKey, { cookie: owner.cookie });
+    const afterBoundDeletion = await read(other);
+    check("LIM-2525: deleting goal usage also withholds the previously released share", deleteBound.status === 204 &&
+      afterBoundDeletion.status === 200 && afterBoundDeletion.json?.unbound_share === null, afterBoundDeletion.text);
+    const deleteEarlier = await call(member.who, "DELETE", base + "/sessions/" + earlierKey, { cookie: member.cookie });
+    const afterEarlierDeletion = await w(member, "/sessions");
+    check("LIM-2525: deleting a session removes its earlier binding history", deleteEarlier.status === 204 &&
+      afterEarlierDeletion.status === 200 && !afterEarlierDeletion.json?.mine.some((s) => s.session_key === earlierKey));
+    const deleted = await call(owner.who, "DELETE", "/api/v2/me", { cookie: owner.cookie, body: { email: owner.email } });
+    const retained = (table) => withDb((d) => d.prepare(`SELECT user_id FROM ${table} WHERE ws_id = ?`).all(W));
+    check("LIM-2525: deletion pseudonymises the reviewer and snooze author",
+      deleted.status === 204 && ["v2_goal_list_reviews", "v2_goal_list_snoozes"].every((table) => /^fm_\d+$/.test(retained(table)[0]?.user_id)));
+    const purged = admin(["workspaces", "delete", W, "--purge", "--yes"], { ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1" });
+    check("LIM-2525: workspace purge removes review, snooze and aggregate release state", purged.status === 0 &&
+      ["v2_goal_list_reviews", "v2_goal_list_snoozes"].every((table) => retained(table).length === 0) &&
+      withDb((d) => !d.prepare("SELECT 1 FROM v2_goal_review_releases WHERE ws_id = ?").get(W)), purged.err);
+  } catch (e) {
+    check("LIM-2525: review setup and browser flow", false, e.stack ?? String(e));
+  }
+
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));
   const ownerSaw = seen.some((s) => s.who === "U2" && s.text.includes(CANARY));
@@ -13727,6 +14184,10 @@ try {
     const runH = retention(monthsLater(13, 2));
     const reqsAt13 = reqsLeft();
     await signIn(r1);
+    const sessionsAfterRollup = await ws(r1, "GET", W1, "/sessions");
+    check("LIM-2525: session roll-up clears epochs and leaves no earlier bindings on Sessions",
+      sessionsAfterRollup.status === 200 && sessionsAfterRollup.json?.mine.length === 0 &&
+      sessionsAfterRollup.json?.all.length === 0 && q1("SELECT COUNT(*) AS n FROM v2_epochs WHERE ws_id = ?", W1).n === 0);
     const spendH = (await ws(r1, "GET", W1, "/spend?by=goal")).json;
     const spendHs = (await ws(r1, "GET", W1, "/spend?by=session")).json;
     const spendLaterFrom = (await ws(r1, "GET", W1, `/spend?by=goal&from=${encodeURIComponent(later(2 * DAY))}`)).json;
@@ -13863,10 +14324,16 @@ try {
         const staleDeleteUi = !q1("SELECT deleted_at FROM v2_workspaces WHERE id = ?", W8)?.deleted_at;
         const deleteBack = await signInAgainTo(r1, `/app/w/${W8}/people`);
         check("ui (Chrome): Delete workspace with an old sign-in shows \"Sign in again to delete this workspace.\" and deletes nothing; Sign in again comes back to People", staleDeleteUi && deleteBack, page.url());
-        await page.waitForFunction(() => document.body.innerText.includes("Delete this workspace"), { timeout: 15000 });
-        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Delete workspace")?.click());
+        const deleteButton = await page.waitForFunction(() => [...document.querySelectorAll("button")].find(
+          (b) => b.textContent === "Delete workspace" && b.getClientRects().length && !b.disabled,
+        ), { timeout: 15000 });
+        const [deleteResponse] = await Promise.all([
+          page.waitForResponse((r) => r.request().method() === "DELETE" && r.url() === `${BASE}/api/v2/workspaces/${W8}`, { timeout: 15000 }),
+          deleteButton.asElement().click(),
+        ]);
         await page.waitForFunction(() => location.pathname === "/app" && document.body.innerText.includes("Deleted workspaces"), { timeout: 15000 });
-        check("ui (Chrome): People's Delete workspace (confirmed) deletes it and the workspace shows under Deleted workspaces", !!q1("SELECT deleted_at FROM v2_workspaces WHERE id = ?", W8)?.deleted_at);
+        check("ui (Chrome): People's Delete workspace (confirmed) deletes it and the workspace shows under Deleted workspaces",
+          deleteResponse.status() === 204 && !!q1("SELECT deleted_at FROM v2_workspaces WHERE id = ?", W8)?.deleted_at, deleteResponse.status());
         // Account deletion, on localhost (passkeys need a domain name) with a virtual authenticator: R8 adds a passkey,
         // says "Not now" to the prompt, comes back with an old sign-in (Sign in again; the passkey autofill signs in),
         // then deletes the account. Nothing that names them is left, passkey tables included.
@@ -14323,7 +14790,7 @@ try {
       device_paired: ["workspaces"], first_session_captured: ["harness"], member_first_session_captured: ["harness"], first_session_bound: ["harness", "authority"], second_member_joined: [],
       first_change_request: [], first_approval: [], first_directive: ["kind"], first_mcp_read: ["client"], loi_sent: ["note_ref"], loi_signed: ["note_ref", "verified_original"],
       first_ask: [], first_limit: [], value_card_viewed: [], value_reported: ["estimate"], follow_up_clicked: [], first_request: ["type"], first_hold: [], first_launch: [],
-      first_expectation: [], outcome_reported: ["outcome"], first_reading: [], first_precedent_shown: [], measure_source_reading: ["source"],
+      first_expectation: [], outcome_reported: ["outcome"], first_reading: [], first_precedent_shown: [], measure_source_reading: ["source"], goal_list_reviewed: [],
     };
     const offList = q("SELECT name, props FROM v2_events").filter((r) => !ALLOWED[r.name] || Object.keys(JSON.parse(r.props)).some((k) => !ALLOWED[r.name].includes(k)));
     check(

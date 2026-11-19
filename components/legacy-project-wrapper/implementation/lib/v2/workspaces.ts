@@ -85,7 +85,7 @@ export async function createWorkspace(req: Request, p: WebPrincipal, name: strin
   const at = nowIso();
   await tx(() => {
     const redeemed = admitCreation(creator, code, id);
-    run("INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)", id, name, userId, at);
+    run("INSERT INTO v2_workspaces (id, name, created_by, created_at, is_sample) VALUES (?, ?, ?, ?, ?)", id, name, userId, at, seed ? 1 : 0);
     run("INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)", id, userId, at);
     audit(id, userId, "workspace.created", id, at);
     if (redeemed) event("code_redeemed", { ws: id, user: userId, at });
@@ -93,6 +93,11 @@ export async function createWorkspace(req: Request, p: WebPrincipal, name: strin
     seed?.(id, at);
   });
   return { id, name, role: "owner" as const };
+}
+
+export function canReviewGoalList(pp: PolicyPrincipal) {
+  return authorize(pp, "workspace.review_goals", { kind: "workspace" }).ok &&
+    get<{ is_sample: number | null }>("SELECT is_sample FROM v2_workspaces WHERE id = ?", pp.wsId)?.is_sample === 0;
 }
 
 export function workspaceDetail(pp: PolicyPrincipal) {
@@ -110,7 +115,7 @@ export function workspaceDetail(pp: PolicyPrincipal) {
       pod.id,
     ),
   }));
-  return { workspace: ws, role: pp.wsRole, me: pp.userId, members, teams };
+  return { workspace: ws, role: pp.wsRole, me: pp.userId, members, teams, can_review_goals: canReviewGoalList(pp) };
 }
 
 /** PATCH { name?, steering? } (owners): rename the workspace and/or turn steering on or off (lib/v2/steering.ts).

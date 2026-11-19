@@ -497,6 +497,14 @@ export const Loading = () => <p className="text-[15px] text-zinc-500">Loading…
 /** Every time on a screen, one format (lib/v2/when.mts). */
 export { when } from "@/lib/v2/when.mts";
 
+/** A fragment can arrive before the section's data. Scroll when its target mounts. */
+export function scrollToLinkedSection(section: HTMLElement | null) {
+  if (!section || window.location.hash !== `#${section.id}`) return;
+  requestAnimationFrame(() => {
+    if (section.isConnected && window.location.hash === `#${section.id}`) section.scrollIntoView({ block: "start" });
+  });
+}
+
 /** Estimated list cost, by the rule the MCP text uses too (Z5). */
 export { usd } from "@/lib/v2/money.mts";
 

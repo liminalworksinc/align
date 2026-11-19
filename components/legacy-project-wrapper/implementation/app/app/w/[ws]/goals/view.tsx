@@ -3,19 +3,21 @@ import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, useAction, useApi } from "../../../_ui/kit";
+import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, scrollToLinkedSection, Select, Shell, useAction, useApi } from "../../../_ui/kit";
 import { AnchorsEditor, LimitEditor, MeasuresEditor, TargetShareField, VISIBILITY_LABEL, anchorsDraft, anchorsOut, hasUnlabelledSource, limitsOut, measuresDraft, measuresOut, takenBy, targetOut, type LimitDraft } from "../../../_ui/goalform";
 import { LimitChips, NotesSuggest } from "../../../_ui/limits";
 import type { Me } from "../../../_ui/server";
 import type { Goal, WsDetail } from "../../../_ui/types";
 import { isBlankText } from "@/lib/v2/text-core.mts";
+import { GoalListReviewCard } from "./goal-list-review";
 
 const STATUS_TONE = { active: "violet", achieved: "green", dropped: "neutral" } as const;
 
 export default function Goals({ me, ws }: { me: Me; ws: string }) {
   // ?first=1: arrived from an empty workspace's "Set the first goal". The form is the point: its Goal field takes focus
   // and the empty line above it, which the person has just been told, is left out.
-  const first = useSearchParams().get("first") === "1";
+  const params = useSearchParams();
+  const first = params.get("first") === "1";
   const detail = useApi<WsDetail>(`/api/v2/workspaces/${ws}`);
   const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
   const holds = useApi<{ holds: { goal: { id: string } }[] }>(`/api/v2/workspaces/${ws}/holds`);
@@ -40,6 +42,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
     <Shell me={me} ws={ws} tab="Goals">
       <h1 className={`${PAGE_H1} mb-5`}>Goals</h1>
       <Err>{detail.error ?? feed.error}</Err>
+      {detail.data?.can_review_goals && !first && <GoalListReviewCard ws={ws} openOnArrival={params.get("review") === "1"} />}
       {/* Arriving from "Set the first goal" with no goals: no empty list card above the form. */}
       {!(first && feed.data?.goals.length === 0) && (
       <Card>
@@ -103,6 +106,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
         </div>
       )}
       {canCreate && (
+        <section id="new-goal" ref={scrollToLinkedSection}>
         <Card title="New goal">
           <form
             onSubmit={(e) => {
@@ -188,6 +192,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
             <Err>{act.error}</Err>
           </form>
         </Card>
+        </section>
       )}
       {/* A second way in, after the form rather than above it (founder ruling, PR 68 pass 1 item 19). */}
       {canCreate && <NotesSuggest ws={ws} onDone={feed.reload} />}

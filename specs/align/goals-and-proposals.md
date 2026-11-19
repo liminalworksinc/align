@@ -527,6 +527,112 @@ access to the change record, and spend SHALL further require the workspace spend
 - **THEN** the readings and spend window still end at the first report, and the figures describe the period
   alongside the readings
 
+### Requirement: Workspace owners can review the goal list
+
+`GET /api/v2/workspaces/{ws}/goal-list-review` SHALL return the signed-in owner's review of the previous complete UTC
+calendar month. It SHALL use existing records, without a new upload, alert or scheduled job. Non-owners and callers
+in a sample workspace SHALL receive 404. The review SHALL start from active goals the caller can read. It SHALL
+name no individual contributors and include no per-person, device or session rows. Hidden goals SHALL affect neither results nor
+counts, including denominators. Review state belongs to the current owner.
+
+The review SHALL ask about goals with no fresh tokens in the month, and goals with a target and no fresh tokens in
+the last three weeks of that month, once the goal is at least three weeks old at month end. It SHALL show the date
+of last recorded usage before month end when known. Goal usage includes retained daily roll-ups. A target-gap
+question requires a comparable actual share of all shared agent time in the workspace. This review SHALL omit
+target-gap questions because it cannot establish that denominator while keeping hidden usage and small unbound
+groups out of the response.
+
+The review SHALL use readings from hand entry, CI and commands together in observation order. It SHALL ask
+about each current measure with no reading, an unknown numeric value, an expired latest reading, or no new
+reading for three weeks. It SHALL also ask about values that have stayed the same for at least three weeks
+on the available dated readings. Use the reading's stored expiry and compare exact decimal values when
+available. Where different recordings have the same observation time, use the newest recording. Identify the
+source of the latest reading as self-reported, reported with a CI credential or reported from a machine.
+The review SHALL omit the underlying reading details, including identities, machine names and command details.
+
+The review SHALL identify due unanswered expectations and the latest self-reported `not_met` outcomes for
+visible active goals. A correction replaces the first answer in the review. `cant_tell` and missing
+observations SHALL never be treated as failures.
+
+**Proposed, pending a founder decision.** The unbound share SHALL appear only as one aggregate for the previous
+complete UTC calendar month, when the records establish that at least five distinct people contributed positive
+fresh tokens under shared sessions with no goal. Count distinct existing accounts with contributing records.
+Pseudonyms cannot establish additional distinct people because a former member may have returned. Divide
+retained metered unbound usage with session records by the sum of that usage and metered usage on workspace-visible goals.
+Show only the resulting percentage, to one decimal, or unknown. Exclude usage on team and private goals, even
+when readable. Never report the size of the group, any person's contribution or unshared local usage. A roll-up
+with no contributor identities does not qualify as an unbound observation. The server SHALL remember the first
+release for the workspace and month, shared across owners. Once a figure has been shown, any change observed in
+either usage total or loss of the five-person minimum SHALL make the share unknown for the rest of that review
+period. This conservative rule prevents an update that could be attributed to one person. Deleting shared history
+SHALL still remove the underlying records. Release state SHALL hold no contributor identities or token totals and
+SHALL be removed when the workspace is purged. The review SHALL take no transcript
+data, derived local analysis or additional opt-ins. Questions about frequently confused goals depend on suggestion
+history, which is outside this phase.
+
+`POST` to the same path SHALL use the shared same-origin check for cookie writes before validating the action.
+It SHALL accept `{action, period_end, goal_id?}`: `reviewed` marks that month's review done,
+`defer` delays the Home link for seven days, and `snooze` hides one readable active goal's inactivity question
+for seven days. `period_end` SHALL match the current review's end date in UTC (YYYY-MM-DD), otherwise return 409.
+An unreadable or unknown snooze goal SHALL return 404. Repeating a recorded review SHALL be idempotent, and a
+completed review SHALL remain complete. Migration 29 SHALL add the review, snooze and aggregate release records.
+It SHALL identify legacy workspaces from retained creation records. Workspaces without a record establishing that
+they were created blank SHALL be ineligible for goal-list review until their type is known. New workspaces SHALL
+record their type at creation, independent of event retention. The server SHALL
+record each accepted state change in the workspace audit with actor and time, without naming the snoozed goal.
+Review records follow workspace purge and person pseudonymisation. No review action SHALL alter a goal, request,
+reading, binding or directive.
+
+#### Scenario: Privacy applies before the comparison
+
+- **WHEN** an owner reviews a workspace with hidden goals and four people with metered unbound usage
+- **THEN** hidden goals and their usage make no difference to the response and unbound usage is unknown, even if one of the four used many sessions
+
+#### Scenario: Enough people contributed unbound usage
+
+- **WHEN** five people have positive metered unbound usage in the completed month
+- **THEN** the owner sees an aggregate percentage of that usage plus usage on workspace-visible goals, and no contribution or contributor counts
+
+#### Scenario: A former member rejoins
+
+- **WHEN** four people contributed unbound usage, including someone whose earlier records were pseudonymised before they rejoined and contributed again
+- **THEN** the unbound share stays unknown
+
+#### Scenario: Shared history is deleted after a release
+
+- **WHEN** a contributor deletes their history after an owner saw the month's unbound share, and five other contributors remain
+- **THEN** deletion removes the history and every owner sees unknown for that month, including after subsequent uploads
+
+#### Scenario: An observed share uses a different denominator from the target
+
+- **WHEN** a goal has a target and comparing it with all shared agent time would use unbound or hidden usage the review cannot disclose
+- **THEN** the review asks no target-gap question based on a narrower denominator
+
+#### Scenario: Readings come from different sources
+
+- **WHEN** the latest CI reading has expired, a command reports an unknown value, or hand and automated readings report the same exact decimal for three weeks
+- **THEN** the review shows the corresponding question and source label without disclosing the reading details
+
+#### Scenario: A machine has shared a derived finding
+
+- **WHEN** a derived session finding is stored for a goal the owner can read
+- **THEN** the finding has no effect on the goal-list review and the review does not retrieve it
+
+#### Scenario: A cookie write comes from another site
+
+- **WHEN** an owner posts an action from a different origin
+- **THEN** the server returns 403 before checking the action
+
+#### Scenario: A renamed sample outlives its creation event
+
+- **WHEN** a legacy sample has been renamed and retention has removed its creation event before upgrade
+- **THEN** the upgrade preserves its goals and keeps it ineligible for review
+
+#### Scenario: An owner defers, snoozes or finishes the review
+
+- **WHEN** an owner defers the review, snoozes one question or marks the review done
+- **THEN** defer affects only their Home link, snooze hides only their inactivity question for that goal, and completion closes their monthly prompt without changing a goal or another owner's review
+
 ### Requirement: Parents come from approved alignments
 
 The server SHALL derive a goal's parents only from approved alignments whose source is that goal, and SHALL report each readable parent in `contributes_to` as `{id, title, version, reviewed_version, stale}`, where `reviewed_version` is the parent version the child's owner last reviewed the child against (null if never) and `stale` is true while `reviewed_version` is null or below the parent's current version. Approving an alignment with a source goal SHALL record the source as reviewed against the target's version at approval; saving a new version of the child SHALL record it as reviewed against every parent's current version. A parent that is revoked stops being a parent.

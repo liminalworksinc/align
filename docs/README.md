@@ -46,3 +46,5 @@ explicit parent change.
 - [Legacy project lift-and-shift decision](decisions/0001-legacy-project-lift-and-shift.md)
 - [Owner decisions for Align v2, 2026-10-30 and 2026-10-31](decisions/0003-owner-decisions-v2.md)
 - [Proposed session data boundary](decisions/0004-session-data-boundary.md)
+- [Proposed measure sources](decisions/0005-proposed-measure-sources.md)
+- [Proposed goal-list review and unbound usage decision](decisions/0006-goal-list-review.md)
