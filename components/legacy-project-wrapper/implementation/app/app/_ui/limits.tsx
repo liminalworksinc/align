@@ -11,7 +11,7 @@ import { isBlankText } from "@/lib/v2/text-core.mts";
 // suggests limits from notes and turns them into a new version (the goal's owner) or a change request (anyone else).
 // Limits are goal content: nothing here saves one except a new version or a change request its approvers approve.
 
-export type LimitDraft = { id?: string; type: "must" | "must_not" | "out_of_scope"; text: string; source_title: string; source_date: string; source_kind?: "meeting" | "manual" };
+export type LimitDraft = { id?: string; type: "must" | "must_not" | "out_of_scope"; text: string; source_title: string; source_date: string; source_kind?: "meeting" | "manual"; path_anchors?: string; example_crossing?: string; example_within?: string };
 
 export const LIMIT_WORDS: Record<Limit["type"], string> = { must: "Must", must_not: "Must not", out_of_scope: "Out of scope" };
 const LIMITS_MAX = 5;
@@ -19,7 +19,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 const EXAMPLE = "No limits found. Write them as rules, like “Spend on the launch must stay under $40,000.”";
 
 export const limitsDraft = (ls: Limit[] = []): LimitDraft[] =>
-  ls.map((l) => ({ id: l.id, type: l.type, text: l.text, source_title: l.source?.title ?? "", source_date: l.source?.date ?? "", source_kind: l.source?.kind }));
+  ls.map((l) => ({ id: l.id, type: l.type, text: l.text, source_title: l.source?.title ?? "", source_date: l.source?.date ?? "", source_kind: l.source?.kind, path_anchors: l.path_anchors?.join("\n"), example_crossing: l.example_crossing, example_within: l.example_within }));
 
 /** The limits to send: empty rows left out (spaces, or only invisible characters: E2E-WEB cycle 14 C14-2); a source
  *  only when it has a date. */
@@ -30,12 +30,15 @@ export const limitsOut = (d: LimitDraft[]) =>
       ...(x.id ? { id: x.id } : {}),
       type: x.type,
       text: x.text.trim(),
+      ...(x.type !== "must" && x.path_anchors?.trim() ? { path_anchors: x.path_anchors.split("\n").map((v) => v.trim()).filter(Boolean) } : {}),
+      ...(x.example_crossing?.trim() ? { example_crossing: x.example_crossing.trim() } : {}),
+      ...(x.example_within?.trim() ? { example_within: x.example_within.trim() } : {}),
       source: x.source_date ? { kind: x.source_kind ?? (isBlankText(x.source_title) ? "manual" : "meeting"), title: isBlankText(x.source_title) ? "" : x.source_title.trim(), date: x.source_date } : null,
     }));
 
 /** True when the drafts say exactly the goal's limits (same ids, types, words and sources, in order). */
 export const sameLimits = (d: LimitDraft[], ls: Limit[]) =>
-  JSON.stringify(limitsOut(d).map((l) => [l.id ?? null, l.type, l.text, l.source])) === JSON.stringify(ls.map((l) => [l.id, l.type, l.text, l.source]));
+  JSON.stringify(limitsOut(d).map((l) => [l.id ?? null, l.type, l.text, l.source, l.path_anchors ?? [], l.example_crossing ?? null, l.example_within ?? null])) === JSON.stringify(ls.map((l) => [l.id, l.type, l.text, l.source, l.path_anchors ?? [], l.example_crossing ?? null, l.example_within ?? null]));
 
 const sourceWords = (l: Limit) => (l.source ? `${l.source.title ? `${l.source.title}, ` : l.source.kind === "manual" ? "written in Align, " : ""}${l.source.date}` : "");
 
@@ -219,6 +222,20 @@ export function LimitEditor({ value, onChange }: { value: LimitDraft[]; onChange
               Remove limit
             </Btn>
           </div>
+          <details className="min-w-0 sm:col-start-2">
+            <summary className="cursor-pointer text-[14px] text-(--text-2)">Examples and file paths</summary>
+            {l.type !== "must" && (
+              <Field label="File path anchors" hint="One repo-relative pattern per line, such as services/billing/**.">
+                <TextArea rows={2} value={l.path_anchors ?? ""} onChange={(e) => set(i, { path_anchors: e.target.value })} />
+              </Field>
+            )}
+            <Field label="Example that crosses the limit">
+              <Input value={l.example_crossing ?? ""} maxLength={160} onChange={(e) => set(i, { example_crossing: e.target.value })} />
+            </Field>
+            <Field label="Example within the limit">
+              <Input value={l.example_within ?? ""} maxLength={160} onChange={(e) => set(i, { example_within: e.target.value })} />
+            </Field>
+          </details>
         </div>
       ))}
       {/* A new row starts as "Must", which its placeholder's example is (DEFECT 14, PR 68 pass 1). */}

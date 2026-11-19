@@ -1,4 +1,4 @@
-import { all, run, touchWs, tx } from "./db";
+import { all, get, run, touchWs, tx } from "./db";
 import { badRequest } from "./errors";
 import { nowIso } from "./ids";
 import { goalObj, goalRow } from "./goals";
@@ -6,6 +6,7 @@ import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { openEpoch, sessionRow } from "./sessions";
 import type { DevicePrincipal } from "./devices";
 import { need } from "./workspaces";
+import { currentDeviceWorkspace, tierBlocked } from "./data-sharing";
 import { cleanProse, isBlankText } from "./text-core.mts";
 import { personName } from "./retention";
 import { SESSION_KEY_RE, type Body } from "./validate";
@@ -39,7 +40,7 @@ interface ActivityRow {
 
 function relPath(v: unknown): string | null {
   if (v === undefined || v === null) return null;
-  if (typeof v !== "string" || !v || v.length > 300 || v.startsWith("/") || /(^|\/)\.\.(\/|$)/.test(v) || /[\u0000-\u001f]/.test(v)) {
+  if (typeof v !== "string" || !v || v.length > 300 || /[\\\u0000-\u001f]/.test(v) || /^[a-z]:/i.test(v) || v.split("/").some((seg) => !seg || seg === "." || seg === "..")) {
     throw badRequest("path must be a repo-relative path");
   }
   return v;
@@ -57,15 +58,18 @@ function shortText(v: unknown): string | null {
  *  `too_old` (more than a day back) or `not_shared` (an unknown, foreign or no longer shared session), so a device
  *  never loses them silently (C3-4). */
 export async function ingestActivity(pp: PolicyPrincipal, dev: DevicePrincipal, b: Body) {
-  need(pp, "session.share");
   const items = b.items;
   if (!Array.isArray(items)) throw badRequest("items must be a list");
   if (items.length > MAX_ITEMS) throw badRequest(`items: at most ${MAX_ITEMS}`);
   const now = Date.now();
   let accepted = 0;
-  const refused: { index: number; reason: "clock_skew" | "too_old" | "not_shared" }[] = [];
+  const refused: { index: number; reason: "clock_skew" | "too_old" | "not_shared" | "work_signals_off" | "Update Align to keep sharing paths and labels" }[] = [];
   await tx(() => {
+    need(currentDeviceWorkspace(pp, dev), "session.share");
     touchWs(pp.wsId);
+    const legacy = b.work_signals_version === undefined;
+    const wasPaired = legacy && !!get("SELECT 1 FROM v2_devices WHERE id = ? AND legacy_work_signals = 1", dev.deviceId);
+    const blocked = tierBlocked(pp.wsId, 1);
     for (const [index, raw] of items.entries()) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw badRequest("each item must be an object");
       const it = raw as Body;
@@ -80,6 +84,9 @@ export async function ingestActivity(pp: PolicyPrincipal, dev: DevicePrincipal, 
       if (it.path_hash != null && !pathHash) throw badRequest("path_hash must be a hex hash");
       const path = relPath(it.path);
       const text = shortText(it.text);
+      if ((path !== null && kind !== "edit" && kind !== "claim") || (text !== null && kind === "edit")) {
+        throw badRequest("A file change can carry a path. Commit, task and claim records can carry a label.");
+      }
       if (at > now + 5 * 60_000 || at < now - 24 * HOUR) {
         refused.push({ index, reason: at > now ? "clock_skew" : "too_old" });
         continue;
@@ -87,6 +94,12 @@ export async function ingestActivity(pp: PolicyPrincipal, dev: DevicePrincipal, 
       const s = sessionRow(pp.wsId, key);
       if (!s || s.device_id !== dev.deviceId || s.state !== "shared") {
         refused.push({ index, reason: "not_shared" });
+        continue;
+      }
+      const allowed = s.work_signals === 1 || (s.work_signals === null && wasPaired);
+      if ((path !== null || text !== null) && (blocked || !allowed)) {
+        const reason = legacy && !blocked && s.work_signals === null ? "Update Align to keep sharing paths and labels" : "work_signals_off";
+        refused.push({ index, reason });
         continue;
       }
       const life = kind === "claim" ? HOUR : 24 * HOUR;

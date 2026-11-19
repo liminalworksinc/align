@@ -1903,6 +1903,53 @@ per-path limits apply only when hosted, since Mode L turns off its IP tracking, 
 - Should deleting shared history stay open to any of the sharer's live devices, or only the device that shared it? (Implemented: any live device of the sharing account; a re-pair otherwise strands the history.)
 - A goal's approver approving a "work toward" alignment now lets the aligned person's agent read that goal's team's accepted asks (read-only, on the device feed only, while the alignment is approved and the session is live on the goal; "Asks feed"). The owners should confirm that approving an alignment may grant this, or say whether the approver should see it on the alignment card first. (Implemented: it does, with no extra wording on the card; the browser and `GET .../asks/{id}` are unchanged.)
 
+### Requirement: Workspace sharing restrictions and private findings
+
+A workspace owner SHALL be able to forbid work signals and proposed tiers 2 through 4 independently. A ban SHALL
+apply to new writes for that tier. Hosted workspaces forbid central logs independently of any setting. A device
+SHALL be able to read the restriction for a workspace it reaches and set only its own proposed derived-result consent.
+A session's work-signal consent SHALL be recorded only on a request authenticated as its sharing device. Named
+activity without that session consent or under a workspace ban SHALL be refused while metadata-only activity
+continues. Devices already paired at the upgrade from schema 26 MAY keep using the prior activity request to express
+an existing local choice to send named fields, until an explicit server-side choice is recorded for the session.
+New clients SHALL identify named requests with the new activity protocol and use the consent endpoint. A workspace ban SHALL override
+both protocols. If a legacy request cannot send names, its refusal SHALL tell the person to update the CLI.
+
+A restriction write SHALL check current membership and workspace ownership in the same transaction as the write.
+In Mode L the sharing device SHALL be able to write, read and delete proposed derived findings in its own shared
+history. Hosted Align SHALL refuse consent and uploads. Upload preflight SHALL reflect that deployment restriction,
+the current device grant and the same workspace sharing permission, session state, consent and ban as the write.
+The person who shared the session SHALL be able to delete the result with session history. A finding belongs to the
+session and a recorded binding epoch. Accept only the closed fields in the data-tier requirement, with a known
+limit on that goal version and a reported turn start later than the server's current consent time. Repeating an
+enabled choice preserves its start time. Turning consent off and on starts a new consent period. An available finding
+with the same id and record SHALL acknowledge an identical retry. The server SHALL keep findings private to the
+sharing device. It SHALL refuse uploads of turns 30 days old or older, and remove results by that cutoff. It SHALL
+also reject retries of findings deleted by the sharing device, including uploads for turns at or before that deletion.
+Deleting session history removes the findings. A deletion request from an authorized device that reaches the sharer's
+history deletion marker SHALL acknowledge that removal. Audit changes to consent, bans, and deletion without recording private data, and keep findings out of
+product analytics. A caller with no right to see the session or workspace SHALL get 404.
+
+#### Scenario: An owner forbids derived findings
+
+- **WHEN** a device with consent sends an allowed finding, the owner bars that tier and the device attempts another upload
+- **THEN** the first can be inspected and deleted by the sharing device, the second is refused, and a different device or a workspace owner gets 404 for the first
+
+#### Scenario: Consent, role changes and removed findings
+
+- **WHEN** a device enables derived results after a turn starts or a member becomes a viewer before syncing
+- **THEN** the server refuses the earlier turn, and the viewer's upload preflight says sharing is off
+
+#### Scenario: Retry after deletion or expiry
+
+- **WHEN** a device retries a finding after deletion or expiry
+- **THEN** Align refuses the retry and the finding stays unavailable
+
+#### Scenario: Ownership changes during a restriction request
+
+- **WHEN** a restriction request's author loses workspace ownership before its write
+- **THEN** Align checks the new role and leaves the restriction unchanged
+
 ## Sources
 
 - proxy.ts

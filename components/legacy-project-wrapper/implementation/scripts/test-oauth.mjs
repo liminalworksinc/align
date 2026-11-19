@@ -1127,6 +1127,10 @@ async function local(env) {
     const COMMIT_CANARY = `COMMIT-SUBJECT-${randomBytes(4).toString("hex")}`;
     const LABEL_CANARY = `TASK-LABEL-${randomBytes(4).toString("hex")}`;
     const nowAt = new Date().toISOString();
+    const sConsent = await req("PUT", `/api/v2/workspaces/${A}/sessions/${SKS}/work-signals`, {
+      headers: { authorization: `Bearer ${DS.access}` },
+      body: { enabled: true },
+    });
     const sAct = await req("POST", `/api/v2/workspaces/${A}/activity`, {
       headers: { authorization: `Bearer ${DS.access}` },
       body: {
@@ -1138,7 +1142,7 @@ async function local(env) {
         ],
       },
     });
-    check("setup: a Security session shared, bound to Security's workspace-visible goal, with work signals", sShare.status === 200 && sBind.status === 200 && sAct.status === 200, `${sShare.status} ${sBind.status} ${sAct.status} ${sAct.text}`);
+    check("setup: a Security session shared, bound to Security's workspace-visible goal, with work signals", sShare.status === 200 && sBind.status === 200 && sConsent.json?.enabled === true && sAct.status === 200 && sAct.json?.accepted === 4, `${sShare.status} ${sBind.status} ${sConsent.status} ${sAct.text}`);
     const act = (tok, args = {}) => tool(tok, "align_get_goal_activity", args);
     const [actU4, actSec, actOwner, actNot, actAllOwner] = await Promise.all([act(tU4app, { goal_id: GSecW.id }), act(DS.access, { goal_id: GSecW.id }), act(app, { goal_id: GSecW.id }), act(DN.access, { goal_id: GSecW.id }), act(app)]);
     const actHidden = await act(tU4app, { goal_id: GSecT.id });

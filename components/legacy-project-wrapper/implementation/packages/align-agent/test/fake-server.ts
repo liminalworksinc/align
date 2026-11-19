@@ -121,6 +121,13 @@ export class FakeServer {
   /** POST /activity items as received, plus items other people's machines "sent" (addRemoteActivity). */
   activity: any[] = [];
   activitySeq = 0;
+  /** Work-signal consent in the local test stand-in. */
+  workSignals = new Set<string>();
+  resultConsent = new Map<string, string>();
+  findingsBlocked = false;
+  findingsAvailable = true;
+  findings = new Map<string, unknown[]>();
+  requestBodies: unknown[] | null = null;
   epochs = new Map<string, any>();
   dropEpochOrigin = false;
   /** AskView per workspace, as `GET /api/v2/workspaces/:ws/asks` returns them (the reader's `can` flags included). */
@@ -434,6 +441,7 @@ export class FakeServer {
     if (req.headers.origin) return send(403, { error: "origin_forbidden" });
     try {
       const body = req.method === "GET" || req.method === "DELETE" ? null : await this.body(req);
+      if (body) this.requestBodies?.push(body);
       // ---- device flow ----
       if (req.method === "POST" && p === "/api/v2/device/authorize" && this.authorizeLimited) {
         const lim = this.authorizeLimited;
@@ -508,6 +516,12 @@ export class FakeServer {
         this.revokesSeen.push({ device: dev.id, replaced_by: url.searchParams.get("replaced_by") });
         return send(204);
       }
+      if (req.method === "PUT" && p === "/api/v2/devices/self/data-sharing") {
+        if (body.enabled && !this.findingsAvailable) return send(403, { error: "results_unavailable" });
+        if (body.enabled && !this.resultConsent.has(dev.id)) this.resultConsent.set(dev.id, new Date().toISOString());
+        else if (!body.enabled) this.resultConsent.delete(dev.id);
+        return send(200, { enabled: this.resultConsent.has(dev.id) });
+      }
       if (req.method === "GET" && p === "/api/v2/me") return send(200, { user: this.user, device: { id: dev.id, name: dev.name }, workspaces: this.workspaces, other_workspaces: this.otherWorkspaces });
       if (req.method === "GET" && p === "/api/v2/devices") {
         const list = [...this.devices.values()].map((d) => ({ id: d.id, name: d.name, created_at: d.createdAt ?? new Date(0).toISOString(), last_seen_at: d.createdAt ?? null, revoked_at: d.revoked ? new Date().toISOString() : null, revoked_reason: d.revoked ? d.revokedReason || "revoked_on_web" : null, workspaces: [], current: d.id === dev.id }));
@@ -528,7 +542,7 @@ export class FakeServer {
         const list = (this.asks.get(m[1]) || []).filter((a) => (!state || a.state === state) && (!team || a.team.id === team));
         return send(200, { version: v, asks: list }, { etag: `"${v}"` });
       }
-      m = /^\/api\/v2\/workspaces\/([^/]+)\/sessions\/([^/]+)(\/(epochs|usage|stop-sharing))?$/.exec(p);
+      m = /^\/api\/v2\/workspaces\/([^/]+)\/sessions\/([^/]+)(\/(epochs|usage|stop-sharing|work-signals|analysis))?$/.exec(p);
       if (m) {
         const [, ws, key, , sub] = m;
         // As the server: a workspace this device's person is no longer a member of is out of reach.
@@ -574,6 +588,25 @@ export class FakeServer {
           for (const [k, e] of this.epochs) if (e.session_key === key) this.epochs.delete(k);
           for (const [k, u] of this.usage) if (u.session_key === key) this.usage.delete(k);
           return send(204);
+        }
+        if (sub === "analysis") {
+          const enabled = this.findingsAvailable && !this.findingsBlocked && this.resultConsent.has(dev.id);
+          const findings = this.findings.get(key) ?? [];
+          if (req.method === "GET") return send(200, { available: this.findingsAvailable, enabled, enabled_since: enabled ? this.resultConsent.get(dev.id) : null, findings });
+          if (req.method === "DELETE") {
+            this.findings.delete(key);
+            return send(204);
+          }
+          if (req.method === "POST" && enabled) {
+            this.findings.set(key, [...findings, body]);
+            return send(200, body);
+          }
+          return send(403, { error: "results_off" });
+        }
+        if (sub === "work-signals" && req.method === "PUT") {
+          if (body.enabled && sess.state === "shared") this.workSignals.add(key);
+          else this.workSignals.delete(key);
+          return send(200, { enabled: this.workSignals.has(key) });
         }
         if (sub === "stop-sharing") {
           this.stopOnWeb(key);
@@ -699,6 +732,10 @@ export class FakeServer {
           const sess = this.sessions.get(it.session_key);
           if (!sess || sess.device !== dev.id) {
             refused.push({ index, reason: "not_shared" });
+            continue;
+          }
+          if ((it.path != null || it.text != null) && !this.workSignals.has(it.session_key)) {
+            refused.push({ index, reason: "work_signals_off" });
             continue;
           }
           this.activity.push({ ...it, seq: ++this.activitySeq, ws: m[1], harness: sess.body.harness, user: { id: this.user.id, name: this.user.name }, mine: true, goal_id: sess.body.goal_id ?? "g_ship", expires_at: new Date(Date.parse(it.at) + 86_400_000).toISOString() });

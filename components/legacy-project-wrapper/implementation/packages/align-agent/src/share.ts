@@ -112,7 +112,7 @@ export function renderPreview(p: SharePlan): string {
     `  usage    ${p.rows_now} finalized request rows now, more as the session continues. Each row: request_key (keyed hash),`,
     "           ts, epoch_id, model, query_source, input, output, cache_read, cache_write_5m, cache_write_1h,",
     "           cache_write_unsplit, basis, est_list_usd_micros (an estimate), price_table_version, source",
-    "Never sent: prompts, responses, tool input or output, file paths, repo path, branch names, transcript text.",
+    "Never sent: prompts, responses, tool input or output, absolute repo path, file contents, transcript text.",
     p.unfinalized_now ? `${p.unfinalized_now} unfinished request rows stay local until they finish.` : "",
   ]
     .filter((l) => l !== "")

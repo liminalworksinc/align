@@ -1,3 +1,4 @@
+import type { AnalysisTurn, DriftFeedback } from "./analysis.ts";
 // Types shared by the CLI, the sync job and the hooks. Wire shapes follow docs/v2/WIRE.md.
 import type { ReleaseReaches, ShareFacts, ShareNow, ShareTold } from "./ended.ts";
 import type { EpochOrigin } from "./epoch-origin.ts";
@@ -16,6 +17,9 @@ export interface Limit {
   type: "must" | "must_not" | "out_of_scope";
   text: string;
   source: { kind: "meeting" | "manual"; title: string; date: string } | null;
+  path_anchors?: string[];
+  example_crossing?: string;
+  example_within?: string;
 }
 
 export interface Goal {
@@ -355,7 +359,7 @@ export interface DriftFile {
   goal_id: string;
   goal_title: string;
   /** One per limit; `digests` are the crossing sentences' digests (`crossingDigest`), never their text. */
-  items: { limit_id: string; type: Limit["type"]; text: string; digests?: string[] }[];
+  items: { limit_id: string; type: Limit["type"]; text: string; digests?: string[]; turns?: Record<string, { root: string; version: number }> }[];
   at: string;
 }
 
@@ -385,6 +389,8 @@ export type SpoolRecord =
       cloud_provider_env: boolean;
       ts: string;
     }
+  | { type: "analysis_turn"; harness: Harness; native_id: string; turn: AnalysisTurn; ts: string; legacy: boolean }
+  | { type: "drift_feedback"; local_id: string; feedback: DriftFeedback; ts: string }
   | { type: "root_turn"; harness: Harness; native_id: string; root_turn: string; cwd: string | null; ts: string }
   | {
       type: "epoch_open";
@@ -424,6 +430,7 @@ export type SpoolRecord =
       /** Set when a folder rule shares the session; otherwise the default workspace is used. */
       workspace?: string | null;
       rule_dir?: string | null;
+      signals?: boolean;
       /** `bind`: the id of the binding the hook already applies at the next prompt (InjectedState.local_binding). */
       pending_id?: string;
       /** `share` from a folder rule at session start: the share's first epoch, chosen by the hook that gave the model the

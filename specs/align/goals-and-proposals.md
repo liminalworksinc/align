@@ -566,9 +566,9 @@ release for the workspace and month, shared across owners. Once a figure has bee
 either usage total or loss of the five-person minimum SHALL make the share unknown for the rest of that review
 period. This conservative rule prevents an update that could be attributed to one person. Deleting shared history
 SHALL still remove the underlying records. Release state SHALL hold no contributor identities or token totals and
-SHALL be removed when the workspace is purged. The review SHALL read no transcripts and require no
-additional opt-in. Questions about frequently confused goals depend on suggestion history, which is
-outside this phase.
+SHALL be removed when the workspace is purged. The review SHALL read neither transcripts nor derived findings
+and SHALL require no additional opt-in. Questions about frequently confused goals depend on suggestion
+history, which is outside this phase.
 
 `POST` to the same path SHALL use the shared same-origin check for cookie writes before validating the action.
 It SHALL accept `{action, period_end, goal_id?}`: `reviewed` marks that month's review done,
@@ -612,6 +612,11 @@ reading, binding or directive.
 
 - **WHEN** the latest CI reading has expired, a command reports an unknown value, or hand and automated readings report the same exact decimal for three weeks
 - **THEN** the review shows the corresponding question and source label without disclosing the reading details
+
+#### Scenario: A machine has shared a derived finding
+
+- **WHEN** a derived session finding is stored for a goal the owner can read
+- **THEN** the finding has no effect on the goal-list review and the review does not retrieve it
 
 #### Scenario: A cookie write comes from another site
 

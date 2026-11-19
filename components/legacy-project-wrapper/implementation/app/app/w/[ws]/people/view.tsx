@@ -131,6 +131,38 @@ function TeamMembers({ ws, team, members, owner, me, onDone }: { ws: string; tea
   );
 }
 
+const SHARE_TIERS = [
+  [1, "Work signals"],
+  [2, "Derived results (proposed)"],
+  [3, "Model input (proposed)"],
+  [4, "Deliberate excerpts (proposed)"],
+] as const;
+
+function SharingRestrictions({ ws }: { ws: string }) {
+  const url = `/api/v2/workspaces/${ws}/data-sharing`;
+  const settings = useApi<{ blocked: number[] }>(url);
+  const change = useAction();
+  const blockedTiers = settings.data?.blocked;
+  return (
+    <Panel title="Sharing restrictions">
+      <p className="mb-2 text-[14px] text-(--text-2)">People choose what to share from their machines. Blocking an option applies to the whole workspace.</p>
+      {settings.loading && <Loading />}
+      <Err>{settings.error}</Err>
+      <Err>{change.error}</Err>
+      {blockedTiers && SHARE_TIERS.map(([tier, label]) => (
+        <label key={tier} className="flex min-h-11 items-center gap-2 text-[14px]">
+          <input type="checkbox" name={`restrict-tier-${tier}`} checked={blockedTiers.includes(tier)} disabled={change.busy}
+            onChange={(e) => {
+              const blocked = e.target.checked;
+              void change.run(() => api(url, { method: "PATCH", body: { tier, blocked } }), settings.reload);
+            }} />
+          Block {label}
+        </label>
+      ))}
+    </Panel>
+  );
+}
+
 export default function People({ me, ws }: { me: Me; ws: string }) {
   const d = useApi<WsDetail>(`/api/v2/workspaces/${ws}`);
   const owner = d.data?.role === "owner";
@@ -166,6 +198,7 @@ export default function People({ me, ws }: { me: Me; ws: string }) {
       <Err>{d.error}</Err>
       {d.data && (
         <div className="flex flex-col gap-4">
+          {owner && <SharingRestrictions ws={ws} />}
           <Panel
             title="Members"
             actions={

@@ -46,6 +46,8 @@ export interface Act {
    *  PostToolUse hook saw it run or fail, or its evidence was checked (`hooks/evidence.ts`), for one file (`p`), the
    *  commit (`p: "#commit"`) or the whole call. */
   u?: string;
+  /** The tool itself reported this outcome. */
+  tool_verdict?: 1;
   /** edit, commit: recorded by a Claude Code plugin that installs PostToolUse, so it counts only once that hook saw
    *  its own call run (A2-local-1). */
   c?: 1;

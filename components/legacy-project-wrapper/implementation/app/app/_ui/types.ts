@@ -7,6 +7,9 @@ export interface Limit {
   type: "must" | "must_not" | "out_of_scope";
   text: string;
   source: { kind: "meeting" | "manual"; title: string; date: string } | null;
+  path_anchors?: string[];
+  example_crossing?: string;
+  example_within?: string;
 }
 
 export interface Goal {

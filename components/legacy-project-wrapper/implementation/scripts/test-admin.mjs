@@ -114,7 +114,7 @@ function testReadingUpgrade() {
     d.exec("PRAGMA foreign_keys = ON;");
     const rows = d.prepare("SELECT id, value_num, source, source_ref, goal_version FROM v2_measure_readings ORDER BY rowid DESC").all();
     const version = d.prepare("PRAGMA user_version").get().user_version;
-    check("LIM-2524: a schema 26 database upgrades through 27 to 28", version === 28, version);
+    check("LIM-2524: a schema 26 database upgrades through migration 27", version === SCHEMA_VERSION, version);
     check("LIM-2524: migration 27 preserves legacy reading order and keeps unknown source details and version",
       rows.map((r) => r.id).join() === "mr_later,mr_one" && rows[0].value_num === 2 &&
       rows.every((r) => r.source === "self" && r.source_ref === null && r.goal_version === null) &&
@@ -124,6 +124,50 @@ function testReadingUpgrade() {
       d.prepare("SELECT COUNT(*) AS n FROM v2_measure_readings").get().n === 0);
   } finally {
     d.close();
+  }
+}
+
+function testDataBoundaryUpgrade() {
+  const dir = path.join(testDir, "schema 28 data boundary upgrade");
+  mkdirSync(path.join(dir, "v2"), { recursive: true });
+  const db = new DatabaseSync(path.join(dir, "v2/align.sqlite"));
+  try {
+    db.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY);");
+    for (const sql of migrations.slice(0, 28)) db.exec(sql);
+    db.exec(`
+      INSERT INTO ba_user (id) VALUES ('u_review');
+      INSERT INTO v2_workspaces (id, name, created_by, created_at, is_sample)
+        VALUES ('ws_review', 'Upgraded workspace', 'u_review', '${OLD}', 0);
+      INSERT INTO v2_devices (id, user_id, name, public_key, created_at)
+        VALUES ('d_old', 'u_review', 'Existing machine', 'test-key', '${OLD}');
+      INSERT INTO v2_goal_list_reviews (ws_id, user_id, period_end, reviewed_at)
+        VALUES ('ws_review', 'u_review', '2026-09-01', '${OLD}');
+      INSERT INTO v2_reading_credentials (id, ws_id, token_hash, label, created_at, created_by)
+        VALUES ('rc_old', 'ws_review', 'test-hash', 'Release job', '${OLD}', 'u_review');
+      PRAGMA user_version = 28;
+    `);
+    migrateFixture(dir);
+    db.exec("PRAGMA foreign_keys = ON;");
+    check("LIM-2526: a schema 28 upgrade keeps review and credential records with clean foreign keys",
+      db.prepare("PRAGMA user_version").get().user_version === SCHEMA_VERSION &&
+      db.prepare("SELECT reviewed_at FROM v2_goal_list_reviews WHERE ws_id = 'ws_review'").get()?.reviewed_at === OLD &&
+      db.prepare("SELECT token_hash FROM v2_reading_credentials WHERE id = 'rc_old'").get()?.token_hash === "test-hash" &&
+      db.prepare("PRAGMA foreign_key_check").all().length === 0);
+    db.exec(`
+      INSERT INTO v2_devices (id, user_id, name, public_key, created_at)
+        VALUES ('d_new', 'u_review', 'New machine', 'new-test-key', '${NOW}');
+    `);
+    check("LIM-2526: migration 29 preserves legacy work-signal compatibility and grants no optional uploads",
+      db.prepare("SELECT legacy_work_signals FROM v2_devices ORDER BY id").all().map((row) => row.legacy_work_signals).join() === "0,1" &&
+      db.prepare("SELECT COUNT(*) AS n FROM v2_device_result_consent").get().n === 0 &&
+      db.prepare("SELECT COUNT(*) AS n FROM v2_data_restrictions").get().n === 0);
+    db.exec("INSERT INTO v2_data_restrictions (ws_id, tier) VALUES ('ws_review', 1), ('ws_review', 2)");
+    migrateFixture(dir);
+    check("LIM-2526: opening the upgraded database again keeps both sharing restrictions",
+      db.prepare("SELECT tier FROM v2_data_restrictions WHERE ws_id = 'ws_review' ORDER BY tier").all().map((row) => row.tier).join() === "1,2" &&
+      db.prepare("PRAGMA foreign_key_check").all().length === 0);
+  } finally {
+    db.close();
   }
 }
 
@@ -180,6 +224,7 @@ function testChangeElementUpgrade(name, shift) {
 
 try {
   testReadingUpgrade();
+  testDataBoundaryUpgrade();
   testChangeElementUpgrade("schema 25 to 26", 0);
   testChangeElementUpgrade("shifted migration", 1);
   const reviewDir = path.join(testDir, "schema 27 to 28");
@@ -222,7 +267,7 @@ try {
     const ci = legacyDb.get("SELECT value_text, source, source_ref, stale_after FROM v2_measure_readings WHERE id = 'mr_ci'");
     const command = legacyDb.get("SELECT value_text, source, source_ref FROM v2_measure_readings WHERE id = 'mr_command'");
     check("LIM-2525 (schema 27 to 28): upgrade keeps automated readings with clean foreign keys",
-      legacyDb.get("PRAGMA user_version").user_version === 28 &&
+      legacyDb.get("PRAGMA user_version").user_version === SCHEMA_VERSION &&
       ci?.value_text === "9007199254740993" && ci.source === "ci" && JSON.parse(ci.source_ref).run === "7" && ci.stale_after === NOW &&
       command?.value_text === null && command.source === "command" && JSON.parse(command.source_ref).exit_status === 7 &&
       legacyDb.all("PRAGMA foreign_key_check").length === 0);

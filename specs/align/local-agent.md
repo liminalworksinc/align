@@ -2726,25 +2726,125 @@ usage error (exit 2): the switch is a workspace owner's, on the web.
 
 ### Requirement: Nothing private leaves the machine
 
-The `align` CLI, hooks and sync pass SHALL never upload or store prompts, responses, tool output, file contents or
-transcript text; the `Stop` hook's local drift check reads the last reply and keeps only a limit's id and a digest of
-each crossing sentence. The only exceptions are local activity records in `~/.align/activity/<lid>.jsonl` for shared
-sessions: file paths taken from edit and read tool input and shell write targets, `git commit -m` subjects taken
-from shell commands, and the labels and reasons the user types in `::align task` and `::align claim`. These leave the
-machine only as described under team activity upload. The agent SHALL identify repos to the session API only by the keyed `repo_key` hash (plus a
-`repo_alias` only when the user chose one) and send session titles as null; SHALL identify repos in team activity
-only by `repo_id`, an unkeyed hash of the workspace and the normalized git remote (or local folder) that is the same on
-every member's machine; SHALL keep folder rules, repo paths and branch names local unless work signals are on; and
-SHALL never send an `Origin` header. Steering reports SHALL carry only a shared session's key, two goal ids, two whole
-percents and a time, and the unshared-time digest (folders and token counts) SHALL stay on the machine. Sessions that
-are not shared SHALL cause zero server requests about them.
+Sharing a session SHALL send only tier 0 by default. The following table is the authority for what may leave
+a machine. Tiers 2 through 5 describe proposed policy in
+[ADR 0006](../../docs/decisions/0006-session-data-boundary.md). The metadata default, existing work-signal
+choice and prohibition on uploading a reply remain the current rulings. A machine owner SHALL choose each
+higher tier separately, and a workspace owner SHALL be able to forbid a tier without granting consent for anyone.
+
+| Tier | Data and recipient | Consent and availability |
+| --- | --- | --- |
+| 0. Metadata | Usage counts, model, estimates, session and repo keys, binding metadata, and existing activity hashes, to the Align workspace | Sharing a session |
+| 1. Work signals | Repo-relative paths, commit subjects, task or claim labels and branch name, to Align and people who can read the bound goal | Explicit `--signals` on this machine for a session or folder. The machine owner can turn it off independently. |
+| 2. Derived results (proposed) | A finding id, the binding epoch, goal version and limit id, fixed evidence label, keyed digest and turn start time, to the local Align server for inspection from this machine | Mode L only, after explicit `align data-sharing results on` on this machine. Only findings for turns started after the current consent qualify. Hosted Align refuses this tier. |
+| 3. Model input (proposed, reserved) | Level 1 asks within the existing session. Level 2 would send the minimum context to a separately named model provider. | Separate, default-off choices for each level. No model request in this phase. |
+| 4. Deliberate excerpt (proposed, reserved) | A person's chosen text to a named reader, with a purpose and expiry | Separate, default-off machine choice and a preview and confirmation per excerpt. No excerpt upload in this phase. |
+| 5. Central logs (proposed) | Full transcripts | Forbidden in hosted workspaces. Mode L may read and retain transcripts locally with separate consent. This phase reads the original files and keeps references and results. |
+
+This phase SHALL keep prompts, replies, tool arguments and results, file contents and transcript text in their
+source files. Folder rules and absolute repo paths SHALL stay local. The session API SHALL receive the keyed
+`repo_key`, an alias only if the person chose one, and a null title. The existing team activity hashes are
+deterministic hashes, including the workspace-scoped `repo_id`; previews SHALL describe them as hashes. The
+agent SHALL send no Origin header. Steering reports SHALL carry only the shared session key, two goal ids, two
+whole percents and a time. A private session SHALL cause zero requests about that session.
+
+The CLI SHALL list what each tier can send, who can receive it, and how to turn it off. The one-session, folder,
+past-session and in-session previews SHALL state whether paths and labels are included for that share and say
+that any separate consent for derived results still applies. The client SHALL gate serialization on its local
+choice and a successful policy read. The server SHALL enforce the workspace prohibition and device consent
+independently of the client. The CLI SHALL use the preflight to keep findings local when uploads are unavailable
+and say that hosted Align cannot receive them. It SHALL accept no model input, excerpts or transcripts in this phase.
 
 Explicit automated measure readings SHALL follow the source consent and access rules in Goals and Proposals.
+Session sharing choices and workspace restrictions on optional session data tiers SHALL leave those rules in effect
+in Mode L and hosted Align.
 
 #### Scenario: Canary text
 
 - **WHEN** a shared session's transcript contains the text `CANARY-TRANSCRIPT` and its usage is uploaded (test `e2e` "login, share, usage, ...")
 - **THEN** no uploaded usage row and no byte of `~/.align/align.db` contains `CANARY`, and the session `PUT` body contains no path
+
+#### Scenario: Independent sharing choices
+
+- **WHEN** a machine shares a session without extra consent, then enables work signals or derived results separately
+- **THEN** by default only tier 0 leaves, work signals allow only their named fields, and derived results allow only their closed finding record. A workspace prohibition wins, and removing it grants no machine consent.
+
+#### Scenario: Derived results with hosted Align
+
+- **WHEN** the machine connects to hosted Align and its person tries to turn on derived results
+- **THEN** Align refuses that choice, the CLI says findings stay on the machine, and no finding is serialized for upload
+
+### Requirement: Local session analysis
+
+After releasing `sync.lock`, one-shot sync SHALL process a bounded number of completed turns under a separate
+owner-checked lease, with bounded reads, a deadline and bounded retries. It SHALL work signed out. The hooks SHALL
+capture the turn, the goal version and the binding applied at the prompt boundary and pass a transcript reference
+on completion. The new analysis SHALL run outside hooks. The existing reply-only check remains a compatibility
+path for sessions without a captured transcript turn.
+
+The content reader SHALL associate root prompts, assistant blocks and tool results by prompt, turn and call ids,
+ignore blocked commands and duplicate records, and abstain on ambiguous or unsupported shapes. When the
+hook provides no prompt id, the reader SHALL require a unique timestamp match before using reply or tool records. It SHALL use its
+own bounded reads independently of metering offsets. The local ledger SHALL keep the turn reference, binding origin,
+record counts with lower bounds when capped and unknown when unavailable and limit findings with a stable id and keyed digest. It SHALL keep no copied raw content.
+`align analysis show <session>` SHALL summarize results, delivery and feedback in plain language. It SHALL label
+capped counts as lower bounds. `align analysis show <session> --json` SHALL expose the exact record acknowledged by
+Align. `align analysis delete <session>` SHALL remove local results and pending work and request deletion of shared
+results. A failed deletion stays pending and is shown as pending. An authorized acknowledgement that shared history
+was already deleted completes the request. The original transcript stays under the harness's
+control. The analysis projection SHALL contain only the results needed for notices.
+
+A later model-based limit check or goal suggester SHALL declare tier 3 and whether the recipient is the existing
+session or a separately named provider. It SHALL pass the same consent gate before receiving input. Both choices
+return disabled in this phase.
+
+#### Scenario: Analysis while signed out
+
+- **WHEN** a completed turn with a supported transcript is recorded and one-shot sync runs signed out
+- **THEN** the local results are inspectable, the hook does not wait for the reader, metering can already be past the turn, and no request carries anything from it
+
+#### Scenario: Transcript selection and inspection
+
+- **WHEN** a transcript has two possible root prompts near the recorded time and the hook supplied no prompt id
+- **THEN** the reader uses neither reply and reports unknown record counts
+
+#### Scenario: Inspecting incomplete counts
+
+- **WHEN** a uniquely identified turn has more records than the reader can collect
+- **THEN** inspection shows positive observed counts as lower bounds, shows unknown for a count with no usable evidence, and still allows the person to inspect any acknowledged record
+
+### Requirement: Limit evidence and feedback
+
+An approved goal version MAY carry optional repo-relative path anchors on a prohibition, and one optional example
+of a crossing and one of a reply within the limit. Each field SHALL use its visible label in validation. Anchors
+match the whole path, with `*` within a segment and `**` across segments. A limit SHALL only match a confirmed edit
+or a conservatively attributed path during that bound turn. Findings SHALL distinguish tool confirmation, file
+inference, git attribution and reply wording. A commit subject alone proves no path. A crossing example SHALL only
+add clear first-person statements, using the same guards as the word rule, and a matching safe example SHALL make
+that rule abstain. Unknown evidence SHALL produce no finding and no compliance label.
+
+Completed results SHALL surface as user-only notices at a subsequent prompt. Apply the existing cap of three
+limits per prompt and three notices per limit per session. Repeat evidence SHALL remain silent. `::align drift wrong`
+SHALL mark the last notice, or one limit in it if its id is supplied. `::align drift missed` SHALL record the last
+completed turn. The reply-only compatibility check SHALL also record the completed turn and the notice identifiers for feedback.
+Feedback SHALL remain local, tied to the turn and version; wrong feedback suppresses repeated
+evidence for that version without silencing other evidence. A person can take a dispute to the goal owner through
+the available drift question flow. Future work records can reference the finding id.
+
+#### Scenario: A bound turn crosses a path limit
+
+- **WHEN** the turn changes a file below a forbidden anchor with clear evidence, then the next turn switches goals
+- **THEN** the notice names the earlier limit and evidence source, the finding keeps the earlier goal version, and a failed tool call or a commit with only a subject produces no path finding
+
+#### Scenario: Example and feedback
+
+- **WHEN** a clear reply matches the added crossing example and a person marks one limit in the resulting notice wrong or reports a missed turn
+- **THEN** the feedback is present in local inspection, the person receives no further notice for the same evidence, and no raw text or feedback is uploaded
+
+#### Scenario: Feedback on a reply-only notice
+
+- **WHEN** a turn lacks a transcript reference and the compatibility check shows a limit notice
+- **THEN** marking that notice wrong or the turn missed records feedback against the completed turn and its goal version on this machine
 
 ### Requirement: Device secret and keyed identifiers
 
@@ -3025,9 +3125,8 @@ normalized git remote, or the local folder when there is none), and `edit` and `
 (file reads stay local); repo-relative `path`, commit subjects, task labels, claim reasons and a `branch <name>` task (except
 `main`, `master`, `trunk`, `develop`, `dev`) SHALL be sent only when work signals are on for that session (`--signals`
 on `align share`, else the folder rule's setting). The `align share` previews SHALL say `Work signals ON: ...` or
-`Work signals OFF: only keyed hashes of edited files are sent, ...`, and the in-session `::align share --dir` preview
-without `--signals` SHALL include `(Add --signals to share file paths and task labels with the team.)` (the
-single-session `::align share` preview does not mention work signals). The pass SHALL fetch `GET
+`Work signals OFF: only hashes of edited files are sent` and say that `--signals` shares paths and labels with
+people who can read the goal. In-session previews SHALL use the same work-signal wording. The pass SHALL fetch `GET
 .../activity?after=<cursor>` into `~/.align/feeds/activity-<ws>.json`, keeping other machines' items from the last 6
 hours (at most 1,000); this machine's own items are never kept, since they are never shown back and would push other
 people's recent work out of the 1,000 (A2-local-8).
@@ -3227,8 +3326,8 @@ accepted)`, and ends the section `- (<n> open ask[s] left out because an agent m
 
 ### Requirement: Local drift notice
 
-The `align` hook SHALL, on `Stop` for a shared session bound to a goal with limits and unless `align config drift
-off` set `"drift": false` in `config.json`, read the turn's last reply locally (the hook input's
+If the prompt hook did not receive a transcript reference, the compatibility check SHALL run on `Stop` for a
+shared session bound to a goal with limits, unless `align config drift off` set `"drift": false` in `config.json`, read the turn's last reply locally (the hook input's
 `last_assistant_message`, else the last assistant text in the last 256 KB of `transcript_path` after the last typed
 prompt) and check it against each of the goal's limits with a word rule (owner decision D5: no model, nothing
 uploaded, never blocks). Where the rule can't tell, it SHALL say nothing: a missed notice costs less than a false alarm
@@ -3319,8 +3418,8 @@ acycle2 A2-cross-4); the full stop after the last quote is left out when the lim
 A1-cross-10). Latching SHALL be per crossing sentence, never per limit: the session keeps (in
 `~/.align/injected/<lid>.json`, `drift_seen` and `drift_count`) the digests of the sentences it was told about and how
 many notices named each limit, so the same sentence is never told twice, a later, different crossing of a limit that
-had a false alarm is still told (E2E acycle2 A2-cross-1), and no limit is named in more than 3 notices per session. It
-SHALL never add model context or upload anything, and keeps no reply text.
+had a false alarm is still told (E2E acycle2 A2-cross-1), and no limit is named in more than 3 notices per session. This compatibility check
+SHALL keep no reply text and SHALL stay outside model context and uploads.
 
 #### Scenario: Word check
 
@@ -3386,9 +3485,6 @@ next to a session shared in the same folder in the last 24 hours, `Align: this f
 1. **Stale "daemon" leftovers.** The code has no daemon or login item (the only background work is the one-pass
    `align sync` that hooks start), yet `package.json` still describes "CLI, daemon, Claude Code and Codex hooks", and
    `paths.ts` resolves an unused `launchAgents` path (`ALIGN_LAUNCH_AGENTS_DIR`). Should these leftovers be removed?
-2. **Preview wording with work signals.** The single-session `align share` preview always prints `Never sent: ...
-   file paths, repo path, branch names ...`, even with `--signals`, where the next lines say repo-relative paths and
-   the branch name are sent. Should the preview line depend on `--signals`, as the `--dir` preview's does?
 3. **Latency budget.** The harness `timeout` is 5 s, the internal deadline is 300 ms, and `align doctor` and the
    tests use p95 < 150 ms as the bar. Which number is the requirement?
 4. **The team activity label.** The report that `align team` prints covers related goals rather than one team's

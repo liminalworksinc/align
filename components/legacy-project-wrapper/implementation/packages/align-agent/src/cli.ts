@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { deleteAnalysis, inspectAnalysis, analysisSharingAllowed, setResultsEnabled } from "./analysis.ts";
+import { EVIDENCE_WORDS, RESULTS_PREVIEW, signalsPreview } from "./shared/analysis.ts";
 // `align` CLI. Works offline for local metering; server features need `align login`.
 import { measureCommand } from "./measure.ts";
 import { execFile, spawnSync } from "node:child_process";
@@ -37,11 +39,11 @@ import { endedWhyWords, latchWayOut, shareAgainWords, STOP_HOLDS_NO_SHARE } from
 import { buildOf, hooksBuildDiffers, hooksBuildWords, selfBuild, supersededWords } from "./build.ts";
 import { resolvePaths, type Paths } from "./paths.ts";
 import { fetchAsks } from "./asks.ts";
-import { settleActivity, uploadActivity, waitingActivity } from "./activity.ts";
+import { settleActivity, signalsAllowed, uploadActivity, waitingActivity } from "./activity.ts";
 import { pullEndedSessions } from "./directives.ts";
 import { hookEvents, install, pluginHooksFile, POST_FLAG, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { newDeviceKey } from "./keys.ts";
-import { applyShare, bind, deleteHistory, deleteRefused, ENDED_UNREAD, endedUnread, endSharesIfSignedOut, endSharesSignedOut, SHARE_UNREAD_WORDS, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stoppedByPerson, stopSharing } from "./share.ts";
+import { applyShare, bind, enqueue, deleteHistory, deleteRefused, ENDED_UNREAD, endedUnread, endSharesIfSignedOut, endSharesSignedOut, SHARE_UNREAD_WORDS, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stoppedByPerson, stopSharing } from "./share.ts";
 import { askLineForPeople, askOrder, myTeams, readAsks } from "./shared/asks.ts";
 import { gitInfo, manualShareOrigin } from "./shared/anchors.ts";
 import { readJson } from "./shared/fsx.ts";
@@ -55,7 +57,7 @@ import { MIN_NODE, unsupportedNode } from "./node-version.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { agentMayRead, podReport } from "./hooks/siblings.ts";
 import { answerable, answerRequest, listRequests, stateWords } from "./requests.ts";
-import { clean, GOAL_MARKS, goalMark, HELD_MARK, keptHoldsNote, otherWorkspaceWords, outOfReachWords, quoted, requestShortId, stoppedForGoodWords } from "./shared/envelope.ts";
+import { clean, GOAL_MARKS, LIMIT_WORDS, goalMark, HELD_MARK, keptHoldsNote, otherWorkspaceWords, outOfReachWords, quoted, requestShortId, stoppedForGoodWords } from "./shared/envelope.ts";
 import { feedHold } from "./shared/feedhold.ts";
 import type { RequestState, WireRequest } from "./shared/types.ts";
 import { computeUnsharedDigest } from "./allocation.ts";
@@ -89,6 +91,11 @@ const HELP = `align ${VERSION}: Align local agent
   align measure revoke <workspace-id> <goal-id> <measure-id>
   align asks [--workspace <name|id>] [--all] [--json]   what other teams asked of your teams, and your own asks (offline)
   align config [drift on|off]  local settings; drift: a user-only note when a reply may conflict with a goal's limit
+  align data-sharing           show what this machine can share and how to change it
+  align data-sharing signals <session> [on|off]
+  align data-sharing results on|off
+  align analysis show <session> [--json]
+  align analysis delete <session>
   align stop-sharing <session>
   align delete-history <session> [--yes]
   align bind <session> --goal <ref|none>
@@ -1032,6 +1039,7 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
   const plan = planShare(ctx, session.local_id, ws, goal, values.alias ?? null, effectiveFrom, origin);
   out(renderPreview(plan));
   out(signalsPreview(!!values.signals));
+  out(RESULTS_PREVIEW);
   if (effectiveFrom !== from) out("This session was shared before, so this share counts from now.");
   if (!(await confirm("Share this session?", !!values.yes))) {
     out("Not shared. Run again with --yes to confirm.");
@@ -1053,11 +1061,7 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
 }
 
 /** What team awareness sends, with and without the user's consent to share names. */
-function signalsPreview(on: boolean): string {
-  return on
-    ? "Work signals ON: repo-relative paths of edited files, commit subjects, task labels and the branch name go to people who\ncan read the goal, kept 24 hours, so their agents can avoid overlapping work. File contents are never sent."
-    : "Work signals OFF: only keyed hashes of edited files are sent, so overlapping edits can be flagged without names.\nAdd --signals to share file paths, commit subjects and task labels with people who can read the goal.";
-}
+
 
 const HARNESS_NAME: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex" };
 
@@ -1079,6 +1083,7 @@ async function shareDir(ctx: Ctx, folder: string, wsRef: string | undefined, goa
   out("Sent per session: harness, a keyed repo hash, start time, binding epochs, per-request token counts with model, basis and");
   out(`estimated list cost. Never sent: prompts, responses, tool input or output${signals ? "" : ", paths, branch names"}.`);
   out(signalsPreview(signals));
+  out(RESULTS_PREVIEW);
   const prev = matchRule(readRules(ctx.home), dir);
   if (prev && prev.dir === dir) out(`This replaces the current rule (${prev.workspace_name}${prev.goal_title ? `, "${prev.goal_title}"` : ""}).`);
   // --past: sessions already metered on this machine whose own folders are all inside this one, each from its start.
@@ -1192,6 +1197,83 @@ async function cmdAsks(ctx: Ctx, argv: string[]): Promise<void> {
   if (all.some((a) => a.asks.some((x) => !x.read_only))) out("Accept, decline or mark done in the web app.");
 }
 
+async function cmdDataSharing(ctx: Ctx, args: string[]) {
+  if (!args.length) {
+    const server = loadCredentials(ctx.home)?.server_url ?? ctx.config.server_url;
+    out(`0  Metadata. Sharing a session sends usage counts, model, estimates, binding details and hashes to Align at ${server}. Use align stop-sharing <session> to stop.`);
+    out("1  Work signals. Off unless chosen for a session or folder. Repo-relative paths, commit subjects, task or claim labels and branch names go to Align and people who can read the goal. Use align data-sharing signals <session> off for a session, or replace a folder rule without --signals.");
+    out(`2  Derived results (proposed). ${analysisSharingAllowed(ctx, 2) ? "On" : "Off"} on this machine. Only a local Align server (Mode L) can receive finding ids, binding and limit ids, goal versions, turn start times, evidence labels and keyed digests. Findings stay on this machine with hosted Align. Use align data-sharing results off to turn it off.`);
+    out("3  Model input (proposed). Off. No recipient configured in this version.");
+    out("4  Deliberate excerpts (proposed). Off. No recipient configured in this version.");
+    out("5  Central logs (proposed). Hosted workspaces cannot receive transcripts. This version reads the transcript locally from its original file.");
+    return;
+  }
+  const [option, ref, choice, extra] = args;
+  if (option === "signals" && ref && !extra) {
+    ingestSpool(ctx);
+    const session = resolveSession(ctx, ref);
+    if (!choice) return out(`Work signals ${signalsAllowed(ctx, session.local_id, session.cwd) ? "on" : "off"} for this session on this machine.`);
+    if (choice === "on" || choice === "off") {
+      kvSet(ctx.db, `signals:${session.local_id}`, choice === "on" ? "1" : "0");
+      const share = getShare(ctx, session.local_id);
+      if (choice === "off" && share && share.state !== "error") {
+        enqueue(ctx, session.local_id, "work_signals_off", { ws: share.workspace_id, session_key: share.session_key });
+        await tryFlush(ctx);
+      }
+      return out(`Work signals ${choice} for this session on this machine. The workspace can block them.`);
+    }
+  }
+  if (option === "results" && (ref === "on" || ref === "off") && !choice) {
+    const status = await setResultsEnabled(ctx, ref === "on");
+    if (status === "unavailable") return out("Hosted Align cannot receive derived findings. They stay on this machine.");
+    return out(`Derived results ${ref} on this machine.${status === "pending" ? " The server has not acknowledged the choice. The next sync retries." : ""}`);
+  }
+  throw new UsageError(commandHelp("data-sharing"));
+}
+
+async function cmdAnalysis(ctx: Ctx, args: string[]) {
+  const [action, ref, option, extra] = args;
+  if ((action !== "show" && action !== "delete") || !ref || extra || (option && (action !== "show" || option !== "--json"))) {
+    throw new UsageError(commandHelp("analysis"));
+  }
+  ingestSpool(ctx);
+  const session = resolveSession(ctx, ref);
+  if (action === "show") {
+    const analysis = inspectAnalysis(ctx, session.local_id);
+    if (option === "--json") return out(JSON.stringify(analysis, null, 2));
+    if (!analysis.turns.length) out("No transcript analysis recorded.");
+    for (const turn of analysis.turns) {
+      const goal = turn.goal;
+      const binding = goal ? ` · ${goal.title ? `${quoted(goal.title, 80)}, ` : ""}goal version ${goal.version}` : "";
+      out(`Turn started ${shortTime(turn.started_at)}${binding}`);
+      const labels = { replies: "Replies", calls: "Tool calls", results: "Tool results" } as const;
+      for (const field of ["replies", "calls", "results"] as const) {
+        const n = turn.records?.[field];
+        const lowerBound = turn.records?.lower_bounds?.includes(field);
+        const count = n === undefined || (lowerBound && n === 0) ? "unknown" : `${lowerBound ? "at least " : ""}${n}`;
+        out(`  ${labels[field]}: ${count}`);
+      }
+      for (const finding of turn.findings) {
+        out(`  ${LIMIT_WORDS[finding.limit.type]} ${quoted(finding.limit.text, 160)}. ${EVIDENCE_WORDS[finding.evidence]}`);
+      }
+    }
+    if (analysis.feedback.length) {
+      out("Feedback on this machine");
+      for (const f of analysis.feedback) {
+        const version = typeof f.version === "number" ? ` · goal version ${f.version}` : "";
+        out(`  ${f.kind === "wrong" ? "False alarm" : "Missed check"} · ${shortTime(String(f.at))}${version}`);
+      }
+    }
+    if (analysis.sent.length) out(`Align acknowledged ${analysis.sent.length} finding${analysis.sent.length === 1 ? "" : "s"}. Use --json to see the exact records.`);
+    if (analysis.delivery_unknown.length) out("Align has not confirmed whether some findings arrived.");
+    if (analysis.upload_pending) out("Some findings are waiting to be sent.");
+    if (analysis.deletion_pending) out("Deletion at Align is pending.");
+    return;
+  }
+  const deleted = await deleteAnalysis(ctx, session.local_id);
+  out(deleted ? "Analysis deleted." : "Local analysis deleted. Deletion at Align is pending.");
+}
+
 /** `align config` prints local settings; `align config drift on|off` turns the local drift notice on or off. */
 async function cmdConfig(ctx: Ctx, argv: string[]): Promise<void> {
   const [key, value] = argv;
@@ -1210,7 +1292,7 @@ async function cmdConfig(ctx: Ctx, argv: string[]): Promise<void> {
   saveConfig(ctx.home, { drift: value === "on" });
   out(
     value === "on"
-      ? "Drift notice on: after each turn of a shared session whose goal has limits, the reply is checked on this machine and you see a note if it may conflict with one. Nothing is sent or added to the agent's context."
+      ? "Drift notice on: after each turn of a shared session whose goal has limits, the reply is checked on this machine and you see a note if it may conflict with one. The reply stays on this machine."
       : "Drift notice off.",
   );
 }
@@ -1729,6 +1811,10 @@ export async function main(argv: string[]): Promise<void> {
         return out(await measureCommand(ctx, rest));
       case "asks":
         return await cmdAsks(ctx, rest);
+      case "data-sharing":
+        return await cmdDataSharing(ctx, rest);
+      case "analysis":
+        return await cmdAnalysis(ctx, rest);
       case "config":
         return await cmdConfig(ctx, rest);
       case "latch":
