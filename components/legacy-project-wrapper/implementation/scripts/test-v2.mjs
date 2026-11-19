@@ -531,12 +531,15 @@ if (build.status !== 0) {
   );
   const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
   const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
-  const modelHost = /api\.anthropic\.com|api\.openai\.com|generativelanguage\.googleapis\.com|api\.mistral\.ai|api\.cohere\.|ai-gateway\.vercel/i;
+  const modelHost = /api\.typesafe\.ai|api\.anthropic\.com|api\.openai\.com|generativelanguage\.googleapis\.com|api\.mistral\.ai|api\.cohere\.|ai-gateway\.vercel/i;
   const callers = sources.filter((f) => modelHost.test(readFileSync(f, "utf8")) || /from "(?:@anthropic-ai\/|openai|@ai-sdk\/|ai")/.test(readFileSync(f, "utf8")));
   const modelDeps = deps.filter((d) => /^(?:@anthropic-ai\/|openai$|@ai-sdk\/|ai$|@google\/generative-ai|@mistralai\/|cohere-ai)/.test(d));
   check(
-    "trust: the server calls no AI model provider (no model API host or SDK in app/, lib/, proxy.ts or package.json), so the subprocessor list rightly has none",
-    callers.length === 0 && modelDeps.length === 0 && /calls no AI model/.test(subprocessors),
+    "trust: the server calls no model provider and the draft lists the proposed recipients of direct, opt-in device requests",
+    callers.length === 0 && modelDeps.length === 0 &&
+      subprocessors.includes("The Align server makes no model requests.") &&
+      ["Proposed decision subprocessors", "TypeSafe", "OpenAI", "Google", "directly to the selected endpoint"]
+        .every((wording) => subprocessors.includes(wording)),
     `${callers.map((f) => path.relative(ROOT, f)).join(" ")} ${modelDeps.join(" ")}`,
   );
   const legal = ["privacy-policy.md", "dpa.md"].map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8"));
@@ -910,10 +913,10 @@ try {
     "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "v2_expectations", "v2_outcome_reports",
     "v2_measure_readings", "v2_reading_credentials", "v2_goal_list_reviews", "v2_goal_list_snoozes", "v2_goal_review_releases",
     "v2_data_restrictions", "v2_device_result_consent", "v2_analysis_findings",
-    "ba_user", "ba_passkey",
+    "v2_workspace_decision_services", "ba_user", "ba_passkey",
   ];
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 29, lib/v2/core.mts SCHEMA_VERSION), v2 tables and Better Auth tables, limits on goals and goal versions`,
-    SCHEMA_VERSION === 29 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION &&
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 30, lib/v2/core.mts SCHEMA_VERSION), v2 tables and Better Auth tables, limits on goals and goal versions`,
+    SCHEMA_VERSION === 30 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION &&
     requiredTables.every((table) => pragmas.tables.includes(table)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
@@ -1857,6 +1860,42 @@ try {
   const restrictSharing = (user, ws, tier, blocked) => call(user.who, "PATCH", `/api/v2/workspaces/${ws}/data-sharing`, {
     cookie: user.cookie, body: { tier, blocked },
   });
+  const blockModels = await restrictSharing(U1, A, 3, true);
+  const readModelPolicy = (dev, ws) => call(dev.who, "GET", `/api/v2/workspaces/${ws}/data-sharing`, { bearer: dev.access });
+  const [blockedModelPolicy, foreignModelPolicy, memberBlockModels] = await Promise.all([
+    readModelPolicy(D3, A), readModelPolicy(D3, B), restrictSharing(U3, A, 3, false),
+  ]);
+  const dispatchPolicy = (u) => call(u.who, "GET", `/api/v2/workspaces/${A}/data-sharing?for=model-suggestion`, { cookie: u.cookie });
+  const [memberDispatch, viewerDispatch, memberDeviceDispatch, viewerDeviceDispatch] = await Promise.all([
+    dispatchPolicy(U3),
+    dispatchPolicy(U4),
+    call(D3.who, "GET", `/api/v2/workspaces/${A}/data-sharing?for=model-suggestion`, { bearer: D3.access }),
+    call(D4.who, "GET", `/api/v2/workspaces/${A}/data-sharing?for=model-suggestion`, { bearer: D4.access }),
+  ]);
+  const unblockModels = await restrictSharing(U1, A, 3, false);
+  check("LIM-2527: only an owner can block model suggestions and a device can read the policy only in its workspace",
+    blockModels.json?.blocked?.includes(3) && blockedModelPolicy.json?.blocked?.includes(3) &&
+    foreignModelPolicy.status === 404 && memberBlockModels.status === 403 && !unblockModels.json?.blocked?.includes(3) &&
+    memberDispatch.status === 200 && viewerDispatch.status === 403 &&
+    memberDeviceDispatch.status === 200 && viewerDeviceDispatch.status === 403,
+    `${blockModels.text} ${blockedModelPolicy.text} ${foreignModelPolicy.text} ${memberBlockModels.text} ${unblockModels.text}`);
+  const servicePath = `/api/v2/workspaces/${A}/data-sharing`;
+  const setDecisionService = (u, address) => call(u.who, "PATCH", servicePath, { cookie: u.cookie, body: { decision_service_url: address } });
+  const address = "https://decision.example.test/v1/systemone";
+  const [deniedAddress, viewerAddress] = await Promise.all([setDecisionService(U3, address), setDecisionService(U4, address)]);
+  const badAddress = await setDecisionService(U1, "https://decision.example.test/v1/systemone?secret=value");
+  const configured = await setDecisionService(U1, address);
+  const readAddress = await readModelPolicy(D3, A);
+  const cleared = await setDecisionService(U1, null);
+  const restored = await setDecisionService(U1, address);
+  const finalClear = await setDecisionService(U1, null);
+  const endpointAudit = withDb((d) => d.prepare("SELECT * FROM v2_audit WHERE ws_id=? AND action='data_sharing.decision_service_changed'").all(A));
+  check("LIM-2527: the owner sets and clears the workspace decision service, replacements expire consent, and audit omits the address",
+    deniedAddress.status === 403 && viewerAddress.status === 403 && badAddress.status === 400 && configured.status === 200 &&
+    readAddress.json?.decision_service?.url === address && typeof readAddress.json.decision_service.revision === "string" &&
+    cleared.json?.decision_service === null && restored.json?.decision_service?.revision !== readAddress.json.decision_service.revision &&
+    finalClear.json?.decision_service === null && endpointAudit.length === 4 && !JSON.stringify(endpointAudit).includes(address),
+    JSON.stringify({ deniedAddress, viewerAddress, badAddress, configured, cleared, readAddress, restored, finalClear, endpointAudit }));
   const signalsByDefault = await actPost(D3, [okItems[0]], { body: { items: [okItems[0]], work_signals_version: 1 } });
   const signalsOther = await optSignals(D1, A, S3a, true);
   const signalsAsMember = await restrictSharing(U3, A, 1, true);
@@ -2008,6 +2047,20 @@ try {
   const rebindOwn = await epoch(D3, S3a, { epoch_id: epochId(), goal_id: G3.id, starts_at: new Date().toISOString() });
   const spendRev = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json;
   check("alignment: revoke is prospective (in-flight usage of the old epoch still lands under G1); G1 needs alignment again; picking an own goal resumes sharing", inflight.json?.accepted === 1 && rebindG1.status === 403 && rebindOwn.status === 200 && spendRev.rows.find((r) => r.goal?.id === G1.id)?.requests === 3, `${inflight.text} ${rebindG1.status} ${rebindOwn.text}`);
+  const unallocatedBody = { epoch_id: epochId(), goal_id: null, starts_at: new Date().toISOString() };
+  const unallocatedSuggestion = await epoch(D3, S3a, { ...unallocatedBody, origin: "suggested_rule" });
+  check("LIM-2527: epochs without a goal cannot record any suggestion origin",
+    unallocatedSuggestion.status === 200 && unallocatedSuggestion.json?.origin === null &&
+    (await Promise.all(["suggested_agent", "suggested_model"].map((origin) =>
+      epoch(D3, S3a, { ...unallocatedBody, origin }),
+    ))).every((r) => r.status === 200 && r.json?.origin === null), unallocatedSuggestion.text);
+  const ruleEpochBody = { epoch_id: epochId(), goal_id: G3.id, starts_at: new Date().toISOString(), origin: "suggested_rule" };
+  const [ruleEpoch, ruleRetry] = await Promise.all([epoch(D3, S3a, ruleEpochBody), epoch(D3, S3a, ruleEpochBody)]);
+  const rulesSession = await call("U3", "GET", `/api/v2/workspaces/${A}/sessions`, { cookie: U3.cookie });
+  check("LIM-2527: a confirmed rules suggestion keeps its origin on retry and the caller's session list",
+    ruleEpoch.status === 200 && ruleEpoch.json?.origin === "suggested_rule" && ruleRetry.text === ruleEpoch.text &&
+      rulesSession.json?.mine?.some((s) => s.session_key === S3a && s.current_epoch?.origin === "suggested_rule"),
+    `${ruleEpoch.text} ${ruleRetry.text} ${JSON.stringify(rulesSession.json?.mine?.find((s) => s.session_key === S3a))}`);
   const wd = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S3b] });
   const wdo = await act(U3, wd.json.id, "withdraw", { revision: 1 });
   const rj = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S3b] });
@@ -4359,6 +4412,41 @@ try {
       await page.click('input[name="restrict-tier-2"]');
       await page.waitForFunction(() => [...document.querySelectorAll("label")].some((l) => l.innerText === "Block Derived results (proposed)" && l.querySelector("input:not(:checked)")));
       check("LIM-2526 (Chrome 390px): a workspace owner can toggle sharing restrictions without horizontal scrolling", phoneRestrictions, page.url());
+      const modelLabel = 'Block Model-based goal suggestions (proposed)';
+      await page.click('input[name="restrict-tier-3"]');
+      await page.waitForFunction((label) => [...document.querySelectorAll("label")].some((l) => l.innerText === label && l.querySelector("input")?.checked), {}, modelLabel);
+      check("LIM-2527 (Chrome 390px): model suggestion restrictions fit and use a plain label",
+        await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), page.url());
+      await page.click('input[name="restrict-tier-3"]');
+      await page.waitForFunction(() => !!document.querySelector('input[name="restrict-tier-3"]:not(:checked)'));
+      const field = 'form input[type="url"][maxlength="2048"]';
+      const save = 'form:has(input[type="url"][maxlength="2048"]) button[type="submit"]';
+      await page.waitForSelector(field, { visible: true });
+      const setAddress = async (value) => {
+        await page.$eval(field, (input) => { input.focus(); input.select(); });
+        await page.keyboard.press("Backspace");
+        if (value) await page.type(field, value);
+        const [response] = await Promise.all([
+          page.waitForResponse((r) => r.url() === BASE + servicePath && r.request().method() === "PATCH"),
+          page.locator(save).click(),
+        ]);
+        return response;
+      };
+      const invalidService = await setAddress(address + "?secret=value");
+      await page.waitForSelector('form:has(input[type="url"][maxlength="2048"]) [role="alert"]', { visible: true });
+      const addressField = await page.$eval(field, (input) => ({
+        name: document.getElementById(input.getAttribute("aria-labelledby"))?.textContent,
+        error: input.closest("label")?.innerText,
+      }));
+      const validService = await setAddress(address);
+      const savedService = (await validService.json()).decision_service;
+      await page.waitForFunction((input, button) => !document.querySelector(input)?.disabled && document.querySelector(button)?.disabled, {}, field, save);
+      const removedService = await setAddress("");
+      check("LIM-2527 (Chrome 390px): the owner can fix an invalid address, save the recipient and clear it",
+        invalidService.status() === 400 && addressField.name === "Decision service address" &&
+        addressField.error?.includes("must be an HTTPS URL") && savedService?.url === address &&
+        (await removedService.json()).decision_service === null && await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth),
+        JSON.stringify({ addressField, savedService }));
       for (const width of [390, 1280]) {
         await page.setViewport({ width, height: 844 });
         await page.goto(`${BASE}/app/w/${A}/sessions`, { waitUntil: "networkidle0" });
@@ -12783,11 +12871,42 @@ try {
         await click("[role=dialog] button", "Approve and launch");
         await page.waitForSelector('[role=dialog] [data-foresight="approve_and_launch"][aria-busy="false"]');
         const drawerFieldsOkay = await fill('[role=dialog] [data-expectation-fields]', "No failed checks", secondDue, "");
-        await click("[role=dialog] button", "Confirm: Approve and launch");
-        await page.waitForSelector("[role=dialog] [data-expectation-record]");
+        await page.setViewport({ width: 390, height: 600 });
+        const confirmButton = '[role=dialog] [data-confirm="approve_and_launch"] > div:last-child > button:first-child';
+        const confirmLaunch = page.locator(confirmButton).setTimeout(15000);
+        const confirmation = await confirmLaunch.waitHandle();
+        await confirmation.scrollIntoView();
+        const fitsShortDrawer = await confirmation.evaluate((button) => {
+          const rect = button.getBoundingClientRect();
+          return button.textContent.trim() === "Confirm: Approve and launch" &&
+            rect.top >= 0 && rect.bottom <= innerHeight && rect.height >= 44 &&
+            button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)) &&
+            document.scrollingElement.scrollWidth <= innerWidth;
+        });
+        check("expectations: on a short phone the expanded drawer scrolls to the confirmation",
+          fitsShortDrawer, await confirmation.evaluate((e) => JSON.stringify(e.getBoundingClientRect())));
+        const responses = [];
+        const drawerResponse = (response) => {
+          if (response.url().startsWith(BASE + w + secondPath)) {
+            responses.push({ method: response.request().method(), url: response.url(), status: response.status(),
+              body: response.request().postData() });
+          }
+        };
+        page.on("response", drawerResponse);
+        try {
+          await confirmLaunch.click();
+          await page.waitForSelector("[role=dialog] [data-expectation-record]");
+        } catch (e) {
+          throw new Error(`Drawer launch: ${e.message} ${JSON.stringify({ responses, errors,
+            drawer: await page.$eval("[role=dialog]", (d) => d.innerText).catch(() => null) })}`, { cause: e });
+        } finally {
+          page.off("response", drawerResponse);
+        }
+        await page.setViewport({ width: 390, height: 844 });
         const secondRead = (await get(owner, secondPath)).json;
         check("expectations: the Requests drawer approves and launches with an expectation at the 366-day boundary",
-          drawerFieldsOkay && secondRead?.launch === "launched" && secondRead.expectation?.due_on === secondDue && secondRead.expectation?.assignee.id === lead.id &&
+          drawerFieldsOkay && secondRead?.launch === "launched" && secondRead.expectation?.due_on === secondDue &&
+          secondRead.expectation?.expected === "No failed checks" && secondRead.expectation?.assignee.id === lead.id &&
           counts() === 2 && !(await get(lead, "/home")).json.outcomes.waiting_on_me.length, JSON.stringify({ drawerFieldsOkay, secondRead }));
 
         const bad = [];

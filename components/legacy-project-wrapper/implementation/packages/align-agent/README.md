@@ -19,6 +19,28 @@ Inside a session, `::align drift wrong [limit id]` and `::align drift missed` re
 Run `align data-sharing` to see what can leave the machine and who receives it. The proposed derived-results option
 starts off and only works with a local Align server. Findings stay on the machine with hosted Align.
 
+After a completed turn, Align can suggest a goal using folder rules, repository and branch matches, or your
+bindings on this machine. The next turn shows the suggestion to you. Use `::align share` to preview it,
+`::align share <goal>` to pick a goal, or `::align dismiss` to skip it. Use `::align not this` to mark a wrong
+suggestion and `::align quiet` to stop suggestions in a folder. `::align suggestions on` turns them back on there.
+A shared session can offer `::align bind <goal>` if several turns point to a different goal.
+
+The workspace can block both proposed model choices. Both start off.
+
+- `align data-sharing session-question on` records your choice for a short fork that uses the original provider and
+  account. It can send eligible goal ids and titles and use tokens on that account. The current integrations skip
+  this option because they cannot keep the original provider and account for a fork.
+- `align data-sharing decision-model on [typesafe|openai|google]` sends your first prompt, branch when known,
+  saved repository alias and eligible goal ids and titles to the named decision provider, using your own key. The default choice is
+  TypeSafe Jev. Supply the corresponding `ALIGN_DECISION_TYPESAFE_KEY`, `ALIGN_DECISION_OPENAI_KEY` or
+  `ALIGN_DECISION_GOOGLE_KEY` in the environment of the process running `align sync`.
+- `align data-sharing decision-model on workspace` opts in to the address a workspace owner set in People.
+  It uses `ALIGN_DECISION_WORKSPACE_KEY` from the local worker. An owner can use HTTPS or loopback HTTP in
+  Mode L. After a change to the address, opt in again if you want to send to it. Add `--workspace <name>`
+  to choose where the decision setting applies.
+- Replace `on` with `off` to turn either choice off. `align analysis show <session>` shows locally recorded
+  suggestions and feedback. A confirmed binding goes to Align with its goal id and sharing source.
+
 ## Install
 
 From a checkout: `npm ci && npm run build` here, then `align install` and `align login`. Once release

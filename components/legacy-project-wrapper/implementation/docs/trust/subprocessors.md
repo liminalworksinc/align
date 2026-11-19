@@ -5,8 +5,7 @@
 > [PRIVACY CONTACT EMAIL].
 
 A subprocessor is a company that processes personal data for Align when Align processes data for a customer. This page
-covers hosted Align only. Align in local mode (Mode L) runs on your own machine, and Align sends nothing from it to
-anyone (see "Local mode" below).
+covers hosted Align only. Align in local mode (Mode L) runs on your own machine. The proposed decision choices apply to the local CLI in either mode (see "Local mode" below).
 
 ## Subprocessors
 
@@ -16,9 +15,26 @@ anyone (see "Local mode" below).
 | The configured email API: Resend in the default configuration | Sends sign-in codes and creation-code messages | The recipient's email address and the message: a sign-in code and link, or a creation code with the recipient's name | United States | When the email settings are set (`ALIGN_EMAIL_API_URL`, `ALIGN_EMAIL_API_KEY`, `ALIGN_EMAIL_FROM`); the default configuration points at `https://api.resend.com/emails` <!-- fly.toml; lib/v2/core.mts postEmail --> |
 | Cloudflare, Inc. (Turnstile) | The check that a visitor is a person, on email-code sign-in, access requests and workspace creation | What the Turnstile widget collects in the browser, the token it issues, and the visitor's IP address, which Align passes with the token | Global network; Cloudflare, Inc. is in the United States | Only when both `ALIGN_TURNSTILE_SITE_KEY` and `ALIGN_TURNSTILE_SECRET_KEY` are set <!-- lib/v2/config.ts turnstile(); lib/v2/captcha.ts sends remoteip from Fly-Client-IP --> |
 
+## Proposed decision subprocessors
+
+These proposed recipients are subject to founder and counsel review. The Align server makes no model requests.
+For each service, the device sends the first
+prompt, branch when known, saved repository alias and eligible goal ids and titles directly to the selected endpoint only when
+the person turns that choice on and the workspace allows it. The provider key stays in the local worker's environment.
+
+| Proposed subprocessor | Service |
+| --- | --- |
+| TypeSafe | Jev |
+| OpenAI | Decisions API |
+| Google | Gemini Decisions API |
+
+A person can choose the workspace owner's configured address for the same fields. Changing the address expires
+that permission on each machine. A session question requires the original provider and account under the person's
+or workspace's agreement with that provider. The current integrations abstain.
+
 ## Authentication providers
 
-Google and GitHub are used for sign-in only, and only when a person chooses them. Align asks each for the person's
+For sign-in, Google and GitHub are used when a person chooses them. Align asks each for the person's
 identity and nothing more: Google for `openid`, `email` and `profile`; GitHub for `read:user` and `user:email`
 (Better Auth's default scopes). Align receives a name, an email address, a profile picture address and the
 provider's account id. It reads no other data from either service.
@@ -30,8 +46,6 @@ provider's account id. It reads no other data from either service.
 
 ## Not subprocessors
 
-- **AI model providers.** Align's server calls no AI model: not Anthropic, not OpenAI, not any other. It sends no
-  workspace data to one, and it trains no model. <!-- no model-provider host anywhere in app/, lib/ or proxy.ts; test-v2 checks -->
 - **AI apps you connect.** When a person connects an AI app (Claude, ChatGPT, Claude Code, Codex) to Align, the app
   reads one workspace through Align's MCP endpoint, as that person and with their permissions. The app is that
   person's or their organization's own tool, under their own agreement with its maker, not a service Align uses.

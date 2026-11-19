@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Align can suggest a goal after a session's first turn using local rules and prior bindings. Sharing still
+  requires confirmation. A dismissed or changed suggestion requires a new share preview. The weekly offer
+  follows current import eligibility and local feedback. The CLI names each suggested goal, its source and your reply.
+  Workspace owners can block model suggestions or set a decision service address. A new address requires fresh
+  permission on the machine, and the device checks workspace policy just before sending. Session questions wait
+  for the harness to support keeping the original provider and account. Sessions and Spend show confirmed
+  suggestions as a sharing source. Schema 30 adds the local suggestion source and the workspace service setting.
+
 - Goal owners can opt measures into CI readings or a command on a chosen machine. CI credentials can be
   revoked, and the machine runs a command only after its operator allows the exact executable and arguments.
   Readings show their source and time. Server migration 27 keeps existing hand readings.
@@ -32,6 +40,7 @@
   The goal page shows self-reported measure readings and their history. MCP includes these readings on goal
   and brief reads, and includes expectations and outcomes in decision records. Server migration 25 adds these records.
 - The outcome form shows how to fix an invalid evidence link beside the field.
+- The launch confirmation stays within reach when the expectation form and decision forecast fill a short review drawer.
 - When proposing or reviewing a goal change, open Earlier decisions to see up to five past decisions on the same items,
   with reasons where you have access and links to the records. Connected clients can read the same history on decision records.
   Server migration 26 indexes changed items on existing request revisions.

@@ -1,3 +1,4 @@
+import type { SuggestionReply, SuggestionStage } from "./goal-suggestions.ts";
 import type { AnalysisTurn, DriftFeedback } from "./analysis.ts";
 // Types shared by the CLI, the sync job and the hooks. Wire shapes follow docs/v2/WIRE.md.
 import type { ReleaseReaches, ShareFacts, ShareNow, ShareTold } from "./ended.ts";
@@ -417,6 +418,14 @@ export type SpoolRecord =
       auto: boolean;
       /** An accepted switch_goal: the id of the binding the hook already applies at the next prompt. */
       pending_id?: string;
+      ts: string;
+    }
+  | {
+      type: "suggestion_reply";
+      local_id: string;
+      stage: SuggestionStage;
+      reply: SuggestionReply;
+      chosen: string | null;
       ts: string;
     }
   | {

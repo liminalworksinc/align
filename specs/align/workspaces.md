@@ -1475,14 +1475,16 @@ time to catch up.
 ### Requirement: Binding epoch origin
 
 The server SHALL store and return `origin` with the epoch, alongside the existing cause and authority. It accepts
-`hand`, `folder_rule`, `anchor_hint`, `alignment`, `switch_request`, `past_import`, `suggested_agent`, `suggested_model`
-or null. Omitted origin and epochs stored before origin was recorded have null origin. The two suggestion values are
-reserved for future clients. The current CLI sends neither.
+`hand`, `folder_rule`, `anchor_hint`, `alignment`, `switch_request`, `past_import`, `suggested_agent`, `suggested_model`,
+`suggested_rule` or null. Omitted origin and epochs stored before origin was recorded have null origin. Suggestion
+origins record a developer’s confirmation. The server receives no candidate list, suggestion input or feedback.
+Migration 30 SHALL preserve existing epochs, their bindings and dependent records while adding the local
+suggestion origin and workspace decision service setting.
 
 #### Scenario: Recording an origin
 
 - **WHEN** a device opens an epoch with a non-null origin
-- **THEN** the server records `alignment` for a `directive:<id>` cause naming the `binding_changed` for that session and goal, issued by an approved `work_toward`. It records `switch_request` for a cause naming a `switch_goal` request to that session and goal which its developer accepted. It records the other known origins with a `manual` cause. If a known origin cannot be confirmed, a valid epoch still returns 200 with origin null and can receive usage. An unknown origin returns 400. Every cause must be `manual` or name a directive sent to this session, including on retries.
+- **THEN** the server records `alignment` for a `directive:<id>` cause naming the `binding_changed` for that session and goal, issued by an approved `work_toward`. It records `switch_request` for a cause naming a `switch_goal` request to that session and goal which its developer accepted. It records the other known origins with a `manual` cause. An epoch without a goal records null for each of the three suggestion origins. If a known origin cannot be confirmed, a valid epoch still returns 200 with origin null and can receive usage. An unknown origin returns 400. Every cause must be `manual` or name a directive sent to this session, including on retries.
 
 #### Scenario: A device clock that ran ahead
 
@@ -1906,7 +1908,9 @@ per-path limits apply only when hosted, since Mode L turns off its IP tracking, 
 ### Requirement: Workspace sharing restrictions and private findings
 
 A workspace owner SHALL be able to forbid work signals and proposed tiers 2 through 4 independently. A ban SHALL
-apply to new writes for that tier. Hosted workspaces forbid central logs independently of any setting. A device
+apply to new writes for that tier. A tier 3 ban SHALL prevent the local worker from making either proposed model
+request for this workspace. Removing the ban grants no machine consent. Hosted workspaces forbid central logs
+independently of any setting. A device
 SHALL be able to read the restriction for a workspace it reaches and set only its own proposed derived-result consent.
 A session's work-signal consent SHALL be recorded only on a request authenticated as its sharing device. Named
 activity without that session consent or under a workspace ban SHALL be refused while metadata-only activity
@@ -1930,6 +1934,11 @@ Deleting session history removes the findings. A deletion request from an author
 history deletion marker SHALL acknowledge that removal. Audit changes to consent, bans, and deletion without recording private data, and keep findings out of
 product analytics. A caller with no right to see the session or workspace SHALL get 404.
 
+#### Scenario: An owner forbids model suggestions
+
+- **WHEN** a workspace owner blocks model-based goal suggestions and a device reads the restriction
+- **THEN** the device receives tier 3 as blocked. A member cannot change that restriction and a device outside the workspace receives 404.
+
 #### Scenario: An owner forbids derived findings
 
 - **WHEN** a device with consent sends an allowed finding, the owner bars that tier and the device attempts another upload
@@ -1949,6 +1958,22 @@ product analytics. A caller with no right to see the session or workspace SHALL 
 
 - **WHEN** a restriction request's author loses workspace ownership before its write
 - **THEN** Align checks the new role and leaves the restriction unchanged
+
+### Requirement: Workspace decision service (proposed)
+
+An owner SHALL be able to set, replace or clear the workspace decision service address in People.
+Use HTTPS, with HTTP on loopback allowed in Mode L. Reject credentials, query strings and fragments in the address.
+Align SHALL store only the address and a revision for this setting. Clearing the setting or purging the workspace
+SHALL remove the record. A change SHALL be audited without the address.
+The workspace policy read SHALL return the current address and revision to a caller entitled to read the workspace.
+For dispatch, require a current device grant with permission to share sessions in the workspace. An address
+write SHALL recheck workspace ownership in the same transaction as the write.
+A member or viewer gets 403 on writes. A caller outside the workspace gets 404.
+
+#### Scenario: A configured recipient changes
+
+- **WHEN** the owner replaces or clears the address
+- **THEN** a device's next policy read cannot authorize dispatch under consent to the old address revision. The person can explicitly choose a newly configured address on their machine.
 
 ## Sources
 

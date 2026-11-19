@@ -26,6 +26,7 @@ estimated cost. It sends no title.
 | Spend roll-ups (no person, no session) | The life of the workspace | Deleted with the workspace |
 | Activity signals (in-flight edits, commits, tasks, claims) | 24 hours (claims 1 hour) | Deleted by the daily job, or with their session |
 | Derived session findings in Mode L, with the proposed machine opt-in | Available for 30 days from the turn start | Deleted on request, with their session or by the daily job at expiry |
+| Workspace decision service address and revision (migration 30) | Until an owner replaces or clears the address | Deleted at removal or with the workspace at purge |
 | Workspace audit log | 1 year | Deleted |
 | A person who leaves or is removed | Their access ends at once: team places, device access and connected AI apps for that workspace. Their goals, sessions and history stay under their name for 30 days | After 30 days they are shown as "Former member #n" (numbered per workspace) in every row of that workspace, the audit log included; their sessions no longer point at their device, invites to or accepted by them are deleted, so their email leaves the workspace, and the keyed hash that stood for them is cleared from that workspace's product events. Their account stays until they delete it |
 | Sessions of a removed member, if the owner ticks "Also delete their shared sessions in this workspace now" | Deleted at removal | Spend already rolled up stays |
@@ -45,7 +46,7 @@ estimated cost. It sends no title.
 | AI apps that registered themselves (`_oauth_clients.json`: an app's name and redirect addresses, nothing about people) | Kept | |
 | Server logs | When hosted, Align logs no request body, path, address, email or code; a server error logs only its error name, and the retention job logs counts only | Fly.io keeps a machine's log output on its platform for a limited time; Align keeps no copy |
 | Email provider message logs | The provider's own retention (set it to the shortest it offers) | The provider deletes them |
-| Local mode (Mode L) | Everything stays in `data/v2/align.sqlite` on the person's own machine; nothing is sent to Align | The same job runs there, on that machine |
+| Local mode (Mode L) | Align keeps its records in `data/v2/align.sqlite` on the person's own machine. Separately enabled decision suggestions go directly to the chosen service | The same job runs there, on that machine |
 
 ## When the job runs
 

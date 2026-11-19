@@ -1,6 +1,7 @@
 // Folder share rules: "every session started under this folder is shared to this workspace and goal".
 // Local only: the folder path never leaves the machine (the server sees the keyed repo hash, as for any share).
 // Hook-safe: node:fs and node:path only.
+import { invalidatePastOffer } from "./goal-suggestions.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { readJson, writeJsonAtomic } from "./fsx.ts";
@@ -45,6 +46,7 @@ export function setRule(home: string, rule: Omit<FolderRule, "dir" | "created_at
   const dir = realDir(rule.dir);
   const stored: FolderRule = { ...rule, dir, created_at: new Date().toISOString() };
   writeRules(home, [...readRules(home).filter((r) => r.dir !== dir), stored]);
+  invalidatePastOffer(home);
   return stored;
 }
 
@@ -53,6 +55,7 @@ export function removeRule(home: string, dir: string): FolderRule | null {
   const hit = matchRule(readRules(home), dir);
   if (!hit) return null;
   writeRules(home, readRules(home).filter((r) => r.dir !== hit.dir));
+  invalidatePastOffer(home);
   return hit;
 }
 

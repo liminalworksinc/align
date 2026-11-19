@@ -33,7 +33,7 @@ what people say to their agents: the server stores no prompt text, tool output, 
 | Database | One SQLite file, `/data/v2/align.sqlite`, file mode 0600 in a 0700 directory, on a Fly volume. Fly states that volumes are created with encryption at rest by default; that is Fly's control, not Align's. <!-- lib/v2/db.ts; https://fly.io/docs/volumes/overview/ --> |
 | Image | Built from an allowlisted context: no tests, docs, local agent packages or `.env` files reach the image. It runs as the unprivileged `node` user. <!-- Dockerfile; .dockerignore --> |
 | Secrets | `ALIGN_SECRET`, `BETTER_AUTH_SECRET` (32+ characters each), the email API key and any Google, GitHub or Turnstile secrets are set with `fly secrets`, never in the repository or the image. A server missing a required setting refuses to start. <!-- lib/config.ts; lib/v2/config.ts v2Problems --> |
-| Outside services | Fly.io, the configured email API (Resend by default), Cloudflare Turnstile when enabled, and Google and GitHub for sign-in when configured. No AI model provider. See [subprocessors](subprocessors.md). |
+| Outside services | Fly.io, the configured email API (Resend by default), Cloudflare Turnstile when enabled, and Google and GitHub for sign-in when configured. The server makes no model requests. See [subprocessors](subprocessors.md). |
 
 ## What Align stores, and what it does not
 
@@ -55,8 +55,16 @@ and only works with a local Align server. When a person turns it on, the local s
 binding and limit ids, the goal version, the turn start time, an evidence label and a keyed digest for new
 turns. The person can inspect and delete these records from that machine. Workspace owners can block the option.
 
-Questions that use a model and excerpts that people choose are proposed for later. Hosted workspaces cannot receive
-full transcripts. A local installation reads the original transcript files, which stay on the machine.
+Excerpts that people choose are proposed for later. Hosted workspaces cannot receive full transcripts.
+A local installation reads the original transcript files, which stay on the machine.
+
+The two proposed ways to use a model for goal suggestions start off. A session fork requires a way to keep the
+original provider and account. The current integrations abstain. A separately enabled decision model receives the
+first prompt, branch when known, saved repo alias and eligible goal ids and titles directly from the device.
+A workspace owner sets the workspace's own service address. Each person chooses that address on their machine
+and chooses again after it changes. The workspace can block both choices.
+The proposed recipients are listed in [subprocessors](subprocessors.md). Align receives the goal and sharing
+source only when the person confirms.
 
 ## Signing in
 

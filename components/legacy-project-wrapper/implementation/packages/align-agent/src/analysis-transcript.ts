@@ -25,6 +25,7 @@ function messageText(value: unknown, kind: string): string {
 export type RecordCount = "replies" | "calls" | "results";
 
 export interface TurnContent {
+  prompt?: string;
   replies: string[];
   calls: Set<string>;
   results: Set<string>;
@@ -105,6 +106,7 @@ function claudeTurn(rows: RecordValue[], native: string, turn: AnalysisTurn, cro
   if (candidates.size !== 1 || (byTime && !sawEarlier)) return null;
   const index = candidates.values().next().value!;
   const first = rows[index];
+  const prompt = blocks(object(first.message).content).some((b) => b.type !== "text") ? undefined : claudePrompt(first, native);
   const root = text(first.promptId) || text(first.uuid);
   const calls = new Set<string>();
   const results = new Set<string>();
@@ -144,7 +146,7 @@ function claudeTurn(rows: RecordValue[], native: string, turn: AnalysisTurn, cro
     for (const b of blocks(message.content)) if (b.type === "tool_use" && text(b.id)) addRecord(calls, text(b.id), lowerBounds, "calls");
   }
   if (!ended && partial) markPartial(lowerBounds);
-  return replies.size || calls.size ? { replies: [...replies.values()], calls, results, lowerBounds } : null;
+  return replies.size || calls.size ? { prompt, replies: [...replies.values()], calls, results, lowerBounds } : null;
 }
 
 function codexTurn(rows: RecordValue[], native: string, root: string, partial: boolean): TurnContent | null {
@@ -159,6 +161,7 @@ function codexTurn(rows: RecordValue[], native: string, root: string, partial: b
   let ended = false;
   let active = false;
   let user = false;
+  let prompt: string | undefined;
   for (const row of rows) {
     const p = object(row.payload);
     const type = p.type;
@@ -178,13 +181,17 @@ function codexTurn(rows: RecordValue[], native: string, root: string, partial: b
     } else if (row.type === "event_msg" && type === "user_message") {
       if (COMMAND.test(text(p.message))) return null;
       user = true;
+      prompt ??= text(p.message) || undefined;
     } else if (row.type === "event_msg" && type === "agent_message") {
       if (text(p.message)) addRecord(events, text(p.message), eventBounds, "replies");
     } else if (row.type === "response_item") {
       if (type === "message" && p.role === "user") {
         const content = messageText(p.content, "input_text");
         if (COMMAND.test(content)) return null;
-        if (content) user = true;
+        if (content) {
+          user = true;
+          if (!blocks(p.content).some((b) => b.type !== "input_text")) prompt ??= content;
+        }
       } else if (type === "message" && p.role === "assistant") {
         const reply = messageText(p.content, "output_text");
         if (reply) addRecord(messages, reply, lowerBounds, "replies");
@@ -198,5 +205,5 @@ function codexTurn(rows: RecordValue[], native: string, root: string, partial: b
   const replies = messages.size ? messages : events;
   if (!messages.size && eventBounds.has("replies")) lowerBounds.add("replies");
   if (!ended && partial) markPartial(lowerBounds);
-  return user && (replies.size || calls.size) ? { replies: [...replies], calls, results, lowerBounds } : null;
+  return user && (replies.size || calls.size) ? { prompt, replies: [...replies], calls, results, lowerBounds } : null;
 }

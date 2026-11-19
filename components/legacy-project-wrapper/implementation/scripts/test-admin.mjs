@@ -222,6 +222,73 @@ function testChangeElementUpgrade(name, shift) {
   }
 }
 
+function testSuggestionOriginUpgrade() {
+  const dir = path.join(testDir, "schema 29 to 30");
+  mkdirSync(path.join(dir, "v2"), { recursive: true });
+  const d = new DatabaseSync(path.join(dir, "v2/align.sqlite"));
+  try {
+    d.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY);");
+    for (const sql of migrations.slice(0, 29)) d.exec(sql);
+    d.exec(`
+      INSERT INTO ba_user VALUES ('owner');
+      INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES ('ws', 'Test workspace', 'owner', '${OLD}');
+      INSERT INTO v2_devices (id, user_id, name, public_key, created_at) VALUES ('dv', 'owner', 'Test device', '{}', '${OLD}');
+      INSERT INTO v2_sessions (ws_id, session_key, user_id, device_id, harness, repo_key, started_at, state, created_at, updated_at)
+        VALUES ('ws', 'ss', 'owner', 'dv', 'codex', 'repo', '${OLD}', 'shared', '${OLD}', '${OLD}');
+      INSERT INTO v2_epochs (ws_id, session_key, epoch_id, starts_at, cause, authority, created_at, origin)
+        VALUES ('ws', 'ss', 'ep', '${OLD}', 'manual', 'none', '${OLD}', 'hand');
+      INSERT INTO v2_epochs (ws_id, session_key, epoch_id, starts_at, ends_at, cause, authority, created_at, origin)
+        VALUES ('ws', 'ss', 'ep_missing_goal', '${OLD}', '${OLD}', 'manual', 'none', '${OLD}', 'suggested_agent');
+      INSERT INTO v2_usage (ws_id, session_key, request_key, epoch_id, ts, model, query_source,
+        input, output, cache_read, cache_write_5m, cache_write_1h, cache_write_unsplit, basis, source, received_at)
+        VALUES ('ws', 'ss', 'req', 'ep', '${OLD}', 'test-model', 'conversation', 10, 2, 0, 0, 0, 0, 'unknown', 'test', '${OLD}');
+      INSERT INTO v2_analysis_findings (ws_id, session_key, epoch_id, device_id, id, goal_version, limit_id, evidence, digest, turn_started_at, received_at)
+        VALUES ('ws', 'ss', 'ep', 'dv', 'test-finding', 1, 'test-limit', 'wording', 'test-digest', '${OLD}', '${NOW}');
+      INSERT INTO v2_data_restrictions (ws_id, tier) VALUES ('ws', 1), ('ws', 2);
+      INSERT INTO v2_device_result_consent (device_id, enabled_at) VALUES ('dv', '${NOW}');
+      INSERT INTO v2_goal_list_reviews (ws_id, user_id, period_end, reviewed_at) VALUES ('ws', 'owner', '${OLD}', '${NOW}');
+      INSERT INTO v2_events (name, ws_id, at) VALUES ('workspace_created', 'ws', '${OLD}');
+      PRAGMA user_version = 29;
+    `);
+    const preserved = () => JSON.stringify([
+      ...["v2_epochs", "v2_usage", "v2_analysis_findings"].map(
+        (table) => d.prepare(`SELECT * FROM ${table} WHERE epoch_id = 'ep'`).all(),
+      ),
+      d.prepare("SELECT * FROM v2_goal_list_reviews").all(),
+      d.prepare("SELECT * FROM v2_events").all(),
+      d.prepare("SELECT * FROM v2_data_restrictions ORDER BY tier").all(),
+      d.prepare("SELECT * FROM v2_device_result_consent").all(),
+    ]);
+    const before = preserved();
+    migrateFixture(dir);
+    d.exec("PRAGMA foreign_keys = ON");
+    const after = preserved();
+    const update = d.prepare("UPDATE v2_epochs SET origin=? WHERE epoch_id='ep'");
+    update.run("suggested_rule");
+    let refused = false;
+    try {
+      update.run("unknown_suggestion");
+    } catch {
+      refused = true;
+    }
+    check("LIM-2527: migration 30 preserves epoch origins, dependent rows, reviews, events and sharing choices",
+      d.prepare("PRAGMA user_version").get().user_version === 30 && before === after && refused && d.prepare("PRAGMA foreign_key_check").all().length === 0 &&
+      d.prepare("SELECT origin FROM v2_epochs WHERE epoch_id='ep'").get().origin === "suggested_rule");
+    check("LIM-2527: upgrade clears suggestion origins on unallocated epochs and starts with no configured service",
+      d.prepare("SELECT origin FROM v2_epochs WHERE epoch_id='ep_missing_goal'").get().origin === null &&
+      !d.prepare("SELECT 1 FROM v2_workspace_decision_services").get());
+    d.exec("DELETE FROM v2_epochs WHERE epoch_id='ep'");
+    check("LIM-2527: rebuilt epochs retain cascading deletion of usage and findings",
+      !d.prepare("SELECT 1 FROM v2_usage").get() && !d.prepare("SELECT 1 FROM v2_analysis_findings").get());
+    d.exec("INSERT INTO v2_workspace_decision_services VALUES ('ws', 'https://decision.example.test/', 'test-revision')");
+    d.exec("DELETE FROM v2_workspaces WHERE id='ws'");
+    check("LIM-2527: purging the workspace cascades to the decision service setting",
+      !d.prepare("SELECT 1 FROM v2_workspace_decision_services").get());
+  } finally {
+    d.close();
+  }
+}
+
 try {
   testReadingUpgrade();
   testDataBoundaryUpgrade();
@@ -274,6 +341,7 @@ try {
   } finally {
     reviewUpgrade.close();
   }
+  testSuggestionOriginUpgrade();
   for (const [name, args] of [
     ["retention typo", ["retention", "run", "--dryrun", "true"]],
     ["purge dry-run", ["workspaces", "delete", WS, "--purge", "--yes", "--dry-run"]],

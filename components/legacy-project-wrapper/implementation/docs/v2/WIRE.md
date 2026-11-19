@@ -112,12 +112,12 @@ Key owned by another user/device → 404. `started_at` more than 5 min ahead of 
    (closes the previous open epoch at `starts_at`). 403 `{ "error": "alignment_required" }` if the goal isn't bindable.
    Epochs never overlap; a first share may open an epoch with `starts_at` = the session's start (counts from start).
 
-`Origin = "hand" | "folder_rule" | "anchor_hint" | "alignment" | "switch_request" | "past_import" | "suggested_agent" | "suggested_model"`.
+`Origin = "hand" | "folder_rule" | "anchor_hint" | "alignment" | "switch_request" | "past_import" | "suggested_agent" | "suggested_model" | "suggested_rule"`.
 The server records `alignment` for the session's `binding_changed` directive for the goal, and `switch_request` for a
 `switch_goal` directive to the session and goal with an accepted developer receipt. It records other known origins
 with a `manual` cause. If a known origin cannot be confirmed, an otherwise valid epoch returns 200 with `origin: null`
 and can receive usage. An unknown origin is 400. Every cause must be `manual` or name a directive sent to this session.
-Omitted origin and legacy rows have null origin. The CLI does not send `suggested_agent` or `suggested_model`.
+Omitted origin and legacy rows have null origin. The three suggestion origins use a manual cause after the developer confirms. Candidate lists, model inputs, scores and feedback are outside this API.
 `GET /api/v2/workspaces/:ws/sessions` (cookie) includes origin in each `mine[].current_epoch`. When there is no current
 epoch, `mine[].last_epoch` gives `{origin}` from the most recent closed epoch if one exists, or null otherwise.
 For workspace owners, `all[]` includes `origin` of the current or most recent closed epoch and `origin_scope` ("current",
@@ -208,8 +208,12 @@ The agent uploads and fetches inside the normal hook-started sync pass; hooks re
 ## Session sharing choices
 
 The authority for tier contents is [Nothing private leaves the machine](../../../../../specs/align/local-agent.md#requirement-nothing-private-leaves-the-machine).
-`GET /api/v2/workspaces/:ws/data-sharing` returns `{blocked: [tier]}` for a workspace the caller can access.
-A workspace owner can `PATCH` it with `{tier, blocked}` for tiers 1 through 4.
+`GET /api/v2/workspaces/:ws/data-sharing` returns `{blocked: [tier], decision_service: {url, revision} | null}`
+for a workspace the caller can access. A dispatch read uses `?for=model-suggestion` and requires permission
+to share sessions and a current grant for device calls. Migration 30 adds the decision service setting.
+A workspace owner can `PATCH` with `{tier, blocked}` for tiers 1 through 4 or
+`{decision_service_url: string | null}` to set or clear the service. Each address change expires consent to its
+earlier revision. The audit action records the change without the address.
 The sharing device records tier 1 with `PUT /api/v2/workspaces/:ws/sessions/:key/work-signals` and
 `{enabled: true|false}`. The returned `enabled` is false if the workspace prohibits a new opt-in.
 

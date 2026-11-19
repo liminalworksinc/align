@@ -654,3 +654,41 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
     The retained receipt is stale. The project verification command also stops at a stale documentation authority review.
 - **Remaining integration:** This stack has no owner-question route or work-record implementation for these
   findings. Connect their stable ids when those routes are available.
+
+### [ ] LIM-2527: Suggest a goal for a session
+
+- **Priority:** P0
+- **Owner:** Align local agent, binding provenance and session data boundary
+- **Direction:** Offer a bindable goal from local rules, the existing session or a decision provider.
+  Let the person confirm, choose another goal or dismiss.
+- **Conclusion:** Use the existing analysis worker and consent boundary. Keep suggestions and feedback on this
+  machine. Carry only the confirmed goal and origin through the normal binding path.
+- **Completion prerequisites:** LIM-2526
+- **Implementation:**
+  - [x] Specify consent, suggestion behavior and provenance before changing code. All eight specifications validated.
+  - [x] Add the three ways to suggest a goal, a user-only notice and local feedback. Schema 30 preserves existing epoch records.
+- **Evidence:**
+  - [x] Test workspace restrictions, default-off canaries, each opt-in and binding provenance.
+    Eight focused agent tests passed. The schema upgrade, access and phone-width checks passed.
+  - [x] Pass the full Node 24 gate on the configured port. Node 24.22.3 on port 5010 reported 2,117 passed and 0 failed.
+  - [x] Restack on LIM-2525 and verify the schema 29 upgrade and a fresh schema 30 database.
+    `ALIGN_TEST_PORT=5010 npm test` on Node 24.22.3 passed 2,228 checks with zero failures.
+    Specification validation accepted all eight documents.
+- **Outcome:** The review fixes protect the decision service and share confirmation, refresh past-session offers,
+  and explain suggestions in the CLI. Requests to decision services and fork adapters used local test stand-ins.
+  Current harness integrations abstain from forks until they can pin the original provider and account.
+  The retained test receipt is stale.
+
+### [ ] ALIGN-001: LIM-2527 review fixes. Protect suggestion inputs and confirmation
+
+- **Priority:** P0
+- **Owner:** Align local agent, workspace sharing restrictions and launch review
+- **Direction:** Resolve all nine findings from the independent packet review and diagnose the intermittent expectations drawer timeout.
+- **Conclusion:** Refresh permission at the point of use, require consent to the owner-configured recipient, and preserve the turn and preview that the person acted on.
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Specify and test the revised permission, confirmation, weekly offer and inspection behavior before fixing it.
+  - [x] Fix the clipped confirmation reproduced on a 390 by 600 pixel screen. The browser test now checks that a pointer can reach Confirm and that launching records the entered expectation.
+  - [ ] Identify the trigger of the earlier intermittent 390 by 844 pixel timeout. The instrumented run at that size passed.
+- **Evidence:**
+  - [x] Node 24.22.3 on port 5010 reported 2,117 passed and 0 failed, including 1,093 server and browser checks and 646 local agent checks. All eight Align specifications validated. The retained test receipt remains in place.
