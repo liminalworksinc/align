@@ -1720,16 +1720,13 @@ try {
         const records = parseCsv(csv.text);
         const data = records.slice(5), total = data.at(-1);
         const report = (await call(u.who, "GET", `/api/v2/workspaces/${A}/spend?by=team&from=2024-02-01T00:00:00.000Z&to=2024-03-01T00:00:00.000Z`, { cookie: u.cookie })).json;
-        const noGoalRows = data.filter((r) => /: spend in no goal$/.test(r[1]));
-        const unallocated = data.find((r) => r[1] === "Not bound to a goal");
-        const expected = [...report.rows.map((row) => [row.label, sums(row)]), ["Total", sums(report.total)]];
-        const noGoalMatches = nums(unallocated).every((n, i) => n + noGoalRows.reduce((v, r) => v + nums(r)[i], 0n) === sums(report.unallocated)[i]);
+        const expected = [...report.rows.map((row) => [row.label, sums(row)]), ["Not bound to a goal", sums(report.unallocated)], ["Total", sums(report.total)]];
         const matches = expected.every(([label, values]) => {
           const row = data.find((r) => r[1] === label);
           return row && nums(row).every((n, i) => n === values[i]);
         });
-        check(`spend export: ${u.who} matches named goal-bound team rows in the on-screen report with member-or-owner home-team visibility`,
-          csv.status === 200 && JSON.stringify(records[4]) === JSON.stringify(columns) && data.length === expected.length + noGoalRows.length + 1 && noGoalMatches && data.every((r) => r.length === columns.length && r[0] === "2024-02") && matches &&
+        check(`spend export: ${u.who} matches exactly the on-screen team report's rows and amounts`,
+          csv.status === 200 && JSON.stringify(records[4]) === JSON.stringify(columns) && data.length === expected.length && data.every((r) => r.length === columns.length && r[0] === "2024-02") && matches &&
           total[1] === "Total" && nums(total).every((n, i) => n === data.slice(0, -1).reduce((sum, r) => sum + nums(r)[i], 0n)) &&
           !csv.text.includes(CANARY) && !csv.text.includes(GP.id) && !users.some((p) => csv.text.includes(p.email) || csv.text.includes(p.name)) && !csv.text.includes(S3a), csv.text);
         check(`spend export: ${u.who} receives an estimate disclaimer, UTC month, current generation time and private no-store attachment`,
@@ -1740,7 +1737,7 @@ try {
       }
       const ownerCsv = parseCsv((await csvOf(U1)).text).slice(5);
       check("spend export: UTC start included, next month excluded, leap-day end included; raw and rolled-up unpriced requests count",
-        ownerCsv.at(-1)[2] === "12" && ownerCsv.at(-1)[4] === "4" && ownerCsv.filter((r) => r[1] === "Not bound to a goal" || /: spend in no goal$/.test(r[1])).reduce((n, r) => n + Number(r[2]), 0) === 4, JSON.stringify(ownerCsv));
+        ownerCsv.at(-1)[2] === "12" && ownerCsv.at(-1)[4] === "4" && ownerCsv.find((r) => r[1] === "Not bound to a goal")[2] === "4", JSON.stringify(ownerCsv));
       for (const name of ['=1+1,\n"quoted"', "+SUM(1,2)", "-1+2", "@SUM(A1:A2)", "\t=1+1", "\r=1+1", 'Finance, "East"\n東京']) {
         withDb((d) => d.prepare("UPDATE v2_pods SET name = ? WHERE id = ?").run(name, P1));
         const csv = await csvOf(U2);
@@ -1760,8 +1757,8 @@ try {
       for (const month of ["2024-12", "2025-01", "0099-02", "9999-12"]) {
         const csv = await csvOf(U4, `month=${month}`);
         const data = parseCsv(csv.text).slice(5);
-        check(`spend export: empty ${month} has zero no-team, unallocated and total rows with no invented team or private rows`,
-          csv.status === 200 && data.map((r) => r[1]).join("|") === "Goals without a team|Not bound to a goal|Total" && data.every((r) => r[0] === month && nums(r).every((n) => n === 0n)), csv.text);
+        check(`spend export: empty ${month} has only the table's zero unallocated and total rows`,
+          csv.status === 200 && data.map((r) => r[1]).join("|") === "Not bound to a goal|Total" && data.every((r) => r[0] === month && nums(r).every((n) => n === 0n)), csv.text);
       }
       const invalid = ["", "month=", "month=2024-2", "month=2024-00", "month=2024-13", "month=0000-01", "month=2024-02-01", "month=2024-02T00:00:00Z", "month=2024-02&month=2024-03", "month=%3D1%2B1", "month=2024-02%0D%0AX-Test:yes"];
       const invalidResults = await Promise.all(invalid.map((q) => csvOf(U4, q)));

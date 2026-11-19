@@ -12,7 +12,7 @@ const cell = (value: string | number) => {
   return `"${safe.replaceAll('"', '""')}"`;
 };
 
-/** Serialize the spending module's privacy-filtered rows, including captured home-team attribution. */
+/** Serialize exactly the on-screen team report's rows and amounts. */
 export function spendCsv(pp: PolicyPrincipal, range: ReturnType<typeof spendMonth>, generatedAt = new Date()) {
   const report = spendTeamExport(pp, range.from, range.to);
   const values = (label: string, s: Sums | null) => [
@@ -36,9 +36,6 @@ export function spendCsv(pp: PolicyPrincipal, range: ReturnType<typeof spendMont
     [],
     ["month", "team", "requests", "estimated_list_cost_usd", "unpriced_requests", "input", "output", "cache_read", "cache_write_5m", "cache_write_1h", "cache_write_unsplit"],
     ...report.rows.map((r) => values(r.label, r)),
-    ...report.no_goal.map((r) => values(r.label, r)),
-    // Empty special rows reveal nothing and keep the chargeback categories explicit in an empty month too.
-    ...(!report.rows.some((r) => r.kind === "no_team") ? [values("Goals without a team", null)] : []),
     values("Not bound to a goal", report.unallocated),
     values("Total", report.total),
   ];

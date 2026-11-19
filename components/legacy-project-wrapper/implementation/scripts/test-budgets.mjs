@@ -469,12 +469,13 @@ await test("home choice is personal, membership-bound, and affects only later ep
   assert.equal(report(pp("owner"), "team", null, null).total.est_list_usd_micros, 60_000_000);
 });
 
-await test("CSV and burn share home attribution; every numeric and basis total survives retention and privacy", async () => {
+await test("CSV matches table totals while burn preserves home attribution across retention and privacy", async () => {
   const { spendTeamExport, spend: report } = await import("../lib/v2/spend.ts");
   const { spendCsv, spendMonth } = await import("../lib/v2/spend-export.ts");
-  await budget(); goal("g_private", "private");
+  await budget(); goal("g_private", "private"); goal("g_public");
   await usage(session(), null, 10_123_456);
   await usage(session("b".repeat(43)), "g_private", 20_000_000);
+  await usage(session("d".repeat(43)), "g_public", 1_234_567);
   await chooseSpendHomeTeam(pp("member"), { team_id: T });
   db.run("DELETE FROM v2_pod_members WHERE ws_id = ? AND user_id = 'member'", W);
   await usage(session("c".repeat(43)), null, null);
@@ -483,31 +484,130 @@ await test("CSV and burn share home attribution; every numeric and basis total s
   const before = [read("owner"), read("other")];
   for (const who of ["owner", "viewer", "other"]) {
     const r = read(who), old = report(pp(who), "team", range.from, range.to);
-    assert.deepEqual(r.rows, old.rows);
-    assert.equal(r.total.requests, old.total.requests);
+    assert.deepEqual(r, old);
     for (const k of Object.keys(r.total).filter((k) => k !== "by_basis")) {
-      assert.equal(r.total[k], [...r.rows, ...r.no_goal, r.unallocated].reduce((n, s) => n + s[k], 0), k);
+      assert.equal(r.total[k], [...r.rows, r.unallocated].reduce((n, s) => n + s[k], 0), k);
       for (const basis of Object.keys(r.total.by_basis))
-        assert.equal(r.total.by_basis[basis][k], [...r.rows, ...r.no_goal, r.unallocated].reduce((n, s) => n + s.by_basis[basis][k], 0));
+        assert.equal(r.total.by_basis[basis][k], [...r.rows, r.unallocated].reduce((n, s) => n + s.by_basis[basis][k], 0));
     }
-    if (who !== "other") assert.equal(r.no_goal[0].est_list_usd_micros, burn().no_goal.priced_spend_usd_micros);
+    assert.equal(r.unallocated.est_list_usd_micros, burn().no_goal.priced_spend_usd_micros);
     assert.equal(r.unallocated.unpriced_requests, 1);
     const csv = spendCsv(pp(who), range);
     assert.ok(csv.includes('"10.123456"')); assert.ok(!csv.includes("g_private")); assert.ok(!csv.includes("a".repeat(43)));
   }
-  assert.equal(read("owner").no_goal[0].label, "Build: spend in no goal");
-  assert.equal(read("other").no_goal.length, 0);
   assert.equal(read("other").rows.filter((r) => r.kind === "private").length, 1);
   assert.equal(read("other").rows.find((r) => r.kind === "private").est_list_usd_micros, 20_000_000);
-  assert.ok(!spendCsv(pp("other"), range).includes("Build"));
+  assert.equal(read("other").rows.find((r) => r.kind === "team").est_list_usd_micros, 1_234_567);
   db.run("UPDATE v2_pods SET name = ? WHERE id = ?", '=1+1,\n"quoted"', T);
-  assert.ok(spendCsv(pp("owner"), range).includes('"\'=1+1,\n""quoted"": spend in no goal"'));
+  assert.ok(spendCsv(pp("owner"), range).includes('"\'=1+1,\n""quoted"""'));
   db.run("UPDATE v2_pods SET name = 'Build' WHERE id = ?", T);
   await runRetention(db.sql, db.tx, new Date("2032-01-01T00:00:00Z"), { secret: "test-secret" });
   assert.deepEqual([read("owner"), read("other")], before);
   assert.equal(db.all("SELECT * FROM v2_team_no_goal_rollups").length, 1);
 });
 
+
+await test("monthly CSV matches every table row for each reader role before and after retention", async () => {
+  const { spendTeamExport, spend: table } = await import("../lib/v2/spend.ts");
+  const { spendCsv } = await import("../lib/v2/spend-export.ts");
+  const hiddenTeam = "pod_hidden", at = new Date().toISOString(), range = spendMonth("2030-01");
+  db.run("INSERT INTO ba_user VALUES ('unaffiliated', 'Unaffiliated', 'unaffiliated@example.test')");
+  db.run("INSERT INTO v2_members VALUES (?, 'unaffiliated', 'member', ?)", W, at);
+  db.run("UPDATE v2_pod_members SET role = 'member' WHERE ws_id = ? AND user_id = 'other'", W);
+  db.run("INSERT INTO v2_pods VALUES (?, ?, 'Hidden team', ?)", hiddenTeam, W, at);
+  db.run("INSERT INTO v2_pod_members VALUES (?, ?, 'lead2', 'member', ?)", W, hiddenTeam, at);
+  // Open each goal while its uploader owns it, then assign its final owner before any report read.
+  const goals = [
+    ["public_a", "workspace", T, "lead2", 10_123_456],
+    ["public_b", "workspace", T2, "other", 20_000_001],
+    ["team_a", "pod", T, "lead2", 30_000_002],
+    ["team_b", "pod", T2, "other", 40_000_003],
+    ["private_a", "private", T, "member", 50_000_004],
+    ["private_b", "private", T2, "other", 60_000_005],
+    ["private_owner", "private", T, "owner", 61_000_001],
+    ["private_lead", "private", T, "lead", 62_000_001],
+    ["private_unaffiliated", "private", T2, "unaffiliated", 63_000_001],
+    ["private_viewer", "private", T, "viewer", 64_000_001],
+    ["hidden_team", "pod", hiddenTeam, "lead2", 70_000_006],
+    ["hidden_private", "private", hiddenTeam, "lead2", 80_000_007],
+    ["no_team", "workspace", null, "lead2", 90_000_008],
+    ["hidden_no_team", "private", null, "lead2", 100_000_009],
+  ];
+  let index = 0;
+  const addUsage = async (goalId, amount) => {
+    const key = String(++index).padStart(43, "s");
+    session(key);
+    await usage(key, goalId, amount);
+    await usage(key, goalId, null, "u".repeat(43));
+    // Exercise every exported token column, not just the columns populated by the common helper.
+    db.run("UPDATE v2_usage SET input = ?, output = ?, cache_read = ?, cache_write_5m = ?, cache_write_1h = ?, cache_write_unsplit = ? WHERE session_key = ?", index, index * 2, index * 3, index * 4, index * 5, index * 6, key);
+  };
+  for (const [id, visibility, team, owner, amount] of goals) {
+    goal(id, visibility, team); await addUsage(id, amount);
+    db.run("UPDATE v2_goals SET owner_id = ? WHERE id = ?", owner, id);
+  }
+  for (const team of [T2, hiddenTeam]) db.run("INSERT INTO v2_pod_members VALUES (?, ?, 'member', 'member', ?)", W, team, at);
+  for (const [team, amount] of [[T, 3_000_011], [T2, 5_000_013], [hiddenTeam, 7_000_017]]) {
+    await chooseSpendHomeTeam(pp("member"), { team_id: team }); await addUsage(null, amount);
+  }
+  db.run("DELETE FROM v2_pod_members WHERE ws_id = ? AND user_id = 'member'", W);
+  await addUsage(null, 11_000_019);
+  db.run("INSERT INTO v2_pod_members VALUES (?, ?, 'member', 'member', ?)", W, T, at);
+  await budget();
+  const readers = [
+    ["owner", ["public_a", "public_b", "team_a", "team_b", "private_owner", "hidden_team", "no_team"]],
+    ["lead", ["public_a", "public_b", "team_a", "private_lead", "no_team"]],
+    ["member", ["public_a", "public_b", "team_a", "private_a", "no_team"]],
+    ["other", ["public_a", "public_b", "team_b", "private_b", "no_team"]],
+    ["unaffiliated", ["public_a", "public_b", "private_unaffiliated", "no_team"]],
+    ["viewer", ["public_a", "public_b", "team_a", "private_viewer", "no_team"]],
+  ];
+  const numbers = ["requests", "est_list_usd_micros", "unpriced_requests", "input", "output", "cache_read", "cache_write_5m", "cache_write_1h", "cache_write_unsplit"];
+  const check = () => readers.map(([who, visible]) => {
+    const report = table(pp(who), "team", range.from, range.to);
+    const exported = spendTeamExport(pp(who), range.from, range.to);
+    const visibleGoals = goals.filter(([id]) => visible.includes(id)), expectedTeams = new Map();
+    for (const [, , team, , amount] of visibleGoals.filter(([, , team]) => team)) {
+      expectedTeams.set(team, (expectedTeams.get(team) ?? 0) + amount);
+    }
+    assert.deepEqual(report.rows.filter((r) => r.kind === "team").map((r) => [r.team.id, r.est_list_usd_micros]).sort(), [...expectedTeams].sort(), who);
+    for (const r of report.rows.filter((r) => r.kind === "team" || r.kind === "no_team")) {
+      const contributing = visibleGoals.filter(([, , team]) => team === (r.team?.id ?? null));
+      assert.equal(r.est_list_usd_micros, contributing.reduce((n, g) => n + g[4], 0), who);
+      assert.equal(r.requests, contributing.length * 2, who);
+      assert.equal(r.unpriced_requests, contributing.length, who);
+    }
+    const hidden = goals.filter(([id]) => !visible.includes(id));
+    const privateRows = report.rows.filter((r) => r.kind === "private");
+    assert.equal(privateRows.length, 1, who);
+    assert.equal(privateRows[0].est_list_usd_micros, hidden.reduce((n, g) => n + g[4], 0), who);
+    assert.equal(privateRows[0].unpriced_requests, hidden.length, who);
+    assert.equal(privateRows[0].requests, hidden.length * 2, who);
+    assert.deepEqual(Object.keys(privateRows[0]).sort(), ["key", "kind", "label", "by_basis", ...numbers].sort(), who);
+    assert.equal(report.unallocated.est_list_usd_micros, 26_000_060, who);
+    assert.equal(report.unallocated.unpriced_requests, 4, who);
+    assert.deepEqual(exported, report, who);
+    const csv = spendCsv(pp(who), range);
+    // These fixture labels contain no CSV metacharacters; compare every serialized data cell exactly.
+    const expectedRows = [...report.rows, { label: "Not bound to a goal", ...report.unallocated }, { label: "Total", ...report.total }];
+    assert.deepEqual(csv.split("\r\n").slice(5, -1), expectedRows.map((r) => [range.month, r.label, ...numbers.map((k) => k === "est_list_usd_micros" ? `${Math.trunc(r[k] / 1_000_000)}.${String(r[k] % 1_000_000).padStart(6, "0")}` : r[k])].map((v) => `"${v}"`).join(",")), who);
+    for (const k of numbers) {
+      assert.equal(report.total[k], [...report.rows, report.unallocated].reduce((n, r) => n + r[k], 0), `${who}: ${k}`);
+      for (const basis of Object.keys(report.total.by_basis)) assert.equal(report.total.by_basis[basis][k], [...report.rows, report.unallocated].reduce((n, r) => n + r.by_basis[basis][k], 0), `${who}: ${basis}: ${k}`);
+    }
+    for (const [id] of goals) assert.ok(!csv.includes(id), `${who}: goal reference`);
+    if (who !== "owner") assert.ok(!csv.includes("Hidden team"), who);
+    const empty = spendMonth("2030-03"), emptyTable = table(pp(who), "team", empty.from, empty.to);
+    assert.deepEqual(emptyTable.rows, [], who);
+    assert.deepEqual(spendCsv(pp(who), empty).split("\r\n").slice(5, -1).map((line) => line.split(",")[1]), ['"Not bound to a goal"', '"Total"'], who);
+    return report;
+  });
+  const before = check();
+  for (const who of ["owner", "lead", "member", "viewer"]) assert.equal((await burn(who)).no_goal.priced_spend_usd_micros, 3_000_011);
+  for (const who of ["other", "unaffiliated"]) await reject(async () => burn(who), 404);
+  await runRetention(db.sql, db.tx, new Date("2032-01-01T00:00:00Z"), { secret: "test-secret" });
+  assert.deepEqual(check(), before);
+});
 
 await test("member-or-owner budget privacy and CSV parity with readable goal-bound team rows", async () => {
   await budget(); goal("g_public"); await usage(session(), "g_public", 20_000_000); await usage(session("b".repeat(43)), null, 10_000_000);
@@ -516,7 +616,7 @@ await test("member-or-owner budget privacy and CSV parity with readable goal-bou
   const { spendTeamExport } = await import("../lib/v2/spend.ts"), hidden = spendTeamExport(pp("other"), "2030-01-01T00:00:00Z", end);
   const { spend } = await import("../lib/v2/spend.ts");
   assert.deepEqual(hidden.rows, spend(pp("other"), "team", "2030-01-01T00:00:00Z", end).rows);
-  assert.equal(hidden.no_goal.length, 0); assert.equal(hidden.rows[0].team.name, "Build");
+  assert.equal(hidden.rows[0].team.name, "Build");
   assert.equal(hidden.rows[0].est_list_usd_micros, 20_000_000); assert.equal(hidden.unallocated.est_list_usd_micros, 10_000_000);
 });
 await test("terminal source cannot receive an allowance and five waiting requests is the limit", async () => {
