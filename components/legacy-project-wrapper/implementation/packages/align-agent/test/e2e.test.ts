@@ -2,6 +2,8 @@
 // start in the background), run in-process so the tests can pace them.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import http from "node:http";
+import { once } from "node:events";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import { loadCredentials } from "../src/api.ts";
@@ -699,6 +701,7 @@ test("the analysis worker sends nothing by default and sends only the allowed fi
   assert.equal(inspectLocal().turns[0].findings.length, 1);
   assert.match((await runCli(t, ["data-sharing", "results", "on"])).stdout, /Derived results on/);
   let separateLease = false;
+  let malformed = false;
   fake.beforeRequest = (method, url) => {
     if (method === "POST" && url.endsWith("/analysis")) {
       separateLease = fs.existsSync(path.join(t.home, "analysis.lock")) && !fs.existsSync(path.join(t.home, "sync.lock"));
@@ -819,6 +822,260 @@ test("the rollout reader distinguishes an exact count at the cap from a truncate
     assert.equal(capped?.calls.size, 200);
     assert.equal(capped?.replies.length, 200);
     assert.deepEqual(capped?.lowerBounds, new Set(["calls", "replies"]));
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("model and excerpt opt-ins send only their own fields, with the model running outside hooks", async () => {
+  const { fake, t } = await world();
+  const requests: Record<string, unknown>[] = [];
+  let unclear = false;
+  let separateLease = false;
+  let malformed = false;
+  // Local test stand-in for the configured decision endpoint.
+  const vendor = http.createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
+    requests.push(JSON.parse(Buffer.concat(chunks).toString()));
+    separateLease = fs.existsSync(path.join(t.home, "analysis.lock")) && !fs.existsSync(path.join(t.home, "sync.lock"));
+    assert.equal(req.headers.authorization, "Bearer test-key");
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ answers: {
+      clear_0: { type: "noul", noul: unclear ? 0.5 : 0.99 },
+      crosses_0: { type: "choice", choice: "yes", probabilities: malformed
+        ? { yes: 0.98, no: 0.01, invalid: 0.01 } : { yes: 0.98, no: 0.01, can_not_tell: 0.01 } },
+    } }));
+  });
+  vendor.listen(0, "127.0.0.1");
+  await once(vendor, "listening");
+  cleanups.push(() => new Promise<void>((resolve) => vendor.close(() => resolve())));
+  const address = vendor.address();
+  assert.ok(address && typeof address !== "string");
+  const endpoint = `http://127.0.0.1:${address.port}/v1/systemone`;
+  const service = { url: endpoint, revision: "first-revision" };
+  fake.decisionServices.set("ws_acme", service);
+  const env = { ALIGN_DECISION_WORKSPACE_KEY: "test-key" };
+  const limit = { id: "lim_aaaaaaaaaaaa", type: "must_not" as const, text: "Keep the invoice history unchanged.", source: null };
+  fake.bumpGoal("ws_acme", "g_ship", { limits: [limit] });
+  await login(t);
+  const sid = "bound-excerpt-privacy";
+  const local = localId("claude-code", sid);
+  const transcript = path.join(t.claudeDir, "projects", "analysis", `${sid}.jsonl`);
+  const cwd = t.root;
+  const tags = ["PROMPT-CANARY", "EARLY-REPLY-CANARY", "FINAL-REPLY-CANARY", "TOOL-ARG-CANARY", "TOOL-RESULT-CANARY", "EXCERPT-CANARY"];
+  const hidden = "Before\u200bAfter";
+  const spelled = "Before\\u200bAfter";
+  const reply = `I'll remove the old entries. ${tags[2]} ${tags[5]} ${hidden} ${spelled}`;
+  const cli = async (args: string[], configuration = env) => {
+    const result = await runCli(t, args, configuration);
+    assert.equal(result.code, 0, result.stderr);
+    return result.stdout;
+  };
+  const prompt = (root: string, text: string) => runHook(t, "claude", "UserPromptSubmit",
+    { session_id: sid, prompt_id: root, prompt: text, transcript_path: transcript, cwd }, env);
+  function complete(root: string, final = reply, repeat = false) {
+    assert.equal(prompt(root, tags[0]).code, 0);
+    appendLines(transcript, [
+      claudeUser(sid, root, new Date().toISOString(), { cwd, message: { role: "user", content: tags[0] } }),
+      ...(repeat ? [{ type: "assistant", sessionId: sid, promptId: root, message: { content: [{ type: "text", text: final }] } }] : []),
+      { type: "assistant", sessionId: sid, promptId: root, message: { content: [
+        { type: "text", text: tags[1] },
+        { type: "tool_use", id: root, input: { argument: tags[3] } },
+      ] } },
+      { type: "user", sessionId: sid, message: { content: [{ type: "tool_result", tool_use_id: root, content: tags[4] }] } },
+      { type: "assistant", sessionId: sid, promptId: root, message: { content: [{ type: "text", text: final }] } },
+    ]);
+    assert.equal(runHook(t, "claude", "Stop", { session_id: sid, prompt_id: root, transcript_path: transcript, cwd }, env).code, 0);
+  }
+  writeLines(transcript, [claudeUser(sid, "start", new Date().toISOString(), { cwd })]);
+  assert.equal(runHook(t, "claude", "SessionStart", { session_id: sid, cwd, transcript_path: transcript }).code, 0);
+  await cli(["sync"]);
+  await cli(["share", sid, "--workspace", "ws_acme", "--goal", "g_ship", "--yes"]);
+
+  fake.requestBodies = [];
+  const mark = fake.log.length;
+  complete("opted-out");
+  await cli(["sync"]);
+  assert.equal(requests.length, 0);
+  assert.ok(!fake.log.slice(mark).some(({ path }) => /model-check|excerpts|analysis/.test(path)));
+  assert.doesNotMatch(JSON.stringify(fake.requestBodies), /CANARY/);
+  const extractCode = (out: string) => {
+    const code = out.match(/\d{13}\.[a-f0-9]{32}/)?.[0];
+    assert.ok(code, out);
+    return code;
+  };
+  const consent = await cli(["data-sharing", "model", "preview"]);
+  assert.ok(consent.includes(endpoint) && consent.includes("last assistant reply"));
+  assert.ok(!consent.includes(env.ALIGN_DECISION_WORKSPACE_KEY));
+  await cli(["data-sharing", "model", "on", extractCode(consent)]);
+
+  complete("clear", reply, true);
+  assert.equal(requests.length, 0, "hooks do not call the decision endpoint");
+  await cli(["sync"]);
+  assert.equal(requests.length, 1);
+  assert.equal(separateLease, true);
+  assert.deepEqual(Object.keys(requests[0]).sort(), ["model", "questions", "state"]);
+  assert.equal(requests[0].state, reply);
+  assert.ok(JSON.stringify(requests[0]).includes(limit.text));
+  assert.ok(!JSON.stringify(requests[0]).includes(limit.id));
+  assert.ok([tags[0], tags[1], tags[3], tags[4]].every((tag) => !JSON.stringify(requests).includes(tag)));
+  assert.equal(fake.findings.size, 0);
+  assert.doesNotMatch(JSON.stringify(fake.requestBodies), /CANARY/);
+
+  const inspected = () => cli(["analysis", "show", sid, "--json"]).then(JSON.parse);
+  assert.equal((await inspected()).turns.find((turn: { root: string }) => turn.root === "clear").findings[0].reply, reply);
+  const notice = prompt("notice", "Continue").stdout;
+  assert.match(notice, /Keep the invoice history unchanged/);
+  assert.match(notice, /flagged the final reply/);
+  assert.doesNotMatch(notice, /CANARY/);
+  assert.match(prompt("wrong", "::align drift wrong").stdout, /false alarm feedback/);
+  await cli(["sync"]);
+  assert.equal((await inspected()).feedback[0].kind, "wrong");
+
+  unclear = true;
+  complete("unclear");
+  await cli(["sync"]);
+  assert.equal(requests.length, 2);
+  assert.deepEqual((await inspected()).turns.find((turn: { root: string }) => turn.root === "unclear").findings, []);
+  fake.modelChecksBlocked = true;
+  complete("blocked");
+  await cli(["sync"]);
+  fake.modelChecksBlocked = false;
+  fake.decisionServices.set("ws_acme", { url: `${endpoint}/changed`, revision: "changed-revision" });
+  complete("changed-recipient");
+  await cli(["sync"]);
+  assert.equal(requests.length, 2);
+  assert.notEqual((await runCli(t, ["data-sharing", "model", "on", extractCode(consent)], env)).code, 0);
+  fake.decisionServices.set("ws_acme", { ...service, revision: "restored-revision" });
+  complete("restored-address");
+  await cli(["sync"]);
+  assert.equal(requests.length, 2, "restoring an address does not restore its earlier consent");
+  await cli(["data-sharing", "model", "on", extractCode(await cli(["data-sharing", "model", "preview"]))]);
+  let releasePermission!: () => void;
+  const permissionHeld = new Promise<void>((resolve) => { releasePermission = resolve; });
+  let receivedPermission = false;
+  fake.beforeReply = async (method, url, status, answer) => {
+    if (url.endsWith("/model-check") && status === 200 && answer?.enabled) {
+      receivedPermission = true;
+      await permissionHeld;
+    }
+  };
+  complete("veto-in-flight");
+  const syncing = cli(["sync"]);
+  try {
+    await waitFor(() => receivedPermission, 3000, "allowed permission response is held");
+    fake.modelChecksBlocked = true;
+    await new Promise((resolve) => setTimeout(resolve, 1550));
+  } finally {
+    releasePermission();
+    await syncing;
+    fake.beforeReply = undefined;
+    fake.modelChecksBlocked = false;
+  }
+  assert.equal(requests.length, 2, "a delayed grant cannot send the reply after the veto");
+  complete("oversized", "x".repeat(2001));
+  await cli(["sync"]);
+  assert.equal(requests.length, 2);
+
+  unclear = false;
+  malformed = true;
+  complete("malformed");
+  await cli(["sync"]);
+  assert.equal(requests.length, 3);
+  assert.deepEqual((await inspected()).turns.find((turn: { root: string }) => turn.root === "malformed").findings, []);
+  malformed = false;
+  await cli(["data-sharing", "results", "on"]);
+  complete("both");
+  await cli(["sync"]);
+  const findings = [...fake.findings.values()].flat();
+  assert.equal(findings.length, 1);
+  assert.deepEqual(Object.keys(findings[0] as object).sort(), ["digest", "epoch_id", "evidence", "goal_version", "id", "limit_id", "turn_started_at"]);
+  assert.match(JSON.stringify(findings), /"evidence":"model"/);
+  assert.doesNotMatch(JSON.stringify(fake.requestBodies), /CANARY/);
+  await cli(["data-sharing", "model", "off"]);
+
+  const file = path.join(t.root, "selected-excerpt.txt");
+  const args = [sid, "--turn", "clear", "--file", file, "--reader", "u_reader", "--purpose", "Review the proposal", "--hours", "24"];
+  fs.writeFileSync(file, tags[5]);
+  assert.notEqual((await runCli(t, ["excerpt", "preview", ...args], env)).code, 0);
+  const consentPath = "/api/v2/devices/self/data-sharing";
+  let releaseOn!: () => void;
+  const onHeld = new Promise<void>((resolve) => { releaseOn = resolve; });
+  let receivedOn = false;
+  fake.beforeReply = async (method, url, status, answer) => {
+    if (method === "PUT" && url === consentPath && status === 200 && answer?.enabled) {
+      receivedOn = true;
+      await onHeld;
+    }
+  };
+  const enabling = runCli(t, ["data-sharing", "excerpts", "on"], env);
+  try {
+    await waitFor(() => receivedOn, 3000, "enabled response is held");
+    await cli(["data-sharing", "excerpts", "off"]);
+  } finally {
+    releaseOn();
+    await enabling;
+    fake.beforeReply = undefined;
+  }
+  assert.match(await cli(["data-sharing"]), /Excerpts \(proposed\)\. Off/i);
+  assert.equal(fake.excerptConsent.size, 0);
+  assert.notEqual((await runCli(t, ["excerpt", "readers", sid], env)).code, 0);
+  await cli(["data-sharing", "excerpts", "on"]);
+  assert.match(await cli(["excerpt", "readers", sid]), /Named reader/);
+  fs.writeFileSync(file, `${hidden} ${spelled}`);
+  const hiddenPreview = await cli(["excerpt", "preview", ...args]);
+  assert.ok(hiddenPreview.includes('"Before\\u200bAfter Before\\\\u200bAfter"'), hiddenPreview);
+  assert.ok(!hiddenPreview.includes("\u200b"), "the preview displays the invisible character");
+  assert.match(await cli(["excerpt", "share", ...args, "--confirm", extractCode(hiddenPreview)]), /Excerpt shared/);
+  assert.ok(fake.requestBodies.some((body) => body.text === `${hidden} ${spelled}`), "the selected bytes are unchanged");
+  fs.writeFileSync(file, tags[5]);
+  const preview = await cli(["excerpt", "preview", ...args]);
+  assert.ok(preview.includes(JSON.stringify(tags[5])) && preview.includes("Named reader") && preview.includes("Review the proposal"));
+  assert.doesNotMatch(JSON.stringify(fake.requestBodies), /CANARY/);
+  fs.writeFileSync(file, tags[2]);
+  assert.notEqual((await runCli(t, ["excerpt", "share", ...args, "--confirm", extractCode(preview)], env)).code, 0);
+  fs.writeFileSync(file, tags[5]);
+  const shareArgs = ["excerpt", "share", ...args, "--confirm", extractCode(preview)];
+  fake.excerptsBlocked = true;
+  assert.notEqual((await runCli(t, shareArgs, env)).code, 0);
+  fake.excerptsBlocked = false;
+  assert.match(await cli(shareArgs), /Excerpt shared/);
+  const leaves = fake.requestBodies.filter((body) => JSON.stringify(body).includes("CANARY")) as unknown[];
+  assert.deepEqual(leaves, [{ id: `ex_${extractCode(preview).slice(14)}`, text: tags[5], purpose: "Review the proposal", readers: ["u_reader"], hours: 24 }]);
+  assert.equal(requests.length, 4);
+  await cli(["data-sharing", "excerpts", "off"]);
+  assert.notEqual((await runCli(t, shareArgs, env)).code, 0);
+  for (const target of ["align.db", "align.db-wal", "logs/align.log", path.relative(t.home, layout.analysis(t.home, local))]) {
+    const file = path.join(t.home, target);
+    if (fs.existsSync(file)) assert.doesNotMatch(fs.readFileSync(file).toString(), /CANARY/, target);
+  }
+});
+
+test("the decision input comes from the completed rollout, preserving repeated text and abstaining on incomplete turns", () => {
+  const t = makeEnv();
+  try {
+    const tr = path.join(t.root, "rollout.jsonl");
+    const native = "model-test";
+    const root = "turn-test";
+    const rowsFor = (completion: object) => [
+      { type: "session_meta", payload: { id: native } },
+      { type: "event_msg", payload: { type: "task_started", turn_id: root } },
+      { type: "event_msg", payload: { type: "user_message", message: "private prompt" } },
+      ...[["Repeat", "commentary"], ["Private interim", "commentary"], ["Repeat", "final_answer"]].map(([reply, phase]) => ({
+        type: "response_item", payload: { type: "message", role: "assistant", phase, content: [{ type: "output_text", text: reply }] },
+      })),
+      { type: "event_msg", payload: { turn_id: root, ...completion } },
+    ];
+    const read = () => readTurn("codex", native, { root, transcript: tr, at: new Date().toISOString() });
+    writeLines(tr, rowsFor({ type: "task_complete" }));
+    assert.equal(read()?.finalReply, "Repeat");
+    writeLines(tr, rowsFor({ type: "task_complete", last_agent_message: "Authoritative final text" }));
+    assert.equal(read()?.finalReply, "Authoritative final text");
+    writeLines(tr, rowsFor({ type: "turn_aborted" }));
+    assert.equal(read()?.finalReply, null);
+    writeLines(tr, rowsFor({ type: "task_complete" }).filter((row) => row.payload.phase !== "final_answer"));
+    assert.equal(read()?.finalReply, null);
   } finally {
     t.cleanup();
   }

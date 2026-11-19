@@ -19,19 +19,20 @@ export interface AnalysisTurn {
   } | null;
 }
 
-/** Declaration for a later worker. It must pass the same consent gate before it receives input. */
+/** Declaration for work using a decision model. It must pass the same consent gate before it receives input. */
 export interface AnalysisExtension {
   kind: "model_check" | "goal_suggestion";
   tier: 3;
   recipient: "session" | "provider";
 }
 
-export type Evidence = "wording" | "example" | "tool" | "file" | "git";
+export type Evidence = "wording" | "example" | "tool" | "file" | "git" | "model";
 export const EVIDENCE_WORDS: Record<Evidence, string> = {
   wording: "The reply stated an action that may cross this limit.",
   example: "The reply matched the crossing example.",
   tool: "A tool confirmed a change to a path covered by this limit.",
   file: "A file change matched a path covered by this limit.",
+  model: "A model flagged the final reply.",
   git: "A change seen in Git matched a path covered by this limit.",
 };
 
@@ -54,7 +55,7 @@ export interface DriftFeedback {
   at: string;
 }
 
-export const RESULTS_PREVIEW = "Derived findings stay on this machine with hosted Align. A local Align server can receive them only if you turn sharing on. Run `align data-sharing` to review it.";
+export const RESULTS_PREVIEW = "Derived findings stay on this machine with hosted Align. A local Align server can receive them only if you turn sharing on. Model checks and excerpts require separate consent. Run `align data-sharing` to review it.";
 
 export function signalsPreview(enabled: boolean): string {
   return enabled

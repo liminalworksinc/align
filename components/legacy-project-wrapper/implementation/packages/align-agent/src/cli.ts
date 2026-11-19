@@ -2,8 +2,9 @@
 import { DECISION_PROVIDERS, decisionService } from "./decision-model.ts";
 import { suggestionConsent } from "./goal-suggestions.ts";
 import { saveSuggestionReply, shownGoalSuggestion } from "./hooks/goal-suggestions.ts";
-import { deleteAnalysis, inspectAnalysis, analysisSharingAllowed, setGoalSuggestionConsent, setResultsEnabled } from "./analysis.ts";
+import { deleteAnalysis, inspectAnalysis, analysisSharingAllowed, modelChecksOn, modelConsentPreview, setModelChecks, setGoalSuggestionConsent, setResultsEnabled } from "./analysis.ts";
 import { EVIDENCE_WORDS, RESULTS_PREVIEW, signalsPreview } from "./shared/analysis.ts";
+import { excerptReadersOnMachine, excerptSharingOn, prepareExcerpt, setExcerptSharing, terminalText } from "./excerpts.ts";
 // `align` CLI. Works offline for local metering; server features need `align login`.
 import { measureCommand } from "./measure.ts";
 import { execFile, spawnSync } from "node:child_process";
@@ -103,6 +104,12 @@ const HELP = `align ${VERSION}: Align local agent
   align data-sharing decision-model off [--workspace <name>]
   align analysis show <session> [--json]
   align analysis delete <session>
+  align data-sharing model preview|off [--workspace <name>]
+  align data-sharing model on <preview code> [--workspace <name>]
+  align data-sharing excerpts on|off
+  align excerpt readers <session>
+  align excerpt preview|share <session> --turn <id> --file <path> --reader <id> --purpose <text> --hours <n>
+    For share, include --confirm <preview code>. Repeat --reader to add a reader.
   align stop-sharing <session>
   align delete-history <session> [--yes]
   align bind <session> --goal <ref|none>
@@ -1220,7 +1227,7 @@ async function cmdDataSharing(ctx: Ctx, args: string[]) {
   let workspace = ctx.config.default_workspace;
   const workspaceFlag = args.indexOf("--workspace");
   if (workspaceFlag >= 0) {
-    if (args[0] !== "decision-model" || workspaceFlag !== args.length - 2) throw new UsageError(commandHelp("data-sharing"));
+    if (!["decision-model", "model"].includes(args[0]) || workspaceFlag !== args.length - 2) throw new UsageError(commandHelp("data-sharing"));
     workspace = args[workspaceFlag + 1];
     args = args.slice(0, workspaceFlag);
   }
@@ -1236,7 +1243,9 @@ async function cmdDataSharing(ctx: Ctx, args: string[]) {
       return service ? [`${name} with ${DECISION_PROVIDERS[service.provider].label}${service.provider === "workspace" ? ` at ${service.endpoint}` : " with your own key"}`] : [];
     });
     out(`3  Decision model (proposed). ${enabled.length ? `On for ${enabled.join(", ")}` : "Off"}. The selected service receives the first prompt, branch, saved repo alias and eligible goal ids and titles. Turn off with align data-sharing decision-model off --workspace <name>.`);
-    out("4  Deliberate excerpts (proposed). Off. No recipient configured in this version.");
+    const checks = (loadMe(ctx.home)?.workspaces ?? []).filter(({ id }) => modelChecksOn(ctx, id)).map(({ name }) => name);
+    out(`3  Model limit checks (proposed). ${checks.length ? `On for ${checks.join(", ")}` : "Off"}. The workspace decision service receives the last assistant reply and the wording and types of selected limits. Use align data-sharing model preview to review the recipient or align data-sharing model off to turn it off.`);
+    out(`4  Excerpts (proposed). ${excerptSharingOn(ctx) ? "On" : "Off"}. Align receives only the text and sharing details confirmed for each excerpt. Use align data-sharing excerpts off to turn off new shares.`);
     out("5  Central logs (proposed). Hosted workspaces cannot receive transcripts. This version reads the transcript locally from its original file.");
     return;
   }
@@ -1297,6 +1306,25 @@ async function cmdDataSharing(ctx: Ctx, args: string[]) {
       unbind();
     }
   }
+  if (option === "model" && !extra) {
+    if (ref === "preview" && !choice) {
+      if (!ws) throw new UsageError("Choose a workspace with --workspace <name>.");
+      const { endpoint, code } = await modelConsentPreview(ctx, ws.id);
+      out(`Decision recipient ${terminalText(endpoint)} for ${terminalText(ws.name)}.`);
+      out("After sync, this endpoint receives the last assistant reply (up to 2,000 UTF-8 bytes), the wording and types of up to ten limits, and fixed questions. The reply may mention private details. The request includes a key for this endpoint.");
+      out("It sends no separate prompt, earlier reply, tool call or result, workspace or session identifier, or feedback. A workspace owner can block these requests.");
+      return out(`To allow this on this machine, run align data-sharing model on ${code} --workspace ${ws.id}. To stop it, run align data-sharing model off --workspace ${ws.id}.`);
+    }
+    if ((ref === "off" && !choice) || (ref === "on" && choice)) {
+      if (!ws) throw new UsageError("Choose a workspace with --workspace <name>.");
+      await setModelChecks(ctx, ws.id, choice);
+      return out(`Model limit checks ${ref} on this machine for ${ws.name}.`);
+    }
+  }
+  if (option === "excerpts" && (ref === "on" || ref === "off") && !choice) {
+    const saved = await setExcerptSharing(ctx, ref === "on");
+    return out(`Excerpt sharing ${ref} on this machine.${saved ? "" : " Sign in and repeat this command to also turn it off at Align."}`);
+  }
   throw new UsageError(commandHelp("data-sharing"));
 }
 
@@ -1331,6 +1359,7 @@ function showAnalysis(ctx: Ctx, report: ReturnType<typeof inspectAnalysis>) {
       out(`  ${labels[field]}: ${count}`);
     }
     for (const finding of turn.findings) {
+      if ("reply" in finding) out(`  Final reply evidence: ${finding.reply === "Unknown" ? "Unknown" : terminalText(String(finding.reply))}`);
       out(`  ${LIMIT_WORDS[finding.limit.type]} ${quoted(finding.limit.text, 160)}. ${EVIDENCE_WORDS[finding.evidence]}`);
     }
   }
@@ -1361,6 +1390,36 @@ function showAnalysis(ctx: Ctx, report: ReturnType<typeof inspectAnalysis>) {
   if (report.deletion_pending) out("Deletion at Align is pending.");
 }
 
+async function cmdExcerpt(ctx: Ctx, args: string[]) {
+  const help = commandHelp("excerpt");
+  const [action, ref, ...flags] = args;
+  if (!ref || !["readers", "preview", "share"].includes(action)) throw new UsageError(help);
+  ingestSpool(ctx);
+  const session = resolveSession(ctx, ref);
+  if (action === "readers") {
+    if (flags.length) throw new UsageError(help);
+    const readers = await excerptReadersOnMachine(ctx, session.local_id);
+    if (!readers.length) return out("There are no other people in this workspace.");
+    for (const { id, name } of readers) out(`${id}  ${terminalText(name)}`);
+    return;
+  }
+  const { values } = parseArgs({ args: flags, options: {
+    turn: { type: "string" }, file: { type: "string" }, reader: { type: "string", multiple: true },
+    purpose: { type: "string" }, hours: { type: "string" }, confirm: { type: "string" },
+  } });
+  const { turn, file, reader, purpose, hours, confirm } = values;
+  if (!turn || !file || !reader || !purpose || !hours || (action === "share" ? !confirm : !!confirm)) throw new UsageError(help);
+  const result = await prepareExcerpt(ctx, session.local_id, { turn, file, purpose, readerIds: reader, hours: Number(hours) }, confirm);
+  const page = `${result.server.replace(/\/$/, "")}/app/w/${encodeURIComponent(result.ws)}/sessions/excerpts`;
+  if ("id" in result) return out(`Excerpt shared through ${result.expiresAt}. To revoke it, open ${page}`);
+  out(`Destination ${page}`);
+  out(`Readers ${result.readers.map(({ id, name }) => `${terminalText(name)} (${id})`).join(", ")}`);
+  out(`Purpose ${terminalText(result.purpose)}`);
+  out(`Expires ${result.hours} hour(s) after Align accepts it.`);
+  out(`Exact excerpt (escaped) ${terminalText(result.text)}`);
+  out(`To share this text, repeat the command with share instead of preview and add --confirm ${result.code}.`);
+}
+
 async function cmdAnalysis(ctx: Ctx, args: string[]) {
   const [action, ...rest] = args;
   const { values, positionals: [ref, extra] } = parseSessionArgs(ctx, "analysis", rest, { json: { type: "boolean" } });
@@ -1370,7 +1429,7 @@ async function cmdAnalysis(ctx: Ctx, args: string[]) {
   ingestSpool(ctx);
   const session = resolveSession(ctx, ref);
   if (action === "show") {
-    const report = inspectAnalysis(ctx, session.local_id);
+    const report = inspectAnalysis(ctx, session.local_id, true);
     return values.json ? out(JSON.stringify(report, null, 2)) : showAnalysis(ctx, report);
   }
   const deleted = await deleteAnalysis(ctx, session.local_id);
@@ -1919,6 +1978,8 @@ export async function main(argv: string[]): Promise<void> {
         return await cmdAsks(ctx, rest);
       case "data-sharing":
         return await cmdDataSharing(ctx, rest);
+      case "excerpt":
+        return await cmdExcerpt(ctx, rest);
       case "analysis":
         return await cmdAnalysis(ctx, rest);
       case "config":

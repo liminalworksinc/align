@@ -58,6 +58,7 @@ The events, where they are recorded and what they may carry:
 | `measure_source_reading` | an automated measure reading is recorded | the workspace, the responsible person | `source`: `ci` or `command` |
 | `first_precedent_shown` | a precedent read first returns at least one item to the requester or a person who can decide, including a draft read by its proposer | the workspace, the person | none |
 | `goal_list_reviewed` | an owner marks their review for the month complete | the workspace, the owner | none |
+| `session_excerpt_shared` | a deliberate excerpt is accepted for the first time for its share id | the workspace, the sharer | none |
 | `first_directive` | the workspace's first directive that reached a session | the workspace, none | `kind` |
 | `first_mcp_read` | the workspace's first MCP tool call | the workspace, the person | `client`: `app` or `device` |
 | `loi_sent` | the operator records it | the workspace, none | `note_ref` |

@@ -208,12 +208,14 @@ The agent uploads and fetches inside the normal hook-started sync pass; hooks re
 ## Session sharing choices
 
 The authority for tier contents is [Nothing private leaves the machine](../../../../../specs/align/local-agent.md#requirement-nothing-private-leaves-the-machine).
-`GET /api/v2/workspaces/:ws/data-sharing` returns `{blocked: [tier], decision_service: {url, revision} | null}`
+`GET /api/v2/workspaces/:ws/data-sharing` returns `{blocked: [tier], model_check_blocked, decision_service: {url, revision} | null}`
 for a workspace the caller can access. A dispatch read uses `?for=model-suggestion` and requires permission
-to share sessions and a current grant for device calls. Migration 30 adds the decision service setting.
-A workspace owner can `PATCH` with `{tier, blocked}` for tiers 1 through 4 or
-`{decision_service_url: string | null}` to set or clear the service. Each address change expires consent to its
-earlier revision. The audit action records the change without the address.
+to share sessions and a current grant for device calls. Device dispatch reads also return `{enabled, send_for_ms?}`.
+A goal suggestion has at most 750 ms to start and a 2,200 ms request timeout within its 2,950 ms window.
+A workspace owner can `PATCH` with `{tier, blocked}` for tiers 1 through 4, `{model_check_blocked}` for
+the independent model check block, or `{decision_service_url: string | null}` to set or clear the shared service.
+The audit action records a service change without the address. Migration 30 adds the decision service setting.
+Migration 31 adds independent model check blocks, send windows and excerpt sharing.
 The sharing device records tier 1 with `PUT /api/v2/workspaces/:ws/sessions/:key/work-signals` and
 `{enabled: true|false}`. The returned `enabled` is false if the workspace prohibits a new opt-in.
 
@@ -225,13 +227,31 @@ device consent and workspace ban. `enabled_since` is the start of the current co
 Without the query the response includes the device's own findings.
 
 `POST` accepts exactly `id`, `epoch_id`, `goal_version`, `limit_id`, `evidence`, `digest` and `turn_started_at`.
-The id and keyed digest are 32 lowercase hex characters. Evidence is one of `wording`, `example`, `tool`, `file`
-or `git`. The reported turn start is an ISO timestamp with milliseconds in UTC, later than the server's current
+The id and keyed digest are 32 lowercase hex characters. Evidence is one of `wording`, `example`, `tool`, `file`,
+`git` or `model`. The reported turn start is an ISO timestamp with milliseconds in UTC, later than the server's current
 consent time. A matching retry is acknowledged while the finding is available. Findings expire 30 days from
 the turn start. Deleted and expired findings return 410 `finding_gone` on replay.
 `DELETE` removes the sharing device's findings and returns 204. It also returns 204 when the sharer's authorized
 request reaches a marker for deleted session history. Other requests outside the device's scope receive 404.
-This API accepts no model inputs, excerpts or transcripts.
+This API accepts only the finding fields above.
+
+`POST /api/v2/workspaces/:ws/sessions/:key/model-check` grants the sharing device a short send window
+(`{enabled: true, send_for_ms: 1500, decision_service: {url, revision}}`) or returns `{enabled: false}`.
+Both decisions go directly from the device to its selected recipient. The device measures each window from
+before its permission request and bounds the send by the deadline. Each workspace block immediately prevents
+new windows for that capability and waits out earlier windows before the save returns. An address change
+expires consent to the earlier revision and waits out existing windows for both capabilities.
+
+`PUT /api/v2/devices/self/data-sharing` with `{tier: 4, enabled: true|false, revision}` sets proposed
+excerpt consent on the device. The device increments its revision before each command. The server applies only
+a greater revision and returns its current `{enabled, revision}`. At `/api/v2/workspaces/:ws/sessions/:key/excerpts` the sharing device gets `{enabled, readers}`
+and can POST exactly `{id, text, purpose, readers, hours}`. Reader ids name current members. The id is
+`ex_` followed by 32 lowercase hex characters. Repeating the same share id and details returns its original expiry.
+Expired or revoked shares cannot be reopened with the same id, even after their audit history expires.
+
+Browser sessions use `GET /api/v2/workspaces/:ws/excerpts` for active excerpts shared by or with that person.
+`GET /api/v2/workspaces/:ws/excerpts/:id` also returns the text. The sharer can DELETE it at the same address.
+Other callers receive 404. Excerpt responses disable caching and the share event carries no content.
 
 ## Asks (PORT-003)
 What a team was asked to do by someone else, recorded by a person from a meeting or by hand. An ask belongs to the

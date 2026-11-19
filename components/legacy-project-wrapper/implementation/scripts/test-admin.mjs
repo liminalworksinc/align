@@ -171,6 +171,56 @@ function testDataBoundaryUpgrade() {
   }
 }
 
+function testExcerptUpgrade() {
+  const dir = path.join(testDir, "excerpt-upgrade");
+  mkdirSync(path.join(dir, "v2"), { recursive: true });
+  const legacy = new DatabaseSync(path.join(dir, "v2/align.sqlite"));
+  try {
+    const excerptMigration = migrations.findIndex((sql) => /\bCREATE TABLE v2_session_excerpts\b/.test(sql));
+    legacy.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY);");
+    for (const sql of migrations.slice(0, excerptMigration)) legacy.exec(sql);
+    legacy.exec(`
+      INSERT INTO ba_user VALUES ('u_old');
+      INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES ('ws_old', 'Old workspace', 'u_old', '${OLD}');
+      INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES ('ws_old', 'u_old', 'owner', '${OLD}');
+      INSERT INTO v2_devices (id,user_id,name,public_key,created_at) VALUES ('dev_old','u_old','Laptop','key','${OLD}');
+      INSERT INTO v2_device_grants VALUES ('dev_old', 'ws_old');
+      INSERT INTO v2_device_result_consent VALUES ('dev_old', '${OLD}');
+      INSERT INTO v2_data_restrictions VALUES ('ws_old', 3), ('ws_old', 4);
+      INSERT INTO v2_workspace_decision_services VALUES ('ws_old', 'https://decision.example.test/', 'old-revision');
+      INSERT INTO v2_sessions (ws_id,session_key,user_id,device_id,harness,repo_key,started_at,state,created_at,updated_at,work_signals)
+        VALUES ('ws_old','session_old','u_old','dev_old','claude-code','repo_old','${OLD}','shared','${OLD}','${OLD}',1);
+      INSERT INTO v2_epochs (ws_id,session_key,epoch_id,starts_at,cause,authority,created_at)
+        VALUES ('ws_old','session_old','ep_old','${OLD}','manual','none','${OLD}');
+      INSERT INTO v2_analysis_findings
+        (ws_id,session_key,epoch_id,device_id,id,goal_version,limit_id,evidence,digest,turn_started_at,received_at)
+        VALUES ('ws_old','session_old','ep_old','dev_old','finding_old',1,'lim_old','file','digest_old','${OLD}','${NOW}');
+      PRAGMA user_version = ${excerptMigration};
+      PRAGMA foreign_keys = ON;
+    `);
+    const preserve = ["v2_analysis_findings", "v2_data_restrictions", "v2_device_result_consent", "v2_sessions", "v2_epochs", "v2_workspace_decision_services"];
+    const records = () => JSON.stringify(preserve.map((name) => legacy.prepare(`SELECT * FROM ${name}`).all()));
+    const before = records();
+    const upgrade = migrateFixture(dir);
+    check("LIM-2528: populated schema 30 upgrades to 31 without losing existing findings and choices",
+      excerptMigration === 30 && upgrade.status === 0 && records() === before
+        && legacy.prepare("PRAGMA user_version").get().user_version === SCHEMA_VERSION
+        && legacy.prepare("PRAGMA foreign_key_check").all().length === 0
+        && legacy.prepare("PRAGMA integrity_check").get().integrity_check === "ok", upgrade.stderr);
+    legacy.exec("UPDATE v2_analysis_findings SET evidence = 'model' WHERE id = 'finding_old'");
+    const findingIndexes = legacy.prepare("PRAGMA index_list(v2_analysis_findings)").all();
+    check("LIM-2528: migration 31 allows model evidence and keeps both finding retention indexes",
+      legacy.prepare("SELECT evidence FROM v2_analysis_findings WHERE id = 'finding_old'").get()?.evidence === "model" &&
+      ["v2_analysis_expiry", "v2_analysis_receipt_expiry"].every((name) => findingIndexes.some((index) => index.name === name)));
+    check("LIM-2528: upgraded excerpt tables and permission state start empty",
+      ["v2_device_excerpt_consent", "v2_session_excerpts", "v2_excerpt_readers", "v2_excerpt_share_ids", "v2_model_send_windows", "v2_model_check_blocks", "v2_excerpt_storage_cleanup"]
+        .every((name) => legacy.prepare("SELECT 1 FROM sqlite_schema WHERE name = ?").get(name)
+          && !legacy.prepare(`SELECT 1 FROM ${name}`).get()));
+  } finally {
+    legacy.close();
+  }
+}
+
 function testChangeElementUpgrade(name, shift) {
   const legacyDir = path.join(testDir, name);
   mkdirSync(path.join(legacyDir, "v2"), { recursive: true });
@@ -272,7 +322,7 @@ function testSuggestionOriginUpgrade() {
       refused = true;
     }
     check("LIM-2527: migration 30 preserves epoch origins, dependent rows, reviews, events and sharing choices",
-      d.prepare("PRAGMA user_version").get().user_version === 30 && before === after && refused && d.prepare("PRAGMA foreign_key_check").all().length === 0 &&
+      d.prepare("PRAGMA user_version").get().user_version === SCHEMA_VERSION && before === after && refused && d.prepare("PRAGMA foreign_key_check").all().length === 0 &&
       d.prepare("SELECT origin FROM v2_epochs WHERE epoch_id='ep'").get().origin === "suggested_rule");
     check("LIM-2527: upgrade clears suggestion origins on unallocated epochs and starts with no configured service",
       d.prepare("SELECT origin FROM v2_epochs WHERE epoch_id='ep_missing_goal'").get().origin === null &&
@@ -342,6 +392,7 @@ try {
     reviewUpgrade.close();
   }
   testSuggestionOriginUpgrade();
+  testExcerptUpgrade();
   for (const [name, args] of [
     ["retention typo", ["retention", "run", "--dryrun", "true"]],
     ["purge dry-run", ["workspaces", "delete", WS, "--purge", "--yes", "--dry-run"]],

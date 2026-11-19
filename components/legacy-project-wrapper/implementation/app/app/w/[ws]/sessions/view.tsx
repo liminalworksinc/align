@@ -147,7 +147,7 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
   return (
     <Shell me={me} ws={ws} tab="Sessions">
       <h1 className={`${PAGE_H1} mb-2`}>Shared sessions</h1>
-      <p className="mb-5 max-w-prose text-[15px] text-(--text-2)">Sessions you shared from your machine with align share. Nothing else from your machine reaches this workspace.</p>
+      <p className="mb-5 max-w-prose text-[15px] text-(--text-2)">Sessions you shared from your machine with align share. <Link href={`/app/w/${ws}/sessions/excerpts`} className="text-(--accent-text) underline">Shared excerpts</Link></p>
       {holds.data?.holds.map((h) => (
         <HoldBanner key={h.goal.id} hold={h} goalTitle={h.goal.title} me={me.id} />
       ))}

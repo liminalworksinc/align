@@ -692,3 +692,29 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [ ] Identify the trigger of the earlier intermittent 390 by 844 pixel timeout. The instrumented run at that size passed.
 - **Evidence:**
   - [x] Node 24.22.3 on port 5010 reported 2,117 passed and 0 failed, including 1,093 server and browser checks and 646 local agent checks. All eight Align specifications validated. The retained test receipt remains in place.
+
+### [ ] LIM-2528: Check limits with a decision model and share selected excerpts
+
+- **Priority:** P0
+- **Owner:** Align local agent, workspace policy and Sessions
+- **Direction:** Add a model check of completed turns and deliberate sharing of selected session text.
+- **Conclusion:** Use the existing sharing tiers and turn-bound goal. Require separate machine consent, fresh workspace permission and explicit confirmation of each excerpt.
+- **Depends on:** LIM-2526 and LIM-2527
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Update the Align specifications and record the proposed decisions in ADR 0008. All eight specification documents validate.
+  - [x] Add the local model check and share and revoke excerpts with named readers. The CLI privacy test passed using a local decision endpoint stand-in.
+- **Original implementation evidence:**
+  - [x] `ALIGN_TEST_PORT=5100 npm test` on Node 24.22.3 passed 2,097 checks with zero failures.
+  - [x] `litai spec validate specs/align --id-prefix align` passed for all eight documents. The retained test receipt is stale.
+- **Outcome:** Schema 31 supports confirmed excerpts with named readers, expiry and revocation. Optional local model
+  checks use a configured recipient. The decision service was exercised with a local test stand-in. Live provider
+  authentication, behavior and retention remain untested.
+
+- **Review follow-up:** Fix the nine findings from the independent browser and CLI pass. Restack onto LIM-2527 and verify the schema 30 to 31 upgrade and a fresh schema 31 database.
+  - [x] Specify the veto boundary, final reply selection, ordered consent, preview escaping, excerpt deletion and stale reader state. All eight spec documents validate.
+  - [x] Cover those cases, reader and sharer rejoin, and a populated schema 30 upgrade with regressions. Packet-specific CLI, server and 390-pixel browser cases passed.
+  - [x] Measure secure deletion and log cleanup bookkeeping. The median ordinary SQLite write was 3.96 microseconds before and 4.82 after across 120,000 transactions per case.
+  - [x] After the restack, `ALIGN_TEST_PORT=5100 npm test` on Node 24.22.3 passed 2,251 checks with zero failures.
+    The short-screen expectations drawer and its dependent checks passed. Both decision send vetoes, the populated
+    schema 30 upgrade, and fresh schema 31 initialization passed. The retained test receipt is stale.

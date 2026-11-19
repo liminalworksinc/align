@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Two proposed choices are off by default. A model can check a completed reply against its goal's limits after
+  sync, with evidence and feedback on the machine. People can also preview and share an exact passage with named
+  workspace readers for a stated purpose and expiry. Schema 31 supports reading and revoking excerpts in Sessions
+  and deleting expired copies. Workspace owners can block both choices.
+
+- A workspace block waits for active sends for that capability before confirming the save. Checks use the completed turn's
+  final reply. Excerpt previews show invisible characters, the most recent sharing choice wins, and revoked or
+  expired shares stay unavailable after audit cleanup. Sessions removes an unavailable excerpt when a reader
+  tries to open it, and deletion clears excerpt text from live storage as described in the retention schedule.
 - Align can suggest a goal after a session's first turn using local rules and prior bindings. Sharing still
   requires confirmation. A dismissed or changed suggestion requires a new share preview. The weekly offer
   follows current import eligibility and local feedback. The CLI names each suggested goal, its source and your reply.

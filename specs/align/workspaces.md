@@ -1908,10 +1908,10 @@ per-path limits apply only when hosted, since Mode L turns off its IP tracking, 
 ### Requirement: Workspace sharing restrictions and private findings
 
 A workspace owner SHALL be able to forbid work signals and proposed tiers 2 through 4 independently. A ban SHALL
-apply to new writes for that tier. A tier 3 ban SHALL prevent the local worker from making either proposed model
-request for this workspace. Removing the ban grants no machine consent. Hosted workspaces forbid central logs
-independently of any setting. A device
-SHALL be able to read the restriction for a workspace it reaches and set only its own proposed derived-result consent.
+apply to new writes for that tier. Owners SHALL be able to block tier 3 goal suggestions and model limit
+checks independently. Removing a ban grants no machine consent. Hosted workspaces forbid central logs
+independently of any setting. A device SHALL be able to read the restrictions for a workspace it reaches
+and set only its own derived-result and deliberate excerpt consent.
 A session's work-signal consent SHALL be recorded only on a request authenticated as its sharing device. Named
 activity without that session consent or under a workspace ban SHALL be refused while metadata-only activity
 continues. Devices already paired at the upgrade from schema 26 MAY keep using the prior activity request to express
@@ -1966,7 +1966,11 @@ Use HTTPS, with HTTP on loopback allowed in Mode L. Reject credentials, query st
 Align SHALL store only the address and a revision for this setting. Clearing the setting or purging the workspace
 SHALL remove the record. A change SHALL be audited without the address.
 The workspace policy read SHALL return the current address and revision to a caller entitled to read the workspace.
-For dispatch, require a current device grant with permission to share sessions in the workspace. An address
+For dispatch, require a current device grant with permission to share sessions in the workspace. Dispatch
+checks SHALL grant short send windows atomically with the current policy read. Goal suggestions and limit
+checks SHALL each have their own block and windows. The block takes effect immediately for new grants and its
+save SHALL wait out the affected windows. An address change SHALL wait out both kinds of existing windows.
+An address
 write SHALL recheck workspace ownership in the same transaction as the write.
 A member or viewer gets 403 on writes. A caller outside the workspace gets 404.
 
@@ -1974,6 +1978,52 @@ A member or viewer gets 403 on writes. A caller outside the workspace gets 404.
 
 - **WHEN** the owner replaces or clears the address
 - **THEN** a device's next policy read cannot authorize dispatch under consent to the old address revision. The person can explicitly choose a newly configured address on their machine.
+
+### Requirement: Deliberate excerpts with named readers
+
+Under the proposed rule in [ADR 0008](../../docs/decisions/0008-limit-checks-and-excerpts.md), only a current,
+opted-in sharing device whose person owns a live shared session SHALL be able to upload an excerpt from it.
+The workspace tier 4 prohibition applies at upload time. An excerpt SHALL have exact plain text of 1 to 4,000
+UTF-8 bytes, a stated purpose of at most 160 characters, one to five distinct current workspace readers other
+than the sharer, and an explicit lifetime of 1 to 168 whole hours from acceptance. The server SHALL accept only
+those fields and a client-generated share id used for idempotent retries. An accepted id SHALL never create a new
+share, even after the excerpt and its audit have been deleted. The replay record SHALL carry only the opaque
+share id and its workspace id, and last until the workspace is permanently purged. Invalid readers and an unreadable
+session or workspace SHALL get 404. No destination based on role, team or link alone is allowed.
+
+Browser reads SHALL require current membership and return excerpts only to their sharer and their named readers.
+A workspace owner gains no access by role. Only the sharer may revoke, even after stopping session sharing or
+turning off the feature. Expired and revoked excerpts SHALL be unavailable on subsequent reads. Revocation
+SHALL delete the text and audience immediately. Expiration SHALL delete the text and audience at the next
+retention pass or excerpt access, whichever comes first. Deleting a session or removing its sharer SHALL delete
+its excerpts. Removing a reader SHALL remove that grant, including across a later rejoin. Retention SHALL include
+excerpts and keep content-free audit rows for sharing, revocation and expiry according to audit retention.
+Deleting excerpt text SHALL overwrite freed SQLite content and trigger a truncating checkpoint on the live
+database log, with retries when readers or writers prevent truncation. The published schedule SHALL distinguish
+immediate loss of access from storage cleanup and disclose the limits of the checkpoint and snapshot retention.
+Schema migration 31 SHALL preserve existing sharing choices and findings and start with excerpt consent off and no
+excerpts.
+
+#### Scenario: Access is limited to the named people
+
+- **WHEN** a sharer names a member and a viewer, and an unnamed workspace owner opens Sessions
+- **THEN** the sharer, member and viewer can each read the excerpt, and the owner has no entry and gets 404 by id
+
+#### Scenario: Excerpt deletion
+
+- **WHEN** the sharer revokes one excerpt and the server's clock reaches the expiry of another
+- **THEN** both become unreadable and the live database deletes the text and reader grants through revocation
+  or expiry cleanup, leaving content-free audit rows
+
+#### Scenario: Replay after audit retention
+
+- **WHEN** a revoked or expired excerpt's audit has been pruned and its original upload is repeated
+- **THEN** the server refuses the old share id and no former reader regains access
+
+#### Scenario: Access after leaving and rejoining
+
+- **WHEN** a named reader or the sharer leaves and rejoins the workspace
+- **THEN** the old reader grant or the sharer's deleted excerpt does not return
 
 ## Sources
 

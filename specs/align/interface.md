@@ -371,6 +371,11 @@ The security overview SHALL identify the additional data tiers as proposed, say 
 and say that derived findings stay on the machine when using hosted Align.
 The subprocessor list SHALL name only actual recipients in service.
 
+The Trust introduction SHALL describe the session content kept local by default and the separate choices to send
+the final reply and applicable limits to a configured decision service or to share a selected excerpt through
+Align. This disclosure applies in local mode as well. The public excerpt retention entry SHALL explain deletion
+and expiry using reader-facing terms.
+
 #### Scenario: Reading the trust page
 
 - **WHEN** anyone opens `/trust`
@@ -1967,6 +1972,21 @@ pills with their own colors: "accepted by the developer" green, "declined" red a
   that person out would tell the requester, who can see the dependency and the people, exactly who can't see it, which
   "Nobody approves or launches a dependency they can't see" forbids; an unnamed "someone who can see every goal it
   depends on" says the same thing whenever the set is small. No safe wording is chosen yet, so the full set stays.
+
+### Requirement: Deliberate excerpts on Sessions
+
+Sessions SHALL offer a link to shared excerpts and show active excerpts shared by or with the signed-in person.
+Each item SHALL show who shared it, its purpose, and when it expires. Opening the item shows the exact text as
+plain text. Only the sharer sees the revoke action. The workspace sharing controls allow an owner to forbid new
+excerpts and model checks without allowing either on any device. If opening or removing an excerpt from a stale
+list returns 404, Sessions SHALL remove the listing and any open text for that item, refresh the list and explain
+that access ended.
+
+#### Scenario: Read and revoke on a phone
+
+- **WHEN** a named reader opens an excerpt with long text at 390 pixels and the sharer revokes their copy
+- **THEN** the text wraps within the page, the reader has no revoke action, and new reads after revocation cannot
+  return the excerpt. If the reader tries to open it from a stale list, the page removes the item and says access ended
 
 ## Sources
 
