@@ -20,7 +20,9 @@
 
 - Teams can set monthly budgets in list-price estimates, record requests for more and keep each decision.
   Terminal requests always wait for a person. Spend includes budget controls and a monthly CSV export with
-  the same goal-bound team visibility as the on-screen report. Budgets, burn, forecasts, history and spend in no goal are visible only to team members and workspace owners. Home includes budget requests in its Needs list. Existing local hooks deliver
+  exactly the on-screen team report's rows and amounts for the same reader and month, keeping all no-goal usage
+  unallocated. Team budgets, burn, forecasts, history and home-team no-goal subtotals are visible only to team
+  members and workspace owners. Home includes budget requests in its Needs list. Existing local hooks deliver
   informational budget notes from cached known spend, including priced lower bounds, without stopping work.
 
 - Server tests finish each readiness response before stopping a phase, preventing a previous server from satisfying

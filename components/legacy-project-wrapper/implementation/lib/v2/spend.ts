@@ -133,7 +133,7 @@ export function spend(pp: PolicyPrincipal, by: SpendBy, from: string | null, to:
   };
 }
 
-/** Captured no-goal attribution, shared by burn and CSV. Aggregate numbers only, no person or session. */
+/** Captured no-goal attribution for authorized budget reads. Aggregate numbers only, no person or session. */
 export function noGoalTeamTotals(ws: string, from: string | null, to: string | null, team: string | null = null) {
   type TeamAgg = Pick<Agg, Num | "basis"> & { team_id: string };
   const live = all<TeamAgg>(
@@ -158,25 +158,9 @@ export function noGoalTeamTotals(ws: string, from: string | null, to: string | n
   return [...totals].map(([team_id, sums]) => ({ team_id, ...sums }));
 }
 
-/** The on-screen report is unchanged. This read adds privacy-filtered home-team rows for the CSV only. */
+/** Export exactly the on-screen team report, including its unnamed goal and unallocated rows. */
 export function spendTeamExport(pp: PolicyPrincipal, from: string, to: string | null) {
-  const report = spend(pp, "team", from, to);
-  const teams = new Map(all<{ id: string; name: string }>("SELECT id, name FROM v2_pods WHERE ws_id = ?", pp.wsId).map((t) => [t.id, t.name]));
-  const unallocated = structuredClone(report.unallocated);
-  const noGoal: ({ label: string } & Sums)[] = [];
-  for (const r of noGoalTeamTotals(pp.wsId, from, to)) {
-    const { team_id: teamId, ...sums } = r;
-    const name = teams.get(teamId);
-    if (name !== undefined && (pp.wsRole === "owner" || pp.pods.has(teamId))) {
-      for (const k of NUMS) {
-        unallocated[k] -= r[k];
-        for (const b of BASES) unallocated.by_basis[b][k] -= r.by_basis[b][k];
-      }
-      noGoal.push({ label: `${name}: spend in no goal`, ...sums });
-    }
-  }
-  noGoal.sort((a, b) => a.label.localeCompare(b.label));
-  return { ...report, unallocated, no_goal: noGoal };
+  return spend(pp, "team", from, to);
 }
 
 /** One goal's usage in [from, to): the total and one row per model, summed exactly as spend() sums a goal's row (every

@@ -93,20 +93,38 @@ function Form({ ws, me, goals, openBy, start, onClose }: { ws: string; me?: stri
   // Said before the form, not after it is filled (founder ruling, PR 68 pass 1 item 1).
   const openCr = g ? (openBy?.get(g.id) ?? null) : null;
 
+  // Owning every active goal, a person changes one by saving a new version: name each, linked to its editor, rather
+  // than leave them to find it (LIM-2513 journey pass: the drawer was a dead end).
+  const owned = goals.filter((x) => x.status === "active");
+  if (!mine.length && owned.length)
+    return (
+      <div className="flex flex-col gap-3 text-[15px] text-(--text-2)" data-propose="none">
+        <p>You own every active goal you can see here, so you change one directly: save a new version on its page.</p>
+        <ul className="flex flex-col divide-y divide-(--line) rounded-(--radius-m) border border-(--line)">
+          {owned.map((x) => (
+            <li key={x.id}>
+              <Link
+                href={`/app/w/${ws}/goals/${x.id}#new-version`}
+                onClick={onClose}
+                className="flex min-h-[44px] items-center justify-between gap-3 px-3 py-2 text-(--text-1) hover:bg-(--bg-raised)"
+                data-propose-edit={x.id}
+              >
+                <span className="min-w-0">{x.title}</span>
+                <span className="shrink-0 text-[14px] text-(--text-2)">Edit v{x.version}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
   if (!mine.length)
     return (
       <p className="text-[15px] text-(--text-2)" data-propose="none">
-        {goals.some((x) => x.status === "active")
-          ? "You own every active goal you can see here. To change one, save a new version on its page."
-          : (
-            <>
-              {/* Owners and members can set a goal (the Goals page's own rule); viewers never reach this drawer. */}
-              There is no active goal here to propose a change to.{" "}
-              <Link href={`/app/w/${ws}/goals`} className="font-medium text-(--text-1) underline underline-offset-2" onClick={onClose}>
-                {goals.length ? "Set a new goal" : "Set the first goal"}
-              </Link>
-            </>
-          )}
+        {/* Owners and members can set a goal (the Goals page's own rule); viewers never reach this drawer. */}
+        There is no active goal here to propose a change to.{" "}
+        <Link href={`/app/w/${ws}/goals`} className="font-medium text-(--text-1) underline underline-offset-2" onClick={onClose}>
+          {goals.length ? "Set a new goal" : "Set the first goal"}
+        </Link>
       </p>
     );
 

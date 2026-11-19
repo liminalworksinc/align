@@ -119,13 +119,24 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
 - **Owner:** specs/align/workspaces.md and the retained spend implementation
 - **Direction:** Download one UTC calendar month as a team CSV for charging estimated cost back to teams.
-- **Conclusion:** Preserve exact workspace totals, split no-goal usage by its recorded home team and keep an
-  unallocated remainder. Name exactly the on-screen report's goal-bound team rows. Name home-team spend in no goal only for team members and workspace owners; keep other teams' home-team amounts unallocated. Keep estimates distinct from a bill and neutralize spreadsheet formulas.
+- **Conclusion:** Preserve exactly the on-screen team report's rows and numeric totals for the same reader and
+  UTC month. Keep all no-goal usage in its existing unallocated row. Named home-team no-goal subtotals belong
+  only in authorized budget reads. Keep estimates distinct from a bill and neutralize spreadsheet formulas.
+- **Parity review:** The goal-bound team rows already share the table's visibility check. Removed the CSV's
+  additional home-team no-goal subtotals and empty no-team row. The new role matrix covers hidden goals,
+  unpriced counts, empty months and retained usage without changing the table or budget access.
+- **Parity evidence:** The new test fails against the original export and passes after the
+  repair (budget tests 50 passed, 0 failed). It checks six readers before and after retention. `npm run lint` and
+  `npx tsc --noEmit -p .` pass; both edited test scripts pass syntax checks, and the diff passes whitespace checks.
+  These commands ran from the application directory without opening ports. The updated HTTP/browser suite was
+  not executed. Parity compares table data with the same UTC window; the page currently requests all-time data
+  and rounds currency for display, while the CSV retains six decimal places. Shared aggregates still permit
+  deductions when only one hidden contributor remains. The workflow guidance command remains unavailable.
 - **Completion prerequisites:** none
 - **Outcome:** The export route and the Spend download control ship with SPEND-003 with coverage in the export domain, HTTP and browser suites.
 - **Implementation and evidence:**
   - [x] Specify the route, CSV fields, privacy and phone controls before implementation.
-  - [x] Implement the export route, shared month validation, exact numeric totals, goal-bound report parity and private home-team attribution, plus the Spend export form.
+  - [x] Implement the export route, shared month validation, exact table row and amount parity with all no-goal usage unallocated, plus the Spend export form.
   - [x] HTTP authorization, the browser download and the 390 pixel controls are covered in test-v2. The budget domain suite covers CSV totals and privacy across retention.
 
 ### [x] TX-001: Recover from transaction and preview setup failures
