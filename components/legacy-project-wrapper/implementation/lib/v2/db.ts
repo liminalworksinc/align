@@ -1374,6 +1374,37 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX v2_reading_credentials_ws ON v2_reading_credentials(ws_id, created_at);
   `,
+  // Migration 28: goal-list reviews, legacy workspace type and monthly aggregate releases.
+  `
+  ALTER TABLE v2_workspaces ADD COLUMN is_sample INTEGER CHECK (is_sample IN (0,1));
+  UPDATE v2_workspaces SET is_sample = (
+    SELECT CASE json_extract(props, '$.kind') WHEN 'sample' THEN 1 WHEN 'blank' THEN 0 END
+    FROM v2_events WHERE name = 'workspace_created' AND ws_id = v2_workspaces.id
+  );
+  CREATE TABLE v2_goal_review_releases (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    period_end TEXT NOT NULL,
+    usage_hash TEXT,
+    PRIMARY KEY (ws_id, period_end)
+  );
+  CREATE TABLE v2_goal_list_reviews (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    period_end TEXT NOT NULL,
+    reviewed_at TEXT,
+    deferred_until TEXT,
+    PRIMARY KEY (ws_id, user_id),
+    CHECK ((reviewed_at IS NULL) <> (deferred_until IS NULL))
+  );
+  CREATE TABLE v2_goal_list_snoozes (
+    ws_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    until_at TEXT NOT NULL,
+    PRIMARY KEY (ws_id, user_id, goal_id),
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id) ON DELETE CASCADE
+  );
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

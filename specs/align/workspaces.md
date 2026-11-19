@@ -1423,6 +1423,19 @@ is off` and `server_time`.
 - **WHEN** a member calls `GET .../sessions`
 - **THEN** `mine` lists their own sessions in full (state, `ended_reason`, current epoch with its origin and goal, governing goal, stop status, conflicts and token totals, and `device`: the machine that shared it as `{id, name, signed_out, has_workspace}`, whether it signed out of Align and whether it has this workspace now, or null when no device is left, so the Sessions tab can say how to share an ended session again). If there is no current epoch, `last_epoch` is `{origin}` from the most recent epoch if there is one, and is null otherwise. `all` is null except for workspace owners, for whom it lists every non-stopped session's key, alias, owner, harness, `started_at`, state, `origin` of the current or most recent closed epoch and `origin_scope` ("current", "last", or null when no epoch exists), and stop status, never the binding's goal or directive, the session's title or usage (`scripts/test-v2.mjs` "W3: the owner's list of everyone's sessions carries each session's started_at ...")
 
+### Requirement: Session owners can read earlier bindings
+
+The signed-in session owner SHALL receive `earlier_bindings` on their own session list items, newest first
+with later-recorded epochs first on ties. Each closed binding SHALL show only its readable goal label (or the
+same redaction as a current binding's goal label), recorded origin, start and end. A binding made without a goal SHALL
+remain distinct from an unreadable goal. `all` SHALL keep its existing visibility and fields. Deleting or
+rolling up a session's history also removes these bindings.
+
+#### Scenario: Someone else owns the workspace
+
+- **WHEN** a workspace owner reads the Sessions list and a different person owns a session with closed bindings
+- **THEN** only the person who owns the session sees its closed bindings, and no earlier goal identifier or label from that session is returned to the workspace owner
+
 ### Requirement: Binding epochs
 
 The server SHALL let the sharing device open a binding epoch on `POST .../sessions/{key}/epochs {epoch_id, goal_id,

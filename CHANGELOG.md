@@ -11,6 +11,12 @@
   Shared sessions show the measure's name from launch even after it has been replaced.
 - Reported changes show readings and estimated spend from launch through the first report. Briefs also
   list unanswered expectations that are due, with a note in shared sessions on the affected goal.
+- Workspace owners can review the goal list from Goals or Home, defer the review, and snooze questions about
+  inactivity. The review asks about shared usage, measure readings and launch outcomes. Session owners can
+  expand earlier goal bindings on Sessions. Server migration 28 records review decisions.
+- The goal-list review requires records that establish five people before showing unbound usage. It shows
+  unknown for the rest of the period if the reviewed usage changes after a figure is shown. Links bring goal
+  controls into view, and proposal forms explain when new measures become available.
 - Sessions and in-session status show how a session came to count toward its goal. Spend can show each goal's
   request counts and list-price estimates by sharing source, with older rolled-up usage identified separately.
 - Retrying a binding with changed details returns a conflict and leaves the original binding in place.

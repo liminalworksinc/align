@@ -174,3 +174,16 @@ export function readableDueExpectations(pp: PolicyPrincipal) {
     return goal && canReadGoal(pp, goalObj(goal)) ? [{ ...row, goal_title: goal.title }] : [];
   });
 }
+
+/** Review the outcome without returning the assignee, reporter or their notes. */
+export function expectationsForGoalReview(ws: string, today: string) {
+  return all<{ goal_id: string; change_request_id: string; measure_text: string; due_on: string; outcome: "not_met" | null }>(
+    `SELECT e.goal_id, e.change_request_id, e.measure_text, e.due_on, o.outcome
+     FROM v2_expectations e
+     LEFT JOIN v2_outcome_reports o ON o.ws_id = e.ws_id AND o.change_request_id = e.change_request_id
+       AND o.answer = (SELECT MAX(answer) FROM v2_outcome_reports WHERE change_request_id = e.change_request_id)
+     WHERE e.ws_id = ? AND (o.outcome = 'not_met' OR (o.outcome IS NULL AND e.due_on <= ?))
+     ORDER BY e.due_on, e.change_request_id`,
+    ws, today,
+  );
+}
