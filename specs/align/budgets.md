@@ -45,7 +45,7 @@ allowance_remaining_usd_micros, no_goal, history, can}`. `budget` is null or
 `history` entries have `{id, action, amount_usd_micros, allowance_usd_micros,
 allowance_ceiling_usd_micros, actor, at}`. `can` is `{manage, request}`.
 `no_goal` has `{priced_spend_usd_micros, estimated_spend_usd_micros, spend_bound,
-unpriced_requests, known_unpriced_requests, share_percent, attribution_unknown}`.
+unpriced_requests, known_unpriced_requests, share_percent, attribution_unknown, few_contributors}`.
 A `team` is `{id, name}` and a person is `{id, name}`. Bounds are `exact`, `lower`, `upper`, `unknown`,
 or null for absent amounts. Monetary fields use integer USD microdollars; instants use ISO UTC on the wire.
 
@@ -123,6 +123,13 @@ With unpriced work and complete attribution, spend and forecast SHALL be lower b
 Forecast SHALL be priced spend divided by elapsed time since month start, multiplied by the month's duration. Past months SHALL use the whole month, future months no elapsed time, and no elapsed time SHALL give no forecast. Remaining SHALL be effective budget less spend, including negative amounts. A projected crossing SHALL lie in that month and account for future grant expiries, or be absent without a budget, positive spend rate or projected crossing. A past projected date SHALL remain labelled a projection.
 
 Align SHALL offer no per-person spend view. Team totals can reveal one person's spend when the team has fewer than three members. Teams of one or two SHALL still be able to have a budget. The team budget panel SHALL show that risk in one plain sentence when the team has fewer than three members. Budget reads SHALL expose no session list or unreadable goal reference or name. History may name who changed a budget, never their spend. Only team members and workspace owners SHALL read home-team spend in no goal through budget reads. Hidden goals SHALL stay unnamed.
+
+Budget reads SHALL return only a yes or no saying whether the no-goal figure may come from fewer than three people: yes when one or two distinct people have recorded no-goal usage attributed to the team's captured home team in the month's read window, and yes when fewer than three are known and retained usage, which keeps no identities, is part of the figure. No count or name SHALL be returned. When it is yes, the panel SHALL show beside the no-goal figure: "Spend in no goal may come from fewer than three people this month, so it can reveal one person's spend." The CSV SHALL carry neither. This sentence SHALL apply regardless of team size, without withholding figures or imposing a minimum size.
+
+#### Scenario: No-goal contributors in a larger team
+
+- **WHEN** the port-free test `scripts/test-budgets.mjs`, "no-goal spend from fewer than three people is flagged without a count", reads a team of at least three members with no-goal usage from zero, one, two and three people, and again after that usage is retained
+- **THEN** the read returns only a yes or no: yes for one or two distinct people with attributed usage in the month's read window, yes when fewer than three are known and retained usage is part of the figure, no otherwise; the panel's disclosure follows it regardless of team size, and no count or name appears in the read or the CSV
 
 #### Scenario: Earlier no-goal usage before and after retention
 
@@ -293,7 +300,7 @@ A shared session SHALL receive one informational note at each of 80 and 100 perc
 
 Each model-context line SHALL start with the Align marker, name the team and threshold, label list-price estimates, state when the figure was read, say work continues, grant no authority and say the person can ask for more in Align. It SHALL contain no command or instruction. The separate person-only message SHALL address the person directly and may name Spend and the terminal request command. A claimed person-only message SHALL be returned even without other context or notices. No note SHALL repeat an unpriced count or imply acknowledgement, approval, a hold or a stop.
 
-The session budget read SHALL answer only the person who owns the session and its sharing device; any other reader SHALL get 404. Hooks SHALL answer only from local snapshots and delivery files, with no network, credential read, network-client import, directory scan, sync wait or lock wait. Snapshots SHALL live outside goal feeds and match the workspace, session and spending period. The existing 150 millisecond p95 whole-hook latency limit SHALL apply both after delivery and with a set budget below 80 percent, when every turn reads its snapshot. Both cases SHALL use the same busy-machine allowance as the existing limit: the measured excess of a bare Node start over 60 milliseconds at p95, and nothing else. Server text in any hook note SHALL have control and invisible Unicode characters removed, including tags, zero-width and bidirectional characters, and Align markers neutralized.
+The session budget read SHALL answer only the person who owns the session and its sharing device; any other reader SHALL get 404. Hooks SHALL answer only from local snapshots and delivery files, with no network, credential read, network-client import, directory scan, sync wait or lock wait. Snapshots SHALL live outside goal feeds and match the workspace, session and spending period. The existing 150 millisecond p95 whole-hook latency limit SHALL apply both after delivery and with a set budget below 80 percent, when every turn reads its snapshot. Both cases SHALL use the same busy-machine allowance as the existing limit: the limit grows by the factor a bare Node start slowed by against 60 milliseconds at p95, a run with a bare start over 160 milliseconds is skipped and never passed, and nothing else changes the limit. Server text in any hook note SHALL have control and invisible Unicode characters removed, including tags, zero-width and bidirectional characters, and Align markers neutralized.
 
 Budget work SHALL run last in each sync pass, after directives, stops, holds, usage, activity and steering. It SHALL refresh at most 100 shared sessions with rotation, reuse positive and empty attribution and team-budget reads for at most five minutes while the team change stamp is unchanged, and start at most 120 reads within a two-second time cap. It SHALL stop at either cap without sign-in refresh or another lock wait, save completed work and its position and continue unfinished work next pass. A running session SHALL be described as able to act on a figure up to five minutes old. A new crossing SHALL require a figure read within five minutes. Server-computed times SHALL use the offset in non-secret local files and the shared one-minute tolerance; device-written times SHALL retain strict device-clock checks. Far-future, mismatched or previous-month observations SHALL be rejected. Brief server/device month disagreement SHALL preserve pending notes and allow the server month's delivery.
 
@@ -403,7 +410,13 @@ SHALL never wait for a lock. A locally opened spending period SHALL receive no m
 Spend SHALL state each currently reached threshold with the figure's computation time for authorized budget readers. A selected past month SHALL be named rather than called this month.
 Home SHALL show the team's first observed crossing of each threshold this UTC month to current team leads and
 workspace owners under Since you last looked's baseline, first-visit, reload, ordering and bounded display rules.
-Concurrent budget reads SHALL record a crossing in a domain transaction with a unique workspace, team, month and threshold key and insert-or-ignore. The record SHALL retain its first observation and computation times across later budget changes, removal and repeated
+Budget burn SHALL be computed read-only without a write transaction. Only a reached current-month threshold with no
+crossing row SHALL open a domain write transaction. Inside it, reads SHALL recheck authorization on a live principal
+and recompute budget, grants and spend from current data before recording with a unique workspace, team, month and
+threshold key and insert-or-ignore. Returned figures and change stamps SHALL reflect that recomputation and recording.
+An absent or zero budget or unknown spend SHALL create no crossing; past months SHALL create none. If the write
+transaction cannot start before the existing busy retry bound, the read SHALL still return its computed figures
+without recording, allowing a later read to record the crossing. The record SHALL retain its first observation and computation times across later budget changes, removal and repeated
 reads, but Home SHALL show no crossing row while the budget is absent, with no goal, person or session references. Crossings SHALL NOT enter Needs or change its count. An absent
 budget SHALL cause no new observation, message, row or burn computation. Existing refreshes SHALL suffice without
 new polling.
@@ -411,7 +424,15 @@ new polling.
 #### Scenario: Concurrent reads record one crossing
 
 - **WHEN** two budget reads observe the same new threshold concurrently (`scripts/test-budgets.mjs`, "concurrent budget reads record one crossing inside a retried transaction")
-- **THEN** one first observation is stored with no decision or audit row and both reads succeed
+- **THEN** current authorization, budget, grants and spend are rechecked inside the write transaction, one first
+  observation is stored with no decision or audit row, and both reads return figures consistent with the recording
+
+#### Scenario: A budget read contends with another writer
+
+- **WHEN** another connection holds the database write lock (`scripts/test-budgets.mjs`, "reads without a new current-month crossing never begin a write transaction under contention" and "a busy crossing write returns figures and a later read records it")
+- **THEN** a read with no new crossing issues no BEGIN IMMEDIATE and succeeds; a read needing a crossing still
+  returns figures if the existing busy retry bound is exhausted, leaves the crossing and change stamp untouched,
+  and a later read records the crossing once the lock is released
 
 #### Scenario: A locally opened period waits for confirmation
 

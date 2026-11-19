@@ -45,6 +45,12 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   history untouched. Required evidence is lint, typecheck, budget domain and agent tests, plus review of the
   listener-dependent tests for the merged code. Fresh listener-dependent execution remains for the operator.
 - **Completion prerequisites:** none
+- **Crossing lock review:** Compute burn without a write lock; only a missing current-month crossing may open a
+  transaction, which rechecks live access and current figures. Busy starts must return the read without recording.
+  Verify with lint, app typecheck and port-free budget tests, including contention, retry and concurrent uniqueness.
+  Node 26.3.0: lint and app typecheck pass; budget domain tests pass 64/0. Before the fix, the two contention
+  regressions fail with database locked (62/2). Fresh budget, grant and spend checks, live access recheck,
+  concurrent uniqueness and change stamps pass. The merged contributor assertions now await their reads.
 - **Outcome:** Changed budgets reach session snapshots on sync. Claude Code can show a user-only tool warning;
   Codex retains next-prompt delivery. Spend states current crossings and Home retains first observations for
   leads and owners outside Needs. Sync saves the clock offset in each snapshot for hooks to read with the shared tolerance; rejected

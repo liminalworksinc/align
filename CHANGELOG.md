@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Budget reads take a write lock only to record a new current-month crossing. If the writer stays busy, figures
+  still return and a later read can record the crossing after rechecking access and current amounts.
+
 - Budget pass tests use a controlled clock so machine load cannot shorten their expected batches; a separate
   regression checks the unchanged time cutoff and continuation with unfinished sessions.
 

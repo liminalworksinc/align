@@ -27,13 +27,18 @@ function bareNodeMs(): number {
   return Number(process.hrtime.bigint() - t0) / 1e6;
 }
 
-/** The limit is 150 ms on a quiet machine. Bare Node runs are interleaved with the hook runs; when their p95 is over
- *  60 ms the machine is slowing every process, and only that measured excess is added to the limit. A slower hook
- *  still fails: the allowance comes from bare Node alone. */
-function assertWithinLimit(tcase: { diagnostic(message: string): void }, hook: number[], bare: number[]): void {
-  const h = p95(hook), b = p95(bare), limit = LIMIT_MS + Math.max(0, b - QUIET_BARE_P95_MS);
+/** Bare Node p95 above which the machine is too busy for the run to say anything about the hook. */
+const TOO_BUSY_BARE_P95_MS = 160;
+
+/** The limit is 150 ms on a quiet machine, where a bare Node start has a p95 of at most 60 ms. Bare Node runs are
+ *  interleaved with the hook runs. On a busy machine every process slows by about the same factor, so the limit grows
+ *  by the factor bare Node slowed by (150 ms times bare p95 over 60 ms). A slower hook still fails: the factor comes
+ *  from bare Node alone. Past a bare p95 of 160 ms the case is skipped with its numbers, never passed. */
+function assertWithinLimit(tcase: { diagnostic(message: string): void; skip(message?: string): void }, hook: number[], bare: number[]): void {
+  const h = p95(hook), b = p95(bare), limit = LIMIT_MS * Math.max(1, b / QUIET_BARE_P95_MS);
   const line = `hook p95 ${h.toFixed(1)} ms, bare Node p95 ${b.toFixed(1)} ms, limit ${limit.toFixed(1)} ms`;
   tcase.diagnostic(line);
+  if (b > TOO_BUSY_BARE_P95_MS) return tcase.skip(`machine too busy to measure hook latency: ${line}`);
   assert.ok(h < limit, line);
 }
 

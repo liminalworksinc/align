@@ -100,10 +100,10 @@ function session(key = "a".repeat(43), who = "member") {
   db.run("INSERT INTO v2_sessions (ws_id, session_key, user_id, device_id, harness, repo_key, started_at, state, created_at, updated_at) VALUES (?, ?, ?, 'dv_spend', 'codex', 'test-repo', ?, 'shared', ?, ?)", W, key, who, at, at, at);
   return key;
 }
-async function usage(key, goalId, amount, requestKey = "r".repeat(43)) {
-  const dev = { deviceId: "dv_spend", user: { id: "member" } };
+async function usage(key, goalId, amount, requestKey = "r".repeat(43), who = "member") {
+  const dev = { deviceId: "dv_spend", user: { id: who } };
   const epoch = `ep_${key.slice(0, 22)}`;
-  await openBindingEpoch(pp("member"), dev, key, { epoch_id: epoch, goal_id: goalId, starts_at: "2030-01-01T00:00:00.000Z", cause: "manual" });
+  await openBindingEpoch(pp(who), dev, key, { epoch_id: epoch, goal_id: goalId, starts_at: "2030-01-01T00:00:00.000Z", cause: "manual" });
   db.run("INSERT INTO v2_usage (ws_id, session_key, request_key, epoch_id, ts, model, query_source, input, output, cache_read, cache_write_5m, cache_write_1h, cache_write_unsplit, basis, est_list_usd_micros, price_table_version, source, received_at) VALUES (?, ?, ?, ?, ?, 'test-model', 'main', 10, 10, 0, 0, 0, 0, 'estimated_list_usd', ?, 'test', 'otel', ?)", W, key, requestKey, epoch, "2030-01-10T00:00:00.000Z", amount, new Date().toISOString());
 }
 
@@ -132,6 +132,46 @@ await test("teams of one or two can keep a budget and report the small-team disc
   await budget(); assert.equal((await burn()).team_member_count, 1); assert.equal((await burn()).budget.amount_usd_micros, 100_000_000);
   db.run("INSERT INTO v2_pod_members VALUES (?, ?, 'member', 'member', ?)", W, T, new Date().toISOString());
   assert.equal((await burn()).team_member_count, 2); assert.equal((await burn()).budget.amount_usd_micros, 100_000_000);
+});
+await test("no-goal spend from fewer than three people is flagged without a count", async () => {
+  await budget(); goal("g_public");
+  const add = async (who, letter, amount = 1_000_000) => {
+    const key = session(letter.repeat(43), who);
+    await usage(key, null, amount, "r".repeat(43), who);
+    return key;
+  };
+  assert.ok((await burn()).team_member_count >= 3); assert.equal((await burn()).no_goal.few_contributors, false);
+  await usage(session("g".repeat(43)), "g_public", 9_000_000);
+  await add("other", "o");
+  const beforeMonth = await add("lead", "b"), afterRead = await add("lead", "f"), unattributed = await add("lead", "h");
+  db.run("UPDATE v2_usage SET ts = '2029-12-31T23:59:59.999Z' WHERE session_key = ?", beforeMonth);
+  db.run("UPDATE v2_usage SET ts = ? WHERE session_key = ?", new Date(now).toISOString(), afterRead);
+  db.run("UPDATE v2_epochs SET spend_team_id = NULL WHERE session_key = ?", unattributed);
+  assert.equal((await burn()).no_goal.few_contributors, false);
+  const first = await add("member", "a");
+  await usage(first, null, 2_000_000, "s".repeat(43));
+  await add("member", "c");
+  assert.equal((await burn()).no_goal.few_contributors, true);
+  assert.equal((await burn("viewer")).no_goal.few_contributors, true);
+  await add("lead", "d", null);
+  assert.equal((await burn()).no_goal.few_contributors, true);
+  // A later home-team choice cannot change the captured attribution or who counts as a contributor.
+  db.run("INSERT INTO v2_pod_members VALUES (?, ?, 'member', 'member', ?)", W, T2, new Date().toISOString());
+  await chooseSpendHomeTeam(pp("member"), { team_id: T2 });
+  await add("member", "j");
+  db.run("DELETE FROM v2_pod_members WHERE ws_id = ? AND pod_id = ? AND user_id = 'member'", W, T);
+  assert.equal((await burn()).team_member_count, 3); assert.equal((await burn()).no_goal.few_contributors, true);
+  await add("lead2", "e");
+  assert.equal((await burn()).no_goal.few_contributors, false);
+  assert.equal((await burn("owner", "2030-02")).no_goal.few_contributors, false);
+  assert.ok(!("contributor_count" in (await burn()).no_goal));
+  const { spendCsv } = await import("../lib/v2/spend-export.ts");
+  const csv = spendCsv(pp("owner"), spendMonth("2030-01"));
+  assert.ok(!/contributor|person|people|member|lead/.test(csv));
+  assert.equal(csv.split("\r\n")[4], '"month","team","requests","estimated_list_cost_usd","unpriced_requests","input","output","cache_read","cache_write_5m","cache_write_1h","cache_write_unsplit"');
+  // Retained usage keeps no identities: with three known contributors rolled away, the figure may be one person's.
+  await runRetention(db.sql, db.tx, new Date("2032-01-01T00:00:00Z"), { secret: "test-secret" });
+  assert.equal((await burn("owner", "2030-01")).no_goal.few_contributors, true);
 });
 await test("set/change/remove are immutable audited history; no-op removal is idempotent", async () => {
   await budget(); await spend.writeBudget(pp("owner"), T, null, { amount_usd: 120 }); await budget(null); await budget(null);
@@ -724,6 +764,31 @@ await test("creation rate limit survives withdrawal and rejects without audit, i
   await reject(() => ask(), 429, "rate_limited"); assert.equal(snapshot(), before);
   now += 3600_001; assert.equal((await ask()).state, "waiting");
 });
+await test("hourly request counts use covering index ranges without scanning request history", async () => {
+  await budget(); await ask();
+  const queries = [...globalThis.__alignV2Db.stmts.keys()].filter((sql) => sql.startsWith("SELECT COUNT(*) AS n FROM v2_budget_requests WHERE ws_id = ?") && sql.includes("created_at > ?"));
+  assert.equal(queries.length, 2);
+  const since = new Date(now - 3600_000).toISOString();
+  for (const sql of queries) {
+    const requester = sql.includes("requester_id = ?");
+    const plan = db.all(`EXPLAIN QUERY PLAN ${sql}`, ...(requester ? [W, "member", since] : [W, since])).map((r) => r.detail).join("\n");
+    assert.doesNotMatch(plan, /\bSCAN\b/);
+    assert.match(plan, new RegExp(`SEARCH v2_budget_requests USING COVERING INDEX ${requester ? "v2_budget_requests_requester_created" : "v2_budget_requests_created"}\\b`));
+    assert.ok(plan.includes(requester ? "(ws_id=? AND requester_id=? AND created_at>?)" : "(ws_id=? AND created_at>?)"), plan);
+  }
+});
+await test("budget request foreign-key child lookups use covering indexes", async () => {
+  for (const [table, columns, index, params] of [
+    ["v2_budget_request_sessions", ["ws_id", "session_key"], "v2_budget_request_sessions_session", [W, "a".repeat(43)]],
+    ["v2_budget_requests", ["ws_id", "goal_id"], "v2_budget_requests_goal", [W, "g_public"]],
+    ["v2_budget_requests", ["source_device_id"], "v2_budget_requests_source_device", ["dv_spend"]],
+  ]) {
+    assert.deepEqual(db.all(`PRAGMA index_info(${index})`).map((r) => r.name), columns);
+    const plan = db.all(`EXPLAIN QUERY PLAN SELECT rowid FROM ${table} WHERE ${columns.map((c) => `${c} = ?`).join(" AND ")}`, ...params).map((r) => r.detail).join("\n");
+    assert.doesNotMatch(plan, /\bSCAN\b/);
+    assert.match(plan, new RegExp(`SEARCH ${table} USING COVERING INDEX ${index}\\b`));
+  }
+});
 
 await test("one requester's allowance grants consume their hourly limit without blocking another person", async () => {
   await budget({ amount_usd: 100, allowance_usd: 5, allowance_ceiling_usd: 1000 });
@@ -863,6 +928,89 @@ await test("migration 26 preserves filing sources and budget history and adds em
   } finally { old.close(); }
 });
 
+await test("reads without a new current-month crossing never begin a write transaction under contention", async () => {
+  await usage(session(), null, 120_000_000);
+  const { domain, auth: lock } = db.openDb(), exec = domain.exec;
+  let begins = 0;
+  domain.exec = function (sql) { if (sql === "BEGIN IMMEDIATE") begins++; return exec.call(this, sql); };
+  const read = async (month = null) => {
+    begins = 0;
+    lock.exec("BEGIN IMMEDIATE");
+    try {
+      const figures = await burn("owner", month);
+      assert.equal(begins, 0);
+      return figures;
+    } finally { lock.exec("ROLLBACK"); }
+  };
+  try {
+    assert.equal((await read()).budget, null);
+    await budget({ amount_usd: 0 });
+    assert.deepEqual((await read()).reached_thresholds, []);
+    db.run("UPDATE v2_usage SET est_list_usd_micros = NULL");
+    await budget();
+    assert.deepEqual((await read()).reached_thresholds, []);
+    db.run("UPDATE v2_usage SET est_list_usd_micros = 10_000_000");
+    assert.deepEqual((await read()).reached_thresholds, []);
+    db.run("UPDATE v2_usage SET est_list_usd_micros = 120000000, ts = '2029-12-10T00:00:00.000Z'");
+    db.run("INSERT INTO v2_team_budgets SELECT ws_id, pod_id, '2029-12', amount_usd_micros, allowance_usd_micros, allowance_ceiling_usd_micros, updated_by, updated_at FROM v2_team_budgets");
+    assert.deepEqual((await read("2029-12")).reached_thresholds, [80, 100]);
+    assert.deepEqual(db.all("SELECT * FROM v2_budget_crossings"), []);
+    db.run("UPDATE v2_usage SET est_list_usd_micros = 80000000, ts = '2030-01-10T00:00:00.000Z'");
+    await burn();
+    assert.deepEqual((await read()).reached_thresholds, [80]);
+    db.run("UPDATE v2_usage SET est_list_usd_micros = 120000000");
+    await burn();
+    assert.deepEqual((await read()).reached_thresholds, [80, 100]);
+  } finally { domain.exec = exec; }
+});
+
+await test("a busy crossing write returns figures and a later read records it", async () => {
+  await budget(); await usage(session(), null, 80_000_000);
+  const priorStamp = spend.budgetStamp(W, T, "2030-01");
+  const { domain, auth: lock } = db.openDb(), exec = domain.exec;
+  let begins = 0;
+  domain.exec = function (sql) { if (sql === "BEGIN IMMEDIATE") begins++; return exec.call(this, sql); };
+  lock.exec("BEGIN IMMEDIATE");
+  let figures;
+  try {
+    figures = await burn();
+    assert.equal(begins, 101, "exhaust the existing busy start retry bound while the lock remains held");
+    assert.equal(figures.priced_spend_usd_micros, 80_000_000);
+    assert.deepEqual(figures.reached_thresholds, [80]);
+    assert.equal(figures.budget_stamp, priorStamp);
+    assert.equal(spend.budgetStamp(W, T, "2030-01"), priorStamp);
+    assert.deepEqual(db.all("SELECT * FROM v2_budget_crossings"), []);
+  } finally { lock.exec("ROLLBACK"); domain.exec = exec; }
+  now += 1000;
+  const next = await burn();
+  const rows = db.all("SELECT * FROM v2_budget_crossings");
+  assert.equal(rows.length, 1); assert.equal(rows[0].threshold, 80);
+  assert.equal(rows[0].as_of, next.as_of); assert.equal(rows[0].observed_at, new Date(now).toISOString());
+  assert.notEqual(next.budget_stamp, priorStamp);
+  assert.equal(next.budget_stamp, spend.budgetStamp(W, T, "2030-01"));
+});
+
+for (const change of ["budget", "grant", "spend"]) await test(`crossing retries recompute ${change} before recording`, async () => {
+  await budget(); const request = await ask(); await usage(session(), null, 80_000_000);
+  const lock = db.openDb().auth;
+  lock.exec("BEGIN IMMEDIATE");
+  try {
+    if (change === "budget") lock.exec("UPDATE v2_team_budgets SET amount_usd_micros = 200000000");
+    else if (change === "grant") lock.prepare("UPDATE v2_budget_requests SET state = 'granted', approved_usd_micros = 100000000, authority = 'approver', expires_at = ? WHERE id = ?").run(end, request.id);
+    else lock.exec("UPDATE v2_usage SET est_list_usd_micros = 120000000");
+    const pending = burn();
+    setImmediate(() => lock.exec("COMMIT"));
+    const figures = await pending;
+    assert.equal(figures.effective_budget_usd_micros, change === "spend" ? 100_000_000 : 200_000_000);
+    assert.equal(figures.priced_spend_usd_micros, change === "spend" ? 120_000_000 : 80_000_000);
+    assert.deepEqual(figures.reached_thresholds, change === "spend" ? [80, 100] : []);
+    const rows = db.all("SELECT * FROM v2_budget_crossings ORDER BY threshold");
+    assert.deepEqual(rows.map((r) => r.threshold), figures.reached_thresholds);
+    for (const row of rows) assert.equal(row.as_of, figures.as_of);
+    assert.equal(figures.budget_stamp, spend.budgetStamp(W, T, "2030-01"));
+  } finally { if (lock.isTransaction) lock.exec("ROLLBACK"); }
+});
+
 await test("concurrent budget reads record one crossing inside a retried transaction", async () => {
   await budget(); await usage(session(), null, 80_000_000);
   const before = db.all("SELECT * FROM v2_audit");
@@ -885,6 +1033,7 @@ await test("concurrent budget reads record one crossing inside a retried transac
   assert.equal(spend.budgetStamp(W, T, "2030-01"), nextStamp);
   assert.deepEqual(db.all("SELECT * FROM v2_audit"), before);
   const stale = pp("member");
+  db.run("UPDATE v2_usage SET est_list_usd_micros = 100000000");
   lock.exec("BEGIN IMMEDIATE");
   const refused = spend.budgetBurn(stale, T);
   setImmediate(() => {
