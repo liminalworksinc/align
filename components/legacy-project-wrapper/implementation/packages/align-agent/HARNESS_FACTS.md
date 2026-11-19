@@ -89,7 +89,14 @@ https://code.claude.com/docs/en/hooks#json-output and https://code.claude.com/do
 This applies to synchronous hooks only. An async hook's output can become context and is not used here.
 Align skips subagents and uses the existing non-waiting delivery lock. Persistent message markers are independent
 of next-prompt context markers; prompt-first delivery consumes the message opportunity too. Output-field routing
-and dedupe are covered by listener-free tests. Actual harness display in a live Claude Code run is not verified here.
+and dedupe are covered by listener-free tests.
+
+Checked on 2026-11-19 in a real Claude Code 2.1.328 run (`claude -p`, stream output): a PreToolUse command hook
+on `Read` that prints only `{"systemMessage": "..."}` produced a `system` event with subtype `informational`,
+level `notice` and content `PreToolUse:Read says: <the message>`. Asked afterwards to quote any such text in its
+context, the model reported none. So the field reaches the person and not the model. That run used a stand-in hook
+that prints the same field. The Align hook itself has not been watched end to end in an interactive terminal
+against a server with a crossed budget.
 
 Codex user-visible tool-call messages that stay outside model context are **not verified**. Budget information on
 Codex remains at the next prompt. No budget field is added to its tool-call output.

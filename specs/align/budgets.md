@@ -122,7 +122,7 @@ With unpriced work and complete attribution, spend and forecast SHALL be lower b
 
 Forecast SHALL be priced spend divided by elapsed time since month start, multiplied by the month's duration. Past months SHALL use the whole month, future months no elapsed time, and no elapsed time SHALL give no forecast. Remaining SHALL be effective budget less spend, including negative amounts. A projected crossing SHALL lie in that month and account for future grant expiries, or be absent without a budget, positive spend rate or projected crossing. A past projected date SHALL remain labelled a projection.
 
-Align SHALL offer no per-person spend view. Team totals can reveal one person's spend when the team has fewer than three members. Teams of one or two SHALL still be able to have a budget. The team budget panel SHALL show that risk in one plain sentence when the team has fewer than three members. Budget reads SHALL expose no session list or unreadable goal reference or name. History may name who changed a budget, never their spend. The monthly CSV SHALL name the same goal-bound team rows and amounts as the on-screen report. Only team members and workspace owners SHALL read home-team spend in no goal; other teams' amounts SHALL remain unallocated. Hidden goals SHALL stay unnamed.
+Align SHALL offer no per-person spend view. Team totals can reveal one person's spend when the team has fewer than three members. Teams of one or two SHALL still be able to have a budget. The team budget panel SHALL show that risk in one plain sentence when the team has fewer than three members. Budget reads SHALL expose no session list or unreadable goal reference or name. History may name who changed a budget, never their spend. Only team members and workspace owners SHALL read home-team spend in no goal through budget reads. Hidden goals SHALL stay unnamed.
 
 #### Scenario: Earlier no-goal usage before and after retention
 
@@ -163,6 +163,15 @@ Align SHALL offer no per-person spend view. Team totals can reveal one person's 
 
 - **WHEN** an ordinary member of another team reads this team's budget, even with a readable goal in this team
 - **THEN** the read is 404 and returns no team burn, no-goal subtotal or budget history
+
+### Requirement: Monthly CSV and spend table visibility parity
+
+For the same reader and UTC month, the monthly team CSV SHALL contain exactly the on-screen team spend report's data rows, named teams and numeric amounts, including request, token and unpriced counts. This SHALL apply to workspace owners, team leads, team members, members of other teams, members of no team and viewers. A readable goal SHALL contribute only to its team's named row, or `Goals without a team` if it has no team. All unreadable goals, including private goals and other teams' restricted goals, SHALL contribute to one unnamed `Private goals` row without team, goal, session or person references. All spend in no goal SHALL remain together in `Not bound to a goal`, without home-team subtotals even for owners or team members. `Total` SHALL equal the other data rows for every numeric column. Empty goal categories SHALL create no row. Retention SHALL preserve this parity. The separate team budget, burn, history and home-team no-goal reads SHALL remain restricted to that team's members and workspace owners; other readers SHALL receive 404.
+
+#### Scenario: CSV matches the table for every reader role
+
+- **WHEN** the port-free test `scripts/test-budgets.mjs`, "monthly CSV matches every table row for each reader role before and after retention", reads a month containing workspace-visible, team-restricted, private, teamless and no-goal usage, including unpriced requests
+- **THEN** each reader receives exactly the table's named teams and amounts, all hidden goal rows fold into its one unnamed row, all no-goal usage stays unallocated, and neither empty months nor retention add disclosures
 
 ### Requirement: Asking for more
 
