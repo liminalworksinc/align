@@ -46,6 +46,7 @@ import { applyShare, bind, deleteHistory, deleteRefused, ENDED_UNREAD, endedUnre
 import { askLineForPeople, askOrder, myTeams, readAsks } from "./shared/asks.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson } from "./shared/fsx.ts";
+import { contextAddedLine, readContextCost } from "./shared/context-cost.ts";
 import { matchRule, readRules, realDir, removeRule, setRule } from "./shared/rules.ts";
 import { layout } from "./shared/layout.ts";
 import type { Ask, Goal, MeFile } from "./shared/types.ts";
@@ -802,6 +803,15 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
   }
   const pending = (ctx.db.prepare("SELECT COUNT(*) AS n FROM goal_requests WHERE state='pending'").get() as { n: number }).n;
   if (pending) out(`  Requests:   ${pending} waiting for your answer; see \`align requests\``);
+  const folder = realDir(process.cwd());
+  const folders = new Map<string, string>([[process.cwd(), folder], [folder, folder]]);
+  const resolved = (cwd: string) => {
+    if (!folders.has(cwd)) folders.set(cwd, realDir(cwd));
+    return folders.get(cwd)!;
+  };
+  const here = (ctx.db.prepare("SELECT local_id, cwd FROM sessions ORDER BY COALESCE(last_active, created_at) DESC").all() as { local_id: string; cwd: string | null }[])
+    .find((s) => s.cwd && resolved(s.cwd) === folder);
+  if (here) out(contextAddedLine(readContextCost(ctx.home, here.local_id).context_added));
 }
 
 async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
@@ -856,7 +866,8 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
             : "; no access to the workspace"
           : "") +
       (refused ? `; history deletion refused (${refused})` : deleting ? "; history deletion queued" : "");
-    return { ...s, repo: repoLabel(ctx, s, share?.workspace_id ?? null), usage: agg, shared: share ? `${share.state} (${share.workspace_name}${why})` : "private" };
+    return { ...s, repo: repoLabel(ctx, s, share?.workspace_id ?? null), usage: agg, shared: share ? `${share.state} (${share.workspace_name}${why})` : "private",
+      ...readContextCost(ctx.home, s.local_id) };
   });
   if (values.json) return out(JSON.stringify(rows, null, 2));
   if (!rows.length) return out("No sessions seen in the last 7 days. Use --all for older ones.");
@@ -868,6 +879,7 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
     out(
       `${pad(r.local_id.slice(0, 8), 10)} ${pad(r.harness, 11)} ${pad(r.repo, 18)} ${pad(shortTime(r.started_at), 16)} ${pad(shortTime(r.last_active), 16)} ${pad(`${fmtTokens(t.i)}/${fmtTokens(t.o)}/${fmtTokens(t.r)}/${fmtTokens(t.w)}`, 28)} ${pad(basis, 22)} ${pad(est, 20)} ${r.shared}`,
     );
+    out(`  ${contextAddedLine(r.context_added)}`);
   }
   out("Estimates use list prices; for subscription_included sessions they are not money spent.");
 }

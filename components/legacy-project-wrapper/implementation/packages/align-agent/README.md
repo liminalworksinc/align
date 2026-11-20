@@ -104,6 +104,48 @@ reach the model.
 So a goal change, request, stop or hold issued from the web lands within one sync interval, at the next prompt or tool
 call.
 
+## Context added by Align
+
+`align status` shows how many characters Align has added to the most recently active session in the current folder,
+how many additions there were, and when the last one happened. `align sessions` shows the same line for each session:
+
+```
+Align has added 742 characters to this session's context in 1 addition, last at session start (2026-11-17T10:00:00.000Z).
+```
+
+A session with no additions says `Align has added no characters to this session's context.` These are character
+counts, with the same string-length measure used for context budgets. They are not token or cost estimates.
+Each nonempty hook return counts once per audience, including newlines within the returned strings. The total
+includes start blocks, goal and ask changes, requests and answers, steering, activity notes, tool denial reasons
+and notices that tools can
+run again. Budget context lines count toward model context, and person-only budget messages at session start,
+prompts and tool calls count toward the separate person-only total. Clear, compact and resume blocks count when
+returned again. Ordinary unchanged prompts add nothing and leave the recorded totals, addition counts and
+last-addition times unchanged. Hooks preserve every existing shared-state read and write, including silent prompts
+and choices that keep the same goal.
+
+Counters live in `~/.align/context-cost/<lid>.jsonl`, separate from shared hook state. Each nonempty audience
+addition appends one short line with its audience, character count, time and hook event. A return with both
+audiences writes both lines in one append call. Counter writes refuse symlinks and special files. A silent hook
+touches no counter file. Accounting reads no file,
+takes no lock and adds no network request or directory scan to a hook. The file is append-only until expiry or
+uninstall. It is never rewritten or rotated because replacement could lose a concurrent append.
+
+`align status` and `align sessions` sum complete valid lines, ignoring malformed lines and an incomplete final
+line. Commands read at most the last 1 MiB of each log. Larger logs show `at least` for characters and additions,
+and both JSON totals include `lower_bound: true`. Person-only notices and local command replies have their own total, excluded from model context. `align sessions --json`
+includes `context_added` and `notices_added`, each with `characters`, `additions`, `last_at` and `last_event`.
+A missing file starts at zero; Align cannot reconstruct earlier additions. Counters from earlier unshipped builds
+in shared hook state are not migrated. A hook with no session reference cannot update a session total.
+On an unsupported runtime, hooks leave all storage untouched, including counters and shared hook state.
+
+Unsharing and sign-out retain counters. During sync, a log expires after 30 days without an addition, using its
+modification time. Each pass lists and sorts names once, resumes after the saved last examined name, examines
+at most 500 paths with `lstat` and removes at most 100 files. Listing names is outside the 10 millisecond
+examination budget. The saved position wraps after the last name; remaining expired files wait for later passes. Hooks and ordinary command reads never run
+cleanup. Expired additions cannot be reconstructed; a later addition starts a new total. Ongoing additions keep
+a log alive, without a size cap. Uninstall removes counters, including without `--purge`.
+
 ## Requests and goal holds
 
 - **Requests.** Someone who can approve a goal (or a workspace owner) can send its sessions a `replan`, `checkpoint`

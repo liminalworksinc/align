@@ -1,6 +1,7 @@
 // Spool ingest, outbox flush, epoch assignment, usage upload and the one-pass sync that hooks start in the background.
 // Only shared sessions ever reach the server.
 import fs from "node:fs";
+import { pruneContextCost } from "./context-cost-retention.ts";
 import path from "node:path";
 import type { Ctx } from "./context.ts";
 import {
@@ -879,6 +880,7 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
   try {
     // A device this machine signed out of while the server was unreachable is revoked before anything else.
     res.revoked = await revokePending(ctx).catch(() => ({ revoked: [], already: [], pending: [] }));
+    pruneContextCost(ctx.home);
     res.spooled += ingestSpool(ctx);
     res.tail = tailAll(ctx, opts.tailBudgetMs);
     res.spooled += ingestSpool(ctx);
