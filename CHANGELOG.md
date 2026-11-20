@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Approving a budget request for its full amount is no longer refused in the browser for amounts such as $4.03.
+  The form now rounds to whole cents before comparing, as the server does.
 - Concurrent writes and approval previews wait for the shared database transaction to finish, preventing nested
   transaction errors.
 - The local agent records the characters Align adds to each session's context, with addition counts and last times.
