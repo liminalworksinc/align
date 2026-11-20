@@ -86,7 +86,7 @@ export function exec(sql: string) {
   openDb().domain.exec(sql);
 }
 
-const isBusy = (e: unknown) => /SQLITE_BUSY|database is locked/i.test(String((e as Error)?.message ?? e)) || (e as { errcode?: number })?.errcode === 5;
+export const isBusy = (e: unknown) => /SQLITE_BUSY|database is locked/i.test(String((e as Error)?.message ?? e)) || (e as { errcode?: number })?.errcode === 5;
 
 // ---- live: which workspaces a write changed (lib/v2/live.ts streams it; the rules are lib/v2/touch-core.mts) ----
 // A write marks its workspace with touchWs(), usually through audit() or writeDirective(). Announced only once durable:
@@ -1371,6 +1371,48 @@ const MIGRATIONS: string[] = [
   ALTER TABLE v2_budget_requests ADD COLUMN source_device_id TEXT REFERENCES v2_devices(id) ON DELETE SET NULL;
   ALTER TABLE v2_budget_requests ADD COLUMN source_device_name TEXT;
   CREATE INDEX v2_budget_requests_source_device ON v2_budget_requests(source_device_id);
+  `,
+  // First observed budget crossings are information for Home, never decisions or product events.
+  `
+  CREATE TABLE v2_budget_crossings (
+    ws_id TEXT NOT NULL,
+    pod_id TEXT NOT NULL,
+    month TEXT NOT NULL,
+    threshold INTEGER NOT NULL CHECK (threshold IN (80,100)),
+    observed_at TEXT NOT NULL,
+    as_of TEXT NOT NULL,
+    PRIMARY KEY (ws_id, pod_id, month, threshold),
+    FOREIGN KEY (ws_id, pod_id) REFERENCES v2_pods(ws_id, id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE v2_budget_stamps (
+    ws_id TEXT NOT NULL,
+    pod_id TEXT NOT NULL,
+    month TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    PRIMARY KEY (ws_id, pod_id, month),
+    FOREIGN KEY (ws_id, pod_id) REFERENCES v2_pods(ws_id, id) ON DELETE CASCADE
+  );
+  INSERT INTO v2_budget_stamps (ws_id, pod_id, month, revision)
+    SELECT ws_id, pod_id, month, COUNT(*) FROM v2_team_budget_history GROUP BY ws_id, pod_id, month;
+  CREATE INDEX v2_budget_stamps_month ON v2_budget_stamps(ws_id, month, pod_id, revision);
+  CREATE INDEX v2_budget_requests_expiry ON v2_budget_requests(ws_id, pod_id, month, state, expires_at);
+  CREATE TRIGGER v2_budget_stamp_history AFTER INSERT ON v2_team_budget_history BEGIN
+    INSERT INTO v2_budget_stamps (ws_id, pod_id, month, revision) VALUES (NEW.ws_id, NEW.pod_id, NEW.month, 1)
+      ON CONFLICT (ws_id, pod_id, month) DO UPDATE SET revision = revision + 1;
+  END;
+  CREATE TRIGGER v2_budget_stamp_grant_insert AFTER INSERT ON v2_budget_requests WHEN NEW.state = 'granted' BEGIN
+    INSERT INTO v2_budget_stamps (ws_id, pod_id, month, revision) VALUES (NEW.ws_id, NEW.pod_id, NEW.month, 1)
+      ON CONFLICT (ws_id, pod_id, month) DO UPDATE SET revision = revision + 1;
+  END;
+  CREATE TRIGGER v2_budget_stamp_grant_update AFTER UPDATE ON v2_budget_requests WHEN NEW.state = 'granted' OR OLD.state = 'granted' BEGIN
+    INSERT INTO v2_budget_stamps (ws_id, pod_id, month, revision) VALUES (NEW.ws_id, NEW.pod_id, NEW.month, 1)
+      ON CONFLICT (ws_id, pod_id, month) DO UPDATE SET revision = revision + 1;
+  END;
+  CREATE TRIGGER v2_budget_stamp_crossing AFTER INSERT ON v2_budget_crossings BEGIN
+    INSERT INTO v2_budget_stamps (ws_id, pod_id, month, revision) VALUES (NEW.ws_id, NEW.pod_id, NEW.month, 1)
+      ON CONFLICT (ws_id, pod_id, month) DO UPDATE SET revision = revision + 1;
+  END;
   `,
 ];
 

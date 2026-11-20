@@ -118,6 +118,9 @@ function TeamMonth({ ws, team, month }: { ws: string; team: string; month: strin
       {r && <>
         {r.team_member_count < 3 && <p>Team totals can reveal one person&apos;s spend when the team has fewer than three members.</p>}
         {!r.budget && <p>No team budget for this month.</p>}
+        {(r.reached_thresholds ?? []).map((threshold) => <p key={threshold} data-budget-threshold={threshold} className="my-2 text-[14px]">
+          {r.team.name} has reached {threshold}% of its budget {r.month === new Date().toISOString().slice(0, 7) ? "this month" : `for ${monthLabel(r.month)} UTC`}, estimated at list price. Read on {when(r.as_of)}.
+        </p>)}
         <dl className="my-3 grid grid-cols-1 gap-3 sm:grid-cols-2" data-burn>
           {[["Base budget", r.budget ? usd(r.budget.amount_usd_micros) : "Not set"], ["Budget including grants", r.budget ? amount(r.effective_budget_usd_micros) : "No budget"], ["Spend estimate at list price", amount(r.estimated_spend_usd_micros, r.spend_bound)], ["Remaining estimate", r.budget ? amount(r.remaining_usd_micros, r.remaining_bound) : "No team budget"], ["Month-end forecast estimate", r.budget ? amount(r.forecast_usd_micros, r.forecast_bound) : "No team budget"], ["Allowance left this month", r.allowance_remaining_usd_micros === null ? "No allowance" : usd(r.allowance_remaining_usd_micros)], ["Spend in no goal, estimate", amount(r.no_goal.estimated_spend_usd_micros, r.no_goal.spend_bound)]].map(([label, value]) => <div key={label}><dt className="text-[13px] text-(--text-2)">{label}</dt><dd className="font-medium text-(--text-1)">{value}
             {label === "Spend in no goal, estimate" && r.no_goal.few_contributors && <p className="text-[13px] font-normal">Spend in no goal may come from fewer than three people this month, so it can reveal one person&apos;s spend.</p>}

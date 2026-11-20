@@ -5,13 +5,15 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { budgetNotes, observedCrossings, BUDGET_FRESH_MS, type BudgetSnapshot } from "../src/shared/budget-notes.ts";
-import { budgetFailure, budgetMonthLabel, budgetReadLabel, cacheTeamBudget, refreshSessionBudgets, requestAmount, budgetTeam } from "../src/budgets.ts";
-import { writeJsonAtomic } from "../src/shared/fsx.ts";
+import { BUDGET_PASS_MS, cacheBudgetRead, receiveBudgetStamps, budgetFailure, budgetMonthLabel, budgetReadLabel, cacheTeamBudget, refreshSessionBudgets, requestAmount, budgetTeam } from "../src/budgets.ts";
+import { readJson, writeJsonAtomic } from "../src/shared/fsx.ts";
 import { layout, localId } from "../src/shared/layout.ts";
 import type { HotState } from "../src/shared/types.ts";
+import { CLOCK_TOLERANCE_MS } from "../src/shared/clock.ts";
 import { saveCredentials } from "../src/api.ts";
+import { pollDirectives } from "../src/directives.ts";
 import { ctxFor, makeEnv, shareSession } from "./helpers.ts";
-import { userPromptSubmit } from "../src/hooks/handlers.ts";
+import { preToolUse, userPromptSubmit } from "../src/hooks/handlers.ts";
 
 function fixture() {
   const home = fs.mkdtempSync(path.join(process.cwd(), ".spending-test-")), sid = "spending-session", lid = localId("claude-code", sid);
@@ -341,8 +343,8 @@ test("terminal reads replace team cache and snapshots after an effective change 
     assert.equal(next.effective_budget_usd_micros, 200); assert.deepEqual(next.crossings, []);
     cacheTeamBudget(ctx, before.workspace_id, b.team.id, { ...b, effective_budget_usd_micros: null }, now);
     await refreshSessionBudgets(ctx, () => now);
-    next = JSON.parse(fs.readFileSync(layout.budgetCache(t.home, lid), "utf8"));
-    assert.equal(next.effective_budget_usd_micros, null); assert.deepEqual(next.crossings, []);
+    assert.equal(readJson(layout.budgetCache(t.home, lid)), null);
+    assert.deepEqual(budgetNotes(t.home, lid, readJson(layout.hot(t.home, lid)), now), []);
   } finally { globalThis.fetch = originalFetch; ctx.db.close(); t.cleanup(); }
 });
 
@@ -468,5 +470,327 @@ test("the sync pass finishes directive, activity and steering work before budget
       assert.ok(index >= 0 && index < budget, `${suffix} is completed before budgets`);
     }
     assert.equal(budget, calls.length - 1);
+  } finally { globalThis.fetch = originalFetch; ctx.db.close(); t.cleanup(); }
+});
+
+test("a budget pass stops after two reads when its injected clock passes the time cap", async () => {
+  const t = makeEnv(), ctx = ctxFor(t), fetchBefore = globalThis.fetch, start = Date.now();
+  let clock = start, reads = 0;
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(start + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
+  for (let n = 0; n < 3; n++) shareSession(ctx, "claude-code", `time-cap-${n}`);
+  const rows = ctx.db.prepare("SELECT local_id FROM shares ORDER BY local_id").all() as { local_id: string }[];
+  globalThis.fetch = async () => {
+    reads++;
+    // One read finishes just before the deadline; the next finishes just after it.
+    clock = start + (reads === 1 ? BUDGET_PASS_MS - 1 : BUDGET_PASS_MS + 1);
+    return Response.json(null);
+  };
+  try {
+    await refreshSessionBudgets(ctx, () => clock);
+    assert.equal(reads, 2);
+    assert.deepEqual(readJson(path.join(t.home, "budgets-cache", "cursor.json")), { local_id: rows[1].local_id });
+    for (const [i, row] of rows.entries()) {
+      assert.equal(fs.existsSync(path.join(t.home, "budget-attribution", `${row.local_id}.json`)), i < 2);
+    }
+    await refreshSessionBudgets(ctx, () => clock);
+    assert.equal(reads, 3, "the next pass resumes with the unfinished session");
+  } finally { globalThis.fetch = fetchBefore; ctx.db.close(); t.cleanup(); }
+});
+
+test("tool warnings stay user-only, skip subagents and a busy lock, and share durable delivery limits with prompts", () => {
+  const f = fixture();
+  try {
+    writeJsonAtomic(layout.hot(f.home, f.lid), f.hot);
+    const input = { session_id: f.sid, tool_name: "Read", tool_input: {} };
+    assert.equal(preToolUse(f.home, "claude-code", { ...input, agent_id: "child" }), null);
+    const lock = layout.injected(f.home, f.lid) + ".lock";
+    fs.mkdirSync(lock, { recursive: true });
+    assert.equal(preToolUse(f.home, "claude-code", input), null);
+    fs.rmdirSync(lock);
+    const warned = preToolUse(f.home, "claude-code", input) as any;
+    assert.match(warned.systemMessage, /80%/);
+    assert.equal(warned.hookSpecificOutput, undefined, "a budget crossing adds zero model context mid-turn");
+    assert.equal(preToolUse(f.home, "claude-code", input), null);
+    const prompt = userPromptSubmit(f.home, "claude-code", { session_id: f.sid, prompt: "Continue", prompt_id: "next" }) as any;
+    assert.match(prompt.hookSpecificOutput.additionalContext, /80%/);
+    assert.ok(!prompt.systemMessage?.includes("80%"));
+    fs.rmSync(layout.injected(f.home, f.lid), { force: true });
+    assert.doesNotMatch(JSON.stringify(userPromptSubmit(f.home, "claude-code", { session_id: f.sid, prompt: "Continue", prompt_id: "restart" })), /80%/);
+    assert.equal(preToolUse(f.home, "claude-code", input), null);
+  } finally { f.cleanup(); }
+});
+
+test("a prompt-first crossing consumes the user warning too; unsupported harness tool calls consume neither marker", () => {
+  const f = fixture();
+  try {
+    writeJsonAtomic(layout.hot(f.home, f.lid), f.hot);
+    // Use Codex's actual local id and hot file; no user-only tool message has been verified for it.
+    const codex = localId("codex", f.sid), hot = { ...f.hot, local_id: codex, harness: "codex" as const };
+    writeJsonAtomic(layout.hot(f.home, codex), hot);
+    writeJsonAtomic(layout.budgetCache(f.home, codex), f.snapshot);
+    assert.equal(preToolUse(f.home, "codex", { session_id: f.sid, tool_name: "shell" }), null);
+    assert.equal(fs.existsSync(layout.budgetShown(f.home, codex, f.snapshot.month, 80)), false);
+    const prompt = userPromptSubmit(f.home, "codex", { session_id: f.sid, prompt: "Continue", turn_id: "first" }) as any;
+    assert.match(prompt.hookSpecificOutput.additionalContext, /80%/);
+    assert.match(prompt.systemMessage, /80%/);
+    assert.equal(preToolUse(f.home, "codex", { session_id: f.sid, tool_name: "shell" }), null);
+  } finally { f.cleanup(); }
+});
+
+test("directive stamps invalidate only changed team reads, including removal, without extra attribution or unchanged-pass reads", async () => {
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch, now = Date.now();
+  const lid = shareSession(ctx, "claude-code", "stamp-session"), at = new Date(now).toISOString(), month = at.slice(0, 7);
+  const calls: string[] = [];
+  let amount: number | null = 100, stamp = "a".repeat(64);
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
+  globalThis.fetch = async (input) => {
+    const url = String(input); calls.push(url);
+    if (url.includes("/directives?")) return Response.json({ directives: [], next_cursor: "0", budget_stamps: [{ ws: "ws_1", team: "pod_build", month, stamp }], unknown_future_field: true });
+    if (url.includes("/sessions/")) return Response.json({ epoch_id: "ep_1", team: { id: "pod_build", name: "Build" }, month, budget_stamp: stamp });
+    return Response.json({ team: { id: "pod_build", name: "Build" }, month, as_of: at, budget_stamp: stamp,
+      effective_budget_usd_micros: amount, estimated_spend_usd_micros: 80, spend_bound: "exact", unpriced_requests: 0 });
+  };
+  try {
+    const pass = async () => { await pollDirectives(ctx, () => undefined); await refreshSessionBudgets(ctx, () => now); };
+    await pass(); assert.equal(calls.length, 3);
+    calls.length = 0; await pass(); assert.equal(calls.length, 1); assert.match(calls[0], /directives\?/);
+    for (const [nextStamp, nextAmount] of [["b", 200], ["c", 50], ["d", null], ["e", 100]] as const) {
+      stamp = nextStamp.repeat(64); amount = nextAmount; calls.length = 0; await pass();
+      assert.equal(calls.length, 2); assert.equal(calls.filter((u) => u.includes("/teams/")).length, 1);
+      assert.equal(calls.filter((u) => u.includes("/sessions/")).length, 0);
+      const cached = readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid));
+      if (amount === null) assert.equal(cached, null, "removal erases even an observed undelivered crossing");
+      else assert.equal(cached?.effective_budget_usd_micros, amount);
+      calls.length = 0; await pass(); assert.equal(calls.length, 1);
+    }
+    receiveBudgetStamps(ctx, undefined); calls.length = 0; await refreshSessionBudgets(ctx, () => now); assert.equal(calls.length, 0);
+  } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
+});
+
+test("terminal and sync cache updates share figure validation and match only confirmed session attribution", async () => {
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch, now = Date.now();
+  const lid = shareSession(ctx, "claude-code", "terminal-read"), at = new Date(now).toISOString(), month = at.slice(0, 7);
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
+  const figure = { team: { id: "pod_build", name: "Build" }, month, as_of: at, effective_budget_usd_micros: 100, estimated_spend_usd_micros: 10, spend_bound: "exact", unpriced_requests: 0 };
+  globalThis.fetch = async (input) => String(input).includes("/sessions/") ? Response.json({ epoch_id: "ep_1", team: figure.team, month }) : Response.json(figure);
+  try {
+    await refreshSessionBudgets(ctx, () => now);
+    globalThis.fetch = async () => { throw new Error("no network expected"); };
+    cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure, estimated_spend_usd_micros: 80 }, now);
+    assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.estimated_spend_usd_micros, 80);
+    for (const patch of [{ month: "2000-01" }, { as_of: "invalid" }, { as_of: new Date(now + CLOCK_TOLERANCE_MS + 1000).toISOString() }, { team: { id: "pod_other", name: "Other" } }, { estimated_spend_usd_micros: "100" }]) {
+      cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure, ...patch }, now);
+      assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.estimated_spend_usd_micros, 80);
+    }
+    cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure, effective_budget_usd_micros: null }, now);
+    assert.equal(readJson(layout.budgetCache(t.home, lid)), null);
+    assert.deepEqual(budgetNotes(t.home, lid, readJson(layout.hot(t.home, lid))), []);
+  } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
+});
+
+test("404 budget routes and unknown additive stamp fields never stop a pass or create a note", async () => {
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch, now = Date.now();
+  const lid = shareSession(ctx, "claude-code", "old-server");
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
+  let reads = 0;
+  globalThis.fetch = async () => { reads++; return Response.json({ error: "not_found", future: true }, { status: 404 }); };
+  try {
+    receiveBudgetStamps(ctx, { future: true });
+    await refreshSessionBudgets(ctx, () => now); assert.equal(reads, 1);
+    await refreshSessionBudgets(ctx, () => now); assert.equal(reads, 1);
+    assert.equal(readJson(layout.budgetCache(t.home, lid)), null);
+    assert.deepEqual(budgetNotes(t.home, lid, readJson(layout.hot(t.home, lid))), []);
+  } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
+});
+
+test("the committed base agent's directive intake ignores budget stamps and still applies a stop", async () => {
+  const { budgetBaseIntake } = await import("./fixtures/budget-base-intake.mjs");
+  const { handleDirective, cursor } = await import("../src/directives.ts");
+  const { kvSet } = await import("../src/db.ts");
+  const { api, HttpError } = await import("../src/api.ts");
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch;
+  const lid = shareSession(ctx, "claude-code", "old-intake"), share = ctx.db.prepare("SELECT session_key FROM shares WHERE local_id=?").get(lid) as any;
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
+  globalThis.fetch = async () => Response.json({ directives: [{ id: "dir_legacy_stop", seq: 1, ws: "ws_1", kind: "stop", session_keys: [share.session_key], goal: null, binding: null, created_at: new Date().toISOString() }], next_cursor: "1", workspaces: ["ws_1"], budget_stamps: [{ ws: "ws_1", team: "pod_build", month: new Date().toISOString().slice(0, 7), stamp: "a".repeat(64) }] });
+  try {
+    const legacy = budgetBaseIntake({ api, HttpError, cursor, handleDirective,
+      advanceCursor: (c: typeof ctx, n: number) => kvSet(c.db, "directive_cursor", String(n)),
+      endSharesEndedOnServer: () => { throw new Error("not exercised"); }, validEnded: () => false, endedRead: () => undefined });
+    assert.equal(await legacy(ctx, () => undefined), 1);
+    assert.equal(cursor(ctx), 1); assert.ok(fs.existsSync(layout.latch(t.home, lid)));
+    assert.equal(ctx.budgetStamps, undefined, "the base intake has no budget stamp support");
+  } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
+});
+
+test("a figure computed after the pass began is accepted, and sync confirms stale attribution within base caps", async () => {
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch, realNow = Date.now;
+  const lid = shareSession(ctx, "claude-code", "during-read");
+  let clock = realNow(); const month = new Date(clock).toISOString().slice(0, 7);
+  let reads = 0;
+  const figure = () => ({ team: { id: "pod_build", name: "Build" }, month, as_of: new Date(clock).toISOString(), effective_budget_usd_micros: 100, estimated_spend_usd_micros: 80, spend_bound: "exact", unpriced_requests: 0 });
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(clock + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
+  globalThis.fetch = async (input) => {
+    reads++; clock += 10;
+    return String(input).includes("/sessions/") ? Response.json({ epoch_id: "ep_1", team: { id: "pod_build", name: "Build" }, month }) : Response.json(figure());
+  };
+  try {
+    Date.now = () => clock;
+    await refreshSessionBudgets(ctx, () => clock);
+    assert.equal(reads, 2); assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.estimated_spend_usd_micros, 80);
+    clock += BUDGET_FRESH_MS + 1000;
+    reads = 0;
+    cacheBudgetRead(ctx, "ws_1", "pod_build", { ...figure(), estimated_spend_usd_micros: 100 });
+    await refreshSessionBudgets(ctx, () => clock); // Sync confirms stale attribution with no repeated team read.
+    assert.equal(reads, 1);
+    assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.estimated_spend_usd_micros, 100);
+  } finally { Date.now = realNow; globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
+});
+
+test("a legacy cached absent budget gets no new read, snapshot, context or message when stamps are empty", async () => {
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch, now = Date.now();
+  const lid = shareSession(ctx, "claude-code", "absent-budget"), at = new Date(now).toISOString(), month = at.slice(0, 7);
+  userPromptSubmit(t.home, "claude-code", { session_id: "absent-budget", prompt: "Start", prompt_id: "baseline" });
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
+  let reads = 0;
+  globalThis.fetch = async (input) => {
+    reads++;
+    return String(input).includes("/sessions/") ? Response.json({ epoch_id: "ep_1", team: { id: "pod_build", name: "Build" }, month }) : Response.json({ team: { id: "pod_build", name: "Build" }, month, as_of: at, effective_budget_usd_micros: null, estimated_spend_usd_micros: 100, spend_bound: "exact", unpriced_requests: 0 });
+  };
+  try {
+    await refreshSessionBudgets(ctx, () => now); assert.equal(reads, 2);
+    const file = path.join(t.home, "budgets-cache", "teams.json"), teams = readJson<Record<string, any>>(file)!;
+    delete teams[`ws_1:pod_build:${month}`].stamp; writeJsonAtomic(file, teams); // The exact cache shape before stamps.
+    receiveBudgetStamps(ctx, []);
+    reads = 0; await refreshSessionBudgets(ctx, () => now); assert.equal(reads, 0);
+    assert.equal(readJson(layout.budgetCache(t.home, lid)), null);
+    const input = { session_id: "absent-budget", tool_name: "Read" };
+    assert.equal(preToolUse(t.home, "claude-code", input), null);
+    assert.equal(userPromptSubmit(t.home, "claude-code", { session_id: "absent-budget", prompt: "Continue", prompt_id: "nothing-new" }), null);
+  } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
+});
+
+test("a confirmed removal clears due notes even outside the rotating session batch, with one team read", async () => {
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch, now = Date.now(), at = new Date(now).toISOString(), month = at.slice(0, 7);
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "unit-token", access_expires_at: new Date(Date.now() + 3600000).toISOString(), refresh_token: "unit-refresh", user: null });
+  const lids = Array.from({ length: 101 }, (_, n) => shareSession(ctx, "claude-code", `remove-batch-${n}`));
+  let removed = false, reads = 0;
+  globalThis.fetch = async (input) => {
+    reads++;
+    return String(input).includes("/sessions/") ? Response.json({ epoch_id: "ep_1", team: { id: "pod_build", name: "Build" }, month }) : Response.json({ team: { id: "pod_build", name: "Build" }, month, as_of: at, budget_stamp: (removed ? "b" : "a").repeat(64), effective_budget_usd_micros: removed ? null : 100, estimated_spend_usd_micros: 100, spend_bound: "exact", unpriced_requests: 0 });
+  };
+  try {
+    await refreshSessionBudgets(ctx, () => now); await refreshSessionBudgets(ctx, () => now);
+    assert.equal(lids.filter((lid) => fs.existsSync(layout.budgetCache(t.home, lid))).length, 101);
+    removed = true; reads = 0;
+    receiveBudgetStamps(ctx, [{ ws: "ws_1", team: "pod_build", month, stamp: "b".repeat(64) }]);
+    await refreshSessionBudgets(ctx, () => now); assert.equal(reads, 1);
+    for (const lid of lids) {
+      assert.equal(fs.existsSync(layout.budgetCache(t.home, lid)), false);
+      assert.deepEqual(budgetNotes(t.home, lid, readJson(layout.hot(t.home, lid))), []);
+    }
+  } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
+});
+
+test("hook and shared modules never import the network client or name the credential file", () => {
+  const roots = [new URL("../src/hooks/", import.meta.url), new URL("../src/shared/", import.meta.url)];
+  const visit = (dir: URL) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const file = new URL(entry.name + (entry.isDirectory() ? "/" : ""), dir);
+      if (entry.isDirectory()) { visit(file); continue; }
+      if (!/\.[cm]?[jt]sx?$/.test(entry.name)) continue;
+      const source = fs.readFileSync(file, "utf8");
+      assert.doesNotMatch(source, /credentials\.json/, file.pathname);
+      assert.doesNotMatch(source, /(?:from\s*|import\s*\(\s*|require\s*\(\s*|import\s*)["'][^"']*\/api\.ts["']/, file.pathname);
+    }
+  };
+  roots.forEach(visit);
+});
+
+test("mid-turn budget messages wait for the locally opened epoch to be confirmed", () => {
+  const f = fixture();
+  try {
+    writeJsonAtomic(layout.hot(f.home, f.lid), f.hot);
+    const input = { session_id: f.sid, tool_name: "Read", tool_input: {} };
+    writeJsonAtomic(layout.injected(f.home, f.lid), { opened_epoch: { epoch_id: "ep_next", goal: null, at: new Date(f.now).toISOString() } });
+    assert.equal(preToolUse(f.home, "claude-code", input), null);
+    assert.equal(fs.existsSync(layout.budgetShown(f.home, f.lid, f.snapshot.month, 80) + "-message"), false);
+    f.hot.binding!.epoch_id = "ep_next";
+    writeJsonAtomic(layout.hot(f.home, f.lid), f.hot);
+    assert.equal(preToolUse(f.home, "claude-code", input), null, "a prior-period snapshot cannot enter a newly confirmed period");
+    f.snapshot.epoch_id = "ep_next"; f.save();
+    const delivered = preToolUse(f.home, "claude-code", input) as any;
+    assert.match(delivered.systemMessage, /Your work continues.*align budget request/);
+    assert.equal(delivered.hookSpecificOutput, undefined);
+    assert.equal(preToolUse(f.home, "claude-code", input), null);
+  } finally { f.cleanup(); }
+});
+
+test("an explicit null budget read clears a pending observation without claiming a marker", async () => {
+  const t = makeEnv(), ctx = ctxFor(t), before = globalThis.fetch, now = Date.now(), month = new Date(now).toISOString().slice(0, 7);
+  const lid = shareSession(ctx, "claude-code", "null-budget");
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "token", access_expires_at: new Date(now + 3600000).toISOString(), refresh_token: "refresh", user: null });
+  let removed = false;
+  globalThis.fetch = async (url) => String(url).includes("/sessions/") ? Response.json({ epoch_id: "ep_1", team: { id: "pod_build", name: "Build" }, month }) : Response.json(removed ? null : { team: { id: "pod_build", name: "Build" }, month, as_of: new Date(now).toISOString(), effective_budget_usd_micros: 100, estimated_spend_usd_micros: 80, spend_bound: "exact" });
+  try {
+    await refreshSessionBudgets(ctx, () => now);
+    assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.crossings?.length, 1);
+    removed = true;
+    fs.rmSync(path.join(t.home, "budgets-cache", "teams.json"));
+    await refreshSessionBudgets(ctx, () => now);
+    assert.equal(readJson(layout.budgetCache(t.home, lid)), null);
+    assert.equal(fs.existsSync(layout.budgetShown(t.home, lid, month, 80)), false);
+  } finally { globalThis.fetch = before; ctx.db.close(); t.cleanup(); }
+});
+
+test("invalid or empty success bodies preserve pending snapshots and retry instead of acting as null", async () => {
+  for (const route of ["attribution", "team"]) {
+    const t = makeEnv(), ctx = ctxFor(t), originalFetch = globalThis.fetch;
+    const now = Date.now(), month = new Date(now).toISOString().slice(0, 7), lid = shareSession(ctx, "claude-code", "invalid-body");
+    saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "token", access_expires_at: new Date(now + 3600000).toISOString(), refresh_token: "refresh", user: null });
+    let bad: string | undefined;
+    const budget = { team: { id: "pod_build", name: "Build" }, month, as_of: new Date(now).toISOString(), effective_budget_usd_micros: 100, estimated_spend_usd_micros: 80, spend_bound: "exact" };
+    globalThis.fetch = async (url) => {
+      const attribution = String(url).includes("/sessions/");
+      if (bad !== undefined && attribution === (route === "attribution")) return new Response(bad, { status: 200 });
+      return Response.json(attribution ? { epoch_id: "ep_1", team: budget.team, month } : budget);
+    };
+    try {
+      await refreshSessionBudgets(ctx, () => now);
+      const before = fs.readFileSync(layout.budgetCache(t.home, lid), "utf8");
+      for (bad of ["not json", ""]) {
+        fs.rmSync(path.join(t.home, "budget-attribution", `${lid}.json`), { force: true });
+        fs.rmSync(path.join(t.home, "budgets-cache", "teams.json"), { force: true });
+        await refreshSessionBudgets(ctx, () => now);
+        assert.equal(fs.readFileSync(layout.budgetCache(t.home, lid), "utf8"), before);
+      }
+      bad = undefined;
+      await refreshSessionBudgets(ctx, () => now);
+      assert.equal(readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.crossings?.length, 1);
+    } finally { globalThis.fetch = originalFetch; ctx.db.close(); t.cleanup(); }
+  }
+});
+
+test("an accepted effective amount invalidates older snapshots outside the rotating batch and stale terminal attribution", async () => {
+  const t = makeEnv(), ctx = ctxFor(t), originalFetch = globalThis.fetch, now = Date.now(), month = new Date(now).toISOString().slice(0, 7);
+  const lids = Array.from({ length: 101 }, (_, n) => shareSession(ctx, "claude-code", `changed-batch-${n}`));
+  saveCredentials(t.home, { server_url: "http://127.0.0.1:3100", device_id: "dv_budget", access_token: "token", access_expires_at: new Date(now + 3600000).toISOString(), refresh_token: "refresh", user: null });
+  let amount = 100, stamp = "a".repeat(64);
+  const figure = () => ({ team: { id: "pod_build", name: "Build" }, month, as_of: new Date(now).toISOString(), effective_budget_usd_micros: amount, estimated_spend_usd_micros: 80, spend_bound: "exact", budget_stamp: stamp });
+  globalThis.fetch = async (url) => Response.json(String(url).includes("/sessions/") ? { epoch_id: "ep_1", team: figure().team, month } : figure());
+  try {
+    await refreshSessionBudgets(ctx, () => now); await refreshSessionBudgets(ctx, () => now);
+    assert.equal(lids.filter((lid) => readJson<BudgetSnapshot>(layout.budgetCache(t.home, lid))?.crossings?.length === 1).length, 101);
+    amount = 200; stamp = "b".repeat(64);
+    receiveBudgetStamps(ctx, [{ ws: "ws_1", team: "pod_build", month, stamp }]);
+    await refreshSessionBudgets(ctx, () => now);
+    assert.equal(lids.filter((lid) => fs.existsSync(layout.budgetCache(t.home, lid))).length, 100);
+    for (const lid of lids) assert.deepEqual(budgetNotes(t.home, lid, readJson(layout.hot(t.home, lid)), now), []);
+    await refreshSessionBudgets(ctx, () => now);
+    assert.equal(lids.filter((lid) => fs.existsSync(layout.budgetCache(t.home, lid))).length, 101);
+    const file = layout.budgetCache(t.home, lids[0]);
+    writeJsonAtomic(file, { ...readJson<BudgetSnapshot>(file), effective_budget_usd_micros: 100, crossings: [{ threshold: 80, as_of: figure().as_of }] });
+    fs.rmSync(path.join(t.home, "budget-attribution", `${lids[0]}.json`));
+    cacheBudgetRead(ctx, "ws_1", "pod_build", figure(), now);
+    assert.equal(readJson(file), null, "a stale attribution cannot retain a note from the replaced amount");
   } finally { globalThis.fetch = originalFetch; ctx.db.close(); t.cleanup(); }
 });

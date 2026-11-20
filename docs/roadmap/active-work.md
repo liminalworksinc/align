@@ -30,6 +30,70 @@ queue item or let `docs/roadmap/` become a plan archive.
 Check the parent only after every required subtask and evidence item passes. Add the
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
+### [ ] SPEND-004: Current budgets and crossing information
+
+- **Owner:** specs/align/budgets.md, local-agent.md, interface.md, directives.md and retained implementation
+- **Direction:** Refresh changed budgets on the next sync, refresh local figures after terminal reads, warn people
+  during supported long turns, and show crossings on Spend and Home. Review fixes address clock differences,
+  rejected figures and terminal cache failures or races.
+- **Conclusion:** Private change stamps use the existing directive response. Unchanged cached passes add no budget
+  reads. The existing reuse window, read and time caps, local-only hooks, separate message/context markers and
+  Needs counts are preserved.
+- **Merge review repair:** Integrate the reviewed budget base and this branch's delivery and browser information.
+  Preserve filing-source migration 25; add crossings and indexed change stamps in migration 26. Keep hook reads
+  local, guard mid-turn spending periods, preserve temporary refusals and both latency cases. Leave the index and
+  history untouched. Required evidence is lint, typecheck, budget domain and agent tests, plus review of the
+  listener-dependent tests for the merged code. Fresh listener-dependent execution remains for the operator.
+- **Completion prerequisites:** none
+- **Crossing lock review:** Compute burn without a write lock; only a missing current-month crossing may open a
+  transaction, which rechecks live access and current figures. Busy starts must return the read without recording.
+  Verify with lint, app typecheck and port-free budget tests, including contention, retry and concurrent uniqueness.
+  Node 26.3.0: lint and app typecheck pass; budget domain tests pass 64/0. Before the fix, the two contention
+  regressions fail with database locked (62/2). Fresh budget, grant and spend checks, live access recheck,
+  concurrent uniqueness and change stamps pass. The merged contributor assertions now await their reads.
+- **Outcome:** Changed budgets reach session snapshots on sync. Claude Code can show a user-only tool warning;
+  Codex retains next-prompt delivery. Spend states current crossings and Home retains first observations for
+  leads and owners outside Needs. Sync saves the clock offset in each snapshot for hooks to read with the shared tolerance; rejected
+  figures preserve snapshots and pending crossings for retry. Terminal reads print figures before a best-effort
+  update restricted to the selected team, using the sync lock without waiting and at most one current-folder
+  attribution read. No daemon, polling, usage metering change, timeout increase or change to begin().
+- **Implementation and evidence:**
+  The following checked entries are prior branch evidence. Current merged verification is recorded separately below.
+  - [x] Budget pass tests use an injected clock with unchanged production defaults and every existing assertion
+    retained. A separate test verifies exactly two reads before the time cutoff and continuation next pass.
+    Node 26.3.0: twenty consecutive budget-file runs pass (23 tests each); 315 listener-free agent units, lint,
+    app and agent typechecks, syntax and the agent build pass. The unchanged serial hook latency check initially
+    misses its 150 ms limit at p95 152.2 ms; one isolated retry passes. The initial miss remains recorded.
+  - [x] Specifications amended before implementation; the agent README and changelog describe the resulting behavior.
+  - [x] The budget domain suite covers change stamps, grants, expiry, removal, Home privacy, retained observations,
+    unchanged Needs data and migration preservation. Listener-free agent tests cover cached passes, mixed releases,
+    bounded sync, removal outside the rotating batch, persistent crossings and user-only hook delivery.
+  - [x] The pre-review server, browser and live-agent suites passed in a listener-capable environment, as reported
+    by the operator. They cover HTTP stamps and privacy, browser crossings, reloads and counts, and real CLI/tool
+    delivery. This is prior evidence for the existing feature, not a run of the clock and terminal review fixes.
+  - [x] New listener-free regressions cover server clocks ahead by seconds or saved minutes, strict local times,
+    far-future rejection, preservation across the rotating batch, and retry after a rejected figure. Real CLI
+    subprocesses with mocked transport cover unwritable caches, a held sync lock, printed figures before local
+    refresh and the single current-folder attribution read. Database and credential failures remain best effort.
+  - [x] Node 26.3.0: lint, app and agent typechecks, syntax, agent build, all no-server suites and listener-free agent
+    units pass. The separate network-blocked serial hook latency test passes under its unchanged p95 limit.
+  - [x] Current merge on Node 26.3.0: budget domain 55/0, listener-free agent checks 393/0, focused budget checks 48/0,
+    agent build and app typecheck pass. Lint passes after a temporary test-directory cleanup race on its first run.
+    Static checks confirm both storage literals are 26, requirements and named scenarios precede Sources, and no
+    conflict markers remain. The index hash is unchanged and all sixteen unmerged entries remain for the operator.
+  - [ ] Current whole-hook latency remains unresolved at the unchanged 150 ms p95 limit. The first full-agent run
+    passes at 79.3/76.2 ms (after delivery/below 80 percent). A later serial run is 105.2/177.3 ms; its single retry is
+    184.6/169.2 ms. An interleaved comparison is 126.5/195.7 ms for the untouched base and 127.9/247.4 ms for the merge.
+    Both builds fail the below-threshold comparison, so these observations cannot isolate a code regression.
+  - [ ] Full agent execution includes 279 listener failures, all listen EPERM on 127.0.0.1; 391 concurrent checks and
+    its two initial serial checks pass. The server, browser and live-agent suites were not launched. Both touched
+    server scripts pass syntax checks and were reviewed for schema literals, counts, exact copy and merged behavior.
+  - [ ] Fresh server, browser and live-agent verification of the review fixes requires a listener-capable environment.
+- **Next action:** Review the uncommitted fixes, investigate the whole-hook latency on a quiet host, then run the
+  listener-based suites for this exact state where ports are available. Those fresh results remain UNKNOWN here. The `litai` guidance command fails with exit 127 because
+  the CLI is not installed; its workflow survey and formal specification verification remain UNKNOWN. The parent
+  stays unchecked until the remaining evidence is recorded. No outbound action is authorized.
+
 ### [ ] SPEND-003: Team budgets and budget requests
 
 - **Owner:** specs/align/budgets.md and the retained implementation
@@ -42,7 +106,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   this change is not attributed to a team. Budgets, burn, forecasts, history and spend in no goal are visible only to team members and workspace owners. The CSV names the same goal-bound team rows as the on-screen report. Read-only MCP exposure of budgets and budget requests is not built.
 - **Review repair:** Address the numbered standalone-branch findings in order: clock and sync defects, owner decisions, then specification and document corrections. Preserve all existing assertions and limits. Leave edits uncommitted.
 - **Next action:** Run the server, browser and live-agent acceptance suites in a listener-capable environment and resolve the hook latency gate before closing this item.
-- **Review evidence:** Budget domain, all no-server suites, listener-free agent unit tests, typecheck and syntax checks pass. The unchanged whole-hook latency gate fails on this host, including the below-threshold case. Server, browser and live-agent execution needs a listener-capable environment.
+- **Prior branch review evidence:** Budget domain, all no-server suites, listener-free agent unit tests, typecheck and syntax checks pass. The unchanged whole-hook latency gate fails on this host, including the below-threshold case. Server, browser and live-agent execution needs a listener-capable environment.
 - **Completion prerequisites:** none
 - **Outcome:** Specified in budgets.md, with the interface, local-agent and workspace parts amended to match. The
   no-server suites and listener-free agent unit tests cover the fixes. Server and browser execution requires a listener-capable environment.

@@ -163,6 +163,13 @@ plus `request` on kind `request` and `hold` on kinds `hold` and `release` (absen
 - `release`: `"hold": { "goal": { "id", "title"|null }, "released_by": { "id", "name" }, "at" }`: lift that goal's hold.
 
 `GET /api/v2/directives?cursor=<seq>` (Bearer) → `{ "directives": [Directive], "next_cursor": "<seq>", "workspaces": [ "<ws id>" ], "ended_sessions": [ { "ws", "session_key", "ended_reason": null | "member_removed", "stopped_at" } ] }` (≤100, this device's sessions only; `workspaces`: the ids, sorted, of the workspaces this device reaches now, so it re-reads `/me` when they changed; `ended_sessions`: this device's sessions in those workspaces whose share ended in the last 30 days, newest first, at most 200, so a share stopped on the web ends on the device at its next pass, not at the session's next usage upload).
+The directive response also carries additive `budget_stamps: [{ws, team, month, stamp}]` for this UTC month's
+budget history in granted workspaces, only for teams whose budgets the person may read. Stamps contain no names,
+amounts, people, goals or sessions. The opaque stamp changes on a set, change, removal, grant, grant expiry or first observed crossing,
+even when writes have the same time. Stored revisions and indexed expiry lookups avoid reading history on directive fetch. Old agents ignore it; old servers may omit it. The same stamp is returned as
+`budget_stamp` on team and session attribution reads. Sync compares it with the cached team read and refreshes a
+changed team in the same pass. Unchanged cached passes add zero budget requests; five-minute reuse, 120 reads,
+100 sessions and two seconds remain the bounds. A 404 or an unknown additive field never stops a pass.
 The device moves its cursor to `next_cursor` after each page, also past directives it had already stored.
 There is no push channel: the local agent has no daemon, and each hook-started sync pass fetches by cursor.
 `POST /api/v2/directives/:id/receipts` (Bearer) → req `{ "session_key", "state": "received"|"applied"|"enforced"|"accepted"|"declined", "at", "auto_accepted"?: bool }` → 200 `{ "fresh": bool }`, plus `"request_state": "sent"|"received"|"accepted"|"declined"|"expired"` on a `request` directive (idempotent, ≤2 KB).
@@ -505,7 +512,7 @@ The month defaults to the current UTC month. Only team members and workspace own
 burn, forecast, no-goal subtotal and history; other readers get 404. The response is `{team, team_member_count, month, from, to, as_of, note, budget, effective_budget_usd_micros,
 estimated_spend_usd_micros, remaining_usd_micros, forecast_usd_micros, runs_out_at, unpriced_requests,
 known_unpriced_requests, priced_spend_usd_micros, spend_bound, remaining_bound, forecast_bound, pricing_note,
-allowance_granted_usd_micros, allowance_remaining_usd_micros, no_goal, history, can}`.
+budget_stamp, reached_thresholds, allowance_granted_usd_micros, allowance_remaining_usd_micros, no_goal, history, can}`.
 `team` is `{id, name}`. `budget` is null or `{amount_usd_micros, allowance_usd_micros,
 allowance_ceiling_usd_micros, updated_by, updated_at}`. People are `{id, name}`. `can` is `{manage, request}`.
 History is ordered oldest first and has `{id, action, amount_usd_micros, allowance_usd_micros,
@@ -513,8 +520,7 @@ allowance_ceiling_usd_micros, actor, at}`. `no_goal` has `{priced_spend_usd_micr
 spend_bound, unpriced_requests, known_unpriced_requests, share_percent, attribution_unknown, few_contributors}`.
 `few_contributors` is true when one or two distinct people have recorded no-goal usage in the month's read window under this team's captured home-team attribution, or when fewer than three are known and retained usage, which keeps no identities, is part of the figure. No count is returned. The panel warns when it is true; the CSV carries neither.
 Bounds are `exact`, `lower`, `upper`, `unknown` or null for absent amounts. Amounts are integer USD microdollars representing list-price estimates.
-Unpriced work and earlier live no-goal usage without a home team give spend and forecast lower bounds and a remaining upper bound. With no positive known subtotal, earlier unattributed usage gives unknown amounts. Missing attribution in retained aggregates gives
-null complete totals and an attribution-incomplete flag, without workspace-wide unattributed counts. No budget is `budget: null`. Reads do not create audit records or decisions.
+Unpriced work and earlier live no-goal usage without a home team give spend and forecast lower bounds and a remaining upper bound. With no positive known subtotal, earlier unattributed usage gives unknown amounts. Missing attribution in retained aggregates also gives a lower bound for a known positive subtotal and unknown amounts otherwise, with an attribution-incomplete flag, without workspace-wide unattributed counts. No budget is `budget: null`. Reads do not create audit records or decisions.
 
 Browser-only `PUT {amount_usd, allowance_usd?, allowance_ceiling_usd?}` and `DELETE` require a team lead or
 workspace owner. Amounts are whole cents, 0 through 1,000,000 dollars. An omitted or null ceiling defaults to
@@ -558,7 +564,7 @@ teams are read in batches.
 
 `GET .../sessions/{key}/budget` is readable only by the session's owner and, for a device, its sharing device.
 It returns `{epoch_id}` plus the budget-read fields for the open shared period, or null with no open shared
-period, readable team or readable goal. `?attribution=1` returns only `{epoch_id, team, month}`. A different
+period, readable team or readable goal. `?attribution=1` returns only `{epoch_id, team, month, budget_stamp}`. A different
 person's session is 404. Session listings add nullable `team_budget_label` only to own rows and only while the
 team has a budget this month. Other people's rows omit the field.
 
@@ -568,6 +574,21 @@ It returns `align-spend-YYYY-MM.csv` with private, no-store headers. Columns are
 `cache_write_unsplit`. List-price amounts retain six decimals. Goal-bound team rows match the on-screen team report exactly for that reader. Hidden goals remain in its single unnamed `Private goals` row. Only team members and workspace owners receive team no-goal rows; other teams' no-goal amounts stay unallocated. The no-team
 row, unallocated remainder and total preserve all numeric sums. Cells are quoted and formula-like prefixes are
 neutralized. The export uses the same UTC month validator as budgets.
+
+Budget reads add `budget_stamp` and `reached_thresholds: [80 | 100]`. Thresholds use a positive effective budget and
+known priced totals, including lower bounds; absent budgets and unknown totals return an empty list. First observed
+crossings are stored once per workspace, team, UTC month and threshold with `observed_at` and the figure's `as_of`.
+They create no decision, audit or product event. Home returns at most 100 `budget_crossings` records as
+`{team: {id, name}, month, threshold, observed_at, as_of}`, only to current team leads and workspace owners, or null
+on a failed source. They appear in Since you last looked, outside Needs, and are hidden while the budget is absent.
+Home reads these records without computing new team burn. Spend states current thresholds and computation time.
+No polling is added. Migration 25 records the terminal filing source. Migration 26 adds crossing records and indexed change stamps, preserving existing budgets and attribution.
+
+A successful `align budget` read updates the team cache and matching locally confirmed session snapshots through the
+sync figure validation path. During a turn only synchronous Claude Code PreToolUse emits a budget `systemMessage`,
+with no budget `additionalContext`. Codex tool-call user-only messages are not verified and retain next-prompt notes.
+Message and context markers persist independently per session, UTC month and threshold; prompt-first delivery
+consumes both opportunities. Hooks skip subagents and never wait on the existing delivery lock.
 
 Closed-month effective budgets include every granted request in force at some time in that month, even after expiry.
 Align offers no per-person spend view. Team totals can reveal one person's spend when a team has fewer than three members.

@@ -14,7 +14,7 @@ import { need } from "./workspaces";
 import { expireStoppedSessionTargets, holdNewlyBound } from "./requests";
 import { personName } from "./retention";
 import { homeTeamId } from "./spend-home";
-import { budgetBurn } from "./budgets";
+import { budgetBurn, budgetStamp } from "./budgets";
 import { shareAgainText, shareAgainWords, sharingStoppedText } from "./share-again.mts";
 import { b64url, iso, nonNegInt, oneOf, optInt, optStr, str, type Body } from "./validate";
 
@@ -125,7 +125,7 @@ const shareOut = (s: SessionRow) => {
 };
 
 /** Current captured attribution for the owner's hook. No current-home guess can rewrite an existing epoch. */
-export function currentSessionBudget(pp: PolicyPrincipal, key: string, attribution = false) {
+export async function currentSessionBudget(pp: PolicyPrincipal, key: string, attribution = false) {
   const s = sessionRow(pp.wsId, key);
   if (!s) throw notFound();
   need(pp, "session.manage", { kind: "session", ownerId: s.user_id });
@@ -137,9 +137,10 @@ export function currentSessionBudget(pp: PolicyPrincipal, key: string, attributi
   if (!team || pp.wsRole !== "owner" && !pp.pods.has(team)) return null;
   if (attribution) {
     const t = get<{ id: string; name: string }>("SELECT id, name FROM v2_pods WHERE ws_id = ? AND id = ?", pp.wsId, team);
-    return t ? { epoch_id: e.epoch_id, team: t, month: new Date().toISOString().slice(0, 7) } : null;
+    const month = new Date().toISOString().slice(0, 7);
+    return t ? { epoch_id: e.epoch_id, team: t, month, budget_stamp: budgetStamp(pp.wsId, team, month) } : null;
   }
-  return { epoch_id: e.epoch_id, ...budgetBurn(pp, team) };
+  return { epoch_id: e.epoch_id, ...await budgetBurn(pp, team) };
 }
 
 export async function putSession(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {

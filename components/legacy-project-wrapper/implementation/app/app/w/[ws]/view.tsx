@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { NextAfterDecision, type NextItem } from "../../_ui/ds";
 import GoalLines from "../../_ui/home/goal-lines";
 import { NeedsList } from "../../_ui/home/needs-list";
-import Since from "../../_ui/home/since";
+import Since, { type SinceBudgetCrossing } from "../../_ui/home/since";
 import { useRead } from "../../_ui/ds/read";
 import { LiveMark } from "../../_ui/home/presence";
 import { useLive, useLiveReload } from "../../_ui/live";
@@ -46,6 +46,7 @@ interface App {
 }
 interface HomeData {
   budget_requests: HomeBudgets | null;
+  budget_crossings: SinceBudgetCrossing[] | null;
   goals: HomeGoal[] | null;
   apps: { everyone: boolean; items: App[] } | null;
 }
@@ -54,7 +55,7 @@ interface Groups {
   mine: ChangeRequest[];
   others: ChangeRequest[];
 }
-const UNREAD: HomeData = { goals: null, apps: null, budget_requests: null };
+const UNREAD: HomeData = { goals: null, apps: null, budget_requests: null, budget_crossings: null };
 /** The page's heading, from NeedsList: its Needs-you count (null while reading, or when nothing is readable); `partial`
  *  when some source couldn't be read, so the count is a lower bound and zero is never claimed. */
 function needsHeading(n: number | null, partial: boolean) {
@@ -168,7 +169,7 @@ export default function Home({ me, ws, creation }: { me: Me; ws: string; creatio
           <Loading />
         ) : noGoals ? null : (
           <>
-            <Since ws={ws} me={me.id} changes={c.data ? allCrs : null} goals={h.goals} apps={h.apps?.items ?? null} onReview={(goal, id) => setReview({ goal, id })} onRefresh={refreshSince} />
+            <Since budgetCrossings={h.budget_crossings} ws={ws} me={me.id} changes={c.data ? allCrs : null} goals={h.goals} apps={h.apps?.items ?? null} onReview={(goal, id) => setReview({ goal, id })} onRefresh={refreshSince} />
             <GoalLines ws={ws} goals={h.goals} changes={c.data ? allCrs : null} feed={feed.data?.goals ?? null} presence={live.presence} canCreate={role === "owner" || role === "member"} onReview={(goal, id) => setReview({ goal, id })} />
           </>
         )}

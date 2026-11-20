@@ -43,7 +43,7 @@ export function observedCrossings(s: BudgetSnapshot, previous: BudgetSnapshot | 
 }
 
 /** Immutable marker per session/month/threshold, independent of context compaction and budget changes. */
-function claimNotes(home: string, lid: string, hot: HotState | null, now: number): { context: string; message: string }[] {
+function claimNotes(home: string, lid: string, hot: HotState | null, now: number, delivery: "context" | "message" = "context", claim = true): { context: string; message: string }[] {
   if (!hot?.share || hot.share.state !== "shared" || !hot.binding || hot.pending_binding) return [];
   const s = readJson<BudgetSnapshot>(layout.budgetCache(home, lid));
   if (!s || s.workspace_id !== hot.share.workspace_id || s.session_key !== hot.share.session_key || s.epoch_id !== hot.binding.epoch_id ||
@@ -57,13 +57,18 @@ function claimNotes(home: string, lid: string, hot: HotState | null, now: number
     if (!crossing) continue;
     const { threshold, as_of } = crossing;
     if (![80, 100].includes(threshold) || !Number.isFinite(Date.parse(as_of)) || Date.parse(as_of) > serverRead + CLOCK_TOLERANCE_MS || monthOf(Date.parse(as_of)) !== s.month) continue;
-    const file = layout.budgetShown(home, lid, s.month, threshold);
+    const contextFile = layout.budgetShown(home, lid, s.month, threshold);
+    const file = contextFile + (delivery === "message" ? "-message" : "");
+    if (delivery === "message" && fs.existsSync(contextFile)) continue;
     if (fs.existsSync(file)) continue;
-    try {
+    if (claim) try {
       fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
       const fd = fs.openSync(file, "wx", 0o600);
       try { fs.writeFileSync(fd, new Date(now).toISOString()); } finally { fs.closeSync(fd); }
     } catch { continue; }
+    if (claim && delivery === "context") {
+      try { fs.writeFileSync(file + "-message", new Date(now).toISOString(), { flag: "wx", mode: 0o600 }); } catch { /* already claimed */ }
+    }
     const readAt = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(as_of));
     const month = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "long", year: "numeric" }).format(new Date(`${s.month}-01T00:00:00Z`));
     const figure = `[Align] ${quoted(s.team.name, 60)} reached ${threshold}% of its team budget for ${month}, estimated at list price. The estimate was read on ${readAt}.`;
@@ -75,12 +80,12 @@ function claimNotes(home: string, lid: string, hot: HotState | null, now: number
 
 
 /** Compatibility context path, sharing the same immutable delivery markers. */
-export function budgetNotes(home: string, lid: string, hot: HotState | null, now = Date.now()): string[] {
-  return claimNotes(home, lid, hot, now).map((note) => note.context);
+export function budgetNotes(home: string, lid: string, hot: HotState | null, now = Date.now(), delivery: "context" | "message" = "context", claim = true): string[] {
+  return claimNotes(home, lid, hot, now, delivery, claim).map((note) => note[delivery]);
 }
 
-/** Claim once, then return both outputs together so no early return can lose the person's message. */
+/** Return both delivery outputs together so no early return loses the person's message. */
 export function claimBudgetNotes(home: string, lid: string, hot: HotState | null, now = Date.now()): { context: string[]; messages: string[] } {
-  const notes = claimNotes(home, lid, hot, now);
-  return { context: notes.map((note) => note.context), messages: notes.map((note) => note.message) };
+  const messages = budgetNotes(home, lid, hot, now, "message");
+  return { context: budgetNotes(home, lid, hot, now), messages };
 }

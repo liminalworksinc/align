@@ -70,12 +70,14 @@ export class HttpError extends Error {
   }
 }
 
+export const credentialsFile = (home: string) => path.join(home, "credentials.json");
+
 export function loadCredentials(home: string): Credentials | null {
-  return readJson<Credentials>(layout.credentials(home));
+  return readJson<Credentials>(credentialsFile(home));
 }
 
 export function saveCredentials(home: string, c: Credentials): void {
-  writeJsonAtomic(layout.credentials(home), c, 0o600);
+  writeJsonAtomic(credentialsFile(home), c, 0o600);
 }
 
 /** Why this machine is signed out, in words for `align status`. The stored reason is the refusal's `reason` when the
@@ -102,6 +104,7 @@ export function signedIn(home: string): boolean {
 export interface Resp {
   status: number;
   json: any;
+  jsonParsed?: boolean;
   headers: Headers;
   /** The server's clock minus this computer's (ms), from the answer's `Date` header; null without one. */
   clockOffsetMs: number | null;
@@ -154,15 +157,15 @@ export async function rawRequest(base: string, method: string, path: string, opt
   const date = Date.parse(res.headers.get("date") || "");
   const clockOffsetMs = Number.isNaN(date) ? null : date + 500 - Math.round((t0 + Date.now()) / 2);
   const text = await res.text().catch(() => "");
-  let json: any = null;
+  let json: any = null, jsonParsed = false;
   if (text) {
     try {
-      json = JSON.parse(text);
+      json = JSON.parse(text); jsonParsed = true;
     } catch {
       json = null;
     }
   }
-  return { status: res.status, json, headers: res.headers, clockOffsetMs };
+  return { status: res.status, json, jsonParsed, headers: res.headers, clockOffsetMs };
 }
 
 /** The ALIGN_HOMEs whose refresh lock the current async call chain holds, so a call made while holding it (a logout's

@@ -79,7 +79,7 @@ sent), `align.db` (SQLite, WAL), `rules.json` (folder rules), `me.json`, `instal
 another ingester waits up to 3 seconds for and takes over after 60, so a record is applied once and in order),
 `activity/<lid>.jsonl` (team activity), `feeds/<ws>.json`
 (goal feeds), `feeds/activity-<ws>.json` (other machines' activity), `feeds/asks-<ws>.json` (asks between teams),
-`budgets-cache/<lid>.json` (observed monthly budget and due crossings), `budget-attribution/<lid>.json` (positive or empty attribution), `budgets-cache/teams.json` (five-minute team reads), `budgets-cache/cursor.json` (bounded sync rotation), `budget-shown/<lid>/<month>-<threshold>` (persistent note dedupe),
+`budgets-cache/<lid>.json` (observed monthly budget and due crossings), `budget-attribution/<lid>.json` (positive or empty attribution), `budgets-cache/teams.json` (five-minute team reads), `budgets-cache/cursor.json` (bounded sync rotation), `budget-shown/<lid>/<month>-<threshold>` (persistent context dedupe), `budget-shown/<lid>/<month>-<threshold>-message` (persistent message dedupe),
 `drift/<lid>.json` (a drift notice waiting for the next prompt: limit ids and sentence digests), `steering/` (steering lines shown, waiting to be
 reported), `unshared-digest.json` and `unshared-shown.json` (this machine's agent time outside shared sessions and the
 week its note was shown; never sent), `logs/align.log`, `logs/sync.log`, and
@@ -1397,6 +1397,40 @@ in `last-sync.json` (it keeps what the pass before it recorded).
 ### Requirement: Informational team budget notes
 
 The budget commands and next-turn notes SHALL follow `budgets`, including clock-aware snapshots, temporary-refusal preservation, terminal cache refresh, last-in-pass budget work and delivery-marker retention. Terminal requests SHALL always wait for a person. Hooks SHALL read only the local budget snapshot and delivery markers, without credentials, network-client imports, directory scans or lock waits. The model context SHALL contain no command. A separate person-only message SHALL address the person and may name the request command. Both SHALL name a readable month and UTC read time. Unknown or mismatched observations SHALL produce no new crossing. A previously observed crossing SHALL remain due within the same month and team until a newer accepted read shows a changed effective budget or removal. Sign-out SHALL remove budget snapshots, attribution caches and delivery markers; stop-sharing SHALL retain delivery markers. Uninstall SHALL remove all three directories.
+
+Successful terminal reads SHALL print figures first, then best-effort update only the selected team's cache and
+matching confirmed sessions under sync validation. A held sync lock SHALL skip that update. At most one attribution
+read SHALL confirm the current folder's most recently active session. Local failures SHALL leave the terminal read
+successful. Directive budget stamps SHALL invalidate changed team reads in the same pass while unchanged cached
+passes make no budget requests. Missing stamps, unknown fields and a 404 budget route SHALL leave sync working.
+
+Claude Code synchronous tool calls SHALL show a due budget warning only through a user-visible field outside model
+context, without a lock wait. Subagent calls SHALL be skipped. Each threshold SHALL
+have one persistent user-message opportunity and one persistent context-line opportunity per session and UTC month
+across starts, prompts, tool calls and restarts; prompt-first delivery consumes the message opportunity too. The next
+prompt SHALL receive its context line even if a tool warning was shown. Codex user-only tool-call messages are not
+verified and SHALL keep next-prompt delivery. No budget context SHALL enter a turn at a tool call.
+A locally opened epoch SHALL receive no budget message until its current epoch and the snapshot match.
+
+#### Scenario: A terminal read leaves the next prompt current
+
+- **WHEN** a person reads the current team's budget with `align budget` successfully (`test/budget-timing.test.ts`, "terminal caching updates one team and its confirmed sessions with at most one current-folder read under the sync lock")
+- **THEN** the local team figure and matching confirmed session snapshot reflect that read under sync validation and bounds
+
+#### Scenario: A tool call after a crossing
+
+- **WHEN** a main-session tool call follows a sync-observed crossing during a supported long turn (`test/budgets.test.ts`, "tool warnings stay user-only, skip subagents and a busy lock, and share durable delivery limits with prompts")
+- **THEN** the person receives one warning outside model context and the next prompt still receives its context line once
+
+#### Scenario: An unverified harness stays on next-prompt delivery
+
+- **WHEN** an unsupported tool-call delivery path follows a sync-observed crossing (`test/budgets.test.ts`, "a prompt-first crossing consumes the user warning too; unsupported harness tool calls consume neither marker")
+- **THEN** no budget message or context enters that tool call and the crossing remains due at the next prompt
+
+#### Scenario: A locally opened spending period waits
+
+- **WHEN** a main-session tool call has opened a new local epoch while its snapshot describes the earlier epoch (`test/budgets.test.ts`, "mid-turn budget messages wait for the locally opened epoch to be confirmed")
+- **THEN** no budget message or marker is claimed until the current epoch and snapshot agree
 
 #### Scenario: Next-turn budget information
 
@@ -3489,4 +3523,5 @@ next to a session shared in the same folder in the last 24 hours, `Align: this f
 - `packages/align-agent/src/shared/budget-notes.ts`
 - `packages/align-agent/src/shared/clock.ts`
 - `packages/align-agent/test/budgets.test.ts`
+- `packages/align-agent/test/budget-timing.test.ts`
 - `packages/align-agent/test/serial/latency.test.ts`

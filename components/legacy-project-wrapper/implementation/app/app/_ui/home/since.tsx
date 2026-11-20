@@ -23,6 +23,10 @@ import { when } from "@/lib/v2/when.mts";
 // list will show rather than inventing a history. Storage can be blocked: every access is guarded, and blocked storage
 // reads as a first visit.
 
+export interface SinceBudgetCrossing {
+  team: { id: string; name: string }; month: string; threshold: number; observed_at: string; as_of: string;
+}
+
 export interface SinceGoal {
   id: string;
   title: string;
@@ -167,6 +171,7 @@ function useVersions(ws: string, goals: SinceGoal[] | null, on: boolean, tick = 
 
 /** One time format with the record's timeline: "Nov 5, 12:28 PM", no seconds, no numeric date. */
 const stamp = (iso: string) => when(iso);
+const budgetReadTime = (iso: string) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(iso));
 const after = (iso: string | null | undefined, since: string) => !!iso && iso > since;
 const same = (a: string | null, b: string | null) => !!a && !!b && Math.abs(Date.parse(a) - Date.parse(b)) < 2000;
 
@@ -178,9 +183,11 @@ export default function Since({
   apps,
   onReview,
   onRefresh,
+  budgetCrossings,
 }: {
   ws: string;
   me: string;
+  budgetCrossings?: SinceBudgetCrossing[] | null;
   /** Home reads its requests, goals and apps again (once a minute while open, from this section). */
   onRefresh?: () => void;
   /** Every change request the person can read (GET …/change-requests, all groups), or null when that read failed. */
@@ -264,18 +271,24 @@ export default function Since({
         });
       }
     }
+    for (const c of budgetCrossings ?? []) {
+      if (!after(c.observed_at, since)) continue;
+      out.push({ id: `budget:${c.team.id}:${c.month}:${c.threshold}`, who: c.team.name,
+        what: `reached ${c.threshold}% of its budget this month, estimated at list price. Read on ${budgetReadTime(c.as_of)}.`,
+        when: c.observed_at, source: { kind: "system" }, object: <Link href={`/app/w/${ws}/spend?team=${encodeURIComponent(c.team.id)}&month=${c.month}`} className="text-(--text-1) underline-offset-2 hover:underline">Team budget</Link> });
+    }
     for (const a of apps ?? []) {
       if (!after(a.last_read_at, since)) continue;
       out.push({ id: `app:${a.id}`, who: a.name, what: "read the goals", when: a.last_read_at!, source: { kind: EV[a.evidence_class], detail: "last read" } });
     }
     // What changed for this person: their own actions are left out ("You approved…" is news to nobody).
     return out.filter((e) => e.who !== "You").sort((x, y) => y.when.localeCompare(x.when));
-  }, [since, changes, goals, versions, apps, me, ws, onReview]);
+  }, [since, changes, goals, versions, apps, budgetCrossings, me, ws, onReview]);
 
   const reading = !!since && goals !== null && versions === null;
   // A goal whose versions read failed is left out of `versions`, so it counts as a source Align didn't read.
   const versionsMissed = !!versions && !!goals?.slice(0, MAX_GOALS).some((g) => !versions.has(g.id));
-  const missing = [changes === null && "change requests", goals === null && "goals", versionsMissed && "goal versions", apps === null && "connected apps"].filter(Boolean) as string[];
+  const missing = [changes === null && "change requests", goals === null && "goals", versionsMissed && "goal versions", apps === null && "connected apps", budgetCrossings === null && "team budget crossings"].filter(Boolean) as string[];
   const shown = all ? events : events.slice(0, SHOWN);
 
   return (
