@@ -18,6 +18,7 @@ import { layout } from "./shared/layout.ts";
 import type { ShareFacts } from "./shared/ended.ts";
 import type { FeedFile, Goal, GoalSnapshot, MeFile } from "./shared/types.ts";
 import type { PodFeed } from "./hooks/siblings.ts";
+import type { EpochOrigin } from "./shared/epoch-origin.ts";
 
 export function enqueue(ctx: Ctx, lid: string, kind: string, payload: unknown): void {
   ctx.db.prepare("INSERT INTO outbox(local_id, kind, payload, created_at) VALUES(?,?,?,?)").run(lid, kind, JSON.stringify(payload), nowIso());
@@ -49,7 +50,7 @@ export interface SharePlan {
   session_key: string;
   repo_key: string;
   put_body: { harness: string; repo_key: string; repo_alias: string | null; started_at: string; title: null };
-  epoch_body: { epoch_id: string; goal_id: string | null; starts_at: string; root_turn: null; cause: "manual" };
+  epoch_body: { epoch_id: string; goal_id: string | null; starts_at: string; root_turn: null; cause: "manual"; origin: EpochOrigin | null };
   rows_now: number;
   unfinalized_now: number;
 }
@@ -61,7 +62,7 @@ const EPOCH_ID = /^ep_[A-Za-z0-9_-]{22,64}$/;
  * `epochId`: the share's first epoch when the caller chose it (a folder rule's share, whose hook told the model about it
  * by that id, cycle 7); a fresh one when it is not a well-formed id or this machine has used it already.
  */
-export function planShare(ctx: Ctx, lid: string, workspace: { id: string; name: string }, goal: Goal | null, alias: string | null, from: "start" | "now", epochId?: string | null): SharePlan {
+export function planShare(ctx: Ctx, lid: string, workspace: { id: string; name: string }, goal: Goal | null, alias: string | null, from: "start" | "now", origin: EpochOrigin | null, epochId?: string | null): SharePlan {
   const s = getSession(ctx.db, lid);
   if (!s) throw new Error("unknown session");
   const root = repoRoot(s.cwd) || s.cwd || "(unknown)";
@@ -84,7 +85,7 @@ export function planShare(ctx: Ctx, lid: string, workspace: { id: string; name: 
     session_key: skey,
     repo_key: rkey,
     put_body: { harness: s.harness, repo_key: rkey, repo_alias: savedAlias, started_at: started, title: null },
-    epoch_body: { epoch_id: freshEpochId(ctx, epochId), goal_id: goal ? goal.id : null, starts_at, root_turn: null, cause: "manual" },
+    epoch_body: { epoch_id: freshEpochId(ctx, epochId), goal_id: goal ? goal.id : null, starts_at, root_turn: null, cause: "manual", origin },
     rows_now: counts.fin || 0,
     unfinalized_now: counts.unf || 0,
   };
@@ -107,7 +108,7 @@ export function renderPreview(p: SharePlan): string {
     "These fields will be sent:",
     `  session  harness=${p.put_body.harness} repo_key=${p.repo_key} (keyed hash, not the path)`,
     `           repo_alias=${p.put_body.repo_alias ?? "none"} started_at=${p.put_body.started_at} title=none`,
-    `  epoch    epoch_id=${p.epoch_body.epoch_id} goal_id=${p.epoch_body.goal_id ?? "none"} starts_at=${p.starts_at} root_turn=none cause=manual`,
+    `  epoch    epoch_id=${p.epoch_body.epoch_id} goal_id=${p.epoch_body.goal_id ?? "none"} starts_at=${p.starts_at} root_turn=none cause=manual origin=${p.epoch_body.origin ?? "unknown"}`,
     `  usage    ${p.rows_now} finalized request rows now, more as the session continues. Each row: request_key (keyed hash),`,
     "           ts, epoch_id, model, query_source, input, output, cache_read, cache_write_5m, cache_write_1h,",
     "           cache_write_unsplit, basis, est_list_usd_micros (an estimate), price_table_version, source",
@@ -144,8 +145,8 @@ export function applyShare(ctx: Ctx, p: SharePlan): void {
       ctx.db.prepare("INSERT INTO repo_aliases(workspace_id, repo_root, alias) VALUES(?,?,?) ON CONFLICT DO UPDATE SET alias=excluded.alias").run(p.workspace.id, root, p.alias);
     }
     ctx.db
-      .prepare("INSERT INTO epochs(epoch_id, local_id, workspace_id, goal_id, starts_at, root_turn, cause, created_at) VALUES(?,?,?,?,?,?,?,?)")
-      .run(p.epoch_body.epoch_id, lid, p.workspace.id, p.epoch_body.goal_id, p.starts_at, null, "manual", nowIso());
+      .prepare("INSERT INTO epochs(epoch_id, local_id, workspace_id, goal_id, starts_at, root_turn, cause, origin, created_at) VALUES(?,?,?,?,?,?,?,?,?)")
+      .run(p.epoch_body.epoch_id, lid, p.workspace.id, p.epoch_body.goal_id, p.starts_at, null, "manual", p.epoch_body.origin, nowIso());
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
     notePriorShare(ctx, lid, false);
     // Which share this is: a share made again after an earlier one ended is told to the model as bound (cycle 6).
@@ -163,15 +164,16 @@ export function applyShare(ctx: Ctx, p: SharePlan): void {
 }
 
 /** Bind takes effect at the next root turn: the UserPromptSubmit hook opens the epoch. */
-export function bind(ctx: Ctx, lid: string, goal: Goal | null, cause = "manual", directiveId: string | null = null, id = randomId("pb_")): void {
+export function bind(ctx: Ctx, lid: string, goal: Goal | null, origin: EpochOrigin | null, id = randomId("pb_")): void {
   const share = getShare(ctx, lid);
   if (!share || (share.state !== "shared" && share.state !== "suspended" && share.state !== "pending")) throw new Error("session is not shared; share it first");
   ctx.db
     .prepare(
-      `INSERT INTO pending_bindings(local_id, id, goal_id, goal_json, cause, directive_id, created_at) VALUES(?,?,?,?,?,?,?)
-       ON CONFLICT(local_id) DO UPDATE SET id=excluded.id, goal_id=excluded.goal_id, goal_json=excluded.goal_json, cause=excluded.cause, directive_id=excluded.directive_id, created_at=excluded.created_at`,
+      `INSERT INTO pending_bindings(local_id, id, goal_id, goal_json, cause, directive_id, origin, created_at) VALUES(?,?,?,?,'manual',NULL,?,?)
+       ON CONFLICT(local_id) DO UPDATE SET id=excluded.id, goal_id=excluded.goal_id, goal_json=excluded.goal_json, cause=excluded.cause,
+         directive_id=excluded.directive_id, origin=excluded.origin, created_at=excluded.created_at`,
     )
-    .run(lid, id, goal?.id ?? null, goal ? JSON.stringify(snapshot(goal)) : null, cause, directiveId, nowIso());
+    .run(lid, id, goal?.id ?? null, goal ? JSON.stringify(snapshot(goal)) : null, origin, nowIso());
   renderHot(ctx, lid);
 }
 

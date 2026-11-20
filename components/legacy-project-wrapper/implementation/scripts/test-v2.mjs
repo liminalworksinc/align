@@ -632,6 +632,13 @@ if (build.status !== 0) {
   process.exit(1);
 }
 
+{
+  const serverOrigins = await import("../lib/v2/epoch-origin.mts").then((m) => m.EPOCH_ORIGINS, () => null);
+  const { EPOCH_ORIGINS: agentOrigins } = await import("../packages/align-agent/src/shared/epoch-origin.ts");
+  check("LIM-2521: the server and local agent accept the same epoch origins",
+    JSON.stringify(serverOrigins) === JSON.stringify(agentOrigins), JSON.stringify({ serverOrigins, agentOrigins }));
+}
+
 // ======== LIM-2455 §F: none of the PR #34 prototype's controls ship (a scan of the served code, no server) ========
 {
   const PROTOTYPE = /SCRIPTED DESIGN STUDY|FICTIONAL \/ SCRIPTED|Preview role|Preview: |Simulate an authorized app read|simulated error|Ink atlas|LIM-2449|passcode/i;
@@ -1054,7 +1061,7 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 26, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds, deleted-session markers and the goal versions sent to connected apps included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 26 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_budget_crossings", "v2_budget_stamps", "v2_spend_home_teams", "v2_team_budgets", "v2_team_budget_history", "v2_budget_requests", "v2_budget_request_decisions", "v2_budget_request_sessions", "v2_team_no_goal_rollups", "v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 27, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds, deleted-session markers and the goal versions sent to connected apps included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 27 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_budget_crossings", "v2_budget_stamps", "v2_spend_home_teams", "v2_team_budgets", "v2_team_budget_history", "v2_budget_requests", "v2_budget_request_decisions", "v2_budget_request_sessions", "v2_team_no_goal_rollups", "v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   const budgetIndexes = withDb((d) => [
     ["v2_budget_requests_requester_created", ["ws_id", "requester_id", "created_at"]],
@@ -1780,20 +1787,43 @@ try {
   const e1Again = await epoch(D3, S3a, { epoch_id: E1, goal_id: G3.id, starts_at: T0 });
   const e1Conflict = await epoch(D3, S3a, { epoch_id: E1, goal_id: G2.id, starts_at: T0 });
   check("epochs: a first epoch may start at the session's start; the same epoch again is idempotent; same id with other values -> 409", e1.status === 200 && e1.json.starts_at === T0 && e1.json.ends_at === null && e1.json.goal_version_at_start === 1 && e1Again.status === 200 && e1Conflict.status === 409, `${e1.text} ${e1Again.status} ${e1Conflict.status}`);
-  const e2 = await epoch(D3, S3a, { epoch_id: E2, goal_id: G2.id, starts_at: at(60), root_turn: "turn-7" });
+  const e2Body = { epoch_id: E2, goal_id: G2.id, starts_at: at(60), root_turn: "turn-7", origin: "folder_rule" };
+  const [e2, e2Concurrent] = await Promise.all([epoch(D3, S3a, e2Body), epoch(D3, S3a, e2Body)]);
   const e1Row = withDb((d) => d.prepare("SELECT ends_at FROM v2_epochs WHERE epoch_id = ?").get(E1));
   check("epochs: a team goal binds; opening it closes the previous epoch at its start", e2.status === 200 && e1Row.ends_at === at(60), `${e2.text} ${JSON.stringify(e1Row)}`);
+  check("LIM-2521: concurrent identical opens return the same epoch and its origin", e2.status === 200 && e2.json.origin === "folder_rule" && e2Concurrent.status === 200 && e2.text === e2Concurrent.text, `${e2.text} ${e2Concurrent.text}`);
+  const epochRetryChanges = [{ root_turn: "another-turn" }, { starts_at: at(61) }, { origin: "hand" }];
+  const epochRetryReplies = await Promise.all(epochRetryChanges.map((patch) => epoch(D3, S3a, { ...e2Body, ...patch })));
+  const epochRetryOrigins = await Promise.all([undefined, null, "switch_request"].map((origin) => epoch(D3, S3a, { ...e2Body, origin })));
+  const e2Kept = await epoch(D3, S3a, e2Body);
+  check("LIM-2521: changed root turn, start or a different origin consistent with the cause conflict and leave the epoch intact", epochRetryReplies.every((r) => r.status === 409 && r.json?.error === "epoch_conflict") && e2Kept.text === e2.text, epochRetryReplies.map((r) => r.text).join(" | "));
+  check("LIM-2521: retrying with omitted, null or unconfirmed origin preserves the stored origin", epochRetryOrigins.every((r) => r.status === 200 && r.text === e2.text), epochRetryOrigins.map((r) => r.text).join(" | "));
+  const legacyOriginRetry = await epoch(D3, S3a, { epoch_id: E1, goal_id: G3.id, starts_at: T0, origin: null });
+  check("LIM-2521: omitted origin is null and a closed epoch retry returns its recorded end", e1.json?.origin === null && legacyOriginRetry.status === 200 && legacyOriginRetry.json.origin === null && legacyOriginRetry.json.ends_at === at(60), `${e1.text} ${legacyOriginRetry.text}`);
   const overlap = await epoch(D3, S3a, { epoch_id: epochId(), goal_id: G3.id, starts_at: at(30) });
   const early = await epoch(D3, S3b, { epoch_id: epochId(), goal_id: G3.id, starts_at: new Date(Date.parse(T0) - 60000).toISOString() });
   const badCause = await epoch(D3, S3b, { epoch_id: epochId(), goal_id: G3.id, starts_at: T0, cause: "directive:dir_aaaaaaaaaaaaaaaaaaaaaaaa" });
   check("epochs: overlapping an earlier epoch -> 409 epoch_overlap; before the session started -> 400; an unknown directive cause -> 400", overlap.status === 409 && overlap.json?.error === "epoch_overlap" && early.status === 400 && badCause.status === 400, `${overlap.status} ${early.status} ${badCause.status}`);
+  const unknownOrigin = await epoch(D3, S3a, { ...e2Body, origin: "random" });
+  const malformedCause = await epoch(D3, S3a, { ...e2Body, cause: "bad-cause" });
+  check("LIM-2521: unknown origin and malformed cause return 400 even on a retry",
+    unknownOrigin.status === 400 && malformedCause.status === 400, `${unknownOrigin.text} ${malformedCause.text}`);
+  const manualAlignment = await epoch(D3, S3b, { epoch_id: epochId(), goal_id: null, starts_at: T0, origin: "alignment" });
   const E3b = epochId();
-  await epoch(D3, S3b, { epoch_id: E3b, goal_id: null, starts_at: T0 });
+  const e3bBody = { epoch_id: E3b, goal_id: null, starts_at: T0, origin: "switch_request" };
+  const e3b = await epoch(D3, S3b, e3bBody);
+  const e3bRetry = await epoch(D3, S3b, e3bBody);
+  const e3bNullRetry = await epoch(D3, S3b, { ...e3bBody, origin: null });
+  check("LIM-2521: directive origins with a manual cause are stored as null and retry as null",
+    manualAlignment.status === 200 && manualAlignment.json?.origin === null && e3b.status === 200 && e3b.json?.origin === null &&
+      e3bRetry.status === 200 && e3bRetry.text === e3b.text && e3bNullRetry.status === 200 && e3bNullRetry.text === e3b.text,
+    `${manualAlignment.text} ${e3b.text} ${e3bRetry.text} ${e3bNullRetry.text}`);
   const E2a = epochId();
-  const priv = await epoch(D2, S2a, { epoch_id: E2a, goal_id: GP.id, starts_at: T0 });
+  const priv = await epoch(D2, S2a, { epoch_id: E2a, goal_id: GP.id, starts_at: T0, origin: "suggested_agent" });
   const E1a = epochId();
-  const own1 = await epoch(D1, S1a, { epoch_id: E1a, goal_id: G1.id, starts_at: T0 });
+  const own1 = await epoch(D1, S1a, { epoch_id: E1a, goal_id: G1.id, starts_at: T0, origin: "suggested_model" });
   check("epochs: an unbound epoch (goal null) and the owner's own private goal bind", priv.status === 200 && own1.status === 200, `${priv.text} ${own1.text}`);
+  check("LIM-2521: the server stores the two reserved origins", priv.json?.origin === "suggested_agent" && own1.json?.origin === "suggested_model", `${priv.text} ${own1.text}`);
 
   const upload = (dev, key, rows, extra = {}) => call(dev.who, "POST", `/api/v2/workspaces/${A}/sessions/${key}/usage`, { bearer: dev.access, body: { rows }, ...extra });
   const rowsA = [usageRow(D3, "r1", E1), usageRow(D3, "r2", E1, { basis: "api_usd" }), usageRow(D3, "r3", E1, { est_list_usd_micros: null, model: "mystery-model" }), usageRow(D3, "r4", E2, { query_source: "subagent" })];
@@ -1804,7 +1834,9 @@ try {
   check("usage: a batch -> accepted 4; the same batch -> duplicates 4; same key with other values -> conflict, never overwritten", u1.json?.accepted === 4 && u2.json?.duplicates === 4 && u2.json.accepted === 0 && u3.json?.conflicts === 1 && kept === 200, `${u1.text} ${u2.text} ${u3.text} ${kept}`);
   const u4 = await upload(D3, S3a, [usageRow(D3, "r5", E3b), usageRow(D3, "r6", epochId())]);
   check("usage: a row whose epoch belongs to another session, or is unknown -> rejected per row as conflicts", u4.json?.accepted === 0 && u4.json.conflicts === 2, u4.text);
-  await upload(D3, S3b, [usageRow(D3, "b1", E3b), usageRow(D3, "b2", E3b, { basis: "workspace_credits" })]);
+  const unrecordedUsage = await upload(D3, S3b, [usageRow(D3, "b1", E3b), usageRow(D3, "b2", E3b, { basis: "workspace_credits" })]);
+  check("LIM-2521: an epoch with a downgraded origin still accepts usage",
+    unrecordedUsage.status === 200 && unrecordedUsage.json?.accepted === 2, unrecordedUsage.text);
   await upload(D2, S2a, [usageRow(D2, "p1", E2a, { input: 7777 })]);
   await upload(D1, S1a, [usageRow(D1, "o1", E1a, { basis: "estimated_list_usd" })]);
   const tooMany = await upload(D3, S3a, Array.from({ length: 501 }, (_, i) => usageRow(D3, `m${i}`, E1)));
@@ -1828,6 +1860,20 @@ try {
   check("spend: by session names only the caller's own sessions; everyone else's is one row", sessRows.some((r) => r.kind === "session") && sessRows.filter((r) => r.kind === "others").length === 1 && !sessRows.some((r) => r.kind === "session" && r.label.startsWith("U1")), JSON.stringify(sessRows.map((r) => r.label)));
   const viewerSpend = sp["U4:goal"];
   const teamRows = sp["U1:team"].rows;
+  const g3Split = g1.rows.find((r) => r.goal?.id === G3.id)?.by_origin;
+  const g2Split = g1.rows.find((r) => r.goal?.id === G2.id)?.by_origin;
+  check("LIM-2521: goal spend uses each uploaded epoch's origin, sums priced and unpriced requests, and keeps the private bucket unsplit",
+    g3Split?.length === 1 && g3Split[0].origin === null && !g3Split[0].rolled_up && g3Split[0].requests === 3 && g3Split[0].unpriced_requests === 1 && g3Split[0].est_list_usd_micros === 2 * rowsA[0].est_list_usd_micros &&
+      g2Split?.length === 1 && g2Split[0].origin === "folder_rule" && g2Split[0].requests === 1 && g2Split[0].est_list_usd_micros === rowsA[3].est_list_usd_micros &&
+      privRowU2?.by_origin?.[0]?.origin === "suggested_agent" && !("by_origin" in privRowU1) && [...teamRows, ...sessRows].every((r) => !("by_origin" in r)),
+    JSON.stringify([g3Split, g2Split, privRowU1?.by_origin, privRowU2?.by_origin]));
+  const originLists = await Promise.all([U1, U3, U4].map((u) => call(u.who, "GET", `/api/v2/workspaces/${A}/sessions`, { cookie: u.cookie })));
+  const ownerOther = originLists[0].json?.all?.find((s) => s.session_key === S3a);
+  const memberCurrent = originLists[1].json?.mine?.find((s) => s.session_key === S3a)?.current_epoch;
+  check("LIM-2521: own sessions show origin and the owner sees only the origin for another member's binding",
+    memberCurrent?.origin === "folder_rule" && ownerOther?.origin === "folder_rule" && ["current_epoch", "goal_id", "title", "usage", "cause"].every((key) => !(key in ownerOther)) &&
+      originLists[1].json.all === null && originLists[2].json?.all === null && originLists[2].json?.mine?.length === 0,
+    JSON.stringify([ownerOther, memberCurrent, originLists[2].json]));
   const podAlias = await spendOf(U1, "pod");
   const badBy = await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=person`, { cookie: U1.cookie });
   check(
@@ -2190,12 +2236,28 @@ try {
     `${againSame.text} ${againOther.text}`,
   );
   const E4 = epochId();
-  const e4 = await epoch(D3, S3a, { epoch_id: E4, goal_id: G1.id, starts_at: at(90), cause: `directive:${bc?.id}` });
+  const e4Body = { epoch_id: E4, goal_id: G1.id, starts_at: at(90), cause: `directive:${bc?.id}`, origin: "alignment" };
+  const wrongSessionCause = await epoch(D3, S3b, e4Body);
+  const unconfirmedOrigins = await Promise.all([
+    epoch(D3, S3a, { ...e4Body, epoch_id: epochId(), goal_id: G2.id }),
+    epoch(D3, S3a, { ...e4Body, epoch_id: epochId(), origin: "hand" }),
+    epoch(D3, S3a, { ...e4Body, epoch_id: epochId(), origin: "switch_request" }),
+  ]);
+  const e4 = await epoch(D3, S3a, e4Body);
+  const e4ChangedCause = await epoch(D3, S3a, { ...e4Body, cause: "manual" });
+  check("LIM-2521: a directive for another session returns 400 and a changed valid cause conflicts on retry",
+    wrongSessionCause.status === 400 && e4ChangedCause.status === 409 && e4ChangedCause.json?.error === "epoch_conflict",
+    `${wrongSessionCause.text} ${e4ChangedCause.text}`);
+  check("LIM-2521: a goal or origin that disagrees with the alignment directive is stored with null origin",
+    unconfirmedOrigins.every((r) => r.status === 200 && r.json?.origin === null) && e4.json?.origin === "alignment",
+    `${unconfirmedOrigins.map((r) => r.text).join(" | ")} ${e4.text}`);
   const notCovered = await epoch(D3, S3b, { epoch_id: epochId(), goal_id: G1.id, starts_at: at(90) });
   check("alignment: the agent opens an epoch on G1 for the covered session (cause directive:<id>); an uncovered session still -> 403", e4.status === 200 && e4.json.goal_id === G1.id && notCovered.status === 403, `${e4.text} ${notCovered.status}`);
   await upload(D3, S3a, [usageRow(D3, "after-align", E4)]);
   const spendAfter = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json;
   check("alignment: future usage counts under G1; past usage did not move", spendAfter.rows.find((r) => r.goal?.id === G1.id)?.requests === 2 && spendAfter.rows.find((r) => r.goal?.id === G2.id)?.requests === 1 && invariantHolds(spendAfter), JSON.stringify(spendAfter.rows.map((r) => [r.label, r.requests])));
+  const alignmentSplit = spendAfter.rows.find((r) => r.goal?.id === G1.id)?.by_origin;
+  check("LIM-2521: one goal's spend keeps both origins after a session changes goals", alignmentSplit?.length === 2 && alignmentSplit.some((r) => r.origin === "suggested_model" && r.requests === 1) && alignmentSplit.some((r) => r.origin === "alignment" && r.requests === 1), JSON.stringify(alignmentSplit));
   const revoke = await act(U1, wt.json.id, "revoke", { revision: 2 });
   const afterRevoke = await dirs(D3, after.next_cursor);
   const bs = afterRevoke.directives.find((d) => d.kind === "binding_suspended");
@@ -2206,6 +2268,11 @@ try {
     revoke.json?.state === "revoked" && bs && bs.session_keys.join() === S3a && bs.binding.cause === `alignment:${wt.json.id}` && s3aState === "suspended" && putAfter.json?.state === "suspended" && putAfter.json.current_epoch === null,
     `${revoke.text} ${JSON.stringify(afterRevoke.directives)} ${s3aState} ${putAfter.text}`,
   );
+  const suspendedList = await call("U1", "GET", `/api/v2/workspaces/${A}/sessions`, { cookie: U1.cookie });
+  const ownerSuspended = suspendedList.json?.all?.find((s) => s.session_key === S3a);
+  check("LIM-2521: the owner's list keeps a suspended session's last binding origin",
+    ownerSuspended?.state === "suspended" && ownerSuspended.origin === "alignment" && ownerSuspended.origin_scope === "last",
+    JSON.stringify(ownerSuspended));
   const inflight = await upload(D3, S3a, [usageRow(D3, "inflight", E4)]);
   const rebindG1 = await epoch(D3, S3a, { epoch_id: epochId(), goal_id: G1.id, starts_at: new Date().toISOString() });
   const rebindOwn = await epoch(D3, S3a, { epoch_id: epochId(), goal_id: G3.id, starts_at: new Date().toISOString() });
@@ -2826,6 +2893,18 @@ try {
   const crZ5 = await propose(U1, GZ5.id, { base_version: 1, changes: { title: "Tiny spend goal, renamed" }, reason: "A clearer name" });
   const mcpZ5 = await mcpCall("U1", D1, "align_list_change_requests", { state: "pending" });
   const money = await import(pathToFileURL(path.join(ROOT, "lib/v2/money.mts")).href).catch(() => null);
+  const splitCosts = [
+    { total: 694_730, parts: [99_730, 98_000, 80_000, 417_000], expected: ["$0.10", "$0.10", "$0.08", "$0.41"] },
+    { total: 298, parts: [149, 0, 149], expected: ["$0.0002", "$0.0000", "$0.0001"] },
+    { total: 9_950, parts: [4_975, 4_975], expected: ["$0.01", "$0.00"] },
+    { total: 49, parts: [25, 24], expected: ["$0.0000", "$0.0000"] },
+  ];
+  const wrongSplits = splitCosts.flatMap(({ total, parts, expected }) => {
+    const actual = money?.splitUsd?.(total, parts);
+    return actual?.join() === expected.join() ? [] : [{ total, actual, expected }];
+  });
+  check("LIM-2521: splitUsd uses the goal total's precision and assigns spare units to the largest remainders in display order",
+    wrongSplits.length === 0, JSON.stringify(wrongSplits));
   const z5Micros = crZ5.json?.revisions?.[0]?.snapshot?.spend?.total?.est_list_usd_micros;
   check(
     "Z5: one money rule for the web and MCP (lib/v2/money.mts): usd(1000) is \"$0.0010\", usd(0) \"$0.00\", usd(12_345_678) \"$12.35\"; a snapshot of $0.001 reads \"$0.0010 estimated over 30 days in 1 request\" in the MCP text, as the web card writes it, never \"$0.00 estimated\"",
@@ -3557,6 +3636,8 @@ try {
       const z3Put = await put(D5, z3Key, { title: "Z3 history" });
       const w5Key = sessionKey(D5, A, "claude-code", "native-w5");
       const w5Put = await put(D5, w5Key, { title: "W5 next action" });
+      await epoch(D5, w5Key, { epoch_id: epochId(), goal_id: null, starts_at: T0, origin: "folder_rule" });
+      await epoch(D5, w5Key, { epoch_id: epochId(), goal_id: null, starts_at: T0, origin: "hand" });
       page.on("dialog", (dl) => void dl.accept());
       await page.goto(`${BASE}/app/w/${A}/sessions`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Z3 history"), { timeout: 15000 }).catch(() => undefined);
@@ -3570,6 +3651,7 @@ try {
         `${z3Put.status} ${z3Gone.status} ${z3Text.slice(0, 600)}`,
       );
       // W5 (E2E-WEB cycle 7): the note is about that delete only: the next action (Stop sharing on another row) clears it.
+      const w5Before = await page.evaluate(() => [...document.querySelectorAll("main li")].find((li) => li.innerText.includes("W5 next action"))?.innerText ?? "");
       await page.evaluate(() => [...document.querySelectorAll("main li")].find((li) => li.innerText.includes("W5 next action"))?.querySelectorAll("button").forEach((b) => b.textContent === "Stop sharing" && b.click()));
       await page.waitForFunction(() => [...document.querySelectorAll("main li")].find((li) => li.innerText.includes("W5 next action"))?.innerText.includes("not shared"), { timeout: 15000 }).catch(() => undefined);
       const w5Text = await page.evaluate(() => document.querySelector("main")?.innerText ?? "");
@@ -3579,6 +3661,9 @@ try {
         w5Put.status === 200 && w5Row.includes("not shared") && !w5Text.includes("That session's shared history was already deleted"),
         w5Text.slice(0, 600),
       );
+      check("LIM-2521 (ui): Stop sharing retains the most recent origin as Last binding",
+        w5Before.includes("Shared by hand") && w5Row.includes("Last binding: Shared by hand"),
+        `${w5Before} | ${w5Row}`);
     } finally {
       await browser.close();
     }
@@ -4280,6 +4365,11 @@ try {
         .prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, last_read_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, 'c-phone', ?, ?, ?, ?, ?, 'h', ?, ?)")
         .run("gr_PHONEPHONEPHONE1", A, U1.id, "An app with a fairly long client name", "a-rather-long-redirect-host.example.com", at, at, at, Date.now() + 86_400_000, kid),
     );
+    const roundingSession = sessionKey(D1, A, "claude-code", "spend-rounding");
+    const roundingEpoch = epochId();
+    await put(D1, roundingSession);
+    await epoch(D1, roundingSession, { epoch_id: roundingEpoch, goal_id: G1.id, starts_at: T0, origin: "hand" });
+    await upload(D1, roundingSession, [usageRow(D1, "spend-rounding", roundingEpoch, { est_list_usd_micros: 24_690 })]);
     const { default: puppeteer } = await import("puppeteer-core");
     const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
     try {
@@ -4310,6 +4400,44 @@ try {
         wide.length === 0 && /Sends you back to/.test(appsRow) && /Last connected/.test(appsRow) && /Last read the goals/.test(appsRow) && errors.length === 0,
         `${wide.join(" | ")} ${errors.join(" | ")}`,
       );
+      for (const width of [390, 1280]) {
+        await page.setViewport({ width, height: 844 });
+        await page.goto(`${BASE}/app/w/${A}/sessions`, { waitUntil: "networkidle0" });
+        await page.waitForSelector(`[data-session-row="${S2a}"]`);
+        const sessionText = await page.evaluate((key) => ({
+          mine: document.querySelector("[data-surface='sessions'] ul")?.innerText,
+          other: document.querySelector(`[data-session-row="${key}"]`)?.innerText,
+          fits: document.scrollingElement.scrollWidth <= innerWidth,
+        }), S2a);
+        await page.screenshot({ path: path.join(onDir, `sessions-origin-${width}.png`), fullPage: true });
+        await page.goto(`${BASE}/app/w/${A}/spend`, { waitUntil: "networkidle0" });
+        await page.waitForSelector("details summary");
+        const initiallyClosed = await page.evaluate(() => [...document.querySelectorAll("td details")].every((d) => !d.open));
+        for (const summary of await page.$$("td details summary")) await summary.click();
+        const splitText = await page.evaluate(() => ({
+          text: [...document.querySelectorAll("td details[open] dl")].map((d) => d.innerText).join("\n"),
+          privateSplit: [...document.querySelectorAll("td")].some((td) => td.innerText.startsWith("Private goals") && td.querySelector("details")),
+          fits: document.scrollingElement.scrollWidth <= innerWidth,
+        }));
+        await page.screenshot({ path: path.join(onDir, `spend-origin-${width}.png`), fullPage: true });
+        check(`LIM-2521 (Chrome ${width}px): Sessions shows binding origins and Spend expands readable goal rows without sideways scrolling`,
+          sessionText.fits && sessionText.mine?.includes("Suggested by a model") && sessionText.other?.includes("Suggested by an agent") &&
+            initiallyClosed && splitText.fits && /Suggested by a model\s+1 request · \$/.test(splitText.text) && !splitText.privateSplit && errors.length === 0,
+          `${JSON.stringify(sessionText)} ${JSON.stringify(splitText)} ${errors.join(" | ")}`);
+        if (width === 390) {
+          const costs = await page.evaluate((title) => {
+            const row = [...document.querySelectorAll("tbody tr")].find((tr) => tr.firstElementChild?.firstElementChild?.textContent === title);
+            return {
+              total: row?.querySelector('[data-label="Estimated list cost"]')?.innerText,
+              parts: [...(row?.querySelectorAll("details[open] dd") ?? [])].map((dd) => dd.innerText.split(" · ")[1]).sort(),
+            };
+          }, G1.title);
+          check("LIM-2521 (ui): a goal's displayed sharing source costs add up to its displayed total",
+            costs.total === "$0.04" && costs.parts.join() === "$0.01,$0.03", JSON.stringify(costs));
+        }
+      }
+      await call("U1", "DELETE", `/api/v2/workspaces/${A}/sessions/${roundingSession}`, { cookie: U1.cookie });
+      await page.setViewport({ width: 390, height: 844 });
       // -- main #44 on v2: compact chrome on a phone, 44 px action buttons, the main pages at desktop widths, the
       //    workspace switcher at 700, one read of the connected apps per page (no poll), and the goal page's
       //    stale-parent prompt for the child's owner only (the LIM-2455 checklist's §B) --
@@ -6812,13 +6940,40 @@ try {
     );
     const swAuto = await qRec(swDir?.id, SM1.key, "accepted", { auto_accepted: true });
     const swAutoRow = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_receipts WHERE directive_id = ? AND state = 'accepted'").get(swDir?.id ?? "").n);
+    const switchEpochBody = (cause) => ({ epoch_id: epochId(), goal_id: G2.id, starts_at: new Date().toISOString(), root_turn: null, cause: `directive:${cause}`, origin: "switch_request" });
+    const switchEpoch = (body) => call("QM", "POST", `/api/v2/workspaces/${QW}/sessions/${SM1.key}/epochs`, { bearer: DQM.access, body });
+    const prematureSwitchBody = switchEpochBody(swDir?.id);
+    const prematureSwitch = await switchEpoch(prematureSwitchBody);
     const swAcc = await qRec(swDir?.id, SM1.key, "accepted");
-    const swBind = await call("QM", "POST", `/api/v2/workspaces/${QW}/sessions/${SM1.key}/epochs`, { bearer: DQM.access, body: { epoch_id: epochId(), goal_id: G2.id, starts_at: new Date().toISOString(), root_turn: null, cause: `directive:${swDir?.id}` } });
+    const prematureSwitchRetry = await switchEpoch(prematureSwitchBody);
+    const checkpointSwitch = await switchEpoch(switchEpochBody(cpDir.id));
+    const swBindBody = switchEpochBody(swDir?.id);
+    const swBind = await switchEpoch(swBindBody);
     check(
       "switch_goal: auto_accepted -> 400 and nothing recorded (it changes direction, so only the developer accepts); the developer's accept -> accepted; the binding then moves through the existing epoch path with the request directive as its cause",
       swAuto.status === 400 && swAutoRow === 0 && swAcc.json?.request_state === "accepted" && swBind.status === 200 && swBind.json.goal_id === G2.id,
       `${swAuto.text} ${swAutoRow} ${swAcc.text} ${swBind.text}`,
     );
+    check("LIM-2521: switch request origin is null without a developer's acceptance or a switch_goal directive",
+      prematureSwitch.status === 200 && prematureSwitch.json?.origin === null && checkpointSwitch.status === 200 && checkpointSwitch.json?.origin === null &&
+        swBind.json?.origin === "switch_request",
+      `${prematureSwitch.text} ${checkpointSwitch.text} ${swBind.text}`);
+    check("LIM-2521: retry after switch request acceptance is recorded returns the stored null origin",
+      prematureSwitchRetry.status === 200 && prematureSwitchRetry.text === prematureSwitch.text && prematureSwitchRetry.json?.origin === null,
+      `${prematureSwitch.text} ${prematureSwitchRetry.text}`);
+
+    // Make the acceptance unavailable for this retry while keeping the directive cause valid.
+    const setSwitchState = (state) => withDb((d) => d.prepare("UPDATE v2_request_targets SET state = ? WHERE request_id = ? AND session_key = ?").run(state, sw.json.request.id, SM1.key).changes);
+    const switchTargetsChanged = setSwitchState("received");
+    let swBindRetry;
+    try {
+      swBindRetry = await switchEpoch(swBindBody);
+    } finally {
+      setSwitchState("accepted");
+    }
+    check("LIM-2521: retry when switch request acceptance is unavailable returns the stored switch_request origin",
+      switchTargetsChanged === 1 && swBindRetry.status === 200 && swBindRetry.text === swBind.text && swBindRetry.json?.origin === "switch_request",
+      `${swBind.text} ${swBindRetry.text}`);
 
     // -- reading: the sender, approvers and workspace owners see every session; others their own rows and counts --
     const views = { QO: await list(QO), QM: await list(QM), QX: await list(QX), QV: await list(QV) };
@@ -13164,6 +13319,10 @@ try {
       `${runH.out} ${rawSessions()} ${usageLeft} ${rollCols}`,
     );
     const g2Row = spendH?.rows?.find((r) => r.goal?.id === G2.id);
+    check("LIM-2521: rolled-up spend has only a separately marked, unknown origin",
+      g2Row?.by_origin?.length === 1 && g2Row.by_origin[0].origin === null && g2Row.by_origin[0].rolled_up === true &&
+        g2Row.by_origin[0].requests === 2 && g2Row.by_origin[0].est_list_usd_micros === 2 * 12_345 && !rollCols.includes("origin"),
+      JSON.stringify(g2Row?.by_origin));
     check(
       "spend: rolled-up totals still report by goal (the same totals as before, invariant holds); by=session they are one \"Older sessions (rolled up)\" row; a from after their day leaves them out",
       spendH?.total?.requests === 5 && invariantHolds(spendH) && g2Row?.requests === 2 && g2Row.est_list_usd_micros === 2 * 12_345 && spendHs?.rows?.length === 1 && spendHs.rows[0].kind === "rolled_up" && spendHs.rows[0].label === "Older sessions (rolled up)" && spendHs.rows[0].requests === 5 && invariantHolds(spendHs) && spendLaterFrom?.total?.requests === 0,
@@ -13224,6 +13383,18 @@ try {
         page.on("pageerror", (e) => errors.push(e.message));
         page.on("dialog", (d) => void d.accept());
         await asUser(page, r1);
+        await page.setViewport({ width: 390, height: 844 });
+        await page.goto(`${BASE}/app/w/${W1}/spend`, { waitUntil: "networkidle0" });
+        await page.waitForSelector("td details summary");
+        for (const summary of await page.$$("td details summary")) await summary.click();
+        const rolledOrigins = await page.evaluate(() => ({
+          text: [...document.querySelectorAll("td details[open]")].map((d) => d.innerText).join("\n"),
+          fits: document.scrollingElement.scrollWidth <= innerWidth,
+        }));
+        check("LIM-2521 (Chrome 390px): expanded rolled-up spend is marked Not recorded (rolled up)",
+          rolledOrigins.fits && /Not recorded \(rolled up\)\s+2 requests · \$/.test(rolledOrigins.text) && errors.length === 0,
+          JSON.stringify(rolledOrigins));
+        await page.setViewport({ width: 800, height: 600 });
         await page.goto(`${BASE}/app`, { waitUntil: "networkidle0" });
         await page.waitForFunction(() => document.body.innerText.includes("Deleted workspaces") && document.body.innerText.includes("Retention UI"), { timeout: 15000 });
         // Each of restore, removal, workspace deletion and account deletion first with a sign-in older than 15 minutes:

@@ -391,6 +391,7 @@ describe("requests e2e", () => {
     const ep = await waitFor(() => [...fake.epochs.values()].find((e) => e.root_turn === "p3"), 5000, "epoch at p3");
     assert.equal(ep.goal_id, "g_perf");
     assert.equal(ep.cause, `directive:${sw.directive_id}`);
+    assert.equal(ep.origin, "switch_request");
 
     // checkpoint: done by the agent at the end of the turn (auto_accepted), then declined by the developer from the CLI.
     const cp = fake.sendRequest("ws_acme", { type: "checkpoint", goal_id: "g_perf", session_keys: [skey] });

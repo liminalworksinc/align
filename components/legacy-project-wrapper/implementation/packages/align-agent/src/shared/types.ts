@@ -1,5 +1,6 @@
 // Types shared by the CLI, the sync job and the hooks. Wire shapes follow docs/v2/WIRE.md.
 import type { ReleaseReaches, ShareFacts, ShareNow, ShareTold } from "./ended.ts";
+import type { EpochOrigin } from "./epoch-origin.ts";
 
 export type Harness = "claude-code" | "codex";
 
@@ -75,13 +76,14 @@ export interface HotState {
    *  else `sharing_ended`), cycle 7. */
   share: { workspace_id: string; workspace_name: string; session_key: string; state: ShareState; since?: string; ended?: EndedWhy } | null;
   goal: GoalSnapshot | null;
-  binding: { epoch_id: string; goal_id: string | null } | null;
+  binding: { epoch_id: string; goal_id: string | null; origin?: EpochOrigin | null } | null;
   /** Opened by the next UserPromptSubmit hook (a root-turn boundary). */
   pending_binding: {
     id: string;
     goal_id: string | null;
     goal: GoalSnapshot | null;
     cause: string;
+    origin?: EpochOrigin | null;
     directive_id: string | null;
   } | null;
   /** Directive ids whose effect on model context has not been injected yet. */
@@ -233,12 +235,14 @@ export interface InjectedState {
    * has recorded it: the next prompt opens its epoch from here, so it never waits for a sync. The spooled command
    * carries the same id, so the sync records the same binding.
    */
-  local_binding?: { id: string; goal_id: string | null; goal: GoalSnapshot | null; cause: string; directive_id: string | null };
+  local_binding?: NonNullable<HotState["pending_binding"]>;
   /** Pending bindings the developer replaced in the session before the sync caught up: never opened (N1). */
   superseded_bindings?: string[];
   /** The epoch this hook opened last, and its goal, until the sync has recorded it (hot `epochs_seen`): until then the
    *  hot file's goal is the one before it, which must not read as another switch (N1). */
-  opened_epoch?: { epoch_id: string; goal: GoalSnapshot | null; at: string; resumed?: boolean };
+  opened_epoch?: { epoch_id: string; goal: GoalSnapshot | null; origin?: EpochOrigin | null; at: string; resumed?: boolean };
+  /** The repo hint this session was shown, kept on this machine. */
+  anchor_hint?: { workspace_id: string; goal_id: string };
   /** The share a folder rule asked for at this session's start, until the sync has made it (hot `share`): `::align
    *  status` says it is on its way rather than "private" (cycle 10, section 5). */
   rule_share?: { workspace_id: string; workspace_name: string; goal_id: string | null; goal_title: string | null; at: string };
@@ -399,6 +403,7 @@ export type SpoolRecord =
       starts_at: string;
       root_turn: string | null;
       cause: string;
+      origin?: EpochOrigin | null;
       pending_id: string;
       directive_id: string | null;
       ts: string;
@@ -422,6 +427,7 @@ export type SpoolRecord =
       cwd: string | null;
       command: "share" | "unshare" | "bind";
       arg: string | null;
+      origin?: EpochOrigin;
       /** Set when a folder rule shares the session; otherwise the default workspace is used. */
       workspace?: string | null;
       rule_dir?: string | null;

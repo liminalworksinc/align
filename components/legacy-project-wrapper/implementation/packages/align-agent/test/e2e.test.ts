@@ -105,6 +105,7 @@ describe("e2e", () => {
     await waitFor(() => fake.usage.size === 1, 5000, "first usage row");
     const firstEpoch = [...fake.epochs.values()][0];
     assert.equal(firstEpoch.goal_id, "g_ship");
+    assert.equal(firstEpoch.origin, "hand");
     assert.equal([...fake.usage.values()][0].epoch_id, firstEpoch.epoch_id);
     assert.equal([...fake.usage.values()][0].basis, "api_usd", "no oauthAccount in the sandbox .claude.json");
 
@@ -145,6 +146,7 @@ describe("e2e", () => {
     const ep3 = await waitFor(() => [...fake.epochs.values()].find((e) => e.root_turn === "p3"), 5000, "epoch at p3");
     assert.equal(ep3.cause, `directive:${d2.id}`);
     assert.equal(ep3.goal_id, "g_perf");
+    assert.equal(ep3.origin, "alignment");
     appendLines(transcript, [{ ...claudeUser(SID, "p3", new Date().toISOString()), cwd }]);
     reply("req_3");
     await waitFor(() => [...fake.usage.values()].some((u) => u.epoch_id === ep3.epoch_id), 5000, "usage in new epoch");
@@ -260,6 +262,7 @@ describe("e2e", () => {
     const skey = sessionKey(ctx.secret, "ws_acme", "claude-code", SID);
     await waitFor(() => fake.usage.size === 1, 5000, "usage from session start");
     assert.equal([...fake.epochs.values()][0].goal_id, "g_ship");
+    assert.equal([...fake.epochs.values()][0].origin, "hand");
     // CLI bind: pending until the next root turn opens the epoch.
     const b = await runCli(t, ["bind", SID.slice(0, 8), "--goal", "g_perf"]);
     assert.equal(b.code, 0, b.stderr);
@@ -268,6 +271,7 @@ describe("e2e", () => {
     assert.match(next.hookSpecificOutput.additionalContext, /Cut hook latency/);
     const ep = await waitFor(() => [...fake.epochs.values()].find((e) => e.root_turn === "d2"), 5000, "epoch at d2");
     assert.equal(ep.cause, "manual");
+    assert.equal(ep.origin, "hand");
     // In-session bind to a goal that is not the person's own or their team's is refused locally, without claiming an
     // alignment would make it bindable (an alignment moves its sessions by itself).
     const refused = JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "x3", prompt: "::align bind Someone" }).stdout);
@@ -275,6 +279,76 @@ describe("e2e", () => {
     assert.doesNotMatch(refused.reason, /needs an approved alignment/);
     void skey;
     await halt();
+  });
+
+  test("sync keeps uploading usage and shows Not recorded when the server stores a null epoch origin", async () => {
+    const { fake, t } = await world();
+    fake.dropEpochOrigin = true;
+    await login(t);
+    const sid = "dddddddd-1111-2222-3333-555555555555";
+    runHook(t, "claude", "SessionStart", { session_id: sid, source: "startup", cwd: t.root });
+    writeLines(path.join(t.claudeDir, "projects", "-d", `${sid}.jsonl`), [
+      claudeUser(sid, "d1", iso(900)), claudeAssistant(sid, "req_d1", iso(800), usage(2, 2)),
+    ]);
+    const prompt = (text: string) => JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: text, prompt: text }).stdout).reason;
+    const ctx = ctxFor(t);
+    try {
+      await syncOnce(ctx, { tailBudgetMs: 200 });
+      assert.match(prompt("::align share Ship confirm"), /sharing requested/);
+      await syncOnce(ctx, { tailBudgetMs: 200 });
+      const row = ctx.db.prepare("SELECT origin, synced FROM epochs WHERE local_id=?").get(localId("claude-code", sid));
+      assert.equal(row?.synced, 1);
+      assert.equal(row?.origin, null);
+      assert.match(prompt("::align status"), /Sharing source: Not recorded/);
+      assert.equal(fake.usage.size, 1);
+    } finally {
+      ctx.db.close();
+    }
+  });
+
+  test("a repo hint changes share origin only for that session and goal", async () => {
+    const { fake, t } = await world();
+    fake.bumpGoal("ws_acme", "g_ship", { anchors: { repos: ["team/project"], branch_patterns: [], issues: [] } });
+    await login(t);
+    const cwd = path.join(t.root, "project");
+    fs.mkdirSync(path.join(cwd, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(cwd, ".git", "HEAD"), "ref: refs/heads/main\n");
+    fs.writeFileSync(path.join(cwd, ".git", "config"), '[remote "origin"]\n  url = https://example.test/team/project.git\n');
+    const start = (sid: string, source = "startup") => {
+      const result = runHook(t, "claude", "SessionStart", { session_id: sid, source, cwd }).stdout;
+      return result ? JSON.parse(result).systemMessage ?? "" : "";
+    };
+    const prompt = (sid: string, text: string) => JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: text, prompt: text, cwd }).stdout).reason;
+    const first = "11111111-1111-2222-3333-444444444444";
+    const second = "22222222-1111-2222-3333-444444444444";
+    const third = "33333333-1111-2222-3333-444444444444";
+    const fourth = "44444444-1111-2222-3333-444444444444";
+    assert.match(start(first), /matches goal "Ship/);
+    assert.doesNotMatch(start(first), /matches goal/, "the hint appears once in the session");
+    assert.match(start(second), /matches goal "Ship/);
+    assert.doesNotMatch(start(third, "fork"), /matches goal/);
+    assert.match(start(fourth), /matches goal "Ship/);
+
+    assert.match(prompt(first, "::align share Ship confirm"), /sharing requested/);
+    const otherGoal = await runCli(t, ["share", second, "--workspace", "ws_acme", "--goal", "g_perf", "--yes"]);
+    assert.equal(otherGoal.code, 0, otherGoal.stderr);
+    const noHint = await runCli(t, ["share", third, "--workspace", "ws_acme", "--goal", "g_ship", "--yes"]);
+    assert.equal(noHint.code, 0, noHint.stderr);
+    const hintedFolder = prompt(fourth, "::align share --dir Ship confirm");
+    assert.match(hintedFolder, /This session too/);
+    const ctx = ctxFor(t);
+    try {
+      await syncOnce(ctx, {});
+      for (const [sid, origin] of [[first, "anchor_hint"], [second, "hand"], [third, "hand"], [fourth, "anchor_hint"]]) {
+        const key = sessionKey(ctx.secret, "ws_acme", "claude-code", sid);
+        assert.equal([...fake.epochs.values()].find((e) => e.session_key === key)?.origin, origin);
+        const row = ctx.db.prepare("SELECT origin FROM epochs WHERE local_id=?").get(localId("claude-code", sid));
+        assert.equal(row?.origin, origin);
+      }
+      assert.match(prompt(first, "::align status"), /Sharing source: After a repo hint/);
+    } finally {
+      ctx.db.close();
+    }
   });
 
   test("folder rule: CLI share --dir shares new sessions from start with the envelope; forks stay private; unshare --dir stops it", async () => {
@@ -296,6 +370,7 @@ describe("e2e", () => {
     writeLines(path.join(t.claudeDir, "projects", "-f", `${SID}.jsonl`), [claudeUser(SID, "f1", new Date(Date.now() + 1000).toISOString()), claudeAssistant(SID, "req_f1", new Date(Date.now() + 2000).toISOString(), usage(2, 2))]);
     await waitFor(() => fake.usage.size === 1, 5000, "usage from session start");
     assert.equal([...fake.epochs.values()][0].goal_id, "g_ship");
+    assert.equal([...fake.epochs.values()][0].origin, "folder_rule");
     await waitFor(() => fs.existsSync(layout.hot(t.home, localId("claude-code", SID))), 5000, "hot state");
     const quiet = runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "f2", prompt: "go" });
     assert.equal(quiet.stdout, "", "envelope already in context: the first prompt adds 0 bytes");

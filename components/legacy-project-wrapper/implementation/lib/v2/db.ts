@@ -1418,6 +1418,11 @@ const MIGRATIONS: string[] = [
       ON CONFLICT (ws_id, pod_id, month) DO UPDATE SET revision = revision + 1;
   END;
   `,
+  `
+  ALTER TABLE v2_epochs ADD COLUMN origin TEXT CHECK (origin IN (
+    'hand', 'folder_rule', 'anchor_hint', 'alignment', 'switch_request', 'past_import', 'suggested_agent', 'suggested_model'
+  ));
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

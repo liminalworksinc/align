@@ -122,6 +122,85 @@ function race(jobs) {
   })));
 }
 
+await test("origin retries preserve captured team attribution and closed period displays", async () => {
+  await budget();
+  const key = session(), dev = { deviceId: "dv_spend", user: { id: "member" } };
+  const body = { epoch_id: `ep_${"p".repeat(22)}`, goal_id: null, starts_at: "2030-01-01T00:00:00.000Z", root_turn: "turn-1", cause: "manual", origin: "folder_rule" };
+  const open = (b = body) => openBindingEpoch(pp("member"), dev, key, b);
+  const [first, concurrent] = await Promise.all([open(), open()]);
+  assert.deepEqual(concurrent, first);
+  assert.equal(first.origin, "folder_rule");
+  assert.match(listSessions(pp("member")).mine[0].team_budget_label, /Build's team budget/);
+  db.run("INSERT INTO v2_pod_members VALUES (?, ?, 'member', 'member', ?)", W, T2, new Date().toISOString());
+  await chooseSpendHomeTeam(pp("member"), { team_id: T2 });
+  const stored = () => db.get("SELECT * FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", W, key, body.epoch_id);
+  const before = stored();
+  for (const origin of [undefined, null, "switch_request", "folder_rule"]) assert.deepEqual(await open({ ...body, origin }), first);
+  for (const change of [{ origin: "hand" }, { root_turn: "turn-2" }, { starts_at: "2030-01-02T00:00:00.000Z" }]) {
+    await reject(() => open({ ...body, ...change }), 409, "epoch_conflict");
+  }
+  await reject(() => open({ ...body, origin: "unknown" }), 400);
+  await reject(() => open({ ...body, cause: `directive:dir_${"a".repeat(24)}` }), 400);
+  assert.deepEqual(stored(), before);
+  assert.equal(stored().spend_team_id, T);
+  const endsAt = "2030-01-03T00:00:00.000Z";
+  db.run("UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ?", endsAt, W, key);
+  assert.deepEqual(await open(), { ...first, ends_at: endsAt });
+  const listed = listSessions(pp("member")).mine[0];
+  assert.equal(listed.current_epoch, null);
+  assert.deepEqual(listed.last_epoch, { origin: "folder_rule" });
+  assert.equal(listed.team_budget_label, null);
+});
+
+await test("switch acceptance changes on retries preserve the recorded origin", async () => {
+  goal("g_switch");
+  const key = session(), directive = `dir_${"a".repeat(24)}`, request = `rq_${"a".repeat(24)}`, at = "2030-01-01T00:00:00.000Z";
+  db.run("INSERT INTO v2_directives (id, ws_id, kind, goal_id, created_at) VALUES (?, ?, 'request', 'g_switch', ?)", directive, W, at);
+  db.run("INSERT INTO v2_directive_targets VALUES (?, ?, ?)", W, directive, key);
+  db.run("INSERT INTO v2_requests (id, ws_id, goal_id, type, target_goal_id, goal_version, sender_id, sender_role, directive_id, created_at) VALUES (?, ?, 'g_switch', 'switch_goal', 'g_switch', 1, 'owner', 'owner', ?, ?)", request, W, directive, at);
+  db.run("INSERT INTO v2_request_targets (ws_id, request_id, session_key, state, updated_at) VALUES (?, ?, ?, 'received', ?)", W, request, key, at);
+  const body = { epoch_id: `ep_${"p".repeat(22)}`, goal_id: "g_switch", starts_at: at, cause: `directive:${directive}`, origin: "switch_request" };
+  const open = (b = body) => openBindingEpoch(pp("member"), { deviceId: "dv_spend", user: { id: "member" } }, key, b);
+  const first = await open();
+  assert.equal(first.origin, null);
+  await reject(() => open({ ...body, cause: "manual" }), 409, "epoch_conflict");
+  await reject(() => open({ ...body, goal_id: null }), 409, "epoch_conflict");
+  db.run("UPDATE v2_request_targets SET state = 'accepted'");
+  assert.deepEqual(await open(), first);
+  const acceptedBody = { ...body, epoch_id: `ep_${"q".repeat(22)}`, starts_at: "2030-01-02T00:00:00.000Z" };
+  const accepted = await open(acceptedBody);
+  assert.equal(accepted.origin, "switch_request");
+  db.run("UPDATE v2_request_targets SET state = 'received'");
+  assert.deepEqual(await open(acceptedBody), accepted);
+});
+
+await test("origin spend agrees with team exports, budget totals and billing bases", async () => {
+  await budget(); goal("g_origins");
+  for (const [letter, origin, basis, amount] of [["a", "hand", "api_usd", 10], ["b", "folder_rule", "subscription_included", 20], ["c", null, "unknown", null]]) {
+    const key = session(letter.repeat(43));
+    await usage(key, "g_origins", amount);
+    db.run("UPDATE v2_epochs SET origin = ? WHERE session_key = ?", origin, key);
+    db.run("UPDATE v2_usage SET basis = ? WHERE session_key = ?", basis, key);
+  }
+  const { spend: report, spendTeamExport } = await import("../lib/v2/spend.ts");
+  const from = "2030-01-01T00:00:00.000Z", to = end;
+  const byGoal = report(pp("owner"), "goal", from, to), byTeam = spendTeamExport(pp("owner"), from, to);
+  assert.deepEqual(byGoal.total, byTeam.total);
+  assert.equal(byGoal.total.by_basis.api_usd.est_list_usd_micros, 10);
+  assert.equal(byGoal.total.by_basis.subscription_included.est_list_usd_micros, 20);
+  assert.equal(byGoal.total.by_basis.unknown.unpriced_requests, 1);
+  const split = byGoal.rows[0].by_origin;
+  for (const field of ["requests", "est_list_usd_micros", "unpriced_requests"]) assert.equal(split.reduce((n, row) => n + row[field], 0), byGoal.total[field]);
+  assert.equal((await burn()).priced_spend_usd_micros, byGoal.total.est_list_usd_micros);
+  await runRetention(db.sql, db.tx, new Date("2032-01-01T00:00:00Z"), { secret: "test-secret" });
+  const retained = report(pp("owner"), "goal", from, to);
+  assert.deepEqual(retained.total, byGoal.total);
+  assert.equal(retained.rows[0].by_origin.length, 1);
+  assert.equal(retained.rows[0].by_origin[0].rolled_up, true);
+  assert.equal(retained.rows[0].by_origin[0].origin, null);
+  assert.deepEqual(spendTeamExport(pp("owner"), from, to).total, retained.total);
+});
+
 await test("absent budget and creation refusal preserve existing work", async () => {
   assert.equal((await burn()).budget, null); assert.equal((await burn()).estimated_spend_usd_micros, 0); assert.equal((await burn()).effective_budget_usd_micros, null);
   await reject(() => ask(), 409, "budget_missing");
@@ -468,7 +547,7 @@ await test("former-member replacement covers every new actor column; workspace p
 });
 await test("migration 24 leaves every pre-feature period without a home team and preserves unallocated spend", async () => {
   const migrations = runInNewContext(/const MIGRATIONS: string\[\] = (\[[\s\S]*?\n\]);/.exec(readFileSync(path.join(ROOT, "lib/v2/db.ts"), "utf8"))[1]);
-  assert.equal(migrations.length, 26);
+  assert.equal(migrations.length, 27);
   const old = new DatabaseSync(":memory:");
   try {
     old.exec("CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY)");
@@ -480,6 +559,11 @@ await test("migration 24 leaves every pre-feature period without a home team and
     const retained = old.prepare("SELECT * FROM v2_spend_rollups").get();
     assert.equal(retained.requests, 1); assert.equal(retained.est_list_usd_micros, 100); assert.equal(retained.team_attributed_requests, 0);
     assert.deepEqual(old.prepare("SELECT * FROM v2_team_no_goal_rollups").all(), []);
+    migrations.slice(24, 26).forEach((m) => old.exec(m));
+    const period = old.prepare("SELECT * FROM v2_epochs WHERE epoch_id = 'e'").get();
+    old.exec(migrations[26]);
+    assert.deepEqual({ ...old.prepare("SELECT * FROM v2_epochs WHERE epoch_id = 'e'").get() }, { ...period, origin: null });
+    assert.deepEqual(old.prepare("SELECT * FROM v2_spend_rollups").get(), retained);
     assert.deepEqual(old.prepare("PRAGMA foreign_key_check").all(), []);
   } finally { old.close(); }
 });

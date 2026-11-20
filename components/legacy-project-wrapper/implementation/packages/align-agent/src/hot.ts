@@ -15,6 +15,7 @@ import { storedText, type ReleaseReaches, type ShareFacts, type ShareNow } from 
 import { isShareStateNotice, noticeKind } from "./shared/notices.ts";
 import { NEWEST_BUILD, selfBuild, WRITER_GEN, type BuildMark } from "./build.ts";
 import type { EndedWhy, GoalSnapshot, HoldLatch, HotRequest, HotState, Latch, MeFile, RequestState, ShareState } from "./shared/types.ts";
+import type { EpochOrigin } from "./shared/epoch-origin.ts";
 
 export { snapshot };
 
@@ -145,7 +146,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   if (!s) return null;
   const share = getShare(ctx, lid);
   const pending = ctx.db.prepare("SELECT * FROM pending_bindings WHERE local_id=?").get(lid) as
-    | { id: string; goal_id: string | null; goal_json: string | null; cause: string; directive_id: string | null }
+    | { id: string; goal_id: string | null; goal_json: string | null; cause: string; directive_id: string | null; origin: EpochOrigin | null }
     | undefined;
   // Notices about the share's state go with what happened (`facts`): the hook words them from `share_now` (cycle 11).
   // One an older build stored (no facts, or facts of an older generation stored after this one first wrote here) is
@@ -167,6 +168,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     .filter((r) => CONTEXT_KINDS.has(r.kind))
     .map((r) => r.id);
   const live = share && share.state !== "error" ? share : null;
+  const epoch = live?.binding_epoch ? ctx.db.prepare("SELECT origin FROM epochs WHERE epoch_id=?").get(live.binding_epoch) as { origin: EpochOrigin | null } | undefined : undefined;
   const shareSince = kvGet(ctx.db, `share_since:${lid}`);
   // Why the share ended so nothing from the web can lift its latches, whether `::align share` shares it again now, and
   // whether a release still reaches its holds: one reading, for its latch files and its notices alike (C6-2, C10-4).
@@ -191,10 +193,10 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
         }
       : null,
     goal: live && live.goal_json ? (JSON.parse(live.goal_json) as GoalSnapshot) : null,
-    binding: live && live.binding_epoch ? { epoch_id: live.binding_epoch, goal_id: live.binding_goal } : null,
+    binding: live && live.binding_epoch ? { epoch_id: live.binding_epoch, goal_id: live.binding_goal, origin: epoch?.origin ?? null } : null,
     pending_binding:
       live && pending
-        ? { id: pending.id, goal_id: pending.goal_id, goal: pending.goal_json ? JSON.parse(pending.goal_json) : null, cause: pending.cause, directive_id: pending.directive_id }
+        ? { id: pending.id, goal_id: pending.goal_id, goal: pending.goal_json ? JSON.parse(pending.goal_json) : null, cause: pending.cause, directive_id: pending.directive_id, origin: pending.origin }
         : null,
     pending_directives: live ? pendingDirs : [],
     notices,

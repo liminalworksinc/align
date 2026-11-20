@@ -149,9 +149,9 @@ function applyOne(ctx: Ctx, d: Directive, lid: string, seq: number, at: string):
       const target = d.goal && d.goal.id === d.binding.goal_id ? d.goal : d.binding.goal_id ? loadFeed(ctx.home, share.workspace_id)?.goals.find((g) => g.id === d.binding!.goal_id) || null : null;
       ctx.db
         .prepare(
-          `INSERT INTO pending_bindings(local_id, id, goal_id, goal_json, cause, directive_id, created_at) VALUES(?,?,?,?,?,?,?)
+          `INSERT INTO pending_bindings(local_id, id, goal_id, goal_json, cause, directive_id, origin, created_at) VALUES(?,?,?,?,?,?,'alignment',?)
            ON CONFLICT(local_id) DO UPDATE SET id=excluded.id, goal_id=excluded.goal_id, goal_json=excluded.goal_json, cause=excluded.cause,
-             directive_id=excluded.directive_id, created_at=excluded.created_at`,
+             directive_id=excluded.directive_id, origin=excluded.origin, created_at=excluded.created_at`,
         )
         .run(lid, d.id, d.binding.goal_id, target ? JSON.stringify(snapshot(target)) : null, `directive:${d.id}`, d.id, at);
       if (d.binding.goal_id && !target) refreshNeeded.add(share.workspace_id);

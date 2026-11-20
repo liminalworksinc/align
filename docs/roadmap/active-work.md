@@ -30,6 +30,33 @@ queue item or let `docs/roadmap/` become a plan archive.
 Check the parent only after every required subtask and evidence item passes. Add the
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
+### [x] PROVENANCE-001: Show how sessions came to count toward goals
+
+- **Priority:** P0
+- **Owner:** Align workspace, interface and local agent specifications and implementation
+- **Direction:** LIM-2521, section 5.6 of the attribution design, asks for binding origins and strict epoch retries.
+- **Conclusion:** Store origin on the epoch alongside cause and authority. Use that record for Spend, so a later
+  binding never changes where earlier usage counts. Keep old and rolled-up usage without an origin.
+- **Completion prerequisites:** none
+- **Outcome:** The server and local agent record origins, and Sessions, Spend and in-session status show them.
+  Changed retries return `epoch_conflict` without changing the stored epoch.
+- **Implementation and evidence:**
+  - [x] Specify origin, retry identity, and the Sessions, Spend and local status displays.
+    `litai spec validate specs/align --id-prefix align` passed for all eight documents.
+  - [x] Add server and local migrations, carry origins through every share and binding path, and update the wire contract.
+    Migration 27 records binding origins. Prior branch live CLI checks and agent package tests passed.
+  - [x] Cover retries, privacy, rolled-up spend, and the session and spend displays at 390 pixels.
+    `test-v2` passed 1,031 checks, including Chrome at 390 and 1,280 pixels.
+  - [x] Run both clean installs and the full test gate with Node 24.22.3.
+    `ALIGN_TEST_PORT=4500 npm test` passed 2,019 checks with zero failures. The retained receipt is stale.
+- **Merge verification:** Main's migrations 24 through 26 remain unchanged and precede origin migration 27.
+  Node 26.3.0: lint, route generation, app and package typechecks, package build and script syntax checks pass.
+  Budget domain checks pass 67/0, including retries, captured teams, origin splits and retention. Eight listener-free
+  package files pass 352/0. Serial latency passes one case and skips one because bare Node startup exceeds its
+  host-load cutoff. The first lint attempt hit a temporary-directory cleanup race; the final sequential run passes.
+  Tracked files contain no conflict markers and the whitespace check passes. Fresh listener-dependent checks
+  remain for the operator. The index and history remain untouched.
+
 ### [ ] CONTEXT-001: Show the context Align adds to each session
 
 - **Owner:** specs/align/local-agent.md and the local agent package

@@ -13,6 +13,7 @@ import { receiptEvidence } from "@/lib/v2/home-core.mts";
 import { count } from "@/lib/v2/plural.mts";
 import { shareAgainWords } from "@/lib/v2/share-again.mts";
 import type { AnySession, GoalLabel, MySession, StopStatus } from "../../../_ui/types";
+import { epochOriginLabel } from "@/lib/v2/epoch-origin.mts";
 
 const goalText = (g: GoalLabel | null | undefined) => (!g ? "no goal" : g.private ? "a goal you can't see" : g.title);
 
@@ -182,7 +183,10 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
                     {s.governing_goal ? `. Follows: ${goalText(s.governing_goal)}` : ""}
                   </>
                 )}
-                . {count(s.usage.requests, "request", undefined, num)}, {num(s.usage.input + s.usage.output)} input and output tokens.
+                .{" "}
+                {s.current_epoch && `${epochOriginLabel(s.current_epoch.origin)}. `}
+                {s.last_epoch && `Last binding: ${epochOriginLabel(s.last_epoch.origin)}. `}
+                {count(s.usage.requests, "request", undefined, num)}, {num(s.usage.input + s.usage.output)} input and output tokens.
               </p>
               {s.state === "suspended" && <Note>The alignment this session counted under was revoked. Pick a goal for it on your machine to resume uploads.</Note>}
               {s.team_budget_label && <p className="my-2 text-[14px] text-(--text-2)">{s.team_budget_label}</p>}
@@ -270,6 +274,11 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
                 <span className="font-mono text-[12.5px] text-(--text-3)" data-session-detail>
                   started {when(s.started_at)} · …{s.session_key.slice(-6)}
                 </span>
+                {s.origin_scope && (
+                  <span className="text-[14px] text-(--text-2)">
+                    {s.origin_scope === "last" && "Last binding: "}{epochOriginLabel(s.origin)}
+                  </span>
+                )}
                 {refused?.key === s.session_key ? (
                   // Its sharing ended: no Stop or Resume reaches it any more, so none is offered.
                   <RowRefusal text={refused.text} />

@@ -1,4 +1,5 @@
 // Response shapes the web app reads (see lib/v2/*). Kept here so client components import no server code.
+import type { EpochOrigin } from "@/lib/v2/epoch-origin.mts";
 
 /** One limit of a goal version (lib/v2/goal-limits.ts). */
 export interface Limit {
@@ -65,7 +66,8 @@ export interface MySession {
   ended_reason: "device_signed_out" | "member_removed" | null;
   /** The machine that shared it: its name, whether it signed out of Align, and whether it has this workspace now (W7). */
   device: { id: string; name: string; signed_out: boolean; has_workspace: boolean } | null;
-  current_epoch: { epoch_id: string; goal_id: string | null; starts_at: string; goal: GoalLabel | null } | null;
+  current_epoch: { epoch_id: string; goal_id: string | null; starts_at: string; goal: GoalLabel | null; origin: EpochOrigin | null } | null;
+  last_epoch: { origin: EpochOrigin | null } | null;
   governing_goal: GoalLabel | null;
   agent_stopped: boolean;
   stop_status: StopStatus | null;
@@ -80,6 +82,8 @@ export interface AnySession {
   harness: string;
   started_at: string;
   state: string;
+  origin: EpochOrigin | null;
+  origin_scope: "current" | "last" | null;
   agent_stopped: boolean;
   stop_status: StopStatus | null;
 }

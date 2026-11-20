@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Sessions and in-session status show how a session came to count toward its goal. Spend can show each goal's
+  request counts and list-price estimates by sharing source, with older rolled-up usage identified separately.
+- Retrying a binding with changed details returns a conflict and leaves the original binding in place.
 - Approving a budget request for its full amount is no longer refused in the browser for amounts such as $4.03.
   The form now rounds to whole cents before comparing, as the server does.
 - Concurrent writes and approval previews wait for the shared database transaction to finish, preventing nested

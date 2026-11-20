@@ -122,6 +122,7 @@ export class FakeServer {
   activity: any[] = [];
   activitySeq = 0;
   epochs = new Map<string, any>();
+  dropEpochOrigin = false;
   /** AskView per workspace, as `GET /api/v2/workspaces/:ws/asks` returns them (the reader's `can` flags included). */
   asks = new Map<string, (Ask & { can: Record<string, boolean> })[]>();
   usage = new Map<string, any>();
@@ -596,7 +597,7 @@ export class FakeServer {
           const floor = [sess.body.started_at, ...mine.map((e) => e.ends_at || e.starts_at)].filter(Boolean).sort().pop();
           if (floor && body.starts_at < floor) return send(409, { error: "epoch_overlap" });
           for (const e of this.epochs.values()) if (e.session_key === key && !e.ends_at) e.ends_at = body.starts_at;
-          const epoch = { epoch_id: body.epoch_id, goal_id: body.goal_id, goal_version_at_start: goal ? goal.version : null, starts_at: body.starts_at, ends_at: null, root_turn: body.root_turn, cause: body.cause, session_key: key };
+          const epoch = { epoch_id: body.epoch_id, goal_id: body.goal_id, goal_version_at_start: goal ? goal.version : null, starts_at: body.starts_at, ends_at: null, root_turn: body.root_turn, cause: body.cause, origin: this.dropEpochOrigin ? null : body.origin ?? null, session_key: key };
           this.epochs.set(body.epoch_id, epoch);
           if (sess.state === "suspended") sess.state = "shared";
           const { session_key: _k, root_turn: _r, cause: _c, ...wire } = epoch;

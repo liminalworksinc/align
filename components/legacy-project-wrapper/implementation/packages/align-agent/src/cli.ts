@@ -44,7 +44,7 @@ import { hookEvents, install, pluginHooksFile, POST_FLAG, sha256File, uninstall,
 import { newDeviceKey } from "./keys.ts";
 import { applyShare, bind, deleteHistory, deleteRefused, ENDED_UNREAD, endedUnread, endSharesIfSignedOut, endSharesSignedOut, SHARE_UNREAD_WORDS, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stoppedByPerson, stopSharing } from "./share.ts";
 import { askLineForPeople, askOrder, myTeams, readAsks } from "./shared/asks.ts";
-import { gitInfo } from "./shared/anchors.ts";
+import { gitInfo, manualShareOrigin } from "./shared/anchors.ts";
 import { readJson } from "./shared/fsx.ts";
 import { contextAddedLine, readContextCost } from "./shared/context-cost.ts";
 import { matchRule, readRules, realDir, removeRule, setRule } from "./shared/rules.ts";
@@ -1040,7 +1040,8 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
   const goal = await goalFor(ctx, ws.id, values.goal);
   // Shared before, also when its shared history was deleted since: this share counts from now (C6-1).
   const effectiveFrom = from === "start" && sharedBefore(ctx, session.local_id) ? "now" : from;
-  const plan = planShare(ctx, session.local_id, ws, goal, values.alias ?? null, effectiveFrom);
+  const origin = manualShareOrigin(ctx.home, session.local_id, ws.id, goal?.id);
+  const plan = planShare(ctx, session.local_id, ws, goal, values.alias ?? null, effectiveFrom, origin);
   out(renderPreview(plan));
   out(signalsPreview(!!values.signals));
   if (effectiveFrom !== from) out("This session was shared before, so this share counts from now.");
@@ -1108,7 +1109,7 @@ async function shareDir(ctx: Ctx, folder: string, wsRef: string | undefined, goa
   if (!past?.take.length) return;
   const epochs: string[] = [];
   for (const s of past.take) {
-    const plan = planShare(ctx, s.local_id, ws, goal, null, "start");
+    const plan = planShare(ctx, s.local_id, ws, goal, null, "start", "past_import");
     applyShare(ctx, plan);
     kvSet(ctx.db, `signals:${s.local_id}`, signals ? "1" : "0");
     epochs.push(plan.epoch_body.epoch_id);
@@ -1282,7 +1283,7 @@ async function cmdBind(ctx: Ctx, argv: string[]): Promise<void> {
   const share = getShare(ctx, s.local_id);
   if (!share) throw new UsageError("session is not shared; run `align share` first");
   const goal = await goalFor(ctx, share.workspace_id, values.goal);
-  bind(ctx, s.local_id, goal);
+  bind(ctx, s.local_id, goal, "hand");
   const kept = (ctx.db.prepare("SELECT goal_id, json FROM holds WHERE local_id=? AND held=1 ORDER BY seq").all(s.local_id) as { goal_id: string; json: string }[])
     .filter((h) => h.goal_id !== goal?.id)
     .map((h) => (JSON.parse(h.json) as { goal_title: string }).goal_title);

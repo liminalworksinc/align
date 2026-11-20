@@ -1447,12 +1447,12 @@ is off` and `server_time`.
 #### Scenario: Session list
 
 - **WHEN** a member calls `GET .../sessions`
-- **THEN** `mine` lists their own sessions in full (state, `ended_reason`, current spending period and goal, governing goal, stop status, conflicts and token totals, and `device`: the machine that shared it as `{id, name, signed_out, has_workspace}`, whether it signed out of Align and whether it has this workspace now, or null when no device is left, so the Sessions tab can say how to share an ended session again), and `all` is null except for workspace owners, for whom it lists every non-stopped session's key, alias, owner, harness, `started_at`, state and stop status, never its title or usage (`scripts/test-v2.mjs` "W3: the owner's list of everyone's sessions carries each session's started_at ...")
+- **THEN** `mine` lists their own sessions in full (state, `ended_reason`, current spending period with its origin and goal, governing goal, stop status, conflicts and token totals, and `device`: the machine that shared it as `{id, name, signed_out, has_workspace}`, whether it signed out of Align and whether it has this workspace now, or null when no device is left, so the Sessions tab can say how to share an ended session again). If there is no current spending period, `last_epoch` is `{origin}` from the most recent spending period if there is one, and is null otherwise. `all` is null except for workspace owners, for whom it lists every non-stopped session's key, alias, owner, harness, `started_at`, state, `origin` of the current or most recent closed spending period and `origin_scope` ("current", "last", or null when no spending period exists), and stop status, never the binding's goal or directive, the session's title or usage (`scripts/test-v2.mjs` "W3: the owner's list of everyone's sessions carries each session's started_at ...")
 
 ### Requirement: Binding spending periods
 
 The server SHALL let the sharing device open a binding spending period on `POST .../sessions/{key}/epochs {epoch_id, goal_id,
-starts_at, root_turn?, cause}`, closing the previous spending period at `starts_at`, only toward a goal the person has authority
+starts_at, root_turn?, cause, origin?}`, closing the previous spending period at `starts_at`, only toward a goal the person has authority
 to bind (as defined in `goals-and-proposals`). A `starts_at` more than 5 minutes ahead of the server's clock SHALL be
 answered 400 `clock_skew` (`starts_at is <n> minutes ahead of the server's clock; this device's clock is off`, with
 `server_time`), never a bare `bad_request`. A session whose stored `started_at` lies in the future on the server's clock
@@ -1463,12 +1463,39 @@ time to catch up.
 #### Scenario: Opening a spending period
 
 - **WHEN** a device POSTs `{epoch_id:"ep_…", goal_id|null, starts_at, cause:"manual"|"directive:<dir id>"}`
-- **THEN** the response is `{epoch_id, goal_id, goal_version_at_start, starts_at, ends_at:null}` and the previous spending period ends at `starts_at`; the session becomes `shared` again if it was suspended
+- **THEN** the response is `{epoch_id, goal_id, goal_version_at_start, starts_at, ends_at:null, origin}` and the previous spending period ends at `starts_at`; the session becomes `shared` again if it was suspended
 
-#### Scenario: spending period refusals
+#### Scenario: Spending period refusals
 
-- **WHEN** the spending period id is reused with other values, `starts_at` is before the open spending period's start or the last spending period's end, `starts_at` is more than 5 minutes ahead or before the session started, the goal cannot be bound, the goal is not active, `cause` names a directive not sent to this session, or sharing stopped
-- **THEN** the server responds 409 `epoch_conflict`, 409 `epoch_overlap`, 400 `clock_skew` or 400, 403 `alignment_required`, 409 `goal_not_active`, 400, or 409 `sharing_stopped` respectively; the same spending period sent again returns it unchanged
+- **WHEN** `starts_at` is before the open spending period's start or the last spending period's end, `starts_at` is more than 5 minutes ahead or before the session started, the goal cannot be bound, the goal is not active, `cause` names a directive not sent to this session, or sharing stopped
+- **THEN** the server responds 409 `epoch_overlap`, 400 `clock_skew` or 400, 403 `alignment_required`, 409 `goal_not_active`, 400, or 409 `sharing_stopped` respectively
+
+#### Scenario: Retrying a spending period id
+
+- **WHEN** the sharing device retries a spending period id for a session still accepting spending periods
+- **THEN** for a valid request, a change to the normalized `goal_id`, `starts_at`, `root_turn` or `cause` returns 409 `epoch_conflict`. With those fields unchanged, the server returns the stored spending period if the sent origin matches the stored origin, the stored origin is null, or the server would store null for the retry. The server would store null for an omitted or explicit null origin or a known origin it cannot confirm. A different known origin that the server can confirm conflicts with a stored non-null origin and returns 409 `epoch_conflict`. An unknown origin returns 400. Retries preserve the stored origin, authority, alignment, goal version and end time.
+
+#### Scenario: Switch request acceptance recorded after the spending period opens
+
+- **WHEN** a device opens a spending period with `switch_request` before the developer's acceptance is recorded, then retries the same request after the acceptance is recorded
+- **THEN** the retry returns 200 with the stored spending period and its null origin
+
+#### Scenario: Switch request acceptance unavailable after the spending period opens
+
+- **WHEN** a device opens a spending period with `switch_request` while the developer's acceptance is recorded, then retries the same request when the server can no longer confirm the acceptance and the cause is still valid
+- **THEN** the retry returns 200 with the stored spending period and its `switch_request` origin
+
+### Requirement: Binding spending period origin
+
+The server SHALL store and return `origin` with the spending period, alongside the existing cause and authority. It accepts
+`hand`, `folder_rule`, `anchor_hint`, `alignment`, `switch_request`, `past_import`, `suggested_agent`, `suggested_model`
+or null. Omitted origin and spending periods stored before origin was recorded have null origin. The two suggestion values are
+reserved for future clients. The current CLI sends neither.
+
+#### Scenario: Recording an origin
+
+- **WHEN** a device opens a spending period with a non-null origin
+- **THEN** the server records `alignment` for a `directive:<id>` cause naming the `binding_changed` for that session and goal, issued by an approved `work_toward`. It records `switch_request` for a cause naming a `switch_goal` request to that session and goal which its developer accepted. It records the other known origins with a `manual` cause. If a known origin cannot be confirmed, a valid spending period still returns 200 with origin null and can receive usage. An unknown origin returns 400. Every cause must be `manual` or name a directive sent to this session, including on retries.
 
 #### Scenario: A device clock that ran ahead
 
@@ -1531,6 +1558,11 @@ the caller may not see.
 
 - **WHEN** a member requests `by=team` or `by=session`
 - **THEN** team rows carry `team:{id, name}` with goals that have no team in one `Goals without a team` row, and session rows name only the caller's own sessions with everyone else's in one `Other people's sessions` row; `by=pod` is accepted as `by=team`, and another `by` or a `from` not before `to` is 400
+
+#### Scenario: A readable goal's spend by origin
+
+- **WHEN** a member requests `by=goal`
+- **THEN** each readable goal row includes `by_origin` with `{origin, rolled_up, requests, est_list_usd_micros, unpriced_requests}` for each group of usage. Live usage uses the origin of the spending period it was uploaded with, including null. Older rolled-up days give one group per goal with `origin: null` and `rolled_up: true`. Each split sums to its goal row. `Private goals` carries only the existing totals and never gives an origin split.
 
 #### Scenario: Rolled-up spend
 

@@ -118,9 +118,9 @@ export function answerRequest(ctx: Ctx, lid: string, requestId: string, answer: 
       // snapshot from the next feed refresh (syncSnapshots).
       ctx.db
         .prepare(
-          `INSERT INTO pending_bindings(local_id, id, goal_id, goal_json, cause, directive_id, created_at) VALUES(?,?,?,?,?,?,?)
+          `INSERT INTO pending_bindings(local_id, id, goal_id, goal_json, cause, directive_id, origin, created_at) VALUES(?,?,?,?,?,?,'switch_request',?)
            ON CONFLICT(local_id) DO UPDATE SET id=excluded.id, goal_id=excluded.goal_id, goal_json=excluded.goal_json, cause=excluded.cause,
-             directive_id=excluded.directive_id, created_at=excluded.created_at`,
+             directive_id=excluded.directive_id, origin=excluded.origin, created_at=excluded.created_at`,
         )
         .run(lid, pendingId || randomId("pb_"), q.target_goal.id, target ? JSON.stringify(snapshot(target)) : null, `directive:${row.directive_id}`, null, at);
     }

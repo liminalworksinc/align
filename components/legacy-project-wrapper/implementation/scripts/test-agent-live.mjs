@@ -687,7 +687,7 @@ try {
   const reqDirId = (rid, cancelled) =>
     sdb((d) => d.prepare("SELECT id FROM v2_directives WHERE ws_id = ? AND kind = 'request' AND json_extract(request_json, '$.request_id') = ? AND json_extract(request_json, '$.cancelled') = ?").get(W, rid ?? "", cancelled ? 1 : 0))?.id;
   const receipts = (dir, key, state) => sdb((d) => d.prepare("SELECT auto_accepted FROM v2_receipts WHERE directive_id = ? AND session_key = ? AND state = ? ORDER BY auto_accepted").all(dir ?? "", key, state)).map((r) => r.auto_accepted);
-  const openEpochOf = (key) => sdb((d) => d.prepare("SELECT goal_id, cause FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL").get(W, key));
+  const openEpochOf = (key) => sdb((d) => d.prepare("SELECT goal_id, cause, origin FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL").get(W, key));
   const localRequests = () => {
     try {
       return JSON.parse(cli(["requests", "--all", "--json"]).stdout);
@@ -825,6 +825,7 @@ try {
   // No sync between the accept and the next prompt (E2E-AGENT B2): the hook itself moves the session there.
   const swNext = prompt(Q1, "carry on");
   const swNextId = `q${qn}`;
+  const swStatus = prompt(Q1, "::align status");
   sync();
   sync();
   const swAccepted = reqRow(await reqView(SW?.id), Q1.key);
@@ -848,6 +849,10 @@ try {
       (swNext.context ?? "").includes(SW_TITLE) && (swNext.context ?? "").includes(`[Align] The developer accepted Lena Lead's request to move this session to goal "${SW_TITLE}".`),
     `accept=${swAccept.stdout} ${JSON.stringify(swAccepted)} before=${JSON.stringify(swEpochBefore)} after=${JSON.stringify(swEpoch)} root=${swRootTurn}/${swNextId} dir=${swDir} next=${swNext.stdout}`,
   );
+  check("LIM-2521: a switch accepted in-session shows its origin before sync and records it on the server after sync",
+    swStatus.json?.reason?.includes("Sharing source: Switch request accepted") && swStatus.json.reason.includes(SW_TITLE) &&
+      swEpochBefore?.origin === "folder_rule" && swEpoch?.origin === "switch_request" && swApi?.current_epoch?.origin === "switch_request",
+    `${swStatus.stdout} ${JSON.stringify(swEpochBefore)} ${JSON.stringify(swEpoch)}`);
 
   // -- a goal hold: every tool blocked, for sessions on the goal and one that binds to it later; independent of stop --
   const Q2 = startQ("q2");
@@ -891,12 +896,13 @@ try {
   const q2MovedId = `q${qn}`;
   sync();
   sync();
-  const q2Epoch = sdb((d) => d.prepare("SELECT goal_id, root_turn, cause FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL").get(W, Q2.key));
+  const q2Epoch = sdb((d) => d.prepare("SELECT goal_id, root_turn, cause, origin FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL").get(W, Q2.key));
   check(
     "bind (E2E-AGENT B2): `::align bind <goal>` with no sync before the next prompt moves the session at that prompt: its context names the goal, and after `align sync` the server has one epoch on it opened at that prompt (cause manual)",
     (q2Moved.context ?? "").startsWith(`[Align] From this turn this session counts toward goal "${SW_TITLE}"`) && q2Epoch?.goal_id === GT?.id && q2Epoch.root_turn === q2MovedId && q2Epoch.cause === "manual",
     `${q2Moved.stdout} ${JSON.stringify(q2Epoch)} ${q2MovedId}`,
   );
+  check("LIM-2521: a binding chosen in-session is recorded as shared by hand", q2Epoch?.origin === "hand", JSON.stringify(q2Epoch));
   const q2Left = tool(Q2, "Bash");
   // Stop and hold are independent: a resume does not lift the hold, and a release does not lift a stop.
   const stop1 = await ws(M, "POST", `/sessions/${Q1.key}/stop`, {});
