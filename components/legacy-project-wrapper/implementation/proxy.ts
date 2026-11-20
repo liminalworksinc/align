@@ -59,7 +59,8 @@ function route(request: NextRequest, cfg: ReturnType<typeof alignConfig>): NextR
   if (request.headers.get("x-forwarded-proto") !== "https") return NextResponse.json({ error: "Use https" }, { status: 403 });
   // Fly's edge sets Fly-Client-IP; a request without it did not come through the public proxy.
   if (!request.headers.get("fly-client-ip")) return NextResponse.json({ error: "Use the public address" }, { status: 403 });
-  if (p === "/") return NextResponse.redirect(new URL("/app", `https://${name}`), 307);
+  // /new: a v1 invite link. It leads to sign-in and the creation-code field; v1 never carried the code in the URL (LIM-2473).
+  if (p === "/" || p === "/new") return NextResponse.redirect(new URL("/app", `https://${name}`), 307);
   if (!HOSTED_ROUTES.test(p)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.next();
 }

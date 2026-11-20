@@ -1,3 +1,4 @@
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { headers } from "next/headers";
 import { connection } from "next/server";
 import { Suspense } from "react";
@@ -50,7 +51,7 @@ async function personFrom(h: Headers): Promise<Person | null> {
 function Refused({ children }: { children: React.ReactNode }) {
   return (
     <main className="mx-auto min-h-screen max-w-[560px] bg-[var(--al-bg)] p-6 text-[16px] text-zinc-900">
-      <h1 className="mb-3 text-[24px] font-semibold">Can’t connect this app</h1>
+      <h1 className={`${PAGE_H1} mb-3`}>Can’t connect this app</h1>
       {children}
     </main>
   );

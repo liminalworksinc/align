@@ -14,7 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import os from "node:os";
-import { withLock } from "../src/api.ts";
+import { loadCredentials, saveCredentials, withLock } from "../src/api.ts";
 import { sessionKey } from "../src/keys.ts";
 import { commitSubject, pathHash, repoIdentity, shellWrites, type Act } from "../src/hooks/siblings.ts";
 import * as envelope from "../src/shared/envelope.ts";
@@ -314,6 +314,35 @@ describe("LIM-2441 H7c: a holder releases only its own refresh lock", () => {
     gb.open();
     await b;
     assert.ok(!fs.existsSync(file), "B released its own lock");
+  });
+});
+
+describe("LIM-2441 H7a: a refresh whose answer was lost is tried once more at once, signed again", () => {
+  test("no answer to the first refresh: one more, and the device stays signed in; no answer to both: that call gives up after two, never signed out, and a later call refreshes", async () => {
+    const { fake, t } = await world();
+    const expire = () => {
+      const c = loadCredentials(t.home)!;
+      saveCredentials(t.home, { ...c, access_expires_at: new Date(Date.now() - 1000).toISOString() });
+    };
+    const refreshCalls = () => fake.log.filter((l) => l.path === "/api/v2/device/refresh").length;
+    expire();
+    fake.holdCalls = { match: (m, p) => m === "POST" && p === "/api/v2/device/refresh", release: Promise.resolve(), left: 1, drop: true };
+    const before = refreshCalls();
+    const r = await runCli(t, ["sync"]);
+    assert.equal(r.code, 0, `${r.stderr} ${JSON.stringify(fake.log.slice(-6).map((l) => [l.method, l.path, l.status]))}`);
+    assert.equal(refreshCalls() - before, 2, "the lost refresh was tried once more");
+    assert.equal(fake.refreshes, 1);
+    assert.ok(!loadCredentials(t.home)?.signed_out, "still signed in");
+    assert.ok(Date.parse(loadCredentials(t.home)!.access_expires_at!) > Date.now(), "a fresh access token");
+
+    expire();
+    fake.holdCalls = { match: (m, p) => m === "POST" && p === "/api/v2/device/refresh", release: Promise.resolve(), left: 2, drop: true };
+    const before2 = refreshCalls();
+    await runCli(t, ["sync"]);
+    const tries = fake.log.filter((l) => l.path === "/api/v2/device/refresh").slice(before2).map((l) => l.status);
+    // The refresh tries twice and gives up for this call; the pass's next call refreshes on its own.
+    assert.deepEqual(tries.slice(0, 3), [0, 0, 200], JSON.stringify(tries));
+    assert.ok(!loadCredentials(t.home)?.signed_out, "a refresh with no answer never signs the device out");
   });
 });
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Gate runner. Usage: scripts/test-all.sh <port>   (run from a worktree; test-v2 also uses <port>+1)
-# Runs in fixed order: lint, typecheck, syntax (node --check on every script), paste-lines (no server), test-v2,
+# Runs in fixed order: lint, typecheck, syntax (node --check on every script), paste-lines, test-admin, invite-races and budgets (no server), test-v2,
 # test-oauth and test-agent-live (each starts its own production servers on <port>; the last two reuse the build test-v2
 # made), then the align-agent package tests.
 # One summary line per step; exits non-zero if any step fails.
@@ -33,6 +33,9 @@ step syntax bash -c 'for f in scripts/*.mjs packages/align-connect/*.mjs; do nod
 
 # The Apps tab's terminal lines in sh, bash and zsh (no server).
 step paste-lines node scripts/test-paste-lines.mjs
+step test-admin node scripts/test-admin.mjs
+step invite-races node scripts/test-invite-races.mjs
+step budgets node scripts/test-budgets.mjs
 
 # ---- servers: each test starts its own production servers on <port> ----
 # The v2 server (docs/v2/WIRE.md): Mode L sign-in and local owner, the edge, Mode L with the test identity provider, hosted.
@@ -47,7 +50,7 @@ step test-agent-live node scripts/test-agent-live.mjs "$PORT" --no-build
 step align-agent bash -c 'cd packages/align-agent && { [ -d node_modules ] || npm ci; } && npm test' # a fresh copy has no node_modules
 
 # ---- one node:test-style total (so `npm test` reports an exact count to tools that read it, e.g. litai) ----
-# Each static step counts as one test; paste-lines, test-v2, test-oauth, test-agent-live and align-agent contribute their
+# Each static step counts as one test; paste-lines, test-admin, invite-races, budgets, test-v2, test-oauth, test-agent-live and align-agent contribute their
 # own counts from their logs.
 TOTAL_PASS=0; TOTAL_FAIL=0
 for s in lint typecheck syntax; do
@@ -61,6 +64,9 @@ count() { # count <log> <regex with two groups: passed, failed>
 count "$LOGDIR/test-v2.log" '^([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/test-oauth.log" '^test-oauth: ([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/paste-lines.log" '^test-paste-lines: ([0-9]+) passed, ([0-9]+) failed$'
+count "$LOGDIR/test-admin.log" '^test-admin: ([0-9]+) passed, ([0-9]+) failed$'
+count "$LOGDIR/budgets.log" '^test-budgets: ([0-9]+) passed, ([0-9]+) failed$'
+count "$LOGDIR/invite-races.log" '^test-invite-races: ([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/test-agent-live.log" '^([0-9]+) passed, ([0-9]+) failed$'
 AGENT_PASS="$(grep -Eo '^(#|ℹ) pass [0-9]+' "$LOGDIR/align-agent.log" 2>/dev/null | awk '{s+=$3} END {print s+0}')"
 AGENT_FAIL="$(grep -Eo '^(#|ℹ) fail [0-9]+' "$LOGDIR/align-agent.log" 2>/dev/null | awk '{s+=$3} END {print s+0}')"

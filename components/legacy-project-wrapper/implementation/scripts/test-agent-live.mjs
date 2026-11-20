@@ -31,7 +31,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHmac, generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -173,8 +173,8 @@ const agentEnv = {
   ALIGN_ALLOW_UNSUPPORTED_NODE: "1",
 };
 const outputs = []; // every CLI and hook output, for the canary checks
-function cli(args, env = agentEnv) {
-  const r = spawnSync(process.execPath, [CLI, ...args], { env, encoding: "utf8", timeout: 60_000 });
+function cli(args, env = agentEnv, cwd = ROOT) {
+  const r = spawnSync(process.execPath, [CLI, ...args], { env, cwd, encoding: "utf8", timeout: 60_000 });
   outputs.push(r.stdout ?? "", r.stderr ?? "");
   return { code: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
@@ -373,6 +373,50 @@ try {
       srvEpochs.length === 1 && srvEpochs[0].goal_id === G.id && srvEpochs[0].goal_version_at_start === 1 && usage1 === 1,
     `${quiet1.stdout} ${JSON.stringify(srvSession)} ${JSON.stringify(srvEpochs)} ${usage1}`,
   );
+
+  // ======== team budgets: real terminal authority, sync attribution and next-turn information ========
+  const savedEstimate = sdb((d) => d.prepare("SELECT request_key, est_list_usd_micros FROM v2_usage WHERE ws_id = ? AND session_key = ?").get(W, SKEY));
+  try {
+    sdb((d) => d.prepare("UPDATE v2_usage SET est_list_usd_micros = 0 WHERE ws_id = ? AND request_key = ?").run(W, savedEstimate.request_key));
+    const budgetSet = await ws(L, "PUT", `/teams/${PLATFORM}/budget`, { amount_usd: 0.01, allowance_usd: 0.05 });
+    const budgetRead = cli(["budget"], agentEnv, repo);
+    const budgetAsk = cli(["budget", "request", "--amount", "0.01", "--reason", "Finish this work"], agentEnv, repo);
+    const budgetRecord = sdb((d) => d.prepare("SELECT state, authority, filed_from FROM v2_budget_requests WHERE ws_id = ? AND requester_id = ? ORDER BY created_at DESC LIMIT 1").get(W, M.id));
+    check("budget: align budget reads the folder goal's team and align budget request always waits for a person under the allowance", budgetSet.status === 200 && budgetRead.code === 0 && budgetRead.stdout.includes("Teams you can choose: Platform") && budgetRead.stdout.includes("estimates at list price") && budgetAsk.code === 0 && budgetAsk.stdout.includes("waits for a person") && !/br_[A-Za-z0-9_-]+|: waiting\b/.test(budgetAsk.stdout) && budgetRecord?.state === "waiting" && budgetRecord?.filed_from === "terminal" && budgetRecord?.authority === null, budgetRead.stdout + budgetAsk.stdout + budgetAsk.stderr);
+    const localBudgetId = withDb(path.join(alignHome, "align.db"), (d) => d.prepare("SELECT local_id FROM shares WHERE workspace_id = ? AND session_key = ?").get(W, SKEY).local_id);
+    const budgetCacheFile = path.join(alignHome, "budgets-cache", `${localBudgetId}.json`);
+    const terminalSnapshot = existsSync(budgetCacheFile) ? JSON.parse(readFileSync(budgetCacheFile, "utf8")) : null;
+    check("budget: a successful terminal read refreshes the confirmed session snapshot immediately", terminalSnapshot?.team.id === PLATFORM && terminalSnapshot?.estimated_spend_usd_micros === 0, JSON.stringify(terminalSnapshot));
+    sdb((d) => d.prepare("UPDATE v2_usage SET est_list_usd_micros = 8000 WHERE ws_id = ? AND request_key = ?").run(W, savedEstimate.request_key));
+    const beforeBudgetSync = hook("UserPromptSubmit", { session_id: SID, prompt_id: "budget-before", prompt: "Continue", cwd: repo });
+    // A change stamp invalidates the already reused team read without waiting five minutes or deleting its cache.
+    await ws(L, "PUT", `/teams/${PLATFORM}/budget`, { amount_usd: 0.01, allowance_usd: 0.05 });
+    const budgetSync = sync();
+    const budgetSnapshot = existsSync(budgetCacheFile) ? JSON.parse(readFileSync(budgetCacheFile, "utf8")) : null;
+    check("budget: the existing sync reads session attribution and the monthly team budget into its separate local cache", budgetSync.code === 0 && budgetSnapshot?.team.id === PLATFORM && budgetSnapshot?.estimated_spend_usd_micros === 8000 && budgetSnapshot?.epoch_id && !beforeBudgetSync.stdout.includes("80%"), budgetSync.stderr + JSON.stringify(budgetSnapshot));
+    const budgetTool = hook("PreToolUse", { session_id: SID, tool_name: "Read", tool_input: { file_path: path.join(repo, "README.md") }, cwd: repo });
+    const budgetToolAgain = hook("PreToolUse", { session_id: SID, tool_name: "Read", tool_input: { file_path: path.join(repo, "README.md") }, cwd: repo });
+    check("budget: a long-turn tool warning is user-only and delivered once", budgetTool.json?.systemMessage?.includes("80%") && !budgetTool.context?.includes("80%") && !budgetToolAgain.stdout.includes("80%"), budgetTool.stdout + budgetToolAgain.stdout);
+    const budgetNote = hook("UserPromptSubmit", { session_id: SID, prompt_id: "budget-next", prompt: "Continue", cwd: repo });
+    const budgetAgain = hook("UserPromptSubmit", { session_id: SID, prompt_id: "budget-again", prompt: "Continue", cwd: repo });
+    check("budget: the next turn receives an informational 80 percent note once, with no command or authority", budgetNote.context?.includes('[Align] "Platform" reached 80%') && budgetNote.context.includes("Work continues.") && budgetNote.context.includes("grants no authority") && !budgetNote.context.includes("align budget") && !budgetAgain.stdout.includes("80%"), budgetNote.stdout + budgetAgain.stdout);
+    sdb((d) => d.prepare("UPDATE v2_usage SET est_list_usd_micros = 10000 WHERE ws_id = ? AND request_key = ?").run(W, savedEstimate.request_key));
+    await ws(L, "PUT", `/teams/${PLATFORM}/budget`, { amount_usd: 0.01 });
+    sync(); // Observe 100 percent without delivering it.
+    await ws(L, "DELETE", `/teams/${PLATFORM}/budget`);
+    sync(); // The removal's stamp must clear the due note without deleting the reused team read by hand.
+    const removedRead = cli(["budget"], agentEnv, repo);
+    check("budget: a terminal read refreshes a removed budget without deleting the cache by hand", removedRead.code === 0 && removedRead.stdout.includes("No team budget for this month."), removedRead.stdout + removedRead.stderr);
+    const afterRemoval = hook("UserPromptSubmit", { session_id: SID, prompt_id: "budget-removed", prompt: "Continue", cwd: repo });
+    check("budget: the next pass after removal clears an undelivered crossing", !existsSync(budgetCacheFile) && !afterRemoval.stdout.includes("100%"), afterRemoval.stdout);
+  } finally {
+    sdb((d) => d.prepare("UPDATE v2_usage SET est_list_usd_micros = ? WHERE ws_id = ? AND request_key = ?").run(savedEstimate.est_list_usd_micros, W, savedEstimate.request_key));
+    await ws(L, "DELETE", `/teams/${PLATFORM}/budget`);
+    // Drop the reused team read too, so no later session in this run is told about a budget that no longer exists.
+    if (existsSync(path.join(alignHome, "budgets-cache", "teams.json"))) unlinkSync(path.join(alignHome, "budgets-cache", "teams.json"));
+    sync();
+
+  }
 
   // ======== a change request that adds a limit: the goal_version directive -> one limit delta ========
   const cur = (await ws(O, "GET", `/goals/${G.id}`)).json?.goal;
@@ -1533,6 +1577,64 @@ try {
     modelText.includes(NOTE_CANARY) && modelText.includes(HOLD_CANARY) && !unquoted.includes(NOTE_CANARY) && !unquoted.includes(HOLD_CANARY) && !modelText.includes("Withdrawn before it was seen") && !modelText.includes(`[Align] ${NOTE_CANARY}`),
     unquoted.slice(0, 600),
   );
+
+  // -- LIM-2441 H8, real agent and real server: an alignment revoked after a hook opened the switch. The machine pauses,
+  //    the pause lists the goals to pick, and picking one resumes the session on it with no further step --
+  {
+    const H8_TITLE = "Harden the ledger backups";
+    const H8_KEEP = "Keep the ledger docs current";
+    const H8_PICK = "Tidy the ledger dashboards";
+    const M8 = await freshMilo();
+    const hTeam = (await ws(O2, "POST", "/teams", { name: "Ledger docs" })).json?.id;
+    await ws(O2, "POST", `/teams/${hTeam}/members`, { user_id: M.id, role: "member" });
+    const hOther = (await ws(O2, "POST", "/teams", { name: "Backups" })).json?.id;
+    await ws(O2, "POST", `/teams/${hOther}/members`, { user_id: O.id, role: "lead" });
+    const GHr = await ws(O2, "POST", "/goals", { title: H8_TITLE, team_id: hOther, visibility: "workspace" });
+    const GH = GHr.json;
+    const GK = (await ws(M8, "POST", "/goals", { title: H8_KEEP, team_id: hTeam, visibility: "workspace" })).json;
+    const GP = (await ws(M8, "POST", "/goals", { title: H8_PICK, team_id: hTeam, visibility: "workspace" })).json;
+    const H8 = startQ("h8");
+    const h8Lid = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === H8.sid)?.local_id ?? "none";
+    cli(["share", "--workspace", W, "--goal", GK?.id, "--yes", "--", h8Lid.slice(0, 8)]);
+    sync();
+    // Another of Milo's sessions follows a different Backups goal through its own approved alignment: that goal is that
+    // session's to work on, not one the paused session can pick.
+    const H8_ELSEWHERE = "Audit the ledger exports";
+    const GX = (await ws(O2, "POST", "/goals", { title: H8_ELSEWHERE, team_id: hOther, visibility: "workspace" })).json;
+    const HX = startQ("h8x");
+    const hxLid = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === HX.sid)?.local_id ?? "none";
+    cli(["share", "--workspace", W, "--goal", GK?.id, "--yes", "--", hxLid.slice(0, 8)]);
+    sync();
+    const alX = (await ws(M8, "POST", "/alignments", { target_goal_id: GX?.id, choice: "work_toward", session_keys: [HX.key] })).json;
+    const alXOk = await ws(O2, "POST", `/alignments/${alX?.id}/approve`, { revision: alX?.revision ?? 1 });
+    const alHr = await ws(M8, "POST", "/alignments", { target_goal_id: GH?.id, choice: "work_toward", session_keys: [H8.key] });
+    const alH = alHr.json;
+    const alHOk = await ws(O2, "POST", `/alignments/${alH?.id}/approve`, { revision: alH?.revision ?? 1 });
+    sync();
+    prompt(H8);
+    const hRevoke = await ws(O2, "POST", `/alignments/${alH?.id}/revoke`, { revision: alHOk.json?.revision ?? 1 });
+    sync();
+    const paused = prompt(H8);
+    const list = /Goals you can pick: (.*?)\. Type/.exec(paused.system ?? "")?.[1] ?? "";
+    const picked = prompt(H8, `::align bind ${H8_PICK}`);
+    const resumed = prompt(H8);
+    sync();
+    const hOpen = openEpochOf(H8.key);
+    const hState = sdb((d) => d.prepare("SELECT state FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, H8.key));
+    const onLost = sdb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND goal_id = ?").get(W, H8.key, GH?.id ?? "")).n;
+    check(
+      "H8 (LIM-2441): an alignment revoked after a hook opened the switch pauses the session; the pause lists the goals to pick and not the lost one; picking one resumes on it at the next prompt; the server has the session shared with an open epoch on the chosen goal and none on the lost goal",
+      alHOk.status === 200 && alHOk.json?.state === "approved" && hRevoke.status === 200 && /so its usage is paused/.test(paused.system ?? "") && list.includes(H8_KEEP) && list.includes(H8_PICK) && !list.includes(H8_TITLE) &&
+        /from your next prompt this session counts toward/.test(picked.json?.reason ?? "") && (resumed.context ?? "").includes(`counts toward goal "${H8_PICK}"`) &&
+        hState?.state === "shared" && hOpen?.goal_id === GP?.id && hOpen?.cause === "manual" && onLost === 0,
+      `${GHr.status} ${alHr.status} ${alHr.text?.slice(0, 200)} ${alHOk.status} ${alHOk.text?.slice(0, 160)} ${hRevoke.status} ${paused.system} ${picked.json?.reason} ${resumed.context} ${JSON.stringify(hState)} ${JSON.stringify(hOpen)} ${onLost}`,
+    );
+    check(
+      "H8 (LIM-2441): the pause never lists a goal the session can't take, here one reached only through another session's approved alignment",
+      alXOk.status === 200 && alXOk.json?.state === "approved" && list.length > 0 && !list.includes(H8_ELSEWHERE),
+      `${alXOk.status} ${alXOk.text?.slice(0, 160)} list=${list}`,
+    );
+  }
 
   // ======== canaries across everything the agent printed or put into context ========
   const all = outputs.join("\n");

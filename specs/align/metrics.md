@@ -58,7 +58,7 @@ The events, where they are recorded and what they may carry:
 | `loi_signed` | the operator records it with `--verified-original` | the workspace, none | `note_ref`, `verified_original`: `yes` |
 | `first_ask` | the workspace's first ask, recorded or imported (the `workspaces` part) | the workspace, the person | none |
 | `first_limit` | the workspace's first goal version saved with at least one limit (the `goals-and-proposals` part) | the workspace, the person | none |
-| `value_card_viewed` | a person's value card was at least half on screen, the first time in the workspace | the workspace, the person | none |
+| `value_card_viewed` | the value card's top 240 px was at least 75% on screen (inside the window and the column it scrolls in) for one second, for the person who approved its change request (the web app shows the card to that approver only), the first time in the workspace; a shorter glance is not a view | the workspace, the person | none |
 | `value_reported` | a person's first value report in the workspace | the workspace, the person | `estimate`: `same_day`, `two_to_three_days`, `about_a_week`, `longer` or `would_not_be_decided` |
 | `follow_up_clicked` | a person's first click on the value card's follow-up link in the workspace | the workspace, the person | none |
 | `first_request` | the workspace's first request to a goal's agents (the `goals-and-proposals` part) | the workspace, the sender | `type`: `replan`, `checkpoint` or `switch_goal` |
@@ -92,8 +92,13 @@ props); and it SHALL do the same in Mode L, where the events stay on the person'
 
 #### Scenario: Value events once per person
 
-- **WHEN** one person's value card is viewed twice, on two approved change requests, they report an estimate on both and click the follow-up link twice, and a second person views the card
-- **THEN** the workspace holds one `value_card_viewed`, one `value_reported` (with the first estimate) and one `follow_up_clicked` for the first person, and one `value_card_viewed` for the second; a second call answers `recorded: false`
+- **WHEN** one approver views the value cards of two change requests they approved, reports an estimate on both and clicks the follow-up link twice, and a second person who approved another change request views its card
+- **THEN** the workspace holds one `value_card_viewed`, one `value_reported` (with the first estimate) and one `follow_up_clicked` for the first approver, and one `value_card_viewed` for the second; a second call answers `recorded: false`
+
+#### Scenario: Only the approver sees the card
+
+- **WHEN** the requester, another member or a viewer opens an approved change request that someone else approved
+- **THEN** the web app shows them no value card and sends no `viewed`, so no `value_card_viewed` is recorded for them
 
 #### Scenario: Pairing for several workspaces
 
@@ -110,7 +115,7 @@ props); and it SHALL do the same in Mode L, where the events stay on the person'
 `POST /api/v2/workspaces/{ws}/goals/{goal}/change-requests/{id}/value` (the `interface` part's value card) SHALL record
 nothing, and answer `409 not_approved`, for a change request that is not approved; `404` for one the person can't read;
 and SHALL record `value_card_viewed`, `follow_up_clicked` and `value_reported` only with the props in the events table,
-never the change request, the goal or a value report's note.
+never the change request, the goal or a value report's note. The server SHALL accept these actions from any reader of the approved request; the web app SHALL show the card, and send `viewed`, only for the person who approved the request (`approved_by`), so `value_card_viewed` from the web app is an approver's view.
 
 #### Scenario: Pending request
 
@@ -174,7 +179,7 @@ content:
 - week-1 and week-4 retention of each creation cohort in the period (the last 12 weeks without `--since`): the share active in the week after, and the fourth week after, their creation week, shown only once that week has ended;
 - the share of sessions shared in the period that were ever bound to a goal, and of requests and estimated spend (live usage and spend roll-ups) on goals;
 - LOIs sent and signed, with the workspace and dates;
-- decision value (JSON key `value`, text table "Decision value"), over non-sample workspaces in the period: the workspaces with at least one approved change request, `value_card_viewed` (person-workspace pairs and workspaces), `value_reported` by estimate, `follow_up_clicked`, access requests with `via` `value_card` by interest, and the workspaces with `first_ask` and `first_limit`;
+- decision value (JSON key `value`, text table "Decision value"), over non-sample workspaces in the period: the workspaces with at least one approved change request, `value_card_viewed` (person-workspace pairs and workspaces; from the web app these are approvers only, since it shows the card only to the person who approved the request), `value_reported` by estimate, `follow_up_clicked`, access requests with `via` `value_card` by interest, and the workspaces with `first_ask` and `first_limit`;
 
 and SHALL exit 2 for a `--since` that is not a date.
 
@@ -190,7 +195,7 @@ and SHALL exit 2 for a `--since` that is not a date.
 
 #### Scenario: Decision value counts
 
-- **WHEN** in a workspace a change request is approved, two people view its value card, one reports `same_day` and clicks the follow-up link, and one access request is made from the card with interest `evaluate`
+- **WHEN** in a workspace two change requests are approved by two different people, each approver views their request's value card, one reports `same_day` and clicks the follow-up link, and one access request is made from the card with interest `evaluate`
 - **THEN** `report --json` `value` shows at least that workspace with an approved request, 2 viewed, `same_day` 1, 1 follow-up click and 1 `evaluate` from the card, matching the rows of `v2_events`
 
 #### Scenario: Since

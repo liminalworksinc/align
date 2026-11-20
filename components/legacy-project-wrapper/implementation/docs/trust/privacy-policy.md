@@ -4,7 +4,7 @@
 > and is not yet in force. The bracketed placeholders are filled in when it is published.
 
 This policy explains what personal data Align collects, why, how long it is kept, who else handles it, and the
-choices and rights you have. "Align", "we" and "us" mean [LEGAL ENTITY], [ADDRESS]. Write to us at
+choices and rights you have. "Align", "we" and "us" mean [LEGAL ENTITY]. Write to us at
 [PRIVACY CONTACT EMAIL].
 
 <!-- Counsel: decide whether an EU (GDPR Art. 27) or UK representative is needed, and add it here. -->
@@ -122,4 +122,4 @@ holders by email before it takes effect.
 
 ## Contact
 
-[LEGAL ENTITY], [ADDRESS]. Privacy questions and requests: [PRIVACY CONTACT EMAIL].
+[LEGAL ENTITY]. Privacy questions and requests: [PRIVACY CONTACT EMAIL].

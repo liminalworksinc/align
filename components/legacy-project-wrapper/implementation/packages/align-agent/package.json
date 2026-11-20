@@ -7,11 +7,16 @@
   "bin": {
     "align": "dist/cli.js"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "engines": {
     "node": ">=24"
   },
   "scripts": {
     "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && node scripts/postbuild.mjs",
+    "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && { npm run test:concurrent; s=$?; npm run test:serial && exit $s; }",
     "test:concurrent": "node --test --test-concurrency=4 test/*.test.ts",

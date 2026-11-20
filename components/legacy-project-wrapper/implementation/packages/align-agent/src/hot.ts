@@ -205,10 +205,17 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     releases_now: releasesNow(ctx, lid),
     resumed: resumedBy(ctx, lid),
     prior_share: sharedBefore(ctx, lid) ? { stopped: stoppedByPerson(ctx, lid) } : null,
-    epochs_seen: (ctx.db.prepare("SELECT epoch_id FROM epochs WHERE local_id=? ORDER BY rowid DESC LIMIT 10").all(lid) as { epoch_id: string }[]).map((e) => e.epoch_id),
+    epochs_seen: [
+      ...(ctx.db.prepare("SELECT epoch_id FROM epochs WHERE local_id=? ORDER BY rowid DESC LIMIT 10").all(lid) as { epoch_id: string }[]).map((e) => e.epoch_id),
+      ...[kvGet(ctx.db, `epoch_cancelled:${lid}`)].filter((id): id is string => !!id),
+    ],
     updated_at: new Date().toISOString(),
     by: { gen: WRITER_GEN, build: selfBuild().build },
   };
+  if (hot.share?.state !== "shared") {
+    removeFile(layout.budgetCache(ctx.home, lid));
+    removeFile(path.join(ctx.home, "budget-attribution", `${lid}.json`));
+  }
   // A newer build has written here: the hot file is its to write (cycle 14). Marked, so it rewrites it; a stop or hold
   // is still enforced below, whatever build hears it.
   if (ctx.superseded) kvSet(ctx.db, `${OLDER_RENDER}${lid}`, nowIso());

@@ -20,7 +20,7 @@ import { V2Error } from "../v2/errors";
 import { EVIDENCE_KINDS, type SnapshotView } from "../v2/evidence";
 import { ACTIVITY_WINDOW_DAYS, goalActivity, goalsActivity, type GoalActivity } from "../v2/goal-activity";
 import { limitsOf, type Limit } from "../v2/goal-limits";
-import { goalObj, goalRow, serializeGoal, toWireVisibility, transferGoals, visibleGoals, bindableFor, type GoalRow, type Measure } from "../v2/goals";
+import { goalObj, goalRow, serializeGoal, toWireVisibility, visibleGoals, bindableFor, type GoalRow, type Measure } from "../v2/goals";
 import { canReadGoal, type PolicyPrincipal } from "../v2/policy";
 import { principalIn } from "../v2/workspaces";
 import { personName } from "../v2/retention";
@@ -213,8 +213,8 @@ const GoalOut = z.object({
 });
 const ListGoalsOut = z.object({ workspace: WorkspaceOut, goals: z.array(GoalOut) });
 
-function goalOut(pp: PolicyPrincipal, g: GoalRow, transfers: Set<string>): z.infer<typeof GoalOut> {
-  const s = serializeGoal(pp, g, transfers);
+function goalOut(pp: PolicyPrincipal, g: GoalRow): z.infer<typeof GoalOut> {
+  const s = serializeGoal(pp, g);
   return {
     id: g.id,
     version: g.version,
@@ -480,7 +480,7 @@ interface DirectiveRow {
 }
 
 /** The goal as ratified when the directive was written, or null if this person can no longer read it. */
-function directiveGoal(pp: PolicyPrincipal, d: DirectiveRow, transfers: Set<string>): z.infer<typeof DirectiveGoalOut> | null {
+function directiveGoal(pp: PolicyPrincipal, d: DirectiveRow): z.infer<typeof DirectiveGoalOut> | null {
   if (!d.goal_json || !d.goal_id) return null;
   const live = goalRow(pp.wsId, d.goal_id);
   if (!live || !canReadGoal(pp, goalObj(live))) return null;
@@ -496,7 +496,7 @@ function directiveGoal(pp: PolicyPrincipal, d: DirectiveRow, transfers: Set<stri
     team: snap.team ? { id: snap.team.id, name: ut(snap.team.name) } : null,
     measures: measuresOut(snap.measures ?? []),
     depends_on: readableIds(pp, snap.depends_on ?? []),
-    bindable: bindableFor(pp, live, transfers),
+    bindable: bindableFor(pp, live),
     limits: limitsShared(pp, live) ? ((snap as { limits?: Limit[] }).limits ?? []).map(limitOut) : null,
   };
 }
@@ -712,8 +712,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
     },
     async ({ workspace }, ctx) => {
       const pp = enter(ctx, workspace);
-      const transfers = transferGoals(pp.wsId, pp.userId);
-      const out = { workspace: workspaceOf(pp), goals: visibleGoals(pp).map((g) => goalOut(pp, g, transfers)) };
+      const out = { workspace: workspaceOf(pp), goals: visibleGoals(pp).map((g) => goalOut(pp, g)) };
       readGoals(ctx, pp, out.goals);
       return result(out, [`${count(out.goals.length, "goal")} you can read in workspace ${pp.wsId} ${tag(out.workspace.name.untrusted_text)}.`, ...out.goals.map(goalLine(pp.userId))].join("\n"));
     },
@@ -735,7 +734,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
       const versions = all<VersionRow>("SELECT version, title, measures_json, depends_on_json, limits_json, status, content_hash FROM v2_goal_versions WHERE goal_id = ? ORDER BY version DESC", g.id);
       const v = versions.find((x) => x.version === (version ?? g.version));
       if (!v) throw new Error("Version not found");
-      const cur = goalOut(pp, g, transferGoals(pp.wsId, pp.userId));
+      const cur = goalOut(pp, g);
       const out: z.infer<typeof GetGoalOut> = {
         goal: {
           ...cur,
@@ -905,14 +904,13 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
         pp.wsId,
         pp.userId,
       );
-      const transfers = transferGoals(pp.wsId, pp.userId);
       const directives = rows.map((d) => ({
         id: d.id,
         kind: d.kind,
         created_at: d.created_at,
         session_keys: d.keys.split(" ").sort(),
         binding: bindingOut(d.binding_json),
-        goal: directiveGoal(pp, d, transfers),
+        goal: directiveGoal(pp, d),
         ...(d.kind === "request" ? { request: requestOut(pp, d) } : {}),
         ...(d.kind === "hold" || d.kind === "release" ? { hold: holdOut(pp, d) } : {}),
       }));

@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useState } from "react";
 import { api, Btn, Err, Field, Input, Note, Select, TextArea, TrustLinks, useAction } from "../_ui/kit";
@@ -16,6 +17,12 @@ const SIZES: [string, string][] = [
   ["51-200", "51–200 people"],
   ["201+", "More than 200 people"],
 ];
+
+// LIM-2472 (stream R): token-only styling in both themes; each interest is a whole-row choice at least 44px tall.
+const CHOICE = "flex min-h-[44px] cursor-pointer gap-2.5 rounded-(--radius-s) border p-3 text-[15px]";
+// Selected or not, one border colour and one background each (two border colours on one element let the CSS order pick).
+const CHOICE_ON = "border-(--accent-text) bg-(--accent-soft)";
+const CHOICE_OFF = "border-(--line-strong) bg-(--bg-inset)";
 
 export default function RequestAccess({
   captchaSiteKey,
@@ -54,21 +61,21 @@ export default function RequestAccess({
   };
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[var(--al-bg)] p-6 text-zinc-800">
-      <div className="al-in w-full max-w-[560px] rounded-[14px] border border-zinc-200 bg-white p-8">
-        <h1 className="mb-1 font-display text-[34px] leading-none">Request access to Align</h1>
+    <main className="grid min-h-screen place-items-center bg-(--bg-page) p-6 text-(--text-1) max-sm:p-3">
+      <div className="al-in w-full max-w-[560px] rounded-(--radius-l) border border-(--line) bg-(--bg-panel) p-8 max-sm:p-5">
+        <h1 className={`${PAGE_H1} mb-1`}>Request access to Align</h1>
         {sent ? (
           <>
-            <p className="mt-4 text-[16px] text-zinc-700">Thanks. We got your request and will answer it by email at {sent}, usually within a day.</p>
+            <p className="mt-4 text-[16px] text-(--text-2)">Thanks. We got your request and will answer it by email at {sent}, usually within a day.</p>
             <p className="mt-4 text-[15px]">
-              <Link href="/app/sign-in" className="underline">
+              <Link href="/app/sign-in" className="font-medium text-(--accent-text) underline underline-offset-2">
                 Back to sign-in
               </Link>
             </p>
           </>
         ) : (
           <form id="request-access" onSubmit={submit}>
-            <p className="mb-5 text-[16px] text-zinc-600">
+            <p className="mb-5 text-[16px] text-(--text-2)">
               Align is opening to a few teams at a time, and we set up each one with them. Tell us a little about yours and we&apos;ll reply by email, usually within a day.
             </p>
             {local && <Note>This server runs on your machine, where anyone signed in can create a workspace without a code.</Note>}
@@ -94,27 +101,27 @@ export default function RequestAccess({
               <TextArea name="use_case" value={useCase} onChange={(e) => setUseCase(e.target.value)} required maxLength={500} rows={3} />
             </Field>
             <fieldset className="mb-4">
-              <legend className="mb-2 text-[14px] text-zinc-600">What are you interested in?</legend>
-              <label className="mb-2 flex gap-2 text-[15px]">
-                <input type="radio" name="interest" value="try" checked={interest === "try"} onChange={() => setInterest("try")} />
+              <legend className="mb-2 text-[14px] text-(--text-2)">What are you interested in?</legend>
+              <label className={`mb-2 ${CHOICE} ${interest === "try" ? CHOICE_ON : CHOICE_OFF}`}>
+                <input type="radio" className="mt-1 size-4 shrink-0 accent-(--accent-text)" name="interest" value="try" checked={interest === "try"} onChange={() => setInterest("try")} />
                 <span>
                   <strong className="font-medium">Try Align.</strong> Get a creation code so I can try it with my team.
                 </span>
               </label>
-              <label className="flex gap-2 text-[15px]">
-                <input type="radio" name="interest" value="evaluate" checked={interest === "evaluate"} onChange={() => setInterest("evaluate")} />
+              <label className={`${CHOICE} ${interest === "evaluate" ? CHOICE_ON : CHOICE_OFF}`}>
+                <input type="radio" className="mt-1 size-4 shrink-0 accent-(--accent-text)" name="interest" value="evaluate" checked={interest === "evaluate"} onChange={() => setInterest("evaluate")} />
                 <span>
                   <strong className="font-medium">Evaluate Align on a real workflow.</strong> Also follow up with me about an evaluation and, if it fits, a non-binding letter of intent.
                 </span>
               </label>
             </fieldset>
-            <p className="mb-4 text-[13px] text-zinc-500">
+            <p className="mb-4 text-[13px] text-(--text-2)">
               Sending this form only asks for access. It is not an agreement, and asking for a follow-up or a letter of intent doesn&apos;t commit you or your employer to anything. Nothing here asks
               you to sign for your organization.
             </p>
-            <p className="mb-4 text-[13px] text-zinc-500">
+            <p className="mb-4 text-[13px] text-(--text-2)">
               How we use and keep what you send:{" "}
-              <Link href="/privacy" className="underline">
+              <Link href="/privacy" className="font-medium text-(--accent-text) underline underline-offset-2">
                 privacy policy
               </Link>
               .
@@ -124,9 +131,9 @@ export default function RequestAccess({
               Send request
             </Btn>
             <Err>{act.error}</Err>
-            <p className="mt-5 text-[15px] text-zinc-600">
+            <p className="mt-5 text-[15px] text-(--text-2)">
               Already have an account or a code?{" "}
-              <Link href="/app/sign-in" className="underline">
+              <Link href="/app/sign-in" className="font-medium text-(--accent-text) underline underline-offset-2">
                 Sign in
               </Link>
             </p>

@@ -386,12 +386,17 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/limits/suggest {notes, sou
 
 ### Requirement: One goal with its versions and contributions
 
-The server SHALL serve one goal on `GET /api/v2/workspaces/{ws}/goals/{goal}` (browser session) as `{goal, versions, contributions, can_edit, can_propose, hidden_depends_on}`: `goal` as in the feed, `versions` every version newest first as `{version, title, status, content_hash, created_at}`, `contributions` the readable source goals of approved alignments targeting this goal as `{goal:{id, title}}`, `can_edit` true only for the goal's owner when not a viewer, `can_propose` true exactly when "Proposing a change request" would not refuse the reader for who they are or the goal's status: not the goal's owner, not a viewer, and the goal `active`, and `hidden_depends_on` the number of the goal's dependencies the reader may not read (never which; `goal.depends_on` lists only the readable ones). A goal the caller may not read SHALL be 404.
+The server SHALL serve one goal on `GET /api/v2/workspaces/{ws}/goals/{goal}` (browser session) as `{goal, versions, contributions, can_edit, can_propose, deciders, hidden_depends_on}`: `goal` as in the feed, `versions` every version newest first as `{version, title, status, content_hash, created_at}`, `contributions` the readable source goals of approved alignments targeting this goal as `{goal:{id, title}}`, `can_edit` true only for the goal's owner when not a viewer, `can_propose` true exactly when "Proposing a change request" would not refuse the reader for who they are or the goal's status: not the goal's owner, not a viewer, and the goal `active`, `deciders` the people who would decide a change request from the reader on this goal as it stands now, as `{id, name}`: the goal's effective set for the reader as requester (its approval set under the requester rule, with the workspace-owner fallback; see "Requester rule and workspace-owner fallback"), empty when `can_propose` is false and when nobody is eligible yet, and `hidden_depends_on` the number of the goal's dependencies the reader may not read (never which; `goal.depends_on` lists only the readable ones). A goal the caller may not read SHALL be 404.
 
 #### Scenario: Owner opens their goal
 
 - **WHEN** the owner of a goal at version 3 opens it
 - **THEN** the response has three `versions` (3, 2, 1), `can_edit: true` and `can_propose: false`; a member reading the same goal gets `can_edit: false` and `can_propose: true`, and a viewer gets both false
+
+#### Scenario: Who would decide
+
+- **WHEN** a member who is not a lead reads an active team goal whose approval set is its owner and one lead, and the owner and a viewer read the same goal
+- **THEN** the member's `deciders` names the owner and the lead, the same people a change request from the member would list as its approvers; the owner and the viewer get `deciders: []`
 
 ### Requirement: Parents come from approved alignments
 
@@ -418,12 +423,12 @@ The server SHALL let only a goal's owner confirm the goal still fits a parent's 
 
 ### Requirement: Bindable goals
 
-The server SHALL mark a goal `bindable` for the caller only when it is `active`, the caller is not a viewer, and the goal is the caller's own, belongs to a team the caller is in, or is the target of an approved `work_toward` alignment whose current revision lists one of the caller's sessions. Binding a session to a goal its owner may read but that is not their own, not their team's and not covered by such an alignment SHALL be refused with 403 `alignment_required`, and binding it to a goal that is not `active` with 409 `goal_not_active` (the epoch route is specified in `workspaces`).
+The server SHALL mark a goal `bindable` for the caller only when it is `active`, the caller is not a viewer, and the goal is the caller's own or belongs to a team the caller is in. This person-level flag SHALL remain false for another goal even when an approved `work_toward` alignment covers one of the caller's sessions. That alignment authorizes only its listed sessions, whose binding is delivered by the server; it does not add a general CLI or folder-rule binding choice. After a covered session moves off that goal, the CLI SHALL not offer manual rebinding through this flag. Binding a session to a goal its owner may read but that is not their own, not their team's and not covered by such an alignment SHALL be refused with 403 `alignment_required`, and binding it to a goal that is not `active` with 409 `goal_not_active` (the epoch route is specified in `workspaces`).
 
 #### Scenario: Teammate's goal
 
 - **WHEN** a member of team Product reads an active goal owned by another member of team Product
-- **THEN** the goal has `bindable: true`; a company goal owned by someone else has `bindable: false` until an approved `work_toward` alignment covers one of the caller's sessions
+- **THEN** the goal has `bindable: true`; a company goal owned by someone else has `bindable: false` even when an approved `work_toward` alignment covers one of the caller's sessions
 
 ### Requirement: Approval set of a goal
 
@@ -441,7 +446,7 @@ The server SHALL compute a goal's approval set, at the time it is needed, as the
 
 ### Requirement: Requester rule and workspace-owner fallback
 
-Wherever a goal's consent is needed (an alignment requirement, a change request or a goal in a reallocation), the server SHALL treat one approval from the goal's approval set as that goal's consent, SHALL count the requester toward the set only when the requester is the goal's owner, and, when the requester is not the goal's owner and the set holds no one other than the requester, SHALL use the workspace owners other than the requester as the set. If even that set is empty, the request SHALL stay open until someone eligible exists or the requester withdraws it.
+Wherever a goal's consent is needed (an alignment requirement, a change request or a goal in a reallocation), the server SHALL treat one approval from the goal's approval set as that goal's consent, SHALL count the requester toward the set only when the requester is the goal's owner, and, when the requester is not the goal's owner and the set holds no one other than the requester, SHALL use the workspace owners other than the requester as the set. If even that set is empty, the request SHALL stay open until someone eligible exists or the requester withdraws it. The web app's **Propose a change** drawer SHALL name "Who decides" from the goal read's `deciders` (see "One goal with its versions and contributions") and SHALL never work the set out itself; with `deciders` empty it says "Nobody can decide it yet. It stays open until someone can, or until you withdraw it."
 
 #### Scenario: Lead asks against their own team's goal
 
@@ -535,12 +540,12 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/alignments/{id}/{action}` 
 
 ### Requirement: Alignment revocation
 
-The server SHALL let the requester or an approver revoke an `approved` alignment (409 `wrong_state` otherwise), set it `revoked`, and, for `work_toward`, remove the governing goal from its sessions and, for each session whose open epoch was bound only through this alignment, end that epoch now, set the session `suspended` and write a `binding_suspended` directive; past usage never moves. A revoked contribution SHALL stop making its source a child of its target.
+The server SHALL let the requester or an approver revoke an `approved` alignment (409 `wrong_state` otherwise), set it `revoked`, and, for `work_toward`, remove the governing goal from its sessions and, for each session whose open epoch was bound only through this alignment, end that epoch now, set the session `suspended` and write a `binding_suspended` directive, and, for each session that received its `binding_changed` and has no epoch under it (unless it has an open epoch on that goal, or another alignment now governs it toward that goal), write a `binding_suspended` directive with `effective` `cancel_pending`, which cancels the pending binding change on its machine and leaves the session shared under its own binding (`directives` "binding_suspended on a revoked work_toward alignment"); past usage never moves. A revoked contribution SHALL stop making its source a child of its target.
 
 #### Scenario: Revoking work toward
 
 - **WHEN** the requester revokes an approved `work_toward` alignment
-- **THEN** it becomes `revoked`, its sessions lose the governing goal, and sessions whose open binding existed only through it become `suspended` and get a `binding_suspended` directive
+- **THEN** it becomes `revoked`, its sessions lose the governing goal, sessions whose open binding existed only through it become `suspended` and get a `binding_suspended` directive, and the other sessions that received its `binding_changed` and have no epoch under it get a `binding_suspended` with `effective` `cancel_pending` and stay shared
 
 ### Requirement: An alignment needs active goals until it is decided
 
@@ -740,7 +745,12 @@ The server SHALL keep, on a `counter`, every dependency on the request's current
 
 ### Requirement: One open change request per goal and requester
 
-The server SHALL refuse a second change request from the same person on the same goal while their earlier one is `pending` or `countered`, with 409 `already_open`.
+The server SHALL refuse a second change request from the same person on the same goal while their earlier one is `pending` or `countered`, with 409 `already_open`. The web app SHALL name that open request before offering any form: on the goal page, in place of the **Full change form**, "You already have an open request on this goal, below." above the request's card in the "Change requests" list; in the **Propose a change** drawer, once that goal is chosen and in place of the rest of the form, "You already have an open request on this goal." with an **Open your request** link to the request's review (`/app/w/{ws}?review=<goal>.<id>`). The server's 409 stays for anything sent anyway.
+
+#### Scenario: Open request named before the form
+
+- **WHEN** a member with a countered request on a goal opens that goal's page, or chooses that goal in the **Propose a change** drawer
+- **THEN** the goal page shows no **Full change form** and says the open request is below; the drawer shows no change fields and offers **Open your request**; nothing is sent
 
 #### Scenario: Second request
 
@@ -898,12 +908,17 @@ The server SHALL write an audit row naming its actor for every change request ac
 
 ### Requirement: Reading change requests and decision records
 
-The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goal}/change-requests?state=` as `{change_requests}` and across the workspace on `GET /api/v2/workspaces/{ws}/change-requests?state=` as `{waiting_on_me, mine, others}`, each list item being the same object as the single read below, with its `can` flags, including only requests on goals the caller may read (viewers included) and answering 400 for a `state` that is not one of the six states. `waiting_on_me` holds the requests whose `waiting_on_me` is true, `mine` the caller's other requests, and `others` the rest. `GET .../goals/{goal}/change-requests/{id}` SHALL return one request: `id`, `goal:{id, title, version}`, `state`, `revision`, `base_version`, `behind` (true while the request is open and the goal has moved past `base_version`), `requester`, `changes`, `reason` (the requester's), `revisions` (each `{revision, base_version, changes, note, author, created_at, evidence, snapshot}`, with `evidence` and `snapshot` as "Evidence links on change request revisions" and "Align snapshot on each change request revision" describe), a `diff` `{before, after}` of the changed fields (before from the base version, after with the changes applied; once launched, from the resulting version), `approvers` (the effective approval set after the requester rule), `launchers` (the launch set), `approved_by`, `rejected_by`, `decision_note` (the approval note or the rejection reason) also shown as `note` when approved and `rejection_reason` when rejected, `launch` (`pending`, `not_yet`, `launched`, `superseded` or `null`), `launch_decided_by` and `launch_decided_at` (the latest not yet or launch, or `null`), `version` (the goal version the launch created, `null` before it), `condition` (see "Accept if conditions on a counter"), `evidence_count` (the links on the current revision), `approved_without_evidence` (`true` or `false` once approved, else `null`), `can` flags `{approve, approve_and_launch, reject, counter, accept_counter, acknowledge, withdraw, rebase, add_evidence, launch, not_yet}` that are true exactly when the server would accept that action from the caller (`approve` false while `behind`; `approve`, `approve_and_launch` and `launch` false for a decider who can't see a dependency the request adds, see "Nobody approves or launches a dependency they can't see"; all false for a viewer; `approve`, `approve_and_launch` and `launch` false for everyone while the request would close a dependency loop, see "A request that would now close a loop is not approved or launched"), `dependency_not_visible` (that decider's refusal, else `null`), `dependency_loop` (the loop refusal, the same for every reader except that it calls the requester "you", else `null`), `state_note` (what happened to the request in the words a `wrong_state` refusal of an action it no longer allows gives, see "Rejecting and countering a change request": "This request was declined by <name>, so nothing changes.", never "rejected"), `waiting_on_me` (true when the caller's `approve`, `accept_counter` or `launch` flag is, or their `counter` flag on a pending request with `dependency_loop`: an approved request they may launch waits on them whether nobody decided the launch yet or someone said not yet, the same rule as the workspace Home), `created_at`, `updated_at` and `decided_at`. A decided request is its decision record. A request on a goal the caller may not read, or on a goal other than the one in the path, SHALL be 404, and `depends_on` in a diff SHALL list only goals the caller may read (`diff.hidden_depends_on` counts the others, see "Dependencies a decider can't see are refused").
+The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goal}/change-requests?state=` as `{change_requests}` and across the workspace on `GET /api/v2/workspaces/{ws}/change-requests?state=` as `{waiting_on_me, mine, others}`, each list item being the same object as the single read below, with its `can` flags, including only requests on goals the caller may read (viewers included) and answering 400 for a `state` that is not one of the six states. `waiting_on_me` holds the requests whose `waiting_on_me` is true, `mine` the caller's other requests, and `others` the rest. `GET .../goals/{goal}/change-requests/{id}` SHALL return one request: `id`, `goal:{id, title, version}`, `state`, `revision`, `base_version`, `behind` (true while the request is open and the goal has moved past `base_version`), `requester`, `changes`, `reason` (the requester's), `revisions` (each `{revision, base_version, changes, note, author, created_at, evidence, snapshot}`, with `evidence` and `snapshot` as "Evidence links on change request revisions" and "Align snapshot on each change request revision" describe), a `diff` `{before, after}` of the changed fields (before from the base version, after with the changes applied; once launched, from the resulting version), `approvers` (the effective approval set after the requester rule), `launchers` (the launch set), `approved_by`, `rejected_by`, `decision_note` (the approval note or the rejection reason) also shown as `note` when approved and `rejection_reason` when rejected (a rejection reason SHALL reach only the requester, the person who declined and the request's approvers: for every other reader, a viewer included, `decision_note` and `rejection_reason` of a rejected request SHALL be `null`, while `rejected_by` and `decided_at` stay), `launch` (`pending`, `not_yet`, `launched`, `superseded` or `null`), `launch_decided_by` and `launch_decided_at` (the latest not yet or launch, or `null`), `version` (the goal version the launch created, `null` before it), `condition` (see "Accept if conditions on a counter"), `evidence_count` (the links on the current revision), `approved_without_evidence` (`true` or `false` once approved, else `null`), `can` flags `{approve, approve_and_launch, reject, counter, accept_counter, acknowledge, withdraw, rebase, add_evidence, launch, not_yet}` that are true exactly when the server would accept that action from the caller (`approve` false while `behind`; `approve`, `approve_and_launch` and `launch` false for a decider who can't see a dependency the request adds, see "Nobody approves or launches a dependency they can't see"; all false for a viewer; `approve`, `approve_and_launch` and `launch` false for everyone while the request would close a dependency loop, see "A request that would now close a loop is not approved or launched"), `dependency_not_visible` (that decider's refusal, else `null`), `dependency_loop` (the loop refusal, the same for every reader except that it calls the requester "you", else `null`), `state_note` (what happened to the request in the words a `wrong_state` refusal of an action it no longer allows gives, see "Rejecting and countering a change request": "This request was declined by <name>, so nothing changes.", never "rejected"), `waiting_on_me` (true when the caller's `approve`, `accept_counter` or `launch` flag is, or their `counter` flag on a pending request with `dependency_loop`: an approved request they may launch waits on them whether nobody decided the launch yet or someone said not yet, the same rule as the workspace Home), `created_at`, `updated_at` and `decided_at`. A decided request is its decision record. A request on a goal the caller may not read, or on a goal other than the one in the path, SHALL be 404, and `depends_on` in a diff SHALL list only goals the caller may read (`diff.hidden_depends_on` counts the others, see "Dependencies a decider can't see are refused").
 
 #### Scenario: Viewer reads but cannot act
 
 - **WHEN** a viewer opens a pending request on a workspace goal
 - **THEN** the response is 200 with every `can` flag false, and a viewer's `approve` is 403 `read_only`
+
+#### Scenario: A decline reason stays with the people in the decision
+
+- **WHEN** an approver declines a request with a reason, and the requester, that approver and a viewer each read it (the single read, and the viewer also on the workspace list)
+- **THEN** the requester and the approver get the reason in `rejection_reason` and `decision_note`, and the viewer gets both as `null` with `rejected_by` and `decided_at` still set (`scripts/test-v2.mjs` "LIM-2515 L1: ..."). The approval set is the effective one at read time, so an approver added after the decision reads the reason and one removed no longer does; the requester and the person who declined always do.
 
 #### Scenario: Waiting on me
 
@@ -1077,12 +1092,12 @@ The server SHALL approve a revision that has no evidence links like any other, a
 
 ### Requirement: Change request controls in the app
 
-The goal page SHALL offer **Propose a change** on any `active` goal the person can read but does not own, unless they are a viewer, and a "Change requests" list whose approve, approve and launch, reject and counter controls appear only for people in the goal's approval set, whose launch and not yet controls appear only for the request's launch set, and whose acknowledge control appears only for the requester; the workspace SHALL have a "Requests" tab, read from `GET /api/v2/workspaces/{ws}/change-requests`, with the groups waiting on me, mine and others, each control appearing only when the server's `can` flag allows it. The "Requests" tab SHALL show change requests only; alignments keep their own "Alignments" tab.
+The goal page SHALL offer **Propose a change** on any `active` goal the person can read but does not own, unless they are a viewer: the shell's **Propose a change** drawer, with the goal chosen, and on the page itself the **Full change form** (shown when the goal read's `can_propose` is true and the person has no open request on the goal; see "One open change request per goal and requester"); and a "Change requests" list whose approve, approve and launch, reject and counter controls appear only for people in the goal's approval set, whose launch and not yet controls appear only for the request's launch set, and whose acknowledge control appears only for the requester; the workspace SHALL have a "Requests" tab, read from `GET /api/v2/workspaces/{ws}/change-requests`, that shows the groups waiting on me, mine and others as one list filtered by "Waiting on me", "Waiting on others", "Decided" and "All", where a row opens the request's review drawer (`?review=<goal>.<id>`), each control appearing only when the server's `can` flag allows it. The "Requests" tab SHALL show change requests only; alignments keep their own "Alignments" tab.
 
 #### Scenario: Non-owner proposes from the goal page
 
 - **WHEN** a member opens a goal they do not own
-- **THEN** the page shows **Propose a change**, which posts to `.../goals/<goal>/change-requests` with the current version as `base_version`
+- **THEN** the page shows **Propose a change** and the **Full change form**, each of which posts to `.../goals/<goal>/change-requests` with the current version as `base_version`
 
 ### Requirement: Creating the Northstar sample workspace
 
@@ -1146,12 +1161,17 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/goals/{goal}/requests` wit
 
 ### Requirement: Switch goal requests name sessions and a bindable goal
 
-The server SHALL require, for a `switch_goal` request, `session_keys` (1 to 20 sessions on the goal) and `target_goal_id`, a goal other than this one that the sender can read (else 404), and SHALL answer 409 `not_bindable`, naming no goal, session or person, unless the target goal is active and every chosen session's owner may bind that session to it now (their own goal, their team's goal, or an approved allocation transfer for that session).
+The server SHALL require, for a `switch_goal` request, `session_keys` (1 to 20 sessions on the goal) and `target_goal_id`, a goal other than this one that the sender can read (else 404), and SHALL answer 409 `not_bindable`, naming no goal, session or person, unless the target goal is active and every chosen session's owner may bind it themselves (their own goal or their team's goal). A goal a session reaches only through an approved `work_toward` alignment SHALL be refused here the same way: the alignment moves the sessions it lists with its own binding change, and the agent, which reads the same `bindable`, would otherwise have to turn the request down.
 
 #### Scenario: Target the session's owner cannot bind
 
 - **WHEN** an approver asks a member's session to switch to a workspace-visible goal owned by someone in no shared team with that member
 - **THEN** the response is 409 `not_bindable` and its message names neither the goal nor its owner
+
+#### Scenario: Target reached only through an alignment
+
+- **WHEN** an approved `work_toward` alignment lists a member's session for a goal that is neither theirs nor their team's, and an approver asks that session to switch to it
+- **THEN** the response is 409 `not_bindable` naming no goal, and the session still moves to it through the alignment's own `binding_changed`
 
 #### Scenario: Switch to a team goal
 

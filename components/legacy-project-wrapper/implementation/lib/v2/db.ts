@@ -1,7 +1,9 @@
+import { createTouches, type TouchHold, type TouchListener, type Touches } from "./touch-core.mts";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import { config } from "../config";
+import { readChangeset, type CsChange, type CsRecord } from "./changeset.mts";
 import { SCHEMA_VERSION, type Sql } from "./core.mts";
 import { count } from "./plural.mts";
 
@@ -84,28 +86,57 @@ export function exec(sql: string) {
   openDb().domain.exec(sql);
 }
 
-const isBusy = (e: unknown) => /SQLITE_BUSY|database is locked/i.test(String((e as Error)?.message ?? e)) || (e as { errcode?: number })?.errcode === 5;
+export const isBusy = (e: unknown) => /SQLITE_BUSY|database is locked/i.test(String((e as Error)?.message ?? e)) || (e as { errcode?: number })?.errcode === 5;
+
+// ---- live: which workspaces a write changed (lib/v2/live.ts streams it; the rules are lib/v2/touch-core.mts) ----
+// A write marks its workspace with touchWs(), usually through audit() or writeDirective(). Announced only once durable:
+// at once for an autocommitted write; after the outer COMMIT inside tx() (dropped on ROLLBACK); never for a write inside
+// a transaction someone else opened (a preview that rolls back) unless that caller holds touches with holdTouches().
+// Kept on globalThis, like the connections, so every route bundle shares one set of listeners.
+const gt = globalThis as unknown as { __alignV2Touches?: Touches };
+const touches = (): Touches => (gt.__alignV2Touches ??= createTouches(() => openDb().domain));
+/** Mark a workspace as changed by the current write. */
+export const touchWs = (ws: string | null | undefined) => touches().touch(ws);
+/** Hear of every committed write to a workspace. Returns the unsubscribe. */
+export const onWsChange = (l: TouchListener) => touches().onChange(l);
+/** For code that opens its own transaction (LIM-2422 previewTx): hold touches, then commit() after a real COMMIT or
+ *  discard() after a ROLLBACK. Without it, touches inside such a transaction are dropped. */
+export const holdTouches = (): TouchHold => touches().hold();
 
 let depth = 0;
+
+/** Wait for the domain connection and BEGIN IMMEDIATE, retrying a busy start for up to ~5 s. */
+async function begin() {
+  for (let attempt = 0; ; attempt++) {
+    // Another caller may have begun before its await continuation sets depth. Preview cleanup can replace d.
+    const d = openDb().domain;
+    if (d.isTransaction) {
+      if (attempt >= 100) throw new Error("Timed out waiting for the domain transaction to finish");
+    } else {
+      try {
+        d.exec("BEGIN IMMEDIATE");
+        return d;
+      } catch (e) {
+        if (!isBusy(e) || attempt >= 100) throw e;
+      }
+    }
+    await new Promise((r) => setTimeout(r, 25 + Math.random() * 25));
+  }
+}
+
 /** Run `fn` synchronously inside BEGIN IMMEDIATE ... COMMIT (ROLLBACK if it throws). A busy start is retried
  *  asynchronously for up to ~5 s. Nested calls join the outer transaction. */
 export async function tx<T>(fn: () => T): Promise<T> {
   if (depth > 0) return fn();
-  const d = openDb().domain;
-  for (let attempt = 0; ; attempt++) {
-    try {
-      d.exec("BEGIN IMMEDIATE");
-      break;
-    } catch (e) {
-      if (!isBusy(e) || attempt >= 100) throw e;
-      await new Promise((r) => setTimeout(r, 25 + Math.random() * 25));
-    }
-  }
+  let held: TouchHold | undefined;
+  const d = await begin();
   depth++;
   try {
+    held = holdTouches();
     const out = fn();
     if (out instanceof Promise) throw new Error("tx() callbacks must be synchronous");
     d.exec("COMMIT");
+    held.commit();
     return out;
   } catch (e) {
     try {
@@ -113,8 +144,134 @@ export async function tx<T>(fn: () => T): Promise<T> {
     } catch {}
     throw e;
   } finally {
+    held?.discard();
     depth--;
   }
+}
+
+// ---- previews (lib/v2/foresight.ts) ----
+// previewTx runs a decision's real transaction body and always rolls it back: BEGIN IMMEDIATE, SAVEPOINT, the body,
+// then `observe` (still inside, so it reads the state the decision would leave), ROLLBACK TO and ROLLBACK. Every row the
+// body writes is read back from a node:sqlite session changeset, so the preview reports exactly what the decision does,
+// through the same code, with no second copy of it. While a preview runs, inPreview() is true: anything that would
+// leave the database (mail, lib/v2/mail.ts) is captured in the outbox instead of sent. The body is synchronous, like
+// every tx() body, so nothing else runs on this connection between BEGIN and ROLLBACK.
+
+export interface RowChange {
+  table: string;
+  op: "insert" | "update" | "delete";
+  /** The row before (update, delete) and after (insert, update), all columns. */
+  before: Row | null;
+  after: Row | null;
+}
+export interface Outbound {
+  kind: "event" | "mail";
+  what: string;
+}
+
+let previewing: Outbound[] | null = null;
+/** True while previewTx runs a decision: nothing may leave the database. */
+export const inPreview = () => previewing !== null;
+/** Record something a decision would send, instead of sending it (only while a preview runs). */
+export function captureOutbound(o: Outbound) {
+  previewing?.push(o);
+}
+
+const tableColumns = new Map<string, { names: string[]; pk: string[] }>();
+function columnsOf(table: string) {
+  let c = tableColumns.get(table);
+  if (!c) {
+    const info = all<{ name: string; pk: number; cid: number }>(`SELECT name, pk, cid FROM pragma_table_info(?) ORDER BY cid`, table);
+    c = { names: info.map((r) => r.name), pk: info.filter((r) => r.pk > 0).sort((a, b) => a.pk - b.pk).map((r) => r.name) };
+    tableColumns.set(table, c);
+  }
+  return c;
+}
+
+/** Tables without a declared primary key, which a session changeset does not record: their new rows are read by rowid. */
+const rowidTables = () =>
+  all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'v2\\_%' ESCAPE '\\' AND sql NOT LIKE '%PRIMARY KEY%' ORDER BY name").map((r) => r.name);
+
+export interface Preview<T, R> {
+  ok: boolean;
+  value?: T;
+  error?: unknown;
+  changes: RowChange[];
+  outbound: Outbound[];
+  observed?: R;
+}
+
+/** Run `fn` as tx() would, record what it changes and would send, run `observe` on the result, then roll everything
+ *  back. An error from `fn` is returned (ok false), never thrown, after the rollback. Setup errors throw after cleanup. */
+export async function previewTx<T, R>(fn: () => T, observe?: (changes: RowChange[]) => R): Promise<Preview<T, R>> {
+  if (depth > 0 || previewing) throw new Error("previewTx can't run inside another transaction");
+  let session: ReturnType<DatabaseSync["createSession"]> | undefined;
+  const d = await begin();
+  depth++;
+  try {
+    previewing = [];
+    session = d.createSession();
+    const out: Preview<T, R> = { ok: false, changes: [], outbound: [] };
+    const plain = rowidTables();
+    const maxRow = new Map(plain.map((t) => [t, get<{ m: number | null }>(`SELECT MAX(rowid) AS m FROM "${t}"`)?.m ?? 0]));
+    d.exec("SAVEPOINT foresight");
+    try {
+      const v = fn();
+      if (v instanceof Promise) throw new Error("previewTx callbacks must be synchronous");
+      out.ok = true;
+      out.value = v;
+    } catch (e) {
+      out.error = e;
+    }
+    if (out.ok) {
+      out.changes = changesFrom(readChangeset(session.changeset()));
+      for (const t of plain) for (const r of all<Row>(`SELECT * FROM "${t}" WHERE rowid > ? ORDER BY rowid`, maxRow.get(t)!)) out.changes.push({ table: t, op: "insert", before: null, after: r });
+      out.outbound = [...previewing];
+      if (observe) out.observed = observe(out.changes);
+    }
+    return out;
+  } finally {
+    // Each step on its own, so none can stop the next: the rollback always runs and the module state is always reset.
+    try {
+      session?.close();
+    } catch {}
+    try {
+      d.exec("ROLLBACK TO foresight");
+      d.exec("RELEASE foresight");
+    } catch {}
+    try {
+      d.exec("ROLLBACK");
+    } catch {}
+    previewing = null;
+    depth--;
+    // A closed connection or one still in a transaction would break later writes (or commit the preview): replace it.
+    if (!d.isOpen || d.isTransaction) reopenDomain(d);
+  }
+}
+
+/** Close a domain connection left inside a transaction (rolling it back) and open a fresh one in its place. */
+function reopenDomain(d: DatabaseSync) {
+  const db = openDb();
+  try {
+    d.close();
+  } catch {}
+  db.domain = connect(db.file, 0);
+  db.stmts.clear();
+  console.error("Align: an approval preview left its connection in a transaction; it was rolled back and reopened");
+}
+
+/** Whole rows for a changeset's changes: an update's other columns are read from the row as the change leaves it. */
+function changesFrom(cs: CsChange[]): RowChange[] {
+  return cs.map((c) => {
+    const { names, pk } = columnsOf(c.table);
+    const rec = (r: CsRecord | null) => (r ? Object.fromEntries(names.map((n, i) => [n, r[i]]).filter(([, v]) => v !== undefined)) : null);
+    if (c.op !== "update") return { table: c.table, op: c.op, before: c.op === "delete" ? rec(c.old) : null, after: c.op === "insert" ? rec(c.new) : null };
+    const key = rec(c.old)!;
+    const now = get<Row>(`SELECT * FROM "${c.table}" WHERE ${pk.map((k) => `"${k}" = ?`).join(" AND ")}`, ...pk.map((k) => key[k] as SQLInputValue))!;
+    const changed = rec(c.new)!;
+    const old = rec(c.old)!;
+    return { table: c.table, op: "update", before: { ...now, ...old }, after: { ...now, ...changed } };
+  });
 }
 
 // ---- migrations (PRAGMA user_version; every table prefixed v2_) ----
@@ -1099,6 +1256,168 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX v2_oauth_goal_sends_goal ON v2_oauth_goal_sends(ws_id, goal_id, version);
   `,
+  // A refresh retried after its answer was lost (LIM-2441 H7a): the signed `ts` of the request that rotated a refresh
+  // token, so a retry must be signed later (a replay of the captured request is not), and when an access token was
+  // first used, so a pair already in use is never replaced.
+  `
+  ALTER TABLE v2_device_tokens ADD COLUMN rotated_ts TEXT;
+  ALTER TABLE v2_device_tokens ADD COLUMN used_at TEXT;
+  `,
+  // Monthly team budgets and immutable request decisions. Amounts are estimated list-price microdollars.
+  `
+  CREATE TABLE v2_team_budgets (
+    ws_id TEXT NOT NULL,
+    pod_id TEXT NOT NULL,
+    month TEXT NOT NULL,
+    amount_usd_micros INTEGER NOT NULL CHECK (amount_usd_micros BETWEEN 0 AND 1000000000000),
+    allowance_usd_micros INTEGER CHECK (allowance_usd_micros BETWEEN 0 AND 1000000000000),
+    allowance_ceiling_usd_micros INTEGER CHECK (allowance_ceiling_usd_micros BETWEEN 0 AND 1000000000000),
+    updated_by TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (ws_id, pod_id, month),
+    FOREIGN KEY (ws_id, pod_id) REFERENCES v2_pods(ws_id, id) ON DELETE CASCADE
+  );
+  CREATE TABLE v2_team_budget_history (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL,
+    pod_id TEXT NOT NULL,
+    month TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('set','changed','removed')),
+    amount_usd_micros INTEGER,
+    allowance_usd_micros INTEGER,
+    allowance_ceiling_usd_micros INTEGER,
+    actor_id TEXT NOT NULL,
+    at TEXT NOT NULL,
+    FOREIGN KEY (ws_id, pod_id) REFERENCES v2_pods(ws_id, id) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_team_budget_history_team ON v2_team_budget_history(ws_id, pod_id, month, at);
+  CREATE TABLE v2_budget_requests (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL,
+    pod_id TEXT NOT NULL,
+    month TEXT NOT NULL,
+    requester_id TEXT NOT NULL,
+    filed_from TEXT NOT NULL CHECK (filed_from IN ('browser','terminal')),
+    state TEXT NOT NULL CHECK (state IN ('waiting','granted','declined','withdrawn')),
+    revision INTEGER NOT NULL DEFAULT 1,
+    amount_usd_micros INTEGER NOT NULL CHECK (amount_usd_micros BETWEEN 1 AND 1000000000000),
+    reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 1000),
+    goal_id TEXT,
+    approved_usd_micros INTEGER,
+    authority TEXT CHECK (authority IN ('allowance','approver')),
+    expires_at TEXT,
+    requested_session_count INTEGER NOT NULL DEFAULT 0 CHECK (requested_session_count BETWEEN 0 AND 50),
+    second_look INTEGER NOT NULL DEFAULT 0 CHECK (second_look IN (0,1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (ws_id, id),
+    FOREIGN KEY (ws_id, pod_id) REFERENCES v2_pods(ws_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id)
+  );
+  CREATE INDEX v2_budget_requests_team ON v2_budget_requests(ws_id, pod_id, month, updated_at);
+  CREATE INDEX v2_budget_requests_requester_created ON v2_budget_requests(ws_id, requester_id, created_at);
+  CREATE INDEX v2_budget_requests_created ON v2_budget_requests(ws_id, created_at);
+  CREATE INDEX v2_budget_requests_goal ON v2_budget_requests(ws_id, goal_id);
+  CREATE TABLE v2_budget_request_decisions (
+    ws_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    round INTEGER NOT NULL CHECK (round IN (1,2)),
+    decision TEXT NOT NULL CHECK (decision IN ('granted','declined')),
+    actor_id TEXT NOT NULL,
+    amount_usd_micros INTEGER,
+    expires_at TEXT,
+    note TEXT CHECK (note IS NULL OR length(note) <= 1000),
+    at TEXT NOT NULL,
+    PRIMARY KEY (request_id, round),
+    FOREIGN KEY (ws_id, request_id) REFERENCES v2_budget_requests(ws_id, id) ON DELETE CASCADE
+  );
+  CREATE TABLE v2_budget_request_sessions (
+    ws_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    session_key TEXT NOT NULL,
+    PRIMARY KEY (request_id, session_key),
+    FOREIGN KEY (ws_id, request_id) REFERENCES v2_budget_requests(ws_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (ws_id, session_key) REFERENCES v2_sessions(ws_id, session_key) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_budget_request_sessions_session ON v2_budget_request_sessions(ws_id, session_key);
+  CREATE UNIQUE INDEX v2_pod_members_workspace_person ON v2_pod_members(ws_id, pod_id, user_id);
+  CREATE TABLE v2_spend_home_teams (
+    ws_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    pod_id TEXT NOT NULL,
+    PRIMARY KEY (ws_id, user_id),
+    FOREIGN KEY (ws_id, user_id) REFERENCES v2_members(ws_id, user_id) ON DELETE CASCADE,
+    FOREIGN KEY (ws_id, pod_id, user_id) REFERENCES v2_pod_members(ws_id, pod_id, user_id) ON DELETE CASCADE
+  );
+  ALTER TABLE v2_epochs ADD COLUMN spend_team_id TEXT;
+  CREATE TABLE v2_team_no_goal_rollups (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    pod_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    basis TEXT NOT NULL,
+    requests INTEGER NOT NULL,
+    input INTEGER NOT NULL,
+    output INTEGER NOT NULL,
+    cache_read INTEGER NOT NULL,
+    cache_write_5m INTEGER NOT NULL,
+    cache_write_1h INTEGER NOT NULL,
+    cache_write_unsplit INTEGER NOT NULL,
+    est_list_usd_micros INTEGER NOT NULL,
+    unpriced_requests INTEGER NOT NULL,
+    PRIMARY KEY (ws_id, pod_id, day, basis)
+  );
+  ALTER TABLE v2_spend_rollups ADD COLUMN team_attributed_requests INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE v2_spend_rollups ADD COLUMN team_attributed_unpriced_requests INTEGER NOT NULL DEFAULT 0;
+  CREATE INDEX v2_budget_requests_home ON v2_budget_requests(ws_id, month, requester_id, updated_at);
+  `,
+  // Filing source for terminal budget requests. Existing records make no claim about an unknown device.
+  `
+  ALTER TABLE v2_budget_requests ADD COLUMN source_device_id TEXT REFERENCES v2_devices(id) ON DELETE SET NULL;
+  ALTER TABLE v2_budget_requests ADD COLUMN source_device_name TEXT;
+  CREATE INDEX v2_budget_requests_source_device ON v2_budget_requests(source_device_id);
+  `,
+  // First observed budget crossings are information for Home, never decisions or product events.
+  `
+  CREATE TABLE v2_budget_crossings (
+    ws_id TEXT NOT NULL,
+    pod_id TEXT NOT NULL,
+    month TEXT NOT NULL,
+    threshold INTEGER NOT NULL CHECK (threshold IN (80,100)),
+    observed_at TEXT NOT NULL,
+    as_of TEXT NOT NULL,
+    PRIMARY KEY (ws_id, pod_id, month, threshold),
+    FOREIGN KEY (ws_id, pod_id) REFERENCES v2_pods(ws_id, id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE v2_budget_stamps (
+    ws_id TEXT NOT NULL,
+    pod_id TEXT NOT NULL,
+    month TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    PRIMARY KEY (ws_id, pod_id, month),
+    FOREIGN KEY (ws_id, pod_id) REFERENCES v2_pods(ws_id, id) ON DELETE CASCADE
+  );
+  INSERT INTO v2_budget_stamps (ws_id, pod_id, month, revision)
+    SELECT ws_id, pod_id, month, COUNT(*) FROM v2_team_budget_history GROUP BY ws_id, pod_id, month;
+  CREATE INDEX v2_budget_stamps_month ON v2_budget_stamps(ws_id, month, pod_id, revision);
+  CREATE INDEX v2_budget_requests_expiry ON v2_budget_requests(ws_id, pod_id, month, state, expires_at);
+  CREATE TRIGGER v2_budget_stamp_history AFTER INSERT ON v2_team_budget_history BEGIN
+    INSERT INTO v2_budget_stamps (ws_id, pod_id, month, revision) VALUES (NEW.ws_id, NEW.pod_id, NEW.month, 1)
+      ON CONFLICT (ws_id, pod_id, month) DO UPDATE SET revision = revision + 1;
+  END;
+  CREATE TRIGGER v2_budget_stamp_grant_insert AFTER INSERT ON v2_budget_requests WHEN NEW.state = 'granted' BEGIN
+    INSERT INTO v2_budget_stamps (ws_id, pod_id, month, revision) VALUES (NEW.ws_id, NEW.pod_id, NEW.month, 1)
+      ON CONFLICT (ws_id, pod_id, month) DO UPDATE SET revision = revision + 1;
+  END;
+  CREATE TRIGGER v2_budget_stamp_grant_update AFTER UPDATE ON v2_budget_requests WHEN NEW.state = 'granted' OR OLD.state = 'granted' BEGIN
+    INSERT INTO v2_budget_stamps (ws_id, pod_id, month, revision) VALUES (NEW.ws_id, NEW.pod_id, NEW.month, 1)
+      ON CONFLICT (ws_id, pod_id, month) DO UPDATE SET revision = revision + 1;
+  END;
+  CREATE TRIGGER v2_budget_stamp_crossing AFTER INSERT ON v2_budget_crossings BEGIN
+    INSERT INTO v2_budget_stamps (ws_id, pod_id, month, revision) VALUES (NEW.ws_id, NEW.pod_id, NEW.month, 1)
+      ON CONFLICT (ws_id, pod_id, month) DO UPDATE SET revision = revision + 1;
+  END;
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).
@@ -1136,4 +1455,5 @@ export const LIVE_WS = (ws: string) => `${ws} IN (SELECT id FROM v2_workspaces W
 
 export function audit(ws: string | null, actor: string | null, action: string, objectId: string | null, at: string) {
   run("INSERT INTO v2_audit (ws_id, actor_id, action, object_id, at) VALUES (?, ?, ?, ?, ?)", ws, actor, action, objectId, at);
+  touchWs(ws);
 }

@@ -4,6 +4,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import type { Ctx } from "./context.ts";
 import { loadDeviceKey, refreshMessage } from "./keys.ts";
 import { layout } from "./shared/layout.ts";
@@ -25,8 +26,8 @@ export interface Credentials {
   clock_offset_ms?: number;
 }
 
-/** Offsets under a minute count as the clocks agreeing (the server allows 5 minutes either way). */
-export const CLOCK_TOLERANCE_MS = 60_000;
+import { CLOCK_TOLERANCE_MS } from "./shared/clock.ts";
+export { CLOCK_TOLERANCE_MS } from "./shared/clock.ts";
 /** A measured offset replaces the saved one only when they differ by more than this, so the offset stays stable. */
 const CLOCK_DRIFT_MS = 30_000;
 
@@ -69,12 +70,14 @@ export class HttpError extends Error {
   }
 }
 
+export const credentialsFile = (home: string) => path.join(home, "credentials.json");
+
 export function loadCredentials(home: string): Credentials | null {
-  return readJson<Credentials>(layout.credentials(home));
+  return readJson<Credentials>(credentialsFile(home));
 }
 
 export function saveCredentials(home: string, c: Credentials): void {
-  writeJsonAtomic(layout.credentials(home), c, 0o600);
+  writeJsonAtomic(credentialsFile(home), c, 0o600);
 }
 
 /** Why this machine is signed out, in words for `align status`. The stored reason is the refusal's `reason` when the
@@ -101,6 +104,7 @@ export function signedIn(home: string): boolean {
 export interface Resp {
   status: number;
   json: any;
+  jsonParsed?: boolean;
   headers: Headers;
   /** The server's clock minus this computer's (ms), from the answer's `Date` header; null without one. */
   clockOffsetMs: number | null;
@@ -153,15 +157,15 @@ export async function rawRequest(base: string, method: string, path: string, opt
   const date = Date.parse(res.headers.get("date") || "");
   const clockOffsetMs = Number.isNaN(date) ? null : date + 500 - Math.round((t0 + Date.now()) / 2);
   const text = await res.text().catch(() => "");
-  let json: any = null;
+  let json: any = null, jsonParsed = false;
   if (text) {
     try {
-      json = JSON.parse(text);
+      json = JSON.parse(text); jsonParsed = true;
     } catch {
       json = null;
     }
   }
-  return { status: res.status, json, headers: res.headers, clockOffsetMs };
+  return { status: res.status, json, jsonParsed, headers: res.headers, clockOffsetMs };
 }
 
 /** The ALIGN_HOMEs whose refresh lock the current async call chain holds, so a call made while holding it (a logout's
@@ -236,7 +240,7 @@ export function bindDevice(ctx: Ctx, deviceId?: string | null): () => void {
 /** Credentials `c` belong to the device `ctx` is bound to (or `ctx` is unbound). Signed out by the server counts as the
  *  same device: a refusal for it is reported as a sign-out, not as a change of pairing. Signed out by `align logout` does
  *  not: the pairing it was bound to was ended under it, as a new `align login` would have replaced it (C5-4). */
-function boundTo(ctx: Ctx, c: Credentials | null): boolean {
+export function boundTo(ctx: Ctx, c: Credentials | null): boolean {
   if (ctx.boundDevice === undefined) return true;
   if (ctx.boundDevice === null) return !c || !!c.signed_out;
   return !!c && c.device_id === ctx.boundDevice && !(c.signed_out && c.signed_out_reason === "logout");
@@ -262,6 +266,9 @@ export function markSignedOut(home: string, reason: string, deviceId?: string): 
   // next `align login` writes a fresh one.
   const me = readJson<MeFile>(layout.me(home));
   if (me && !me.signed_out) writeJsonAtomic(layout.me(home), { ...me, signed_out: true });
+  for (const dir of ["budgets-cache", "budget-attribution", "budget-shown"]) {
+    try { fs.rmSync(path.join(home, dir), { recursive: true, force: true }); } catch { /* cache cleanup cannot prevent sign-out */ }
+  }
 }
 
 /** Write `c` only while it is still the current device's credentials (under the refresh lock, which a new pairing
@@ -378,13 +385,39 @@ export async function refreshIfNeeded(ctx: Ctx, force = false): Promise<Credenti
       markSignedOut(ctx.home, "device key missing", c.device_id);
       throw new SignedOut("device key missing");
     }
-    const attempt = (offset: number) => {
-      const ts = new Date(Date.now() + offset).toISOString();
+    // Each attempt is signed anew. A retry of one that got no answer is signed later than it (`after`): the server lets
+    // a retry of a rotation whose answer was lost through only then (LIM-2441 H7a). A clock_skew retry is not one: it
+    // signs with the server's time, earlier than a clock that runs ahead.
+    let sentTs = 0;
+    const attempt = (offset: number, after = 0) => {
+      sentTs = Math.max(Date.now() + offset, after + 1);
+      const ts = new Date(sentTs).toISOString();
       const sig = key.sign(refreshMessage(c.device_id, c.refresh_token!, ts));
       return rawRequest(c.server_url, "POST", "/api/v2/device/refresh", { body: { device_id: c.device_id, refresh_token: c.refresh_token, ts, sig } });
     };
     let offset = Number(c.clock_offset_ms) || 0;
-    let r = await attempt(offset);
+    // An answer lost in transit (no answer, or a 200 whose body did not arrive) may have rotated the token on the server:
+    // retried once at once, inside the server's grace, so the device is not signed out for it.
+    const once = async (o: number) => {
+      let res: Resp;
+      const prior = trouble;
+      try {
+        res = await attempt(o);
+      } catch (e) {
+        if (!(e instanceof NetworkError)) throw e;
+        ctx.log("refresh: no answer from the server; trying once more, signed again");
+        const again = await attempt(o, sentTs);
+        // Answered the second time: the lost first answer is not the server's trouble for this pass.
+        trouble = prior;
+        return again;
+      }
+      if (res.status === 200 && !(res.json?.access_token && res.json?.refresh_token)) {
+        ctx.log("refresh: the server's answer did not arrive whole; trying once more, signed again");
+        return attempt(o, sentTs);
+      }
+      return res;
+    };
+    let r = await once(offset);
     if (r.status === 400 && r.json?.error === "clock_skew") {
       // This computer's clock is off by more than the server allows. That is not a revocation: keep the tokens, say so,
       // and sign again with the server's time (the server still checks the timestamp against its own clock).
@@ -402,7 +435,7 @@ export async function refreshIfNeeded(ctx: Ctx, force = false): Promise<Credenti
         process.stderr.write(`align: this computer's clock is ${words} the Align server's. Align used the server's time and you stay signed in; set the system clock to update automatically.\n`);
         saveCredentials(ctx.home, withClockOffset(c, offset));
       }
-      r = await attempt(offset);
+      r = await once(offset);
       if (r.status === 400 && r.json?.error === "clock_skew") throw new ClockSkew(`this computer's clock is ${words} the Align server's; fix the system clock (you are still signed in)`);
     }
     if (r.status === 200 && r.json?.access_token && r.json?.refresh_token) {

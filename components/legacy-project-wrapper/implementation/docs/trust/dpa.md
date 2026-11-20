@@ -19,7 +19,7 @@ law. To sign, write to [PRIVACY CONTACT EMAIL].
 | Key term | Align's entry |
 | --- | --- |
 | Agreement | The agreement under which the Customer uses hosted Align, named when the DPA is signed |
-| Provider | [LEGAL ENTITY], [ADDRESS] |
+| Provider | [LEGAL ENTITY] |
 | Provider Security Contact | [SECURITY CONTACT EMAIL] |
 | Approved Subprocessors | The [subprocessor list](subprocessors.md): Fly.io (hosting, United States), the configured email API (Resend in the default configuration, United States), and Cloudflare Turnstile (bot check, when enabled) |
 | Security Policy | The [security overview](security-overview.md), summarized in Annex II below. Certifications: none |
@@ -51,7 +51,7 @@ wording.
 
 | | Data exporter | Data importer |
 | --- | --- | --- |
-| Who | The Customer, as named when the DPA is signed | [LEGAL ENTITY], [ADDRESS] |
+| Who | The Customer, as named when the DPA is signed | [LEGAL ENTITY] |
 | Contact | The Customer's contact, as named when signed | [PRIVACY CONTACT EMAIL] |
 | Role | Controller (or processor, for its own customers) | Processor (or subprocessor) |
 

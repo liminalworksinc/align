@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useState } from "react";
 import { Btn, Card, Err, SignInAgain } from "@/app/app/_ui/kit";
 
@@ -70,7 +71,7 @@ export default function AuthorizeForm(props: {
   return (
     <main className="mx-auto min-h-screen max-w-[600px] bg-[var(--al-bg)] p-6 text-[16px] text-zinc-800">
       <p className="font-display mb-4 text-[26px] leading-none text-zinc-900">Align</p>
-      <h1 className="mb-1 text-[24px] font-semibold text-zinc-900">Connect {clientName} to Align</h1>
+      <h1 className={`${PAGE_H1} mb-1`}>Connect {clientName} to Align</h1>
       <p className="mb-5 text-zinc-600">
         {selfNamed ? "This app named itself. " : ""}After you allow it, Align sends you back to <span className="font-mono">{redirectHost}</span>.
       </p>
@@ -108,7 +109,7 @@ export default function AuthorizeForm(props: {
             <ul className="list-disc space-y-1 pl-5 text-[15px]">
               <li>It reads goals and their limits, change requests, decision records, directives, asks between teams and agent activity counts in the workspace you choose, as you and with your role.</li>
               <li>It can’t propose, approve or change anything. Those stay with the people in the workspace.</li>
-              {evidence && <li>It may also attach links to change requests you can act on, as evidence. Align labels them agent-reported.</li>}
+              {evidence && <li>It may also attach links to change requests you can act on, as evidence. Align labels them agent reported.</li>}
               <li>It never sees captured prompts.</li>
               <li>What it reads is sent to {provider}.</li>
               <li>You or a workspace owner can disconnect it on the workspace’s Apps tab, and it is disconnected if you leave the workspace.</li>

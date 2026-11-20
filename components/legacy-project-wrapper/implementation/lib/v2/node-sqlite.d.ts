@@ -18,10 +18,16 @@ declare module "node:sqlite" {
     get(...params: SQLInputValue[]): Record<string, SQLOutputValue> | undefined;
     run(...params: SQLInputValue[]): StatementResultingChanges;
   }
+  /** A session (the SQLite session extension, Node 22.12+): records the rows changed after it was created. */
+  export class Session {
+    changeset(): Uint8Array;
+    close(): void;
+  }
   export class DatabaseSync {
     constructor(path: string, options?: DatabaseSyncOptions);
     exec(sql: string): void;
     prepare(sql: string): StatementSync;
+    createSession(options?: { table?: string; db?: string }): Session;
     close(): void;
     readonly isOpen: boolean;
     readonly isTransaction: boolean;

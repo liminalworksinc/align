@@ -15,7 +15,7 @@ import { ensureSession } from "../src/ledger.ts";
 import { renderHot } from "../src/hot.ts";
 import { renderCard, type SiblingSummary } from "../src/shared/envelope.ts";
 import { writeJsonAtomic } from "../src/shared/fsx.ts";
-import { layout, localId } from "../src/shared/layout.ts";
+import { layout, listSpool, localId, spoolWrite } from "../src/shared/layout.ts";
 import type { Ask, FeedFile, Goal, GoalSnapshot, Harness, Limit } from "../src/shared/types.ts";
 import { FakeServer } from "./fake-server.ts";
 import { ctxFor, makeEnv, runCli, runHook, touch, type TestEnv } from "./helpers.ts";
@@ -311,8 +311,230 @@ describe("A3-cross-2 (agent side): a binding ended because the followed goal clo
     fake.pushDirective({ ws: "ws_acme", kind: "binding_suspended", session_keys: [skey.session_key], goal: null, binding: { goal_id: "g_ship", effective: "next_root_turn", cause: "goal_closed:al_1" } });
     assert.equal((await runCli(t, ["sync"])).code, 0);
     const out = JSON.parse(prompt());
-    assert.match(out.systemMessage, /^Align: the goal this session followed through an alignment was achieved or dropped, so its usage is paused and stays on this machine\. Type `::align bind <goal>`/m);
+    assert.match(out.systemMessage, /^Align: the goal this session followed through an alignment was achieved or dropped, so its usage is paused and stays on this machine\. Goals you can pick: "Cut hook latency"\. Type `::align bind <goal>`/m);
     assert.doesNotMatch(out.systemMessage, /revoked/);
     assert.match(out.hookSpecificOutput.additionalContext, /no longer bound to an Align goal/);
+  });
+});
+
+describe("LIM-2441 H8 (agent side): an alignment revoked before its session switched goals cancels only the pending switch", () => {
+  const setup = async (extraGoals: Goal[] = []) => {
+    const fake = new FakeServer();
+    await fake.start();
+    cleanups.push(() => fake.stop());
+    fake.goals.get("ws_acme")!.push(...extraGoals);
+    const t = env({ ALIGN_SERVER: fake.url, ALIGN_DEVICE_POLL_SCALE_MS: "10", ALIGN_OUTBOX_MAX_BACKOFF_MS: "200" });
+    assert.equal((await runCli(t, ["login", "--name", "Lena Mac"])).code, 0);
+    const sid = `aaaaaaaa-8888-2222-3333-${Math.random().toString(16).slice(2, 14).padEnd(12, "0")}`;
+    const cwd = path.join(t.root, `ledger-${sid.slice(-4)}`);
+    fs.mkdirSync(cwd, { recursive: true });
+    runHook(t, "claude", "SessionStart", { session_id: sid, source: "startup", cwd });
+    runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "p0", prompt: "start", cwd });
+    const lid = localId("claude-code", sid);
+    assert.equal((await runCli(t, ["share", lid.slice(0, 8), "--workspace", "Acme", "--goal", "Ship the v2", "--yes"])).code, 0);
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    const say = (text: string) => JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: `p${Math.random()}`, prompt: text, cwd }).stdout || "{}");
+    const prompt = () => say("go on");
+    prompt();
+    const row = () => {
+      const c = ctxFor(t);
+      const r = c.db.prepare("SELECT session_key, state, binding_goal, (SELECT goal_id FROM pending_bindings p WHERE p.local_id=shares.local_id) AS pending FROM shares WHERE local_id=?").get(lid) as { session_key: string; state: string; binding_goal: string | null; pending: string | null };
+      c.db.close();
+      return r;
+    };
+    const perf = fake.goals.get("ws_acme")!.find((g) => g.id === "g_perf")!;
+    fake.pushDirective({ ws: "ws_acme", kind: "binding_changed", session_keys: [row().session_key], goal: perf, binding: { goal_id: "g_perf", effective: "next_root_turn", cause: "alignment:al_9" } });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.equal(row().pending, "g_perf");
+    const pendingRow = () => {
+      const c = ctxFor(t);
+      const r = c.db.prepare("SELECT id, directive_id FROM pending_bindings WHERE local_id=?").get(lid) as { id: string; directive_id: string };
+      c.db.close();
+      return r;
+    };
+    // A hook that read the pending switch just before the pass that cancelled it: its record is ingested by a later pass.
+    const lateEpoch = (p: { id: string; directive_id: string }) =>
+      spoolWrite(t.home, { type: "epoch_open", harness: "claude-code", native_id: sid, local_id: lid, epoch_id: `ep_${"a".repeat(22)}`, goal_id: "g_perf", starts_at: nowIso(), root_turn: "p-late", cause: `directive:${p.directive_id}`, pending_id: p.id, directive_id: p.directive_id, ts: nowIso() });
+    return { fake, t, prompt, say, row, lid, pendingRow, lateEpoch };
+  };
+  const cancel = { ws: "ws_acme", kind: "binding_suspended" as const, goal: null, binding: { goal_id: "g_perf", effective: "cancel_pending", cause: "alignment:al_9" } };
+  const closedCancel = { ...cancel, binding: { ...cancel.binding, cause: "goal_closed:al_9" } };
+  type Setup = Awaited<ReturnType<typeof setup>>;
+  /** The switch a hook opened, cancelled by a pass that ran between the hook and its record's ingest. */
+  const pauseLate = async (s: Setup, directive: typeof cancel = cancel) => {
+    const p = s.pendingRow();
+    s.fake.pushDirective({ ...directive, session_keys: [s.row().session_key] });
+    assert.equal((await runCli(s.t, ["sync"])).code, 0);
+    assert.equal(s.row().state, "shared", "the cancel alone leaves the session shared");
+    s.lateEpoch(p);
+    assert.equal((await runCli(s.t, ["sync"])).code, 0);
+  };
+
+  test("binding_suspended with effective cancel_pending: the pending switch is dropped, the share stays shared under its goal, and the user hears why", async () => {
+    const { fake, t, prompt, row } = await setup();
+    const before = row();
+    fake.pushDirective({ ...cancel, session_keys: [before.session_key] });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    const after = row();
+    assert.equal(after.pending, null);
+    assert.equal(after.state, "shared");
+    assert.equal(after.binding_goal, before.binding_goal);
+    const out = prompt();
+    assert.match(out.systemMessage ?? "", /the alignment this session was about to switch goals for was revoked before the switch, so it keeps its current goal/);
+    assert.doesNotMatch(out.systemMessage ?? "", /usage is paused/);
+  });
+
+  test("the same directive after a hook opened the switch but before the pass that sends it: suspended, never switched", async () => {
+    const { fake, t, prompt, row } = await setup();
+    prompt();
+    fake.pushDirective({ ...cancel, session_keys: [row().session_key] });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.equal(row().state, "suspended");
+    assert.equal(row().pending, null);
+    assert.match(prompt().systemMessage ?? "", /goal binding was revoked, so its usage is paused/);
+  });
+
+  test("the same directive once the session already switched to that goal: suspended, as for any revocation", async () => {
+    const { fake, t, prompt, row } = await setup();
+    prompt();
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.equal(row().binding_goal, "g_perf", "switched to g_perf at the root turn");
+    fake.pushDirective({ ...cancel, session_keys: [row().session_key] });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.equal(row().state, "suspended");
+    assert.match(prompt().systemMessage ?? "", /this session's goal binding was revoked, so its usage is paused/);
+  });
+
+  test("a hook's switch ingested after the pass that cancelled it (sync.ts): paused, nothing reaches the server, and the notice that it would keep its goal is withdrawn", async () => {
+    const s = await setup();
+    await pauseLate(s);
+    assert.equal(s.row().state, "suspended");
+    assert.equal(s.row().pending, null);
+    assert.equal([...s.fake.epochs.values()].some((e) => e.goal_id === "g_perf"), false);
+    const msg = s.prompt().systemMessage ?? "";
+    assert.match(msg, /goal binding was revoked, so its usage is paused/);
+    assert.doesNotMatch(msg, /keeps its current goal/);
+  });
+
+  test("the pause lists the goals the person can pick: bindable and active, the previous goal included, never the lost goal", async () => {
+    const closed: Goal = { ...goal("g_done", "Finished migration"), status: "achieved" };
+    const s = await setup([closed, goal("g_docs", "Write the runbook")]);
+    await pauseLate(s);
+    const msg = s.prompt().systemMessage ?? "";
+    const list = /Goals you can pick: (.*?)\. Type/.exec(msg)?.[1] ?? "";
+    assert.match(list, /"Ship the v2 onboarding flow"/);
+    assert.match(list, /"Write the runbook"/);
+    assert.doesNotMatch(list, /Cut hook latency/);
+    assert.doesNotMatch(list, /Someone else's private plan/);
+    assert.doesNotMatch(list, /Finished migration/);
+    assert.match(msg, /`::align bind <goal>` or run `align bind` to pick a goal, and the session resumes on it at your next prompt/);
+  });
+
+  test("every kind of pause lists the goals: a cancel after the switch, and a binding that had reached the server", async () => {
+    for (const effective of ["cancel_pending", "next_root_turn"]) {
+      const s = await setup();
+      s.prompt();
+      assert.equal((await runCli(s.t, ["sync"])).code, 0);
+      s.fake.pushDirective({ ...cancel, binding: { ...cancel.binding, effective }, session_keys: [s.row().session_key] });
+      assert.equal((await runCli(s.t, ["sync"])).code, 0);
+      assert.match(s.prompt().systemMessage ?? "", /Goals you can pick: "Ship the v2 onboarding flow"\./, effective);
+    }
+  });
+
+  test("more goals than fit: twelve are listed and the rest counted; no goal to pick says so", async () => {
+    const s = await setup(Array.from({ length: 14 }, (_, i) => goal(`g_x${i}`, `Extra goal ${i}`)));
+    await pauseLate(s);
+    const msg = s.prompt().systemMessage ?? "";
+    assert.equal((/Goals you can pick: (.*?)\. Type/.exec(msg)?.[1] ?? "").match(/"/g)?.length, 24);
+    assert.match(msg, /and 3 more \(`::align goals` lists them\)/);
+
+    const none = await setup();
+    for (const g of none.fake.goals.get("ws_acme")!) if (g.id !== "g_perf") g.bindable = false;
+    assert.equal((await runCli(none.t, ["sync"])).code, 0);
+    await pauseLate(none);
+    const empty = none.prompt().systemMessage ?? "";
+    assert.doesNotMatch(empty, /Goals you can pick/);
+    assert.match(empty, /No goal is open to pick right now; `::align goals` shows the latest/);
+  });
+
+  for (const route of ["::align bind", "align bind"] as const) {
+    test(`the whole path with \`${route}\`: paused, goals shown, picked, and the very next prompt is on that goal with no further step`, async () => {
+      const s = await setup();
+      await pauseLate(s);
+      assert.match(s.prompt().systemMessage ?? "", /Goals you can pick: "Ship the v2 onboarding flow"/);
+      if (route === "::align bind") {
+        assert.match(s.say("::align bind Ship the v2").reason ?? "", /from your next prompt this session counts toward "Ship the v2 onboarding flow"/);
+      } else {
+        assert.equal((await runCli(s.t, ["bind", s.lid.slice(0, 8), "--goal", "g_ship"])).code, 0);
+      }
+      const resumed = s.prompt();
+      assert.match(resumed.hookSpecificOutput?.additionalContext ?? "", /From this turn this session counts toward goal "Ship the v2 onboarding flow"/);
+      // Before any sync has recorded it, the session does not fall back to "unbound".
+      assert.doesNotMatch(s.prompt().hookSpecificOutput?.additionalContext ?? "", /no longer bound/);
+      assert.equal((await runCli(s.t, ["sync"])).code, 0);
+      assert.equal(s.row().state, "shared");
+      assert.equal(s.row().binding_goal, "g_ship");
+      const open = [...s.fake.epochs.values()].filter((e) => !e.ends_at);
+      assert.deepEqual(open.map((e) => [e.goal_id, e.cause]), [["g_ship", "manual"]]);
+      assert.equal([...s.fake.epochs.values()].some((e) => e.goal_id === "g_perf"), false);
+      assert.doesNotMatch(s.prompt().hookSpecificOutput?.additionalContext ?? "", /From this turn/, "told once");
+    });
+  }
+
+  test("a switch opened while shared, then cancelled, never becomes the session's goal at a later prompt", async () => {
+    const s = await setup();
+    s.prompt();
+    s.fake.pushDirective({ ...cancel, session_keys: [s.row().session_key] });
+    assert.equal((await runCli(s.t, ["sync"])).code, 0);
+    assert.equal(s.row().state, "suspended");
+    assert.doesNotMatch(JSON.stringify(s.prompt()), /counts toward goal "Cut hook latency"/);
+    assert.doesNotMatch(JSON.stringify(s.prompt()), /counts toward goal "Cut hook latency"/);
+  });
+
+  test("a switch opened while already paused, then cancelled before its record is ingested: it stops reading as the goal and the model is told", async () => {
+    const s = await setup();
+    const key = s.row().session_key;
+    s.fake.pushDirective({ ...cancel, binding: { goal_id: "g_ship", effective: "next_root_turn", cause: "alignment:al_8" }, session_keys: [key] });
+    assert.equal((await runCli(s.t, ["sync"])).code, 0);
+    assert.equal(s.row().state, "suspended");
+    s.prompt();
+    const perf = s.fake.goals.get("ws_acme")!.find((g) => g.id === "g_perf")!;
+    s.fake.pushDirective({ ws: "ws_acme", kind: "binding_changed", session_keys: [key], goal: perf, binding: { goal_id: "g_perf", effective: "next_root_turn", cause: "alignment:al_9" } });
+    assert.equal((await runCli(s.t, ["sync"])).code, 0);
+    assert.match(s.prompt().hookSpecificOutput?.additionalContext ?? "", /counts toward goal "Cut hook latency"/);
+    // The pass that applies the cancel runs before this hook's record reaches the ingest.
+    const held = path.join(s.t.root, "held-spool");
+    fs.mkdirSync(held);
+    const files = listSpool(s.t.home);
+    assert.equal(files.length > 0, true);
+    for (const f of files) fs.renameSync(f, path.join(held, path.basename(f)));
+    s.fake.pushDirective({ ...cancel, session_keys: [key] });
+    assert.equal((await runCli(s.t, ["sync"])).code, 0);
+    for (const f of files) fs.renameSync(path.join(held, path.basename(f)), f);
+    assert.equal((await runCli(s.t, ["sync"])).code, 0);
+    assert.equal(s.row().state, "suspended");
+    assert.equal([...s.fake.epochs.values()].some((e) => e.goal_id === "g_perf"), false);
+    const told = s.prompt();
+    assert.match(told.hookSpecificOutput?.additionalContext ?? "", /no longer bound to an Align goal/);
+    assert.doesNotMatch(JSON.stringify(told), /counts toward goal "Cut hook latency"/);
+    assert.doesNotMatch(JSON.stringify(s.prompt()), /counts toward goal "Cut hook latency"/);
+  });
+
+  test("a goal achieved or dropped never says revoked: the kept-goal notice, the pause a hook's switch hits, and `::align status`", async () => {
+    const kept = await setup();
+    kept.fake.pushDirective({ ...closedCancel, session_keys: [kept.row().session_key] });
+    assert.equal((await runCli(kept.t, ["sync"])).code, 0);
+    const keptMsg = kept.prompt().systemMessage ?? "";
+    assert.match(keptMsg, /the goal this session was about to switch to was achieved or dropped before the switch, so it keeps its current goal/);
+    assert.doesNotMatch(keptMsg, /revoked/);
+
+    const paused = await setup();
+    await pauseLate(paused, closedCancel);
+    const pausedMsg = paused.prompt().systemMessage ?? "";
+    assert.match(pausedMsg, /was achieved or dropped, so its usage is paused/);
+    assert.doesNotMatch(pausedMsg, /revoked/);
+    const status = paused.say("::align status").reason ?? "";
+    assert.match(status, /Goal: +none \(the alignment that set it no longer applies/);
+    assert.doesNotMatch(status, /revoked/);
   });
 });

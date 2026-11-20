@@ -1,7 +1,9 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useState } from "react";
-import { api, ApiError, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, sentence, Shell, TextArea, useAction, useApi } from "../../../_ui/kit";
+import { api, ApiError, Btn, Err, Field, Input, Loading, Note, Pill, Select, sentence, Shell, TextArea, useAction, useApi } from "../../../_ui/kit";
+import { Panel } from "../../../_ui/ds";
 import { NoticeBox, useNotice } from "../../../_ui/crparts";
 import type { Me } from "../../../_ui/server";
 import type { Goal, WsDetail } from "../../../_ui/types";
@@ -31,6 +33,8 @@ interface Ask {
   can: { accept: boolean; decline: boolean; done: boolean; reopen: boolean; withdraw: boolean; mention: boolean };
 }
 
+// LIM-2472 (stream R): a disclosure is a full-height row on a phone, with a visible focus ring from the global style.
+const SUMMARY = "cursor-pointer py-1 font-medium text-(--text-1) max-sm:flex max-sm:min-h-[44px] max-sm:items-center";
 const TONE: Record<AskState, "amber" | "violet" | "green" | "neutral"> = { open: "amber", accepted: "violet", done: "green", declined: "neutral", withdrawn: "neutral" };
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -48,8 +52,8 @@ function MentionForm({ ws, a, onDone }: { ws: string; a: Ask; onDone: () => void
   const [where, setWhere] = useState("");
   const act = useAction();
   return (
-    <div className="mt-3 rounded-[12px] border border-zinc-300 p-3">
-      <p className="mb-2 text-[15px] text-zinc-700">Record that this came up again.</p>
+    <div className="mt-3 rounded-(--radius-m) border border-(--edge) p-3">
+      <p className="mb-2 text-[15px] text-(--text-2)">Record that this came up again.</p>
       <Field label="When">
         <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
       </Field>
@@ -89,29 +93,29 @@ function AskCard({ ws, a, me, onDone }: { ws: string; a: Ask; me: string; onDone
       onDone();
     });
   return (
-    <div className="ask-card mb-4 rounded-[12px] border border-zinc-200 p-4" data-ask={a.id}>
+    <div className="ask-card mb-3 rounded-(--radius-m) border border-(--line) bg-(--bg-raised) p-4 last:mb-0" data-ask={a.id}>
       {notice && <NoticeBox notice={notice} />}
       <div className="mb-1 flex flex-wrap items-center gap-2">
-        <span className="text-[16px] text-zinc-900">
+        <span className="min-w-0 text-[15px] font-semibold text-(--text-1)">
           {a.from_label ?? (a.requester.id === me ? "You" : a.requester.name)} asked {a.team.name}
         </span>
         <Pill tone={TONE[a.state]}>{a.state}</Pill>
         {a.goal && (
-          <Link href={`/app/w/${ws}/goals/${a.goal.id}`} className="text-[14px] text-violet-700 hover:underline">
+          <Link href={`/app/w/${ws}/goals/${a.goal.id}`} className="inline-flex min-h-[28px] items-center text-[14px] font-medium text-(--accent-text) underline-offset-2 hover:underline max-sm:min-h-[44px]">
             {a.goal.title}
           </Link>
         )}
       </div>
-      <blockquote className="my-2 border-l-2 border-zinc-300 pl-3 text-[15px] text-zinc-800">“{a.text}”</blockquote>
-      <p className="text-[14px] text-zinc-500">{askSubline(a)}</p>
+      <blockquote className="my-2 border-l-2 border-(--edge) pl-3 text-[15px] text-(--text-1)">“{a.text}”</blockquote>
+      <p className="text-[14px] text-(--text-2)">{askSubline(a)}</p>
       {/* Who last decided it, in the refusal's words: "marked done by <name>", never the bare "done by" (c10 W3). */}
-      <p className="text-[13px] text-zinc-500">
+      <p className="text-[13px] text-(--text-3)">
         Recorded by {said(a.requester, me)}
         {a.decided_by && a.state !== "open" ? ` · ${a.state === "done" ? "marked done" : a.state} by ${said(a.decided_by, me)}` : ""}
       </p>
       {a.mentions.length > 0 && (
-        <details className="mt-1 text-[14px] text-zinc-500">
-          <summary className="cursor-pointer">When it came up again</summary>
+        <details className="mt-1 text-[14px] text-(--text-2)">
+          <summary className={SUMMARY}>When it came up again</summary>
           {a.mentions.map((m) => (
             <p key={m.n}>
               {m.date}, {m.source_title}: “{m.text}” ({said(m.added_by, me)})
@@ -252,12 +256,12 @@ function ImportAsks({ ws, teams, onDone }: { ws: string; teams: { id: string; na
     }, onDone);
   return (
     <details id="import-asks">
-      <summary className="cursor-pointer text-[15px] text-zinc-700">Import asks (JSON, at most 60)</summary>
-      <p className="my-2 text-[14px] text-zinc-500">
+      <summary className={`${SUMMARY} text-[15px]`}>Import asks (JSON, at most 60)</summary>
+      <p className="my-2 text-[14px] text-(--text-3)">
         Each ask: {"{"}team (the team&apos;s name) or team_id, text, from_label, goal_id, source: {"{"}kind: &quot;meeting&quot; or &quot;manual&quot;, title, date{"}"}, state, mentions{"}"}. An import adds to the asks here and never replaces them: an ask already recorded for that team with the same text and date is skipped, and one with a new date is recorded as having come up again.
       </p>
       {teams.length > 0 && (
-        <p className="my-2 text-[14px] text-zinc-500" data-import-teams>
+        <p className="my-2 text-[14px] text-(--text-3)" data-import-teams>
           Teams here: {teams.map((t) => `${t.name} (team_id ${t.id})`).join(", ")}.
         </p>
       )}
@@ -286,7 +290,7 @@ export default function Asks({ me, ws }: { me: Me; ws: string }) {
   const others = all.filter((a) => !a.waiting_on_me && !myTeams.has(a.team.id) && a.requester.id !== me.id);
   const list = (asks: Ask[], empty: string) => (
     <>
-      {asks.length === 0 && <Note>{empty}</Note>}
+      {asks.length === 0 && <p className="text-[15px] text-(--text-2)">{empty}</p>}
       {asks.map((a) => (
         <AskCard key={`${a.id}:${a.state}:${a.mentions.length}`} ws={ws} a={a} me={me.id} onDone={d.reload} />
       ))}
@@ -294,28 +298,28 @@ export default function Asks({ me, ws }: { me: Me; ws: string }) {
   );
   return (
     <Shell me={me} ws={ws} tab="Asks">
-      <h1 className="mb-2 text-[26px] font-semibold text-zinc-900">Asks</h1>
-      <p className="mb-5 text-[15px] text-zinc-600">What people asked of a team, from meetings or recorded by hand. An open ask is not an agreed goal until a lead of the team accepts it.</p>
+      <h1 className={`${PAGE_H1} mb-2`}>Asks</h1>
+      <p className="mb-5 max-w-prose text-[15px] text-(--text-2)">What people asked of a team, from meetings or recorded by hand. An open ask is not an agreed goal until a lead of the team accepts it.</p>
       {d.loading && <Loading />}
       <Err>{d.error}</Err>
       {d.data && (
         <>
-          <Card title="Waiting on you">{list(waiting, "Nothing is waiting on you.")}</Card>
+          <Panel className="mb-4" title="Waiting on you">{list(waiting, "Nothing is waiting on you.")}</Panel>
           {/* An ask that waits on this person is listed once, under Waiting on you: the sections below say so. */}
-          <Card title="Asked of your teams">{list(ofTeams, waiting.some((a) => myTeams.has(a.team.id)) ? "No other asks of your teams. The ones that need you are under Waiting on you." : "No asks yet.")}</Card>
-          <Card title="Your asks">{list(mine, waiting.some((a) => !myTeams.has(a.team.id) && a.requester.id === me.id) ? "No other asks of yours. The ones that need you are under Waiting on you." : "No asks yet.")}</Card>
-          {role === "owner" && <Card title="Others">{list(others, "No asks yet.")}</Card>}
+          <Panel className="mb-4" title="Asked of your teams">{list(ofTeams, waiting.some((a) => myTeams.has(a.team.id)) ? "No other asks of your teams. The ones that need you are under Waiting on you." : "No asks yet.")}</Panel>
+          <Panel className="mb-4" title="Your asks">{list(mine, waiting.some((a) => !myTeams.has(a.team.id) && a.requester.id === me.id) ? "No other asks of yours. The ones that need you are under Waiting on you." : "No asks yet.")}</Panel>
+          {role === "owner" && <Panel className="mb-4" title="Others">{list(others, "No asks yet.")}</Panel>}
         </>
       )}
       {role && role !== "viewer" && w.data && (
-        <Card title="Record an ask">
+        <Panel className="mb-4" title="Record an ask">
           <RecordAsk ws={ws} teams={w.data.teams} goals={goals.data?.goals ?? []} onDone={d.reload} />
-        </Card>
+        </Panel>
       )}
       {role === "owner" && (
-        <Card>
+        <Panel className="mb-4">
           <ImportAsks ws={ws} teams={w.data?.teams ?? []} onDone={d.reload} />
-        </Card>
+        </Panel>
       )}
     </Shell>
   );

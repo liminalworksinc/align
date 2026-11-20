@@ -13,9 +13,11 @@ import {
   commitPairing,
   loadCredentials,
   bindDevice,
+  credentialsFile,
   loadPendingRevokes,
   logoutLocked,
   NetworkError,
+  HttpError,
   rawRequest,
   revokePending,
   SignedOut,
@@ -28,7 +30,7 @@ import {
   signedOutWords,
   type Credentials,
 } from "./api.ts";
-import { openCtx, saveConfig, type Ctx } from "./context.ts";
+import { DEV_SERVER, openCtx, saveConfig, type Config, type Ctx } from "./context.ts";
 import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
 import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedByLogin, endedReason, endedState, endedUnsent, getShare, notMember, releaseOf, renderEndedShares, stopOutlivesShare } from "./hot.ts";
@@ -44,6 +46,7 @@ import { applyShare, bind, deleteHistory, deleteRefused, ENDED_UNREAD, endedUnre
 import { askLineForPeople, askOrder, myTeams, readAsks } from "./shared/asks.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson } from "./shared/fsx.ts";
+import { contextAddedLine, readContextCost } from "./shared/context-cost.ts";
 import { matchRule, readRules, realDir, removeRule, setRule } from "./shared/rules.ts";
 import { layout } from "./shared/layout.ts";
 import type { Ask, Goal, MeFile } from "./shared/types.ts";
@@ -59,6 +62,7 @@ import { feedHold } from "./shared/feedhold.ts";
 import type { RequestState, WireRequest } from "./shared/types.ts";
 import { computeUnsharedDigest } from "./allocation.ts";
 import { listSteering, weekKey } from "./shared/steering.ts";
+import { budgetFailure, budgetMonthLabel, budgetReadLabel, cacheTerminalBudget, requestAmount, budgetTeam, budgetFolder } from "./budgets.ts";
 
 const out = (s = ""): void => {
   process.stdout.write(s + "\n");
@@ -70,7 +74,7 @@ class UsageError extends Error {}
 
 const HELP = `align ${VERSION}: Align local agent
 
-  align login [--server <url>] [--name <device name>]
+  align login [--server <url> | --dev] [--name <device name>]
   align logout
   align status
   align sessions [--all] [--json]
@@ -92,6 +96,8 @@ const HELP = `align ${VERSION}: Align local agent
   align latch status           stop latches and goal holds
   align allocation [--workspace <name|id>] [--week YYYY-MM-DD] [--refresh] [--json]   agent time per goal against its target
   align steering status [--workspace <name|id>]
+  align budget [--team <name>] [--workspace <name|id>]   this folder's monthly team budget and estimates
+  align budget request --amount <USD> --reason <text> [--team <name>] [--goal <ref>] [--session <ref> ...] [--workspace <name|id>]
   align install [--claude] [--codex] [--dry-run]
   align uninstall [--purge]
   align sync                   (hooks also run this in the background, one pass each)
@@ -312,11 +318,33 @@ const INVISIBLE = /[\p{Cc}\p{Cf}\p{Cs}\s\u2028\u2029\u115F\u1160\u3164\uFFA0\u28
  *  render as nothing, so a name of only these is blank too (E2E-AGENT cycle 12, section 6). */
 const MARKS_ONLY = /\p{M}+/gu;
 
+/** A server address as an origin (scheme, host, port), or the address itself when it isn't a URL. */
+function serverOrigin(server: string): string {
+  try {
+    return new URL(server).origin;
+  } catch {
+    return server;
+  }
+}
+
+/** Where `align login`'s server came from, in the order it is chosen (LIM-2504 L1). */
+function serverSource(ctx: Ctx, values: { server?: string; dev?: boolean }): string {
+  if (values.server) return "from --server";
+  if (values.dev) return "from --dev, the local dev server";
+  if (ctx.env.ALIGN_SERVER) return "from ALIGN_SERVER";
+  if (ctx.env.ALIGN_DEV === "1") return "from ALIGN_DEV=1, the local dev server";
+  if (readJson<Partial<Config>>(layout.config(ctx.home))?.server_url) return "saved by an earlier login";
+  return "the default";
+}
+
 async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values } = parseArgs({ args: argv, options: { server: { type: "string" }, name: { type: "string" } }, allowPositionals: false });
+  const { values } = parseArgs({ args: argv, options: { server: { type: "string" }, dev: { type: "boolean" }, name: { type: "string" } }, allowPositionals: false });
+  if (values.server && values.dev) throw new UsageError("pass --server <url> or --dev, not both");
   // A blank `--name` is refused here, before a pairing is started (each counts toward the server's hourly limit).
   if (values.name !== undefined && !values.name.replace(INVISIBLE, "").replace(MARKS_ONLY, "")) throw new UsageError(nameRefused(EMPTY_NAME));
-  const server = (values.server || ctx.config.server_url).replace(/\/$/, "");
+  const server = (values.server || (values.dev ? DEV_SERVER : ctx.config.server_url)).replace(/\/$/, "");
+  // Said before anything is sent, so the person sees which server gets the pairing and why (LIM-2504 L1).
+  out(`Pairing with ${serverOrigin(server)} (${serverSource(ctx, values)}).`);
   const deviceName = values.name || ctx.config.device_name || `${os.userInfo().username}'s ${os.hostname().replace(/\.local$/, "")}`;
   // A device this machine signed out of while the server was unreachable is revoked first, so its sessions end there
   // and can be shared again from the new pairing.
@@ -355,11 +383,17 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   /** The device of this machine's earlier pairing that this login replaced, and its name as this machine cached it. */
   let replacedDevice: string | null = null;
   const earlierName = readJson<MeFile>(layout.me(ctx.home))?.device?.name ?? null;
-  out(`To connect this device, open ${verification_uri} and enter the code ${user_code}`);
+  // The device page fills its code from ?code= (app/app/device/page.tsx), so the link saves typing it; the code is
+  // still printed, to check against the page, and the line keeps its shape for scripts that read the code from it.
+  const link = `${verification_uri}?code=${encodeURIComponent(user_code)}`;
+  out(`To connect this device, open ${link} and enter the code ${user_code}`);
+  // What the page asks, in its own words, and that this window must stay open (first-time tester report: the device
+  // step was unclear and the tester couldn't tell when it had worked).
+  out(`On that page: press Look up, check the code matches ${user_code}, tick the workspaces this device may use, and press Approve. Keep this terminal open: it carries on by itself once you approve, and names you and this device once it is connected.`);
   // The page approves only with a recent sign-in: an older browser session sees a sign-in prompt there while this
   // command waits (E2E-AGENT cycle 14, section 5).
   out(`Approving needs a sign-in from the last 15 minutes in that browser: if the page asks you to sign in again, do so. This command waits until the device is approved (the code is good for ${Math.round(Number(a.json.expires_in || 600) / 60)} minutes).`);
-  if (!ctx.env.ALIGN_NO_BROWSER && process.platform === "darwin") execFile("open", [verification_uri], () => undefined);
+  if (!ctx.env.ALIGN_NO_BROWSER && process.platform === "darwin") execFile("open", [link], () => undefined);
   const scale = Number(ctx.env.ALIGN_DEVICE_POLL_SCALE_MS || 1000);
   for (;;) {
     if (Date.now() > expiresAt) throw new Error("the code expired; run `align login` again");
@@ -478,6 +512,8 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   if (endedLids.length) out(endedLine(ctx, endedLids));
   // After the workspace lines, which belong with "Signed in as" (cycle 6).
   await mentionOtherDevices(ctx, server, pairedAs!);
+  // The next step, so a first-time tester knows the connection worked and what to do with it.
+  if (me.workspaces.length) out(`Connected. Next: run \`align goals\` to see the goals this device can read, and in a Claude Code session type ::align share to give that session one.`);
 }
 
 /**
@@ -767,6 +803,15 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
   }
   const pending = (ctx.db.prepare("SELECT COUNT(*) AS n FROM goal_requests WHERE state='pending'").get() as { n: number }).n;
   if (pending) out(`  Requests:   ${pending} waiting for your answer; see \`align requests\``);
+  const folder = realDir(process.cwd());
+  const folders = new Map<string, string>([[process.cwd(), folder], [folder, folder]]);
+  const resolved = (cwd: string) => {
+    if (!folders.has(cwd)) folders.set(cwd, realDir(cwd));
+    return folders.get(cwd)!;
+  };
+  const here = (ctx.db.prepare("SELECT local_id, cwd FROM sessions ORDER BY COALESCE(last_active, created_at) DESC").all() as { local_id: string; cwd: string | null }[])
+    .find((s) => s.cwd && resolved(s.cwd) === folder);
+  if (here) out(contextAddedLine(readContextCost(ctx.home, here.local_id).context_added));
 }
 
 async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
@@ -821,7 +866,8 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
             : "; no access to the workspace"
           : "") +
       (refused ? `; history deletion refused (${refused})` : deleting ? "; history deletion queued" : "");
-    return { ...s, repo: repoLabel(ctx, s, share?.workspace_id ?? null), usage: agg, shared: share ? `${share.state} (${share.workspace_name}${why})` : "private" };
+    return { ...s, repo: repoLabel(ctx, s, share?.workspace_id ?? null), usage: agg, shared: share ? `${share.state} (${share.workspace_name}${why})` : "private",
+      ...readContextCost(ctx.home, s.local_id) };
   });
   if (values.json) return out(JSON.stringify(rows, null, 2));
   if (!rows.length) return out("No sessions seen in the last 7 days. Use --all for older ones.");
@@ -833,6 +879,7 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
     out(
       `${pad(r.local_id.slice(0, 8), 10)} ${pad(r.harness, 11)} ${pad(r.repo, 18)} ${pad(shortTime(r.started_at), 16)} ${pad(shortTime(r.last_active), 16)} ${pad(`${fmtTokens(t.i)}/${fmtTokens(t.o)}/${fmtTokens(t.r)}/${fmtTokens(t.w)}`, 28)} ${pad(basis, 22)} ${pad(est, 20)} ${r.shared}`,
     );
+    out(`  ${contextAddedLine(r.context_added)}`);
   }
   out("Estimates use list prices; for subscription_included sessions they are not money spent.");
 }
@@ -911,7 +958,9 @@ async function goalFor(ctx: Ctx, wsId: string, ref: string): Promise<Goal | null
     /* use the cache */
   }
   const goal = resolveGoal(loadFeed(ctx.home, wsId), ref);
-  if (!goal.bindable) throw new UsageError(`goal "${goal.title}" is not bindable for you yet; it needs an approved alignment`);
+  // Bindable means the person's own goal or their team's. An approved alignment moves the sessions it lists by itself
+  // (binding_changed); it never makes the goal one this person binds.
+  if (!goal.bindable) throw new UsageError(`goal "${goal.title}" isn't one you can bind: only your own goals and your team's goals. An approved alignment moves the sessions it lists by itself`);
   return goal;
 }
 
@@ -1481,7 +1530,7 @@ async function cmdDoctor(ctx: Ctx): Promise<void> {
   add("node", major >= MIN_NODE ? "OK" : "FAIL", `${process.version} at ${process.execPath}`);
   const st = fs.statSync(ctx.home);
   add("align home", (st.mode & 0o077) === 0 ? "OK" : "FAIL", `${ctx.home} mode ${(st.mode & 0o777).toString(8)}`);
-  for (const f of [layout.deviceSecret(ctx.home), layout.credentials(ctx.home), layout.deviceKey(ctx.home)]) {
+  for (const f of [layout.deviceSecret(ctx.home), credentialsFile(ctx.home), layout.deviceKey(ctx.home)]) {
     if (!fs.existsSync(f)) continue;
     const m = fs.statSync(f).mode & 0o777;
     add(path.basename(f), m === 0o600 ? "OK" : "FAIL", `mode ${m.toString(8)}`);
@@ -1624,6 +1673,53 @@ async function cmdSteering(ctx: Ctx, argv: string[]): Promise<void> {
   out(`${queued} ${queued === 1 ? "line" : "lines"} waiting to be reported by the next sync.`);
 }
 
+// ---------- team budgets ----------
+async function cmdBudget(ctx: Ctx, argv: string[], request: boolean): Promise<void> {
+  const { values } = parseArgs({ args: argv, options: { team: { type: "string" }, workspace: { type: "string" },
+    ...(request ? { amount: { type: "string" as const }, reason: { type: "string" as const }, goal: { type: "string" as const }, session: { type: "string" as const, multiple: true } } : {}) } });
+  const requestedAmount = request ? requestAmount(values.amount as string | undefined) : null;
+  if (request && (!(values.reason as string | undefined)?.trim() || String(values.reason).trim().length > 1000)) throw new UsageError("--reason is required, at most 1000 characters.");
+  const explainReadFailure = (e: unknown): never => { throw new Error(budgetFailure(e instanceof SignedOut ? 401 : e instanceof HttpError ? e.status : 500, e instanceof HttpError ? e.code ?? undefined : undefined)); };
+  await refreshMe(ctx).catch(explainReadFailure);
+  const rule = matchRule(readRules(ctx.home), process.cwd()) ?? (values.workspace && (values.team || values.goal) ? null : budgetFolder(ctx, process.cwd()));
+  const ws = resolveWorkspace(ctx.home, values.workspace || rule?.workspace_id);
+  if (!ws) throw new UsageError("No single workspace applies. Pass --workspace <name|id>.");
+  await refreshFeed(ctx, ws.id).catch(explainReadFailure);
+  const goalRef = values.goal as string | undefined ?? (rule?.workspace_id === ws.id ? rule.goal_id : null);
+  const goal = goalRef ? resolveGoal(loadFeed(ctx.home, ws.id), goalRef) : null;
+  const detail = await api(ctx, "GET", `/api/v2/workspaces/${encodeURIComponent(ws.id)}/spend/teams`);
+  if (detail.status !== 200) throw new Error("The teams could not be read. Try again.");
+  const teams = detail.json.teams as { id: string; name: string }[];
+  out(teams.length ? `Teams you can choose: ${teams.map((t) => clean(t.name, 80)).join(", ")}. Use --team with a team name.` : "No team budgets are available to you.");
+  const team = budgetTeam(goal, values.team, teams);
+  if (request) {
+    const sessionKeys = ((values.session as string[] | undefined) ?? []).map((ref) => {
+      const local = resolveSession(ctx, ref), s = getShare(ctx, local.local_id);
+      if (!s || s.workspace_id !== ws.id || s.state !== "shared") throw new UsageError("Every attached session must be shared in this workspace.");
+      return s.session_key;
+    });
+    const r = await api(ctx, "POST", `/api/v2/workspaces/${encodeURIComponent(ws.id)}/teams/${encodeURIComponent(team)}/budget-requests`, {
+      body: { amount_usd: requestedAmount, reason: values.reason, goal_id: goal?.id ?? null, session_keys: sessionKeys },
+    });
+    if (r.status !== 201) throw new Error(budgetFailure(r.status, r.json?.error));
+    out(`Budget request recorded for ${clean(r.json.team.name, 80)}. All amounts are estimates at list price.`);
+    out("This terminal request waits for a person to decide in Align. The request grants no authority.");
+    if (r.json.decision_unavailable_reason) out("Nobody else is eligible to decide this request. A different team lead or workspace owner is needed.");
+    return;
+  }
+  const r = await api(ctx, "GET", `/api/v2/workspaces/${encodeURIComponent(ws.id)}/teams/${encodeURIComponent(team)}/budget`);
+  if (r.status !== 200) throw new Error(budgetFailure(r.status, r.json?.error));
+  const b = r.json;
+  const money = (v: number | null, bound?: string) => v === null ? "unknown" : `${bound === "lower" ? "at least " : bound === "upper" ? "at most " : ""}$${(v / 1_000_000).toFixed(2)}`;
+  out(`${clean(b.team.name, 80)}, ${budgetMonthLabel(b.month)} UTC. All amounts are estimates at list price. Read on ${budgetReadLabel(b.as_of)}.`);
+  out(b.budget ? `Base budget: ${money(b.budget.amount_usd_micros)}. Budget including grants: ${money(b.effective_budget_usd_micros)}.` : "No team budget for this month.");
+  out(`Spend: ${money(b.estimated_spend_usd_micros, b.spend_bound)}. Remaining: ${b.budget ? money(b.remaining_usd_micros, b.remaining_bound) : "no team budget"}. Month-end forecast: ${b.budget ? money(b.forecast_usd_micros, b.forecast_bound) : "no team budget"}.`);
+  out(`Remaining monthly allowance: ${b.allowance_remaining_usd_micros === null ? "no allowance" : money(b.allowance_remaining_usd_micros)}. Unpriced requests: ${b.unpriced_requests ?? "unknown"}.`);
+  out(b.no_goal?.attribution_unknown ? "Some earlier usage could not be attributed. The displayed bounds show only known spend." : b.unpriced_requests ? "Some requests have no price. Spend and forecast are at least the priced estimates, and remaining is at most its estimate." : "All requests in this total have prices.");
+  out("Goal-bound spend counts toward the goal team's budget. Spend in no goal counts toward the home team's budget recorded when its spending period began. Work continues.");
+  await cacheTerminalBudget(ctx, ws.id, team, b, process.cwd());
+}
+
 // ---------- main ----------
 export async function main(argv: string[]): Promise<void> {
   const [cmd, ...rest] = argv;
@@ -1697,6 +1793,8 @@ export async function main(argv: string[]): Promise<void> {
         return await cmdAllocation(ctx, rest);
       case "steering":
         return await cmdSteering(ctx, rest);
+      case "budget":
+        return await cmdBudget(ctx, rest[0] === "request" ? rest.slice(1) : rest, rest[0] === "request");
       case "requests":
         return await cmdRequests(ctx, rest);
       case "install":

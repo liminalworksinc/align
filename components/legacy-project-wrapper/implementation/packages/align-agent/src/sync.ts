@@ -1,6 +1,7 @@
 // Spool ingest, outbox flush, epoch assignment, usage upload and the one-pass sync that hooks start in the background.
 // Only shared sessions ever reach the server.
 import fs from "node:fs";
+import { pruneContextCost } from "./context-cost-retention.ts";
 import path from "node:path";
 import type { Ctx } from "./context.ts";
 import {
@@ -29,9 +30,10 @@ import { bumpGap, nowIso, tx } from "./db.ts";
 import { endEpochs, ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
 import { addNotice, addShareNotice, catchUpOtherBuilds, getShare, renderHot, snapshot, stopOutlivesShare } from "./hot.ts";
 import { clean, otherWorkspaceWords, outOfReachWords, requestShortId } from "./shared/envelope.ts";
+import { refreshSessionBudgets } from "./budgets.ts";
 import { applyShare, bind, endedUnread, endShareRemoved, endShareSignedOutByServer, endShareStoppedByPerson, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, SHARE_UNREAD_WORDS, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
-import { pollDirectives } from "./directives.ts";
+import { cancelledBinding, pauseNotice, pollDirectives } from "./directives.ts";
 import { answerRequest } from "./requests.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { tailAll, type TailResult } from "./tailer.ts";
@@ -157,6 +159,18 @@ function applySpool(ctx: Ctx, r: SpoolRecord): string | null {
       const share = getShare(ctx, lid);
       if (!share || share.state === "stopped" || share.state === "error") return lid;
       const pending = ctx.db.prepare("SELECT * FROM pending_bindings WHERE local_id=?").get(lid) as { id: string; goal_json: string | null } | undefined;
+      // Opened with a binding the server cancelled meanwhile (LIM-2441): the server would refuse the epoch, so the session
+      // pauses, as for any loss of its binding, rather than switching, until its person picks a goal. An unread notice that
+      // it would keep its goal is no longer true.
+      const cancelled = r.pending_id ? cancelledBinding(ctx, lid) : null;
+      if (cancelled && cancelled.pending_id === r.pending_id) {
+        ctx.db.prepare("UPDATE shares SET state='suspended', suspended_at=? WHERE local_id=? AND state IN ('shared','pending','suspended')").run(nowIso(), lid);
+        ctx.db.prepare("DELETE FROM notices WHERE id=?").run(`${lid}/susp_${cancelled.directive_id}`);
+        kvSet(ctx.db, `epoch_cancelled:${lid}`, r.epoch_id);
+        addNotice(ctx, lid, `susp_cancelled_${r.pending_id}`, pauseNotice(ctx, share.workspace_id, r.goal_id, cancelled.cause));
+        renderHot(ctx, lid);
+        return lid;
+      }
       tx(ctx.db, () => {
         const exists = ctx.db.prepare("SELECT 1 FROM epochs WHERE epoch_id=?").get(r.epoch_id);
         if (exists) return;
@@ -858,6 +872,7 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
   // The whole pass is one device's (C4-2): if `align login` or `align logout` commits while it runs, its next call to
   // the server refuses to go on as the new pairing (or none), and the pass stops there.
   const unbind = bindDevice(ctx);
+  let localViewsFinished = false;
   /** Stop the pass when the pairing changed under it: steps that swallow their own errors would otherwise go on. */
   const guard = () => {
     if (!stillBound(ctx)) throw new DeviceChanged("pairing changed during the pass");
@@ -865,6 +880,7 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
   try {
     // A device this machine signed out of while the server was unreachable is revoked before anything else.
     res.revoked = await revokePending(ctx).catch(() => ({ revoked: [], already: [], pending: [] }));
+    pruneContextCost(ctx.home);
     res.spooled += ingestSpool(ctx);
     res.tail = tailAll(ctx, opts.tailBudgetMs);
     res.spooled += ingestSpool(ctx);
@@ -919,6 +935,10 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     for (const ws of refresh) await fetchPod(ctx, ws).catch(() => 0);
     res.steering = await uploadSteering(ctx).catch(() => 0);
     guard();
+    try { catchUpOtherBuilds(ctx, true); }
+    catch (e) { ctx.log(`sync: catching up with another build failed: ${(e as Error).message}`); }
+    localViewsFinished = true;
+    await refreshSessionBudgets(ctx).catch(() => undefined);
     return res;
   } catch (e) {
     if (!(e instanceof DeviceChanged)) throw e;
@@ -940,7 +960,7 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     // Another build that wrote here since (an older `align` on PATH, the hooks' older copy): every session re-rendered
     // from the state now, an older build's notices read as "changed" (E2E-AGENT cycle 14).
     try {
-      catchUpOtherBuilds(ctx, true);
+      if (!localViewsFinished) catchUpOtherBuilds(ctx, true);
     } catch (e) {
       ctx.log(`sync: catching up with another build failed: ${(e as Error).message}`);
     }

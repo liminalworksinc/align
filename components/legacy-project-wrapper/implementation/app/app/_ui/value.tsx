@@ -73,7 +73,10 @@ function post(ws: string, cr: ChangeRequest, body: Record<string, unknown>) {
 }
 
 export function ValueCard({ ws, cr, me, titles }: { ws: string; cr: ChangeRequest; me: string; titles?: Map<string, string> }) {
-  const v = useApi<ValueView>(`/api/v2/workspaces/${ws}/goals/${cr.goal.id}/change-requests/${cr.id}/value`);
+  // LIM-2472 defect 4: the card and its question are for the person who approved the request (cr.approved_by, already on
+  // the page); everyone else reads the decision record without them, and nothing is fetched or recorded for them.
+  const decider = cr.approved_by?.id === me;
+  const v = useApi<ValueView>(decider ? `/api/v2/workspaces/${ws}/goals/${cr.goal.id}/change-requests/${cr.id}/value` : null);
   const top = useRef<HTMLDivElement>(null);
   const loaded = !!v.data;
 
@@ -109,6 +112,7 @@ export function ValueCard({ ws, cr, me, titles }: { ws: string; cr: ChangeReques
     };
   }, [loaded, ws, me, cr]);
 
+  if (!decider) return null;
   if (!v.data) return v.error ? <Err>{v.error}</Err> : null;
   const d = v.data;
   // Each changed field in words ("Arms shipped target 500 → 600"), the same lines as the MCP decision record.

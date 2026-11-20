@@ -1,6 +1,8 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import { useState } from "react";
-import { api, ApiError, Btn, Card, Err, Loading, Note, Pill, Select, Shell, SignInAgain, useAction, useApi, when, type WsSummary } from "../_ui/kit";
+import { api, ApiError, Btn, Err, Loading, Note, Pill, Select, Shell, SignInAgain, useAction, useApi, when, type WsSummary } from "../_ui/kit";
+import { Panel } from "../_ui/ds";
 import type { Me } from "../_ui/server";
 
 interface Device {
@@ -54,12 +56,12 @@ export default function Devices({ me }: { me: Me }) {
   }
   return (
     <Shell me={me}>
-      <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">Your devices</h1>
-      <Card>
+      <h1 className={`${PAGE_H1} mb-5`}>Your devices</h1>
+      <Panel className="mb-4">
         {list.loading && <Loading />}
         <Err>{list.error ?? act.error}</Err>
         {list.data?.devices.length === 0 && <Note>No devices yet. Run align login on your machine to connect one.</Note>}
-        <ul className="divide-y divide-zinc-200">
+        <ul className="divide-y divide-(--line)">
           {[...(list.data?.devices ?? [])].sort(byName).map((d) => {
             // Workspaces I am a member of that this device does not reach: one can be given to it here, as when
             // accepting an invite with the device ticked (ADR 0003 section 6).
@@ -70,10 +72,10 @@ export default function Devices({ me }: { me: Me }) {
             return (
               <li key={d.id} data-device={d.id} className="flex flex-wrap items-center gap-3 py-3">
                 <div className="min-w-0 flex-1">
-                  <p className="overflow-hidden text-[16px] text-zinc-900 [overflow-wrap:anywhere]">
+                  <p className="overflow-hidden text-[16px] text-(--text-1) [overflow-wrap:anywhere]">
                     {d.name} {d.revoked_at ? <Pill tone="red">revoked</Pill> : <Pill tone="green">active</Pill>}
                   </p>
-                  <p className="text-[14px] text-zinc-500 [overflow-wrap:anywhere]">
+                  <p className="text-[14px] text-(--text-3) [overflow-wrap:anywhere]">
                     <span className="font-mono">{tag(d.id)}</span>. Connected {when(d.created_at)}
                     {d.last_seen_at ? `, last seen ${when(d.last_seen_at)}` : ""}
                     {d.workspaces.length ? `. Workspaces: ${d.workspaces.map((w) => w.name).join(", ")}` : ""}
@@ -111,7 +113,7 @@ export default function Devices({ me }: { me: Me }) {
         {list.data?.devices.some((d) => !d.revoked_at) && (
           <Note>A device reaches only the workspaces it was given. Giving one a workspace here needs a sign-in from the last 15 minutes; the device picks it up at its next sync.</Note>
         )}
-      </Card>
+      </Panel>
     </Shell>
   );
 }

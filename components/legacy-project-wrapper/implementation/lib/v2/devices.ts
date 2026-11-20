@@ -10,7 +10,8 @@ import { endSessions } from "./sessions";
 
 // Device pairing (RFC 8628 style, key-bound) and device credentials. docs/v2/WIRE.md "Device pairing".
 // Access tokens (alnd_) last 1 h; refresh tokens (alnr_) rotate on every use and last 30 days. Only SHA-256 hashes
-// are stored. Presenting a refresh token that was already rotated revokes the whole device.
+// are stored. Presenting a refresh token that was already rotated revokes the whole device, except a retry of the latest
+// rotation within REFRESH_GRACE_MS whose new pair is still unused (see `refresh`).
 
 export const ACCESS_TTL_S = 3600;
 export const REFRESH_TTL_S = 30 * 24 * 3600;
@@ -18,6 +19,8 @@ export const CODE_TTL_S = 600;
 export const POLL_INTERVAL_S = 5;
 const USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ"; // no vowels (no words), no lookalikes
 const REFRESH_SKEW_MS = 5 * 60 * 1000;
+// Covers a refresh whose answer was lost: the agent's 15 s timeout and its one retry at once, with room for a slow link.
+const REFRESH_GRACE_MS = 30 * 1000;
 
 export interface UserRef {
   id: string;
@@ -263,18 +266,42 @@ export async function refresh(input: { device_id: string; refresh_token: string;
     throw new V2Error(400, "clock_skew", `This device's clock is ${Math.abs(minutes)} minutes ${minutes > 0 ? "ahead of" : "behind"} the server's`, { server_time: new Date(nowMs).toISOString() });
   }
   const out = await tx(() => {
-    const t = get<{ rotated_at: string | null; expires_at: string }>(
-      "SELECT rotated_at, expires_at FROM v2_device_tokens WHERE token_hash = ? AND device_id = ? AND kind = 'refresh'",
+    const t = get<{ rotated_at: string | null; rotated_ts: string | null; expires_at: string }>(
+      "SELECT rotated_at, rotated_ts, expires_at FROM v2_device_tokens WHERE token_hash = ? AND device_id = ? AND kind = 'refresh'",
       sha256hex(input.refresh_token),
       input.device_id,
     );
     if (!t) return null;
     if (t.rotated_at) {
-      revokeInTx(input.device_id, "refresh_reuse", null);
-      return null;
+      // A device whose answer was lost in transit retries with the token it still holds. That retry is let through once:
+      // only for this device's latest rotation, within REFRESH_GRACE_MS of it, signed anew with a `ts` later than the
+      // rotating request's (a replay of a captured request is not, so it still revokes), while the pair that rotation
+      // issued is unused (its refresh token not rotated, its access token never presented). That pair is deleted and a
+      // new one issued, so the device keeps exactly one live chain, and the retry is audited. Any other reuse revokes
+      // the whole device.
+      const rotatedMs = Date.parse(t.rotated_at);
+      const next = all<{ token_hash: string; kind: string; rotated_at: string | null; used_at: string | null }>(
+        "SELECT token_hash, kind, rotated_at, used_at FROM v2_device_tokens WHERE device_id = ? AND created_at = ?",
+        input.device_id,
+        t.rotated_at,
+      );
+      const nextRefresh = next.filter((r) => r.kind === "refresh");
+      const signedLater = !!t.rotated_ts && tsMs > Date.parse(t.rotated_ts);
+      const unused = nextRefresh.length === 1 && !nextRefresh[0].rotated_at && next.every((r) => !r.used_at);
+      // Strictly after the rotation, so the new pair's created_at never matches it and a second retry revokes.
+      const graced = nowMs > rotatedMs && nowMs - rotatedMs <= REFRESH_GRACE_MS && signedLater && unused;
+      if (!graced) {
+        revokeInTx(input.device_id, "refresh_reuse", null);
+        return null;
+      }
+      for (const r of next) run("DELETE FROM v2_device_tokens WHERE token_hash = ?", r.token_hash);
+      audit(null, null, "device.refresh_retried", input.device_id, new Date(nowMs).toISOString());
+      run("UPDATE v2_devices SET last_seen_at = ? WHERE id = ?", new Date(nowMs).toISOString(), input.device_id);
+      const n = issueTokens(input.device_id, nowMs);
+      return { access_token: n.access, expires_in: ACCESS_TTL_S, refresh_token: n.refresh };
     }
     if (Date.parse(t.expires_at) <= nowMs) return null;
-    run("UPDATE v2_device_tokens SET rotated_at = ? WHERE token_hash = ?", new Date(nowMs).toISOString(), sha256hex(input.refresh_token));
+    run("UPDATE v2_device_tokens SET rotated_at = ?, rotated_ts = ? WHERE token_hash = ?", new Date(nowMs).toISOString(), input.ts, sha256hex(input.refresh_token));
     run("UPDATE v2_devices SET last_seen_at = ? WHERE id = ?", new Date(nowMs).toISOString(), input.device_id);
     const n = issueTokens(input.device_id, nowMs);
     return { access_token: n.access, expires_in: ACCESS_TTL_S, refresh_token: n.refresh };
@@ -347,14 +374,17 @@ export function revokeDevicesOf(userId: string, reason: string, actor: string): 
 /** The device behind a Bearer access token, or null (unknown, expired, revoked). */
 export function deviceFromAccessToken(tokenValue: string): DevicePrincipal | null {
   if (!/^alnd_[A-Za-z0-9_-]{20,100}$/.test(tokenValue)) return null;
-  const row = get<{ device_id: string; expires_at: string; name: string; user_id: string; revoked_at: string | null; last_seen_at: string | null }>(
-    `SELECT t.device_id, t.expires_at, d.name, d.user_id, d.revoked_at, d.last_seen_at FROM v2_device_tokens t JOIN v2_devices d ON d.id = t.device_id
+  const row = get<{ device_id: string; expires_at: string; name: string; user_id: string; revoked_at: string | null; last_seen_at: string | null; used_at: string | null }>(
+    `SELECT t.device_id, t.expires_at, d.name, d.user_id, d.revoked_at, d.last_seen_at, t.used_at FROM v2_device_tokens t JOIN v2_devices d ON d.id = t.device_id
      WHERE t.token_hash = ? AND t.kind = 'access'`,
     sha256hex(tokenValue),
   );
   if (!row || row.revoked_at || Date.parse(row.expires_at) <= Date.now()) return null;
   const user = userById(row.user_id);
   if (!user) return null;
+  // Its first use, once: a pair whose access token was used is never replaced by a refresh retry (LIM-2441 H7a). Not
+  // best effort: a use that can't be recorded is refused, so a retry can never kill a token already in use.
+  if (!row.used_at) run("UPDATE v2_device_tokens SET used_at = ? WHERE token_hash = ? AND used_at IS NULL", nowIso(), sha256hex(tokenValue));
   // "Last seen" for the devices page, at most every 5 minutes; best effort (a busy database just skips it).
   if (!row.last_seen_at || Date.now() - Date.parse(row.last_seen_at) > 5 * 60 * 1000) {
     try {

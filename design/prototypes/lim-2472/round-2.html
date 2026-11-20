@@ -1,0 +1,663 @@
+<!doctype html>
+<!-- LIM-2472 round 2 primitives specimen. Generated from the real app/app/_ui/ds components (local dev render, compiled CSS inlined, React removed). Lane lines are the ones measured at 1440. Adds no font files; opened alone it uses fallback faces. All content is fictional. -->
+<html lang="en" data-theme="dark" class="space_grotesk_d7b50fc5-module__qeW00a__variable space_mono_fdf5de47-module__aex0MW__variable h-full antialiased" data-theme-pref="system"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="next-size-adjust" content=""><title>Align</title><meta name="description" content="Goals that change only with their owners' approval, and the coding agents working on them kept current."><link rel="icon" href="/favicon.ico?favicon.117ezoe8m31dk.ico" sizes="48x48" type="image/x-icon"><style>@font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 300 700; font-display: swap; src: url("../media/32687112bd2dd8db-s.1gepa_7fcx9fm.woff2") format("woff2"); unicode-range: U+102-103, U+110-111, U+128-129, U+168-169, U+1A0-1A1, U+1AF-1B0, U+300-301, U+303-304, U+308-309, U+323, U+329, U+1EA0-1EF9, U+20AB; }
+@font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 300 700; font-display: swap; src: url("../media/28868e710e86be81-s.2eksvhm1z0jwa.woff2") format("woff2"); unicode-range: U+100-2BA, U+2BD-2C5, U+2C7-2CC, U+2CE-2D7, U+2DD-2FF, U+304, U+308, U+329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 300 700; font-display: swap; src: url("../media/0c89a48fa5027cee-s.p.2cyn07wtgehh0.woff2") format("woff2"); unicode-range: U+0-FF, U+131, U+152-153, U+2BB-2BC, U+2C6, U+2DA, U+2DC, U+304, U+308, U+329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Space Grotesk Fallback"; src: local("Arial"); ascent-override: 89.71%; descent-override: 26.62%; line-gap-override: 0%; size-adjust: 109.69%; }
+.space_grotesk_d7b50fc5-module__qeW00a__className { font-family: "Space Grotesk", "Space Grotesk Fallback"; font-style: normal; }
+.space_grotesk_d7b50fc5-module__qeW00a__variable { --font-space-grotesk: "Space Grotesk", "Space Grotesk Fallback"; }
+@font-face { font-family: "Space Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("../media/4ba802ed8e67eac5-s.0fuxtgzazslqx.woff2") format("woff2"); unicode-range: U+102-103, U+110-111, U+128-129, U+168-169, U+1A0-1A1, U+1AF-1B0, U+300-301, U+303-304, U+308-309, U+323, U+329, U+1EA0-1EF9, U+20AB; }
+@font-face { font-family: "Space Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("../media/d7a0600e467cf0bd-s.451yigaaz_4mg.woff2") format("woff2"); unicode-range: U+100-2BA, U+2BD-2C5, U+2C7-2CC, U+2CE-2D7, U+2DD-2FF, U+304, U+308, U+329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Space Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("../media/dc0d9adbac686440-s.p.3cik_s2si-ft-.woff2") format("woff2"); unicode-range: U+0-FF, U+131, U+152-153, U+2BB-2BC, U+2C6, U+2DA, U+2DC, U+304, U+308, U+329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Space Mono"; font-style: normal; font-weight: 700; font-display: swap; src: url("../media/b8f2b92a9960dd69-s.0we3rzhp_h228.woff2") format("woff2"); unicode-range: U+102-103, U+110-111, U+128-129, U+168-169, U+1A0-1A1, U+1AF-1B0, U+300-301, U+303-304, U+308-309, U+323, U+329, U+1EA0-1EF9, U+20AB; }
+@font-face { font-family: "Space Mono"; font-style: normal; font-weight: 700; font-display: swap; src: url("../media/28e60ca39c9ae554-s.44izq0ia6orkf.woff2") format("woff2"); unicode-range: U+100-2BA, U+2BD-2C5, U+2C7-2CC, U+2CE-2D7, U+2DD-2FF, U+304, U+308, U+329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Space Mono"; font-style: normal; font-weight: 700; font-display: swap; src: url("../media/8d05cfa5faa8406c-s.p.1s123piy9_v1m.woff2") format("woff2"); unicode-range: U+0-FF, U+131, U+152-153, U+2BB-2BC, U+2C6, U+2DA, U+2DC, U+304, U+308, U+329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Space Mono Fallback"; src: local("Arial"); ascent-override: 81.58%; descent-override: 26.3%; line-gap-override: 0%; size-adjust: 137.28%; }
+.space_mono_fdf5de47-module__aex0MW__className { font-family: "Space Mono", "Space Mono Fallback"; font-style: normal; }
+.space_mono_fdf5de47-module__aex0MW__variable { --font-space-mono: "Space Mono", "Space Mono Fallback"; }
+@layer properties {
+  @supports (((-webkit-hyphens: none)) and (not (margin-trim: inline))) or ((-moz-orient: inline) and (not (color: rgb(from red r g b)))) {
+  *, ::before, ::after, ::backdrop { --tw-space-y-reverse: 0; --tw-divide-y-reverse: 0; --tw-border-style: solid; --tw-leading: initial; --tw-font-weight: initial; --tw-tracking: initial; --tw-ordinal: initial; --tw-slashed-zero: initial; --tw-numeric-figure: initial; --tw-numeric-spacing: initial; --tw-numeric-fraction: initial; --tw-shadow: 0 0 #0000; --tw-shadow-color: initial; --tw-shadow-alpha: 100%; --tw-inset-shadow: 0 0 #0000; --tw-inset-shadow-color: initial; --tw-inset-shadow-alpha: 100%; --tw-ring-color: initial; --tw-ring-shadow: 0 0 #0000; --tw-inset-ring-color: initial; --tw-inset-ring-shadow: 0 0 #0000; --tw-ring-inset: initial; --tw-ring-offset-width: 0px; --tw-ring-offset-color: #fff; --tw-ring-offset-shadow: 0 0 #0000; --tw-blur: initial; --tw-brightness: initial; --tw-contrast: initial; --tw-grayscale: initial; --tw-hue-rotate: initial; --tw-invert: initial; --tw-opacity: initial; --tw-saturate: initial; --tw-sepia: initial; --tw-drop-shadow: initial; --tw-drop-shadow-color: initial; --tw-drop-shadow-alpha: 100%; --tw-drop-shadow-size: initial; --tw-content: ""; --tw-outline-style: solid; }
+}
+}
+@layer theme {
+  :root, :host { --color-red-200: #ffcaca; --spacing: .25rem; --font-weight-normal: 400; --font-weight-medium: 500; --font-weight-semibold: 600; --leading-tight: 1.25; --leading-snug: 1.375; --leading-relaxed: 1.625; --default-transition-duration: .15s; --default-transition-timing-function: cubic-bezier(.4, 0, .2, 1); --default-font-family: var(--al-sans); --default-mono-font-family: var(--al-mono); --font-display: var(--al-display); }
+  @supports (color: lab(0% 0 0)) {
+  :root, :host { --color-red-200: lab(86.017% 19.8815 7.75869); }
+}
+}
+@layer base {
+  *, ::after, ::before, ::backdrop { box-sizing: border-box; border: 0px solid; margin: 0px; padding: 0px; }
+  ::file-selector-button { box-sizing: border-box; border: 0px solid; margin: 0px; padding: 0px; }
+  html, :host { text-size-adjust: 100%; tab-size: 4; line-height: 1.5; font-family: var(--default-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"); font-feature-settings: var(--default-font-feature-settings, normal); font-variation-settings: var(--default-font-variation-settings, normal); -webkit-tap-highlight-color: transparent; }
+  hr { height: 0px; color: inherit; border-top-width: 1px; }
+  abbr:where([title]) { text-decoration: underline dotted; }
+  h1, h2, h3, h4, h5, h6 { font-size: inherit; font-weight: inherit; }
+  a { color: inherit; text-decoration: inherit; }
+  b, strong { font-weight: bolder; }
+  code, kbd, samp, pre { font-family: var(--default-mono-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace); font-feature-settings: var(--default-mono-font-feature-settings, normal); font-variation-settings: var(--default-mono-font-variation-settings, normal); font-size: 1em; }
+  small { font-size: 80%; }
+  sub, sup { vertical-align: baseline; font-size: 75%; line-height: 0; position: relative; }
+  sub { bottom: -0.25em; }
+  sup { top: -0.5em; }
+  table { text-indent: 0px; border-color: inherit; border-collapse: collapse; }
+  progress { vertical-align: baseline; }
+  summary { display: list-item; }
+  ol, ul, menu { list-style: none; }
+  img, svg, video, canvas, audio, iframe, embed, object { vertical-align: middle; display: block; }
+  img, video { max-width: 100%; height: auto; }
+  button, input, select, optgroup, textarea { font: inherit; letter-spacing: inherit; color: inherit; opacity: 1; background-color: rgba(0, 0, 0, 0); border-radius: 0px; }
+  ::file-selector-button { font: inherit; letter-spacing: inherit; color: inherit; opacity: 1; background-color: rgba(0, 0, 0, 0); border-radius: 0px; }
+  :where(select:is([multiple], [size])) optgroup { font-weight: bolder; }
+  :where(select:is([multiple], [size])) optgroup option { padding-inline-start: 20px; }
+  ::file-selector-button { margin-inline-end: 4px; }
+  ::placeholder { opacity: 1; }
+  @supports (not ((-webkit-appearance: -apple-pay-button))) or (contain-intrinsic-size: 1px) {
+  ::placeholder { color: currentcolor; }
+  @supports (color: color-mix(in lab, red, red)) {
+  ::placeholder { color: color-mix(currentcolor, transparent); }
+}
+}
+  textarea { resize: vertical; }
+  ::-webkit-search-decoration { appearance: none; }
+  ::-webkit-date-and-time-value { min-height: 1lh; text-align: inherit; }
+  ::-webkit-datetime-edit { display: inline-flex; }
+  ::-webkit-datetime-edit-fields-wrapper { padding: 0px; }
+  ::-webkit-datetime-edit { padding-block: 0px; }
+  ::-webkit-datetime-edit-year-field { padding-block: 0px; }
+  ::-webkit-datetime-edit-month-field { padding-block: 0px; }
+  ::-webkit-datetime-edit-day-field { padding-block: 0px; }
+  ::-webkit-datetime-edit-hour-field { padding-block: 0px; }
+  ::-webkit-datetime-edit-minute-field { padding-block: 0px; }
+  ::-webkit-datetime-edit-second-field { padding-block: 0px; }
+  ::-webkit-datetime-edit-millisecond-field { padding-block: 0px; }
+  ::-webkit-datetime-edit-meridiem-field { padding-block: 0px; }
+  ::-webkit-calendar-picker-indicator { line-height: 1; }
+  button, input:where([type="button"], [type="reset"], [type="submit"]) { appearance: button; }
+  ::file-selector-button { appearance: button; }
+  ::-webkit-inner-spin-button { height: auto; }
+  ::-webkit-outer-spin-button { height: auto; }
+  [hidden]:where(:not([hidden="until-found"])) { display: none !important; }
+  [tabindex="-1"]:focus { outline: none; }
+  @media not (min-width: 40rem) {
+  button, select { min-height: 44px; }
+}
+}
+@layer components;
+@layer utilities {
+  .\@container { container-type: inline-size; }
+  .pointer-events-none { pointer-events: none; }
+  .collapse { visibility: collapse; }
+  .invisible { visibility: hidden; }
+  .visible { visibility: visible; }
+  .sr-only { clip-path: inset(50%); white-space: nowrap; border-width: 0px; width: 1px; height: 1px; margin: -1px; padding: 0px; position: absolute; overflow: hidden; }
+  .absolute { position: absolute; }
+  .fixed { position: fixed; }
+  .relative { position: relative; }
+  .static { position: static; }
+  .sticky { position: sticky; }
+  .inset-0 { inset: 0px; }
+  .inset-x-0 { inset-inline: 0px; }
+  .top-0 { top: 0px; }
+  .top-5 { top: calc(var(--spacing) * 5); }
+  .top-\[-3px\] { top: -3px; }
+  .bottom-\[-4px\] { bottom: -4px; }
+  .z-10 { z-index: 10; }
+  .z-50 { z-index: 50; }
+  .col-span-2 { grid-column: span 2 / span 2; }
+  .float-left { float: left; }
+  .container { width: 100%; }
+  @media (min-width: 40rem) {
+  .container { max-width: 40rem; }
+}
+  @media (min-width: 48rem) {
+  .container { max-width: 48rem; }
+}
+  @media (min-width: 64rem) {
+  .container { max-width: 64rem; }
+}
+  @media (min-width: 80rem) {
+  .container { max-width: 80rem; }
+}
+  @media (min-width: 96rem) {
+  .container { max-width: 96rem; }
+}
+  .mx-auto { margin-inline: auto; }
+  .my-2 { margin-block: calc(var(--spacing) * 2); }
+  .my-6 { margin-block: calc(var(--spacing) * 6); }
+  .mt-0\.5 { margin-top: calc(var(--spacing) * .5); }
+  .mt-1 { margin-top: var(--spacing); }
+  .mt-1\.5 { margin-top: calc(var(--spacing) * 1.5); }
+  .mt-2 { margin-top: calc(var(--spacing) * 2); }
+  .mt-3 { margin-top: calc(var(--spacing) * 3); }
+  .mt-4 { margin-top: calc(var(--spacing) * 4); }
+  .mt-5 { margin-top: calc(var(--spacing) * 5); }
+  .mt-6 { margin-top: calc(var(--spacing) * 6); }
+  .mt-8 { margin-top: calc(var(--spacing) * 8); }
+  .mt-10 { margin-top: calc(var(--spacing) * 10); }
+  .mr-4 { margin-right: calc(var(--spacing) * 4); }
+  .mb-0\.5 { margin-bottom: calc(var(--spacing) * .5); }
+  .mb-1 { margin-bottom: var(--spacing); }
+  .mb-1\.5 { margin-bottom: calc(var(--spacing) * 1.5); }
+  .mb-2 { margin-bottom: calc(var(--spacing) * 2); }
+  .mb-3 { margin-bottom: calc(var(--spacing) * 3); }
+  .mb-4 { margin-bottom: calc(var(--spacing) * 4); }
+  .mb-5 { margin-bottom: calc(var(--spacing) * 5); }
+  .mb-6 { margin-bottom: calc(var(--spacing) * 6); }
+  .mb-8 { margin-bottom: calc(var(--spacing) * 8); }
+  .ml-1 { margin-left: var(--spacing); }
+  .ml-1\.5 { margin-left: calc(var(--spacing) * 1.5); }
+  .ml-2 { margin-left: calc(var(--spacing) * 2); }
+  .ml-5 { margin-left: calc(var(--spacing) * 5); }
+  .ml-auto { margin-left: auto; }
+  .block { display: block; }
+  .contents { display: contents; }
+  .flex { display: flex; }
+  .grid { display: grid; }
+  .hidden { display: none; }
+  .inline { display: inline; }
+  .inline-flex { display: inline-flex; }
+  .table { display: table; }
+  .size-4 { width: calc(var(--spacing) * 4); height: calc(var(--spacing) * 4); }
+  .h-2\.5 { height: calc(var(--spacing) * 2.5); }
+  .h-3 { height: calc(var(--spacing) * 3); }
+  .h-\[18px\] { height: 18px; }
+  .h-full { height: 100%; }
+  .max-h-36 { max-height: calc(var(--spacing) * 36); }
+  .min-h-0 { min-height: 0px; }
+  .min-h-\[36px\] { min-height: 36px; }
+  .min-h-\[40px\] { min-height: 40px; }
+  .min-h-\[44px\] { min-height: 44px; }
+  .min-h-full { min-height: 100%; }
+  .min-h-screen { min-height: 100vh; }
+  .w-2\.5 { width: calc(var(--spacing) * 2.5); }
+  .w-\[2px\] { width: 2px; }
+  .w-\[120px\] { width: 120px; }
+  .w-\[130px\] { width: 130px; }
+  .w-\[140px\] { width: 140px; }
+  .w-fit { width: fit-content; }
+  .w-full { width: 100%; }
+  .w-px { width: 1px; }
+  .max-w-\[460px\] { max-width: 460px; }
+  .max-w-\[520px\] { max-width: 520px; }
+  .max-w-\[560px\] { max-width: 560px; }
+  .max-w-\[600px\] { max-width: 600px; }
+  .max-w-\[680px\] { max-width: 680px; }
+  .max-w-\[860px\] { max-width: 860px; }
+  .max-w-\[1100px\] { max-width: 1100px; }
+  .max-w-\[1180px\] { max-width: 1180px; }
+  .max-w-full { max-width: 100%; }
+  .max-w-prose { max-width: 65ch; }
+  .min-w-0 { min-width: 0px; }
+  .min-w-\[1\.6em\] { min-width: 1.6em; }
+  .min-w-\[12rem\] { min-width: 12rem; }
+  .min-w-\[200px\] { min-width: 200px; }
+  .min-w-\[220px\] { min-width: 220px; }
+  .min-w-\[240px\] { min-width: 240px; }
+  .flex-1 { flex: 1 1 0%; }
+  .flex-\[1_1_auto\] { flex: 1 1 auto; }
+  .shrink-0 { flex-shrink: 0; }
+  .grow { flex-grow: 1; }
+  .basis-60 { flex-basis: calc(var(--spacing) * 60); }
+  .basis-64 { flex-basis: calc(var(--spacing) * 64); }
+  .border-collapse { border-collapse: collapse; }
+  .cursor-pointer { cursor: pointer; }
+  .resize-y { resize: vertical; }
+  .scroll-mt-4 { scroll-margin-top: calc(var(--spacing) * 4); }
+  .scroll-mt-6 { scroll-margin-top: calc(var(--spacing) * 6); }
+  .list-decimal { list-style-type: decimal; }
+  .list-disc { list-style-type: disc; }
+  .list-none { list-style-type: none; }
+  .grid-cols-2 { grid-template-columns: repeat(2, minmax(0px, 1fr)); }
+  .grid-cols-\[16px_minmax\(0\,1fr\)\] { grid-template-columns: 16px minmax(0px, 1fr); }
+  .grid-cols-\[auto_minmax\(0\,1fr\)\] { grid-template-columns: auto minmax(0px, 1fr); }
+  .grid-cols-\[max-content_1fr\] { grid-template-columns: max-content 1fr; }
+  .grid-cols-\[minmax\(0\,1fr\)_auto\] { grid-template-columns: minmax(0px, 1fr) auto; }
+  .flex-col { flex-direction: column; }
+  .flex-wrap { flex-wrap: wrap; }
+  .place-items-center { place-items: center; }
+  .items-baseline { align-items: baseline; }
+  .items-center { align-items: center; }
+  .items-end { align-items: flex-end; }
+  .items-start { align-items: flex-start; }
+  .justify-between { justify-content: space-between; }
+  .justify-center { justify-content: center; }
+  .justify-end { justify-content: flex-end; }
+  .gap-0\.5 { gap: calc(var(--spacing) * .5); }
+  .gap-1 { gap: var(--spacing); }
+  .gap-1\.5 { gap: calc(var(--spacing) * 1.5); }
+  .gap-2 { gap: calc(var(--spacing) * 2); }
+  .gap-2\.5 { gap: calc(var(--spacing) * 2.5); }
+  .gap-3 { gap: calc(var(--spacing) * 3); }
+  .gap-4 { gap: calc(var(--spacing) * 4); }
+  :where(.space-y-1 > :not(:last-child)) { --tw-space-y-reverse: 0; margin-block-start: calc(var(--spacing) * var(--tw-space-y-reverse)); margin-block-end: calc(var(--spacing) * calc(1 - var(--tw-space-y-reverse))); }
+  :where(.space-y-2 > :not(:last-child)) { --tw-space-y-reverse: 0; margin-block-start: calc(calc(var(--spacing) * 2) * var(--tw-space-y-reverse)); margin-block-end: calc(calc(var(--spacing) * 2) * calc(1 - var(--tw-space-y-reverse))); }
+  .gap-x-1\.5 { column-gap: calc(var(--spacing) * 1.5); }
+  .gap-x-2 { column-gap: calc(var(--spacing) * 2); }
+  .gap-x-3 { column-gap: calc(var(--spacing) * 3); }
+  .gap-x-4 { column-gap: calc(var(--spacing) * 4); }
+  .gap-x-5 { column-gap: calc(var(--spacing) * 5); }
+  .gap-x-8 { column-gap: calc(var(--spacing) * 8); }
+  .gap-y-0\.5 { row-gap: calc(var(--spacing) * .5); }
+  .gap-y-1 { row-gap: var(--spacing); }
+  .gap-y-1\.5 { row-gap: calc(var(--spacing) * 1.5); }
+  .gap-y-2 { row-gap: calc(var(--spacing) * 2); }
+  .gap-y-3 { row-gap: calc(var(--spacing) * 3); }
+  .gap-y-6 { row-gap: calc(var(--spacing) * 6); }
+  :where(.divide-y > :not(:last-child)) { --tw-divide-y-reverse: 0; border-bottom-style: var(--tw-border-style); border-top-style: var(--tw-border-style); border-top-width: calc(1px * var(--tw-divide-y-reverse)); border-bottom-width: calc(1px * calc(1 - var(--tw-divide-y-reverse))); }
+  :where(.divide-zinc-200 > :not(:last-child)) { border-color: var(--al-line); }
+  .self-center { align-self: center; }
+  .self-start { align-self: flex-start; }
+  .truncate { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+  .overflow-hidden { overflow: hidden; }
+  .overflow-visible { overflow: visible; }
+  .overflow-x-auto { overflow-x: auto; }
+  .overflow-y-auto { overflow-y: auto; }
+  .rounded { border-radius: 0.25rem; }
+  .rounded-\(--radius-m\) { border-radius: var(--radius-m); }
+  .rounded-\(--radius-s\) { border-radius: var(--radius-s); }
+  .rounded-\[6px\] { border-radius: 6px; }
+  .rounded-\[7px\] { border-radius: 7px; }
+  .rounded-\[8px\] { border-radius: 8px; }
+  .rounded-\[10px\] { border-radius: 10px; }
+  .rounded-\[12px\] { border-radius: 12px; }
+  .rounded-\[14px\] { border-radius: 14px; }
+  .rounded-full { border-radius: 3.40282e+38px; }
+  .rounded-t-\[8px\] { border-top-left-radius: 8px; border-top-right-radius: 8px; }
+  .border { border-style: var(--tw-border-style); border-width: 1px; }
+  .border-2 { border-style: var(--tw-border-style); border-width: 2px; }
+  .border-t { border-top-style: var(--tw-border-style); border-top-width: 1px; }
+  .border-b { border-bottom-style: var(--tw-border-style); border-bottom-width: 1px; }
+  .border-b-0 { border-bottom-style: var(--tw-border-style); border-bottom-width: 0px; }
+  .border-b-2 { border-bottom-style: var(--tw-border-style); border-bottom-width: 2px; }
+  .border-l { border-left-style: var(--tw-border-style); border-left-width: 1px; }
+  .border-l-2 { border-left-style: var(--tw-border-style); border-left-width: 2px; }
+  .border-dashed { --tw-border-style: dashed; border-style: dashed; }
+  .border-\(--accent\) { border-color: var(--accent); }
+  .border-\(--accent-text\) { border-color: var(--accent-text); }
+  .border-\(--edge\) { border-color: var(--edge); }
+  .border-\(--ev-receipt\)\/40 { border-color: var(--ev-receipt); }
+  @supports (color: color-mix(in lab, red, red)) {
+  .border-\(--ev-receipt\)\/40 { border-color: color-mix(in oklab, var(--ev-receipt) 40%, transparent); }
+}
+  .border-\(--ev-reported\)\/40 { border-color: var(--ev-reported); }
+  @supports (color: color-mix(in lab, red, red)) {
+  .border-\(--ev-reported\)\/40 { border-color: color-mix(in oklab, var(--ev-reported) 40%, transparent); }
+}
+  .border-\(--ev-unobserved\)\/50 { border-color: var(--ev-unobserved); }
+  @supports (color: color-mix(in lab, red, red)) {
+  .border-\(--ev-unobserved\)\/50 { border-color: color-mix(in oklab, var(--ev-unobserved) 50%, transparent); }
+}
+  .border-\(--line\) { border-color: var(--line); }
+  .border-\(--line-strong\) { border-color: var(--line-strong); }
+  .border-\(--st-approved\)\/40 { border-color: var(--st-approved); }
+  @supports (color: color-mix(in lab, red, red)) {
+  .border-\(--st-approved\)\/40 { border-color: color-mix(in oklab, var(--st-approved) 40%, transparent); }
+}
+  .border-\(--st-declined\)\/40 { border-color: var(--st-declined); }
+  @supports (color: color-mix(in lab, red, red)) {
+  .border-\(--st-declined\)\/40 { border-color: color-mix(in oklab, var(--st-declined) 40%, transparent); }
+}
+  .border-\(--st-launched\)\/45 { border-color: var(--st-launched); }
+  @supports (color: color-mix(in lab, red, red)) {
+  .border-\(--st-launched\)\/45 { border-color: color-mix(in oklab, var(--st-launched) 45%, transparent); }
+}
+  .border-\(--st-pending\)\/40 { border-color: var(--st-pending); }
+  @supports (color: color-mix(in lab, red, red)) {
+  .border-\(--st-pending\)\/40 { border-color: color-mix(in oklab, var(--st-pending) 40%, transparent); }
+}
+  .border-amber-300, .border-amber-700 { border-color: var(--al-warn); }
+  .border-emerald-700 { border-color: var(--al-pass); }
+  .border-red-200 { border-color: var(--color-red-200); }
+  .border-red-700 { border-color: var(--al-fail); }
+  .border-violet-200 { border-color: var(--al-accent); }
+  @supports (color: color-mix(in lab, red, red)) {
+  .border-violet-200 { border-color: color-mix(in oklab, var(--al-accent) 35%, transparent); }
+}
+  .border-violet-700 { border-color: var(--al-accent); }
+  .border-zinc-200 { border-color: var(--al-line); }
+  .border-zinc-300 { border-color: var(--al-line-strong); }
+  .bg-\(--accent\) { background-color: var(--accent); }
+  .bg-\(--accent-soft\) { background-color: var(--accent-soft); }
+  .bg-\(--bg-inset\) { background-color: var(--bg-inset); }
+  .bg-\(--bg-overlay\) { background-color: var(--bg-overlay); }
+  .bg-\(--bg-panel\) { background-color: var(--bg-panel); }
+  .bg-\(--bg-raised\) { background-color: var(--bg-raised); }
+  .bg-\(--ev-receipt-soft\) { background-color: var(--ev-receipt-soft); }
+  .bg-\(--ev-reported-soft\) { background-color: var(--ev-reported-soft); }
+  .bg-\(--ev-unobserved-soft\) { background-color: var(--ev-unobserved-soft); }
+  .bg-\(--line-strong\) { background-color: var(--line-strong); }
+  .bg-\(--st-approved-soft\) { background-color: var(--st-approved-soft); }
+  .bg-\(--st-declined-soft\) { background-color: var(--st-declined-soft); }
+  .bg-\(--st-launched-soft\) { background-color: var(--st-launched-soft); }
+  .bg-\(--st-pending-soft\) { background-color: var(--st-pending-soft); }
+  .bg-\[var\(--al-bg\)\] { background-color: var(--al-bg); }
+  .bg-\[var\(--al-rail\)\] { background-color: var(--al-rail); }
+  .bg-amber-50 { background-color: var(--al-warn-bg); }
+  .bg-black\/45 { background-color: var(--al-bg); }
+  @supports (color: color-mix(in lab, red, red)) {
+  .bg-black\/45 { background-color: color-mix(in oklab, var(--al-bg) 45%, transparent); }
+}
+  .bg-red-50 { background-color: var(--al-fail-bg); }
+  .bg-transparent { background-color: rgba(0, 0, 0, 0); }
+  .bg-violet-50 { background-color: var(--al-accent-bg); }
+  .bg-violet-50\/40 { background-color: var(--al-accent-bg); }
+  @supports (color: color-mix(in lab, red, red)) {
+  .bg-violet-50\/40 { background-color: color-mix(in oklab, var(--al-accent-bg) 40%, transparent); }
+}
+  .bg-violet-600, .bg-violet-700 { background-color: var(--al-accent); }
+  .bg-white { background-color: var(--al-surface); }
+  .bg-zinc-50 { background-color: var(--al-surface-sunk); }
+  .bg-zinc-100 { background-color: var(--al-surface-raised); }
+  .bg-zinc-900 { background-color: var(--al-ink); }
+  .p-0\.5 { padding: calc(var(--spacing) * .5); }
+  .p-2 { padding: calc(var(--spacing) * 2); }
+  .p-2\.5 { padding: calc(var(--spacing) * 2.5); }
+  .p-3 { padding: calc(var(--spacing) * 3); }
+  .p-4 { padding: calc(var(--spacing) * 4); }
+  .p-5 { padding: calc(var(--spacing) * 5); }
+  .p-6 { padding: calc(var(--spacing) * 6); }
+  .p-8 { padding: calc(var(--spacing) * 8); }
+  .p-10 { padding: calc(var(--spacing) * 10); }
+  .px-1 { padding-inline: var(--spacing); }
+  .px-1\.5 { padding-inline: calc(var(--spacing) * 1.5); }
+  .px-2 { padding-inline: calc(var(--spacing) * 2); }
+  .px-2\.5 { padding-inline: calc(var(--spacing) * 2.5); }
+  .px-3 { padding-inline: calc(var(--spacing) * 3); }
+  .px-3\.5 { padding-inline: calc(var(--spacing) * 3.5); }
+  .px-4 { padding-inline: calc(var(--spacing) * 4); }
+  .px-5 { padding-inline: calc(var(--spacing) * 5); }
+  .px-6 { padding-inline: calc(var(--spacing) * 6); }
+  .py-0\.5 { padding-block: calc(var(--spacing) * .5); }
+  .py-1 { padding-block: var(--spacing); }
+  .py-1\.5 { padding-block: calc(var(--spacing) * 1.5); }
+  .py-2 { padding-block: calc(var(--spacing) * 2); }
+  .py-2\.5 { padding-block: calc(var(--spacing) * 2.5); }
+  .py-3 { padding-block: calc(var(--spacing) * 3); }
+  .py-4 { padding-block: calc(var(--spacing) * 4); }
+  .py-6 { padding-block: calc(var(--spacing) * 6); }
+  .py-8 { padding-block: calc(var(--spacing) * 8); }
+  .pt-0\.5 { padding-top: calc(var(--spacing) * .5); }
+  .pt-2 { padding-top: calc(var(--spacing) * 2); }
+  .pt-3 { padding-top: calc(var(--spacing) * 3); }
+  .pt-4 { padding-top: calc(var(--spacing) * 4); }
+  .pt-5 { padding-top: calc(var(--spacing) * 5); }
+  .pr-3 { padding-right: calc(var(--spacing) * 3); }
+  .pb-2 { padding-bottom: calc(var(--spacing) * 2); }
+  .pb-4 { padding-bottom: calc(var(--spacing) * 4); }
+  .pl-3 { padding-left: calc(var(--spacing) * 3); }
+  .pl-4 { padding-left: calc(var(--spacing) * 4); }
+  .pl-5 { padding-left: calc(var(--spacing) * 5); }
+  .pl-6 { padding-left: calc(var(--spacing) * 6); }
+  .text-left { text-align: left; }
+  .text-right { text-align: right; }
+  .align-bottom { vertical-align: bottom; }
+  .align-middle { vertical-align: middle; }
+  .align-top { vertical-align: top; }
+  .font-\[family-name\:var\(--font-display\)\] { font-family: var(--font-display); }
+  .font-display { font-family: var(--al-display); }
+  .font-mono { font-family: var(--al-mono); }
+  .font-sans { font-family: var(--al-sans); }
+  .text-\[0\.9em\] { font-size: 0.9em; }
+  .text-\[10px\] { font-size: 10px; }
+  .text-\[11px\] { font-size: 11px; }
+  .text-\[12\.5px\] { font-size: 12.5px; }
+  .text-\[12px\] { font-size: 12px; }
+  .text-\[13\.5px\] { font-size: 13.5px; }
+  .text-\[13px\] { font-size: 13px; }
+  .text-\[14px\] { font-size: 14px; }
+  .text-\[15px\] { font-size: 15px; }
+  .text-\[16px\] { font-size: 16px; }
+  .text-\[17px\] { font-size: 17px; }
+  .text-\[18px\] { font-size: 18px; }
+  .text-\[19px\] { font-size: 19px; }
+  .text-\[20px\] { font-size: 20px; }
+  .text-\[22px\] { font-size: 22px; }
+  .text-\[24px\] { font-size: 24px; }
+  .text-\[26px\] { font-size: 26px; }
+  .text-\[32px\] { font-size: 32px; }
+  .text-\[34px\] { font-size: 34px; }
+  .leading-\[1\.6\] { --tw-leading: 1.6; line-height: 1.6; }
+  .leading-\[18px\] { --tw-leading: 18px; line-height: 18px; }
+  .leading-none { --tw-leading: 1; line-height: 1; }
+  .leading-relaxed { --tw-leading: var(--leading-relaxed); line-height: var(--leading-relaxed); }
+  .leading-snug { --tw-leading: var(--leading-snug); line-height: var(--leading-snug); }
+  .leading-tight { --tw-leading: var(--leading-tight); line-height: var(--leading-tight); }
+  .font-medium { --tw-font-weight: var(--font-weight-medium); font-weight: var(--font-weight-medium); }
+  .font-normal { --tw-font-weight: var(--font-weight-normal); font-weight: var(--font-weight-normal); }
+  .font-semibold { --tw-font-weight: var(--font-weight-semibold); font-weight: var(--font-weight-semibold); }
+  .tracking-\[0\.1em\] { --tw-tracking: .1em; letter-spacing: 0.1em; }
+  .tracking-\[0\.04em\] { --tw-tracking: .04em; letter-spacing: 0.04em; }
+  .tracking-\[0\.08em\] { --tw-tracking: .08em; letter-spacing: 0.08em; }
+  .\[overflow-wrap\:anywhere\] { overflow-wrap: anywhere; }
+  .\[overflow-wrap\:normal\] { overflow-wrap: normal; }
+  .break-words { overflow-wrap: break-word; }
+  .break-all { word-break: break-all; }
+  .whitespace-nowrap { white-space: nowrap; }
+  .text-\(--accent-text\) { color: var(--accent-text); }
+  .text-\(--ev-receipt\) { color: var(--ev-receipt); }
+  .text-\(--ev-reported\) { color: var(--ev-reported); }
+  .text-\(--ev-unobserved\) { color: var(--ev-unobserved); }
+  .text-\(--st-approved\) { color: var(--st-approved); }
+  .text-\(--st-declined\) { color: var(--st-declined); }
+  .text-\(--st-launched\) { color: var(--st-launched); }
+  .text-\(--st-pending\) { color: var(--st-pending); }
+  .text-\(--text-1\) { color: var(--text-1); }
+  .text-\(--text-2\) { color: var(--text-2); }
+  .text-\(--text-3\) { color: var(--text-3); }
+  .text-\(--text-on-accent\) { color: var(--text-on-accent); }
+  .text-\[var\(--al-bg\)\] { color: var(--al-bg); }
+  .text-amber-700, .text-amber-800, .text-amber-900 { color: var(--al-warn); }
+  .text-emerald-700 { color: var(--al-pass); }
+  .text-red-700, .text-red-800 { color: var(--al-fail); }
+  .text-violet-700 { color: var(--al-accent); }
+  .text-zinc-400 { color: var(--al-ink-4); }
+  .text-zinc-500 { color: var(--al-ink-3); }
+  .text-zinc-600 { color: var(--al-ink-3); }
+  @supports (color: color-mix(in lab, red, red)) {
+  .text-zinc-600 { color: color-mix(in oklab, var(--al-ink-3), var(--al-ink-2)); }
+}
+  .text-zinc-700 { color: var(--al-ink-2); }
+  .text-zinc-800, .text-zinc-900 { color: var(--al-ink); }
+  .lowercase { text-transform: lowercase; }
+  .uppercase { text-transform: uppercase; }
+  .tabular-nums { --tw-numeric-spacing: tabular-nums; font-variant-numeric: var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, ); }
+  .underline { text-decoration-line: underline; }
+  .decoration-zinc-400 { text-decoration-color: var(--al-ink-4); }
+  .underline-offset-2 { text-underline-offset: 2px; }
+  .underline-offset-4 { text-underline-offset: 4px; }
+  .antialiased { -webkit-font-smoothing: antialiased; }
+  .accent-violet-700 { accent-color: var(--al-accent); }
+  .shadow-\(--shadow-pop\) { --tw-shadow: var(--shadow-pop); box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow); }
+  .shadow-\[inset_2px_0_0_var\(--accent-text\)\] { --tw-shadow: inset 2px 0 0 var(--tw-shadow-color, var(--accent-text)); box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow); }
+  .ring { --tw-ring-shadow: var(--tw-ring-inset, ) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor); box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow); }
+  .filter { filter: var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, ); }
+  .transition { transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events; transition-timing-function: var(--tw-ease, var(--default-transition-timing-function)); transition-duration: var(--tw-duration, var(--default-transition-duration)); }
+  .transition-\[color\,background-color\,border-color\,opacity\] { transition-property: color, background-color, border-color, opacity; transition-timing-function: var(--tw-ease, var(--default-transition-timing-function)); transition-duration: var(--tw-duration, var(--default-transition-duration)); }
+  .transition-\[color\,background-color\,border-color\] { transition-property: color, background-color, border-color; transition-timing-function: var(--tw-ease, var(--default-transition-timing-function)); transition-duration: var(--tw-duration, var(--default-transition-duration)); }
+  .transition-colors { transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to; transition-timing-function: var(--tw-ease, var(--default-transition-timing-function)); transition-duration: var(--tw-duration, var(--default-transition-duration)); }
+  .outline-none { --tw-outline-style: none; outline-style: none; }
+  .\[goals\:read\] { }
+  .group-first\/need\:font-semibold:is(:where(.group\/need):first-child *) { --tw-font-weight: var(--font-weight-semibold); font-weight: var(--font-weight-semibold); }
+  .group-open\/disclosure\:rotate-90:is(:where(.group\/disclosure):is([open], :popover-open, :open) *) { rotate: 90deg; }
+  .placeholder\:text-\(--text-3\)::placeholder { color: var(--text-3); }
+  .after\:absolute::after { content: var(--tw-content); position: absolute; }
+  .after\:inset-0::after { content: var(--tw-content); inset: 0px; }
+  .after\:content-\[\'\'\]::after { --tw-content: ""; content: var(--tw-content); }
+  .last\:border-b-0:last-child { border-bottom-style: var(--tw-border-style); border-bottom-width: 0px; }
+  .last\:pb-0:last-child { padding-bottom: 0px; }
+  .empty\:hidden:empty { display: none; }
+  @media (hover: hover) {
+  .hover\:border-\(--accent-hover\):hover { border-color: var(--accent-hover); }
+  .hover\:bg-\(--accent-hover\):hover { background-color: var(--accent-hover); }
+  .hover\:bg-\(--bg-overlay\):hover { background-color: var(--bg-overlay); }
+  .hover\:bg-\(--bg-raised\):hover { background-color: var(--bg-raised); }
+  .hover\:bg-red-50:hover { background-color: var(--al-fail-bg); }
+  .hover\:bg-zinc-100:hover { background-color: var(--al-surface-raised); }
+  .hover\:text-\(--text-1\):hover { color: var(--text-1); }
+  .hover\:text-zinc-900:hover { color: var(--al-ink); }
+  .hover\:underline:hover { text-decoration-line: underline; }
+  .hover\:opacity-90:hover { opacity: 0.9; }
+}
+  .focus\:outline-none:focus { --tw-outline-style: none; outline-style: none; }
+  .focus-visible\:outline-2:focus-visible { outline-style: var(--tw-outline-style); outline-width: 2px; }
+  .focus-visible\:outline-offset-2:focus-visible { outline-offset: 2px; }
+  .focus-visible\:outline-violet-600:focus-visible { outline-color: var(--al-accent); }
+  .disabled\:cursor-not-allowed:disabled { cursor: not-allowed; }
+  .disabled\:opacity-50:disabled { opacity: 0.5; }
+  .aria-invalid\:border-\(--st-declined\)[aria-invalid="true"] { border-color: var(--st-declined); }
+  @media not (min-width: 40rem) {
+  .max-sm\:sr-only { clip-path: inset(50%); white-space: nowrap; border-width: 0px; width: 1px; height: 1px; margin: -1px; padding: 0px; position: absolute; overflow: hidden; }
+  .max-sm\:mb-3 { margin-bottom: calc(var(--spacing) * 3); }
+  .max-sm\:block { display: block; }
+  .max-sm\:flex { display: flex; }
+  .max-sm\:hidden { display: none; }
+  .max-sm\:inline-flex { display: inline-flex; }
+  .max-sm\:min-h-\[44px\] { min-height: 44px; }
+  .max-sm\:flex-col { flex-direction: column; }
+  .max-sm\:items-center { align-items: center; }
+  .max-sm\:justify-between { justify-content: space-between; }
+  .max-sm\:gap-0\.5 { gap: calc(var(--spacing) * .5); }
+  .max-sm\:gap-2 { gap: calc(var(--spacing) * 2); }
+  .max-sm\:gap-3 { gap: calc(var(--spacing) * 3); }
+  .max-sm\:gap-x-3 { column-gap: calc(var(--spacing) * 3); }
+  .max-sm\:gap-y-1 { row-gap: var(--spacing); }
+  .max-sm\:rounded-\(--radius-m\) { border-radius: var(--radius-m); }
+  .max-sm\:border { border-style: var(--tw-border-style); border-width: 1px; }
+  .max-sm\:bg-\(--bg-panel\) { background-color: var(--bg-panel); }
+  .max-sm\:p-0 { padding: 0px; }
+  .max-sm\:p-3 { padding: calc(var(--spacing) * 3); }
+  .max-sm\:p-4 { padding: calc(var(--spacing) * 4); }
+  .max-sm\:px-2\.5 { padding-inline: calc(var(--spacing) * 2.5); }
+  .max-sm\:px-3 { padding-inline: calc(var(--spacing) * 3); }
+  .max-sm\:px-4 { padding-inline: calc(var(--spacing) * 4); }
+  .max-sm\:py-0\.5 { padding-block: calc(var(--spacing) * .5); }
+  .max-sm\:py-2 { padding-block: calc(var(--spacing) * 2); }
+  .max-sm\:pt-1 { padding-top: var(--spacing); }
+  .max-sm\:pr-0 { padding-right: 0px; }
+  .max-sm\:text-left { text-align: left; }
+  .max-sm\:text-right { text-align: right; }
+  .max-sm\:before\:shrink-0::before { content: var(--tw-content); flex-shrink: 0; }
+  .max-sm\:before\:text-left::before { content: var(--tw-content); text-align: left; }
+  .max-sm\:before\:text-\[13px\]::before { content: var(--tw-content); font-size: 13px; }
+  .max-sm\:before\:font-normal::before { content: var(--tw-content); --tw-font-weight: var(--font-weight-normal); font-weight: var(--font-weight-normal); }
+  .max-sm\:before\:text-zinc-500::before { content: var(--tw-content); color: var(--al-ink-3); }
+  .max-sm\:before\:content-\[attr\(data-label\)\]::before { --tw-content: attr(data-label); content: var(--tw-content); }
+}
+  @media (min-width: 40rem) {
+  .sm\:block { display: block; }
+  .sm\:hidden { display: none; }
+  .sm\:max-w-\[480px\] { max-width: 480px; }
+  .sm\:max-w-\[720px\] { max-width: 720px; }
+  .sm\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0px, 1fr)); }
+  .sm\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0px, 1fr)); }
+  .sm\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0px, 1fr)); }
+  .sm\:grid-cols-\[1fr_180px\] { grid-template-columns: 1fr 180px; }
+  .sm\:grid-cols-\[10rem_minmax\(0\,1fr\)\] { grid-template-columns: 10rem minmax(0px, 1fr); }
+  .sm\:grid-cols-\[120px_1fr_1fr\] { grid-template-columns: 120px 1fr 1fr; }
+  .sm\:grid-cols-\[150px_1fr\] { grid-template-columns: 150px 1fr; }
+  .sm\:grid-cols-\[minmax\(0\,1fr\)_160px_auto\] { grid-template-columns: minmax(0px, 1fr) 160px auto; }
+  .sm\:grid-cols-\[minmax\(0\,1fr\)_180px_auto\] { grid-template-columns: minmax(0px, 1fr) 180px auto; }
+  .sm\:gap-3 { gap: calc(var(--spacing) * 3); }
+  .sm\:p-8 { padding: calc(var(--spacing) * 8); }
+  .sm\:px-6 { padding-inline: calc(var(--spacing) * 6); }
+  .sm\:text-right { text-align: right; }
+}
+  @media (min-width: 48rem) {
+  .md\:block { display: block; }
+}
+  @media (min-width: 64rem) {
+  .lg\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0px, 1fr)); }
+}
+  @container not (min-width: 48rem) {
+  .\@max-3xl\:min-h-\[44px\] { min-height: 44px; }
+}
+  @container (min-width: 42rem) {
+  .\@2xl\:block { display: block; }
+}
+  @container (min-width: 48rem) {
+  .\@3xl\:order-1 { order: 1; }
+  .\@3xl\:order-2 { order: 2; }
+  .\@3xl\:order-3 { order: 3; }
+  .\@3xl\:order-4 { order: 4; }
+  .\@3xl\:order-5 { order: 5; }
+  .\@3xl\:col-span-1 { grid-column: span 1 / span 1; }
+  .\@3xl\:col-span-full { grid-column: 1 / -1; }
+  .\@3xl\:contents { display: contents; }
+  .\@3xl\:min-h-0 { min-height: 0px; }
+  .\@3xl\:flex-none { flex: 0 0 auto; }
+  .\@3xl\:grid-cols-\[auto_minmax\(0\,1fr\)_auto_auto_auto\] { grid-template-columns: auto minmax(0px, 1fr) auto auto auto; }
+  .\@3xl\:grid-cols-subgrid { grid-template-columns: subgrid; }
+  .\@3xl\:items-center { align-items: center; }
+  .\@3xl\:gap-x-4 { column-gap: calc(var(--spacing) * 4); }
+  .\@3xl\:gap-y-0 { row-gap: 0px; }
+  .\@3xl\:self-center { align-self: center; }
+  .\@3xl\:truncate { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+  .\@3xl\:py-1\.5 { padding-block: calc(var(--spacing) * 1.5); }
+  .\@3xl\:pt-0 { padding-top: 0px; }
+  .\@3xl\:text-right { text-align: right; }
+  .\@3xl\:group-first\/need\:text-\[15px\]:is(:where(.group\/need):first-child *) { font-size: 15px; }
+  .\@3xl\:empty\:block:empty { display: block; }
+}
+  .\[\&\:\:-webkit-details-marker\]\:hidden::-webkit-details-marker { display: none; }
+  @media not (min-width: 40rem) {
+  .\[\&\>\*\:first-child\]\:max-sm\:col-span-2 > :first-child { grid-column: span 2 / span 2; }
+}
+}
+@font-face { font-family: "Nineties Headliner"; src: local("Nineties Headliner"), local("NinetiesHeadliner-Regular"); font-display: swap; }
+:root, :root[data-theme="dark"] { --lightningcss-light: ; --lightningcss-dark: initial; color-scheme: dark; --bg-page: #0b0b0d; --bg-inset: #08080a; --bg-panel: #121316; --bg-raised: #191a1e; --bg-overlay: #202126; --text-1: #f4f2ee; --text-2: #bdb9b1; --text-3: #9a968f; --text-on-accent: #fff; --line: #26272c; --line-strong: #34353b; --edge: #6e6e78; --focus: #b48cff; --accent: #bf0078; --accent-hover: #94005c; --accent-soft: #e9009524; --accent-text: #ff3db4; --between: #d975ff; --between-soft: #cc24f524; --st-pending: var(--between); --st-pending-soft: var(--between-soft); --st-approved: #3ee68c; --st-approved-soft: #31e6821f; --st-launched: #5aa7ff; --st-launched-soft: #197eeb2e; --st-declined: #f57; --st-declined-soft: #ed214f24; --st-retry: #fdc237; --st-retry-soft: #fdc2371f; --st-urgent: #ff7a52; --st-urgent-soft: #fa552b24; --ev-receipt: #3cc9c2; --ev-receipt-soft: #1e96922e; --ev-reported: #a88bff; --ev-reported-soft: #8e66fb24; --ev-unobserved: #a3a09a; --ev-unobserved-soft: #a3a09a1a; --radius-s: 9px; --radius-m: 13px; --radius-l: 19px; --font-display: var(--al-display); --font-sans: var(--al-sans); --font-mono: var(--al-mono); --shadow-pop: 0 0 0 1px var(--line-strong), 0 12px 32px -12px #000000b3; }
+:root[data-theme="light"] { --lightningcss-light: initial; --lightningcss-dark: ; color-scheme: light; --bg-page: #f6f5f2; --bg-inset: #efede9; --bg-panel: #fff; --bg-raised: #fbfaf8; --bg-overlay: #fff; --text-1: #16161a; --text-2: #4a4842; --text-3: #6a675f; --text-on-accent: #fff; --line: #e4e1db; --line-strong: #d2cec6; --edge: #8a877f; --focus: #6f4dda; --accent: #bf0078; --accent-hover: #94005c; --accent-soft: #e9009517; --accent-text: #bf0078; --between: #9312b8; --between-soft: #cc24f51a; --st-pending: var(--between); --st-pending-soft: var(--between-soft); --st-approved: #137a43; --st-approved-soft: #31e68224; --st-launched: #0f62c0; --st-launched-soft: #197eeb1a; --st-declined: #c0123b; --st-declined-soft: #ed214f17; --st-retry: #8a5a00; --st-retry-soft: #fdc23733; --st-urgent: #b83a0a; --st-urgent-soft: #fa552b1a; --ev-receipt: #0e6f6b; --ev-receipt-soft: #1e96921a; --ev-reported: #5b3fc4; --ev-reported-soft: #8e66fb1a; --ev-unobserved: #625f58; --ev-unobserved-soft: #625f5812; --shadow-pop: 0 0 0 1px var(--line-strong), 0 14px 32px -14px #16161a47; }
+:root { --al-bg: var(--bg-page); --al-rail: var(--bg-inset); --al-surface: var(--bg-panel); --al-surface-sunk: var(--bg-inset); --al-surface-raised: var(--bg-raised); --al-line: var(--line); --al-line-strong: var(--line-strong); --al-ink: var(--text-1); --al-ink-2: var(--text-2); --al-ink-3: var(--text-3); --al-ink-4: var(--text-3); --al-accent: var(--between); --al-accent-bg: var(--between-soft); --al-warn: var(--st-retry); --al-warn-bg: var(--st-retry-soft); --al-fail: var(--st-declined); --al-fail-bg: var(--st-declined-soft); --al-pass: var(--st-approved); --al-pass-bg: var(--st-approved-soft); --al-info: var(--st-launched); --al-info-bg: var(--st-launched-soft); --al-focus: var(--focus); --al-ease: cubic-bezier(.4, 0, .2, 1); --al-sans: var(--font-space-grotesk), "Space Grotesk", ui-sans-serif, sans-serif; --al-mono: var(--font-space-mono), "Space Mono", ui-monospace, monospace; --al-display: "Nineties Headliner", "Perfectly Nineties", "Iowan Old Style", Georgia, serif; }
+html, body { background: var(--al-bg); color: var(--al-ink); font-family: var(--al-sans); font-size: 15px; line-height: 1.45; }
+:focus-visible:not([tabindex="-1"]) { outline: 2px solid var(--al-focus); outline-offset: 2px; border-radius: 6px; }
+::selection { background: var(--al-accent-bg); color: var(--al-ink); }
+@keyframes al-in { 
+  0% { opacity: 0; transform: translateY(6px); }
+  100% { opacity: 1; transform: none; }
+}
+.al-in { animation: al-in .3s var(--al-ease); }
+.al-lbl { font-family: var(--al-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--al-ink-4); font-size: 12px; }
+@property --tw-space-y-reverse { syntax: "*"; inherits: false; initial-value: 0; }
+@property --tw-divide-y-reverse { syntax: "*"; inherits: false; initial-value: 0; }
+@property --tw-border-style { syntax: "*"; inherits: false; initial-value: solid; }
+@property --tw-leading { syntax: "*"; inherits: false; }
+@property --tw-font-weight { syntax: "*"; inherits: false; }
+@property --tw-tracking { syntax: "*"; inherits: false; }
+@property --tw-ordinal { syntax: "*"; inherits: false; }
+@property --tw-slashed-zero { syntax: "*"; inherits: false; }
+@property --tw-numeric-figure { syntax: "*"; inherits: false; }
+@property --tw-numeric-spacing { syntax: "*"; inherits: false; }
+@property --tw-numeric-fraction { syntax: "*"; inherits: false; }
+@property --tw-shadow { syntax: "*"; inherits: false; initial-value: 0 0 #0000; }
+@property --tw-shadow-color { syntax: "*"; inherits: false; }
+@property --tw-shadow-alpha { syntax: "<percentage>"; inherits: false; initial-value: 100%; }
+@property --tw-inset-shadow { syntax: "*"; inherits: false; initial-value: 0 0 #0000; }
+@property --tw-inset-shadow-color { syntax: "*"; inherits: false; }
+@property --tw-inset-shadow-alpha { syntax: "<percentage>"; inherits: false; initial-value: 100%; }
+@property --tw-ring-color { syntax: "*"; inherits: false; }
+@property --tw-ring-shadow { syntax: "*"; inherits: false; initial-value: 0 0 #0000; }
+@property --tw-inset-ring-color { syntax: "*"; inherits: false; }
+@property --tw-inset-ring-shadow { syntax: "*"; inherits: false; initial-value: 0 0 #0000; }
+@property --tw-ring-inset { syntax: "*"; inherits: false; }
+@property --tw-ring-offset-width { syntax: "<length>"; inherits: false; initial-value: 0; }
+@property --tw-ring-offset-color { syntax: "*"; inherits: false; initial-value: #fff; }
+@property --tw-ring-offset-shadow { syntax: "*"; inherits: false; initial-value: 0 0 #0000; }
+@property --tw-blur { syntax: "*"; inherits: false; }
+@property --tw-brightness { syntax: "*"; inherits: false; }
+@property --tw-contrast { syntax: "*"; inherits: false; }
+@property --tw-grayscale { syntax: "*"; inherits: false; }
+@property --tw-hue-rotate { syntax: "*"; inherits: false; }
+@property --tw-invert { syntax: "*"; inherits: false; }
+@property --tw-opacity { syntax: "*"; inherits: false; }
+@property --tw-saturate { syntax: "*"; inherits: false; }
+@property --tw-sepia { syntax: "*"; inherits: false; }
+@property --tw-drop-shadow { syntax: "*"; inherits: false; }
+@property --tw-drop-shadow-color { syntax: "*"; inherits: false; }
+@property --tw-drop-shadow-alpha { syntax: "<percentage>"; inherits: false; initial-value: 100%; }
+@property --tw-drop-shadow-size { syntax: "*"; inherits: false; }
+@property --tw-content { syntax: "*"; inherits: false; initial-value: ""; }
+@property --tw-outline-style { syntax: "*"; inherits: false; initial-value: solid; }
+@font-face { font-family: __nextjs-Geist; font-style: normal; font-weight: 400 600; font-display: swap; src: url("/__nextjs_font/geist-latin-ext.woff2") format("woff2"); unicode-range: U+100-2BA, U+2BD-2C5, U+2C7-2CC, U+2CE-2D7, U+2DD-2FF, U+304, U+308, U+329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "__nextjs-Geist Mono"; font-style: normal; font-weight: 400 600; font-display: swap; src: url("/__nextjs_font/geist-mono-latin-ext.woff2") format("woff2"); unicode-range: U+100-2BA, U+2BD-2C5, U+2C7-2CC, U+2CE-2D7, U+2DD-2FF, U+304, U+308, U+329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: __nextjs-Geist; font-style: normal; font-weight: 400 600; font-display: swap; src: url("/__nextjs_font/geist-latin.woff2") format("woff2"); unicode-range: U+0-FF, U+131, U+152-153, U+2BB-2BC, U+2C6, U+2DA, U+2DC, U+304, U+308, U+329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "__nextjs-Geist Mono"; font-style: normal; font-weight: 400 600; font-display: swap; src: url("/__nextjs_font/geist-mono-latin.woff2") format("woff2"); unicode-range: U+0-FF, U+131, U+152-153, U+2BB-2BC, U+2C6, U+2DA, U+2DC, U+304, U+308, U+329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }</style></head><body class="min-h-full font-sans"><div hidden=""><!--$--><!--/$--></div><noscript><p class="p-10 text-[16px] text-zinc-900">Align needs JavaScript. Turn it on and reload this page.</p></noscript><!--&--><!--&--><!--&--><main class="mx-auto flex max-w-[1180px] flex-col gap-3 px-4 py-4"><header class="flex flex-wrap items-end justify-between gap-3"><div><p class="font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">LIM-2472 round 2 primitives · fictional content</p><h1 class="font-[family-name:var(--font-display)] text-[32px] leading-tight text-(--text-1)">Desk shortcut, lane map, short form</h1></div><div class="flex flex-col gap-2"><div class="flex flex-col gap-1.5"><span id="_R_1gpbn5ritqlb_" class="sr-only">Appearance</span><div role="radiogroup" aria-labelledby="_R_1gpbn5ritqlb_" class="inline-flex w-fit max-w-full flex-wrap gap-0.5 rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) p-0.5"><button type="button" role="radio" aria-checked="false" tabindex="-1" class="inline-flex items-center gap-1.5 rounded-[7px] font-medium transition-[color,background-color,border-color] max-sm:min-h-[44px] px-3.5 py-1.5 text-[14px] text-(--text-2) hover:bg-(--bg-raised) hover:text-(--text-1)">Light</button><button type="button" role="radio" aria-checked="false" tabindex="-1" class="inline-flex items-center gap-1.5 rounded-[7px] font-medium transition-[color,background-color,border-color] max-sm:min-h-[44px] px-3.5 py-1.5 text-[14px] text-(--text-2) hover:bg-(--bg-raised) hover:text-(--text-1)">Dark</button><button type="button" role="radio" aria-checked="true" tabindex="0" class="inline-flex items-center gap-1.5 rounded-[7px] font-medium transition-[color,background-color,border-color] max-sm:min-h-[44px] px-3.5 py-1.5 text-[14px] bg-(--accent) text-(--text-on-accent)">System</button></div></div><p class="text-[13px] text-(--text-2)">System follows your device. Your choice is saved in this browser only.</p></div></header><h2 class="mt-8 font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">Desk row: option A, recommended</h2><p class="text-[14px] text-(--text-2)">Review keeps the outline. "Approve only" is underlined text beside it, next to the evidence that backs it. No evidence, no shortcut. Launch is never on the same row.</p><section id="desk-a" class="rounded-(--radius-m) border border-(--line) bg-(--bg-panel)"><table class="w-full border-collapse text-[14px]"><caption class="sr-only">Desk rows, option a (fictional)</caption><thead class="max-sm:hidden"><tr class="border-b border-(--line-strong)"><th scope="col" class="whitespace-nowrap px-3 py-2 font-mono text-[11px] font-normal uppercase tracking-[0.08em] text-(--text-3) text-left">Request</th><th scope="col" class="whitespace-nowrap px-3 py-2 font-mono text-[11px] font-normal uppercase tracking-[0.08em] text-(--text-3) text-left">State</th><th scope="col" class="whitespace-nowrap px-3 py-2 font-mono text-[11px] font-normal uppercase tracking-[0.08em] text-(--text-3) text-left">Evidence</th><th scope="col" class="px-3 py-2 text-right"><span class="sr-only">Actions</span></th></tr></thead><tbody><tr class="border-b border-(--line) align-middle max-sm:mb-3 max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:rounded-(--radius-m) max-sm:border max-sm:bg-(--bg-panel) max-sm:p-3 hover:bg-(--bg-raised)"><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Request</span><span><span class="block font-medium text-(--text-1)">Retain access logs 90 days</span><span class="text-[13px] text-(--text-2)">Maya Ortiz<!-- -->'s request</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">State</span><span data-status="pending" class="inline-flex max-w-full items-center gap-1.5 rounded-full border font-medium text-(--st-pending) bg-(--st-pending-soft) border-(--st-pending)/40 px-2 py-0.5 text-[12px]"><span class="shrink-0"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="5"></circle><path d="M7 2a5 5 0 0 1 0 10z" fill="currentColor" stroke="none"></path></svg></span><span class="[overflow-wrap:normal]">Decision</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Evidence</span><span data-evidence="reported" class="inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-(--radius-s) border text-(--ev-reported) bg-(--ev-reported-soft) border-(--ev-reported)/40 px-1.5 py-0.5 text-[12px]"><span class="inline-flex items-center gap-1.5 whitespace-nowrap font-medium"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3h9v6h-5l-2.8 2.4V9H2.5z"></path></svg>Agent reported</span><span class="min-w-0 break-words font-mono text-[12px]">2 links</span></span></td><td class="px-3 py-2 text-right max-sm:p-0 max-sm:text-left"><span class="inline-flex flex-wrap items-center justify-end gap-2"><a aria-label="Approve only: Retain access logs 90 days. This does not launch it." class="inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) text-[13px] transition-[color,background-color,border-color] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px] px-2 font-normal text-(--text-2) underline underline-offset-4 hover:text-(--text-1)" href="#desk">Approve only</a><a class="inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) text-[13px] transition-[color,background-color,border-color] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px] border border-(--edge) px-3 font-medium text-(--text-1) hover:bg-(--bg-overlay)" href="#desk">Review</a></span></td></tr><tr class="border-b border-(--line) align-middle max-sm:mb-3 max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:rounded-(--radius-m) max-sm:border max-sm:bg-(--bg-panel) max-sm:p-3 hover:bg-(--bg-raised)"><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Request</span><span><span class="block font-medium text-(--text-1)">Book the pen-test window</span><span class="text-[13px] text-(--text-2)">Sam Okafor<!-- -->'s request</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">State</span><span data-status="pending" class="inline-flex max-w-full items-center gap-1.5 rounded-full border font-medium text-(--st-pending) bg-(--st-pending-soft) border-(--st-pending)/40 px-2 py-0.5 text-[12px]"><span class="shrink-0"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="5"></circle><path d="M7 2a5 5 0 0 1 0 10z" fill="currentColor" stroke="none"></path></svg></span><span class="[overflow-wrap:normal]">Decision</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Evidence</span><span data-evidence="self" class="inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-(--radius-s) border text-(--text-2) border-(--line-strong) px-1.5 py-0.5 text-[12px]"><span class="inline-flex items-center gap-1.5 whitespace-nowrap font-medium"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="4.6" r="2.3"></circle><path d="M2.6 12.2a4.4 4.4 0 0 1 8.8 0"></path></svg>Self-reported</span><span class="min-w-0 break-words font-mono text-[12px]">1 link</span></span></td><td class="px-3 py-2 text-right max-sm:p-0 max-sm:text-left"><span class="inline-flex flex-wrap items-center justify-end gap-2"><a aria-label="Approve only: Book the pen-test window. This does not launch it." class="inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) text-[13px] transition-[color,background-color,border-color] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px] px-2 font-normal text-(--text-2) underline underline-offset-4 hover:text-(--text-1)" href="#desk">Approve only</a><a class="inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) text-[13px] transition-[color,background-color,border-color] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px] border border-(--edge) px-3 font-medium text-(--text-1) hover:bg-(--bg-overlay)" href="#desk">Review</a></span></td></tr><tr class="border-b border-(--line) align-middle max-sm:mb-3 max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:rounded-(--radius-m) max-sm:border max-sm:bg-(--bg-panel) max-sm:p-3 hover:bg-(--bg-raised)"><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Request</span><span><span class="block font-medium text-(--text-1)">Move the onboarding target to 75%</span><span class="text-[13px] text-(--text-2)">Priya Nair<!-- -->'s request</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">State</span><span data-status="pending" class="inline-flex max-w-full items-center gap-1.5 rounded-full border font-medium text-(--st-pending) bg-(--st-pending-soft) border-(--st-pending)/40 px-2 py-0.5 text-[12px]"><span class="shrink-0"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="5"></circle><path d="M7 2a5 5 0 0 1 0 10z" fill="currentColor" stroke="none"></path></svg></span><span class="[overflow-wrap:normal]">Decision</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Evidence</span><span class="text-[13px] text-(--text-3)">No links</span></td><td class="px-3 py-2 text-right max-sm:p-0 max-sm:text-left"><a class="inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) text-[13px] transition-[color,background-color,border-color] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px] border border-(--edge) px-3 font-medium text-(--text-1) hover:bg-(--bg-overlay)" href="#desk">Review</a></td></tr><tr class="border-b border-(--line) align-middle max-sm:mb-3 max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:rounded-(--radius-m) max-sm:border max-sm:bg-(--bg-panel) max-sm:p-3 hover:bg-(--bg-raised)"><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Request</span><span><span class="block font-medium text-(--text-1)">Add EU data residency</span><span class="text-[13px] text-(--text-2)">Jordan Lee<!-- -->'s request</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">State</span><span data-status="approved" class="inline-flex max-w-full items-center gap-1.5 rounded-full border font-medium text-(--st-approved) bg-(--st-approved-soft) border-(--st-approved)/40 px-2 py-0.5 text-[12px]"><span class="shrink-0"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="5.5"></circle><path d="m4.6 7.2 1.7 1.7 3.2-3.5"></path></svg></span><span class="[overflow-wrap:normal]">Approved, not launched</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Evidence</span><span data-evidence="reported" class="inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-(--radius-s) border text-(--ev-reported) bg-(--ev-reported-soft) border-(--ev-reported)/40 px-1.5 py-0.5 text-[12px]"><span class="inline-flex items-center gap-1.5 whitespace-nowrap font-medium"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3h9v6h-5l-2.8 2.4V9H2.5z"></path></svg>Agent reported</span><span class="min-w-0 break-words font-mono text-[12px]">2 links</span></span></td><td class="px-3 py-2 text-right max-sm:p-0 max-sm:text-left"><a class="inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) text-[13px] transition-[color,background-color,border-color] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px] border border-(--edge) px-3 font-medium text-(--text-1) hover:bg-(--bg-overlay)" href="#desk">Launch v4</a></td></tr><tr class="border-b border-(--line) align-middle max-sm:mb-3 max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:rounded-(--radius-m) max-sm:border max-sm:bg-(--bg-panel) max-sm:p-3 hover:bg-(--bg-raised)"><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Request</span><span><span class="block font-medium text-(--text-1)">Drop the beta flag</span><span class="text-[13px] text-(--text-2)">Sam Okafor<!-- -->'s request</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">State</span><span data-status="pending" class="inline-flex max-w-full items-center gap-1.5 rounded-full border font-medium text-(--st-pending) bg-(--st-pending-soft) border-(--st-pending)/40 px-2 py-0.5 text-[12px]"><span class="shrink-0"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="5"></circle><path d="M7 2a5 5 0 0 1 0 10z" fill="currentColor" stroke="none"></path></svg></span><span class="[overflow-wrap:normal]">Decision</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Evidence</span><span data-evidence="reported" class="inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-(--radius-s) border text-(--ev-reported) bg-(--ev-reported-soft) border-(--ev-reported)/40 px-1.5 py-0.5 text-[12px]"><span class="inline-flex items-center gap-1.5 whitespace-nowrap font-medium"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3h9v6h-5l-2.8 2.4V9H2.5z"></path></svg>Agent reported</span><span class="min-w-0 break-words font-mono text-[12px]">2 links</span></span></td><td class="px-3 py-2 text-right max-sm:p-0 max-sm:text-left"><span class="text-[13px] text-(--text-2)">Alex Rivera can decide</span></td></tr></tbody></table></section><h2 class="mt-8 font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">Desk row: option B, two outlines</h2><p class="text-[14px] text-(--text-2)">As the brief words it. The two read as equals, and "Approve" alone doesn't say it stops short of launch.</p><section id="desk-b" class="rounded-(--radius-m) border border-(--line) bg-(--bg-panel)"><table class="w-full border-collapse text-[14px]"><caption class="sr-only">Desk rows, option b (fictional)</caption><thead class="max-sm:hidden"><tr class="border-b border-(--line-strong)"><th scope="col" class="whitespace-nowrap px-3 py-2 font-mono text-[11px] font-normal uppercase tracking-[0.08em] text-(--text-3) text-left">Request</th><th scope="col" class="whitespace-nowrap px-3 py-2 font-mono text-[11px] font-normal uppercase tracking-[0.08em] text-(--text-3) text-left">State</th><th scope="col" class="whitespace-nowrap px-3 py-2 font-mono text-[11px] font-normal uppercase tracking-[0.08em] text-(--text-3) text-left">Evidence</th><th scope="col" class="px-3 py-2 text-right"><span class="sr-only">Actions</span></th></tr></thead><tbody><tr class="border-b border-(--line) align-middle max-sm:mb-3 max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:rounded-(--radius-m) max-sm:border max-sm:bg-(--bg-panel) max-sm:p-3 hover:bg-(--bg-raised)"><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Request</span><span><span class="block font-medium text-(--text-1)">Retain access logs 90 days</span><span class="text-[13px] text-(--text-2)">Maya Ortiz<!-- -->'s request</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">State</span><span data-status="pending" class="inline-flex max-w-full items-center gap-1.5 rounded-full border font-medium text-(--st-pending) bg-(--st-pending-soft) border-(--st-pending)/40 px-2 py-0.5 text-[12px]"><span class="shrink-0"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="5"></circle><path d="M7 2a5 5 0 0 1 0 10z" fill="currentColor" stroke="none"></path></svg></span><span class="[overflow-wrap:normal]">Decision</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Evidence</span><span data-evidence="reported" class="inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-(--radius-s) border text-(--ev-reported) bg-(--ev-reported-soft) border-(--ev-reported)/40 px-1.5 py-0.5 text-[12px]"><span class="inline-flex items-center gap-1.5 whitespace-nowrap font-medium"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3h9v6h-5l-2.8 2.4V9H2.5z"></path></svg>Agent reported</span><span class="min-w-0 break-words font-mono text-[12px]">2 links</span></span></td><td class="px-3 py-2 text-right max-sm:p-0 max-sm:text-left"><span class="inline-flex flex-wrap items-center justify-end gap-2"><a class="inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) text-[13px] transition-[color,background-color,border-color] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px] border border-(--edge) px-3 font-medium text-(--text-1) hover:bg-(--bg-overlay)" href="#desk">Approve</a><a class="inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) text-[13px] transition-[color,background-color,border-color] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px] border border-(--edge) px-3 font-medium text-(--text-1) hover:bg-(--bg-overlay)" href="#desk">Review</a></span></td></tr><tr class="border-b border-(--line) align-middle max-sm:mb-3 max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:rounded-(--radius-m) max-sm:border max-sm:bg-(--bg-panel) max-sm:p-3 hover:bg-(--bg-raised)"><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Request</span><span><span class="block font-medium text-(--text-1)">Book the pen-test window</span><span class="text-[13px] text-(--text-2)">Sam Okafor<!-- -->'s request</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">State</span><span data-status="pending" class="inline-flex max-w-full items-center gap-1.5 rounded-full border font-medium text-(--st-pending) bg-(--st-pending-soft) border-(--st-pending)/40 px-2 py-0.5 text-[12px]"><span class="shrink-0"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="5"></circle><path d="M7 2a5 5 0 0 1 0 10z" fill="currentColor" stroke="none"></path></svg></span><span class="[overflow-wrap:normal]">Decision</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Evidence</span><span data-evidence="self" class="inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-(--radius-s) border text-(--text-2) border-(--line-strong) px-1.5 py-0.5 text-[12px]"><span class="inline-flex items-center gap-1.5 whitespace-nowrap font-medium"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="4.6" r="2.3"></circle><path d="M2.6 12.2a4.4 4.4 0 0 1 8.8 0"></path></svg>Self-reported</span><span class="min-w-0 break-words font-mono text-[12px]">1 link</span></span></td><td class="px-3 py-2 text-right max-sm:p-0 max-sm:text-left"><span class="inline-flex flex-wrap items-center justify-end gap-2"><a class="inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) text-[13px] transition-[color,background-color,border-color] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px] border border-(--edge) px-3 font-medium text-(--text-1) hover:bg-(--bg-overlay)" href="#desk">Approve</a><a class="inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) text-[13px] transition-[color,background-color,border-color] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px] border border-(--edge) px-3 font-medium text-(--text-1) hover:bg-(--bg-overlay)" href="#desk">Review</a></span></td></tr><tr class="border-b border-(--line) align-middle max-sm:mb-3 max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:rounded-(--radius-m) max-sm:border max-sm:bg-(--bg-panel) max-sm:p-3 hover:bg-(--bg-raised)"><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Request</span><span><span class="block font-medium text-(--text-1)">Move the onboarding target to 75%</span><span class="text-[13px] text-(--text-2)">Priya Nair<!-- -->'s request</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">State</span><span data-status="pending" class="inline-flex max-w-full items-center gap-1.5 rounded-full border font-medium text-(--st-pending) bg-(--st-pending-soft) border-(--st-pending)/40 px-2 py-0.5 text-[12px]"><span class="shrink-0"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="5"></circle><path d="M7 2a5 5 0 0 1 0 10z" fill="currentColor" stroke="none"></path></svg></span><span class="[overflow-wrap:normal]">Decision</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Evidence</span><span class="text-[13px] text-(--text-3)">No links</span></td><td class="px-3 py-2 text-right max-sm:p-0 max-sm:text-left"><a class="inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) text-[13px] transition-[color,background-color,border-color] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px] border border-(--edge) px-3 font-medium text-(--text-1) hover:bg-(--bg-overlay)" href="#desk">Review</a></td></tr><tr class="border-b border-(--line) align-middle max-sm:mb-3 max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:rounded-(--radius-m) max-sm:border max-sm:bg-(--bg-panel) max-sm:p-3 hover:bg-(--bg-raised)"><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Request</span><span><span class="block font-medium text-(--text-1)">Add EU data residency</span><span class="text-[13px] text-(--text-2)">Jordan Lee<!-- -->'s request</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">State</span><span data-status="approved" class="inline-flex max-w-full items-center gap-1.5 rounded-full border font-medium text-(--st-approved) bg-(--st-approved-soft) border-(--st-approved)/40 px-2 py-0.5 text-[12px]"><span class="shrink-0"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="5.5"></circle><path d="m4.6 7.2 1.7 1.7 3.2-3.5"></path></svg></span><span class="[overflow-wrap:normal]">Approved, not launched</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Evidence</span><span data-evidence="reported" class="inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-(--radius-s) border text-(--ev-reported) bg-(--ev-reported-soft) border-(--ev-reported)/40 px-1.5 py-0.5 text-[12px]"><span class="inline-flex items-center gap-1.5 whitespace-nowrap font-medium"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3h9v6h-5l-2.8 2.4V9H2.5z"></path></svg>Agent reported</span><span class="min-w-0 break-words font-mono text-[12px]">2 links</span></span></td><td class="px-3 py-2 text-right max-sm:p-0 max-sm:text-left"><a class="inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) text-[13px] transition-[color,background-color,border-color] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px] border border-(--edge) px-3 font-medium text-(--text-1) hover:bg-(--bg-overlay)" href="#desk">Launch v4</a></td></tr><tr class="border-b border-(--line) align-middle max-sm:mb-3 max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:rounded-(--radius-m) max-sm:border max-sm:bg-(--bg-panel) max-sm:p-3 hover:bg-(--bg-raised)"><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Request</span><span><span class="block font-medium text-(--text-1)">Drop the beta flag</span><span class="text-[13px] text-(--text-2)">Sam Okafor<!-- -->'s request</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">State</span><span data-status="pending" class="inline-flex max-w-full items-center gap-1.5 rounded-full border font-medium text-(--st-pending) bg-(--st-pending-soft) border-(--st-pending)/40 px-2 py-0.5 text-[12px]"><span class="shrink-0"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="5"></circle><path d="M7 2a5 5 0 0 1 0 10z" fill="currentColor" stroke="none"></path></svg></span><span class="[overflow-wrap:normal]">Decision</span></span></td><td class="px-3 py-2 max-sm:p-0 "><span class="mb-0.5 hidden font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3) max-sm:block">Evidence</span><span data-evidence="reported" class="inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-(--radius-s) border text-(--ev-reported) bg-(--ev-reported-soft) border-(--ev-reported)/40 px-1.5 py-0.5 text-[12px]"><span class="inline-flex items-center gap-1.5 whitespace-nowrap font-medium"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3h9v6h-5l-2.8 2.4V9H2.5z"></path></svg>Agent reported</span><span class="min-w-0 break-words font-mono text-[12px]">2 links</span></span></td><td class="px-3 py-2 text-right max-sm:p-0 max-sm:text-left"><span class="text-[13px] text-(--text-2)">Alex Rivera can decide</span></td></tr></tbody></table></section><h2 class="mt-8 font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">Lane map, at the review drawer's width, behind a disclosure</h2><p class="text-[14px] text-(--text-1)">Not yours: Alex Rivera or Dev Patel can decide.</p><section id="lanes" class="max-w-[680px] rounded-(--radius-m) border border-(--line) bg-(--bg-overlay) p-4"><details class="group/disclosure min-w-0 hidden md:block" open=""><summary class="inline-flex min-h-[36px] cursor-pointer list-none items-center gap-1.5 rounded-(--radius-s) text-[13px] font-medium text-(--text-2) underline underline-offset-4 hover:text-(--text-1) max-sm:min-h-[44px] [&amp;::-webkit-details-marker]:hidden"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 group-open/disclosure:rotate-90"><path d="m4.5 2.5 3.5 3.5-3.5 3.5"></path></svg>See who decides</summary><div class="mt-2"><div class="@container min-w-0"><div class="hidden @2xl:block"><p class="sr-only">Who decides this request, by lane (fictional)</p><div class="relative"><svg aria-hidden="true" class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"><defs><marker id="_R_l9bn5ritqlb_-live" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--accent-text)"></path></marker><marker id="_R_l9bn5ritqlb_-done" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--edge)"></path></marker><marker id="_R_l9bn5ritqlb_-muted" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--edge)"></path></marker></defs><path data-link="done" d="M196,135 H223" fill="none" stroke="var(--edge)" stroke-width="1" stroke-linejoin="round" marker-end="url(#_R_l9bn5ritqlb_-done)"></path><path data-link="live" d="M422,135 H449" fill="none" stroke="var(--accent-text)" stroke-width="1.75" stroke-linejoin="round" marker-end="url(#_R_l9bn5ritqlb_-live)"></path><path data-link="live" d="M246,194.859375 V214.359375" fill="none" stroke="var(--accent-text)" stroke-width="1.75" stroke-linejoin="round" marker-end="url(#_R_l9bn5ritqlb_-live)"></path><path data-link="live" d="M226,149.375 H208 V254.59375 H199" fill="none" stroke="var(--accent-text)" stroke-width="1.75" stroke-linejoin="round" marker-end="url(#_R_l9bn5ritqlb_-live)"></path><path data-link="muted" d="M196,260.59375 H220 V155.375 H223" fill="none" stroke="var(--edge)" stroke-width="1" stroke-dasharray="3 4" stroke-linejoin="round" marker-end="url(#_R_l9bn5ritqlb_-muted)"></path><path data-link="muted" d="M20,291.828125 V311.328125" fill="none" stroke="var(--edge)" stroke-width="1" stroke-dasharray="3 4" stroke-linejoin="round" marker-end="url(#_R_l9bn5ritqlb_-muted)"></path><path data-link="muted" d="M472,178.359375 V214.359375" fill="none" stroke="var(--edge)" stroke-width="1" stroke-dasharray="3 4" stroke-linejoin="round" marker-end="url(#_R_l9bn5ritqlb_-muted)"></path></svg><div class="relative grid gap-x-8 gap-y-6" style="grid-template-columns:repeat(3, minmax(0, 1fr))"><header class="min-w-0 border-b border-(--line-strong) pb-2" style="grid-column:1;grid-row:1"><h4 class="font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">Asking</h4><p class="text-[12px] text-(--text-2)">The person who asked</p><div class="mt-0.5 text-[13px] text-(--text-1)">Maya Ortiz</div></header><header class="min-w-0 border-b border-(--line-strong) pb-2" style="grid-column:2;grid-row:1"><h4 class="font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">Deciding</h4><p class="text-[12px] text-(--text-2)">Approve, suggest a change or decline</p><div class="mt-0.5 text-[13px] text-(--text-1)">Alex Rivera, Dev Patel</div></header><header class="min-w-0 border-b border-(--line-strong) pb-2" style="grid-column:3;grid-row:1"><h4 class="font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">Launch</h4><p class="text-[12px] text-(--text-2)">Approvers and workspace owners</p><div class="mt-0.5 text-[13px] text-(--text-1)">Alex Rivera, Dev Patel, Priya Nair</div></header><div data-lane-card="asked" data-state="done" class="relative min-w-0 self-start rounded-(--radius-s) border p-2.5 border-(--line-strong) bg-(--bg-panel)" style="grid-column:1;grid-row:2"><div class="flex items-baseline justify-between gap-2"><p class="text-[13px] font-semibold text-(--text-1)">Asked</p><span class="font-mono text-[10px] uppercase tracking-[0.1em] text-(--text-3)">Done</span></div><div class="mt-0.5 text-[12px] leading-snug text-(--text-2)">Maya asked to change v2 into v3.</div></div><div data-lane-card="sugg" data-state="next" class="relative min-w-0 self-start rounded-(--radius-s) border p-2.5 border-(--edge) bg-(--bg-panel)" style="grid-column:1;grid-row:3"><div class="flex items-baseline justify-between gap-2"><p class="text-[13px] font-semibold text-(--text-1)">Change suggested</p></div><div class="mt-0.5 text-[12px] leading-snug text-(--text-2)">The person asking accepts it or withdraws.</div></div><div data-lane-card="with" data-state="idle" class="relative min-w-0 self-start rounded-(--radius-s) border p-2.5 border-dashed border-(--line-strong) bg-(--bg-inset)" style="grid-column:1;grid-row:4"><div class="flex items-baseline justify-between gap-2"><p class="text-[13px] font-semibold text-(--text-2)">Withdrawn</p></div></div><div data-lane-card="wait" data-state="now" aria-current="step" class="relative min-w-0 self-start rounded-(--radius-s) border p-2.5 border-(--accent-text) bg-(--bg-raised)" style="grid-column:2;grid-row:2"><div class="flex items-baseline justify-between gap-2"><p class="text-[13px] font-semibold text-(--text-1)">Waiting for a decision</p><span class="font-mono text-[10px] uppercase tracking-[0.1em] text-(--accent-text)">Now</span></div><div class="mt-0.5 text-[12px] leading-snug text-(--text-2)">An approver approves it, suggests a change, or declines it.</div></div><div data-lane-card="decl" data-state="next" class="relative min-w-0 self-start rounded-(--radius-s) border p-2.5 border-(--edge) bg-(--bg-panel)" style="grid-column:2;grid-row:3"><div class="flex items-baseline justify-between gap-2"><p class="text-[13px] font-semibold text-(--text-1)">Declined</p></div><div class="mt-0.5 text-[12px] leading-snug text-(--text-2)">With a reason. The goal doesn't change.</div></div><div data-lane-card="appr" data-state="next" class="relative min-w-0 self-start rounded-(--radius-s) border p-2.5 border-(--edge) bg-(--bg-panel)" style="grid-column:3;grid-row:2"><div class="flex items-baseline justify-between gap-2"><p class="text-[13px] font-semibold text-(--text-1)">Approved, not launched</p></div><div class="mt-0.5 text-[12px] leading-snug text-(--text-2)">Align keeps serving v2 until someone launches v3.</div></div><div data-lane-card="laun" data-state="idle" class="relative min-w-0 self-start rounded-(--radius-s) border p-2.5 border-dashed border-(--line-strong) bg-(--bg-inset)" style="grid-column:3;grid-row:3"><div class="flex items-baseline justify-between gap-2"><p class="text-[13px] font-semibold text-(--text-2)">Launched</p></div><div class="mt-0.5 text-[12px] leading-snug text-(--text-2)">Align sends v3.</div></div></div></div></div></div></div></details></section><h2 class="mt-8 font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">Short form: propose a change</h2><section id="form" class="flex max-w-[520px] flex-col gap-3 rounded-(--radius-m) border border-(--line) bg-(--bg-panel) p-4"><p class="text-[15px] font-semibold text-(--text-1)">Propose a change</p><div class="flex min-w-0 flex-col gap-1"><div class="flex items-baseline justify-between gap-3"><label for="_R_m9bn5ritqlb_-c" class="text-[13px] font-medium text-(--text-1)">Goal</label></div><select id="_R_m9bn5ritqlb_-c" required="" class="w-full rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) px-3 py-2 text-[14px] text-(--text-1) placeholder:text-(--text-3) aria-invalid:border-(--st-declined) max-sm:min-h-[44px] min-h-[40px]"><option value="s" selected="">Pass the security review</option><option value="o">Ship self-serve onboarding</option></select></div><div class="flex min-w-0 flex-col gap-1"><div class="flex items-baseline justify-between gap-3"><label for="_R_u9bn5ritqlb_-c" class="text-[13px] font-medium text-(--text-1)">What should change</label></div><textarea rows="3" id="_R_u9bn5ritqlb_-c" required="" class="w-full rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) px-3 py-2 text-[14px] text-(--text-1) placeholder:text-(--text-3) aria-invalid:border-(--st-declined) max-sm:min-h-[44px] resize-y">Retain access logs 90 days, not 30.</textarea></div><div class="flex min-w-0 flex-col gap-1"><div class="flex items-baseline justify-between gap-3"><label for="_R_169bn5ritqlb_-c" class="text-[13px] font-medium text-(--text-1)">Why</label></div><textarea rows="2" id="_R_169bn5ritqlb_-c" aria-describedby="_R_169bn5ritqlb_-e" aria-invalid="true" required="" class="w-full rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) px-3 py-2 text-[14px] text-(--text-1) placeholder:text-(--text-3) aria-invalid:border-(--st-declined) max-sm:min-h-[44px] resize-y"></textarea><p id="_R_169bn5ritqlb_-e" role="alert" class="flex items-start gap-1.5 text-[13px] font-medium text-(--st-declined)"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" class="mt-0.5 shrink-0"><circle cx="7" cy="7" r="5.5"></circle><path d="M7 4.2v3.4M7 9.8v.01"></path></svg>Say why this should change.</p></div><div class="flex min-w-0 flex-col gap-1"><div class="flex items-baseline justify-between gap-3"><label for="_R_1e9bn5ritqlb_-c" class="text-[13px] font-medium text-(--text-1)">A link<span class="ml-1.5 font-normal text-(--text-3)">Optional</span></label></div><input type="url" placeholder="https://" id="_R_1e9bn5ritqlb_-c" aria-describedby="_R_1e9bn5ritqlb_-h" class="w-full rounded-(--radius-s) border border-(--edge) bg-(--bg-inset) px-3 py-2 text-[14px] text-(--text-1) placeholder:text-(--text-3) aria-invalid:border-(--st-declined) max-sm:min-h-[44px] min-h-[40px]"><p id="_R_1e9bn5ritqlb_-h" class="text-[12px] text-(--text-2)">A PR, a doc, a dashboard. Without one the request says it has no evidence.</p></div><section class="rounded-(--radius-s) border border-(--line-strong) bg-(--bg-inset) p-3"><h4 class="font-mono text-[11px] uppercase tracking-[0.1em] text-(--text-3)">Before you send</h4><dl class="mt-1.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[13px]"><div class="contents"><dt class="text-(--text-2)">Who decides</dt><dd class="min-w-0 text-(--text-1)">Alex Rivera or Dev Patel</dd></div><div class="contents"><dt class="text-(--text-2)">Evidence</dt><dd class="min-w-0 text-(--text-1)">None yet</dd></div></dl><p class="mt-2 text-[13px] text-(--text-1)">Nothing changes until they approve and someone launches.</p></section><div class="flex flex-wrap items-center justify-end gap-2"><a class="inline-flex min-h-[36px] items-center justify-center whitespace-nowrap rounded-(--radius-s) text-[13px] transition-[color,background-color,border-color] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] @max-3xl:min-h-[44px] border border-(--edge) px-3 font-medium text-(--text-1) hover:bg-(--bg-overlay)" href="#form">Not now</a><button type="button" class="min-h-[36px] rounded-(--radius-s) bg-(--accent) px-4 text-[14px] font-semibold text-(--text-on-accent) max-sm:min-h-[44px]">Send for approval</button></div></section></main><!--$--><!--/$--><!--/&--><!--/&--><!--/&--><script>(function(){var d=document.documentElement;var on="bg-(--accent) text-(--text-on-accent)",off="text-(--text-2) hover:bg-(--bg-raised) hover:text-(--text-1)";function set(t){d.setAttribute("data-theme",t==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):t);document.querySelectorAll("[role=radio]").forEach(function(b){var n=b.textContent.trim().toLowerCase();if(!/^(light|dark|system)$/.test(n))return;var c=n===t;b.setAttribute("aria-checked",c);b.className=b.className.replace(on,"").replace(off,"")+" "+(c?on:off)})}document.addEventListener("click",function(e){var b=e.target.closest("[role=radio]");if(b&&/^(light|dark|system)$/i.test(b.textContent.trim()))set(b.textContent.trim().toLowerCase())});set("system")})();</script></body></html>

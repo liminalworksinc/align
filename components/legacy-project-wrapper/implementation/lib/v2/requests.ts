@@ -4,7 +4,7 @@ import { goalTargets, writeDirective, type ReceiptState } from "./directives";
 import { V2Error, badRequest, conflict, forbidden, notFound } from "./errors";
 import { event } from "./events";
 import { newId, nowIso } from "./ids";
-import { goalObj, goalRow, transferFor, visibleGoal, type GoalRow } from "./goals";
+import { goalObj, goalRow, visibleGoal, type GoalRow } from "./goals";
 import { authorize, canReadGoal, type PolicyPrincipal } from "./policy";
 import type { EndedReason } from "./sessions";
 import { optStr, oneOf, SESSION_KEY_RE, str, type Body } from "./validate";
@@ -108,14 +108,15 @@ function sessionKeysIn(b: Body): string[] | null {
   return out;
 }
 
-/** May this session's owner bind it to `target` now (own goal, their team's goal, or an approved transfer for this
- *  session), and is the goal active? */
+/** May this session's owner bind `target` themselves (their own goal or their team's), and is the goal active? An
+ *  approved alignment does not count here: it moves the sessions it lists with its own binding change, and the agent,
+ *  which reads the same `bindable`, would otherwise have to turn the request down. */
 function bindableForSession(ws: string, sessionKey: string, target: GoalRow): boolean {
   if (target.status !== "active") return false;
   const s = get<{ user_id: string }>("SELECT user_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?", ws, sessionKey);
   if (!s) return false;
   const owner = memberPrincipal(ws, s.user_id);
-  return authorize(owner, "goal.bind", { kind: "bind", goal: goalObj(target), hasTransfer: !!transferFor(ws, sessionKey, target.id) }).ok;
+  return authorize(owner, "goal.bind", { kind: "bind", goal: goalObj(target), hasTransfer: false }).ok;
 }
 
 const OPEN_TARGET = "t.state IN ('sent','received')";
@@ -146,7 +147,7 @@ export async function sendRequest(pp: PolicyPrincipal, goalId: string, b: Body) 
     if (!targets.length) throw conflict("no_sessions", "No shared session is working on this goal, so there is nobody to ask.");
     const to = target;
     if (to && !targets.every((k) => bindableForSession(pp.wsId, k, to))) {
-      throw conflict("not_bindable", "That goal can't be taken up by every chosen session: it is not active, or a session's owner can't bind it.");
+      throw conflict("not_bindable", "That goal can't be taken up by every chosen session: it is not active, or it isn't a session owner's own goal or their team's. An approved alignment moves the sessions it lists by itself.");
     }
     const open = get(
       `SELECT 1 AS x FROM v2_requests r WHERE r.ws_id = ? AND r.goal_id = ? AND r.type = ? AND r.cancelled_at IS NULL

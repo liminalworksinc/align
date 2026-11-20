@@ -9,6 +9,9 @@
 // retention job reads ALIGN_SESSION_MAX_DAYS as the server does, and hosted the codes need ALIGN_SECRET.
 //
 //   codes create [--email <address>] [--days <n>] [--count <n>]   new creation codes, each printed once
+//   codes import --file <path> --used <path> --days <n>           v1 invite codes from a private file: code or code,email
+//                                                                 one per line (# comments allowed), minus those in v1's
+//                                                                 _used_invites.json: counts only, never a code
 //   codes list                                                    every code: id, state, binding, dates (no secrets)
 //   codes revoke <id>                                             revoke an unused code
 //   requests list [--status pending|approved|declined]
@@ -29,17 +32,19 @@
 //                                                                 a signed LOI, only with the countersigned original in
 //                                                                 hand; never inferred from a form or a claim
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
   CODE_DAYS,
   REQUEST_STATUSES,
+  V1_CODE_RE,
   RESTORE_DAYS,
   SCHEMA_VERSION,
   accessRequest,
   approveAccessRequest,
   codeEmail,
   declineAccessRequest,
+  importCreationCodes,
   insertCreationCode,
   listAccessRequests,
   listCreationCodes,
@@ -56,6 +61,7 @@ import { buildReport, formatReport, LOI_EVENTS, recordLoi } from "../lib/v2/metr
 
 const USAGE = `Usage: node scripts/align-admin.mjs <command>   (or npm run admin -- <command>)
   codes create [--email <address>] [--days <n>] [--count <n>]
+  codes import --file <path> --used <path> --days <n>
   codes list
   codes revoke <id>
   requests list [--status pending|approved|declined]
@@ -76,7 +82,22 @@ function fail(msg, code = 1) {
 }
 
 // ---- arguments: positionals, then --flag value / --switch ----
-const SWITCHES = new Set(["print", "yes", "purge", "dry-run", "help", "json", "verified-original"]);
+const COMMANDS = new Map([
+  ["codes create", { positionals: 2, values: ["email", "days", "count"], switches: [] }],
+  ["codes import", { positionals: 2, values: ["file", "used", "days"], switches: [] }],
+  ["codes list", { positionals: 2, values: [], switches: [] }],
+  ["codes revoke", { positionals: 3, values: [], switches: [] }],
+  ["requests list", { positionals: 2, values: ["status"], switches: [] }],
+  ["requests approve", { positionals: 3, values: ["days"], switches: ["print"] }],
+  ["requests decline", { positionals: 3, values: [], switches: [] }],
+  ["workspaces list", { positionals: 2, values: [], switches: [] }],
+  ["workspaces delete", { positionals: 3, values: [], switches: ["purge", "yes"] }],
+  ["retention run", { positionals: 2, values: [], switches: ["dry-run"] }],
+  ["report", { positionals: 1, values: ["since"], switches: ["json"] }],
+  ["events record", { positionals: 3, values: ["workspace", "note-ref"], switches: ["verified-original"] }],
+]);
+const SWITCHES = new Set(["help", ...Array.from(COMMANDS.values()).flatMap((c) => c.switches)]);
+const VALUES = new Set(Array.from(COMMANDS.values()).flatMap((c) => c.values));
 const pos = [];
 const opt = {};
 const argv = process.argv.slice(2);
@@ -87,12 +108,27 @@ for (let i = 0; i < argv.length; i++) {
     continue;
   }
   const k = a.slice(2);
+  if (!SWITCHES.has(k) && !VALUES.has(k)) fail(`Unknown option: --${k}\n\n${USAGE}`, 2);
   if (SWITCHES.has(k)) opt[k] = true;
   else if (i + 1 < argv.length && !argv[i + 1].startsWith("--")) opt[k] = argv[++i];
   else fail(`--${k} needs a value\n\n${USAGE}`, 2);
 }
-if (opt.help || pos.length < (pos[0] === "report" ? 1 : 2)) fail(USAGE, opt.help ? 0 : 2);
 const [group, cmd, arg] = pos;
+const command = COMMANDS.get(group === "report" ? group : `${group} ${cmd}`);
+if (!command) {
+  if (opt.help && pos.length <= 1 && Object.keys(opt).length === 1 &&
+      (!group || Array.from(COMMANDS.keys()).some((k) => k === group || k.startsWith(`${group} `)))) fail(USAGE, 0);
+  fail(USAGE, 2);
+}
+for (const k of Object.keys(opt)) {
+  if (k !== "help" && !command.switches.includes(k) && !command.values.includes(k)) fail(`--${k} is not supported by this command\n\n${USAGE}`, 2);
+}
+if (pos.length > command.positionals || (!opt.help && pos.length !== command.positionals)) fail(USAGE, 2);
+if (group === "events" && cmd === "record") {
+  if (arg !== undefined && !LOI_EVENTS.includes(arg)) fail(`events record takes ${LOI_EVENTS.join(" or ")}: every other event is recorded by the app itself\n\n${USAGE}`, 2);
+  if (opt["verified-original"] && arg !== "loi_signed") fail("--verified-original is only for loi_signed", 2);
+}
+if (opt.help) fail(USAGE, 0);
 const intOpt = (k, def, max) => {
   if (opt[k] === undefined) return def;
   const n = Number(opt[k]);
@@ -197,11 +233,42 @@ async function main() {
     for (const c of made) console.log(`${c.code}  (${c.id}, ${c.email ? `only for ${c.email}` : "anyone"}, until ${day(c.expires_at)})`);
     return;
   }
+  if (key === "codes import") {
+    if (typeof opt.file !== "string" || typeof opt.used !== "string" || opt.days === undefined) fail(USAGE, 2);
+    const days = intOpt("days", CODE_DAYS, 365);
+    const read = (f) => {
+      try {
+        return readFileSync(f, "utf8");
+      } catch {
+        fail(`Nothing imported. Can't read ${f}.`);
+      }
+    };
+    const text = read(opt.file);
+    let used;
+    try {
+      used = JSON.parse(read(opt.used));
+    } catch {
+      fail(`Nothing imported. ${opt.used} isn't JSON.`);
+    }
+    if (!Array.isArray(used) || !used.every((h) => typeof h === "string" && /^[0-9a-f]{64}$/.test(h))) fail(`Nothing imported. ${opt.used} isn't v1's list of spent codes.`);
+    const lines = text.split(/\r?\n/).map((l, i) => ({ n: i + 1, raw: l.trim() })).filter((l) => l.raw && !l.raw.startsWith("#")).map(({ n, raw }) => {
+      const parts = raw.split(",").map((p) => p.trim());
+      return { n, code: parts[0], email: parts.length === 1 ? null : parts[1].toLowerCase(), fields: parts.length };
+    });
+    // Line numbers only: a line that isn't a code might still be one with a typo, so it is never printed.
+    const bad = lines.filter((l) => l.fields > 2 || !V1_CODE_RE.test(l.code) || (l.email !== null && !EMAIL.test(l.email))).map((l) => l.n);
+    if (bad.length) fail(`Nothing imported. Expected a v1 invite code (20 lowercase hex characters), optionally followed by a comma and an email address, on line${bad.length === 1 ? "" : "s"} ${bad.join(", ")}.`, 2);
+    if (!lines.length) fail("Nothing imported. The file holds no codes.", 2);
+    const s = secret();
+    const r = tx(() => importCreationCodes(db, s, lines.map(({ code, email }) => ({ code, email })), new Set(used), days));
+    console.log(`Imported ${r.imported}, for ${days} days. ${r.present} already here, left as they were (${r.used} of those used). ${r.spentOnV1} spent on v1, skipped.`);
+    return;
+  }
   if (key === "codes list") {
     table(listCreationCodes(db), [
       ["id", (r) => r.id],
       ["state", (r) => r.state],
-      ["email", (r) => r.email ?? "(anyone)"],
+      ["binding", (r) => r.email ? "bound" : "(anyone)"],
       ["created", (r) => day(r.created_at)],
       ["expires", (r) => day(r.expires_at)],
       ["used", (r) => day(r.redeemed_at)],
@@ -319,9 +386,7 @@ async function main() {
     return;
   }
   if (key === "events record") {
-    if (!LOI_EVENTS.includes(arg)) fail(`events record takes ${LOI_EVENTS.join(" or ")}: every other event is recorded by the app itself\n\n${USAGE}`, 2);
     if (!opt.workspace) fail(`--workspace <id> is required\n\n${USAGE}`, 2);
-    if (arg === "loi_sent" && opt["verified-original"]) fail("--verified-original is only for loi_signed", 2);
     const out = tx(() => recordLoi(db, arg, opt.workspace, { noteRef: opt["note-ref"] ?? null, verifiedOriginal: !!opt["verified-original"] }));
     if (!out.ok) {
       if (out.reason === "verified_original_required") {

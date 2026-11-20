@@ -1,0 +1,57 @@
+# Builds the align CLI release tarball (LIM-2504) and attests its provenance. It never creates a release or tag and
+# never publishes a package: the founder downloads the artifact, verifies it (`gh attestation verify`), and makes the
+# release by hand (packages/align-agent/README.md, "Publishing a release"). Run from the Actions tab.
+name: agent-release
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    # Attested from main only: the documented `gh attestation verify --source-ref refs/heads/main` rejects anything else.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    defaults:
+      run:
+        working-directory: components/legacy-project-wrapper/implementation/packages/align-agent
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Install (lockfile only, no scripts)
+        run: npm ci --ignore-scripts
+      - name: Typecheck and test
+        run: npm run typecheck && npm run build && npm run test:concurrent
+      - name: Pack (prepack builds dist/ again; npm names a scoped package liminal-align-agent-<version>.tgz)
+        id: pack
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          file="liminal-align-agent-${version}.tgz"
+          mkdir -p "$RUNNER_TEMP/out"
+          npm pack --pack-destination "$RUNNER_TEMP/out"
+          test -f "$RUNNER_TEMP/out/$file"
+          (cd "$RUNNER_TEMP/out" && sha256sum "$file" > "$file.sha256")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "path=$RUNNER_TEMP/out/$file" >> "$GITHUB_OUTPUT"
+          {
+            echo "### align CLI ${version}"
+            echo "Release tag: \`agent-v${version}\` · asset: \`${file}\`"
+            echo '```'
+            cat "$RUNNER_TEMP/out/$file.sha256"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.pack.outputs.path }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: liminal-align-agent-${{ steps.pack.outputs.version }}
+          path: ${{ runner.temp }}/out/
+          if-no-files-found: error

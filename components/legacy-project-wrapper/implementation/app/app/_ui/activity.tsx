@@ -46,9 +46,10 @@ export function GoalActivityCard({ ws, goal, me }: { ws: string; goal: Goal; me:
             {a.sessions}
             {harnesses.length > 0 && <span className="text-zinc-500"> ({harnesses.join(", ")})</span>}
           </dd>
-          <dt className="text-zinc-500">Active now</dt>
+          {/* What the align CLI reported in the last 90 minutes (lib/v2/goal-activity.ts active_now), never "active now". */}
+          <dt className="text-zinc-500">Reported activity, last 90 min</dt>
           <dd className="text-zinc-900">{a.active_now}</dd>
-          <dt className="text-zinc-500">Last activity</dt>
+          <dt className="text-zinc-500">Last reported activity</dt>
           <dd className="text-zinc-900">{a.last_activity_at ? when(a.last_activity_at) : "None yet"}</dd>
         </dl>
         {a.detail && (

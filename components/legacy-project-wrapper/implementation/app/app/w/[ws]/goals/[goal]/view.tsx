@@ -1,4 +1,5 @@
 "use client";
+import { PAGE_H1 } from "@/app/app/_ui/page-title";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, TextArea, useAction, useApi, when } from "../../../../_ui/kit";
@@ -31,6 +32,85 @@ interface Detail {
 
 /** The owner's New version form. Depends on leaves out the goals that already depend on this one (`loops`, the goal
  *  read's version_loops: saving one would be refused as a loop) and says so, as the propose form does (X5). */
+/** "Drop this goal" for its owner (founder ruling, PR 68 pass 1 item 13): its own action, with a confirmation that says
+ *  what happens. It saves the next version with status dropped and every other field as it is, the same write as the
+ *  New version form's Status select. */
+function DropGoal({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () => void }) {
+  const [asking, setAsking] = useState(false);
+  // Gone the moment the drop is recorded, so a second Confirm is never offered on the version it replaced (founder
+  // review of e780d842: the confirmation stayed on screen until a reload).
+  const [dropped, setDropped] = useState(false);
+  const act = useAction();
+  if (dropped) return null;
+  if (!asking)
+    return (
+      <div className="mb-5">
+        <Btn kind="secondary" onClick={() => setAsking(true)}>
+          Drop this goal
+        </Btn>
+      </div>
+    );
+  return (
+    <div role="region" aria-label="Drop this goal" data-drop-goal className="mb-5 flex flex-col gap-2 rounded-(--radius-m) border border-(--line-strong) bg-(--bg-raised) p-3 text-[15px]">
+      <p className="font-semibold text-(--text-1)">Drop “{goal.title}”?</p>
+      <p className="text-(--text-2)">
+        It becomes version {goal.version + 1}, marked dropped. Sessions bound to it get that at their next turn, nobody can bind new sessions to it, and people can no longer ask to change it. To bring it back, save a new
+        version marked active.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Btn
+          kind="danger"
+          disabled={act.busy}
+          onClick={() =>
+            void act.run(
+              () =>
+                api(`/api/v2/workspaces/${ws}/goals/${goal.id}/versions`, {
+                  body: {
+                    version: goal.version,
+                    title: goal.title,
+                    status: "dropped",
+                    measures: measuresOut(measuresDraft(goal)),
+                    anchors: anchorsOut(anchorsDraft(goal)),
+                    depends_on: goal.depends_on ?? [],
+                    limits: limitsOut(limitsDraft(goal.limits)),
+                    target_share: goal.target_share ?? null,
+                  },
+                }),
+              () => {
+                setDropped(true);
+                onDone();
+              },
+            )
+          }
+        >
+          Confirm: drop the goal
+        </Btn>
+        <Btn kind="secondary" onClick={() => setAsking(false)}>
+          Cancel
+        </Btn>
+      </div>
+      <Err>{act.error}</Err>
+    </div>
+  );
+}
+
+/** The editor's way in from under the title: moves to the New version form and focuses its first field. */
+function EditThisGoal() {
+  return (
+    <div className="mb-5">
+      <Btn
+        onClick={() => {
+          const form = document.getElementById("new-version");
+          form?.scrollIntoView({ behavior: "smooth", block: "start" });
+          form?.querySelector<HTMLElement>("input, select, textarea")?.focus({ preventScroll: true });
+        }}
+      >
+        Edit this goal
+      </Btn>
+    </div>
+  );
+}
+
 function NewVersion({ ws, goal, hiddenDeps, loops, onDone }: { ws: string; goal: Goal; hiddenDeps: number; loops: string[] | null; onDone: () => void }) {
   const [title, setTitle] = useState(goal.title);
   const [status, setStatus] = useState(goal.status);
@@ -49,8 +129,16 @@ function NewVersion({ ws, goal, hiddenDeps, loops, onDone }: { ws: string; goal:
   // At most 5 dependencies, the ones the owner can't see included: the rest can't be ticked (W4).
   const full = dependsOnFull(deps.length, hiddenDeps);
   const act = useAction();
+  // Arriving by …#new-version (the Propose drawer's Edit link), the form renders after the goal is read, too late for
+  // the browser's own jump: move here and focus the first field once it exists.
+  const here = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (window.location.hash !== "#new-version" || !here.current) return;
+    here.current.scrollIntoView({ block: "start" });
+    here.current.querySelector<HTMLElement>("input, select, textarea")?.focus({ preventScroll: true });
+  }, []);
   return (
-    <section id="new-version">
+    <section id="new-version" ref={here}>
       <Card title="New version">
         <Note>Each change is a new version. Saving sends it to every session bound to this goal, for its agent to pick up at its next turn.</Note>
         <form
@@ -112,6 +200,14 @@ function NewVersion({ ws, goal, hiddenDeps, loops, onDone }: { ws: string; goal:
           </Btn>
           <Err>{act.error}</Err>
         </form>
+        {/* Dropping is a version too, so it lives with the other way to make one, after Save, never above the goal's
+            content (LIM-2513 journey pass: it was the first control under the title). */}
+        {goal.status === "active" && (
+          <div className="mt-5 border-t border-(--line) pt-4">
+            <p className="mb-2 text-[14px] text-(--text-2)">Or end this goal</p>
+            <DropGoal ws={ws} goal={goal} onDone={onDone} />
+          </div>
+        )}
       </Card>
     </section>
   );
@@ -162,7 +258,7 @@ function RequestAlignment({ ws, goal, me }: { ws: string; goal: Goal; me: Me }) 
       )}
       <p className="mb-1 text-[14px] text-zinc-600">Your shared sessions{choice === "work_toward" ? " (pick at least one)" : ""}</p>
       {sessions.loading && <Loading />}
-      {live.length === 0 && !sessions.loading && <Note>You have no shared sessions in this workspace. Share one with align share.</Note>}
+      {live.length === 0 && !sessions.loading && <Note>{sessions.error ? "Couldn't read your sessions just now. Reload to try again." : "You have no shared sessions in this workspace. Share one with align share."}</Note>}
       {/* Each session as the Alignments tab names it, "started <time> · …<key end>", so two of one person in one
           repository can be told apart before one is ticked (A1-cross-4). */}
       {shared.map((s) => (
@@ -302,11 +398,27 @@ function ChangeRequests({
     seenVersion.current = goal.version;
     if (listVersion !== undefined && listVersion !== goal.version) reload();
   }, [goal.version, listVersion, reload]);
+  // A link to #change-requests (the Propose drawer's, a declined request's) lands here once the list has loaded: the
+  // section renders after the goal and the list are read, so the browser's own jump finds nothing (DEFECT 3, PR 68 pass 1).
+  const jumped = useRef(false);
+  useEffect(() => {
+    if (jumped.current || !list.data || window.location.hash !== "#change-requests") return;
+    jumped.current = true;
+    document.getElementById("change-requests")?.scrollIntoView({ block: "start" });
+  }, [list.data]);
+  // The person's own open request (pending or countered): one per person and goal, so the form is not offered while it
+  // is open, and the page says so before anything is typed (founder ruling, PR 68 pass 1 item 1).
+  const myOpen = list.data?.change_requests.find((cr) => cr.requester.id === me.id && (cr.state === "pending" || cr.state === "countered")) ?? null;
   if (!canPropose && !list.data?.change_requests.length) return null;
   return (
     <section id="change-requests">
       <Card title="Change requests">
-        {canPropose && (
+        {canPropose && myOpen && (
+          <p className="mb-4 text-[14px] text-(--text-2)" data-my-open-request={myOpen.id}>
+            You already have an open request on this goal, below. Align takes one open request per person and goal: add to it or withdraw it, then ask again.
+          </p>
+        )}
+        {canPropose && !myOpen && (
           <div className="mb-4">
             <ProposeChange ws={ws} goal={goal} choices={choices} loops={loops} hiddenDeps={hiddenDeps} onDone={reload} />
           </div>
@@ -341,7 +453,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
       {g && (
         <>
           <HoldBanner hold={hold.data?.held ?? null} me={me.id} />
-          <h1 className="mb-2 text-[26px] font-semibold text-zinc-900">{g.title}</h1>
+          <h1 className={`${PAGE_H1} mb-2`}>{g.title}</h1>
           <div className="mb-5 flex flex-wrap gap-2">
             <Pill tone="violet">{g.status}</Pill>
             <Pill>{g.level === "company" ? "company goal" : "team goal"}</Pill>
@@ -351,6 +463,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
             {g.target_share !== null && g.target_share !== undefined && <Pill tone="violet">target {g.target_share}% of agent time</Pill>}
             <span className="text-[14px] text-zinc-500">Owner: {g.owner.id === me.id ? "you" : g.owner.name}</span>
           </div>
+          {d.data!.can_edit && g.status === "active" && <EditThisGoal />}
           <Card title="Measures">
             {g.measures.length === 0 && <Note>No measures.</Note>}
             <ul className="list-disc pl-5 text-[15px]">
@@ -370,11 +483,9 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
           </Card>
           <GoalLimits ws={ws} goal={g} canEdit={d.data!.can_edit} onDone={limitsDone} />
           <Tree ws={ws} goal={g} canEdit={d.data!.can_edit} hiddenDeps={d.data!.hidden_depends_on ?? 0} onDone={d.reload} />
-          <GoalActivityCard ws={ws} goal={g} me={me} />
-          {/* Not keyed by the goal's version: a new version reloads the card in place (C3-4). Keyed, it shared its key with
-              the New version form below, and a launch left a second card beside the first. */}
-          <AgentsOnGoalCard ws={ws} goal={g} me={me} onHoldChanged={hold.reload} />
-          {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} hiddenDeps={d.data!.hidden_depends_on ?? 0} loops={d.data!.version_loops ?? null} onDone={d.reload} />}
+          {/* The plan, then what is being decided about it, then the agents, then the editing form (specs/align/interface.md,
+              "Goal page details and new version"; LIM-2513): an approved request's "What this decision gave you" sits
+              right after the plan, and the two forms (Align with this goal, New version) come last. */}
           {/* Keyed by limit proposals only (a new request to list): a goal version, a launch's included, reloads the list
               in place (C2 N3). */}
           <ChangeRequests
@@ -388,7 +499,12 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
             hiddenDeps={d.data!.hidden_depends_on ?? 0}
             onGoalChanged={d.reload}
           />
+          <GoalActivityCard ws={ws} goal={g} me={me} />
+          {/* Not keyed by the goal's version: a new version reloads the card in place (C3-4). Keyed, it shared its key with
+              the New version form below, and a launch left a second card beside the first. */}
+          <AgentsOnGoalCard ws={ws} goal={g} me={me} onHoldChanged={hold.reload} />
           {ws0.data && ws0.data.role !== "viewer" && g.owner.id !== me.id && <RequestAlignment ws={ws} goal={g} me={me} />}
+          {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} hiddenDeps={d.data!.hidden_depends_on ?? 0} loops={d.data!.version_loops ?? null} onDone={d.reload} />}
           <Card title="Versions">
             <ul className="text-[14px] text-zinc-600">
               {d.data!.versions.map((v) => (

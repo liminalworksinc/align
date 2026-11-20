@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
-import { loadCredentials } from "../src/api.ts";
+import { credentialsFile, loadCredentials } from "../src/api.ts";
 import { syncOnce } from "../src/sync.ts";
 import { sessionKey } from "../src/keys.ts";
 import { layout, localId } from "../src/shared/layout.ts";
@@ -72,7 +72,7 @@ describe("e2e", () => {
     assert.ok(!fake.log.some((l) => l.origin), "agent never sends Origin");
     const creds = loadCredentials(t.home)!;
     assert.match(creds.device_id, /^dv_/);
-    assert.equal(fs.statSync(layout.credentials(t.home)).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(credentialsFile(t.home)).mode & 0o777, 0o600);
     assert.equal(fs.statSync(layout.deviceKey(t.home)).mode & 0o777, 0o600);
     assert.ok(fs.existsSync(layout.feed(t.home, "ws_acme")));
 
@@ -268,9 +268,11 @@ describe("e2e", () => {
     assert.match(next.hookSpecificOutput.additionalContext, /Cut hook latency/);
     const ep = await waitFor(() => [...fake.epochs.values()].find((e) => e.root_turn === "d2"), 5000, "epoch at d2");
     assert.equal(ep.cause, "manual");
-    // In-session bind to a goal that needs alignment is refused locally.
+    // In-session bind to a goal that is not the person's own or their team's is refused locally, without claiming an
+    // alignment would make it bindable (an alignment moves its sessions by itself).
     const refused = JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "x3", prompt: "::align bind Someone" }).stdout);
-    assert.match(refused.reason, /needs an approved alignment/);
+    assert.match(refused.reason, /isn't a goal you can bind: only your own goals and your team's goals\. If an approved alignment lists this session, Align moves it there by itself\./);
+    assert.doesNotMatch(refused.reason, /needs an approved alignment/);
     void skey;
     await halt();
   });
@@ -501,7 +503,7 @@ describe("e2e", () => {
     assert.equal(fake.sessionHits(), 0);
     const denied = await runCli(t, ["share", SID.slice(0, 8), "--workspace", "ws_acme", "--goal", "g_theirs", "--yes"]);
     assert.notEqual(denied.code, 0);
-    assert.match(denied.stderr, /not bindable/);
+    assert.match(denied.stderr, /isn.t one you can bind: only your own goals and your team.s goals/);
     const ok = await runCli(t, ["share", SID.slice(0, 8), "--workspace", "ws_acme", "--goal", "g_perf", "--alias", "align-repo", "--yes"]);
     assert.equal(ok.code, 0, ok.stderr);
     assert.match(ok.stdout, /is shared/);

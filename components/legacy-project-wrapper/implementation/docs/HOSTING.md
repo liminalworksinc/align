@@ -110,6 +110,7 @@ fly ssh console -C "node scripts/align-admin.mjs requests approve ar_…"     # 
 fly ssh console -C "node scripts/align-admin.mjs requests decline ar_…"
 fly ssh console -C "node scripts/align-admin.mjs codes create --email someone@example.com"   # printed once
 fly ssh console -C "node scripts/align-admin.mjs codes list"                # ids and states, never a code
+fly ssh console -C "node scripts/align-admin.mjs codes import --file /tmp/v1-codes.txt --used /data/workspaces/_used_invites.json --days 60"   # v1 invite codes, counts only
 fly ssh console -C "node scripts/align-admin.mjs codes revoke cc_…"
 fly ssh console -C "node scripts/align-admin.mjs workspaces list"           # counts only, no people; deleted_at
 fly ssh console -C "node scripts/align-admin.mjs workspaces delete ws_… --yes"          # soft: restorable 30 days
@@ -159,7 +160,7 @@ Before the first public deploy, fill in the legal entity, address and contact em
   The kernel gives PID 1 no default signal action: Fly's SIGINT/SIGTERM stop the server only because `next start`
   installs its own handlers, so `NEXT_MANUAL_SIG_HANDLE` must stay unset.
 
-**The health check** (`fly.toml`) calls `/api/v2/auth/get-session` with the Host, `X-Forwarded-Proto` and
+**The health check** (`fly.toml`) calls `/api/v2/health` (the server is up and its database answers; no sign-in rate limit counts it, unlike `/api/v2/auth/get-session`, which refused every 101st check every 50 minutes) with the Host, `X-Forwarded-Proto` and
 `Fly-Client-IP` headers Fly's edge would send; without them the app answers 421 or 403.
 
 **Response headers** (`proxy.ts`): every page and route the proxy sees (Next's static assets and the favicon aside),

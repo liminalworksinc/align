@@ -9,10 +9,49 @@ reach the server. Wire contract: `docs/v2/WIRE.md`. Harness facts and sources: `
 
 Zero runtime dependencies (Node 24+: `node:sqlite`, `node:crypto`, `fetch`).
 
+## Install
+
+From a checkout: `npm ci && npm run build` here, then `align install` and `align login`. Once release
+`agent-v<version>` is published (and `AGENT_RELEASE` in `lib/paste-lines.ts` names it, which is what makes the Apps tab
+show it), a pinned tarball whose checksum is checked before npm installs it, into `~/.local` in your home folder, so no
+administrator rights or `sudo` are needed (a plain `npm install -g` fails with EACCES where Node's global folder belongs
+to root, as with Node's official installer):
+
+```
+curl -fsSLO https://github.com/liminalworksinc/align/releases/download/agent-v<version>/liminal-align-agent-<version>.tgz && echo '<sha256>  liminal-align-agent-<version>.tgz' | shasum -a 256 -c && npm install --global --prefix "$HOME/.local" ./liminal-align-agent-<version>.tgz && "$HOME/.local/bin/align" install && "$HOME/.local/bin/align" login
+```
+
+`align login` prints a link to Align's device page with its code filled in: press **Look up**, check the code matches,
+tick the workspaces and press **Approve**, and keep the terminal open until it says "Signed in as" you. Run `align`
+later as `~/.local/bin/align`, or add `~/.local/bin` to your PATH. The hooks `align install` adds don't need it on PATH:
+they run the copy it keeps in `~/.align/bin/current`.
+
+`align login` says which server it pairs with and why. It signs in to the hosted server
+(`https://align-pg-draft.fly.dev`) unless told otherwise: `align login --server <url>` for another one,
+`align login --dev` (or `ALIGN_DEV=1`) for the local dev server on 127.0.0.1:3100, and `ALIGN_SERVER=<url>` overrides
+both. A server saved by an earlier login is kept.
+
+### Publishing a release (founder only)
+
+1. Once, in the repo's settings: turn on **immutable releases** (Settings, General, Releases, "Enable release
+   immutability"), so a published release's assets and tag can't be changed or replaced afterwards.
+2. Actions, **agent-release**, Run workflow (on `main`). It typechecks, tests, runs `npm pack`, attests the tarball's
+   build provenance and uploads it with its `.sha256` as an artifact. It creates no tag or release and publishes nothing.
+3. Download the artifact and verify it. The attestation must come from this workflow, run on `main`; a build attested
+   from any other workflow or branch fails here:
+   ```
+   gh attestation verify liminal-align-agent-<version>.tgz --repo liminalworksinc/align \
+     --signer-workflow liminalworksinc/align/.github/workflows/agent-release.yml --source-ref refs/heads/main
+   shasum -a 256 -c liminal-align-agent-<version>.tgz.sha256
+   ```
+4. Create release `agent-v<version>` from that commit with the `.tgz` as its asset, then publish it.
+5. In a PR, set `AGENT_RELEASE` in `lib/paste-lines.ts` to `{ version, sha256 }` from the run's summary. Until then the
+   Apps tab keeps its current steps (no step 4), so it never shows a link that 404s.
+
 ## Commands
 
 ```
-align login [--server <url>] [--name <device name>]   device flow; key-bound tokens; names your other paired devices
+align login [--server <url> | --dev] [--name <name>] device flow; key-bound tokens; names your other paired devices
 align logout                                          revokes this device, wipes tokens and the device key; this
                                                       machine's shares stop (sessions stopped or held from the web
                                                       stay blocked: after `align login`, `::align share` shares one
@@ -64,6 +103,48 @@ reach the model.
 
 So a goal change, request, stop or hold issued from the web lands within one sync interval, at the next prompt or tool
 call.
+
+## Context added by Align
+
+`align status` shows how many characters Align has added to the most recently active session in the current folder,
+how many additions there were, and when the last one happened. `align sessions` shows the same line for each session:
+
+```
+Align has added 742 characters to this session's context in 1 addition, last at session start (2026-11-17T10:00:00.000Z).
+```
+
+A session with no additions says `Align has added no characters to this session's context.` These are character
+counts, with the same string-length measure used for context budgets. They are not token or cost estimates.
+Each nonempty hook return counts once per audience, including newlines within the returned strings. The total
+includes start blocks, goal and ask changes, requests and answers, steering, activity notes, tool denial reasons
+and notices that tools can
+run again. Budget context lines count toward model context, and person-only budget messages at session start,
+prompts and tool calls count toward the separate person-only total. Clear, compact and resume blocks count when
+returned again. Ordinary unchanged prompts add nothing and leave the recorded totals, addition counts and
+last-addition times unchanged. Hooks preserve every existing shared-state read and write, including silent prompts
+and choices that keep the same goal.
+
+Counters live in `~/.align/context-cost/<lid>.jsonl`, separate from shared hook state. Each nonempty audience
+addition appends one short line with its audience, character count, time and hook event. A return with both
+audiences writes both lines in one append call. Counter writes refuse symlinks and special files. A silent hook
+touches no counter file. Accounting reads no file,
+takes no lock and adds no network request or directory scan to a hook. The file is append-only until expiry or
+uninstall. It is never rewritten or rotated because replacement could lose a concurrent append.
+
+`align status` and `align sessions` sum complete valid lines, ignoring malformed lines and an incomplete final
+line. Commands read at most the last 1 MiB of each log. Larger logs show `at least` for characters and additions,
+and both JSON totals include `lower_bound: true`. Person-only notices and local command replies have their own total, excluded from model context. `align sessions --json`
+includes `context_added` and `notices_added`, each with `characters`, `additions`, `last_at` and `last_event`.
+A missing file starts at zero; Align cannot reconstruct earlier additions. Counters from earlier unshipped builds
+in shared hook state are not migrated. A hook with no session reference cannot update a session total.
+On an unsupported runtime, hooks leave all storage untouched, including counters and shared hook state.
+
+Unsharing and sign-out retain counters. During sync, a log expires after 30 days without an addition, using its
+modification time. Each pass lists and sorts names once, resumes after the saved last examined name, examines
+at most 500 paths with `lstat` and removes at most 100 files. Listing names is outside the 10 millisecond
+examination budget. The saved position wraps after the last name; remaining expired files wait for later passes. Hooks and ordinary command reads never run
+cleanup. Expired additions cannot be reconstructed; a later addition starts a new total. Ongoing additions keep
+a log alive, without a size cap. Uninstall removes counters, including without `--purge`.
 
 ## Requests and goal holds
 
@@ -258,3 +339,44 @@ Every location is overridable for tests and dry runs: `HOME`, `ALIGN_HOME`, `CLA
 `ALIGN_SERVER`. `ALIGN_NO_AUTOSTART=1` stops hooks from starting syncs. Below Node 24 the CLI refuses to run (one
 line on stderr, exit 1) and the hooks do nothing but keep stop latches and goal holds closed;
 `ALIGN_ALLOW_UNSUPPORTED_NODE=1` skips that check (the tests set it, since a test machine may run an older Node).
+
+## Team budgets
+
+`align budget [--team <name>] [--workspace <name|id>]` reads this folder's goal team or sole team and shows
+this UTC month's budget, spend, forecast and allowance left. Amounts are list-price estimates. Lower bounds
+say "at least" and upper bounds say "at most". Unpriced requests are counted. No budget is stated plainly. After printing its figures, a successful read makes a best-effort update to that team's local figure and matching confirmed session snapshots. It skips the update while sync holds its lock and confirms only the current folder's latest shared session when attribution is stale. A local update failure does not fail the read.
+
+`align budget request --amount <USD> --reason <text> [--goal <ref>] [--team <name>] [--session <ref> ...]`
+files a request for this month, using the folder's goal by default. `--workspace` selects a workspace when
+needed. Teams are listed by name. An ambiguous team needs `--team <name>`. Attached sessions must be your shared sessions in that workspace.
+Every terminal request waits for a person in Align, including amounts within the allowance. Its record says
+the device it was filed from and that Align cannot tell whether the person or an agent on that device ran the command. These commands never decide a request or grant authority.
+
+The existing one-pass sync refreshes at most 100 shared sessions at a time, with rotation. It briefly reuses
+matching session attribution, including nothing-to-report answers, and each workspace/team/month budget for five minutes across passes while its change stamp is unchanged. The existing directive response carries private stamps without names or amounts. Setting, changing or removing a budget, granting more or passing a grant expiry invalidates the matching team read in that pass. An unchanged cached pass makes zero budget requests. Missing fields and 404 budget routes leave sync working. It makes at most 120 budget reads and waits at most two seconds per pass. Local
+snapshots live in `budgets-cache/`, outside goal feeds; persistent dedupe markers live in `budget-shown/`.
+Uninstall removes these directories and the attribution cache. Stopping sharing, removal and sign-out remove session caches; old-month markers are pruned. Hooks use only local files, with no network or lock wait. At the next
+turn they may deliver one `[Align]` note at 80 percent and one at 100 percent per session and UTC month.
+A fresh known priced subtotal can cross a threshold even when it is a lower bound. An unpriced request alone
+cannot cross; unknown totals, future observations and session mismatches give no new crossing. Once a sync observes a crossing, it remains due at the next turn however long the pause within the same UTC month and team, unless a newer accepted read shows a removed budget or changed effective amount. Removing a budget clears due notes on the next successful pass. Claude Code can show a user-only warning at the next main-session tool call during a long turn, with no budget context added then. The next prompt still gets its context line. Each threshold has at most one user message and one context line across all delivery points and restarts. Codex user-only tool messages are not verified, so it keeps next-prompt behavior. Notes state
+what was reached, when the estimate was read, that work continues, that they grant no authority and that the person can ask for more in
+Align. Model-context notes contain no runnable command or instruction. The separate person-only message addresses the person and names Spend and the request command. There is no daemon.
+
+Budget, burn, forecast, history and spend in no goal are visible only to that team's members and workspace owners. The monthly CSV names the same goal-bound team rows as the on-screen report. Hidden goals remain unnamed and other teams' spend in no goal remains unallocated.
+
+Spend states current 80 and 100 percent crossings with the computation time. Home shows first observed monthly
+crossings to team leads and workspace owners under Since you last looked's existing visit rules. These are
+information and never affect Needs or its count. Existing refreshes suffice; no polling is added.
+
+Team budgets have no minimum team size. Align offers no per-person spend view; totals for a team with fewer
+than three members can reveal one person's spend. Earlier no-goal usage without a recorded home team stays
+unallocated and prevents an exact team total. Closed-month budget reads include grants that applied in that month.
+Requests name their authenticated filing source. Terminal records name the device and say Align cannot tell
+whether the person or an agent on that device ran the command. Terminal requests always wait for a person.
+Creation limits apply per requester, with a larger workspace ceiling.
+
+Running sessions can act on a figure up to five minutes old. `align budget` refreshes this device's cached figure.
+Budget reads run last in a sync pass. Local snapshots include the non-secret server clock offset, preserve pending
+crossings through rejected figures and temporary refusals, and store only needed fields. Hooks deliver separate model-context and person-only
+messages; only the person's message may name the request command. Sign-out removes budget delivery markers;
+stop-sharing keeps them so sharing again in the same month does not repeat a note.

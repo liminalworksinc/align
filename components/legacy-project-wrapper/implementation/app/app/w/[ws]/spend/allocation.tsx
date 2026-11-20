@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import { api, Btn, Card, Err, Loading, Note, Pill, num, usd, useAction, useApi } from "../../../_ui/kit";
+import { api, Btn, Err, Loading, Note, Pill, num, usd, useAction, useApi } from "../../../_ui/kit";
+import { Panel } from "../../../_ui/ds";
 import type { AllocationResponse, AllocationRow, WsDetail } from "../../../_ui/types";
 import { count, plural } from "@/lib/v2/plural.mts";
 
@@ -24,9 +25,9 @@ function gapText(gap: number | null) {
 
 function Bar({ share, target }: { share: number; target: number | null }) {
   return (
-    <div className="relative h-3 w-full rounded-full bg-zinc-100" aria-hidden>
-      <div className="h-3 rounded-full bg-violet-600" style={{ width: `${Math.min(100, share)}%` }} />
-      {target !== null && <div className="absolute top-[-3px] h-[18px] w-[2px] bg-zinc-900" style={{ left: `calc(${Math.min(100, target)}% - 1px)` }} title={`target ${target}%`} />}
+    <div className="relative h-3 w-full rounded-full bg-(--bg-raised)" aria-hidden>
+      <div className="h-3 rounded-full bg-(--text-3)" style={{ width: `${Math.min(100, share)}%` }} />
+      {target !== null && <div className="absolute top-[-3px] h-[18px] w-[2px] bg-(--text-1)" style={{ left: `calc(${Math.min(100, target)}% - 1px)` }} title={`target ${target}%`} />}
     </div>
   );
 }
@@ -38,39 +39,39 @@ export function AllocationCard({ ws, detail }: { ws: string; detail: WsDetail | 
   const isOwner = detail?.role === "owner";
   const weekGoals = d.data ? [...new Map(d.data.weekly.flatMap((w) => w.rows.filter((r) => r.kind === "goal").map((r) => [r.goal!.id, r.goal!.title] as const))).entries()] : [];
   return (
-    <Card title="Agent time against targets" actions={<Pill tone={steering === "on" ? "green" : "neutral"}>steering {steering}</Pill>}>
+    <Panel className="mb-4" title="Agent time against targets" actions={<Pill>steering {steering}</Pill>}>
       {d.loading && <Loading />}
       <Err>{d.error}</Err>
       {d.data && (
         <>
           <Note>Last 7 days. {d.data.window.note} Shares are of all shared agent time in the workspace. There is no per-person view.</Note>
-          {d.data.window.total_fresh_tokens === 0 && <p className="text-[15px] text-zinc-500">No shared agent time in the last 7 days yet.</p>}
-          <ul className="divide-y divide-zinc-200" aria-label="Allocation by goal">
+          {d.data.window.total_fresh_tokens === 0 && <p className="text-[15px] text-(--text-3)">No shared agent time in the last 7 days yet.</p>}
+          <ul className="divide-y divide-(--line)" aria-label="Allocation by goal">
             {d.data.window.rows.map((r) => (
               <li key={r.kind + (r.goal?.id ?? "")} className="py-3">
                 <div className="mb-1 flex flex-wrap items-baseline gap-2 text-[15px]">
-                  <span className="min-w-0 break-words text-zinc-900">{rowLabel(r)}</span>
-                  <span className="ml-auto text-zinc-700">
+                  <span className="min-w-0 break-words text-(--text-1)">{rowLabel(r)}</span>
+                  <span className="ml-auto text-(--text-2)">
                     {r.share}% of agent time{r.target_share !== null ? ` · target ${r.target_share}%` : ""}
                   </span>
                   {r.kind === "goal" && <Pill tone={r.gap !== null && gapPoints(r.gap) >= 10 ? "amber" : "neutral"}>{gapText(r.gap)}</Pill>}
                 </div>
                 <Bar share={r.share} target={r.target_share} />
-                <p className="mt-1 text-[13px] text-zinc-500">
+                <p className="mt-1 text-[13px] text-(--text-3)">
                   {num(r.fresh_tokens)} fresh tokens · {usd(r.est_list_usd_micros)} at list price{r.unpriced_requests ? ` · ${count(r.unpriced_requests, "unpriced request", undefined, num)}` : ""} · {count(r.sessions, "session")}
                 </p>
               </li>
             ))}
           </ul>
           {d.data.window.unpriced_requests > 0 && (
-            <p className="mt-2 text-[14px] text-amber-700">{count(d.data.window.unpriced_requests, "request", undefined, num)} used a model with no list price. {plural(d.data.window.unpriced_requests, "It counts", "They count")} in agent time (tokens) but not in the list price.</p>
+            <p className="mt-2 text-[14px] text-(--st-retry)">{count(d.data.window.unpriced_requests, "request", undefined, num)} used a model with no list price. {plural(d.data.window.unpriced_requests, "It counts", "They count")} in agent time (tokens) but not in the list price.</p>
           )}
           {weekGoals.length > 0 && (
             <div className="mt-4 overflow-x-auto">
-              <p className="mb-1 text-[14px] text-zinc-600">Share of agent time by week (weeks start Monday, UTC)</p>
+              <p className="mb-1 text-[14px] text-(--text-2)">Share of agent time by week (weeks start Monday, UTC)</p>
               <table className="w-full text-[14px]">
                 <thead>
-                  <tr className="text-left text-[13px] text-zinc-500">
+                  <tr className="border-b border-(--line-strong) text-left font-mono text-[11px] uppercase tracking-[0.08em] text-(--text-3)">
                     <th className="py-1 pr-3 font-normal">Goal</th>
                     {d.data.weekly.map((w) => (
                       <th key={w.week_start} className="py-1 pr-3 text-right font-normal">
@@ -81,7 +82,7 @@ export function AllocationCard({ ws, detail }: { ws: string; detail: WsDetail | 
                 </thead>
                 <tbody>
                   {weekGoals.map(([id, title]) => (
-                    <tr key={id} className="border-t border-zinc-200">
+                    <tr key={id} className="border-t border-(--line)">
                       <td className="py-1 pr-3">{title}</td>
                       {d.data!.weekly.map((w) => {
                         const r = w.rows.find((x) => x.goal?.id === id);
@@ -97,12 +98,12 @@ export function AllocationCard({ ws, detail }: { ws: string; detail: WsDetail | 
               </table>
             </div>
           )}
-          <div className="mt-4 flex flex-wrap items-center gap-3 text-[14px] text-zinc-600">
+          <div className="mt-4 flex flex-wrap items-center gap-3 text-[14px] text-(--text-2)">
             <span>
               Steering is {steering}. When it is on, a shared session that starts on a goal at least 10 points over its target, while another goal is at least 10 points under, gets one line naming
               both shares. Goals on hold are left out. {d.data.steering.total} {d.data.steering.total === 1 ? "line was" : "lines were"} shown in the last 7 days.
             </span>
-            <Link href={`/app/w/${ws}/alignments#target-changes`} className="text-violet-700 hover:underline">
+            <Link href={`/app/w/${ws}/alignments#target-changes`} className="inline-flex min-h-[36px] items-center font-medium text-(--accent-text) underline-offset-2 hover:underline max-sm:min-h-[44px]">
               Propose new targets
             </Link>
             {isOwner && (
@@ -114,6 +115,6 @@ export function AllocationCard({ ws, detail }: { ws: string; detail: WsDetail | 
           <Err>{act.error}</Err>
         </>
       )}
-    </Card>
+    </Panel>
   );
 }

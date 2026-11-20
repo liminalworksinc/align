@@ -30,3 +30,56 @@ export function codexLine(url: string): string | null {
   const u = safeMcpUrl(url);
   return u ? `codex mcp add align --url ${shq(u)}` : null;
 }
+
+/** A published align CLI release (LIM-2504): its version and the sha256 of its tarball, from the release workflow's
+ *  output (.github/workflows/agent-release.yml) after the founder checks its attestation. */
+export interface AgentRelease {
+  version: string;
+  sha256: string;
+}
+
+/** THE SWITCH. null means no release, and the Apps tab keeps its current steps (no step 4), never a link that 404s.
+ *  It names release agent-v0.2.0 (https://github.com/liminalworksinc/align/releases/tag/agent-v0.2.0, immutable), built
+ *  and attested by agent-release run 43529215918 from main d107963c65a6363480e07a31f4cefe561425884d. A new release
+ *  replaces both fields (packages/align-agent/README.md, "Publishing a release"). */
+export const AGENT_RELEASE: AgentRelease | null = {
+  version: "0.2.0",
+  sha256: "b36a1f0b358e13f9a406699310fa4407cddae79a33a60de3aabdeada2c4d4a74",
+};
+
+export const AGENT_REPO = "https://github.com/liminalworksinc/align";
+/** Where an installed `align` signs in by default (packages/align-agent/src/context.ts HOSTED_SERVER). */
+export const HOSTED_ORIGIN = "https://align-pg-draft.fly.dev";
+
+const VERSION = /^\d+\.\d+\.\d+$/;
+const SHA256 = /^[0-9a-f]{64}$/;
+
+/** The tarball's file name and pinned URL (never `latest`), or null for a release that isn't well formed. */
+export function agentTarball(r: AgentRelease | null): { file: string; url: string } | null {
+  if (!r || !VERSION.test(r.version) || !SHA256.test(r.sha256)) return null;
+  const file = `liminal-align-agent-${r.version}.tgz`;
+  return { file, url: `${AGENT_REPO}/releases/download/agent-v${r.version}/${file}` };
+}
+
+/** Where the line installs `align`: the person's own home folder, so no administrator rights or sudo are needed (a
+ *  plain `npm install -g` writes to Node's global folder, which the official installer leaves owned by root: EACCES,
+ *  first-time tester report). The hooks `align install` writes don't depend on it: they run the copy it makes in
+ *  ~/.align/bin/current by absolute path (packages/align-agent/src/install.ts). */
+export const AGENT_PREFIX = '"$HOME/.local"';
+const ALIGN_BIN = '"$HOME/.local/bin/align"';
+
+/**
+ * The Apps tab's align CLI line, or null: no release set (or one that isn't well formed), or a URL Align couldn't
+ * have made. Fetch the pinned tarball, check its sha256 (shasum stops the line on a mismatch, before npm runs),
+ * install that file into ~/.local, add the hooks, pair: a plain `align login` on the hosted server,
+ * `--server '<origin>'` (from the checked MCP URL, single-quoted) elsewhere. `align` is called by its full path, so
+ * the line works whether or not ~/.local/bin is on PATH.
+ */
+export function agentInstallLine(url: string, release: AgentRelease | null = AGENT_RELEASE): string | null {
+  const u = safeMcpUrl(url);
+  const t = agentTarball(release);
+  if (!u || !t || !release) return null;
+  const origin = u.slice(0, -"/api/mcp".length);
+  const login = `${ALIGN_BIN} install && ${ALIGN_BIN} login${origin === HOSTED_ORIGIN ? "" : ` --server ${shq(origin)}`}`;
+  return `curl -fsSLO ${t.url} && echo '${release.sha256}  ${t.file}' | shasum -a 256 -c && npm install --global --prefix ${AGENT_PREFIX} ./${t.file} && ${login}`;
+}

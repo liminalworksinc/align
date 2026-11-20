@@ -533,8 +533,8 @@ async function local(env) {
   const evPage = plain((await page(authParams(clientId, challenge, { scope: "goals:read changes:evidence" }), { cookie: U1.cookie })).text);
   const readScopePage = plain((await page(authParams(clientId, challenge, { scope: "goals:read" }), { cookie: U1.cookie })).text);
   check(
-    "consent page with scope changes:evidence: the same read-only lines plus 'It may also attach links to change requests you can act on, as evidence. Align labels them agent-reported.' and an 'Allow access' button; scope goals:read alone reads like the default",
-    evPage.includes("can’t propose, approve or change anything") && evPage.includes("It may also attach links to change requests you can act on, as evidence. Align labels them agent-reported.") && evPage.includes("Allow access") && !evPage.includes("Allow read-only access") && readScopePage.includes("Allow read-only access") && !readScopePage.includes("agent-reported"),
+    "consent page with scope changes:evidence: the same read-only lines plus 'It may also attach links to change requests you can act on, as evidence. Align labels them agent reported.' and an 'Allow access' button; scope goals:read alone reads like the default",
+    evPage.includes("can’t propose, approve or change anything") && evPage.includes("It may also attach links to change requests you can act on, as evidence. Align labels them agent reported.") && evPage.includes("Allow access") && !evPage.includes("Allow read-only access") && readScopePage.includes("Allow read-only access") && !readScopePage.includes("agent-reported"),
     evPage.slice(0, 900),
   );
   check("consent page: a loopback redirect gets the warning naming its host", okPage.includes("This app sends you back to a program on this computer (127.0.0.1:33418). Allow it only if you started it yourself just now."), "");
@@ -1572,7 +1572,7 @@ async function hosted(env) {
   // SH2 hosted (LIM-2437 security headers): the same framing headers on the app, an API route, the proxy's 404 for an
   // unlisted path, the consent page, the redirect from /, an https refusal and the metadata, plus HSTS (one year, no
   // preload) on every one of them.
-  const shH = [await req("GET", "/app"), await req("GET", "/api/v2/me"), await req("GET", "/new"), await req("GET", "/oauth/authorize"), await req("GET", "/"), await req("GET", "/app", { headers: { "x-forwarded-proto": "http" } }), as];
+  const shH = [await req("GET", "/app"), await req("GET", "/api/v2/me"), await req("GET", "/setup"), await req("GET", "/oauth/authorize"), await req("GET", "/"), await req("GET", "/app", { headers: { "x-forwarded-proto": "http" } }), as];
   check("SH2 hosted: /app, /api/v2/me, an unlisted path, /oauth/authorize, /, an https refusal and the metadata send X-Frame-Options DENY and frame-ancestors 'none', once each", shH.every(unframed), shH.map(framing).join(" | "));
   check("SH2 hosted: every one of them sends Strict-Transport-Security max-age=31536000", shH.every((r) => header(r, "strict-transport-security") === "max-age=31536000"), shH.map(framing).join(" | "));
   const devHosted = await tool(D1.access, "align_list_goals");

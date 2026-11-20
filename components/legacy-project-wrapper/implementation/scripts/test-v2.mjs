@@ -33,10 +33,11 @@
 //                                         is open when hosted
 // Usage: node scripts/test-v2.mjs <port>   (from a worktree root; refuses 3100, the main checkout and a busy port;
 //                                           also uses <port>+1 for the second-server check)
+//        node scripts/test-v2.mjs --storage-only   (in-process storage regressions, no server or port)
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, createHmac, generateKeyPairSync, randomBytes, sign } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import os from "node:os";
@@ -44,8 +45,9 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
+const STORAGE_ONLY = process.argv.includes("--storage-only");
 const PORT = Number(process.argv[2]);
-if (!Number.isInteger(PORT) || PORT === 3100) {
+if (!STORAGE_ONLY && (!Number.isInteger(PORT) || PORT === 3100)) {
   console.error("usage: node scripts/test-v2.mjs <port> (not 3100)");
   process.exit(2);
 }
@@ -55,7 +57,7 @@ if (path.resolve(ROOT) === path.join(os.homedir(), "liminal/align")) {
   console.error(`test-v2: refusing the main checkout ${ROOT}; run from a worktree`);
   process.exit(2);
 }
-if (spawnSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]).status === 0) {
+if (!STORAGE_ONLY && spawnSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]).status === 0) {
   console.error(`test-v2: port ${PORT} is already in use`);
   process.exit(2);
 }
@@ -153,6 +155,8 @@ async function startServer(env) {
   for (let i = 0; i < 90 && !exited; i++) {
     try {
       const r = env.HOSTED === "1" ? await hosted("GET", "/api/v2/auth/get-session") : await fetch(`${BASE}/api/v2/auth/get-session`);
+      // Finish the response so a stopped phase cannot answer the next readiness probe on its still-active connection.
+      if (env.HOSTED !== "1") await r.arrayBuffer();
       last = r.status;
       if (r.status === 200) return { started: true, stderr: () => stderr, stdout: () => stdout, exited, last };
       if (r.status === 503) break; // up, but serving nothing (proxy.ts startupProblems)
@@ -359,6 +363,269 @@ function invariantHolds(s) {
 }
 
 const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "align-v2-"));
+// Run the real db.ts in isolated processes: its extensionless imports need Node's resolver to add .ts.
+// Isolation also contains the one-shot Set allocation failure used to exercise the real touch hold.
+for (const setup of ["touch", "session"]) {
+  const regression = spawnSync(process.execPath, ["--input-type=module", "-e", String.raw`
+    import assert from "node:assert/strict";
+    import { registerHooks } from "node:module";
+    import path from "node:path";
+    import { pathToFileURL } from "node:url";
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        return nextResolve(specifier.startsWith(".") && !path.extname(specifier) ? specifier + ".ts" : specifier, context);
+      },
+    });
+    const { openDb, exec, get, tx, previewTx, inPreview, onWsChange, touchWs, captureOutbound } =
+      await import(pathToFileURL(path.join(process.cwd(), "lib/v2/db.ts")).href);
+    const db = openDb();
+    exec("CREATE TABLE v2_setup_test (id TEXT PRIMARY KEY)");
+    const events = [];
+    const stop = onWsChange((ws) => events.push(ws)); // Initialize the real touches before failing its hold allocation.
+    const setup = process.argv[1];
+    let called = false;
+    try {
+      if (setup === "touch") {
+        const originalSet = globalThis.Set;
+        const fault = new Error("touch hold allocation failed");
+        let pending;
+        try {
+          pending = tx(() => { called = true; }); // BEGIN succeeds before tx awaits its continuation.
+          assert.equal(db.domain.isTransaction, true);
+          globalThis.Set = function FailingSet() { throw fault; };
+          await assert.rejects(pending, (error) => error === fault);
+        } finally {
+          globalThis.Set = originalSet;
+        }
+      } else {
+        const closed = db.domain;
+        const pending = previewTx(() => { called = true; });
+        assert.equal(closed.isTransaction, true);
+        const queued = tx(() => 42);
+        // A real lifecycle failure: close after BEGIN and before native createSession, without replacing any db method.
+        closed.close();
+        await assert.rejects(pending, (error) => error.code === "ERR_INVALID_STATE" && /database is not open/.test(error.message));
+        assert.equal(inPreview(), false);
+        assert.notEqual(db.domain, closed); // The safety net replaced the closed connection and cleared statements.
+        assert.equal(await queued, 42); // A waiter must pick up the replacement connection.
+      }
+      assert.equal(called, false);
+      assert.equal(inPreview(), false);
+      assert.equal(db.domain.isTransaction, false);
+      db.auth.exec("BEGIN IMMEDIATE; ROLLBACK"); // No writer lock is left on the real shared database.
+
+      assert.equal(await tx(() => {
+        assert.equal(db.domain.isTransaction, true);
+        exec("INSERT INTO v2_setup_test VALUES ('committed')");
+        touchWs("committed");
+        return 42;
+      }), 42);
+      assert.equal(db.auth.prepare("SELECT id FROM v2_setup_test WHERE id = 'committed'").get().id, "committed");
+      const fault = new Error("callback failed");
+      await assert.rejects(tx(() => {
+        assert.equal(db.domain.isTransaction, true);
+        exec("INSERT INTO v2_setup_test VALUES ('rolled-back')");
+        touchWs("rolled-back");
+        throw fault;
+      }), (error) => error === fault);
+      assert.equal(get("SELECT id FROM v2_setup_test WHERE id = 'rolled-back'"), undefined);
+
+      const preview = await previewTx(() => {
+        assert.equal(inPreview(), true);
+        assert.equal(db.domain.isTransaction, true);
+        exec("INSERT INTO v2_setup_test VALUES ('previewed')");
+        touchWs("previewed");
+        captureOutbound({ kind: "mail", what: "preview mail" });
+        return 7;
+      }, () => get("SELECT id FROM v2_setup_test WHERE id = 'previewed'").id);
+      assert.equal(preview.ok, true);
+      assert.equal(preview.value, 7);
+      assert.equal(preview.observed, "previewed");
+      assert.equal(preview.changes.length, 1);
+      assert.equal(preview.changes[0].after.id, "previewed");
+      assert.deepEqual(preview.outbound, [{ kind: "mail", what: "preview mail" }]);
+      assert.equal(get("SELECT id FROM v2_setup_test WHERE id = 'previewed'"), undefined);
+      const failed = await previewTx(() => {
+        exec("INSERT INTO v2_setup_test VALUES ('failed-preview')");
+        throw fault;
+      });
+      assert.equal(failed.ok, false);
+      assert.equal(failed.error, fault);
+      assert.deepEqual(failed.changes, []);
+      assert.equal(get("SELECT id FROM v2_setup_test WHERE id = 'failed-preview'"), undefined);
+      assert.equal(inPreview(), false);
+      assert.equal(db.domain.isTransaction, false);
+      assert.deepEqual(events, ["committed"]);
+      console.log(setup + " setup: cleanup, later commit/rollback, preview and callback errors passed");
+    } finally {
+      stop();
+      if (db.domain.isOpen) db.domain.close();
+      db.auth.close();
+    }
+  `, setup], { cwd: ROOT, encoding: "utf8", env: { ...process.env, ALIGN_DATA_DIR: path.join(tmpRoot, `setup-${setup}`) } });
+  check(`storage: ${setup} setup failure cleans up; later tx commits and rolls back, previews work and inPreview resets`, regression.status === 0, regression.stdout + regression.stderr);
+}
+for (const first of ["tx", "mixed", "preview"]) {
+  const regression = spawnSync(process.execPath, ["--input-type=module", "-e", String.raw`
+    import assert from "node:assert/strict";
+    import { registerHooks } from "node:module";
+    import path from "node:path";
+    import { pathToFileURL } from "node:url";
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        return nextResolve(specifier.startsWith(".") && !path.extname(specifier) ? specifier + ".ts" : specifier, context);
+      },
+    });
+    const { openDb, exec, all, run, tx, previewTx, inPreview, onWsChange, touchWs, captureOutbound } =
+      await import(pathToFileURL(path.join(process.cwd(), "lib/v2/db.ts")).href);
+    const db = openDb();
+    exec("CREATE TABLE v2_concurrent_test (id TEXT PRIMARY KEY)");
+    const first = process.argv[1];
+    const events = [];
+    const stop = onWsChange((ws) => events.push(ws));
+    try {
+      const ids = Array.from({ length: 64 }, (_, i) => String(i));
+      const previewIds = new Set(first === "tx" ? [] : ids.filter((_, i) => i % 3 === (first === "preview" ? 0 : 1)));
+      const outcomes = await Promise.allSettled(ids.map(id => {
+        const body = () => {
+          assert.equal(db.domain.isTransaction, true);
+          assert.equal(inPreview(), previewIds.has(id));
+          run("INSERT INTO v2_concurrent_test VALUES (?)", id);
+          touchWs(id);
+          if (previewIds.has(id)) captureOutbound({ kind: "mail", what: id });
+          return id;
+        };
+        return previewIds.has(id) ? previewTx(body) : tx(body);
+      }));
+      const failures = outcomes.filter(r => r.status === "rejected");
+      assert.equal(failures.length, 0, failures.length + " starts failed: " + failures[0]?.reason);
+      for (let i = 0; i < ids.length; i++) {
+        const result = outcomes[i].value;
+        if (previewIds.has(ids[i])) {
+          assert.equal(result.ok, true);
+          assert.equal(result.value, ids[i]);
+          assert.equal(result.changes.length, 1);
+          assert.equal(result.changes[0].after.id, ids[i]);
+          assert.deepEqual(result.outbound, [{ kind: "mail", what: ids[i] }]);
+        } else assert.equal(result, ids[i]);
+      }
+      const committed = ids.filter(id => !previewIds.has(id)).sort();
+      assert.deepEqual(all("SELECT id FROM v2_concurrent_test ORDER BY id").map(r => r.id), committed);
+      assert.deepEqual(events.sort(), committed);
+      assert.equal(inPreview(), false);
+      assert.equal(db.domain.isTransaction, false);
+    } finally {
+      stop();
+      db.domain.close();
+      db.auth.close();
+    }
+  `, first], { cwd: ROOT, encoding: "utf8", timeout: 15_000, env: { ...process.env, ALIGN_DATA_DIR: path.join(tmpRoot, `concurrent-${first}`) } });
+  check(`storage: concurrent ${first === "tx" ? "tx calls commit each write once" : `tx and preview calls commit only real writes once (${first === "preview" ? "preview" : "tx"} first)`}`, regression.status === 0, regression.stdout + regression.stderr);
+}
+for (const rule of ["nested", "rollback", "busy", "wait", "nonbusy", "reopen"]) {
+  const regression = spawnSync(process.execPath, ["--input-type=module", "-e", String.raw`
+    import assert from "node:assert/strict";
+    import { registerHooks } from "node:module";
+    import path from "node:path";
+    import { pathToFileURL } from "node:url";
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        return nextResolve(specifier.startsWith(".") && !path.extname(specifier) ? specifier + ".ts" : specifier, context);
+      },
+    });
+    const { openDb, exec, all, run, tx, previewTx, inPreview } =
+      await import(pathToFileURL(path.join(process.cwd(), "lib/v2/db.ts")).href);
+    const db = openDb();
+    exec("CREATE TABLE v2_wait_test (id TEXT PRIMARY KEY)");
+    const insert = id => run("INSERT INTO v2_wait_test VALUES (?)", id);
+    const fault = new Error("test transaction failure");
+    const realSetTimeout = globalThis.setTimeout;
+    try {
+      const rule = process.argv[1];
+      if (rule === "nested") {
+        let nested, refused;
+        await tx(() => {
+          nested = tx(() => insert("nested"));
+          refused = assert.rejects(previewTx(() => assert.fail("nested preview ran")), /inside another transaction/);
+        });
+        await Promise.all([nested, refused]);
+        assert.deepEqual(all("SELECT id FROM v2_wait_test").map(r => r.id), ["nested"]);
+        const preview = await previewTx(() => {
+          assert.equal(inPreview(), true);
+          nested = tx(() => insert("preview-nested"));
+          refused = assert.rejects(previewTx(() => assert.fail("nested preview ran")), /inside another transaction/);
+        });
+        await Promise.all([nested, refused]);
+        assert.equal(preview.ok, true);
+        assert.equal(preview.changes[0].after.id, "preview-nested");
+      } else if (rule === "rollback") {
+        let nested;
+        const failed = assert.rejects(tx(() => {
+          nested = tx(() => insert("rolled-back"));
+          throw fault;
+        }), e => e === fault);
+        const queued = tx(() => insert("after-throw"));
+        await Promise.all([failed, queued]);
+        await nested;
+        assert.deepEqual(all("SELECT id FROM v2_wait_test").map(r => r.id), ["after-throw"]);
+      } else if (rule === "busy" || rule === "wait") {
+        let waits = 0;
+        globalThis.setTimeout = resume => { waits++; queueMicrotask(resume); return 0; };
+        const holder = rule === "busy" ? db.auth : db.domain;
+        for (const start of [tx, previewTx]) {
+          holder.exec("BEGIN IMMEDIATE");
+          waits = 0;
+          await assert.rejects(start(() => assert.fail("body ran before lock release")), rule === "busy" ? /database is locked/ : /Timed out waiting for the domain transaction to finish/);
+          assert.equal(waits, 100);
+          assert.equal(holder.isTransaction, true);
+          holder.exec("ROLLBACK");
+        }
+        if (rule === "busy") {
+          db.auth.exec("BEGIN IMMEDIATE");
+          const pending = tx(() => insert("after-busy"));
+          db.auth.exec("ROLLBACK");
+          await pending;
+        }
+      } else if (rule === "nonbusy") {
+        const original = db.domain.exec;
+        db.domain.exec = () => { throw fault; };
+        try {
+          for (const start of [tx, previewTx]) await assert.rejects(start(() => assert.fail("body ran after BEGIN error")), e => e === fault);
+        } finally {
+          db.domain.exec = original;
+        }
+      } else if (rule === "reopen") {
+        const old = db.domain;
+        const original = old.exec;
+        old.exec = function(sql) {
+          if (sql.startsWith("ROLLBACK")) throw fault;
+          return original.call(this, sql);
+        };
+        const preview = previewTx(() => insert("rolled-back-on-close"));
+        const queued = tx(() => insert("after-reopen"));
+        assert.equal((await preview).ok, true);
+        assert.notEqual(db.domain, old);
+        await queued;
+        assert.deepEqual(all("SELECT id FROM v2_wait_test").map(r => r.id), ["after-reopen"]);
+      }
+      assert.equal(inPreview(), false);
+      assert.equal(db.domain.isTransaction, false);
+      await tx(() => insert("later-write"));
+      assert.equal(all("SELECT id FROM v2_wait_test WHERE id = 'later-write'").length, 1);
+      assert.equal(all("SELECT id FROM v2_wait_test WHERE id = 'preview-nested'").length, 0);
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      if (db.domain.isOpen) db.domain.close();
+      db.auth.close();
+    }
+  `, rule], { cwd: ROOT, encoding: "utf8", timeout: 15_000, env: { ...process.env, ALIGN_DATA_DIR: path.join(tmpRoot, `wait-${rule}`) } });
+  check(`storage: transaction wait preserves ${rule} behavior and allows later writes`, regression.status === 0, regression.stdout + regression.stderr);
+}
+if (STORAGE_ONLY || process.argv.includes("--tx-setup-only")) {
+  rmSync(tmpRoot, { recursive: true, force: true });
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+}
 const build = spawnSync("npx", ["next", "build"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, HOSTED: "", ALIGN_DATA_DIR: "" } });
 if (build.status !== 0) {
   console.log(`FAIL  next build\n${(build.stdout + build.stderr).slice(-1500)}`);
@@ -427,9 +694,10 @@ if (build.status !== 0) {
   const legal = ["privacy-policy.md", "dpa.md"].map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8"));
   const pack = ["privacy-policy.md", "dpa.md", "subprocessors.md", "security-overview.md", "questionnaire.md"].map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8")).join("\n");
   check(
-    "trust: the privacy policy and DPA open with 'Draft for counsel review'; the pack uses the [LEGAL ENTITY], [ADDRESS] and [PRIVACY CONTACT EMAIL] placeholders, and no PRESEED marker is left in docs/trust or SECURITY.md (every package is merged and its claims checked)",
+    "trust: the privacy policy and DPA open with 'Draft for counsel review'; the pack and the /trust page use legal-entity and contact substitutions with no postal-address placeholder, and no PRESEED marker is left in docs/trust or SECURITY.md (every package is merged and its claims checked)",
     legal.every((t) => t.split("\n").slice(0, 4).join(" ").includes("Draft for counsel review")) &&
-      ["[LEGAL ENTITY]", "[ADDRESS]", "[PRIVACY CONTACT EMAIL]"].every((t) => pack.includes(t)) &&
+      ["[LEGAL ENTITY]", "[PRIVACY CONTACT EMAIL]"].every((t) => pack.includes(t)) && !pack.includes("[ADDRESS]") &&
+      !readFileSync(path.join(ROOT, "app/trust/page.tsx"), "utf8").includes("[ADDRESS]") &&
       !/PRESEED-\d/.test(readdirSync(path.join(ROOT, "docs/trust")).map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8")).join("\n") + readFileSync(path.join(ROOT, "SECURITY.md"), "utf8")) &&
       existsSync(path.join(ROOT, "SECURITY.md")),
     "",
@@ -722,7 +990,7 @@ try {
   const madeIds = [...made.out.matchAll(/\((cc_[a-z2-7]{24}), anyone, until/g)].map((m) => m[1]);
   check(
     "align-admin: codes create --count 2 --days 3 prints 2 distinct unbound codes once; codes list shows ids, states and bindings and never a code",
-    made.status === 0 && madeCodes.length === 2 && madeCodes[0] !== madeCodes[1] && madeIds.length === 2 && listed.status === 0 && madeIds.every((id) => listed.out.includes(id)) && listed.out.includes("req@example.test") && listed.out.includes("live") && codesIn(listed.out).length === 0 && madeCodes.every((c) => dbFilesLack(dbFile, c)),
+    made.status === 0 && madeCodes.length === 2 && madeCodes[0] !== madeCodes[1] && madeIds.length === 2 && listed.status === 0 && madeIds.every((id) => listed.out.includes(id)) && listed.out.includes("bound") && !listed.out.includes("@") && listed.out.includes("live") && codesIn(listed.out).length === 0 && madeCodes.every((c) => dbFilesLack(dbFile, c)),
     made.out + made.err + listed.out,
   );
   const revoked = admin(["codes", "revoke", madeIds[0]], opEnv);
@@ -779,14 +1047,23 @@ try {
     res.end();
   });
   await new Promise((r) => oauthStub.listen(0, "127.0.0.1", r));
-  const onRun = await mustStart({ ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1", ALIGN_TEST_OAUTH_URL: `http://127.0.0.1:${oauthStub.address().port}`, ...ignoredInModeL });
+  // ALIGN_LIVE_STREAMS_PER_WORKSPACE=8: the live workspace's workspace-wide stream cap (default 50), low so live: reaches it.
+  const onRun = await mustStart({ ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1", ALIGN_LIVE_STREAMS_PER_WORKSPACE: "8", ALIGN_TEST_OAUTH_URL: `http://127.0.0.1:${oauthStub.address().port}`, ...ignoredInModeL });
   dbFile = path.join(onDir, "v2", "align.sqlite");
   const mode = (p) => (statSync(p).mode & 0o777).toString(8);
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 22, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds, deleted-session markers and the goal versions sent to connected apps included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 22 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 26, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds, deleted-session markers and the goal versions sent to connected apps included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 26 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_budget_crossings", "v2_budget_stamps", "v2_spend_home_teams", "v2_team_budgets", "v2_team_budget_history", "v2_budget_requests", "v2_budget_request_decisions", "v2_budget_request_sessions", "v2_team_no_goal_rollups", "v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
+  const budgetIndexes = withDb((d) => [
+    ["v2_budget_requests_requester_created", ["ws_id", "requester_id", "created_at"]],
+    ["v2_budget_requests_created", ["ws_id", "created_at"]],
+    ["v2_budget_requests_goal", ["ws_id", "goal_id"]],
+    ["v2_budget_request_sessions_session", ["ws_id", "session_key"]],
+    ["v2_budget_requests_source_device", ["source_device_id"]],
+  ].every(([name, columns]) => JSON.stringify(d.prepare(`PRAGMA index_info(${name})`).all().map((c) => c.name)) === JSON.stringify(columns)));
+  check("storage: budget request hourly limits and foreign-key child lookups have ordered indexes", budgetIndexes);
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
   check("storage (PORT2-001): migration 14 adds last_read_at to connected-app grants, beside last_used_at (connected, not read)", grantCols.includes("last_read_at") && grantCols.includes("last_used_at"), grantCols.join());
@@ -1319,20 +1596,92 @@ try {
       d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), x.id);
   });
   const ts3 = new Date().toISOString();
-  const rr1 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });
-  const rrReuse = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });
-  const afterReuse = await call("U1", "GET", "/api/v2/me", { bearer: rr1.json?.access_token });
-  const newRefreshDead = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: rr1.json?.refresh_token, ts: ts3, sig: refreshSig(DR, DR.id, rr1.json?.refresh_token ?? "", ts3) } });
-  const drRow = withDb((d) => d.prepare("SELECT revoked_at, revoked_reason FROM v2_devices WHERE id = ?").get(DR.id));
+  const refreshOf = (dev, id, token, ts = new Date().toISOString()) => call("D", "POST", "/api/v2/device/refresh", { body: { device_id: id, refresh_token: token, ts, sig: refreshSig(dev, id, token, ts) } });
+  const revokedOf = (id) => withDb((d) => d.prepare("SELECT revoked_at, revoked_reason FROM v2_devices WHERE id = ?").get(id));
+  const rr1 = await refreshOf(DR, DR.id, DR.refresh, ts3);
+  // A retry of the latest rotation within 30 s, signed anew (a later ts), while its new pair is unused (the answer was
+  // lost): a fresh pair, the unused one is gone, the device stays paired and the retry is audited. A second retry of
+  // the same token revokes.
+  const rrRetry = await refreshOf(DR, DR.id, DR.refresh, new Date(Date.parse(ts3) + 1000).toISOString());
+  const lostAccess = await call("U1", "GET", "/api/v2/me", { bearer: rr1.json?.access_token });
+  const lostRefresh = await refreshOf(DR, DR.id, rr1.json?.refresh_token ?? "");
+  const retriedRow = revokedOf(DR.id);
+  const retryAudit = withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE action = 'device.refresh_retried' AND object_id = ?").all(DR.id));
+  const retryWorks = await call("U1", "GET", "/api/v2/me", { bearer: rrRetry.json?.access_token });
+  check(
+    "refresh (LIM-2441 H7a): retrying the latest rotation within 30 s while its new pair is unused gets a fresh pair (the unused access and refresh tokens are dead, the refresh one without revoking), the device stays paired and one device.refresh_retried audit row is written",
+    rr1.status === 200 && rrRetry.status === 200 && rrRetry.json?.refresh_token !== rr1.json?.refresh_token && retryWorks.status === 200 &&
+      lostAccess.status === 401 && lostRefresh.status === 401 && lostRefresh.json?.reason === undefined && !retriedRow.revoked_at && retryAudit.length === 1 && retryAudit[0].actor_id === null,
+    `${rr1.status} ${rrRetry.status} ${retryWorks.status} ${lostAccess.status} ${lostRefresh.text} ${JSON.stringify(retriedRow)} ${JSON.stringify(retryAudit)}`,
+  );
+  // Outside the grace, reuse still revokes: a retry 31 s after the rotation, and the replay of a token whose new pair
+  // was already used. Each on its own device written straight into the database (the pairing limit is spent here).
+  const keyedDevice = (name) => {
+    const keys = newDeviceKeys();
+    const id = `dv_${randomBytes(15).toString("hex").slice(0, 24).replace(/[01089]/g, "a")}`;
+    const refresh = `alnr_${randomBytes(32).toString("base64url")}`;
+    const at = new Date().toISOString();
+    withDb((d) => {
+      d.prepare("INSERT INTO v2_devices (id, user_id, name, public_key, created_at) VALUES (?, ?, ?, ?, ?)").run(id, U1.id, name, keys.pub, at);
+      d.prepare("INSERT INTO v2_device_tokens (token_hash, device_id, kind, created_at, expires_at) VALUES (?, ?, 'refresh', ?, ?)").run(sha256hex(refresh), id, at, new Date(Date.now() + 3_600_000).toISOString());
+    });
+    return { ...keys, id, refresh };
+  };
+  const DL1 = keyedDevice("late retry");
+  const late1 = await refreshOf(DL1, DL1.id, DL1.refresh);
+  withDb((d) => {
+    const row = d.prepare("SELECT rotated_at FROM v2_device_tokens WHERE token_hash = ?").get(sha256hex(DL1.refresh));
+    const back = new Date(Date.parse(row.rotated_at) - 31_000).toISOString();
+    d.prepare("UPDATE v2_device_tokens SET created_at = ? WHERE device_id = ? AND created_at = ?").run(back, DL1.id, row.rotated_at);
+    d.prepare("UPDATE v2_device_tokens SET rotated_at = ? WHERE token_hash = ?").run(back, sha256hex(DL1.refresh));
+  });
+  const lateRetry = await refreshOf(DL1, DL1.id, DL1.refresh);
+  const DU = keyedDevice("used pair");
+  const used1 = await refreshOf(DU, DU.id, DU.refresh);
+  const used2 = await refreshOf(DU, DU.id, used1.json?.refresh_token ?? "");
+  const usedReplay = await refreshOf(DU, DU.id, DU.refresh);
+  // A captured request replayed byte for byte, or one signed before the rotating request: never a retry, so it revokes
+  // (a takeover without the device key otherwise). A pair whose access token was already used is never replaced.
+  const DB = keyedDevice("byte replay");
+  const tsB = new Date().toISOString();
+  const sigB = refreshSig(DB, DB.id, DB.refresh, tsB);
+  const byte1 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DB.id, refresh_token: DB.refresh, ts: tsB, sig: sigB } });
+  const byte2 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DB.id, refresh_token: DB.refresh, ts: tsB, sig: sigB } });
+  const byteAccess = await call("U1", "GET", "/api/v2/me", { bearer: byte1.json?.access_token });
+  const DO = keyedDevice("older signature");
+  const tsO = new Date().toISOString();
+  const old1 = await refreshOf(DO, DO.id, DO.refresh, tsO);
+  const oldRetry = await refreshOf(DO, DO.id, DO.refresh, new Date(Date.parse(tsO) - 120_000).toISOString());
+  const DA = keyedDevice("access in use");
+  const acc1 = await refreshOf(DA, DA.id, DA.refresh);
+  const accUse = await call("U1", "GET", "/api/v2/me", { bearer: acc1.json?.access_token });
+  const accRetry = await refreshOf(DA, DA.id, DA.refresh);
+  check(
+    "refresh (LIM-2441 H7a): a byte-identical replay of the rotating request, a retry signed before it, and a retry once the new access token is in use all revoke the device (401 invalid_grant, revoked_reason refresh_reuse); the new pair dies with it",
+    byte1.status === 200 && byte2.status === 401 && revokedOf(DB.id)?.revoked_reason === "refresh_reuse" && byteAccess.status === 401 &&
+      old1.status === 200 && oldRetry.status === 401 && revokedOf(DO.id)?.revoked_reason === "refresh_reuse" &&
+      acc1.status === 200 && accUse.status === 200 && accRetry.status === 401 && revokedOf(DA.id)?.revoked_reason === "refresh_reuse",
+    `${byte1.status} ${byte2.text} ${byteAccess.status} ${old1.status} ${oldRetry.text} ${acc1.status} ${accUse.status} ${accRetry.text} ${JSON.stringify([revokedOf(DB.id), revokedOf(DO.id), revokedOf(DA.id)])}`,
+  );
+  check(
+    "refresh (LIM-2441 H7a): outside the grace, reuse still revokes the device (401 invalid_grant, revoked_reason refresh_reuse): a retry 31 s after the rotation, and a replay of a token whose new pair was already used",
+    late1.status === 200 && lateRetry.status === 401 && lateRetry.json?.error === "invalid_grant" && revokedOf(DL1.id)?.revoked_reason === "refresh_reuse" &&
+      used1.status === 200 && used2.status === 200 && usedReplay.status === 401 && usedReplay.json?.error === "invalid_grant" && revokedOf(DU.id)?.revoked_reason === "refresh_reuse",
+    `${late1.status} ${lateRetry.text} ${JSON.stringify(revokedOf(DL1.id))} ${used1.status} ${used2.status} ${usedReplay.text} ${JSON.stringify(revokedOf(DU.id))}`,
+  );
+  const rrReuse = await refreshOf(DR, DR.id, DR.refresh, ts3);
+  const afterReuse = await call("U1", "GET", "/api/v2/me", { bearer: rrRetry.json?.access_token });
+  const newRefreshDead = await refreshOf(DR, DR.id, rrRetry.json?.refresh_token ?? "", ts3);
+  const drRow = revokedOf(DR.id);
   const ts4 = new Date().toISOString();
-  const badSigRevoked = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: rr1.json?.refresh_token, ts: ts4, sig: refreshSig(D1, DR.id, rr1.json?.refresh_token ?? "", ts4) } });
+  const badSigRevoked = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: rrRetry.json?.refresh_token, ts: ts4, sig: refreshSig(D1, DR.id, rrRetry.json?.refresh_token ?? "", ts4) } });
   const unknownDevice = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: "dv_aaaaaaaaaaaaaaaaaaaaaaaa", refresh_token: DR.refresh, ts: ts4, sig: refreshSig(DR, "dv_aaaaaaaaaaaaaaaaaaaaaaaa", DR.refresh, ts4) } });
   check(
-    "refresh: reusing an old refresh token revokes the device (new access 401, new refresh 401, revoked_reason refresh_reuse); a correctly signed refresh of the revoked device says why (reason refresh_reuse), a badly signed one says nothing more, and an unknown device (only deleting an account deletes devices) gets reason unknown_device",
-    rr1.status === 200 && rrReuse.status === 401 && afterReuse.status === 401 && newRefreshDead.status === 401 && drRow.revoked_at && drRow.revoked_reason === "refresh_reuse" &&
+    "refresh: reusing an old refresh token revokes the device (its second retry within the grace; new access 401, new refresh 401, revoked_reason refresh_reuse); a correctly signed refresh of the revoked device says why (reason refresh_reuse), a badly signed one says nothing more, and an unknown device (only deleting an account deletes devices) gets reason unknown_device",
+    rrRetry.status === 200 && rrReuse.status === 401 && afterReuse.status === 401 && newRefreshDead.status === 401 && drRow.revoked_at && drRow.revoked_reason === "refresh_reuse" &&
       newRefreshDead.json?.error === "invalid_grant" && newRefreshDead.json?.reason === "refresh_reuse" &&
       badSigRevoked.status === 401 && badSigRevoked.json?.reason === undefined && unknownDevice.status === 401 && unknownDevice.json?.error === "invalid_grant" && unknownDevice.json?.reason === "unknown_device",
-    `${rr1.status} ${rrReuse.status} ${afterReuse.status} ${newRefreshDead.text} ${JSON.stringify(drRow)} ${badSigRevoked.text} ${unknownDevice.text}`,
+    `${rrRetry.status} ${rrReuse.status} ${afterReuse.status} ${newRefreshDead.text} ${JSON.stringify(drRow)} ${badSigRevoked.text} ${unknownDevice.text}`,
   );
   D1.access = r2.json.access_token;
   D1.refresh = r2.json.refresh_token;
@@ -1489,6 +1838,163 @@ try {
   check("spend: a viewer may read spend; the team goal it can't see is in the private row", viewerSpend.rows.some((r) => r.kind === "private") && !viewerSpend.rows.some((r) => r.goal?.id === G2.id), JSON.stringify(viewerSpend.rows.map((r) => r.label)));
   const ranged = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal&from=${encodeURIComponent(new Date().toISOString())}`, { cookie: U1.cookie })).json;
   check("spend: from/to filter by request time", ranged.total.requests === 0 && invariantHolds(ranged), JSON.stringify(ranged.total).slice(0, 100));
+
+  // ---- BEGIN SPEND EXPORT: monthly CSV, report parity, privacy, spreadsheet safety and phone download ----
+  {
+    // A parser independent of the serializer: quoted commas, doubled quotes and embedded newlines stay in one cell.
+    const parseCsv = (text) => {
+      const records = [];
+      let record = [], value = "", quoted = false;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (c === '"') {
+          if (quoted && text[i + 1] === '"') { value += '"'; i++; }
+          else quoted = !quoted;
+        } else if (!quoted && (c === "," || c === "\r" || c === "\n")) {
+          record.push(value); value = "";
+          if (c !== ",") {
+            records.push(record); record = [];
+            if (c === "\r" && text[i + 1] === "\n") i++;
+          }
+        } else value += c;
+      }
+      if (quoted || value || record.length) throw new Error("CSV has an unfinished record");
+      return records;
+    };
+    const columns = ["month", "team", "requests", "estimated_list_cost_usd", "unpriced_requests", "input", "output", "cache_read", "cache_write_5m", "cache_write_1h", "cache_write_unsplit"];
+    const moneyMicros = (usd) => { const [whole, fraction] = usd.split("."); return BigInt(whole) * 1_000_000n + BigInt(fraction); };
+    const nums = (row) => row.slice(2).map((v, i) => i === 1 ? moneyMicros(v) : BigInt(v));
+    const sums = (s) => [s.requests, s.est_list_usd_micros, s.unpriced_requests, s.input, s.output, s.cache_read, s.cache_write_5m, s.cache_write_1h, s.cache_write_unsplit].map(BigInt);
+    const csvOf = (u, query = "month=2024-02", ws = A) => call(u.who, "GET", `/api/v2/workspaces/${ws}/spend/export?${query}`, { cookie: u.cookie });
+    const original = withDb((d) => ({
+      usage: d.prepare("SELECT request_key, ts FROM v2_usage WHERE ws_id = ?").all(A),
+      team: d.prepare("SELECT name FROM v2_pods WHERE id = ?").get(P1).name,
+    }));
+    const rollModel = "spend-export-test";
+    try {
+      // Temporary database fixtures, restored below. Include both month edges, leap day and retained usage in each category.
+      withDb((d) => {
+        d.prepare("UPDATE v2_usage SET ts = '2024-02-15T12:00:00.000Z' WHERE ws_id = ?").run(A);
+        for (const [request, ts] of [["r1", "2024-01-31T23:59:59.999Z"], ["r2", "2024-02-01T00:00:00.000Z"], ["r3", "2024-02-29T23:59:59.999Z"], ["r4", "2024-03-01T00:00:00.000Z"]]) {
+          d.prepare("UPDATE v2_usage SET ts = ? WHERE ws_id = ? AND request_key = ?").run(ts, A, reqKey(D3, request));
+        }
+        const insert = d.prepare("INSERT INTO v2_spend_rollups (ws_id, goal_id, day, model, basis, requests, input, output, cache_read, cache_write_5m, cache_write_1h, cache_write_unsplit, est_list_usd_micros, unpriced_requests) VALUES (?, ?, ?, ?, 'unknown', 2, 11, 13, 17, 19, 23, 29, 1, 1)");
+        for (const goal of [G2.id, GP.id, ""]) insert.run(A, goal, "2024-02-29", rollModel);
+        insert.run(A, G1.id, "2024-03-01", rollModel);
+      });
+      const started = Date.now();
+      for (const u of users) {
+        const csv = await csvOf(u);
+        const records = parseCsv(csv.text);
+        const data = records.slice(5), total = data.at(-1);
+        const report = (await call(u.who, "GET", `/api/v2/workspaces/${A}/spend?by=team&from=2024-02-01T00:00:00.000Z&to=2024-03-01T00:00:00.000Z`, { cookie: u.cookie })).json;
+        const expected = [...report.rows.map((row) => [row.label, sums(row)]), ["Not bound to a goal", sums(report.unallocated)], ["Total", sums(report.total)]];
+        const matches = expected.every(([label, values]) => {
+          const row = data.find((r) => r[1] === label);
+          return row && nums(row).every((n, i) => n === values[i]);
+        });
+        check(`spend export: ${u.who} matches exactly the on-screen team report's rows and amounts`,
+          csv.status === 200 && JSON.stringify(records[4]) === JSON.stringify(columns) && data.length === expected.length && data.every((r) => r.length === columns.length && r[0] === "2024-02") && matches &&
+          total[1] === "Total" && nums(total).every((n, i) => n === data.slice(0, -1).reduce((sum, r) => sum + nums(r)[i], 0n)) &&
+          !csv.text.includes(CANARY) && !csv.text.includes(GP.id) && !users.some((p) => csv.text.includes(p.email) || csv.text.includes(p.name)) && !csv.text.includes(S3a), csv.text);
+        check(`spend export: ${u.who} receives an estimate disclaimer, UTC month, current generation time and private no-store attachment`,
+          records[0][1] === report.note && records[1].join() === "Month (UTC),2024-02" && records[2][0] === "Generated at (UTC)" &&
+          records[2][1].endsWith("Z") && Date.parse(records[2][1]) >= started && Date.parse(records[2][1]) <= Date.now() &&
+          csv.headers.get("content-type") === "text/csv; charset=utf-8" && csv.headers.get("content-disposition") === 'attachment; filename="align-spend-2024-02.csv"' &&
+          csv.headers.get("cache-control") === "private, no-store" && csv.headers.get("x-content-type-options") === "nosniff" && csv.text.endsWith("\r\n"), csv.text);
+      }
+      const ownerCsv = parseCsv((await csvOf(U1)).text).slice(5);
+      check("spend export: UTC start included, next month excluded, leap-day end included; raw and rolled-up unpriced requests count",
+        ownerCsv.at(-1)[2] === "12" && ownerCsv.at(-1)[4] === "4" && ownerCsv.find((r) => r[1] === "Not bound to a goal")[2] === "4", JSON.stringify(ownerCsv));
+      for (const name of ['=1+1,\n"quoted"', "+SUM(1,2)", "-1+2", "@SUM(A1:A2)", "\t=1+1", "\r=1+1", 'Finance, "East"\n東京']) {
+        withDb((d) => d.prepare("UPDATE v2_pods SET name = ? WHERE id = ?").run(name, P1));
+        const csv = await csvOf(U2);
+        const data = parseCsv(csv.text).slice(5);
+        const safeName = /^[=+\-@\t\r]/.test(name) ? `'${name}` : name;
+        const hiddenCsv = await csvOf(U4);
+        // U4 is a viewer in no team. Their CSV names exactly the teams their on-screen team report names, and no team's no-goal spend.
+        const hiddenRows = parseCsv(hiddenCsv.text).slice(5);
+        const hiddenReport = (await call(U4.who, "GET", `/api/v2/workspaces/${A}/spend?by=team&from=2024-02-01T00:00:00.000Z&to=2024-03-01T00:00:00.000Z`, { cookie: U4.cookie })).json;
+        check(`spend export: quotes and neutralizes ${JSON.stringify(name)}; a viewer receives the same goal-bound team name as the on-screen report`,
+          csv.status === 200 && data.some((r) => r[1] === safeName && r.length === columns.length) && !data.some((r) => /^[=+\-@\t\r]/.test(r[1])) &&
+          hiddenRows.every((r) => !/^[=+\-@\t\r]/.test(r[1])) && !hiddenRows.some((r) => /: spend in no goal$/.test(r[1])) &&
+          hiddenReport.rows.every((row) => hiddenRows.some((r) => r[1] === (/^[=+\-@\t\r]/.test(row.label) ? `'${row.label}` : row.label))) &&
+          hiddenRows.some((r) => r[1] === safeName) === hiddenReport.rows.some((row) => row.label === name), `${csv.text}\n${hiddenCsv.text}`);
+      }
+      withDb((d) => d.prepare("UPDATE v2_pods SET name = ? WHERE id = ?").run(original.team, P1));
+      for (const month of ["2024-12", "2025-01", "0099-02", "9999-12"]) {
+        const csv = await csvOf(U4, `month=${month}`);
+        const data = parseCsv(csv.text).slice(5);
+        check(`spend export: empty ${month} has only the table's zero unallocated and total rows`,
+          csv.status === 200 && data.map((r) => r[1]).join("|") === "Not bound to a goal|Total" && data.every((r) => r[0] === month && nums(r).every((n) => n === 0n)), csv.text);
+      }
+      const invalid = ["", "month=", "month=2024-2", "month=2024-00", "month=2024-13", "month=0000-01", "month=2024-02-01", "month=2024-02T00:00:00Z", "month=2024-02&month=2024-03", "month=%3D1%2B1", "month=2024-02%0D%0AX-Test:yes"];
+      const invalidResults = await Promise.all(invalid.map((q) => csvOf(U4, q)));
+      check("spend export: missing, repeated, malformed and header-injection months return 400 JSON, never CSV",
+        invalidResults.every((r) => r.status === 400 && r.json?.error === "bad_request" && !r.headers.get("content-disposition")), invalidResults.map((r) => r.status).join());
+      const authResults = await Promise.all([
+        call("anon", "GET", `/api/v2/workspaces/${A}/spend/export`),
+        csvOf(U1, "month=invalid", B),
+        call("U1", "GET", `/api/v2/workspaces/${A}/spend/export?month=2024-02`, { bearer: D1.access, cookie: U1.cookie }),
+      ]);
+      check("spend export: report authorization precedes month validation: anonymous 401, non-member 404, device token 403",
+        authResults.map((r) => r.status).join() === "401,404,403" && authResults.every((r) => !r.headers.get("content-disposition")), authResults.map((r) => `${r.status} ${r.text}`).join(" | "));
+
+      if (existsSync(CHROME)) {
+        const { default: puppeteer } = await import("puppeteer-core");
+        const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+        const downloads = mkdtempSync(path.join(os.tmpdir(), "align-spend-export-"));
+        try {
+          const page = await browser.newPage(), errors = [];
+          page.on("pageerror", (e) => errors.push(String(e)));
+          await page.setCookie(...U4.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          const cdp = await page.createCDPSession();
+          await cdp.send("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: downloads });
+          await page.setViewport({ width: 1280, height: 900 });
+          await page.goto(`${BASE}/app/w/${A}/spend`, { waitUntil: "networkidle0" });
+          await page.waitForSelector('input[aria-label="Export month (UTC)"]');
+          const current = await page.$eval('[data-spend-export] input[type="month"]', (e) => e.value);
+          await page.screenshot({ path: path.join(ROOT, ".next/spend-export-desktop.png"), fullPage: true });
+          await page.setViewport({ width: 390, height: 844 });
+          await page.select('select[aria-label="Group by"]', "session");
+          await page.$eval('[data-spend-export] input[type="month"]', (e) => {
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(e, "2024-02");
+            e.dispatchEvent(new Event("input", { bubbles: true }));
+          });
+          const exportButton = () => page.$eval("[data-spend-export] button", (b) => b.click());
+          const request = page.waitForRequest((r) => r.url().includes("/spend/export?month=2024-02"));
+          await exportButton();
+          await request;
+          const file = path.join(downloads, "align-spend-2024-02.csv");
+          for (let i = 0; i < 100 && !existsSync(file); i++) await sleep(50);
+          const saved = existsSync(file) ? parseCsv(readFileSync(file, "utf8")).slice(5) : [];
+          const expected = parseCsv((await csvOf(U4)).text).slice(5);
+          const fit = await page.evaluate(() => ({
+            sw: document.scrollingElement.scrollWidth, width: innerWidth,
+            controls: [...document.querySelectorAll('[data-spend-export] input, [data-spend-export] button')].filter((e) => e.matches('[data-spend-export] input[type="month"]') || e.textContent === "Download team CSV").map((e) => {
+              const r = e.getBoundingClientRect(); return { h: r.height, left: r.left, right: r.right };
+            }),
+          }));
+          await page.screenshot({ path: path.join(ROOT, ".next/spend-export-390.png"), fullPage: true });
+          check("spend export (Chrome): viewer downloads the selected UTC month by team while viewing sessions; current UTC month is the default; controls fit 390 px and are at least 44 px tall",
+            current === new Date().toISOString().slice(0, 7) && JSON.stringify(saved) === JSON.stringify(expected) && saved.length > 0 && fit.sw <= fit.width && fit.controls.length === 2 &&
+            fit.controls.every((r) => r.h >= 44 && r.left >= 0 && r.right <= 390) && errors.length === 0, `${JSON.stringify(fit)} ${errors.join(" | ")}`);
+          await page.deleteCookie(...(await page.cookies()));
+          await exportButton();
+          await page.waitForFunction(() => [...document.querySelectorAll('[role="alert"]')].some((e) => /Could not download/.test(e.textContent)), { timeout: 10000 });
+          check("spend export (Chrome): an expired sign-in leaves a visible download error on the Spend page",
+            (await page.$eval('[role="alert"]', (e) => e.textContent)).includes("Sign in first") && errors.length === 0, errors.join(" | "));
+        } finally { await browser.close(); rmSync(downloads, { recursive: true, force: true }); }
+      } else check("spend export (Chrome): browser download and 390 px layout", false, `Chrome not found: ${CHROME}`);
+    } finally {
+      withDb((d) => {
+        for (const row of original.usage) d.prepare("UPDATE v2_usage SET ts = ? WHERE ws_id = ? AND request_key = ?").run(row.ts, A, row.request_key);
+        d.prepare("UPDATE v2_pods SET name = ? WHERE id = ?").run(original.team, P1);
+        d.prepare("DELETE FROM v2_spend_rollups WHERE ws_id = ? AND model = ?").run(A, rollModel);
+      });
+    }
+  }
+  // ---- END SPEND EXPORT ----
 
   // -- directives --
   const dirs = async (dev, cursor = 0) => (await call(dev.who, "GET", `/api/v2/directives?cursor=${cursor}`, { bearer: dev.access })).json;
@@ -1670,7 +2176,11 @@ try {
   );
   check("alignment: notes and counters never reach agents", !JSON.stringify(after).includes("Moving to onboarding") && !JSON.stringify(after).includes("only this one"), "a note reached a directive");
   const feedAfter = await call("U3", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D3.access });
-  check("alignment: G1 is now bindable for U3", feedAfter.json.goals.find((g) => g.id === G1.id).bindable === true, "");
+  check("LIM-2485: session-specific approval never makes G1 generally bindable for U3, including its directive snapshot", feedAfter.json.goals.find((g) => g.id === G1.id).bindable === false && bc.goal.bindable === false, "");
+  // A request can't move that session to G1 either: the agent reads the same narrowed feed and would have to turn it
+  // down, so the server refuses it first. The alignment's own binding_changed above is what moves the session.
+  const swCovered = await call(U1.who, "POST", `/api/v2/workspaces/${A}/goals/${G2.id}/requests`, { cookie: U1.cookie, body: { type: "switch_goal", session_keys: [S3a], target_goal_id: G1.id } });
+  check("LIM-2485: a switch_goal request to a goal the session's owner can bind only through an alignment -> 409 not_bindable, naming no goal", swCovered.status === 409 && swCovered.json?.error === "not_bindable" && !swCovered.text.includes(G1.title), swCovered.text);
   const againSame = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S3a] });
   const againOther = await al(U3, { target_goal_id: G3.id, choice: "work_toward", session_keys: [S3a] });
   check(
@@ -2240,6 +2750,23 @@ try {
     crRbyReq.status === 403 && crRbyReq.json?.error === "not_an_approver" && crRrej.json?.state === "rejected" && crRrej.json.rejected_by?.id === U3.id && crRrej.json.rejection_reason === "Out of scope this quarter" && crRrej.json.decision_note === "Out of scope this quarter" && crWbyLead.status === 403 && crWbyLead.json?.error === "not_requester" && crWok.json?.state === "withdrawn",
     `${crRbyReq.text} ${crRrej.text.slice(0, 200)} ${crWbyLead.text} ${crWok.json?.state}`,
   );
+  // LIM-2515 L1 (ruling A): the decline reason reaches only the requester, the decider and the approvers. A viewer still
+  // sees who declined it and when, never the reason, on the single read and on the workspace list.
+  {
+    const asReq = await crGet(U1, GL.id, crR.json?.id);
+    const asDecider = await crGet(U3, GL.id, crR.json?.id);
+    const asViewer = await crGet(U4, GL.id, crR.json?.id);
+    const viewerList = await call("U4", "GET", `/api/v2/workspaces/${A}/change-requests?state=rejected`, { cookie: U4.cookie });
+    const inList = [...(viewerList.json?.waiting_on_me ?? []), ...(viewerList.json?.mine ?? []), ...(viewerList.json?.others ?? [])].find((c) => c.id === crR.json?.id);
+    check(
+      "LIM-2515 L1: a decline reason goes to the requester and the decider; a viewer gets rejected_by and decided_at with rejection_reason and decision_note null (single read and list)",
+      asReq.json?.rejection_reason === "Out of scope this quarter" && asReq.json.decision_note === "Out of scope this quarter" &&
+        asDecider.json?.rejection_reason === "Out of scope this quarter" &&
+        asViewer.status === 200 && asViewer.json?.rejection_reason === null && asViewer.json.decision_note === null && asViewer.json.rejected_by?.id === U3.id && typeof asViewer.json.decided_at === "string" &&
+        !!inList && inList.rejection_reason === null && inList.decision_note === null,
+      `${asReq.json?.rejection_reason} | ${asDecider.json?.rejection_reason} | ${asViewer.status} ${asViewer.json?.rejection_reason} ${asViewer.json?.decision_note} | list ${!!inList} ${inList?.rejection_reason}`,
+    );
+  }
   // The LIM-2455 checklist (§C, §A): the reason and note caps on reject and counter, an approver declining while a counter
   // waits on the requester, and decisions are cookie-only (a device token proposes and decides nothing).
   const crCap = await propose(U1, GL.id, { base_version: 2, changes: { title: "Pen-test the mobile app" }, reason: "Mobile too" });
@@ -3099,8 +3626,8 @@ try {
   );
   const allAudit = withDb((d) => d.prepare("SELECT ws_id, actor_id, action FROM v2_audit WHERE ws_id = ? OR action LIKE 'device.%' OR action LIKE 'team.%'").all(A));
   check(
-    "audit: team actions are written as team.*; a person revoking a device is its actor; only refresh-token reuse has no actor",
-    allAudit.some((r) => r.action === "team.member_set" && r.actor_id === U2.id) && allAudit.some((r) => r.action === "team.member_removed") && allAudit.some((r) => r.action === "device.revoked" && r.actor_id === U3.id) && allAudit.filter((r) => r.actor_id === null).length >= 1 && allAudit.filter((r) => r.actor_id === null).every((r) => r.action === "device.revoked"),
+    "audit: team actions are written as team.*; a person revoking a device is its actor; only refresh-token reuse and a refresh retry have no actor",
+    allAudit.some((r) => r.action === "team.member_set" && r.actor_id === U2.id) && allAudit.some((r) => r.action === "team.member_removed") && allAudit.some((r) => r.action === "device.revoked" && r.actor_id === U3.id) && allAudit.filter((r) => r.actor_id === null).length >= 1 && allAudit.filter((r) => r.actor_id === null).every((r) => r.action === "device.revoked" || r.action === "device.refresh_retried"),
     JSON.stringify(allAudit.filter((r) => r.actor_id === null)),
   );
 
@@ -3796,16 +4323,18 @@ try {
           h1: document.querySelector("main h1")?.getBoundingClientRect().top ?? null,
           header: document.querySelector("header")?.innerText ?? "",
           tabs: document.querySelector('nav[aria-label="Workspace"]')?.innerText ?? "",
+          rail: document.querySelector("aside")?.innerText ?? "",
+          workspace: document.querySelector('select[aria-label="Switch workspace"]')?.selectedOptions[0]?.textContent ?? "",
           prompt: document.querySelector("#passkey-prompt")?.innerText ?? null,
         }));
       };
-      const [chrome390, chrome1000] = [await chromeAt(390), await chromeAt(1000)];
+      const [chrome390, chrome1000, chrome1280] = [await chromeAt(390), await chromeAt(1000), await chromeAt(1280)];
       const wsAName = ((await call("U1", "GET", "/api/v2/workspaces", { cookie: U1.cookie })).json?.workspaces ?? []).find((w) => w.id === A)?.name;
       check(
-        "ui (Chrome, main #44): at 390x844 the chrome is compact: the Home's heading starts above y=300, the top bar has no person's name, the passkey prompt is one short sentence and the tab row has no workspace name; at 1000 the name and the workspace show",
+        "ui (Chrome, main #44, LIM-2472): at 390x844 the chrome is compact: the Home's heading starts above y=300, the top bar has no person's name, the passkey prompt is one short sentence and the tab row has no workspace name; at 1000 the top bar names the workspace and not the person; at 1280 the rail names the person and the switcher shows the workspace",
         chrome390.h1 !== null && chrome390.h1 < 300 && !chrome390.header.includes(U1.name) && !chrome390.tabs.includes(wsAName) && (chrome390.prompt === null || (/Sign in with a passkey instead of an email code\./.test(chrome390.prompt) && !/phished/.test(chrome390.prompt))) &&
-          chrome1000.header.includes(U1.name) && chrome1000.tabs.includes(wsAName),
-        JSON.stringify({ wsAName, tabs390: chrome390.tabs.slice(0, 40), tabs1000: chrome1000.tabs.slice(0, 40), h1: chrome390.h1, header390: chrome390.header }),
+          chrome1000.header.includes(wsAName) && !chrome1000.header.includes(U1.name) && chrome1280.rail.includes(U1.name) && chrome1280.workspace === wsAName,
+        JSON.stringify({ wsAName, tabs390: chrome390.tabs.slice(0, 40), header1000: chrome1000.header, rail1280: chrome1280.rail.slice(-120), workspace1280: chrome1280.workspace, h1: chrome390.h1, header390: chrome390.header }),
       );
       await page.setViewport({ width: 390, height: 844 });
       const short = [];
@@ -3871,8 +4400,8 @@ try {
       const appsReads = await readsOf(`/app/w/${A}/apps`);
       const nOf = (xs, re) => xs.filter((x) => re.test(x)).length;
       check(
-        "ui (Chrome, main #44): one read of the connected apps per page and no poll: over 3 s after load the Home reads .../home once and .../apps never, and the Apps tab reads .../apps once",
-        nOf(homeReads, /\/home$/) === 1 && nOf(homeReads, /\/apps$/) === 0 && nOf(appsReads, /\/apps$/) === 1,
+        "ui (Chrome, main #44, LIM-2472): over 3 s after load, for a person whose app Align has seen (so first run stops checking), the Home reads .../home twice (Home and its Needs list) and .../apps once (first run), and the Apps tab reads .../apps once",
+        nOf(homeReads, /\/home$/) === 2 && nOf(homeReads, /\/apps$/) === 1 && nOf(appsReads, /\/apps$/) === 1,
         JSON.stringify({ homeReads, appsReads }),
       );
       const parentNow = (await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${GT.id}`, { cookie: U1.cookie })).json?.goal;
@@ -4156,79 +4685,107 @@ try {
       await page.type('#test-idp input[type="email"]', "ui@example.test");
       await page.type('#test-idp input[type="password"]', "browser-pass-1");
       await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => document.querySelector("#test-idp button[type=submit]")?.click())]);
-      await page.waitForFunction(() => document.body.innerText.includes("Your workspaces") && document.body.innerText.includes("Create the Northstar sample"), { timeout: 15000 });
+      await page.waitForFunction(() => document.body.innerText.includes("No workspaces yet") && document.body.innerText.includes("Create the Northstar sample"), { timeout: 15000 });
       // First run: the sample, then its pending change request approved from the Requests tab.
       await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create the Northstar sample")?.click())]);
       await page.waitForFunction(() => document.body.innerText.includes("Expand to regulated customers") && document.body.innerText.includes("Pass the security review"), { timeout: 15000 });
       const sampleUrl = page.url();
       await page.goto(`${sampleUrl}/requests`, { waitUntil: "networkidle0" });
-      await page.waitForFunction(() => document.body.innerText.includes("Waiting on you") && document.body.innerText.includes("waiting for approval") && document.body.innerText.includes("Pen test window booked"), { timeout: 15000 });
-      const requestsText = await page.evaluate(() => document.body.innerText);
-      // With no evidence, choosing Approve asks first ("Approve without evidence?"); then evidence is added and the
-      // confirmation says what approving does: it records the decision, and agents switch only at launch.
+      await page.waitForFunction(() => !!document.querySelector("[data-desk]") && /^1 decision waiting on you\./.test(document.querySelector("[data-desk-summary]")?.textContent ?? ""), { timeout: 15000 });
+      const sampleCr = await page.$eval("[data-row]", (e) => e.getAttribute("data-row"));
+      const requestsText = await page.evaluate(() => document.querySelector("[data-desk]")?.innerText ?? "");
+      // The row opens the review drawer: the reason and what it changes are there, not on the row.
+      await page.evaluate(() => document.querySelector('[data-desk] a[href*="review="]')?.click());
+      await page.waitForFunction(
+        (id) => {
+          const t = document.querySelector(`[data-review="${id}"]`)?.innerText ?? "";
+          return t.includes("This is a sample change request.") && t.includes("Pen test window booked") && /Waits on you/.test(t);
+        },
+        { timeout: 15000 },
+        sampleCr,
+      );
+      const reviewText = () => page.$eval(`[data-review="${sampleCr}"]`, (e) => e.innerText);
       const clickButton = (label) => page.evaluate((t) => [...document.querySelectorAll("button")].find((b) => b.textContent === t)?.click(), label);
-      await page.click('[data-decision="Approve"]');
-      await page.waitForFunction(() => document.body.innerText.includes("Approve without evidence?") && document.querySelector('[data-decision="Approve"]')?.getAttribute("aria-pressed") === "true", { timeout: 15000 });
-      const approvePanel = await page.evaluate(() => document.body.innerText);
+      const buttonShows = (label) => page.waitForFunction((t) => [...document.querySelectorAll("button")].some((b) => b.textContent === t), { timeout: 15000 }, label);
+      // With no evidence the review says approving is recorded as such, and the confirmation says so again; then evidence
+      // is added and the confirmation says what approving does: it records the decision, and launching is a separate step.
+      const approvePanel = await reviewText();
+      await page.click('[data-decision="Approve only"]');
+      await buttonShows("Review this decision");
+      await clickButton("Review this decision");
+      await page.waitForSelector('[data-confirm="approve"]', { timeout: 15000 });
+      const noEvidenceConfirm = await page.$eval("[data-confirm]", (e) => e.innerText);
+      await clickButton("Back");
+      await buttonShows("Cancel");
+      await clickButton("Cancel");
+      await page.waitForFunction(() => !document.querySelector("[data-decision-input]") && !document.querySelector("[data-confirm]"), { timeout: 15000 });
       await clickButton("Add evidence");
-      await page.waitForSelector('input[type="url"]');
-      await page.type('input[type="url"]', "https://github.com/northstar/security/pull/7");
-      await page.type('input[maxlength="120"]', "Pen-test vendor contract");
+      await page.waitForSelector('[data-add-evidence] input[type="url"]');
+      await page.type('[data-add-evidence] input[type="url"]', "https://github.com/northstar/security/pull/7");
+      await page.type('[data-add-evidence] input[maxlength="120"]', "Pen-test vendor contract");
       await clickButton("Add link");
       await page.waitForFunction(() => [...document.querySelectorAll("a")].some((a) => a.textContent === "Pen-test vendor contract"), { timeout: 15000 });
       const evLink = await page.evaluate(() => {
         const a = [...document.querySelectorAll("a")].find((x) => x.textContent === "Pen-test vendor contract");
-        return { href: a?.getAttribute("href"), target: a?.getAttribute("target"), rel: a?.getAttribute("rel"), text: document.body.innerText };
+        const row = a?.closest("li");
+        return { href: a?.getAttribute("href"), target: a?.getAttribute("target"), rel: a?.getAttribute("rel"), row: row?.innerText ?? "", evidence: row?.querySelector("[data-evidence]")?.getAttribute("data-evidence") ?? null };
       });
+      const evReview = await reviewText();
       check(
-        "ui (Chrome): choosing Approve on a request with no evidence asks \"Approve without evidence?\"; an added link shows its kind, label, host, who added it and \"self-reported\", opens in a new tab with rel noopener noreferrer, beside \"Recorded by Align at revision 1\"",
-        approvePanel.includes("Approve without evidence?") && evLink.href === "https://github.com/northstar/security/pull/7" && evLink.target === "_blank" && evLink.rel === "noopener noreferrer" && /self-reported/.test(evLink.text) && /Pull request/.test(evLink.text) && /github\.com/.test(evLink.text) && /by you/.test(evLink.text) && /Recorded by Align at revision 1/.test(evLink.text) && !/\bverified\b/.test(evLink.text.replace("never verified", "")),
-        JSON.stringify({ ...evLink, text: evLink.text.slice(0, 300) }),
+        "ui (Chrome, LIM-2472): the review of a request with no evidence says \"Approving without evidence is recorded as such.\" and the confirmation says the record will say so; an added link shows as Self-reported with who added it and the revision, opens in a new tab with rel noopener noreferrer, and nothing says verified",
+        approvePanel.includes("Approving without evidence is recorded as such.") && noEvidenceConfirm.includes("No evidence: the record will say it was approved without evidence.") && evLink.href === "https://github.com/northstar/security/pull/7" && evLink.target === "_blank" && evLink.rel === "noopener noreferrer" && evLink.evidence === "self" && /Self-reported/.test(evLink.row) && /you, revision 1/.test(evLink.row) && !/\bverified\b/.test(evReview),
+        JSON.stringify({ ...evLink, approvePanel: approvePanel.slice(0, 300), noEvidenceConfirm: noEvidenceConfirm.slice(0, 300) }),
       );
-      await page.waitForFunction(() => !document.body.innerText.includes("Approve without evidence?"), { timeout: 15000 });
+      await page.click('[data-decision="Approve only"]');
+      await buttonShows("Review this decision");
       await clickButton("Review this decision");
-      await page.waitForFunction(() => document.activeElement?.textContent === "Confirm: Approve", { timeout: 15000 });
+      await page.waitForFunction(() => document.activeElement?.tagName === "H4" && document.activeElement.textContent.startsWith("Approve only: "), { timeout: 15000 });
       const confirmText = await page.$eval("[data-confirm]", (e) => e.innerText);
-      await clickButton("Confirm: Approve");
-      await page.waitForFunction(() => document.body.innerText.includes("Approved, agents still on v1 until launch") && document.body.innerText.includes("Approved with 1 evidence link, none verified."), { timeout: 15000 });
+      await clickButton("Confirm: Approve only");
+      await page.waitForFunction(() => [...document.querySelectorAll('[data-notice="done"]')].some((n) => n.textContent.startsWith("Recorded: you approved revision 1")) && [...document.querySelectorAll("button")].some((b) => b.textContent === "Launch v2"), { timeout: 15000 });
       const approvedText = await page.evaluate(() => document.body.innerText);
       const launchButtons = await page.evaluate(() => [...document.querySelectorAll("button")].map((b) => b.textContent));
       check(
-        "ui (Chrome): the approve confirmation says approval is not launch (agents stay on version 1 until someone launches it) and what happens (version 2 recorded as approved); after confirming the record says \"Recorded: you approved revision 1 as version 2\" and reads \"Approved, agents still on v1 until launch\" (not \"It became version 2\", never \"agents on v2\") and offers Launch version 2 to agents and Not yet",
-        /Approval is not launch\. Agents stay on version 1 until someone who can launch it does\./.test(confirmText) && /waiting for approval → approved\. Version 2 is recorded as approved/.test(confirmText) && /Recorded: you approved revision 1 as version 2/.test(approvedText) &&
-          !approvedText.includes("It became version 2") && !/agents on v2/.test(approvedText) && launchButtons.includes("Launch version 2 to agents") && launchButtons.includes("Not yet"),
+        "ui (Chrome, LIM-2472): the approve confirmation says approval is not launch (version 2 becomes the launched version only when someone launches it); after confirming the review says \"Recorded: you approved revision 1\", \"Approved, not launched\" and that approval is not launch (never \"It became version 2\" or \"agents on v2\") and offers Launch v2 and Not yet",
+        /Approval is not launch: version 2 becomes the launched version only when someone launches it\./.test(confirmText) && /Recorded: you approved revision 1\./.test(approvedText) && /Approved, not launched/.test(approvedText) && /Approval is not launch: version 2 becomes the launched version only when /.test(approvedText) &&
+          !approvedText.includes("It became version 2") && !/agents on v2/.test(approvedText) && launchButtons.includes("Launch v2") && launchButtons.includes("Not yet"),
         `${confirmText.slice(0, 600)} | ${approvedText.slice(0, 600)}`,
       );
-      await clickButton("Launch version 2 to agents");
-      await page.waitForFunction(() => document.body.innerText.includes("Launched, agents on v2") && document.body.innerText.includes("It became version 2") && document.body.innerText.includes("Approved with 1 evidence link, none verified."), { timeout: 15000 });
-      const sampleGoal = await page.evaluate(() => [...document.querySelectorAll("a")].find((a) => a.textContent === "Pass the security review")?.getAttribute("href"));
-      await page.goto(`${BASE}${sampleGoal}`, { waitUntil: "networkidle0" });
+      await page.click('[data-decision="Launch v2"]');
+      await buttonShows("Confirm: Launch v2");
+      await clickButton("Confirm: Launch v2");
+      await page.waitForFunction(() => document.body.innerText.includes("Launched by you") && document.body.innerText.includes("Launched v2"), { timeout: 15000 });
+      const sampleGoal = new URL(page.url()).searchParams.get("review")?.split(".")[0];
+      await page.goto(`${sampleUrl}/goals/${sampleGoal}`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Change requests") && document.body.innerText.includes("approved") && document.body.innerText.includes("version 2"), { timeout: 15000 });
       const ownGoalText = await page.evaluate(() => document.body.innerText);
-      check("ui (Chrome): first run offers the Northstar sample; its request is approved and launched from the Requests tab; the owner's goal page lists it without Propose a change", !ownGoalText.includes("Propose a change") && /Your requests/.test(requestsText), "");
+      check("ui (Chrome): first run offers the Northstar sample; its request is approved and launched from the Requests tab; the owner's goal page lists it (\"Approved with 1 evidence link, none verified.\", \"It became version 2\") without its own Full change form (the rail's Propose a change is on every page)", !ownGoalText.includes("Full change form") && ownGoalText.includes("Approved with 1 evidence link, none verified.") && ownGoalText.includes("It became version 2") && /Waiting on me 1/.test(requestsText), `${requestsText.slice(0, 200)} | ${ownGoalText.slice(0, 400)}`);
       await page.goto(`${BASE}/app`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Northstar (sample)") && !document.body.innerText.includes("Create the Northstar sample"), { timeout: 15000 });
       await page.type("main form input", "UI workspace");
       await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create")?.click())]);
-      // A new workspace opens on its Home, which points to the Goals tab for the first goal.
-      await page.waitForFunction(() => document.body.innerText.includes("Know what needs you") && document.body.innerText.includes("No active goals you can see."), { timeout: 15000 });
+      // A new workspace opens on its Home, which says it has no goals and leads with "Set the first goal" (LIM-2472 round 2:
+      // the first-run card replaces the empty goal list), which opens the Goals tab's form.
+      await page.waitForFunction(() => document.querySelector('h1[data-home-count="0"]')?.textContent === "No goals here yet" && [...document.querySelectorAll('[data-first-run="empty"] a[data-first-goal]')].some((a) => a.textContent === "Set the first goal"), { timeout: 15000 });
       const wsUrl = page.url();
-      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("a")].find((a) => a.textContent === "Create one on the Goals tab.")?.click())]);
-      check("ui (Chrome): a new workspace opens on its Home (\"Know what needs you\"); with no goals it links to the Goals tab at /app/w/<ws>/goals", new URL(page.url()).pathname === `${new URL(wsUrl).pathname}/goals`, page.url());
+      const newWsH1 = await page.$eval("h1[data-home-count]", (e) => e.textContent);
+      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => document.querySelector('[data-first-run="empty"] a[data-first-goal]')?.click())]);
+      check("ui (Chrome, LIM-2472 round 2): a new workspace opens on its Home (\"No goals here yet\"); its first-run card's \"Set the first goal\" opens the Goals tab at /app/w/<ws>/goals?first=1", newWsH1 === "No goals here yet" && new URL(page.url()).pathname === `${new URL(wsUrl).pathname}/goals` && new URL(page.url()).searchParams.get("first") === "1", `${newWsH1} ${page.url()}`);
       await page.waitForFunction(() => document.body.innerText.includes("New goal") && document.body.innerText.includes("Level"), { timeout: 15000 });
       await page.type('main form input:not([aria-label])', "Browser goal");
       await page.type('input[aria-label="Measure 1"]', "Browser measure");
       await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create goal")?.click());
       await page.waitForFunction(() => document.body.innerText.includes("Browser goal") && document.body.innerText.includes("Browser measure"), { timeout: 15000 });
       await page.goto(`${wsUrl}/spend`, { waitUntil: "networkidle0" });
-      await page.waitForFunction(() => document.body.innerText.includes("Estimated list cost") && document.body.innerText.includes("Total"), { timeout: 15000 });
+      // The header row is uppercase in CSS and innerText applies that, so read the cell's textContent.
+      await page.waitForFunction(() => [...document.querySelectorAll("thead th")].some((th) => th.textContent === "Estimated list cost") && document.body.innerText.includes("Total"), { timeout: 15000 });
       const spendText = await page.evaluate(() => document.body.innerText);
       await page.goto(`${wsUrl}/people`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => ["Invite someone", "Teams", "No teams yet.", "Leave workspace", "Create team"].every((x) => document.body.innerText.includes(x)), { timeout: 15000 });
       const peopleText = await page.evaluate(() => document.body.innerText);
       for (const t of ["sessions", "alignments", "requests"]) {
         await page.goto(`${wsUrl}/${t}`, { waitUntil: "networkidle0" });
-        await page.waitForFunction((x) => document.body.innerText.includes(x), { timeout: 15000 }, t === "sessions" ? "Shared sessions" : t === "requests" ? "You have not proposed a change" : "Waiting on you");
+        await page.waitForFunction((x) => document.body.innerText.includes(x), { timeout: 15000 }, t === "sessions" ? "Shared sessions" : t === "requests" ? "No change requests yet" : "Waiting on you");
       }
       await page.goto(`${wsUrl}/apps`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("No AI apps are connected to this workspace.") && document.body.innerText.includes("/api/mcp"), { timeout: 15000 });
@@ -4273,7 +4830,7 @@ try {
       await pk.type('#test-idp input[type="email"]', "pk@example.test");
       await pk.type('#test-idp input[type="password"]', "browser-pass-2");
       await Promise.all([pk.waitForNavigation({ waitUntil: "networkidle0" }), pk.evaluate(() => document.querySelector("#test-idp button[type=submit]")?.click())]);
-      await pk.waitForFunction(() => document.body.innerText.includes("Your workspaces"), { timeout: 15000 });
+      await pk.waitForFunction(() => document.body.innerText.includes("No workspaces yet"), { timeout: 15000 });
       const promptText = await pkText();
       await pkClick("Add a passkey", "#passkey-prompt a");
       await pk.waitForFunction(() => document.body.innerText.includes("No passkeys yet.") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Add a passkey"), { timeout: 15000 });
@@ -4345,6 +4902,7 @@ try {
       await pkClick("Rename");
       await pk.waitForSelector('input[aria-label="Passkey name"]');
       await pk.click('input[aria-label="Passkey name"]', { clickCount: 3 });
+      await pk.$eval('input[aria-label="Passkey name"]', (e) => e.select());
       await pk.type('input[aria-label="Passkey name"]', "Work laptop");
       await pkClick("Save");
       await pk.waitForFunction(() => document.body.innerText.includes("Work laptop") && !document.body.innerText.includes("MacBook passkey"), { timeout: 15000 });
@@ -4682,8 +5240,10 @@ try {
           await page.goto(`${BASE}/app/w/${LW}/goals`, { waitUntil: "networkidle0" });
           await page.waitForFunction(() => document.body.innerText.includes("Ship the inference cluster"), { timeout: 15000 });
           await click(page, "Paste meeting notes");
-          await page.waitForSelector("textarea");
-          await page.type("textarea", notes);
+          // The notes box itself: the Goals tab's New goal form has textareas of its own (Anchors), and since PR 68 pass 1
+          // item 19 Paste meeting notes comes after that form.
+          await page.waitForSelector("textarea[data-notes]");
+          await page.type("textarea[data-notes]", notes);
           await click(page, "Suggest limits");
         };
         const pe = await asUser(LE);
@@ -5114,14 +5674,21 @@ try {
       await page.waitForFunction(() => document.querySelector("#goal-activity")?.textContent.includes("src/sso.ts"), { timeout: 15000 });
       const cardText = await page.evaluate(() => document.querySelector("#goal-activity")?.innerText ?? "");
       check(
-        "ui (Chrome): the goal page's Agent activity card shows sessions by harness, active now, the files and the reader's own sessions, and says counts come from bindings",
-        cardText.includes("Counts come from bindings, not from what agents wrote") && /Sessions\s+2 \(1 Claude Code, 1 Codex\)/.test(cardText) && /Active now\s+1/.test(cardText) && cardText.includes("src/login.ts") && cardText.includes("Your sessions") && errors.length === 0,
+        "ui (Chrome): the goal page's Agent activity card shows sessions by harness, reported activity, the files and the reader's own sessions, and says counts come from bindings",
+        cardText.includes("Counts come from bindings, not from what agents wrote") && /Sessions\s+2 \(1 Claude Code, 1 Codex\)/.test(cardText) && /Reported activity, last 90 min\s+1/.test(cardText) && cardText.includes("src/login.ts") && cardText.includes("Your sessions") && errors.length === 0,
         `${cardText} ${errors.join(" | ")}`,
       );
       const actClasses = await page.$$eval("#goal-activity [data-evidence-class]", (els) => els.map((e) => e.getAttribute("data-evidence-class")));
+      // LIM-2513 (one evidence wording): the class is the same label the Home and Apps use, with its icon and words.
+      const actLabels = await page.$$eval("#goal-activity [data-evidence-class] [data-evidence]", (els) => els.map((e) => [e.getAttribute("data-evidence"), !!e.querySelector("svg"), e.textContent?.trim()]));
       check(
-        "ui (Chrome, LIM-2455 §E2): the Agent activity card carries exactly one evidence class, \"agent reported\", and names the files as reported (\"Files these sessions reported working on\"), never \"Files agents are working on\"",
-        JSON.stringify(actClasses) === '["agent_reported"]' && cardText.includes("agent reported") && cardText.includes("Files these sessions reported working on") && !cardText.includes("Files agents are working on"),
+        "ui (Chrome, LIM-2513): the Agent activity card's class is the shared evidence label (data-evidence=\"reported\", an icon, \"Agent reported\"), not a lower-case pill",
+        JSON.stringify(actLabels) === '[["reported",true,"Agent reported"]]',
+        JSON.stringify(actLabels),
+      );
+      check(
+        "ui (Chrome, LIM-2455 §E2): the Agent activity card carries exactly one evidence class, \"Agent reported\", and names the files as reported (\"Files these sessions reported working on\"), never \"Files agents are working on\"",
+        JSON.stringify(actClasses) === '["agent_reported"]' && cardText.includes("Agent reported") && !cardText.includes("agent reported") && cardText.includes("Files these sessions reported working on") && !cardText.includes("Files agents are working on"),
         `${JSON.stringify(actClasses)} ${cardText.slice(0, 300)}`,
       );
       await page.goto(`${BASE}/app/w/${AK}/sessions`, { waitUntil: "networkidle0" });
@@ -5439,8 +6006,40 @@ try {
         page.on("pageerror", (e) => errors.push(e.message));
         await page.setViewport({ width: 1000, height: 420 });
         const [name, ...v] = V1.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
+        const [n3, ...v3] = V3.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
         await page.setCookie({ name, value: v.join("="), url: BASE });
+        // LIM-2472: the card is for the person who approved. V1, the workspace owner, didn't: no card, no read of it, no event.
+        const valueReads = [];
+        const onValueRead = (r) => {
+          if (/\/value$/.test(new URL(r.url()).pathname)) valueReads.push(r.url());
+        };
+        page.on("request", onValueRead);
+        const beforeV1 = eventsIn("value_card_viewed").length;
+        await page.goto(`${BASE}/app/w/${W}/goals/${GV.id}`, { waitUntil: "networkidle0" });
+        await page.waitForSelector(`[data-cr="${crP.json?.id}"]`, { timeout: 15000 });
+        const v1Card = await page.$("[data-value-card]");
+        page.off("request", onValueRead);
+        check(
+          "ui (Chrome, LIM-2472): a workspace owner who didn't approve the request sees no value card on the goal page, makes no read of it and records no view",
+          !v1Card && valueReads.length === 0 && eventsIn("value_card_viewed").length === beforeV1 && errors.length === 0,
+          `${!!v1Card} ${JSON.stringify(valueReads)} ${errors.join(" | ")}`,
+        );
+        // V3 approved it, so V3 gets the card; a non-owner's card lists only their own apps, so give V3 the two apps the
+        // card's apps row tells apart (one sent the launched version, one sent only the version before). Removed below.
+        withDb((d) => {
+          const ins = d.prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, last_read_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, ?, ?, 'app.example', ?, ?, ?, 'h', ?, ?)");
+          ins.run("gr_VALUEVALUEVALUE4", W, V3.id, "c-value-4", "Claude Code", sentAt, sentAt, sentAt, Date.now() + 86_400_000, vkid);
+          ins.run("gr_VALUEVALUEVALUE5", W, V3.id, "c-value-5", "Codex", sentAt, sentAt, sentAt, Date.now() + 86_400_000, vkid);
+          const sent = d.prepare("INSERT INTO v2_oauth_goal_sends (grant_id, ws_id, goal_id, version, sent_at) VALUES (?, ?, ?, ?, ?)");
+          sent.run("gr_VALUEVALUEVALUE4", W, GV.id, 2, sentAt);
+          sent.run("gr_VALUEVALUEVALUE5", W, GV.id, 1, sentAt); // the version before the launch: not this decision's
+        });
+        await page.setCookie({ name: n3, value: v3.join("="), url: BASE });
         const before = eventsIn("value_card_viewed").length;
+        // A short window, so the card starts below the fold: since LIM-2513 the goal page puts Change requests (and this
+        // card) right after the plan, above the agents and the forms, so at 900 tall it can open already in view.
+        const vp0 = page.viewport();
+        await page.setViewport({ ...vp0, height: 420 });
         await page.goto(`${BASE}/app/w/${W}/goals/${GV.id}`, { waitUntil: "networkidle0" });
         await page.waitForSelector(`[data-value-card="${crP.json?.id}"]`, { timeout: 15000 });
         const card = await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => ({ top: el.getBoundingClientRect().top, vh: window.innerHeight, text: el.innerText }));
@@ -5463,10 +6062,22 @@ try {
             belowFold === before && seenAfter === before + 1 && errors.length === 0,
           `${JSON.stringify({ top: card.top, vh: card.vh, before, belowFold, seenAfter })} ${card.text.slice(0, 300)} ${errors.join(" | ")}`,
         );
+        await page.setViewport(vp0);
+        // LIM-2513: the goal page reads plan, decisions, agents, then the forms: Change requests (with this card) comes
+        // before Agent activity, Agents on this goal and the New version form.
+        const order = await page.evaluate((id) => {
+          const y = (sel) => { const el = document.querySelector(sel); return el ? el.getBoundingClientRect().top + window.scrollY : null; };
+          return { cr: y("#change-requests"), card: y(`[data-value-card="${id}"]`), activity: y("#goal-activity"), form: y("#new-version") };
+        }, crP.json?.id);
+        check(
+          "ui (Chrome, LIM-2513): the goal page puts Change requests and its \"What this decision gave you\" card above Agent activity and the New version form",
+          order.cr !== null && order.card !== null && order.activity !== null && order.cr < order.card && order.card < order.activity && (order.form === null || order.activity < order.form),
+          JSON.stringify(order),
+        );
         const valueClasses = await page.$$eval(`[data-value-card="${crP.json?.id}"] [data-value-row="delivery"] [data-evidence-class]`, (els) => els.map((e) => e.getAttribute("data-evidence-class")));
         check(
           "ui (Chrome, LIM-2455 §E2): the value card's \"Agents on the new version\" line carries exactly one evidence class, a delivery receipt (the session's machine sent a receipt for the launched version)",
-          JSON.stringify(valueClasses) === '["delivery_receipt"]' && /delivery receipt/.test(card.text),
+          JSON.stringify(valueClasses) === '["delivery_receipt"]' && /Receipt/.test(card.text) && !/delivery receipt/i.test(card.text),
           JSON.stringify(valueClasses),
         );
         const appsRow = await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => {
@@ -5474,16 +6085,40 @@ try {
           return { text: row?.innerText ?? "", classes: [...(row?.querySelectorAll("[data-evidence-class]") ?? [])].map((e) => e.getAttribute("data-evidence-class")), apps: [...(row?.querySelectorAll("[data-value-app]") ?? [])].map((e) => e.getAttribute("data-value-app")) };
         });
         check(
-          "ui (Chrome, main #56): the launched request's value card has a \"Connected AI apps\" row with one evidence class (delivery receipt) naming the app Align sent version 2 (\"Claude Code (connected by Vic Two): Align sent it version 2 on <time>\"), not the app sent only version 1, and saying Align can't see what the app does next",
-          /Connected AI apps/i.test(appsRow.text) && JSON.stringify(appsRow.classes) === '["delivery_receipt"]' && JSON.stringify(appsRow.apps) === '["gr_VALUEVALUEVALUE1"]' && /Claude Code \(connected by Vic Two\): Align sent it version 2 on \S/.test(appsRow.text) && !/Codex/.test(appsRow.text) && /can.t see what the app does next/.test(appsRow.text),
+          "ui (Chrome, main #56): the launched request's value card has a \"Connected AI apps\" row with one evidence class (delivery receipt) naming the app Align sent version 2 (to the approver, who connected it: \"Claude Code (connected by you): Align sent it version 2 on <time>\"), not the app sent only version 1, and saying Align can't see what the app does next",
+          /Connected AI apps/i.test(appsRow.text) && JSON.stringify(appsRow.classes) === '["delivery_receipt"]' && JSON.stringify(appsRow.apps) === '["gr_VALUEVALUEVALUE4"]' && /Claude Code \(connected by you\): Align sent it version 2 on \S/.test(appsRow.text) && !/Codex/.test(appsRow.text) && /can.t see what the app does next/.test(appsRow.text),
           JSON.stringify(appsRow),
         );
+        // LIM-2513 (one evidence wording; Mini 0's check of PR 86): while Align has sent the launched version to an app,
+        // no page says "delivery receipt": the goal page, the Work page's Connected apps panel (its "Align sent it vN"
+        // sentence is "a receipt"), Home, Apps and Sessions. API values (delivery_receipt) are unchanged.
+        const saysOld = {};
+        let workSentence = "";
+        for (const [k, u] of [["goal", `/app/w/${W}/goals/${GV.id}`], ["work", `/app/w/${W}/work?goal=${GV.id}&cr=${crP.json?.id}`], ["home", `/app/w/${W}`], ["apps", `/app/w/${W}/apps`], ["sessions", `/app/w/${W}/sessions`]]) {
+          await page.goto(`${BASE}${u}`, { waitUntil: "networkidle0" });
+          await page.waitForFunction(() => !/Loading|Reading/.test(document.body.innerText.slice(0, 3000)), { timeout: 10000 }).catch(() => undefined);
+          if (k === "work") await page.waitForFunction(() => /Align sent it v\d/.test(document.body.innerText), { timeout: 10000 }).catch(() => undefined);
+          const t = await page.evaluate(() => document.body.innerText);
+          saysOld[k] = /delivery receipt/i.test(t);
+          if (k === "work") workSentence = (t.match(/"Align sent it v\d+" is a [^:]+:/) ?? [""])[0];
+        }
+        check(
+          "ui (Chrome, LIM-2513): with a version sent to a connected app, no page says \"delivery receipt\" (goal, Work, Home, Apps, Sessions); the Work page says \"Align sent it v2\" is a receipt",
+          Object.values(saysOld).every((v) => v === false) && /is a receipt:$/.test(workSentence),
+          JSON.stringify({ saysOld, workSentence }),
+        );
+        // value_card_viewed is once per person and only V3 can see this card, so a first view on the phone needs V3's
+        // view above cleared. The two test apps go too.
+        withDb((d) => {
+          d.prepare("DELETE FROM v2_oauth_goal_sends WHERE grant_id IN ('gr_VALUEVALUEVALUE4', 'gr_VALUEVALUEVALUE5')").run();
+          d.prepare("DELETE FROM v2_oauth_grants WHERE id IN ('gr_VALUEVALUEVALUE4', 'gr_VALUEVALUEVALUE5')").run();
+          d.prepare("DELETE FROM v2_events WHERE id = (SELECT MAX(id) FROM v2_events WHERE name = 'value_card_viewed' AND ws_id = ?)").run(W);
+        });
         // On a phone (390x844) the card is taller than the screen: its top seen for 1.5 s is a view, once; a second look
-        // adds nothing (V3, the approver, who has not viewed it yet).
+        // adds nothing (V3, the approver).
         {
           const phone = await browser.newPage();
           await phone.setViewport({ width: 390, height: 844 });
-          const [n3, ...v3] = V3.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
           await phone.setCookie({ name: n3, value: v3.join("="), url: BASE });
           const byV3 = () => withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_events WHERE name = 'value_card_viewed' AND ws_id = ? AND actor IS NOT NULL").get(W).n);
           const start = byV3();
@@ -5515,7 +6150,7 @@ try {
         // viewer nobody can approve V1's request.
         {
           await page.setViewport({ width: 1000, height: 900 });
-          await page.setCookie({ name, value: v.join("="), url: BASE }); // the phone page signed this browser in as V3
+          await page.setCookie({ name, value: v.join("="), url: BASE }); // this browser has been signed in as V3 since the value card
           const CONDV = `Accept if the checklist is reviewed ${randomBytes(3).toString("hex")}`;
           const GL2 = (await goalIn(V5, { title: "Launch checklist", visibility: "workspace" })).json;
           const crL = await call("V2", "POST", crBaseV(GL2.id), { cookie: V2.cookie, body: { base_version: 1, changes: { title: "Launch checklist, reviewed" }, reason: "Review it first" } });
@@ -5652,7 +6287,7 @@ try {
         // the focus once the page has settled (no request for half a second), so a read between the two finds no body.
         const settledNotice = async (page, kind) => {
           await page.waitForFunction((k) => document.activeElement?.getAttribute("data-notice") === k, { timeout: 15000 }, kind);
-          await page.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+          await page.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
           await page.waitForFunction((k) => document.activeElement?.getAttribute("data-notice") === k, { timeout: 15000 }, kind);
           return focused(page);
         };
@@ -5903,8 +6538,8 @@ try {
         };
         const home = async (page, ws) => {
           await page.goto(`${BASE}/app/w/${ws}`, { waitUntil: "networkidle0" });
-          await page.waitForSelector("[data-home-summary]", { timeout: 15000 });
-          await page.waitForSelector("[data-first-run-status]:not([data-first-run-status=checking])", { timeout: 15000 }).catch(() => undefined);
+          await page.waitForSelector('h1[data-home-count]:not([data-home-count="reading"])', { timeout: 15000 });
+          await page.waitForSelector('[data-first-run-status]:not([data-first-run-status=checking]), [data-first-run="compact"]', { timeout: 15000 }).catch(() => undefined);
         };
         const cardOf = (page) =>
           page.evaluate(() => {
@@ -5930,13 +6565,16 @@ try {
 
         const po = await pageAs(FO);
         await home(po, FW);
+        await po.click('[data-first-run="empty"] button:not([data-sample-create])');
+        await po.waitForSelector('[data-first-run-line]');
         const a = await cardOf(po);
         check(
-          "ui (Chrome, first run): on a workspace where no app was seen, the owner's Home shows \"Two ways to start\": Explore a sample (fictional), linking to their Northstar sample, and Connect one agent with Copy above the Claude Code line, what it can read (one line per read tool in the server's tools/list), what it can't do, \"No AI app is connected to this workspace yet.\" and that connecting is not a read",
-          a?.kind === "two" && a.title === "Two ways to start" && JSON.stringify(a.paths) === JSON.stringify(["sample", "connect"]) && a.sample === `/app/w/${SW}` && /fictional/i.test(a.sampleLabel) && /Fictional/.test(a.text) && /Nothing in it is real/.test(a.text) &&
-            a.line === `claude mcp add --transport http --scope user align 'http://127.0.0.1:${PORT}/api/mcp'; claude mcp login align` && a.copyBeforeLine && JSON.stringify([...a.tools].sort()) === JSON.stringify([...serverTools].sort()) &&
-            /can.t propose, approve, launch or change anything/.test(a.text) && a.status === "none" && a.statusText === "No AI app is connected to this workspace yet." && /Connecting is not a read/.test(a.text) && /last connected \(any request to Align\) and, separately, when it last read the goals/.test(a.text) && errors.length === 0,
-          `${JSON.stringify(a)} ${errors.join(" | ")}`,
+          "ui (Chrome, first run): empty Home offers the first goal and fictional sample; Connect an agent reveals the command, read tools, limits and observed connection status",
+          a?.kind === "empty" && /Set the first goal/.test(a.text) && a.sample === `/app/w/${SW}` && /fictional/.test(a.sampleLabel) &&
+            !!a.line && a.copyBeforeLine && serverTools.every((t) => a.tools.includes(t)) &&
+            /can.t.*propose, approve, launch or change/.test(a.text.replace(/\s+/g, " ")) && /Connecting is not a read/.test(a.text) &&
+            a.statusText === "No AI app is connected to this workspace yet." && errors.length === 0,
+          `kind ${a?.kind}; command ${!!a?.line}; tools ${a?.tools.length}`,
         );
 
         // Live status: an approved app with no request yet, then its first request (a connection): the card yields.
@@ -5949,50 +6587,43 @@ try {
         await po.waitForSelector('[data-first-run-status="approved"]', { timeout: 15000 });
         const st = await cardOf(po);
         withDb((d) => d.prepare("UPDATE v2_oauth_grants SET last_used_at = ? WHERE id = 'gr_FIRSTRUNFIRSTRU1'").run(new Date().toISOString()));
-        await po.waitForFunction(() => !document.querySelector("[data-first-run]") && /Connected .+, no goal read seen yet/.test(document.querySelector("#apps")?.innerText ?? ""), { timeout: 20000 });
-        const appsNow = await po.$eval("#apps", (e) => e.innerText);
+        await po.waitForFunction(() => !document.querySelector('[data-first-run-path="connect"]') && /Align has recorded no goal read from Claude Code/.test(document.querySelector("[data-needs-notice]")?.innerText ?? ""), { timeout: 20000 });
+        const appsNow = await po.$eval("[data-needs-notice]", (e) => e.innerText);
         check(
-          "ui (Chrome, first run): the status follows what Align sees without a reload: an approved app with no request reads \"Claude Code: approved <time>, Align hasn't seen it connect yet\"; after its first request the card is gone and the Home's apps section shows \"Connected <time>, no goal read seen yet\" (not observed), never a read",
-          /^Claude Code: approved .+, Align hasn't seen it connect yet\.$/.test(st?.statusText ?? "") && /Connected .+, no goal read seen yet/.test(appsNow) && !/Read the goals /.test(appsNow) && errors.length === 0,
+          "ui (Chrome, first run, LIM-2472): the status follows what Align sees without a reload: an approved app with no request reads \"Claude Code: approved <time>, Align hasn't seen it connect yet\"; after its first request the connection steps are gone and the Home's notice says Align has recorded no goal read from it, never a read",
+          /^Claude Code: approved .+, Align hasn't seen it connect yet\.$/.test(st?.statusText ?? "") && /Align has recorded no goal read from Claude Code/.test(appsNow) && !/Read the goals /.test(appsNow) && errors.length === 0,
           `${st?.statusText} | ${appsNow.slice(0, 300)} ${errors.join(" | ")}`,
         );
         withDb((d) => d.prepare("DELETE FROM v2_oauth_grants WHERE id = 'gr_FIRSTRUNFIRSTRU1'").run());
 
-        // Hide: per workspace, kept across a reload, focus back on the heading; blocked storage still hides it.
+        // First run ends by rule, never by a dismiss (LIM-2472): no Hide, and the card is back on every load until this
+        // person's app has made a request. With storage blocked the card still shows, with no page error.
+        const hideOf = (page) => page.$$eval("[data-first-run] button", (els) => els.some((b) => b.textContent === "Hide"));
         await home(po, FW);
-        await po.$$eval("[data-first-run] button", (els) => els.find((b) => b.textContent === "Hide")?.click());
-        await sleep(300);
-        const hid = await po.evaluate((ws) => ({ card: !!document.querySelector("[data-first-run]"), focus: document.activeElement?.tagName, stored: localStorage.getItem(`align.firstRun.hidden:${ws}`) }), FW);
-        await home(po, FW);
-        const stillHidden = !(await po.$("[data-first-run]"));
-        await home(po, SW);
-        const s = await cardOf(po);
-        await po.evaluate((ws) => localStorage.removeItem(`align.firstRun.hidden:${ws}`), FW);
+        const hasHide = await hideOf(po);
         await home(po, FW);
         const back = !!(await po.$("[data-first-run]"));
         const pb = await pageAs(FO, 1000, true);
         await home(pb, FW);
         const blockedShown = !!(await pb.$("[data-first-run]"));
-        await pb.$$eval("[data-first-run] button", (els) => els.find((b) => b.textContent === "Hide")?.click());
-        await sleep(300);
-        const blockedHidden = !(await pb.$("[data-first-run]"));
+        const blockedHide = await hideOf(pb);
         await pb.close(); // a page left in the background may be frozen by Chrome
         await po.bringToFront();
         check(
-          "ui (Chrome, first run): Hide removes the card, moves focus to the Home heading and keeps it hidden on that workspace after a reload (localStorage align.firstRun.hidden:<ws>), not on the sample's Home; with storage blocked the card shows and Hide still hides it with no page error",
-          !hid.card && hid.focus === "H1" && hid.stored === "1" && stillHidden && back && blockedShown && blockedHidden && s?.kind === "two" && errors.length === 0,
-          `${JSON.stringify(hid)} ${stillHidden} ${back} ${blockedShown} ${blockedHidden} ${errors.join(" | ")}`,
+          "ui (Chrome, first run, LIM-2472): the card has no Hide and is back after a reload until the person's app makes a request; with storage blocked it still shows, with no page error",
+          !hasHide && back && blockedShown && !blockedHide && errors.length === 0,
+          `${hasHide} ${back} ${blockedShown} ${blockedHide} ${errors.join(" | ")}`,
         );
+        await home(po, SW);
+        const s = await cardOf(po);
+        const sampleHeader = await po.$eval("header", (e) => e.innerText);
         check(
-          "ui (Chrome, first run): on the sample's own Home the explore path says the person is in the Northstar sample, that it is fictional, and links to its change request on the Requests tab",
-          /You are in the Northstar sample/.test(s?.text ?? "") && /fictional/.test(s?.text ?? "") && s?.sample === null,
-          s?.text.slice(0, 400),
+          "ui (Chrome, first run, LIM-2472): the sample has goals, so its own Home shows the compact panel (\"Connect your agent\", no link to the sample it is already in), and the top bar names the workspace \"Northstar (sample)\"",
+          s?.kind === "compact" && /Northstar is fictional/.test(s.text) && /Connect your agent/.test(s.text) && s.sample === null && sampleHeader.includes("Northstar (sample)"),
+          `${s?.text.slice(0, 400)} | ${sampleHeader}`,
         );
-        const sampleReq = await (async () => {
-          await home(po, SW);
-          return po.$$eval("[data-first-run] a", (els) => els.map((e) => [e.textContent, e.getAttribute("href")]));
-        })();
-        check("ui (Chrome, first run): the sample's explore link opens its Requests tab", sampleReq.some(([t, h]) => t === "Open the sample's change request" && h === `/app/w/${SW}/requests`), JSON.stringify(sampleReq));
+        const sampleReq = await po.$$eval('[data-needs="list"] li a', (els) => els.map((e) => [e.textContent, e.getAttribute("href")]));
+        check("ui (Chrome, first run, LIM-2472): on the sample's Home its change request is a Needs you row whose action opens the review", sampleReq.some(([t, h]) => t === "Review" && /review=/.test(h ?? "")), JSON.stringify(sampleReq));
 
         // A member with no sample: one path; a viewer: no line, told viewers can't connect.
         await po.close();
@@ -6005,9 +6636,9 @@ try {
         const v = await cardOf(pv);
         await pv.close();
         check(
-          "ui (Chrome, first run): a member with no sample sees only \"Connect one agent\" and \"You haven't connected an AI app to this workspace yet.\"; a viewer sees no command, only that viewers can't connect AI apps",
-          m?.kind === "connect" && m.title === "Connect one agent" && m.sample === null && !/Explore a sample/.test(m.text) && m.statusText === "You haven't connected an AI app to this workspace yet." && !!m.line &&
-            v?.line === null && /Viewers can.t connect AI apps to this workspace/.test(v?.text ?? "") && errors.length === 0,
+          "ui (Chrome, first run): a member with no goals sees the first-goal and optional connect actions; a viewer sees who can set the goals and no command",
+          m?.kind === "empty" && /Set the first goal/.test(m.text) && /Connect one agent/.test(m.text) && m.line === null &&
+            v?.kind === "viewer-empty" && v?.line === null && /A workspace owner or member sets them/.test(v?.text ?? "") && errors.length === 0,
           `${JSON.stringify(m)?.slice(0, 300)} ${JSON.stringify(v)?.slice(0, 300)}`,
         );
         // On a phone the card and its long line fit.
@@ -6486,10 +7117,19 @@ try {
     const hc = await import(pathToFileURL(path.join(ROOT, "lib/v2/home-core.mts")).href);
     const P = (id, name) => ({ id, name });
     check(
-      "home rules: an app's goal read (last_read_at) is a delivery receipt and no goal read is not observed; the three classes read \"Delivery receipt\", \"Agent reported\", \"Not observed\"; a request answer is agent reported, but an auto_accepted one (delivered, not declined: E2E-AGENT G1) is a delivery receipt",
+      "home rules: an app's goal read (last_read_at) is a delivery receipt and no goal read is not observed; the three classes read \"Receipt\", \"Agent reported\", \"Not observed\" (LIM-2513: the words every screen uses); a request answer is agent reported, but an auto_accepted one (delivered, not declined: E2E-AGENT G1) is a delivery receipt",
       hc.appEvidence("2026-10-31T00:00:00Z") === "delivery_receipt" && hc.answerEvidence("accepted", true) === "delivery_receipt" && hc.answerEvidence("accepted") === "agent_reported" && hc.answerEvidence("declined") === "agent_reported" && hc.answerEvidence("received") === "delivery_receipt" && hc.appEvidence(null) === "not_observed" && hc.appEvidence(undefined) === "not_observed" && hc.appEvidence("") === "not_observed" &&
-        JSON.stringify(hc.EVIDENCE_CLASSES) === JSON.stringify(["delivery_receipt", "agent_reported", "not_observed"]) && Object.values(hc.EVIDENCE_WORDS).join("|") === "Delivery receipt|Agent reported|Not observed",
+        JSON.stringify(hc.EVIDENCE_CLASSES) === JSON.stringify(["delivery_receipt", "agent_reported", "not_observed"]) && Object.values(hc.EVIDENCE_WORDS).join("|") === "Receipt|Agent reported|Not observed",
       "",
+    );
+    // LIM-2513: one time format on every screen: no numeric date, no seconds, the year only for another year.
+    const wh = await import(pathToFileURL(path.join(ROOT, "lib/v2/when.mts")).href);
+    const now = new Date("2026-11-13T12:00:00Z");
+    const wThis = wh.when("2026-11-13T16:25:49Z", now), wOld = wh.when("2025-10-02T16:05:00Z", now);
+    check(
+      "time format (LIM-2513): a time this year reads like \"Nov 13, 4:25 PM\" (month, day, minute; no year, no seconds, no numeric date) and another year's adds its year; no time is \"\" and an unparseable one is kept",
+      !/\d\/\d/.test(wThis) && !/:\d\d:\d\d/.test(wThis) && !/2026/.test(wThis) && /2025/.test(wOld) && !/:\d\d:\d\d/.test(wOld) && wh.when(null) === "" && wh.when("soon") === "soon",
+      JSON.stringify({ wThis, wOld }),
     );
     const T = "2026-10-31T00:00:00Z";
     const sw = (o) => hc.appStatusWords({ approved_at: "A", last_used_at: null, last_read_at: null, ...o }, (iso) => `@${iso}`);
@@ -6635,30 +7275,24 @@ try {
           await page.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
           return page;
         };
-        const tiles = (page) => page.$$eval("[data-tile]", (els) => Object.fromEntries(els.map((e) => [e.getAttribute("data-tile"), e.firstElementChild?.textContent ?? ""])));
+        const needRows = (page) => page.$$eval('[data-needs="list"] li', (els) => els.map((e) => ({ text: e.innerText, href: e.querySelector("a")?.getAttribute("href") ?? "" })));
+        const filterTo = (page, label) => page.evaluate((t) => [...document.querySelectorAll('[data-needs="list"] [role="radio"]')].find((b) => b.textContent.startsWith(t))?.click(), label);
         const po = await pageAs(HO);
         await po.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
-        await po.waitForSelector("[data-home-app]", { timeout: 15000 });
+        await po.waitForSelector('h1[data-home-count]:not([data-home-count="reading"])', { timeout: 15000 });
         const o = await po.evaluate(() => ({
           text: document.body.innerText,
           tab: [...document.querySelectorAll('nav[aria-label="Workspace"] a')].map((a) => [a.textContent, a.getAttribute("href")]),
-          apps: [...document.querySelectorAll("[data-home-app]")].map((e) => ({ classes: [...e.querySelectorAll("[data-evidence-class]")].map((c) => c.getAttribute("data-evidence-class")), text: e.innerText })),
-          appsSection: document.querySelector("#apps")?.innerText ?? "",
-          items: [...document.querySelectorAll("[data-home-item]")].map((e) => e.getAttribute("data-home-item")),
+          h1: document.querySelector("h1[data-home-count]")?.textContent ?? "",
+          count: document.querySelector("h1[data-home-count]")?.getAttribute("data-home-count") ?? "",
+          notice: document.querySelector("[data-needs-notice]")?.innerText ?? "",
         }));
-        const oT = await tiles(po);
+        const oRows = await needRows(po);
         check(
-          "ui (Chrome): the workspace opens on Home (\"Know what needs you\", the Home tab first, Goals at /goals): tiles Waiting on you 1, Waiting on others 0, Active goals 3, Connected apps that read the goals \"1 of 2\" (the app that only connected is not counted); the alignment is waiting on the owner with Open",
-          /Know what needs you/.test(o.text) && /1 thing waiting on you\./.test(o.text) && o.tab[0]?.[0] === "Home" && o.tab[0][1] === `/app/w/${HW}` && o.tab[1]?.[0] === "Goals" && o.tab[1][1] === `/app/w/${HW}/goals` &&
-            oT["Waiting on you"] === "1" && oT["Waiting on others"] === "0" && oT["Active goals"] === "3" && oT["Connected apps that read the goals"] === "1 of 2" && o.items.includes(`alignment:${alH.json?.id}`) && /Hank Other asks to align with Win the regulated market/.test(o.text),
-          `${JSON.stringify(oT)} ${JSON.stringify(o.tab)} ${o.text.slice(0, 400)}`,
-        );
-        check(
-          "ui (Chrome, §E2): every connected app on Home shows exactly one evidence class (delivery receipt with \"Read the goals <time>\"; the app that only connected not observed with \"Connected <time>, no goal read seen yet\"); the section says connecting is not a read and Align sees goal reads, not which version an app has or what it does; nothing on the page says \"on the current plan\" or infers working, stuck, blocked or diverged",
-          o.apps.length === 2 && o.apps.every((a) => a.classes.length === 1) && o.apps[0].classes[0] === "delivery_receipt" && /delivery receipt/.test(o.apps[0].text) && /Read the goals /.test(o.apps[0].text) && !/Connected .*no goal read/.test(o.apps[0].text) && /connected by Hedy Member/.test(o.apps[0].text) &&
-            o.apps[1].classes[0] === "not_observed" && /not observed/.test(o.apps[1].text) && /Connected .+, no goal read seen yet/.test(o.apps[1].text) && !/Read the goals/.test(o.apps[1].text) &&
-            /Connecting is not a read/.test(o.appsSection) && /not which version it has or what it does with them/.test(o.appsSection) && !/\b(working|stuck|blocked|diverged)\b/i.test(o.appsSection) && !/current plan/i.test(o.text) && errors.length === 0,
-          `${JSON.stringify(o.apps)} ${errors.join(" | ")}`,
+          "ui (Chrome, LIM-2472): the workspace opens on Home (\"1 thing needs you\", the Home tab first, Goals at /goals); the alignment is the owner's one row, titled with their goal, says it comes from Hank's goal and offers Review",
+          o.count === "1" && o.h1 === "1 thing needs you" && oRows.length === 1 && o.tab[0]?.[0] === "Home" && o.tab[0][1] === `/app/w/${HW}` && o.tab[1]?.[0] === "Goals" && o.tab[1][1] === `/app/w/${HW}/goals` &&
+            oRows[0].href === `/app/w/${HW}/alignments` && /Win the regulated market/.test(oRows[0].text) && /From Hank's side project: Hank Other asks to align with this goal/.test(oRows[0].text) && /Review/.test(oRows[0].text),
+          `${o.h1} ${o.count} ${JSON.stringify(oRows)} ${JSON.stringify(o.tab)}`,
         );
         // The Apps tab: Last connected and Last read the goals, never one "Last read" fed by a connection.
         const pa = await pageAs(HO);
@@ -6670,6 +7304,7 @@ try {
             text: r.innerText,
             connected: r.querySelector('[data-label="Last connected"]')?.textContent ?? null,
             read: r.querySelector('[data-label="Last read the goals"]')?.textContent ?? null,
+            evidence: [...r.querySelectorAll("[data-evidence]")].map((e) => e.getAttribute("data-evidence")),
           })),
           note: document.querySelector("[data-apps-times]")?.textContent ?? "",
           text: document.body.innerText,
@@ -6683,33 +7318,47 @@ try {
             /connecting and listing tools included/.test(ap.note) && /Last read the goals is its last call that returned goals/.test(ap.note) && /doesn.t see which goal version an app has/.test(ap.note) && !/current plan/i.test(ap.text) && errors.length === 0,
           `${JSON.stringify(ap.heads)} ${JSON.stringify(ap.rows)} ${ap.note}`,
         );
+        check(
+          "ui (Chrome, §E2, LIM-2472): on the Apps tab every connected app shows exactly one evidence class (Receipt for the app that read the goals, Hedy Member's; Not observed for the app that only connected) under \"Connected is not the same as read\"; Home keeps one line naming the app with no goal read; nothing says \"on the current plan\" or infers working, stuck, blocked or diverged",
+          JSON.stringify(claude?.evidence) === '["receipt"]' && /Hedy Member/.test(claude.text) && JSON.stringify(codex?.evidence) === '["unobserved"]' && /Connected is not the same as read/.test(ap.text) && /Align has recorded no goal read from Codex\./.test(o.notice) &&
+            !/\b(working|stuck|blocked|diverged)\b/i.test(`${ap.text} ${o.notice}`) && !/current plan/i.test(o.text) && errors.length === 0,
+          `${JSON.stringify(ap.rows)} ${o.notice} ${errors.join(" | ")}`,
+        );
         const pl = await pageAs(HL);
         await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
-        await pl.waitForSelector("[data-home-app]", { timeout: 15000 });
-        const l = await pl.evaluate(() => ({ text: document.body.innerText, waiting: document.querySelector("#waiting")?.innerText ?? "", others: document.querySelector("#others")?.innerText ?? "", none: document.querySelector('[data-home-app="none"]')?.innerText ?? "", noneClasses: [...document.querySelectorAll('[data-home-app="none"] [data-evidence-class]')].map((c) => c.getAttribute("data-evidence-class")) }));
+        await pl.waitForSelector('h1[data-home-count]:not([data-home-count="reading"])', { timeout: 15000 });
+        const lRows = await needRows(pl);
+        const lFirst = await pl.evaluate(() => ({ kind: document.querySelector("[data-first-run]")?.getAttribute("data-first-run") ?? null, text: document.querySelector("[data-first-run]")?.innerText ?? "" }));
+        await filterTo(pl, "Waiting on others");
+        await pl.waitForFunction(() => [...document.querySelectorAll('[data-needs="list"] li')].some((e) => e.innerText.includes("Needs an update")), { timeout: 15000 }).catch(() => undefined);
+        const lOthers = await needRows(pl);
+        // The ask's words moved off Home: its row opens the Asks tab, which quotes them.
+        await pl.goto(`${BASE}/app/w/${HW}/asks`, { waitUntil: "networkidle0" });
+        await pl.waitForFunction(() => document.body.innerText.includes("“Home: write the runbook”"), { timeout: 15000 }).catch(() => undefined);
+        const lAsks = await pl.evaluate(() => document.body.innerText);
         check(
-          "ui (Chrome): the lead's Home lists the ask waiting on them (\"Compliance asked Core\", the quoted text) and, under Waiting on others, the change request waiting on Hedy Member to update it to version 2; with no app of their own, one \"not observed\" item",
-          /Compliance asked Core/.test(l.waiting) && /“Home: write the runbook”/.test(l.waiting) && /Hedy Member's request on Ship the audit log \(v2\)/.test(l.others) && /Waiting on Hedy Member to update it to version 2\./.test(l.others) &&
-            JSON.stringify(l.noneClasses) === JSON.stringify(["not_observed"]) && /Align has observed no goal reads/.test(l.none) && errors.length === 0,
-          `${l.waiting.slice(0, 300)} | ${l.others.slice(0, 300)} | ${l.none} ${errors.join(" | ")}`,
+          "ui (Chrome, LIM-2472): the lead's Home lists the ask waiting on them (a Team ask row, \"Compliance asked Core\", opening the Asks tab, which quotes the text) and, under the Waiting on others filter, the change request needing an update from Hedy Member; with no app of their own, the compact first-run panel",
+          lRows.some((r) => /Team ask/.test(r.text) && /Compliance asked Core/.test(r.text) && r.href === `/app/w/${HW}/asks`) && lAsks.includes("“Home: write the runbook”") &&
+            lOthers.some((r) => /Ship the audit log \(v2\)/.test(r.text) && /Needs an update/.test(r.text) && /Waiting on Hedy Member/.test(r.text)) && lFirst.kind === "compact" && /Connect your agent/.test(lFirst.text) && errors.length === 0,
+          `${JSON.stringify(lRows)} | ${JSON.stringify(lOthers)} | ${JSON.stringify(lFirst)} ${errors.join(" | ")}`,
         );
-        // A failed read of the Home: every count says unknown, never zero.
+        // A failed read of the Home: the list says what it couldn't read and its count is a lower bound, never zero.
         const pf = await pageAs(HO);
         await pf.setRequestInterception(true);
         pf.on("request", (r) => (r.url().endsWith(`/api/v2/workspaces/${HW}/home`) ? r.respond({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "server_error", message: "Server error" }) }) : r.continue()));
         await pf.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
-        await pf.waitForSelector("[data-tile]", { timeout: 15000 });
-        const fT = await tiles(pf);
-        const fText = await pf.evaluate(() => document.body.innerText);
+        await pf.waitForSelector("[data-needs-partial]", { timeout: 15000 });
+        await pf.waitForSelector('h1[data-home-count]:not([data-home-count="reading"])', { timeout: 15000 });
+        const f = await pf.evaluate(() => ({ text: document.body.innerText, h1: document.querySelector("h1[data-home-count]")?.textContent ?? "", partial: document.querySelector("[data-needs-partial]")?.textContent ?? "", firstRun: !!document.querySelector("[data-first-run]"), notice: !!document.querySelector("[data-needs-notice]") }));
         check(
-          "ui (Chrome, §E2): when the Home's read fails every tile says unknown (never 0), the summary says how much is waiting is unknown, and the apps section says their reads are unknown",
-          Object.keys(fT).length === 4 && Object.values(fT).every((v) => v === "unknown") && /so how much is waiting is unknown/.test(fText) && /whether any of them read the goals is unknown/.test(fText) && !/Nothing is waiting on you/.test(fText) && !/\bnot observed\b/.test(fText),
-          `${JSON.stringify(fT)} ${fText.slice(0, 500)}`,
+          "ui (Chrome, §E2, LIM-2472): when the Home's read fails the list says it couldn't read the workspace summary, the heading is a lower bound and never \"Nothing needs you\", the goals say they couldn't be read, and first run and the apps notice stay away (an unread Home says nothing about them)",
+          /the workspace summary/.test(f.partial) && /^(At least \d+ things? needs? you|Some of this could not be read)$/.test(f.h1) && !/Nothing needs you/.test(f.text) && f.text.includes("Align couldn't read the goals just now.") && !f.firstRun && !f.notice,
+          JSON.stringify({ ...f, text: f.text.slice(0, 500) }),
         );
         // On a phone: the lead's Home with its queue fits 390 px.
         const pp = await pageAs(HL, 390);
         await pp.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
-        await pp.waitForSelector("[data-home-app]", { timeout: 15000 });
+        await pp.waitForSelector('[data-needs="list"]', { timeout: 15000 });
         const pm = await pp.evaluate(() => ({ sw: document.scrollingElement.scrollWidth, W: window.innerWidth }));
         check("ui (Chrome, 390x844): the Home with its queue has no sideways scroll", pm.sw <= pm.W && errors.length === 0, `${JSON.stringify(pm)} ${errors.join(" | ")}`);
       } catch (e) {
@@ -6740,9 +7389,10 @@ try {
         await page.setViewport({ width: 1000, height: 844 });
         await page.setCookie(...HX.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
         await page.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
-        await page.waitForFunction(() => document.body.innerText.includes("Approved, not launched"), { timeout: 15000 });
-        const hx = await page.evaluate(() => document.querySelector("#waiting")?.innerText ?? document.body.innerText);
-        check("ui (Chrome): the launcher's Home lists the approved change under waiting on you as \"Approved, not launched\", agents still on version 1 until they launch it", /Approved, not launched: agents are still on version 1 until you launch it\./.test(hx), hx.slice(0, 400));
+        await page.waitForFunction(() => [...document.querySelectorAll('[data-needs="list"] li')].some((e) => e.innerText.includes("Approved, not launched")), { timeout: 15000 });
+        const hx = await page.$$eval('[data-needs="list"] li', (els) => els.map((e) => e.innerText).find((t) => t.includes("Approved, not launched")) ?? "");
+        const hxPage = await page.evaluate(() => document.body.innerText);
+        check("ui (Chrome, LIM-2472): the launcher's Home lists the approved change as \"Approved, not launched\", approved by them, with Launch v2 as its action; nothing says what agents are on", /Hedy Member's request, approved by you/.test(hx) && /Launch v2/.test(hx) && !/agents are still on/.test(hxPage), hx.slice(0, 400));
       } catch (e) {
         check("ui (Chrome) home launch run", false, e?.stack ?? e);
       } finally {
@@ -6776,23 +7426,342 @@ try {
         await page.setViewport({ width: 390, height: 844 });
         await page.setCookie(...HM.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
         await page.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
-        await page.waitForSelector(`[data-home-item="declined:${crD.json?.id}"]`, { timeout: 15000 });
-        const dv = await page.evaluate((id) => {
-          const row = document.querySelector(`[data-home-item="declined:${id}"]`);
-          return {
-            text: row?.innerText ?? "",
-            href: row?.querySelector("a")?.getAttribute("href") ?? "",
-            section: row?.closest("section[aria-label]")?.getAttribute("aria-label") ?? "",
-            summary: document.querySelector("[data-home-summary]")?.textContent ?? "",
-            sw: document.scrollingElement.scrollWidth,
-            W: window.innerWidth,
-          };
-        }, crD.json?.id);
+        await page.waitForSelector('h1[data-home-count]:not([data-home-count="reading"])', { timeout: 15000 });
+        const declinedLink = `[data-needs="list"] a[href*="review=${GX.id}.${crD.json?.id}"]`;
+        const inNeeds = !!(await page.$(declinedLink));
+        await page.waitForSelector(declinedLink, { timeout: 15000 });
+        const dv = await page.evaluate((sel) => {
+          const row = document.querySelector(sel)?.closest("li");
+          return { text: row?.innerText ?? "", status: row?.querySelector("[data-status]")?.getAttribute("data-status") ?? "", sw: document.scrollingElement.scrollWidth, W: window.innerWidth };
+        }, declinedLink);
+        await page.evaluate((sel) => document.querySelector(sel)?.click(), declinedLink);
+        await page.waitForSelector(`[data-review="${crD.json?.id}"]`, { timeout: 15000 });
+        const dvReview = await page.$eval(`[data-review="${crD.json?.id}"]`, (e) => e.innerText);
+        // Opening a returned decline shows its reason and marks it seen; it then moves to Done.
+        await page.goto(`${BASE}/app/w/${HW}/goals/${GX.id}`, { waitUntil: "networkidle0" });
+        await page.waitForFunction((id) => (document.querySelector(`[data-cr="${id}"]`)?.innerText ?? "").includes("Reason:"), { timeout: 15000 }, crD.json?.id).catch(() => undefined);
+        const dvGoal = await page.evaluate((id) => document.querySelector(`[data-cr="${id}"]`)?.innerText ?? "", crD.json?.id);
         check(
-          "ui (Chrome, main #53): the requester's Home lists \"Hank Other declined your request on <goal>\" under \"Your declined requests\" with when, the quoted reason and \"Your change wasn't made; the goal is at version 2.\", and Open goes to the goal's change requests; the summary still counts only what waits on them; it fits 390 px",
-          /Hank Other declined your request on Hank's side project, shipped/.test(dv.text) && /Declined .+\. Reason: “Home: not this quarter”\. Your change wasn.t made; the goal is at version 2\./.test(dv.text) && dv.section === "Your declined requests" &&
-            dv.href === `/app/w/${HW}/goals/${GX.id}#change-requests` && !/declined/i.test(dv.summary) && dv.sw <= dv.W && errors.length === 0,
-          `${JSON.stringify(dv)} ${errors.join(" | ")}`,
+          "ui (Chrome, main #53, LIM-2472): the requester's unseen decline returns under Needs you; its review names the decider, reason and next step, and its goal page retains the reason; it fits 390 px",
+          inNeeds && dv.status === "declined" && /Declined/.test(dv.text) && /Declined by Hank Other: “Home: not this quarter”/.test(dv.text) && /Hank Other declined your request/.test(dvReview) && /Home: not this quarter/.test(dvReview) && /A declined request is closed/.test(dvReview) && /Open the goal to propose again/.test(dvReview) && /Reason: Home: not this quarter/.test(dvGoal) && dv.sw <= dv.W && errors.length === 0,
+          `${inNeeds} ${JSON.stringify(dv)} | ${dvReview.slice(0, 300).replace(/\n/g, " / ")} | ${dvGoal.slice(0, 600).replace(/\n/g, " / ")} ${errors.join(" | ")}`,
+        );
+        // LIM-2472 60253f95 (founder ruling on Mini S3's delta audit): in the review drawer the decline reason shows to the
+        // decider and the request's approvers only; a viewer and a member outside the approval set don't see it (display
+        // only: the server still sends it to every reader of the request).
+        const crDNow = (await ha(HX, "GET", `/goals/${GX.id}/change-requests/${crD.json?.id}`)).json;
+        const approverIds = (crDNow?.approvers ?? []).map((a) => a.id);
+        const reasonFor = async (u) => {
+          const p = await browser.newPage();
+          await p.setViewport({ width: 1440, height: 900 });
+          await p.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          await p.goto(`${BASE}/app/w/${HW}?review=${GX.id}.${crD.json?.id}`, { waitUntil: "networkidle0" });
+          await p.waitForSelector(`[data-review="${crD.json?.id}"]`, { timeout: 15000 });
+          const r = await p.evaluate(() => document.querySelector("[data-decline-reason]")?.textContent ?? null);
+          await p.close();
+          return r;
+        };
+        const [rX, rO, rV, rL] = [await reasonFor(HX), await reasonFor(HO), await reasonFor(HV), await reasonFor(HL)];
+        // GX is Hank's own goal with no team, so its approval set is Hank alone: the workspace owner is outside it here.
+        check(
+          "ui (Chrome, LIM-2472 60253f95): in the review drawer the decline reason (\"Reason: “Home: not this quarter”\") shows to the decider (Hank Other, the request's only approver), never to the workspace owner outside its approval set (Hana Owner), a viewer (Hope Viewer) or another member (Hugo Lead)",
+          JSON.stringify(approverIds) === JSON.stringify([HX.id]) && rX === "Reason: “Home: not this quarter”" && rO === null && rV === null && rL === null,
+          JSON.stringify({ approverIds, rX, rO, rV, rL }),
+        );
+        // Founder ruling, Nov 11: the goal page's request card follows the same rule. Every reader sees who declined and
+        // when; only the requester, the decider and the request's approvers see the reason.
+        const cardFor = async (u) => {
+          const p = await browser.newPage();
+          await p.setViewport({ width: 1440, height: 900 });
+          await p.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          await p.goto(`${BASE}/app/w/${HW}/goals/${GX.id}`, { waitUntil: "networkidle0" });
+          await p.waitForFunction((id) => !!document.querySelector(`[data-cr="${id}"] [data-declined-line]`), { timeout: 15000 }, crD.json?.id).catch(() => undefined);
+          const t = await p.evaluate((id) => document.querySelector(`[data-cr="${id}"] [data-declined-line]`)?.textContent ?? null, crD.json?.id);
+          await p.close();
+          return t;
+        };
+        const [gV, gX] = [await cardFor(HV), await cardFor(HX)];
+        check(
+          "ui (Chrome, Nov 11 ruling): on the goal page a declined request's card shows every reader \"Declined by Hank Other, <time>.\" but the reason only to the requester, the decider and the request's approvers: Hope Viewer sees no reason, Hank (who declined) does",
+          /^Declined by Hank Other/.test(gV ?? "") && !/Reason:|not this quarter/.test(gV ?? "") && /Reason: Home: not this quarter/.test(gX ?? ""),
+          JSON.stringify({ gV, gX }),
+        );
+        // Two approvers: Hedy's Core team goal (Hedy owns it, Hugo leads Core). Hank asks; Hugo declines; Hedy, an approver
+        // who didn't decide, sees the reason, and the viewer still doesn't.
+        const GQ = (await ha(HM, "POST", "/goals", { title: "Hedy's audit export", visibility: "workspace", team_id: HT })).json;
+        const crQ2 = await ha(HX, "POST", `/goals/${GQ?.id}/change-requests`, { base_version: 1, changes: { title: "Hedy's audit export, monthly" }, reason: "Monthly is enough" });
+        await ha(HL, "POST", `/goals/${GQ?.id}/change-requests/${crQ2.json?.id}/reject`, { revision: 1, reason: "Weekly is the promise" });
+        const q2Approvers = ((await ha(HM, "GET", `/goals/${GQ?.id}/change-requests/${crQ2.json?.id}`)).json?.approvers ?? []).map((a) => a.id);
+        const reasonOn = async (u, goal, id) => {
+          const p = await browser.newPage();
+          await p.setViewport({ width: 1440, height: 900 });
+          await p.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          await p.goto(`${BASE}/app/w/${HW}?review=${goal}.${id}`, { waitUntil: "networkidle0" });
+          await p.waitForSelector(`[data-review="${id}"]`, { timeout: 15000 });
+          const r = await p.evaluate(() => document.querySelector("[data-decline-reason]")?.textContent ?? null);
+          await p.close();
+          return r;
+        };
+        const [qL, qM, qV] = [await reasonOn(HL, GQ?.id, crQ2.json?.id), await reasonOn(HM, GQ?.id, crQ2.json?.id), await reasonOn(HV, GQ?.id, crQ2.json?.id)];
+        check(
+          "ui (Chrome, LIM-2472 60253f95): on a request with two approvers, the decider (Hugo Lead) and the other approver (Hedy Member, the goal's owner) both see \"Reason: “Weekly is the promise”\"; a viewer (Hope Viewer) doesn't",
+          q2Approvers.includes(HL.id) && q2Approvers.includes(HM.id) && qL === "Reason: “Weekly is the promise”" && qM === qL && qV === null,
+          JSON.stringify({ q2Approvers, qL, qM, qV, created: crQ2.status }),
+        );
+        // PR 68 item 13 (founder review of e780d842): Drop this goal → Confirm drops it (next version, status dropped) and the
+        // confirmation goes away at once, with no second Confirm on the replaced version and no reload needed.
+        const GD = (await ha(HO, "POST", "/goals", { title: "Hana's goal to drop", visibility: "workspace", measures: [{ text: "Kept on drop", target: "1" }] })).json;
+        // LIM-2513 journey pass: the goal page leads with what the goal is. Under the title the owner's one action is Edit
+        // this goal (it moves to the New version form and focuses its first field); with no shared session on the goal
+        // the hold controls are folded; Drop this goal sits at the foot of the New version form, after Save.
+        {
+          const pg = await browser.newPage();
+          await pg.setViewport({ width: 1440, height: 900 });
+          await pg.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          await pg.goto(`${BASE}/app/w/${HW}/goals/${GD?.id}`, { waitUntil: "networkidle0" });
+          await pg.waitForSelector("#new-version", { timeout: 15000 });
+          const lay = await pg.evaluate(() => {
+            const h1 = document.querySelector("main h1");
+            const measures = [...document.querySelectorAll("main h2, main h3")].find((h) => h.textContent?.trim() === "Measures");
+            const before = (el) => !!el && !!measures && !!(el.compareDocumentPosition(measures) & Node.DOCUMENT_POSITION_FOLLOWING);
+            const buttons = [...document.querySelectorAll("main button")];
+            const edit = buttons.find((b) => b.textContent?.trim() === "Edit this goal");
+            const drop = buttons.find((b) => b.textContent?.trim() === "Drop this goal");
+            const save = buttons.find((b) => /^Save version \d+$/.test(b.textContent?.trim() ?? ""));
+            const aboveMeasures = buttons.filter((b) => before(b) && !!h1 && !!(h1.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)).map((b) => b.textContent?.trim());
+            const folded = document.querySelector("#agents-on-goal [data-hold-folded]");
+            return {
+              aboveMeasures,
+              dropInForm: !!drop && !!drop.closest("#new-version") && !!save && !!(save.compareDocumentPosition(drop) & Node.DOCUMENT_POSITION_FOLLOWING),
+              folded: !!folded && !folded.hasAttribute("open") && /Hold agents on this goal/.test(folded.querySelector("summary")?.textContent ?? ""),
+              editFirst: !!edit,
+            };
+          });
+          await pg.evaluate(() => [...document.querySelectorAll("main button")].find((b) => b.textContent?.trim() === "Edit this goal")?.click());
+          await sleep(600);
+          const focusIn = await pg.evaluate(() => !!document.activeElement?.closest("#new-version") && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? ""));
+          await pg.close();
+          check(
+            "ui (Chrome, LIM-2513): the owner's goal page leads with the goal: under the title the only action is Edit this goal, which focuses the New version form; with no shared session the hold controls are folded under \"Hold agents on this goal\"; Drop this goal is in the New version form after Save",
+            lay.editFirst && JSON.stringify(lay.aboveMeasures) === '["Edit this goal"]' && lay.folded && lay.dropInForm && focusIn,
+            JSON.stringify({ ...lay, focusIn }),
+          );
+        }
+        // LIM-2513 journey pass: a person who owns every active goal gets, in the Propose a change drawer, each goal linked
+        // to its New version form instead of a dead end; following one lands on the form with its first field focused.
+        {
+          const wsO = await call(HO.who, "POST", "/api/v2/workspaces", { cookie: HO.cookie, body: { name: "Hana solo" } });
+          const gO = await call(HO.who, "POST", `/api/v2/workspaces/${wsO.json?.id}/goals`, { cookie: HO.cookie, body: { title: "Hana's only goal", visibility: "workspace" } });
+          const po = await browser.newPage();
+          await po.setViewport({ width: 390, height: 844 });
+          await po.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          await po.goto(`${BASE}/app/w/${wsO.json?.id}`, { waitUntil: "networkidle0" });
+          await po.evaluate(() => document.querySelector("[data-propose-open]")?.click());
+          await po.waitForSelector(`[data-propose-edit="${gO.json?.id}"]`, { timeout: 15000 }).catch(() => undefined);
+          const drawerO = await po.evaluate(() => document.querySelector('[data-propose="none"]')?.innerText ?? "");
+          await po.evaluate((id) => document.querySelector(`[data-propose-edit="${id}"]`)?.click(), gO.json?.id);
+          await po.waitForSelector("#new-version", { timeout: 15000 }).catch(() => undefined);
+          await sleep(800);
+          const landed = await po.evaluate(() => ({ path: location.pathname + location.hash, focus: !!document.activeElement?.closest("#new-version") }));
+          await po.close();
+          check(
+            "ui (Chrome, 390, LIM-2513): owning every active goal, the Propose a change drawer names each goal with \"Edit v1\", linked to its New version form; following it lands on that form with its first field focused",
+            wsO.status === 201 && gO.status === 201 && /You own every active goal you can see here, so you change one directly/.test(drawerO) && /Hana's only goal/.test(drawerO) && /Edit v1/.test(drawerO) &&
+              landed.path === `/app/w/${wsO.json?.id}/goals/${gO.json?.id}#new-version` && landed.focus,
+            JSON.stringify({ ws: wsO.status, goal: gO.status, drawerO, landed }),
+          );
+        }
+        const pd = await browser.newPage();
+        await pd.setViewport({ width: 390, height: 844 });
+        await pd.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await pd.goto(`${BASE}/app/w/${HW}/goals/${GD?.id}`, { waitUntil: "networkidle0" });
+        const pressD = (label) => pd.evaluate((t) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === t)?.click(), label);
+        await pd.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Drop this goal"), { timeout: 15000 });
+        await pressD("Drop this goal");
+        await pd.waitForSelector("[data-drop-goal]", { timeout: 15000 });
+        await pressD("Confirm: drop the goal");
+        await pd.waitForFunction(() => [...document.querySelectorAll("main h1 + div span")].some((s) => s.textContent?.trim() === "dropped"), { timeout: 15000 }).catch(() => undefined);
+        await new Promise((r) => setTimeout(r, 800));
+        const dropAfter = await pd.evaluate(() => ({
+          box: !!document.querySelector("[data-drop-goal]"),
+          confirm: [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Confirm: drop the goal" || b.textContent?.trim() === "Drop this goal"),
+          pills: [...document.querySelectorAll("main h1 + div span")].map((s) => s.textContent?.trim()),
+        }));
+        const gdNow = (await ha(HO, "GET", `/goals/${GD?.id}`)).json?.goal;
+        await pd.close();
+        check(
+          "ui (Chrome, PR 68 item 13): Drop this goal → Confirm makes the next version, marked dropped, keeping its measures; the confirmation and its Confirm go away at once, without a reload",
+          gdNow?.status === "dropped" && gdNow.version === 2 && gdNow.measures?.[0]?.text === "Kept on drop" && !dropAfter.box && !dropAfter.confirm && dropAfter.pills.includes("dropped"),
+          JSON.stringify({ dropAfter, status: gdNow?.status, version: gdNow?.version }),
+        );
+        // Founder ruling, Nov 11 (Mini 3's inventory, goals 19): the goal read's deciders are the server's effective set for
+        // the reader, the same people a request from them gets as approvers; the owner and a viewer get none. The
+        // propose drawer's "Who decides" names exactly them.
+        const dOf = async (u) => ((await ha(u, "GET", `/goals/${GQ?.id}`)).json?.deciders ?? null);
+        const [dX, dM, dV] = [await dOf(HX), await dOf(HM), await dOf(HV)];
+        const q2Sorted = [...q2Approvers].sort();
+        const pw = await browser.newPage();
+        await pw.setViewport({ width: 1440, height: 900 });
+        await pw.setCookie(...HX.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await pw.goto(`${BASE}/app/w/${HW}/goals/${GQ?.id}`, { waitUntil: "networkidle0" });
+        await pw.evaluate(() => document.querySelector("[data-propose-open]")?.click());
+        await pw.waitForSelector('[data-propose-field="goal"]', { timeout: 15000 });
+        await pw.select('[data-propose-field="goal"]', GQ?.id);
+        await pw.waitForFunction(() => /Who decides/.test(document.body.innerText) && !/Reading who decides/.test(document.body.innerText), { timeout: 15000 }).catch(() => undefined);
+        const drawerText = await pw.evaluate(() => document.querySelector('[data-propose="form"]')?.innerText ?? document.body.innerText.slice(0, 600));
+        await pw.close();
+        check(
+          "goals 19 (Nov 11 ruling): GET …/goals/:id deciders is the server's effective set for the reader (Hank's equals the approvers his request got: Hedy Member and Hugo Lead); the owner (Hedy) and a viewer get []; the propose drawer's Who decides names them",
+          Array.isArray(dX) && JSON.stringify(dX.map((p) => p.id).sort()) === JSON.stringify(q2Sorted) && dX.every((p) => typeof p.name === "string" && p.name) && JSON.stringify(dM) === "[]" && JSON.stringify(dV) === "[]" &&
+            /Hedy Member/.test(drawerText) && /Hugo Lead/.test(drawerText) && !/Usually/.test(drawerText),
+          JSON.stringify({ dX, dM, dV, q2Sorted, drawer: drawerText.slice(0, 400).replace(/\n/g, " / ") }),
+        );
+        // Founder ruling, Nov 11: "Since you last looked" names who created a goal (its owner), and leaves out a goal the
+        // reader created, as it leaves out their other own actions. Hana's last visit is set long ago, so every goal's
+        // creation is since then.
+        const ps = await browser.newPage();
+        await ps.setViewport({ width: 1440, height: 900 });
+        await ps.evaluateOnNewDocument((k) => localStorage.setItem(k, "2000-01-01T00:00:00.000Z"), `align.lastVisit:${HW}:${HO.id}`);
+        await ps.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await ps.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        await ps.waitForFunction(() => { const s = document.querySelector("[data-since]"); return !!s && s.getAttribute("data-since") !== "reading" && /created the goal/.test(s.innerText); }, { timeout: 15000 }).catch(() => undefined);
+        // The section shows its first 8 lines; "Show all N" opens the rest, where the other creations are.
+        await ps.evaluate(() => [...document.querySelectorAll("[data-since] button")].find((b) => /^Show all \d+$/.test(b.textContent?.trim() ?? ""))?.click());
+        await ps.waitForFunction(() => [...document.querySelectorAll("[data-since] button")].some((b) => b.textContent?.trim() === "Show fewer") || ![...document.querySelectorAll("[data-since] button")].some((b) => /^Show all/.test(b.textContent?.trim() ?? "")), { timeout: 15000 }).catch(() => undefined);
+        const sinceText = await ps.evaluate(() => document.querySelector("[data-since]")?.innerText ?? "");
+        await ps.close();
+        check(
+          "ui (Chrome, Since): a goal's creation names its owner (\"Hugo Lead … created the goal\", \"Hank Other … created the goal\"); the reader's own goals (Hana's) get no line, and no creation reads \"Someone\"",
+          /Hugo Lead[\s\S]{0,60}created the goal/.test(sinceText) && /Hank Other[\s\S]{0,60}created the goal/.test(sinceText) && !/Hana Owner[\s\S]{0,60}created the goal/.test(sinceText) && !/You[\s\S]{0,20}created the goal/.test(sinceText) && !/Someone[\s\S]{0,20}created the goal/.test(sinceText),
+          sinceText.slice(0, 900).replace(/\n/g, " / "),
+        );
+        // LIM-2513 item 1 (Mini 0's PR 68 audit Low, 03c415a8): a reload keeps the tab's comparison, but leaving Home by a
+        // full page load (a plain link to /trust, a typed URL) is leaving it, so coming back compares against that moment.
+        // Hana's last visit starts long ago; every count below is the section's own `data-since` (lines since the visit).
+        const pl = await browser.newPage();
+        await pl.setViewport({ width: 1440, height: 900 });
+        await pl.setCookie(...HO.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        const sinceCount = async () => {
+          await pl.waitForFunction(() => { const s = document.querySelector("[data-since]"); return !!s && s.getAttribute("data-since") !== "reading"; }, { timeout: 15000 }).catch(() => undefined);
+          return pl.evaluate(() => document.querySelector("[data-since]")?.getAttribute("data-since") ?? null);
+        };
+        await pl.goto(`${BASE}/trust`, { waitUntil: "networkidle0" });
+        await pl.evaluate((k) => { localStorage.setItem(k, "2000-01-01T00:00:00.000Z"); sessionStorage.removeItem(k); }, `align.lastVisit:${HW}:${HO.id}`);
+        await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        const lFirst = await sinceCount();
+        await pl.reload({ waitUntil: "networkidle0" });
+        const lReload = await sinceCount();
+        await pl.goto(`${BASE}/trust`, { waitUntil: "networkidle0" });
+        await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        const lBack = await sinceCount();
+        await pl.reload({ waitUntil: "networkidle0" });
+        const lBackReload = await sinceCount();
+        // The coordinator's review gap (PR 87): a reload of another workspace page, then Home through the app's own
+        // navigation, must not reuse the tab's old Home baseline (only a reload of Home itself does).
+        await pl.goto(`${BASE}/trust`, { waitUntil: "networkidle0" });
+        await pl.evaluate((k) => { localStorage.setItem(k, "2000-01-01T00:00:00.000Z"); sessionStorage.removeItem(k); }, `align.lastVisit:${HW}:${HO.id}`);
+        await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        const lOld = await sinceCount();
+        await pl.goto(`${BASE}/app/w/${HW}/goals`, { waitUntil: "networkidle0" });
+        await pl.reload({ waitUntil: "networkidle0" });
+        await pl.evaluate((ws) => [...document.querySelectorAll(`a[href="/app/w/${ws}"]`)].find((a) => a.offsetParent)?.click(), HW);
+        await pl.waitForFunction((ws) => location.pathname === `/app/w/${ws}`, { timeout: 15000 }, HW).catch(() => undefined);
+        const lInApp = await sinceCount();
+        await pl.close();
+        check(
+          "ui (Chrome, Since, LIM-2513): a reload keeps the tab's comparison (same lines), but leaving Home by a full page load to /trust and coming back by URL compares against when Home was left (no lines), and a reload after that keeps the new comparison; a reload of the Goals page, then Home through the app's navigation, doesn't reuse the tab's old Home comparison either",
+          Number(lFirst) > 0 && lReload === lFirst && lBack === "0" && lBackReload === "0" && Number(lOld) > 0 && lInApp === "0",
+          JSON.stringify({ lFirst, lReload, lBack, lBackReload, lOld, lInApp }),
+        );
+        // Mini 5's click walk, Nov 11: at 390 wide the review drawer's "More actions" menu opened below its footer, so
+        // Decline, the last item, was off screen and only reachable by keyboard. Hugo asks Hank to change Hank's goal;
+        // Hank opens it in the review drawer on a phone, opens More actions, and every item lies inside the screen and
+        // is the element under its own centre; a real pointer tap on Decline opens the decline step. The request is
+        // then withdrawn, so nothing after this changes.
+        const gxNow = await ha(HL, "GET", `/goals/${GX.id}`);
+        const crM = await ha(HL, "POST", `/goals/${GX.id}/change-requests`, { base_version: gxNow.json?.goal?.version, changes: { title: "Hank's side project, menu check" }, reason: "Menu check at 390" });
+        const pm = await browser.newPage();
+        await pm.setViewport({ width: 390, height: 844, hasTouch: true, isMobile: true });
+        await pm.setCookie(...HX.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await pm.goto(`${BASE}/app/w/${HW}?review=${GX.id}.${crM.json?.id}`, { waitUntil: "networkidle0" });
+        await pm.waitForSelector(`[data-review-actions="${crM.json?.id}"] [data-more-actions] summary`, { visible: true, timeout: 15000 });
+        await pm.tap(`[data-review-actions="${crM.json?.id}"] [data-more-actions] summary`);
+        await pm.waitForSelector('[data-more-actions][open] [role="menuitem"]', { visible: true, timeout: 5000 });
+        await sleep(300);
+        const menu = await pm.evaluate(() =>
+          [...document.querySelectorAll('[data-more-actions][open] [role="menuitem"]')].map((b) => {
+            const r = b.getBoundingClientRect();
+            const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return { t: b.textContent?.trim(), inside: r.top >= 0 && r.bottom <= window.innerHeight && r.left >= 0 && r.right <= window.innerWidth, hit: !!top && (top === b || b.contains(top)), h: Math.round(r.height) };
+          }),
+        );
+        await pm.tap('[data-more-actions][open] [role="menuitem"][data-decision="Decline"]');
+        const declineOpen = await pm.waitForSelector(`[data-review-actions="${crM.json?.id}"] [data-decision-input="reject"]`, { visible: true, timeout: 5000 }).then(() => true).catch(() => false);
+        const pmW = await pm.evaluate(() => ({ sw: document.scrollingElement.scrollWidth, W: window.innerWidth }));
+        await pm.close();
+        const wdM = await ha(HL, "POST", `/goals/${GX.id}/change-requests/${crM.json?.id}/withdraw`, {});
+        check(
+          "ui (Chrome, 390x844, Mini 5 Nov 11): in the review drawer every item of the \"More actions\" menu is inside the screen, at least 44 px tall and the element under its own centre (Decline included, the last one); tapping Decline opens the decline step; no sideways scroll",
+          crM.status === 201 && menu.length > 0 && menu.some((m) => m.t === "Decline") && menu.every((m) => m.inside && m.hit && m.h >= 44) && declineOpen && pmW.sw <= pmW.W && wdM.status === 200,
+          `${crM.status} ${JSON.stringify(menu)} declineOpen=${declineOpen} ${JSON.stringify(pmW)} withdraw=${wdM.status}`,
+        );
+        // Mini 0, LIM-2472 66fdddad (founder ruling 8a588dfc): while someone typed in the Propose a change drawer, the
+        // drawer's reads landing re-rendered it, the Drawer's effect reran and moved focus to its panel, and every key
+        // after that was lost. Hugo opens the drawer on Hank's goal with both reads held (his requests, for an open one,
+        // and the goal, for Who decides), types the new measure one key at a time and lets the requests read land part
+        // way through, then types the target the same way while the goal read lands. Both fields keep every key, focus
+        // never leaves them, and the request stores the full text. It is then withdrawn.
+        const MEASURE = "Weekly demo signups from the beta list";
+        const TARGET = "120 by Jan 15";
+        const pf = await browser.newPage();
+        await pf.setViewport({ width: 1440, height: 900 });
+        await pf.setCookie(...HL.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await pf.goto(`${BASE}/app/w/${HW}/goals/${GX.id}`, { waitUntil: "networkidle0" });
+        await pf.setRequestInterception(true);
+        const held = { crs: [], goal: [] };
+        let holding = true;
+        pf.on("request", (r) => {
+          const p = new URL(r.url()).pathname;
+          if (holding && r.method() === "GET" && p === `/api/v2/workspaces/${HW}/change-requests`) held.crs.push(r);
+          else if (holding && r.method() === "GET" && p === `/api/v2/workspaces/${HW}/goals/${GX.id}`) held.goal.push(r);
+          else void r.continue();
+        });
+        const release = (k) => held[k].splice(0).forEach((r) => void r.continue());
+        await pf.evaluate(() => document.querySelector("[data-propose-open]")?.click());
+        await pf.waitForSelector('[data-propose-field="part"]', { visible: true, timeout: 15000 });
+        await pf.select('[data-propose-field="goal"]', GX.id);
+        await pf.select('[data-propose-field="part"]', "add");
+        await pf.waitForSelector('[data-propose-field="text"]', { visible: true, timeout: 5000 });
+        const heldBefore = { crs: held.crs.length, goal: held.goal.length };
+        const lost = [];
+        const typeSlowly = async (field, text, releaseAt, k) => {
+          await pf.focus(`[data-propose-field="${field}"]`);
+          for (let i = 0; i < text.length; i++) {
+            if (i === releaseAt) release(k);
+            await pf.keyboard.type(text[i]);
+            await sleep(70);
+            const on = await pf.evaluate(() => document.activeElement?.getAttribute("data-propose-field") ?? document.activeElement?.tagName ?? null);
+            if (on !== field) lost.push(`${field}@${i}:${on}`);
+          }
+        };
+        await typeSlowly("text", MEASURE, 5, "crs");
+        await typeSlowly("target", TARGET, 3, "goal");
+        holding = false;
+        release("crs");
+        release("goal");
+        const typed = await pf.evaluate(() => ({ text: document.querySelector('[data-propose-field="text"]')?.value, target: document.querySelector('[data-propose-field="target"]')?.value }));
+        await pf.type('[data-propose-field="why"]', "Focus check: typed while the drawer's reads landed");
+        await pf.click("[data-propose-send]");
+        const sent = await pf.waitForSelector('[data-propose="sent"]', { timeout: 15000 }).then(() => true).catch(() => false);
+        await pf.close();
+        const mineF = (await ha(HL, "GET", "/change-requests")).json?.mine ?? [];
+        const crF = mineF.find((c) => c.goal.id === GX.id && (c.state === "pending" || c.state === "countered"));
+        const stored = JSON.stringify(crF?.changes ?? null);
+        const wdF = crF ? await ha(HL, "POST", `/goals/${GX.id}/change-requests/${crF.id}/withdraw`, {}) : { status: 0 };
+        check(
+          "ui (Chrome, Mini 0 LIM-2472 66fdddad): typing one key at a time in the Propose a change drawer while its requests read and its goal read land, focus never leaves the field, the new measure and its target keep every key, and the request stores them in full",
+          heldBefore.crs > 0 && heldBefore.goal > 0 && lost.length === 0 && typed.text === MEASURE && typed.target === TARGET && sent && stored.includes(JSON.stringify(MEASURE)) && stored.includes(JSON.stringify(TARGET)) && wdF.status === 200,
+          JSON.stringify({ heldBefore, lost: lost.slice(0, 8), typed, sent, stored: stored.slice(0, 300), withdraw: wdF.status }),
         );
       } catch (e) {
         check("ui (Chrome) home declined run", false, e?.stack ?? e);
@@ -6811,6 +7780,760 @@ try {
     );
   }
   // ==== end port2:home ====
+
+  // ==== live:stream ====
+  // The live workspace (LIM-2503, lib/v2/live.ts): GET /api/v2/workspaces/<ws>/stream. Its own workspaces: LO owns LW and
+  // a workspace goal; LM is a member (proposes a change, shares a session); LV a viewer; LX owns another workspace LW2.
+  {
+    // touchWs (lib/v2/touch-core.mts, wired in lib/v2/db.ts): a stream hears only of writes that were committed. Driven
+    // here with a real node:sqlite connection, as tx() and a preview (LIM-2422 previewTx: BEGIN, SAVEPOINT, ROLLBACK) use it.
+    const tc = await import(pathToFileURL(path.join(ROOT, "lib/v2/touch-core.mts")).href);
+    const tdb = new DatabaseSync(":memory:");
+    tdb.exec("CREATE TABLE t (x INTEGER)");
+    const T = tc.createTouches(() => tdb);
+    const heard = [];
+    T.onChange((ws) => heard.push(ws));
+    const step = (fn) => {
+      heard.length = 0;
+      fn();
+      return [...heard];
+    };
+    const auto = step(() => (tdb.exec("INSERT INTO t VALUES (1)"), T.touch("ws_auto")));
+    const committed = step(() => {
+      const h = T.hold();
+      tdb.exec("BEGIN IMMEDIATE");
+      T.touch("ws_a");
+      const inner = T.hold(); // a nested tx() joins the outer one
+      T.touch("ws_b");
+      inner.commit(); // only the outer decides
+      const early = heard.length;
+      T.touch("ws_a");
+      tdb.exec("COMMIT");
+      h.commit();
+      h.discard(); // tx()'s finally after a commit: nothing more
+      if (early) heard.push("EARLY");
+    });
+    const rolledBack = step(() => {
+      const h = T.hold();
+      tdb.exec("BEGIN IMMEDIATE");
+      T.touch("ws_c");
+      tdb.exec("ROLLBACK");
+      h.discard();
+    });
+    const previewBare = step(() => {
+      tdb.exec("BEGIN");
+      tdb.exec("SAVEPOINT preview");
+      tdb.exec("INSERT INTO t VALUES (2)");
+      T.touch("ws_preview");
+      tdb.exec("ROLLBACK TO preview");
+      tdb.exec("ROLLBACK");
+    });
+    const previewHeld = step(() => {
+      const h = T.hold();
+      tdb.exec("BEGIN");
+      tdb.exec("SAVEPOINT preview");
+      T.touch("ws_preview");
+      tdb.exec("ROLLBACK TO preview");
+      tdb.exec("ROLLBACK");
+      h.discard();
+    });
+    const afterPreview = step(() => T.touch("ws_after"));
+    tdb.close();
+    check(
+      "live (touchWs): a stream hears only of committed writes: an autocommitted write at once; tx() after its outer COMMIT, each workspace once, a nested hold deciding nothing; nothing after a ROLLBACK; nothing from a preview (BEGIN, SAVEPOINT, ROLLBACK) whether or not it holds touches (holdTouches + discard); and a write after the preview is heard again",
+      JSON.stringify(auto) === '["ws_auto"]' && JSON.stringify(committed) === '["ws_a","ws_b"]' && rolledBack.length === 0 && previewBare.length === 0 && previewHeld.length === 0 && JSON.stringify(afterPreview) === '["ws_after"]',
+      JSON.stringify({ auto, committed, rolledBack, previewBare, previewHeld, afterPreview }),
+    );
+  }
+  {
+    /** One SSE connection: its status, and the events it got (each with when it arrived). */
+    const sse = (who, p, { cookie, headers = {} } = {}) =>
+      new Promise((resolve, reject) => {
+        const h = { accept: "text/event-stream", ...headers };
+        if (cookie) h.cookie = cookie;
+        const req = http.request({ host: "127.0.0.1", port: PORT, method: "GET", path: p, headers: h }, (res) => {
+          const conn = { status: res.statusCode, headers: res.headers, events: [], body: "", closed: false, waiters: [] };
+          let buf = "";
+          const flush = () => {
+            for (const w of [...conn.waiters]) {
+              const hit = conn.events.find((e, i) => i >= w.from && w.pred(e));
+              if (hit) {
+                conn.waiters.splice(conn.waiters.indexOf(w), 1);
+                clearTimeout(w.t);
+                w.resolve(hit);
+              }
+            }
+          };
+          res.setEncoding("utf8");
+          res.on("data", (c) => {
+            conn.body += c;
+            if (res.statusCode !== 200) return;
+            buf += c;
+            let i;
+            while ((i = buf.indexOf("\n\n")) >= 0) {
+              const block = buf.slice(0, i);
+              buf = buf.slice(i + 2);
+              const e = { at: Date.now(), id: null, event: "message", data: null };
+              for (const line of block.split("\n")) {
+                if (line.startsWith("id: ")) e.id = line.slice(4);
+                else if (line.startsWith("event: ")) e.event = line.slice(7);
+                else if (line.startsWith("data: ")) {
+                  try {
+                    e.data = JSON.parse(line.slice(6));
+                  } catch {
+                    e.data = line.slice(6);
+                  }
+                }
+              }
+              if (e.event !== "message" || e.data !== null) conn.events.push(e);
+            }
+            flush();
+          });
+          res.on("end", () => (conn.closed = true));
+          res.on("error", () => (conn.closed = true));
+          conn.close = () => req.destroy();
+          /** The first event from index `from` on matching `pred`, or null after `ms`. */
+          conn.next = (pred, ms = 3000, from = 0) =>
+            new Promise((ok) => {
+              const w = { pred, from, resolve: ok, t: setTimeout(() => (conn.waiters.splice(conn.waiters.indexOf(w), 1), ok(null)), ms) };
+              conn.waiters.push(w);
+              flush();
+            });
+          if (res.statusCode === 200) resolve(conn);
+          else res.on("end", () => resolve({ ...conn, json: (() => { try { return JSON.parse(conn.body); } catch { return null; } })() }));
+        });
+        req.on("error", reject);
+        req.end();
+      });
+    const lUsers = {};
+    for (const [who, name] of [
+      ["LO", "Lia Owner"],
+      ["LM", "Leo Member"],
+      ["LV", "Lux Viewer"],
+      ["LX", "Lex Outsider"],
+    ])
+      lUsers[who] = await signUp(who, name, `${who.toLowerCase()}@live.example.test`);
+    const { LO, LM, LV, LX } = lUsers;
+    const LW = (await call("LO", "POST", "/api/v2/workspaces", { cookie: LO.cookie, body: { name: "Live workspace" } })).json?.id;
+    const LW2 = (await call("LX", "POST", "/api/v2/workspaces", { cookie: LX.cookie, body: { name: "Elsewhere" } })).json?.id;
+    const la = (u, method, p, body, w = LW) => call(u.who, method, `/api/v2/workspaces/${w}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const [u, role] of [
+      [LM, "member"],
+      [LV, "viewer"],
+    ]) {
+      const i = await la(LO, "POST", "/invites", { email: u.email, role });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const LG = (await la(LO, "POST", "/goals", { title: "Ship the live floor", visibility: "workspace" })).json;
+    const stream = (u, w = LW, headers) => sse(u.who, `/api/v2/workspaces/${w}/stream`, { cookie: u.cookie, headers });
+
+    // -- who may open it: the same rules as the reads --
+    const anon = await sse("anon", `/api/v2/workspaces/${LW}/stream`);
+    const bearer = await sse("LM", `/api/v2/workspaces/${LW}/stream`, { cookie: LM.cookie, headers: { authorization: "Bearer alnd_x" } });
+    const outsider = await stream(LX);
+    const nope = await stream(LM, "ws_doesnotexist0000000000000");
+    const sV = await stream(LV);
+    const vHello = await sV.next((e) => e.event === "hello");
+    const vWrite = await la(LV, "POST", "/goals", { title: "Viewer goal", visibility: "workspace" });
+    check(
+      "live: the stream is cookie-only and scoped like the reads: signed out 401, an Authorization header 403 bearer_not_allowed, a non-member and an unknown workspace 404 (alike), a viewer 200 text/event-stream with hello; a viewer's write is still 403",
+      LW && LG?.id && anon.status === 401 && bearer.status === 403 && bearer.json?.error === "bearer_not_allowed" && outsider.status === 404 && nope.status === 404 && outsider.json?.error === nope.json?.error &&
+        sV.status === 200 && /^text\/event-stream/.test(sV.headers["content-type"]) && /no-transform/.test(sV.headers["cache-control"]) && /^[A-Za-z0-9_-]{16}$/.test(vHello?.id ?? "") && Array.isArray(vHello?.data?.presence) && vWrite.status === 403,
+      `${anon.status} ${bearer.status} ${bearer.body} ${outsider.status} ${nope.status} ${sV.status} ${JSON.stringify(vHello)} ${vWrite.status}`,
+    );
+
+    // -- approve in one window, see it in another within about a second --
+    const sM = await stream(LM);
+    const sO = await stream(LO);
+    await sM.next((e) => e.event === "hello");
+    await sO.next((e) => e.event === "hello");
+    const cr = await la(LM, "POST", `/goals/${LG.id}/change-requests`, { base_version: 1, changes: { title: "Ship the live floor this week" }, reason: "Live: the demo is Friday" });
+    const oSees = await sO.next((e) => e.event === "change" && e.data.views.includes("home"));
+    const mark = sM.events.length;
+    const t0 = Date.now();
+    const ap = await la(LO, "POST", `/goals/${LG.id}/change-requests/${cr.json?.id}/approve`, { revision: 1 });
+    const mSees = await sM.next((e) => e.event === "change" && e.data.views.includes("changes"), 3000, mark);
+    const lag = mSees ? mSees.at - t0 : null;
+    check(
+      "live: a change request sent in one window reaches its approver's stream, and its approval reaches the requester's within about a second (change naming home and changes, with an id); the events carry view names and presence, never the request's words",
+      cr.status === 201 && !!oSees && ap.status === 200 && !!mSees && lag !== null && lag < 1500 && mSees.data.views.includes("home") && /^[A-Za-z0-9_-]{16}$/.test(mSees.id) && !JSON.stringify(sM.events).includes("demo is Friday") && !JSON.stringify(sO.events).includes("demo is Friday"),
+      `${cr.status} ${ap.status} lag=${lag} ${JSON.stringify(sM.events.slice(mark)).slice(0, 400)}`,
+    );
+
+    // -- another workspace's events never arrive; nor does a change the reader can't read --
+    const s2 = await stream(LX, LW2);
+    await s2.next((e) => e.event === "hello");
+    const mMark = sM.events.length;
+    const vMark = sV.events.length;
+    const x2 = await la(LX, "POST", "/goals", { title: "Elsewhere goal", visibility: "workspace" }, LW2);
+    const xSees = await s2.next((e) => e.event === "change", 3000);
+    const oPrivMark = sO.events.length;
+    const priv = await la(LO, "POST", "/goals", { title: "Owner's private plan", visibility: "private" });
+    const oPriv = await sO.next((e) => e.event === "change" && e.data.views.includes("goals"), 3000, oPrivMark);
+    await sleep(1200);
+    check(
+      "live: writes in another workspace reach that workspace's streams and none of this one's; a private goal reaches its owner's stream but no member's or viewer's (their reads didn't move, so nothing is sent)",
+      x2.status === 201 && !!xSees && priv.status === 201 && !!oPriv && sM.events.length === mMark && sV.events.length === vMark && !JSON.stringify(s2.events).includes(LW) && !JSON.stringify(sM.events).includes(LW2),
+      `${x2.status} ${!!xSees} ${priv.status} ${!!oPriv} m+${sM.events.length - mMark} v+${sV.events.length - vMark}`,
+    );
+    s2.close();
+
+    // -- resume: Last-Event-ID --
+    const lastM = [...sM.events].reverse().find((e) => e.id)?.id;
+    sM.close();
+    await sleep(200);
+    const v2 = await la(LO, "POST", "/goals", { title: "Measure the live floor", visibility: "workspace" });
+    const r1 = await stream(LM, LW, { "last-event-id": lastM });
+    const r1h = await r1.next((e) => e.event === "hello");
+    const r1id = r1h?.id;
+    r1.close();
+    await sleep(200);
+    const r2 = await stream(LM, LW, { "last-event-id": r1id });
+    const r2h = await r2.next((e) => e.event === "hello");
+    r2.close();
+    const r3 = await stream(LM, LW, { "last-event-id": "deadbeef.1" });
+    const r3h = await r3.next((e) => e.event === "hello");
+    r3.close();
+    const r4 = await sse("LM", `/api/v2/workspaces/${LW}/stream?last_event_id=${encodeURIComponent(r1id ?? "")}`, { cookie: LM.cookie });
+    const r4h = await r4.next((e) => e.event === "hello");
+    r4.close();
+    check(
+      "live: a reconnect with Last-Event-ID is told what moved while it was away (a new workspace goal: goals and home) and nothing more; with the id it was just given, nothing (resync false, no views); with an id this server doesn't know, resync; ?last_event_id= works like the header",
+      v2.status === 201 && !!lastM && r1h?.data?.resync === false && r1h.data.views.includes("goals") && r1h.data.views.includes("home") && r2h?.data?.resync === false && r2h.data.views.length === 0 && r3h?.data?.resync === true && r4h?.data?.resync === false && r4h.data.views.length === 0,
+      `${v2.status} ${JSON.stringify(r1h?.data?.views)} ${JSON.stringify(r2h?.data)} ${JSON.stringify(r3h?.data)} ${JSON.stringify(r4h?.data)}`.slice(0, 600),
+    );
+
+    // -- a per-person cap --
+    await sleep(300);
+    const capped = [];
+    for (let i = 0; i < 5; i++) capped.push(await stream(LM));
+    const fifth = capped[4];
+    capped[0].close();
+    await sleep(300);
+    const again = await stream(LM);
+    const otherPerson = await stream(LO);
+    check(
+      "live: one person holds at most 4 streams on a workspace (a fifth -> 429 too_many_streams); closing one frees its place; another person's streams don't count",
+      capped.slice(0, 4).every((c) => c.status === 200) && fifth.status === 429 && fifth.json?.error === "too_many_streams" && again.status === 200 && otherPerson.status === 200,
+      `${capped.map((c) => c.status)} ${fifth.body} ${again.status} ${otherPerson.status}`,
+    );
+    for (const c of [...capped.slice(1, 4), again, otherPerson]) c.close?.();
+
+    // -- presence: a session working toward the goal, paused, and its directive delivered --
+    // A device written straight into the database (this phase spent Mode L's pairing limit long ago), granted LW.
+    // Leo's own goal: a member binds a session only to a goal they may bind (theirs, their team's, or with an alignment).
+    const LMG = (await la(LM, "POST", "/goals", { title: "Leo's latency budget", visibility: "workspace" })).json;
+    const LMd = { ...insertDevice(LM.id, "Leo's laptop"), secret: randomBytes(32), who: "LM" };
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(LMd.id, LW));
+    const key = sessionKey(LMd, LW, "claude-code", "live-1");
+    const start = new Date(Date.now() - 60_000).toISOString();
+    await call("LM", "PUT", `/api/v2/workspaces/${LW}/sessions/${key}`, { bearer: LMd.access, body: { harness: "claude-code", repo_key: repoKey(LMd, LW, "/src/live"), started_at: start, title: "Live floor session" } });
+    // Leo watches his own session in full; Lia (owner) sees it only as a count; Lux (viewer) sees no presence at all.
+    const sL = await stream(LM);
+    await sL.next((e) => e.event === "hello");
+    const oMark = sO.events.length;
+    const vpMark = sV.events.length;
+    const bound = await call("LM", "POST", `/api/v2/workspaces/${LW}/sessions/${key}/epochs`, { bearer: LMd.access, body: { epoch_id: epochId(), goal_id: LMG?.id, starts_at: start, root_turn: null, cause: "manual" } });
+    const pOf = (e) => e?.data?.presence?.find((p) => p.goal_id === LMG?.id);
+    const working = await sO.next((e) => e.event === "change" && pOf(e)?.working === 1, 3000, oMark);
+    const mineWorking = await sL.next((e) => e.event === "change" && pOf(e)?.mine?.length === 1, 3000);
+    const stop = await la(LO, "POST", `/sessions/${key}/stop`, {});
+    const paused = await sO.next((e) => e.event === "change" && pOf(e)?.paused === 1, 3000, oMark);
+    const minePaused = await sL.next((e) => e.event === "change" && pOf(e)?.mine?.[0]?.state === "paused", 3000);
+    const ps = pOf(minePaused)?.mine?.[0];
+    const rc = await call("LM", "POST", `/api/v2/directives/${stop.json?.directive_id}/receipts`, { bearer: LMd.access, body: { session_key: key, state: "received", at: new Date().toISOString() } });
+    const received = await sL.next((e) => e.event === "change" && pOf(e)?.mine?.[0]?.directive?.delivery === "received", 3000);
+    const resume = await la(LO, "POST", `/sessions/${key}/resume`, {});
+    const back = await sO.next((e) => e.event === "change" && pOf(e)?.working === 1 && pOf(e)?.paused === 0, 3000, oMark);
+    await sleep(400);
+    const ownerPresence = sO.events.slice(oMark).map(pOf).filter(Boolean);
+    const viewerEvents = sV.events.slice(vpMark);
+    const all = JSON.stringify([...sO.events, ...sV.events, ...sL.events]);
+    check(
+      "live (presence, founder ruling 2026-11-11): a session bound to a goal counts as working toward it; a stop counts it paused and a resume working again. The owner sees counts only (no per-session ids or delivery, `mine` empty); the session's own person sees it in full (paused with the stop sent, then received); the viewer gets no presence at all; nothing carries the session key, title or person",
+      [200, 201].includes(bound.status) && !!working && !!paused && !!back && stop.status === 200 && resume.status === 200 && rc.status === 200 &&
+        ownerPresence.length >= 3 && ownerPresence.every((p) => Array.isArray(p.mine) && p.mine.length === 0 && !("sessions" in p)) &&
+        !!mineWorking && ps?.state === "paused" && ps?.directive?.kind === "stop" && ps?.directive?.delivery === "sent" && !!received && /^[0-9a-f]{12}$/.test(ps?.id ?? "") &&
+        viewerEvents.every((e) => e.event !== "change" || (Array.isArray(e.data.presence) && e.data.presence.length === 0)) && !viewerEvents.some((e) => e.data?.views?.includes("presence")) &&
+        !all.includes(key) && !all.includes("Live floor session") && !all.includes(LM.id),
+      `${bound.status} ${!!working} ${!!paused} ${!!back} owner=${JSON.stringify(ownerPresence).slice(0, 200)} mine=${JSON.stringify(ps)} ${!!received} viewer=${JSON.stringify(viewerEvents).slice(0, 200)}`,
+    );
+
+    // -- M1: an event id says nothing about writes the reader can't see --
+    const m1Mark = sL.events.length;
+    for (let i = 0; i < 3; i++) await la(LO, "POST", `/goals/${priv.json?.id}/versions`, { version: i + 1, title: `Owner's private plan, take ${i + 2}` });
+    await sleep(400);
+    const hiddenSent = sL.events.length - m1Mark;
+    await la(LO, "POST", "/goals", { title: "A visible goal after hidden writes", visibility: "workspace" });
+    const afterHidden = await sL.next((e) => e.event === "change" && e.data.views.includes("goals"), 3000, m1Mark);
+    const ids = sL.events.map((e) => e.id).filter(Boolean);
+    const h1 = await stream(LM);
+    const h1h = await h1.next((e) => e.event === "hello");
+    h1.close();
+    const h2 = await stream(LM);
+    const h2h = await h2.next((e) => e.event === "hello");
+    h2.close();
+    check(
+      "live (audit M1): event ids are opaque per-reader tokens, never a write counter: three writes the reader can't see send them nothing, their next event's id is a fresh random token like every other (no digits run, none repeated), and two hellos with no write between them get unrelated ids",
+      hiddenSent === 0 && !!afterHidden && ids.length >= 3 && ids.every((x) => /^[A-Za-z0-9_-]{16}$/.test(x) && !/\.\d+$/.test(x)) && new Set(ids).size === ids.length && h1h?.id && h2h?.id && h1h.id !== h2h.id,
+      `${hiddenSent} ${!!afterHidden} ${JSON.stringify(ids)} ${h1h?.id} ${h2h?.id}`,
+    );
+    sL.close();
+
+    // -- the workspace-wide cap: streams can't take every request the machine serves --
+    await sleep(300);
+    const wsCap = [];
+    // Open now: Lia's and Lux's. Six more fill the 8; Leo's fourth is under his own cap but over the workspace's.
+    for (const u of [LO, LO, LO, LM, LM, LM]) wsCap.push(await stream(u));
+    const overWs = await stream(LM);
+    const elsewhere = await stream(LX, LW2);
+    check(
+      "live: a workspace holds at most ALIGN_LIVE_STREAMS_PER_WORKSPACE streams (8 here: Lia's and Lux's open ones, 3 more of Lia's and 3 of Leo's); Leo's fourth, under his own cap, -> 429 too_many_streams; another workspace's streams don't count",
+      wsCap.every((c) => c.status === 200) && overWs.status === 429 && overWs.json?.error === "too_many_streams" && /as many live views open/.test(overWs.json?.message ?? "") && elsewhere.status === 200,
+      `${wsCap.map((c) => c.status)} ${overWs.status} ${overWs.body} ${elsewhere.status}`,
+    );
+    for (const c of [...wsCap, elsewhere]) c.close?.();
+    await sleep(300);
+
+    // -- removed while watching: the stream says gone and ends --
+    const sV2 = sV;
+    const rm = await la(LO, "DELETE", `/members/${LV.id}`, {});
+    const gone = await sV2.next((e) => e.event === "gone", 3000);
+    await sleep(300);
+    check(
+      "live: a person removed from the workspace while a stream is open gets gone (404) and the stream ends; a new one is 404",
+      [200, 204].includes(rm.status) && gone?.data?.status === 404 && sV2.closed && (await stream(LV)).status === 404,
+      `${rm.status} ${JSON.stringify(gone)} ${sV2.closed}`,
+    );
+    sO.close();
+
+    // -- the hosted proxy serves it (an /api/v2 path, on the allowlist) --
+    const allow = /const HOSTED_ROUTES = (\/.*\/);/.exec(readFileSync(path.join(ROOT, "proxy.ts"), "utf8"))?.[1];
+    const re = allow ? new Function(`return ${allow}`)() : null;
+    check("live: the stream's path is on the hosted proxy's allowlist (proxy.ts HOSTED_ROUTES)", !!re && re.test(`/api/v2/workspaces/${LW}/stream`), String(allow));
+
+    // -- the web: approve in one window, see it in the other within about a second --
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const asCookies = (u) => u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE }));
+        const cA = await browser.createBrowserContext();
+        const cB = await browser.createBrowserContext();
+        const pA = await cA.newPage();
+        const pB = await cB.newPage();
+        await pA.setCookie(...asCookies(LO));
+        await pB.setCookie(...asCookies(LM));
+        const cr2 = await la(LM, "POST", `/goals/${LG.id}/change-requests`, { base_version: 1, changes: { title: "Ship the live floor today" }, reason: "Live UI: approve across windows" });
+        const cC = await browser.createBrowserContext();
+        const pC = await cC.newPage();
+        await pC.setCookie(...asCookies(LO));
+        for (const pg of [pA, pB, pC]) await pg.setViewport({ width: 1440, height: 900 });
+        // A: the owner on the request's decision page (its lane map). C: the owner's Home in another window, where the
+        // request waits on them. B: the requester's Home, with presence on their own goal.
+        await pA.goto(`${BASE}/app/w/${LW}/decisions/${LG.id}/${cr2.json?.id}`, { waitUntil: "networkidle0" });
+        await pC.goto(`${BASE}/app/w/${LW}`, { waitUntil: "networkidle0" });
+        await pB.goto(`${BASE}/app/w/${LW}`, { waitUntil: "networkidle0" });
+        const liveAll = await Promise.all([pA, pB, pC].map((pg) => pg.waitForSelector('[data-live-status="live"], [data-node="deciding"]', { timeout: 12000 }).then(() => true).catch(() => false)));
+        await pC.waitForSelector('[data-live-status="live"]', { timeout: 12000 });
+        await pB.waitForSelector('[data-live-status="live"]', { timeout: 12000 });
+        // The decision page has no Live mark: wait until its stream is open (the hub opens once reads are quiet).
+        await sleep(2500);
+        const deciding = await pA.$('[data-node="deciding"][data-current="1"]');
+        // The request's row in the owner's other Home: "decide" now; once approved it waits on them to launch instead.
+        const rowText = (id) => [...document.querySelectorAll('[data-needs] li')].find((li) => li.querySelector(`a[href*=".${id}"]`))?.innerText ?? null;
+        const rowBefore = await pC.evaluate(rowText, cr2.json?.id);
+        const t1 = Date.now();
+        const ap2 = await la(LO, "POST", `/goals/${LG.id}/change-requests/${cr2.json?.id}/approve`, { revision: 1 });
+        const seenCp = pC
+          .waitForFunction((id, before) => ([...document.querySelectorAll("[data-needs] li")].find((li) => li.querySelector(`a[href*=".${id}"]`))?.innerText ?? null) !== before, { timeout: 5000 }, cr2.json?.id, rowBefore)
+          .then(() => Date.now() - t1)
+          .catch(() => null);
+        const arrivedA = await pA.waitForSelector('[data-node="approved"][data-current="1"][data-arrived="1"]', { timeout: 5000 }).then(() => Date.now() - t1).catch(() => null);
+        const drawn = await pA.$("path.al-draw");
+        const seenC = await seenCp;
+        const rowAfter = await pC.evaluate(rowText, cr2.json?.id);
+        const presenceB = await pB.$eval(`[data-presence="${LMG?.id}"] [data-presence-sentence]`, (el) => el.textContent).catch(() => null);
+        check(
+          "live (web): an approval shows in the other windows within about a second: the decision page's lane map moves from Waiting for a decision to Approved, lights it and draws the line it came along; the request's row in the owner's other Home window moves from deciding to launching; the requester's Home says \"1 agent session is working toward this goal now (yours)\" on their goal; the Homes say Live",
+          cr2.status === 201 && ap2.status === 200 && liveAll.every(Boolean) && !!deciding && arrivedA !== null && arrivedA < 2000 && !!drawn && !!rowBefore && seenC !== null && seenC < 2000 && rowAfter !== rowBefore && presenceB === "1 agent session is working toward this goal now (yours)",
+          `${cr2.status} ${ap2.status} live=${liveAll} deciding=${!!deciding} A=${arrivedA} drawn=${!!drawn} C=${seenC} [${rowBefore?.slice(0, 80)}] -> [${rowAfter?.slice(0, 80)}] presence=${presenceB}`,
+        );
+      } finally {
+        await browser.close();
+      }
+    }
+  }
+  // ==== end live:stream ====
+
+  // ======== team budgets: server acceptance (stages B and C) ========
+  {
+    const people = {};
+    for (const [who, name] of [["SO", "Spend Owner"], ["SO2", "Second Owner"], ["SL", "Spend Lead"], ["SL2", "Other Lead"], ["SM", "Spend Member"], ["SV", "Spend Viewer"], ["SX", "Other Team Member"]])
+      people[who] = await signUp(who, name, `${who.toLowerCase()}@spend.example.test`);
+    const { SO, SO2, SL, SL2, SM, SV, SX } = people;
+    const W = (await call(SO.who, "POST", "/api/v2/workspaces", { cookie: SO.cookie, body: { name: "Spending workspace" } })).json.id;
+    const req = (u, method, p, body, headers) => call(u.who, method, `/api/v2/workspaces/${W}${p}`, { cookie: u.cookie, ...(body === undefined ? {} : { body }), ...(headers ? { headers } : {}) });
+    for (const [u, role] of [[SO2, "owner"], [SL, "member"], [SL2, "member"], [SM, "member"], [SV, "viewer"], [SX, "member"]]) {
+      const i = await req(SO, "POST", "/invites", { email: u.email, role });
+      await call(u.who, "POST", `/api/v2/invites/${i.json.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const T = (await req(SO, "POST", "/teams", { name: "Build" })).json.id;
+    const T2 = (await req(SO, "POST", "/teams", { name: "Other" })).json.id;
+    for (const [u, role] of [[SL, "lead"], [SL2, "lead"], [SM, "member"], [SV, "member"]]) await req(SO, "POST", `/teams/${T}/members`, { user_id: u.id, role });
+    const env = `/teams/${T}/budget`;
+    const asks = `/teams/${T}/budget-requests`;
+    const m = new Date().toISOString().slice(0, 7);
+    const monthEnd = new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5)), 1)).toISOString();
+    const request = (u, body = {}) => req(u, "POST", asks, { amount_usd: 20, reason: "Finish the current task", ...body });
+    const act = (u, r, action, body = {}) => req(u, "POST", `/budget-requests/${r.id}/${action}`, { revision: r.revision, ...body });
+    const read = (u, r) => req(u, "GET", `/budget-requests/${r.id}`);
+    const auditCount = () => withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE ws_id = ? AND (action LIKE 'team_budget.%' OR action LIKE 'budget_request.%')").get(W).n);
+    const empty = await req(SM, "GET", env);
+    const noEnv = await request(SM);
+    check("team budgets: no budget is an honest null with zero known usage and no change to work; asking without one is 409", empty.json.budget === null && empty.json.estimated_spend_usd_micros === 0 && empty.json.effective_budget_usd_micros === null && noEnv.status === 409 && noEnv.json.error === "budget_missing", noEnv.text);
+    const set = await req(SL, "PUT", env, { amount_usd: 100, allowance_usd: 5 });
+    const setHistory = set.json.history;
+    check("team budgets: a lead sets one monthly budget and allowance with recorded actor, time and audit", set.status === 200 && set.json.budget.amount_usd_micros === 100_000_000 && set.json.budget.allowance_usd_micros === 5_000_000 && setHistory.length === 1 && setHistory[0].actor.id === SL.id && setHistory[0].action === "set" && auditCount() === 1, set.text);
+    const badSets = await Promise.all([-1, 0.001, "100", 1_000_001].map((amount_usd) => req(SO, "PUT", env, { amount_usd })));
+    const badMonth = await req(SO, "GET", `${env}?month=2026-13`);
+    const past = await req(SO, "PUT", `${env}?month=2000-01`, { amount_usd: 1 });
+    const foreign = await call(SO.who, "PUT", `/api/v2/workspaces/${A}/teams/${T}/budget`, { cookie: SO.cookie, body: { amount_usd: 1 } });
+    const rejected = await Promise.all([req(SM, "PUT", env, { amount_usd: 1 }), req(SV, "DELETE", env), req(SL, "PUT", `/teams/${T2}/budget`, { amount_usd: 1 }), req(U1, "GET", env), req(SO, "PUT", env, { amount_usd: 1 }, { origin: "http://evil.example" })]);
+    check("team budgets: bad money/month, past writes, member/viewer/other-team writes, cross-workspace and cross-site requests fail without writes", badSets.every((r) => r.status === 400) && badMonth.status === 400 && past.status === 409 && foreign.status === 404 && rejected.map((r) => r.status).join() === "403,403,403,404,403" && rejected[1].json.error === "read_only" && auditCount() === 1, JSON.stringify([badSets.map((r) => r.status), rejected.map((r) => [r.status, r.json?.error])]));
+
+    const privateTitle = `SPEND-PRIVATE-${randomBytes(6).toString("hex")}`;
+    const goal = (await req(SM, "POST", "/goals", { title: "Finish build", team_id: T, visibility: "workspace" })).json;
+    const hidden = (await req(SM, "POST", "/goals", { title: privateTitle, team_id: T, visibility: "private" })).json;
+    const keys = newDeviceKeys();
+    const dev = insertDevice(SM.id, "Spend device");
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(dev.id, W));
+    const D = { ...keys, who: SM.who, user: SM, id: dev.id, access: dev.access };
+    const device = (method, p, body) => call(SM.who, method, `/api/v2/workspaces/${W}${p}`, { bearer: D.access, ...(body === undefined ? {} : { body }) });
+    const started = new Date(Date.now() - 60_000).toISOString();
+    const share = async (native, g, price) => {
+      const key = sessionKey(D, W, "claude-code", native), ep = epochId();
+      const s = await device("PUT", `/sessions/${key}`, { harness: "claude-code", repo_key: repoKey(D, W, `/src/${native}`), started_at: started, title: null });
+      const e = await device("POST", `/sessions/${key}/epochs`, { epoch_id: ep, goal_id: g, starts_at: started, cause: "manual", root_turn: null });
+      const u = await device("POST", `/sessions/${key}/usage`, { rows: [usageRow(D, native, ep, { ts: started, est_list_usd_micros: price })] });
+      check(`team budgets setup: ${native} shared, bound and metered`, s.status === 200 && e.status === 200 && u.json?.accepted === 1, `${s.status} ${e.text} ${u.text}`);
+      return { key, ep };
+    };
+    const own = await share("spend-visible", goal.id, 20_000_000);
+    await share("spend-hidden", hidden.id, 10_000_000);
+    const unbound = await share("spend-no-goal", null, 10_000_000);
+    const outsiderBudget = await req(SO2, "GET", env);
+    check("budgets: workspace owners read another team budget", outsiderBudget.status === 200);
+    const burns = await Promise.all([SO, SM, SV].map((u) => req(u, "GET", env)));
+    check("team budgets: team burn includes readable, private and no-goal work, with no named goal/session/person spend; viewer sees the same totals", burns.every((r) => r.status === 200 && r.json.estimated_spend_usd_micros === 40_000_000 && r.json.remaining_usd_micros === 60_000_000 && r.json.no_goal.share_percent === 25 && r.json.forecast_usd_micros >= 40_000_000 && !r.text.includes(hidden.id) && !r.text.includes(privateTitle) && !r.text.includes(own.key)), burns[0].text);
+    const privateBudget = await req(SX, "GET", env), privateCsv = await req(SX, "GET", `/spend/export?month=${m}`);
+    check("budgets and spend export: readable goal-bound team spend matches the on-screen report while home-team spend stays unallocated", privateBudget.status === 404 && privateCsv.text.includes('"Build","1","20.000000"') && privateCsv.text.includes('"Private goals","1","10.000000"') && privateCsv.text.includes('"Not bound to a goal","1","10.000000"') && !privateCsv.text.includes("Build: spend in no goal") && !privateCsv.text.includes("Private teams"), privateCsv.text);
+    await req(SO, "DELETE", `/teams/${T}/members/${SM.id}`);
+    const afterLeave = await req(SO, "GET", env);
+    await req(SO, "POST", `/teams/${T}/members`, { user_id: SM.id, role: "member" });
+    check("team budgets: no-goal attribution survives a later membership change", afterLeave.json.no_goal.priced_spend_usd_micros === 10_000_000 && afterLeave.json.estimated_spend_usd_micros === 40_000_000, afterLeave.text);
+    await req(SO, "POST", `/teams/${T2}/members`, { user_id: SM.id, role: "member" });
+    const defaultHome = await device("GET", "/spend/home-team");
+    const chosenHome = await req(SM, "PUT", "/spend/home-team", { team_id: T2 });
+    const notMyTeam = await req(SO, "PUT", "/spend/home-team", { team_id: T });
+    const bearerChoice = await device("PUT", "/spend/home-team", { team_id: T });
+    const unchangedBurn = await req(SO, "GET", env);
+    const terminalTeams = await device("GET", "/spend/teams");
+    const ownerTeams = await req(SO, "GET", "/spend/teams");
+    check("budget choices: device members get named member teams and workspace owners get every team", terminalTeams.status === 200 && terminalTeams.json.teams.some((t) => t.id === T && t.name === "Build") && terminalTeams.json.teams.some((t) => t.id === T2) && terminalTeams.json.teams.length === 2 && ownerTeams.status === 200 && ownerTeams.json.teams.some((t) => t.id === T2), terminalTeams.text);
+    const capturedBudget = await device("GET", `/sessions/${unbound.key}/budget`);
+    const otherSessionReader = await req(SL, "GET", `/sessions/${unbound.key}/budget`);
+    check("session budget: only its person/sharing device reads the captured team, and a later home choice does not move it",
+      capturedBudget.status === 200 && capturedBudget.json.team.id === T && capturedBudget.json.epoch_id === unbound.ep && otherSessionReader.status === 404,
+      `${capturedBudget.text} ${otherSessionReader.status}`);
+
+    check("spend home: earliest membership defaults, only the person chooses their own teams, devices read but cannot write, past epochs stay put",
+      defaultHome.json.team.id === T && defaultHome.json.can_choose && chosenHome.json.team.id === T2 && notMyTeam.status === 404 && bearerChoice.status === 403 && unchangedBurn.json.estimated_spend_usd_micros === 40_000_000,
+      `${defaultHome.text} ${chosenHome.text} ${notMyTeam.status} ${bearerChoice.status}`);
+    await req(SO, "DELETE", `/teams/${T2}/members/${SM.id}`);
+    check("spend home: leaving the chosen team clears the preference", (await req(SM, "GET", "/spend/home-team")).json.team.id === T);
+    const devRead = await device("GET", env);
+    const devWrite = await device("PUT", env, { amount_usd: 999 });
+    check("team budgets: granted devices read burn but cannot set a budget", devRead.status === 200 && devWrite.status === 403 && devWrite.json.error === "bearer_not_allowed", devWrite.text);
+
+    const low = await request(SM, { amount_usd: 5, goal_id: hidden.id, session_keys: [own.key] });
+    const waiting = await request(SM, { goal_id: hidden.id, session_keys: [own.key] });
+    const mine = await read(SM, waiting.json), ownerView = await read(SO, waiting.json);
+    check("team budgets: allowance grant has no approver and exact authority label; larger request waits; private goal and attached sessions are redacted for the owner", low.status === 201 && low.json.state === "granted" && low.json.authority === "allowance" && low.json.authority_label === "This request was recorded under the team's allowance." && low.json.decisions.length === 0 && low.json.expires_at === monthEnd && waiting.status === 201 && waiting.json.state === "waiting" && mine.json.goal.id === hidden.id && mine.json.session_keys[0] === own.key && ownerView.json.goal === null && ownerView.json.goal_hidden && ownerView.json.session_count === 1 && ownerView.json.session_keys.length === 0 && !ownerView.text.includes(hidden.id) && !ownerView.text.includes(own.key), ownerView.text);
+    const badRequests = await Promise.all([request(SV), request(SO), request(SM, { amount_usd: 0 }), request(SM, { reason: " " }), request(SL, { goal_id: hidden.id }), request(SL, { session_keys: [own.key] }), request(SM, { session_keys: [own.key, own.key] }), request(SM, { reason: "x".repeat(17_000) })]);
+    check("team budgets: viewer/non-team requester, zero amount, blank reason, unreadable goal, another person's sessions, duplicate sessions and oversized body fail", badRequests.map((r) => r.status).join() === "403,403,400,400,404,404,400,413", JSON.stringify(badRequests.map((r) => [r.status, r.json?.error])));
+    const exhausted = await request(SM, { amount_usd: 1 });
+    const exhaustedBurn = (await req(SO, "GET", env)).json;
+    check("team budgets: omitted ceiling defaults to allowance and a second grant waits after exhaustion", exhausted.json.state === "waiting" && exhaustedBurn.budget.allowance_ceiling_usd_micros === 5_000_000 && exhaustedBurn.allowance_remaining_usd_micros === 0, exhausted.text);
+    const raisedCeiling = await req(SL, "PUT", env, { amount_usd: 100, allowance_usd: 5, allowance_ceiling_usd: 6 });
+    check("team budgets: a lead changes the ceiling, preserving grants and recording its history", raisedCeiling.json.allowance_granted_usd_micros === 5_000_000 && raisedCeiling.json.allowance_remaining_usd_micros === 1_000_000 && raisedCeiling.json.history.at(-1).allowance_ceiling_usd_micros === 6_000_000, raisedCeiling.text);
+    const deviceAsk = await device("POST", asks, { amount_usd: 1, reason: "Terminal request" });
+    check("budgets: terminal requests always wait for a person under the allowance", deviceAsk.status === 201 && deviceAsk.json.authority === null && deviceAsk.json.state === "waiting" && deviceAsk.json.filed_from === "terminal", deviceAsk.text);
+    check("budgets: authenticated filing source is shown on records, lists and Home", /Filed from a terminal on the device .+\. Align cannot tell whether .+ or an agent on that device ran the command\./.test(deviceAsk.json.filing_note) && /^Filed in the browser by .+\.$/.test(low.json.filing_note) && (await req(SM, "GET", "/budget-requests")).json.mine.some((r) => r.id === deviceAsk.json.id && r.filing_note === deviceAsk.json.filing_note) && (await req(SM, "GET", "/home")).json.budget_requests.mine.some((r) => r.id === deviceAsk.json.id && r.filing_note === deviceAsk.json.filing_note), deviceAsk.text);
+    const first = waiting.json;
+    const beforeDecisions = auditCount();
+    const missingRevision = await req(SL, "POST", `/budget-requests/${first.id}/approve`, { amount_usd: 1, expires_at: monthEnd });
+    const invalidDecisions = await Promise.all([act(SM, first, "approve", { amount_usd: 20, expires_at: monthEnd }), act(SV, first, "decline", { reason: "No" }), act(SL, first, "approve", { amount_usd: 21, expires_at: monthEnd }), act(SL, first, "approve", { amount_usd: 1, expires_at: "2000-01-01T00:00:00Z" }), act(SL, first, "approve", { amount_usd: 1, expires_at: "2099-01-01T00:00:00Z" }), act(SL, first, "decline", { reason: " " }), act(SL, first, "decline", { revision: 99, reason: "x".repeat(1001) })]);
+    check("team budgets: self-decision, viewer, amount above ask, expired/next-month expiry, blank decline and missing/future revisions are refused atomically", missingRevision.status === 400 && invalidDecisions.map((r) => r.status).join() === "403,403,400,400,400,400,400" && invalidDecisions[6].json.error === "unknown_revision" && auditCount() === beforeDecisions, JSON.stringify(invalidDecisions.map((r) => [r.status, r.json?.error])));
+    const decline = await act(SO, first, "decline", { reason: "Keep the scope smaller" });
+    const referral = await act(SM, decline.json, "second-look");
+    const repeatedReferral = await act(SM, referral.json, "second-look");
+    const sameOwner = await act(SO, referral.json, "approve", { amount_usd: 12, expires_at: monthEnd });
+    const leadSecond = await act(SL, referral.json, "approve", { amount_usd: 12, expires_at: monthEnd });
+    const staleFirst = await act(SO2, first, "approve", { amount_usd: 12, expires_at: monthEnd });
+    const grant = await act(SO2, referral.json, "approve", { amount_usd: 12, expires_at: monthEnd, note: "Finish this part" });
+    check("team budgets: one second look, different owner only, stale first decision refused, partial approval preserves both decisions", decline.json.state === "declined" && referral.json.state === "waiting" && referral.json.second_look && repeatedReferral.status === 409 && sameOwner.status === 403 && leadSecond.status === 403 && staleFirst.status === 409 && staleFirst.json.error === "stale_revision" && grant.status === 200 && grant.json.state === "granted" && grant.json.approved_usd_micros === 12_000_000 && grant.json.decisions.map((d) => d.decision).join() === "declined,granted" && grant.json.decisions[0].actor.id === SO.id && grant.json.decisions[1].actor.id === SO2.id, grant.text);
+    const burnGranted = (await req(SO, "GET", env)).json;
+    check("team budgets: active allowance and approved grants raise the monthly effective budget and remaining estimate", burnGranted.effective_budget_usd_micros === 117_000_000 && burnGranted.remaining_usd_micros === 77_000_000, JSON.stringify(burnGranted));
+    const twice = (await request(SM)).json;
+    const d1 = await act(SL, twice, "decline", { reason: "No" });
+    const s2 = await act(SM, d1.json, "second-look");
+    const d2 = await act(SO, s2.json, "decline", { reason: "Still no" });
+    const s3 = await act(SM, d2.json, "second-look");
+    check("team budgets: two declines remain in the record and a second referral is refused", d2.json.decisions.length === 2 && s3.status === 409 && !d2.json.can.second_look, s3.text);
+    const withdrawMe = (await request(SL)).json;
+    const selfLead = await act(SL, withdrawMe, "approve", { amount_usd: 1, expires_at: monthEnd });
+    const wrongWithdraw = await act(SO, withdrawMe, "withdraw");
+    const withdrew = await act(SL, withdrawMe, "withdraw");
+    const afterWithdraw = await act(SO, withdrawMe, "approve", { amount_usd: 1, expires_at: monthEnd });
+    check("team budgets: a requesting lead cannot approve themselves; only requester withdraws; a decision after withdrawal fails", selfLead.status === 403 && wrongWithdraw.status === 403 && withdrew.json.state === "withdrawn" && afterWithdraw.status === 409, `${selfLead.status} ${wrongWithdraw.status} ${withdrew.text}`);
+    const racing = (await request(SM)).json;
+    const raced = await Promise.all([act(SL, racing, "approve", { amount_usd: 2, expires_at: monthEnd }), act(SL2, racing, "decline", { reason: "No" })]);
+    const raceRecord = (await read(SM, racing)).json;
+    check("team budgets: racing decisions produce one transition and one immutable decision", raced.map((r) => r.status).sort().join() === "200,409" && raceRecord.decisions.length === 1, JSON.stringify(raced.map((r) => [r.status, r.json?.error])));
+    const privateRead = await read(U1, first);
+    const waitingHome = (await request(SM)).json;
+    const ownerHome = await req(SO, "GET", "/home"), requesterHome = await req(SM, "GET", "/home");
+    const listing = (await req(SL, "GET", "/budget-requests")).json;
+    check("team budgets: eligible deciders see waiting requests on Home, requester sees every own state, outsiders cannot read, and lists do not leak private goals", ownerHome.json.budget_requests.waiting_on_me.some((r) => r.id === waitingHome.id) && requesterHome.json.budget_requests.mine.some((r) => r.id === first.id && r.state === "granted") && listing.waiting_on_me.some((r) => r.id === waitingHome.id) && privateRead.status === 404 && !ownerHome.text.includes(hidden.id) && !ownerHome.text.includes(privateTitle), ownerHome.text.slice(-1000));
+    // Home excludes irrelevant history before loading records, while the full list retains it.
+    const oldHome = (await request(SM)).json;
+    withDb((d) => d.prepare("UPDATE v2_budget_requests SET month = '2000-01' WHERE id = ?").run(oldHome.id));
+    const previousHome = (await request(SM)).json;
+    const previousMonth = new Date(`${m}-01T00:00:00.000Z`); previousMonth.setUTCMonth(previousMonth.getUTCMonth() - 1);
+    const olderMonth = new Date(previousMonth); olderMonth.setUTCMonth(olderMonth.getUTCMonth() - 1);
+    withDb((d) => {
+      d.prepare("UPDATE v2_budget_requests SET month = ? WHERE id = ?").run(olderMonth.toISOString().slice(0, 7), oldHome.id);
+      d.prepare("UPDATE v2_budget_requests SET month = ? WHERE id = ?").run(previousMonth.toISOString().slice(0, 7), previousHome.id);
+    });
+    const boundedHome = (await req(SM, "GET", "/home")).json.budget_requests;
+    const fullHistory = (await req(SM, "GET", `/budget-requests?month=${olderMonth.toISOString().slice(0, 7)}`)).json;
+    check("spend Home: own previous month is retained, older requests remain only in full lists, other people's terminal history is excluded",
+      boundedHome.mine.some((r) => r.id === previousHome.id && r.state === "expired") && !boundedHome.mine.some((r) => r.id === oldHome.id) && fullHistory.mine.some((r) => r.id === oldHome.id) &&
+      !ownerHome.json.budget_requests.mine.some((r) => r.requester.id !== SO.id) && !ownerHome.json.budget_requests.waiting_on_me.some((r) => r.state !== "waiting"), JSON.stringify(boundedHome));
+    const solo = (await req(SO, "POST", "/teams", { name: "Solo" })).json.id;
+    await req(SO, "POST", `/teams/${solo}/members`, { user_id: SO.id, role: "lead" });
+    await req(SO, "POST", `/teams/${solo}/members`, { user_id: SM.id, role: "member" });
+    await req(SO, "PUT", `/teams/${solo}/budget`, { amount_usd: 100 });
+    withDb((d) => d.prepare("UPDATE v2_members SET role = 'member' WHERE ws_id = ? AND user_id = ?").run(W, SO2.id));
+    try {
+      const stranded = await req(SO, "POST", `/teams/${solo}/budget-requests`, { amount_usd: 20, reason: "Finish work" });
+      const self = await act(SO, stranded.json, "approve", { amount_usd: 20, expires_at: monthEnd });
+      const strandedList = (await req(SO, "GET", `/teams/${solo}/budget-requests`)).json;
+      check("budget requests: sole lead and sole owner creates successfully, record and list explain no eligible decider, self-approval stays forbidden",
+        stranded.status === 201 && stranded.json.state === "waiting" && stranded.json.approvers.length === 0 && stranded.json.decision_unavailable_reason.includes("Nobody is eligible") &&
+        strandedList.mine.some((r) => r.id === stranded.json.id && r.decision_unavailable_reason) && self.status === 403, stranded.text);
+      const pendingSecond = await req(SM, "POST", `/teams/${solo}/budget-requests`, { amount_usd: 20, reason: "Finish work" });
+      const no = await act(SO, pendingSecond.json, "decline", { reason: "Scope" });
+      const before = auditCount();
+      const noSecond = await act(SM, no.json, "second-look");
+      const after = await read(SM, no.json);
+      check("budget requests: no eligible different owner means no second look is offered, a reason is shown and a referral records nothing",
+        !after.json.can.second_look && after.json.second_look_unavailable_reason.includes("No other workspace owner") && noSecond.status === 409 && noSecond.json.error === "no_eligible_approver" && after.json.revision === no.json.revision && auditCount() === before, noSecond.text);
+    } finally {
+      withDb((d) => d.prepare("UPDATE v2_members SET role = 'owner' WHERE ws_id = ? AND user_id = ?").run(W, SO2.id));
+    }
+    const beforeRead = auditCount();
+    await req(SO, "GET", env); await req(SO, "GET", "/budget-requests");
+    check("team budgets: reading and derived expiry write no audit or decisions", auditCount() === beforeRead);
+    withDb((d) => d.prepare("UPDATE v2_budget_requests SET expires_at = ? WHERE id = ?").run("2000-01-01T00:00:00.000Z", grant.json.id));
+    const expired = await read(SM, grant.json), afterExpiry = await req(SO, "GET", env);
+    check("team budgets: expired grant is distinct and contributes nothing; decision history survives", expired.json.state === "expired" && expired.json.authority === "approver" && expired.json.decisions.length === 2 && afterExpiry.json.effective_budget_usd_micros === burnGranted.effective_budget_usd_micros - 12_000_000 + (raceRecord.state === "granted" ? 2_000_000 : 0), afterExpiry.text);
+    const unknown = await device("POST", `/sessions/${unbound.key}/usage`, { rows: [usageRow(D, "spend-unknown", unbound.ep, { ts: started, est_list_usd_micros: null })] });
+    const withUnknown = await req(SV, "GET", env);
+    check("team budgets: unpriced work is counted with explicit spend/forecast lower bounds and remaining upper bound; share and crossing stay absent", unknown.json.accepted === 1 && withUnknown.json.unpriced_requests === 1 && withUnknown.json.priced_spend_usd_micros === 40_000_000 && withUnknown.json.estimated_spend_usd_micros === 40_000_000 && withUnknown.json.spend_bound === "lower" && withUnknown.json.remaining_bound === "upper" && withUnknown.json.remaining_usd_micros === afterExpiry.json.effective_budget_usd_micros - 40_000_000 && withUnknown.json.forecast_bound === "lower" && withUnknown.json.forecast_usd_micros >= 40_000_000 && withUnknown.json.runs_out_at === null && withUnknown.json.no_goal.share_percent === null && withUnknown.json.no_goal.estimated_spend_usd_micros === 10_000_000 && withUnknown.json.no_goal.spend_bound === "lower" && withUnknown.json.pricing_note.includes("1 unpriced request"), withUnknown.text);
+    const homeBeforeCrossing = (await req(SO, "GET", "/home")).json;
+    const crossedBudget = await req(SL, "PUT", env, { amount_usd: 0.01 });
+    const stamps = await call(SM.who, "GET", "/api/v2/directives?cursor=0", { bearer: D.access });
+    const attrStamped = await device("GET", `/sessions/${own.key}/budget?attribution=1`);
+    check("budget timing: directive, attribution and team reads return the same private change stamp", stamps.status === 200 && stamps.json.budget_stamps.some((v) => v.ws === W && v.team === T && v.stamp === crossedBudget.json.budget_stamp) && stamps.json.budget_stamps.every((v) => Object.keys(v).sort().join() === "month,stamp,team,ws") && attrStamped.json.budget_stamp === crossedBudget.json.budget_stamp, stamps.text);
+    await req(SO, "PUT", `/teams/${T2}/budget`, { amount_usd: 100 });
+    const privateStamps = await call(SM.who, "GET", "/api/v2/directives?cursor=0", { bearer: D.access });
+    check("budget timing: a member's directive response omits another team's stamp", !privateStamps.json.budget_stamps.some((v) => v.ws === W && v.team === T2), privateStamps.text);
+    await req(SO, "DELETE", `/teams/${T2}/budget`);
+    const homeCrossed = (await req(SO, "GET", "/home")).json;
+    const leadCrossed = (await req(SL, "GET", "/home")).json;
+    const memberCrossed = (await req(SM, "GET", "/home")).json;
+    const otherCrossed = (await req(SX, "GET", "/home")).json;
+    const crossingRows = homeCrossed.budget_crossings.filter((v) => v.team.id === T);
+    check("budget timing: Home crossings are first observations for leads and owners, with no change to Needs data", crossedBudget.json.reached_thresholds.join() === "80,100" && crossingRows.length === 2 && crossingRows.every((v) => v.as_of && v.observed_at) && leadCrossed.budget_crossings.filter((v) => v.team.id === T).length === 2 && memberCrossed.budget_crossings.length === 0 && !otherCrossed.budget_crossings.some((v) => v.team.id === T) && JSON.stringify(homeBeforeCrossing.budget_requests) === JSON.stringify(homeCrossed.budget_requests), JSON.stringify(crossingRows));
+    const homeRepeated = (await req(SO, "GET", "/home")).json;
+    check("budget timing: repeated reads preserve the first crossing and disclose no private goal or session", JSON.stringify(homeRepeated.budget_crossings) === JSON.stringify(homeCrossed.budget_crossings) && !JSON.stringify(crossingRows).includes(hidden.id) && !JSON.stringify(crossingRows).includes(own.key), JSON.stringify(homeRepeated.budget_crossings));
+    const changed = await req(SO, "PUT", env, { amount_usd: 120 });
+    const removed = await req(SL, "DELETE", env);
+    const removedAgain = await req(SL, "DELETE", env);
+    check("team budgets: changing clears omitted allowance; removal preserves immutable budget history and grants; repeated removal changes nothing", changed.json.budget.allowance_usd_micros === null && removed.json.budget === null && removed.json.effective_budget_usd_micros === null && removed.json.history.map((h) => h.action).join() === "set,changed,changed,changed,removed" && removedAgain.json.history.length === 5 && (await read(SM, low.json)).json.authority === "allowance", removed.text);
+
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const errors = [];
+        const as = async (u) => {
+          const context = await browser.createBrowserContext();
+          const p = await context.newPage(); await p.setViewport({ width: 390, height: 844 });
+          p.on("pageerror", (e) => errors.push(String(e)));
+          await p.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          return p;
+        };
+        const open = (p, url) => p.goto(`${BASE}${url}`, { waitUntil: "networkidle0" });
+        const fill = (p, selector, value) => p.$eval(selector, (e, v) => { e.value = v; e.dispatchEvent(new Event("input", { bubbles: true })); }, String(value));
+        const text = (p, selector = "main") => p.$eval(selector, (e) => e.textContent);
+        const link = (r) => `/app/w/${W}/spend?team=${r.team.id}&month=${r.month}&request=${r.id}`;
+        const pL = await as(SL), pM = await as(SM), pO = await as(SO2), pV = await as(SV);
+        await open(pL, `/app/w/${W}/spend?team=${T}`);
+        await pL.waitForSelector("[data-budget-form]");
+        await fill(pL, '[data-budget-form] [name="amount"]', "");
+        await pL.click('[data-budget-form] button[type="submit"]');
+        await pL.waitForFunction(() => document.querySelector('[data-budget-form] [role="alert"]')?.textContent.includes("Enter the budget amount"));
+        check("budget screens: an empty required amount cannot save a zero budget", (await req(SO, "GET", env)).json.budget === null);
+        await fill(pL, '[data-budget-form] [name="amount"]', 100);
+        await fill(pL, '[data-budget-form] [name="allowance"]', 5);
+        await fill(pL, '[data-budget-form] [name="ceiling"]', 10);
+        await pL.click('[data-budget-form] button[type="submit"]');
+        await pL.waitForSelector("[data-budget-request-form]");
+        await pL.waitForFunction(() => document.querySelector('[data-budget-form] [role="status"]')?.textContent.includes("Budget saved."));
+        await pL.reload({ waitUntil: "networkidle0" });
+        await pL.waitForFunction(() => document.querySelector('[data-budget-form] [role="status"]')?.textContent.includes("Budget saved."));
+        check("budget screens: saving a budget leaves a confirmation after reload", await pL.$eval('[data-budget-form] [role="status"]', (e) => e.textContent.includes("Budget saved.")));
+
+        const months = () => pL.$$eval('input[type="month"]', (els) => els.map((e) => ({ label: e.closest("label")?.textContent, value: e.value })));
+        const initialMonths = await months();
+        const monthControl = (label) => pL.$(`input[type="month"][aria-labelledby]`).then(async () => {
+          const handles = await pL.$$('input[type="month"]');
+          for (const h of handles) if (await h.evaluate((e, word) => (e.getAttribute("aria-label") ?? document.getElementById(e.getAttribute("aria-labelledby"))?.textContent ?? [...(e.labels ?? [])].map((l) => l.textContent).join(" ")).includes(word), label)) return h;
+          throw new Error(`Month control missing: ${label}`);
+        });
+        const csvMonth = await monthControl("Export month");
+        await csvMonth.evaluate((e) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(e, "2024-02"); e.dispatchEvent(new Event("input", { bubbles: true })); e.dispatchEvent(new Event("change", { bubbles: true })); });
+        const afterCsv = await months();
+        check("budget screens: changing the CSV month preserves the budget month", afterCsv[0].value === "2024-02" && afterCsv[1].value === initialMonths[1].value, JSON.stringify(afterCsv));
+        const budgetMonth = await monthControl("Budget month");
+        await budgetMonth.evaluate((e) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(e, "2024-03"); e.dispatchEvent(new Event("input", { bubbles: true })); e.dispatchEvent(new Event("change", { bubbles: true })); });
+        const afterBudget = await months();
+        check("budget screens: changing the budget month preserves the CSV month", afterBudget[0].value === "2024-02" && afterBudget[1].value === "2024-03", JSON.stringify(afterBudget));
+        await open(pL, `/app/w/${W}/spend?team=${T}`); await pL.waitForSelector("[data-budget-request-form]");
+        const uiBudget = (await req(SO, "GET", env)).json;
+        check("budget screens: lead sets base, per-request allowance and monthly ceiling with named fields, bounds and remaining allowance", uiBudget.budget.amount_usd_micros === 100_000_000 && uiBudget.budget.allowance_ceiling_usd_micros === 10_000_000 && (await text(pL, "[data-burn]")).includes("At least") && (await text(pL, "[data-burn]")).includes("At most"), await text(pL, "[data-team-spending]"));
+        const noGoalRisk = "Spend in no goal may come from fewer than three people this month, so it can reveal one person's spend.";
+        const noGoalFigure = await pL.$eval("[data-burn]", (el) => [...el.querySelectorAll("div")].find((row) => row.querySelector("dt")?.textContent === "Spend in no goal, estimate")?.querySelector("dd")?.textContent ?? "");
+        check("budget screens: a larger team warns beside no-goal spend from fewer than three people without showing the count", uiBudget.team_member_count >= 3 && uiBudget.no_goal.few_contributors === true && !("contributor_count" in uiBudget.no_goal) && noGoalFigure.includes(noGoalRisk) && !/contributor|1 person/.test(noGoalFigure) && !(await text(pL, "[data-team-spending]")).includes("Team totals can reveal one person's spend when the team has fewer than three members."), noGoalFigure);
+        await open(pM, `/app/w/${W}/spend?team=${T}`);
+        await pM.waitForSelector('select[name="team_id"]');
+        await pM.select('select[name="team_id"]', solo);
+        await pM.$eval('select[name="team_id"]', (e) => e.closest("form").querySelector("button").click());
+        await pM.waitForFunction(() => document.querySelector("main")?.textContent.includes("Your home team is Solo"));
+        check("budget screens: a person with several teams changes only their home team for future spending periods", (await req(SM, "GET", "/spend/home-team")).json.team.id === solo && (await req(SO, "GET", env)).json.priced_spend_usd_micros === 40_000_000);
+        await pM.select('select[name="team_id"]', T);
+        await pM.$eval('select[name="team_id"]', (e) => e.closest("form").querySelector("button").click());
+        await pM.waitForFunction(() => document.querySelector("main")?.textContent.includes("Your home team is Build"));
+        await pM.reload({ waitUntil: "networkidle0" });
+        await pM.waitForFunction(() => document.querySelector("main")?.textContent.includes("Home team saved."));
+        check("budget screens: home-team confirmation survives reload and names the saved outcome", (await text(pM)).includes("Home team saved. This choice applies to future spending periods."));
+        await fill(pM, '[data-budget-request-form] [name="amount"]', 20);
+        await fill(pM, '[data-budget-request-form] [name="reason"]', "Browser budget request");
+        await pM.select('[data-budget-request-form] [name="goal"]', hidden.id);
+        await pM.click(`[data-budget-request-form] input[value="${own.key}"]`);
+        await pM.$eval('[data-budget-request-form]', (form) => { form.requestSubmit(); form.requestSubmit(); });
+        await pM.waitForFunction(() => document.querySelector("[data-budget-request-form]")?.textContent.includes("Recorded."));
+        check("budget screens: a successful request clears required draft fields", await pM.$eval('[data-budget-request-form]', (f) => f.elements.amount.value === "" && f.elements.reason.value === ""));
+        const browserRequest = (await req(SM, "GET", "/budget-requests")).json.mine.find((r) => r.reason === "Browser budget request");
+        check("budget screens: member requests with a readable goal and their own session; home-team rule is visible", (await req(SM, "GET", "/budget-requests")).json.mine.filter((r) => r.reason === "Browser budget request").length === 1 && browserRequest?.state === "waiting" && browserRequest.session_count === 1 && browserRequest.goal.id === hidden.id && (await text(pM)).includes("home team's budget recorded when its spending period opened"), JSON.stringify(browserRequest));
+        await open(pM, link(browserRequest)); await pM.waitForSelector("[data-budget-request]");
+        await pM.waitForFunction(() => document.querySelector("[data-budget-request]")?.textContent.includes("Withdraw budget request"));
+        check("budget screens: requester can withdraw but is never offered self-approval or self-decline", !(await pM.$("[data-budget-approve]")) && !(await pM.$("[data-budget-decline]")), await text(pM, "[data-budget-request]"));
+        await open(pL, link(browserRequest)); await pL.waitForSelector("[data-budget-approve]");
+        await fill(pL, '[data-budget-approve] [name="amount"]', 12);
+        await act(SO, browserRequest, "decline", { reason: "Review the scope" });
+        await pL.click('[data-budget-approve] button[type="submit"]');
+        await pL.waitForFunction(() => document.querySelector("[data-budget-request]")?.textContent.includes("Not recorded. This request changed after you read it") && !document.querySelector("[data-budget-approve]"));
+        check("budget screens: stale decision is refused visibly, takes focus and reloads the record", await pL.$eval('[data-budget-request] [role="alert"]', (e) => document.activeElement === e), await text(pL, "[data-budget-request]"));
+        await open(pM, link(browserRequest));
+        await pM.waitForFunction(() => [...document.querySelectorAll("[data-budget-request] button")].some((b) => b.textContent === "Ask for a second look"));
+        await pM.$eval("[data-budget-request]", (e) => [...e.querySelectorAll("button")].find((b) => b.textContent === "Ask for a second look").click());
+        await pM.waitForFunction(() => document.querySelector("[data-budget-request]")?.textContent.includes("waiting for a second look"));
+        await open(pO, link(browserRequest)); await pO.waitForSelector("[data-budget-approve]");
+        check("budget screens: approval amount, UTC expiry, note and decline reason fit 390 pixels", await pO.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        await fill(pO, '[data-budget-approve] [name="amount"]', 12);
+        await fill(pO, '[data-budget-approve] [name="note"]', "Finish this part");
+        await pO.click('[data-budget-approve] button[type="submit"]');
+        await pO.waitForFunction(() => document.querySelector("[data-budget-request]")?.textContent.includes("This request was granted by an approver."));
+        const recordText = await text(pO, "[data-budget-request]");
+        check("budget screens: second owner approves an amount and expiry with note; both decisions and authority survive; hidden goal and sessions stay unnamed", recordText.includes("declined this request as an approver") && recordText.includes("granted this request as an approver") && recordText.includes("Finish this part") && !recordText.includes(privateTitle) && !recordText.includes(own.key) && !(await pO.$(`[data-budget-request] a[href*="${hidden.id}"]`)), recordText);
+        await pO.waitForSelector("[data-budget-form]");
+        const phone = await pO.evaluate(() => ({ overflow: document.documentElement.scrollWidth > innerWidth, short: [...document.querySelectorAll("[data-team-spending] button, [data-team-spending] select, [data-team-spending] input:not([type=checkbox])")].filter((e) => e.getBoundingClientRect().height < 44).length }));
+        await pO.screenshot({ path: path.join(ROOT, ".next/spend-budgets-phone.png"), fullPage: true });
+        check("budget screens: budget, requests and decisions fit 390 pixels with 44-pixel controls", !phone.overflow && phone.short === 0, JSON.stringify(phone));
+        await open(pV, link(browserRequest)); await pV.waitForSelector("[data-budget-decisions]");
+        check("budget screens: viewers read records and estimates without management, request or decision forms", !(await pV.$("[data-budget-form]")) && !(await pV.$("[data-budget-request-form]")) && !(await pV.$("[data-budget-approve]")) && !(await pV.$("[data-budget-decline]")), await text(pV, "[data-team-spending]"));
+        check("budget screens: team picker contains only teams whose budget the viewer may read", await pV.$$eval("select", (els) => { const e = els.find((s) => [...(s.labels ?? [])].some((l) => l.textContent.includes("Budget team"))); return !!e && [...e.options].map((o) => o.textContent).includes("Build") && ![...e.options].some((o) => o.textContent === "Other"); }));
+        await req(SO, "POST", `/teams/${T2}/members`, { user_id: SV.id, role: "member" });
+        await open(pV, `/app/w/${W}/spend?team=${T2}`);
+        await pV.waitForFunction(() => document.querySelector("[data-team-spending]")?.textContent.includes("No team budget for this month"));
+        check("budget screens: empty team has honest absence, no invented requests and no phone overflow", (await text(pV, "[data-team-spending]")).includes("No budget requests for this month") && await pV.evaluate(() => document.documentElement.scrollWidth <= innerWidth), await text(pV, "[data-team-spending]"));
+        check("budget screens: a team without a budget has no threshold message", !(await pV.$("[data-budget-threshold]")));
+        const needsBeforeCross = (await req(SO, "GET", "/home")).json.budget_requests;
+        await open(pO, `/app/w/${W}`); await pO.waitForSelector('[data-live-status="live"]');
+        const headingBeforeCross = await pO.$eval("[data-home-count]", (e) => e.getAttribute("data-home-count"));
+        await req(SL, "PUT", env, { amount_usd: 0.01 });
+        await open(pL, `/app/w/${W}/spend?team=${T}&month=${m}`);
+        await pL.waitForSelector('[data-budget-threshold="100"]');
+        const thresholdText = await pL.$$eval("[data-budget-threshold]", (els) => els.map((e) => e.textContent).join(" "));
+        check("budget screens: Spend states 80 and 100 percent, computation time and estimates at phone width", thresholdText.includes("80%") && thresholdText.includes("100%") && thresholdText.includes("Read on") && thresholdText.includes("estimated at list price") && await pL.evaluate(() => document.documentElement.scrollWidth <= innerWidth), thresholdText);
+        await open(pO, `/app/w/${W}/requests`);
+        await pO.evaluate((ws, me, month) => { const k = `align.lastVisit:${ws}:${me}`; localStorage.setItem(k, `${month}-01T00:00:00.000Z`); sessionStorage.removeItem(k); }, W, SO2.id, m);
+        await open(pO, `/app/w/${W}`);
+        await pO.$eval("[data-since]", (section) => [...section.querySelectorAll("button")].find((b) => b.textContent.startsWith("Show all"))?.click());
+        await pO.waitForFunction(() => document.querySelector('[data-since]')?.textContent.includes("reached 100%"));
+        const sinceCross = await text(pO, "[data-since]");
+        const headingCross = await pO.$eval("[data-home-count]", (e) => e.getAttribute("data-home-count"));
+        check("budget screens: Since shows crossings and Needs contains no crossing row", headingCross === headingBeforeCross && sinceCross.includes("reached 80%") && sinceCross.includes("Read on") && !(await text(pO, "[data-needs]")).includes("reached 100%") && JSON.stringify((await req(SO, "GET", "/home")).json.budget_requests) === JSON.stringify(needsBeforeCross), sinceCross);
+        await pO.reload({ waitUntil: "networkidle0" });
+        await pO.$eval("[data-since]", (section) => [...section.querySelectorAll("button")].find((b) => b.textContent.startsWith("Show all"))?.click());
+        await pO.waitForFunction(() => document.querySelector('[data-since]')?.textContent.includes("reached 100%"));
+        check("budget screens: reload keeps the same crossing comparison and Needs count", (await text(pO, "[data-since]")).includes("reached 80%") && await pO.$eval("[data-home-count]", (e) => e.getAttribute("data-home-count")) === headingCross);
+        await req(SL, "PUT", env, { amount_usd: 100, allowance_usd: 5, allowance_ceiling_usd: 10 });
+        const smallBudget = await req(SO, "PUT", `/teams/${T2}/budget`, { amount_usd: 1 });
+        await pV.reload({ waitUntil: "networkidle0" });
+        await pV.waitForFunction(() => document.querySelector("[data-team-spending]")?.textContent.includes("Team totals can reveal one person's spend when the team has fewer than three members."));
+        check("budget screens: a small team keeps its budget and sees the privacy sentence and cache age", smallBudget.status === 200 && smallBudget.json.team_member_count < 3 && smallBudget.json.no_goal.few_contributors === false && !(await text(pV, "[data-team-spending]")).includes(noGoalRisk) && (await text(pV, "[data-team-spending]")).includes("five minutes old"), await text(pV, "[data-team-spending]"));
+        await open(pO, link(deviceAsk.json)); await pO.waitForSelector(`[data-budget-request="${deviceAsk.json.id}"]`);
+        check("budget screens: terminal source and readable dates appear on the record", (await text(pO, `[data-budget-request="${deviceAsk.json.id}"]`)).includes(deviceAsk.json.filing_note) && !(await text(pO, `[data-budget-request="${deviceAsk.json.id}"]`)).includes(`${m} UTC`));
+        const homeRequest = (await request(SM)).json;
+        await open(pO, `/app/w/${W}`); await pO.waitForSelector(`a[href*="request=${homeRequest.id}"]`);
+        check("budget screens: Home what needs you links to the same record and contributes to its headline", Number(await pO.$eval("[data-home-count]", (e) => e.getAttribute("data-home-count"))) > 0 && await pO.$(`[data-needs] a[href*="request=${homeRequest.id}"]`) !== null);
+        check("budget screens: Home budget rows name the filing source", (await text(pO, "[data-needs]")).includes(homeRequest.filing_note));
+        await open(pO, `/app/w/${W}/requests`); await pO.waitForSelector(`a[href*="request=${homeRequest.id}"]`);
+        check("budget screens: Requests links to the same Spend record", await pO.$eval(`a[href*="request=${homeRequest.id}"]`, (e, expected) => e.getAttribute("href") === expected, link(homeRequest)));
+        check("budget screens: request lists name the filing source", (await text(pO, "main")).includes(homeRequest.filing_note));
+        await open(pL, `/app/w/${W}/spend?team=${T}`); await pL.waitForSelector("[data-budget-form]");
+        await pL.$eval("[data-budget-form]", (f) => [...f.querySelectorAll("button")].find((b) => b.textContent === "Remove budget").click());
+        await pL.waitForFunction(() => document.querySelector("[data-budget-form]")?.textContent.includes("Budget removed."));
+        await pL.reload({ waitUntil: "networkidle0" });
+        await pL.waitForFunction(() => document.querySelector("[data-budget-form]")?.textContent.includes("Budget removed."));
+        check("budget screens: removing a budget leaves the removal confirmation after reload", (await req(SO, "GET", env)).json.budget === null && (await text(pL, "[data-budget-form]")).includes("Budget removed."));
+        await pO.setRequestInterception(true);
+        pO.on("request", (r) => r.url().endsWith(`/api/v2/workspaces/${W}/change-requests`) ? r.respond({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "server_error", message: "Could not read requests." }) }) : r.continue());
+        await open(pO, `/app/w/${W}`);
+        await pO.waitForSelector('[data-live-status="live"]');
+        check("budget screens: Home goes live even when a change-request read fails", await pO.$('[data-live-status="live"]') !== null);
+        check("budget screens: no page errors", errors.length === 0, errors.join(" | "));
+      } catch (e) { check("budget screens (Chrome) run", false, e?.stack ?? e); }
+      finally { await browser.close(); }
+    } else check("ui (Chrome) available for spending screens", false, `no Chrome at ${CHROME}`);
+    check("team budgets: schema retains all references", withDb((d) => d.prepare("PRAGMA foreign_key_check").all()).length === 0);
+  }
+  // ======== end team budgets: server acceptance ========
 
   // ==== port29:allocation ====
   // Goal sessions: agent time follows priorities (main #29), on a workspace of its own. AO owns it; team Core has a
@@ -7565,12 +9288,16 @@ try {
         const homeFO = (await fa(FO, "GET", "/home")).json;
         const pO = await as(FO);
         await open(pO, `/app/w/${FW}/requests`);
-        const waitingUi = await pO.evaluate(() => [...document.querySelectorAll("main section")].find((s) => s.querySelector("h2")?.textContent === "Waiting on you")?.innerText ?? "");
+        await pO.waitForSelector(`[data-row="${crN?.id}"]`, { timeout: 15000 }).catch(() => undefined);
+        const waitingUi = await pO.evaluate((id) => ({ row: document.querySelector(`[data-row="${id}"]`)?.innerText ?? "", filter: document.querySelector('[data-desk] [role="radio"][aria-checked="true"]')?.textContent ?? "" }), crN?.id);
+        // Who decided not yet is on the goal page's card; the Requests row and its review don't name them.
+        await open(pO, `/app/w/${FW}/goals/${GCI.id}`);
+        const waitingCard = await cardText(pO, crN?.id);
         check(
-          "B9: after approve then not yet, the workspace owner (who may launch) has it waiting on them on the Requests tab (waiting_on_me, under \"Waiting on you\") and on the Home (\"Approved, not launched\", next launch): the same rule",
+          "B9 (LIM-2472): after approve then not yet, the workspace owner (who may launch) has it waiting on them on the Requests tab (waiting_on_me, a row under the default \"Waiting on me\" filter) and on the Home (next launch): the same rule; the goal page says who decided not yet",
           apN.status === 200 && nyN.json?.launch === "not_yet" && groupsFO?.waiting_on_me?.some((c) => c.id === crN?.id && c.waiting_on_me) && !groupsFO.others.some((c) => c.id === crN?.id) &&
-            homeFO?.change_requests?.waiting_on_me?.some((c) => c.id === crN?.id && c.next === "launch") && waitingUi.includes("Cut CI time in half") && /Not launched yet: Fran Lead decided not yet/.test(waitingUi),
-          `${apN.status} ${nyN.json?.launch} ${JSON.stringify(groupsFO?.waiting_on_me?.map((c) => c.id))} ${waitingUi.slice(0, 200)}`,
+            homeFO?.change_requests?.waiting_on_me?.some((c) => c.id === crN?.id && c.next === "launch") && waitingUi.row.includes("Cut CI time in half") && /^Waiting on me \d+$/.test(waitingUi.filter) && /Not launched yet: Fran Lead decided not yet/.test(waitingCard),
+          `${apN.status} ${nyN.json?.launch} ${JSON.stringify(groupsFO?.waiting_on_me?.map((c) => c.id))} ${JSON.stringify(waitingUi)} ${waitingCard.slice(0, 200)}`,
         );
         // B5 and B13: the approver counters with a condition, reads their own note, then declines.
         const ctr = await fAct(FC, GG.id, crD.json?.id, "counter", { revision: 1, changes: { title: "Grow trials 2x by Q3" }, note: "A shorter change", condition: "Finance agrees" });
@@ -7646,10 +9373,12 @@ try {
         const sample = await call("FS", "POST", "/api/v2/workspaces/sample", { cookie: FS.cookie, body: {} });
         const pS = await as(FS);
         await open(pS, `/app/w/${sample.json?.id}/requests`);
+        await pS.waitForFunction(() => /^1 decision waiting on you\./.test(document.querySelector("[data-desk-summary]")?.textContent ?? ""), { timeout: 15000 }).catch(() => undefined);
         const sampleReq = await text(pS);
+        const sampleSummary = await text(pS, "[data-desk-summary]");
         check(
-          "B12: in the Northstar sample the Requests tab lists the person's request under Waiting on you and \"Your requests\" says so (\"No other requests of yours…\"), never \"You have not proposed a change\"",
-          sample.status === 201 && /You proposed a change/.test(sampleReq) && sampleReq.includes("No other requests of yours. Yours that need you are under Waiting on you.") && !sampleReq.includes("You have not proposed a change"),
+          "B12 (LIM-2472): in the Northstar sample the Requests tab says one decision waits on the person and its row says it is their own request on their own goal (\"your request, on your own goal\", so Decision beside it reads right, LIM-2513), never \"You have not proposed a change\" or \"No change requests yet\"",
+          sample.status === 201 && /^1 decision waiting on you\./.test(sampleSummary) && /your request, on your own goal/.test(sampleReq) && !sampleReq.includes("You have not proposed a change") && !sampleReq.includes("No change requests yet"),
           sampleReq.slice(0, 400),
         );
         // U9: restoring says connected apps don't come back.
@@ -7780,7 +9509,7 @@ try {
         const y4Withdrawn = await call("FO", "DELETE", `/api/v2/workspaces/${IWY4}/invites/${ivY4.json?.id}`, { cookie: FO.cookie });
         await press(pY, "main", "Join workspace");
         await pY.waitForFunction(() => document.querySelector("main")?.innerText.includes("can't be used any more"), { timeout: 15000 }).catch(() => undefined);
-        await pY.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        await pY.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const y4 = await pY.evaluate(() => ({ text: document.querySelector("main")?.innerText ?? "", buttons: [...document.querySelectorAll("main button")].map((b) => b.textContent?.trim()) }));
         check(
           "C6-5 (ui): Join on an invite withdrawn while the page was open shows only \"This invite can't be used any more: … You have not joined. …\": no \"You are invited …\", no \"This invite link is not valid\" and no Join button",
@@ -7825,14 +9554,27 @@ try {
           const hs = await phone.evaluate(() =>
             [...document.querySelectorAll("header button, header select, #passkey-prompt button, #passkey-prompt a, main button, main select")]
               .filter((b) => b.getBoundingClientRect().height > 0 && getComputedStyle(b).visibility !== "hidden")
-              .map((b) => [b.textContent.trim().slice(0, 30) || b.getAttribute("aria-label") || b.tagName, Math.round(b.getBoundingClientRect().height * 100) / 100]),
+              .map((b) => {
+                b.scrollIntoView({ block: "center" });
+                const r = b.getBoundingClientRect();
+                let height = r.height;
+                // A compact chip may extend its target with a pseudo-element. Prove the full 44px area
+                // actually hits this control, including its edges; CSS dimensions alone can hide overlap.
+                if (height < 44) {
+                  const cy = r.top + r.height / 2;
+                  const hits = [r.left + 1, r.left + r.width / 2, r.right - 1].every((x) =>
+                    [cy - 21.5, cy, cy + 21.5].every((y) => b.contains(document.elementFromPoint(x, y))));
+                  if (hits) height = 44;
+                }
+                return [b.textContent.trim().slice(0, 30) || b.getAttribute("aria-label") || b.tagName, Math.round(height * 100) / 100];
+              }),
           );
           counted += hs.length;
           for (const [t, h] of hs) if (h < 44) short.push(`${p} "${t}" ${h}px`);
         }
         const prompt = await phone.evaluate(() => !!document.querySelector("#passkey-prompt"));
         check(
-          "B6: at 390 px every button and select on the top bar, the page and the passkey prompt (Sign out, Not now, Paste meeting notes, Remove included) is at least 44 px tall",
+          "B6: at 390 px every button and select on the top bar, the page and the passkey prompt (Sign out, Not now, Paste meeting notes, Remove included) has a hit-tested tap target at least 44 px tall",
           counted >= 40 && short.length === 0,
           `${counted} controls; prompt ${prompt}; ${short.slice(0, 8).join(" | ")}`,
         );
@@ -7850,14 +9592,15 @@ try {
           wide320.length === 0 && measureW >= 200,
           `${wide320.join(" | ")} measure ${measureW}`,
         );
-        // U3: with something waiting on them and no app seen, the Home's first-run card follows the queue.
+        // U3 (LIM-2472): with something waiting on them and no app seen, the compact first-run panel sits above the list.
         await open(pO, `/app/w/${FW}`);
+        await pO.waitForSelector('h1[data-home-count]:not([data-home-count="reading"])', { timeout: 15000 }).catch(() => undefined);
         const order = await pO.evaluate(() => {
-          const w = document.querySelector("#waiting");
+          const n = document.querySelector("[data-needs]");
           const f = document.querySelector("[data-first-run]");
-          return { both: !!w && !!f, after: !!w && !!f && !!(w.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING) };
+          return { both: !!n && !!f, above: !!n && !!f && !!(f.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING), kind: f?.getAttribute("data-first-run") ?? null, count: Number(document.querySelector("h1[data-home-count]")?.getAttribute("data-home-count")) };
         });
-        check("U3: when something waits on the person, the Home's first-run card comes after \"Waiting on you\"", order.both && order.after, JSON.stringify(order));
+        check("U3 (LIM-2472): when something waits on the person, the Home's compact first-run panel comes above the Needs you list", order.both && order.above && order.kind === "compact" && order.count >= 1, JSON.stringify(order));
         check("web fix (ui): no page error in any of these pages", errors.length === 0, errors.slice(0, 3).join(" | "));
       } catch (e) {
         check("web fix (ui) run", false, e?.stack ?? e);
@@ -8423,7 +10166,7 @@ try {
         await press(pA, `[data-cr="${crL?.id}"]`, "Not yet");
         // Waits that time out don't stop the run: each check below then says what it saw.
         await pA.waitForFunction(() => document.body.innerText.includes("Not launched yet: you decided not yet") && document.body.innerText.includes("Recorded: you decided not yet"), { timeout: 15000 }).catch(() => undefined);
-        await pA.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const afterNotYet = { text: await cardText(pA, crL?.id), calls: await calls(), loading: await pA.evaluate(() => window.__loading) };
         await pA.evaluate(() => (window.__calls = []));
         await press(pA, `[data-cr="${crL?.id}"]`, "Launch version 2 to agents");
@@ -8435,7 +10178,7 @@ try {
           },
           { timeout: 15000 },
         ).catch(() => undefined);
-        await pA.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const afterLaunch = { text: await cardText(pA, crL?.id), calls: await calls(), loading: await pA.evaluate(() => window.__loading) };
         const posted = (cs, action) => cs.filter((c) => c.method === "POST" && c.url.endsWith(`/${crL?.id}/${action}`)).map((c) => c.body);
         check(
@@ -8444,8 +10187,8 @@ try {
           `${JSON.stringify(posted(afterNotYet.calls, "not_yet"))} ${JSON.stringify(posted(afterLaunch.calls, "launch"))}`,
         );
         check(
-          "C2 F4: Not yet and Launch each leave a \"Recorded: …\" line like every other decision (\"Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.\", \"Recorded: you launched version 2 to agents. They get it at their next turn.\")",
-          afterNotYet.text.includes("Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.") && afterLaunch.text.includes("Recorded: you launched version 2 to agents. They get it at their next turn."),
+          "C2 F4: Not yet and Launch each leave a \"Recorded: …\" line like every other decision (\"Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.\", \"Recorded: you launched version 2.\" (the drawer's wording, Nov 11))",
+          afterNotYet.text.includes("Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.") && afterLaunch.text.includes("Recorded: you launched version 2.") && !afterLaunch.text.includes("next turn"),
           `${afterNotYet.text.slice(0, 300)} | ${afterLaunch.text.slice(0, 300)}`,
         );
         check(
@@ -8490,12 +10233,25 @@ try {
           `${bumpCI2.status} ${rebK.status} ${rebK.text}`,
         );
 
-        // F5 (ui): the propose form offers only goals everyone deciding can see, and says some aren't offered.
+        // PR 68 pass 1 item 1 (founder ruling): KB's request on this goal (crN1, countered) is still open, so the goal page
+        // says so before any form and offers none. KB then withdraws it (nothing below reads crN1) for F5's form.
         const pB = await as(KB);
         await open(pB, `/app/w/${KW}/goals/${KCI3.id}`);
-        await press(pB, "#change-requests", "Propose a change");
+        await pB.waitForSelector(`[data-my-open-request="${crN1?.id}"]`, { timeout: 15000 }).catch(() => undefined);
+        const openLine = await pB.evaluate(() => document.querySelector("[data-my-open-request]")?.textContent ?? "");
+        const formOffered = await pB.evaluate(() => [...document.querySelectorAll("#change-requests button")].some((b) => b.textContent?.trim() === "Full change form"));
+        check(
+          "PR 68 item 1 (ui): with the person's own request on a goal still open (countered), the goal page says \"You already have an open request on this goal\" before any form and offers no Full change form",
+          /^You already have an open request on this goal, below\./.test(openLine) && !formOffered,
+          `${openLine} formOffered=${formOffered}`,
+        );
+        const n1Now = await kRead(KB, KCI3.id, crN1?.id);
+        await kAct(KB, KCI3.id, crN1?.id, "withdraw", { revision: n1Now?.revision });
+        // F5 (ui): the propose form offers only goals everyone deciding can see, and says some aren't offered.
+        await open(pB, `/app/w/${KW}/goals/${KCI3.id}`);
+        await press(pB, "#change-requests", "Full change form");
         await pB.waitForFunction(() => /Send for approval/.test(document.querySelector("#change-requests")?.innerText ?? ""), { timeout: 15000 });
-        await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const proposeForm = await pB.evaluate(() => document.querySelector("#change-requests form")?.innerText ?? "");
         check(
           "C2 F5 (ui): the propose form's Depends on lists the goals everyone deciding can see (Faster builds for everyone), never the proposer's private goal or the Hardware-only one, and says \"2 goals you can see aren't offered: someone who decides on this goal can't see them.\"",
@@ -8509,7 +10265,7 @@ try {
         const qCard = `[data-cr="${crQ?.id}"]`;
         await pA8.click(`${qCard} [data-decision="Suggest a change"]`);
         await pA8.waitForSelector(`${qCard} [data-decision-input="counter"] form`, { timeout: 15000 });
-        await pA8.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pA8.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const counterForm = await pA8.evaluate((q) => document.querySelector(`${q} [data-decision-input="counter"] form`)?.innerText ?? "", qCard);
         check(
           "C3 (ui): the counter form's Depends on lists the goals the requester and everyone deciding can see (Faster builds for everyone), never Robot firmware or the counterer's private goal, and says \"2 goals you can see aren't offered: Kai Member or someone who decides on this goal can't see them.\"",
@@ -8527,7 +10283,7 @@ try {
         // X5 (ui): the owner's New version form leaves out the goal that would make a loop, and says why.
         await open(pA8, `/app/w/${KW}/goals/${KCI8.id}`);
         await pA8.waitForSelector("#new-version form", { timeout: 15000 }).catch(() => undefined);
-        await pA8.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pA8.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const nvForm = await pA8.evaluate(() => document.querySelector("#new-version form")?.innerText ?? "");
         check(
           "X5 (ui): the New version form's Depends on doesn't offer the goal that already depends on this one and says \"1 goal isn't offered: it already depends on this goal, so adding it would make a loop.\"",
@@ -8551,7 +10307,7 @@ try {
         const kcOut = await ka(KO, "DELETE", `/teams/${KHT}/members/${KC.id}`);
         await press(pC9, `${vCard} [data-confirm="approve"]`, "Confirm: Approve");
         await pC9.waitForFunction((s) => /Not recorded\./.test(document.querySelector(s)?.innerText ?? ""), { timeout: 15000 }, vCard).catch(() => undefined);
-        await pC9.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        await pC9.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const v = await pC9.evaluate(
           (s) => ({
             text: document.querySelector(s)?.innerText ?? "",
@@ -8939,11 +10695,11 @@ try {
         await pS.waitForSelector(rlSel, { timeout: 15000 }).catch(() => undefined);
         await press(pS, rlSel, "Approve (agents switch at launch)");
         await pS.waitForFunction((s) => /Recorded:/.test(document.querySelector(s)?.innerText ?? ""), { timeout: 15000 }, rlSel).catch(() => undefined);
-        await pS.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pS.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const afterApprove = await textOf(pS, rlSel);
         await press(pS, rlSel, "Launch");
         await pS.waitForFunction((s) => /Recorded: you launched/.test(document.querySelector(s)?.innerText ?? ""), { timeout: 15000 }, rlSel).catch(() => undefined);
-        await pS.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pS.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const afterLaunchRl = await textOf(pS, rlSel);
         const gs1After = (await xa(XS, "GET", `/goals/${GS1?.id}`)).json?.goal;
         check(
@@ -8967,6 +10723,9 @@ try {
         // never a "Loading…" on the page, and the hold reason typed into it stays.
         await open(pO, `/app/w/${XW}/goals/${GL?.id}`);
         await pO.waitForFunction(() => !!document.querySelector("#agents-on-goal") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Launch version 2 to agents"), { timeout: 15000 }).catch(() => undefined);
+        // With no shared session on the goal the hold controls are folded (LIM-2513): open them as a person would.
+        const holdFolded = await pO.$("#agents-on-goal [data-hold-folded]:not([open]) summary");
+        if (holdFolded) await holdFolded.click();
         await pO.evaluate(() => {
           const f = [...document.querySelectorAll("#agents-on-goal label")].find((x) => x.querySelector("span")?.textContent?.trim() === "Reason (optional, shown to the developers)")?.querySelector("input");
           f?.setAttribute("data-typing", "1");
@@ -8980,8 +10739,8 @@ try {
           }).observe(document.body, { childList: true, subtree: true, characterData: true });
         });
         await press(pO, `[data-cr="${crL?.id}"]`, "Launch version 2 to agents");
-        await pO.waitForFunction(() => document.body.innerText.includes("Recorded: you launched version 2 to agents") && /version 2/.test(document.querySelector("h1")?.nextElementSibling?.textContent ?? ""), { timeout: 15000 }).catch(() => undefined);
-        await pO.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        await pO.waitForFunction(() => document.body.innerText.includes("Recorded: you launched version 2.") && /version 2/.test(document.querySelector("h1")?.nextElementSibling?.textContent ?? ""), { timeout: 15000 }).catch(() => undefined);
+        await pO.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const c34 = await pO.evaluate(() => ({
           gone: window.__agentsGone,
           cards: document.querySelectorAll("#agents-on-goal").length,
@@ -9024,9 +10783,9 @@ try {
 
         // C3-3 (ui): the propose form doesn't offer the goals that would make a loop, and says why.
         await open(pO, `/app/w/${XW}/goals/${GQ?.id}`);
-        await press(pO, "#change-requests", "Propose a change");
+        await press(pO, "#change-requests", "Full change form");
         await pO.waitForFunction(() => /Send for approval/.test(document.querySelector("#change-requests")?.innerText ?? ""), { timeout: 15000 }).catch(() => undefined);
-        await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const qForm = await textOf(pO, "#change-requests form");
         check(
           "C3-3 (ui): the propose form on Grow trials doesn't offer Ship arms or Arms launch (they already depend on it) and says \"2 goals aren't offered: they already depend on this goal, so adding them would make a loop.\", never that someone can't see them",
@@ -9163,7 +10922,7 @@ try {
         );
         await press(pO, aSel, "Approve");
         await pO.waitForFunction((s) => /Recorded:/.test(document.querySelector(s)?.innerText ?? ""), { timeout: 15000 }, aSel).catch(() => undefined);
-        await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const aAfter = await textOf(pO, aSel);
         const alNow = (await ya(YO, "GET", `/alignments/${al.json?.id}`)).json;
         check(
@@ -9409,7 +11168,7 @@ try {
         const w2No = await zAct(ZA, GW2.id, w2?.id, "reject", { reason: "Declined first" });
         await press(pB, w2Card, "Confirm: Withdraw");
         await pB.waitForFunction((c) => !!document.querySelector(`${c} [data-notice="stale"]`), { timeout: 15000 }, w2Card).catch(() => undefined);
-        await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const w2Text = await textOf(pB, w2Card);
         const w2After = await zRead(ZA, GW2.id, w2?.id);
         check(
@@ -9426,7 +11185,7 @@ try {
         await pA.waitForSelector(`${bCard} [data-decision="Suggest a change"]`, { timeout: 15000 }).catch(() => undefined);
         await pA.click(`${bCard} [data-decision="Suggest a change"]`).catch(() => undefined);
         await pA.waitForSelector(`${bForm} form`, { timeout: 15000 }).catch(() => undefined);
-        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const bOpen = await reviewState(pA, bCard);
         await typeIn(pA, bForm, "Note", "Back to the old name");
         await typeIn(pA, bForm, "Goal", "Behind goal");
@@ -9454,7 +11213,7 @@ try {
         await pA.waitForSelector(`${nCard} [data-decision="Suggest a change"]`, { timeout: 15000 }).catch(() => undefined);
         await pA.click(`${nCard} [data-decision="Suggest a change"]`).catch(() => undefined);
         await pA.waitForSelector(`${nForm} form`, { timeout: 15000 }).catch(() => undefined);
-        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         await typeIn(pA, nForm, "Note", "A thought");
         const nOpen = await reviewState(pA, nCard);
         await typeIn(pA, nForm, "Accept if… (optional condition the requester confirms)", "Docs first");
@@ -9719,7 +11478,7 @@ try {
         const u2Ctr = await qAct(QA, GU2.id, u2?.id, "counter", { revision: 1, changes: { title: "Add after a counter, countered" }, note: "Shorter" });
         await press(pB, u2Card, "Add link");
         await pB.waitForFunction((c) => /Not recorded\./.test(document.querySelector(c)?.innerText ?? "") && /revision 2/.test(document.querySelector(c)?.innerText ?? ""), { timeout: 15000 }, u2Card).catch(() => undefined);
-        await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const u2Ui = await cardState(pB, u2Card);
         check(
           "c9 W6 (ui): Add link on a request countered in another tab reads \"Not recorded. This request changed after you read it: Quinn Approver countered it, and it is now at revision 2. Add the link again if it supports that revision.\" on the reloaded card (now offering Accept the change), never \"…; reload and try again\"",
@@ -9738,7 +11497,7 @@ try {
         const t2No = await qa(QA, "POST", `/reallocations/${t2.json?.id}/reject`, { reason: "Not in the browser" });
         await press(pA, t2Card, "Decline");
         await pA.waitForFunction((c) => !!document.querySelector(`${c} [data-notice]`) && !/needs one of/.test(document.querySelector(c)?.innerText ?? ""), { timeout: 15000 }, t2Card).catch(() => undefined);
-        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const t2Ui = await cardState(pA, t2Card);
         const t3Ui = await cardState(pA, t3Card);
         check(
@@ -9769,6 +11528,9 @@ try {
         // W2 (ui): the Home's first-run card lists what an agent reads in the app's words.
         const pO = await as(QO);
         await open(pO, `/app/w/${QW}`);
+        // QW has goals, so the panel is compact: the read list is behind "Connect an agent".
+        await pO.waitForSelector('[data-first-run="compact"]', { timeout: 15000 }).catch(() => undefined);
+        await press(pO, "[data-first-run]", "Connect an agent");
         await pO.waitForSelector('[data-tool="align_get_decision_record"]', { timeout: 15000 }).catch(() => undefined);
         const readLine = await textOf(pO, '[data-tool="align_get_decision_record"]');
         const homeText = await textOf(pO, "main");
@@ -9858,16 +11620,16 @@ try {
     walk("app/api/v2");
     // Asks have no revisions in the spec (an ask's actions are state transitions, refused as wrong_state); typed requests
     // (DELETE) and holds (PUT/DELETE) aren't [action] routes and have no revisions either.
-    const REVISIONED = { alignments: "lib/v2/alignments.ts", "change-requests": "lib/v2/changes.ts", reallocations: "lib/v2/reallocations.ts" };
+    const REVISIONED = { alignments: "lib/v2/alignments.ts", "change-requests": "lib/v2/changes.ts", reallocations: "lib/v2/reallocations.ts", "budget-requests": "lib/v2/budgets.ts" };
     const STATE_ONLY = ["asks"];
     const actionsIn = (rel, name) => JSON.parse(new RegExp(`${name} = (\\[[^\\]]*\\])`).exec(readFileSync(path.join(ROOT, rel), "utf8"))?.[1] ?? "[]");
-    const listed = { alignments: actionsIn(REVISIONED.alignments, "ACTIONS"), "change-requests": actionsIn(REVISIONED["change-requests"], "CHANGE_REQUEST_ACTIONS"), reallocations: actionsIn(REVISIONED.reallocations, "REALLOCATION_ACTIONS") };
+    const listed = { alignments: actionsIn(REVISIONED.alignments, "ACTIONS"), "change-requests": actionsIn(REVISIONED["change-requests"], "CHANGE_REQUEST_ACTIONS"), reallocations: actionsIn(REVISIONED.reallocations, "REALLOCATION_ACTIONS"), "budget-requests": actionsIn(REVISIONED["budget-requests"], "BUDGET_ACTIONS") };
     check(
-      "c10 C10-2 (routes): every decision route ([action]) is classified: alignments, change requests and reallocations carry a revision; asks are state-only",
-      JSON.stringify([...new Set(actionRoutes)].sort()) === JSON.stringify([...Object.keys(REVISIONED), ...STATE_ONLY].sort()) && Object.values(listed).every((l) => l.length >= 6),
+      "c10 C10-2 (routes): every decision route ([action]) is classified: alignments, change requests, reallocations and budget requests carry a revision; asks are state-only",
+      JSON.stringify([...new Set(actionRoutes)].sort()) === JSON.stringify([...Object.keys(REVISIONED), ...STATE_ONLY].sort()) && Object.entries(listed).every(([k, l]) => l.length >= (k === "budget-requests" ? 4 : 6)),
       `${JSON.stringify(actionRoutes)} ${JSON.stringify(listed)}`,
     );
-    const tried = { alignments: {}, "change-requests": {}, reallocations: {} };
+    const tried = { alignments: {}, "change-requests": {}, reallocations: {}, "budget-requests": {} };
     const staleOk = (r) => r.status === 409 && r.json?.error === "stale_revision" && /changed after you read it/.test(r.json.message ?? "");
 
     // Alignments: e1 pending, e2 countered, e3 approved.
@@ -9961,11 +11723,29 @@ try {
       tried.reallocations[action] = staleOk(stale) && JSON.stringify(rlNow(t)) === was ? "ok" : stale.text;
     }
     const rlFresh = t3Ok.json?.state === "approved" && rlNow(t2)?.state === "countered";
+    // Budget requests carry a revision too, including the second decision round.
+    const se = await ra(RO, "PUT", `/teams/${RT}/budget`, { amount_usd: 100 });
+    const srNew = async () => (await ra(RD, "POST", `/teams/${RT}/budget-requests`, { amount_usd: 20, reason: "Finish this work" })).json;
+    const sr1 = await srNew(), sr2 = await srNew();
+    const srDeclined = await ra(RC, "POST", `/budget-requests/${sr2?.id}/decline`, { revision: 1, reason: "Scope" });
+    for (const [action, u, r] of [["approve", RC, sr1], ["decline", RC, sr1], ["withdraw", RD, sr1], ["second-look", RD, srDeclined.json]]) {
+      const snapshot = () => withDb((d) => JSON.stringify({
+        row: d.prepare("SELECT * FROM v2_budget_requests WHERE id = ?").get(r?.id),
+        decisions: d.prepare("SELECT * FROM v2_budget_request_decisions WHERE request_id = ?").all(r?.id),
+        audit: d.prepare("SELECT * FROM v2_audit WHERE object_id = ?").all(r?.id),
+      }));
+      const was = snapshot();
+      const stale = await ra(u, "POST", `/budget-requests/${r?.id}/${action}`, { revision: 0 });
+      tried["budget-requests"][action] = staleOk(stale) && snapshot() === was ? "ok" : stale.text;
+    }
+    const srMissing = await ra(RC, "POST", `/budget-requests/${sr1?.id}/decline`, { reason: "Scope" });
+    const srFresh = se.status === 200 && srDeclined.status === 200 && srMissing.status === 400 &&
+      (await ra(RC, "POST", `/budget-requests/${sr1?.id}/decline`, { revision: 1, reason: "Scope" })).json?.state === "declined";
     const uncovered = Object.entries(listed).flatMap(([k, acts]) => acts.filter((a) => a !== "mention" && tried[k][a] !== "ok").map((a) => `${k}/${a}: ${tried[k][a] ?? "not tried"}`));
     check(
-      "c10 C10-2 (every decision): each action of alignments, change requests and reallocations sent with a revision that isn't current is 409 stale_revision and changes nothing; an alignment action without a revision is 400; with the current revision each alignment action is then recorded",
-      uncovered.length === 0 && alFresh && crFresh && rlFresh,
-      `${uncovered.join(" | ")} ${JSON.stringify({ alFresh, crFresh, rlFresh })}`,
+      "c10 C10-2 (every decision): each action of alignments, change requests, reallocations and budget requests sent with a revision that isn't current is 409 stale_revision and changes nothing; an alignment action without a revision is 400; with the current revision each alignment action is then recorded",
+      uncovered.length === 0 && alFresh && crFresh && rlFresh && srFresh,
+      `${uncovered.join(" | ")} ${JSON.stringify({ alFresh, crFresh, rlFresh, srFresh })}`,
     );
     // A target change countered meanwhile names the counter's author, as a change request's and an alignment's refusal do.
     const t2Stale = await rlAct(RO, t2, "reject", { revision: 1, reason: "No" });
@@ -10045,7 +11825,7 @@ try {
         const r = await meanwhile();
         await press(pg, card, label);
         await pg.waitForFunction((c) => !!document.querySelector(`${c} [data-notice]`), { timeout: 15000 }, card).catch(() => undefined);
-        await pg.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pg.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         return { r, ui: await cardState(pg, card) };
       };
       try {
@@ -10248,7 +12028,7 @@ try {
         const n2Other = await sRlAct(SC, n2, "not_yet", { revision: 1 });
         await press(pO, card, "Not yet");
         await pO.waitForFunction((c) => !!document.querySelector(`${c} [data-notice]`), { timeout: 15000 }, card).catch(() => undefined);
-        await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         const n2Ui = await cardState(pO, card);
         check(
           "c11 W2 (ui): Not yet on a target change card left open while another launcher said not yet reads, focused, \"Not recorded. Sol Lead already decided not yet, so nothing changes: …\"; the card reloads (\"Approved, not launched yet: Sol Lead decided not yet.\", no Not yet button) and only Sol Lead's not yet is recorded",
@@ -10388,7 +12168,7 @@ try {
       const hasButton = (pg, scope, label) => pg.waitForFunction((sc, t) => [...document.querySelectorAll(`${sc} button`)].some((b) => b.textContent?.trim() === t), { timeout: 15000 }, scope, label).catch(() => undefined);
       const noticeOf = async (pg, card) => {
         await pg.waitForFunction((c) => !!document.querySelector(`${c} [data-notice]`), { timeout: 15000 }, card).catch(() => undefined);
-        await pg.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await pg.waitForNetworkIdle({ idleTime: 300, timeout: 15000, concurrency: 1 }).catch(() => undefined);
         return pg.evaluate((c) => {
           const n = document.querySelector(`${c} [data-notice]`);
           return { notice: n?.getAttribute("data-notice") ?? null, text: n?.textContent?.trim() ?? "", focused: !!n && document.activeElement === n, card: document.querySelector(c)?.innerText ?? "" };
@@ -10471,6 +12251,201 @@ try {
     } else check("ui (Chrome) available for the c12 web fix checks", false, `no Chrome at ${CHROME}`);
   }
   // ==== end fix:c12-web ====
+
+  // ==== laneb:foresight ====
+  // Approve with foresight (Lane B): POST …/change-requests/<id>/preview { action, revision, … } runs the decision's own
+  // body and rolls it back. For the five decisions the drawer offers (approve and launch, approve only, launch, decline,
+  // withdraw), the database is identical after a preview (every table, every row), no event row is written, and the
+  // preview's rows per table and operation are exactly the rows the decision then writes. A viewer gets 403, someone
+  // outside the workspace 404, and a member who can't decide the decision's own 403.
+  {
+    const fUsers = {};
+    for (const [who, name] of [
+      ["FO", "Fern Owner"],
+      ["FM", "Femi Asker"],
+      ["FX", "Faye Bystander"],
+      ["FV", "Fio Viewer"],
+      ["FZ", "Finn Outsider"],
+    ])
+      fUsers[who] = await signUp(who, name, `${who.toLowerCase()}@foresight.example.test`);
+    const { FO, FM, FX, FV, FZ } = fUsers;
+    const FW = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "Foresight workspace" } })).json?.id;
+    const fa = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${FW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const [u, role] of [
+      [FM, "member"],
+      [FX, "member"],
+      [FV, "viewer"],
+    ]) {
+      const i = await fa(FO, "POST", "/invites", { email: u.email, role });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    await call("FZ", "POST", "/api/v2/workspaces", { cookie: FZ.cookie, body: { name: "Finn's own workspace" } });
+    const FG = (await fa(FO, "POST", "/goals", { title: "Cut onboarding to one day", visibility: "workspace", measures: [{ text: "Median onboarding", target: "1 day" }] })).json;
+    const FDep = (await fa(FO, "POST", "/goals", { title: "Hire two support engineers", visibility: "workspace", depends_on: [FG?.id] })).json;
+    // Three of Fern's sessions bound to FG, with usage in the last week.
+    // Written straight into the database, with its grant: this phase has spent the machine's pairing limit by now.
+    const fDev = insertDevice(FO.id, "Fern's laptop");
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(fDev.id, FW));
+    const FD = { ...newDeviceKeys(), who: "FO", user: FO, id: fDev.id, access: fDev.access };
+    const fStart = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
+    const fKeys = ["a", "b", "c"].map((n) => sessionKey(FD, FW, "claude-code", `foresight-${n}`));
+    for (const [i, k] of fKeys.entries()) {
+      await call("FO", "PUT", `/api/v2/workspaces/${FW}/sessions/${k}`, { bearer: FD.access, body: { harness: "claude-code", repo_key: repoKey(FD, FW, "/src/fern"), repo_alias: "fern-repo", started_at: fStart, title: `Fern session ${i}` } });
+      const e = epochId();
+      await call("FO", "POST", `/api/v2/workspaces/${FW}/sessions/${k}/epochs`, { bearer: FD.access, body: { root_turn: null, cause: "manual", epoch_id: e, goal_id: FG?.id, starts_at: fStart } });
+      await call("FO", "POST", `/api/v2/workspaces/${FW}/sessions/${k}/usage`, { bearer: FD.access, body: { rows: [usageRow(FD, `foresight-${i}`, e)] } });
+    }
+
+    // Every row of every table, keyed by its primary key (rowid where it has none), and the differences between two.
+    const dump = () =>
+      withDb((d) => {
+        const out = {};
+        for (const { name } of d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()) {
+          const pk = d.prepare("SELECT name FROM pragma_table_info(?) WHERE pk > 0 ORDER BY pk").all(name).map((r) => r.name);
+          const withoutRowid = /WITHOUT ROWID/i.test(d.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(name)?.sql ?? "");
+          const rows = d.prepare(`SELECT ${pk.length || withoutRowid ? "" : "rowid AS __rowid, "}* FROM "${name}"`).all();
+          out[name] = Object.fromEntries(rows.map((r) => [JSON.stringify(pk.length ? pk.map((k) => r[k]) : [r.__rowid]), JSON.stringify(r)]));
+        }
+        return out;
+      });
+    const sameDump = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const tableOps = (a, b) => {
+      const out = {};
+      for (const t of new Set([...Object.keys(a), ...Object.keys(b)])) {
+        if (t === "sqlite_sequence" || !t.startsWith("v2_")) continue;
+        const x = a[t] ?? {};
+        const y = b[t] ?? {};
+        const o = { insert: 0, update: 0, delete: 0 };
+        for (const k of Object.keys(y)) if (!(k in x)) o.insert++;
+        else if (x[k] !== y[k]) o.update++;
+        for (const k of Object.keys(x)) if (!(k in y)) o.delete++;
+        if (o.insert || o.update || o.delete) out[t] = o;
+      }
+      return out;
+    };
+    const sortOps = (o) => JSON.stringify(Object.fromEntries(Object.entries(o ?? {}).sort(([a], [b]) => a.localeCompare(b))));
+    const crPathF = (g, id, a) => `/goals/${g}/change-requests/${id}/${a}`;
+    const propose = async (title) => {
+      const v = withDb((d) => d.prepare("SELECT version FROM v2_goals WHERE id = ?").get(FG?.id)?.version);
+      return (await fa(FM, "POST", `/goals/${FG?.id}/change-requests`, { base_version: v, changes: { title }, reason: "Foresight check" })).json;
+    };
+    const eventsNow = () => withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_events").get().n);
+    /** Preview `action` as `u`, then make it: the preview's answer, the database before and after it, and what the
+     *  decision then changed. */
+    const decide = async (u, cr, action, body) => {
+      const before = dump();
+      const ev0 = eventsNow();
+      const preview = await fa(u, "POST", `/goals/${FG?.id}/change-requests/${cr?.id}/preview`, { action, ...body });
+      const afterPreview = dump();
+      const ev1 = eventsNow();
+      const real = await fa(u, "POST", crPathF(FG?.id, cr?.id, action), body);
+      const afterReal = dump();
+      return { preview, real, untouched: sameDump(before, afterPreview), events: ev1 - ev0, ops: tableOps(before, afterReal), afterReal };
+    };
+    const newDirectiveTargets = (d) => Object.keys(d.afterReal.v2_directive_targets ?? {}).length;
+    const results = [];
+
+    // 1. Approve and launch, by the goal's owner.
+    const cr1 = await propose("Cut onboarding to one day, with a buddy");
+    const t0 = Object.keys(dump().v2_directive_targets ?? {}).length;
+    const d1 = await decide(FO, cr1, "approve_and_launch", { revision: 1 });
+    results.push(["approve_and_launch", d1]);
+    check(
+      "laneb foresight: Approve and launch previewed: \"3 agent sessions switch to version 2\", the goal moves from version 1 to 2 with a before and after, 1 dependent goal sees version 2, recorded as approved and launched; events held back, not written",
+      d1.preview.status === 200 && d1.preview.json?.quiet === false &&
+        d1.preview.json.lines.some((l) => l.kind === "agents" && l.text === `3 agent sessions switch to version 2 of “${FG?.title}”`) &&
+        d1.preview.json.lines.some((l) => l.kind === "goal" && l.compare?.before?.title === FG?.title && l.compare?.after?.title === "Cut onboarding to one day, with a buddy") &&
+        d1.preview.json.lines.some((l) => l.kind === "dependents" && l.text === "1 dependent goal sees version 2" && l.detail?.join() === `“${FDep?.title}”`) &&
+        d1.preview.json.lines.some((l) => l.kind === "record" && l.text === "Recorded as approved and launched as version 2") &&
+        d1.preview.json.held_back.events > 0 && d1.preview.json.held_back.mail === 0 && d1.events === 0 &&
+        d1.real.status === 200 && newDirectiveTargets(d1) - t0 === 3,
+      `${d1.preview.status} ${d1.preview.text.slice(0, 900)} | real ${d1.real.status} targets ${newDirectiveTargets(d1) - t0} events ${d1.events}`,
+    );
+
+    // 2. Approve only.
+    const cr2 = await propose("Cut onboarding to one day, documented");
+    const d2 = await decide(FO, cr2, "approve", { revision: 1 });
+    results.push(["approve", d2]);
+    check(
+      "laneb foresight: Approve only previewed as quiet (nothing reaches agents or spend) and \"Recorded as approved, not launched: agents keep the current version\"",
+      d2.preview.status === 200 && d2.preview.json?.quiet === true && d2.preview.json.lines.length === 1 && d2.preview.json.lines[0].text === "Recorded as approved, not launched: agents keep the current version" && d2.real.status === 200,
+      `${d2.preview.text.slice(0, 600)} | ${d2.real.status}`,
+    );
+
+    // 3. Launch the request approved in 2.
+    const d3 = await decide(FO, cr2, "launch", {});
+    results.push(["launch", d3]);
+    check(
+      "laneb foresight: Launch previewed: \"3 agent sessions switch to version 3\" and \"Recorded as approved and launched as version 3\"",
+      d3.preview.status === 200 && d3.preview.json?.lines.some((l) => l.text === `3 agent sessions switch to version 3 of “Cut onboarding to one day, with a buddy”`) && d3.preview.json.lines.some((l) => l.text === "Recorded as approved and launched as version 3") && d3.real.status === 200,
+      `${d3.preview.text.slice(0, 600)} | ${d3.real.status}`,
+    );
+
+    // 4. Decline, with a reason.
+    const cr4 = await propose("Cut onboarding to half a day");
+    const d4 = await decide(FO, cr4, "reject", { revision: 1, reason: "Half a day isn't measurable yet." });
+    results.push(["reject", d4]);
+    check(
+      "laneb foresight: Decline previewed as quiet and \"Recorded as declined, with your reason\"",
+      d4.preview.status === 200 && d4.preview.json?.quiet === true && d4.preview.json.lines.map((l) => l.text).join() === "Recorded as declined, with your reason" && d4.real.status === 200,
+      `${d4.preview.text.slice(0, 600)} | ${d4.real.status}`,
+    );
+
+    // 5. Withdraw, by the person who asked.
+    const cr5 = await propose("Cut onboarding to two days");
+    const d5 = await decide(FM, cr5, "withdraw", { revision: 1 });
+    results.push(["withdraw", d5]);
+    check(
+      "laneb foresight: Withdraw previewed by the requester as quiet and \"Recorded as withdrawn\"",
+      d5.preview.status === 200 && d5.preview.json?.quiet === true && d5.preview.json.lines.map((l) => l.text).join() === "Recorded as withdrawn" && d5.real.status === 200,
+      `${d5.preview.text.slice(0, 600)} | ${d5.real.status}`,
+    );
+
+    // The key check: for all five, nothing changed during the preview, and the preview's rows are the decision's rows.
+    const mismatched = results.filter(([, d]) => !(d.untouched && d.events === 0 && sortOps(d.preview.json?.tables) === sortOps(d.ops)));
+    check(
+      "laneb foresight: for all five decisions the database is identical after the preview (every table and row, sqlite_sequence included), no event row is written, and the preview's rows per table and operation are exactly what the decision then wrote",
+      results.length === 5 && mismatched.length === 0,
+      mismatched.map(([a, d]) => `${a}: untouched ${d.untouched} events ${d.events} preview ${sortOps(d.preview.json?.tables)} real ${sortOps(d.ops)}`).join(" | "),
+    );
+
+    // Who may ask: a viewer 403, an outsider 404, a member outside the approval set gets the decision's own 403; none
+    // changes anything.
+    const cr6 = await propose("Cut onboarding to one day, remote");
+    const before6 = dump();
+    const pv = await fa(FV, "POST", `/goals/${FG?.id}/change-requests/${cr6?.id}/preview`, { action: "approve", revision: 1 });
+    const pz = await fa(FZ, "POST", `/goals/${FG?.id}/change-requests/${cr6?.id}/preview`, { action: "approve", revision: 1 });
+    const px = await fa(FX, "POST", `/goals/${FG?.id}/change-requests/${cr6?.id}/preview`, { action: "approve", revision: 1 });
+    const pStale = await fa(FO, "POST", `/goals/${FG?.id}/change-requests/${cr6?.id}/preview`, { action: "approve", revision: 9 });
+    const pNone = await fa(FO, "POST", `/goals/${FG?.id}/change-requests/${cr6?.id}/preview`, { revision: 1 });
+    check(
+      "laneb foresight: a viewer's preview is 403 read_only, an outsider's 404, a member outside the approval set gets 403 not_an_approver, a revision never reached 400 unknown_revision, no action 400; the database is unchanged",
+      pv.status === 403 && pv.json?.error === "read_only" && pz.status === 404 && px.status === 403 && px.json?.error === "not_an_approver" && pStale.status === 400 && pStale.json?.error === "unknown_revision" && pNone.status === 400 && sameDump(before6, dump()),
+      `${pv.status} ${pv.json?.error} | ${pz.status} | ${px.status} ${px.json?.error} | ${pStale.status} ${pStale.json?.error} | ${pNone.status}`,
+    );
+
+    // held_back.events is the event rows the decision adds (a first-time event already recorded adds none), and
+    // `tables` is there under the test identity provider only.
+    const heldWrong = results.filter(([, d]) => d.preview.json?.held_back?.events !== (d.ops.v2_events?.insert ?? 0) || d.preview.json?.held_back?.mail !== 0);
+    check(
+      "laneb foresight (audit L2): for all five decisions held_back.events is exactly the event rows the decision then wrote (Approve and launch's first approval and launch: some; Launch, later: none), mail 0; `tables` is returned with ALIGN_TEST_IDP=1",
+      heldWrong.length === 0 && d1.preview.json?.held_back?.events > 0 && d3.preview.json?.held_back?.events === 0 && results.every(([, d]) => d.preview.json?.tables && typeof d.preview.json.tables === "object"),
+      heldWrong.map(([a, d]) => `${a}: held ${JSON.stringify(d.preview.json?.held_back)} real events ${d.ops.v2_events?.insert ?? 0}`).join(" | ") || `d1 ${JSON.stringify(d1.preview.json?.held_back)} d3 ${JSON.stringify(d3.preview.json?.held_back)}`,
+    );
+
+    // 30 previews a minute per person (each takes the write lock): Faye has spent 1 above; 35 more give 29 refusals
+    // of her own (403) and then 429 rate_limited; nothing changes.
+    const before7 = dump();
+    const burst = [];
+    for (let i = 0; i < 35; i++) burst.push(await fa(FX, "POST", `/goals/${FG?.id}/change-requests/${cr6?.id}/preview`, { action: "approve", revision: 1 }));
+    const firstLimited = burst.findIndex((r) => r.status === 429);
+    check(
+      "laneb foresight (audit L3): a person's 31st preview within a minute is 429 rate_limited, and every one after it; the database is unchanged",
+      firstLimited === 29 && burst.slice(0, 29).every((r) => r.status === 403) && burst.slice(29).every((r) => r.status === 429 && r.json?.error === "rate_limited") && sameDump(before7, dump()),
+      `first 429 at ${firstLimited}: ${burst.map((r) => r.status).join(",")}`,
+    );
+  }
+  // ==== end laneb:foresight ====
 
   // ==== fix:a1-web ====
   // Regression checks for the alignment cross walk (e2e-reports/acycle1/cross.md: A1-cross-2, -4, -8, -9 and three of its
@@ -10568,9 +12543,22 @@ try {
       !has(browserLL, ask3) && readLL.status === 404 && !has(otherDevice, ask3),
       `${browserLL.length} ${readLL.status} ${otherDevice.length}`,
     );
-    // Revoked: gone. Its session is suspended, and no other session follows the goal.
+    // Revoked: gone, and no other session follows the goal. Its session never opened the binding the alignment gave (its
+    // binding_changed is still pending on its machine): it gets binding_suspended with effective cancel_pending, so its
+    // machine drops that pending change, and it stays shared under its own epoch (LIM-2441 H8).
     await alAct(LM, alW1Ok.json, "revoke");
     const afterRevoke = await feedOf();
+    const l4Dirs = ((await call("LL", "GET", "/api/v2/directives?cursor=0", { bearer: LD.access })).json?.directives ?? []).filter((d) => d.session_keys?.includes(L.l4.key));
+    const l4Bs = l4Dirs.filter((d) => d.kind === "binding_suspended");
+    const l4Row = withDb((d) => d.prepare("SELECT state, governing_goal_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(LW, L.l4.key));
+    const l4Open = withDb((d) => d.prepare("SELECT goal_id FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL").all(LW, L.l4.key));
+    check(
+      "revoke (LIM-2441 H8): a governed session that never opened the alignment's binding gets one binding_suspended (effective cancel_pending, cause alignment:<id>, after its binding_changed), its governing goal is cleared, and it stays shared under its own open epoch",
+      l4Dirs.some((d) => d.kind === "binding_changed") && l4Bs.length === 1 && l4Bs[0].binding?.effective === "cancel_pending" && l4Bs[0].binding?.cause === `alignment:${alW1?.id}` && l4Bs[0].binding?.goal_id === LGC?.id &&
+        l4Dirs.indexOf(l4Bs[0]) > l4Dirs.findIndex((d) => d.kind === "binding_changed") &&
+        l4Row?.state === "shared" && l4Row.governing_goal_id === null && l4Open.length === 1 && l4Open[0].goal_id === LGR?.id,
+      `${JSON.stringify(l4Dirs.map((d) => [d.kind, d.binding]))} ${JSON.stringify(l4Row)} ${JSON.stringify(l4Open)}`,
+    );
     // A second one, approved, ends when its session stops sharing.
     const alW2 = (await la(LL, "POST", "/alignments", { target_goal_id: LGC?.id, choice: "work_toward", session_keys: [L.l5.key] })).json;
     await alAct(LM, alW2, "approve");
@@ -10704,15 +12692,16 @@ try {
           JSON.stringify({ decL, decM, wdL, wdM, rvL, rvM, decCardL: decCardL.slice(0, 300) }),
         );
 
-        // A1-cross-9 (ui): Milo's Home tells the two requests apart.
+        // A1-cross-9 (ui): Milo's Home tells the two requests apart: each Needs row leads with the choice and its session's key end.
         await open(pM, `/app/w/${LW}`);
-        await pM.waitForSelector(`[data-home-item="alignment:${alP1?.id}"]`, { timeout: 15000 }).catch(() => undefined);
-        const d1 = await textOf(pM, `[data-home-item="alignment:${alP1?.id}"] [data-home-detail]`);
-        const d2 = await textOf(pM, `[data-home-item="alignment:${alP2?.id}"] [data-home-detail]`);
+        const rowWith = (end) => pM.evaluate((e) => [...document.querySelectorAll('[data-needs="list"] li')].map((li) => li.innerText).find((t) => t.includes(`session …${e}`)) ?? "", end);
+        await pM.waitForFunction((e) => [...document.querySelectorAll('[data-needs="list"] li')].some((li) => li.innerText.includes(`session …${e}`)), { timeout: 15000 }, L.l2.key.slice(-6)).catch(() => undefined);
+        const d1 = await rowWith(L.l2.key.slice(-6));
+        const d2 = await rowWith(L.l3.key.slice(-6));
         check(
-          "A1-cross-9 (ui): the Home's two alignment items from one person on one goal differ: \"Contribution only · session: claude-code session · started <time> · …<key end>\" and \"Work toward, usage moves · session: …\"",
-          d1.startsWith("Contribution only · session: ") && d1.includes(`…${L.l2.key.slice(-6)}`) && d2.startsWith("Work toward, usage moves · session: ") && d2.includes(`…${L.l3.key.slice(-6)}`) && d1 !== d2,
-          `${d1} | ${d2}`,
+          "A1-cross-9 (ui): the Home's two alignment rows from one person on one goal differ: \"Contribution only · session …<key end>: <name> asks to align with this goal\" and \"Work toward, usage moves · session …<key end>: …\"",
+          d1.includes(`Contribution only · session …${L.l2.key.slice(-6)}: `) && d2.includes(`Work toward, usage moves · session …${L.l3.key.slice(-6)}: `) && d1 !== d2,
+          `${d1.replace(/\n/g, " / ")} | ${d2.replace(/\n/g, " / ")}`,
         );
 
         // Sessions tab (works but confusing): a stopped session says sharing stopped, never "Counting under: no goal".
@@ -10740,6 +12729,76 @@ try {
         await browser.close();
       }
     } else check("ui (Chrome) available for the a1 web fix checks", false, `no Chrome at ${CHROME}`);
+    // Who the cancel reaches (LIM-2441 H8): every session that got this alignment's binding_changed and has no epoch under
+    // it, even if its governing goal is already gone; never a session already on that goal by its own right.
+    const LGR2 = (await la(LL, "POST", "/goals", { title: "Archive the old ledger snapshots", visibility: "workspace", team_id: TRet })).json;
+    const LGC2 = (await la(LM, "POST", "/goals", { title: "Rehearse the ledger cutover", visibility: "workspace", team_id: TCut })).json;
+    const h8Share = async (name) => (await lShare(`h8-${name}`, 15)).key;
+    const h8Align = async (goal, key) => {
+      const al = (await la(LL, "POST", "/alignments", { target_goal_id: goal?.id, choice: "work_toward", session_keys: [key] })).json;
+      return (await alAct(LM, al, "approve")).json;
+    };
+    const h8Epoch = (key, goal) => call("LL", "POST", `/api/v2/workspaces/${LW}/sessions/${key}/epochs`, { bearer: LD.access, body: { epoch_id: epochId(), goal_id: goal?.id ?? null, starts_at: new Date().toISOString(), root_turn: null, cause: "manual" } });
+    const h8Cancels = async (key) => ((await call("LL", "GET", "/api/v2/directives?cursor=0", { bearer: LD.access })).json?.directives ?? []).filter((d) => d.session_keys?.includes(key) && d.kind === "binding_suspended");
+    const h8Row = (key) => withDb((d) => d.prepare("SELECT state, governing_goal_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(LW, key));
+    const h8Open = (key) => withDb((d) => d.prepare("SELECT goal_id, authority FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL").all(LW, key));
+    // An epoch to another goal cleared its governance, and its machine still holds the binding_changed.
+    const hCleared = await h8Share("cleared");
+    const alCleared = await h8Align(LGC, hCleared);
+    const clearedEpoch = await h8Epoch(hCleared, LGR2);
+    const clearedBefore = h8Row(hCleared);
+    await alAct(LM, alCleared, "revoke");
+    const clearedCancels = await h8Cancels(hCleared);
+    check(
+      "revoke (LIM-2441 H8): a session whose governance another goal already cleared, with the alignment's binding_changed unopened, still gets one binding_suspended cancel_pending and stays shared on the other goal",
+      clearedEpoch.status === 200 && clearedBefore?.governing_goal_id === null && clearedCancels.length === 1 && clearedCancels[0].binding?.effective === "cancel_pending" && clearedCancels[0].binding?.cause === `alignment:${alCleared?.id}` && clearedCancels[0].binding?.goal_id === LGC?.id &&
+        h8Row(hCleared)?.state === "shared" && h8Open(hCleared)[0]?.goal_id === LGR2?.id,
+      `${clearedEpoch.status} ${JSON.stringify(clearedBefore)} ${JSON.stringify(clearedCancels.map((d) => d.binding))} ${JSON.stringify(h8Open(hCleared))}`,
+    );
+    // Already on the goal by its own right: through the team (a real join), and as the goal's owner.
+    const hTeam = await h8Share("team");
+    const alTeam = await h8Align(LGC, hTeam);
+    await la(LO, "POST", `/teams/${TCut}/members`, { user_id: LL.id, role: "member" });
+    const teamEpoch = await h8Epoch(hTeam, LGC);
+    const teamOpen = h8Open(hTeam);
+    await alAct(LM, alTeam, "revoke");
+    await la(LO, "DELETE", `/teams/${TCut}/members/${LL.id}`);
+    const teamCancels = await h8Cancels(hTeam);
+    const hOwn = await h8Share("own");
+    const alOwn = await h8Align(LGC2, hOwn);
+    await h8Epoch(hOwn, LGC2);
+    withDb((d) => d.prepare("UPDATE v2_epochs SET authority = 'own', alignment_id = NULL WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL").run(LW, hOwn));
+    await alAct(LM, alOwn, "revoke");
+    const ownCancels = await h8Cancels(hOwn);
+    check(
+      "revoke (LIM-2441 H8): a session whose open epoch on the goal is its team's, or its own, gets no cancel and stays shared on that goal",
+      teamEpoch.status === 200 && teamOpen[0]?.authority === "pod" && teamCancels.length === 0 && h8Row(hTeam)?.state === "shared" && h8Open(hTeam)[0]?.goal_id === LGC?.id &&
+        ownCancels.length === 0 && h8Row(hOwn)?.state === "shared" && h8Open(hOwn)[0]?.goal_id === LGC2?.id,
+      `${teamEpoch.text?.slice(0, 120)} ${JSON.stringify(teamOpen)} ${JSON.stringify(teamCancels.map((d) => d.binding))} ${JSON.stringify(ownCancels.map((d) => d.binding))}`,
+    );
+    // It opened the binding and later moved off it: nothing is pending on its machine.
+    const hMoved = await h8Share("moved");
+    const alMoved = await h8Align(LGC, hMoved);
+    const movedOn = await h8Epoch(hMoved, LGC);
+    const movedAuthority = h8Open(hMoved)[0]?.authority;
+    await h8Epoch(hMoved, LGR2);
+    await alAct(LM, alMoved, "revoke");
+    check(
+      "revoke (LIM-2441 H8): a session that opened an epoch under the alignment and later moved off it gets no cancel",
+      movedOn.status === 200 && movedAuthority === "alignment" && (await h8Cancels(hMoved)).length === 0 && h8Open(hMoved)[0]?.goal_id === LGR2?.id,
+      `${movedOn.status} ${movedAuthority} ${JSON.stringify(h8Open(hMoved))}`,
+    );
+    // The goal closes with the switch still pending, and with the governance already cleared.
+    const hClosed = await h8Share("closed");
+    const alClosed = await h8Align(LGC2, hClosed);
+    await h8Epoch(hClosed, LGR2);
+    const closedGoal = await la(LM, "POST", `/goals/${LGC2?.id}/versions`, { version: 1, status: "dropped" });
+    const closedCancels = await h8Cancels(hClosed);
+    check(
+      "a goal dropped (LIM-2441 H8): a session with the alignment's binding_changed unopened gets one binding_suspended cancel_pending with cause goal_closed:<id>, and stays shared",
+      closedGoal.status < 300 && closedCancels.length === 1 && closedCancels[0].binding?.effective === "cancel_pending" && closedCancels[0].binding?.cause === `goal_closed:${alClosed?.id}` && h8Row(hClosed)?.state === "shared",
+      `${closedGoal.status} ${closedGoal.text?.slice(0, 160)} ${JSON.stringify(closedCancels.map((d) => d.binding))}`,
+    );
   }
   // ==== end fix:a1-web ====
 
@@ -11404,7 +13463,8 @@ try {
   // ======== phase events: product events (PRESEED-007) and the operator's report ========
   // Mode L with the test IdP on a fresh data directory: a scripted set of actions, so every funnel count is known.
   const evDir = path.join(tmpRoot, "events");
-  await mustStart({ ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1" });
+  // ALIGN_LIVE_STREAMS_TOTAL=2: the server-wide live stream cap (default 200), low so the check below reaches it.
+  await mustStart({ ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1", ALIGN_LIVE_STREAMS_TOTAL: "2" });
   dbFile = path.join(evDir, "v2", "align.sqlite");
   {
     // Z4 (E2E-WEB cycle 6), on this fresh server (the pairing limit of the first one is spent): a device name is one line.
@@ -11497,6 +13557,37 @@ try {
     const W = (await call("E1", "POST", "/api/v2/workspaces", { cookie: e1.cookie, body: { name: WS_NAME } })).json?.id;
     const WQ = (await call("E3", "POST", "/api/v2/workspaces", { cookie: e3.cookie, body: { name: "Quiet Kestrel Workspace" } })).json?.id;
     const WS_SAMPLE = (await call("E1", "POST", "/api/v2/workspaces/sample", { cookie: e1.cookie, body: {} })).json?.id;
+    {
+      // The server-wide live stream cap (2 on this server): past it the refusal says the server is busy, not "this
+      // workspace", since the stream that hits it may be the first one open on its workspace (audit LIM-2503, Low).
+      const openStream = (u, w) =>
+        new Promise((resolve) => {
+          const req = http.request({ host: "127.0.0.1", port: PORT, method: "GET", path: `/api/v2/workspaces/${w}/stream`, headers: { accept: "text/event-stream", cookie: u.cookie } }, (res) => {
+            const c = { status: res.statusCode, body: "", close: () => req.destroy() };
+            res.setEncoding("utf8");
+            if (res.statusCode === 200) return resolve(c);
+            res.on("data", (d) => (c.body += d));
+            res.on("end", () => {
+              try {
+                c.json = JSON.parse(c.body);
+              } catch {}
+              resolve(c);
+            });
+          });
+          req.on("error", () => resolve({ status: 0, body: "", close: () => undefined }));
+          req.end();
+        });
+      const open = [await openStream(e1, W), await openStream(e3, WQ)];
+      const third = await openStream(e1, WS_SAMPLE);
+      for (const c of open) c.close();
+      check(
+        "live: past the server's cap (ALIGN_LIVE_STREAMS_TOTAL, 2 here) a stream -> 429 too_many_streams \"Align is busy and can't keep this view live right now. It reads when you act or reload instead.\", even on a workspace with no stream open, never \"this workspace\"",
+        open.every((c) => c.status === 200) && third.status === 429 && third.json?.error === "too_many_streams" &&
+          third.json?.message === "Align is busy and can't keep this view live right now. It reads when you act or reload instead.",
+        `${open.map((c) => c.status)} ${third.status} ${third.body}`,
+      );
+      await sleep(300);
+    }
     const inv = await ws(e1, "POST", W, "/invites", { email: e2.email, role: "member" });
     await ws(e1, "POST", W, "/invites", { email: "dormant-invitee@example.test", role: "viewer" });
     const acc = await call("E2", "POST", `/api/v2/invites/${inv.json?.token}/accept`, { cookie: e2.cookie, body: {} });
@@ -11802,11 +13893,18 @@ try {
   // -- the hosted route allowlist: / -> /app; /app*, /api/v2/*, /api/mcp, /oauth/*, /.well-known/*, /api/oauth/* and static assets; else 404 --
   const hRoot = await hosted("GET", "/");
   check("hosted: / redirects to https://<host>/app (307)", hRoot.status === 307 && hRoot.headers.location === `https://${HOSTED_HOST}/app`, `${hRoot.status} ${hRoot.headers.location}`);
+  const hNew = await Promise.all([hosted("GET", "/new"), hosted("GET", "/new?code=abc")]);
+  check(
+    "hosted (LIM-2473): a v1 invite link, /new, redirects to https://<host>/app (307), and a query goes no further",
+    hNew.every((r) => r.status === 307 && r.headers.location === `https://${HOSTED_HOST}/app`),
+    hNew.map((r) => `${r.status} ${r.headers.location}`).join(" | "),
+  );
   const outside = [
     ["GET", "/api/state"],
     ["POST", "/api/sessions/events"],
     ["GET", "/setup"],
-    ["GET", "/new"],
+    ["GET", "/new/x"],
+    ["GET", "/newx"],
     ["GET", "/w/x"],
     ["POST", "/api/session"],
     ["GET", "/api/workspaces/config"],
@@ -11850,6 +13948,14 @@ try {
     hTrustPages[0].status === 200 && hTrustPages[0].text.includes("Our two roles") && hTrustPages[1].status === 200 && hTrustPages[1].text.includes("Subprocessors"),
     hTrustPages.map((r) => r.status).join(" "),
   );
+  // The legal entity ends with its own full stop: a template's "[LEGAL ENTITY]." reads "Liminal Works, Inc." once,
+  // never "Inc.." (founder ruling, Nov 10). Read as text: HTML comments and tags out.
+  const trustText = hTrustPages.map((r) => r.text.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " "));
+  check(
+    "hosted: /privacy and /trust name \"Liminal Works, Inc.\" and never print \"Inc..\" (the filled entity's full stop stands for the sentence's own)",
+    trustText.every((t) => t.includes("Liminal Works, Inc.") && !/Inc\.\s*\./.test(t)),
+    trustText.map((t) => [...t.matchAll(/.{0,40}Inc\.\s*\..{0,20}/g)].map((m) => m[0]).join(" | ")).join(" || "),
+  );
   const hMe = await hosted("GET", "/api/v2/me");
   const hSignIn = await hosted("GET", "/app/sign-in");
   const hSession = await hosted("GET", "/api/v2/auth/get-session");
@@ -11860,6 +13966,22 @@ try {
     hAsks.status === 401 && hAsks.json?.error === "unauthorized" && !(hSuggest.status === 404 && hSuggest.json?.error === "Not found"),
     `${hAsks.status} ${hAsks.text.slice(0, 100)} ${hSuggest.status} ${hSuggest.text.slice(0, 100)}`,
   );
+  // The platform health check (fly.toml) calls /api/v2/health, which no sign-in rate limit counts. Its earlier path,
+  // Better Auth's get-session, is counted per client, and the check's Fly-Client-IP never changes: live, every 101st
+  // check (every 50 minutes) was refused. Here, one client: 150 health calls are all 200; get-session is refused past 100.
+  {
+    const hc = { "fly-client-ip": "fly-health-check" };
+    const health = [];
+    for (let i = 0; i < 150; i++) health.push(await hosted("GET", "/api/v2/health", { headers: hc }));
+    const sess = [];
+    for (let i = 0; i < 101; i++) sess.push(await hosted("GET", "/api/v2/auth/get-session", { headers: hc }));
+    check(
+      "hosted: the health check's route (/api/v2/health, fly.toml) answers 200 {ok:true} to 150 calls in a row from one client, while Better Auth's get-session, its earlier path, refuses that client its 101st call (429): the check is no longer rate-limited",
+      /^\s*path = "\/api\/v2\/health"$/m.test(readFileSync(path.join(ROOT, "fly.toml"), "utf8")) &&
+        health.every((r) => r.status === 200 && r.json?.ok === true) && sess.slice(0, 100).every((r) => r.status === 200) && sess[100].status === 429,
+      JSON.stringify({ health: [...new Set(health.map((r) => r.status))], sess100: sess[99]?.status, sess101: sess[100]?.status }),
+    );
+  }
   check("hosted: v2 routes are served (/api/v2/me 401, /app/sign-in 200, Better Auth answers)", hMe.status === 401 && hSignIn.status === 200 && hSession.status === 200, `${hMe.status} ${hSignIn.status} ${hSession.status}`);
   check("hosted: the sign-in page offers Google and GitHub, never the test sign-in; without email settings, no email code", hSignIn.text.includes("Continue with Google") && hSignIn.text.includes("Continue with GitHub") && !hSignIn.text.includes("Test sign-in") && !hSignIn.text.includes("Send code"), "");
   check("hosted: the sign-in page links to /privacy and /trust", hSignIn.text.includes('href="/privacy"') && hSignIn.text.includes('href="/trust"'), "");
@@ -12207,8 +14329,8 @@ try {
   const useExpired = await gCreate(ALICE, "Alice Two", expC);
   const useBobs = await gCreate(ALICE, "Alice Two", bobC);
   check(
-    "gate: a revoked code, an expired code, and a code bound to another address -> 403 creation_code_invalid, and none of them is spent",
-    gMade.status === 0 && bobMade.status === 0 && [useRevoked, useExpired, useBobs].every((r) => r.status === 403 && r.json?.error === "creation_code_invalid") && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_creation_codes WHERE redeemed_at IS NOT NULL").get().n) === 1,
+    "gate: a revoked code, an expired code, and a code bound to another address -> 403 creation_code_invalid with the founder's wording, and none of them is spent",
+    gMade.status === 0 && bobMade.status === 0 && [useRevoked, useExpired, useBobs].every((r) => r.status === 403 && r.json?.error === "creation_code_invalid" && r.json?.message === "That creation code isn't valid. It may be mistyped, used, expired, revoked or for another email address. Reply to the message with your code for a new one.") && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_creation_codes WHERE redeemed_at IS NOT NULL").get().n) === 1,
     `${useRevoked.status} ${useExpired.status} ${useBobs.status} ${gMade.err}`,
   );
   const tmpInv = await gPost(`/api/v2/workspaces/${W2.json?.id}/invites`, { email: "temp@mailinator.com", role: "member" }, ALICE);
@@ -12232,6 +14354,247 @@ try {
   const BOB = await gSignIn("bob@example.test");
   const bobAccept = await gPost(`/api/v2/invites/${bobInv.json?.token}/accept`, {}, BOB);
   check("caps: accepting an open invite within the cap works (it was already counted)", BOB.status === 200 && bobAccept.status === 200, `${BOB.status} ${bobAccept.status} ${bobAccept.text}`);
+  // -- v1 invite codes (LIM-2473): imported as unbound single-use codes; exactly one extra shape; alc_ unchanged --
+  const v1Hex = () => randomBytes(10).toString("hex");
+  const [v1Code, v1Unused, v1Spent, v1Kept] = [v1Hex(), v1Hex(), v1Hex(), v1Hex()];
+  const v1File = path.join(tmpRoot, "v1-codes.txt");
+  const v1Used = path.join(tmpRoot, "v1-used.json");
+  writeFileSync(v1File, `# unspent\n\n${v1Code}\n${v1Unused}\r\n${v1Kept}\n${v1Spent}\n`, { mode: 0o600 });
+  writeFileSync(v1Used, JSON.stringify([createHash("sha256").update(v1Spent).digest("hex")]), { mode: 0o600 });
+  const v1Args = ["codes", "import", "--file", v1File, "--used", v1Used, "--days", "60"];
+  const v1Noisy = (r) => [v1Code, v1Unused, v1Kept, v1Spent].some((c) => r.out.includes(c) || r.err.includes(c));
+  const v1Rows = () => withDb((d) => d.prepare("SELECT * FROM v2_creation_codes").all());
+  const v1Before = v1Rows().length;
+  const v1Imported = admin(v1Args, opGate);
+  const v1Added = v1Rows().filter((r) => !r.request_id && r.email === null).sort((x, y) => y.expires_at.localeCompare(x.expires_at)).slice(0, 3);
+  const v1Days = (Date.parse(v1Added[0]?.expires_at) - Date.now()) / 86400000;
+  const v1ListOut = admin(["codes", "list"], opGate).out;
+  check(
+    "align-admin: codes import --file --used --days 60 loads 3 unbound codes valid for 60 days, skips the 1 spent on v1, says so in counts, and neither the output nor codes list holds a code",
+    v1Imported.status === 0 && /Imported 3, for 60 days\. 0 already here, left as they were \(0 of those used\)\. 1 spent on v1, skipped\./.test(v1Imported.out) && v1Rows().length === v1Before + 3 && v1Added.length === 3 && v1Days > 59.9 && v1Days <= 60 && !v1Noisy(v1Imported) && ![v1Code, v1Unused, v1Kept, v1Spent].some((c) => v1ListOut.includes(c)),
+    `${v1Imported.status} ${v1Imported.out} ${v1Imported.err} ${v1Rows().length - v1Before} ${v1Days}`,
+  );
+  const v1BadFile = path.join(tmpRoot, "v1-bad.txt");
+  const v1BadUsed = path.join(tmpRoot, "v1-bad-used.json");
+  writeFileSync(v1BadFile, `${v1Hex()}\n${v1Code.toUpperCase()}\nalc_${"a".repeat(32)}\n${v1Code.slice(0, 19)}\n${v1Code}0\n`, { mode: 0o600 });
+  writeFileSync(v1BadUsed, JSON.stringify({ spent: [] }), { mode: 0o600 });
+  const v1Bad = admin(["codes", "import", "--file", v1BadFile, "--used", v1Used, "--days", "60"], opGate);
+  const v1NoDays = admin(["codes", "import", "--file", v1File, "--used", v1Used], opGate);
+  const v1NoUsed = admin(["codes", "import", "--file", v1File, "--days", "60"], opGate);
+  const v1WrongUsed = admin(["codes", "import", "--file", v1File, "--used", v1BadUsed, "--days", "60"], opGate);
+  const v1MissingUsed = admin(["codes", "import", "--file", v1File, "--used", path.join(tmpRoot, "v1-none.json"), "--days", "60"], opGate);
+  check(
+    "align-admin: one line of another shape (alc_, uppercase, 19 or 21 hex) imports nothing, names the lines and never their text; --days and --used are required; a --used file that isn't v1's list or can't be read imports nothing",
+    v1Bad.status === 2 && /lines 2, 3, 4, 5\./.test(v1Bad.err) && !v1Bad.err.includes(v1Code.toUpperCase()) && !v1Bad.err.includes("alc_a") && !v1Bad.err.includes(v1Code.slice(0, 19)) && v1NoDays.status === 2 && v1NoUsed.status === 2 && v1WrongUsed.status === 1 && /Nothing imported/.test(v1WrongUsed.err) && v1MissingUsed.status === 1 && /Nothing imported/.test(v1MissingUsed.err) && v1Rows().length === v1Before + 3,
+    `${v1Bad.status} ${v1NoDays.status} ${v1NoUsed.status} ${v1WrongUsed.status} ${v1MissingUsed.status} ${v1Rows().length - v1Before}`,
+  );
+  const v1OldDir = path.join(tmpRoot, "v1-old-schema");
+  mkdirSync(path.join(v1OldDir, "v2"), { recursive: true });
+  const v1OldDb = new DatabaseSync(path.join(v1OldDir, "v2", "align.sqlite"));
+  v1OldDb.exec("PRAGMA user_version = 1");
+  v1OldDb.close();
+  const v1OldRun = admin(v1Args, { ...opGate, ALIGN_DATA_DIR: v1OldDir });
+  const v1NoDbRun = admin(v1Args, { ...opGate, ALIGN_DATA_DIR: path.join(tmpRoot, "v1-no-db") });
+  check(
+    "align-admin: codes import refuses a database this version hasn't migrated, and a server that has no database yet, so the import can only follow the deploy",
+    v1OldRun.status !== 0 && /not been migrated/.test(v1OldRun.err) && v1NoDbRun.status === 1 && /No Align database/.test(v1NoDbRun.err),
+    `${v1OldRun.status} ${v1OldRun.err} ${v1NoDbRun.status} ${v1NoDbRun.err}`,
+  );
+  const v1Shapes = [v1Code.slice(0, 19), `${v1Code}0`, v1Code.toUpperCase(), v1Hex()];
+  const v1Refused = [];
+  for (const c of v1Shapes) v1Refused.push(await gCreate(ALICE, "Alice V1", c));
+  const v1OnSpent = await gCreate(BOB, "Bob V1 spent", v1Spent);
+  check(
+    "gate (LIM-2473): 19 hex, 21 hex, uppercase, a 20-hex code never imported, and a code spent on v1 -> 403 creation_code_invalid, and no code is spent",
+    [...v1Refused, v1OnSpent].every((r) => r.status === 403 && r.json?.error === "creation_code_invalid") && v1Rows().filter((r) => r.redeemed_at && v1Added.some((x) => x.id === r.id)).length === 0,
+    [...v1Refused, v1OnSpent].map((r) => `${r.status} ${r.json?.error}`).join(" "),
+  );
+  // A create that fails after the code was redeemed: the transaction rolls back, so a failed create burns nothing.
+  withDb((d) => d.exec("CREATE TRIGGER v1_fail BEFORE INSERT ON v2_members BEGIN SELECT RAISE(ABORT, 'forced'); END"));
+  const v1Failed = await gCreate(BOB, "Bob V1 failed", v1Code);
+  withDb((d) => d.exec("DROP TRIGGER v1_fail"));
+  const v1AfterFail = withDb((d) => ({ spent: d.prepare("SELECT COUNT(*) AS n FROM v2_creation_codes WHERE redeemed_at IS NOT NULL").get().n, ws: d.prepare("SELECT COUNT(*) AS n FROM v2_workspaces WHERE name = 'Bob V1 failed'").get().n }));
+  const v1SpentBefore = v1Rows().filter((r) => r.redeemed_at).length;
+  const v1Create = await gCreate(BOB, "Bob V1", v1Code);
+  check(
+    "gate (LIM-2473): a create that fails after the code was redeemed leaves no workspace and the code unspent, and the same code then creates the workspace",
+    v1Failed.status >= 500 && v1AfterFail.ws === 0 && v1AfterFail.spent === v1SpentBefore && v1Create.status === 201,
+    `${v1Failed.status} ${JSON.stringify(v1AfterFail)} ${v1SpentBefore} ${v1Create.status} ${v1Create.text}`,
+  );
+  const v1Replay = await gCreate(BOB, "Bob V1 again", v1Code);
+  const v1Row = v1Rows().find((r) => r.ws_id === v1Create.json?.id);
+  const v1Reimport = admin(v1Args, opGate);
+  const v1Purge = admin(["workspaces", "delete", v1Create.json?.id ?? "", "--purge", "--yes"], opGate);
+  admin(v1Args, opGate);
+  const v1AfterPurge = await gCreate(BOB, "Bob V1 after", v1Code);
+  check(
+    "gate (LIM-2473): an imported v1 code creates one workspace (201) and is spent with it; used again -> 403 creation_code_invalid, also after a re-import (0 new, 3 left as they were, 1 of those used, 1 spent on v1) and after that workspace is purged",
+    v1Create.status === 201 && v1Row?.redeemed_at && v1Replay.status === 403 && v1Replay.json?.error === "creation_code_invalid" && /Imported 0, for 60 days\. 3 already here, left as they were \(1 of those used\)\. 1 spent on v1, skipped\./.test(v1Reimport.out) && v1Purge.status === 0 && v1AfterPurge.status === 403 && v1AfterPurge.json?.error === "creation_code_invalid",
+    `${v1Create.status} ${v1Create.text} ${v1Replay.status} ${v1Reimport.out} ${v1Purge.status} ${v1Purge.err} ${v1AfterPurge.status}`,
+  );
+  // Testers paste codes from a text message. The route trims (optStr); the shape match stays exact, so case is untouched.
+  const v1Pasted = await gCreate(BOB, "Bob V1 pasted", `  ${v1Kept}\n`);
+  const v1PastedPurge = admin(["workspaces", "delete", v1Pasted.json?.id ?? "", "--purge", "--yes"], opGate);
+  check("gate (LIM-2473): a code pasted with spaces and a newline around it is accepted (201)", v1Pasted.status === 201 && v1PastedPurge.status === 0, `${v1Pasted.status} ${v1Pasted.text} ${v1PastedPurge.status}`);
+  const v1Clear = readdirSync(gateDir, { recursive: true }).filter((f) => statSync(path.join(gateDir, f)).isFile()).some((f) => readFileSync(path.join(gateDir, f)).includes(v1Unused));
+  check("gate (LIM-2473): an imported code is in no file of the data directory in clear; only its HMAC is stored", !v1Clear);
+  const v1SignIn = await hosted("GET", "/app/sign-in");
+  const v1Field = await hosted("GET", "/app", { cookie: BOB.cookie });
+  check(
+    "gate (LIM-2473, founder's wording): the sign-in page says \"Have an invite code? Sign in first, then enter it.\"; the code field says \"Use the code you were given.\" and has no alc_ placeholder",
+    v1SignIn.text.includes("Have an invite code? Sign in first, then enter it.") && v1Field.text.includes('name="creation_code"') && v1Field.text.includes("Use the code you were given.") && !v1Field.text.includes('placeholder="alc_'),
+    `${v1SignIn.status} ${v1Field.status}`,
+  );
+  // LIM-2480: no prior invite/account; import is the only way this tester qualifies for email sign-in.
+  const boundAddress = ["imported-tester", "example.test"].join("@");
+  const boundCode = v1Hex();
+  const boundFile = path.join(tmpRoot, "v1-bound.txt");
+  const boundArgs = ["codes", "import", "--file", boundFile, "--used", v1Used, "--days", "60"];
+  const boundBefore = v1Rows().length;
+  writeFileSync(boundFile, `${boundCode}, ${boundAddress.toUpperCase()} \n`, { mode: 0o600 });
+  const boundImport = admin(boundArgs, opGate);
+  const boundRow = v1Rows().find((r) => r.email === boundAddress);
+  const boundList = admin(["codes", "list"], opGate);
+  check("LIM-2480: bound import normalizes the address and prints neither address nor code (including codes list)",
+    boundImport.status === 0 && boundList.status === 0 && v1Rows().length === boundBefore + 1 && !!boundRow &&
+    [boundImport, boundList].every((r) => ![boundCode, boundAddress].some((v) => (r.out + r.err).toLowerCase().includes(v))),
+    `import status ${boundImport.status}; row present ${!!boundRow}`);
+  const preservedBefore = v1Rows().find((r) => r.id === v1Added.find((x) => !v1Rows().find((y) => y.id === x.id)?.redeemed_at)?.id);
+  writeFileSync(boundFile, `${v1Unused},${boundAddress}\n`, { mode: 0o600 });
+  const liveAgain = admin(boundArgs, opGate);
+  const preservedAfter = v1Rows().find((r) => r.id === preservedBefore?.id);
+  check("LIM-2480: re-import leaves a live unbound row entirely unchanged",
+    liveAgain.status === 0 && !!preservedBefore && JSON.stringify(preservedBefore) === JSON.stringify(preservedAfter));
+  const boundWrong = await gCreate(BOB, "Wrong recipient", boundCode);
+  const boundTester = await gSignIn(boundAddress);
+  const boundHome = await hosted("GET", "/app", { cookie: boundTester.cookie });
+  const boundCreate = await gCreate(boundTester, "Imported tester", boundCode);
+  check("LIM-2480: a new email tester reaches the creation field and creates once; another account is refused",
+    boundWrong.status === 403 && boundWrong.json?.error === "creation_code_invalid" && boundTester.status === 200 &&
+    boundHome.status === 200 && boundHome.text.includes('name="creation_code"') && boundCreate.status === 201,
+    `wrong ${boundWrong.status}; sign-in ${boundTester.status}; home ${boundHome.status}; create ${boundCreate.status}`);
+  const reboundAddress = ["different-tester", "example.test"].join("@");
+  writeFileSync(boundFile, `${boundCode},${reboundAddress}\n`, { mode: 0o600 });
+  const boundAgain = admin(boundArgs, opGate);
+  const boundAfter = v1Rows().find((r) => r.id === boundRow?.id);
+  const boundReplay = await gCreate(boundTester, "Imported again", boundCode);
+  check("LIM-2480: re-import cannot rebind or revive a used code",
+    boundAgain.status === 0 && boundAfter?.email === boundAddress && !!boundAfter?.redeemed_at && boundReplay.status === 403,
+    `import ${boundAgain.status}; replay ${boundReplay.status}`);
+  const boundPurge = admin(["workspaces", "delete", boundCreate.json?.id ?? "", "--purge", "--yes"], opGate);
+  check("LIM-2480: imported tester fixture is purged before cap checks", boundPurge.status === 0);
+  // Validate all rows before writing, including a good first row followed by malformed private input.
+  const invalidBefore = v1Rows().length;
+  writeFileSync(boundFile, `${v1Hex()},${boundAddress}\n${v1Hex()},\n${v1Hex()},invalid\n${v1Hex()},${boundAddress},extra\n`, { mode: 0o600 });
+  const boundInvalid = admin(boundArgs, opGate);
+  check("LIM-2480: malformed bound rows abort the complete import with line numbers only",
+    boundInvalid.status === 2 && /lines 2, 3, 4\./.test(boundInvalid.err) && v1Rows().length === invalidBefore &&
+    !boundInvalid.err.includes(boundAddress) && !boundInvalid.err.includes("invalid\n"), `status ${boundInvalid.status}`);
+  // LIM-2480: exercise the real hosted pages and handlers. Only delivery and the external bot widget are fakes.
+  // Interception preserves the public HTTPS origin (and Secure cookies) while forwarding to the isolated server.
+  if (existsSync(CHROME)) {
+    const { default: puppeteer } = await import("puppeteer-core");
+    const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
+    try {
+      for (const width of [1440, 390, 320]) for (const theme of ["light", "dark"]) {
+        const context = await browser.createBrowserContext();
+        const page = await context.newPage();
+        const clientIp = nextIp();
+        const address = [`browser-${width}-${theme}`, "example.test"].join("@");
+        const invite = v1Hex();
+        writeFileSync(boundFile, `${invite},${address}\n`, { mode: 0o600 });
+        const imported = admin(boundArgs, opGate);
+        let errors = 0;
+        let created = null;
+        let createRefused = "";
+        let overflow = false;
+        page.on("pageerror", () => errors++);
+        await page.setViewport({ width, height: 900 });
+        await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: theme }]);
+        await page.evaluateOnNewDocument(() => {
+          const callbacks = new Map();
+          window.turnstile = {
+            render(_el, options) { const id = String(callbacks.size); callbacks.set(id, options.callback); setTimeout(() => options.callback("ok"), 0); return id; },
+            reset(id) { setTimeout(() => callbacks.get(id)?.("ok"), 0); },
+            remove(id) { callbacks.delete(id); },
+          };
+        });
+        await page.setRequestInterception(true);
+        page.on("request", async (request) => {
+          try {
+            const url = new URL(request.url());
+            if (url.origin !== `https://${HOSTED_HOST}`) return void await request.abort();
+            const headers = { ...request.headers(), host: HOSTED_HOST, "x-forwarded-proto": "https", "fly-client-ip": clientIp };
+            delete headers["accept-encoding"];
+            const result = await new Promise((resolve, reject) => {
+              const outgoing = http.request({ hostname: "127.0.0.1", port: PORT, path: url.pathname + url.search, method: request.method(), headers }, (res) => {
+                const chunks = [];
+                res.on("data", (chunk) => chunks.push(chunk));
+                res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
+              });
+              outgoing.on("error", reject);
+              outgoing.end(request.postData());
+            });
+            if (url.pathname === "/api/v2/workspaces" && request.method() === "POST") {
+              if (result.status === 201) created = JSON.parse(result.body.toString()).id;
+              else { try { createRefused = `${result.status} ${JSON.parse(result.body.toString()).error}`; } catch { createRefused = String(result.status); } }
+            }
+            delete result.headers["transfer-encoding"];
+            await request.respond(result);
+          } catch { errors++; await request.abort().catch(() => {}); }
+        });
+        const fit = async () => { overflow ||= await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1); };
+        // Each page loads data after it is drawn (the create page's workspace list replaces its loading line), which moves
+        // the form; a click aimed before that lands beside the button. So let the page settle, type, check the field
+        // kept every key, and only then click.
+        const settle = () => page.waitForNetworkIdle({ idleTime: 500, timeout: 15000, concurrency: 1 }).catch(() => undefined);
+        const fill = async (selector, value) => {
+          await page.type(selector, value);
+          await page.waitForFunction((s, v) => document.querySelector(s)?.value === v, { timeout: 5000 }, selector, value);
+        };
+        const submit = async (selector) => {
+          await page.waitForFunction((s) => { const button = document.querySelector(s); return button && !button.disabled; }, {}, selector);
+          await settle();
+          await page.click(selector);
+        };
+        let step = "";
+        try {
+          step = "open /new";
+          await page.goto(`https://${HOSTED_HOST}/new`, { waitUntil: "networkidle0" });
+          await page.waitForSelector('input[name="email"]');
+          await settle();
+          await fit();
+          step = "send email";
+          await fill('input[name="email"]', address);
+          await submit('#email-code button[type="submit"]');
+          step = "code field";
+          await page.waitForSelector('input[name="code"]');
+          await settle();
+          await fit();
+          step = "verify code";
+          await fill('input[name="code"]', mailCode(address));
+          await submit('#email-code button[type="submit"]');
+          step = "creation field";
+          await page.waitForSelector('input[name="creation_code"]');
+          await settle();
+          await fit();
+          step = "create";
+          await fill('form input:not([name])', "Browser tester");
+          await fill('input[name="creation_code"]', invite);
+          await submit('form button[type="submit"]');
+          step = "workspace page";
+          await page.waitForFunction(() => /^\/app\/w\//.test(location.pathname));
+          await fit();
+          check(`LIM-2480: hosted new tester browser path ${width} ${theme}`, imported.status === 0 && !!created && errors === 0 && !overflow,
+            `import ${imported.status}; created ${!!created}; errors ${errors}; overflow ${overflow}`);
+        } catch (e) { check(`LIM-2480: hosted new tester browser path ${width} ${theme}`, false, `stopped at ${step}: ${String(e?.message ?? e).split("\n")[0].slice(0, 160)}; create ${createRefused || (created ? "201" : "not sent")}; errors ${errors}; overflow ${overflow}`); }
+        finally {
+          if (created) check(`LIM-2480: browser fixture cleanup ${width} ${theme}`, admin(["workspaces", "delete", created, "--purge", "--yes"], opGate).status === 0);
+          await context.close();
+        }
+      }
+    } finally { await browser.close(); }
+  } else check("LIM-2480: Chrome available for hosted browser coverage", false);
   // -- workspaces per account (2 by default) and on the server (4 here) --
   const W3 = await gCreate(OPSG, "Ops Two", U1c);
   const opsThird = await gCreate(OPSG, "Ops Three", U2c);

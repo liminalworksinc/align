@@ -1,6 +1,6 @@
 import { secret } from "../secret";
 import { eventActor, recordEvent, type EventName, type EventProps } from "./core.mts";
-import { get, sql, tx } from "./db";
+import { captureOutbound, get, sql, tx } from "./db";
 
 // Product events (PRESEED-007), bound to the app's database: lib/v2/core.mts recordEvent with the actor as the keyed
 // hash of the person (eventActor). The code points call event() inside the transaction of the action they record, so
@@ -13,6 +13,7 @@ export const actorOf = (userId: string) => eventActor(secret(), userId);
 /** Record one event inside the caller's tx(). `user` is the person whose action it is (null: nobody signed in). A
  *  first-time event already recorded for the workspace is skipped. True when a row was added. */
 export function event(name: EventName, o: { ws?: string | null; user?: string | null; props?: EventProps; at?: string } = {}): boolean {
+  captureOutbound({ kind: "event", what: name }); // a preview (lib/v2/foresight.ts) lists it; its rollback removes the row
   return recordEvent(sql, name, { ws: o.ws ?? null, actor: o.user ? actorOf(o.user) : null, props: o.props, at: o.at });
 }
 

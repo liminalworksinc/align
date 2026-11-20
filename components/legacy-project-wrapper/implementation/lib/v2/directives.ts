@@ -1,4 +1,4 @@
-import { all, get, run, tx } from "./db";
+import { all, get, run, touchWs, tx } from "./db";
 import { V2Error, badRequest, notFound } from "./errors";
 import { event } from "./events";
 import { newId, nowIso } from "./ids";
@@ -16,7 +16,9 @@ import { expireStoppedSessionTargets, holdWire, requestReceipt, requestWire, typ
 export type DirectiveKind = "goal_version" | "binding_changed" | "binding_suspended" | "stop" | "resume" | "request" | "hold" | "release";
 export interface Binding {
   goal_id: string | null;
-  effective: "next_root_turn";
+  // binding_suspended: "cancel_pending" when the session never opened the binding it is losing (LIM-2441): its machine
+  // drops the pending binding_changed and keeps its own binding.
+  effective: "next_root_turn" | "cancel_pending";
   cause: string; // "alignment:<al_id>" | "goal_closed:<al_id>" (binding_suspended: the target was achieved or dropped) | "manual"
 }
 
@@ -59,6 +61,7 @@ export function writeDirective(ws: string, kind: DirectiveKind, sessionKeys: str
     nowIso(),
   );
   for (const k of keys) run("INSERT INTO v2_directive_targets (ws_id, directive_id, session_key) VALUES (?, ?, ?)", ws, id, k);
+  touchWs(ws);
   // The workspace's first directive that reached a session (no actor: several actions write directives).
   event("first_directive", { ws, props: { kind } });
   return id;
@@ -214,6 +217,7 @@ export async function recordReceipt(dev: DevicePrincipal, directiveId: string, s
     throw new V2Error(409, "request_expired", "This request expired: this session's sharing was stopped, so it no longer takes answers.", { ended_reason: t.ended_reason ?? null });
   }
   return tx(() => {
+    touchWs(t.ws_id);
     const n = run(
       "INSERT OR IGNORE INTO v2_receipts (ws_id, directive_id, session_key, state, at, recorded_at, auto_accepted) VALUES (?, ?, ?, ?, ?, ?, ?)",
       t.ws_id,

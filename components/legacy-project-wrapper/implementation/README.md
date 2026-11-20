@@ -193,6 +193,7 @@ npm run lint
 npx next typegen && npx tsc --noEmit
 node scripts/test-v2.mjs <port>       # the server: sign-in, workspaces, goals, change requests, devices, sessions,
                                       # directives, spend, the web UI (needs Chrome: CHROME_PATH), the edge, hosted mode
+node scripts/test-budgets.mjs # spending domain, migrations, races and retention (no server)
 node scripts/test-oauth.mjs <port>    # connected AI apps: the OAuth server, consent, grants, /api/mcp, align-connect
 node scripts/test-agent-live.mjs <port>
                                       # the real align CLI and hooks against a real Mode L server: limits and accepted
@@ -210,6 +211,27 @@ in use.
 (`ℹ tests`, `ℹ pass`, `ℹ fail`) over every step, which is what the literate-ai test receipt records. Running as root
 (for example in a container), point `CHROME_PATH` at a Chrome wrapper that adds `--no-sandbox`.
 
+## Team budgets and requests
+
+Team leads and workspace owners set a team's budget and optional allowance for a UTC month on Spend.
+Amounts are estimates at list price. A browser request within the allowance and its monthly ceiling can be
+recorded under that allowance. A terminal request always waits for a different eligible person. The record
+names where it was filed and preserves both decision rounds. At most five requests per person, team and month
+can wait at once. Lists default to this month and have bounded pages. Reaching a budget never stops work.
+
+Only a team's members and workspace owners read its budget, burn, forecast, history and spend in no goal. No-goal spend counts toward the budget of the
+home team recorded when the spending period opened. Earlier periods have no home team and stay unallocated.
+The person can choose a different home team for future periods. The monthly team CSV preserves exact totals
+and names the same goal-bound team rows as the on-screen report. Hidden goals remain unnamed; other teams' spend in no goal remains unallocated.
+
+Budget requests appear in Home's single Needs list and in a month-filtered section on Requests. Spend has
+budget forms, estimate bounds, the request record and CSV export. Own sessions have a budget label only when
+that team has a budget this month. `align budget` shows the folder's team budget and `align budget request`
+files a request that waits for a person. The existing one-pass sync reads bounded session attribution and
+reuses positive and empty attribution answers and team budgets for five minutes across passes, with read and time bounds. Hooks read only local files and deliver an
+informational `[Align]` note at 80 and 100 percent once a sync observes a priced known crossing, including a lower bound. The note remains due at the next turn in the same month and team however long the pause, and states when the figure was read.
+Model-context notes have no commands and grant no authority. The separate person-only message names Spend and the request command. The goal context envelope and MCP are unchanged.
+
 ## Where things are
 
 | Path | What |
@@ -225,3 +247,17 @@ in use.
 | `packages/align-connect/` | A stdio MCP bridge for clients without OAuth |
 | `docs/trust/`, `SECURITY.md`, `lib/trust/`, `app/privacy`, `app/trust` | The security pack and the public trust pages built from it |
 | `docs/archive/` | Pages about the retired v1 prototype |
+
+Team budgets have no minimum team size. Align offers no per-person spend view; totals for a team with fewer
+than three members can reveal one person's spend. Earlier no-goal usage without a recorded home team stays
+unallocated and prevents an exact team total. Closed-month budget reads include grants that applied in that month.
+Requests name their authenticated filing source. Terminal records name the device and say Align cannot tell
+whether the person or an agent on that device ran the command. Terminal requests always wait for a person.
+Creation limits apply per requester, with a larger workspace ceiling.
+
+Running sessions can act on a figure up to five minutes old. `align budget` refreshes this device's cached figure.
+Budget reads run last in a sync pass. Local snapshots include the non-secret server clock offset, preserve pending
+crossings through rejected figures and temporary refusals, and store only needed fields. A newer accepted budget
+removal or effective-amount change replaces earlier figures. Hooks deliver separate model-context and person-only
+messages; only the person's message may name the request command. Sign-out removes budget delivery markers;
+stop-sharing keeps them so sharing again in the same month does not repeat a note.

@@ -30,7 +30,7 @@ interface Agg extends Record<Num, number> {
   basis: Basis;
 }
 
-function add(s: Sums, a: Agg) {
+function add(s: Sums, a: Pick<Agg, Num | "basis">) {
   const b = BASES.includes(a.basis) ? a.basis : "unknown";
   for (const k of NUMS) {
     s[k] += a[k];
@@ -131,6 +131,36 @@ export function spend(pp: PolicyPrincipal, by: SpendBy, from: string | null, to:
     unpriced_requests: total.unpriced_requests,
     rows: out,
   };
+}
+
+/** Captured no-goal attribution for authorized budget reads. Aggregate numbers only, no person or session. */
+export function noGoalTeamTotals(ws: string, from: string | null, to: string | null, team: string | null = null) {
+  type TeamAgg = Pick<Agg, Num | "basis"> & { team_id: string };
+  const live = all<TeamAgg>(
+    `SELECT e.spend_team_id AS team_id, u.basis, ${SUM_COLUMNS}
+     FROM v2_usage u JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id
+     WHERE u.ws_id = ? AND e.goal_id IS NULL AND e.spend_team_id IS NOT NULL
+       AND (? IS NULL OR e.spend_team_id = ?) AND (? IS NULL OR u.ts >= ?) AND (? IS NULL OR u.ts < ?)
+     GROUP BY e.spend_team_id, u.basis`, ws, team, team, from, from, to, to,
+  );
+  const rolled = all<TeamAgg>(
+    `SELECT pod_id AS team_id, basis, ${NUMS.map((k) => `SUM(${k}) AS ${k}`).join(", ")}
+     FROM v2_team_no_goal_rollups WHERE ws_id = ? AND (? IS NULL OR pod_id = ?)
+       AND (? IS NULL OR day || 'T00:00:00.000Z' >= ?) AND (? IS NULL OR day || 'T00:00:00.000Z' < ?)
+     GROUP BY pod_id, basis`, ws, team, team, from, from, to, to,
+  );
+  const totals = new Map<string, Sums>();
+  for (const r of [...live, ...rolled]) {
+    let s = totals.get(r.team_id);
+    if (!s) totals.set(r.team_id, (s = emptySums()));
+    add(s, r);
+  }
+  return [...totals].map(([team_id, sums]) => ({ team_id, ...sums }));
+}
+
+/** Export exactly the on-screen team report, including its unnamed goal and unallocated rows. */
+export function spendTeamExport(pp: PolicyPrincipal, from: string, to: string | null) {
+  return spend(pp, "team", from, to);
 }
 
 /** One goal's usage in [from, to): the total and one row per model, summed exactly as spend() sums a goal's row (every
