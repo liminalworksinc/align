@@ -267,7 +267,7 @@ test(`share-state notices agree with the deny and the status views, whatever the
           // A stop or a hold it alone hears is enforced at the next tool call, before the newest build runs.
           // Only this pairing's sessions: the fake leaves replaced devices' rows shared, but their directives cannot
           // reach this device (specs/align/directives.md, "Device fetch of v2 directives by cursor").
-          const device = readJson<{ device_id: string }>(layout.credentials(t.home));
+          const device = readJson<{ device_id: string }>(credentialsFile(t.home));
           const reachable = live().filter((s) => fake.sessions.get(s.key)?.device === device?.device_id);
           const target = signedIn() && reachable.length && rand() < 0.5 ? pick(reachable) : null;
           if (target) {
