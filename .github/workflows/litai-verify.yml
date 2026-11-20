@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 10
     env:
       # literate-ai at the exact revision this project's locks, native children and conversion stage were produced with.
-      LITAI_SOURCE: git+https://github.com/jordanhubbard/literate-ai@b26dd359b32f6138a1b199b79ffbbf8c935b48db
+      LITAI_SOURCE: git+https://github.com/jordanhubbard/literate-ai@ebf88985be10f733dd64f469b7cd4aa685ce9083
     steps:
       - uses: actions/checkout@v4
         with:
