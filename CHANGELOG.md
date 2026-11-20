@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Team budget notes use the saved server clock offset, preserve state through temporary refusals and run after
+  other sync work. Terminal budget reads refresh the same cache used by running sessions. Notes distinguish model
+  context from the person's message. Budget records name the authenticated filing source and terminal device.
+  Small teams see the spend privacy limit. Earlier unattributed usage prevents exact totals, closed months retain
+  their applicable grants, and request rate limits apply per requester with a separate workspace ceiling.
+
+- Teams can set monthly budgets in list-price estimates, record requests for more and keep each decision.
+  Terminal requests always wait for a person. Spend includes budget controls and a monthly CSV export with
+  exactly the on-screen team report's rows and amounts for the same reader and month, keeping all no-goal usage
+  unallocated. Team budgets, burn, forecasts, history and home-team no-goal subtotals are visible only to team
+  members and workspace owners. Home includes budget requests in its Needs list. Existing local hooks deliver
+  informational budget notes from cached known spend, including priced lower bounds, without stopping work.
+
 - Server tests finish each readiness response before stopping a phase, preventing a previous server from satisfying
   the next phase's readiness check.
 - Failed transaction and preview setup releases database state so later writes, previews and sign-in mail work.

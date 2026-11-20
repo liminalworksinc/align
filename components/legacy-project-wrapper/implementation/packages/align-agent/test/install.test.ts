@@ -80,7 +80,9 @@ describe("install", () => {
     const doctor = await runCli(t, ["doctor"]);
     assert.match(doctor.stdout, /hook latency/);
 
+    for (const name of ["budgets-cache", "budget-attribution", "budget-shown"]) { fs.mkdirSync(path.join(t.home, name), { recursive: true }); fs.writeFileSync(path.join(t.home, name, "record"), "test"); }
     const un = await runCli(t, ["uninstall"]);
+    for (const name of ["budgets-cache", "budget-attribution", "budget-shown"]) assert.equal(fs.existsSync(path.join(t.home, name)), false, `${name} removed on uninstall`);
     assert.equal(un.code, 0, un.stderr);
     assert.deepEqual(JSON.parse(fs.readFileSync(settingsFile, "utf8")), USER_SETTINGS, "settings still the user's original");
     assert.equal(fs.existsSync(plugin), false, "plugin folder removed");

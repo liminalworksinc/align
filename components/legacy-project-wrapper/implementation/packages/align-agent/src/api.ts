@@ -4,6 +4,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import type { Ctx } from "./context.ts";
 import { loadDeviceKey, refreshMessage } from "./keys.ts";
 import { layout } from "./shared/layout.ts";
@@ -25,8 +26,8 @@ export interface Credentials {
   clock_offset_ms?: number;
 }
 
-/** Offsets under a minute count as the clocks agreeing (the server allows 5 minutes either way). */
-export const CLOCK_TOLERANCE_MS = 60_000;
+import { CLOCK_TOLERANCE_MS } from "./shared/clock.ts";
+export { CLOCK_TOLERANCE_MS } from "./shared/clock.ts";
 /** A measured offset replaces the saved one only when they differ by more than this, so the offset stays stable. */
 const CLOCK_DRIFT_MS = 30_000;
 
@@ -236,7 +237,7 @@ export function bindDevice(ctx: Ctx, deviceId?: string | null): () => void {
 /** Credentials `c` belong to the device `ctx` is bound to (or `ctx` is unbound). Signed out by the server counts as the
  *  same device: a refusal for it is reported as a sign-out, not as a change of pairing. Signed out by `align logout` does
  *  not: the pairing it was bound to was ended under it, as a new `align login` would have replaced it (C5-4). */
-function boundTo(ctx: Ctx, c: Credentials | null): boolean {
+export function boundTo(ctx: Ctx, c: Credentials | null): boolean {
   if (ctx.boundDevice === undefined) return true;
   if (ctx.boundDevice === null) return !c || !!c.signed_out;
   return !!c && c.device_id === ctx.boundDevice && !(c.signed_out && c.signed_out_reason === "logout");
@@ -262,6 +263,9 @@ export function markSignedOut(home: string, reason: string, deviceId?: string): 
   // next `align login` writes a fresh one.
   const me = readJson<MeFile>(layout.me(home));
   if (me && !me.signed_out) writeJsonAtomic(layout.me(home), { ...me, signed_out: true });
+  for (const dir of ["budgets-cache", "budget-attribution", "budget-shown"]) {
+    try { fs.rmSync(path.join(home, dir), { recursive: true, force: true }); } catch { /* cache cleanup cannot prevent sign-out */ }
+  }
 }
 
 /** Write `c` only while it is still the current device's credentials (under the refresh lock, which a new pairing

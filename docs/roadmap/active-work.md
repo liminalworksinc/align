@@ -30,6 +30,56 @@ queue item or let `docs/roadmap/` become a plan archive.
 Check the parent only after every required subtask and evidence item passes. Add the
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
+### [ ] SPEND-003: Team budgets and budget requests
+
+- **Owner:** specs/align/budgets.md and the retained implementation
+- **Direction:** Let a team set a monthly budget in list-price estimates, see how fast it is used, and record a
+  request for more with the decision of an accountable person.
+- **Conclusion:** Budgets are per team and per UTC month. Nothing is stopped or held when a budget is reached.
+  A request filed from a terminal always waits for a person; only a browser request can be recorded under the
+  team's allowance, up to its monthly ceiling. The requester never decides their own request. Spend in no goal
+  counts against the person's one home team, recorded when a session's spending period begins; usage from before
+  this change is not attributed to a team. Budgets, burn, forecasts, history and spend in no goal are visible only to team members and workspace owners. The CSV names the same goal-bound team rows as the on-screen report. Read-only MCP exposure of budgets and budget requests is not built.
+- **Review repair:** Address the numbered standalone-branch findings in order: clock and sync defects, owner decisions, then specification and document corrections. Preserve all existing assertions and limits. Leave edits uncommitted.
+- **Next action:** Run the server, browser and live-agent acceptance suites in a listener-capable environment and resolve the hook latency gate before closing this item.
+- **Review evidence:** Budget domain, all no-server suites, listener-free agent unit tests, typecheck and syntax checks pass. The unchanged whole-hook latency gate fails on this host, including the below-threshold case. Server, browser and live-agent execution needs a listener-capable environment.
+- **Completion prerequisites:** none
+- **Outcome:** Specified in budgets.md, with the interface, local-agent and workspace parts amended to match. The
+  no-server suites and listener-free agent unit tests cover the fixes. Server and browser execution requires a listener-capable environment.
+- **Implementation and evidence:**
+  - [x] Schema version 24 for budgets, history, requests, decisions and home teams, plus version 25 to record the terminal filing device without rewriting existing records.
+  - [x] Budget, burn, forecast, request, decision, second-look, withdrawal and home-team routes, with audit rows.
+  - [x] Spend, Requests, Sessions and Home screens; budget requests are rows in Home's single Needs list.
+  - [x] `align budget` and `align budget request`; 80 and 100 percent notes delivered by the existing hooks from
+    local files, once per session, month and threshold.
+  - [x] The budget domain suite covers authorization, decision audit, paging, rate limits, attribution and retention.
+  - [x] Listener-free agent tests cover clock offsets, pending crossings, deterministic pass limits, terminal cache refresh, temporary refusals, cleanup, sync order and terminal wording.
+  - [ ] The unchanged serial hook latency gate passes for delivered thresholds and budgets below 80 percent.
+  - [ ] Server, browser and live-agent suites execute successfully in a listener-capable environment. Coverage includes routes, filing sources, small-team privacy, independent month controls and request decisions.
+
+### [x] SPEND-002: Export monthly team spend
+
+- **Owner:** specs/align/workspaces.md and the retained spend implementation
+- **Direction:** Download one UTC calendar month as a team CSV for charging estimated cost back to teams.
+- **Conclusion:** Preserve exactly the on-screen team report's rows and numeric totals for the same reader and
+  UTC month. Keep all no-goal usage in its existing unallocated row. Named home-team no-goal subtotals belong
+  only in authorized budget reads. Keep estimates distinct from a bill and neutralize spreadsheet formulas.
+- **Parity review:** The goal-bound team rows already share the table's visibility check. Removed the CSV's
+  additional home-team no-goal subtotals and empty no-team row. The new role matrix covers hidden goals,
+  unpriced counts, empty months and retained usage without changing the table or budget access.
+- **Parity evidence:** The new test fails against the original export and passes after the
+  repair (budget tests 50 passed, 0 failed). It checks six readers before and after retention. `npm run lint` and
+  `npx tsc --noEmit -p .` pass; both edited test scripts pass syntax checks, and the diff passes whitespace checks.
+  The full gate, including the HTTP and browser suite, then passed on this branch (2,168 passed, 0 failed). Parity compares table data with the same UTC window; the page currently requests all-time data
+  and rounds currency for display, while the CSV retains six decimal places. Shared aggregates still permit
+  deductions when only one hidden contributor remains.
+- **Completion prerequisites:** none
+- **Outcome:** The export route and the Spend download control ship with SPEND-003 with coverage in the export domain, HTTP and browser suites.
+- **Implementation and evidence:**
+  - [x] Specify the route, CSV fields, privacy and phone controls before implementation.
+  - [x] Implement the export route, shared month validation, exact table row and amount parity with all no-goal usage unallocated, plus the Spend export form.
+  - [x] HTTP authorization, the browser download and the 390 pixel controls are covered in test-v2. The budget domain suite covers CSV totals and privacy across retention.
+
 ### [x] TX-001: Recover from transaction and preview setup failures
 
 - **Owner:** components/legacy-project-wrapper/implementation/lib/v2/db.ts

@@ -1259,6 +1259,119 @@ const MIGRATIONS: string[] = [
   ALTER TABLE v2_device_tokens ADD COLUMN rotated_ts TEXT;
   ALTER TABLE v2_device_tokens ADD COLUMN used_at TEXT;
   `,
+  // Monthly team budgets and immutable request decisions. Amounts are estimated list-price microdollars.
+  `
+  CREATE TABLE v2_team_budgets (
+    ws_id TEXT NOT NULL,
+    pod_id TEXT NOT NULL,
+    month TEXT NOT NULL,
+    amount_usd_micros INTEGER NOT NULL CHECK (amount_usd_micros BETWEEN 0 AND 1000000000000),
+    allowance_usd_micros INTEGER CHECK (allowance_usd_micros BETWEEN 0 AND 1000000000000),
+    allowance_ceiling_usd_micros INTEGER CHECK (allowance_ceiling_usd_micros BETWEEN 0 AND 1000000000000),
+    updated_by TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (ws_id, pod_id, month),
+    FOREIGN KEY (ws_id, pod_id) REFERENCES v2_pods(ws_id, id) ON DELETE CASCADE
+  );
+  CREATE TABLE v2_team_budget_history (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL,
+    pod_id TEXT NOT NULL,
+    month TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('set','changed','removed')),
+    amount_usd_micros INTEGER,
+    allowance_usd_micros INTEGER,
+    allowance_ceiling_usd_micros INTEGER,
+    actor_id TEXT NOT NULL,
+    at TEXT NOT NULL,
+    FOREIGN KEY (ws_id, pod_id) REFERENCES v2_pods(ws_id, id) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_team_budget_history_team ON v2_team_budget_history(ws_id, pod_id, month, at);
+  CREATE TABLE v2_budget_requests (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL,
+    pod_id TEXT NOT NULL,
+    month TEXT NOT NULL,
+    requester_id TEXT NOT NULL,
+    filed_from TEXT NOT NULL CHECK (filed_from IN ('browser','terminal')),
+    state TEXT NOT NULL CHECK (state IN ('waiting','granted','declined','withdrawn')),
+    revision INTEGER NOT NULL DEFAULT 1,
+    amount_usd_micros INTEGER NOT NULL CHECK (amount_usd_micros BETWEEN 1 AND 1000000000000),
+    reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 1000),
+    goal_id TEXT,
+    approved_usd_micros INTEGER,
+    authority TEXT CHECK (authority IN ('allowance','approver')),
+    expires_at TEXT,
+    requested_session_count INTEGER NOT NULL DEFAULT 0 CHECK (requested_session_count BETWEEN 0 AND 50),
+    second_look INTEGER NOT NULL DEFAULT 0 CHECK (second_look IN (0,1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (ws_id, id),
+    FOREIGN KEY (ws_id, pod_id) REFERENCES v2_pods(ws_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id)
+  );
+  CREATE INDEX v2_budget_requests_team ON v2_budget_requests(ws_id, pod_id, month, updated_at);
+  CREATE INDEX v2_budget_requests_requester_created ON v2_budget_requests(ws_id, requester_id, created_at);
+  CREATE INDEX v2_budget_requests_created ON v2_budget_requests(ws_id, created_at);
+  CREATE INDEX v2_budget_requests_goal ON v2_budget_requests(ws_id, goal_id);
+  CREATE TABLE v2_budget_request_decisions (
+    ws_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    round INTEGER NOT NULL CHECK (round IN (1,2)),
+    decision TEXT NOT NULL CHECK (decision IN ('granted','declined')),
+    actor_id TEXT NOT NULL,
+    amount_usd_micros INTEGER,
+    expires_at TEXT,
+    note TEXT CHECK (note IS NULL OR length(note) <= 1000),
+    at TEXT NOT NULL,
+    PRIMARY KEY (request_id, round),
+    FOREIGN KEY (ws_id, request_id) REFERENCES v2_budget_requests(ws_id, id) ON DELETE CASCADE
+  );
+  CREATE TABLE v2_budget_request_sessions (
+    ws_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    session_key TEXT NOT NULL,
+    PRIMARY KEY (request_id, session_key),
+    FOREIGN KEY (ws_id, request_id) REFERENCES v2_budget_requests(ws_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (ws_id, session_key) REFERENCES v2_sessions(ws_id, session_key) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_budget_request_sessions_session ON v2_budget_request_sessions(ws_id, session_key);
+  CREATE UNIQUE INDEX v2_pod_members_workspace_person ON v2_pod_members(ws_id, pod_id, user_id);
+  CREATE TABLE v2_spend_home_teams (
+    ws_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    pod_id TEXT NOT NULL,
+    PRIMARY KEY (ws_id, user_id),
+    FOREIGN KEY (ws_id, user_id) REFERENCES v2_members(ws_id, user_id) ON DELETE CASCADE,
+    FOREIGN KEY (ws_id, pod_id, user_id) REFERENCES v2_pod_members(ws_id, pod_id, user_id) ON DELETE CASCADE
+  );
+  ALTER TABLE v2_epochs ADD COLUMN spend_team_id TEXT;
+  CREATE TABLE v2_team_no_goal_rollups (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    pod_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    basis TEXT NOT NULL,
+    requests INTEGER NOT NULL,
+    input INTEGER NOT NULL,
+    output INTEGER NOT NULL,
+    cache_read INTEGER NOT NULL,
+    cache_write_5m INTEGER NOT NULL,
+    cache_write_1h INTEGER NOT NULL,
+    cache_write_unsplit INTEGER NOT NULL,
+    est_list_usd_micros INTEGER NOT NULL,
+    unpriced_requests INTEGER NOT NULL,
+    PRIMARY KEY (ws_id, pod_id, day, basis)
+  );
+  ALTER TABLE v2_spend_rollups ADD COLUMN team_attributed_requests INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE v2_spend_rollups ADD COLUMN team_attributed_unpriced_requests INTEGER NOT NULL DEFAULT 0;
+  CREATE INDEX v2_budget_requests_home ON v2_budget_requests(ws_id, month, requester_id, updated_at);
+  `,
+  // Filing source for terminal budget requests. Existing records make no claim about an unknown device.
+  `
+  ALTER TABLE v2_budget_requests ADD COLUMN source_device_id TEXT REFERENCES v2_devices(id) ON DELETE SET NULL;
+  ALTER TABLE v2_budget_requests ADD COLUMN source_device_name TEXT;
+  CREATE INDEX v2_budget_requests_source_device ON v2_budget_requests(source_device_id);
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).
