@@ -110,7 +110,7 @@ export const HOLD_HINT =
   "Align blocks their tools until someone who can approve for the goal releases it. Holding, like releasing, needs a sign-in from the last 15 minutes: with an older one, Align asks you to sign in again and brings you back here.";
 export const RELEASE_HINT = "Releasing needs a sign-in from the last 15 minutes: with an older one, Align asks you to sign in again and brings you back here to press Release again.";
 
-function HoldControls({ ws, goal, me, hold, onDone }: { ws: string; goal: Goal; me: Me; hold: HoldState; onDone: () => void }) {
+function HoldControls({ ws, goal, me, hold, quiet, onDone }: { ws: string; goal: Goal; me: Me; hold: HoldState; quiet: boolean; onDone: () => void }) {
   const [reason, setReason] = useState("");
   const act = useAction();
   if (!hold.can_hold) return null;
@@ -135,19 +135,33 @@ function HoldControls({ ws, goal, me, hold, onDone }: { ws: string; goal: Goal; 
           </p>
         </>
       ) : (
-        goal.status === "active" && (
-          <>
-            <Field label="Reason (optional, shown to the developers)">
-              <Input value={reason} maxLength={280} onChange={(e) => setReason(e.target.value)} />
-            </Field>
-            <Btn kind="danger" disabled={act.busy} onClick={() => void act.run(() => api(path, { method: "PUT", body: { reason: reason || null } }), onDone)}>
-              Hold all agents on this goal
-            </Btn>
-            <p className="mt-1 text-[13px] text-(--text-3)" data-hold-hint>
-              {HOLD_HINT}
-            </p>
-          </>
-        )
+        goal.status === "active" &&
+        (() => {
+          const controls = (
+            <>
+              <Field label="Reason (optional, shown to the developers)">
+                <Input value={reason} maxLength={280} onChange={(e) => setReason(e.target.value)} />
+              </Field>
+              <Btn kind="danger" disabled={act.busy} onClick={() => void act.run(() => api(path, { method: "PUT", body: { reason: reason || null } }), onDone)}>
+                Hold all agents on this goal
+              </Btn>
+              <p className="mt-1 text-[13px] text-(--text-3)" data-hold-hint>
+                {HOLD_HINT}
+              </p>
+            </>
+          );
+          // With no shared session on the goal, holding isn't what the card leads with (LIM-2513 journey pass): the
+          // controls are one click away, folded, until a session is on it.
+          return quiet ? (
+            <details data-hold-folded>
+              {/* A list-item summary keeps the disclosure triangle, as Anchors has, so it reads as something that opens. */}
+              <summary className="min-h-[44px] cursor-pointer py-3 text-[14px] text-(--text-2) hover:text-(--text-1)">Hold agents on this goal</summary>
+              <div className="pt-2">{controls}</div>
+            </details>
+          ) : (
+            controls
+          );
+        })()
       )}
       <Err>{act.error}</Err>
     </div>
@@ -291,7 +305,7 @@ export function AgentsOnGoalCard({ ws, goal, me, onHoldChanged }: { ws: string; 
   return (
     <section id="agents-on-goal">
       <Panel className="mb-4" title="Agents on this goal">
-        <HoldControls ws={ws} goal={goal} me={me} hold={data.hold} onDone={reload} />
+        <HoldControls ws={ws} goal={goal} me={me} hold={data.hold} quiet={!data.sessions?.length} onDone={reload} />
         {data.can_send && <SendRequest ws={ws} goal={goal} data={data} onDone={d.reload} />}
         <Err>{d.error}</Err>
         {data.requests.length === 0 ? (

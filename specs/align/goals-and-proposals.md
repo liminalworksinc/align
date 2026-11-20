@@ -415,7 +415,7 @@ gets `403 read_only` on a visible measure; an unreadable goal or unknown measure
 each recording. Readings SHALL follow their measure id across versions, stay with the goal, and follow the
 workspace's person pseudonymisation and purge schedule.
 
-Server migration 25 SHALL add measure readings, launch expectations, and outcome history after the binding origin
+Server migration 28 SHALL add measure readings, launch expectations, and outcome history after the binding origin
 migration. Existing goals, change requests, and binding origins SHALL survive the upgrade. Existing records SHALL
 start with no readings or expectations.
 

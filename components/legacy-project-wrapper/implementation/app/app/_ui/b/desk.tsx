@@ -90,7 +90,7 @@ export function Desk({
         <span className="flex min-w-0 flex-col gap-0.5" data-row={r.id}>
           <span className="text-[14px] font-medium text-(--text-1)">{r.goal.title}</span>
           <span className="text-[12px] font-normal text-(--text-3)">
-            {oneLine(r)} · {r.requester.id === me ? "your request" : `${r.requester.name}'s request`}
+            {oneLine(r)} · {r.requester.id === me ? (r.can.approve ? "your request, on your own goal" : "your request") : `${r.requester.name}'s request`}
           </span>
           {/* The one-click result reads on its own line under the title, the row's widest cell, never squeezed in
               beside the buttons. */}
