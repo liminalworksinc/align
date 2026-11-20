@@ -46,6 +46,8 @@ export interface Ctx {
   boundDevice?: string | null;
   /** When the sync pass running in this process started (ms), for what it tells sessions that started with it. */
   passStartedAt?: number;
+  /** Private stamps from the directive response already fetched by this pass. */
+  budgetStamps?: Map<string, string>;
   /** A newer build has written to this database (its mark): this one leaves the sessions' notices about their share,
    *  hot files and latch files to it (E2E-AGENT cycle 14). Null when this build is the newest. */
   superseded?: BuildMark | null;
