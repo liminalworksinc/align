@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Concurrent writes and approval previews wait for the shared database transaction to finish, preventing nested
+  transaction errors.
 - The local agent records the characters Align adds to each session's context, with addition counts and last times.
   `align status` shows the current folder's session total and `align sessions` shows each session's total.
   Budget context lines count toward model context; person-only budget messages and notices count separately.
