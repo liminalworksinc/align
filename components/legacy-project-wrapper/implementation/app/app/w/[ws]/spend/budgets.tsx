@@ -206,7 +206,7 @@ export function BudgetRequestRecord({ ws, id, onChanged }: { ws: string; id: str
   const decide = (e: FormEvent<HTMLFormElement>, verb: "approve" | "decline") => {
     e.preventDefault(); if (!r) return; const f = new FormData(e.currentTarget);
     const errors: Record<string, string | null> = verb === "approve" ? { amount: moneyError(f.get("amount"), "the approved amount", true), expiry: !f.get("expiry") || !Number.isFinite(Date.parse(`${f.get("expiry")}:00.000Z`)) || Date.parse(`${f.get("expiry")}:00.000Z`) <= Date.now() || Date.parse(`${f.get("expiry")}:00.000Z`) > spendMonth(r.month).end ? "Enter a future UTC time within this month." : null } : { reason: reasonError(f.get("reason")) };
-    if (verb === "approve" && Number(f.get("amount")) * 1_000_000 > r.amount_usd_micros) errors.amount = "The approved amount cannot exceed the requested amount.";
+    if (verb === "approve" && Math.round(Number(f.get("amount")) * 100) * 10_000 > r.amount_usd_micros) errors.amount = "The approved amount cannot exceed the requested amount.";
     setErrors(errors); if (Object.values(errors).some(Boolean)) return;
     void action.write(`${base(ws)}/budget-requests/${id}/${verb}`, { revision: r.revision, ...(verb === "approve" ? { amount_usd: Number(f.get("amount")), expires_at: `${f.get("expiry")}:00.000Z`, note: f.get("note") } : { reason: f.get("reason") }) });
   };
