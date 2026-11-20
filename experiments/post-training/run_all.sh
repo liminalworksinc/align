@@ -19,6 +19,7 @@ $PY -m mlx_lm lora --model "$MODEL" --train --data data \
   --adapter-path "adapters/$TAG" --seed 0 2>&1 | tee "results/$TAG.train.log"
 
 $PY evaluate.py --model "$MODEL" --arm "$TAG.base" --out results
+$PY evaluate.py --model "$MODEL" --arm "$TAG.base_fewshot" --fewshot --out results
 $PY evaluate.py --model "$MODEL" --arm "$TAG.base_context" --context --out results
 $PY evaluate.py --model "$MODEL" --arm "$TAG.tuned" --adapter "adapters/$TAG" --out results
 $PY evaluate.py --model "$MODEL" --arm "$TAG.tuned_context" --adapter "adapters/$TAG" --context --out results
