@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { Desk } from "@/app/app/_ui/b/desk";
 import { Shell } from "../../../_ui/kit";
 import type { Me } from "../../../_ui/server";
+import { BudgetRequestsTab } from "../spend/budgets";
 import { ReviewDrawer, useReview } from "../review-drawer";
 
 // The workspace Requests tab: the decision desk (every change request this person can read, by what it needs from them).
@@ -18,6 +19,7 @@ export default function Requests({ me, ws }: { me: Me; ws: string }) {
     <Shell me={me} ws={ws} tab="Requests">
       <h1 className={`${PAGE_H1} mb-5`}>Change requests</h1>
       <Desk ws={ws} me={me.id} selectedId={review?.id ?? null} reloadToken={reloadToken} />
+      <BudgetRequestsTab ws={ws} />
       {/* The drawers break words only where needed, so a short label ("Close", "Esc") never splits at 320. */}
       <div className="[overflow-wrap:break-word]">
         {review && <ReviewDrawer key={`${review.id}:${review.choice ?? ""}`} ws={ws} goal={review.goal} id={review.id} me={me.id} choice={review.choice} onPick={(c) => setReview({ goal: review.goal, id: review.id, choice: c })} onClose={closeReview} onChanged={changed} />}
