@@ -29,6 +29,7 @@ const AUTHORITY =
 export function clean(text: unknown, max: number): string {
   const s = String(text ?? "")
     .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ")
+    .replace(/\p{Default_Ignorable_Code_Point}/gu, "")
     .replace(/\[\s*align/gi, "(Align")
     .replace(/\s+/g, " ")
     .trim();

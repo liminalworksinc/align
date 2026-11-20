@@ -21,7 +21,7 @@ Cloudflare Turnstile when configured, refuses disposable email domains where it 
 members and new shared sessions. Each member has one
 workspace **role**: `owner`, `member` or `viewer`. Members are grouped into flat **teams** with a `lead` or `member`
 team role. A person pairs a **device** (the `align` CLI on their machine) with a key-bound device-code flow, grants it
-some of their workspaces, and the device then shares chosen coding-agent **sessions**, opens binding **epochs**,
+some of their workspaces, and the device then shares chosen coding-agent **sessions**, opens binding **spending periods**,
 uploads **usage** and posts **activity** signals. Members read **spend** reports and the workspace's people, teams
 and devices; owners also read the **audit** trail. Members record **asks** (what a team was asked to do) and read each
 goal's agent **activity** counts.
@@ -45,7 +45,7 @@ Directives (including stop and resume) are in `directives`, the MCP endpoint and
 | Invite | A single-use, 7-day link for one email address, optionally naming a team |
 | Device | A paired machine (`dv_…`) with an Ed25519 key, workspace grants, a 1-hour access token and a rotating 30-day refresh token |
 | Shared session | A coding-agent session a device chose to share, addressed by a 43-character `session_key` |
-| Epoch | A period of a shared session bound to one goal (or none); usage counts under its epoch's goal |
+| spending period | A period of a shared session bound to one goal (or none); usage counts under its spending period's goal |
 | Ask | `ask_…`: something a person recorded that a team was asked to do (by "Faculty", in a meeting or by hand), owned by the team asked; `open`, `accepted`, `done`, `declined` or `withdrawn` |
 | Mention | A later time an ask came up again (date, what was said, where), at most 10 per ask |
 | Goal activity | Counts of the sessions bound to a goal over the last 14 days, from bindings, usage times and work signals, never from what agents wrote |
@@ -594,6 +594,27 @@ when `BETTER_AUTH_SECRET` is unset, migrate the database before serving, and run
 - **WHEN** a request reaches an `/api/v2` route before the database has been opened and migrated
 - **THEN** the route waits for the migration to finish and never runs against an unmigrated file
 
+### Requirement: Serialize transaction starts on the shared connection
+
+The server SHALL wait asynchronously for an open domain transaction to finish before starting another `tx()` or
+`previewTx()` on the shared connection, including between a successful `BEGIN IMMEDIATE` and its caller's continuation.
+The wait SHALL use the existing bound of 100 retry delays (up to approximately five seconds) and fail with a clear
+transaction-wait timeout if the connection stays occupied. A busy database SHALL retain its bounded retries, and a
+non-busy start error SHALL be rethrown unchanged. Nested `tx()` calls SHALL join their synchronous outer body;
+`previewTx()` SHALL still refuse nesting, capture outbound actions and roll back preview writes. A thrown body SHALL
+release the transaction for later callers, and callers waiting through preview cleanup SHALL use the replacement
+connection if cleanup reopens it.
+
+#### Scenario: Concurrent writes and previews
+
+- **WHEN** 64 callers start transactions together on one connection, with writes only or with previews mixed in and either kind starting first (`scripts/test-v2.mjs --storage-only`, tests "storage: concurrent tx calls commit each write once" and "storage: concurrent tx and preview calls commit only real writes once")
+- **THEN** every caller succeeds, each real write commits exactly once, every preview write rolls back, preview outbound actions stay captured, and only committed writes announce workspace changes
+
+#### Scenario: Bounded waits and cleanup
+
+- **WHEN** transaction starts encounter nested calls, a throwing body, a busy database, an occupied connection, a non-busy error or preview cleanup that reopens the connection (`scripts/test-v2.mjs --storage-only`, tests "storage: transaction wait preserves ... behavior and allows later writes")
+- **THEN** nested writes join the outer transaction, nested previews are refused, a throwing body rolls back, occupied or busy starts stop after 100 retry delays, non-busy errors retain their identity, and later writes succeed after the lock is released or the connection is reopened
+
 ### Requirement: Workspace creation
 
 The server SHALL let a signed-in person create a workspace on `POST /api/v2/workspaces {name, creation_code?}` (name
@@ -1083,7 +1104,7 @@ shared sessions in that workspace at once.
 #### Scenario: Remove and delete their sessions now
 
 - **WHEN** an owner DELETEs `.../members/{user}?delete_sessions=1`
-- **THEN** the removal happens as above, the person's shared sessions in this workspace (with their epochs, usage, directive deliveries and receipts) are deleted at once so spend totals drop by them, spend already rolled up stays, and the audit also records `member.sessions_deleted`
+- **THEN** the removal happens as above, the person's shared sessions in this workspace (with their spending periods, usage, directive deliveries and receipts) are deleted at once so spend totals drop by them, spend already rolled up stays, and the audit also records `member.sessions_deleted`
 
 #### Scenario: Back within 30 days
 
@@ -1129,11 +1150,11 @@ owners see and revoke every grant and other members only their own.
 ### Requirement: Workspace audit trail
 
 The server SHALL write an audit row naming its actor for every change a person makes to a workspace's settings,
-members, invites, teams, goals, alignments, change requests, reallocations, asks, connected-app revocations and session controls (stop sharing, history
+members, invites, teams, goals, alignments, change requests, reallocations, asks, team budgets and budget requests, connected-app revocations and session controls (stop sharing, history
 deletion, agent stop and resume), with actor null only for system actions and the row that records an account
 deletion, show a former member as `{id:"fm_<n>", name:"Former member #<n>"}`, and serve the newest 200 rows of that
 workspace to workspace owners only on `GET /api/v2/workspaces/{ws}/audit`. Device uploads (sharing a session, opening an
-epoch, usage, activity and steering reports) write no audit row, and device pairing and revocation, passkeys added and deleted, and
+spending period, usage, activity and steering reports) write no audit row. A device-filed budget request is a recorded request by its person and writes `budget_request.requested` with that person as actor; it never writes an allowance grant. Budget writes use `team_budget.set`, `.changed` and `.removed`; browser-filed allowance grants and decisions use `budget_request.requested`, `.allowance_granted`, `.approved`, `.declined`, `.withdrawn` and `.second_look`. Device pairing and revocation, passkeys added and deleted, and
 signing out everywhere are recorded without a workspace, so they never appear in a workspace's audit; giving a paired
 device a workspace at an invite (`device.workspace_added`) is recorded in that workspace's audit.
 
@@ -1151,6 +1172,11 @@ device a workspace at an invite (`device.workspace_added`) is recorded in that w
 
 - **WHEN** a person records, imports, accepts, declines, finishes, reopens, withdraws or mentions an ask
 - **THEN** the workspace's audit gets `ask.created`, `ask.imported` (object: the number created and merged), `ask.accepted`, `ask.declined`, `ask.done`, `ask.reopened`, `ask.withdrawn` or `ask.mentioned` with that person as actor and the ask as object; a refused action writes nothing
+
+#### Scenario: Budget actions name the person
+
+- **WHEN** a device files a budget request and a signed-in person decides it in the browser
+- **THEN** the workspace audit contains `budget_request.requested` and the resulting decision with each person's actor, and the device request has no allowance-grant event
 
 ### Requirement: Device pairing flow
 
@@ -1329,7 +1355,7 @@ reason (`revoked_on_web`, `signed_out_everywhere`, `logout`, `refresh_reuse`); a
 `GET /api/v2/devices` SHALL also answer a device's own token, with the same list plus `current: true` on that device,
 so `align login` can name the person's other paired devices. Revoking a device, for any reason
 (logout, its owner on the web, signing out everywhere, refresh-token reuse), SHALL in the same transaction end each of
-its sessions that is not stopped: close its open epoch, clear its governing goal, set it `stopped` with
+its sessions that is not stopped: close its open spending period, clear its governing goal, set it `stopped` with
 `ended_reason` `device_signed_out`, keeping its history, and expire the request targets still waiting on it.
 
 #### Scenario: Approving a code
@@ -1360,7 +1386,7 @@ its sessions that is not stopped: close its open epoch, clear its governing goal
 #### Scenario: Revoking a device ends its sessions
 
 - **WHEN** a device with a shared, stopped session logs out (`scripts/test-v2.mjs` "sessions (E2E-AGENT B4/G2) ...")
-- **THEN** the session is `stopped` with `ended_reason` `device_signed_out` and no open epoch, a workspace owner's list of everyone's sessions no longer shows it, and the person's own list does, with `ended_reason`
+- **THEN** the session is `stopped` with `ended_reason` `device_signed_out` and no open spending period, a workspace owner's list of everyone's sessions no longer shows it, and the person's own list does, with `ended_reason`
 
 ### Requirement: Shared session ownership
 
@@ -1376,7 +1402,7 @@ holding only its workspace, when, and a hash of the person who shared it and its
 marker lasts (13 months, "Data retention"), deleting it again SHALL answer 410 `history_deleted` to that person (from
 the web or any of their devices granted the workspace), so a deletion queued on a device while the history was deleted
 on the web is done, and 404 to anyone else; every other call on the session (its
-epochs, usage, stop-sharing) stays with the device that shared it, and another person's device gets 404. A session that ended because its device was revoked
+spending periods, usage, stop-sharing) stays with the device that shared it, and another person's device gets 404. A session that ended because its device was revoked
 (`ended_reason` `device_signed_out`) SHALL be shared again by a `PUT` from another device of the same person with the
 same harness and repo key (its device, state `shared`, `stopped_at` and `ended_reason` cleared, its stop flag kept,
 audited `session.shared_again`), and so SHALL one that ended because its person left the workspace (`member_removed`),
@@ -1411,7 +1437,7 @@ is off` and `server_time`.
 #### Scenario: Stop sharing and delete
 
 - **WHEN** the session's person stops sharing, then deletes it
-- **THEN** stop-sharing returns `{session_key, state:"stopped"}`, ends the open epoch and refuses later uploads with 409 `sharing_stopped`; the delete returns 204 and removes the session, its epochs, usage, directive deliveries and receipts, so spend totals change
+- **THEN** stop-sharing returns `{session_key, state:"stopped"}`, ends the open spending period and refuses later uploads with 409 `sharing_stopped`; the delete returns 204 and removes the session, its spending periods, usage, directive deliveries and receipts, so spend totals change
 
 #### Scenario: Stopping a session that had ended
 
@@ -1421,67 +1447,67 @@ is off` and `server_time`.
 #### Scenario: Session list
 
 - **WHEN** a member calls `GET .../sessions`
-- **THEN** `mine` lists their own sessions in full (state, `ended_reason`, current epoch and goal, governing goal, stop status, conflicts and token totals, and `device`: the machine that shared it as `{id, name, signed_out, has_workspace}`, whether it signed out of Align and whether it has this workspace now, or null when no device is left, so the Sessions tab can say how to share an ended session again), and `all` is null except for workspace owners, for whom it lists every non-stopped session's key, alias, owner, harness, `started_at`, state and stop status, never its title or usage (`scripts/test-v2.mjs` "W3: the owner's list of everyone's sessions carries each session's started_at ...")
+- **THEN** `mine` lists their own sessions in full (state, `ended_reason`, current spending period and goal, governing goal, stop status, conflicts and token totals, and `device`: the machine that shared it as `{id, name, signed_out, has_workspace}`, whether it signed out of Align and whether it has this workspace now, or null when no device is left, so the Sessions tab can say how to share an ended session again), and `all` is null except for workspace owners, for whom it lists every non-stopped session's key, alias, owner, harness, `started_at`, state and stop status, never its title or usage (`scripts/test-v2.mjs` "W3: the owner's list of everyone's sessions carries each session's started_at ...")
 
-### Requirement: Binding epochs
+### Requirement: Binding spending periods
 
-The server SHALL let the sharing device open a binding epoch on `POST .../sessions/{key}/epochs {epoch_id, goal_id,
-starts_at, root_turn?, cause}`, closing the previous epoch at `starts_at`, only toward a goal the person has authority
+The server SHALL let the sharing device open a binding spending period on `POST .../sessions/{key}/epochs {epoch_id, goal_id,
+starts_at, root_turn?, cause}`, closing the previous spending period at `starts_at`, only toward a goal the person has authority
 to bind (as defined in `goals-and-proposals`). A `starts_at` more than 5 minutes ahead of the server's clock SHALL be
 answered 400 `clock_skew` (`starts_at is <n> minutes ahead of the server's clock; this device's clock is off`, with
 `server_time`), never a bare `bad_request`. A session whose stored `started_at` lies in the future on the server's clock
-(it came from a device clock that ran ahead) SHALL take an epoch that starts before it, and that epoch SHALL move the
+(it came from a device clock that ran ahead) SHALL take a spending period that starts before it, and that spending period SHALL move the
 session's `started_at` back to its own `starts_at` in the same transaction, so a corrected clock need not wait for real
 time to catch up.
 
-#### Scenario: Opening an epoch
+#### Scenario: Opening a spending period
 
 - **WHEN** a device POSTs `{epoch_id:"ep_…", goal_id|null, starts_at, cause:"manual"|"directive:<dir id>"}`
-- **THEN** the response is `{epoch_id, goal_id, goal_version_at_start, starts_at, ends_at:null}` and the previous epoch ends at `starts_at`; the session becomes `shared` again if it was suspended
+- **THEN** the response is `{epoch_id, goal_id, goal_version_at_start, starts_at, ends_at:null}` and the previous spending period ends at `starts_at`; the session becomes `shared` again if it was suspended
 
-#### Scenario: Epoch refusals
+#### Scenario: spending period refusals
 
-- **WHEN** the epoch id is reused with other values, `starts_at` is before the open epoch's start or the last epoch's end, `starts_at` is more than 5 minutes ahead or before the session started, the goal cannot be bound, the goal is not active, `cause` names a directive not sent to this session, or sharing stopped
-- **THEN** the server responds 409 `epoch_conflict`, 409 `epoch_overlap`, 400 `clock_skew` or 400, 403 `alignment_required`, 409 `goal_not_active`, 400, or 409 `sharing_stopped` respectively; the same epoch sent again returns it unchanged
+- **WHEN** the spending period id is reused with other values, `starts_at` is before the open spending period's start or the last spending period's end, `starts_at` is more than 5 minutes ahead or before the session started, the goal cannot be bound, the goal is not active, `cause` names a directive not sent to this session, or sharing stopped
+- **THEN** the server responds 409 `epoch_conflict`, 409 `epoch_overlap`, 400 `clock_skew` or 400, 403 `alignment_required`, 409 `goal_not_active`, 400, or 409 `sharing_stopped` respectively; the same spending period sent again returns it unchanged
 
 #### Scenario: A device clock that ran ahead
 
-- **WHEN** a device shares one session with a `started_at` 10 minutes ahead, another 4 minutes ahead, opens an epoch on the second 10 minutes ahead, then one at the server's now (`scripts/test-v2.mjs` "sessions (E2E-AGENT cycle 2 N2): ...")
-- **THEN** the first `PUT` and the first epoch get 400 `clock_skew` naming the field with `server_time`, the second `PUT` is accepted, and the epoch at now opens and moves the session's `started_at` to its `starts_at`
+- **WHEN** a device shares one session with a `started_at` 10 minutes ahead, another 4 minutes ahead, opens a spending period on the second 10 minutes ahead, then one at the server's now (`scripts/test-v2.mjs` "sessions (E2E-AGENT cycle 2 N2): ...")
+- **THEN** the first `PUT` and the first spending period get 400 `clock_skew` naming the field with `server_time`, the second `PUT` is accepted, and the spending period at now opens and moves the session's `started_at` to its `starts_at`
 
 ### Requirement: Usage upload
 
 The server SHALL accept usage from the sharing device on `POST .../sessions/{key}/usage {rows}` (at most 500 rows and
 256 KB), store each row once by its `request_key`, and never overwrite a stored row. A row whose `ts` is at or after
-the end of the epoch it names, at a time no epoch of the session covers (its share had ended, by a stop, a removal or a
+the end of the spending period it names, at a time no spending period of the session covers (its share had ended, by a stop, a removal or a
 revoked device, and the session was shared again only later), was made while the session was not shared: it SHALL be a
-conflict, counted on the session and never stored, so a re-share never brings in the gap. A row from after its epoch
-ended while a later epoch of the session was open is the tail of a turn that started in its epoch, and is stored. A
-row whose `ts` is before the start of the epoch it names was not made in that epoch (from the gap, naming the epoch of
+conflict, counted on the session and never stored, so a re-share never brings in the gap. A row from after its spending period
+ended while a later spending period of the session was open is the tail of a turn that started in its spending period, and is stored. A
+row whose `ts` is before the start of the spending period it names was not made in that spending period (from the gap, naming the spending period of
 the re-share, say, or from before the session was first shared): it SHALL be a conflict too, counted and never stored.
-Usage or an epoch for a stopped session SHALL be refused 409 `sharing_stopped` with `ended_reason`: `member_removed` when
+Usage or a spending period for a stopped session SHALL be refused 409 `sharing_stopped` with `ended_reason`: `member_removed` when
 its sharing ended because its person was removed from the workspace or left it (they may be a member again, and their
 device that never saw the ending can then share it again), `device_signed_out` when its device signed out, and `null`
 when its person stopped sharing it, so the device words the refusal as what its user can do.
 
 #### Scenario: Why a stopped session's usage is refused
 
-- **WHEN** a session's person stops sharing it and its device uploads usage and opens an epoch; and a session that ended when its person was removed is uploaded to by its own device once they are back and it has the workspace again (`scripts/test-v2.mjs` "stop sharing (E2E-AGENT cycle 6 C6-3) ..." and "usage (E2E-AGENT cycle 6 C6-3) ...")
+- **WHEN** a session's person stops sharing it and its device uploads usage and opens a spending period; and a session that ended when its person was removed is uploaded to by its own device once they are back and it has the workspace again (`scripts/test-v2.mjs` "stop sharing (E2E-AGENT cycle 6 C6-3) ..." and "usage (E2E-AGENT cycle 6 C6-3) ...")
 - **THEN** the first two answers are 409 `sharing_stopped` with `ended_reason: null`, and the last 409 `sharing_stopped` with `ended_reason: "member_removed"`
 
 #### Scenario: Usage batch
 
 - **WHEN** a device POSTs rows for its session
-- **THEN** the response is `{accepted, duplicates, conflicts, refused}`, where a repeated `request_key` with identical values is a duplicate, and one with other values or a row for an epoch this session does not have is a conflict that is counted on the session and never stored; `refused` lists the `request_key` of each conflict that was not stored (an unknown epoch, made while the session was not shared, or dated before its epoch started), so the device counts it as not shared, never a key stored earlier with other values
+- **THEN** the response is `{accepted, duplicates, conflicts, refused}`, where a repeated `request_key` with identical values is a duplicate, and one with other values or a row for a spending period this session does not have is a conflict that is counted on the session and never stored; `refused` lists the `request_key` of each conflict that was not stored (an unknown spending period, made while the session was not shared, or dated before its spending period started), so the device counts it as not shared, never a key stored earlier with other values
 
 #### Scenario: Usage from while a session was not shared
 
-- **WHEN** a member's session ends when they are removed, they are let back in, their device shares it again with a new epoch starting 2 seconds after the old one ended, and uploads rows naming the old epoch from 1 second before its end, 1 second after it and 2.5 seconds after it, and one naming the new epoch from 2.5 seconds after (`scripts/test-v2.mjs` "usage (C5-1): a row naming an epoch that ended ...")
+- **WHEN** a member's session ends when they are removed, they are let back in, their device shares it again with a new spending period starting 2 seconds after the old one ended, and uploads rows naming the old spending period from 1 second before its end, 1 second after it and 2.5 seconds after it, and one naming the new spending period from 2.5 seconds after (`scripts/test-v2.mjs` "usage (C5-1): a row naming a spending period that ended ...")
 - **THEN** the response is `{accepted: 3, conflicts: 1}` with `refused` naming the gap row's key (`scripts/test-v2.mjs` "usage (E2E-AGENT cycle 6): the answer names the conflicts it did not store ..."), the session's conflicts grow by one, and only the row from the gap is not stored
 
-#### Scenario: Usage from before its epoch started
+#### Scenario: Usage from before its spending period started
 
-- **WHEN** after such a re-share the device uploads a row naming the new epoch from the gap (1 second after the old epoch ended, before the new one started), one naming the old epoch from before it started, and one naming the new epoch from after it started (`scripts/test-v2.mjs` "Z7: a usage row dated before the start of the epoch it names ...")
+- **WHEN** after such a re-share the device uploads a row naming the new spending period from the gap (1 second after the old spending period ended, before the new one started), one naming the old spending period from before it started, and one naming the new spending period from after it started (`scripts/test-v2.mjs` "Z7: a usage row dated before the start of the epoch it names ...")
 - **THEN** the response is `{accepted: 1, conflicts: 2}` with `refused` naming the first two rows' keys, the session's conflicts grow by two, and only the last row is stored
 
 #### Scenario: Oversized batch
@@ -1493,13 +1519,13 @@ when its person stopped sharing it, so the device words the refusal as what its 
 
 The server SHALL report token usage and estimated list cost on
 `GET /api/v2/workspaces/{ws}/spend?by=goal|team|session&from&to` (browser session) to every workspace member, viewers
-included, counting each request under the goal of the epoch it was uploaded with and never naming a goal or session
+included, counting each request under the goal of the spending period it was uploaded with and never naming a goal or session
 the caller may not see.
 
 #### Scenario: Spend by goal
 
 - **WHEN** a member requests spend by goal
-- **THEN** the response is `{by, from, to, note, total, unallocated, unpriced_requests, rows}`, `note` says costs are list-price estimates, not a bill, usage in epochs without a goal is `unallocated`, and usage on goals the caller cannot read is one `Private goals` row
+- **THEN** the response is `{by, from, to, note, total, unallocated, unpriced_requests, rows}`, `note` says costs are list-price estimates, not a bill, usage in spending periods without a goal is `unallocated`, and usage on goals the caller cannot read is one `Private goals` row
 
 #### Scenario: Spend by team and session
 
@@ -1511,13 +1537,40 @@ the caller may not see.
 - **WHEN** the workspace has sessions the retention job rolled up
 - **THEN** their usage counts in `total`, `unallocated` and the goal, team and private rows exactly as before, filtered by `from` and `to` by its UTC day (a day counts when its start is at or after `from` and before `to`), and `by=session` shows it as one `{kind:"rolled_up", label:"Older sessions (rolled up)"}` row; the invariant `total = rows + unallocated` still holds
 
+Align SHALL offer no per-person spend view. Team totals can reveal one person's spend when the team has fewer than three members.
+
+### Requirement: Monthly team spend CSV
+
+The server SHALL export one UTC calendar month through browser-only `GET /api/v2/workspaces/{ws}/spend/export?month=YYYY-MM`. It SHALL use the shared month validator, require exactly one month from 0001-01 through 9999-12, preserve request timestamps in the half-open month and retained UTC-day totals, and return a UTF-8 CSV attachment named `align-spend-YYYY-MM.csv` with `Cache-Control: private, no-store` and `X-Content-Type-Options: nosniff`.
+The first rows SHALL give the estimate disclaimer, UTC month and UTC generation time, then a blank row and columns `month`, `team`, `requests`, `estimated_list_cost_usd`, `unpriced_requests`, `input`, `output`, `cache_read`, `cache_write_5m`, `cache_write_1h`, `cache_write_unsplit`. Costs SHALL use six decimal places. The CSV SHALL contain exactly the on-screen team report's data rows and numeric amounts for that reader and month, as required by `budgets.md`, "Monthly CSV and spend table visibility parity". Hidden goal spend SHALL remain in its single unnamed `Private goals` row. All no-goal usage SHALL remain together in `Not bound to a goal`, without named home-team subtotals. The separate team budget, burn, forecast, no-goal subtotal and budget history SHALL remain readable only by team members and workspace owners. `Goals without a team` SHALL appear only when the table has that row. `Not bound to a goal` and `Total` SHALL always exist, including as zero rows. `Total` SHALL equal all preceding data rows for every numeric column. The on-screen report SHALL preserve its existing behavior and totals.
+
+#### Scenario: Monthly team spend CSV
+
+- **WHEN** a signed-in workspace member, viewers included, exports a valid month
+- **THEN** the attachment has the specified header and numeric columns, exactly the table's rows and amounts, one unnamed row for hidden goals, one unallocated row for all no-goal spend and an additive total, without any person's name or unreadable goal or team identifiers
+
+#### Scenario: Export authorization and invalid month
+
+- **WHEN** an export request has no sign-in, comes from a non-member, uses a device token, or has a missing, repeated or invalid `month` (including a day, time or month outside 01 through 12)
+- **THEN** the response is respectively 401, 404, 403 or 400, matching the spend report's authorization checks before validating the month, and no CSV is returned
+
+#### Scenario: Spreadsheet-safe team names
+
+- **WHEN** a CSV cell begins with `=`, `+`, `-`, `@`, a tab or a carriage return, or a team name contains commas, quotes or newlines
+- **THEN** a leading apostrophe neutralizes each formula-like value, every cell is quoted with embedded quotes doubled, and records end in CRLF so parsing preserves each team name as one cell
+
+#### Scenario: Download from Spend on a phone
+
+- **WHEN** a member or viewer opens the Spend tab and selects a month in the labelled `Export month (UTC)` control, initially the current UTC month
+- **THEN** `Download team CSV` downloads that month's team report regardless of the screen's group choice, says amounts are estimates at list price and not a bill, shows a failed download as an alert on the page, and has controls at least 44 px tall with no sideways scrolling at 390 px
+
 ### Requirement: Agent time against targets
 
 The server SHALL report agent time per goal against each goal's target share on
 `GET /api/v2/workspaces/{ws}/allocation?from&to&weeks` (device token or browser session) to every workspace member,
 viewers included, as `{window, weekly, steering}`. Agent time SHALL be counted in fresh tokens (input, output and the
 three cache-write counts, for every model, priced or not; cache reads left out), each request under the goal of the
-epoch it was uploaded with, rolled-up days by goal as in the spend report. `window` covers [`from`, `to`) (default: the
+spending period it was uploaded with, rolled-up days by goal as in the spend report. `window` covers [`from`, `to`) (default: the
 7 days before `to`, or before now) as `{from, to, total_fresh_tokens, total_est_list_usd_micros, unpriced_requests,
 rows, note}`, where each row is `{kind, goal, fresh_tokens, share, target_share, gap, est_list_usd_micros,
 unpriced_requests, sessions}`: one `goal` row per goal the caller can read that had usage or is active with a target
@@ -1700,9 +1753,9 @@ ignores it.
 
 The server SHALL serve `GET /api/v2/workspaces/{ws}/goals/{goal}/activity` (browser session) to readers of the goal
 (404 otherwise) as `{window_days:14, sessions, active_now, by_harness:{claude-code, codex}, last_activity_at, evidence_class, detail}`,
-counting the distinct shared sessions with an epoch bound to the goal (or governed by it) that overlaps the last 14
+counting the distinct shared sessions with a spending period bound to the goal (or governed by it) that overlaps the last 14
 days, of those the ones shared, with the agent not stopped, still on the goal and with usage or a binding in the last
-90 minutes (`active_now`), and the latest usage, epoch start or work signal on the goal; `evidence_class` SHALL be
+90 minutes (`active_now`), and the latest usage, spending period start or work signal on the goal; `evidence_class` SHALL be
 `agent_reported` when there is any session or activity in the window (bindings, usage and work signals all come from
 the align CLI on developers' machines, so none of it is observed by Align) and `not_observed` otherwise, never
 `delivery_receipt`; `detail` SHALL be
@@ -1776,8 +1829,8 @@ expiry and ends only when it is released.
 
 #### Scenario: Session roll-up
 
-- **WHEN** the job runs more than 13 months after a shared session ended (its `stopped_at`, or else its last activity: its last update, usage upload or epoch)
-- **THEN** its usage is added to `v2_spend_rollups` per workspace, goal (none for unbound), UTC day of the request, model and basis, with request, token and estimated-cost sums and no person or session, and the session, its epochs, usage, alignment links, directive deliveries, receipts and steering reports are deleted, as are directives left with no recipient; running the job again adds nothing
+- **WHEN** the job runs more than 13 months after a shared session ended (its `stopped_at`, or else its last activity: its last update, usage upload or spending period)
+- **THEN** its usage is added to `v2_spend_rollups` per workspace, goal (none for unbound), UTC day of the request, model and basis, with request, token and estimated-cost sums and no person or session, and the session, its spending periods, usage, alignment links, directive deliveries, receipts and steering reports are deleted, as are directives left with no recipient; running the job again adds nothing
 
 #### Scenario: Former members
 
@@ -1842,6 +1895,11 @@ per-path limits apply only when hosted, since Mode L turns off its IP tracking, 
 
 - **WHEN** a hosted client exceeds 3 requests per minute to `/api/v2/auth/email-otp/send-verification-otp`, 10 to `/sign-in/email-otp`, `/sign-in/email` or `/sign-up/email`, 20 to `/sign-in/social`, or 100 per minute elsewhere under `/api/v2/auth`, including across a server restart
 - **THEN** Better Auth refuses the request with 429; a Mode L server applies none of these, only the email-code send limits and the v2 limits
+
+#### Scenario: Budget request creation limits
+
+- **WHEN** a workspace would receive its 61st budget request within an hour, including withdrawn requests, allowance grants and requests made with a device token, across server restarts
+- **THEN** creation is refused with 429 `rate_limited`, without a new request, decision or audit row; after requests leave the hour window, creation is available again
 
 #### Scenario: v2 limits
 
@@ -1959,3 +2017,13 @@ per-path limits apply only when hosted, since Mode L turns off its IP tracking, 
 - app/api/v2/workspaces/[ws]/asks/[id]/route.ts
 - app/api/v2/workspaces/[ws]/asks/[id]/[action]/route.ts
 - app/api/v2/workspaces/[ws]/goals/[goal]/activity/route.ts
+
+- `lib/v2/budgets.ts`
+- `lib/v2/spend-home.ts`
+- `lib/v2/spend-month.ts`
+- `lib/v2/spend-export.ts`
+- `packages/align-agent/src/budgets.ts`
+- `packages/align-agent/src/shared/budget-notes.ts`
+- `packages/align-agent/src/shared/clock.ts`
+- `packages/align-agent/test/budgets.test.ts`
+- `packages/align-agent/test/serial/latency.test.ts`

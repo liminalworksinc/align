@@ -2,6 +2,7 @@
 // They read local files only (hot/, injected/, latch/, feeds/, drift/, me.json, config.json), never the network or
 // credentials. The one transcript read is the Stop hook's local drift check (D5), which keeps no reply text.
 import fs from "node:fs";
+import { countOutput } from "../shared/context-cost.ts";
 import path from "node:path";
 import { gitInfo, matchAnchors } from "../shared/anchors.ts";
 import {
@@ -50,6 +51,7 @@ import { layout, localId, spoolWrite } from "../shared/layout.ts";
 import { isShareStateNotice, noticeKind, resumedButHeld } from "../shared/notices.ts";
 import { matchRule, readRules, realDir, removeRule, setRule } from "../shared/rules.ts";
 import { queueSteering, steeringLine, unsharedNote } from "../shared/steering.ts";
+import { budgetNotes, claimBudgetNotes } from "../shared/budget-notes.ts";
 import type { DriftFile, FeedFile, Goal, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
 import { CLAIM_MS, collisions, commitSubject, crossOverlap, display, editedPaths, liveGoalId, podReport, rawActs, readPaths, record, shellWrites, siblingChanges, siblingNews, activityHot, type Act, type StartingShare } from "./siblings.ts";
 import { changedSince, COMMIT, commitMade, expectations, explainer, reflogMark, settle, shows, type SettleBy } from "./evidence.ts";
@@ -535,7 +537,7 @@ function autoAccept(home: string, lid: string, hot: HotState | null): void {
 }
 
 // ---------- SessionStart ----------
-export function sessionStart(home: string, harness: Harness, input: HookInput, env: NodeJS.ProcessEnv): HookOutput {
+export function sessionStartUncounted(home: string, harness: Harness, input: HookInput, env: NodeJS.ProcessEnv): HookOutput {
   const sid = input.session_id;
   if (!sid) return null;
   const source = input.source || "startup";
@@ -629,6 +631,9 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
     if (again.length) context = [context, ...again].filter(Boolean).join("\n");
   }
   const notices = takeNotices(hot, inj, () => blockingHolds(home, lid, cwd), () => stoppedNow(home, lid));
+  const spending = !inj.opened_epoch && (source === "startup" || source === "resume") ? claimBudgetNotes(home, lid, hot) : { context: [], messages: [] };
+  if (spending.context.length) context = [context, ...spending.context].filter(Boolean).join("\n");
+  messages.push(...spending.messages);
   if (notices) messages.push(notices);
   if (source === "startup") {
     const note = unsharedNote(home);
@@ -823,13 +828,13 @@ function noteBlockTold(home: string, lid: string, block: { stop?: boolean; goals
   }
 }
 
-export function userPromptSubmit(home: string, harness: Harness, input: HookInput): HookOutput {
+export function userPromptSubmitUncounted(home: string, harness: Harness, input: HookInput): HookOutput {
   const sid = input.session_id;
   if (!sid) return null;
   const prompt = typeof input.prompt === "string" ? input.prompt : "";
   const lid = localId(harness, sid);
   if (/^\s*::align\b/i.test(prompt)) {
-    return { decision: "block", reason: command(home, harness, sid, input.cwd || null, prompt.trim()) };
+    return { decision: "block", reason: commandUncounted(home, harness, sid, input.cwd || null, prompt.trim()) };
   }
   const ts = new Date().toISOString();
   const rootTurn = (harness === "claude-code" ? input.prompt_id : input.turn_id) || input.prompt_id || input.turn_id || `ts:${ts}`;
@@ -959,11 +964,15 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   const resumed = resumeLine(hot, inj, held);
   if (resumed) context = [context, resumed].filter(Boolean).join("\n");
   const notices = [takeNotices(hot, inj, () => held, () => stoppedNow(home, lid)), ...req.notices, ...lifted.notices, takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
+  // A just-opened epoch waits for the server's captured attribution before any threshold can be claimed.
+  const spending = inj.opened_epoch ? { context: [], messages: [] } : claimBudgetNotes(home, lid, hot);
+  if (spending.context.length) context = [context, ...spending.context].filter(Boolean).join("\n");
   writeInjected(home, lid, inj);
-  if (!context && !notices) return null;
+  const messages = [notices, ...spending.messages].filter(Boolean).join("\n");
+  if (!context && !messages) return null;
   const out: Record<string, unknown> = {};
   if (context) out.hookSpecificOutput = { hookEventName: "UserPromptSubmit", additionalContext: context };
-  if (notices) out.systemMessage = notices;
+  if (messages) out.systemMessage = messages;
   return out;
 }
 
@@ -1081,16 +1090,16 @@ function holdDenyReason(h: HoldLatch | null, lid: string): string {
 }
 
 /** The goal-hold latch: a hold file that names a hold, or one that can't be read, blocks every tool (read-only ones too). */
-function holdDeny(home: string, lid: string): HookOutput {
+function holdDeny(home: string, lid: string, record = true): HookOutput {
   const h = readJsonStrict<HoldLatch>(layout.hold(home, lid));
   if (h.state === "absent") return null;
   if (h.state === "ok" && h.value && Array.isArray(h.value.holds) && !h.value.holds.length) return null;
-  if (h.state === "ok" && h.value && Array.isArray(h.value.holds)) noteBlockTold(home, lid, { goals: h.value.holds.map((x) => x.goal_id), titles: Object.fromEntries(h.value.holds.map((x) => [x.goal_id, x.goal_title])) });
+  if (record && h.state === "ok" && h.value && Array.isArray(h.value.holds)) noteBlockTold(home, lid, { goals: h.value.holds.map((x) => x.goal_id), titles: Object.fromEntries(h.value.holds.map((x) => [x.goal_id, x.goal_title])) });
   return denyOutput(holdDenyReason(h.state === "ok" ? h.value : null, lid));
 }
 
 /** The deny a crashed PreToolUse emits: the stop wording unless only a goal hold is known for this session. */
-export function failureDeny(home: string, harness: Harness, sessionId: string | null): Record<string, unknown> {
+export function failureDenyUncounted(home: string, harness: Harness, sessionId: string | null): Record<string, unknown> {
   if (!sessionId) return denyOutput();
   const lid = localId(harness, sessionId);
   if (!fs.existsSync(layout.latch(home, lid)) && fs.existsSync(layout.hold(home, lid))) return denyOutput(holdDenyReason(readJson<HoldLatch>(layout.hold(home, lid)), lid));
@@ -1107,19 +1116,19 @@ export interface ToolHookOpts {
  * Fail closed: a latch file that exists but cannot be read denies. The stop latch and the goal-hold latch are
  * independent; a tool runs only when neither blocks it. Otherwise, deliver a pending goal change.
  */
-export function preToolUse(home: string, harness: Harness, input: HookInput, opts: ToolHookOpts = {}): HookOutput {
+export function preToolUseUncounted(home: string, harness: Harness, input: HookInput, opts: ToolHookOpts = {}): HookOutput {
   const sid = input.session_id;
   if (!sid) return anyLatch(home) ? denyOutput() : null;
   const lid = localId(harness, sid);
-  const blocked = latchDeny(home, harness, input);
+  const blocked = latchDenyUncounted(home, harness, input);
   if (blocked) return blocked;
   const sib = siblingEdits(home, harness, lid, input, opts);
   if (sib.held) return sib.held;
   // Context from a subagent's tool call reaches only that subagent, so the delta waits for the main agent.
-  const delta = input.agent_id ? null : midTurnDelta(home, lid);
+  const delta = input.agent_id ? null : midTurnDelta(home, lid, harness);
   if (!sib.note) return delta;
   const prev = (delta?.hookSpecificOutput as { additionalContext?: string } | undefined)?.additionalContext;
-  return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: prev ? `${prev}\n${sib.note}` : sib.note } };
+  return { ...delta, hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: prev ? `${prev}\n${sib.note}` : sib.note } };
 }
 
 /**
@@ -1127,7 +1136,7 @@ export function preToolUse(home: string, harness: Harness, input: HookInput, opt
  * not; a latch file that can't be read denies. Also what the hooks enforce on an unsupported Node, so a stopped
  * session behaves the same there.
  */
-export function latchDeny(home: string, harness: Harness, input: HookInput): HookOutput {
+export function latchDenyUncounted(home: string, harness: Harness, input: HookInput, opts: { record?: boolean } = {}): HookOutput {
   const sid = input.session_id;
   if (!sid) return anyLatch(home) ? denyOutput() : null;
   const lid = localId(harness, sid);
@@ -1137,17 +1146,17 @@ export function latchDeny(home: string, harness: Harness, input: HookInput): Hoo
     (latch.state === "ok" && latch.value && latch.value.stopped !== true) ||
     (latch.state === "ok" && !!input.tool_name && READ_ONLY[harness].has(input.tool_name));
   if (!allowed) {
-    noteBlockTold(home, lid, { stop: true });
+    if (opts.record !== false) noteBlockTold(home, lid, { stop: true });
     return denyOutput(latch.state === "ok" ? stopReason(latch.value, lid) : DENY_REASON);
   }
-  return holdDeny(home, lid) || feedHoldDeny(home, lid, input.cwd || null);
+  return holdDeny(home, lid, opts.record) || feedHoldDeny(home, lid, input.cwd || null, opts.record);
 }
 
 /** A goal hold that has not reached this session yet, from the cached feed (`shared/feedhold.ts`): every tool is denied
  *  as a hold, fail closed (cycle 6). */
-function feedHoldDeny(home: string, lid: string, cwd: string | null): HookOutput {
+function feedHoldDeny(home: string, lid: string, cwd: string | null, record = true): HookOutput {
   const h = feedHold(home, lid, cwd);
-  if (h) noteBlockTold(home, lid, { goals: [h.goal_id], titles: { [h.goal_id]: h.goal_title } });
+  if (h && record) noteBlockTold(home, lid, { goals: [h.goal_id], titles: { [h.goal_id]: h.goal_title } });
   return h ? denyOutput(`${feedHoldReason(h.goal_title, clean)} ${TELL_USER}`) : null;
 }
 
@@ -1359,12 +1368,13 @@ function contextChanged(hot: HotState, inj: InjectedState): boolean {
   return (hot.context_goals || []).some((c) => seen[c.goal.id] !== undefined && seen[c.goal.id] !== c.goal.version);
 }
 
-function midTurnDelta(home: string, lid: string): HookOutput {
+function midTurnDelta(home: string, lid: string, harness: Harness): HookOutput {
   const hot = readHot(home, lid);
   if (!hot?.share) return null;
   const pre = readInjected(home, lid);
   const own = deltaKind(hot, pre);
-  if (!own && !(hot.share.state === "shared" && contextChanged(hot, pre))) return null;
+  const messageDue = harness === "claude-code" && (!pre.opened_epoch || pre.opened_epoch.epoch_id === hot.binding?.epoch_id) && budgetNotes(home, lid, hot, Date.now(), "message", false).length > 0;
+  if (!own && !messageDue && !(hot.share.state === "shared" && contextChanged(hot, pre))) return null;
   const release = claimDelta(home, lid);
   if (!release) return null;
   try {
@@ -1378,9 +1388,11 @@ function midTurnDelta(home: string, lid: string): HookOutput {
       reportApplied(home, lid, inj, hot.pending_directives);
     }
     if (hot.share.state === "shared") parts.push(...contextNotes(inj, hot.context_goals));
-    if (!parts.length) return null;
-    writeInjected(home, lid, inj);
-    return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: parts.join("\n") } };
+    const spending = harness === "claude-code" && (!inj.opened_epoch || inj.opened_epoch.epoch_id === hot.binding?.epoch_id) ? budgetNotes(home, lid, hot, Date.now(), "message") : [];
+    if (!parts.length && !spending.length) return null;
+    if (parts.length) writeInjected(home, lid, inj);
+    return { ...(parts.length ? { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: parts.join("\n") } } : {}),
+      ...(spending.length ? { systemMessage: spending.join("\n") } : {}) };
   } finally {
     release();
   }
@@ -1549,7 +1561,7 @@ function replacedRule(home: string, dir: string): string | null {
   return `${clean(prev.workspace_name, 80)}, ${title ? `"${clean(title, 100)}"` : "no goal"}`;
 }
 
-export function command(home: string, harness: Harness, sid: string, cwd: string | null, line: string): string {
+export function commandUncounted(home: string, harness: Harness, sid: string, cwd: string | null, line: string): string {
   const lid = localId(harness, sid);
   const hot = readHot(home, lid);
   const parts = line.replace(/^\s*::align\s*/i, "").trim();
@@ -1864,4 +1876,38 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
     default:
       return "Align commands: `::align status`, `::align goals`, `::align share [--dir] [goal]`, `::align bind <goal>`, `::align unshare [--dir]`, `::align task <label>`, `::align claim <file>`, `::align team`, `::align requests`, `::align accept|decline <id>`. They stay local and never reach the model.";
   }
+}
+
+// Account only after the uncounted handler has decided its complete return. No shared hook state is read or saved here.
+export function recordStandaloneOutput(home: string, harness: Harness, sid: string | null | undefined, out: HookOutput, event: "SessionStart" | "UserPromptSubmit" | "PreToolUse"): HookOutput {
+  if (sid && out) countOutput(home, localId(harness, sid), out, event);
+  return out;
+}
+
+export function sessionStart(home: string, harness: Harness, input: HookInput, env: NodeJS.ProcessEnv): HookOutput {
+  return recordStandaloneOutput(home, harness, input.session_id, sessionStartUncounted(home, harness, input, env), "SessionStart");
+}
+
+export function userPromptSubmit(home: string, harness: Harness, input: HookInput): HookOutput {
+  return recordStandaloneOutput(home, harness, input.session_id, userPromptSubmitUncounted(home, harness, input), "UserPromptSubmit");
+}
+
+export function preToolUse(home: string, harness: Harness, input: HookInput, opts: ToolHookOpts = {}): HookOutput {
+  return recordStandaloneOutput(home, harness, input.session_id, preToolUseUncounted(home, harness, input, opts), "PreToolUse");
+}
+
+export function latchDeny(home: string, harness: Harness, input: HookInput): HookOutput {
+  return recordStandaloneOutput(home, harness, input.session_id, latchDenyUncounted(home, harness, input), "PreToolUse");
+}
+
+export function failureDeny(home: string, harness: Harness, sessionId: string | null): Record<string, unknown> {
+  const out = failureDenyUncounted(home, harness, sessionId);
+  recordStandaloneOutput(home, harness, sessionId, out, "PreToolUse");
+  return out;
+}
+
+export function command(home: string, harness: Harness, sid: string, cwd: string | null, line: string): string {
+  const reason = commandUncounted(home, harness, sid, cwd, line);
+  recordStandaloneOutput(home, harness, sid, { decision: "block", reason }, "UserPromptSubmit");
+  return reason;
 }
