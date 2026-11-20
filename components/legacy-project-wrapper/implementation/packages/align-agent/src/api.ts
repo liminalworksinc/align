@@ -4,6 +4,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import type { Ctx } from "./context.ts";
 import { loadDeviceKey, refreshMessage } from "./keys.ts";
 import { layout } from "./shared/layout.ts";
@@ -25,8 +26,8 @@ export interface Credentials {
   clock_offset_ms?: number;
 }
 
-/** Offsets under a minute count as the clocks agreeing (the server allows 5 minutes either way). */
-export const CLOCK_TOLERANCE_MS = 60_000;
+import { CLOCK_TOLERANCE_MS } from "./shared/clock.ts";
+export { CLOCK_TOLERANCE_MS } from "./shared/clock.ts";
 /** A measured offset replaces the saved one only when they differ by more than this, so the offset stays stable. */
 const CLOCK_DRIFT_MS = 30_000;
 
@@ -69,12 +70,14 @@ export class HttpError extends Error {
   }
 }
 
+export const credentialsFile = (home: string) => path.join(home, "credentials.json");
+
 export function loadCredentials(home: string): Credentials | null {
-  return readJson<Credentials>(layout.credentials(home));
+  return readJson<Credentials>(credentialsFile(home));
 }
 
 export function saveCredentials(home: string, c: Credentials): void {
-  writeJsonAtomic(layout.credentials(home), c, 0o600);
+  writeJsonAtomic(credentialsFile(home), c, 0o600);
 }
 
 /** Why this machine is signed out, in words for `align status`. The stored reason is the refusal's `reason` when the
@@ -101,6 +104,7 @@ export function signedIn(home: string): boolean {
 export interface Resp {
   status: number;
   json: any;
+  jsonParsed?: boolean;
   headers: Headers;
   /** The server's clock minus this computer's (ms), from the answer's `Date` header; null without one. */
   clockOffsetMs: number | null;
@@ -153,15 +157,15 @@ export async function rawRequest(base: string, method: string, path: string, opt
   const date = Date.parse(res.headers.get("date") || "");
   const clockOffsetMs = Number.isNaN(date) ? null : date + 500 - Math.round((t0 + Date.now()) / 2);
   const text = await res.text().catch(() => "");
-  let json: any = null;
+  let json: any = null, jsonParsed = false;
   if (text) {
     try {
-      json = JSON.parse(text);
+      json = JSON.parse(text); jsonParsed = true;
     } catch {
       json = null;
     }
   }
-  return { status: res.status, json, headers: res.headers, clockOffsetMs };
+  return { status: res.status, json, jsonParsed, headers: res.headers, clockOffsetMs };
 }
 
 /** The ALIGN_HOMEs whose refresh lock the current async call chain holds, so a call made while holding it (a logout's
@@ -236,7 +240,7 @@ export function bindDevice(ctx: Ctx, deviceId?: string | null): () => void {
 /** Credentials `c` belong to the device `ctx` is bound to (or `ctx` is unbound). Signed out by the server counts as the
  *  same device: a refusal for it is reported as a sign-out, not as a change of pairing. Signed out by `align logout` does
  *  not: the pairing it was bound to was ended under it, as a new `align login` would have replaced it (C5-4). */
-function boundTo(ctx: Ctx, c: Credentials | null): boolean {
+export function boundTo(ctx: Ctx, c: Credentials | null): boolean {
   if (ctx.boundDevice === undefined) return true;
   if (ctx.boundDevice === null) return !c || !!c.signed_out;
   return !!c && c.device_id === ctx.boundDevice && !(c.signed_out && c.signed_out_reason === "logout");
@@ -262,6 +266,9 @@ export function markSignedOut(home: string, reason: string, deviceId?: string): 
   // next `align login` writes a fresh one.
   const me = readJson<MeFile>(layout.me(home));
   if (me && !me.signed_out) writeJsonAtomic(layout.me(home), { ...me, signed_out: true });
+  for (const dir of ["budgets-cache", "budget-attribution", "budget-shown"]) {
+    try { fs.rmSync(path.join(home, dir), { recursive: true, force: true }); } catch { /* cache cleanup cannot prevent sign-out */ }
+  }
 }
 
 /** Write `c` only while it is still the current device's credentials (under the refresh lock, which a new pairing

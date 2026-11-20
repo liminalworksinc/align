@@ -363,7 +363,7 @@ export function WorkPanels({ ws, goalId, crId, me = "" }: { ws: string; goalId?:
       <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-4">
           {decision && <DecisionEvidence ws={ws} cr={decision} me={me} value={delivery.value} />}
-          <Panel eyebrow="What Align sent" title={goal.title} actions={<Link href={`/app/w/${ws}/goals/${goal.id}`} className={`${LINK} text-[14px]`}>Open goal</Link>}>
+          <Panel eyebrow="What Align sent" title={goal.title} actions={<Link href={`/app/w/${ws}/goals/${goal.id}`} className={`${LINK} text-[14px]`}>Open the goal</Link>}>
             <dl className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[14px]">
               <Row label="Current version">v{goal.version}</Row>
               <Row label="Owner">{goal.owner.name}</Row>

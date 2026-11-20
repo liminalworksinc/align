@@ -272,7 +272,7 @@ The server SHALL include, for every session returned by `GET /api/v2/workspaces/
 
 ### Requirement: Device fetch of v2 directives by cursor
 
-The server SHALL serve `GET /api/v2/directives?cursor=<seq>` to a v2 device access token (`alnd_…`) only, returning HTTP 200 `{ directives, next_cursor, workspaces, ended_sessions }` with up to 100 directives whose `seq` is greater than the cursor and that target sessions owned by the token's person on the token's device in workspaces the device is still granted, oldest first, each as `{ id, seq, ws, kind, session_keys, goal, binding, created_at }` plus `request` on kind `request` and `hold` on kinds `hold` and `release`, where `session_keys` lists only that device's targeted keys, `goal` is the snapshot plus `bindable` or null when the person can no longer read the goal, and `next_cursor` is the last returned `seq` as a string (or the given cursor when none is returned). `workspaces` SHALL list the ids, sorted, of the workspaces the device reaches now (its grants in live workspaces its person is still a member of), so a device learns at its next pass that it gained a workspace (its person accepted an invite with it ticked) or lost one, without re-reading `/api/v2/me` every pass.
+The server SHALL serve `GET /api/v2/directives?cursor=<seq>` to a v2 device access token (`alnd_…`) only, returning HTTP 200 `{ directives, next_cursor, workspaces, ended_sessions, budget_stamps }` with up to 100 directives whose `seq` is greater than the cursor and that target sessions owned by the token's person on the token's device in workspaces the device is still granted, oldest first, each as `{ id, seq, ws, kind, session_keys, goal, binding, created_at }` plus `request` on kind `request` and `hold` on kinds `hold` and `release`, where `session_keys` lists only that device's targeted keys, `goal` is the snapshot plus `bindable` or null when the person can no longer read the goal, and `next_cursor` is the last returned `seq` as a string (or the given cursor when none is returned). `workspaces` SHALL list the ids, sorted, of the workspaces the device reaches now (its grants in live workspaces its person is still a member of), so a device learns at its next pass that it gained a workspace (its person accepted an invite with it ticked) or lost one, without re-reading `/api/v2/me` every pass.
 `ended_sessions` SHALL list, newest first and at most 200, `{ws, session_key, ended_reason, stopped_at}` for the
 token's person's sessions on any of their devices, in the workspaces the token's device reaches, whose share ended
 (state `stopped`) in the last 30 days: stopped with Stop sharing on the web, or by the device that shared it
@@ -482,6 +482,26 @@ The server SHALL serve directives only through `/api/v2/directives`, `/api/v2/di
 
 - **WHEN** a client calls `GET /api/directives/stream?session=claude-code:x`
 - **THEN** the response is HTTP 404
+
+### Requirement: Private budget change stamps
+
+The existing directive response SHALL include additive `budget_stamps` as `[{ws, team, month, stamp}]` for this UTC
+month's teams whose budget the device's person may read in a granted workspace and whose budget has history. The opaque stamp SHALL change on set, change, removal, grant, grant expiry and first observed crossing, including changes recorded
+at the same instant. Entries SHALL contain no amounts, names, people, goals or sessions. A team without budget history
+SHALL add no entry or burn computation. The stamp SHALL also accompany session attribution and team budget reads.
+Directive fetch SHALL use stored revisions and indexed expiry lookups with no table scan or history aggregation. Older agents SHALL continue processing directives while ignoring this unknown field. Agents SHALL accept its absence
+from older servers without stopping sync.
+
+#### Scenario: Stamps reveal only readable teams
+
+- **WHEN** a granted device fetches directives after changes to its own and another team's budgets (`scripts/test-budgets.mjs`, "change stamps distinguish tied writes, allowance grants, decisions, expiry and removal without leaking other teams"; `test/budgets.test.ts`, "the committed base agent's directive intake ignores budget stamps and still applies a stop")
+- **THEN** only readable teams have stamps, no amounts or names appear, and an older agent still applies ordinary directives
+
+#### Scenario: Directive stamps use indexed reads
+
+- **WHEN** the directive stamp queries are explained with accumulated budget history (`scripts/test-budgets.mjs`, "directive budget stamps use indexed revisions and expiry lookups without table scans")
+- **THEN** each table access is an indexed search and the query never reads budget history
+
 
 ## Open questions
 

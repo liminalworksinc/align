@@ -21,12 +21,13 @@
 //     which version it was last sent or applied; per-session receipts exist only on the goal's value read after a launch.
 //     Saying a session is "not on" a version would be a claim Align can't make from these reads.
 
+import type { BudgetRequestView } from "../../../../lib/v2/budgets";
 import type { StatusKind } from "../ds";
 import type { Alignment, ChangeRequest } from "../types";
 import { changeWaits, launchWaits, type HomePerson } from "../../../../lib/v2/home-core.mts";
 import { oneLine } from "../b/model";
 
-export type NeedKind = "launch" | "decide" | "returned" | "agent_declined" | "team_ask" | "alignment" | "app_behind";
+export type NeedKind = "launch" | "decide" | "returned" | "agent_declined" | "team_ask" | "alignment" | "app_behind" | "budget_request";
 export type NeedPhase = "needs_you" | "waiting_on_others" | "done";
 
 /** Two orders, by person (founder ruling, LIM-2472 eaa5cf92). The order only ORDERS rows: what a person may do or see
@@ -38,17 +39,17 @@ export type NeedPhase = "needs_you" | "waiting_on_others" | "done";
  *               that is yours, then the rest as above. */
 export type RankOrder = "approver" | "requester";
 export const ORDERS: Record<RankOrder, NeedKind[]> = {
-  approver: ["launch", "decide", "returned", "agent_declined", "team_ask", "alignment", "app_behind"],
-  requester: ["returned", "agent_declined", "decide", "launch", "team_ask", "alignment", "app_behind"],
+  approver: ["launch", "decide", "budget_request", "returned", "agent_declined", "team_ask", "alignment", "app_behind"],
+  requester: ["returned", "agent_declined", "decide", "budget_request", "launch", "team_ask", "alignment", "app_behind"],
 };
 /** The one visible line: which order this is, never the rule behind it. */
 export const ORDER_LINE: Record<RankOrder, string> = { approver: "Ranked for someone who approves: launches and decisions first.", requester: "Ranked for your own requests first." };
 /** The full sentence, behind "How it's ranked". */
 export const ORDER_SENTENCE: Record<RankOrder, string> = {
   approver:
-    "Ranked for someone who approves on a goal here: approved changes waiting to launch, then decisions waiting on you, then your requests that came back, then requests an agent declined, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.",
+    "Ranked for someone who approves on a goal here: approved changes waiting to launch, then decisions waiting on you, then budget requests, then your requests that came back, then requests an agent declined, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.",
   requester:
-    "Ranked for your own requests first: your requests that came back, then requests an agent declined, then any decision or launch that is yours, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.",
+    "Ranked for your own requests first: your requests that came back, then requests an agent declined, then any decision that is yours, then budget requests, then launches, then team asks, then alignments, then launched versions Align has not sent to an app. Oldest first within each.",
 };
 /** Why this order: the rule, in words, behind "How it's ranked". */
 export const ORDER_WHY: Record<RankOrder, string> = {
@@ -108,6 +109,7 @@ export const SENT_GOALS_MAX = 12;
 export const KIND_ORDER: NeedKind[] = ORDERS.approver;
 
 export const KIND_WORDS: Record<NeedKind, string> = {
+  budget_request: "Budget request",
   launch: "Approved, not launched",
   decide: "Decision",
   returned: "Your request came back",
@@ -149,6 +151,7 @@ export interface Need {
   word: string;
   /** The change request a row is about, for the renderer's evidence summary. */
   cr?: ChangeRequest;
+  href?: string;
 }
 
 /** Not a judgment, so never a row and never counted: a connected app Align has recorded no goal read from (a setup
@@ -161,6 +164,7 @@ export interface Notice {
 }
 
 export interface NeedsInput {
+  budgets?: BudgetRequestView[] | null;
   ws: string;
   me: string;
   /** CR: every view from the three groups. */
@@ -238,7 +242,9 @@ const goalOf = (cr: ChangeRequest) => ({ id: cr.goal.id, title: cr.goal.title })
 /** One change request as at most one row (CR read). */
 function crNeed(cr: ChangeRequest, me: string, returning?: Set<string>): Need | null {
   const base = { key: `cr:${cr.id}`, goal: goalOf(cr), quote: cr.reason, evidence: crEvidence(cr), review: reviewOf(cr), cr, word: "" };
-  const asker = cr.requester.id === me ? "Your request" : `${cr.requester.name}'s request`;
+  // Asking on a goal they own, the requester can decide it too (the server's approval set): say why it is theirs to
+  // decide, so "Decision" beside "Your request" doesn't read as a mistake (LIM-2513 journey pass).
+  const asker = cr.requester.id === me ? (cr.can.approve ? "Your request, on your own goal" : "Your request") : `${cr.requester.name}'s request`;
   const c = cr.can;
   const next = cr.version ?? cr.base_version + 1;
 
@@ -451,7 +457,7 @@ export function needForChangeRequest(cr: ChangeRequest, me: string): Need | null
  *  renderer says that kind is unknown rather than showing nothing. */
 /** A source Align couldn't read, as a noun phrase that reads after "the" ("Align couldn't read the asks and the
  *  deliveries to apps"). */
-export type Unknown = "change requests" | "asks" | "alignments" | "workspace summary" | "requests to agents" | "deliveries to apps";
+export type Unknown = "change requests" | "asks" | "alignments" | "workspace summary" | "requests to agents" | "deliveries to apps" | "budget requests";
 
 export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[]; notices: Notice[]; order: RankOrder; orderFallback: boolean } {
   const { me } = input;
@@ -475,6 +481,15 @@ export function buildNeeds(input: NeedsInput): { rows: Need[]; unknown: Unknown[
   if (input.apps) rows.push(...appNeeds(input.apps, input.sends ?? undefined, me));
   else unknown.push("workspace summary");
   if (input.sends === null) unknown.push("deliveries to apps");
+  if (input.budgets === null) unknown.push("budget requests");
+  for (const r of input.budgets ?? []) {
+    const mine = r.requester.id === me, needs = r.waiting_on_me || mine && r.state === "declined" && r.can.second_look;
+    rows.push({ key: `budget:${r.id}`, kind: "budget_request", phase: needs ? "needs_you" : r.state === "waiting" ? "waiting_on_others" : "done", goal: r.goal,
+      cause: `${r.team.name}: ${mine ? "you" : r.requester.name} asked for more team budget`, quote: r.reason,
+      since: { at: r.updated_at, field: "updated_at" }, evidence: none(), action: needs ? { label: r.state === "declined" ? "Ask for a second look" : "Review budget request", opens: "budget" } : null,
+      who: `${r.state_note} ${r.filing_note}`, review: null, tone: r.state === "declined" ? "declined" : r.state === "granted" ? "approved" : "pending", word: r.state === "waiting" ? "Budget request" : r.state === "granted" ? "Budget granted" : r.state === "declined" ? "Budget declined" : r.state === "withdrawn" ? "Budget withdrawn" : "Budget expired",
+      href: `/app/w/${input.ws}/spend?team=${encodeURIComponent(r.team.id)}&month=${r.month}&request=${encodeURIComponent(r.id)}` });
+  }
   const { order, fallback } = rankOrder(me, input.approver, input.crs);
   return { rows: rankNeeds(rows.map(withWord), order), unknown, notices: input.apps ? neverRead(input.apps) : [], order, orderFallback: fallback };
 }

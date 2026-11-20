@@ -333,6 +333,7 @@ export function uninstall(paths: Paths, opts: { purge: boolean }): string[] {
   const backups = [...backupsOf(claudeFile), ...backupsOf(codexHooks)];
   for (const b of backups) fs.rmSync(b, { force: true });
   if (backups.length) lines.push(`Removed ${backups.length} backup file(s) Align made when installing (${backups.map((b) => path.basename(b)).join(", ")}).`);
+  for (const name of ["context-cost", "budgets-cache", "budget-attribution", "budget-shown"]) fs.rmSync(path.join(home, name), { recursive: true, force: true });
   if (opts.purge) {
     fs.rmSync(home, { recursive: true, force: true });
     lines.push(`Deleted ${home} (local ledger, keys and tokens).`);

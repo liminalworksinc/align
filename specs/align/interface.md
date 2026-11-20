@@ -17,7 +17,7 @@ open it reads again at most once a minute (see "Workspace Home"). A page shows o
 set, and the `can` flags the server returns on alignments and change requests. "Pod" is stored data only: every
 screen says "team".
 
-Every time on a screen reads the same way, in the person's locale: month, day and minute ("Nov 13, 4:25 PM"), with the
+Budget figures and records use readable UTC dates and read times as specified in `budgets`. Other screen times read the same way, in the person's locale: month, day and minute ("Nov 13, 4:25 PM"), with the
 year only when it is not this year ("Oct 2, 2025, 9:05 AM"), never a numeric date and never seconds (LIM-2513 journey
 pass: the goal page, Requests and the value card said "11/13/2026, 4:25:49 PM" while Home and the review drawer said
 "Nov 13, 4:25 PM"). A duration ("18 seconds") is not a time and keeps its seconds.
@@ -583,7 +583,7 @@ unknown, never zero, and nothing on the page SHALL infer what an agent is doing 
 versions it sent an app, never which one the app uses; the decision value card names the apps Align sent a launched
 version). The page reads when it opens and again after a decision in the review drawer or a request sent from the
 "Propose a change" drawer, and again when the workspace's live stream says one of the person's views moved (Requirement:
-Live workspace); it does not poll (only its first-run card checks the apps while it is shown, and its "Since you last
+Live workspace). It does not poll (only its first-run card checks the apps while it is shown, and its "Since you last
 looked" section checks for new changes as below, the Needs-you list reading again with it).
 
 The heading SHALL read "<n> things need you" ("1 thing needs you"), or "Nothing needs you"; when a source could not be
@@ -600,11 +600,11 @@ its evidence, and at most one outlined action. The kinds are "Approved, not laun
 (**Review**, its line leading with what the request changes, then "<requester>'s request"), "Your request came back"
 (**See the change**, **See the condition** or **Update to v<n>**), "Declined" (**Propose again**), "Agent declined" (a
 request to agents that a session declined, **Open the requests**), "Team ask" (**Accept or decline** or **Mark
-done**), "Alignment" (**Review** or **Accept the change**) and "Launched, not sent" ("Align has not sent v<n> to the
+done**), "Budget request" (**Review budget request** for a decision, **Ask for a second look** for an eligible declined own request), "Alignment" (**Review** or **Accept the change**) and "Launched, not sent" ("Align has not sent v<n> to the
 app <app>.", for a connected app the person can see that has read the goals but was not sent the goal's latest
 launched version, with **See apps** when the person connected it); a row waiting on others or done carries its own
 word ("Change suggested", "Needs an update", "Launched as v<n>", "Declined", "Withdrawn", "Superseded", "Approved",
-"Ask done", and so on). A change request's row opens it in the review drawer over the Home (`?review=<goal>.<id>`),
+"Ask done", "Budget granted", "Budget declined", "Budget withdrawn", "Budget expired", and so on). Done rows SHALL carry no action. Budget requests SHALL rank after decisions and before returned requests in the approver order, and after decisions and before launches in the requester order. A change request's row opens it in the review drawer over the Home (`?review=<goal>.<id>`),
 and closing the drawer returns to the same list; any other row opens the tab that holds it. A row's evidence SHALL be
 its change request's evidence summary (a decision with no links says "No evidence attached", an approval recorded
 without links "Approved without evidence"), or, for other kinds, chips by class ("Receipt", "Agent reported", "Not
@@ -634,7 +634,11 @@ compares against when they left. While
 Home stays open, it SHALL add new changes without a reload, checking at most once a minute, and the Needs-you list
 reads again with it, so its count never trails what Since shows. With no earlier visit on
 the device it SHALL say "First visit on this device, so nothing to compare yet." The time is kept in this browser only
-and is never sent to the server.
+and is never sent to the server. Home SHALL receive `budget_crossings`, null on failure or a bounded list of
+`{team: {id, name}, month, threshold, observed_at, as_of}` for first observed monthly crossings, only for current team
+leads and workspace owners. Since you last looked SHALL apply its existing visit and display rules, naming the team,
+threshold, list-price estimate and computation time. Crossings SHALL NOT enter Needs or its count. An absent budget
+SHALL create no new crossing. Spend SHALL state current crossings with computation time. No polling is added.
 A goal's creation line SHALL name its owner, who created it (Align never reassigns an owner), and a goal the reader
 created gets no line, like their other own actions; a later saved version's line still says "Someone".
 
@@ -684,6 +688,18 @@ part's goal read); only an app with a `last_read_at` is a receipt. The Home list
 an app's goal read since the last visit is a line in "Since you last looked" ("<app> read the goals", with its evidence
 class), and an app with no goal read is the muted line under the Needs list. A connection SHALL never be shown or
 counted as a read. A workspace owner's read has every connected app and anyone else's their own, as on the Apps tab.
+
+The existing Needs list SHALL also use `home.budget_requests` (`waiting_on_me`, `mine`, `next_cursor`). It SHALL deduplicate request ids and use the same rows for its heading and filter counts. Requests waiting on the person and their own declined requests for which `can.second_look` is true belong in Needs you; their other declined requests belong in Done; own waiting requests belong in Waiting on others; granted, withdrawn and expired requests belong in Done. It SHALL show no separate budget panel. A null budget source is unknown; a non-null `next_cursor` links to Requests for more. Rows link to their record on Spend.
+
+#### Scenario: Budget requests in the one Needs list
+
+- **WHEN** a budget request waits on the reader and another of their own was declined
+- **THEN** both appear as rows in the existing Needs you filter and count, with links to the Spend record and no separate panel
+
+#### Scenario: A declined budget request no longer needs you
+
+- **WHEN** a person's declined budget request can no longer receive a second look, including after the month closes or after its second decision
+- **THEN** it leaves Needs you and appears in Done without an action
 
 #### Scenario: Needs you and waiting on others
 
@@ -926,6 +942,13 @@ The Apps tab SHALL read the connected apps once, through `GET .../apps`, and SHA
 through `GET .../home` twice when it opens (its own read and its Needs list's) and again at most once a minute while it
 stays open, and its first-run card checks `GET .../apps` as "Home first-run card" says.
 
+Budget team and month controls, the CSV export month and download, all budget forms and request actions SHALL fit the same 390 pixel rule and have controls at least 44 pixels tall. Each panel SHALL have its own accessible labels so selecting the export month never changes the budget month.
+
+#### Scenario: Two month controls on a phone
+
+- **WHEN** a person uses the budget panel and the export panel at 390 pixels
+- **THEN** each panel fits the page, every action control is at least 44 pixels tall and changing either month leaves the other selected month unchanged
+
 #### Scenario: Compact phone chrome
 
 - **WHEN** a signed-in person with the passkey prompt due opens a workspace's Home on a 390×844 screen
@@ -1004,10 +1027,22 @@ marked active; **Confirm: drop the goal** saves the next version with status `dr
 the drop is recorded, so a second confirm is never offered on the version it replaced.
 
 The goal page SHALL read top to bottom as the plan, then what is being decided about it, then the agents, then the
-editing form: the heading and its pills, **Drop this goal**, "Measures", "Limits", the goal tree, "Change requests"
+editing form: the heading and its pills, **Edit this goal**, "Measures", "Limits", the goal tree, "Change requests"
 (with each approved one's "What this decision gave you"), "Agent activity", "Agents on this goal", then the two forms,
 "Align with this goal" and "New version", and "Versions". A person who comes to a goal to see what was asked or decided finds it right after
 the plan, not below the New version form (LIM-2513 journey pass).
+
+Under the title, a person who can edit an active goal SHALL get **Edit this goal**, which moves to the New version form
+and focuses its first field; nothing that drops or holds sits above the goal's content (founder ruling, Nov 16,
+LIM-2513). **Drop this goal** SHALL sit at the foot of the New version form, after **Save version <n+1>**, under "Or
+end this goal". On the Agents on this goal card, while no shared session is on the goal and it isn't held, the hold
+controls SHALL be folded under a "Hold agents on this goal" disclosure rather than leading the card; once a session is
+on the goal, or the goal is held, they show as before.
+
+#### Scenario: What the goal page leads with
+
+- **WHEN** the owner opens an active goal that no shared session is on
+- **THEN** under the title the only action is **Edit this goal**, which moves to the New version form; the measures come next; the Agents on this goal card shows its hold controls folded under "Hold agents on this goal"; **Drop this goal** is under "Or end this goal" after **Save version <n+1>**
 
 #### Scenario: Reading a goal
 
@@ -1071,7 +1106,11 @@ whose page or `?goal=` they are on is chosen), marking a goal with "· your requ
 such a goal is chosen the drawer SHALL say so before any field, "You already have an open request on this goal." with
 "It is waiting for a decision." (or "An approver suggested a change to it; accept it or withdraw it.") and "Align takes
 one open request per person and goal: open yours to add to it or withdraw it, then ask again.", with **Open your
-request** (its review on the Home) and **Not now**, and SHALL offer no form. Otherwise "What should change" offers the
+request** (its review on the Home) and **Not now**, and SHALL offer no form. When the person owns every active goal they
+can read, there is nothing to propose: the drawer SHALL say "You own every active goal you can see here, so you change
+one directly: save a new version on its page." and list each such goal, linked to its New version form
+(`/app/w/<ws>/goals/<goal>#new-version`, which the goal page moves to and focuses once it is read), with "Edit v<n>"
+(LIM-2513). Otherwise "What should change" offers the
 title, each measure, "Add a measure" (under 10 measures), "Mark the goal achieved" and "Drop the goal", with "It should
 say" or "The new measure" (up to 300 characters) and an optional "Target" for a measure; it links to "the goal page's
 full change form" for limits and dependencies. "Why" is required (up to 2000 characters) and "A link" (an https link)
@@ -1266,7 +1305,7 @@ see, from one read of `GET /api/v2/workspaces/<ws>/change-requests`, as one list
 "Waiting on me" when anything waits on the person and on "All" otherwise, and a search field ("Search goal, person,
 reason"). A line above it says "<n> decisions waiting on you. <m> waiting on others." ("1 decision …", or "Nothing is
 waiting on you. <m> waiting on others."). Each row SHALL show Request (the goal's title, then what the request changes
-in words, its first change and "and <n> more changes" when there are more, and "your request" or "<requester>'s
+in words, its first change and "and <n> more changes" when there are more, and "your request" ("your request, on your own goal" when the person may also decide it, on a goal they own) or "<requester>'s
 request"), State (the Home's word for it as a status pill), Versions ("Asks for v<n>", "Approved v<n>", "Launched v<n>"
 or "Not approved"), Evidence ("No evidence attached" when the current revision has no link, and the shared evidence
 summary) and Updated (how long ago). A row opens the request in the review drawer (`?review=<goal>.<id>`); its action
@@ -1277,6 +1316,13 @@ evidence on its current revision and the person's `can.approve` is set, never on
 sends the approval through the review's own path, reading the request again first and sending nothing if it changed or
 its evidence was removed meanwhile, and the row then says "Recorded: you approved revision <r>. Not launched yet." (or
 "Not recorded. …"). A row never launches.
+
+Below the existing change-request list, the tab SHALL show a clearly labelled Budget requests section, with a UTC month filter defaulting to this month. It SHALL read `GET .../budget-requests?month=YYYY-MM&limit=50&cursor=<id>`, show only that month's returned records and provide Next page and First page controls when applicable. Each row links to the same record on Spend and names where it was filed. It SHALL never read all months by default.
+
+#### Scenario: Budget requests by month
+
+- **WHEN** a person opens Requests and chooses another month in Budget requests
+- **THEN** the section reads that month only, pages through at most 50 records at a time and opens each record on Spend
 
 #### Scenario: Filters
 
@@ -1421,6 +1467,13 @@ teams, and let owners and team leads manage team members, with lead changes rese
 
 The Sessions tab SHALL list the person's own shared sessions with their usage and controls, and for workspace owners
 everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<ws>/sessions`.
+
+Own session rows SHALL include nullable `team_budget_label`: a sentence naming the team budget only while the reader can read that team and it has a budget this UTC month. Other people's rows SHALL omit this field and label. A hidden goal stays unnamed.
+
+#### Scenario: A budget label belongs to the session's person
+
+- **WHEN** a person and a different workspace owner read the same session and its team has a budget this month
+- **THEN** only that person's own row has the budget label, and a month without a budget shows no label
 
 #### Scenario: Own sessions
 
@@ -1622,6 +1675,18 @@ top of the goal page (from `GET …/goals/<goal>/hold`), and on the Sessions tab
 The Spend tab SHALL show token usage and estimated list cost from
 `GET /api/v2/workspaces/<ws>/spend?by=goal|team|session` with a "Group by" choice of By goal, By team and By my
 sessions.
+
+The tab SHALL offer the monthly team CSV export and the team-budget screens specified in `budgets`. The team picker SHALL default to the reader's home team. A budget not set SHALL read "No team budget for this month." The attribution rule SHALL appear once here: goal-bound work counts under the goal's team and work in no goal under the home team recorded when that spending period opened. No shared workspace footer SHALL repeat it. Budget request records, lists and Home rows SHALL show the authenticated filing source specified in `budgets`, including the recorded terminal device and uncertainty about who ran its command, show the full authority sentence and the preserved decisions, and link using `?team=<id>&month=<YYYY-MM>&request=<id>`.
+
+#### Scenario: Budget crossings inform the reader
+
+- **WHEN** a budget reader opens Spend and a team lead returns to Home after a first crossing (`scripts/test-v2.mjs`, "budget screens: Since shows crossings and Needs contains no crossing row")
+- **THEN** Spend states current thresholds and computation time, Home follows Since you last looked's rules, and Needs and its count remain unchanged
+
+#### Scenario: Spend combines budget and export controls
+
+- **WHEN** a person opens Spend with no budget for their default team
+- **THEN** the tab says there is no team budget, offers the selected month's team CSV export and exposes only authorized budget forms
 
 #### Scenario: Usage table
 
@@ -1874,3 +1939,10 @@ pills with their own colors: "accepted by the developer" green, "declined" red a
 - `lib/v2/config.ts`
 - `lib/v2/changes.ts`
 - `lib/v2/mail.ts`
+
+
+- `app/app/w/[ws]/spend/budgets.tsx`
+- `app/app/_ui/home/needs.ts`
+- `app/app/_ui/home/since.tsx`
+- `app/app/_ui/home/needs-list.tsx`
+- `scripts/test-budgets.mjs`

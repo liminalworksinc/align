@@ -5,6 +5,46 @@
 - Sessions and in-session status show how a session came to count toward its goal. Spend can show each goal's
   request counts and list-price estimates by sharing source, with older rolled-up usage identified separately.
 - Retrying a binding with changed details returns a conflict and leaves the original binding in place.
+- Approving a budget request for its full amount is no longer refused in the browser for amounts such as $4.03.
+  The form now rounds to whole cents before comparing, as the server does.
+- Concurrent writes and approval previews wait for the shared database transaction to finish, preventing nested
+  transaction errors.
+- The local agent records the characters Align adds to each session's context, with addition counts and last times.
+  `align status` shows the current folder's session total and `align sessions` shows each session's total.
+  Budget context lines count toward model context; person-only budget messages and notices count separately.
+  Counters use a separate append-only file per session, with one append per text return, so parallel hooks keep
+  every addition without changing shared hook-state reads, writes or fields. Commands sum valid complete lines
+  and tolerate a torn last line. Sync expires logs after 30 days without an addition. Each pass lists and sorts
+  names once, resumes after its saved name, examines at most 500 paths, and removes at most 100 files, with a
+  10 millisecond budget on examinations. Counter writes refuse symlinks and special files. Commands read at most
+  the last 1 MiB per counter log and label capped totals as lower bounds. Unsupported runtimes leave counter and
+  hook-state storage untouched. Later additions start a new total. Uninstall removes all counters.
+  Unchanged prompts return zero bytes and leave totals, addition counts and last times unchanged.
+- Budget reads take a write lock only to record a new current-month crossing. If the writer stays busy, figures
+  still return and a later read can record the crossing after rechecking access and current amounts.
+- Budget pass tests use a controlled clock so machine load cannot shorten their expected batches; a separate
+  regression checks the unchanged time cutoff and continuation with unfinished sessions.
+
+- Budget changes reach shared sessions on the next sync through private change stamps on the existing response.
+  Unchanged cached passes add no budget requests. Indexed change stamps avoid rereading history, and concurrent
+  crossing reads retain one first observation. Terminal budget reads print figures before a best-effort local update,
+  skip that update while sync holds its lock, and confirm at most the current folder's session. Claude Code can warn
+  the person during a long turn without adding budget context; Codex retains next-prompt notes. Spend states current
+  crossings and their computation time; Home shows first observed crossings to leads and owners outside Needs.
+
+- Team budget notes use the clock offset in their local snapshot, preserve state through rejected figures and
+  temporary refusals, and run after other sync work. Notes distinguish model
+  context from the person's message. Budget records name the authenticated filing source and terminal device.
+  Small teams see the spend privacy limit. Earlier unattributed usage prevents exact totals, closed months retain
+  their applicable grants, and request rate limits apply per requester with a separate workspace ceiling.
+
+- Teams can set monthly budgets in list-price estimates, record requests for more and keep each decision.
+  Terminal requests always wait for a person. Spend includes budget controls and a monthly CSV export with
+  exactly the on-screen team report's rows and amounts for the same reader and month, keeping all no-goal usage
+  unallocated. Team budgets, burn, forecasts, history and home-team no-goal subtotals are visible only to team
+  members and workspace owners. Home includes budget requests in its Needs list. Existing local hooks deliver
+  informational budget notes from cached known spend, including priced lower bounds, without stopping work.
+
 - Server tests finish each readiness response before stopping a phase, preventing a previous server from satisfying
   the next phase's readiness check.
 - Failed transaction and preview setup releases database state so later writes, previews and sign-in mail work.
