@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
-import { loadCredentials } from "../src/api.ts";
+import { credentialsFile, loadCredentials } from "../src/api.ts";
 import { readTurn } from "../src/analysis-transcript.ts";
 import { inspectAnalysis } from "../src/analysis.ts";
 import { syncOnce } from "../src/sync.ts";
@@ -74,7 +74,7 @@ describe("e2e", () => {
     assert.ok(!fake.log.some((l) => l.origin), "agent never sends Origin");
     const creds = loadCredentials(t.home)!;
     assert.match(creds.device_id, /^dv_/);
-    assert.equal(fs.statSync(layout.credentials(t.home)).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(credentialsFile(t.home)).mode & 0o777, 0o600);
     assert.equal(fs.statSync(layout.deviceKey(t.home)).mode & 0o777, 0o600);
     assert.ok(fs.existsSync(layout.feed(t.home, "ws_acme")));
 

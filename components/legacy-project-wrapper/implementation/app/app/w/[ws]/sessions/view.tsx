@@ -204,6 +204,7 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
                 </details>
               )}
               {s.state === "suspended" && <Note>The alignment this session counted under was revoked. Pick a goal for it on your machine to resume uploads.</Note>}
+              {s.team_budget_label && <p className="my-2 text-[14px] text-(--text-2)">{s.team_budget_label}</p>}
               {s.ended_reason === "device_signed_out" && (
                 <Note>
                   The machine that shared this session signed out of Align, so sharing ended and Stop or Resume can&apos;t reach it.

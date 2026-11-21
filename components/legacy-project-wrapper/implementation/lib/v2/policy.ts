@@ -36,6 +36,7 @@ export type PolicyObject =
   | { kind: "goal_draft"; podId: string | null }
   | { kind: "bind"; goal: GoalObject; hasTransfer: boolean }
   | { kind: "pod"; podId: string }
+  | { kind: "budget_request"; podId: string; requesterId: string; secondLook: boolean; firstDeciderId: string | null }
   | { kind: "session"; ownerId: string }
   | { kind: "alignment"; involved: readonly string[] };
 
@@ -80,7 +81,13 @@ export type Action =
   | "pod.manage_members"
   | "session.manage" // the session's own owner: re-share, epochs, usage, stop sharing, delete
   | "session.stop" // stop/resume its agent: the owner, or a workspace owner
-  | "alignment.read";
+  | "alignment.read"
+  | "team_budget.manage"
+  | "budget_request.create"
+  | "budget_request.read"
+  | "budget_request.decide"
+  | "budget_request.withdraw"
+  | "budget_request.second_look";
 
 export type Decision = { ok: true } | { ok: false; status: 403 | 404; code: string; message: string };
 
@@ -177,6 +184,27 @@ export function authorize(p: PolicyPrincipal, action: Action, obj: PolicyObject)
       if (obj.kind !== "session") return hidden();
       if (obj.ownerId === p.userId || wsCan(p, "session.stop_any")) return ALLOW;
       return hidden();
+
+    case "team_budget.manage":
+    case "budget_request.create": {
+      if (obj.kind !== "pod") return hidden();
+      if (p.wsRole === "viewer") return roleDenied(p);
+      if (action === "budget_request.create") return p.pods.has(obj.podId) ? ALLOW : deny("not_in_team", "Only members of this team can ask for more.");
+      return p.wsRole === "owner" || p.pods.get(obj.podId) === "lead" ? ALLOW : deny("not_team_lead", "Only a team lead or workspace owner can change its team budget.");
+    }
+    case "budget_request.read":
+    case "budget_request.decide":
+    case "budget_request.withdraw":
+    case "budget_request.second_look": {
+      if (obj.kind !== "budget_request") return hidden();
+      if (obj.requesterId !== p.userId && p.wsRole !== "owner" && !p.pods.has(obj.podId)) return hidden();
+      if (action === "budget_request.read") return ALLOW;
+      if (action === "budget_request.withdraw" && obj.requesterId === p.userId) return ALLOW;
+      if (p.wsRole === "viewer") return roleDenied(p);
+      if (action === "budget_request.withdraw" || action === "budget_request.second_look") return obj.requesterId === p.userId ? ALLOW : deny("not_requester", "Only the requester can do this.");
+      const eligible = obj.secondLook ? p.wsRole === "owner" && p.userId !== obj.firstDeciderId : p.wsRole === "owner" || p.pods.get(obj.podId) === "lead";
+      return eligible && p.userId !== obj.requesterId ? ALLOW : deny("not_an_approver", "Only an eligible team lead or workspace owner other than the requester can decide this request.");
+    }
 
     case "alignment.read":
       if (obj.kind !== "alignment") return hidden();
