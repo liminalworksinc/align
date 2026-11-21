@@ -1,6 +1,7 @@
 // Directive intake: polled by cursor from the hook-started sync. A directive is accepted only for session keys this device owns, written durably, projected into hot files, and
 // acknowledged with a `received` receipt (plus `enforced` once a stop latch or a goal hold is set, `applied` once a
 // resume or release lifts it). Requests (REQ-002) get `accepted` or `declined` later, when they are answered.
+import { receiveBudgetStamps } from "./budgets.ts";
 import type { Ctx } from "./context.ts";
 import { api, HttpError } from "./api.ts";
 import { bumpGap, kvGet, kvSet, nowIso, tx } from "./db.ts";
@@ -242,6 +243,7 @@ export async function pollDirectives(ctx: Ctx, onRefresh: (ws: string) => void, 
       if (r.status >= 500 || r.status === 429) throw new HttpError(r.status, r.json?.error ?? null, r.json);
       return n;
     }
+    if (i === 0) receiveBudgetStamps(ctx, r.json?.budget_stamps);
     if (i === 0 && Array.isArray(r.json?.workspaces)) onReach(r.json.workspaces.filter((w: unknown): w is string => typeof w === "string"));
     // Shares the server ended (Stop sharing on the web, say), which no directive tells: they end here now (cycle 8).
     if (i === 0 && Array.isArray(r.json?.ended_sessions)) endSharesEndedOnServer(ctx, r.json.ended_sessions.filter(validEnded));

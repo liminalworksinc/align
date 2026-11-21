@@ -10,6 +10,7 @@ import { goalRow, visibleGoals } from "./goals";
 import { alignmentWaits, appEvidence, changeWaits, launchWaits, type EvidenceClass, type HomeNext, type HomePerson } from "./home-core.mts";
 import type { PolicyPrincipal } from "./policy";
 import { memberName } from "./workspaces";
+import { homeBudgetRequests, homeBudgetCrossings } from "./budgets";
 
 // The workspace Home (PORT2-001, from v1's "Know what needs you", main #41/#42): one read of what needs this person
 // and what waits on others, the active goals, and the connected AI apps with when each last read the goals. Built
@@ -234,7 +235,8 @@ export function workspaceHome(pp: PolicyPrincipal) {
 
   const outcomes = section(() => ({ waiting_on_me: dueExpectations(pp) }));
   const goal_list_review_due = active_goals === null ? null : active_goals.length > 0 && section(() => goalListReviewDue(pp));
-  return { me, change_requests, asks, alignments, goals: active_goals, apps, outcomes, goal_list_review_due };
+  const budget_requests = section(() => homeBudgetRequests(pp));
+  return { me, change_requests, asks, alignments, budget_requests, budget_crossings: section(() => homeBudgetCrossings(pp)), goals: active_goals, apps, outcomes, goal_list_review_due };
 }
 
 export type WorkspaceHome = ReturnType<typeof workspaceHome>;

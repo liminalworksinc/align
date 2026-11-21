@@ -80,6 +80,27 @@ Source: https://code.claude.com/docs/en/hooks (markdown at https://code.claude.c
   `claude plugin list` shows `align@skills-dir` loaded and its hooks fire. A hook in both settings.json and a plugin
   "runs twice", hence install removes older Align handlers from settings.json.
 
+### Budget warnings at a tool call (2026-11-17)
+
+The synchronous Claude Code PreToolUse contract supports a user-visible `systemMessage` separate from
+`hookSpecificOutput.additionalContext`. Budget warnings use only `systemMessage`: they do not enter the model's
+context. The current primary hooks reference was re-read for this change:
+https://code.claude.com/docs/en/hooks#json-output and https://code.claude.com/docs/en/hooks#pretooluse.
+This applies to synchronous hooks only. An async hook's output can become context and is not used here.
+Align skips subagents and uses the existing non-waiting delivery lock. Persistent message markers are independent
+of next-prompt context markers; prompt-first delivery consumes the message opportunity too. Output-field routing
+and dedupe are covered by listener-free tests.
+
+Checked on 2026-11-19 in a real Claude Code 2.1.328 run (`claude -p`, stream output): a PreToolUse command hook
+on `Read` that prints only `{"systemMessage": "..."}` produced a `system` event with subtype `informational`,
+level `notice` and content `PreToolUse:Read says: <the message>`. Asked afterwards to quote any such text in its
+context, the model reported none. So the field reaches the person and not the model. That run used a stand-in hook
+that prints the same field. The Align hook itself has not been watched end to end in an interactive terminal
+against a server with a crossed budget.
+
+Codex user-visible tool-call messages that stay outside model context are **not verified**. Budget information on
+Codex remains at the next prompt. No budget field is added to its tool-call output.
+
 ## Claude Code telemetry
 
 Source: https://code.claude.com/docs/en/monitoring-usage and the CHANGELOG at
