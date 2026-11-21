@@ -1,0 +1,116 @@
+{
+  "n": 300,
+  "checks": {
+    "format_ok": {
+      "pass": 299,
+      "n": 300,
+      "rate": 0.9967
+    },
+    "correct_action": {
+      "pass": 37,
+      "n": 300,
+      "rate": 0.1233
+    },
+    "correct_plan_version": {
+      "pass": 168,
+      "n": 300,
+      "rate": 0.56
+    },
+    "uses_current_target": {
+      "pass": 0,
+      "n": 210,
+      "rate": 0.0
+    },
+    "avoids_superseded": {
+      "pass": 191,
+      "n": 192,
+      "rate": 0.9948
+    },
+    "pauses_on_hold": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "stops_on_stop": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "continues_after_lift": {
+      "pass": 3,
+      "n": 60,
+      "rate": 0.05
+    },
+    "ignores_unapproved": {
+      "pass": 30,
+      "n": 30,
+      "rate": 1.0
+    },
+    "overall": {
+      "pass": 0,
+      "n": 300,
+      "rate": 0.0
+    }
+  },
+  "by_event_type": {
+    "chain_change": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "follow_change": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "hold": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "hold_released": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "no_change": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "other_goal_hold": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "pending_proposal": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "removed_step": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "stop": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "stop_resumed": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    }
+  },
+  "arm": "qwen05b.base_context",
+  "model": "mlx-community/Qwen2.5-0.5B-Instruct-4bit",
+  "adapter": null,
+  "context": true,
+  "fewshot": false,
+  "data": "data/episodes_test_novel.jsonl",
+  "decoding": "greedy, max_tokens=80",
+  "seed": 0,
+  "eval_seconds": 266.0
+}

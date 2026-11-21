@@ -1,0 +1,116 @@
+{
+  "n": 300,
+  "checks": {
+    "format_ok": {
+      "pass": 300,
+      "n": 300,
+      "rate": 1.0
+    },
+    "correct_action": {
+      "pass": 211,
+      "n": 300,
+      "rate": 0.7033
+    },
+    "correct_plan_version": {
+      "pass": 275,
+      "n": 300,
+      "rate": 0.9167
+    },
+    "uses_current_target": {
+      "pass": 100,
+      "n": 210,
+      "rate": 0.4762
+    },
+    "avoids_superseded": {
+      "pass": 81,
+      "n": 192,
+      "rate": 0.4219
+    },
+    "pauses_on_hold": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "stops_on_stop": {
+      "pass": 1,
+      "n": 30,
+      "rate": 0.0333
+    },
+    "continues_after_lift": {
+      "pass": 60,
+      "n": 60,
+      "rate": 1.0
+    },
+    "ignores_unapproved": {
+      "pass": 30,
+      "n": 30,
+      "rate": 1.0
+    },
+    "overall": {
+      "pass": 101,
+      "n": 300,
+      "rate": 0.3367
+    }
+  },
+  "by_event_type": {
+    "chain_change": {
+      "pass": 11,
+      "n": 30,
+      "rate": 0.3667
+    },
+    "follow_change": {
+      "pass": 4,
+      "n": 30,
+      "rate": 0.1333
+    },
+    "hold": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "hold_released": {
+      "pass": 4,
+      "n": 30,
+      "rate": 0.1333
+    },
+    "no_change": {
+      "pass": 24,
+      "n": 30,
+      "rate": 0.8
+    },
+    "other_goal_hold": {
+      "pass": 20,
+      "n": 30,
+      "rate": 0.6667
+    },
+    "pending_proposal": {
+      "pass": 25,
+      "n": 30,
+      "rate": 0.8333
+    },
+    "removed_step": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "stop": {
+      "pass": 1,
+      "n": 30,
+      "rate": 0.0333
+    },
+    "stop_resumed": {
+      "pass": 12,
+      "n": 30,
+      "rate": 0.4
+    }
+  },
+  "arm": "qwen05b.tuned_context",
+  "model": "mlx-community/Qwen2.5-0.5B-Instruct-4bit",
+  "adapter": "adapters/qwen05b",
+  "context": true,
+  "fewshot": false,
+  "data": "data/episodes_test_novel.jsonl",
+  "decoding": "greedy, max_tokens=80",
+  "seed": 0,
+  "eval_seconds": 496.0
+}
