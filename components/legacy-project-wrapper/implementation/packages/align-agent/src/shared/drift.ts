@@ -481,7 +481,7 @@ export function crossings(l: Pick<Limit, "text" | "type">, reply: string, known:
 export function exampleCrossings(l: Limit, reply: string, known: DriftKnown): { sentence: string; example: boolean }[] {
   const within = norm(l.example_within ?? "");
   const example = l.example_crossing?.trim();
-  const unsaid = example?.replace(/^(?:I|we)(?: will|'ll| shall| am going to| are going to)\s+/i, "");
+  const unsaid = example?.replace(/^(?:I|we)(?:(?: will|'ll| shall| am going to| are going to))?\s+/i, "");
   const shape = unsaid && unsaid !== example ? shapeOf({ text: unsaid, type: "must_not" }) : null;
   const regular = crossings(l, reply, known).filter((s) => norm(s) !== within).map((sentence) => ({ sentence, example: false }));
   if (!shape || !example) return regular;

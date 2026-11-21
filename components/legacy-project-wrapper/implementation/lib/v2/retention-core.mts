@@ -27,6 +27,17 @@ import { deleteExpiredExcerpts } from "./excerpt-retention.mts";
 // Like lib/v2/core.mts, Node runs this file directly (type stripping): it imports only core.mts and takes its database
 // as an argument. Account deletion (lib/v2/account.ts) uses pseudonymise() at once instead of after 30 days.
 
+export const FINDING_RETENTION_MS = 30 * 86_400_000;
+
+export function deleteExpiredFindings(db: Sql, now: Date) {
+  const cutoff = new Date(now.getTime() - FINDING_RETENTION_MS).toISOString();
+  const expired = "turn_started_at <= ? OR received_at <= ?";
+  db.run(`INSERT INTO v2_audit (ws_id, actor_id, action, object_id, at)
+    SELECT DISTINCT ws_id, NULL, 'data_sharing.results_expired', NULL, ?
+    FROM v2_analysis_findings WHERE ${expired}`, now.toISOString(), cutoff, cutoff);
+  return db.run(`DELETE FROM v2_analysis_findings WHERE ${expired}`, cutoff, cutoff);
+}
+
 export { RESTORE_DAYS };
 export const FORMER_MEMBER_DAYS = 30;
 export const SESSION_MONTHS = 13;
@@ -306,8 +317,7 @@ const STEPS: ((db: Sql, now: Date, c: RetentionCounts, o: StepOptions) => void)[
     if (tableExists(db, "ba_verification")) c.codes_deleted += db.run("DELETE FROM ba_verification WHERE expiresAt < ?", at);
     if (tableExists(db, "ba_session")) c.sign_in_sessions_deleted += db.run("DELETE FROM ba_session WHERE expiresAt < ? OR createdAt < ?", at, daysBefore(now, sessionMaxDays(env)));
     if (tableExists(db, "v2_analysis_findings")) {
-      const findingsCutoff = daysBefore(now, 30);
-      c.analysis_findings_deleted += db.run("DELETE FROM v2_analysis_findings WHERE turn_started_at <= ? OR received_at <= ?", findingsCutoff, findingsCutoff);
+      c.analysis_findings_deleted += deleteExpiredFindings(db, now);
     }
     if (tableExists(db, "v2_session_excerpts")) c.session_excerpts_deleted += deleteExpiredExcerpts(db, at);
     c.activity_deleted += db.run("DELETE FROM v2_activity WHERE expires_at < ?", at);

@@ -30,6 +30,99 @@ queue item or let `docs/roadmap/` become a plan archive.
 Check the parent only after every required subtask and evidence item passes. Add the
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
+### [x] ALIGN-002: Close the second review of model suggestions and sharing
+
+- **Priority:** P0
+- **Owner:** Align local agent, workspace sharing policy, People, Trust and Spend
+- **Direction:** Resolve the second review on the stacked goal suggestions, model limits and excerpts work.
+- **Conclusion:** Authorize the exact inputs immediately before sending, discard stale answers, and keep confirmations, notices and deletion tied to the state the person acted on.
+- **Completion prerequisites:** none
+- **Implementation and evidence:**
+  - [x] Specify the revised boundaries and review the proposed decisions.
+    Specification validation accepted all eight documents.
+  - [x] Check the regressions for the confirmed findings and the two coverage gaps in the full local gate.
+    The focused suggestion suite passed 24 checks. The prior excerpt client failed the delayed dispatch test,
+    and the updated client passed. The server and browser suite passed 1,200 checks.
+  - [x] Record the complete Node 24 gate with both clean installs and leave the implementation staged.
+    On Node 24.22.3 both clean installs exited successfully. `ALIGN_TEST_PORT=5400 npm test` passed
+    2,266 checks with zero failures. Schema 35 preserved consent and restrictions and expired the old dispatch
+    windows. The retained test receipt is stale.
+
+### [ ] ALIGN-003: Preserve consent and turn evidence through sync and upgrades
+
+- **Priority:** P0
+- **Owner:** Align local agent, workspace session sharing and limits
+- **Direction:** Address the independent reviews of data sharing, local analysis, model limit checks and excerpts in the existing staged worktree.
+- **Conclusion:** Use the recorded turn for attribution and recheck current permission at dispatch and response. Preserve choices, deletion scope and supported prior records across upgrades.
+- **Depends on:** ALIGN-002
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Compare both reviews with the staged work and update the owning specifications. All eight Align documents validate.
+  - [x] Repair dispatch, attribution, upgrades, grants, counts, cleanup and reader-facing wording. Add CLI,
+    server and 390-pixel browser checks for the implemented paths.
+  - [ ] Exercise a full older-client downgrade, expiry of a second excerpt during a held writer, and stale revoke
+    through the browser. The current suite covers isolated queue storage, access-time expiry and stale revoke
+    through the API. The goal link in local inspection supports taking a dispute to the owner directly.
+- **Evidence:**
+  - [x] Both clean installs succeeded. On Node 24.22.3, `ALIGN_TEST_PORT=5400 npm test` passed 2,291 checks
+    with zero failures, including 1,214 server and browser checks, 187 OAuth checks, 78 live CLI checks and
+    680 agent checks. Specification validation passed all eight documents. The retained test receipt is stale.
+
+
+- **Merge integration, 2026-11-20:** Resolve the lower branch merge with both sets of review fixes and budget
+  behavior. The first 34 migration SQL strings and their source prefix match `MERGE_HEAD` exactly. This branch
+  adds only migration 35, previously 32. Comparing with the common ancestor confirms no earlier migration was
+  edited in place. An in-memory SQLite upgrade preserves all prior dispatch-window columns, foreign keys,
+  primary-key index and triggers, adds the answer revision and expires old grants. Spending period and finding
+  schemas remain identical across that upgrade, including captured teams. The lower branch did not change
+  either local database schema file. Both Home need kinds, ID prefixes, budget notes, context counters and
+  review fixes remain combined. Duplicate roadmap entries and the repeated local measure requirement were
+  consolidated without losing their distinct rules. No behavioral disagreement remains.
+- **Merge verification:** Node 26.3.0. Both dependency directories were present, so no install was needed.
+  Commands below ran from the implementation directory unless the package directory is specified.
+  The initial `npm run lint` from the repository root failed because it has no package manifest. The corrected
+  run passed with no errors and two existing unused-variable warnings. All 590 executed checks passed.
+  The two serial hook latency cases passed; their measured p95 values were 120.3 ms and 102.0 ms, under 150 ms.
+  Five script syntax checks passed. The tracked-file marker scan returned no matches, and the whitespace check
+  passed. The in-memory migration comparison and checks of both shared union types passed.
+
+```sh
+npm run lint
+npx next typegen && npx tsc --noEmit
+node scripts/test-budgets.mjs
+node scripts/test-admin.mjs
+node scripts/test-invite-races.mjs
+node --check scripts/test-v2.mjs && node --check scripts/test-oauth.mjs && node --check scripts/test-agent-live.mjs
+node --check scripts/test-budgets.mjs && node --check scripts/test-admin.mjs
+```
+
+The budget, admin and invite checks passed 69/0, 88/0 and 11/0 respectively. From
+`components/legacy-project-wrapper/implementation/packages/align-agent`, the exact commands were:
+
+```sh
+npm run typecheck && npm run build
+node --test --test-concurrency=4 --test-skip-pattern='sessions toward the same goal: a card|a file a script wrote|reporting steering lines|wire: received|`align login` saves the server|`align login` says which server' test/metering.test.ts test/drift-corpus.test.ts test/hooks.test.ts test/pod.test.ts test/install.test.ts test/requests.test.ts test/budgets.test.ts test/budget-timing.test.ts test/context-cost.test.ts test/context-concurrency.test.ts test/context-retention.test.ts test/hook-parity.test.ts
+node --test --test-name-pattern='^rules abstain on weak history|^the transcript reader rejects ambiguous|^the rollout reader distinguishes|^the decision input comes from|^transcript selection follows|^rollout timestamp selection counts|^exact previews show|^a partly rolled back clock|^a new folder choice|^a successful no-op edit|^path patterns match|^analysis retries an unreadable' test/goal-suggestions.test.ts test/e2e.test.ts
+node --test --test-skip-pattern='reporting steering lines' test/allocation.test.ts
+node --test --test-concurrency=1 test/serial/*.test.ts
+```
+
+Package typecheck and build passed. The four test commands passed 398/0, 12/0, 10/0 and 2/0 respectively.
+From the repository root, the exact final scans were:
+
+```sh
+git ls-files -z | xargs -0 grep -n '^<<<<<<<\|^=======$\|^>>>>>>>'
+git diff --check
+```
+
+- **Verification scope:** The skip patterns exclude the same-goal sibling card and script-written file tests
+  because they run mutating git commands, the Requests wire case and two login pairing cases because they
+  start listeners, and the allocation reporting group because it starts listeners. The reporting-group pattern
+  has no match in the first package command. The selected end-to-end and suggestion tests use no listeners;
+  their remaining cases require listeners. Other listener-dependent suites, the application server and browser
+  tests, live provider behavior and the live smoke test remain unverified. The three port-dependent scripts
+  received syntax checks only. The index and history remain untouched.
+
 ### [ ] LIM-2528: Check limits with a decision model and share selected excerpts
 
 - **Priority:** P0

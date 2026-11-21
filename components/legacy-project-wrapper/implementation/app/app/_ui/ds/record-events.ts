@@ -301,6 +301,10 @@ const SAID: Record<string, string> = {
   "oauth.app_approved": "approved a connected app",
   "oauth.app_revoked": "disconnected a connected app",
   "device.workspace_added": "added a device to this workspace",
+  "data_sharing.work_signals_off": "turned off work signals",
+  "data_sharing.work_signals_on": "turned on work signals",
+  "data_sharing.results_deleted": "deleted shared findings",
+  "data_sharing.results_expired": "removed expired findings",
   "account.signed_out_everywhere": "signed out everywhere",
 };
 
@@ -316,6 +320,8 @@ function auditWhat(action: string): string {
 }
 
 const FAMILY: Record<string, string> = {
+  data_sharing: "Data sharing",
+  session_excerpt: "Session excerpt",
   change_request: "Change request",
   alignment: "Alignment",
   reallocation: "Target change",

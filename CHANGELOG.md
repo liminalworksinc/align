@@ -2,13 +2,26 @@
 
 ## Unreleased
 
+- Buffered activity keeps the goal it belonged to when it was recorded. Turning off work signals still lets
+  eligible file hashes through. Derived results respect a new consent period after an offline opt-out, and queued
+  deletions keep their original cutoff. Earlier clients leave the new sharing queue intact.
+- Limit checks use a final reply from the recorded turn. Inspection shows unknown or a lower bound when the
+  transcript is incomplete. Both approval views show changes to limit examples and path anchors. Excerpt
+  confirmations stay current through lookup and send, and previews show otherwise invisible characters.
+
+- A workspace block stops new decision requests when saved and discards answers that arrive later.
+  Goal suggestions send the current bindable goal list. Repeated turn starts keep their original consent boundary.
+  Sharing and suggested binding confirmations require a matching preview. Excerpt confirmations expire when consent
+  changes or their source is deleted. Local findings and deletions continue while decision calls wait. Hosted Align
+  hides an address it would refuse to save. People, Trust and Privacy explain the optional transfers, and Spend shows
+  unknown for fully unpriced rows. Schema 35 preserves saved choices and expires old dispatch windows.
+
 - Two proposed choices are off by default. A model can check a completed reply against its goal's limits after
   sync, with evidence and feedback on the machine. People can also preview and share an exact passage with named
   workspace readers for a stated purpose and expiry. Schema 34 supports reading and revoking excerpts in Sessions
   and deleting expired copies. Workspace owners can block both choices.
 
-- A workspace block waits for active sends for that capability before confirming the save. Checks use the completed turn's
-  final reply. Excerpt previews show invisible characters, the most recent sharing choice wins, and revoked or
+- Checks use the completed turn's final reply. Excerpt previews show invisible characters, the most recent sharing choice wins, and revoked or
   expired shares stay unavailable after audit cleanup. Sessions removes an unavailable excerpt when a reader
   tries to open it, and deletion clears excerpt text from live storage as described in the retention schedule.
 - Align can suggest a goal after a session's first turn using local rules and prior bindings. Sharing still

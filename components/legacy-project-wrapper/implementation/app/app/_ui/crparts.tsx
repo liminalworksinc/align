@@ -6,7 +6,7 @@ import { LIMIT_WORDS } from "./limits";
 import { EvidenceLabel } from "./ds";
 import type { AlignSnapshot, ChangeFields, ChangeRequest, Evidence, EvidenceKind, Goal } from "./types";
 import { DraftPrecedents } from "./precedents";
-import { counterSameAsBase, counterSameAsRequest, dependsOnFull, hiddenGoals, withHidden } from "@/lib/v2/change-words.mts";
+import { counterSameAsBase, counterSameAsRequest, dependsOnFull, hiddenGoals, limitChanged, limitDetails, withHidden } from "@/lib/v2/change-words.mts";
 import { count } from "@/lib/v2/plural.mts";
 import { isBlankText } from "@/lib/v2/text-core.mts";
 
@@ -33,7 +33,7 @@ export { hiddenGoals, withHidden };
 
 /** One field's value in plain words (dependencies by title when the person can see them; `hidden` counts the ones they
  *  can't, so a dependency they can't see never reads as "Nothing"). */
-export function FieldValue({ k, v, titles, hidden = 0 }: { k: keyof ChangeFields; v: ChangeFields[keyof ChangeFields]; titles: Map<string, string>; hidden?: number }) {
+export function FieldValue({ k, v, titles, hidden = 0, other }: { k: keyof ChangeFields; v: ChangeFields[keyof ChangeFields]; titles: Map<string, string>; hidden?: number; other?: ChangeFields[keyof ChangeFields] }) {
   if (v === undefined) return <span className="text-zinc-500">(unchanged)</span>;
   if (k === "measures") {
     const ms = v as Goal["measures"];
@@ -59,11 +59,23 @@ export function FieldValue({ k, v, titles, hidden = 0 }: { k: keyof ChangeFields
     if (!ls.length) return <span className="text-zinc-500">No limits</span>;
     return (
       <ul className="list-disc pl-5">
-        {ls.map((l, i) => (
-          <li key={`${l.id}-${i}`}>
-            {LIMIT_WORDS[l.type]}: {l.text}
-          </li>
-        ))}
+        {ls.map((l, i) => {
+          const twin = (other as Goal["limits"] | undefined)?.find((limit) => limit.id === l.id);
+          const otherDetails = limitDetails(twin);
+          return (
+            <li className="wrap-anywhere" key={`${l.id}-${i}`}>
+              {LIMIT_WORDS[l.type]}: {l.text}
+              <dl className="pl-2">
+                {limitDetails(l).map(([label, values], index) => values.length || otherDetails[index][1].length ? (
+                  <div key={label}>
+                    <dt className="text-[12px] text-zinc-500">{label}</dt>
+                    <dd>{values.length ? values.join(", ") : "None"}</dd>
+                  </div>
+                ) : null)}
+              </dl>
+            </li>
+          );
+        })}
       </ul>
     );
   }
@@ -103,8 +115,9 @@ function sameField(k: keyof ChangeFields, a: ChangeFields[keyof ChangeFields], b
     return m(a) === m(b);
   }
   if (k === "limits") {
-    const l = (v: unknown) => JSON.stringify(((v as Goal["limits"] | undefined) ?? []).map((x) => [x.id ?? null, x.type, x.text, x.source ?? null]));
-    return l(a) === l(b);
+    const before = (a as Goal["limits"] | undefined) ?? [];
+    const after = (b as Goal["limits"] | undefined) ?? [];
+    return before.length === after.length && before.every((item, i) => item.id === after[i].id && !limitChanged(item, after[i]));
   }
   return a === b;
 }

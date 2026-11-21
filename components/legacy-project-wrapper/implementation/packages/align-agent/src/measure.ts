@@ -107,10 +107,13 @@ export async function measureCommand(ctx: Ctx, argv: string[]): Promise<string> 
       throw new Error("The command has changed or permission was removed. Review it and allow the exact command again.");
     const result = await runLocal(consent);
     const body = { goal_version: source.goal_version, run_id: randomUUID(), ...result };
+    const samePermission = () => JSON.stringify(readJson<Consent>(file)) === JSON.stringify(consent);
     const submit = async () => {
-      if (JSON.stringify(readJson<Consent>(file)) !== JSON.stringify(consent))
-        throw new Error("Permission was removed before the reading could be sent.");
-      const reply = await apiOk(ctx, "POST", target, { pairedOrigin, body });
+      const reply = await apiOk(ctx, "POST", target, { pairedOrigin, bodyAtSend: () => {
+        if (!samePermission()) throw new Error("Permission was removed before the reading could be sent.");
+        return body;
+      } });
+      if (!samePermission()) throw new Error("Permission changed before the reading was acknowledged.");
       if (typeof reply?.id !== "string" || !reply.id) throw new NetworkError("The reading confirmation did not arrive.");
     };
     try {

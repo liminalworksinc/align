@@ -22,6 +22,7 @@ function driftOn(home: string) {
 
 export function rememberTurn(home: string, lid: string, state: AnalysisTurn) {
   try {
+    if (readJson<AnalysisTurn>(layout.analysisTurn(home, lid))?.root === state.root) return;
     writeJsonAtomic(layout.analysisTurn(home, lid), { ...state, git: state.cwd ? gitInfo(state.cwd) : null });
   } catch {
     /* The analysis reference must not interrupt goal delivery. */
@@ -36,7 +37,7 @@ export function queueTurn(home: string, lid: string, harness: Harness, session: 
   const transcript = file || turn.transcript;
   if (!transcript && turn.binding) return { queued: false, turn };
   const ts = new Date().toISOString();
-  const legacy = !turn.transcript;
+  const legacy = !transcript || (!!turn.binding && !turn.transcript);
   let endOffset: number | undefined;
   try {
     if (transcript) {
@@ -54,6 +55,10 @@ type NoticeHistory = { seen: string[]; count: Record<string, number> };
 const noticeHistory = (home: string, lid: string): NoticeHistory =>
   readJson<NoticeHistory>(layout.analysisSeen(home, lid)) ?? { seen: [], count: {} };
 
+export function analysisNoticeSeen(home: string, lid: string) {
+  return noticeHistory(home, lid).seen;
+}
+
 export function analysisNoticeCounts(home: string, lid: string) {
   return noticeHistory(home, lid).count;
 }
@@ -61,11 +66,11 @@ export function analysisNoticeCounts(home: string, lid: string) {
 export function takeAnalysisNotice(home: string, lid: string, inj: InjectedState, max: number, cap: number): string | null {
   if (!driftOn(home)) return null;
   const items = readJson<AnalysisNotice[]>(layout.analysis(home, lid));
-  if (!items?.length) return null;
+  if (!items?.length || readJson<{ signed_out?: boolean }>(layout.me(home))?.signed_out) return null;
   const history = noticeHistory(home, lid);
   const counts = history.count;
-  const seen = new Set(history.seen);
-  const eligible = items.filter((f) => (counts[f.limit.id] ?? 0) + (inj.drift_count?.[f.limit.id] ?? 0) < cap && !seen.has(`${f.limit.id}:${f.digest}`));
+  const seen = new Set([...history.seen, ...(inj.drift_seen ?? [])]);
+  const eligible = items.filter((f) => (counts[f.limit.id] ?? 0) + (inj.drift_count?.[f.limit.id] ?? 0) < cap && !seen.has(`${f.limit.id}:${f.repeat ?? f.digest}`));
   if (!eligible.length) return null;
   const first = eligible[0];
   const named = new Map<string, AnalysisNotice[]>();
@@ -81,9 +86,9 @@ export function takeAnalysisNotice(home: string, lid: string, inj: InjectedState
   for (const group of selected) {
     const id = group[0].limit.id;
     counts[id] = (counts[id] ?? 0) + 1;
-    for (const finding of group) seen.add(`${id}:${finding.digest}`);
+    for (const finding of group) seen.add(`${id}:${finding.repeat ?? finding.digest}`);
   }
-  writeJsonAtomic(layout.analysisSeen(home, lid), { seen: [...seen].slice(-200), count: counts });
+  writeJsonAtomic(layout.analysisSeen(home, lid), { seen: [...seen], count: counts });
   const detail = selected.map((group) => {
     const { limit } = group[0];
     const reasons = [...new Set(group.map((f) => EVIDENCE_WORDS[f.evidence]))];

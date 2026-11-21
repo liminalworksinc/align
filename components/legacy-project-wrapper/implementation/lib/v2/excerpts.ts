@@ -1,10 +1,11 @@
 import { all, audit, get, run, sql, tx } from "./db";
-import { currentDeviceWorkspace, tierBlocked } from "./data-sharing";
+import { currentDeviceWorkspace, dispatchRevisionMatches, grantDispatchWindow, tierBlocked } from "./data-sharing";
 import type { DevicePrincipal } from "./devices";
 import { badRequest, conflict, forbidden, notFound } from "./errors";
 import { event } from "./events";
 import { deleteExpiredExcerpts } from "./excerpt-retention.mts";
 import { nowIso } from "./ids";
+import { scheduleOptionalSessionExpiry } from "./retention";
 import type { PolicyPrincipal } from "./policy";
 import { ownSession } from "./sessions";
 import { isBlankText } from "./text-core.mts";
@@ -39,9 +40,8 @@ function excerptPolicy(pp: PolicyPrincipal, dev: DevicePrincipal, key: string) {
   const current = currentDeviceWorkspace(pp, dev);
   const session = ownSession(current, dev, key);
   need(current, "session.share");
-  const enabled = session.state === "shared" && !tierBlocked(pp.wsId, 4)
-    && !!get("SELECT 1 FROM v2_device_excerpt_consent WHERE device_id = ? AND enabled = 1", dev.deviceId);
-  return { enabled };
+  const revision = get<{ revision: number }>("SELECT revision FROM v2_device_excerpt_consent WHERE device_id = ? AND enabled = 1", dev.deviceId)?.revision;
+  return { enabled: session.state === "shared" && !tierBlocked(pp.wsId, 4) && revision !== undefined, revision };
 }
 
 export function excerptReaders(pp: PolicyPrincipal, dev: DevicePrincipal, key: string) {
@@ -54,15 +54,26 @@ export function excerptReaders(pp: PolicyPrincipal, dev: DevicePrincipal, key: s
   };
 }
 
+export async function excerptDispatch(pp: PolicyPrincipal, dev: DevicePrincipal, key: string,
+  phase: "dispatch" | "answer", revision: string | null) {
+  return tx(() => {
+    const choices = excerptReaders(pp, dev, key);
+    if (!choices.enabled) return choices;
+    if (phase === "answer") return dispatchRevisionMatches(pp.wsId, "excerpt", revision)
+      ? choices : { enabled: false, readers: [] };
+    return { ...choices, ...grantDispatchWindow(pp.wsId, "excerpt") };
+  });
+}
+
 function selection(b: Body) {
   const { id, text, purpose, readers, hours } = b;
   if (Object.keys(b).some((key) => !["id", "text", "purpose", "readers", "hours"].includes(key))) {
     throw badRequest("Send only the excerpt and its sharing details.");
   }
   if (typeof id !== "string" || !EXCERPT_ID.test(id)) throw badRequest("Confirm the excerpt preview again.");
-  if (typeof text !== "string" || isBlankText(text) || !text.isWellFormed() || BIDI_OR_CONTROL.test(text)
+  if (typeof text !== "string" || !text.length || !text.isWellFormed() || BIDI_OR_CONTROL.test(text)
     || Buffer.byteLength(text) > 4000) throw badRequest("Choose excerpt text that fits in 4,000 bytes and has no hidden controls.");
-  if (typeof purpose !== "string" || isBlankText(purpose) || purpose.length > 160 || !purpose.isWellFormed()
+  if (typeof purpose !== "string" || isBlankText(purpose) || [...purpose].length > 160 || !purpose.isWellFormed()
     || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(purpose) || BIDI_OR_CONTROL.test(purpose)) {
     throw badRequest("Enter a purpose on one line, up to 160 characters.");
   }
@@ -79,14 +90,16 @@ function selection(b: Body) {
 async function expire(ws: string) {
   const at = nowIso();
   if (get("SELECT 1 FROM v2_session_excerpts WHERE ws_id = ? AND expires_at <= ? LIMIT 1", ws, at)) {
-    await tx(() => deleteExpiredExcerpts(sql, at, ws));
+    await tx(() => deleteExpiredExcerpts(sql, nowIso(), ws));
   }
 }
 
-export async function shareExcerpt(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {
+export async function shareExcerpt(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body, ifMatch: string | null) {
   await expire(pp.wsId);
-  return tx(() => {
-    if (!excerptPolicy(pp, dev, key).enabled) throw forbidden("excerpts_off", "Sharing excerpts is off.");
+  const shared = await tx(() => {
+    const { enabled, revision } = excerptPolicy(pp, dev, key);
+    if (!enabled) throw forbidden("excerpts_off", "Sharing excerpts is off.");
+    if (ifMatch !== `"${revision}"`) throw conflict("excerpt_preview_expired", "The sharing choice changed. Preview the excerpt again.");
     const input = selection(b);
     const at = nowIso();
     const { id, text, purpose, readers, hours } = input;
@@ -113,33 +126,42 @@ export async function shareExcerpt(pp: PolicyPrincipal, dev: DevicePrincipal, ke
     event("session_excerpt_shared", { ws: pp.wsId, user: pp.userId, at });
     return { id, expires_at };
   });
+  scheduleOptionalSessionExpiry();
+  return shared;
 }
 
 export async function listExcerpts(pp: PolicyPrincipal) {
-  await expire(pp.wsId);
-  need(memberPrincipal(pp.wsId, pp.userId), "workspace.read");
-  const rows = all<Omit<Excerpt, "text" | "session_key">>(`SELECT ${SUMMARY} FROM v2_session_excerpts e
-    WHERE ${VISIBLE} ORDER BY e.created_at DESC, e.id`, pp.wsId, nowIso(), pp.userId, pp.userId);
-  return { excerpts: rows.map((row) => view(row, pp.userId)) };
+  return tx(() => {
+    need(memberPrincipal(pp.wsId, pp.userId), "workspace.read");
+    const at = nowIso();
+    deleteExpiredExcerpts(sql, at, pp.wsId);
+    const rows = all<Omit<Excerpt, "text" | "session_key">>(`SELECT ${SUMMARY} FROM v2_session_excerpts e
+      WHERE ${VISIBLE} ORDER BY e.created_at DESC, e.id`, pp.wsId, at, pp.userId, pp.userId);
+    return { excerpts: rows.map((row) => view(row, pp.userId)) };
+  });
 }
 
 export async function readExcerpt(pp: PolicyPrincipal, id: string) {
-  await expire(pp.wsId);
-  need(memberPrincipal(pp.wsId, pp.userId), "workspace.read");
-  const row = get<Omit<Excerpt, "session_key">>(`SELECT ${SUMMARY}, e.text FROM v2_session_excerpts e
-    WHERE e.id = ? AND ${VISIBLE}`, id, pp.wsId, nowIso(), pp.userId, pp.userId);
+  const row = await tx(() => {
+    need(memberPrincipal(pp.wsId, pp.userId), "workspace.read");
+    const at = nowIso();
+    deleteExpiredExcerpts(sql, at, pp.wsId);
+    return get<Omit<Excerpt, "session_key">>(`SELECT ${SUMMARY}, e.text FROM v2_session_excerpts e
+      WHERE e.id = ? AND ${VISIBLE}`, id, pp.wsId, at, pp.userId, pp.userId);
+  });
   if (!row) throw notFound();
   const { text, ...summary } = row;
   return { ...view(summary, pp.userId), text };
 }
 
 export async function revokeExcerpt(pp: PolicyPrincipal, id: string) {
-  await expire(pp.wsId);
-  return tx(() => {
+  const removed = await tx(() => {
     need(memberPrincipal(pp.wsId, pp.userId), "workspace.read");
     const at = nowIso();
-    const removed = run("DELETE FROM v2_session_excerpts WHERE ws_id = ? AND id = ? AND shared_by = ? AND expires_at > ?", pp.wsId, id, pp.userId, at);
-    if (!removed) throw notFound();
-    audit(pp.wsId, pp.userId, "session_excerpt.revoked", id, at);
+    deleteExpiredExcerpts(sql, at, pp.wsId);
+    const count = run("DELETE FROM v2_session_excerpts WHERE ws_id = ? AND id = ? AND shared_by = ? AND expires_at > ?", pp.wsId, id, pp.userId, at);
+    if (count) audit(pp.wsId, pp.userId, "session_excerpt.revoked", id, at);
+    return count;
   });
+  if (!removed) throw notFound();
 }

@@ -217,6 +217,7 @@ describe("C12-3: every share path holds back while the ended shares are unread",
     const preview = prompt(t, V2, "::align share --dir").reason as string;
     assert.match(preview, /This session is not shared yet: this machine has not yet heard from the Align server whether its sharing was stopped on the web meanwhile/);
     assert.doesNotMatch(preview, /This session is shared too/);
+    prompt(t, V2, "::align share --dir");
     const done = prompt(t, V2, "::align share --dir confirm").reason as string;
     assert.match(done, /are now shared with Acme/);
     assert.match(done, /This session is not shared yet: .* Run `align sync` in a terminal, then type `::align share` here\./);

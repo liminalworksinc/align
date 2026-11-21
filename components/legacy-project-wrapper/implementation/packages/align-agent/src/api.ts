@@ -135,7 +135,16 @@ function failureWords(e: unknown, timeoutMs: number): string {
   return code || err?.cause?.message || err?.message || "fetch failed";
 }
 
-type RequestOptions = { body?: unknown; headers?: Record<string, string>; timeoutMs?: number; pairedOrigin?: string; redirect?: "error" };
+type RequestOptions = {
+  body?: unknown;
+  bodyAtSend?: () => unknown;
+  deadline?: number;
+  headers?: Record<string, string>;
+  timeoutMs?: number;
+  pairedOrigin?: string;
+  redirect?: "error";
+  dispatch?: (send: () => Promise<Response>) => Promise<Response>;
+};
 
 export async function rawRequest(base: string, method: string, path: string, opts: RequestOptions = {}): Promise<Resp> {
   let res: Response;
@@ -143,16 +152,23 @@ export async function rawRequest(base: string, method: string, path: string, opt
   const url = server + path;
   if (opts.pairedOrigin && new URL(url).origin !== opts.pairedOrigin)
     throw new Error("This request must go to the server where this machine is signed in.");
-  const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
+  const timeoutMs = Math.max(1, Math.min(opts.timeoutMs ?? TIMEOUT_MS, (opts.deadline ?? Infinity) - Date.now()));
   const t0 = Date.now();
-  try {
-    res = await fetch(url, {
+  const send = () => {
+    if (opts.deadline !== undefined && Date.now() >= opts.deadline) throw new NetworkError("Request budget expired");
+    const body = opts.bodyAtSend ? opts.bodyAtSend() : opts.body;
+    return fetch(url, {
       method,
       redirect: opts.pairedOrigin ? "manual" : opts.redirect,
-      headers: { ...(opts.body !== undefined ? { "content-type": "application/json" } : {}), accept: "application/json", ...(opts.headers || {}) },
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), accept: "application/json", ...(opts.headers || {}) },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(timeoutMs),
     });
+  };
+  // Authorization failures from a local dispatch check retain their own message.
+  const pending = opts.dispatch?.(send);
+  try {
+    res = await (pending ?? send());
   } catch (e) {
     const msg = `could not reach the Align server at ${server} (${failureWords(e, timeoutMs)})`;
     trouble ??= msg;
@@ -202,8 +218,8 @@ export function withLock<T>(home: string, fn: () => Promise<T>, waitMs = 15_000)
       } catch {
         /* raced */
       }
-      if (Date.now() > deadline) throw new NetworkError("refresh lock busy");
-      await new Promise((r) => setTimeout(r, 100));
+      if (Date.now() >= deadline) throw new NetworkError("refresh lock busy");
+      await new Promise((r) => setTimeout(r, Math.min(100, Math.max(1, deadline - Date.now()))));
       return attempt();
     }
     // Kept fresh while held, so a holder that waits on the network (a logout's revoke) is never taken for a stale lock.
@@ -324,14 +340,30 @@ export interface Refused {
  * more on the offset the answer's `server_time` gives; whatever is still refused is logged with why, never dropped
  * silently (C3-4). Returns the answer (null when the server could not be reached) and the items still refused.
  */
-export async function postTimed<T extends { at: string }>(ctx: Ctx, path: string, field: string, items: T[], what: string, extra: Record<string, unknown> = {}): Promise<{ r: Resp | null; refused: Refused[] }> {
-  const send = (list: T[]) => {
-    const offset = clockOffset(ctx.home);
-    return api(ctx, "POST", path, { body: { ...extra, [field]: list.map((i) => ({ ...i, at: serverIso(i.at, offset, true) })) } }).catch(() => null);
+export async function postTimed<T extends { at: string }>(ctx: Ctx, path: string, field: string, items: T[], what: string,
+  extra: Record<string, unknown> = {}, prepare?: () => Promise<(item: T) => T | null>): Promise<{ r: Resp | null; refused: Refused[] }> {
+  const send = async (list: T[]) => {
+    let sent: number[] = [];
+    const makeItem = await prepare?.();
+    const r = await api(ctx, "POST", path, { redirect: "error", bodyAtSend: () => {
+      sent = [];
+      const offset = clockOffset(ctx.home);
+      const batch = list.flatMap((item, index) => {
+        const ready = makeItem ? makeItem(item) : item;
+        if (!ready) return [];
+        sent.push(index);
+        return [{ ...ready, at: serverIso(ready.at, offset, true) }];
+      });
+      return { ...extra, [field]: batch };
+    } }).catch(() => null);
+    const refused = Array.isArray(r?.json?.refused) ? (r.json.refused as Refused[]).flatMap(({ index, reason }) =>
+      sent[index] === undefined ? [] : [{ index: sent[index], reason }]) : [];
+    return { r, refused: [...refused, ...list.flatMap((_, index) => sent.includes(index) ? [] : [{ index, reason: "not_sent" }])] };
   };
-  const r = await send(items);
+  const first = await send(items);
+  const { r } = first;
   if (!r || r.status < 200 || r.status >= 300) return { r, refused: [] };
-  let refused = (Array.isArray(r.json?.refused) ? r.json.refused : []) as Refused[];
+  let refused = first.refused;
   const skewed = refused.filter((x) => x.reason === "clock_skew" && items[x.index]);
   const server = Date.parse(String(r.json?.server_time ?? ""));
   if (skewed.length && !Number.isNaN(server)) {
@@ -341,14 +373,17 @@ export async function postTimed<T extends { at: string }>(ctx: Ctx, path: string
       ctx.log(`clock: the server refused ${what} as clock_skew; this computer's clock is ${clockWords(offset)} the server's`);
     }
     const again = skewed.map((x) => items[x.index]);
-    const r2 = await send(again);
-    const still = r2 && r2.status >= 200 && r2.status < 300 ? ((Array.isArray(r2.json?.refused) ? r2.json.refused : []) as Refused[]) : again.map((_, index) => ({ index, reason: "clock_skew" }));
+    const retried = await send(again);
+    const r2 = retried.r;
+    if (!r2 || r2.status >= 500 || r2.status === 429) return { r: r2, refused };
+    const still = r2 && r2.status >= 200 && r2.status < 300 ? retried.refused : again.map((_, index) => ({ index, reason: "clock_skew" }));
     // Indexes back into `items`.
     refused = [...refused.filter((x) => x.reason !== "clock_skew"), ...still.map((x) => ({ index: skewed[x.index]?.index ?? x.index, reason: x.reason }))];
   }
-  if (refused.length) {
-    const why = [...new Set(refused.map((x) => x.reason))].join(", ");
-    ctx.log(`${what}: the server refused ${refused.length} of ${items.length} (${why}); they are not sent again`);
+  const rejected = refused.filter(({ reason }) => reason !== "not_sent" && reason !== "work_signals_off");
+  if (rejected.length) {
+    const why = [...new Set(rejected.map((x) => x.reason))].join(", ");
+    ctx.log(`${what}: the server refused ${rejected.length} of ${items.length} (${why})`);
   }
   return { r, refused };
 }
@@ -378,7 +413,7 @@ async function noteClock(ctx: Ctx, measured: number | null): Promise<void> {
 }
 
 /** Refresh the access token if it is missing or within 2 minutes of expiry (or `force`). */
-export async function refreshIfNeeded(ctx: Ctx, force = false, pairedOrigin?: string): Promise<Credentials> {
+export async function refreshIfNeeded(ctx: Ctx, force = false, pairedOrigin?: string, deadline?: number): Promise<Credentials> {
   const initial = loadCredentials(ctx.home);
   checkBound(ctx, initial);
   if (!initial || initial.signed_out || !initial.refresh_token) throw new SignedOut("not signed in");
@@ -387,6 +422,7 @@ export async function refreshIfNeeded(ctx: Ctx, force = false, pairedOrigin?: st
   return withLock(ctx.home, async () => {
     const c = loadCredentials(ctx.home);
     checkBound(ctx, c);
+    if (deadline !== undefined && Date.now() >= deadline) throw new NetworkError("Request budget expired");
     if (!c || c.signed_out || !c.refresh_token) throw new SignedOut("not signed in");
     // Someone else refreshed while we waited.
     if (c.refresh_token !== initial.refresh_token && fresh(c)) return c;
@@ -403,7 +439,7 @@ export async function refreshIfNeeded(ctx: Ctx, force = false, pairedOrigin?: st
       sentTs = Math.max(Date.now() + offset, after + 1);
       const ts = new Date(sentTs).toISOString();
       const sig = key.sign(refreshMessage(c.device_id, c.refresh_token!, ts));
-      return rawRequest(c.server_url, "POST", "/api/v2/device/refresh", { pairedOrigin, body: { device_id: c.device_id, refresh_token: c.refresh_token, ts, sig } });
+      return rawRequest(c.server_url, "POST", "/api/v2/device/refresh", { pairedOrigin, deadline, body: { device_id: c.device_id, refresh_token: c.refresh_token, ts, sig } });
     };
     let offset = Number(c.clock_offset_ms) || 0;
     // An answer lost in transit (no answer, or a 200 whose body did not arrive) may have rotated the token on the server:
@@ -468,17 +504,24 @@ export async function refreshIfNeeded(ctx: Ctx, force = false, pairedOrigin?: st
       throw new SignedOut("signed out by server");
     }
     throw new HttpError(r.status, r.json?.error ?? null, r.json);
-  });
+  }, deadline === undefined ? undefined : Math.max(0, deadline - Date.now()));
 }
 
 /** Authenticated device request. Retries once after a forced refresh on 401; a second 401 signs the device out. */
 export async function api(ctx: Ctx, method: string, path: string, opts: RequestOptions = {}): Promise<Resp> {
-  let c = await refreshIfNeeded(ctx, false, opts.pairedOrigin);
-  let r = await rawRequest(c.server_url, method, path, { ...opts, headers: { ...(opts.headers || {}), authorization: `Bearer ${c.access_token}` } });
-  await noteClock(ctx, r.clockOffsetMs);
+  let c = await refreshIfNeeded(ctx, false, opts.pairedOrigin, opts.deadline);
+  const request = () => rawRequest(c.server_url, method, path, {
+    ...opts, headers: { ...(opts.headers || {}), authorization: `Bearer ${c.access_token}` },
+    dispatch: (send) => {
+      checkBound(ctx, loadCredentials(ctx.home));
+      return opts.dispatch ? opts.dispatch(send) : send();
+    },
+  });
+  let r = await request();
+  if (opts.deadline === undefined) await noteClock(ctx, r.clockOffsetMs);
   if (r.status === 401) {
-    c = await refreshIfNeeded(ctx, true, opts.pairedOrigin);
-    r = await rawRequest(c.server_url, method, path, { ...opts, headers: { ...(opts.headers || {}), authorization: `Bearer ${c.access_token}` } });
+    c = await refreshIfNeeded(ctx, true, opts.pairedOrigin, opts.deadline);
+    r = await request();
     if (r.status === 401) {
       // A new pairing committed meanwhile (`align login`): this answer was for the device it replaced.
       if (loadCredentials(ctx.home)?.device_id !== c.device_id) return r;
@@ -486,6 +529,7 @@ export async function api(ctx: Ctx, method: string, path: string, opts: RequestO
       throw new SignedOut("signed out by server");
     }
   }
+  if (opts.dispatch || opts.bodyAtSend || opts.deadline !== undefined) checkBound(ctx, loadCredentials(ctx.home));
   return r;
 }
 

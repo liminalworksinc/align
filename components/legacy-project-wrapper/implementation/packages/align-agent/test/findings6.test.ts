@@ -82,6 +82,7 @@ describe("C5-1 follow-up: what counts as waiting to upload, and as shared time",
     await sleep(50);
     fake.workspaces = [ACME];
     assert.equal((await runCli(t, ["sync"])).code, 0);
+    prompt(t, A.sid, "::align share", A.cwd);
     prompt(t, A.sid, "::align share confirm", A.cwd);
     assert.equal((await runCli(t, ["sync"])).code, 0);
     assert.equal((await runCli(t, ["sync"])).code, 0);

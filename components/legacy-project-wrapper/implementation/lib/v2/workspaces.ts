@@ -142,8 +142,10 @@ export async function updateWorkspace(pp: PolicyPrincipal, b: Body) {
  *  purges every row (purgeWorkspace in lib/v2/core.mts). */
 export async function deleteWorkspace(pp: PolicyPrincipal) {
   need(pp, "workspace.manage");
-  const at = nowIso();
-  await tx(() => softDeleteWorkspace(sql, pp.wsId, pp.userId, at));
+  await tx(() => {
+    need(memberPrincipal(pp.wsId, pp.userId), "workspace.manage");
+    softDeleteWorkspace(sql, pp.wsId, pp.userId, nowIso());
+  });
 }
 
 const restoreUntil = (deletedAt: string) => new Date(Date.parse(deletedAt) + RESTORE_DAYS * DAY_MS).toISOString();
@@ -200,6 +202,7 @@ export async function setMemberRole(pp: PolicyPrincipal, userId: string, role: W
   if (!memberRole(pp.wsId, userId)) throw notFound();
   const at = nowIso();
   await tx(() => {
+    need(memberPrincipal(pp.wsId, pp.userId), "workspace.manage");
     const current = memberRole(pp.wsId, userId);
     if (!current) throw notFound();
     if (current === role) return;
@@ -220,6 +223,7 @@ export async function removeMember(pp: PolicyPrincipal, userId: string, { delete
   if (!memberRole(pp.wsId, userId)) throw notFound();
   const at = nowIso();
   await tx(() => {
+    need(memberPrincipal(pp.wsId, pp.userId), leaving ? "workspace.read" : "workspace.manage");
     const current = memberRole(pp.wsId, userId);
     if (!current) throw notFound();
     if (current === "owner" && ownerCount(pp.wsId) <= 1) throw conflict("last_owner", LAST_OWNER);
@@ -407,17 +411,18 @@ function teamInWs(wsId: string, podId: string) {
 }
 
 export async function setTeamMember(pp: PolicyPrincipal, podId: string, userId: string, role: PodRole) {
-  teamInWs(pp.wsId, podId);
-  need(pp, "pod.manage_members", { kind: "pod", podId });
-  // A lead adds and removes members; only a workspace owner makes someone a lead (or changes a lead's role).
-  const current = get<{ role: PodRole }>("SELECT role FROM v2_pod_members WHERE pod_id = ? AND user_id = ?", podId, userId);
-  if ((role === "lead" || current?.role === "lead") && pp.wsRole !== "owner") throw forbidden("owner_only", "Only a workspace owner can make someone a team lead.");
-  const member = get<{ role: WsRole }>("SELECT role FROM v2_members WHERE ws_id = ? AND user_id = ?", pp.wsId, userId);
-  if (!member) throw notFound();
-  // A viewer can't change anything, so leading a team would give them nothing; the policy refuses them regardless.
-  if (role === "lead" && member.role === "viewer") throw forbidden("viewer_lead", "A viewer can't lead a team. Change their workspace role first, or add them as a member.");
-  const at = nowIso();
   await tx(() => {
+    teamInWs(pp.wsId, podId);
+    const actor = memberPrincipal(pp.wsId, pp.userId);
+    need(actor, "pod.manage_members", { kind: "pod", podId });
+    // A lead adds and removes members; only a workspace owner makes someone a lead (or changes a lead's role).
+    const current = get<{ role: PodRole }>("SELECT role FROM v2_pod_members WHERE pod_id = ? AND user_id = ?", podId, userId);
+    if ((role === "lead" || current?.role === "lead") && actor.wsRole !== "owner") throw forbidden("owner_only", "Only a workspace owner can make someone a team lead.");
+    const member = get<{ role: WsRole }>("SELECT role FROM v2_members WHERE ws_id = ? AND user_id = ?", pp.wsId, userId);
+    if (!member) throw notFound();
+    // A viewer can't change anything, so leading a team would give them nothing; the policy refuses them regardless.
+    if (role === "lead" && member.role === "viewer") throw forbidden("viewer_lead", "A viewer can't lead a team. Change their workspace role first, or add them as a member.");
+    const at = nowIso();
     run(
       "INSERT INTO v2_pod_members (ws_id, pod_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (pod_id, user_id) DO UPDATE SET role = excluded.role",
       pp.wsId,
@@ -432,11 +437,12 @@ export async function setTeamMember(pp: PolicyPrincipal, podId: string, userId: 
 }
 
 export async function removeTeamMember(pp: PolicyPrincipal, podId: string, userId: string) {
-  teamInWs(pp.wsId, podId);
-  need(pp, "pod.manage_members", { kind: "pod", podId });
-  const current = get<{ role: PodRole }>("SELECT role FROM v2_pod_members WHERE pod_id = ? AND user_id = ?", podId, userId);
-  if (current?.role === "lead" && pp.wsRole !== "owner" && userId !== pp.userId) throw forbidden("owner_only", "Only a workspace owner can remove a team lead.");
   const n = await tx(() => {
+    teamInWs(pp.wsId, podId);
+    const actor = memberPrincipal(pp.wsId, pp.userId);
+    need(actor, "pod.manage_members", { kind: "pod", podId });
+    const current = get<{ role: PodRole }>("SELECT role FROM v2_pod_members WHERE pod_id = ? AND user_id = ?", podId, userId);
+    if (current?.role === "lead" && actor.wsRole !== "owner" && userId !== pp.userId) throw forbidden("owner_only", "Only a workspace owner can remove a team lead.");
     const deleted = run("DELETE FROM v2_pod_members WHERE ws_id = ? AND pod_id = ? AND user_id = ?", pp.wsId, podId, userId);
     if (deleted) audit(pp.wsId, pp.userId, "team.member_removed", podId, nowIso());
     return deleted;

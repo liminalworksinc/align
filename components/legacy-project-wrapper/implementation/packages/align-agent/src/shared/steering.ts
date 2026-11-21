@@ -92,7 +92,7 @@ export interface UnsharedDigest {
   unshared_tokens: number;
   share: number;
   top: { dir: string; tokens: number }[];
-  past_goal?: { folder: string; workspace: string; goal: string; sessions: number; micros: number | null; expires_at: number };
+  past_goal?: { folder: string; workspace: string; goal: string; sessions: number; micros: number | null; expires_at: number; local_ids?: string[] };
   past_offer_change?: string | null;
 }
 
@@ -107,7 +107,7 @@ export function unsharedNote(home: string, now = Date.now()): string | null {
     .slice(0, 3)
     .map((t) => path.basename(t.dir) || t.dir)
     .join(", ");
-  const past = d.past_goal;
+  const past = readJson<{ signed_out?: boolean }>(layout.me(home))?.signed_out ? undefined : d.past_goal;
   const goal = past && readJson<FeedFile>(layout.feed(home, past.workspace))?.goals
     .find((g) => g.id === past.goal && g.bindable && g.status === "active");
   if (past && goal && now < past.expires_at && d.past_offer_change === readJson<string>(layout.pastOfferChange(home))

@@ -88,12 +88,13 @@ export function limitDetails(limit?: LimitLike): [string, string[]][] {
     ["File path anchors", limit?.path_anchors ?? []],
     ["Example that crosses the limit", limit?.example_crossing ? [limit.example_crossing] : []],
     ["Example within the limit", limit?.example_within ? [limit.example_within] : []],
-    ["Source", source ? [source.kind === "manual" ? "Written by hand" : source.title, source.date] : []],
+    ["Source", source ? [source.title || (source.kind === "manual" ? "Written by hand" : "Meeting"), source.date] : []],
   ];
 }
 
 export const limitChanged = (before: LimitLike, after: LimitLike) =>
   before.text !== after.text || before.type !== after.type
+  || JSON.stringify(before.source ?? null) !== JSON.stringify(after.source ?? null)
   || JSON.stringify(limitDetails(before)) !== JSON.stringify(limitDetails(after));
 
 /** One line per change in one field of a diff (title, measures, depends_on, status, limits). */

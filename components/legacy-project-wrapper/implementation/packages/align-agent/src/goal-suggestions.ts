@@ -1,7 +1,7 @@
 import path from "node:path";
 import { api, loadCredentials, signedIn, stillBound } from "./api.ts";
 import type { Ctx } from "./context.ts";
-import { kvGet, kvSet } from "./db.ts";
+import { kvGet, kvSet, tx } from "./db.ts";
 import { DECISION_PROVIDERS, decideGoal, decisionService, decisionWindow, decisionWindowStart, sameDecisionService, type DecisionService } from "./decision-model.ts";
 import { loadFeed, loadMe, resolveWorkspace } from "./goals.ts";
 import { getShare } from "./hot.ts";
@@ -62,12 +62,16 @@ export function ruleChoices(goals: Goal[], folderGoal: string | null, cwd: strin
 
 function ownHistory(ctx: Ctx, ws: string, lid: string, person: string): History[] {
   const captured = ctx.db.prepare(`SELECT folder, repo, branch, goal FROM goal_binding_history
-    WHERE workspace=? AND person=? AND local_id<>? ORDER BY at DESC LIMIT 40`).all(ws, person, lid) as History[];
+    WHERE workspace=? AND person=? AND local_id<>?
+      AND at > COALESCE((SELECT value FROM kv WHERE key='analysis_deleted:' || goal_binding_history.local_id), '')
+    ORDER BY at DESC LIMIT 40`).all(ws, person, lid) as History[];
   if (captured.length === 40) return captured;
   // Earlier clients did not retain branch snapshots. Use their current live bindings for folder evidence.
   const current = ctx.db.prepare(`SELECT s.cwd, h.binding_goal AS goal FROM sessions s JOIN shares h USING(local_id)
     JOIN epochs e ON e.epoch_id=h.binding_epoch
-    WHERE h.workspace_id=? AND h.local_id<>? AND h.state='shared' AND e.synced=1 AND h.binding_goal IS NOT NULL
+    WHERE h.workspace_id=? AND h.local_id<>? AND NOT EXISTS (
+      SELECT 1 FROM kv WHERE key='analysis_deleted:' || s.local_id
+    ) AND h.state='shared' AND e.synced=1 AND h.binding_goal IS NOT NULL
       AND s.cwd IS NOT NULL AND NOT EXISTS (SELECT 1 FROM goal_binding_history g WHERE g.local_id=s.local_id)
     ORDER BY e.starts_at DESC LIMIT ?`).all(ws, lid, 40 - captured.length) as { cwd: string; goal: string }[];
   return [...captured, ...current.map(({ cwd, goal }) => ({ folder: path.resolve(cwd), repo: null, branch: null, goal }))];
@@ -95,7 +99,7 @@ export function pastGoalSuggestion(ctx: Ctx, folders: string[], now: number) {
       FROM requests WHERE local_id=?`).get(local_id)?.micros);
     const micros = estimates.every((v) => typeof v === "number") ? estimates.reduce((a, b) => a + b, 0) : null;
     const expires_at = Math.min(...take.map((session) => Date.parse(session.last_active ?? session.started_at ?? session.created_at))) + 7 * 86_400_000;
-    if (expires_at > now) return { folder, workspace: ws.id, goal: ids[0], sessions: take.length, micros, expires_at };
+    if (expires_at > now) return { folder, workspace: ws.id, goal: ids[0], sessions: take.length, micros, expires_at, local_ids: take.map(({ local_id }) => local_id) };
   }
 }
 
@@ -107,17 +111,20 @@ const checked = (ctx: Ctx, lid: string, stage: SuggestionStage) => ctx.db.prepar
 
 function saveChoice(ctx: Ctx, lid: string, turn: AnalysisTurn, suggestion: GoalSuggestion) {
   const { stage, workspace, candidates, origin } = suggestion;
-  if (checked(ctx, lid, stage)) return;
-  ctx.db.prepare("INSERT INTO goal_suggestions VALUES (?,?,?,?,?,?,?)")
-    .run(lid, stage, workspace, turn.root, JSON.stringify(candidates), origin, turn.at);
-  if (candidates.length) writeJsonAtomic(layout.suggestion(ctx.home, lid), suggestion);
+  tx(ctx.db, () => {
+    if ((kvGet(ctx.db, `analysis_deleted:${lid}`) ?? "") >= turn.at || checked(ctx, lid, stage)) return;
+    ctx.db.prepare("INSERT INTO goal_suggestions VALUES (?,?,?,?,?,?,?)")
+      .run(lid, stage, workspace, turn.root, JSON.stringify(candidates), origin, turn.at);
+    if (candidates.length) writeJsonAtomic(layout.suggestion(ctx.home, lid), suggestion);
+  });
 }
 
 function streak(ctx: Ctx, lid: string, binding: string, root: string, goal: string): number {
   const previous = ctx.db.prepare(`SELECT earlier.root_turn FROM root_turns earlier
     JOIN root_turns current ON current.local_id=earlier.local_id
-    WHERE current.local_id=? AND current.root_turn=? AND (earlier.ts, earlier.seq) < (current.ts, current.seq)
-    ORDER BY earlier.ts DESC, earlier.seq DESC LIMIT 1`).get(lid, root)?.root_turn as string | undefined;
+    WHERE current.local_id=? AND current.root_turn=?
+      AND (COALESCE(earlier.first_hook_at, earlier.ts), earlier.seq) < (COALESCE(current.first_hook_at, current.ts), current.seq)
+    ORDER BY COALESCE(earlier.first_hook_at, earlier.ts) DESC, earlier.seq DESC LIMIT 1`).get(lid, root)?.root_turn as string | undefined;
   const row = ctx.db.prepare(`INSERT INTO goal_suggestion_streaks VALUES (?, ?, ?, ?, 1)
     ON CONFLICT(local_id) DO UPDATE SET binding=excluded.binding, goal=excluded.goal, root=excluded.root,
     count=CASE WHEN goal_suggestion_streaks.binding<>excluded.binding OR goal_suggestion_streaks.goal<>excluded.goal THEN 1
@@ -128,9 +135,10 @@ function streak(ctx: Ctx, lid: string, binding: string, root: string, goal: stri
 }
 
 export async function considerGoalSuggestion(ctx: Ctx, lid: string, turn: AnalysisTurn,
-  prompt: string | undefined, canUse: (cap: AnalysisExtension, workspace: string, at: string) => boolean) {
+  prompt: string | undefined, canUse: (cap: AnalysisExtension, workspace: string, at: string) => boolean, deadline: number) {
+  const currentTurn = () => (kvGet(ctx.db, `analysis_deleted:${lid}`) ?? "") < turn.at && stillBound(ctx) && signedIn(ctx.home);
   const cwd = turn.cwd && path.resolve(turn.cwd);
-  if (!cwd || !signedIn(ctx.home) || suggestionsQuiet(ctx.home, cwd)) return;
+  if (!currentTurn() || !cwd || !signedIn(ctx.home) || suggestionsQuiet(ctx.home, cwd)) return;
   const inj = readJson<InjectedState>(layout.injected(ctx.home, lid));
   const share = getShare(ctx, lid);
   const binding = turn.binding;
@@ -140,7 +148,7 @@ export async function considerGoalSuggestion(ctx: Ctx, lid: string, turn: Analys
   if (binding ? share?.state !== "shared" || share.binding_goal !== binding.goal.id : share || inj?.anchor_hint || inj?.rule_share) return;
   if (!binding && (checked(ctx, lid, stage) || readJson(layout.suggestionReply(ctx.home, lid, stage)))) return;
   if (!binding) {
-    const first = ctx.db.prepare("SELECT root_turn FROM root_turns WHERE local_id=? ORDER BY ts, seq LIMIT 1").get(lid);
+    const first = ctx.db.prepare("SELECT root_turn FROM root_turns WHERE local_id=? ORDER BY COALESCE(first_hook_at, ts), seq LIMIT 1").get(lid);
     if (first?.root_turn !== turn.root) return;
   }
 
@@ -150,10 +158,13 @@ export async function considerGoalSuggestion(ctx: Ctx, lid: string, turn: Analys
   const cached = loadFeed(ctx.home, ws.id);
   const git = turn.git ?? null;
   if (binding) {
-    ctx.db.prepare(`INSERT INTO goal_binding_history VALUES (?,?,?,?,?,?,?,?)
-      ON CONFLICT(local_id, workspace, person) DO UPDATE SET folder=excluded.folder, repo=excluded.repo,
-      branch=excluded.branch, goal=excluded.goal, at=excluded.at WHERE excluded.at>goal_binding_history.at`)
-      .run(lid, ws.id, person, cwd, git?.remotes[0] ?? null, git?.branch ?? null, binding.goal.id, turn.at);
+    tx(ctx.db, () => {
+      if (!currentTurn()) return;
+      ctx.db.prepare(`INSERT INTO goal_binding_history VALUES (?,?,?,?,?,?,?,?)
+        ON CONFLICT(local_id, workspace, person) DO UPDATE SET folder=excluded.folder, repo=excluded.repo,
+        branch=excluded.branch, goal=excluded.goal, at=excluded.at WHERE excluded.at>goal_binding_history.at`)
+        .run(lid, ws.id, person, cwd, git?.remotes[0] ?? null, git?.branch ?? null, binding.goal.id, turn.at);
+    });
     const declinedInitial = ctx.db.prepare("SELECT 1 FROM goal_suggestion_feedback WHERE local_id=? AND stage='initial' AND reply<>'accepted'").get(lid);
     if (declinedInitial || checked(ctx, lid, stage) || readJson(layout.suggestionReply(ctx.home, lid, stage))) return;
   }
@@ -162,19 +173,23 @@ export async function considerGoalSuggestion(ctx: Ctx, lid: string, turn: Analys
   if (candidates.length !== 1) candidates = ruleChoices(goals, folderRule?.goal_id ?? null, cwd, git, ownHistory(ctx, ws.id, lid, person));
   let origin: GoalSuggestion["origin"] = "suggested_rule";
   if (binding) {
-    if (candidates.length !== 1 || candidates[0] === binding.goal.id) {
-      ctx.db.prepare("DELETE FROM goal_suggestion_streaks WHERE local_id=?").run(lid);
-      return;
-    }
-    if (streak(ctx, lid, binding.epoch, turn.root, candidates[0]) < 3) return;
+    const count = tx(ctx.db, () => {
+      if (!currentTurn()) return 0;
+      if (candidates.length !== 1 || candidates[0] === binding.goal.id) {
+        ctx.db.prepare("DELETE FROM goal_suggestion_streaks WHERE local_id=?").run(lid);
+        return 0;
+      }
+      return streak(ctx, lid, binding.epoch, turn.root, candidates[0]);
+    });
+    if (count < 3) return;
   } else if (!candidates.length) {
     const choice = await modelSuggestion(ctx, ws.id, git, turn, prompt, canUse, () =>
-      !getShare(ctx, lid) && !suggestionsQuiet(ctx.home, cwd) && !readJson(layout.suggestionReply(ctx.home, lid, stage)));
+      currentTurn() && !getShare(ctx, lid) && !suggestionsQuiet(ctx.home, cwd) && !readJson(layout.suggestionReply(ctx.home, lid, stage)), deadline);
     if (!choice) return;
     candidates = [choice.goal];
     origin = choice.origin;
   }
-  if (!checked(ctx, lid, stage) && !suggestionsQuiet(ctx.home, cwd) && !readJson(layout.suggestionReply(ctx.home, lid, stage))) {
+  if (currentTurn() && !checked(ctx, lid, stage) && !suggestionsQuiet(ctx.home, cwd) && !readJson(layout.suggestionReply(ctx.home, lid, stage))) {
     saveChoice(ctx, lid, turn, { stage, workspace: ws.id, candidates, origin, binding: binding?.goal.id ?? null, folder: cwd });
   }
 }
@@ -183,7 +198,7 @@ const MODEL_POLICY_MS = 750;
 const MODEL_REQUEST_MS = 2200;
 
 async function modelSuggestion(ctx: Ctx, ws: string, git: GitInfo | null, turn: AnalysisTurn, prompt: string | undefined,
-  canUse: (cap: AnalysisExtension, workspace: string, at: string) => boolean, stillPrivate: () => boolean) {
+  canUse: (cap: AnalysisExtension, workspace: string, at: string) => boolean, stillPrivate: () => boolean, deadline: number) {
   // The harness integrations do not expose a way to pin the original provider and account to a fork.
   if (canUse({ kind: "goal_suggestion", tier: 3, recipient: "session" }, ws, turn.at)) return null;
   const cap: AnalysisExtension = { kind: "goal_suggestion", tier: 3, recipient: "provider" };
@@ -199,29 +214,38 @@ async function modelSuggestion(ctx: Ctx, ws: string, git: GitInfo | null, turn: 
       && stillBound(ctx) && stillPrivate();
   };
   const url = `/api/v2/workspaces/${encodeURIComponent(ws)}`;
-  const feed = await api(ctx, "GET", `${url}/goals`, { timeoutMs: MODEL_POLICY_MS });
+  const timeout = () => Math.max(1, Math.min(MODEL_POLICY_MS, deadline - Date.now()));
+  const feed = await api(ctx, "GET", `${url}/goals`, { timeoutMs: timeout(), deadline });
   if (feed.status !== 200 || !Array.isArray(feed.json?.goals) || !current()) return null;
   const active = bindable(feed.json.goals as Goal[]);
-  if (!active.length || active.length > 254) return null;
-  const goals = active.map(({ id, title }) => ({ id, title }));
 
+  const permissionUrl = `${url}/data-sharing?for=model-suggestion&recipient=${service.provider}`;
+  const requestPolicy = (phase: string) => api(ctx, "GET", `${permissionUrl}&${phase}`, {
+    timeoutMs: timeout(), deadline, redirect: "error",
+  });
   const remaining = decisionWindowStart();
-  const policy = await api(ctx, "GET", `${url}/data-sharing?for=model-suggestion`, { timeoutMs: MODEL_POLICY_MS, redirect: "error" });
-  const duration = decisionWindow(policy, MODEL_POLICY_MS + MODEL_REQUEST_MS);
-  const blocked = policy.json?.blocked;
-  if (!duration || !Array.isArray(blocked)
-    || !blocked.every((tier: unknown) => tier === 1 || tier === 2 || tier === 3 || tier === 4) || blocked.includes(3)) return null;
-  if (service.provider === "workspace") {
-    if (!sameDecisionService(service, decisionService("workspace", policy.json?.decision_service))) return null;
-  }
+  const policy = await requestPolicy("phase=dispatch");
+  const duration = decisionWindow(policy);
+  const { revision, goals } = policy.json ?? {};
+  if (!duration || !/^[a-f0-9]{32}$/.test(typeof revision === "string" ? revision : "")
+    || !Array.isArray(goals) || !goals.every((goal) => goal && typeof goal.id === "string" && typeof goal.title === "string")
+    || new Set(goals.map(({ id }) => id)).size !== goals.length) return null;
 
+  const recipientMatches = (value: unknown) =>
+    service.provider !== "workspace" || sameDecisionService(service, decisionService("workspace", value));
+  if (!recipientMatches(policy.json?.decision_service)) return null;
   const repoAlias = ctx.db.prepare("SELECT alias FROM repo_aliases WHERE workspace_id=? AND repo_root=?")
     .get(ws, git?.toplevel ?? turn.cwd)?.alias as string | undefined;
 
   const goal = await decideGoal(service, key, {
-    first_prompt: prompt, ...(git?.branch ? { branch: git.branch } : {}), repo_alias: repoAlias ?? null, goals,
-  }, MODEL_REQUEST_MS, fetch, () => current() && remaining(MODEL_POLICY_MS) > 0 ? remaining(duration) : 0);
+    first_prompt: prompt, ...(git?.branch ? { branch: git.branch } : {}), repo_alias: repoAlias ?? null,
+    goals: goals.map(({ id, title }) => ({ id, title })),
+  }, Math.max(1, Math.min(MODEL_REQUEST_MS, deadline - Date.now())), fetch, (send) => tx(ctx.db, () =>
+    current() && remaining(duration) > 0 && Date.now() < deadline ? send() : null));
   const anchors = git ? matchAnchors(active, git) : [];
-  if (!goal || !current() || (anchors.length && !anchors.some(({ id }) => id === goal))) return null;
+  if (!goal || !current() || Date.now() >= deadline || (anchors.length && !anchors.some(({ id }) => id === goal))) return null;
+  const answer = await requestPolicy(`phase=answer&revision=${revision}`);
+  if (answer.status !== 200 || answer.json?.enabled !== true || !recipientMatches(answer.json.decision_service)
+    || !current() || remaining(Number.MAX_SAFE_INTEGER) <= 0) return null;
   return { goal, origin: "suggested_model" as const };
 }

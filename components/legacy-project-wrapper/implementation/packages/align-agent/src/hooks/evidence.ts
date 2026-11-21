@@ -270,6 +270,12 @@ function mtimeOf(file: string): number {
   }
 }
 
+export function changedSinceToolStart(file: string, evidence: Expect): boolean {
+  if (evidence.no) return false;
+  if (evidence.h === undefined) return shows(file, evidence);
+  return contentKey(file, { bytes: MAX_READ }) !== evidence.h;
+}
+
 /** Whether the file now shows what the call was to do. */
 export function shows(file: string, e: Expect): boolean {
   if (e.no) return false;
@@ -352,6 +358,7 @@ export function happened(a: Act, v: Verdicts, confirmed: boolean, lazy: Lazy | n
     return !a.c && !!lazy && !!a.d && !!a.s && Date.now() - Date.parse(a.at) < PENDING_MS && committed(a.d, a.s, a.at, a.rl);
   }
   if (a.t !== "edit" || a.via || !a.p) return true;
+  if (a.v?.no) return false;
   const d = verdictFor(a, v);
   if (d !== null) {
     // A `ran` for a whole shell command (an older build's) still needs its file changed.

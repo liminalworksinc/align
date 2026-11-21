@@ -81,6 +81,7 @@ export const layout = {
   suggestion: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.suggestion.json`),
   suggestionSeen: (h: string, lid: string, stage: "initial" | "move") => path.join(h, "analysis", `${safe(lid)}.${stage}.shown.json`),
   suggestionReply: (h: string, lid: string, stage: "initial" | "move") => path.join(h, "analysis", `${safe(lid)}.${stage}.reply.json`),
+  suggestionBindPreview: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.bind-preview.json`),
   suggestionSharePreview: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.share-preview.json`),
   suggestionQuiet: (h: string) => path.join(h, "analysis", "quiet-folders.json"),
   analysisEnd: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.end.json`),

@@ -371,10 +371,12 @@ The security overview SHALL identify the additional data tiers as proposed, say 
 and say that derived findings stay on the machine when using hosted Align.
 The subprocessor list SHALL name only actual recipients in service.
 
-The Trust introduction SHALL describe the session content kept local by default and the separate choices to send
-the final reply and applicable limits to a configured decision service or to share a selected excerpt through
-Align. This disclosure applies in local mode as well. The public excerpt retention entry SHALL explain deletion
-and expiry using reader-facing terms.
+Trust, Privacy and sharing settings SHALL say that metadata is the default in both hosted and local mode.
+They SHALL describe the separate opt-ins and recipients, including a first prompt, branch, saved repository
+alias and eligible goal ids and titles for model suggestions, the final reply and applicable limit types and
+wording for model checks, and exact selected text, readers, purpose and expiry for excerpts. They SHALL explain
+that derived findings can only be shared with a local Align server.
+The public excerpt retention entry SHALL explain deletion and expiry using reader-facing terms.
 
 #### Scenario: Reading the trust page
 
@@ -1588,7 +1590,9 @@ member's role or remove a member, and let any member leave.
 The People tab's sharing restrictions SHALL let a workspace owner block both proposed model choices with
 **Block Model-based goal suggestions (proposed)**. The control SHALL reflect the workspace policy and fit
 at 390 pixels. The device's own consent stays separate. People SHALL display an owner-only
-**Decision service address** field, with a plain validation message beside it.
+**Decision service address** field, with a plain validation message beside it. An untouched field SHALL reflect
+the latest retrieved saved address. The CLI SHALL distinguish a current recipient from expired consent and
+state when current policy could not be read.
 
 #### Scenario: Change the workspace choice on a phone
 
@@ -1878,7 +1882,7 @@ The tab SHALL offer the monthly team CSV export and the team-budget screens spec
 #### Scenario: Expand a goal's usage by origin
 
 - **WHEN** a person expands "By sharing source" on a goal row in By goal
-- **THEN** the row shows the number of requests and estimated list cost per origin with the same labels as Sessions. Priced amounts use the goal total's display precision and add up to its rounded value. Round each amount down to that precision, then give one unit each to the largest remainders until they reach the rounded total, in display order when remainders tie. All-unpriced groups show "Unknown" for cost and partial estimates say how many requests were unpriced. Rolled-up days have their own "Not recorded (rolled up)" line. Private goals remain grouped without a breakdown. The expanded rows fit at 390 pixels wide.
+- **THEN** the row shows the number of requests and estimated list cost per origin with the same labels as Sessions. Priced amounts use the goal total's display precision and add up to its rounded value. Round each amount down to that precision, then give one unit each to the largest remainders until they reach the rounded total, in display order when remainders tie. All-unpriced groups and usage rows show "Unknown" for cost and partial estimates say how many requests were unpriced. Rolled-up days have their own "Not recorded (rolled up)" line. Private goals remain grouped without a breakdown. The expanded rows fit at 390 pixels wide.
 
 #### Scenario: Agent time against targets
 
@@ -2143,3 +2147,15 @@ that access ended.
 - `app/app/_ui/home/since.tsx`
 - `app/app/_ui/home/needs-list.tsx`
 - `scripts/test-budgets.mjs`
+
+### Requirement: Consistent limit changes and sharing disclosures
+
+Both approval views SHALL show before and after values for a changed path anchor, crossing example or safe
+example. The change and counter forms SHALL submit a change to any one of these fields without also editing
+the limit statement. Trust and Privacy SHALL state the same metadata default, recipients, independent settings
+and retention periods. Retention rows SHALL use readable labels.
+
+#### Scenario: An example is the only change
+
+- **WHEN** a person corrects only an example and an approver opens the same request on its goal and in Requests
+- **THEN** both views show the actual example change and are usable on a 390 pixel wide screen

@@ -41,7 +41,10 @@ function addRecord<T>(records: Set<T>, value: T, lowerBounds: Set<RecordCount>, 
 }
 
 function addResult(calls: Set<string>, results: Set<string>, id: unknown, lowerBounds: Set<RecordCount>) {
-  if (typeof id !== "string" || !id) return;
+  if (typeof id !== "string" || !id) {
+    lowerBounds.add("results");
+    return;
+  }
   if (calls.has(id)) addRecord(results, id, lowerBounds, "results");
   else if (lowerBounds.has("calls")) lowerBounds.add("results");
 }
@@ -70,15 +73,25 @@ export function readTurn(harness: Harness, native: string, turn: TurnReference):
       fs.closeSync(fd);
     }
     const lines = data.split("\n").slice(from ? 1 : 0);
+    let corrupt = false;
     const rows = lines.flatMap((line) => {
+      if (!line.trim()) return [];
       try {
-        return [object(JSON.parse(line))];
+        const row = object(JSON.parse(line));
+        if (typeof row.type !== "string") corrupt = true;
+        return [row];
       } catch {
+        corrupt = true;
         return [];
       }
     });
     const partial = end < stat.size || !data.endsWith("\n");
-    return harness === "claude-code" ? claudeTurn(rows, native, turn, from > 0, partial) : codexTurn(rows, native, turn.root, partial);
+    const content = harness === "claude-code" ? claudeTurn(rows, native, turn, from > 0, partial) : codexTurn(rows, native, turn, from > 0);
+    if (corrupt && content) {
+      markPartial(content.lowerBounds);
+      content.finalReply = null;
+    }
+    return content;
   } catch {
     return null;
   }
@@ -108,18 +121,16 @@ function claudeTurn(rows: RecordValue[], native: string, turn: TurnReference, cr
   if (candidates.size !== 1 || (byTime && !sawEarlier)) return null;
   const index = candidates.values().next().value!;
   const first = rows[index];
-  const prompt = blocks(object(first.message).content).some((b) => b.type !== "text") ? undefined : claudePrompt(first, native);
+  const prompt = claudePrompt(first, native);
   const root = text(first.promptId) || text(first.uuid);
   const calls = new Set<string>();
   const results = new Set<string>();
   const replies = new Map<string, string>();
   const lowerBounds = new Set<RecordCount>();
   const seen = new Set([text(first.uuid)]);
+  const linked = new Set([root, text(first.uuid)].filter(Boolean));
   let finalReply: string | null = null;
-  let lastMessage = "";
-  let disputedText = false;
-  let lastText = "";
-  let usedTool = false;
+  let explicitlyFinal = false;
   let ended = false;
   for (const row of rows.slice(index + 1)) {
     if (row.sessionId !== native || row.isSidechain === true) continue;
@@ -129,10 +140,13 @@ function claudeTurn(rows: RecordValue[], native: string, turn: TurnReference, cr
     if (uuid && row.type !== "assistant") seen.add(uuid);
     const message = object(row.message);
     const promptId = text(row.promptId);
+    const parent = text(row.parentUuid);
+    const belongs = (!promptId || !root || promptId === root) && (!parent || linked.has(parent));
     if (row.type === "user") {
       const toolResults = blocks(message.content).filter((b) => b.type === "tool_result");
       if (toolResults.length) {
-        if (!promptId || promptId === root) {
+        if (belongs) {
+          if (uuid) linked.add(uuid);
           for (const b of toolResults) addResult(calls, results, b.tool_use_id, lowerBounds);
         }
       } else if (messageText(message.content, "text") && (!promptId || promptId !== root || COMMAND.test(messageText(message.content, "text")))) {
@@ -141,43 +155,83 @@ function claudeTurn(rows: RecordValue[], native: string, turn: TurnReference, cr
       }
       continue;
     }
-    if (row.type !== "assistant" || (promptId && root && promptId !== root)) continue;
+    if (row.type !== "assistant" || !belongs) continue;
+    if (uuid) linked.add(uuid);
     const reply = messageText(message.content, "text");
     const identity = text(message.id) || uuid;
     const toolUses = blocks(message.content).filter((b) => b.type === "tool_use");
-    if (!identity || identity !== lastMessage) {
-      lastMessage = identity;
-      lastText = "";
-      disputedText = false;
-      usedTool = false;
+    const terminal = message.stop_reason === "end_turn" || message.stop_reason === "stop_sequence"
+      || row.phase === "final_answer" || message.phase === "final_answer";
+    if (terminal && reply && !toolUses.length) {
+      finalReply = reply;
+      explicitlyFinal = true;
+    } else if (toolUses.length || message.stop_reason === "tool_use" || !identity || !replies.has(identity)) {
+      finalReply = null;
+      explicitlyFinal = false;
     }
-    if (lastText && reply && lastText !== reply) disputedText = true;
-    if (reply) lastText = reply;
-    usedTool ||= toolUses.length > 0 || message.stop_reason === "tool_use";
-    finalReply = reply && !disputedText && !usedTool ? reply : null;
     if (reply) {
       const replyKey = identity || reply;
       const earlier = replies.get(replyKey);
       if (earlier !== undefined || replies.size < BLOCKS) {
-        if (!earlier || reply.length > earlier.length) replies.set(replyKey, reply);
+        if (terminal || !earlier || reply.length > earlier.length) replies.set(replyKey, reply);
       } else lowerBounds.add("replies");
     }
-    for (const b of toolUses) if (text(b.id)) addRecord(calls, text(b.id), lowerBounds, "calls");
+    for (const b of toolUses) {
+      if (text(b.id)) addRecord(calls, text(b.id), lowerBounds, "calls");
+      else {
+        lowerBounds.add("calls");
+        lowerBounds.add("results");
+      }
+    }
   }
-  if (!ended && partial) markPartial(lowerBounds);
-  return replies.size || calls.size ? { prompt, replies: [...replies.values()], calls, results, lowerBounds, finalReply: ended || !partial ? finalReply : null } : null;
+  if (!ended && (!explicitlyFinal || partial)) markPartial(lowerBounds);
+  return prompt || replies.size || calls.size ? { prompt, replies: [...replies.values()], calls, results, lowerBounds, finalReply: explicitlyFinal ? finalReply : null } : null;
 }
 
-function codexTurn(rows: RecordValue[], native: string, root: string, partial: boolean): TurnContent | null {
+function codexTurn(rows: RecordValue[], native: string, reference: TurnReference, cropped: boolean): TurnContent | null {
+  let root = reference.root;
+  if (root.startsWith("ts:")) {
+    const at = Date.parse(reference.at);
+    const ids = new Set<string>();
+    let active = "";
+    let sawEarlier = !cropped;
+    for (const row of rows) {
+      const payload = object(row.payload);
+      const type = payload.type;
+      const turnId = text(payload.turn_id);
+      const rootId = text(payload.root_turn_id) || turnId;
+      if (row.type === "event_msg" && type === "task_started") active = rootId === turnId ? turnId : "";
+      if (!active || (rootId && rootId !== active)) continue;
+      if (type === "task_complete" || type === "turn_aborted") {
+        active = "";
+        continue;
+      }
+      if (type !== "task_started" && type !== "user_message" && !(type === "message" && payload.role === "user")) continue;
+      const time = Date.parse(text(row.timestamp));
+      if (time < at - 1500) sawEarlier = true;
+      if (Math.abs(time - at) <= 1500) ids.add(active);
+    }
+    if (ids.size !== 1 || !sawEarlier) return null;
+    root = ids.values().next().value!;
+  }
   const meta = rows.find((r) => r.type === "session_meta");
   if (meta && object(meta.payload).id !== native) return null;
   const calls = new Set<string>();
   const results = new Set<string>();
-  const messages = new Set<string>();
-  const events = new Set<string>();
+  const messages = new Map<string, string>();
+  const events = new Map<string, string>();
   const lowerBounds = new Set<RecordCount>();
   const eventBounds = new Set<RecordCount>();
-  let ended = false;
+  const addReply = (records: Map<string, string>, payload: RecordValue, reply: string, bounds: Set<RecordCount>) => {
+    if (!reply) return;
+    const id = text(payload.message_id) || text(payload.id);
+    const key = id ? `id:${id}` : `text:${reply}`;
+    if (records.has(key)) {
+      if (payload.phase === "final_answer" || records.get(key)!.length < reply.length) records.set(key, reply);
+    } else if (records.size < BLOCKS) records.set(key, reply);
+    else bounds.add("replies");
+  };
+  let complete = false;
   let active = false;
   let user = false;
   let prompt: string | undefined;
@@ -189,16 +243,15 @@ function codexTurn(rows: RecordValue[], native: string, root: string, partial: b
     const id = text(p.turn_id);
     const turn = text(p.root_turn_id) || id;
     if (row.type === "event_msg" && type === "task_started") {
-      if (active && turn !== root) {
-        ended = true;
-        break;
-      }
+      if (active && turn !== root) break;
       active = id === root && turn === root;
     } else if (!active || (turn && turn !== root)) {
       continue;
     } else if (row.type === "event_msg" && (type === "task_complete" || type === "turn_aborted")) {
-      ended = true;
-      if (type === "task_complete" && turn === root) finalReply = text(p.last_agent_message) || markedFinal;
+      if (type === "task_complete" && turn === root) {
+        complete = true;
+        finalReply = text(p.last_agent_message) || markedFinal;
+      }
       break;
     } else if (row.type === "event_msg" && type === "user_message") {
       if (COMMAND.test(text(p.message))) return null;
@@ -207,21 +260,25 @@ function codexTurn(rows: RecordValue[], native: string, root: string, partial: b
     } else if (row.type === "event_msg" && type === "agent_message") {
       const reply = text(p.message);
       if (p.phase === "final_answer") markedFinal = reply || null;
-      if (reply) addRecord(events, reply, eventBounds, "replies");
+      addReply(events, p, reply, eventBounds);
     } else if (row.type === "response_item") {
       if (type === "message" && p.role === "user") {
         const content = messageText(p.content, "input_text");
         if (COMMAND.test(content)) return null;
         if (content) {
           user = true;
-          if (!blocks(p.content).some((b) => b.type !== "input_text")) prompt ??= content;
+          prompt ??= content;
         }
       } else if (type === "message" && p.role === "assistant") {
         const reply = messageText(p.content, "output_text");
         if (p.phase === "final_answer") markedFinal = reply || null;
-        if (reply) addRecord(messages, reply, lowerBounds, "replies");
+        addReply(messages, p, reply, lowerBounds);
       } else if (type === "function_call" || type === "custom_tool_call") {
         if (text(p.call_id)) addRecord(calls, text(p.call_id), lowerBounds, "calls");
+        else {
+          lowerBounds.add("calls");
+          lowerBounds.add("results");
+        }
       } else if (type === "function_call_output" || type === "custom_tool_call_output") {
         addResult(calls, results, p.call_id, lowerBounds);
       }
@@ -229,7 +286,7 @@ function codexTurn(rows: RecordValue[], native: string, root: string, partial: b
   }
   const replies = messages.size ? messages : events;
   if (!messages.size && eventBounds.has("replies")) lowerBounds.add("replies");
-  if (finalReply && !replies.size) addRecord(replies, finalReply, lowerBounds, "replies");
-  if (!ended && partial) markPartial(lowerBounds);
-  return user && (replies.size || calls.size) ? { prompt, replies: [...replies], calls, results, lowerBounds, finalReply } : null;
+  if (finalReply && !replies.size) replies.set("final", finalReply);
+  if (!complete) markPartial(lowerBounds);
+  return user ? { prompt, replies: [...replies.values()], calls, results, lowerBounds, finalReply } : null;
 }

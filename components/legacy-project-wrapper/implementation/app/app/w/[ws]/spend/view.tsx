@@ -70,7 +70,7 @@ function Row({ label, s, strong, origins }: { label: string; s: Sums; strong?: b
       <td data-label="Cache write" className={`py-2 pr-3 text-right ${PHONE_TABLE.cell}`}>{num(cacheWrite(s))}</td>
       <td data-label="Estimated list cost" className={`py-2 text-right ${PHONE_TABLE.cell}`}>
         <span>
-          {usd(s.est_list_usd_micros)}
+          {s.requests > 0 && s.unpriced_requests === s.requests ? "Unknown" : usd(s.est_list_usd_micros)}
           {s.unpriced_requests > 0 && <span className="block text-[13px] font-normal text-(--st-retry)">{num(s.unpriced_requests)} unpriced</span>}
         </span>
       </td>
