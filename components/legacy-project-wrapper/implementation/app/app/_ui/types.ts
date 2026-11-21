@@ -53,6 +53,7 @@ export interface StopStatus {
 }
 
 export interface MySession {
+  team_budget_label: string | null;
   session_key: string;
   harness: string;
   repo_alias: string | null;

@@ -119,7 +119,7 @@ function testChangeElementUpgrade(name, shift) {
     const version = legacy.prepare("PRAGMA user_version").get().user_version;
     const keys = legacy.prepare("SELECT ws_id, goal_id, revision, kind, element_key, change FROM v2_change_request_elements ORDER BY revision, element_key").all();
     check(`LIM-2522 (${name}): backfills each revision, counts one missing base and keeps both sides of a measure replacement`,
-      elementMigration === 25 && version === SCHEMA_VERSION + shift &&
+      elementMigration === 28 && version === SCHEMA_VERSION + shift &&
         upgrade.stderr.includes(`migration ${elementMigration + 1 + shift} skipped 1 change request revision with missing base versions`) &&
         keys.map((k) => Object.values(k).join(":")).join(",") ===
         "ws_old:g_old:1:measure:m_after:added,ws_old:g_old:1:measure:m_before:removed,ws_old:g_old:2:field:title:changed" &&
@@ -136,7 +136,7 @@ function testChangeElementUpgrade(name, shift) {
 }
 
 try {
-  testChangeElementUpgrade("schema 25 to 26", 0);
+  testChangeElementUpgrade("schema 28 to 29", 0);
   testChangeElementUpgrade("shifted migration", 1);
   for (const [name, args] of [
     ["retention typo", ["retention", "run", "--dryrun", "true"]],

@@ -415,7 +415,7 @@ gets `403 read_only` on a visible measure; an unreadable goal or unknown measure
 each recording. Readings SHALL follow their measure id across versions, stay with the goal, and follow the
 workspace's person pseudonymisation and purge schedule.
 
-Server migration 25 SHALL add measure readings, launch expectations, and outcome history after the binding origin
+Server migration 28 SHALL add measure readings, launch expectations, and outcome history after the binding origin
 migration. Existing goals, change requests, and binding origins SHALL survive the upgrade. Existing records SHALL
 start with no readings or expectations.
 
@@ -1021,7 +1021,7 @@ stored base version. Each row SHALL record `kind`, `element_key` and `change` (`
 Use a limit's ID for `limit`, a depended-on goal's ID for `dependency`, a measure's ID for `measure` and the field
 name for `field` (`title`, `status` or `anchors`). Anchors remain editable by goal owners only. Target share is outside
 change requests, and reallocations use a separate record. Reordering a list alone SHALL yield no element keys.
-Server migration 26 SHALL create the element index after launch expectations, outcome history, and measure
+Server migration 29 SHALL create the element index after launch expectations, outcome history, and measure
 readings. The migration that creates the index SHALL backfill every stored revision against its own base
 version in the same transaction, regardless of the migration's schema version. It SHALL skip and count
 revisions whose base version is missing. An element row SHALL be deleted with its revision or goal.
