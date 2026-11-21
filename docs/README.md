@@ -45,3 +45,4 @@ explicit parent change.
 
 - [Legacy project lift-and-shift decision](decisions/0001-legacy-project-lift-and-shift.md)
 - [Owner decisions for Align v2, 2026-10-30 and 2026-10-31](decisions/0003-owner-decisions-v2.md)
+- [Proposed measure source and disclosure rules, pending ratification](decisions/0004-proposed-measure-sources.md)
