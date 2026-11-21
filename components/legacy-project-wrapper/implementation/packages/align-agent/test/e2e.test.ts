@@ -5,6 +5,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import { credentialsFile, loadCredentials } from "../src/api.ts";
+import { readTurn } from "../src/analysis-transcript.ts";
+import { inspectAnalysis } from "../src/analysis.ts";
 import { syncOnce } from "../src/sync.ts";
 import { sessionKey } from "../src/keys.ts";
 import { layout, localId } from "../src/shared/layout.ts";
@@ -409,7 +411,7 @@ describe("e2e", () => {
     assert.match(on.stdout, /Work signals ON: repo-relative paths of edited files, commit subjects, task labels and the branch name/);
     assert.match(on.stdout, /Never sent: prompts, responses, tool input or output\./);
     const off = await runCli(t, ["share", "--dir", hashed, "--workspace", "ws_acme", "--goal", "g_ship", "--yes"]);
-    assert.match(off.stdout, /Work signals OFF: only keyed hashes of edited files are sent/);
+    assert.match(off.stdout, /Work signals OFF: only hashes of edited files are sent/);
     assert.match((await runCli(t, ["rules"])).stdout, /app +-> +Acme \/ Ship.*work signals on/);
     const { halt } = await startSyncing(t);
     const A = "a0a0a0a0-1111-2222-3333-444444444444";
@@ -469,7 +471,7 @@ describe("e2e", () => {
     const pv = JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "x", cwd: repo, prompt: "::align share --dir Ship" }).stdout);
     assert.equal(pv.decision, "block");
     assert.match(pv.reason, /folder share preview/);
-    assert.match(pv.reason, /\(Add --signals to share file paths and task labels with the team\.\)/);
+    assert.match(pv.reason, /Work signals OFF: only hashes of edited files are sent\. Add --signals to share paths and labels with people who can read the goal\./);
     assert.equal((await runCli(t, ["rules"])).stdout.includes("repo-b"), false);
     const ok = JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "x2", cwd: repo, prompt: "::align share --dir Ship confirm" }).stdout);
     assert.match(ok.reason, /now shared with Acme/);
@@ -610,4 +612,214 @@ describe("e2e", () => {
     assert.match(st.stdout, /signed out/);
     ctx.db.close();
   });
+});
+
+test("local analysis of a signed-out rollout joins the root turn and calls without keeping transcript text", async () => {
+  const t = makeEnv();
+  try {
+    const ctx = ctxFor(t);
+    const sid = "local-rollout";
+    const root = "turn-local";
+    const tr = path.join(t.codexHome, "sessions", "rollout-local.jsonl");
+    const canary = "LOCAL-CONTENT-CANARY";
+    const prompt = { session_id: sid, turn_id: root, prompt: canary, cwd: t.root, transcript_path: tr };
+    assert.equal(runHook(t, "codex", "UserPromptSubmit", prompt).code, 0);
+    const row = (type: string, payload: object) => ({ type, timestamp: new Date().toISOString(), payload });
+    const response = (type: string, payload: object) => row("response_item", { type, ...payload });
+    const event = (type: string, payload: object) => row("event_msg", { type, ...payload });
+    const message = response("message", { role: "assistant", content: [{ type: "output_text", text: canary }] });
+    writeLines(tr, [
+      row("session_meta", { id: sid }),
+      event("task_started", { turn_id: root }),
+      event("user_message", { message: canary }),
+      message, message,
+      response("function_call", { call_id: "one", arguments: canary }),
+      response("function_call_output", { call_id: "other", output: canary }),
+      response("function_call_output", { call_id: "one", output: canary }),
+      event("task_complete", { turn_id: root }),
+      event("task_started", { turn_id: "blocked" }),
+      event("user_message", { message: "::align status" }),
+      response("function_call", { call_id: "blocked-call", arguments: canary }),
+    ]);
+    assert.equal(runHook(t, "codex", "Stop", { ...prompt, last_assistant_message: canary }).stdout, "");
+    assert.equal((ctx.db.prepare("SELECT count(*) AS n FROM analysis_results").get())?.n, 0);
+    await syncOnce(ctx, { tailBudgetMs: 200 });
+    const got = JSON.parse((await runCli(t, ["analysis", "show", sid, "--json"])).stdout);
+    assert.deepEqual(got.turns[0].records, { replies: 1, calls: 1, results: 1 });
+    assert.equal(got.turns[0].goal, null);
+    assert.deepEqual(got.sent, []);
+    for (const file of ["align.db", "align.db-wal", "logs/align.log"]) {
+      const target = path.join(t.home, file);
+      if (fs.existsSync(target)) assert.equal(fs.readFileSync(target).includes(canary), false, file);
+    }
+    assert.match((await runCli(t, ["analysis", "delete", sid])).stdout, /Analysis deleted/);
+    const removed = JSON.parse((await runCli(t, ["analysis", "show", sid, "--json"])).stdout);
+    assert.deepEqual(removed.turns, []);
+    assert.equal(fs.readFileSync(tr).includes(canary), true);
+    ctx.db.close();
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("the analysis worker sends nothing by default and sends only the allowed finding while it owns its own lease", async () => {
+  const { fake, t } = await world();
+  const limit = { id: "lim_aaaaaaaaaaaa", type: "out_of_scope" as const, text: "Rewriting billing is out of scope.", source: null,
+    example_crossing: "I will replace invoice serialization." };
+  fake.bumpGoal("ws_acme", "g_ship", { limits: [limit] });
+  await login(t);
+  const ctx = ctxFor(t);
+  const sid = "test-bound-privacy";
+  const transcript = path.join(t.claudeDir, "projects", "analysis", `${sid}.jsonl`);
+  const cwd = t.root;
+  const tags = ["PROMPT-CANARY", "REPLY-CANARY", "INPUT-CANARY", "RESULT-CANARY"];
+  writeLines(transcript, [claudeUser(sid, "initial", new Date().toISOString(), { cwd })]);
+  runHook(t, "claude", "SessionStart", { session_id: sid, cwd, transcript_path: transcript });
+  await syncOnce(ctx, { tailBudgetMs: 200 });
+  const share = await runCli(t, ["share", sid, "--workspace", "ws_acme", "--goal", "g_ship", "--yes"]);
+  assert.equal(share.code, 0, share.stderr);
+  const mark = fake.log.length;
+  fake.requestBodies = [];
+  const complete = (root: string) => {
+    runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: root, prompt: tags[0], transcript_path: transcript, cwd });
+    const at = new Date().toISOString();
+    appendLines(transcript, [
+      claudeUser(sid, root, at, { cwd, message: { role: "user", content: tags[0] } }),
+      { type: "assistant", sessionId: sid, promptId: root, message: { content: [
+        { type: "text", text: `I will replace invoice serialization. ${tags[1]} is a tag.` },
+        { type: "tool_use", id: root, input: { value: tags[2] } },
+      ] } },
+      { type: "user", sessionId: sid, message: { content: [{ type: "tool_result", tool_use_id: root, content: tags[3] }] } },
+    ]);
+    runHook(t, "claude", "Stop", { session_id: sid, prompt_id: root, transcript_path: transcript, cwd });
+  };
+  complete("off");
+  await syncOnce(ctx, { tailBudgetMs: 200 });
+  assert.equal(fake.log.slice(mark).some((row) => /analysis|data-sharing|work-signals/.test(row.path)), false);
+  assert.equal(inspectLocal().turns[0].findings.length, 1);
+  assert.match((await runCli(t, ["data-sharing", "results", "on"])).stdout, /Derived results on/);
+  let separateLease = false;
+  fake.beforeRequest = (method, url) => {
+    if (method === "POST" && url.endsWith("/analysis")) {
+      separateLease = fs.existsSync(path.join(t.home, "analysis.lock")) && !fs.existsSync(path.join(t.home, "sync.lock"));
+    }
+  };
+  complete("on");
+  await syncOnce(ctx, { tailBudgetMs: 200 });
+  const findings = [...fake.findings.values()].flat() as { [key: string]: unknown }[];
+  assert.equal(findings.length, 1, JSON.stringify(fake.log.slice(mark)));
+  assert.deepEqual(Object.keys(findings[0]).sort(), ["digest", "epoch_id", "evidence", "goal_version", "id", "limit_id", "turn_started_at"]);
+  assert.equal(separateLease, true);
+  assert.equal(tags.some((tag) => JSON.stringify(fake.requestBodies).includes(tag)), false);
+  assert.deepEqual(inspectLocal().sent[0].finding, findings[0]);
+  const readable = await runCli(t, ["analysis", "show", sid]);
+  assert.match(readable.stdout, /Align acknowledged 1 finding/);
+  assert.match(readable.stdout, /--json/);
+  assert.doesNotMatch(readable.stdout, /delivery_unknown|epoch_id|goal_version/);
+  fake.findingsAvailable = false;
+  complete("now-hosted");
+  const sinceHosted = fake.log.length;
+  await syncOnce(ctx, { tailBudgetMs: 200 });
+  assert.ok(fake.log.slice(sinceHosted).some((row) => row.method === "GET" && row.path.endsWith("/analysis")));
+  assert.ok(fake.log.slice(sinceHosted).every((row) => row.method !== "POST" || !row.path.endsWith("/analysis")));
+  const hostedChoice = await runCli(t, ["data-sharing", "results", "on"]);
+  assert.match(hostedChoice.stdout, /Hosted Align cannot receive derived findings/);
+  fake.findingsAvailable = true;
+  assert.match((await runCli(t, ["data-sharing", "results", "on"])).stdout, /Derived results on/);
+  fake.findingsBlocked = true;
+  complete("blocked");
+  await syncOnce(ctx, { tailBudgetMs: 200 });
+  assert.equal([...fake.findings.values()].flat().length, 1);
+  assert.equal(inspectLocal().turns.length, 4);
+  fake.offline = true;
+  assert.match((await runCli(t, ["analysis", "delete", sid])).stdout, /Deletion at Align is pending/);
+  assert.deepEqual(inspectLocal().turns, []);
+  fake.offline = false;
+  ctx.db.prepare("UPDATE outbox SET next_at = 0 WHERE kind = 'analysis_delete'").run();
+  await syncOnce(ctx, { tailBudgetMs: 200 });
+  assert.equal(fake.findings.size, 0);
+  assert.equal(inspectLocal().deletion_pending, false);
+  ctx.db.close();
+
+  function inspectLocal() {
+    return inspectAnalysis(ctx, localId("claude-code", sid));
+  }
+});
+
+test("the transcript reader rejects ambiguous timestamp roots and labels capped counts in analysis inspection", async () => {
+  const t = makeEnv();
+  try {
+    const sid = "timestamp-root";
+    const transcript = path.join(t.claudeDir, "projects", "analysis", `${sid}.jsonl`);
+    const at = new Date().toISOString();
+    const start = { root: `ts:${at}`, at, cwd: t.root, binding: null, transcript };
+    const reply = (root: string, text: string) => ({
+      type: "assistant", sessionId: sid, promptId: root, message: { id: root, content: [{ type: "text", text }] },
+    });
+    const earlier = claudeUser(sid, "earlier", new Date(Date.parse(at) - 1000).toISOString());
+    const current = claudeUser(sid, "current", at);
+    writeLines(transcript, [earlier, reply("earlier", "Earlier reply"), current, current, reply("current", "Current reply")]);
+    assert.equal(readTurn("claude-code", sid, start), null);
+    assert.deepEqual(readTurn("claude-code", sid, { ...start, root: "current" })?.replies, ["Current reply"]);
+    writeLines(transcript, [current, current, reply("current", "Current reply")]);
+    assert.deepEqual(readTurn("claude-code", sid, start)?.replies, ["Current reply"]);
+    const ctx = ctxFor(t);
+    const root = "many-tools";
+    const hook = { session_id: sid, prompt_id: root, cwd: t.root, transcript_path: transcript };
+    runHook(t, "claude", "UserPromptSubmit", { ...hook, prompt: "Count the records" });
+    const calls = Array.from({ length: 201 }, (_, i) => ({
+      type: "assistant", sessionId: sid, promptId: root, message: { id: `message-${i}`, content: [
+        { type: "tool_use", id: `call-${i}` }, { type: "text", text: `Reply ${i}` },
+      ] },
+    }));
+    appendLines(transcript, [claudeUser(sid, root, new Date().toISOString()), ...calls, {
+      type: "user", sessionId: sid, message: { content: [{ type: "tool_result", tool_use_id: "call-200" }] },
+    }]);
+    runHook(t, "claude", "Stop", hook);
+    await syncOnce(ctx, { tailBudgetMs: 200 });
+    const summary = await runCli(t, ["analysis", "show", sid]);
+    assert.match(summary.stdout, /Replies: at least 200/);
+    assert.match(summary.stdout, /Tool calls: at least 200/);
+    assert.match(summary.stdout, /Tool results: unknown/);
+    const raw = JSON.parse((await runCli(t, ["analysis", "show", sid, "--json"])).stdout);
+    assert.deepEqual(raw.turns[0].records, { replies: 200, calls: 200, results: 0, lower_bounds: ["replies", "calls", "results"] });
+    ctx.db.close();
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("the rollout reader distinguishes an exact count at the cap from a truncated count", () => {
+  const t = makeEnv();
+  try {
+    const sid = "rollout-cap";
+    const transcript = path.join(t.codexHome, "sessions", "rollout-cap.jsonl");
+    const turn = { root: "rollout-turn", at: new Date().toISOString(), cwd: t.root, binding: null, transcript };
+    const event = (type: string, fields: object) => ({ type: "event_msg", payload: { type, ...fields } });
+    const calls = Array.from({ length: 201 }, (_, i) => ({
+      type: "response_item", payload: { type: "function_call", call_id: `call-${i}` },
+    }));
+    const messages = Array.from({ length: 201 }, (_, i) => event("agent_message", { message: `Reply ${i}` }));
+    const read = (count: number) => {
+      writeLines(transcript, [
+        { type: "session_meta", payload: { id: sid } },
+        event("task_started", { turn_id: turn.root }),
+        event("user_message", { message: "Count the records" }),
+        ...calls.slice(0, count), calls[0],
+        ...messages.slice(0, count), messages[0],
+        event("task_complete", { turn_id: turn.root }),
+      ]);
+      return readTurn("codex", sid, turn);
+    };
+    const exact = read(200);
+    const capped = read(201);
+    assert.equal(exact?.calls.size, 200);
+    assert.equal(exact?.replies.length, 200);
+    assert.equal(exact?.lowerBounds.size, 0);
+    assert.equal(capped?.calls.size, 200);
+    assert.equal(capped?.replies.length, 200);
+    assert.deepEqual(capped?.lowerBounds, new Set(["calls", "replies"]));
+  } finally {
+    t.cleanup();
+  }
 });

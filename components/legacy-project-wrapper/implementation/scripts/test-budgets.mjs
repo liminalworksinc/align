@@ -543,11 +543,11 @@ await test("former-member replacement covers every new actor column; workspace p
   await db.tx(() => { db.run("DELETE FROM v2_members WHERE ws_id = ? AND user_id = 'owner'", W); pseudonymise(db.sql, W, "owner", new Date().toISOString(), "test-secret"); });
   assert.equal(spend.getBudgetRequest(pp("owner2"), r.id).decisions[0].actor.name, "Former member #1");
   await db.tx(() => purgeWorkspace(db.sql, W));
-  for (const t of ["v2_team_budgets", "v2_team_budget_history", "v2_budget_requests", "v2_budget_request_decisions", "v2_budget_request_sessions", "v2_team_no_goal_rollups", "v2_spend_home_teams", "v2_budget_crossings", "v2_budget_stamps", "v2_expectations", "v2_outcome_reports", "v2_measure_readings", "v2_reading_credentials", "v2_change_request_elements"]) assert.deepEqual(db.all(`SELECT * FROM ${t}`), []);
+  for (const t of ["v2_team_budgets", "v2_team_budget_history", "v2_budget_requests", "v2_budget_request_decisions", "v2_budget_request_sessions", "v2_team_no_goal_rollups", "v2_spend_home_teams", "v2_budget_crossings", "v2_budget_stamps", "v2_expectations", "v2_outcome_reports", "v2_measure_readings", "v2_reading_credentials", "v2_change_request_elements", "v2_data_restrictions", "v2_device_result_consent", "v2_analysis_findings"]) assert.deepEqual(db.all(`SELECT * FROM ${t}`), []);
 });
 await test("migration 24 leaves every pre-feature period without a home team and preserves unallocated spend", async () => {
   const migrations = runInNewContext(/const MIGRATIONS: string\[\] = (\[[\s\S]*?\n\]);/.exec(readFileSync(path.join(ROOT, "lib/v2/db.ts"), "utf8"))[1]);
-  assert.equal(migrations.length, 31);
+  assert.equal(migrations.length, 32);
   const old = new DatabaseSync(":memory:");
   try {
     old.exec("CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY)");

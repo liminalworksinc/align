@@ -504,7 +504,7 @@ try {
   check(
     "drift: Stop adds 0 bytes; the next prompt shows the user a systemMessage naming the crossed limit, with no model context; once",
     stop.code === 0 && stop.stdout === "" &&
-      drift.system === `Align: the agent's last reply may conflict with a limit on goal "${GOAL_TITLE}": Must not "${LIM1}" This is a word check on this machine only; nothing was sent or added to the agent's context. \`align config drift off\` turns it off.` &&
+      drift.system === `Align: the agent's last reply may conflict with a limit on goal "${GOAL_TITLE}": Must not "${LIM1}" (${G.limits[0].id}). The reply check ran on this machine. The reply stays here. Type \`::align drift wrong\` to mark this notice as a false alarm, or add a limit id to mark one. \`align config drift off\` turns it off.` &&
       drift.json?.hookSpecificOutput === undefined && driftAgain.stdout === "",
     `stop=${stop.stdout} drift=${drift.stdout} again=${driftAgain.stdout}`,
   );
@@ -1647,6 +1647,151 @@ try {
       alXOk.status === 200 && alXOk.json?.state === "approved" && list.length > 0 && !list.includes(H8_ELSEWHERE),
       `${alXOk.status} ${alXOk.text?.slice(0, 160)} list=${list}`,
     );
+  }
+
+  {
+    const owner = await freshMilo();
+    const team = await ws(O2, "POST", "/teams", { name: "Invoicing" });
+    const member = await ws(O2, "POST", `/teams/${team.json?.id}/members`, { user_id: M.id, role: "member" });
+    const created = await ws(owner, "POST", "/goals", {
+      title: "Keep invoices stable", team_id: team.json?.id, visibility: "workspace",
+      limits: [{ type: "out_of_scope", text: "Rewriting billing is out of scope.", path_anchors: ["services/billing/**"],
+        example_crossing: "I will replace invoice serialization.", example_within: "I will leave invoice serialization alone." }],
+    });
+    const goal = created.json;
+    if (team.status !== 201 || member.status !== 200 || created.status !== 201 || !goal?.limits?.length) {
+      throw new Error(`Analysis fixture could not create its goal. Team: ${team.text}. Membership: ${member.text}. Goal: ${created.text}`);
+    }
+    const sid = randomUUID();
+    const key = sessionKey(W, "claude-code", sid);
+    const cwd = path.join(tmpRoot, "analysis-repo");
+    spawnSync("git", ["init", "-q", cwd]);
+    const tr = path.join(claudeDir, "projects", "analysis", `${sid}.jsonl`);
+    const privateText = ["PROMPT", "REPLY", "ARG", "RESULT"].map((kind) => `${kind}-PRIVATE-${randomBytes(6).toString("hex")}`);
+    const [promptCanary, replyCanary, argCanary, resultCanary] = privateText;
+    writeLines(tr, [userLine(sid, "before", new Date().toISOString(), cwd)]);
+    hook("SessionStart", { session_id: sid, source: "startup", cwd, transcript_path: tr });
+    sync();
+    const share = cli(["share", sid, "--workspace", W, "--goal", goal.id, "--yes"]);
+    const inspect = () => JSON.parse(cli(["analysis", "show", sid, "--json"]).stdout || "{}");
+    const serverFindings = () => sdb((d) => d.prepare(
+      "SELECT id, epoch_id, goal_version, limit_id, evidence, digest, turn_started_at FROM v2_analysis_findings WHERE session_key=? ORDER BY id",
+    ).all(key));
+    const activity = () => sdb((d) => d.prepare("SELECT path, text FROM v2_activity WHERE session_key=?").all(key));
+    const turn = (root, statement, edit = false, commit = false) => {
+      hook("UserPromptSubmit", { session_id: sid, prompt_id: root, prompt: promptCanary, cwd, transcript_path: tr });
+      const at = new Date().toISOString();
+      const tool = `tool_${root}`;
+      const file = path.join(cwd, "services", "billing", `${root}.ts`);
+      if (edit) {
+        const input = { file_path: file, content: argCanary };
+        hook("PreToolUse", { session_id: sid, cwd, tool_name: "Write", tool_input: input, tool_use_id: tool });
+        mkdirSync(path.dirname(file), { recursive: true });
+        writeFileSync(file, argCanary);
+        hook("PostToolUse", { session_id: sid, cwd, tool_name: "Write", tool_input: input, tool_use_id: tool });
+      }
+      if (commit) {
+        spawnSync("git", ["-C", cwd, "add", "services/billing/default.ts"]);
+        const input = { command: 'git commit -m "Save invoice changes"' };
+        hook("PreToolUse", { session_id: sid, cwd, tool_name: "Bash", tool_input: input, tool_use_id: tool });
+        spawnSync("git", ["-C", cwd, "-c", "user.name=Local Test", "-c", "user.email=test@example.test", "commit", "-qm", "Save invoice changes"]);
+        hook("PostToolUse", { session_id: sid, cwd, tool_name: "Bash", tool_input: input, tool_use_id: tool });
+      }
+      const assistant = assistantLine(sid, `req_${root}`, new Date().toISOString(), cwd, `${statement} ${replyCanary} is a tag.`);
+      assistant.message.content.push({ type: "tool_use", id: tool, input: { value: argCanary } });
+      appendLines(tr, [
+        { ...userLine(sid, root, at, cwd), message: { role: "user", content: promptCanary } },
+        assistant,
+        { type: "user", sessionId: sid, message: { role: "user", content: [{ type: "tool_result", tool_use_id: tool, content: resultCanary }] } },
+      ]);
+      return hook("Stop", { session_id: sid, prompt_id: root, transcript_path: tr, cwd });
+    };
+    const stop = turn("default", "I will replace invoice serialization.", true);
+    const beforeSync = inspect();
+    sync();
+    const first = inspect();
+    check("LIM-2526: default keeps all derived results local, outside the hook, with linked tool evidence and only hashed activity",
+      share.code === 0 && stop.stdout === "" && beforeSync.turns?.length === 0 && first.sent?.length === 0 && serverFindings().length === 0
+        && first.turns?.[0]?.records?.results === 1 && first.turns?.[0]?.findings.some((f) => f.evidence === "example")
+        && first.turns[0].findings.some((f) => f.evidence === "tool") && activity().length > 0 && activity().every((row) => row.path === null && row.text === null),
+      JSON.stringify(first));
+    const shown = hook("UserPromptSubmit", { session_id: sid, prompt_id: "next", prompt: "continue", cwd, transcript_path: tr });
+    const wrong = hook("UserPromptSubmit", { session_id: sid, prompt: `::align drift wrong ${goal.limits[0].id}`, cwd });
+    const missed = hook("UserPromptSubmit", { session_id: sid, prompt: "::align drift missed", cwd });
+    sync();
+    const feedback = inspect().feedback ?? [];
+    check("LIM-2526: a user-only notice names evidence and false-alarm and missed feedback keep the bound version locally",
+      shown.context === null && shown.system?.includes("crossing example") && shown.system.includes("A tool confirmed")
+        && wrong.json?.reason?.includes("false alarm") && missed.json?.reason?.includes("missed limit check")
+        && feedback.some((f) => f.kind === "wrong" && f.version === 1) && feedback.some((f) => f.kind === "missed" && f.version === 1),
+      JSON.stringify({ shown, feedback }));
+    cli(["data-sharing", "signals", sid, "on"]);
+    turn("signals", "I will leave invoice serialization alone.", true);
+    sync();
+    check("LIM-2526: work signals opt-in sends a repo-relative path and no derived results",
+      activity().some((item) => item.path === "services/billing/signals.ts") && serverFindings().length === 0,
+      JSON.stringify(activity()));
+    cli(["data-sharing", "signals", sid, "off"]);
+    const on = cli(["data-sharing", "results", "on"]);
+    turn("derived", "I will replace invoice serialization.", true);
+    sync();
+    const sent = inspect();
+    const shared = serverFindings();
+    check("LIM-2526: derived-results opt-in sends the closed record for new turns without enabling work signals or sending transcript text",
+      on.code === 0 && shared.length === 2 && sent.sent?.length === 2 && sent.sent.every((row) => shared.some((f) => Object.entries(row.finding).every(([k, v]) => f[k] === v)))
+        && !activity().some((item) => item.path === "services/billing/derived.ts")
+        && privateText.every((canary) => dbFilesLack(dbFile, canary) && dbFilesLack(path.join(alignHome, "align.db"), canary) && !outputs.some((o) => o.includes(canary))),
+      JSON.stringify(sent));
+    turn("demoted", "I will replace invoice serialization.", true);
+    const demoted = await ws(O2, "POST", `/members/${M.id}`, { role: "viewer" });
+    sync();
+    const asViewer = inspect();
+    const restored = await ws(O2, "POST", `/members/${M.id}`, { role: "member" });
+    check("LIM-2526: after demotion before sync, the finding stays local and delivery is not attempted",
+      demoted.status === 200 && restored.status === 200 && asViewer.turns?.[0]?.root === "demoted"
+        && asViewer.turns[0].findings.length === 2 && asViewer.delivery_unknown?.length === 0
+        && !asViewer.upload_pending && serverFindings().length === shared.length, JSON.stringify(asViewer));
+    await ws(O2, "PATCH", "/data-sharing", { tier: 2, blocked: true });
+    turn("blocked", "I will replace invoice serialization.", true);
+    sync();
+    check("LIM-2526: a workspace ban bars new derived results while local findings keep recording",
+      serverFindings().length === shared.length && inspect().turns?.[0]?.findings?.length === 2, JSON.stringify(inspect()));
+    turn("commit-paths", "I will leave invoice serialization alone.", false, true);
+    sync();
+    const committed = inspect().turns?.[0];
+    check("LIM-2526: an attributable commit uses its changed paths and a reply matching the safe example does not add a finding",
+      committed?.root === "commit-paths" && committed.findings?.length === 1 && committed.findings[0].evidence === "git",
+      JSON.stringify(committed));
+    const off = cli(["data-sharing", "results", "off"]);
+    const gone = cli(["analysis", "delete", sid]);
+    check("LIM-2526: turning sharing off and deleting analysis works under the ban",
+      off.code === 0 && gone.stdout.includes("Analysis deleted.") && serverFindings().length === 0 && inspect().turns?.length === 0
+        && inspect().feedback?.length === 0 && dbFilesLack(dbFile, replyCanary), gone.stdout + gone.stderr);
+    await ws(O2, "PATCH", "/data-sharing", { tier: 2, blocked: false });
+    hook("UserPromptSubmit", { session_id: sid, prompt: "Continue billing work", cwd });
+    hook("Stop", { session_id: sid, last_assistant_message: "I will rewrite billing.", cwd });
+    const compatibility = hook("UserPromptSubmit", { session_id: sid, prompt: "Continue", cwd });
+    const compatibilityWrong = hook("UserPromptSubmit", { session_id: sid, prompt: "::align drift wrong", cwd });
+    const compatibilityMissed = hook("UserPromptSubmit", { session_id: sid, prompt: "::align drift missed", cwd });
+    sync();
+    const compatibilityFeedback = inspect().feedback ?? [];
+    check("LIM-2526: reply-only notices and completed turns accept feedback without any transcript reference",
+      compatibility.context === null && compatibility.system?.includes("last reply may conflict")
+        && compatibilityWrong.json?.reason?.includes("false alarm") && compatibilityMissed.json?.reason?.includes("missed limit check")
+        && compatibilityFeedback.length === 2 && compatibilityFeedback.every((f) => f.root.startsWith("ts:") && f.version === 1)
+        && compatibilityFeedback[0].root === compatibilityFeedback[1].root
+        && compatibilityFeedback.some((f) => f.kind === "wrong" && f.finding),
+      JSON.stringify({ compatibility, compatibilityFeedback }));
+    cli(["data-sharing", "results", "on"]);
+    turn("before-history-delete", "I will replace invoice serialization.", true);
+    sync();
+    const uploaded = serverFindings().length;
+    const historyGone = await ws(owner, "DELETE", `/sessions/${key}`);
+    const analysisGone = cli(["analysis", "delete", sid]);
+    check("LIM-2526: deleting local analysis settles after the server already removed session history",
+      uploaded === 2 && historyGone.status === 204 && serverFindings().length === 0
+        && analysisGone.stdout.includes("Analysis deleted.") && !inspect().deletion_pending,
+      `${uploaded} ${historyGone.status} ${analysisGone.stdout}`);
   }
 
   // ======== canaries across everything the agent printed or put into context ========

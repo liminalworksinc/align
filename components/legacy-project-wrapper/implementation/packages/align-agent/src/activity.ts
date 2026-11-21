@@ -397,11 +397,22 @@ export async function uploadActivity(ctx: Ctx): Promise<number> {
       kvSet(ctx.db, waitKey, "[]");
       continue;
     }
-    const named = signalsAllowed(ctx, s.local_id, cwd);
+    let named = false;
+    const branchChanged = repo.branch && !DEFAULT_BRANCHES.has(repo.branch) && kvGet(ctx.db, `act_branch:${s.local_id}`) !== repo.branch;
+    if (signalsAllowed(ctx, s.local_id, cwd) && (acts.length || branchChanged)) {
+      try {
+        const consent = await api(ctx, "PUT", `/api/v2/workspaces/${encodeURIComponent(s.workspace_id)}/sessions/${encodeURIComponent(s.session_key)}/work-signals`, {
+          body: { enabled: true }, timeoutMs: 1500,
+        });
+        named = consent.status === 200 && consent.json?.enabled === true && signalsAllowed(ctx, s.local_id, cwd);
+      } catch {
+        /* A named batch requires an explicit answer. */
+      }
+    }
     const items: Item[] = [];
     const base = { session_key: s.session_key, repo_id: repo.repo_id };
     // The branch name is a useful default label, except for the default branch, which says nothing about the work.
-    if (named && repo.branch && !DEFAULT_BRANCHES.has(repo.branch) && kvGet(ctx.db, `act_branch:${s.local_id}`) !== repo.branch) {
+    if (named && repo.branch && branchChanged) {
       items.push({ ...base, kind: "task", at: new Date().toISOString(), text: `branch ${repo.branch}` });
       kvSet(ctx.db, `act_branch:${s.local_id}`, repo.branch);
     }
@@ -416,8 +427,15 @@ export async function uploadActivity(ctx: Ctx): Promise<number> {
     let ok = true;
     for (let i = 0; i < items.length && ok; i += BATCH) {
       // Times go up on the server's clock; refusals are logged, never dropped silently (C3-4).
-      const batch = items.slice(i, i + BATCH);
-      const { r, refused } = await postTimed(ctx, `/api/v2/workspaces/${encodeURIComponent(s.workspace_id)}/activity`, "items", batch, "activity");
+      const batch = items.slice(i, i + BATCH).flatMap<Item>((item) => {
+        if (!named || signalsAllowed(ctx, s.local_id, cwd)) return [item];
+        if (item.kind === "task") return [];
+        const { path: _path, text: _text, ...metadata } = item;
+        return [metadata];
+      });
+      if (!batch.length) continue;
+      const protocol = batch.some((item) => item.path != null || item.text != null) ? { work_signals_version: 1 } : {};
+      const { r, refused } = await postTimed(ctx, `/api/v2/workspaces/${encodeURIComponent(s.workspace_id)}/activity`, "items", batch, "activity", protocol);
       ok = !!r && r.status >= 200 && r.status < 300;
       if (ok) sent += batch.length - refused.length;
     }

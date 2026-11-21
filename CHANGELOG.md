@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Session analysis runs locally after sync and shows possible limit crossings from recorded activity or reply wording.
+  Developers can inspect and delete findings and record false alarms or missed checks. Metadata remains the sharing
+  default. Schema 32 adds workspace sharing restrictions and a proposed, default-off choice for sending derived findings
+  to a local Align server. Hosted Align keeps findings on the machine. Consent applies to new turns only, and retrying an
+  upload cannot restore a deleted or expired finding.
+- Request reviews show the old and proposed limit anchors and examples. The CLI labels incomplete counts, shows how to
+  inspect acknowledged records, and accepts feedback on reply-only notices.
+
 - Workspace owners can review the goal list from Goals or Home, defer the review, and snooze questions about
   inactivity. The review asks about shared usage, measure readings and launch outcomes. Session owners can
   expand earlier goal bindings on Sessions. Server migration 31 records review decisions.

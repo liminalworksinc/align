@@ -30,6 +30,52 @@ queue item or let `docs/roadmap/` become a plan archive.
 Check the parent only after every required subtask and evidence item passes. Add the
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
+### [ ] LIM-2526: Keep session analysis on the machine by default
+
+- **Priority:** P0
+- **Owner:** Align local agent, workspace sharing policy and trust copy
+- **Direction:** Specify proposed data tiers and build local session analysis and limit checks in the LIM-2526 worktree.
+- **Conclusion:** Retain metadata-only sharing by default. Run bounded local analysis after sync releases its lock. Require explicit device consent and workspace permission before derived findings leave.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Specify the data boundary, local processing, and limit evidence and feedback before code. All eight specifications validated.
+  - [x] Add schema 32, sharing controls, local processing, previews and privacy tests. The targeted transport and signed-out processing tests passed.
+- **Evidence:**
+  - [x] Run the full Node 24 test gate and validate the Align specifications.
+    `ALIGN_TEST_PORT=4900 npm test` passed 2,090 checks with zero failures on Node 24.22.3.
+    Specification validation passed for all eight documents. The retained test receipt is stale.
+- **Outcome:** Metadata remains the default. Schema 32 adds controls for sharing and retention. A person can
+  inspect and delete their findings and mark false alarms or misses from the session.
+- **Review follow-up:** The independent review found ten defects in sharing, approvals and local analysis.
+  The operator confirmed that hosted Align must refuse derived results. Keep prior devices' named activity
+  working under their existing explicit local choice while applying workspace bans.
+  - [x] Specify and test the review findings, then fix the server, app and CLI.
+    Server, browser and live CLI checks exercised the new sharing boundaries, approval values and feedback.
+    The previous CLI still sent usage, hashes and opted-in named activity after upgrading from the prior schema.
+  - [x] Run both clean installs, the full Node 24 gate and specification validation.
+    Both installs succeeded on Node 24.22.3. The final `ALIGN_TEST_PORT=4900 npm test` passed 2,105 checks
+    with zero failures, including the 150 ms hook latency check. All eight specification documents passed.
+    The retained receipt is stale. The project verification command also stops at a stale documentation authority review.
+- **Remaining integration:** This stack has no owner-question route or work-record implementation for these
+  findings. Connect their stable ids when those routes are available.
+
+- **Merge integration:** Preserved the lower branch's 31 migration SQL strings and source prefix exactly.
+  Migration 32 is this branch's unchanged data-boundary SQL. The local package database retains the analysis
+  tables; the lower branch made no local schema change. Combined analysis notices with budget notes and kept
+  the existing context counters. Updated current schema checks, upgrade fixtures, table lists and sharing prose.
+  Both changelog and roadmap keep this branch first without repeating prior entries.
+- **Merge verification:** Node 26.3.0. Dependency directories were already present. Lint passed with two existing
+  unused-variable warnings. Route type generation, app typecheck, package typecheck and package build passed.
+  Budget checks passed 69/0, admin checks passed 80/0, and write-race checks passed 11/0. The 11 listener-free
+  package files passed 393/0. The added combined analysis and budget prompt regression passed 1/0 separately.
+  Two cases were excluded by name because they execute mutating git commands in temporary repositories:
+  `sessions toward the same goal: a card with the other's edits and commits at the next prompt, once; an edit to a file it just changed is held once`
+  and `a file a script wrote (no edit tool, no shell redirect) is found in the working tree by the sync pass and recorded for the pod`.
+  The two serial latency checks passed with their existing host-load adjustment and no skips. All five script
+  syntax checks passed. Conflict-marker and whitespace checks passed. Listener-dependent tests and quiet-host
+  latency remain unverified. No behavioral disagreement remained. The index and history remain untouched.
+
 ### [x] LIM-2525: Help workspace owners review the goal list
 
 - **Priority:** P0

@@ -324,10 +324,10 @@ export interface Refused {
  * more on the offset the answer's `server_time` gives; whatever is still refused is logged with why, never dropped
  * silently (C3-4). Returns the answer (null when the server could not be reached) and the items still refused.
  */
-export async function postTimed<T extends { at: string }>(ctx: Ctx, path: string, field: string, items: T[], what: string): Promise<{ r: Resp | null; refused: Refused[] }> {
+export async function postTimed<T extends { at: string }>(ctx: Ctx, path: string, field: string, items: T[], what: string, extra: Record<string, unknown> = {}): Promise<{ r: Resp | null; refused: Refused[] }> {
   const send = (list: T[]) => {
     const offset = clockOffset(ctx.home);
-    return api(ctx, "POST", path, { body: { [field]: list.map((i) => ({ ...i, at: serverIso(i.at, offset, true) })) } }).catch(() => null);
+    return api(ctx, "POST", path, { body: { ...extra, [field]: list.map((i) => ({ ...i, at: serverIso(i.at, offset, true) })) } }).catch(() => null);
   };
   const r = await send(items);
   if (!r || r.status < 200 || r.status >= 300) return { r, refused: [] };

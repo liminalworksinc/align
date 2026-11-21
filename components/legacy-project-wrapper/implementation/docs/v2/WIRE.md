@@ -196,18 +196,45 @@ Requests and holds are sent from the web (cookie): `GET`/`POST /api/v2/workspace
 ## Activity (v2.2)
 In-flight work signals for agents toward related goals. Deterministic metadata from the user's own hooks, never model
 output, prompts, tool output or file contents.
-`POST /api/v2/workspaces/:ws/activity` (Bearer) `{ "items": [ { "session_key", "kind": "edit"|"commit"|"task"|"claim",
+`POST /api/v2/workspaces/:ws/activity` (Bearer) `{ "work_signals_version"?: 1, "items": [ { "session_key", "kind": "edit"|"commit"|"task"|"claim",
 "at", "repo_id": hex, "path_hash": hex|null, "path": repo-relative string|null, "text": string|null } ] }` →
-`{ "accepted", "refused": [ { "index", "reason": "clock_skew"|"too_old"|"not_shared" } ], "server_time" }`.
+`{ "accepted", "refused": [ { "index", "reason": "clock_skew"|"too_old"|"not_shared"|"work_signals_off" } ], "server_time" }`.
 At most 200 items and 128 KB. Items for sessions this device didn't share, sessions not in `shared`, more than 5 minutes
 ahead or older than 24 h are skipped and listed in `refused`. `path` and `text` are sent only when the user turned on work signals (`align share ... --signals`);
-otherwise only `path_hash` goes up. `repo_id` = sha256(ws + "\0repo\0" + normalized git remote) so clones on different
+otherwise only `path_hash` goes up. The server also requires consent recorded by the sharing device and permission from
+the workspace. Current clients include the protocol version with named fields. A device paired before the schema 32 migration can send its opted-in names using the earlier request
+shape (without `work_signals_version`) until an explicit session choice is recorded. The workspace ban still applies.
+Other legacy requests with names receive an update message in the refusal reason. `repo_id` = sha256(ws + "\0repo\0" + normalized git remote) so clones on different
 machines match; `path_hash` = sha256(repo_id + "\0" + repo-relative path). Absolute and `..` paths are refused.
 Kept 24 hours; a `claim` 1 hour. The session's open epoch's goal is recorded with each item.
 `GET /api/v2/workspaces/:ws/activity?after=<seq>` (Bearer) → `{ "cursor", "items": [ { "seq", "session_key", "harness",
 "user": { "id", "name" }, "mine", "goal_id", "repo_id", "kind", "path_hash", "path", "text", "at", "expires_at" } ] }`,
 oldest first, at most 500, only items on goals the caller can read (an unbound session's items only to its own user).
 The agent uploads and fetches inside the normal hook-started sync pass; hooks read the cached copy.
+
+## Session sharing choices
+
+The authority for tier contents is [Nothing private leaves the machine](../../../../../specs/align/local-agent.md#requirement-nothing-private-leaves-the-machine).
+`GET /api/v2/workspaces/:ws/data-sharing` returns `{blocked: [tier]}` for a workspace the caller can access.
+A workspace owner can `PATCH` it with `{tier, blocked}` for tiers 1 through 4.
+The sharing device records tier 1 with `PUT /api/v2/workspaces/:ws/sessions/:key/work-signals` and
+`{enabled: true|false}`. The returned `enabled` is false if the workspace prohibits a new opt-in.
+
+In Mode L, `PUT /api/v2/devices/self/data-sharing` with `{enabled: true|false}` sets proposed tier 2 consent for the
+calling device. Hosted Align refuses opt-ins and uploads with 403 `results_unavailable`.
+`GET /api/v2/workspaces/:ws/sessions/:key/analysis?status=1` returns `{available, enabled, enabled_since}`.
+`available` is false in hosted mode. `enabled` also checks the device grant, current workspace role, session state,
+device consent and workspace ban. `enabled_since` is the start of the current consent period when enabled, or null.
+Without the query the response includes the device's own findings.
+
+`POST` accepts exactly `id`, `epoch_id`, `goal_version`, `limit_id`, `evidence`, `digest` and `turn_started_at`.
+The id and keyed digest are 32 lowercase hex characters. Evidence is one of `wording`, `example`, `tool`, `file`
+or `git`. The reported turn start is an ISO timestamp with milliseconds in UTC, later than the server's current
+consent time. A matching retry is acknowledged while the finding is available. Findings expire 30 days from
+the turn start. Deleted and expired findings return 410 `finding_gone` on replay.
+`DELETE` removes the sharing device's findings and returns 204. It also returns 204 when the sharer's authorized
+request reaches a marker for deleted session history. Other requests outside the device's scope receive 404.
+This API accepts no model inputs, excerpts or transcripts.
 
 ## Asks (PORT-003)
 What a team was asked to do by someone else, recorded by a person from a meeting or by hand. An ask belongs to the

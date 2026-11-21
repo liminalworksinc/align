@@ -74,6 +74,11 @@ export const layout = {
   podFeed: (h: string, ws: string) => path.join(h, "feeds", `activity-${safe(ws)}.json`),
   /** Asks of this person's teams and their own, for one workspace (`align asks`, `align team`, the envelope). */
   asksFeed: (h: string, ws: string) => path.join(h, "feeds", `asks-${safe(ws)}.json`),
+  analysis: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.json`),
+  analysisTurn: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.turn.json`),
+  analysisSeen: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.seen.json`),
+  analysisLast: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.last.json`),
+  analysisEnd: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.end.json`),
   driftDir: (h: string) => path.join(h, "drift"),
   /** A local drift notice waiting for the session's next prompt. */
   drift: (h: string, lid: string) => path.join(h, "drift", `${safe(lid)}.json`),

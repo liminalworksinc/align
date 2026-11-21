@@ -367,6 +367,10 @@ document, and fill the placeholders `[LEGAL ENTITY]`, `[ADDRESS]`, `[PRIVACY CON
 `[SECURITY CONTACT EMAIL]` from `lib/trust/entity.ts`; the sign-in and request-access cards SHALL end with links to
 both pages, and the request-access form SHALL link to `/privacy`.
 
+The security overview SHALL identify the additional data tiers as proposed, say that metadata is the default,
+and say that derived findings stay on the machine when using hosted Align.
+The subprocessor list SHALL name only actual recipients in service.
+
 #### Scenario: Reading the trust page
 
 - **WHEN** anyone opens `/trust`
@@ -381,6 +385,26 @@ both pages, and the request-access form SHALL link to `/privacy`.
 
 - **WHEN** someone opens `/app/sign-in` or `/app/request-access`
 - **THEN** the card ends with **Privacy** (`/privacy`) and **Trust and security** (`/trust`)
+
+### Requirement: Sharing restrictions in the workspace
+
+A workspace owner's People page SHALL offer labelled controls to forbid the optional tiers, explain that people
+choose what to share from their machines, and fit a 390 pixel screen. The limit editor SHALL label optional
+`File path anchors`, `Example that crosses the limit` and `Example within the limit` fields. Validation SHALL
+name those labels and preserve the person's input. The approval comparison SHALL show the approved and proposed
+values of changed limit fields, including path anchors and both examples, with their own labels and a clear empty value
+for a removal.
+
+#### Scenario: Reading restrictions and examples at phone width
+
+- **WHEN** the owner opens People at 390 pixels and an approver edits a limit
+- **THEN** the owner can change each restriction without horizontal scrolling, and the approver can enter and correct each optional field by its own label
+
+
+#### Scenario: Reviewing a limit with changed examples
+
+- **WHEN** a request changes an anchor or an example while keeping the limit text
+- **THEN** before approval, the comparison shows the actual old and proposed values on their respective sides at 390 pixels
 
 ### Requirement: Device approval screen
 

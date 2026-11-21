@@ -9,6 +9,16 @@ reach the server. Wire contract: `docs/v2/WIRE.md`. Harness facts and sources: `
 
 Zero runtime dependencies (Node 24+: `node:sqlite`, `node:crypto`, `fetch`).
 
+## Session analysis
+
+After sync releases its lock, a short local pass reads completed turns from their original transcript files. Run
+`align analysis show <session>` for record counts, limit findings and local feedback. Add `--json` to see the
+exact records Align acknowledged. Run `align analysis delete <session>` to remove the results and request deletion
+of shared findings.
+Inside a session, `::align drift wrong [limit id]` and `::align drift missed` record feedback on this machine.
+Run `align data-sharing` to see what can leave the machine and who receives it. The proposed derived-results option
+starts off and only works with a local Align server. Findings stay on the machine with hosted Align.
+
 ## Install
 
 From a checkout: `npm ci && npm run build` here, then `align install` and `align login`. Once release
@@ -223,7 +233,7 @@ a log alive, without a size cap. Uninstall removes counters, including without `
   and measures never count. If one may conflict, the next prompt shows *you* a `systemMessage` naming every limit it
   may conflict with (up to 3 per prompt; at most 3 notices per limit per session). Each crossing sentence is told
   once (only a digest of it is kept), so a false alarm never silences a later, different crossing. Nothing is
-  uploaded, nothing is added to the model's context, no reply text is kept, and it never blocks. `align config drift
+  uploaded by the legacy reply check. These notices stay out of the session context and never block. `align config drift
   off` turns it off.
 - **Past sessions.** `align share --dir <folder> --past <days>` writes the folder rule and also shares the sessions
   already metered on this machine in the last 1 to 14 days whose own recorded folders (the first one and any it later

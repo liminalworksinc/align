@@ -1564,6 +1564,39 @@ const MIGRATIONS: string[] = [
     FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id) ON DELETE CASCADE
   );
   `,
+  // Migration 32: explicit sharing choices and short-lived private findings.
+  `
+  ALTER TABLE v2_sessions ADD COLUMN work_signals INTEGER CHECK (work_signals IN (0, 1));
+  ALTER TABLE v2_sessions ADD COLUMN analysis_deleted_at TEXT;
+  ALTER TABLE v2_devices ADD COLUMN legacy_work_signals INTEGER NOT NULL DEFAULT 0 CHECK (legacy_work_signals IN (0, 1));
+  UPDATE v2_devices SET legacy_work_signals = 1;
+  CREATE TABLE v2_data_restrictions (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    tier INTEGER NOT NULL CHECK (tier BETWEEN 1 AND 4),
+    PRIMARY KEY (ws_id, tier)
+  );
+  CREATE TABLE v2_device_result_consent (
+    device_id TEXT PRIMARY KEY REFERENCES v2_devices(id) ON DELETE CASCADE,
+    enabled_at TEXT NOT NULL
+  );
+  CREATE TABLE v2_analysis_findings (
+    ws_id TEXT NOT NULL,
+    session_key TEXT NOT NULL,
+    epoch_id TEXT NOT NULL,
+    device_id TEXT NOT NULL REFERENCES v2_devices(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    goal_version INTEGER NOT NULL,
+    limit_id TEXT NOT NULL,
+    evidence TEXT NOT NULL CHECK (evidence IN ('wording','example','tool','file','git')),
+    digest TEXT NOT NULL,
+    turn_started_at TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    PRIMARY KEY (ws_id, session_key, device_id, id),
+    FOREIGN KEY (ws_id, session_key, epoch_id) REFERENCES v2_epochs(ws_id, session_key, epoch_id) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_analysis_expiry ON v2_analysis_findings(turn_started_at);
+  CREATE INDEX v2_analysis_receipt_expiry ON v2_analysis_findings(received_at);
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

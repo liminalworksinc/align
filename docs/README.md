@@ -47,3 +47,4 @@ explicit parent change.
 - [Owner decisions for Align v2, 2026-10-30 and 2026-10-31](decisions/0003-owner-decisions-v2.md)
 - [Proposed measure sources](decisions/0004-proposed-measure-sources.md)
 - [Proposed goal-list review and unbound usage decision](decisions/0005-goal-list-review.md)
+- [Proposed session data boundary](decisions/0006-session-data-boundary.md)

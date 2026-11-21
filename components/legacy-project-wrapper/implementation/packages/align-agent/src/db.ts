@@ -176,6 +176,44 @@ CREATE TABLE IF NOT EXISTS repo_aliases (
   PRIMARY KEY(workspace_id, repo_root)
 );
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS analysis_jobs (
+  local_id TEXT NOT NULL,
+  root TEXT NOT NULL,
+  input TEXT NOT NULL,
+  ended_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_at INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (local_id, root)
+);
+CREATE TABLE IF NOT EXISTS analysis_results (
+  local_id TEXT NOT NULL,
+  root TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT NOT NULL,
+  result TEXT NOT NULL,
+  PRIMARY KEY (local_id, root)
+);
+CREATE TABLE IF NOT EXISTS analysis_feedback (
+  local_id TEXT NOT NULL,
+  root TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('wrong','missed')),
+  finding TEXT NOT NULL,
+  version INTEGER,
+  at TEXT NOT NULL,
+  digest TEXT,
+  PRIMARY KEY (local_id, root, kind, finding)
+);
+CREATE TABLE IF NOT EXISTS analysis_projection (local_id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS analysis_copies (
+  local_id TEXT NOT NULL,
+  workspace TEXT NOT NULL,
+  session_key TEXT NOT NULL,
+  device TEXT NOT NULL,
+  id TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  acknowledged INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (local_id, workspace, session_key, id)
+);
 CREATE TABLE IF NOT EXISTS gaps (reason TEXT PRIMARY KEY, n INTEGER NOT NULL);
 `;
 

@@ -44,6 +44,8 @@ export interface SessionRow {
   governing_alignment_id: string | null;
   agent_stopped: number;
   conflicts: number;
+  work_signals: number | null;
+  analysis_deleted_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -164,7 +166,8 @@ export async function putSession(pp: PolicyPrincipal, dev: DevicePrincipal, key:
       // local secret), shares it again from now on.
       if (s.harness !== harness || s.repo_key !== repoKey) throw conflict("session_conflict", "This session key was shared with a different harness or repo");
       run(
-        "UPDATE v2_sessions SET device_id = ?, state = 'shared', stopped_at = NULL, ended_reason = NULL, repo_alias = ?, title = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?",
+        "UPDATE v2_sessions SET device_id = ?, state = 'shared', stopped_at = NULL, ended_reason = NULL, work_signals = CASE WHEN device_id = ? THEN work_signals END, repo_alias = ?, title = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?",
+        dev.deviceId,
         dev.deviceId,
         alias,
         title,
@@ -454,6 +457,9 @@ export async function stopSharing(pp: PolicyPrincipal, p: Principal, key: string
 
 /** The marker a deleted session leaves: a hash of the person who shared it and its key, never either one. */
 const deletedKeyHash = (userId: string, key: string) => sha256hex(`deleted-session\0${userId}\0${key}`);
+export function wasSessionDeleted(pp: PolicyPrincipal, key: string) {
+  return !!get("SELECT 1 FROM v2_deleted_sessions WHERE ws_id = ? AND key_hash = ?", pp.wsId, deletedKeyHash(pp.userId, key));
+}
 
 /** Delete shared history: the session, its epochs, usage, directive deliveries and receipts, hard-deleted.
  *  Spend totals change. Directives left with no recipient are removed too. Unlike the session's other calls, any live
@@ -463,7 +469,7 @@ export async function deleteSession(pp: PolicyPrincipal, p: Principal, key: stri
   const s = sessionRow(pp.wsId, key);
   if (!s) {
     // Deleted already (on the web, say): the account that shared it hears so, anyone else not found (cycle 5).
-    if (get("SELECT 1 AS x FROM v2_deleted_sessions WHERE ws_id = ? AND key_hash = ?", pp.wsId, deletedKeyHash(pp.userId, key))) {
+    if (wasSessionDeleted(pp, key)) {
       throw new V2Error(410, "history_deleted", "This session's shared history was already deleted; nothing is left to delete");
     }
     throw notFound();
