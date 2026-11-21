@@ -123,6 +123,10 @@ finding record only to a local Align server. Findings stay on the machine with h
 block either option. Run `align data-sharing` to review your choices and `align analysis show <session>` to inspect
 local results. Add `--json` to see the exact records Align acknowledged. Transcript content remains in its original files.
 
+The proposed model check is a separate opt-in for the workspace decision service shown in its preview. The proposed excerpt
+option requires its own opt-in and confirmation of each selected passage, named audience, purpose and expiry.
+Read or revoke an excerpt from Sessions. Workspace owners can block model checks and new excerpts.
+
 ## Hosted (HOSTED=1)
 
 One server behind an HTTPS edge (Fly.io), for one public origin. Only `/app*`, `/api/v2/*`, `/api/mcp`, `/oauth/*`,

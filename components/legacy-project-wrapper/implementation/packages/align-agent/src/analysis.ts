@@ -4,10 +4,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { api, bindDevice, clockOffset, loadCredentials, serverIso, signedIn, stillBound } from "./api.ts";
 import { readTurn, type RecordCount, type TurnContent } from "./analysis-transcript.ts";
+import { confirmedPreview, previewCode } from "./preview-code.ts";
 import type { Ctx } from "./context.ts";
 import { kvGet, kvSet, tx } from "./db.ts";
 import { considerGoalSuggestion, saveSuggestionConsent, suggestionConsent } from "./goal-suggestions.ts";
-import type { DecisionService } from "./decision-model.ts";
+import {
+  checkLimits, DECISION_PROVIDERS, decisionService, decisionWindow, decisionWindowStart, sameDecisionService, type DecisionService,
+} from "./decision-model.ts";
 import { loadFeed } from "./goals.ts";
 import { getShare } from "./hot.ts";
 import { takeLease } from "./lease.ts";
@@ -27,16 +30,23 @@ const MAX_SEND = 8;
 const RUN_MS = 3000;
 const SEND_TIMEOUT = 750;
 const CONSENT = "analysis_results_consent";
+const MAX_MODEL_SEND_MS = 1500;
+const modelConsentKey = (ws: string) => `analysis_model_check_consent:${ws}`;
+const MODEL_CHECK = { kind: "model_check", tier: 3, recipient: "provider" } as const satisfies AnalysisExtension;
+type WorkspaceService = Extract<DecisionService, { provider: "workspace" }>;
+type ModelConsent = { service: WorkspaceService; device: string; enabledFrom: string };
 type Consent = { device: string; enabledFrom: string | null; pending: boolean };
 type Scope = { ws: string; key: string; device: string };
 type Wire = { id: string; epoch_id: string; goal_version: number; limit_id: string; evidence: Evidence; digest: string; turn_started_at: string };
-type JobInput = { turn: AnalysisTurn; harness: Harness; native: string; legacy: boolean };
+type Source = { turn: Pick<AnalysisTurn, "root" | "at" | "transcript" | "endOffset">; harness: Harness; native: string };
+type JobInput = Source & { turn: AnalysisTurn; legacy: boolean };
 type Job = { local_id: string; root: string; input: string; ended_at: string; attempts: number };
 type Result = {
   goal: { id: string; title?: string; version: number; epoch: string; origin: NonNullable<AnalysisTurn["binding"]>["origin"] } | null;
   records: { replies: number; calls: number; results: number; lower_bounds?: RecordCount[] } | null;
   findings: AnalysisNotice[];
   notices: boolean;
+  source?: Source & { workspace?: string };
 };
 
 const base = ({ ws, key }: Scope) => `/api/v2/workspaces/${encodeURIComponent(ws)}/sessions/${encodeURIComponent(key)}/analysis`;
@@ -48,6 +58,7 @@ const startedAfterConsent = (turnStart: string, enabledFrom: string | null | und
   !!enabledFrom && turnStart > enabledFrom;
 const wireOf = ({ id, version, limit, evidence, digest }: AnalysisNotice, epoch: string, turnStartedAt: string): Wire =>
   ({ id, epoch_id: epoch, goal_version: version, limit_id: limit.id, evidence, digest, turn_started_at: turnStartedAt });
+const modelConsentOf = (ctx: Ctx, ws: string): ModelConsent | null => JSON.parse(kvGet(ctx.db, modelConsentKey(ws)) ?? "null");
 
 export function recordAnalysis(ctx: Ctx, rec: Extract<SpoolRecord, { type: "analysis_turn" | "drift_feedback" }>) {
   tx(ctx.db, () => {
@@ -151,7 +162,11 @@ function activityFindings(ctx: Ctx, job: Job, turn: AnalysisTurn, content: TurnC
   return [...edits, ...committedPaths];
 }
 
-function findingsFor(ctx: Ctx, job: Job, turn: AnalysisTurn, content: TurnContent | null): AnalysisNotice[] {
+function evidenceDigest(ctx: Ctx, workspace: string, goal: string, limit: string, value: string) {
+  return keyed(ctx, "limit evidence", [workspace, goal, limit, value]);
+}
+
+function findingsFor(ctx: Ctx, job: Job, turn: AnalysisTurn, content: TurnContent | null, checked: Limit[]): AnalysisNotice[] {
   const binding = turn.binding;
   if (!binding || readJson<{ drift?: boolean }>(layout.config(ctx.home))?.drift === false) return [];
   const goal = binding.goal;
@@ -161,7 +176,7 @@ function findingsFor(ctx: Ctx, job: Job, turn: AnalysisTurn, content: TurnConten
   const edits = activityFindings(ctx, job, turn, content);
   const out = new Map<string, AnalysisNotice>();
   const add = (limit: Limit, value: string, evidence: Evidence) => {
-    const digest = keyed(ctx, "limit evidence", [binding.workspace, goal.id, limit.id, value]);
+    const digest = evidenceDigest(ctx, binding.workspace, goal.id, limit.id, value);
     const id = keyed(ctx, "finding", [job.local_id, turn.root, String(goal.version), digest]);
     if (!out.has(id)) out.set(id, { id, root: turn.root, version: goal.version, title: goal.title, limit: { id: limit.id, text: limit.text, type: limit.type }, evidence, digest });
   };
@@ -171,6 +186,9 @@ function findingsFor(ctx: Ctx, job: Job, turn: AnalysisTurn, content: TurnConten
     }
     const reply = content?.replies.join("\n") ?? "";
     for (const { sentence, example } of exampleCrossings(limit, reply, known).slice(-4)) add(limit, sentence, example ? "example" : "wording");
+  }
+  for (const limit of checked) {
+    if (![...out.values()].some((finding) => finding.limit.id === limit.id)) add(limit, content!.finalReply!, "model");
   }
   return [...out.values()];
 }
@@ -187,7 +205,7 @@ function project(ctx: Ctx, lid: string): void {
   else removeFile(layout.analysis(ctx.home, lid));
 }
 
-function finishJob(ctx: Ctx, job: Job, input: JobInput, content: TurnContent | null) {
+function finishJob(ctx: Ctx, job: Job, input: JobInput, content: TurnContent | null, checked: Limit[]) {
   const { turn } = input;
   const bind = turn.binding;
   const result: Result = {
@@ -196,8 +214,12 @@ function finishJob(ctx: Ctx, job: Job, input: JobInput, content: TurnContent | n
       replies: content.replies.length, calls: content.calls.size, results: content.results.size,
       ...(content.lowerBounds.size ? { lower_bounds: [...content.lowerBounds] } : {}),
     } : null,
-    findings: findingsFor(ctx, job, turn, content),
+    findings: findingsFor(ctx, job, turn, content, checked),
     notices: !input.legacy,
+    source: content ? {
+      harness: input.harness, native: input.native, workspace: bind?.workspace,
+      turn: { root: turn.root, at: turn.at, transcript: turn.transcript, endOffset: turn.endOffset },
+    } : undefined,
   };
   const recorded = tx(ctx.db, () => {
     if ((kvGet(ctx.db, deletionKey(job.local_id)) ?? "") >= turn.at) return false;
@@ -238,12 +260,94 @@ async function syncConsent(ctx: Ctx, deadline: number) {
 /** A later check or goal suggestion must declare its tier here before receiving input. */
 export function analysisSharingAllowed(ctx: Ctx, capability: 2 | AnalysisExtension, workspace?: string, at?: string): boolean {
   if (capability !== 2) {
+    if (capability.kind === "model_check") return !!workspace && modelChecksOn(ctx, workspace, at);
     if (capability.kind !== "goal_suggestion" || capability.tier !== 3) return false;
     const consent = suggestionConsent(ctx, capability.recipient, workspace);
     return at ? startedAfterConsent(at, consent?.at) : !!consent;
   }
   const consent = consentOf(ctx);
   return !!consent?.enabledFrom && consent.device === currentDevice(ctx);
+}
+
+const modelScope = (device: string, ws: string, service: WorkspaceService) =>
+  ["model check", device, ws, service.endpoint, service.revision];
+
+async function readModelService(ctx: Ctx, ws: string) {
+  const result = await api(ctx, "GET", `/api/v2/workspaces/${encodeURIComponent(ws)}/data-sharing`, {
+    timeoutMs: SEND_TIMEOUT, redirect: "error",
+  });
+  const service = result.status === 200 ? decisionService("workspace", result.json?.decision_service) : null;
+  if (service?.provider !== "workspace") throw new Error("Ask the workspace owner to set a decision service address in People.");
+  return service;
+}
+
+export async function modelConsentPreview(ctx: Ctx, ws: string) {
+  const device = currentDevice(ctx);
+  if (!device || !signedIn(ctx.home)) throw new Error("Sign in on this machine before allowing model checks.");
+  const service = await readModelService(ctx, ws);
+  if (device !== currentDevice(ctx)) throw new Error("This machine's pairing changed. Preview the recipient again.");
+  return { endpoint: service.endpoint, code: previewCode(ctx.secret, modelScope(device, ws, service)) };
+}
+
+export function modelChecksOn(ctx: Ctx, ws: string, at?: string) {
+  const consent = modelConsentOf(ctx, ws);
+  return !!consent && signedIn(ctx.home) && consent.device === currentDevice(ctx)
+    && (!at || startedAfterConsent(at, consent.enabledFrom));
+}
+
+export async function setModelChecks(ctx: Ctx, ws: string, code?: string) {
+  const unlock = await waitForAnalysisLease(ctx);
+  const unbind = bindDevice(ctx);
+  try {
+    if (code === undefined) {
+      ctx.db.prepare("DELETE FROM kv WHERE key = ?").run(modelConsentKey(ws));
+      return;
+    }
+    const device = currentDevice(ctx);
+    if (!device || !signedIn(ctx.home)) throw new Error("Sign in on this machine before allowing model checks.");
+    const service = await readModelService(ctx, ws);
+    if (!stillBound(ctx) || !confirmedPreview(ctx.secret, modelScope(device, ws, service), code)) {
+      throw new Error("Review the current recipient with align data-sharing model preview, then confirm it.");
+    }
+    if (!modelChecksOn(ctx, ws) || !sameDecisionService(modelConsentOf(ctx, ws)?.service, service)) {
+      kvSet(ctx.db, modelConsentKey(ws), JSON.stringify({ device, service, enabledFrom: new Date().toISOString() } satisfies ModelConsent));
+    }
+  } finally {
+    unbind();
+    unlock();
+  }
+}
+
+async function checkTurn(ctx: Ctx, job: Job, input: JobInput, content: TurnContent, deadline: number): Promise<Limit[]> {
+  const { binding, at } = input.turn;
+  const reply = content.finalReply;
+  if (input.legacy || !binding || !reply?.trim() || Buffer.byteLength(reply) > 2000
+    || readJson<{ drift?: boolean }>(layout.config(ctx.home))?.drift === false) return [];
+  const limits = binding.goal.limits?.slice(0, 10);
+  const { workspace: ws, key: sessionKey } = binding;
+  const consent = modelConsentOf(ctx, ws);
+  const key = ctx.env[DECISION_PROVIDERS.workspace.key];
+  if (!limits?.length || !consent || !key?.trim() || !analysisSharingAllowed(ctx, MODEL_CHECK, ws, at)) return [];
+  const current = () => {
+    const share = getShare(ctx, job.local_id);
+    return stillBound(ctx) && share?.state === "shared" && share.workspace_id === ws && share.session_key === sessionKey
+      && (kvGet(ctx.db, deletionKey(job.local_id)) ?? "") < at && modelConsentOf(ctx, ws)?.enabledFrom === consent.enabledFrom;
+  };
+  if (!current() || Date.now() >= deadline) return [];
+  try {
+    const remaining = decisionWindowStart();
+    const permission = await api(ctx, "POST", `/api/v2/workspaces/${encodeURIComponent(ws)}/sessions/${encodeURIComponent(sessionKey)}/model-check`, {
+      timeoutMs: Math.max(1, deadline - Date.now()),
+      redirect: "error",
+    });
+    const duration = decisionWindow(permission, MAX_MODEL_SEND_MS);
+    if (!duration || !sameDecisionService(consent.service, decisionService("workspace", permission.json?.decision_service))) return [];
+    const crossed = await checkLimits(consent.service, key, reply, limits, MAX_MODEL_SEND_MS,
+      () => current() ? Math.min(remaining(duration), deadline - Date.now()) : 0);
+    return current() ? crossed.map((index) => limits[index]) : [];
+  } catch {
+    return [];
+  }
 }
 
 async function waitForAnalysisLease(ctx: Ctx) {
@@ -373,7 +477,8 @@ export async function runAnalysis(ctx: Ctx) {
         ctx.db.prepare("UPDATE analysis_jobs SET attempts=attempts+1, next_at=? WHERE local_id=? AND root=?")
           .run(Date.now() + 1000 * (job.attempts + 1), job.local_id, job.root);
       } else {
-        const recorded = finishJob(ctx, job, input, content);
+        const checked = content ? await checkTurn(ctx, job, input, content, deadline) : [];
+        const recorded = finishJob(ctx, job, input, content, checked);
         if (recorded && signedIn(ctx.home)) {
           await considerGoalSuggestion(ctx, job.local_id, input.turn, content?.prompt,
             (cap, ws, at) => analysisSharingAllowed(ctx, cap, ws, at)).catch(() => undefined);
@@ -399,15 +504,38 @@ export async function runAnalysis(ctx: Ctx) {
 type SavedSuggestion = { stage: SuggestionStage; workspace: string; candidates: string; origin: SuggestionOrigin; at: string };
 type SavedReply = { stage: SuggestionStage; reply: SuggestionReply; chosen: string | null; at: string };
 
-export function inspectAnalysis(ctx: Ctx, lid: string) {
+function readSource(source: Source | undefined) {
+  return source ? readTurn(source.harness, source.native, source.turn) : null;
+}
+
+export function excerptSource(ctx: Ctx, lid: string, root: string) {
+  const row = ctx.db.prepare("SELECT result FROM analysis_results WHERE local_id=? AND root=?").get(lid, root) as { result: string } | undefined;
+  if (!row) return null;
+  const { source } = JSON.parse(row.result) as Result;
+  return readSource(source);
+}
+
+export function inspectAnalysis(ctx: Ctx, lid: string, showEvidence = false) {
   const turns = ctx.db.prepare("SELECT root, started_at, ended_at, result FROM analysis_results WHERE local_id=? ORDER BY ended_at DESC").all(lid);
   const feedback = ctx.db.prepare("SELECT root, version, kind, NULLIF(finding, '') AS finding, at FROM analysis_feedback WHERE local_id=? ORDER BY at").all(lid);
   const copies = ctx.db.prepare("SELECT workspace, session_key, payload, acknowledged FROM analysis_copies WHERE local_id=? ORDER BY rowid").all(lid);
   const pending = ctx.db.prepare("SELECT kind FROM outbox WHERE local_id=? AND kind IN ('analysis_put','analysis_delete')").all(lid);
   return {
-    turns: turns.map(({ root, started_at, ended_at, result }) => ({
-      root: String(root), started_at: String(started_at), ended_at: String(ended_at), ...JSON.parse(String(result)) as Result,
-    })),
+    turns: turns.map(({ root, started_at, ended_at, result }) => {
+      const row = { root: String(root), started_at: String(started_at), ended_at: String(ended_at) };
+      const { source, findings, ...parsed } = JSON.parse(String(result)) as Result;
+      if (!showEvidence || !findings.some((finding) => finding.evidence === "model")) return { ...row, ...parsed, findings };
+      const reply = readSource(source)?.finalReply;
+      const workspace = source?.workspace;
+      return {
+        ...row, ...parsed,
+        findings: findings.map((finding) => finding.evidence === "model" ? {
+          ...finding,
+          reply: workspace && parsed.goal && reply && evidenceDigest(ctx, workspace, parsed.goal.id, finding.limit.id, reply) === finding.digest
+            ? reply : "Unknown",
+        } : finding),
+      };
+    }),
     feedback,
     suggestions: ctx.db.prepare("SELECT stage, workspace, candidates, origin, at FROM goal_suggestions WHERE local_id=? ORDER BY at").all(lid)
       .map((row) => {

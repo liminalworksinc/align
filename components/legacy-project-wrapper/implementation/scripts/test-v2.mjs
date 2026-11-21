@@ -759,6 +759,12 @@ try {
       ![lPrivacy, lTrust].some((r) => /PRESEED-00|lib\/v2\/auth\.ts|<!-- (?:fly|lib|Counsel)/.test(r.text)),
     `${lPrivacy.status} ${lTrust.status}`,
   );
+  check("LIM-2528: Trust explains the default and both opt-ins without an internal excerpt counter",
+    lTrust.text.includes("By default, your prompts, replies and tool output stay on your machine")
+      && lTrust.text.includes("send the final reply and applicable limits to the decision service")
+      && lTrust.text.includes("share a selected excerpt with named readers through Align")
+      && !lTrust.text.includes("session_excerpts_deleted") && !lTrust.text.includes("local mode keeps everything"),
+    lTrust.status);
   check(
     "local: the sign-in and request-access pages link to /privacy and /trust",
     [lSignIn, lRequest].every((r) => r.status === 200 && r.text.includes('href="/privacy"') && r.text.includes('href="/trust"')),
@@ -1076,10 +1082,12 @@ try {
     "v2_team_budgets", "v2_team_budget_history", "v2_budget_requests", "v2_budget_request_decisions",
     "v2_budget_request_sessions", "v2_team_no_goal_rollups", "v2_spend_home_teams", "v2_budget_crossings", "v2_budget_stamps",
     "v2_data_restrictions", "v2_device_result_consent", "v2_analysis_findings",
-    "v2_workspace_decision_services", "ba_user", "ba_passkey",
+    "v2_workspace_decision_services", "v2_device_excerpt_consent", "v2_session_excerpts", "v2_excerpt_readers",
+    "v2_excerpt_share_ids", "v2_excerpt_storage_cleanup", "v2_model_send_windows", "v2_model_check_blocks",
+    "ba_user", "ba_passkey",
   ];
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 33, lib/v2/core.mts SCHEMA_VERSION), v2 tables and Better Auth tables, limits on goals and goal versions`,
-    SCHEMA_VERSION === 33 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION &&
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 34, lib/v2/core.mts SCHEMA_VERSION), v2 tables and Better Auth tables, limits on goals and goal versions`,
+    SCHEMA_VERSION === 34 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION &&
     requiredTables.every((table) => pragmas.tables.includes(table)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   const budgetIndexes = withDb((d) => [
@@ -6016,10 +6024,10 @@ try {
   );
 
   // The feed: ETag / 304, for a device too, and the same set as the browser; filters.
-  const kDevice = (u) => {
+  const kDevice = (u, workspace = AK) => {
     const keys = newDeviceKeys();
     const d = insertDevice(u.id, `${u.who}'s laptop`);
-    withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, AK));
+    withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, workspace));
     return { ...keys, who: u.who, user: u, id: d.id, access: d.access };
   };
   const DKR = kDevice(KR);
@@ -6098,16 +6106,16 @@ try {
   const DKL = kDevice(KL);
   const DKM = kDevice(KM);
   const hAgo = (h) => new Date(Date.now() - h * 3600 * 1000).toISOString();
-  const kShare = async (dev, harness, native, startedH, epochs, usage) => {
-    const key = sessionKey(dev, AK, harness, native);
-    await call(dev.who, "PUT", `/api/v2/workspaces/${AK}/sessions/${key}`, { bearer: dev.access, body: { harness, repo_key: repoKey(dev, AK, "/src/sso"), started_at: hAgo(startedH), title: `ACT-TITLE ${native}` } });
+  const kShare = async (dev, harness, native, startedH, epochs, usage, workspace = AK) => {
+    const key = sessionKey(dev, workspace, harness, native);
+    await call(dev.who, "PUT", `/api/v2/workspaces/${workspace}/sessions/${key}`, { bearer: dev.access, body: { harness, repo_key: repoKey(dev, workspace, "/src/sso"), started_at: hAgo(startedH), title: `ACT-TITLE ${native}` } });
     const ids = [];
     for (const [goalId, h] of epochs) {
       const id = epochId();
       ids.push(id);
-      await call(dev.who, "POST", `/api/v2/workspaces/${AK}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: id, goal_id: goalId, starts_at: hAgo(h), root_turn: null, cause: "manual" } });
+      await call(dev.who, "POST", `/api/v2/workspaces/${workspace}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: id, goal_id: goalId, starts_at: hAgo(h), root_turn: null, cause: "manual" } });
     }
-    const up = await call(dev.who, "POST", `/api/v2/workspaces/${AK}/sessions/${key}/usage`, { bearer: dev.access, body: { rows: usage.map(([i, h]) => usageRow(dev, `${native}-${i}`, ids[0], { ts: hAgo(h) })) } });
+    const up = await call(dev.who, "POST", `/api/v2/workspaces/${workspace}/sessions/${key}/usage`, { bearer: dev.access, body: { rows: usage.map(([i, h]) => usageRow(dev, `${native}-${i}`, ids[0], { ts: hAgo(h) })) } });
     return { key, epoch: ids[0], accepted: up.json?.accepted };
   };
   const kSA = await kShare(DKL, "claude-code", "act-a", 4, [[GW.id, 4]], [[1, 0.5]]);
@@ -6224,6 +6232,270 @@ try {
   const oldTurn = await sendFinding(expiredTurn);
   await resultConsent(false);
   check("LIM-2526: an expired turn stays refused when its finding row is absent", oldTurn.status === 410, oldTurn.text);
+  {
+    // A deliberate share is private to the named people even when the caller owns the workspace.
+    const excerptUrl = `/api/v2/workspaces/${AK}/sessions/${kSA.key}/excerpts`;
+    const modelUrl = `/api/v2/workspaces/${AK}/sessions/${kSA.key}/model-check`;
+    const excerptList = `/api/v2/workspaces/${AK}/excerpts`;
+    const exId = () => `ex_${randomBytes(16).toString("hex")}`;
+    const excerpt = {
+      id: exId(), text: `EXCERPT-CONTENT-CANARY-<b>${"z".repeat(3900)}</b>\nEXCERPT-OVERFLOW-CANARY\n`,
+      purpose: "Review the invoice decision", readers: [KM.id, KV.id], hours: 2,
+    };
+    const excerptDevice = (method, url, body, dev = DKL) =>
+      call(dev.who, method, url, { bearer: dev.access, body });
+    const excerptWeb = (u, method, id) =>
+      call(u.who, method, id ? `${excerptList}/${id}` : excerptList, { cookie: u.cookie });
+    let consentRevision = 0;
+    const excerptConsent = (enabled, revision = ++consentRevision, dev = DKL) =>
+      excerptDevice("PUT", "/api/v2/devices/self/data-sharing", { tier: 4, enabled, revision }, dev);
+    const noExcerptConsent = await excerptDevice("POST", excerptUrl, excerpt);
+    const sharingUrl = `/api/v2/workspaces/${AK}/data-sharing`;
+    const modelBlock = (user, model_check_blocked) => call(user.who, "PATCH", sharingUrl, {
+      cookie: user.cookie, body: { model_check_blocked },
+    });
+    const configured = await call(KO.who, "PATCH", sharingUrl, {
+      cookie: KO.cookie, body: { decision_service_url: "https://decision.example.test/v1/systemone" },
+    });
+    const deniedModelBlock = await modelBlock(KM, true);
+    const hiddenModel = await excerptDevice("POST", modelUrl, undefined, DKM);
+    const modelAllowed = await excerptDevice("POST", modelUrl);
+    const grantUntil = (capability) => withDb((d) => d.prepare(
+      "SELECT until_ms FROM v2_model_send_windows WHERE ws_id = ? AND capability = ?",
+    ).get(AK, capability)?.until_ms);
+    const checkUntil = grantUntil("limit_check");
+    const veto = await modelBlock(KO, true);
+    const finishedAfterGrant = !!checkUntil && Date.now() >= checkUntil;
+    const modelBlocked = await excerptDevice("POST", modelUrl);
+    const suggestionUrl = `${sharingUrl}?for=model-suggestion`;
+    const suggestionAllowed = await excerptDevice("GET", suggestionUrl);
+
+    await modelBlock(KO, false);
+    const suggestionUntil = grantUntil("suggestion");
+    const suggestionVeto = await restrictSharing(KO, AK, 3, true);
+    const suggestionFinishedAfterGrant = !!suggestionUntil && Date.now() >= suggestionUntil;
+    const suggestionBlocked = await excerptDevice("GET", suggestionUrl);
+    const modelStillAllowed = await excerptDevice("POST", modelUrl);
+    await restrictSharing(KO, AK, 3, false);
+
+    check("LIM-2528: model policy reads belong to the sharing device and honor its own owner-set block",
+      modelAllowed.json?.enabled === true && modelAllowed.json?.send_for_ms === 1500
+        && modelAllowed.json?.decision_service?.revision === configured.json?.decision_service?.revision
+        && modelBlocked.json?.enabled === false && hiddenModel.status === 404 && deniedModelBlock.status === 403,
+      [modelAllowed, modelBlocked, hiddenModel, deniedModelBlock].map((r) => r.status).join());
+    check("LIM-2528: a model check veto save waits out a previously granted send window",
+      veto.json?.model_check_blocked === true && finishedAfterGrant);
+    check("LIM-2528: a suggestion veto save waits out its window and both blocks are independent",
+      suggestionAllowed.json?.enabled === true && suggestionVeto.json?.blocked?.includes(3) && suggestionFinishedAfterGrant
+        && suggestionBlocked.json?.enabled === false && modelStillAllowed.json?.enabled === true);
+
+    const olderRevision = ++consentRevision;
+    const off = await excerptConsent(false);
+    const staleOn = await excerptConsent(true, olderRevision);
+    check("LIM-2528: a tier 4 request arriving out of order cannot undo a newer opt-out",
+      off.status === 200 && off.json?.revision === consentRevision && staleOn.status === 200 && staleOn.json?.enabled === false
+        && (await excerptDevice("GET", excerptUrl)).json?.enabled === false, `${off.text} ${staleOn.text}`);
+    await excerptConsent(true);
+    const roster = await excerptDevice("GET", excerptUrl);
+    const hiddenRoster = await excerptDevice("GET", excerptUrl, undefined, DKM);
+    const foreignReader = await excerptDevice("POST", excerptUrl, { ...excerpt, readers: [U1.id] });
+    const invalidExpiry = await excerptDevice("POST", excerptUrl, { ...excerpt, hours: 0 });
+    const invalidPurpose = await excerptDevice("POST", excerptUrl, { ...excerpt, purpose: "" });
+    const extraField = await excerptDevice("POST", excerptUrl, { ...excerpt, transcript: "RAW-CANARY" });
+    await restrictSharing(KO, AK, 4, true);
+    const blockedExcerpt = await excerptDevice("POST", excerptUrl, excerpt);
+    await restrictSharing(KO, AK, 4, false);
+    check("LIM-2528: excerpt upload independently checks consent, workspace veto, named members and closed fields",
+      noExcerptConsent.status === 403 && blockedExcerpt.status === 403 && hiddenRoster.status === 404
+        && foreignReader.status === 404 && invalidExpiry.status === 400 && /expiry/i.test(invalidExpiry.json?.message)
+        && invalidPurpose.status === 400 && /purpose/i.test(invalidPurpose.json?.message) && extraField.status === 400
+        && roster.json?.readers?.some((r) => r.id === KV.id),
+      [noExcerptConsent, blockedExcerpt, hiddenRoster, foreignReader, invalidExpiry, invalidPurpose, extraField].map((r) => r.status).join());
+
+    const uploaded = await excerptDevice("POST", excerptUrl, excerpt);
+    const retry = await excerptDevice("POST", excerptUrl, excerpt);
+    const editedRetry = await excerptDevice("POST", excerptUrl, { ...excerpt, purpose: "Different purpose" });
+    const sharerExcerpt = await excerptWeb(KL, "GET", excerpt.id);
+    const namedExcerpt = await excerptWeb(KM, "GET", excerpt.id);
+    const viewerExcerpt = await excerptWeb(KV, "GET", excerpt.id);
+    const ownerExcerpt = await excerptWeb(KO, "GET", excerpt.id);
+    const ownerExcerptList = await excerptWeb(KO, "GET");
+    const namedExcerptList = await excerptWeb(KV, "GET");
+    const deviceExcerpt = await excerptDevice("GET", `${excerptList}/${excerpt.id}`);
+    const namedRevoke = await excerptWeb(KM, "DELETE", excerpt.id);
+    const ownerRevoke = await excerptWeb(KO, "DELETE", excerpt.id);
+    check("LIM-2528: only the sharer and named members or viewers can read exact uncached text, and only the sharer can revoke",
+      uploaded.status === 200 && !uploaded.json?.text && retry.json?.expires_at === uploaded.json?.expires_at && editedRetry.status === 409
+        && sharerExcerpt.json?.text === excerpt.text && sharerExcerpt.json?.can_revoke === true
+        && namedExcerpt.json?.text === excerpt.text && namedExcerpt.headers.get("cache-control") === "private, no-store"
+        && viewerExcerpt.json?.text === excerpt.text && !viewerExcerpt.json?.can_revoke && namedExcerptList.json?.excerpts?.[0]?.purpose === excerpt.purpose
+        && !namedExcerptList.text.includes("EXCERPT-CONTENT-CANARY") && ownerExcerpt.status === 404
+        && ownerExcerptList.json?.excerpts?.length === 0 && deviceExcerpt.status === 403 && namedRevoke.status === 404 && ownerRevoke.status === 404,
+      [uploaded, retry, editedRetry, sharerExcerpt, namedExcerpt, viewerExcerpt, ownerExcerpt, namedRevoke, ownerRevoke].map((r) => r.status).join());
+    const expires = { ...excerpt, id: exId(), hours: 1, purpose: "Access expiry case", text: "ACCESS-EXPIRY-CANARY" };
+    const scheduled = { ...excerpt, id: exId(), hours: 1, purpose: "Scheduled expiry case", text: "SCHEDULED-EXPIRY-CANARY" };
+    await excerptDevice("POST", excerptUrl, expires);
+    await excerptDevice("POST", excerptUrl, scheduled);
+    await excerptConsent(false);
+    const inLiveFiles = (file, passage) => [file, `${file}-wal`].some((f) => existsSync(f) && readFileSync(f).includes(passage));
+    withDb((d) => d.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get());
+    const revokeCanaries = ["EXCERPT-CONTENT-CANARY", "EXCERPT-OVERFLOW-CANARY"];
+    const beforeRevoke = revokeCanaries.every((canary) => inLiveFiles(dbFile, canary));
+    let revoked;
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const page = await browser.newPage();
+        await page.setCookie(...KV.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await page.setViewport({ width: 390, height: 844 });
+        await page.goto(`${BASE}/app/w/${AK}/sessions/excerpts`, { waitUntil: "networkidle0" });
+        await page.waitForFunction(() => [...document.querySelectorAll("button")].filter((b) => b.textContent === "Read excerpt").length === 3);
+        await page.evaluate((purpose) => [...document.querySelectorAll("li")].find((li) => li.innerText.includes(purpose))
+          .querySelector("button").click(), excerpt.purpose);
+        await page.waitForFunction(() => document.body.innerText.includes("EXCERPT-CONTENT-CANARY"));
+        const render = await page.evaluate(() => ({
+          width: document.scrollingElement.scrollWidth,
+          code: document.body.innerText.includes("<b>"),
+          mayRevoke: [...document.querySelectorAll("button")].some((b) => b.textContent === "Revoke access"),
+        }));
+        check("LIM-2528 (Chrome 390px): named reader opens wrapped plain text without a revoke control",
+          render.width <= 390 && render.code && !render.mayRevoke, JSON.stringify(render));
+        const clickExcerpt = (label) => page.evaluate((purpose, name) => {
+          const row = [...document.querySelectorAll("li")].find((li) => li.innerText.includes(purpose));
+          [...(row?.querySelectorAll("button") ?? [])].find((button) => button.textContent === name)?.click();
+        }, excerpt.purpose, label);
+        await clickExcerpt("Close excerpt");
+        revoked = await excerptWeb(KL, "DELETE", excerpt.id);
+        await clickExcerpt("Read excerpt");
+        const accessEnded = await page.waitForFunction(() => document.body.innerText.includes("Access to this excerpt ended."), { timeout: 3000 }).then(() => true, () => false);
+        const stale = await page.evaluate(() => ({
+          text: document.body.innerText.includes("EXCERPT-CONTENT-CANARY"),
+          width: document.scrollingElement.scrollWidth,
+          readButtons: [...document.querySelectorAll("button")].filter((b) => b.textContent === "Read excerpt").length,
+        }));
+        check("LIM-2528 (Chrome 390px): a stale listing and its text disappear when access has ended",
+          accessEnded && !stale.text && stale.width <= 390 && stale.readButtons === 2, JSON.stringify(stale));
+      } catch (e) {
+        check("LIM-2528 (Chrome 390px): excerpt page loads for the named reader", false, e.stack);
+      } finally {
+        await browser.close();
+      }
+    } else check("LIM-2528: Chrome is available for the excerpt page", false, CHROME);
+
+    revoked ??= await excerptWeb(KL, "DELETE", excerpt.id);
+    check("LIM-2528: revocation scrubs excerpt plaintext from database and WAL",
+      beforeRevoke && revokeCanaries.every((canary) => !inLiveFiles(dbFile, canary)));
+    const revokedRead = await excerptWeb(KV, "GET", excerpt.id);
+    await excerptConsent(true);
+    const noResurrection = await excerptDevice("POST", excerptUrl, excerpt);
+    const past = new Date(Date.now() - 1_000).toISOString();
+    withDb((d) => d.prepare("UPDATE v2_session_excerpts SET expires_at = ? WHERE id = ?").run(past, expires.id));
+    const beforeExpiry = inLiveFiles(dbFile, expires.text);
+    const expiredRead = await excerptWeb(KV, "GET", expires.id);
+    check("LIM-2528: access-time expiry scrubs excerpt plaintext from database and WAL",
+      beforeExpiry && !inLiveFiles(dbFile, expires.text));
+    const snapshot = withDb((d) => ({
+      excerpts: d.prepare("SELECT id FROM v2_session_excerpts WHERE id IN (?, ?)").all(excerpt.id, expires.id),
+      grants: d.prepare("SELECT * FROM v2_excerpt_readers WHERE excerpt_id IN (?, ?)").all(excerpt.id, expires.id),
+      audits: d.prepare("SELECT action FROM v2_audit WHERE ws_id = ? AND object_id IN (?, ?) ORDER BY seq").all(AK, excerpt.id, expires.id).map((row) => row.action),
+      events: d.prepare("SELECT props FROM v2_events WHERE ws_id = ? AND name = 'session_excerpt_shared'").all(AK),
+    }));
+    check("LIM-2528: revoke works with uploads off, expiry removes stored text and readers, and the event carries no content",
+      revoked.status === 204 && revokedRead.status === 404 && noResurrection.status === 404 && expiredRead.status === 404
+        && !snapshot.excerpts.length && !snapshot.grants.length && snapshot.events.length === 3 && snapshot.events.every((row) => row.props === "{}")
+        && snapshot.audits.join() === "session_excerpt.shared,session_excerpt.shared,session_excerpt.revoked,session_excerpt.expired",
+      JSON.stringify(snapshot));
+
+    const archive = path.join(tmpRoot, "excerpt-retention");
+    const excerptRetentionFile = path.join(archive, "v2", "align.sqlite");
+    mkdirSync(path.dirname(excerptRetentionFile), { recursive: true });
+    const auditTargets = [excerpt.id, expires.id];
+    const longAgo = new Date(Date.now() - 400 * 86_400_000).toISOString();
+    withDb((d) => {
+      d.prepare("UPDATE v2_audit SET at = ? WHERE object_id IN (?, ?)").run(longAgo, ...auditTargets);
+      d.prepare("VACUUM INTO ?").run(excerptRetentionFile);
+    });
+    const liveArchive = new DatabaseSync(excerptRetentionFile);
+    liveArchive.exec("PRAGMA journal_mode = WAL");
+    const beforeScheduledExpiry = inLiveFiles(excerptRetentionFile, scheduled.text);
+    const afterExpiry = new Date(Date.now() + 2 * 3_600_000).toISOString();
+    const scheduledRun = admin(["retention", "run"], { ALIGN_DATA_DIR: archive, ALIGN_TEST_IDP: "1", ALIGN_TEST_NOW: afterExpiry });
+    const scheduledCounts = scheduledRun.status === 0 ? JSON.parse(scheduledRun.out.trim().split("\n").at(-1)) : {};
+    const excerptRetentionDb = new DatabaseSync(excerptRetentionFile);
+    try {
+      check("LIM-2528: the scheduled retention pass scrubs expired plaintext and removes grants while keeping a content-free audit",
+        scheduledRun.status === 0 && scheduledCounts.session_excerpts_deleted === 1 && beforeScheduledExpiry && !inLiveFiles(excerptRetentionFile, scheduled.text)
+          && !excerptRetentionDb.prepare("SELECT 1 FROM v2_session_excerpts WHERE id = ?").get(scheduled.id)
+          && !excerptRetentionDb.prepare("SELECT 1 FROM v2_excerpt_readers WHERE excerpt_id = ?").get(scheduled.id)
+          && !!excerptRetentionDb.prepare("SELECT 1 FROM v2_audit WHERE object_id = ? AND action = 'session_excerpt.expired'").get(scheduled.id),
+        scheduledRun.err);
+      const auditGone = !excerptRetentionDb.prepare("SELECT 1 FROM v2_audit WHERE object_id IN (?, ?)").get(...auditTargets);
+      // Match just these two shares to the archived database after its real retention pass.
+      if (auditGone) withDb((d) => d.prepare("DELETE FROM v2_audit WHERE object_id IN (?, ?)").run(...auditTargets));
+      const responses = await Promise.all([excerpt, expires].map((share) => excerptDevice("POST", excerptUrl, share)));
+      check("LIM-2528: revoked and expired share ids remain unavailable after audit pruning",
+        auditGone && responses.every((r) => r.status === 404)
+          && (await excerptWeb(KV, "GET", expires.id)).status === 404 && (await excerptWeb(KV, "GET", excerpt.id)).status === 404,
+        responses.map((r) => r.status).join());
+    } finally {
+      excerptRetentionDb.close();
+      liveArchive.close();
+    }
+    await excerptWeb(KL, "DELETE", scheduled.id);
+
+    const rejoinWs = (await call(KO.who, "POST", "/api/v2/workspaces", {
+      cookie: KO.cookie, body: { name: "Excerpt rejoin" },
+    })).json?.id;
+    const rejoinBase = `/api/v2/workspaces/${rejoinWs}`;
+    const rejoinWeb = (person, method, route, body) => call(person.who, method, `${rejoinBase}${route}`, { cookie: person.cookie, body });
+    const invite = async (person) => {
+      const i = await rejoinWeb(KO, "POST", "/invites", { email: person.email, role: "member" });
+      return call(person.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: person.cookie, body: {} });
+    };
+    const reader = await signUp("XR", "Excerpt reader", "rejoin-reader@example.test");
+    const sharer = await signUp("XS", "Excerpt sharer", "rejoin-sharer@example.test");
+    await invite(reader);
+    await invite(sharer);
+    const dev = kDevice(sharer, rejoinWs);
+    const session = await kShare(dev, "claude-code", "excerpt-rejoin", 1, [], [], rejoinWs);
+    const rejoinUrl = `${rejoinBase}/sessions/${session.key}/excerpts`;
+    const rejoinShare = { ...excerpt, id: exId(), text: "REJOIN-EXCERPT-CANARY", readers: [reader.id], hours: 1 };
+    const rejoinRead = (person) => rejoinWeb(person, "GET", `/excerpts/${rejoinShare.id}`);
+    await excerptConsent(true, 1, dev);
+    const created = await excerptDevice("POST", rejoinUrl, rejoinShare, dev);
+    const active = await rejoinRead(reader);
+    const removedReader = await rejoinWeb(KO, "DELETE", `/members/${reader.id}`);
+    const rejoinedReader = await invite(reader);
+    const readAfterRejoin = await rejoinRead(reader);
+    const sharerStillHas = await rejoinRead(sharer);
+    const removedSharer = await rejoinWeb(KO, "DELETE", `/members/${sharer.id}`);
+    const rejoinedSharer = await invite(sharer);
+    const afterSharerRejoins = await rejoinRead(sharer);
+    check("LIM-2528: a removed reader or sharer regains no access on rejoin, and removal of the sharer scrubs the passage",
+      created.status === 200 && active.status === 200 && removedReader.status === 204 && rejoinedReader.status === 200
+      && readAfterRejoin.status === 404 && sharerStillHas.status === 200 && removedSharer.status === 204
+      && rejoinedSharer.status === 200 && afterSharerRejoins.status === 404 && !inLiveFiles(dbFile, rejoinShare.text),
+      [created, active, removedReader, rejoinedReader, readAfterRejoin, sharerStillHas, removedSharer, rejoinedSharer, afterSharerRejoins].map((r) => r.status).join());
+    const pinnedShare = { ...excerpt, id: exId(), text: "PINNED-WAL-CANARY" };
+    await excerptDevice("POST", excerptUrl, pinnedShare);
+    const pin = new DatabaseSync(dbFile, { readOnly: true });
+    try {
+      pin.exec("BEGIN");
+      pin.prepare("SELECT text FROM v2_session_excerpts WHERE id = ?").get(pinnedShare.id);
+      const removed = await excerptWeb(KL, "DELETE", pinnedShare.id);
+      check("LIM-2528: revocation denies fresh reads even while a connection pins the old database log",
+        removed.status === 204 && (await excerptWeb(KV, "GET", pinnedShare.id)).status === 404
+        && inLiveFiles(dbFile, pinnedShare.text));
+    } finally {
+      pin.close();
+    }
+    const checkBy = Date.now() + 3500;
+    while (inLiveFiles(dbFile, pinnedShare.text) && Date.now() < checkBy) await new Promise((resolve) => setTimeout(resolve, 100));
+    check("LIM-2528: a blocked log cleanup retries and removes plaintext when the reader releases it",
+      !inLiveFiles(dbFile, pinnedShare.text));
+    await excerptConsent(false);
+  }
   const invalidAnchor = await ka(KL, "POST", `/goals/${GW.id}/versions`, {
     limits: [{ ...GW.limits[0], path_anchors: ["/private"] }],
   });

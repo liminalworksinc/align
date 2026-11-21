@@ -2923,22 +2923,24 @@ usage error (exit 2): the switch is a workspace owner's, on the web.
 
 Sharing a session SHALL send only tier 0 by default. The following table is the authority for what may leave
 a machine. Tiers 2 through 5 describe proposed policy in
-[ADR 0006](../../docs/decisions/0006-session-data-boundary.md) and
-[ADR 0007](../../docs/decisions/0007-goal-suggestion-consent.md). The metadata default, existing work-signal
-choice and prohibition on uploading a reply remain the current rulings. A machine owner SHALL choose each
-higher tier separately, and a workspace owner SHALL be able to forbid a tier without granting consent for anyone.
+[ADR 0006](../../docs/decisions/0006-session-data-boundary.md),
+[ADR 0007](../../docs/decisions/0007-goal-suggestion-consent.md) and
+[ADR 0008](../../docs/decisions/0008-limit-checks-and-excerpts.md). The metadata default, existing work-signal
+choice and prohibition on automated uploads of replies to Align remain the current rulings. A machine owner SHALL choose each
+higher tier separately, and a workspace owner SHALL be able to forbid a tier without granting consent for anyone. Owners SHALL be able to
+block tier 3 goal suggestions and model limit checks independently.
 
 | Tier | Data and recipient | Consent and availability |
 | --- | --- | --- |
 | 0. Metadata | Usage counts, model, estimates, session and repo keys, binding metadata, and existing activity hashes, to the Align workspace | Sharing a session |
 | 1. Work signals | Repo-relative paths, commit subjects, task or claim labels and branch name, to Align and people who can read the bound goal | Explicit `--signals` on this machine for a session or folder. The machine owner can turn it off independently. |
 | 2. Derived results (proposed) | A finding id, the binding spending period, goal version and limit id, fixed evidence label, keyed digest and turn start time, to the local Align server for inspection from this machine | Mode L only, after explicit `align data-sharing results on` on this machine. Only findings for turns started after the current consent qualify. Hosted Align refuses this tier. |
-| 3. Model input (proposed) | Level 1 sends a short question with candidate goal ids and titles through a fork to the session’s existing provider. Level 2 sends candidate goal ids and titles, the chosen repo alias if known, the branch if known, and the first prompt to the selected decision provider. | Separate, default-off choices on each machine, subject to the workspace restriction. The external recipient must be named at opt-in. |
-| 4. Deliberate excerpt (proposed, reserved) | A person's chosen text to a named reader, with a purpose and expiry | Separate, default-off machine choice and a preview and confirmation per excerpt. No excerpt upload in this phase. |
+| 3. Model input (proposed) | Level 1 sends a short question with candidate goal ids and titles through a fork to the session’s existing provider. Level 2 sends candidate goal ids and titles, the chosen repo alias if known, the branch if known, and the first prompt to the selected decision provider for goal suggestions. The independent Level 2 limit check sends a bounded final reply and applicable limit wording and types to the owner-configured workspace decision service. | Separate, default-off choices on each machine, subject to the workspace restriction. The external recipient must be named at opt-in. |
+| 4. Deliberate excerpt (proposed) | A person's chosen text to Align for named workspace readers, with a purpose and expiry | Separate, default-off machine choice and a preview and confirmation per excerpt. |
 | 5. Central logs (proposed) | Full transcripts | Forbidden in hosted workspaces. Mode L may read and retain transcripts locally with separate consent. This phase reads the original files and keeps references and results. |
 
-This phase SHALL keep prompts, replies, tool arguments and results, file contents and transcript text in their
-source files. Folder rules and absolute repo paths SHALL stay local. The session API SHALL receive the keyed
+Outside the explicit tier 3 and 4 transfers below, prompts, replies, tool arguments and results, file contents and
+transcript text SHALL stay in their source files. Folder rules and absolute repo paths SHALL stay local. The session API SHALL receive the keyed
 `repo_key`, an alias only if the person chose one, and a null title. The existing team activity hashes are
 deterministic hashes, including the workspace-scoped `repo_id`; previews SHALL describe them as hashes. The
 agent SHALL send no Origin header. Steering reports SHALL carry only the shared session key, two goal ids, two
@@ -2950,7 +2952,7 @@ past-session and in-session previews SHALL state whether paths and labels are in
 that any separate consent for derived results still applies. The client SHALL gate serialization on its local
 choice and a successful policy read. The server SHALL enforce the workspace prohibition and device consent
 independently of the client. The CLI SHALL use the preflight to keep findings local when uploads are unavailable
-and say that hosted Align cannot receive them. Align SHALL accept no model input, excerpts or transcripts in this phase.
+and say that hosted Align cannot receive them. Only explicitly confirmed tier 4 excerpt text may be uploaded. Align SHALL accept no model inputs or transcripts.
 
 Explicit automated measure readings SHALL follow the source consent and access rules in Goals and Proposals.
 Session sharing choices and workspace restrictions on optional session data tiers SHALL leave those rules in effect
@@ -2992,8 +2994,8 @@ results. A failed deletion stays pending and is shown as pending. An authorized 
 was already deleted completes the request. The original transcript stays under the harness's
 control. The analysis projection SHALL contain only the results needed for notices.
 
-A later model-based limit check or goal suggester SHALL declare tier 3 and whether the recipient is the existing
-session or a separately named provider. It SHALL pass the same consent gate before receiving input. The goal suggester uses both choices. Model-based limit checks remain reserved.
+A model-based limit check or goal suggester SHALL declare tier 3 and whether the recipient is the existing
+session or a separately named provider. It SHALL pass the corresponding consent gate before receiving input.
 
 #### Scenario: Analysis while signed out
 
@@ -3075,9 +3077,11 @@ The existing tier 3 consent gate SHALL require independent opt-ins on this machi
 the decision provider. The worker SHALL obtain permission from the scope of the current workspace and a current
 bindable goal list before either model sees goal data. The worker SHALL complete the goal read before requesting
 a fresh workspace policy. That policy read permits at most one immediate dispatch, within 750 milliseconds of
-starting the read, while this device and the original local consent are still current. A workspace change made
-before that read takes effect for the dispatch. A request already authorized by that read may finish under its
-original timeout. Retries SHALL require a fresh policy read. A failed policy read, blocked workspace, changed device,
+starting the read, while this device and the original local consent are still current. The policy read SHALL
+grant a short send window for that request. The client SHALL measure both deadlines from before asking for
+permission and bound the request by the window and the original timeout. Once blocked, no new windows SHALL
+be granted for that capability. A block save SHALL wait for previously issued windows for that capability
+to expire before acknowledging the block. Retries SHALL require a fresh policy read. A failed policy read, blocked workspace, changed device,
 disabled choice, timeout, refusal or malformed result SHALL yield no model suggestion. Rules SHALL run first.
 If both model choices are on, a session fork takes precedence. A failure SHALL never route data to another
 recipient. The worker SHALL only consider turns started after the current opt-in. Repeating the same enabled
@@ -3153,6 +3157,90 @@ the available drift question flow. Future work records can reference the finding
 
 - **WHEN** a turn lacks a transcript reference and the compatibility check shows a limit notice
 - **THEN** marking that notice wrong or the turn missed records feedback against the completed turn and its goal version on this machine
+
+### Requirement: Model check of a completed turn
+
+Under the proposed rule in [ADR 0008](../../docs/decisions/0008-limit-checks-and-excerpts.md), the machine
+owner MAY opt in to Level 2 model checks for the current pairing and the owner-configured workspace decision
+service. Before consent, the CLI SHALL show the recipient, the fields sent, and how to turn the check off.
+Changing the address revision or pairing SHALL require consent again. The key stays on the machine except
+for authentication to that endpoint. The limit check and goal suggestion use the same service setting with
+independent machine consents and workspace blocks.
+
+After sync, the local worker SHALL use the goal version captured at the prompt boundary. It SHALL check only turns
+started after opt-in, while sharing is active in the same workspace. The sharing device SHALL obtain a
+short-lived send window for each check. The client SHALL measure its window from before the permission request,
+using a monotonic clock and expiring the window conservatively if the machine sleeps or its clock moves back.
+The client SHALL neither start nor continue sending after that window. The grant SHALL include the current
+decision service revision. Blocking limit checks SHALL prevent new limit check windows and the block save
+SHALL acknowledge only after previously issued limit check windows elapsed.
+The only session evidence sent SHALL be the final assistant reply, up to 2,000 UTF-8 bytes. The worker SHALL
+use the transcript's turn completion or final reply records when present and abstain when the final reply cannot
+be determined, or is too long. Repeated reply text SHALL keep its position when determining the final reply.
+The request MAY include the types and wording of up to ten `must`, `must_not` or `out_of_scope` limits from that
+version, using request-local indices and fixed instructions.
+It SHALL send no prompts, earlier replies, tool arguments or results, paths, workspace, goal or session identifiers,
+or feedback as separate fields. Verbatim reply text can itself mention those details. The worker SHALL use a clear-case
+companion question and the choices `yes`, `no` and `can_not_tell`. A finding requires a companion score of at
+least 0.95, a `yes` probability of at least 0.95 and a lead of at least 0.80 over the next choice. Missing,
+refused, ambiguous or failed answers SHALL fall silent. The hook SHALL make no model request.
+
+A finding SHALL name the limit, say that the model used the final reply, and point to local inspection where the
+exact evidence can be reread from its original transcript. If it is unavailable or no longer matches, inspection
+SHALL say that evidence is unknown. The local ledger SHALL keep only a reference and digest for that reply.
+Findings SHALL use the existing notice caps and feedback commands. No clean check SHALL be shown as compliance.
+Only the tier 2 finding record may leave for Align, and only with independent tier 2 consent and permission.
+
+#### Scenario: Independent model and derived result consent
+
+- **WHEN** an opted-in device finishes a clear turn under an allowed workspace, with derived results off
+- **THEN** the endpoint receives only the bounded final reply and the configured questions, the person can inspect
+  the limit and evidence locally and mark the notice wrong, and Align receives no verdict or evidence text
+
+#### Scenario: A delayed permission response crosses a veto
+
+- **WHEN** a reply is ready to check, its permission response is delayed, and the workspace's block save succeeds
+- **THEN** releasing that response cannot send the reply
+
+#### Scenario: A final reply repeats earlier text
+
+- **WHEN** a completed turn ends by repeating an earlier reply after another interim reply
+- **THEN** the endpoint receives only the final reply, and an ambiguous or incomplete turn sends no reply
+
+#### Scenario: Denied, unclear or changed recipient
+
+- **WHEN** the workspace blocks model limit checks, the pairing or configured recipient changes, or the endpoint has no clear answer
+- **THEN** a denied or changed recipient receives no reply, and an unclear answer produces no notice
+
+### Requirement: Preview and confirm a deliberate excerpt
+
+Under the proposed rule in ADR 0008, `align data-sharing excerpts on` SHALL enable the option for this pairing
+and `off` SHALL disable new uploads locally as soon as requested and at Align when accepted. Choices on
+the same pairing SHALL be ordered when issued, so a delayed request or response cannot overwrite a newer choice.
+`align excerpt readers <session>` SHALL list choices from the session's
+current workspace. For a locally recorded completed turn of their own shared session, a person MAY select an
+exact substring of a recorded prompt or reply. The CLI SHALL preview the exact text in escaped form, the named
+readers, the purpose, the lifetime and the destination. The preview SHALL render terminal controls, invisible
+formatting characters and combining marks as visible escapes if accepted, and SHALL distinguish an escape from
+literal text that resembles it. The send SHALL require an explicit confirmation bound
+to all of those choices, the pairing, session and turn. Confirmations expire after ten minutes. Changed input
+or an expired confirmation requires a new preview. Neither the excerpt nor its confirmation SHALL be sent by sync or kept in the sync queue. The server
+SHALL enforce tier 4 permission independently.
+
+#### Scenario: A delayed opt-in
+
+- **WHEN** an opt-in request or response is delayed and a later opt-out succeeds
+- **THEN** the older command cannot turn sharing back on locally or at Align
+
+#### Scenario: Invisible text in a selection
+
+- **WHEN** the selection includes a zero-width character or a literal escape spelling
+- **THEN** the preview visibly distinguishes them and a confirmed upload preserves the selected bytes
+
+#### Scenario: Changed preview
+
+- **WHEN** a person previews an excerpt and then changes the text, readers, purpose or lifetime before confirming
+- **THEN** no excerpt is sent until the new selection is previewed and explicitly confirmed
 
 ### Requirement: Device secret and keyed identifiers
 

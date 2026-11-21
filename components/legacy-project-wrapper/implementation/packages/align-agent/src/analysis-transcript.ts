@@ -5,6 +5,7 @@ import type { Harness } from "./shared/types.ts";
 const BYTES = 512 * 1024;
 const BLOCKS = 200;
 const LATE_BYTES = 128 * 1024;
+type TurnReference = Pick<AnalysisTurn, "at" | "root" | "transcript" | "endOffset">;
 const COMMAND = /^\s*::align\b/i;
 type RecordValue = { [key: string]: unknown };
 
@@ -27,6 +28,7 @@ export type RecordCount = "replies" | "calls" | "results";
 export interface TurnContent {
   prompt?: string;
   replies: string[];
+  finalReply: string | null;
   calls: Set<string>;
   results: Set<string>;
   lowerBounds: Set<RecordCount>;
@@ -50,7 +52,7 @@ function markPartial(lowerBounds: Set<RecordCount>) {
 
 
 /** This reader has its own bounded byte window. Metering offsets can be past the entire turn. */
-export function readTurn(harness: Harness, native: string, turn: AnalysisTurn): TurnContent | null {
+export function readTurn(harness: Harness, native: string, turn: TurnReference): TurnContent | null {
   if (!turn.transcript) return null;
   try {
     // Refuse pipes and device files without opening them. Only a regular transcript can be analysed.
@@ -88,7 +90,7 @@ function claudePrompt(row: RecordValue, native: string): string {
   return blocks(content).some((b) => b.type === "tool_result") ? "" : messageText(content, "text");
 }
 
-function claudeTurn(rows: RecordValue[], native: string, turn: AnalysisTurn, cropped: boolean, partial: boolean): TurnContent | null {
+function claudeTurn(rows: RecordValue[], native: string, turn: TurnReference, cropped: boolean, partial: boolean): TurnContent | null {
   const byTime = turn.root.startsWith("ts:");
   const at = Date.parse(turn.at);
   const candidates = new Map<string | number, number>();
@@ -113,6 +115,11 @@ function claudeTurn(rows: RecordValue[], native: string, turn: AnalysisTurn, cro
   const replies = new Map<string, string>();
   const lowerBounds = new Set<RecordCount>();
   const seen = new Set([text(first.uuid)]);
+  let finalReply: string | null = null;
+  let lastMessage = "";
+  let disputedText = false;
+  let lastText = "";
+  let usedTool = false;
   let ended = false;
   for (const row of rows.slice(index + 1)) {
     if (row.sessionId !== native || row.isSidechain === true) continue;
@@ -136,17 +143,29 @@ function claudeTurn(rows: RecordValue[], native: string, turn: AnalysisTurn, cro
     }
     if (row.type !== "assistant" || (promptId && root && promptId !== root)) continue;
     const reply = messageText(message.content, "text");
+    const identity = text(message.id) || uuid;
+    const toolUses = blocks(message.content).filter((b) => b.type === "tool_use");
+    if (!identity || identity !== lastMessage) {
+      lastMessage = identity;
+      lastText = "";
+      disputedText = false;
+      usedTool = false;
+    }
+    if (lastText && reply && lastText !== reply) disputedText = true;
+    if (reply) lastText = reply;
+    usedTool ||= toolUses.length > 0 || message.stop_reason === "tool_use";
+    finalReply = reply && !disputedText && !usedTool ? reply : null;
     if (reply) {
-      const identity = text(message.id) || uuid || reply;
-      const earlier = replies.get(identity);
+      const replyKey = identity || reply;
+      const earlier = replies.get(replyKey);
       if (earlier !== undefined || replies.size < BLOCKS) {
-        if (!earlier || reply.length > earlier.length) replies.set(identity, reply);
+        if (!earlier || reply.length > earlier.length) replies.set(replyKey, reply);
       } else lowerBounds.add("replies");
     }
-    for (const b of blocks(message.content)) if (b.type === "tool_use" && text(b.id)) addRecord(calls, text(b.id), lowerBounds, "calls");
+    for (const b of toolUses) if (text(b.id)) addRecord(calls, text(b.id), lowerBounds, "calls");
   }
   if (!ended && partial) markPartial(lowerBounds);
-  return replies.size || calls.size ? { prompt, replies: [...replies.values()], calls, results, lowerBounds } : null;
+  return replies.size || calls.size ? { prompt, replies: [...replies.values()], calls, results, lowerBounds, finalReply: ended || !partial ? finalReply : null } : null;
 }
 
 function codexTurn(rows: RecordValue[], native: string, root: string, partial: boolean): TurnContent | null {
@@ -162,6 +181,8 @@ function codexTurn(rows: RecordValue[], native: string, root: string, partial: b
   let active = false;
   let user = false;
   let prompt: string | undefined;
+  let markedFinal: string | null = null;
+  let finalReply: string | null = null;
   for (const row of rows) {
     const p = object(row.payload);
     const type = p.type;
@@ -177,13 +198,16 @@ function codexTurn(rows: RecordValue[], native: string, root: string, partial: b
       continue;
     } else if (row.type === "event_msg" && (type === "task_complete" || type === "turn_aborted")) {
       ended = true;
+      if (type === "task_complete" && turn === root) finalReply = text(p.last_agent_message) || markedFinal;
       break;
     } else if (row.type === "event_msg" && type === "user_message") {
       if (COMMAND.test(text(p.message))) return null;
       user = true;
       prompt ??= text(p.message) || undefined;
     } else if (row.type === "event_msg" && type === "agent_message") {
-      if (text(p.message)) addRecord(events, text(p.message), eventBounds, "replies");
+      const reply = text(p.message);
+      if (p.phase === "final_answer") markedFinal = reply || null;
+      if (reply) addRecord(events, reply, eventBounds, "replies");
     } else if (row.type === "response_item") {
       if (type === "message" && p.role === "user") {
         const content = messageText(p.content, "input_text");
@@ -194,6 +218,7 @@ function codexTurn(rows: RecordValue[], native: string, root: string, partial: b
         }
       } else if (type === "message" && p.role === "assistant") {
         const reply = messageText(p.content, "output_text");
+        if (p.phase === "final_answer") markedFinal = reply || null;
         if (reply) addRecord(messages, reply, lowerBounds, "replies");
       } else if (type === "function_call" || type === "custom_tool_call") {
         if (text(p.call_id)) addRecord(calls, text(p.call_id), lowerBounds, "calls");
@@ -204,6 +229,7 @@ function codexTurn(rows: RecordValue[], native: string, root: string, partial: b
   }
   const replies = messages.size ? messages : events;
   if (!messages.size && eventBounds.has("replies")) lowerBounds.add("replies");
+  if (finalReply && !replies.size) addRecord(replies, finalReply, lowerBounds, "replies");
   if (!ended && partial) markPartial(lowerBounds);
-  return user && (replies.size || calls.size) ? { prompt, replies: [...replies], calls, results, lowerBounds } : null;
+  return user && (replies.size || calls.size) ? { prompt, replies: [...replies], calls, results, lowerBounds, finalReply } : null;
 }

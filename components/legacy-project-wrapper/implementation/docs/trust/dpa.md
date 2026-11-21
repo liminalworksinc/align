@@ -86,7 +86,7 @@ A summary of the [security overview](security-overview.md):
 - **Credentials.** Device, AI app and invite tokens are stored as hashes; refresh tokens rotate and reuse revokes them; devices hold their own
   keys; connected AI apps are read-only and limited to one workspace, except for adding agent-reported evidence links
   with the separate `changes:evidence` scope.
-- **Data minimization.** No prompts, agent output or code on the server.
+- **Data minimization.** Session text stays on the machine by default. The server stores only excerpts that a person confirms for named readers.
 - **Abuse prevention.** Rate limits, creation codes and caps, a disposable-domain block, and a bot check.
 - **Logging.** A per-workspace audit log kept 1 year; server logs hold no request bodies, addresses, emails or codes.
 - **Availability.** Daily volume snapshots kept 7 days and a health check every 30 seconds.

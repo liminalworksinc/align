@@ -49,3 +49,4 @@ explicit parent change.
 - [Proposed goal-list review and unbound usage decision](decisions/0005-goal-list-review.md)
 - [Proposed session data boundary](decisions/0006-session-data-boundary.md)
 - [Proposed consent for goal suggestions](decisions/0007-goal-suggestion-consent.md)
+- [Proposed model limit checks and deliberate excerpts](decisions/0008-limit-checks-and-excerpts.md)

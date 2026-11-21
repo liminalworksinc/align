@@ -135,7 +135,7 @@ function failureWords(e: unknown, timeoutMs: number): string {
   return code || err?.cause?.message || err?.message || "fetch failed";
 }
 
-type RequestOptions = { body?: unknown; headers?: Record<string, string>; timeoutMs?: number; pairedOrigin?: string };
+type RequestOptions = { body?: unknown; headers?: Record<string, string>; timeoutMs?: number; pairedOrigin?: string; redirect?: "error" };
 
 export async function rawRequest(base: string, method: string, path: string, opts: RequestOptions = {}): Promise<Resp> {
   let res: Response;
@@ -148,7 +148,7 @@ export async function rawRequest(base: string, method: string, path: string, opt
   try {
     res = await fetch(url, {
       method,
-      redirect: opts.pairedOrigin ? "manual" : undefined,
+      redirect: opts.pairedOrigin ? "manual" : opts.redirect,
       headers: { ...(opts.body !== undefined ? { "content-type": "application/json" } : {}), accept: "application/json", ...(opts.headers || {}) },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
       signal: AbortSignal.timeout(timeoutMs),

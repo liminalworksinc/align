@@ -33,14 +33,15 @@ choices and rights you have. "Align", "we" and "us" mean [LEGAL ENTITY]. Write t
 | Workspace data (we are processor) | Workspace name, members and their roles, teams, invites (the invitee's email), goals and their versions, alignments, change requests with their notes and decisions, evidence links on change requests, labelled self-reported or agent-reported, and goal snapshots Align computes, directives, and the audit log | People in the workspace <!-- lib/v2/db.ts --> |
 | Shared sessions (we are processor) | For each agent session a person chooses to share: which agent it was (Claude Code or Codex), a hashed repository key, an optional repository alias, times, state, the goal it works toward, and token usage with estimated cost | The `align` agent on the person's computer <!-- docs/RETENTION.md --> |
 | Work signals (we are processor) | For 24 hours: hashes of files a shared session touched, and, only if the person turns on "share work signals", file paths and short text such as a task or commit title | The `align` agent <!-- lib/v2/activity.ts --> |
+| Deliberate excerpts (proposed) | The passage, readers, purpose and expiry you confirm. Shared with those readers until expiry or revocation. | You, on the machine that shared the session |
 | Access requests | Email, name, company, team size, what you want to use Align for, and your interest (try or evaluate) | You, on the request-access form <!-- app/app/request-access/view.tsx --> |
 | Creation codes | A keyed hash of each code, the email it is for, its dates, and the workspace it created | Us <!-- lib/v2/db.ts v2_creation_codes --> |
 | Abuse prevention | Rate-limit counters keyed by a keyed hash of an email address or network address; when the bot check is on, what Cloudflare Turnstile collects in your browser and your IP address | Your browser <!-- lib/v2/limits.ts; lib/v2/captcha.ts --> |
 | Product events | An event name (such as "workspace created" or "first session shared"), the workspace, a keyed hash that stands for the person, the time, and a few allowlisted properties such as the interest chosen on the request form. Never an email, name, title, address or token | Our server |
 | Messages we send | Sign-in codes and creation codes, sent to your email address | Us |
 
-**What we never collect on our servers:** the prompts you or your colleagues write to coding agents, the agents'
-replies and tool output, your code and file contents, or a session's title. **Cookies:** only the ones needed to
+**What stays on your machine by default:** prompts, replies, tool output, code and file contents. Align receives
+the text you explicitly share as an excerpt. Align's server receives no full transcript or session title. **Cookies:** only the ones needed to
 sign in: your session cookie and short-lived cookies set during a Google, GitHub or passkey sign-in. We use no
 analytics, advertising or tracking cookies and no third-party analytics.
 
@@ -49,7 +50,7 @@ analytics, advertising or tracking cookies and no third-party analytics.
 | Purpose | Data | Legal basis (EU and UK GDPR) |
 | --- | --- | --- |
 | Create your account, sign you in, keep you signed in | Account, passkeys, sessions, codes, devices | Contract |
-| Provide workspaces to our customers | Workspace data, shared sessions, work signals, connected apps | Contract with our customer (as processor, on their instructions) |
+| Provide workspaces to our customers | Workspace data, shared sessions, work signals, deliberate excerpts, connected apps | Contract with our customer (as processor, on their instructions) |
 | Answer a request for access and send a creation code | Access requests, creation codes | Steps before a contract, at your request; legitimate interests in choosing whom to onboard |
 | Keep Align secure and stop abuse | Sessions (IP address, user agent), rate-limit counters, the bot check, the audit log | Legitimate interests in security, and the customer's interest in an audit trail |
 | Understand whether people get value from Align, in aggregate | Product events, which hold no content and no direct identifiers | Legitimate interests in improving the product |
@@ -63,7 +64,10 @@ any AI model provider.
 - **Our subprocessors**: Fly.io (hosting), our email provider (Resend in the default configuration) and, when the bot
   check is on, Cloudflare Turnstile. See the [subprocessor list](subprocessors.md).
 - **Google and GitHub**, if you choose to sign in with them.
-- **People in your workspace**, according to their role and the visibility of each goal.
+- **People in your workspace**, according to their role and the visibility of each goal. Only you and the people
+  you name can read an excerpt you share.
+- **The decision service your workspace owner configures**, if you opt in to model limit checks. Your machine sends the final
+  assistant reply and selected limit wording directly to the recipient shown in the preview.
 - **AI apps you connect**, which read one workspace as you, with your permissions. You choose them, and their makers
   handle what they read under their own terms.
 - **Authorities**, when the law requires it, and a successor if [LEGAL ENTITY] is merged or sold, under this policy.

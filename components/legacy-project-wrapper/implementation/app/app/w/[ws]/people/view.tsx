@@ -140,7 +140,7 @@ const SHARE_TIERS = [
 
 function SharingRestrictions({ ws }: { ws: string }) {
   const url = `/api/v2/workspaces/${ws}/data-sharing`;
-  const settings = useApi<{ blocked: number[]; decision_service: { url: string } | null }>(url);
+  const settings = useApi<{ blocked: number[]; model_check_blocked: boolean; decision_service: { url: string } | null }>(url);
   const [address, setAddress] = useState<string | null>(null);
   const addressChange = useAction();
   const savedAddress = settings.data?.decision_service?.url ?? "";
@@ -163,6 +163,16 @@ function SharingRestrictions({ ws }: { ws: string }) {
         </label>
       ))}
       {settings.data && (
+        <label className="flex min-h-11 items-center gap-2 text-[14px]">
+          <input type="checkbox" name="restrict-model-check" checked={settings.data.model_check_blocked} disabled={change.busy}
+            onChange={(e) => {
+              const model_check_blocked = e.target.checked;
+              void change.run(() => api(url, { method: "PATCH", body: { model_check_blocked } }), settings.reload);
+            }} />
+          Block model limit checks (proposed)
+        </label>
+      )}
+      {settings.data && (
         <form className="mt-3 min-w-0 space-y-2" onSubmit={(event) => {
           event.preventDefault();
           const decision_service_url = address?.trim() || null;
@@ -171,7 +181,7 @@ function SharingRestrictions({ ws }: { ws: string }) {
             setAddress(saved.decision_service?.url ?? "");
           }, settings.reload);
         }}>
-          <Field label="Decision service address" hint="People can choose to send their first prompt and eligible goals to this address from their machine. Leave it blank to remove the service."
+          <Field label="Decision service address" hint="People can separately allow goal suggestions and limit checks to use this address from their machine. Leave it blank to remove the service."
             error={addressChange.error}>
             <Input type="url" maxLength={2048} disabled={addressChange.busy} value={address ?? savedAddress} onChange={(event) => {
               setAddress(event.target.value);

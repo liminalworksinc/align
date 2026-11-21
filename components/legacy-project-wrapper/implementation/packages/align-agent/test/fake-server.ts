@@ -93,6 +93,7 @@ export class FakeServer {
   /** Each self-revoke, with the device it named as its replacement (`replaced_by`, null when none). */
   revokesSeen: { device: string; replaced_by: string | null }[] = [];
   /** Hold matching calls (before the server looks at them) until `release` settles; `left` of them, when set (C4). */
+  beforeReply?: (method: string, path: string, status: number, body: any) => Promise<void>;
   holdCalls: { match: (method: string, path: string) => boolean; release: Promise<void>; left?: number; drop?: boolean } | null = null;
   /** Answer matching calls 503 without processing them (a proxy in front of a failing route, C4-3). */
   failCalls: ((method: string, path: string) => boolean) | null = null;
@@ -126,6 +127,10 @@ export class FakeServer {
   resultConsent = new Map<string, string>();
   findingsBlocked = false;
   findingsAvailable = true;
+  modelChecksBlocked = false;
+  excerptsBlocked = false;
+  excerptRevisions = new Map<string, number>();
+  excerptConsent = new Set<string>();
   findings = new Map<string, unknown[]>();
   requestBodies: unknown[] | null = null;
   epochs = new Map<string, any>();
@@ -426,7 +431,9 @@ export class FakeServer {
     this.beforeRequest?.(req.method || "", p);
     const send = (status: number, body?: unknown, headers?: Record<string, string>) => {
       entry.status = status;
-      this.send(res, status, body, headers);
+      if (this.beforeReply) {
+        void this.beforeReply(entry.method, p, status, body).then(() => this.send(res, status, body, headers));
+      } else this.send(res, status, body, headers);
     };
     if (this.offline) {
       entry.status = 503;
@@ -519,6 +526,15 @@ export class FakeServer {
         return send(204);
       }
       if (req.method === "PUT" && p === "/api/v2/devices/self/data-sharing") {
+        if (body.tier === 4) {
+          const prior = this.excerptRevisions.get(dev.id) ?? 0;
+          if (!Number.isSafeInteger(body.revision) || body.revision < 1) return send(400);
+          if (body.revision <= prior) return send(200, { enabled: this.excerptConsent.has(dev.id), revision: prior });
+          this.excerptRevisions.set(dev.id, body.revision);
+          if (body.enabled) this.excerptConsent.add(dev.id);
+          else this.excerptConsent.delete(dev.id);
+          return send(200, { enabled: this.excerptConsent.has(dev.id), revision: body.revision });
+        }
         if (body.enabled && !this.findingsAvailable) return send(403, { error: "results_unavailable" });
         if (body.enabled && !this.resultConsent.has(dev.id)) this.resultConsent.set(dev.id, new Date().toISOString());
         else if (!body.enabled) this.resultConsent.delete(dev.id);
@@ -534,8 +550,14 @@ export class FakeServer {
         const ws = dataSharing[1];
         const workspace = this.workspaces.find((w) => w.id === ws);
         if (!workspace) return send(404, { error: "not_found" });
-        if (workspace.role === "viewer" && url.searchParams.get("for") === "model-suggestion") return send(403, { error: "read_only" });
-        return send(200, { blocked: this.blockedModelWorkspaces.has(ws) ? [3] : [], decision_service: this.decisionServices.get(ws) ?? null });
+        const suggestion = url.searchParams.get("for") === "model-suggestion";
+        if (workspace.role === "viewer" && suggestion) return send(403, { error: "read_only" });
+        const blocked = this.blockedModelWorkspaces.has(ws);
+        return send(200, {
+          blocked: blocked ? [3] : [], decision_service: this.decisionServices.get(ws) ?? null,
+          model_check_blocked: this.modelChecksBlocked,
+          ...(suggestion ? blocked ? { enabled: false } : { enabled: true, send_for_ms: 2950 } : {}),
+        });
       }
       let m = /^\/api\/v2\/workspaces\/([^/]+)\/goals$/.exec(p);
       if (m && req.method === "GET") {
@@ -552,7 +574,7 @@ export class FakeServer {
         const list = (this.asks.get(m[1]) || []).filter((a) => (!state || a.state === state) && (!team || a.team.id === team));
         return send(200, { version: v, asks: list }, { etag: `"${v}"` });
       }
-      m = /^\/api\/v2\/workspaces\/([^/]+)\/sessions\/([^/]+)(\/(epochs|usage|stop-sharing|work-signals|analysis))?$/.exec(p);
+      m = /^\/api\/v2\/workspaces\/([^/]+)\/sessions\/([^/]+)(\/(epochs|usage|stop-sharing|work-signals|analysis|model-check|excerpts))?$/.exec(p);
       if (m) {
         const [, ws, key, , sub] = m;
         // As the server: a workspace this device's person is no longer a member of is out of reach.
@@ -598,6 +620,17 @@ export class FakeServer {
           for (const [k, e] of this.epochs) if (e.session_key === key) this.epochs.delete(k);
           for (const [k, u] of this.usage) if (u.session_key === key) this.usage.delete(k);
           return send(204);
+        }
+        if (sub === "model-check" && req.method === "POST") {
+          const decision_service = this.decisionServices.get(ws);
+          const enabled = !this.modelChecksBlocked && sess.state === "shared" && !!decision_service;
+          return send(200, enabled ? { enabled, send_for_ms: 1500, decision_service } : { enabled });
+        }
+        if (sub === "excerpts") {
+          const enabled = !this.excerptsBlocked && sess.state === "shared" && this.excerptConsent.has(dev.id);
+          if (req.method === "GET") return send(200, { enabled, readers: enabled ? [{ id: "u_reader", name: "Named reader" }] : [] });
+          if (req.method === "POST" && enabled) return send(200, { id: body.id, expires_at: new Date(Date.now() + body.hours * 3_600_000).toISOString() });
+          return send(403, { error: "excerpts_off" });
         }
         if (sub === "analysis") {
           const enabled = this.findingsAvailable && !this.findingsBlocked && this.resultConsent.has(dev.id);

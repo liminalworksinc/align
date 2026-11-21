@@ -10,8 +10,10 @@ import { ownSession, sessionRow, wasSessionDeleted } from "./sessions";
 import type { Body } from "./validate";
 import { memberPrincipal, need } from "./workspaces";
 
+const MODEL_SEND_MS = { suggestion: 2950, limit_check: 1500 } as const;
+type ModelCapability = keyof typeof MODEL_SEND_MS;
 const TIERS = [1, 2, 3, 4] as const;
-const EVIDENCE = ["wording", "example", "tool", "file", "git"] as const;
+const EVIDENCE = ["wording", "example", "tool", "file", "git", "model"] as const;
 const FINDING_FIELDS = ["id", "epoch_id", "goal_version", "limit_id", "evidence", "digest", "turn_started_at"] as const;
 type Tier = typeof TIERS[number];
 type Finding = {
@@ -42,7 +44,7 @@ function decisionService(ws: string) {
 
 export function dataRestrictions(pp: PolicyPrincipal) {
   const blocked = all<{ tier: Tier }>("SELECT tier FROM v2_data_restrictions WHERE ws_id = ? ORDER BY tier", pp.wsId).map((r) => r.tier);
-  return { blocked, decision_service: decisionService(pp.wsId) };
+  return { blocked, model_check_blocked: modelBlocked(pp.wsId, "limit_check"), decision_service: decisionService(pp.wsId) };
 }
 
 function decisionServiceUrl(value: unknown): string | null {
@@ -61,8 +63,23 @@ function decisionServiceUrl(value: unknown): string | null {
   throw badRequest("Decision service address must be an HTTPS URL without credentials, a query or a fragment.");
 }
 
+function modelBlocked(ws: string, capability: ModelCapability) {
+  return capability === "suggestion" ? tierBlocked(ws, 3) : !!get("SELECT 1 FROM v2_model_check_blocks WHERE ws_id = ?", ws);
+}
+
+function sendUntil(ws: string, capability: ModelCapability) {
+  return get<{ until_ms: number }>("SELECT until_ms FROM v2_model_send_windows WHERE ws_id = ? AND capability = ?", ws, capability)?.until_ms ?? 0;
+}
+
+async function waitForWindow(until: number) {
+  for (let remaining = until - Date.now(); remaining > 0; remaining = until - Date.now()) {
+    await new Promise((resolve) => setTimeout(resolve, remaining));
+  }
+}
+
 export async function setDataRestriction(pp: PolicyPrincipal, b: Body) {
-  return tx(() => {
+  const { wsId: ws } = pp;
+  const wait = await tx((): { until?: number; blocked?: ModelCapability } => {
     need(memberPrincipal(pp.wsId, pp.userId), "workspace.manage");
     if (Object.hasOwn(b, "decision_service_url") && Object.keys(b).length === 1) {
       const url = decisionServiceUrl(b.decision_service_url);
@@ -70,9 +87,18 @@ export async function setDataRestriction(pp: PolicyPrincipal, b: Body) {
         if (url === null) run("DELETE FROM v2_workspace_decision_services WHERE ws_id = ?", pp.wsId);
         else run(`INSERT INTO v2_workspace_decision_services (ws_id, url, revision) VALUES (?, ?, ?)
           ON CONFLICT(ws_id) DO UPDATE SET url = excluded.url, revision = excluded.revision`, pp.wsId, url, randomUUID());
-        audit(pp.wsId, pp.userId, "data_sharing.decision_service_changed", null, nowIso());
+        audit(ws, pp.userId, "data_sharing.decision_service_changed", null, nowIso());
+        return { until: Math.max(sendUntil(ws, "suggestion"), sendUntil(ws, "limit_check")) };
       }
-      return dataRestrictions(pp);
+      return {};
+    }
+    if (typeof b.model_check_blocked === "boolean" && Object.keys(b).length === 1) {
+      if (modelBlocked(ws, "limit_check") !== b.model_check_blocked) {
+        if (b.model_check_blocked) run("INSERT INTO v2_model_check_blocks (ws_id) VALUES (?)", ws);
+        else run("DELETE FROM v2_model_check_blocks WHERE ws_id = ?", ws);
+        audit(ws, pp.userId, b.model_check_blocked ? "data_sharing.model_check_blocked" : "data_sharing.model_check_unblocked", null, nowIso());
+      }
+      return b.model_check_blocked ? { blocked: "limit_check" } : {};
     }
     const tier = b.tier as Tier;
     if (!TIERS.includes(tier) || typeof b.blocked !== "boolean" || Object.keys(b).length !== 2) {
@@ -83,24 +109,55 @@ export async function setDataRestriction(pp: PolicyPrincipal, b: Body) {
       else run("DELETE FROM v2_data_restrictions WHERE ws_id = ? AND tier = ?", pp.wsId, tier);
       audit(pp.wsId, pp.userId, b.blocked ? `data_sharing.tier_${tier}_blocked` : `data_sharing.tier_${tier}_unblocked`, null, nowIso());
     }
-    return dataRestrictions(pp);
+    return tier === 3 && b.blocked ? { blocked: "suggestion" } : {};
   });
+  if (wait.until) await waitForWindow(wait.until);
+  if (wait.blocked) {
+    // The workspace may have unblocked and issued another window while a save was waiting.
+    while (modelBlocked(ws, wait.blocked)) {
+      const until = sendUntil(ws, wait.blocked);
+      if (until <= Date.now()) break;
+      await waitForWindow(until);
+    }
+  }
+  return dataRestrictions(pp);
 }
 
-export async function setResultsConsent(dev: DevicePrincipal, b: Body) {
-  if (typeof b.enabled !== "boolean" || Object.keys(b).length !== 1) throw badRequest("Choose whether to share derived results.");
+export async function setDeviceSharingConsent(dev: DevicePrincipal, b: Body) {
+  const { enabled, tier, revision } = b;
+  const excerpts = tier === 4;
+  if (typeof enabled !== "boolean" || (tier !== undefined && !excerpts)
+    || Object.keys(b).some((key) => key !== "enabled" && key !== "tier" && !(excerpts && key === "revision"))) {
+    throw badRequest("Choose whether to allow sharing.");
+  }
+  if (excerpts && (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1)) {
+    throw badRequest("Update the align CLI before changing excerpt sharing.");
+  }
   return tx(() => {
     if (!get("SELECT 1 FROM v2_devices WHERE id = ? AND revoked_at IS NULL", dev.deviceId)) throw notFound();
-    if (b.enabled && config().hosted) throw hostedRefusal();
-    if (!!deviceConsent(dev) !== b.enabled) {
-      const at = nowIso();
-      if (b.enabled) run("INSERT INTO v2_device_result_consent (device_id, enabled_at) VALUES (?, ?)", dev.deviceId, at);
+    const prior = excerpts
+      ? get<{ enabled: number; revision: number }>("SELECT enabled, revision FROM v2_device_excerpt_consent WHERE device_id = ?", dev.deviceId)
+      : undefined;
+    const wasEnabled = excerpts ? !!prior?.enabled : !!deviceConsent(dev);
+    const at = nowIso();
+    if (excerpts) {
+      if (prior && prior.revision >= (revision as number)) return { enabled: wasEnabled, revision: prior.revision };
+      run(`INSERT INTO v2_device_excerpt_consent (device_id, enabled, revision) VALUES (?, ?, ?)
+        ON CONFLICT(device_id) DO UPDATE SET enabled = excluded.enabled, revision = excluded.revision`,
+      dev.deviceId, Number(enabled), revision as number);
+    } else {
+      if (enabled && config().hosted) throw hostedRefusal();
+      if (wasEnabled === enabled) return { enabled };
+      if (enabled) run("INSERT INTO v2_device_result_consent (device_id, enabled_at) VALUES (?, ?)", dev.deviceId, at);
       else run("DELETE FROM v2_device_result_consent WHERE device_id = ?", dev.deviceId);
+    }
+    if (wasEnabled !== enabled) {
+      const choice = excerpts ? "excerpts" : "results";
       for (const { ws_id } of all<{ ws_id: string }>("SELECT ws_id FROM v2_device_grants WHERE device_id = ?", dev.deviceId)) {
-        audit(ws_id, dev.user.id, b.enabled ? "data_sharing.results_on" : "data_sharing.results_off", null, at);
+        audit(ws_id, dev.user.id, `data_sharing.${choice}_${enabled ? "on" : "off"}`, null, at);
       }
     }
-    return { enabled: b.enabled };
+    return excerpts ? { enabled, revision } : { enabled };
   });
 }
 
@@ -110,6 +167,33 @@ export function currentDeviceWorkspace(pp: PolicyPrincipal, dev: DevicePrincipal
   const current = memberPrincipal(pp.wsId, pp.userId);
   need(current, "workspace.read");
   return current;
+}
+
+function grantModelWindow(ws: string, capability: ModelCapability) {
+  if (modelBlocked(ws, capability)) return { enabled: false };
+  const send_for_ms = MODEL_SEND_MS[capability];
+  run(`INSERT INTO v2_model_send_windows (ws_id, capability, until_ms) VALUES (?, ?, ?)
+    ON CONFLICT(ws_id, capability) DO UPDATE SET until_ms = max(until_ms, excluded.until_ms)`,
+  ws, capability, Date.now() + send_for_ms);
+  return { enabled: true, send_for_ms };
+}
+
+export async function suggestionSendWindow(pp: PolicyPrincipal, dev: DevicePrincipal) {
+  return tx(() => {
+    need(currentDeviceWorkspace(pp, dev), "session.share");
+    return { ...dataRestrictions(pp), ...grantModelWindow(pp.wsId, "suggestion") };
+  });
+}
+
+export async function modelSendWindow(pp: PolicyPrincipal, dev: DevicePrincipal, key: string) {
+  return tx(() => {
+    const current = currentDeviceWorkspace(pp, dev);
+    const session = ownSession(current, dev, key);
+    need(current, "session.share");
+    const decision_service = decisionService(pp.wsId);
+    if (session.state !== "shared" || !decision_service) return { enabled: false };
+    return { ...grantModelWindow(pp.wsId, "limit_check"), decision_service };
+  });
 }
 
 export async function setWorkSignals(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {
