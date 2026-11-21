@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { config } from "../config";
 import { all, audit, get, run, tx } from "./db";
 import type { DevicePrincipal } from "./devices";
@@ -35,15 +36,48 @@ export function tierBlocked(ws: string, tier: Tier) {
   return !!get("SELECT 1 FROM v2_data_restrictions WHERE ws_id = ? AND tier = ?", ws, tier);
 }
 
+function decisionService(ws: string) {
+  return get<{ url: string; revision: string }>("SELECT url, revision FROM v2_workspace_decision_services WHERE ws_id = ?", ws) ?? null;
+}
+
 export function dataRestrictions(pp: PolicyPrincipal) {
-  return { blocked: all<{ tier: Tier }>("SELECT tier FROM v2_data_restrictions WHERE ws_id = ? ORDER BY tier", pp.wsId).map((r) => r.tier) };
+  const blocked = all<{ tier: Tier }>("SELECT tier FROM v2_data_restrictions WHERE ws_id = ? ORDER BY tier", pp.wsId).map((r) => r.tier);
+  return { blocked, decision_service: decisionService(pp.wsId) };
+}
+
+function decisionServiceUrl(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value === "string" && value.length <= 2048) {
+    try {
+      const url = new URL(value);
+      const loopback = !config().hosted && url.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(url.hostname);
+      if ((url.protocol === "https:" || loopback) && !url.username && !url.password && !url.href.includes("?") && !url.href.includes("#")) {
+        return url.href;
+      }
+    } catch {
+      // Use the field label for all invalid addresses.
+    }
+  }
+  throw badRequest("Decision service address must be an HTTPS URL without credentials, a query or a fragment.");
 }
 
 export async function setDataRestriction(pp: PolicyPrincipal, b: Body) {
   return tx(() => {
     need(memberPrincipal(pp.wsId, pp.userId), "workspace.manage");
+    if (Object.hasOwn(b, "decision_service_url") && Object.keys(b).length === 1) {
+      const url = decisionServiceUrl(b.decision_service_url);
+      if ((decisionService(pp.wsId)?.url ?? null) !== url) {
+        if (url === null) run("DELETE FROM v2_workspace_decision_services WHERE ws_id = ?", pp.wsId);
+        else run(`INSERT INTO v2_workspace_decision_services (ws_id, url, revision) VALUES (?, ?, ?)
+          ON CONFLICT(ws_id) DO UPDATE SET url = excluded.url, revision = excluded.revision`, pp.wsId, url, randomUUID());
+        audit(pp.wsId, pp.userId, "data_sharing.decision_service_changed", null, nowIso());
+      }
+      return dataRestrictions(pp);
+    }
     const tier = b.tier as Tier;
-    if (!TIERS.includes(tier) || typeof b.blocked !== "boolean") throw badRequest("Choose a sharing restriction and whether to block it.");
+    if (!TIERS.includes(tier) || typeof b.blocked !== "boolean" || Object.keys(b).length !== 2) {
+      throw badRequest("Choose a sharing restriction and whether to block it.");
+    }
     if (tierBlocked(pp.wsId, tier) !== b.blocked) {
       if (b.blocked) run("INSERT INTO v2_data_restrictions (ws_id, tier) VALUES (?, ?)", pp.wsId, tier);
       else run("DELETE FROM v2_data_restrictions WHERE ws_id = ? AND tier = ?", pp.wsId, tier);

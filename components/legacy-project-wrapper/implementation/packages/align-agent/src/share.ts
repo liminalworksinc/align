@@ -14,6 +14,7 @@ import { clockOffset, loadCredentials, signedIn } from "./api.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { clean, requestShortId } from "./shared/envelope.ts";
 import { randomId, readJson, removeFile, writeJsonAtomic } from "./shared/fsx.ts";
+import { invalidatePastOffer } from "./shared/goal-suggestions.ts";
 import { layout } from "./shared/layout.ts";
 import type { ShareFacts } from "./shared/ended.ts";
 import type { FeedFile, Goal, GoalSnapshot, MeFile } from "./shared/types.ts";
@@ -160,6 +161,7 @@ export function applyShare(ctx: Ctx, p: SharePlan): void {
     enqueue(ctx, lid, "put_session", { ws: p.workspace.id, session_key: p.session_key, body: p.put_body });
     enqueue(ctx, lid, "post_epoch", { ws: p.workspace.id, session_key: p.session_key, body: p.epoch_body });
   });
+  invalidatePastOffer(ctx.home);
   renderHot(ctx, lid);
 }
 
@@ -249,6 +251,7 @@ export function forgetShare(ctx: Ctx, lid: string): void {
     kvSet(ctx.db, `history_deleted:${lid}`, nowIso());
     notePriorShare(ctx, lid, true);
   });
+  invalidatePastOffer(ctx.home);
   if (share) {
     const file = layout.podFeed(ctx.home, share.workspace_id);
     const feed = readJson<PodFeed>(file);

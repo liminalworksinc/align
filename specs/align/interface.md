@@ -1401,7 +1401,8 @@ Every change request card on the goal page SHALL show (the Requests tab lists re
 
 When the version being launched has measures, the goal page and Requests drawer SHALL offer an optional collapsed
 "What do you expect this to change?" block for Launch or Approve and launch, with labelled fields for the measure from the version being launched,
-expected value, date and evidence. The existing form rules SHALL apply. The launched request SHALL show
+expected value, date and evidence. The existing form rules SHALL apply. At phone widths, a review drawer whose
+decision controls exceed the screen height SHALL let the person scroll to the confirmation. The launched request SHALL show
 "Expected: <text> by <date>" and "Not answered yet" or "Reported met", "Reported not met" or "Reported can't tell"
 with who and when, labelled self-reported. The request SHALL offer an early answer and an eligible correction
 using the same outcome form as Home. Validation messages for the optional expectation fields SHALL use their
@@ -1413,6 +1414,11 @@ leave the outcome unrecorded and the entered values available to edit.
 
 - **WHEN** a launcher opens the launch controls on a request that launches a version with measures
 - **THEN** launching needs no expectation, and opening the optional block lets them choose from the exact version's measures and review what they entered before confirming approval and launch
+
+#### Scenario: A short phone screen shows the expanded launch form
+
+- **WHEN** the expectation form and the decision forecast together exceed the space in the review drawer
+- **THEN** the confirmation remains reachable by scrolling, and approving and launching keeps the expectation entered in the drawer.
 
 #### Scenario: An outcome link uses HTTP
 
@@ -1572,6 +1578,23 @@ member's role or remove a member, and let any member leave.
 - **WHEN** a role change, removal or leave gets 409 `last_owner`
 - **THEN** the page shows "A workspace needs at least one owner. Make someone else an owner first." and nothing changes
 
+### Requirement: A workspace owner can block model-based goal suggestions
+
+The People tab's sharing restrictions SHALL let a workspace owner block both proposed model choices with
+**Block Model-based goal suggestions (proposed)**. The control SHALL reflect the workspace policy and fit
+at 390 pixels. The device's own consent stays separate. People SHALL display an owner-only
+**Decision service address** field, with a plain validation message beside it.
+
+#### Scenario: Change the workspace choice on a phone
+
+- **WHEN** an owner checks or clears the model suggestions restriction at 390 pixels
+- **THEN** the new setting appears on the checkbox and the page fits the screen.
+
+#### Scenario: An owner saves the decision service address on a phone
+
+- **WHEN** the owner enters or clears the Decision service address at 390 pixels
+- **THEN** the saved address is shown in the field, or the field is empty after removal. Invalid addresses leave the saved value as it was and show how to correct the field.
+
 ### Requirement: Workspace People tab invites
 
 The People tab SHALL give workspace owners an "Invite someone" card that creates an email-bound invite link,
@@ -1667,7 +1690,7 @@ Own session rows SHALL include nullable `team_budget_label`: a sentence naming t
 #### Scenario: How the session was bound
 
 - **WHEN** a session is shown in either list
-- **THEN** its current binding reads "Shared by hand", "Folder rule", "After a repo hint", "Alignment", "Switch request accepted", "Past sessions import", "Suggested by an agent" or "Suggested by a model", as recorded. With no current binding, both lists show "Last binding: <origin label>" for the most recent binding. A binding with null origin reads "Not recorded". A session with no binding history shows no origin label. The owner's list shows the origin label without the binding's goal or directive.
+- **THEN** its current binding reads "Shared by hand", "Folder rule", "After a repo hint", "Alignment", "Switch request accepted", "Past sessions import", "Suggested by an agent", "Suggested by a model" or "Suggested from this machine", as recorded. With no current binding, both lists show "Last binding: <origin label>" for the most recent binding. A binding with null origin reads "Not recorded". A session with no binding history shows no origin label. The owner's list shows the origin label without the binding's goal or directive.
 
 ### Requirement: Workspace Alignments tab
 

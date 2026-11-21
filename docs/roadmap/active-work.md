@@ -30,6 +30,58 @@ queue item or let `docs/roadmap/` become a plan archive.
 Check the parent only after every required subtask and evidence item passes. Add the
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
+### [ ] LIM-2527: Suggest a goal for a session
+
+- **Priority:** P0
+- **Owner:** Align local agent, binding provenance and session data boundary
+- **Direction:** Offer a bindable goal from local rules, the existing session or a decision provider.
+  Let the person confirm, choose another goal or dismiss.
+- **Conclusion:** Use the existing analysis worker and consent boundary. Keep suggestions and feedback on this
+  machine. Carry only the confirmed goal and origin through the normal binding path.
+- **Completion prerequisites:** LIM-2526
+- **Implementation:**
+  - [x] Specify consent, suggestion behavior and provenance before changing code. All eight specifications validated.
+  - [x] Add the three ways to suggest a goal, a user-only notice and local feedback. Schema 33 preserves existing spending period records.
+- **Evidence:**
+  - [x] Test workspace restrictions, default-off canaries, each opt-in and binding provenance.
+    Eight focused agent tests passed. The schema upgrade, access and phone-width checks passed.
+  - [x] Pass the full Node 24 gate on the configured port. Node 24.22.3 on port 5010 reported 2,117 passed and 0 failed.
+  - [x] Before the budget merge, restack on LIM-2525 and verify the prior-schema upgrade and a fresh database.
+    `ALIGN_TEST_PORT=5010 npm test` on Node 24.22.3 passed 2,228 checks with zero failures.
+    Specification validation accepted all eight documents.
+- **Outcome:** The review fixes protect the decision service and share confirmation, refresh past-session offers,
+  and explain suggestions in the CLI. Requests to decision services and fork adapters used local test stand-ins.
+  Current harness integrations abstain from forks until they can pin the original provider and account.
+  The retained test receipt is stale.
+
+- **Merge integration:** The first 32 migration SQL strings and their source prefix match the lower branch exactly.
+  Migration 33 adds suggestion origins and the workspace decision service, preserving the captured team on each
+  spending period. The local database retains the lower schema followed by the four suggestion tables. Home needs,
+  budget notes, context counters and suggestion notices remain combined. The upgrade test preserves team attribution,
+  dependent usage and findings, reviews and sharing choices. The prompt regression delivers all three notices once.
+- **Merge verification:** Node 26.3.0. Both dependency directories were present. Lint has no errors and two existing
+  unused-variable warnings. Route type generation, app typecheck, package typecheck and package build pass.
+  Budget checks pass 69/0, admin checks pass 84/0, write-race checks pass 11/0, the listener-free package checks
+  pass 394/0, and the selected suggestion rule check passes 1/0. Two package cases were excluded because they run
+  mutating git commands: the same-goal sibling card case in `hooks.test.ts` and script-written file detection in
+  `pod.test.ts`. The other suggestion cases and listener-dependent suites remain unverified. Serial latency has one
+  pass using the existing host-load adjustment and one skip because the host is too busy. Quiet-host latency remains
+  unverified. Five script syntax checks pass. No behavioral disagreement remains. The index and history stay untouched.
+
+### [ ] ALIGN-001: LIM-2527 review fixes. Protect suggestion inputs and confirmation
+
+- **Priority:** P0
+- **Owner:** Align local agent, workspace sharing restrictions and launch review
+- **Direction:** Resolve all nine findings from the independent packet review and diagnose the intermittent expectations drawer timeout.
+- **Conclusion:** Refresh permission at the point of use, require consent to the owner-configured recipient, and preserve the turn and preview that the person acted on.
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Specify and test the revised permission, confirmation, weekly offer and inspection behavior before fixing it.
+  - [x] Fix the clipped confirmation reproduced on a 390 by 600 pixel screen. The browser test now checks that a pointer can reach Confirm and that launching records the entered expectation.
+  - [ ] Identify the trigger of the earlier intermittent 390 by 844 pixel timeout. The instrumented run at that size passed.
+- **Evidence:**
+  - [x] Node 24.22.3 on port 5010 reported 2,117 passed and 0 failed, including 1,093 server and browser checks and 646 local agent checks. All eight Align specifications validated. The retained test receipt remains in place.
+
 ### [ ] LIM-2526: Keep session analysis on the machine by default
 
 - **Priority:** P0

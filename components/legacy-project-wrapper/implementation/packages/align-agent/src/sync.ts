@@ -1,3 +1,4 @@
+import { recordSuggestionReply } from "./goal-suggestions.ts";
 import { recordAnalysis, runAnalysis } from "./analysis.ts";
 import { takeLease } from "./lease.ts";
 // Spool ingest, outbox flush, epoch assignment, usage upload and the one-pass sync that hooks start in the background.
@@ -146,6 +147,9 @@ function dropStartingShares(ctx: Ctx, before: number): void {
 
 function applySpool(ctx: Ctx, r: SpoolRecord): string | null {
   switch (r.type) {
+    case "suggestion_reply":
+      recordSuggestionReply(ctx, r);
+      return null;
     case "analysis_turn":
     case "drift_feedback":
       recordAnalysis(ctx, r);
@@ -885,11 +889,6 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     res.spooled += ingestSpool(ctx);
     res.tail = tailAll(ctx, opts.tailBudgetMs);
     res.spooled += ingestSpool(ctx);
-    try {
-      computeUnsharedDigest(ctx);
-    } catch {
-      /* best effort; the note just doesn't show */
-    }
     if (!signedIn(ctx.home)) {
       endSharesIfSignedOut(ctx);
       return res;
@@ -987,6 +986,13 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     } finally {
       unlock();
     }
-    if (!res.aborted) await runAnalysis(ctx).catch(() => ctx.log("Local analysis will retry at the next sync."));
+    if (!res.aborted) {
+      await runAnalysis(ctx).catch(() => ctx.log("Local analysis will retry at the next sync."));
+      try {
+        computeUnsharedDigest(ctx);
+      } catch {
+        /* The weekly note is best effort. */
+      }
+    }
   }
 }

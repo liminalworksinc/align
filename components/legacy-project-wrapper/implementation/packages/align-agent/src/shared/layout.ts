@@ -78,6 +78,11 @@ export const layout = {
   analysisTurn: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.turn.json`),
   analysisSeen: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.seen.json`),
   analysisLast: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.last.json`),
+  suggestion: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.suggestion.json`),
+  suggestionSeen: (h: string, lid: string, stage: "initial" | "move") => path.join(h, "analysis", `${safe(lid)}.${stage}.shown.json`),
+  suggestionReply: (h: string, lid: string, stage: "initial" | "move") => path.join(h, "analysis", `${safe(lid)}.${stage}.reply.json`),
+  suggestionSharePreview: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.share-preview.json`),
+  suggestionQuiet: (h: string) => path.join(h, "analysis", "quiet-folders.json"),
   analysisEnd: (h: string, lid: string) => path.join(h, "analysis", `${safe(lid)}.end.json`),
   driftDir: (h: string) => path.join(h, "drift"),
   /** A local drift notice waiting for the session's next prompt. */
@@ -85,6 +90,7 @@ export const layout = {
   /** Steering lines shown, one file each, until the sync pass reports them. */
   steeringDir: (h: string) => path.join(h, "steering"),
   /** This machine's agent time outside shared sessions, last 7 days (computed by sync, read by hooks; never uploaded). */
+  pastOfferChange: (h: string) => path.join(h, "past-offer-change.json"),
   unsharedDigest: (h: string) => path.join(h, "unshared-digest.json"),
   /** The week (Monday, UTC) the unshared-work note was last shown. */
   unsharedShown: (h: string) => path.join(h, "unshared-shown.json"),

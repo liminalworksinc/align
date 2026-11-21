@@ -219,7 +219,8 @@ const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 function recordedEpochOrigin(ws: string, key: string, cause: string, origin: EpochOrigin | null, goalId: string | null): EpochOrigin | null {
   const directiveOrigin = origin === "alignment" || origin === "switch_request";
-  if (cause === "manual") return directiveOrigin ? null : origin;
+  const suggestionWithoutGoal = !goalId && (origin === "suggested_rule" || origin === "suggested_agent" || origin === "suggested_model");
+  if (cause === "manual") return directiveOrigin || suggestionWithoutGoal ? null : origin;
   if (!/^directive:dir_[a-z2-7]{24}$/.test(cause)) throw badRequest('cause must be "manual" or "directive:<dir_id>"');
   const id = cause.slice(10);
   const directive = get<{ kind: string | null; goal_id: string | null }>(

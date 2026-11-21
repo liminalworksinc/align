@@ -1,3 +1,5 @@
+import { invalidatePastOffer, suggestionsQuiet, type GoalSuggestion } from "../shared/goal-suggestions.ts";
+import { matchingSuggestionChoices, saveSuggestionReply, shownGoalSuggestion, suggestionCommand, takeGoalSuggestion } from "./goal-suggestions.ts";
 import { RESULTS_PREVIEW, signalsPreview } from "../shared/analysis.ts";
 import { analysisNoticeCounts, driftFeedback, finishTurn, queueTurn, rememberNotice, rememberTurn, takeAnalysisNotice } from "./analysis.ts";
 // Hook handlers for Claude Code and Codex. Hook-safe: imports only node:fs, node:path, node:crypto (via shared/*).
@@ -646,17 +648,15 @@ export function sessionStartUncounted(home: string, harness: Harness, input: Hoo
       const sib = recentSharedSibling(home, cwd, lid);
       if (sib) messages.push(`Align: this ${source === "fork" ? "forked" : "new"} session is private. Type \`::align share\` to share it.`);
     }
-    if (source === "startup" && cwd && !inj.notices_shown.includes("anchor")) {
+    if (source === "startup" && cwd && !inj.notices_shown.includes("anchor") && !suggestionsQuiet(home, cwd)) {
       const info = gitInfo(cwd);
       if (info) {
-        for (const f of feeds(home)) {
-          const hits = matchAnchors(f.goals, info);
-          if (hits.length) {
-            messages.push(`Align: this repo matches goal "${hits[0].title}" in ${f.workspace_name}. Type \`::align share ${hits[0].title}\` to share this session toward it.`);
-            inj.notices_shown.push("anchor");
-            inj.anchor_hint = { workspace_id: f.workspace_id, goal_id: hits[0].id };
-            break;
-          }
+        const hits = feeds(home).flatMap((f) => matchAnchors(f.goals, info).map((goal) => ({ goal, feed: f })));
+        if (hits.length === 1) {
+          const [{ goal, feed }] = hits;
+          messages.push(`Align: this repo matches goal "${clean(goal.title, 100)}" in ${clean(feed.workspace_name, 80)}. Type \`::align share ${goal.title}\` to share this session toward it.`);
+          inj.notices_shown.push("anchor");
+          inj.anchor_hint = { workspace_id: feed.workspace_id, goal_id: goal.id };
         }
       }
     }
@@ -876,13 +876,15 @@ export function userPromptSubmitUncounted(home: string, harness: Harness, input:
   spoolWrite(home, { type: "root_turn", harness, native_id: sid, root_turn: rootTurn, cwd: input.cwd || null, ts });
   const hot = readHot(home, lid);
   if (!hot || !hot.share) {
-    if (input.transcript_path) rememberTurn(home, lid, { root: rootTurn, at: ts, transcript: input.transcript_path, cwd: input.cwd || null, binding: null });
+    rememberTurn(home, lid, { root: rootTurn, at: ts, transcript: input.transcript_path || null, cwd: input.cwd || null, binding: null });
     // A session whose share failed (or ended) still hears the sync's notices at its next prompt (N5); and one a folder
     // rule is sharing that saw the cached feed's hold, that the hold is gone (C9-3).
     const inj = readInjected(home, lid);
     const notices = takeNotices(hot, inj, undefined, () => stoppedNow(home, lid));
     const lifted = liftedHolds(home, lid, inj, input.cwd || hot?.cwd || null);
-    const system = [notices, ...lifted.notices].filter(Boolean).join("\n") || null;
+    const cwd = input.cwd || hot?.cwd || null;
+    const suggestion = takeGoalSuggestion(home, lid, cwd, () => feedFor(home, hot, cwd), null, "initial");
+    const system = [notices, ...lifted.notices, suggestion].filter(Boolean).join("\n") || null;
     if (!system && !lifted.context.length) return null;
     writeInjected(home, lid, inj);
     const out: Record<string, unknown> = {};
@@ -1011,7 +1013,10 @@ export function userPromptSubmitUncounted(home: string, harness: Harness, input:
   const held = blockingHolds(home, lid, input.cwd || hot.cwd);
   const resumed = resumeLine(hot, inj, held);
   if (resumed) context = [context, resumed].filter(Boolean).join("\n");
-  const notices = [takeNotices(hot, inj, () => held, () => stoppedNow(home, lid)), ...req.notices, ...lifted.notices, takeAnalysisNotice(home, lid, inj, DRIFT_PER_PROMPT, DRIFT_PER_LIMIT) || takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
+  const cwd = input.cwd || hot.cwd;
+  const suggestion = shareState === "shared" && goal && !pending
+    ? takeGoalSuggestion(home, lid, cwd, () => feedFor(home, hot, cwd), goal.id, "move") : null;
+  const notices = [suggestion, takeNotices(hot, inj, () => held, () => stoppedNow(home, lid)), ...req.notices, ...lifted.notices, takeAnalysisNotice(home, lid, inj, DRIFT_PER_PROMPT, DRIFT_PER_LIMIT) || takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
   // A just-opened spending period waits for the server's captured attribution before any threshold can be claimed.
   const spending = inj.opened_epoch ? { context: [], messages: [] } : claimBudgetNotes(home, lid, hot);
   if (spending.context.length) context = [context, ...spending.context].filter(Boolean).join("\n");
@@ -1633,6 +1638,11 @@ export function commandUncounted(home: string, harness: Harness, sid: string, cw
   const spool = (command: "share" | "unshare" | "bind", a: string | null) =>
     spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command, arg: a, ts });
   switch (verb) {
+    case "not":
+    case "dismiss":
+    case "quiet":
+    case "suggestions":
+      return suggestionCommand(home, lid, hot?.share?.state === "shared" ? "move" : "initial", cwd, verb, arg, ts);
     case "drift":
       return driftFeedback(home, lid, arg, ts);
     case "status": {
@@ -1813,8 +1823,35 @@ export function commandUncounted(home: string, harness: Harness, sid: string, cw
         rule && feed && rule.workspace_id === feed.workspace_id && rule.goal_id && (!dirMode || rule.dir === realDir(gitInfo(cwd || "")?.toplevel || cwd || ""))
           ? feed.goals.find((g) => g.id === rule.goal_id && g.bindable && g.status === "active") || null
           : null;
-      const goal = arg && feed ? feed.goals.find((g) => g.id === arg) || feed.goals.find((g) => g.title.toLowerCase().startsWith(arg.toLowerCase())) || null : before || ruleGoal;
+      const offered = dirMode ? null : shownGoalSuggestion(home, lid, "initial", feed, null);
+      type SharePreview = {
+        workspace: string | null;
+        workspaceName: string | null;
+        goal: string | null;
+        title: string | null;
+        version: number | null;
+        from: string;
+        signals: boolean;
+        suggestion: GoalSuggestion | null;
+      };
+      const freshPreview = "Align: sharing has changed. Type `::align share` or `::align share <goal>` for a new preview.";
+      const previewPath = layout.suggestionSharePreview(home, lid);
+      const savedPreview = !dirMode ? readJson<SharePreview | true>(previewPath) : null;
+      if (confirm && savedPreview === true) return freshPreview;
+      const pending = savedPreview === true ? null : savedPreview;
+      const sawSuggestion = !dirMode && (savedPreview === true || !!readJson(layout.suggestionSeen(home, lid, "initial")));
+      if (confirm && pending && !arg && pending.goal) arg = pending.goal;
+      if (confirm && !pending && sawSuggestion && (!arg || !offered)) return freshPreview;
+      if (!arg && offered && !before && !ruleGoal && !(confirm && pending)) {
+        if (offered.goals.length > 1) return "Align: more than one goal may fit. Type \`::align share <goal>\` to pick one or \`::align dismiss\` to skip.";
+        if (confirm) return "Align: preview this suggestion with \`::align share\`, then confirm the goal named in the preview.";
+        arg = offered.goals[0].id;
+      }
+      const matches = offered && arg ? matchingSuggestionChoices(feed, arg) : null;
+      if (matches && matches.length > 1) return "Align: more than one goal matches that name. Type \`::align goals\` to find the id of the one you want.";
+      const goal = matches ? matches[0] ?? null : arg && feed ? feed.goals.find((g) => g.id === arg) || feed.goals.find((g) => g.title.toLowerCase().startsWith(arg.toLowerCase())) || null : before || ruleGoal;
       if (arg && !goal) {
+        if (confirm && pending) return freshPreview;
         // Shared before in its own workspace, which is in reach, and the goal named is another workspace's: it is shared
         // again only there, as the out-of-reach answer says, never "no cached goal matches" (cycle 9).
         const elsewhere = !dirMode && own ? feeds(home).find((f) => f.workspace_id !== own.workspace_id && f.goals.some((g) => g.id === arg || g.title.toLowerCase().startsWith(arg.toLowerCase()))) : undefined;
@@ -1833,7 +1870,9 @@ export function commandUncounted(home: string, harness: Harness, sid: string, cw
         return noCachedGoal(arg, feed);
       }
       // A goal the cached feed says this person can't bind yet: said now, never "sharing requested" and a failure later.
-      if (!dirMode && goal && !goal.bindable) return `Align: "${goal.title}" needs an approved alignment before sessions can count toward it.`;
+      if (!dirMode && goal && !goal.bindable) {
+        return confirm && pending ? freshPreview : `Align: "${goal.title}" needs an approved alignment before sessions can count toward it.`;
+      }
       if (dirMode) {
         if (!feed) return "Align: no cached workspace. Run `align goals --refresh` in a terminal.";
         if (!cwd) return "Align: this session has no working folder to share.";
@@ -1850,7 +1889,7 @@ export function commandUncounted(home: string, harness: Harness, sid: string, cw
             `  Sent per session: harness, a keyed repo hash, start time, an epoch, and per-request token counts with model, basis and estimated list cost.`,
             `  ${signalsPreview(signals)}`,
             `  ${RESULTS_PREVIEW}`,
-            `  Prompts, replies, tool input and output, and file contents stay on this machine.`,
+            `  This share sends no prompts, replies, tool input, tool output or file contents.`,
             `Type \`::align share --dir ${signals ? "--signals " : ""}${noGoal ? "none " : arg ? `${arg} ` : ""}confirm\` to turn it on.`,
           ]
             .filter(Boolean)
@@ -1866,10 +1905,15 @@ export function commandUncounted(home: string, harness: Harness, sid: string, cw
         const self = already ? "" : kept ? " This session stays private: its sharing was stopped (or its history deleted)." : waits ? ` ${DIR_UNREAD}` : goal ? " This session too; your next prompt carries the goal." : " This session too, with no goal (its usage counts as unallocated).";
         return `Align: new sessions in ${dir} are now shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : ""}.${replaces ? ` This replaces the current rule (${replaces}).` : ""}${self}${goal ? heldNote(goal) : ""} \`::align unshare --dir\` turns it off.`;
       }
+      const from = hot?.share || hot?.prior_share ? "now" : "session start";
+      const preview: SharePreview = {
+        workspace: feed?.workspace_id ?? null, workspaceName: feed?.workspace_name ?? null,
+        goal: goal?.id ?? null, title: goal?.title ?? null, version: goal?.version ?? null, from, signals,
+        suggestion: offered?.suggestion ?? null,
+      };
+      if (confirm && pending && JSON.stringify(pending) !== JSON.stringify(preview)) return freshPreview;
       if (!confirm) {
-        // Shared before (its share ended, or its history was deleted since): the new share counts from now, as the sync
-        // then shares it (C5-1, C6-1).
-        const from = hot?.share || hot?.prior_share ? "now" : "session start";
+        if (sawSuggestion) writeJsonAtomic(previewPath, preview);
         return [
           `Align share preview for this session (nothing uploaded yet):`,
           `  Workspace: ${feed?.workspace_name || "your default workspace"}`,
@@ -1877,13 +1921,17 @@ export function commandUncounted(home: string, harness: Harness, sid: string, cw
           `  Sent: harness, a keyed repo hash, start time, an epoch, and per-request token counts with model, basis and estimated list cost.`,
           `  ${signalsPreview(signals)}`,
           `  ${RESULTS_PREVIEW}`,
-          `  Prompts, replies, tool input and output, and file contents stay on this machine.`,
+          `  This share sends no prompts, replies, tool input, tool output or file contents.`,
           `Type \`::align share ${signals ? "--signals " : ""}${arg ? `${arg} ` : ""}confirm\` to share.`,
         ].join("\n");
       }
+      invalidatePastOffer(home);
       // The workspace whose goals it read (the one the session had, or the default): a device with two workspaces and
       // no default would otherwise not know which (C3-6).
-      spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed?.workspace_id, signals, origin: manualShareOrigin(home, lid, feed?.workspace_id, goal?.id), ts });
+      const suggested = offered?.goals.some((g) => g.id === goal?.id) ? offered.suggestion.origin : null;
+      spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed?.workspace_id, signals, origin: suggested ?? manualShareOrigin(home, lid, feed?.workspace_id, goal?.id), ts });
+      if (offered) saveSuggestionReply(home, lid, "initial", suggested ? "accepted" : "changed", goal?.id ?? null, ts);
+      if (pending) fs.rmSync(previewPath, { force: true });
       return goal
         ? `Align: sharing requested toward "${goal.title}". The next sync asks the Align server for it (within a few seconds); once it is shared, your next prompt carries the goal.${heldNote(goal)}`
         : "Align: sharing requested with no goal (its usage counts as unallocated; `::align bind <goal>` picks one). The next sync asks the Align server for it (within a few seconds).";
@@ -1919,9 +1967,13 @@ export function commandUncounted(home: string, harness: Harness, sid: string, cw
       // Recorded here, so the very next prompt opens the epoch even before a sync runs (as `align bind` does).
       const inj = readInjected(home, lid);
       const id = randomId("pb_");
-      chooseBinding(hot, inj, { id, goal_id: goal.id, goal: snapshot(goal), cause: "manual", directive_id: null, origin: "hand" });
+      const offered = shownGoalSuggestion(home, lid, "move", feed, hot.goal?.id ?? null);
+      const suggested = offered?.goals.some((g) => g.id === goal.id) ? offered.suggestion.origin : null;
+      const origin = suggested ?? "hand";
+      chooseBinding(hot, inj, { id, goal_id: goal.id, goal: snapshot(goal), cause: "manual", directive_id: null, origin });
       writeInjected(home, lid, inj);
-      spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "bind", arg: goal.id, pending_id: id, origin: "hand", ts });
+      spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "bind", arg: goal.id, pending_id: id, origin, ts });
+      if (offered) saveSuggestionReply(home, lid, "move", suggested ? "accepted" : "changed", goal.id, ts);
       const h = readJsonStrict<HoldLatch>(layout.hold(home, lid));
       const kept = h.state === "ok" && Array.isArray(h.value?.holds) ? h.value.holds.filter((x) => x.goal_id !== goal.id).map((x) => x.goal_title) : [];
       return `${endSentence(`Align: from your next prompt this session counts toward "${goal.title}"`)}${heldNote(goal)}${keptHoldsNote(kept)}`;

@@ -989,21 +989,22 @@ the user and wait for instructions.`, so neither hears of the hold first from a 
 
 ### Requirement: Record how each binding started
 
-The CLI and hooks SHALL send an origin whenever they open a new binding epoch and keep it through the local ledger,
-hook spool and retries. After a successful epoch upload, the CLI SHALL record the origin returned by the server and
-continue uploading usage for that epoch even if the returned origin is null. Old epochs and queued epoch uploads with
+The CLI and hooks SHALL send an origin whenever they open a new binding spending period and keep it through the local ledger,
+hook spool and retries. After a successful spending period upload, the CLI SHALL record the origin returned by the server and
+continue uploading usage for that spending period even if the returned origin is null. Old spending periods and queued spending period uploads with
 no origin keep it unknown. The local repo-anchor hint's existing once-per-session record SHALL remember which workspace
-and goal the hint named. The CLI sends neither of the reserved origins `suggested_agent` and `suggested_model`.
+and goal the hint named. A developer who chooses the goal shown in a new suggestion opens a spending period with
+`suggested_rule`, `suggested_agent` or `suggested_model`, as it was calculated. These use the manual cause.
 
 #### Scenario: The developer shares or binds a session
 
 - **WHEN** the developer shares or binds a session from the terminal or with `::align share` or `::align bind`
-- **THEN** the epoch has origin `hand`, or `anchor_hint` when the action shares that session toward the same workspace and goal the repo hint named in that session. The current session shared by `::align share --dir ... confirm` counts as a developer share.
+- **THEN** the spending period has the confirmed suggestion's origin if its goal was shown, `anchor_hint` if the action shares the session toward the workspace and goal named in its startup hint, or `hand` for another choice. The current session shared by `::align share --dir ... confirm` follows the existing developer share path.
 
 #### Scenario: Other ways a binding opens
 
 - **WHEN** a folder rule shares a new session at its start, an approved `work_toward` changes its binding, the developer accepts a switch request, or `align share --dir --past` imports a session
-- **THEN** the new epoch has origin `folder_rule`, `alignment`, `switch_request` or `past_import`, respectively. Use the existing directive cause for alignment and switch request and `manual` for the other two.
+- **THEN** the new spending period has origin `folder_rule`, `alignment`, `switch_request` or `past_import`, respectively. Use the existing directive cause for alignment and switch request and `manual` for the other two.
 
 #### Scenario: Inspect a session's current binding
 
@@ -2922,7 +2923,8 @@ usage error (exit 2): the switch is a workspace owner's, on the web.
 
 Sharing a session SHALL send only tier 0 by default. The following table is the authority for what may leave
 a machine. Tiers 2 through 5 describe proposed policy in
-[ADR 0006](../../docs/decisions/0006-session-data-boundary.md). The metadata default, existing work-signal
+[ADR 0006](../../docs/decisions/0006-session-data-boundary.md) and
+[ADR 0007](../../docs/decisions/0007-goal-suggestion-consent.md). The metadata default, existing work-signal
 choice and prohibition on uploading a reply remain the current rulings. A machine owner SHALL choose each
 higher tier separately, and a workspace owner SHALL be able to forbid a tier without granting consent for anyone.
 
@@ -2931,7 +2933,7 @@ higher tier separately, and a workspace owner SHALL be able to forbid a tier wit
 | 0. Metadata | Usage counts, model, estimates, session and repo keys, binding metadata, and existing activity hashes, to the Align workspace | Sharing a session |
 | 1. Work signals | Repo-relative paths, commit subjects, task or claim labels and branch name, to Align and people who can read the bound goal | Explicit `--signals` on this machine for a session or folder. The machine owner can turn it off independently. |
 | 2. Derived results (proposed) | A finding id, the binding spending period, goal version and limit id, fixed evidence label, keyed digest and turn start time, to the local Align server for inspection from this machine | Mode L only, after explicit `align data-sharing results on` on this machine. Only findings for turns started after the current consent qualify. Hosted Align refuses this tier. |
-| 3. Model input (proposed, reserved) | Level 1 asks within the existing session. Level 2 would send the minimum context to a separately named model provider. | Separate, default-off choices for each level. No model request in this phase. |
+| 3. Model input (proposed) | Level 1 sends a short question with candidate goal ids and titles through a fork to the session’s existing provider. Level 2 sends candidate goal ids and titles, the chosen repo alias if known, the branch if known, and the first prompt to the selected decision provider. | Separate, default-off choices on each machine, subject to the workspace restriction. The external recipient must be named at opt-in. |
 | 4. Deliberate excerpt (proposed, reserved) | A person's chosen text to a named reader, with a purpose and expiry | Separate, default-off machine choice and a preview and confirmation per excerpt. No excerpt upload in this phase. |
 | 5. Central logs (proposed) | Full transcripts | Forbidden in hosted workspaces. Mode L may read and retain transcripts locally with separate consent. This phase reads the original files and keeps references and results. |
 
@@ -2940,14 +2942,15 @@ source files. Folder rules and absolute repo paths SHALL stay local. The session
 `repo_key`, an alias only if the person chose one, and a null title. The existing team activity hashes are
 deterministic hashes, including the workspace-scoped `repo_id`; previews SHALL describe them as hashes. The
 agent SHALL send no Origin header. Steering reports SHALL carry only the shared session key, two goal ids, two
-whole percents and a time. A private session SHALL cause zero requests about that session.
+whole percents and a time. A private session SHALL cause zero requests about that session to Align. An
+optional goal suggestion has only the tier 3 recipients and inputs specified below.
 
 The CLI SHALL list what each tier can send, who can receive it, and how to turn it off. The one-session, folder,
 past-session and in-session previews SHALL state whether paths and labels are included for that share and say
 that any separate consent for derived results still applies. The client SHALL gate serialization on its local
 choice and a successful policy read. The server SHALL enforce the workspace prohibition and device consent
 independently of the client. The CLI SHALL use the preflight to keep findings local when uploads are unavailable
-and say that hosted Align cannot receive them. It SHALL accept no model input, excerpts or transcripts in this phase.
+and say that hosted Align cannot receive them. Align SHALL accept no model input, excerpts or transcripts in this phase.
 
 Explicit automated measure readings SHALL follow the source consent and access rules in Goals and Proposals.
 Session sharing choices and workspace restrictions on optional session data tiers SHALL leave those rules in effect
@@ -2982,15 +2985,15 @@ hook provides no prompt id, the reader SHALL require a unique timestamp match be
 own bounded reads independently of metering offsets. The local ledger SHALL keep the turn reference, binding origin,
 record counts with lower bounds when capped and unknown when unavailable and limit findings with a stable id and keyed digest. It SHALL keep no copied raw content.
 `align analysis show <session>` SHALL summarize results, delivery and feedback in plain language. It SHALL label
-capped counts as lower bounds. `align analysis show <session> --json` SHALL expose the exact record acknowledged by
-Align. `align analysis delete <session>` SHALL remove local results and pending work and request deletion of shared
+capped counts as lower bounds. A recorded goal suggestion SHALL name its goals, source and the person's
+response, using unknown when a title is unavailable. `align analysis show <session> --json` SHALL expose the
+structured local record and the exact records acknowledged by Align. `align analysis delete <session>` SHALL remove local results and pending work and request deletion of shared
 results. A failed deletion stays pending and is shown as pending. An authorized acknowledgement that shared history
 was already deleted completes the request. The original transcript stays under the harness's
 control. The analysis projection SHALL contain only the results needed for notices.
 
 A later model-based limit check or goal suggester SHALL declare tier 3 and whether the recipient is the existing
-session or a separately named provider. It SHALL pass the same consent gate before receiving input. Both choices
-return disabled in this phase.
+session or a separately named provider. It SHALL pass the same consent gate before receiving input. The goal suggester uses both choices. Model-based limit checks remain reserved.
 
 #### Scenario: Analysis while signed out
 
@@ -3006,6 +3009,117 @@ return disabled in this phase.
 
 - **WHEN** a uniquely identified turn has more records than the reader can collect
 - **THEN** inspection shows positive observed counts as lower bounds, shows unknown for a count with no usable evidence, and still allows the person to inspect any acknowledged record
+
+### Requirement: A person decides whether a suggested goal counts
+
+After the first completed turn of an unshared session the local analysis worker SHALL look for an active,
+bindable goal in the session's workspace, using its saved folder rule, repo and branch anchors, and the person's
+previous bindings on this machine. Prefer an applicable explicit folder rule, then anchor evidence, then repeated
+history for the same folder or repository and branch. A tie between two equally supported rule choices MAY name
+both and require an explicit pick. With weaker or broader ambiguity, abstain. A pre-existing repo hint on startup
+counts as that session's initial hint. A rule that already authorizes sharing retains its existing behavior.
+
+The worker SHALL record suggestions locally and publish only the ids, origin and information needed by a hook to
+show a short user-only notice at the next turn. The hook SHALL perform no suggestion analysis or network call.
+The notice offers `::align share` to preview a sole suggestion, `::align share <goal>` to choose a goal,
+`::align not this` to reject the proposed goal, `::align dismiss` to decline for this session, and
+`::align quiet` to stop suggestions in this folder. `::align suggestions on` lifts the folder choice.
+The share preview SHALL name the workspace, goal and sharing scope. Confirmation of a preview shown during a
+suggestion interaction SHALL use the same workspace, goal, start point and work-signal choice. If the suggestion
+is dismissed, rejected, no longer available, or any previewed detail changes, confirmation SHALL request a new
+preview and queue no share. A different confirmed goal
+records local feedback and carries the ordinary binding origin. The monthly goal-list review uses workspace
+records. The device SHALL keep suggestion feedback local, outside that review. A dismissed suggestion SHALL
+never repeat in that session. For a session already shared, three consecutive completed turns supporting a different goal may
+yield one user-only suggestion to `::align bind <goal>`. The user must name the goal before its binding changes.
+
+#### Scenario: A developer confirms a local suggestion
+
+- **WHEN** local evidence points to one goal and the worker finishes before the next turn
+- **THEN** the next hook shows the goal to the developer without adding context or sharing anything. A confirmed share records `suggested_rule`. Confirming another goal records the difference on the machine and the ordinary origin on Align.
+
+#### Scenario: A developer dismisses the suggestion
+
+- **WHEN** the person rejects the goal, dismisses it, or turns suggestions off in the folder
+- **THEN** the local ledger distinguishes the three choices and the suggestion does not return in the session. Turning the folder choice back on allows suggestions in new sessions.
+
+#### Scenario: A suggestion preview expires
+
+- **WHEN** the visible suggestion or the previewed share changes after the developer previews it
+- **THEN** confirmation queues nothing until the developer previews the new sharing choice.
+
+### Requirement: A local past-session suggestion
+
+The weekly note about time outside shared sessions MAY name a goal for past work when at least two sessions
+in a folder would be included by the existing seven-day import preview and every included session has the
+same unambiguous local rule suggestion. Quiet folders and declined or corrected suggestions SHALL be
+excluded. Refresh the offer after syncing feedback and import eligibility, even when the time totals remain
+cached. A known local change that can invalidate the offer SHALL hide it until refreshed. An offer SHALL expire
+when a session in it ages out of the import window. The note MAY show a local list-price estimate, and SHALL say that the estimate is unknown if any
+included usage has no price. The person SHALL preview and confirm the existing folder share and import.
+This suggestion SHALL add no network request.
+
+#### Scenario: The weekly note offers a folder with one clear choice
+
+- **WHEN** all eligible unshared sessions for a folder have the same rule suggestion and the note has not appeared this week
+- **THEN** it names the folder, count and goal, and points to the existing preview for past and future sessions. A folder with different suggestions gets no import offer.
+
+#### Scenario: A saved import offer becomes stale
+
+- **WHEN** a session in the offer is dismissed, becomes ineligible for import or ages out of the seven-day window
+- **THEN** the device does not display the old offer, and a refreshed offer uses the current eligible sessions.
+
+### Requirement: Optional model goal suggestions (proposed)
+
+The existing tier 3 consent gate SHALL require independent opt-ins on this machine for the session fork and for
+the decision provider. The worker SHALL obtain permission from the scope of the current workspace and a current
+bindable goal list before either model sees goal data. The worker SHALL complete the goal read before requesting
+a fresh workspace policy. That policy read permits at most one immediate dispatch, within 750 milliseconds of
+starting the read, while this device and the original local consent are still current. A workspace change made
+before that read takes effect for the dispatch. A request already authorized by that read may finish under its
+original timeout. Retries SHALL require a fresh policy read. A failed policy read, blocked workspace, changed device,
+disabled choice, timeout, refusal or malformed result SHALL yield no model suggestion. Rules SHALL run first.
+If both model choices are on, a session fork takes precedence. A failure SHALL never route data to another
+recipient. The worker SHALL only consider turns started after the current opt-in. Repeating the same enabled
+choice preserves its start time. Turning a choice off and on, changing the decision recipient, or choosing a
+new workspace service revision starts a new consent period. The worker SHALL discard a response if the
+device or local consent changed while it was in flight.
+
+The session fork SHALL ask the existing session provider for one candidate id or `none`, with tools and hooks
+disabled where supported. The worker SHALL dispatch only when it can establish and pin both the original provider
+and the original account for the fork. The absence of an environment key or the presence of current sign-in
+credentials is insufficient. When the harness exposes no way to establish and pin both, the worker SHALL abstain
+without starting a fork or contacting a fallback provider. The original session SHALL receive no classification instruction. The worker SHALL
+accept only a listed id consistent with any applicable anchor evidence. The fork can use tokens on the account
+that already runs the session.
+
+The decision adapter SHALL offer TypeSafe Jev by default when explicitly enabled, with OpenAI Decisions,
+Google Gemini Decisions and a workspace-provided System One endpoint as alternatives. The named recipient
+receives the decision directly from this machine. A named vendor uses the person's own provider choice and key.
+The workspace service address SHALL come from owner-managed workspace policy. The CLI SHALL display that address
+when saving machine consent and SHALL refuse a locally supplied address. A change to the address, including removal,
+expires the earlier consent. Keys stay in the local process environment. Input SHALL be
+restricted to a bounded first prompt, optional saved repo alias, optional branch and the bindable goals' ids
+and titles. The branch SHALL come from a local snapshot of this turn, or be omitted when the turn has no such
+snapshot. The choice has to be a string equal to one of the listed ids. A positive fit question and a separate
+choice with `none` must both pass. The initial proposed
+threshold is 0.80 for fit and the top choice, with a 0.20 margin over the next choice. This is an initial
+conservative threshold pending labelled cases.
+
+#### Scenario: Model permission and input separation
+
+- **WHEN** both choices are off or the workspace blocks tier 3, then one choice is enabled and permitted for a new session
+- **THEN** only the enabled recipient is used, and only its allowed input leaves. Align receives no suggestion, question, prompt, probability or feedback. An accepted share or bind sends the same binding details as a manual one, using `suggested_agent` or `suggested_model`.
+
+#### Scenario: Permission changes while goals are loading
+
+- **WHEN** a workspace blocks model suggestions or replaces its decision service before the final policy read
+- **THEN** the worker sends no model request under the earlier permission or to the earlier address.
+
+#### Scenario: A model has no usable route or answer
+
+- **WHEN** a session fork cannot pin its original provider and account, or a decision service returns a malformed choice
+- **THEN** the worker abstains. The session fork failure sends no goal data.
 
 ### Requirement: Limit evidence and feedback
 
@@ -3663,8 +3777,8 @@ SHALL keep no reply text and SHALL stay outside model context and uploads.
 ### Requirement: User-only hints for unshared sessions
 
 The `align` hook SHALL, for an unshared session, show only `systemMessage` text (never `additionalContext`): on
-`startup` in a git repo that matches the anchors of a cached active, bindable goal (its repo anchors, its branch
-patterns, or both when the goal has both kinds), once, `Align: this repo matches goal
+`startup` in a git repo that matches the anchors of exactly one cached active, bindable goal (its repo anchors,
+its branch patterns, or both when the goal has both kinds), when the folder has suggestions on, once, `Align: this repo matches goal
 "<title>" in <workspace>. Type \`::align share <title>\` to share this session toward it.`; and on `fork` or `clear`
 next to a session shared in the same folder in the last 24 hours, `Align: this forked session is private.` or
 `Align: this new session is private.` followed by ``Type `::align share` to share it.``

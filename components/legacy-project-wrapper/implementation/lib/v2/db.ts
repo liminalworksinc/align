@@ -1597,6 +1597,46 @@ const MIGRATIONS: string[] = [
   CREATE INDEX v2_analysis_expiry ON v2_analysis_findings(turn_started_at);
   CREATE INDEX v2_analysis_receipt_expiry ON v2_analysis_findings(received_at);
   `,
+  // Migration 33: workspace decision service and confirmed local suggestion provenance.
+  `
+  CREATE TABLE v2_workspace_decision_services (
+    ws_id TEXT PRIMARY KEY REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    revision TEXT NOT NULL
+  );
+  CREATE TABLE v2_epochs_next (
+    ws_id TEXT NOT NULL,
+    session_key TEXT NOT NULL,
+    epoch_id TEXT NOT NULL,
+    goal_id TEXT,
+    goal_version_at_start INTEGER,
+    starts_at TEXT NOT NULL,
+    ends_at TEXT,
+    root_turn TEXT,
+    cause TEXT NOT NULL,
+    authority TEXT NOT NULL CHECK (authority IN ('none','own','pod','alignment')),
+    alignment_id TEXT,
+    created_at TEXT NOT NULL,
+    spend_team_id TEXT,
+    origin TEXT CHECK (origin IN (
+      'hand', 'folder_rule', 'anchor_hint', 'alignment', 'switch_request', 'past_import',
+      'suggested_agent', 'suggested_model', 'suggested_rule'
+    )),
+    PRIMARY KEY (ws_id, session_key, epoch_id),
+    FOREIGN KEY (ws_id, session_key) REFERENCES v2_sessions(ws_id, session_key) ON DELETE CASCADE,
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id),
+    FOREIGN KEY (ws_id, alignment_id) REFERENCES v2_alignments(ws_id, id)
+  );
+  INSERT INTO v2_epochs_next (ws_id, session_key, epoch_id, goal_id, goal_version_at_start, starts_at, ends_at,
+      root_turn, cause, authority, alignment_id, created_at, spend_team_id, origin)
+    SELECT ws_id, session_key, epoch_id, goal_id, goal_version_at_start, starts_at, ends_at,
+      root_turn, cause, authority, alignment_id, created_at, spend_team_id,
+      CASE WHEN goal_id IS NULL AND origin IN ('suggested_agent', 'suggested_model', 'suggested_rule')
+        THEN NULL ELSE origin END FROM v2_epochs;
+  DROP TABLE v2_epochs;
+  ALTER TABLE v2_epochs_next RENAME TO v2_epochs;
+  CREATE UNIQUE INDEX v2_epochs_open ON v2_epochs(ws_id, session_key) WHERE ends_at IS NULL;
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Align can suggest a goal after a session's first turn using local rules and prior bindings. Sharing still
+  requires confirmation. A dismissed or changed suggestion requires a new share preview. The weekly offer
+  follows current import eligibility and local feedback. The CLI names each suggested goal, its source and your reply.
+  Workspace owners can block model suggestions or set a decision service address. A new address requires fresh
+  permission on the machine, and the device checks workspace policy just before sending. Session questions wait
+  for the harness to support keeping the original provider and account. Sessions and Spend show confirmed
+  suggestions as a sharing source. Schema 33 adds the local suggestion source and the workspace service setting.
+- The launch confirmation stays within reach when the expectation form and decision forecast fill a short review drawer.
+
 - Session analysis runs locally after sync and shows possible limit crossings from recorded activity or reply wording.
   Developers can inspect and delete findings and record false alarms or missed checks. Metadata remains the sharing
   default. Schema 32 adds workspace sharing restrictions and a proposed, default-off choice for sending derived findings
