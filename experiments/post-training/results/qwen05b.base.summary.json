@@ -1,0 +1,116 @@
+{
+  "n": 300,
+  "checks": {
+    "format_ok": {
+      "pass": 297,
+      "n": 300,
+      "rate": 0.99
+    },
+    "correct_action": {
+      "pass": 72,
+      "n": 300,
+      "rate": 0.24
+    },
+    "correct_plan_version": {
+      "pass": 145,
+      "n": 300,
+      "rate": 0.4833
+    },
+    "uses_current_target": {
+      "pass": 0,
+      "n": 210,
+      "rate": 0.0
+    },
+    "avoids_superseded": {
+      "pass": 199,
+      "n": 201,
+      "rate": 0.99
+    },
+    "pauses_on_hold": {
+      "pass": 1,
+      "n": 30,
+      "rate": 0.0333
+    },
+    "stops_on_stop": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "continues_after_lift": {
+      "pass": 23,
+      "n": 60,
+      "rate": 0.3833
+    },
+    "ignores_unapproved": {
+      "pass": 30,
+      "n": 30,
+      "rate": 1.0
+    },
+    "overall": {
+      "pass": 1,
+      "n": 300,
+      "rate": 0.0033
+    }
+  },
+  "by_event_type": {
+    "chain_change": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "follow_change": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "hold": {
+      "pass": 1,
+      "n": 30,
+      "rate": 0.0333
+    },
+    "hold_released": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "no_change": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "other_goal_hold": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "pending_proposal": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "removed_step": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "stop": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    },
+    "stop_resumed": {
+      "pass": 0,
+      "n": 30,
+      "rate": 0.0
+    }
+  },
+  "arm": "qwen05b.base",
+  "model": "mlx-community/Qwen2.5-0.5B-Instruct-4bit",
+  "adapter": null,
+  "context": false,
+  "fewshot": false,
+  "data": "data/episodes_test.jsonl",
+  "decoding": "greedy, max_tokens=80",
+  "seed": 0,
+  "eval_seconds": 180.1
+}

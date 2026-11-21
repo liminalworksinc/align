@@ -1,0 +1,6 @@
+.venv/
+data/
+adapters/
+*.safetensors
+__pycache__/
+results/*.outputs.jsonl.tmp
