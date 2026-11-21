@@ -93,12 +93,12 @@ function migrateFixture(dir, shift = 0) {
 }
 
 function testReadingUpgrade() {
-  const dir = path.join(testDir, "schema 26 to 27");
+  const dir = path.join(testDir, "schema 29 to 30");
   mkdirSync(path.join(dir, "v2"), { recursive: true });
   const d = new DatabaseSync(path.join(dir, "v2/align.sqlite"));
   try {
     d.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY); CREATE TABLE ba_passkey (id TEXT PRIMARY KEY);");
-    for (const sql of migrations.slice(0, 26)) d.exec(sql);
+    for (const sql of migrations.slice(0, 29)) d.exec(sql);
     d.exec(`
       INSERT INTO ba_user (id) VALUES ('u_reader');
       INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES ('ws_read', 'Reading test data', 'u_reader', '${OLD}');
@@ -107,14 +107,14 @@ function testReadingUpgrade() {
       INSERT INTO v2_measure_readings (id, ws_id, goal_id, measure_id, value_text, value_num, source, observed_at, recorded_by, recorded_at)
         VALUES ('mr_one', 'ws_read', 'g_read', 'm_one', '1', 1, 'self', '${OLD}', 'u_reader', '${OLD}'),
                ('mr_later', 'ws_read', 'g_read', 'm_one', '2', 2, 'self', '${OLD}', 'u_reader', '${OLD}');
-      PRAGMA user_version = 26;
+      PRAGMA user_version = 29;
     `);
     migrateFixture(dir);
     d.exec("PRAGMA foreign_keys = ON;");
     const rows = d.prepare("SELECT id, value_num, source, source_ref, goal_version FROM v2_measure_readings ORDER BY rowid DESC").all();
     const version = d.prepare("PRAGMA user_version").get().user_version;
-    check("LIM-2524: a schema 26 database upgrades to 27", version === 27, version);
-    check("LIM-2524: migration 27 preserves legacy reading order and keeps unknown source details and version",
+    check("LIM-2524: a schema 29 database upgrades to 30", version === 30, version);
+    check("LIM-2524: migration 30 preserves legacy reading order and keeps unknown source details and version",
       rows.map((r) => r.id).join() === "mr_later,mr_one" && rows[0].value_num === 2 &&
       rows.every((r) => r.source === "self" && r.source_ref === null && r.goal_version === null) &&
       d.prepare("PRAGMA foreign_key_check").all().length === 0, JSON.stringify(rows));
@@ -157,7 +157,7 @@ function testChangeElementUpgrade(name, shift) {
     const version = legacy.prepare("PRAGMA user_version").get().user_version;
     const keys = legacy.prepare("SELECT ws_id, goal_id, revision, kind, element_key, change FROM v2_change_request_elements ORDER BY revision, element_key").all();
     check(`LIM-2522 (${name}): backfills each revision, counts one missing base and keeps both sides of a measure replacement`,
-      elementMigration === 25 && version === SCHEMA_VERSION + shift &&
+      elementMigration === 28 && version === SCHEMA_VERSION + shift &&
         upgrade.stderr.includes(`migration ${elementMigration + 1 + shift} skipped 1 change request revision with missing base versions`) &&
         keys.map((k) => Object.values(k).join(":")).join(",") ===
         "ws_old:g_old:1:measure:m_after:added,ws_old:g_old:1:measure:m_before:removed,ws_old:g_old:2:field:title:changed" &&
@@ -175,7 +175,7 @@ function testChangeElementUpgrade(name, shift) {
 
 try {
   testReadingUpgrade();
-  testChangeElementUpgrade("schema 25 to 26", 0);
+  testChangeElementUpgrade("schema 28 to 29", 0);
   testChangeElementUpgrade("shifted migration", 1);
   for (const [name, args] of [
     ["retention typo", ["retention", "run", "--dryrun", "true"]],

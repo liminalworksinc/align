@@ -4,23 +4,64 @@
 
 - Goal owners can opt measures into CI readings or a command on a chosen machine. CI credentials can be
   revoked, and the machine runs a command only after its operator allows the exact executable and arguments.
-  Readings show their source and time. Server migration 27 keeps existing hand readings.
+  Readings show their source and time. Server migration 30 keeps existing hand readings.
 - Command readings stay at the paired server, preserve exact decimals and retry without adding a duplicate.
   Goal forms keep source settings while asking for a missing measure label, and CI readings say they were
   reported with a CI credential. Briefs keep approved changes visible when many outcomes are due.
   Shared sessions show the measure's name from launch even after it has been replaced.
 - Reported changes show readings and estimated spend from launch through the first report. Briefs also
   list unanswered expectations that are due, with a note in shared sessions on the affected goal.
+
+- When proposing or reviewing a goal change, open Earlier decisions to see up to five past decisions on the same items,
+  with reasons where you have access and links to the records. Connected clients can read the same history on decision records.
+  Server migration 29 indexes changed items on existing request revisions.
+- Launchers can record an expectation for a goal measure and report its outcome from Home or the request.
+  The goal page shows self-reported measure readings and their history. MCP includes these readings on goal
+  and brief reads, and includes expectations and outcomes in decision records. Server migration 28 adds these records.
+- The outcome form shows how to fix an invalid evidence link beside the field.
 - Sessions and in-session status show how a session came to count toward its goal. Spend can show each goal's
   request counts and list-price estimates by sharing source, with older rolled-up usage identified separately.
 - Retrying a binding with changed details returns a conflict and leaves the original binding in place.
-- Launchers can record an expectation for a goal measure and report its outcome from Home or the request.
-  The goal page shows self-reported measure readings and their history. MCP includes these readings on goal
-  and brief reads, and includes expectations and outcomes in decision records. Server migration 25 adds these records.
-- The outcome form shows how to fix an invalid evidence link beside the field.
-- When proposing or reviewing a goal change, open Earlier decisions to see up to five past decisions on the same items,
-  with reasons where you have access and links to the records. Connected clients can read the same history on decision records.
-  Server migration 26 indexes changed items on existing request revisions.
+- Approving a budget request for its full amount is no longer refused in the browser for amounts such as $4.03.
+  The form now rounds to whole cents before comparing, as the server does.
+- Concurrent writes and approval previews wait for the shared database transaction to finish, preventing nested
+  transaction errors.
+- The local agent records the characters Align adds to each session's context, with addition counts and last times.
+  `align status` shows the current folder's session total and `align sessions` shows each session's total.
+  Budget context lines count toward model context; person-only budget messages and notices count separately.
+  Counters use a separate append-only file per session, with one append per text return, so parallel hooks keep
+  every addition without changing shared hook-state reads, writes or fields. Commands sum valid complete lines
+  and tolerate a torn last line. Sync expires logs after 30 days without an addition. Each pass lists and sorts
+  names once, resumes after its saved name, examines at most 500 paths, and removes at most 100 files, with a
+  10 millisecond budget on examinations. Counter writes refuse symlinks and special files. Commands read at most
+  the last 1 MiB per counter log and label capped totals as lower bounds. Unsupported runtimes leave counter and
+  hook-state storage untouched. Later additions start a new total. Uninstall removes all counters.
+  Unchanged prompts return zero bytes and leave totals, addition counts and last times unchanged.
+- Budget reads take a write lock only to record a new current-month crossing. If the writer stays busy, figures
+  still return and a later read can record the crossing after rechecking access and current amounts.
+- Budget pass tests use a controlled clock so machine load cannot shorten their expected batches; a separate
+  regression checks the unchanged time cutoff and continuation with unfinished sessions.
+
+- Budget changes reach shared sessions on the next sync through private change stamps on the existing response.
+  Unchanged cached passes add no budget requests. Indexed change stamps avoid rereading history, and concurrent
+  crossing reads retain one first observation. Terminal budget reads print figures before a best-effort local update,
+  skip that update while sync holds its lock, and confirm at most the current folder's session. Claude Code can warn
+  the person during a long turn without adding budget context; Codex retains next-prompt notes. Spend states current
+  crossings and their computation time; Home shows first observed crossings to leads and owners outside Needs.
+
+- Team budget notes use the clock offset in their local snapshot, preserve state through rejected figures and
+  temporary refusals, and run after other sync work. Notes distinguish model
+  context from the person's message. Budget records name the authenticated filing source and terminal device.
+  Small teams see the spend privacy limit. Earlier unattributed usage prevents exact totals, closed months retain
+  their applicable grants, and request rate limits apply per requester with a separate workspace ceiling.
+
+- Teams can set monthly budgets in list-price estimates, record requests for more and keep each decision.
+  Terminal requests always wait for a person. Spend includes budget controls and a monthly CSV export with
+  exactly the on-screen team report's rows and amounts for the same reader and month, keeping all no-goal usage
+  unallocated. Team budgets, burn, forecasts, history and home-team no-goal subtotals are visible only to team
+  members and workspace owners. Home includes budget requests in its Needs list. Existing local hooks deliver
+  informational budget notes from cached known spend, including priced lower bounds, without stopping work.
+
 - Server tests finish each readiness response before stopping a phase, preventing a previous server from satisfying
   the next phase's readiness check.
 - Failed transaction and preview setup releases database state so later writes, previews and sign-in mail work.
