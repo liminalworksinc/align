@@ -15,6 +15,7 @@
 // told at its next prompt, and a hold, its release and a hold again with no prompt between (C14-2: no release notice
 // while held again). A fixed set of seeds runs every time, plus random ones (printed, so a failure can be run again with
 // ALIGN_PROP_SEEDS=<seed>).
+import { credentialsFile } from "../src/api.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -36,7 +37,7 @@ after(async () => {
   for (const c of cleanups.reverse()) await c();
 });
 
-const FIXED = [1, 2, 3, 5, 8, 13, 21, 1488526920];
+const FIXED = [1, 2, 3, 5, 8, 13, 21, 1488526920, 122265148];
 const SEEDS = process.env.ALIGN_PROP_SEEDS
   ? process.env.ALIGN_PROP_SEEDS.split(",").map(Number)
   : [...FIXED, ...Array.from({ length: 2 }, () => Math.floor(Math.random() * 2 ** 31))];
@@ -155,7 +156,7 @@ test(`share-state notices agree with the deny and the status views, whatever the
     const sync = () => runCli(t, ["sync"]);
     const live = () => ss.filter((s) => fake.sessions.get(s.key)?.state === "shared");
     const signedIn = () => {
-      const c = readJson<{ signed_out?: boolean }>(layout.credentials(t.home));
+      const c = readJson<{ signed_out?: boolean }>(credentialsFile(t.home));
       return !!c && !c.signed_out;
     };
     const events: Record<string, () => Promise<unknown>> = {
@@ -226,7 +227,7 @@ test(`share-state notices agree with the deny and the status views, whatever the
       },
       // C12-2: the device revoked on the Devices page, heard by the next pass, which ends the shares there and then.
       "device revoked on the web, then a sync": async () => {
-        const c = readJson<{ device_id: string; signed_out?: boolean }>(layout.credentials(t.home));
+        const c = readJson<{ device_id: string; signed_out?: boolean }>(credentialsFile(t.home));
         if (c && !c.signed_out) fake.revokeOnWeb(c.device_id);
         await sync();
       },
@@ -264,8 +265,11 @@ test(`share-state notices agree with the deny and the status views, whatever the
           ctx.db.prepare("INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(NEWEST_BUILD, JSON.stringify({ version: "9.9.9", build: "fffffffffff0", gen: WRITER_GEN + 1, since: new Date().toISOString() }));
           ctx.db.close();
           // A stop or a hold it alone hears is enforced at the next tool call, before the newest build runs.
-          // (Only to a session shared on the server while this machine is signed in: a signed-out pass hears nothing.)
-          const target = signedIn() && live().length && rand() < 0.5 ? pick(live()) : null;
+          // Only this pairing's sessions: the fake leaves replaced devices' rows shared, but their directives cannot
+          // reach this device (specs/align/directives.md, "Device fetch of v2 directives by cursor").
+          const device = readJson<{ device_id: string }>(credentialsFile(t.home));
+          const reachable = live().filter((s) => fake.sessions.get(s.key)?.device === device?.device_id);
+          const target = signedIn() && reachable.length && rand() < 0.5 ? pick(reachable) : null;
           if (target) {
             // A hold only when the goal is not held already (a hold that is on reached the sessions it was sent to).
             if (rand() < 0.5 || fake.holds.has("ws_acme/g_ship")) fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [target.key], goal: null, binding: null });

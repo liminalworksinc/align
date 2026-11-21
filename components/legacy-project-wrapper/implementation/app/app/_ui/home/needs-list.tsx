@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import type { BudgetRequestView } from "@/lib/v2/budgets";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EvidenceLabel, EvidenceSummary, hasEvidence, NeedAction, NeedList, NeedRow, Segmented, type Delivery, type NextItem } from "../ds";
@@ -66,6 +67,7 @@ export function EvidenceChips({ e }: { e: EvidenceCounts }) {
 /** Where a row opens: a change request's review (`?review=<goal>.<id>`, on the page that mounts this list), else the tab
  *  that holds that kind. */
 export function needHref(ws: string, n: Need, base = ""): string {
+  if (n.href) return n.href;
   if (n.review) return `${base}${n.review}`;
   if (n.kind === "agent_declined" && n.goal) return `/app/w/${ws}/goals/${n.goal.id}#agents-on-goal`;
   const tab = n.kind === "team_ask" ? "asks" : n.kind === "alignment" ? "alignments" : n.kind === "app_behind" ? "apps" : "";
@@ -212,7 +214,7 @@ export function NeedsList({
   const cr = useApi<Groups<ChangeRequest>>(`${W}/change-requests`);
   const asks = useApi<{ asks: AskLite[] }>(`${W}/asks?state=open,accepted,done,declined`);
   const al = useApi<Groups<Alignment>>(`${W}/alignments`);
-  const home = useApi<{ apps: { items: AppLite[] } | null; outcomes: { waiting_on_me: DueExpectation[] } | null }>(`${W}/home`);
+  const home = useApi<{ outcomes: { waiting_on_me: DueExpectation[] } | null; apps: { items: AppLite[] } | null; budget_requests: { waiting_on_me: BudgetRequestView[]; mine: BudgetRequestView[]; next_cursor: string | null } | null }>(`${W}/home`);
   const goals = useApi<{ goals: Goal[] }>(`${W}/goals`);
   // The approver rule's other read: this workspace's role and the teams this person leads.
   const wsList = useApi<{ workspaces: { id: string; role: "owner" | "member" | "viewer"; teams: { id: string; role: "lead" | "member" }[] }[] }>("/api/v2/workspaces");
@@ -263,6 +265,7 @@ export function NeedsList({
         alignments: al.data ? [...al.data.waiting_on_me, ...al.data.mine, ...al.data.others] : null,
         apps: home.data?.apps?.items ?? null,
         outcomes: home.error ? null : home.data?.outcomes?.waiting_on_me ?? null,
+        budgets: home.data?.budget_requests ? [...new Map([...home.data.budget_requests.waiting_on_me, ...home.data.budget_requests.mine].map((r) => [r.id, r])).values()] : null,
         requests: reqs.groups,
         sends: sent.sends,
         approver,
@@ -373,6 +376,7 @@ export function NeedsList({
           </label>
         )}
       </div>
+      {home.data?.budget_requests?.next_cursor && <Link href={`/app/w/${ws}/requests`} className="min-h-[44px] text-(--accent-text) underline">More budget requests are available on Requests.</Link>}
       {capped > 0 && !loading && (
         // What WAS checked, then what wasn't: a statement of scope, not an alarm.
         <p data-needs-capped className="mt-1 mb-1.5 px-1 text-[12px] text-(--text-3)">

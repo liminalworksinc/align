@@ -1,3 +1,4 @@
+import { deviceBudgetStamps } from "@/lib/v2/budgets";
 import { directivesFor, endedSessionsFor, parseCursor } from "@/lib/v2/directives";
 import { deviceAuth, route } from "@/lib/v2/http";
 
@@ -10,5 +11,5 @@ export const GET = route(async (req) => {
   const dev = deviceAuth(req);
   const cursor = parseCursor(new URL(req.url).searchParams.get("cursor"));
   const directives = directivesFor(dev, cursor, 100);
-  return { directives, next_cursor: String(directives.length ? directives[directives.length - 1].seq : cursor), workspaces: [...dev.grants].sort(), ended_sessions: endedSessionsFor(dev) };
+  return { directives, next_cursor: String(directives.length ? directives[directives.length - 1].seq : cursor), workspaces: [...dev.grants].sort(), ended_sessions: endedSessionsFor(dev), budget_stamps: deviceBudgetStamps(dev) };
 });

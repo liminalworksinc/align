@@ -13,6 +13,8 @@ import type { Principal } from "./http";
 import { need } from "./workspaces";
 import { expireStoppedSessionTargets, holdNewlyBound } from "./requests";
 import { personName } from "./retention";
+import { homeTeamId } from "./spend-home";
+import { budgetBurn, budgetStamp } from "./budgets";
 import { shareAgainText, shareAgainWords, sharingStoppedText } from "./share-again.mts";
 import { b64url, iso, nonNegInt, oneOf, optInt, optOneOf, optStr, str, type Body } from "./validate";
 import { EPOCH_ORIGINS, type EpochOrigin } from "./epoch-origin.mts";
@@ -59,6 +61,7 @@ interface EpochRow {
   origin: EpochOrigin | null;
   authority: "none" | "own" | "pod" | "alignment";
   alignment_id: string | null;
+  spend_team_id: string | null;
 }
 
 export type EndedReason = "device_signed_out" | "member_removed";
@@ -122,6 +125,25 @@ const shareOut = (s: SessionRow) => {
   const e = openEpoch(s.ws_id, s.session_key);
   return { session_key: s.session_key, state: s.state as "shared" | "suspended" | "stopped", current_epoch: e ? epochOut(e) : null };
 };
+
+/** Current captured attribution for the owner's hook. No current-home guess can rewrite an existing epoch. */
+export async function currentSessionBudget(pp: PolicyPrincipal, key: string, attribution = false) {
+  const s = sessionRow(pp.wsId, key);
+  if (!s) throw notFound();
+  need(pp, "session.manage", { kind: "session", ownerId: s.user_id });
+  const e = openEpoch(pp.wsId, key);
+  if (s.state !== "shared" || !e) return null;
+  const g = e.goal_id ? goalRow(pp.wsId, e.goal_id) : null;
+  if (e.goal_id && (!g || !canReadGoal(pp, goalObj(g)))) return null;
+  const team = g ? g.pod_id : e.spend_team_id;
+  if (!team || pp.wsRole !== "owner" && !pp.pods.has(team)) return null;
+  if (attribution) {
+    const t = get<{ id: string; name: string }>("SELECT id, name FROM v2_pods WHERE ws_id = ? AND id = ?", pp.wsId, team);
+    const month = new Date().toISOString().slice(0, 7);
+    return t ? { epoch_id: e.epoch_id, team: t, month, budget_stamp: budgetStamp(pp.wsId, team, month) } : null;
+  }
+  return { epoch_id: e.epoch_id, ...await budgetBurn(pp, team) };
+}
 
 export async function putSession(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {
   need(pp, "session.share");
@@ -267,8 +289,8 @@ function recordBindingEpoch(pp: PolicyPrincipal, dev: DevicePrincipal, key: stri
   if (open) run("UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", startsAt, pp.wsId, key, open.epoch_id);
   if (startsAt < s.started_at) run("UPDATE v2_sessions SET started_at = ? WHERE ws_id = ? AND session_key = ?", startsAt, pp.wsId, key);
   run(
-    `INSERT INTO v2_epochs (ws_id, session_key, epoch_id, goal_id, goal_version_at_start, starts_at, root_turn, cause, origin, authority, alignment_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO v2_epochs (ws_id, session_key, epoch_id, goal_id, goal_version_at_start, starts_at, root_turn, cause, origin, authority, alignment_id, created_at, spend_team_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     pp.wsId,
     key,
     epochId,
@@ -281,6 +303,7 @@ function recordBindingEpoch(pp: PolicyPrincipal, dev: DevicePrincipal, key: stri
     authority,
     alignmentId,
     at,
+    goalId ? null : homeTeamId(pp.wsId, pp.userId),
   );
   // Picking a goal ends a suspension. A manual binding to another goal ends any governing goal.
   const cur = sessionRow(pp.wsId, key)!;
@@ -529,6 +552,14 @@ export function listSessions(pp: PolicyPrincipal) {
       pp.wsId,
       key,
     );
+  const labels = new Map(all<{ session_key: string; name: string; goal_id: string | null; owner_id: string; visibility: "private" | "pod" | "workspace"; pod_id: string | null }>(
+    `SELECT s.session_key, p.name, e.goal_id, g.owner_id, g.visibility, g.pod_id FROM v2_sessions s
+     JOIN v2_epochs e ON e.ws_id = s.ws_id AND e.session_key = s.session_key AND e.ends_at IS NULL
+     LEFT JOIN v2_goals g ON g.ws_id = e.ws_id AND g.id = e.goal_id
+     JOIN v2_pods p ON p.ws_id = e.ws_id AND p.id = CASE WHEN e.goal_id IS NULL THEN e.spend_team_id ELSE g.pod_id END
+     JOIN v2_team_budgets b ON b.ws_id = p.ws_id AND b.pod_id = p.id AND b.month = ?
+     WHERE s.ws_id = ? AND s.user_id = ? AND (? = 'owner' OR EXISTS (SELECT 1 FROM v2_pod_members pm WHERE pm.ws_id = p.ws_id AND pm.pod_id = p.id AND pm.user_id = ?))`, new Date().toISOString().slice(0, 7), pp.wsId, pp.userId, pp.wsRole, pp.userId,
+  ).filter((r) => !r.goal_id || canReadGoal(pp, { kind: "goal", ownerId: r.owner_id, visibility: r.visibility, podId: r.pod_id })).map((r) => [r.session_key, `This session's spend counts toward ${r.name}'s team budget this month.`]));
   const goalLabel = (id: string | null) => {
     if (!id) return null;
     const g = goalRow(pp.wsId, id);
@@ -560,6 +591,7 @@ export function listSessions(pp: PolicyPrincipal) {
       earlier_bindings: earlier.map((b) => ({
         goal: goalLabel(b.goal_id), origin: b.origin, starts_at: b.starts_at, ends_at: b.ends_at,
       })),
+      team_budget_label: labels.get(s.session_key) ?? null,
       governing_goal: goalLabel(s.governing_goal_id),
       agent_stopped: !!s.agent_stopped,
       stop_status: stopStatus(pp.wsId, s.session_key),

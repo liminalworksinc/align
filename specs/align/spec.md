@@ -34,6 +34,15 @@ agent hooks and screens), not the framework, hosting, or language choices.
 | Goal | An objective with immutable versions, owned by one person and optionally by one team; a `company` goal belongs to the workspace owners |
 | Approval set | The people any one of whom may approve on a goal's behalf: its owner, its team's leads, and for a company goal the workspace owners |
 | Alignment | A consented link that makes a goal contribute to another goal, or makes chosen sessions work toward a goal |
+| Team budget | A monthly planning amount in estimated list-price US dollars for a team; reaching it never stops work or grants authority |
+| Home team | The person's one current team chosen for future spending periods in no goal, defaulting to their earliest joined team |
+| Spending period | The portion of a shared session from one goal binding or no-goal binding until its next binding or sharing ends; its captured team determines where usage counts |
+| Allowance | The amount a browser request may receive under a team's recorded budget rule without an individual approver, subject to its monthly ceiling |
+| Monthly allowance ceiling | The total that can be granted under a team's allowance in that UTC month, including grants that later expire |
+| Effective budget | The month's base budget including applicable grants; an absent base means no effective budget |
+| Second look | One referral of a declined budget request for a decision by a different eligible workspace owner |
+| Known priced subtotal | The sum of requests with list-price estimates; incomplete pricing or attribution can make it only a lower bound |
+| Budget request | A recorded request for more team budget; a device request always waits for a person |
 | Change request | A proposed new version of someone else's goal, approved or rejected by the goal's approval set |
 | Session | A coding-agent session (Claude Code or Codex) that its owner shared toward a goal, identified by a keyed `session_key` |
 | Directive | A sequence-numbered message Align delivers to a person's running sessions: `goal_version`, `binding_changed`, `binding_suspended`, `stop` or `resume` |
@@ -43,10 +52,11 @@ agent hooks and screens), not the framework, hosting, or language choices.
 
 ## Parts
 
-- `goals-and-proposals` — goals and their versions, approval sets, alignments, change requests and their evidence, and the sample workspace
-- `directives` — directives to running agents, receipts, and stopping and resuming an agent
-- `mcp` — the read-only MCP server (with an opt-in scope for adding evidence links), its OAuth authorization server and the `align-connect` stdio relay
-- `workspaces` — identity and sign-in, workspaces, members, teams, invites, devices, shared sessions, usage and spend, activity, and hosted mode
-- `metrics` — content-free product events, operator-recorded LOIs and the operator's metrics report
-- `local-agent` — the `align` CLI, its Claude Code and Codex hooks, the one-pass sync and local metering
-- `interface` — the web app under `/app` and the OAuth consent page
+- `goals-and-proposals`: goals and their versions, approval sets, alignments, change requests and their evidence, and the sample workspace
+- `directives`: directives to running agents, receipts, and stopping and resuming an agent
+- `mcp`: the read-only MCP server (with an opt-in scope for adding evidence links), its OAuth authorization server and the `align-connect` stdio relay
+- `workspaces`: identity and sign-in, workspaces, members, teams, invites, devices, shared sessions, usage and spend, activity, and hosted mode
+- `budgets`: monthly team budgets, estimated team spend and recorded requests for more
+- `metrics`: content-free product events, operator-recorded LOIs and the operator's metrics report
+- `local-agent`: the `align` CLI, its Claude Code and Codex hooks, the one-pass sync and local metering
+- `interface`: the web app under `/app` and the OAuth consent page
