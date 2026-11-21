@@ -185,6 +185,14 @@ export interface HoldLatch {
   holds: { goal_id: string; goal_title: string; by: string; reason: string | null; directive_id: string; seq: number; at: string }[];
 }
 
+export interface AddedText {
+  lower_bound?: boolean;
+  characters: number;
+  additions: number;
+  last_at: string | null;
+  last_event: "SessionStart" | "UserPromptSubmit" | "PreToolUse" | null;
+}
+
 export interface InjectedState {
   v: 1;
   goal_id: string | null;

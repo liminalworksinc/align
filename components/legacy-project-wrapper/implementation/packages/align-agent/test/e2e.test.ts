@@ -14,7 +14,7 @@ import { exampleCrossings } from "../src/shared/drift.ts";
 import { takeLease } from "../src/lease.ts";
 import { kvSet } from "../src/db.ts";
 import { setRule } from "../src/shared/rules.ts";
-import { loadCredentials, saveCredentials } from "../src/api.ts";
+import { credentialsFile, loadCredentials, saveCredentials } from "../src/api.ts";
 import { prepareExcerpt, terminalText } from "../src/excerpts.ts";
 import { readTurn } from "../src/analysis-transcript.ts";
 import { inspectAnalysis, pathMatches, runAnalysis, setResultsEnabled } from "../src/analysis.ts";
@@ -85,7 +85,7 @@ describe("e2e", () => {
     assert.ok(!fake.log.some((l) => l.origin), "agent never sends Origin");
     const creds = loadCredentials(t.home)!;
     assert.match(creds.device_id, /^dv_/);
-    assert.equal(fs.statSync(layout.credentials(t.home)).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(credentialsFile(t.home)).mode & 0o777, 0o600);
     assert.equal(fs.statSync(layout.deviceKey(t.home)).mode & 0o777, 0o600);
     assert.ok(fs.existsSync(layout.feed(t.home, "ws_acme")));
 

@@ -30,6 +30,375 @@ queue item or let `docs/roadmap/` become a plan archive.
 Check the parent only after every required subtask and evidence item passes. Add the
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
+### [x] ALIGN-002: Close the second review of model suggestions and sharing
+
+- **Priority:** P0
+- **Owner:** Align local agent, workspace sharing policy, People, Trust and Spend
+- **Direction:** Resolve the second review on the stacked goal suggestions, model limits and excerpts work.
+- **Conclusion:** Authorize the exact inputs immediately before sending, discard stale answers, and keep confirmations, notices and deletion tied to the state the person acted on.
+- **Completion prerequisites:** none
+- **Implementation and evidence:**
+  - [x] Specify the revised boundaries and review the proposed decisions.
+    Specification validation accepted all eight documents.
+  - [x] Check the regressions for the confirmed findings and the two coverage gaps in the full local gate.
+    The focused suggestion suite passed 24 checks. The prior excerpt client failed the delayed dispatch test,
+    and the updated client passed. The server and browser suite passed 1,200 checks.
+  - [x] Record the complete Node 24 gate with both clean installs and leave the implementation staged.
+    On Node 24.22.3 both clean installs exited successfully. `ALIGN_TEST_PORT=5400 npm test` passed
+    2,266 checks with zero failures. Schema 35 preserved consent and restrictions and expired the old dispatch
+    windows. The retained test receipt is stale.
+
+### [ ] ALIGN-003: Preserve consent and turn evidence through sync and upgrades
+
+- **Priority:** P0
+- **Owner:** Align local agent, workspace session sharing and limits
+- **Direction:** Address the independent reviews of data sharing, local analysis, model limit checks and excerpts in the existing staged worktree.
+- **Conclusion:** Use the recorded turn for attribution and recheck current permission at dispatch and response. Preserve choices, deletion scope and supported prior records across upgrades.
+- **Depends on:** ALIGN-002
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Compare both reviews with the staged work and update the owning specifications. All eight Align documents validate.
+  - [x] Repair dispatch, attribution, upgrades, grants, counts, cleanup and reader-facing wording. Add CLI,
+    server and 390-pixel browser checks for the implemented paths.
+  - [ ] Exercise a full older-client downgrade, expiry of a second excerpt during a held writer, and stale revoke
+    through the browser. The current suite covers isolated queue storage, access-time expiry and stale revoke
+    through the API. The goal link in local inspection supports taking a dispute to the owner directly.
+- **Evidence:**
+  - [x] Both clean installs succeeded. On Node 24.22.3, `ALIGN_TEST_PORT=5400 npm test` passed 2,291 checks
+    with zero failures, including 1,214 server and browser checks, 187 OAuth checks, 78 live CLI checks and
+    680 agent checks. Specification validation passed all eight documents. The retained test receipt is stale.
+
+
+- **Merge integration, 2026-11-20:** Resolve the lower branch merge with both sets of review fixes and budget
+  behavior. The first 34 migration SQL strings and their source prefix match `MERGE_HEAD` exactly. This branch
+  adds only migration 35, previously 32. Comparing with the common ancestor confirms no earlier migration was
+  edited in place. An in-memory SQLite upgrade preserves all prior dispatch-window columns, foreign keys,
+  primary-key index and triggers, adds the answer revision and expires old grants. Spending period and finding
+  schemas remain identical across that upgrade, including captured teams. The lower branch did not change
+  either local database schema file. Both Home need kinds, ID prefixes, budget notes, context counters and
+  review fixes remain combined. Duplicate roadmap entries and the repeated local measure requirement were
+  consolidated without losing their distinct rules. No behavioral disagreement remains.
+- **Merge verification:** Node 26.3.0. Both dependency directories were present, so no install was needed.
+  Commands below ran from the implementation directory unless the package directory is specified.
+  The initial `npm run lint` from the repository root failed because it has no package manifest. The corrected
+  run passed with no errors and two existing unused-variable warnings. All 590 executed checks passed.
+  The two serial hook latency cases passed; their measured p95 values were 120.3 ms and 102.0 ms, under 150 ms.
+  Five script syntax checks passed. The tracked-file marker scan returned no matches, and the whitespace check
+  passed. The in-memory migration comparison and checks of both shared union types passed.
+
+```sh
+npm run lint
+npx next typegen && npx tsc --noEmit
+node scripts/test-budgets.mjs
+node scripts/test-admin.mjs
+node scripts/test-invite-races.mjs
+node --check scripts/test-v2.mjs && node --check scripts/test-oauth.mjs && node --check scripts/test-agent-live.mjs
+node --check scripts/test-budgets.mjs && node --check scripts/test-admin.mjs
+```
+
+The budget, admin and invite checks passed 69/0, 88/0 and 11/0 respectively. From
+`components/legacy-project-wrapper/implementation/packages/align-agent`, the exact commands were:
+
+```sh
+npm run typecheck && npm run build
+node --test --test-concurrency=4 --test-skip-pattern='sessions toward the same goal: a card|a file a script wrote|reporting steering lines|wire: received|`align login` saves the server|`align login` says which server' test/metering.test.ts test/drift-corpus.test.ts test/hooks.test.ts test/pod.test.ts test/install.test.ts test/requests.test.ts test/budgets.test.ts test/budget-timing.test.ts test/context-cost.test.ts test/context-concurrency.test.ts test/context-retention.test.ts test/hook-parity.test.ts
+node --test --test-name-pattern='^rules abstain on weak history|^the transcript reader rejects ambiguous|^the rollout reader distinguishes|^the decision input comes from|^transcript selection follows|^rollout timestamp selection counts|^exact previews show|^a partly rolled back clock|^a new folder choice|^a successful no-op edit|^path patterns match|^analysis retries an unreadable' test/goal-suggestions.test.ts test/e2e.test.ts
+node --test --test-skip-pattern='reporting steering lines' test/allocation.test.ts
+node --test --test-concurrency=1 test/serial/*.test.ts
+```
+
+Package typecheck and build passed. The four test commands passed 398/0, 12/0, 10/0 and 2/0 respectively.
+From the repository root, the exact final scans were:
+
+```sh
+git ls-files -z | xargs -0 grep -n '^<<<<<<<\|^=======$\|^>>>>>>>'
+git diff --check
+```
+
+- **Verification scope:** The skip patterns exclude the same-goal sibling card and script-written file tests
+  because they run mutating git commands, the Requests wire case and two login pairing cases because they
+  start listeners, and the allocation reporting group because it starts listeners. The reporting-group pattern
+  has no match in the first package command. The selected end-to-end and suggestion tests use no listeners;
+  their remaining cases require listeners. Other listener-dependent suites, the application server and browser
+  tests, live provider behavior and the live smoke test remain unverified. The three port-dependent scripts
+  received syntax checks only. The index and history remain untouched.
+
+### [ ] LIM-2528: Check limits with a decision model and share selected excerpts
+
+- **Priority:** P0
+- **Owner:** Align local agent, workspace policy and Sessions
+- **Direction:** Add a model check of completed turns and deliberate sharing of selected session text.
+- **Conclusion:** Use the existing sharing tiers and turn-bound goal. Require separate machine consent, fresh workspace permission and explicit confirmation of each excerpt.
+- **Depends on:** LIM-2526 and LIM-2527
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Update the Align specifications and record the proposed decisions in ADR 0008. All eight specification documents validate.
+  - [x] Add the local model check and share and revoke excerpts with named readers. The CLI privacy test passed using a local decision endpoint stand-in.
+- **Original implementation evidence:**
+  - [x] `ALIGN_TEST_PORT=5100 npm test` on Node 24.22.3 passed 2,097 checks with zero failures.
+  - [x] `litai spec validate specs/align --id-prefix align` passed for all eight documents. The retained test receipt is stale.
+- **Outcome:** Schema 34 supports confirmed excerpts with named readers, expiry and revocation. Optional local model
+  checks use a configured recipient. The decision service was exercised with a local test stand-in. Live provider
+  authentication, behavior and retention remain untested.
+
+- **Review follow-up:** Fix the nine findings from the independent browser and CLI pass. Restack onto LIM-2527 and verify the schema 33 to 34 upgrade and a fresh schema 34 database.
+  - [x] Specify the veto boundary, final reply selection, ordered consent, preview escaping, excerpt deletion and stale reader state. All eight spec documents validate.
+  - [x] Cover those cases, reader and sharer rejoin, and a populated schema 33 upgrade with regressions. Packet-specific CLI, server and 390-pixel browser cases passed.
+  - [x] Measure secure deletion and log cleanup bookkeeping. The median ordinary SQLite write was 3.96 microseconds before and 4.82 after across 120,000 transactions per case.
+  - [x] After the restack, `ALIGN_TEST_PORT=5100 npm test` on Node 24.22.3 passed 2,251 checks with zero failures.
+    The short-screen expectations drawer and its dependent checks passed. Both decision send vetoes, the populated
+    schema 33 upgrade, and fresh schema 34 initialization passed. The retained test receipt is stale.
+
+- **Merge integration:** The first 33 migration SQL strings and their source prefix match the lower branch
+  exactly. Migration 34 is the only migration added by LIM-2528. In-memory SQLite comparison preserves all 11
+  findings columns, foreign keys, three indexes and the existing trigger set. Only the evidence check gains
+  `model`. The local database schema matches the lower branch. Both Home need kinds, budget and excerpt CLI
+  commands, retention records and asynchronous transaction callers remain combined. Current schema literals
+  and table lists agree on 34. The changelog and this queue retain LIM-2528 first without duplicate entries.
+- **Merge verification:** Node 26.3.0. Both dependency directories were present. Lint passes with two existing
+  unused-variable warnings. Route type generation, app typecheck, package typecheck and package build pass.
+  Budget checks pass 69/0, admin checks pass 87/0, invite and restriction race checks pass 11/0, and the selected
+  package tests pass 425/0. Both latency cases use the suite's host-load adjustment; quiet-machine latency remains
+  unverified. Five script syntax checks pass. The tracked-file marker scan and whitespace check are clean.
+  Lint was rerun after an initial collision with a budget test's temporary-directory cleanup.
+- **Verification scope:** Excluded the same-goal sibling card and script-written file cases because they run
+  mutating git commands. Excluded the reporting steering lines group, requests wire case and two login pairing
+  cases because they start listeners. Ran only the rules-abstention goal-suggestion case and the four local
+  analysis and transcript cases in the end-to-end file; the other cases there require listeners. Other suites
+  that require listeners, browser checks and live provider behavior remain unverified. No behavioral disagreement
+  remains. The index and history stay untouched.
+
+### [ ] LIM-2527: Suggest a goal for a session
+
+- **Priority:** P0
+- **Owner:** Align local agent, binding provenance and session data boundary
+- **Direction:** Offer a bindable goal from local rules, the existing session or a decision provider.
+  Let the person confirm, choose another goal or dismiss.
+- **Conclusion:** Use the existing analysis worker and consent boundary. Keep suggestions and feedback on this
+  machine. Carry only the confirmed goal and origin through the normal binding path.
+- **Completion prerequisites:** LIM-2526
+- **Implementation:**
+  - [x] Specify consent, suggestion behavior and provenance before changing code. All eight specifications validated.
+  - [x] Add the three ways to suggest a goal, a user-only notice and local feedback. Schema 33 preserves existing spending period records.
+- **Evidence:**
+  - [x] Test workspace restrictions, default-off canaries, each opt-in and binding provenance.
+    Eight focused agent tests passed. The schema upgrade, access and phone-width checks passed.
+  - [x] Pass the full Node 24 gate on the configured port. Node 24.22.3 on port 5010 reported 2,117 passed and 0 failed.
+  - [x] Before the budget merge, restack on LIM-2525 and verify the prior-schema upgrade and a fresh database.
+    `ALIGN_TEST_PORT=5010 npm test` on Node 24.22.3 passed 2,228 checks with zero failures.
+    Specification validation accepted all eight documents.
+- **Outcome:** The review fixes protect the decision service and share confirmation, refresh past-session offers,
+  and explain suggestions in the CLI. Requests to decision services and fork adapters used local test stand-ins.
+  Current harness integrations abstain from forks until they can pin the original provider and account.
+  The retained test receipt is stale.
+
+- **Merge integration:** The first 32 migration SQL strings and their source prefix match the lower branch exactly.
+  Migration 33 adds suggestion origins and the workspace decision service, preserving the captured team on each
+  spending period. The local database retains the lower schema followed by the four suggestion tables. Home needs,
+  budget notes, context counters and suggestion notices remain combined. The upgrade test preserves team attribution,
+  dependent usage and findings, reviews and sharing choices. The prompt regression delivers all three notices once.
+- **Merge verification:** Node 26.3.0. Both dependency directories were present. Lint has no errors and two existing
+  unused-variable warnings. Route type generation, app typecheck, package typecheck and package build pass.
+  Budget checks pass 69/0, admin checks pass 84/0, write-race checks pass 11/0, the listener-free package checks
+  pass 394/0, and the selected suggestion rule check passes 1/0. Two package cases were excluded because they run
+  mutating git commands: the same-goal sibling card case in `hooks.test.ts` and script-written file detection in
+  `pod.test.ts`. The other suggestion cases and listener-dependent suites remain unverified. Serial latency has one
+  pass using the existing host-load adjustment and one skip because the host is too busy. Quiet-host latency remains
+  unverified. Five script syntax checks pass. No behavioral disagreement remains. The index and history stay untouched.
+
+### [ ] ALIGN-001: LIM-2527 review fixes. Protect suggestion inputs and confirmation
+
+- **Priority:** P0
+- **Owner:** Align local agent, workspace sharing restrictions and launch review
+- **Direction:** Resolve all nine findings from the independent packet review and diagnose the intermittent expectations drawer timeout.
+- **Conclusion:** Refresh permission at the point of use, require consent to the owner-configured recipient, and preserve the turn and preview that the person acted on.
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Specify and test the revised permission, confirmation, weekly offer and inspection behavior before fixing it.
+  - [x] Fix the clipped confirmation reproduced on a 390 by 600 pixel screen. The browser test now checks that a pointer can reach Confirm and that launching records the entered expectation.
+  - [ ] Identify the trigger of the earlier intermittent 390 by 844 pixel timeout. The instrumented run at that size passed.
+- **Evidence:**
+  - [x] Node 24.22.3 on port 5010 reported 2,117 passed and 0 failed, including 1,093 server and browser checks and 646 local agent checks. All eight Align specifications validated. The retained test receipt remains in place.
+
+### [ ] LIM-2526: Keep session analysis on the machine by default
+
+- **Priority:** P0
+- **Owner:** Align local agent, workspace sharing policy and trust copy
+- **Direction:** Specify proposed data tiers and build local session analysis and limit checks in the LIM-2526 worktree.
+- **Conclusion:** Retain metadata-only sharing by default. Run bounded local analysis after sync releases its lock. Require explicit device consent and workspace permission before derived findings leave.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Specify the data boundary, local processing, and limit evidence and feedback before code. All eight specifications validated.
+  - [x] Add schema 32, sharing controls, local processing, previews and privacy tests. The targeted transport and signed-out processing tests passed.
+- **Evidence:**
+  - [x] Run the full Node 24 test gate and validate the Align specifications.
+    `ALIGN_TEST_PORT=4900 npm test` passed 2,090 checks with zero failures on Node 24.22.3.
+    Specification validation passed for all eight documents. The retained test receipt is stale.
+- **Outcome:** Metadata remains the default. Schema 32 adds controls for sharing and retention. A person can
+  inspect and delete their findings and mark false alarms or misses from the session.
+- **Review follow-up:** The independent review found ten defects in sharing, approvals and local analysis.
+  The operator confirmed that hosted Align must refuse derived results. Keep prior devices' named activity
+  working under their existing explicit local choice while applying workspace bans.
+  - [x] Specify and test the review findings, then fix the server, app and CLI.
+    Server, browser and live CLI checks exercised the new sharing boundaries, approval values and feedback.
+    The previous CLI still sent usage, hashes and opted-in named activity after upgrading from the prior schema.
+  - [x] Run both clean installs, the full Node 24 gate and specification validation.
+    Both installs succeeded on Node 24.22.3. The final `ALIGN_TEST_PORT=4900 npm test` passed 2,105 checks
+    with zero failures, including the 150 ms hook latency check. All eight specification documents passed.
+    The retained receipt is stale. The project verification command also stops at a stale documentation authority review.
+- **Remaining integration:** This stack has no owner-question route or work-record implementation for these
+  findings. Connect their stable ids when those routes are available.
+
+- **Merge integration:** Preserved the lower branch's 31 migration SQL strings and source prefix exactly.
+  Migration 32 is this branch's unchanged data-boundary SQL. The local package database retains the analysis
+  tables; the lower branch made no local schema change. Combined analysis notices with budget notes and kept
+  the existing context counters. Updated current schema checks, upgrade fixtures, table lists and sharing prose.
+  Both changelog and roadmap keep this branch first without repeating prior entries.
+- **Merge verification:** Node 26.3.0. Dependency directories were already present. Lint passed with two existing
+  unused-variable warnings. Route type generation, app typecheck, package typecheck and package build passed.
+  Budget checks passed 69/0, admin checks passed 80/0, and write-race checks passed 11/0. The 11 listener-free
+  package files passed 393/0. The added combined analysis and budget prompt regression passed 1/0 separately.
+  Two cases were excluded by name because they execute mutating git commands in temporary repositories:
+  `sessions toward the same goal: a card with the other's edits and commits at the next prompt, once; an edit to a file it just changed is held once`
+  and `a file a script wrote (no edit tool, no shell redirect) is found in the working tree by the sync pass and recorded for the pod`.
+  The two serial latency checks passed with their existing host-load adjustment and no skips. All five script
+  syntax checks passed. Conflict-marker and whitespace checks passed. Listener-dependent tests and quiet-host
+  latency remain unverified. No behavioral disagreement remained. The index and history remain untouched.
+
+### [x] LIM-2525: Help workspace owners review the goal list
+
+- **Priority:** P0
+- **Owner:** Align goals, Home, Sessions and product metrics
+- **Direction:** Review the goal list periodically from existing workspace records and show earlier bindings on the Sessions page.
+- **Conclusion:** Use readable records, a workspace aggregate when the proposed minimum is met, and the existing goal action flows. Review actions record an owner decision without changing any goal.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Specify review signals, visibility, state and binding history before changing code.
+  - [x] Implement owner review and binding history with migration 31 and the existing action flows.
+  - [x] Address the independent review's findings on aggregate privacy, target comparisons, write protection, legacy samples and goal page flows.
+- **Evidence:**
+  - [x] Cover review signals, privacy, lifecycle, migration and narrow browser layouts.
+    The 17 packet checks passed in the production-server suite, including Chrome at 390 and 1280 pixels.
+    The admin suite passed its migration and renumbering cases.
+  - [x] Run both clean installs, the full Node 24 gate and spec validation. Record the outcome in the changelog.
+    Both clean installs succeeded. `ALIGN_TEST_PORT=4800 npm test` on Node 24.22.3 passed 2,095 checks with zero failures.
+    `litai spec validate specs/align --id-prefix align` accepted all eight documents. The retained test receipt is stale.
+  - [x] Reproduce the review findings with regression tests, rerun the Node 24 gate and validate the revised spec.
+    The fix pass added browser, API and migration regressions. On Node 24.22.3, both clean installs succeeded and
+    `ALIGN_TEST_PORT=4800 npm test` passed 2,116 checks with zero failures. The spec validator accepted all eight
+    documents. The retained test receipt is stale.
+  - [x] Rebased on LIM-2524 before the budget merge. The prior-schema upgrade kept its readings and credential
+    intact, and a fresh database passed. The isolated Node 24.22.3 gate passed 2,166 checks at port 4800,
+    including the synchronized proposal form check and hook latency. All eight specification documents passed.
+
+- **Merge verification:** Node 26.3.0: the first 30 migration SQL strings and their source prefix match the lower
+  branch exactly. Migration 31 is the unchanged goal-list review SQL. The local package database matches both
+  branches. Home keeps budget requests, budget crossings and the review link; Sessions keeps budget labels and
+  earlier bindings. Goal links retain section scrolling, form focus and the existing drop confirmation.
+  Lint passes with one existing unused-variable warning. Route type generation, app typecheck, package typecheck
+  and package build pass. Budget checks pass 69/0, admin checks pass 77/0, and 393 listener-free package checks pass
+  with zero failures. Two package cases that create git commits in fixtures were excluded. Both latency cases skip
+  because bare process startup exceeds the host-load cutoff. All five script syntax checks pass. Both dependency
+  directories were already present. No conflict markers or whitespace errors remain. Listener-dependent execution
+  remains unverified. The index and history remain untouched.
+
+### [x] LIM-2524 - Read measures from CI and a chosen machine
+
+- **Priority:** P0
+- **Owner:** Align measures, local agent and spend
+- **Direction:** Accept opted-in CI and command readings, show spend during the outcome period, and surface due expectations.
+- **Conclusion:** Build on the readings and expectations from LIM-2520. Version source settings with each measure. Keep readings separate and use a scoped credential or an exact local command approval. Compare recorded readings with estimated spend over the launch period.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [x] Specify source, access, payload and period rules before code. The source and disclosure choices are proposed in decision 0004.
+  - [x] Implement both reading sources, period displays and due expectations. Migration 30 preserves prior
+    readings. The application suite passed all 15 packet checks, including the new views at 390 pixels.
+  - [x] Fixed the eight review findings covering command origin, exact values, retries and machine eligibility,
+    brief overflow, launch-time labels in session notes, source form validation and CI provenance wording.
+  - [x] Seed 1488526920 failed on origin/main at bf583fdf. The stand-in's self-revoke left old sessions shared.
+    Its self-revoke now ends sessions as the real server does. The pinned seed and the focused older-build
+    enforcement tests passed under Node 24.22.3.
+- **Evidence:**
+  - [x] The review regressions passed, including both 390-pixel goal forms and the pinned share-state seed.
+    The v2 suite reported 1,110 passed, and the standalone agent package run reported 639 passed.
+  - [x] `ALIGN_TEST_PORT=4700 npm test` on Node 24.22.3 passed all 2,119 checks, including the hook latency
+    limit. The retained receipt is stale.
+  - [x] Specification validation accepted all eight updated Align documents.
+  - [x] Rebased on LIM-2522 before the budget merge. The prior-schema upgrade preserved its readings, and a
+    fresh database passed. The isolated Node 24.22.3 gate passed 2,121 checks at port 4700, including
+    the hook latency check. All eight specification documents passed.
+
+- **Merge verification:** Node 26.3.0: the first 29 server migration strings and source prefix match the lower
+  branch exactly. Migration 30 is this branch's unchanged reading-source SQL. The local package database matches
+  the lower branch. Lint, route type generation, app typecheck, package typecheck and package build pass.
+  Budget checks pass 69/0, admin checks pass 71/0, and all 11 listener-free package files pass 395/0.
+  Both serial latency cases skip because bare process startup exceeds the host-load cutoff. Limits stay unchanged.
+  Syntax checks pass for all five checked scripts. No conflict markers or whitespace errors remain.
+  Listener-dependent execution remains unverified. The index and history remain untouched.
+
+### [ ] LIM-2522: Show earlier decisions on the same goal items
+
+- **Priority:** P0
+- **Owner:** Align change requests, their web review controls and decision records
+- **Direction:** Show people earlier decisions on the items they are proposing to change or deciding on.
+- **Conclusion:** Match stored revisions by element ID on the same goal and use the existing request read policy.
+- **Completion prerequisites:** none
+- **Implementation and evidence:**
+  - [x] Specify revision indexing, precedent reads, visibility, presentation and event recording.
+    The spec validation command accepted all eight documents.
+  - [x] Index existing and new revisions, and expose earlier decisions to the app and connected clients.
+    Server migration 29 follows the expectations migration and backfills from the base versions, counting missing bases.
+  - [x] Test migration, matching, visibility, event recording and proposal and review controls at 390 px.
+    The 14 packet server and browser checks passed on Node 24.22.3.
+  - [x] Keep the backfill attached to the migration when its schema version changes, and test the runner with a shifted version.
+    The regression covers the direct upgrade from schema 28 to 29 and a simulated migration at a later version.
+    Both paths passed all six upgrade checks. `test-admin` reported 68 passed and 0 failed.
+  - [x] Pass the full local test gate and spec validation. Record the outcome in the changelog.
+    `ALIGN_TEST_PORT=4600 npm test` on Node 24.22.3 reported 2,074 passed and 0 failed.
+    `litai spec validate specs/align --id-prefix align` accepted all eight documents.
+    The retained test receipt is stale.
+- **Merge verification:** Node 26.3.0: the first 28 server migrations match the lower branch byte for byte;
+  migration 29 adds the precedent index. Lint, app type generation and typecheck, agent typecheck and build pass.
+  Budget checks pass 69/0 and admin checks pass 68/0, including the direct and shifted index upgrades.
+  The 393 listener-free agent checks first pass 391/2; the two affected files pass 17/0 when run sequentially.
+  Serial latency reports 0 passed, 0 failed and 2 skipped because the host is too busy to measure. Limits stay
+  unchanged. Syntax checks pass for the three listener-dependent scripts.
+  No conflict markers remain. Listener-dependent execution remains unverified; the index and history stay unchanged.
+
+### [x] LIM-2520: Record launch expectations, outcomes and measure readings
+
+- **Owner:** Align goals, change requests, Home and MCP contracts
+- **Direction:** Let a launcher state an expectation for a goal measure, report what
+  happened, and record self-reported measure readings independently of goal versions.
+  Show validation messages beside the affected outcome or reading field, using the form's labels.
+- **Conclusion:** Keep expectations with the launch decision and readings with the
+  measure id. A reading leaves goal content and agent delivery unchanged.
+- **Completion prerequisites:** PROVENANCE-001
+- **Implementation and evidence:**
+  - [x] Specify the launch, outcome, reading, visibility and retention rules.
+  - [x] Implement the records, app flows, MCP reads and product events in server schema 28.
+  - [x] Exercise both launch paths, access, correction, history, retention and mobile layout.
+    The packet checks passed in `scripts/test-v2.mjs`.
+  - [x] Verify the upgrade from schema 27 to 28 and a fresh schema 28 database.
+    Both SQLite checks passed. The upgrade preserved the stored goal version, change request and binding origin.
+  - [x] Show which field needs a correction when an outcome or reading is refused.
+    The Home browser regression reproduced the raw field name before the fix and passed with the inline message.
+  - [x] Run the full test gate on Node 24 and validate the specifications.
+    `ALIGN_TEST_PORT=4400 npm test` passed 2,054 checks on Node 24.22.3 with zero failures.
+    `litai spec validate specs/align --id-prefix align` passed for all eight documents.
+
+- **Merge verification:** The first 27 migration strings and their source prefix match the lower branch exactly.
+  Migration 28 adds expectation records. Schema 27 records survive the upgrade, and fresh databases contain all
+  budget, expectation, outcome and reading tables. Home retains both needs kinds, rankings and partial-read states.
+  Lint, route generation, app and package typechecks, package build and four script syntax checks pass on Node 26.3.0.
+  Budget domain checks pass 69/0, and eight listener-free package files pass 352/0. Both serial latency cases skip
+  because bare process startup exceeds the host-load cutoff. Listener-dependent checks remain for the operator.
+  The local database schema matches the lower branch. One lint rerun raced with test-directory cleanup;
+  the final sequential lint run passes. The index and history remain untouched.
+
 ### [x] PROVENANCE-001: Show how sessions came to count toward goals
 
 - **Priority:** P0
@@ -44,55 +413,183 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [x] Specify origin, retry identity, and the Sessions, Spend and local status displays.
     `litai spec validate specs/align --id-prefix align` passed for all eight documents.
   - [x] Add server and local migrations, carry origins through every share and binding path, and update the wire contract.
-    Schema 24, live CLI checks and agent package tests passed.
+    Migration 27 records binding origins. Prior branch live CLI checks and agent package tests passed.
   - [x] Cover retries, privacy, rolled-up spend, and the session and spend displays at 390 pixels.
     `test-v2` passed 1,031 checks, including Chrome at 390 and 1,280 pixels.
   - [x] Run both clean installs and the full test gate with Node 24.22.3.
     `ALIGN_TEST_PORT=4500 npm test` passed 2,019 checks with zero failures. The retained receipt is stale.
+- **Merge verification:** Main's migrations 24 through 26 remain unchanged and precede origin migration 27.
+  Node 26.3.0: lint, route generation, app and package typechecks, package build and script syntax checks pass.
+  Budget domain checks pass 67/0, including retries, captured teams, origin splits and retention. Eight listener-free
+  package files pass 352/0. Serial latency passes one case and skips one because bare Node startup exceeds its
+  host-load cutoff. The first lint attempt hit a temporary-directory cleanup race; the final sequential run passes.
+  Tracked files contain no conflict markers and the whitespace check passes. Fresh listener-dependent checks
+  remain for the operator. The index and history remain untouched.
 
-### [x] LIM-2520: Record launch expectations, outcomes and measure readings
+### [ ] CONTEXT-001: Show the context Align adds to each session
 
-- **Owner:** Align goals, change requests, Home and MCP contracts
-- **Direction:** Let a launcher state an expectation for a goal measure, report what
-  happened, and record self-reported measure readings independently of goal versions.
-  Show validation messages beside the affected outcome or reading field, using the form's labels.
-- **Conclusion:** Keep expectations with the launch decision and readings with the
-  measure id. A reading leaves goal content and agent delivery unchanged.
-- **Completion prerequisites:** PROVENANCE-001
-- **Implementation and evidence:**
-  - [x] Specify the launch, outcome, reading, visibility and retention rules.
-  - [x] Implement the records, app flows, MCP reads and product events in server schema 25.
-  - [x] Exercise both launch paths, access, correction, history, retention and mobile layout.
-    The packet checks passed in `scripts/test-v2.mjs`.
-  - [x] Verify the upgrade from schema 24 to 25 and a fresh schema 25 database.
-    Both SQLite checks passed. The upgrade preserved the stored goal version, change request and binding origin.
-  - [x] Show which field needs a correction when an outcome or reading is refused.
-    The Home browser regression reproduced the raw field name before the fix and passed with the inline message.
-  - [x] Run the full test gate on Node 24 and validate the specifications.
-    `ALIGN_TEST_PORT=4400 npm test` passed 2,054 checks on Node 24.22.3 with zero failures.
-    `litai spec validate specs/align --id-prefix align` passed for all eight documents.
-
-### [ ] LIM-2522: Show earlier decisions on the same goal items
-
-- **Priority:** P0
-- **Owner:** Align change requests, their web review controls and decision records
-- **Direction:** Show people earlier decisions on the items they are proposing to change or deciding on.
-- **Conclusion:** Match stored revisions by element ID on the same goal and use the existing request read policy.
+- **Owner:** specs/align/local-agent.md and the local agent package
+- **Direction:** Record exact returned character totals, addition counts and last times per session, and show them in status and sessions.
+- **Conclusion:** Compare counted hooks with the current uncounted handlers using identical copied local homes.
+  Counter storage stays outside shared hook state. Expire logs after 30 days without an addition, only in sync.
+  Per the operator's review correction, list and sort names once outside the time budget, examine at most 500 paths
+  and remove at most 100 files per pass, and resume after the saved last examined name. There is no persistent
+  scanner process. Unshare and sign-out retain counter files; there is no separate local session deletion path.
 - **Completion prerequisites:** none
 - **Implementation and evidence:**
-  - [x] Specify revision indexing, precedent reads, visibility, presentation and event recording.
-    The spec validation command accepted all eight documents.
-  - [x] Index existing and new revisions, and expose earlier decisions to the app and connected clients.
-    Server migration 26 follows the expectations migration and backfills from the base versions, counting missing bases.
-  - [x] Test migration, matching, visibility, event recording and proposal and review controls at 390 px.
-    The 14 packet server and browser checks passed on Node 24.22.3.
-  - [x] Keep the backfill attached to the migration when its schema version changes, and test the runner with a shifted version.
-    The regression covers the direct upgrade from schema 25 to 26 and a simulated migration at a later version.
-    Both paths passed all six upgrade checks. `test-admin` reported 68 passed and 0 failed.
-  - [x] Pass the full local test gate and spec validation. Record the outcome in the changelog.
-    `ALIGN_TEST_PORT=4600 npm test` on Node 24.22.3 reported 2,074 passed and 0 failed.
-    `litai spec validate specs/align --id-prefix align` accepted all eight documents.
-    The retained test receipt is stale.
+  - [x] Complete the six review repairs: bounded resumable retention, denial parity, safe counter opens, dead fixture
+    removal, unsupported-runtime storage silence, and bounded command reads with visible lower bounds. Add 20
+    regression cases. Whole-directory listing is outside the 10 millisecond lstat/unlink loop budget.
+  - [x] Twenty-six paired cases cover all six counted handlers across both harnesses, four start sources, goal holds,
+    stop latches, sibling collisions and a missing session reference. Outputs and shared file bytes match, excluding
+    only `context-cost/`. The real hook's deadline and failure paths also preserve denials with broken counters.
+    Test-only timing observes the production timer's installation and exit without changing its duration; the
+    internal 300 millisecond limit stays separate from whole-process startup, which the serial suite measures.
+  - [x] Keep the worker-based concurrency schedule. Two batches of 16 processes preserve all 36 model additions,
+    delivered goal changes, stop and hold bookkeeping. Exact emitted lengths match raw counter records.
+    Five real-hook storage cases cover read-only storage, a file occupying its directory, symlinks, FIFOs with and
+    without a reader, and a directory occupying the counter path. All seven remaining fixtures have references.
+  - [x] Eight retention checks preserve the injected-clock expiry and loop-budget cases, recent additions, absent or
+    inaccessible storage, signed-out sync, a held sync lock and ordinary command reads. Fresh processes using the
+    real elapsed clock remove all 50 late expired files among both 6,000 and 20,000 live logs. Separate checks prove
+    one names-only listing, at most 500 lstat calls, saved-name deletion, wrapping and symlink preservation.
+  - [x] Counter reads consume at most the last 1 MiB, handle short reads and torn records, and mark both JSON totals
+    as lower bounds when capped. Text says `at least`, including when the capped tail has no complete addition.
+    Status resolves each distinct folder once. Unsupported-runtime notices and denials change no storage and do
+    not create an absent home. The specification, README and changelog describe the same behavior.
+  - [x] Node 26.3.0: package `npm run build` and `npm run typecheck` pass. All 11 listener-free files pass with
+    concurrency 4 (393 passed, 0 failed). App `npm run lint` passes. Copy lint and whitespace checks pass.
+  - [ ] Whole-process serial latency remains open, with the tests and thresholds unchanged. An early run passed
+    2/2 (hook p95 128.0/122.9 ms). The final rerun passed 1/2: 184.5 ms against 178.4 allowed, then 200.1 against
+    212.4 ms. Its isolated retry passed 0/2: 430.4 against 251.3 ms and 252.0 against 209.9 ms. Retry bare-Node p95
+    values were 161.3/119.9 ms. These results do not isolate counting overhead from host load.
+  - [ ] Run listener-dependent server, browser and live-agent suites in a listener-capable environment.
+- **Outcome:** All six review findings are addressed, with 393 listener-free checks passing. The serial latency
+  gate remains open, so this broader item stays unchecked. No staging, commit, history mutation or outbound action
+  was made. All edits stay in the authorized package, specification, changelog and active-work file.
+- **Next action:** Recheck whole-process latency on a quiet host and run the listener-dependent suites in their
+  authorized environment. Keep the serial thresholds unchanged.
+- **Verification boundary:** No ports were opened. The unsupported-version branch was exercised by a test preload
+  on Node 26.3.0, rather than a separate older runtime. The `litai` CLI is absent, so its peer survey and formal
+  specification verification remain unknown.
+
+### [ ] SPEND-004: Current budgets and crossing information
+
+- **Owner:** specs/align/budgets.md, local-agent.md, interface.md, directives.md and retained implementation
+- **Direction:** Refresh changed budgets on the next sync, refresh local figures after terminal reads, warn people
+  during supported long turns, and show crossings on Spend and Home. Review fixes address clock differences,
+  rejected figures and terminal cache failures or races.
+- **Conclusion:** Private change stamps use the existing directive response. Unchanged cached passes add no budget
+  reads. The existing reuse window, read and time caps, local-only hooks, separate message/context markers and
+  Needs counts are preserved.
+- **Merge review repair:** Integrate the reviewed budget base and this branch's delivery and browser information.
+  Preserve filing-source migration 25; add crossings and indexed change stamps in migration 26. Keep hook reads
+  local, guard mid-turn spending periods, preserve temporary refusals and both latency cases. Leave the index and
+  history untouched. Required evidence is lint, typecheck, budget domain and agent tests, plus review of the
+  listener-dependent tests for the merged code. Fresh listener-dependent execution remains for the operator.
+- **Completion prerequisites:** none
+- **Crossing lock review:** Compute burn without a write lock; only a missing current-month crossing may open a
+  transaction, which rechecks live access and current figures. Busy starts must return the read without recording.
+  Verify with lint, app typecheck and port-free budget tests, including contention, retry and concurrent uniqueness.
+  Node 26.3.0: lint and app typecheck pass; budget domain tests pass 64/0. Before the fix, the two contention
+  regressions fail with database locked (62/2). Fresh budget, grant and spend checks, live access recheck,
+  concurrent uniqueness and change stamps pass. The merged contributor assertions now await their reads.
+- **Outcome:** Changed budgets reach session snapshots on sync. Claude Code can show a user-only tool warning;
+  Codex retains next-prompt delivery. Spend states current crossings and Home retains first observations for
+  leads and owners outside Needs. Sync saves the clock offset in each snapshot for hooks to read with the shared tolerance; rejected
+  figures preserve snapshots and pending crossings for retry. Terminal reads print figures before a best-effort
+  update restricted to the selected team, using the sync lock without waiting and at most one current-folder
+  attribution read. No daemon, polling, usage metering change, timeout increase or change to begin().
+- **Implementation and evidence:**
+  The following checked entries are prior branch evidence. Current merged verification is recorded separately below.
+  - [x] Budget pass tests use an injected clock with unchanged production defaults and every existing assertion
+    retained. A separate test verifies exactly two reads before the time cutoff and continuation next pass.
+    Node 26.3.0: twenty consecutive budget-file runs pass (23 tests each); 315 listener-free agent units, lint,
+    app and agent typechecks, syntax and the agent build pass. The unchanged serial hook latency check initially
+    misses its 150 ms limit at p95 152.2 ms; one isolated retry passes. The initial miss remains recorded.
+  - [x] Specifications amended before implementation; the agent README and changelog describe the resulting behavior.
+  - [x] The budget domain suite covers change stamps, grants, expiry, removal, Home privacy, retained observations,
+    unchanged Needs data and migration preservation. Listener-free agent tests cover cached passes, mixed releases,
+    bounded sync, removal outside the rotating batch, persistent crossings and user-only hook delivery.
+  - [x] The pre-review server, browser and live-agent suites passed in a listener-capable environment, as reported
+    by the operator. They cover HTTP stamps and privacy, browser crossings, reloads and counts, and real CLI/tool
+    delivery. This is prior evidence for the existing feature, not a run of the clock and terminal review fixes.
+  - [x] New listener-free regressions cover server clocks ahead by seconds or saved minutes, strict local times,
+    far-future rejection, preservation across the rotating batch, and retry after a rejected figure. Real CLI
+    subprocesses with mocked transport cover unwritable caches, a held sync lock, printed figures before local
+    refresh and the single current-folder attribution read. Database and credential failures remain best effort.
+  - [x] Node 26.3.0: lint, app and agent typechecks, syntax, agent build, all no-server suites and listener-free agent
+    units pass. The separate network-blocked serial hook latency test passes under its unchanged p95 limit.
+  - [x] Prior merged budget branch check, before the context-counter repairs, on Node 26.3.0: budget domain 55/0,
+    listener-free agent checks 393/0, focused budget checks 48/0,
+    agent build and app typecheck pass. Lint passes after a temporary test-directory cleanup race on its first run.
+    Static checks confirm both storage literals are 26, requirements and named scenarios precede Sources, and no
+    conflict markers remain. Current context-counter results and the index check are recorded under CONTEXT-001.
+  - [ ] Earlier whole-hook latency observations used a fixed 150 ms p95 limit. The first full-agent run
+    passes at 79.3/76.2 ms (after delivery/below 80 percent). A later serial run is 105.2/177.3 ms; its single retry is
+    184.6/169.2 ms. An interleaved comparison is 126.5/195.7 ms for the untouched base and 127.9/247.4 ms for the merge.
+    Both builds fail the below-threshold comparison, so these observations cannot isolate a code regression.
+    Current serial results with bare Node measured in the same run are recorded under CONTEXT-001; the gate remains open.
+  - [ ] Prior full agent execution includes 279 listener failures, all listen EPERM on 127.0.0.1; 391 concurrent checks and
+    its two initial serial checks pass. The server, browser and live-agent suites were not launched. Both touched
+    server scripts pass syntax checks and were reviewed for schema literals, counts, exact copy and merged behavior.
+  - [ ] Fresh server, browser and live-agent verification of the review fixes requires a listener-capable environment.
+- **Next action:** Review the uncommitted fixes, investigate the whole-hook latency on a quiet host, then run the
+  listener-based suites for this exact state where ports are available. Those fresh results remain UNKNOWN here. The `litai` guidance command fails with exit 127 because
+  the CLI is not installed; its workflow survey and formal specification verification remain UNKNOWN. The parent
+  stays unchecked until the remaining evidence is recorded. No outbound action is authorized.
+
+### [ ] SPEND-003: Team budgets and budget requests
+
+- **Owner:** specs/align/budgets.md and the retained implementation
+- **Direction:** Let a team set a monthly budget in list-price estimates, see how fast it is used, and record a
+  request for more with the decision of an accountable person.
+- **Conclusion:** Budgets are per team and per UTC month. Nothing is stopped or held when a budget is reached.
+  A request filed from a terminal always waits for a person; only a browser request can be recorded under the
+  team's allowance, up to its monthly ceiling. The requester never decides their own request. Spend in no goal
+  counts against the person's one home team, recorded when a session's spending period begins; usage from before
+  this change is not attributed to a team. Budgets, burn, forecasts, history and spend in no goal are visible only to team members and workspace owners. The CSV names the same goal-bound team rows as the on-screen report. Read-only MCP exposure of budgets and budget requests is not built.
+- **Review repair:** Address the numbered standalone-branch findings in order: clock and sync defects, owner decisions, then specification and document corrections. Preserve all existing assertions and limits. Leave edits uncommitted.
+- **Next action:** Run the server, browser and live-agent acceptance suites in a listener-capable environment and resolve the hook latency gate before closing this item.
+- **Prior branch review evidence:** Budget domain, all no-server suites, listener-free agent unit tests, typecheck and syntax checks pass. The unchanged whole-hook latency gate fails on this host, including the below-threshold case. Server, browser and live-agent execution needs a listener-capable environment.
+- **Completion prerequisites:** none
+- **Outcome:** Specified in budgets.md, with the interface, local-agent and workspace parts amended to match. The
+  no-server suites and listener-free agent unit tests cover the fixes. Server and browser execution requires a listener-capable environment.
+- **Implementation and evidence:**
+  - [x] Schema version 24 for budgets, history, requests, decisions and home teams, plus version 25 to record the terminal filing device without rewriting existing records.
+  - [x] Budget, burn, forecast, request, decision, second-look, withdrawal and home-team routes, with audit rows.
+  - [x] Spend, Requests, Sessions and Home screens; budget requests are rows in Home's single Needs list.
+  - [x] `align budget` and `align budget request`; 80 and 100 percent notes delivered by the existing hooks from
+    local files, once per session, month and threshold.
+  - [x] The budget domain suite covers authorization, decision audit, paging, rate limits, attribution and retention.
+  - [x] Listener-free agent tests cover clock offsets, pending crossings, deterministic pass limits, terminal cache refresh, temporary refusals, cleanup, sync order and terminal wording.
+  - [ ] The serial hook latency gate, using bare Node measured in the same run, passes for delivered thresholds and budgets below 80 percent.
+  - [ ] Server, browser and live-agent suites execute successfully in a listener-capable environment. Coverage includes routes, filing sources, small-team privacy, independent month controls and request decisions.
+
+### [x] SPEND-002: Export monthly team spend
+
+- **Owner:** specs/align/workspaces.md and the retained spend implementation
+- **Direction:** Download one UTC calendar month as a team CSV for charging estimated cost back to teams.
+- **Conclusion:** Preserve exactly the on-screen team report's rows and numeric totals for the same reader and
+  UTC month. Keep all no-goal usage in its existing unallocated row. Named home-team no-goal subtotals belong
+  only in authorized budget reads. Keep estimates distinct from a bill and neutralize spreadsheet formulas.
+- **Parity review:** The goal-bound team rows already share the table's visibility check. Removed the CSV's
+  additional home-team no-goal subtotals and empty no-team row. The new role matrix covers hidden goals,
+  unpriced counts, empty months and retained usage without changing the table or budget access.
+- **Parity evidence:** The new test fails against the original export and passes after the
+  repair (budget tests 50 passed, 0 failed). It checks six readers before and after retention. `npm run lint` and
+  `npx tsc --noEmit -p .` pass; both edited test scripts pass syntax checks, and the diff passes whitespace checks.
+  The full gate, including the HTTP and browser suite, then passed on this branch (2,168 passed, 0 failed). Parity compares table data with the same UTC window; the page currently requests all-time data
+  and rounds currency for display, while the CSV retains six decimal places. Shared aggregates still permit
+  deductions when only one hidden contributor remains.
+- **Completion prerequisites:** none
+- **Outcome:** The export route and the Spend download control ship with SPEND-003 with coverage in the export domain, HTTP and browser suites.
+- **Implementation and evidence:**
+  - [x] Specify the route, CSV fields, privacy and phone controls before implementation.
+  - [x] Implement the export route, shared month validation, exact table row and amount parity with all no-goal usage unallocated, plus the Spend export form.
+  - [x] HTTP authorization, the browser download and the 390 pixel controls are covered in test-v2. The budget domain suite covers CSV totals and privacy across retention.
+
+
 
 ### [x] TX-001: Recover from transaction and preview setup failures
 
@@ -569,190 +1066,3 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [ ] Resolve ownership and record an upstream issue before changing parent authority if applicable
 - **Evidence:**
   - [ ] A fixture reports the complete aggregate and still rejects a failure in any stage
-
-### [x] LIM-2524 - Read measures from CI and a chosen machine
-
-- **Priority:** P0
-- **Owner:** Align measures, local agent and spend
-- **Direction:** Accept opted-in CI and command readings, show spend during the outcome period, and surface due expectations.
-- **Conclusion:** Build on the readings and expectations from LIM-2520. Version source settings with each measure. Keep readings separate and use a scoped credential or an exact local command approval. Compare recorded readings with estimated spend over the launch period.
-- **Depends on:** none
-- **Completion prerequisites:** none
-- **Implementation:**
-  - [x] Specify source, access, payload and period rules before code. The source and disclosure choices are proposed in decision 0004.
-  - [x] Implement both reading sources, period displays and due expectations. Migration 27 preserves prior
-    readings. The application suite passed all 15 packet checks, including the new views at 390 pixels.
-  - [x] Fixed the eight review findings covering command origin, exact values, retries and machine eligibility,
-    brief overflow, launch-time labels in session notes, source form validation and CI provenance wording.
-  - [x] Seed 1488526920 failed on origin/main at bf583fdf. The stand-in's self-revoke left old sessions shared.
-    Its self-revoke now ends sessions as the real server does. The pinned seed and the focused older-build
-    enforcement tests passed under Node 24.22.3.
-- **Evidence:**
-  - [x] The review regressions passed, including both 390-pixel goal forms and the pinned share-state seed.
-    The v2 suite reported 1,110 passed, and the standalone agent package run reported 639 passed.
-  - [x] `ALIGN_TEST_PORT=4700 npm test` on Node 24.22.3 passed all 2,119 checks, including the hook latency
-    limit. The retained receipt is stale.
-  - [x] Specification validation accepted all eight updated Align documents.
-  - [x] Rebased on LIM-2522. The schema 26 database upgraded to 27 with its readings intact, and a fresh
-    schema 27 database passed. The isolated Node 24.22.3 gate passed 2,121 checks at port 4700, including
-    the hook latency check. All eight specification documents passed.
-
-### [x] LIM-2525: Help workspace owners review the goal list
-
-- **Priority:** P0
-- **Owner:** Align goals, Home, Sessions and product metrics
-- **Direction:** Review the goal list periodically from existing workspace records and show earlier bindings on the Sessions page.
-- **Conclusion:** Use readable records, a workspace aggregate when the proposed minimum is met, and the existing goal action flows. Review actions record an owner decision without changing any goal.
-- **Depends on:** none
-- **Completion prerequisites:** none
-- **Implementation:**
-  - [x] Specify review signals, visibility, state and binding history before changing code.
-  - [x] Implement owner review and binding history with migration 28 and the existing action flows.
-  - [x] Address the independent review's findings on aggregate privacy, target comparisons, write protection, legacy samples and goal page flows.
-- **Evidence:**
-  - [x] Cover review signals, privacy, lifecycle, migration and narrow browser layouts.
-    The 17 packet checks passed in the production-server suite, including Chrome at 390 and 1280 pixels.
-    The admin suite passed its migration and renumbering cases.
-  - [x] Run both clean installs, the full Node 24 gate and spec validation. Record the outcome in the changelog.
-    Both clean installs succeeded. `ALIGN_TEST_PORT=4800 npm test` on Node 24.22.3 passed 2,095 checks with zero failures.
-    `litai spec validate specs/align --id-prefix align` accepted all eight documents. The retained test receipt is stale.
-  - [x] Reproduce the review findings with regression tests, rerun the Node 24 gate and validate the revised spec.
-    The fix pass added browser, API and migration regressions. On Node 24.22.3, both clean installs succeeded and
-    `ALIGN_TEST_PORT=4800 npm test` passed 2,116 checks with zero failures. The spec validator accepted all eight
-    documents. The retained test receipt is stale.
-  - [x] Rebased on the new LIM-2524. The schema 27 database upgraded to 28 with its readings and credential
-    intact, and a fresh schema 28 database passed. The isolated Node 24.22.3 gate passed 2,166 checks at
-    port 4800, including the synchronized proposal form check and hook latency. All eight specification
-    documents passed.
-
-### [ ] LIM-2526: Keep session analysis on the machine by default
-
-- **Priority:** P0
-- **Owner:** Align local agent, workspace sharing policy and trust copy
-- **Direction:** Specify proposed data tiers and build local session analysis and limit checks in the LIM-2526 worktree.
-- **Conclusion:** Retain metadata-only sharing by default. Run bounded local analysis after sync releases its lock. Require explicit device consent and workspace permission before derived findings leave.
-- **Depends on:** none
-- **Completion prerequisites:** none
-- **Implementation:**
-  - [x] Specify the data boundary, local processing, and limit evidence and feedback before code. All eight specifications validated.
-  - [x] Add schema 29, sharing controls, local processing, previews and privacy tests. The targeted transport and signed-out processing tests passed.
-- **Evidence:**
-  - [x] Run the full Node 24 test gate and validate the Align specifications.
-    `ALIGN_TEST_PORT=4900 npm test` passed 2,090 checks with zero failures on Node 24.22.3.
-    Specification validation passed for all eight documents. The retained test receipt is stale.
-- **Outcome:** Metadata remains the default. Schema 29 adds controls for sharing and retention. A person can
-  inspect and delete their findings and mark false alarms or misses from the session.
-- **Review follow-up:** The independent review found ten defects in sharing, approvals and local analysis.
-  The operator confirmed that hosted Align must refuse derived results. Keep prior devices' named activity
-  working under their existing explicit local choice while applying workspace bans.
-  - [x] Specify and test the review findings, then fix the server, app and CLI.
-    Server, browser and live CLI checks exercised the new sharing boundaries, approval values and feedback.
-    The previous CLI still sent usage, hashes and opted-in named activity after upgrading from schema 26.
-  - [x] Run both clean installs, the full Node 24 gate and specification validation.
-    Both installs succeeded on Node 24.22.3. The final `ALIGN_TEST_PORT=4900 npm test` passed 2,105 checks
-    with zero failures, including the 150 ms hook latency check. All eight specification documents passed.
-    The retained receipt is stale. The project verification command also stops at a stale documentation authority review.
-- **Remaining integration:** This stack has no owner-question route or work-record implementation for these
-  findings. Connect their stable ids when those routes are available.
-
-### [ ] LIM-2527: Suggest a goal for a session
-
-- **Priority:** P0
-- **Owner:** Align local agent, binding provenance and session data boundary
-- **Direction:** Offer a bindable goal from local rules, the existing session or a decision provider.
-  Let the person confirm, choose another goal or dismiss.
-- **Conclusion:** Use the existing analysis worker and consent boundary. Keep suggestions and feedback on this
-  machine. Carry only the confirmed goal and origin through the normal binding path.
-- **Completion prerequisites:** LIM-2526
-- **Implementation:**
-  - [x] Specify consent, suggestion behavior and provenance before changing code. All eight specifications validated.
-  - [x] Add the three ways to suggest a goal, a user-only notice and local feedback. Schema 30 preserves existing epoch records.
-- **Evidence:**
-  - [x] Test workspace restrictions, default-off canaries, each opt-in and binding provenance.
-    Eight focused agent tests passed. The schema upgrade, access and phone-width checks passed.
-  - [x] Pass the full Node 24 gate on the configured port. Node 24.22.3 on port 5010 reported 2,117 passed and 0 failed.
-  - [x] Restack on LIM-2525 and verify the schema 29 upgrade and a fresh schema 30 database.
-    `ALIGN_TEST_PORT=5010 npm test` on Node 24.22.3 passed 2,228 checks with zero failures.
-    Specification validation accepted all eight documents.
-- **Outcome:** The review fixes protect the decision service and share confirmation, refresh past-session offers,
-  and explain suggestions in the CLI. Requests to decision services and fork adapters used local test stand-ins.
-  Current harness integrations abstain from forks until they can pin the original provider and account.
-  The retained test receipt is stale.
-
-### [ ] ALIGN-001: LIM-2527 review fixes. Protect suggestion inputs and confirmation
-
-- **Priority:** P0
-- **Owner:** Align local agent, workspace sharing restrictions and launch review
-- **Direction:** Resolve all nine findings from the independent packet review and diagnose the intermittent expectations drawer timeout.
-- **Conclusion:** Refresh permission at the point of use, require consent to the owner-configured recipient, and preserve the turn and preview that the person acted on.
-- **Completion prerequisites:** none
-- **Implementation:**
-  - [x] Specify and test the revised permission, confirmation, weekly offer and inspection behavior before fixing it.
-  - [x] Fix the clipped confirmation reproduced on a 390 by 600 pixel screen. The browser test now checks that a pointer can reach Confirm and that launching records the entered expectation.
-  - [ ] Identify the trigger of the earlier intermittent 390 by 844 pixel timeout. The instrumented run at that size passed.
-- **Evidence:**
-  - [x] Node 24.22.3 on port 5010 reported 2,117 passed and 0 failed, including 1,093 server and browser checks and 646 local agent checks. All eight Align specifications validated. The retained test receipt remains in place.
-
-### [x] ALIGN-002: Close the second review of model suggestions and sharing
-
-- **Priority:** P0
-- **Owner:** Align local agent, workspace sharing policy, People, Trust and Spend
-- **Direction:** Resolve the second review on the stacked goal suggestions, model limits and excerpts work.
-- **Conclusion:** Authorize the exact inputs immediately before sending, discard stale answers, and keep confirmations, notices and deletion tied to the state the person acted on.
-- **Completion prerequisites:** none
-- **Implementation and evidence:**
-  - [x] Specify the revised boundaries and review the proposed decisions.
-    Specification validation accepted all eight documents.
-  - [x] Check the regressions for the confirmed findings and the two coverage gaps in the full local gate.
-    The focused suggestion suite passed 24 checks. The prior excerpt client failed the delayed dispatch test,
-    and the updated client passed. The server and browser suite passed 1,200 checks.
-  - [x] Record the complete Node 24 gate with both clean installs and leave the implementation staged.
-    On Node 24.22.3 both clean installs exited successfully. `ALIGN_TEST_PORT=5400 npm test` passed
-    2,266 checks with zero failures. Schema 32 preserved consent and restrictions and expired the old dispatch
-    windows. The retained test receipt is stale.
-
-### [ ] LIM-2528: Check limits with a decision model and share selected excerpts
-
-- **Priority:** P0
-- **Owner:** Align local agent, workspace policy and Sessions
-- **Direction:** Add a model check of completed turns and deliberate sharing of selected session text.
-- **Conclusion:** Use the existing sharing tiers and turn-bound goal. Require separate machine consent, fresh workspace permission and explicit confirmation of each excerpt.
-- **Depends on:** LIM-2526 and LIM-2527
-- **Completion prerequisites:** none
-- **Implementation:**
-  - [x] Update the Align specifications and record the proposed decisions in ADR 0008. All eight specification documents validate.
-  - [x] Add the local model check and share and revoke excerpts with named readers. The CLI privacy test passed using a local decision endpoint stand-in.
-- **Original implementation evidence:**
-  - [x] `ALIGN_TEST_PORT=5100 npm test` on Node 24.22.3 passed 2,097 checks with zero failures.
-  - [x] `litai spec validate specs/align --id-prefix align` passed for all eight documents. The retained test receipt is stale.
-- **Outcome:** Schema 31 supports confirmed excerpts with named readers, expiry and revocation. Optional local model
-  checks use a configured recipient. The decision service was exercised with a local test stand-in. Live provider
-  authentication, behavior and retention remain untested.
-
-- **Review follow-up:** Fix the nine findings from the independent browser and CLI pass. Restack onto LIM-2527 and verify the schema 30 to 31 upgrade and a fresh schema 31 database.
-  - [x] Specify the veto boundary, final reply selection, ordered consent, preview escaping, excerpt deletion and stale reader state. All eight spec documents validate.
-  - [x] Cover those cases, reader and sharer rejoin, and a populated schema 30 upgrade with regressions. Packet-specific CLI, server and 390-pixel browser cases passed.
-  - [x] Measure secure deletion and log cleanup bookkeeping. The median ordinary SQLite write was 3.96 microseconds before and 4.82 after across 120,000 transactions per case.
-  - [x] After the restack, `ALIGN_TEST_PORT=5100 npm test` on Node 24.22.3 passed 2,251 checks with zero failures.
-    The short-screen expectations drawer and its dependent checks passed. Both decision send vetoes, the populated
-    schema 30 upgrade, and fresh schema 31 initialization passed. The retained test receipt is stale.
-
-### [ ] ALIGN-003: Preserve consent and turn evidence through sync and upgrades
-
-- **Priority:** P0
-- **Owner:** Align local agent, workspace session sharing and limits
-- **Direction:** Address the independent reviews of data sharing, local analysis, model limit checks and excerpts in the existing staged worktree.
-- **Conclusion:** Use the recorded turn for attribution and recheck current permission at dispatch and response. Preserve choices, deletion scope and supported prior records across upgrades.
-- **Depends on:** ALIGN-002
-- **Completion prerequisites:** none
-- **Implementation:**
-  - [x] Compare both reviews with the staged work and update the owning specifications. All eight Align documents validate.
-  - [x] Repair dispatch, attribution, upgrades, grants, counts, cleanup and reader-facing wording. Add CLI,
-    server and 390-pixel browser checks for the implemented paths.
-  - [ ] Exercise a full older-client downgrade, expiry of a second excerpt during a held writer, and stale revoke
-    through the browser. The current suite covers isolated queue storage, access-time expiry and stale revoke
-    through the API. The goal link in local inspection supports taking a dispute to the owner directly.
-- **Evidence:**
-  - [x] Both clean installs succeeded. On Node 24.22.3, `ALIGN_TEST_PORT=5400 npm test` passed 2,291 checks
-    with zero failures, including 1,214 server and browser checks, 187 OAuth checks, 78 live CLI checks and
-    680 agent checks. Specification validation passed all eight documents. The retained test receipt is stale.
